@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import type { Tag } from '../types';
 import { getTagColor } from '../utils/colorUtils';
 import { getAllCamelotKeys } from '../utils/keyUtils';
+import { getBpmColor, getAverageKeyColor } from '../utils/displayColors';
 import EnergySquare from './EnergySquare';
 import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon } from './icons';
 import CircleOfFifthsModal from './CircleOfFifthsModal';
@@ -221,7 +222,7 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
           }}
           style={{
             padding: '4px 12px',
-            border: `1px solid ${filters.selectedKeyCamelotIds.length > 0 ? 'var(--mauve)' : 'var(--surface0)'}`,
+            border: `1px solid ${filters.selectedKeyCamelotIds.length > 0 ? getAverageKeyColor(filters.selectedKeyCamelotIds) || 'var(--mauve)' : 'var(--surface0)'}`,
             cursor: 'pointer',
             fontSize: '13px',
             background: 'transparent',
@@ -253,7 +254,7 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
           }}
           style={{
             padding: '4px 12px',
-            border: `1px solid ${filters.bpmCenter !== null ? 'var(--mauve)' : 'var(--surface0)'}`,
+            border: `1px solid ${filters.bpmCenter !== null ? getBpmColor(filters.bpmCenter) || 'var(--mauve)' : 'var(--surface0)'}`,
             cursor: 'pointer',
             fontSize: '13px',
             background: 'transparent',

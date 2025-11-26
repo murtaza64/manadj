@@ -67,10 +67,14 @@ def get_tracks(
         bpm_min = bpm_center - threshold_value
         bpm_max = bpm_center + threshold_value
 
+        # Convert BPM range to centiBPM for database comparison
+        bpm_min_centi = int(bpm_min * 100)
+        bpm_max_centi = int(bpm_max * 100)
+
         # Filter tracks within range (exclude NULL bpm)
         query = query.filter(
-            models.Track.bpm >= bpm_min,
-            models.Track.bpm <= bpm_max,
+            models.Track.bpm >= bpm_min_centi,
+            models.Track.bpm <= bpm_max_centi,
             models.Track.bpm.isnot(None)
         )
 

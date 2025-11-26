@@ -73,9 +73,9 @@ export function useKeyboardShortcuts({
         if (key === ' ') {
           playerRef.current?.togglePlay();
         } else if (key === 'a') {
-          playerRef.current?.skip(-15);
+          playerRef.current?.skip(-32);  // Jump back 32 beats
         } else if (key === 's') {
-          playerRef.current?.skip(15);
+          playerRef.current?.skip(32);   // Jump forward 32 beats
         } else if (key === 'f') {
           playerRef.current?.handleCueDown();
         }

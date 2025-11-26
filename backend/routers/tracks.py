@@ -132,7 +132,8 @@ def refresh_metadata(
         track.title = metadata["title"]
         track.artist = metadata["artist"]
         track.key = metadata["key"]
-        track.bpm = metadata["bpm"]
+        # Convert BPM to centiBPM (multiply by 100) for storage
+        track.bpm = int(metadata["bpm"] * 100) if metadata["bpm"] is not None else None
 
         db.commit()
         db.refresh(track)
@@ -149,7 +150,8 @@ def refresh_metadata(
             track.title = metadata["title"]
             track.artist = metadata["artist"]
             track.key = metadata["key"]
-            track.bpm = metadata["bpm"]
+            # Convert BPM to centiBPM (multiply by 100) for storage
+            track.bpm = int(metadata["bpm"] * 100) if metadata["bpm"] is not None else None
             updated_count += 1
 
         db.commit()

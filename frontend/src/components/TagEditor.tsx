@@ -6,6 +6,7 @@ import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import HotCue from './HotCue';
+import WaveformMinimap from './WaveformMinimap';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon } from './icons';
 import './TagEditor.css';
 
@@ -126,9 +127,9 @@ export default function TagEditor({ track, onSave, onUpdate }: Props) {
           </div>
         </div>
 
-        {/* Right side: Hot Cues and Tags in separate rows */}
+        {/* Right side: Hot Cues with Minimap, and Tags in separate rows */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-          {/* Row 1: Hot Cues */}
+          {/* Row 1: Hot Cues and Minimap side by side */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <NeedleIcon />
             {[1, 2, 3, 4, 5, 6, 7, 8].map(cueNum => (
@@ -139,6 +140,9 @@ export default function TagEditor({ track, onSave, onUpdate }: Props) {
                 disabled={isDisabled}
               />
             ))}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <WaveformMinimap trackId={track?.id ?? null} />
+            </div>
           </div>
 
           {/* Row 2: Tags */}

@@ -1,6 +1,6 @@
 """Pydantic schemas for API validation."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 from datetime import datetime
 
 
@@ -52,7 +52,7 @@ class TrackBase(BaseModel):
     title: str | None = None
     artist: str | None = None
     key: int | None = None  # Engine DJ key ID (0-23)
-    bpm: int | None = None
+    bpm: float | None = None  # Exposed as float, stored as int * 100
 
 
 class TrackCreate(TrackBase):
@@ -65,8 +65,16 @@ class TrackUpdate(BaseModel):
     title: str | None = None
     artist: str | None = None
     key: int | None = None  # Engine DJ key ID (0-23)
-    bpm: int | None = None
+    bpm: float | None = None  # Exposed as float, stored as int * 100
     tag_ids: list[int] | None = None
+
+    @field_validator('bpm', mode='before')
+    @classmethod
+    def convert_bpm_to_centibpm(cls, v):
+        """Convert incoming BPM (float) to centiBPM (int * 100) for storage."""
+        if v is None:
+            return None
+        return int(v * 100)
 
 
 class Track(TrackBase):
@@ -75,6 +83,13 @@ class Track(TrackBase):
     updated_at: datetime
     tags: list[Tag] = []
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer('bpm')
+    def serialize_bpm(self, bpm: int | None, _info) -> float | None:
+        """Convert stored centiBPM (int * 100) back to BPM (float) for API responses."""
+        if bpm is None:
+            return None
+        return bpm / 100.0
 
 
 # Pagination

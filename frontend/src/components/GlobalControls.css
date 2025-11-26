@@ -35,6 +35,10 @@
   gap: 6px;
 }
 
+.find-related-quick svg path {
+  fill: var(--base);
+}
+
 .find-related-quick:hover:not(:disabled) {
   background: var(--teal);
 }
@@ -43,6 +47,10 @@
   background: var(--surface0);
   color: var(--overlay0);
   cursor: not-allowed;
+}
+
+.find-related-quick:disabled svg path {
+  fill: var(--overlay0);
 }
 
 .find-related-settings {

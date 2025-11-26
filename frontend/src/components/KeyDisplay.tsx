@@ -1,4 +1,5 @@
 import { formatKeyDisplay } from '../utils/keyUtils';
+import { getKeyColor } from '../utils/displayColors';
 import './KeyDisplay.css';
 
 interface KeyDisplayProps {
@@ -22,25 +23,12 @@ export default function KeyDisplay({ keyValue }: KeyDisplayProps) {
     return <span style={{ color: 'var(--overlay0)' }}>-</span>;
   }
 
-  // Extract position (1-12) and mode (m/d)
-  const match = openKey.match(/^(\d+)(m|d)$/);
-  if (!match) {
-    return <span>{openKey}</span>;
-  }
-
-  const position = parseInt(match[1]);
-  const mode = match[2];
-
-  // Calculate color
-  // Map 1-12 to 0-360° hue (full color wheel, 30° per step)
-  const hue = ((position - 1) * 30) % 360;
-  // Minor keys darker (60%), major keys brighter (75%)
-  const lightness = mode === 'm' ? 60 : 75;
+  const color = getKeyColor(openKey);
 
   return (
     <span
       className="key-display"
-      style={{ color: `hsl(${hue}, 100%, ${lightness}%)` }}
+      style={{ color: color || 'var(--text)' }}
     >
       {openKey}
     </span>
