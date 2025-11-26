@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import TagManagementModal from './TagManagementModal';
 import FindRelatedTracksModal from './FindRelatedTracksModal';
+import { SearchIcon } from './icons';
 import { type RelatedTracksSettings } from './TrackList';
 import type { Track } from '../types';
 import './GlobalControls.css';
@@ -38,21 +39,24 @@ export default function GlobalControls({ selectedTrack, onFindRelated, onApplySe
         Manage Tags
       </button>
 
-      <button
-        onClick={handleQuickApply}
-        disabled={selectedTrack === null}
-        className="global-controls-btn find-related-quick"
-      >
-        Find Related
-      </button>
+      <div className="find-related-button-group">
+        <button
+          onClick={handleQuickApply}
+          disabled={selectedTrack === null}
+          className="global-controls-btn find-related-quick"
+        >
+          <SearchIcon width={14} height={14} opacity={1} />
+          <span>Find Related</span>
+        </button>
 
-      <button
-        onClick={handleOpenSettings}
-        disabled={selectedTrack === null}
-        className="global-controls-btn find-related-settings"
-      >
-        ⚙
-      </button>
+        <button
+          onClick={handleOpenSettings}
+          disabled={selectedTrack === null}
+          className="global-controls-btn find-related-settings"
+        >
+          ⚙
+        </button>
+      </div>
 
       <TagManagementModal
         isOpen={showManagementModal}

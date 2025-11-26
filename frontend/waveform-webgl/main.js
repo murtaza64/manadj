@@ -28,10 +28,9 @@ document.getElementById('load-track').addEventListener('click', async () => {
         // Configure minimap: always show full track, moving playhead
         minimapRenderer.isMinimapMode = true;  // Different playhead and rendering behavior
         minimapRenderer.setZoom(1.0);
-        minimapRenderer.playMarkerPosition = 0.0;  // Playhead moves across width, not fixed
-        minimapRenderer.lockDisplayWindow = true;  // Prevent display window recalculation
 
         // Set display window to always show full track (0.0 to 1.0)
+        // isMinimapMode prevents this from being recalculated
         minimapRenderer.firstDisplayedPosition = 0.0;
         minimapRenderer.lastDisplayedPosition = 1.0;
 
@@ -62,8 +61,6 @@ document.getElementById('play-pause').addEventListener('click', () => {
 // Drag-to-scrub on main waveform
 let isDragging = false;
 let dragStartX = 0;
-let dragStartFirstPos = 0;
-let dragStartLastPos = 0;
 let wasPlaying = false;
 
 canvas.addEventListener('mousedown', (event) => {
@@ -71,8 +68,6 @@ canvas.addEventListener('mousedown', (event) => {
 
     isDragging = true;
     dragStartX = event.clientX;
-    dragStartFirstPos = renderer.firstDisplayedPosition;
-    dragStartLastPos = renderer.lastDisplayedPosition;
     canvas.style.cursor = 'grabbing';
 
     // Pause playback during drag if playing
@@ -87,18 +82,8 @@ canvas.addEventListener('mousemove', (event) => {
 
     const deltaX = event.clientX - dragStartX;
 
-    // Calculate how much to move in track position space
-    // Negative for natural scroll direction (drag right = forward in time)
-    const visibleRange = dragStartLastPos - dragStartFirstPos;
-    const deltaPosition = -(deltaX / canvas.width) * visibleRange;
-
-    // Shift the display window
-    renderer.firstDisplayedPosition = dragStartFirstPos + deltaPosition;
-    renderer.lastDisplayedPosition = dragStartLastPos + deltaPosition;
-
-    // Update playPosition to reflect what's under the playhead (at 25%)
-    renderer.playPosition = renderer.firstDisplayedPosition +
-        (renderer.lastDisplayedPosition - renderer.firstDisplayedPosition) * renderer.playMarkerPosition;
+    // Apply drag offset directly (natural scroll: drag right = move forward in time)
+    renderer.manualDragOffset = deltaX;
 });
 
 canvas.addEventListener('mouseup', () => {
@@ -107,14 +92,27 @@ canvas.addEventListener('mouseup', () => {
     isDragging = false;
     canvas.style.cursor = 'grab';
 
-    // Seek audio to the scrubbed position
+    // Calculate new playPosition based on drag offset
     if (renderer.waveformData && audio.duration) {
+        // Convert pixel offset to position delta (use display width, not buffer width)
+        const rect = canvas.getBoundingClientRect();
+        const visibleRange = renderer.lastDisplayedPosition - renderer.firstDisplayedPosition;
+        const pixelDelta = renderer.manualDragOffset;
+        const positionDelta = (pixelDelta / rect.width) * visibleRange;
+
+        // Update playPosition
+        renderer.playPosition -= positionDelta;
+
+        // Clear manual offset (now baked into playPosition and display window)
+        renderer.manualDragOffset = 0;
+
+        // Recalculate display window for the new playPosition
+        renderer.calculateDisplayWindow();
+
+        // Seek audio
         const seekTime = renderer.playPosition * renderer.waveformData.duration;
         audio.currentTime = Math.max(0, Math.min(audio.duration, seekTime));
         console.log('Scrubbed to:', seekTime);
-
-        // Resume normal auto-tracking by recalculating display window
-        renderer.calculateDisplayWindow();
 
         // Resume playback if it was playing before drag
         if (wasPlaying) {
@@ -129,14 +127,27 @@ canvas.addEventListener('mouseleave', () => {
     isDragging = false;
     canvas.style.cursor = 'grab';
 
-    // Seek on mouse leave as well
+    // Calculate new playPosition based on drag offset
     if (renderer.waveformData && audio.duration) {
+        // Convert pixel offset to position delta (use display width, not buffer width)
+        const rect = canvas.getBoundingClientRect();
+        const visibleRange = renderer.lastDisplayedPosition - renderer.firstDisplayedPosition;
+        const pixelDelta = renderer.manualDragOffset;
+        const positionDelta = (pixelDelta / rect.width) * visibleRange;
+
+        // Update playPosition
+        renderer.playPosition -= positionDelta;
+
+        // Clear manual offset
+        renderer.manualDragOffset = 0;
+
+        // Recalculate display window for the new playPosition
+        renderer.calculateDisplayWindow();
+
+        // Seek audio
         const seekTime = renderer.playPosition * renderer.waveformData.duration;
         audio.currentTime = Math.max(0, Math.min(audio.duration, seekTime));
         console.log('Scrubbed to:', seekTime);
-
-        // Resume normal auto-tracking by recalculating display window
-        renderer.calculateDisplayWindow();
 
         // Resume playback if it was playing before drag
         if (wasPlaying) {
@@ -156,6 +167,10 @@ minimapCanvas.addEventListener('click', (event) => {
     const seekTime = minimapRenderer.handleClick(event);
     if (seekTime !== undefined && audio.duration) {
         audio.currentTime = seekTime;
+
+        // Update main waveform position (especially important when paused)
+        renderer.setPlayPosition(seekTime);
+
         console.log('Minimap clicked, seeking to:', seekTime);
     }
 });

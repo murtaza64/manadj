@@ -254,8 +254,8 @@ def create_waveform(db: Session, track_id: int, filepath: str):
     )
     from pathlib import Path
 
-    # Generate multiband waveform data (512 samples/peak for higher detail PNG)
-    multiband_data = generate_multiband_waveform_data(filepath, samples_per_peak=512)
+    # Generate multiband waveform data (128 samples/peak for high detail)
+    multiband_data = generate_multiband_waveform_data(filepath, samples_per_peak=128)
 
     # Generate PNG waveform file
     png_filename = f"track_{track_id}.png"
@@ -268,7 +268,7 @@ def create_waveform(db: Session, track_id: int, filepath: str):
         generate_waveform_png_file(
             audio_path=filepath,
             output_path=str(png_path),
-            samples_per_peak=512,
+            samples_per_peak=128,
             pixels_per_point=2,
             height_per_band=60
         )

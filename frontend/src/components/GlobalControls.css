@@ -6,6 +6,11 @@
   border-bottom: 1px solid var(--surface0);
 }
 
+.find-related-button-group {
+  display: flex;
+  gap: 0;
+}
+
 .global-controls-btn {
   padding: 6px 12px;
   background: var(--mauve);
@@ -25,6 +30,9 @@
   background: var(--green);
   color: var(--base);
   font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .find-related-quick:hover:not(:disabled) {

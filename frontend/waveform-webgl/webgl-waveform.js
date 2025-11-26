@@ -20,9 +20,48 @@ export class WebGLWaveformRenderer {
         // Minimap mode (different playhead behavior and rendering)
         this.isMinimapMode = false;
 
+        // Manual drag offset (pixels) - applied during drag operations
+        this.manualDragOffset = 0;
+
+        // Set up high DPI rendering
+        this.setupHighDPI();
+
         // Initialize WebGL
         this.initShaders();
         this.initBuffers();
+    }
+
+    setupHighDPI() {
+        // Get device pixel ratio for high DPI displays
+        const dpr = window.devicePixelRatio || 1;
+
+        // Get display size from CSS
+        const rect = this.canvas.getBoundingClientRect();
+        const displayWidth = rect.width;
+        const displayHeight = rect.height;
+
+        // Set canvas buffer size to actual display size * DPR
+        this.canvas.width = displayWidth * dpr;
+        this.canvas.height = displayHeight * dpr;
+
+        // Store display dimensions for pixel-aligned calculations
+        this.displayWidth = displayWidth;
+        this.displayHeight = displayHeight;
+        this.pixelRatio = dpr;
+    }
+
+    quantizeToPixelBoundary(position) {
+        // Quantize a normalized position [0.0, 1.0] to align with exact pixel boundaries
+        // This prevents sub-pixel rendering jitter during drag
+        if (!this.waveformData) return position;
+
+        const totalDataPoints = this.waveformData.low.length;
+        const visibleRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
+        const samplesPerPixel = (visibleRange * totalDataPoints) / this.canvas.width;
+
+        // Round to nearest sample that aligns with pixel boundary
+        const sampleIndex = Math.round(position * totalDataPoints / samplesPerPixel) * samplesPerPixel;
+        return Math.max(0, Math.min(1, sampleIndex / totalDataPoints));
     }
 
     initShaders() {
@@ -141,6 +180,9 @@ export class WebGLWaveformRenderer {
     calculateDisplayWindow() {
         if (!this.waveformData) return;
 
+        // Minimap always shows full track - don't recalculate
+        if (this.isMinimapMode) return;
+
         const totalDataPoints = this.waveformData.low.length;
 
         // At zoom 1.0, show entire track
@@ -188,6 +230,10 @@ export class WebGLWaveformRenderer {
             // Calculate pixel offset so playPosition aligns with playhead
             // Round to nearest pixel to prevent sub-pixel rendering glitches
             pixelOffset = Math.round(playheadPixel - (playPositionInRange * canvasWidth));
+
+            // Apply manual drag offset (for smooth dragging without recalculating display window)
+            // Scale from display pixels to buffer pixels
+            pixelOffset += this.manualDragOffset * this.pixelRatio;
         }
 
         // Samples per pixel
@@ -196,18 +242,19 @@ export class WebGLWaveformRenderer {
         // Vertex array: [x, y, r, g, b] * 6 vertices per pixel * 3 bands
         const vertices = [];
 
-        // Band colors (matching PNG compositing)
+        // Band colors - RGB for bass/mid/treble
         const colors = {
-            low: [0.0, 0.333, 0.886],      // Blue #0055e2
-            mid: [0.949, 0.667, 0.235],    // Orange #f2aa3c
-            high: [1.0, 1.0, 1.0]          // White #ffffff
+            low: [1.0, 0.0, 0.0],      // Red - bass
+            mid: [0.0, 1.0, 0.0],      // Green - mids
+            high: [0.0, 0.0, 1.0]      // Blue - highs
         };
 
-        // Band opacity (matching PNG compositing)
+        // Band opacity for additive blending
+        // Lower opacity prevents oversaturation where bands overlap
         const opacities = {
-            low: 1.0,    // 100% - opaque base layer
-            mid: 0.6,    // 60% - semi-transparent overlay
-            high: 0.4    // 40% - most transparent top layer
+            low: 0.7,    // Red bass
+            mid: 0.7,    // Green mids
+            high: 0.7    // Blue highs
         };
 
         // Render each pixel column
@@ -340,9 +387,10 @@ export class WebGLWaveformRenderer {
         gl.bindVertexArray(this.vao);
         gl.uniformMatrix4fv(this.u_matrix, false, matrix);
 
-        // Enable alpha blending for band transparency
+        // Enable additive blending for proper RGB compositing
+        // Red + Green = Yellow, Red + Blue = Magenta, Green + Blue = Cyan
         gl.enable(gl.BLEND);
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
         const vertexCount = vertices.length / 5;  // 5 floats per vertex
         gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
@@ -352,6 +400,9 @@ export class WebGLWaveformRenderer {
 
     render() {
         const gl = this.gl;
+
+        // Set viewport to match canvas size (important for high DPI)
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
         // Clear canvas
         gl.clearColor(0.067, 0.067, 0.067, 1.0);  // var(--crust) #111111
@@ -547,7 +598,8 @@ export class WebGLWaveformRenderer {
 
         const rect = this.canvas.getBoundingClientRect();
         const clickX = event.clientX - rect.left;
-        const clickProgress = clickX / this.canvas.width;
+        // Use display width, not canvas buffer width (which may be scaled for high DPI)
+        const clickProgress = clickX / rect.width;
 
         let trackPosition;
 

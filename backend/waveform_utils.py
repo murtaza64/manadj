@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw
 
 def generate_multiband_waveform_data(
     filepath: str,
-    samples_per_peak: int = 2048
+    samples_per_peak: int = 128
 ) -> Dict:
     """
     Generate 3-band frequency waveform data from an audio file.
@@ -24,7 +24,7 @@ def generate_multiband_waveform_data(
     Args:
         filepath: Absolute path to the audio file
         samples_per_peak: Number of audio samples to aggregate into each peak
-                         Default 2048 (~46ms at 44.1kHz) provides good detail for zoom
+                         Default 128 (~2.9ms at 44.1kHz) provides high detail for zoom
 
     Returns:
         Dictionary with keys:
