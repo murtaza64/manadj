@@ -1,0 +1,21 @@
+.waveform-container {
+  width: 100%;
+  height: 60px;
+  background: var(--crust);
+  border-bottom: 1px solid var(--surface0);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Fixed playhead at 25% */
+.waveform-container::before {
+  content: '';
+  position: absolute;
+  left: 25%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--text);
+  z-index: 10;
+  pointer-events: none;
+}

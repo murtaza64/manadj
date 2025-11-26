@@ -1,0 +1,58 @@
+:root {
+  /* Base backgrounds */
+  --base: #1e1e1e;
+  --mantle: #181818;
+  --crust: #111111;
+
+  /* Surfaces */
+  --surface0: #313136;
+  --surface1: #45454f;
+  --surface2: #58585b;
+
+  /* Text hierarchy */
+  --text: #cdd6f4;
+  --subtext1: #bac2de;
+  --subtext0: #a6adc8;
+
+  /* Overlays */
+  --overlay0: #6c7086;
+  --overlay1: #7f849c;
+  --overlay2: #9399b2;
+
+  /* Accent colors */
+  --blue: #4a9eff;
+  --sapphire: #00b8d4;
+  --green: #5ed75e;
+  --teal: #26c6b8;
+  --red: #ff4466;
+  --mauve: #b366ff;
+  --lavender: #7a7aff;
+
+  /* Energy gradient */
+  --energy-1: #ffffcc;
+  --energy-2: #ffcc66;
+  --energy-3: #ff9933;
+  --energy-4: #ff4444;
+  --energy-5: #ff0000;
+
+  /* Spacing scale (multiples of 4px) */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+
+  /* Font sizes */
+  --font-xs: 13px;
+  --font-sm: 14px;
+  --font-md: 16px;
+  --font-lg: 20px;
+  --font-xl: 24px;
+
+  /* Border radius (0 for geometric design) */
+  --radius: 0;
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+}

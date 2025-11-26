@@ -1,0 +1,81 @@
+.track-row {
+  height: 28px;
+  border-bottom: 1px solid var(--surface0);
+  transition: background var(--transition-normal);
+  cursor: pointer;
+}
+
+.track-row:hover {
+  background: #1f1f1f;
+}
+
+.track-row-selected {
+  background: #2a2a3e !important;
+}
+
+.track-row-selected:hover {
+  background: #32324a !important;
+}
+
+.track-cell {
+  padding: 2px 12px;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+/* Text cells - single line only */
+.track-cell-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+/* Single line cells */
+.track-cell-single {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+/* Tags cell with horizontal scroll */
+.track-tags-cell {
+  padding: 2px 12px;
+  vertical-align: middle;
+  max-width: 300px;
+}
+
+.track-tags-container {
+  display: flex;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-height: 24px;
+  align-items: center;
+}
+
+/* Hide scrollbar for cleaner look, but keep functionality */
+.track-tags-container::-webkit-scrollbar {
+  height: 4px;
+}
+
+.track-tags-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.track-tags-container::-webkit-scrollbar-thumb {
+  background: var(--overlay0);
+  border-radius: 0;
+}
+
+.track-tags-container::-webkit-scrollbar-thumb:hover {
+  background: var(--overlay1);
+}
+
+/* Energy cell */
+.track-energy-cell {
+  padding: 2px 12px;
+  vertical-align: middle;
+}

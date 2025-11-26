@@ -1,0 +1,7 @@
+.tag-pill {
+  display: inline-block;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-xs);
+  color: var(--text);
+  white-space: nowrap;
+}

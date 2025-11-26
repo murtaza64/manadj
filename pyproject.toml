@@ -1,0 +1,33 @@
+[project]
+name = "manadj"
+version = "0.1.0"
+description = "Engine DJ database access library"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.122.0",
+    "librosa>=0.11.0",
+    "mutagen>=1.47.0",
+    "numpy>=2.3.5",
+    "pyrekordbox>=0.4.4",
+    "soundfile>=0.13.1",
+    "sqlalchemy>=2.0.0,<3.0.0",
+    "uvicorn>=0.38.0",
+]
+
+[project.scripts]
+sync-rekordbox-mytags = "scripts.sync_rekordbox_mytags:main"
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.7.0",
+    "ruff>=0.1.0",
+]
+
+[tool.mypy]
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
