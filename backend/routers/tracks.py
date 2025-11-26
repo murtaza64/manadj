@@ -22,11 +22,21 @@ def list_tracks(
     energy_min: int | None = Query(None, ge=1, le=5),
     energy_max: int | None = Query(None, ge=1, le=5),
     tag_match_mode: str = Query("ANY", pattern="^(ANY|ALL)$"),
+    bpm_center: int | None = Query(None, ge=1, le=300),
+    bpm_threshold_percent: int | None = Query(None, ge=0, le=100),
+    key_camelot_ids: List[str] | None = Query(None),
     db: Session = Depends(get_db)
 ):
     # Validate energy range
     if energy_min is not None and energy_max is not None and energy_min > energy_max:
         raise HTTPException(status_code=400, detail="energy_min must be <= energy_max")
+
+    # Validate BPM parameters (both or neither required)
+    if (bpm_center is None) != (bpm_threshold_percent is None):
+        raise HTTPException(
+            status_code=400,
+            detail="Both bpm_center and bpm_threshold_percent must be provided together"
+        )
 
     skip = (page - 1) * per_page
     items, total = crud.get_tracks(
@@ -37,7 +47,10 @@ def list_tracks(
         search=search,
         energy_min=energy_min,
         energy_max=energy_max,
-        tag_match_mode=tag_match_mode
+        tag_match_mode=tag_match_mode,
+        bpm_center=bpm_center,
+        bpm_threshold_percent=bpm_threshold_percent,
+        key_camelot_ids=key_camelot_ids
     )
 
     return {
@@ -71,6 +84,14 @@ def update_track(
     track = crud.get_track(db, track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
+
+    # Update title if provided
+    if update_data.title is not None:
+        track.title = update_data.title
+
+    # Update artist if provided
+    if update_data.artist is not None:
+        track.artist = update_data.artist
 
     # Update energy if provided
     if update_data.energy is not None:

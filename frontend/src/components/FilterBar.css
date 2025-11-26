@@ -1,0 +1,92 @@
+.filter-bar-container {
+  padding: 12px;
+  background: var(--crust);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.filter-bar-label {
+  font-size: 14px;
+  color: var(--subtext1);
+}
+
+.filter-bar-search {
+  flex: 1;
+  padding: 6px 12px;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.filter-bar-search:focus {
+  outline: none;
+  border-color: var(--text);
+}
+
+.filter-bar-energy-selector {
+  display: inline-flex;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-bar-energy-squares {
+  display: flex;
+  gap: 4px;
+}
+
+.filter-bar-energy-squares .energy-square:hover {
+  border-color: var(--text);
+  opacity: 0.8;
+}
+
+.filter-bar-x-btn {
+  background: transparent;
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.filter-bar-match-mode-btn {
+  padding: 4px 12px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.filter-bar-tag-pill {
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  border: none;
+}
+
+.filter-bar-tag-pill:hover {
+  opacity: 0.8;
+}
+
+.filter-bar-counts {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--overlay0);
+}
+
+.filter-bar-clear-all-btn {
+  padding: 4px 8px;
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  cursor: pointer;
+  fontSize: 12px;
+  font-weight: bold;
+}
+
+.filter-bar-clear-all-btn:hover {
+  background: var(--surface1);
+}

@@ -1,21 +1,103 @@
+/* Color variables */
+:root {
+  --pink: #f5c2e7;
+  --peach: #fab387;
+}
+
 .waveform-container {
   width: 100%;
-  height: 60px;
+  height: 120px;
   background: var(--crust);
   border-bottom: 1px solid var(--surface0);
   overflow: hidden;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-/* Fixed playhead at 25% */
-.waveform-container::before {
-  content: '';
+.waveform-container canvas {
+  width: 100%;
+  height: 120px;
+  display: block;
+}
+
+.waveform-loading,
+.waveform-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* PNG Waveform Styles */
+.png-waveform-wrapper {
+  position: relative;
+  width: 100%;
+  height: 120px;
+  background: var(--crust);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.png-waveform-scroll-container {
+  position: relative;  /* Make this the positioning context for cue point */
+  width: 100%;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  cursor: pointer;
+  /* Add padding so waveform aligns with playhead at start/end */
+  padding-left: 25%;
+  padding-right: 75%;
+  box-sizing: border-box;
+}
+
+/* Hide scrollbar */
+.png-waveform-scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
+.png-waveform-scroll-container {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.png-waveform-image {
+  display: block;
+  height: 100%;
+  image-rendering: pixelated;  /* Prevent blur on zoom */
+  image-rendering: crisp-edges;
+}
+
+.waveform-playhead {
   position: absolute;
-  left: 25%;
+  top: 0;
+  bottom: 0;
+  left: 25%;  /* Fixed at 25% of viewport */
+  width: 3px;
+  background: var(--pink);
+  pointer-events: none;
+  z-index: 100;
+  opacity: 1;
+}
+
+.waveform-cue-point {
+  position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
-  background: var(--text);
-  z-index: 10;
+  background: var(--peach);
   pointer-events: none;
+  z-index: 9;
+}
+
+.waveform-cue-triangle {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 6px solid var(--peach);
 }

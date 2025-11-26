@@ -74,3 +74,33 @@ class RekordboxReader:
                 ))
 
         return tracks
+
+    def get_tracks_with_colors(self) -> list[RekordboxTrack]:
+        """
+        Get all tracks that have colors assigned.
+
+        Returns:
+            List of RekordboxTrack objects with color_id populated
+        """
+        tracks = []
+        all_content = self.db.get_content()
+
+        for content in all_content:
+            # Only include tracks with colors (ColorID != "0" and not None)
+            if not content.ColorID or content.ColorID == "0":
+                continue
+
+            # Get file path
+            file_path = Path(content.FolderPath) if content.FolderPath else None
+
+            tracks.append(RekordboxTrack(
+                title=content.Title or "",
+                artist=content.Artist.Name if content.Artist else "",
+                file_path=file_path,
+                bpm=content.BPM,
+                key=content.Key.ScaleName if content.Key else None,
+                mytags=tuple(),  # Empty - only need colors here
+                color_id=content.ColorID
+            ))
+
+        return tracks

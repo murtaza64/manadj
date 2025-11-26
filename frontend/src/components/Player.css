@@ -41,16 +41,18 @@
 
 .player-button {
   padding: 4px 12px;
-  background: var(--surface1);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--surface0);
+  border: 1px solid var(--text);
   cursor: pointer;
   font-size: 12px;
   font-weight: bold;
 }
 
 .player-button:hover:not(:disabled) {
-  background: var(--surface2);
+  background: transparent;
+  color: var(--subtext1);
+  border-color: var(--subtext1);
 }
 
 .player-button:disabled {
@@ -59,23 +61,29 @@
 }
 
 .player-button-paused {
-  background: var(--surface1);
-  color: var(--text);
+  background: transparent;
+  color: var(--green);
+  border-color: var(--green);
   min-width: 60px;
 }
 
 .player-button-paused:hover:not(:disabled) {
-  background: var(--surface2);
+  background: transparent;
+  color: var(--subtext1);
+  border-color: var(--subtext1);
 }
 
 .player-button-playing {
   background: var(--green);
   color: var(--base);
+  border-color: var(--green);
   min-width: 60px;
 }
 
 .player-button-playing:hover:not(:disabled) {
-  background: var(--teal);
+  border-color: var(--text);
+  background: var(--green);
+  color: var(--base);
 }
 
 .player-button-cue {

@@ -1,0 +1,78 @@
+:root {
+    --base: #1e1e1e;
+    --crust: #111111;
+    --text: #cdd6f4;
+    --pink: #f5c2e7;
+}
+
+body {
+    font-family: 'UbuntuMono Nerd Font', monospace;
+    background: var(--base);
+    color: var(--text);
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+h1 {
+    font-size: 24px;
+    margin-bottom: 20px;
+}
+
+.controls {
+    margin: 20px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+button {
+    background: var(--crust);
+    color: var(--text);
+    border: 1px solid var(--pink);
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+}
+
+button:hover {
+    background: var(--pink);
+    color: var(--crust);
+}
+
+#status {
+    color: var(--text);
+    font-size: 14px;
+}
+
+.waveform-container {
+    border: 1px solid var(--pink);
+    background: var(--crust);
+    display: inline-block;
+}
+
+#waveform {
+    display: block;
+    cursor: pointer;
+    width: 1200px;
+    height: 120px;
+}
+
+.minimap-container {
+    border: 1px solid var(--pink);
+    background: var(--crust);
+    display: inline-block;
+    margin-top: 10px;
+}
+
+#minimap {
+    display: block;
+    cursor: pointer;
+    width: 1200px;
+    height: 40px;
+}

@@ -1,0 +1,103 @@
+.cof-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.cof-modal-overlay::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(12px);
+  mask-image: radial-gradient(
+    circle at var(--blur-center-x, 50%) var(--blur-center-y, 50%),
+    black 0%,
+    black 200px,
+    transparent 600px
+  );
+  -webkit-mask-image: radial-gradient(
+    circle at var(--blur-center-x, 50%) var(--blur-center-y, 50%),
+    black 0%,
+    black 200px,
+    transparent 600px
+  );
+}
+
+.cof-modal-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.cof-svg {
+  width: 500px;
+  height: 500px;
+}
+
+.cof-key-segment {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cof-key-segment.selected {
+  fill: var(--mauve);
+  stroke: var(--mauve);
+  stroke-width: 2;
+}
+
+.cof-key-segment.hovered {
+  fill: transparent;
+  stroke: var(--text);
+  stroke-width: 2;
+  stroke-linejoin: miter;
+  stroke-linecap: square;
+}
+
+.cof-key-segment.unselected {
+  fill: transparent;
+  stroke: var(--surface0);
+  stroke-width: 1;
+}
+
+.cof-key-label {
+  fill: var(--text);
+  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: 12px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cof-modal-footer {
+  margin-top: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  padding: 8px 16px;
+}
+
+.cof-clear-btn {
+  padding: 6px 12px;
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.cof-clear-btn:hover {
+  background: var(--surface1);
+}

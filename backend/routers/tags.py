@@ -32,3 +32,32 @@ def create_category(category: schemas.TagCategoryCreate, db: Session = Depends(g
 @router.post("/", response_model=schemas.Tag, status_code=201)
 def create_tag(tag: schemas.TagCreate, db: Session = Depends(get_db)):
     return crud.create_tag(db, tag)
+
+
+@router.patch("/{tag_id}", response_model=schemas.Tag)
+def update_tag(
+    tag_id: int,
+    tag_update: schemas.TagUpdate,
+    db: Session = Depends(get_db)
+):
+    tag = crud.update_tag(db, tag_id, tag_update)
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return tag
+
+
+@router.delete("/{tag_id}", status_code=204)
+def delete_tag(tag_id: int, db: Session = Depends(get_db)):
+    result = crud.delete_tag(db, tag_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return None
+
+
+@router.post("/reorder", status_code=200)
+def reorder_tags(
+    tag_order: List[dict],
+    db: Session = Depends(get_db)
+):
+    crud.reorder_tags(db, tag_order)
+    return {"message": "Tags reordered successfully"}

@@ -1,0 +1,54 @@
+.global-controls {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--crust);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.global-controls-btn {
+  padding: 6px 12px;
+  background: var(--mauve);
+  color: var(--base);
+  border: 1px solid var(--surface0);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.global-controls-btn:hover {
+  background: var(--lavender);
+}
+
+/* Find Related Tracks buttons */
+.find-related-quick {
+  background: var(--green);
+  color: var(--base);
+  font-weight: bold;
+}
+
+.find-related-quick:hover:not(:disabled) {
+  background: var(--teal);
+}
+
+.find-related-quick:disabled {
+  background: var(--surface0);
+  color: var(--overlay0);
+  cursor: not-allowed;
+}
+
+.find-related-settings {
+  background: var(--surface0);
+  color: var(--text);
+  padding: 6px 10px;
+  min-width: 32px;
+}
+
+.find-related-settings:hover:not(:disabled) {
+  background: var(--surface1);
+}
+
+.find-related-settings:disabled {
+  color: var(--overlay0);
+  cursor: not-allowed;
+}

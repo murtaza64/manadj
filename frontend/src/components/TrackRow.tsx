@@ -1,4 +1,7 @@
 import TagPill from './TagPill';
+import EnergySquare from './EnergySquare';
+import BPMDisplay from './BPMDisplay';
+import KeyDisplay from './KeyDisplay';
 import type { Track } from '../types';
 import './TrackRow.css';
 
@@ -18,7 +21,35 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
       onClick={() => onSelect(track)}
       data-track-id={track.id}
       style={{ cursor: 'pointer' }}
+      draggable={true}
+      onDragStart={(e) => {
+        e.dataTransfer.setData('trackId', track.id.toString());
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
     >
+        <td className="track-cell" style={{ textAlign: 'right' }}>
+          <div className="track-cell-single">
+            <KeyDisplay keyValue={track.key} />
+          </div>
+        </td>
+        <td className="track-cell">
+          <div className="track-cell-single">
+            <BPMDisplay bpm={track.bpm} />
+          </div>
+        </td>
+        <td className="track-energy-cell">
+          {track.energy ? (
+            <EnergySquare
+              level={track.energy}
+              filled={true}
+              showNumber={true}
+            />
+          ) : (
+            <div className="energy-square-empty">
+              -
+            </div>
+          )}
+        </td>
         <td className="track-cell">
           <div className="track-cell-text">
             {track.title || filename}
@@ -28,46 +59,6 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
           <div className="track-cell-text">
             {track.artist || <span style={{ color: 'var(--overlay0)' }}>-</span>}
           </div>
-        </td>
-        <td className="track-cell">
-          <div className="track-cell-single">
-            {track.key || <span style={{ color: 'var(--overlay0)' }}>-</span>}
-          </div>
-        </td>
-        <td className="track-cell">
-          <div className="track-cell-single">
-            {track.bpm || <span style={{ color: 'var(--overlay0)' }}>-</span>}
-          </div>
-        </td>
-        <td className="track-energy-cell">
-          {track.energy ? (
-            <div style={{ display: 'flex' }}>
-              {[1, 2, 3, 4, 5].map(level => {
-                const isFilled = level <= track.energy!;
-                const colors = [
-                  'var(--energy-1)',
-                  'var(--energy-2)',
-                  'var(--energy-3)',
-                  'var(--energy-4)',
-                  'var(--energy-5)'
-                ];
-                const color = isFilled ? colors[level - 1] : 'var(--surface0)';
-
-                return (
-                  <div
-                    key={level}
-                    style={{
-                      width: '16px',
-                      height: '12px',
-                      background: color
-                    }}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <span style={{ color: 'var(--overlay0)' }}>-</span>
-          )}
         </td>
         <td className="track-tags-cell">
           <div className="track-tags-container">

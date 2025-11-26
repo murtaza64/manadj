@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 from .. import crud, schemas
 from ..database import get_db
-from ..waveform_utils import json_to_waveform_peaks
+from ..waveform_utils import json_to_band_peaks
 
 router = APIRouter()
 
@@ -61,7 +61,23 @@ def update_cue_point(
 
 def _format_waveform_response(waveform):
     """Format waveform model for API response."""
-    peaks = json_to_waveform_peaks(waveform.peaks_json)
+    # Parse multiband data
+    low_peaks = json_to_band_peaks(waveform.low_peaks_json)
+    mid_peaks = json_to_band_peaks(waveform.mid_peaks_json)
+    high_peaks = json_to_band_peaks(waveform.high_peaks_json)
+
+    bands = {
+        "low": low_peaks,
+        "mid": mid_peaks,
+        "high": high_peaks
+    }
+
+    # Generate PNG URL if PNG file exists
+    png_url = None
+    if waveform.png_path:
+        # Extract just the filename from the path
+        png_filename = Path(waveform.png_path).name
+        png_url = f"/waveforms/{png_filename}"
 
     return {
         "id": waveform.id,
@@ -69,10 +85,11 @@ def _format_waveform_response(waveform):
         "data": {
             "sample_rate": waveform.sample_rate,
             "duration": waveform.duration,
-            "peaks": peaks,
             "samples_per_peak": waveform.samples_per_peak,
-            "cue_point_time": waveform.cue_point_time
+            "cue_point_time": waveform.cue_point_time,
+            "bands": bands
         },
+        "png_url": png_url,
         "created_at": waveform.created_at,
         "updated_at": waveform.updated_at
     }

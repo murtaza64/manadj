@@ -1,0 +1,87 @@
+.hot-cue {
+  width: 32px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+  background: transparent;
+}
+
+.hot-cue.set {
+  color: var(--text);
+}
+
+.hot-cue.unset {
+  color: var(--overlay0);
+}
+
+.hot-cue.clickable {
+  cursor: pointer;
+}
+
+.hot-cue.clickable:not(.disabled):hover {
+  border-color: var(--text);
+}
+
+.hot-cue.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* Hot cue colors when set */
+.hot-cue.cue-1.set {
+  border: 1px solid var(--red);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+.hot-cue.cue-2.set {
+  border: 1px solid var(--peach);
+  background: color-mix(in srgb, var(--peach) 12%, transparent);
+  color: var(--peach);
+}
+
+.hot-cue.cue-3.set {
+  border: 1px solid var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
+  color: var(--yellow);
+}
+
+.hot-cue.cue-4.set {
+  border: 1px solid var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+}
+
+.hot-cue.cue-5.set {
+  border: 1px solid var(--blue);
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  color: var(--blue);
+}
+
+.hot-cue.cue-6.set {
+  border: 1px solid var(--mauve);
+  background: color-mix(in srgb, var(--mauve) 12%, transparent);
+  color: var(--mauve);
+}
+
+.hot-cue.cue-7.set {
+  border: 1px solid var(--pink);
+  background: color-mix(in srgb, var(--pink) 12%, transparent);
+  color: var(--pink);
+}
+
+.hot-cue.cue-8.set {
+  border: 1px solid var(--teal);
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+  color: var(--teal);
+}
+
+.hot-cue.unset {
+  border: 1px solid var(--surface0);
+}

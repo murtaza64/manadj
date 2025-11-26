@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Waveform Prototype</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>WebGL Waveform Prototype</h1>
+
+        <div class="controls">
+            <input type="number" id="track-id" value="1" min="1" style="width: 60px;">
+            <button id="load-track">Load Track</button>
+            <button id="play-pause">Play/Pause</button>
+            <button id="zoom-out">Zoom Out</button>
+            <button id="zoom-reset">Reset Zoom</button>
+            <button id="zoom-in">Zoom In</button>
+            <span id="status">Ready</span>
+        </div>
+
+        <div class="waveform-container">
+            <canvas id="waveform" width="1200" height="120"></canvas>
+        </div>
+
+        <div class="minimap-container">
+            <canvas id="minimap" width="1200" height="40"></canvas>
+        </div>
+
+        <audio id="audio"></audio>
+    </div>
+
+    <script type="module" src="waveform-data-loader.js"></script>
+    <script type="module" src="webgl-waveform.js"></script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>

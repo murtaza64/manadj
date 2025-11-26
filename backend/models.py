@@ -19,7 +19,7 @@ class Track(Base):
     energy = Column(Integer)  # 1-5 energy level
     title = Column(String, nullable=True)
     artist = Column(String, nullable=True)
-    key = Column(String, nullable=True)  # Musical key (e.g., "Am", "C#")
+    key = Column(Integer, nullable=True)  # Engine DJ key ID (0-23)
     bpm = Column(Integer, nullable=True)  # Beats per minute
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -36,7 +36,10 @@ class Waveform(Base):
     sample_rate = Column(Integer, nullable=False)
     duration = Column(Float, nullable=False)
     samples_per_peak = Column(Integer, nullable=False)
-    peaks_json = Column(Text, nullable=False)  # JSON array: [max, min, max, min, ...]
+    low_peaks_json = Column(Text, nullable=False)  # JSON array for low frequency band (20-250Hz)
+    mid_peaks_json = Column(Text, nullable=False)  # JSON array for mid frequency band (250-4000Hz)
+    high_peaks_json = Column(Text, nullable=False)  # JSON array for high frequency band (4000-20000Hz)
+    png_path = Column(String, nullable=True)  # Relative path to PNG waveform file
     cue_point_time = Column(Float, nullable=True)  # CUE point in seconds
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -64,6 +67,7 @@ class Tag(Base):
     category_id = Column(Integer, ForeignKey("tag_categories.id"), nullable=False)
     name = Column(String, nullable=False)
     display_order = Column(Integer, default=0)
+    color = Column(String)
 
     # Relationships
     category = relationship("TagCategory", back_populates="tags")
@@ -90,4 +94,38 @@ class TrackTag(Base):
         Index("idx_track_tags_track", "track_id"),
         Index("idx_track_tags_tag", "tag_id"),
         Index("idx_track_tags_unique", "track_id", "tag_id", unique=True),
+    )
+
+
+class Playlist(Base):
+    __tablename__ = "playlists"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    color = Column(String)  # Hex color
+    display_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationships
+    playlist_tracks = relationship("PlaylistTrack", back_populates="playlist", cascade="all, delete-orphan")
+
+
+class PlaylistTrack(Base):
+    __tablename__ = "playlist_tracks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    playlist_id = Column(Integer, ForeignKey("playlists.id"), nullable=False)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False)
+    position = Column(Integer, nullable=False)  # Order within playlist (0-indexed)
+    created_at = Column(DateTime, default=func.now())
+
+    # Relationships
+    playlist = relationship("Playlist", back_populates="playlist_tracks")
+    track = relationship("Track")
+
+    __table_args__ = (
+        Index("idx_playlist_tracks_playlist", "playlist_id"),
+        Index("idx_playlist_tracks_track", "track_id"),
+        Index("idx_playlist_tracks_position", "playlist_id", "position"),
     )

@@ -13,6 +13,7 @@ class RekordboxTrack:
     bpm: float | None
     key: str | None
     mytags: tuple[tuple[str, str], ...] = field(default_factory=tuple)  # ((category, tag), ...)
+    color_id: str | None = None  # Rekordbox color ID (0-8 as string)
 
 
 @dataclass

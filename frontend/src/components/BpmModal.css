@@ -1,0 +1,135 @@
+.bpm-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.bpm-modal-overlay::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(12px);
+  mask-image: radial-gradient(
+    circle at var(--blur-center-x, 50%) var(--blur-center-y, 50%),
+    black 0%,
+    black 200px,
+    transparent 600px
+  );
+  -webkit-mask-image: radial-gradient(
+    circle at var(--blur-center-x, 50%) var(--blur-center-y, 50%),
+    black 0%,
+    black 200px,
+    transparent 600px
+  );
+}
+
+.bpm-modal-content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  padding: 16px;
+  min-width: 320px;
+  gap: 16px;
+}
+
+.bpm-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bpm-label {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.bpm-center-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  color: var(--text);
+  font-size: 14px;
+  font-family: 'UbuntuMono Nerd Font', monospace;
+}
+
+.bpm-center-input:focus {
+  outline: none;
+  border-color: var(--mauve);
+}
+
+.bpm-center-input::placeholder {
+  color: var(--subtext0);
+}
+
+.bpm-threshold-slider {
+  width: 100%;
+  height: 24px;
+  cursor: pointer;
+}
+
+.bpm-threshold-slider:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.bpm-range-display {
+  text-align: center;
+  font-size: 24px;
+  font-weight: bold;
+  color: var(--mauve);
+  padding: 16px;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  font-family: 'UbuntuMono Nerd Font', monospace;
+}
+
+.bpm-range-display.inactive {
+  color: var(--subtext0);
+  font-size: 32px;
+}
+
+.bpm-modal-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface0);
+}
+
+.bpm-action-btn {
+  padding: 6px 16px;
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: 'UbuntuMono Nerd Font', monospace;
+}
+
+.bpm-action-btn:hover {
+  background: var(--surface1);
+}
+
+.bpm-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bpm-action-btn:disabled:hover {
+  background: var(--surface0);
+}

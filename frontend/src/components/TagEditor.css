@@ -35,22 +35,14 @@
   gap: 8px;
 }
 
-.tag-editor-energy-label {
-  font-size: 13px;
-  font-weight: 500;
-  min-width: 50px;
+.tag-editor-energy-squares {
+  display: flex;
+  gap: 4px;
 }
 
-.tag-editor-energy-bar {
-  display: inline-flex;
-  cursor: pointer;
-  user-select: none;
-}
-
-.tag-editor-energy-cell {
-  width: 32px;
-  height: 20px;
+.tag-editor-energy-icon {
   flex-shrink: 0;
+  margin-right: 8px;
 }
 
 .tag-editor-tags {

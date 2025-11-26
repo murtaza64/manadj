@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Seek Test</title>
+  <style>
+    body {
+      font-family: 'UbuntuMono Nerd Font', monospace;
+      background: #1e1e1e;
+      color: #cdd6f4;
+      padding: 40px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .controls {
+      margin: 20px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      background: #313136;
+      color: #cdd6f4;
+      border: 1px solid #45454f;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    button:hover {
+      background: #45454f;
+    }
+
+    button:active {
+      background: #58585b;
+    }
+
+    input[type="number"] {
+      background: #313136;
+      color: #cdd6f4;
+      border: 1px solid #45454f;
+      padding: 8px;
+      width: 100px;
+      font-family: inherit;
+    }
+
+    .info {
+      background: #111111;
+      padding: 16px;
+      margin: 20px 0;
+      border: 1px solid #313136;
+    }
+
+    .info div {
+      margin: 8px 0;
+    }
+
+    .log {
+      background: #111111;
+      padding: 16px;
+      margin: 20px 0;
+      border: 1px solid #313136;
+      max-height: 300px;
+      overflow-y: auto;
+      font-size: 12px;
+    }
+
+    .log div {
+      margin: 4px 0;
+      padding: 2px 0;
+      border-bottom: 1px solid #1e1e1e;
+    }
+
+    h1 {
+      color: #b4befe;
+    }
+
+    h2 {
+      color: #89b4fa;
+      font-size: 16px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Audio Seek Test</h1>
+
+  <p>Test whether setting <code>currentTime</code> on an HTMLAudioElement works correctly.</p>
+
+  <h2>Track Selection</h2>
+  <div class="controls">
+    <input type="number" id="trackIdInput" value="1" min="1" step="1" style="width: 80px;">
+    <button onclick="loadTrack()">Load Track</button>
+  </div>
+
+  <audio id="audio" controls style="width: 100%; margin: 20px 0;">
+    <source id="audioSource" src="http://localhost:8000/api/tracks/1/audio" type="audio/mpeg">
+    Your browser does not support the audio element.
+  </audio>
+
+  <h2>Track Metadata</h2>
+  <div class="info" id="trackMetadata">
+    <div><strong>Track ID:</strong> <span id="trackId">-</span></div>
+    <div><strong>Filename:</strong> <span id="filename">-</span></div>
+    <div><strong>Title:</strong> <span id="title">-</span></div>
+    <div><strong>Artist:</strong> <span id="artist">-</span></div>
+    <div><strong>File Type:</strong> <span id="fileType">-</span></div>
+    <div><strong>MIME Type:</strong> <span id="mimeType">-</span></div>
+    <div><strong>Codec:</strong> <span id="codec">-</span></div>
+  </div>
+
+  <h2>Quick Seek Tests</h2>
+  <div class="controls">
+    <button onclick="seekTo(0)">Seek to 0s</button>
+    <button onclick="seekTo(10)">Seek to 10s</button>
+    <button onclick="seekTo(30)">Seek to 30s</button>
+    <button onclick="seekTo(60)">Seek to 60s</button>
+    <button onclick="skip(-5)">Skip -5s</button>
+    <button onclick="skip(5)">Skip +5s</button>
+  </div>
+
+  <h2>Custom Seek</h2>
+  <div class="controls">
+    <input type="number" id="seekInput" value="0" min="0" step="0.1">
+    <button onclick="seekToCustom()">Seek to Time</button>
+  </div>
+
+  <h2>Audio Element State</h2>
+  <div class="info">
+    <div><strong>Current Time:</strong> <span id="currentTime">-</span>s</div>
+    <div><strong>Duration:</strong> <span id="duration">-</span>s</div>
+    <div><strong>Paused:</strong> <span id="paused">-</span></div>
+    <div><strong>Ready State:</strong> <span id="readyState">-</span> <span id="readyStateText" style="color: #a6adc8;"></span></div>
+    <div><strong>Network State:</strong> <span id="networkState">-</span> <span id="networkStateText" style="color: #a6adc8;"></span></div>
+    <div><strong>Seekable:</strong> <span id="seekable">-</span></div>
+    <div><strong>Buffered:</strong> <span id="buffered">-</span></div>
+  </div>
+
+  <h2>Event Log</h2>
+  <div class="log" id="log"></div>
+
+  <script>
+    const audio = document.getElementById('audio');
+    const audioSource = document.getElementById('audioSource');
+    const log = document.getElementById('log');
+    let currentTrackId = 1;
+
+    // Load track
+    async function loadTrack() {
+      const trackId = parseInt(document.getElementById('trackIdInput').value);
+      if (isNaN(trackId) || trackId < 1) {
+        logEvent('ERROR: Invalid track ID');
+        return;
+      }
+
+      currentTrackId = trackId;
+      logEvent(`Loading track ${trackId}...`);
+
+      // Update audio source
+      audioSource.src = `http://localhost:8000/api/tracks/${trackId}/audio`;
+      audio.load();
+
+      // Fetch track metadata
+      try {
+        const response = await fetch(`http://localhost:8000/api/tracks/${trackId}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const track = await response.json();
+
+        // Update metadata display
+        document.getElementById('trackId').textContent = track.id;
+        document.getElementById('filename').textContent = track.filename?.split('/').pop() || '-';
+        document.getElementById('title').textContent = track.title || '-';
+        document.getElementById('artist').textContent = track.artist || '-';
+
+        // Determine file type from filename
+        const ext = track.filename?.split('.').pop()?.toLowerCase() || '-';
+        document.getElementById('fileType').textContent = ext.toUpperCase();
+
+        logEvent(`Track loaded: ${track.title || track.filename?.split('/').pop()}`);
+      } catch (err) {
+        logEvent(`ERROR: Failed to load track metadata - ${err.message}`);
+      }
+    }
+
+    // Update display
+    function updateDisplay() {
+      document.getElementById('currentTime').textContent = audio.currentTime.toFixed(2);
+      document.getElementById('duration').textContent = audio.duration.toFixed(2);
+      document.getElementById('paused').textContent = audio.paused;
+
+      // Ready state
+      const readyState = audio.readyState;
+      const readyStateNames = ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'];
+      document.getElementById('readyState').textContent = readyState;
+      document.getElementById('readyStateText').textContent = `(${readyStateNames[readyState]})`;
+
+      // Network state
+      const networkState = audio.networkState;
+      const networkStateNames = ['NETWORK_EMPTY', 'NETWORK_IDLE', 'NETWORK_LOADING', 'NETWORK_NO_SOURCE'];
+      document.getElementById('networkState').textContent = networkState;
+      document.getElementById('networkStateText').textContent = `(${networkStateNames[networkState]})`;
+
+      // Seekable ranges
+      const seekable = audio.seekable;
+      let seekableText = 'none';
+      if (seekable.length > 0) {
+        seekableText = `${seekable.start(0).toFixed(2)}s - ${seekable.end(0).toFixed(2)}s`;
+      }
+      document.getElementById('seekable').textContent = seekableText;
+
+      // Buffered ranges
+      const buffered = audio.buffered;
+      let bufferedText = 'none';
+      if (buffered.length > 0) {
+        const ranges = [];
+        for (let i = 0; i < buffered.length; i++) {
+          ranges.push(`${buffered.start(i).toFixed(2)}s-${buffered.end(i).toFixed(2)}s`);
+        }
+        bufferedText = ranges.join(', ');
+      }
+      document.getElementById('buffered').textContent = bufferedText;
+    }
+
+    // Log event
+    function logEvent(message) {
+      const timestamp = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.textContent = `[${timestamp}] ${message}`;
+      log.insertBefore(div, log.firstChild);
+      console.log(message);
+    }
+
+    // Seek functions
+    function seekTo(time) {
+      logEvent(`SEEKING: Setting currentTime from ${audio.currentTime.toFixed(2)}s to ${time}s`);
+      audio.currentTime = time;
+      logEvent(`AFTER SET: currentTime is now ${audio.currentTime.toFixed(2)}s`);
+      updateDisplay();
+    }
+
+    function skip(seconds) {
+      const newTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds));
+      seekTo(newTime);
+    }
+
+    function seekToCustom() {
+      const time = parseFloat(document.getElementById('seekInput').value);
+      if (!isNaN(time)) {
+        seekTo(time);
+      }
+    }
+
+    // Audio event listeners
+    audio.addEventListener('loadedmetadata', () => {
+      logEvent('EVENT: loadedmetadata');
+
+      // Try to detect MIME type and codec
+      const sourceEl = audio.querySelector('source');
+      if (sourceEl) {
+        document.getElementById('mimeType').textContent = sourceEl.type || 'unknown';
+      }
+
+      // Try to get codec info from canPlayType
+      const types = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac'];
+      let codecInfo = 'unknown';
+      for (const type of types) {
+        const canPlay = audio.canPlayType(type);
+        if (canPlay === 'probably' || canPlay === 'maybe') {
+          codecInfo = `${type} (${canPlay})`;
+          break;
+        }
+      }
+      document.getElementById('codec').textContent = codecInfo;
+
+      updateDisplay();
+    });
+
+    audio.addEventListener('canplay', () => {
+      logEvent('EVENT: canplay');
+      updateDisplay();
+    });
+
+    audio.addEventListener('canplaythrough', () => {
+      logEvent('EVENT: canplaythrough');
+      updateDisplay();
+    });
+
+    audio.addEventListener('play', () => {
+      logEvent('EVENT: play');
+      updateDisplay();
+    });
+
+    audio.addEventListener('pause', () => {
+      logEvent('EVENT: pause');
+      updateDisplay();
+    });
+
+    audio.addEventListener('timeupdate', () => {
+      updateDisplay();
+    });
+
+    audio.addEventListener('seeking', () => {
+      logEvent(`EVENT: seeking (currentTime: ${audio.currentTime.toFixed(2)}s)`);
+      updateDisplay();
+    });
+
+    audio.addEventListener('seeked', () => {
+      logEvent(`EVENT: seeked (currentTime: ${audio.currentTime.toFixed(2)}s)`);
+      updateDisplay();
+    });
+
+    audio.addEventListener('error', (e) => {
+      logEvent(`EVENT: error - ${audio.error?.message || 'Unknown error'}`);
+      updateDisplay();
+    });
+
+    audio.addEventListener('stalled', () => {
+      logEvent('EVENT: stalled');
+      updateDisplay();
+    });
+
+    audio.addEventListener('waiting', () => {
+      logEvent('EVENT: waiting');
+      updateDisplay();
+    });
+
+    // Initial load and display
+    loadTrack();
+    updateDisplay();
+
+    // Update display every 100ms
+    setInterval(updateDisplay, 100);
+  </script>
+</body>
+</html>

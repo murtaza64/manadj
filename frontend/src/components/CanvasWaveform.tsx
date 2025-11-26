@@ -31,6 +31,7 @@ export default function CanvasWaveform({ audioElement, trackId, cuePoint }: Canv
     try {
       const renderer = new CanvasWaveformRenderer(canvasRef.current);
       renderer.load(waveformData.data);
+      renderer.setAudioElement(audioElement);
       renderer.onSeek((time) => {
         if (audioElement) audioElement.currentTime = time;
       });
@@ -48,11 +49,19 @@ export default function CanvasWaveform({ audioElement, trackId, cuePoint }: Canv
 
   // Update playback time
   useEffect(() => {
-    if (!audioElement || !rendererRef.current) return;
+    if (!audioElement || !rendererRef.current) {
+      return;
+    }
 
-    const handleTimeUpdate = () => rendererRef.current?.setCurrentTime(audioElement.currentTime);
-    const handlePlay = () => rendererRef.current?.setPlaying(true);
-    const handlePause = () => rendererRef.current?.setPlaying(false);
+    const handleTimeUpdate = () => {
+      rendererRef.current?.setCurrentTime(audioElement.currentTime);
+    };
+    const handlePlay = () => {
+      rendererRef.current?.setPlaying(true);
+    };
+    const handlePause = () => {
+      rendererRef.current?.setPlaying(false);
+    };
 
     audioElement.addEventListener('timeupdate', handleTimeUpdate);
     audioElement.addEventListener('play', handlePlay);
@@ -63,7 +72,7 @@ export default function CanvasWaveform({ audioElement, trackId, cuePoint }: Canv
       audioElement.removeEventListener('play', handlePlay);
       audioElement.removeEventListener('pause', handlePause);
     };
-  }, [audioElement]);
+  }, [audioElement, waveformData]);
 
   // Update CUE point
   useEffect(() => {
@@ -78,6 +87,14 @@ export default function CanvasWaveform({ audioElement, trackId, cuePoint }: Canv
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  if (trackId === null) {
+    return (
+      <div className="waveform-container waveform-empty">
+        <span style={{ color: 'var(--subtext1)', fontSize: '12px' }}>hello world</span>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

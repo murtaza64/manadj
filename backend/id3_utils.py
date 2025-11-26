@@ -2,6 +2,7 @@
 
 from mutagen import File
 from typing import Dict, Optional
+from .key import Key
 
 
 def extract_id3_metadata(filepath: str) -> Dict[str, Optional[str | int]]:
@@ -15,6 +16,7 @@ def extract_id3_metadata(filepath: str) -> Dict[str, Optional[str | int]]:
 
     Returns:
         Dictionary with keys: title, artist, key, bpm
+        Key is returned as Engine DJ ID (0-23) or None
         Values are None if tags are missing or file cannot be read
     """
     try:
@@ -41,8 +43,12 @@ def extract_id3_metadata(filepath: str) -> Dict[str, Optional[str | int]]:
             artist = audio["artist"][0] if audio["artist"] else None
 
         # Key can be stored as "initialkey" in some formats
+        # Convert to Engine DJ ID
         if "initialkey" in audio:
-            key = audio["initialkey"][0] if audio["initialkey"] else None
+            key_str = audio["initialkey"][0] if audio["initialkey"] else None
+            if key_str:
+                key_obj = Key.from_musical(key_str)
+                key = key_obj.engine_id if key_obj else None
 
         # BPM can be stored as "bpm" or "tempo"
         if "bpm" in audio:

@@ -48,7 +48,7 @@
 
 .track-tags-container {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
@@ -76,6 +76,56 @@
 
 /* Energy cell */
 .track-energy-cell {
-  padding: 2px 12px;
+  padding: 2px 4px;
   vertical-align: middle;
+  width: 25px;
+  text-align: center;
+}
+
+/* Energy square overrides for track list */
+.track-energy-cell .energy-square {
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+}
+
+.track-energy-cell .energy-square.level-1.filled {
+  background: color-mix(in srgb, var(--energy-1) 30%, var(--base));
+  color: var(--energy-1);
+  border: none;
+}
+
+.track-energy-cell .energy-square.level-2.filled {
+  background: color-mix(in srgb, var(--energy-2) 30%, var(--base));
+  color: var(--energy-2);
+  border: none;
+}
+
+.track-energy-cell .energy-square.level-3.filled {
+  background: color-mix(in srgb, var(--energy-3) 30%, var(--base));
+  color: var(--energy-3);
+  border: none;
+}
+
+.track-energy-cell .energy-square.level-4.filled {
+  background: color-mix(in srgb, var(--energy-4) 30%, var(--base));
+  color: var(--energy-4);
+  border: none;
+}
+
+.track-energy-cell .energy-square.level-5.filled {
+  background: color-mix(in srgb, var(--energy-5) 30%, var(--base));
+  color: var(--energy-5);
+  border: none;
+}
+
+.track-energy-cell .energy-square-empty {
+  background: var(--surface0);
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  padding: 0;
 }

@@ -1,0 +1,73 @@
+.energy-square {
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.energy-square.filled {
+  color: var(--text);
+}
+
+.energy-square.unfilled {
+  color: var(--overlay0);
+  background: transparent;
+}
+
+.energy-square.clickable {
+  cursor: pointer;
+}
+
+.energy-square.clickable:not(.disabled):hover {
+  border-color: var(--text);
+}
+
+.energy-square.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* Energy level colors */
+.energy-square.level-1.filled {
+  border: 1px solid var(--energy-1);
+  background: color-mix(in srgb, var(--energy-1) 12%, transparent);
+}
+
+.energy-square.level-2.filled {
+  border: 1px solid var(--energy-2);
+  background: color-mix(in srgb, var(--energy-2) 12%, transparent);
+}
+
+.energy-square.level-3.filled {
+  border: 1px solid var(--energy-3);
+  background: color-mix(in srgb, var(--energy-3) 12%, transparent);
+}
+
+.energy-square.level-4.filled {
+  border: 1px solid var(--energy-4);
+  background: color-mix(in srgb, var(--energy-4) 12%, transparent);
+}
+
+.energy-square.level-5.filled {
+  border: 1px solid var(--energy-5);
+  background: color-mix(in srgb, var(--energy-5) 12%, transparent);
+}
+
+.energy-square.unfilled {
+  border: 1px solid var(--surface0);
+}
+
+.energy-square-empty {
+  padding: 4px 8px;
+  border: 1px solid var(--surface0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--overlay0);
+  font-size: 12px;
+}

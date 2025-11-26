@@ -1,0 +1,237 @@
+/* Modal Overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Modal Content */
+.modal-content {
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  width: 90%;
+  max-width: 800px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Modal Header */
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--surface0);
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 32px;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  line-height: 1;
+}
+
+.modal-close-btn:hover {
+  color: var(--red);
+}
+
+/* Modal Body */
+.modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Category Section */
+.category-section {
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--surface0);
+}
+
+.category-section:last-child {
+  border-bottom: none;
+}
+
+.category-title {
+  color: var(--text);
+  font-size: 14px;
+  margin: 0 0 12px 0;
+  font-weight: bold;
+}
+
+/* Tag List */
+.tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Tag Item */
+.tag-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+}
+
+.tag-color-swatch {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--surface0);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tag-name {
+  flex: 1;
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* Buttons */
+.btn-edit,
+.btn-delete,
+.btn-save,
+.btn-cancel,
+.btn-create {
+  padding: 4px 12px;
+  border: 1px solid var(--surface0);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.btn-edit {
+  background: var(--blue);
+  color: var(--base);
+}
+
+.btn-delete {
+  background: var(--red);
+  color: var(--base);
+}
+
+.btn-save {
+  background: var(--green);
+  color: var(--base);
+}
+
+.btn-cancel {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+.btn-create {
+  background: var(--mauve);
+  color: var(--base);
+}
+
+.btn-create:disabled {
+  background: var(--surface0);
+  color: var(--overlay0);
+  cursor: not-allowed;
+}
+
+/* Edit Form */
+.tag-edit-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.tag-name-input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* Color Picker */
+.tag-color-picker {
+  position: relative;
+}
+
+.color-picker-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  padding: 12px;
+  z-index: 1001;
+  min-width: 240px;
+}
+
+.color-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.color-palette-item {
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  border: 1px solid var(--surface0);
+}
+
+.color-palette-item:hover {
+  border-color: var(--text);
+}
+
+/* Hex Input */
+.color-hex-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hex-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  color: var(--text);
+  font-size: 12px;
+  font-family: 'UbuntuMono Nerd Font', monospace;
+}
+
+.hex-error {
+  color: var(--red);
+  font-size: 10px;
+}
+
+/* Create Form */
+.tag-create-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}

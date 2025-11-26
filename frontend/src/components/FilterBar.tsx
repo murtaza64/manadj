@@ -2,26 +2,27 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag } from '../types';
+import { getTagColor } from '../utils/colorUtils';
+import { getAllCamelotKeys } from '../utils/keyUtils';
+import EnergySquare from './EnergySquare';
+import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon } from './icons';
+import CircleOfFifthsModal from './CircleOfFifthsModal';
+import BpmModal from './BpmModal';
+import { useFilters } from '../contexts/FilterContext';
+import './FilterBar.css';
 
 interface FilterBarProps {
-  onFilterChange: (filters: {
-    search: string;
-    selectedTagIds: number[];
-    energyMin: number | null;
-    energyMax: number | null;
-    tagMatchMode: 'ANY' | 'ALL';
-  }) => void;
   totalTracks: number;
   filteredCount: number;
 }
 
-export default function FilterBar({ onFilterChange, totalTracks, filteredCount }: FilterBarProps) {
-  const [searchInput, setSearchInput] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(new Set());
-  const [energyMin, setEnergyMin] = useState<number>(1);
-  const [energyMax, setEnergyMax] = useState<number>(5);
-  const [tagMatchMode, setTagMatchMode] = useState<'ANY' | 'ALL'>('ANY');
+export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps) {
+  const { filters, setFilters } = useFilters();
+  const [searchInput, setSearchInput] = useState(filters.search);
+  const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+  const [keyModalPosition, setKeyModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
+  const [isBpmModalOpen, setIsBpmModalOpen] = useState(false);
+  const [bpmModalPosition, setBpmModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
 
   // Fetch all tags
   const { data: allTags } = useQuery({
@@ -32,40 +33,31 @@ export default function FilterBar({ onFilterChange, totalTracks, filteredCount }
   // Debounce search input
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedSearch(searchInput);
+      if (searchInput !== filters.search) {
+        setFilters({ ...filters, search: searchInput });
+      }
     }, 300);
 
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Notify parent of filter changes
-  useEffect(() => {
-    onFilterChange({
-      search: debouncedSearch,
-      selectedTagIds: Array.from(selectedTagIds),
-      energyMin: energyMin,
-      energyMax: energyMax,
-      tagMatchMode,
-    });
-  }, [debouncedSearch, selectedTagIds, energyMin, energyMax, tagMatchMode]);
-
   const toggleTag = (tagId: number) => {
-    const newSet = new Set(selectedTagIds);
+    const newSet = new Set(filters.selectedTagIds);
     if (newSet.has(tagId)) {
       newSet.delete(tagId);
     } else {
       newSet.add(tagId);
     }
-    setSelectedTagIds(newSet);
+    setFilters({ ...filters, selectedTagIds: Array.from(newSet) });
   };
 
   const toggleMatchMode = () => {
-    setTagMatchMode(prev => prev === 'ANY' ? 'ALL' : 'ANY');
+    setFilters({ ...filters, tagMatchMode: filters.tagMatchMode === 'ANY' ? 'ALL' : 'ANY' });
   };
 
   const clearSearch = () => {
     setSearchInput('');
-    setDebouncedSearch('');
+    setFilters({ ...filters, search: '' });
   };
 
   // Group tags by category
@@ -82,8 +74,52 @@ export default function FilterBar({ onFilterChange, totalTracks, filteredCount }
       borderBottom: '1px solid var(--surface0)',
       padding: '12px'
     }}>
-      {/* Search Input */}
-      <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Search, Energy, and BPM on same line */}
+      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Result Count */}
+        <div style={{
+          fontSize: '14px',
+          color: 'var(--subtext1)',
+          minWidth: '80px',
+          flexShrink: 0
+        }}>
+          {filteredCount} / {totalTracks}
+        </div>
+
+        {/* Clear All Filters Button */}
+        <button
+          onClick={() => {
+            setSearchInput('');
+            setFilters({
+              search: '',
+              selectedTagIds: [],
+              energyMin: 1,
+              energyMax: 5,
+              tagMatchMode: 'ANY',
+              bpmCenter: null,
+              bpmThresholdPercent: 5,
+              selectedKeyCamelotIds: [],
+            });
+          }}
+          className="filter-bar-clear-all-btn"
+        >
+          Clear All
+        </button>
+
+        {/* Search Input */}
+        <div style={{ width: '16px', flexShrink: 0 }}>
+          {searchInput ? (
+            <button
+              onClick={clearSearch}
+              className="filter-bar-x-btn"
+              style={{ padding: 0, width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              ×
+            </button>
+          ) : (
+            <SearchIcon />
+          )}
+        </div>
         <input
           type="text"
           placeholder="Search by filename..."
@@ -98,45 +134,44 @@ export default function FilterBar({ onFilterChange, totalTracks, filteredCount }
             fontSize: '14px'
           }}
         />
-        {searchInput && (
-          <button
-            onClick={clearSearch}
-            style={{
-              padding: '8px 12px',
-              background: 'var(--red)',
-              color: 'var(--base)',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            Clear
-          </button>
-        )}
-      </div>
 
-      {/* Energy Range Bar */}
-      <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Energy Range Selector */}
+        <div style={{ width: '16px', flexShrink: 0 }}>
+          {(filters.energyMin !== 1 || filters.energyMax !== 5) ? (
+            <button
+              onClick={() => {
+                setFilters({ ...filters, energyMin: 1, energyMax: 5 });
+              }}
+              className="filter-bar-x-btn"
+              style={{ padding: 0, width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              ×
+            </button>
+          ) : (
+            <EnergyIcon />
+          )}
+        </div>
         <div
-          style={{ display: 'inline-flex', cursor: 'pointer', userSelect: 'none' }}
+          className="filter-bar-energy-selector"
           onMouseDown={(e) => {
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            const getLevel = (clientX: number) => {
-              const x = clientX - rect.left;
-              return Math.max(1, Math.min(5, Math.ceil((x / rect.width) * 5)));
+            const getLevel = (target: HTMLElement): number | null => {
+              const square = target.closest('[data-level]');
+              if (!square) return null;
+              return parseInt(square.getAttribute('data-level') || '0');
             };
 
-            const startLevel = getLevel(e.clientX);
-            setEnergyMin(startLevel);
-            setEnergyMax(startLevel);
+            const startLevel = getLevel(e.target as HTMLElement);
+            if (!startLevel) return;
+
+            setFilters({ ...filters, energyMin: startLevel, energyMax: startLevel });
 
             const handleMouseMove = (moveEvent: MouseEvent) => {
-              const currentLevel = getLevel(moveEvent.clientX);
+              const currentLevel = getLevel(moveEvent.target as HTMLElement);
+              if (!currentLevel) return;
+
               const newMin = Math.min(startLevel, currentLevel);
               const newMax = Math.max(startLevel, currentLevel);
-
-              setEnergyMin(newMin);
-              setEnergyMax(newMax);
+              setFilters({ ...filters, energyMin: newMin, energyMax: newMax });
             };
 
             const handleMouseUp = () => {
@@ -148,60 +183,112 @@ export default function FilterBar({ onFilterChange, totalTracks, filteredCount }
             document.addEventListener('mouseup', handleMouseUp);
           }}
         >
-          {[1, 2, 3, 4, 5].map(level => {
-            const isInRange = level >= energyMin && level <= energyMax;
-            const colors = [
-              'var(--energy-1)',
-              'var(--energy-2)',
-              'var(--energy-3)',
-              'var(--energy-4)',
-              'var(--energy-5)'
-            ];
-            const color = isInRange ? colors[level - 1] : 'var(--surface0)';
-
-            return (
-              <div
-                key={level}
-                style={{
-                  width: '32px',
-                  height: '24px',
-                  background: color,
-                  flexShrink: 0
-                }}
-              />
-            );
-          })}
+          <div className="filter-bar-energy-squares">
+            {[1, 2, 3, 4, 5].map(level => {
+              const isFilterActive = filters.energyMin !== 1 || filters.energyMax !== 5;
+              const isInRange = level >= filters.energyMin && level <= filters.energyMax;
+              return (
+                <div key={level} data-level={level}>
+                  <EnergySquare
+                    level={level}
+                    filled={isFilterActive && isInRange}
+                    showNumber={true}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
-        {(energyMin !== 1 || energyMax !== 5) && (
-          <button
-            onClick={() => {
-              setEnergyMin(1);
-              setEnergyMax(5);
-            }}
-            style={{
-              padding: '4px 12px',
-              background: 'var(--red)',
-              color: 'var(--base)',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 'bold'
-            }}
-          >
-            Clear
-          </button>
-        )}
+
+        {/* Key Filter */}
+        <div style={{ width: '16px', flexShrink: 0 }}>
+          {filters.selectedKeyCamelotIds.length > 0 ? (
+            <button
+              onClick={() => setFilters({ ...filters, selectedKeyCamelotIds: [] })}
+              className="filter-bar-x-btn"
+              style={{ padding: 0, width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              ×
+            </button>
+          ) : (
+            <KeyIcon />
+          )}
+        </div>
+        <button
+          onClick={(e) => {
+            setKeyModalPosition({ x: e.clientX, y: e.clientY });
+            setIsKeyModalOpen(true);
+          }}
+          style={{
+            padding: '4px 12px',
+            border: `1px solid ${filters.selectedKeyCamelotIds.length > 0 ? 'var(--mauve)' : 'var(--surface0)'}`,
+            cursor: 'pointer',
+            fontSize: '13px',
+            background: 'transparent',
+            color: 'var(--text)',
+            minWidth: '70px'
+          }}
+        >
+          {filters.selectedKeyCamelotIds.length > 0 ? `Keys (${filters.selectedKeyCamelotIds.length})` : 'Keys'}
+        </button>
+
+        {/* BPM Filter */}
+        <div style={{ width: '16px', flexShrink: 0 }}>
+          {filters.bpmCenter !== null ? (
+            <button
+              onClick={() => setFilters({ ...filters, bpmCenter: null })}
+              className="filter-bar-x-btn"
+              style={{ padding: 0, width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              ×
+            </button>
+          ) : (
+            <SpeedIcon />
+          )}
+        </div>
+        <button
+          onClick={(e) => {
+            setBpmModalPosition({ x: e.clientX, y: e.clientY });
+            setIsBpmModalOpen(true);
+          }}
+          style={{
+            padding: '4px 12px',
+            border: `1px solid ${filters.bpmCenter !== null ? 'var(--mauve)' : 'var(--surface0)'}`,
+            cursor: 'pointer',
+            fontSize: '13px',
+            background: 'transparent',
+            color: 'var(--text)',
+            minWidth: '110px'
+          }}
+        >
+          {filters.bpmCenter !== null
+            ? `${Math.round(filters.bpmCenter - filters.bpmCenter * filters.bpmThresholdPercent / 100)}-${Math.round(filters.bpmCenter + filters.bpmCenter * filters.bpmThresholdPercent / 100)}`
+            : 'BPM'
+          }
+        </button>
       </div>
 
       {/* Tags with Match Mode Toggle */}
       <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '14px', color: 'var(--subtext1)' }}>Tags:</span>
+        <div style={{ width: '16px', flexShrink: 0 }}>
+          {filters.selectedTagIds.length > 0 ? (
+            <button
+              onClick={() => setFilters({ ...filters, selectedTagIds: [] })}
+              className="filter-bar-x-btn"
+              style={{ padding: 0, width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              ×
+            </button>
+          ) : (
+            <TagIcon />
+          )}
+        </div>
         <button
           onClick={toggleMatchMode}
           style={{
             padding: '4px 12px',
-            background: tagMatchMode === 'ANY' ? 'var(--blue)' : 'var(--surface1)',
-            color: tagMatchMode === 'ANY' ? 'var(--base)' : 'var(--text)',
+            background: filters.tagMatchMode === 'ANY' ? 'var(--blue)' : 'var(--surface1)',
+            color: filters.tagMatchMode === 'ANY' ? 'var(--base)' : 'var(--text)',
             border: '1px solid var(--surface0)',
             cursor: 'pointer',
             fontSize: '13px',
@@ -214,8 +301,8 @@ export default function FilterBar({ onFilterChange, totalTracks, filteredCount }
           onClick={toggleMatchMode}
           style={{
             padding: '4px 12px',
-            background: tagMatchMode === 'ALL' ? 'var(--blue)' : 'var(--surface1)',
-            color: tagMatchMode === 'ALL' ? 'var(--base)' : 'var(--text)',
+            background: filters.tagMatchMode === 'ALL' ? 'var(--blue)' : 'var(--surface1)',
+            color: filters.tagMatchMode === 'ALL' ? 'var(--base)' : 'var(--text)',
             border: '1px solid var(--surface0)',
             cursor: 'pointer',
             fontSize: '13px',
@@ -225,9 +312,9 @@ export default function FilterBar({ onFilterChange, totalTracks, filteredCount }
           ALL
         </button>
         {allTags?.map((tag: Tag) => {
-          const isSelected = selectedTagIds.has(tag.id);
+          const isSelected = filters.selectedTagIds.includes(tag.id);
           const borderColor = isSelected
-            ? (tag.category.color || 'var(--surface0)')
+            ? getTagColor(tag)
             : 'var(--surface0)';
           return (
             <button
@@ -258,13 +345,33 @@ export default function FilterBar({ onFilterChange, totalTracks, filteredCount }
         })}
       </div>
 
-      {/* Result Count */}
-      <div style={{
-        fontSize: '14px',
-        color: 'var(--subtext1)'
-      }}>
-        {filteredCount} / {totalTracks}
-      </div>
+      <CircleOfFifthsModal
+        isOpen={isKeyModalOpen}
+        onClose={() => setIsKeyModalOpen(false)}
+        selectedKeys={new Set(filters.selectedKeyCamelotIds)}
+        onToggleKey={(key) => {
+          const newSet = new Set(filters.selectedKeyCamelotIds);
+          if (newSet.has(key)) {
+            newSet.delete(key);
+          } else {
+            newSet.add(key);
+          }
+          setFilters({ ...filters, selectedKeyCamelotIds: Array.from(newSet) });
+        }}
+        onClearAll={() => setFilters({ ...filters, selectedKeyCamelotIds: [] })}
+        openPosition={keyModalPosition}
+      />
+
+      <BpmModal
+        isOpen={isBpmModalOpen}
+        onClose={() => setIsBpmModalOpen(false)}
+        bpmCenter={filters.bpmCenter}
+        bpmThresholdPercent={filters.bpmThresholdPercent}
+        onBpmCenterChange={(value) => setFilters({ ...filters, bpmCenter: value })}
+        onThresholdChange={(value) => setFilters({ ...filters, bpmThresholdPercent: value })}
+        onClear={() => setFilters({ ...filters, bpmCenter: null })}
+        openPosition={bpmModalPosition}
+      />
     </div>
   );
 }
