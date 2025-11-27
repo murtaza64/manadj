@@ -153,6 +153,40 @@ export const api = {
     },
   },
 
+  beatgrids: {
+    get: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/beatgrids/${trackId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch beatgrid: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    setDownbeat: async (trackId: number, downbeatTime: number) => {
+      const response = await fetch(`${API_BASE}/beatgrids/${trackId}/set-downbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ downbeat_time: downbeatTime }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to set downbeat: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    nudge: async (trackId: number, offsetMs: number) => {
+      const response = await fetch(`${API_BASE}/beatgrids/${trackId}/nudge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offset_ms: offsetMs }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to nudge beatgrid: ${response.statusText}`);
+      }
+      return response.json();
+    },
+  },
+
   playlists: {
     list: async () => {
       const response = await fetch(`${API_BASE}/playlists/`);

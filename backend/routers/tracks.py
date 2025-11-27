@@ -180,11 +180,17 @@ def get_track_audio(track_id: int, db: Session = Depends(get_db)):
         with open(file_path, "rb") as f:
             yield from f
 
+    # Encode filename for Content-Disposition header (RFC 5987)
+    # Use ASCII-safe filename and add UTF-8 encoded filename* parameter
+    from urllib.parse import quote
+    ascii_filename = file_path.name.encode('ascii', 'ignore').decode('ascii')
+    utf8_filename = quote(file_path.name.encode('utf-8'))
+
     return StreamingResponse(
         iterfile(),
         media_type=mime_type,
         headers={
             "Accept-Ranges": "bytes",
-            "Content-Disposition": f"inline; filename=\"{file_path.name}\""
+            "Content-Disposition": f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{utf8_filename}"
         }
     )

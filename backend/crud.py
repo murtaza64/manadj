@@ -1,9 +1,11 @@
 """CRUD operations for database."""
 
+import json
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql import func
 from . import models, schemas
 from .id3_utils import extract_id3_metadata
+from .beatgrid_utils import generate_beatgrid_from_bpm
 
 
 # Tracks
@@ -486,4 +488,76 @@ def reorder_playlists(db: Session, playlist_order: list[dict]):
 
     db.commit()
     return True
+
+
+# Beatgrids
+def get_beatgrid(db: Session, track_id: int):
+    """Get beatgrid for a track."""
+    return db.query(models.Beatgrid).filter(
+        models.Beatgrid.track_id == track_id
+    ).first()
+
+
+def create_beatgrid_from_track_bpm(db: Session, track_id: int):
+    """
+    Generate beatgrid from track's BPM value.
+    Requires waveform to exist (for duration).
+    """
+    track = get_track(db, track_id)
+    if not track:
+        raise ValueError("Track not found")
+
+    if not track.bpm:
+        raise ValueError("Track has no BPM set")
+
+    waveform = get_waveform(db, track_id)
+    if not waveform:
+        raise ValueError("Waveform must exist before generating beatgrid")
+
+    beatgrid_data = generate_beatgrid_from_bpm(track.bpm, waveform.duration)
+
+    db_beatgrid = models.Beatgrid(
+        track_id=track_id,
+        tempo_changes_json=json.dumps(beatgrid_data["tempo_changes"])
+    )
+
+    db.add(db_beatgrid)
+    db.commit()
+    db.refresh(db_beatgrid)
+    return db_beatgrid
+
+
+def update_beatgrid_tempo_changes(
+    db: Session,
+    track_id: int,
+    tempo_changes: list[dict]
+) -> models.Beatgrid:
+    """
+    Update or create beatgrid with new tempo_changes.
+
+    Args:
+        db: Database session
+        track_id: Track ID
+        tempo_changes: New tempo changes array
+
+    Returns:
+        Updated or created Beatgrid model
+    """
+    beatgrid = get_beatgrid(db, track_id)
+
+    if beatgrid:
+        # Update existing
+        beatgrid.tempo_changes_json = json.dumps(tempo_changes)
+        beatgrid.updated_at = func.now()
+    else:
+        # Create new
+        beatgrid = models.Beatgrid(
+            track_id=track_id,
+            tempo_changes_json=json.dumps(tempo_changes)
+        )
+        db.add(beatgrid)
+
+    db.commit()
+    db.refresh(beatgrid)
+    return beatgrid
 

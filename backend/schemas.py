@@ -167,3 +167,31 @@ class PlaylistTrackAdd(BaseModel):
 class PlaylistTrackReorder(BaseModel):
     """Request to reorder tracks in playlist."""
     track_positions: list[dict]  # [{"id": playlist_track_id, "position": new_position}, ...]
+
+
+# Beatgrid Schemas
+class TempoChange(BaseModel):
+    """Single tempo change point."""
+    start_time: float
+    bpm: float
+    time_signature_num: int
+    time_signature_den: int
+    bar_position: int
+
+
+class BeatgridData(BaseModel):
+    """Beatgrid data for API responses."""
+    tempo_changes: list[TempoChange]
+    beat_times: list[float]
+    downbeat_times: list[float]
+
+
+class BeatgridResponse(BaseModel):
+    """Full beatgrid API response."""
+    id: int
+    track_id: int
+    data: BeatgridData
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

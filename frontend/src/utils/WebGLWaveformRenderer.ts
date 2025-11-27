@@ -69,6 +69,10 @@ export class WebGLWaveformRenderer {
   // Cue point (time in seconds)
   public cuePoint: number | null = null;
 
+  // Beatgrid data
+  private beatTimes: Float32Array | null = null;
+  private downbeatIndices: Set<number> = new Set();
+
   constructor(canvas: HTMLCanvasElement, config: WebGLRendererConfig = {}) {
     this.canvas = canvas;
 
@@ -254,6 +258,19 @@ export class WebGLWaveformRenderer {
 
   public setCuePoint(cueTime: number | null): void {
     this.cuePoint = cueTime;
+  }
+
+  public setBeatgrid(beatTimes: number[], downbeatTimes: number[]): void {
+    this.beatTimes = new Float32Array(beatTimes);
+
+    // Convert downbeat times to indices for reliable lookup
+    this.downbeatIndices = new Set();
+    const downbeatSet = new Set(downbeatTimes);
+    for (let i = 0; i < beatTimes.length; i++) {
+      if (downbeatSet.has(beatTimes[i])) {
+        this.downbeatIndices.add(i);
+      }
+    }
   }
 
   public calculateDisplayWindow(): void {
@@ -479,6 +496,9 @@ export class WebGLWaveformRenderer {
       this.renderVertices(mainVertices);
     }
 
+    // Render beatgrid
+    this.renderBeatgrid();
+
     // Render cue point if set
     if (this.cuePoint !== null) {
       this.renderCuePoint(this.cuePoint);
@@ -486,6 +506,87 @@ export class WebGLWaveformRenderer {
 
     // Render playhead (fixed vertical line at 25%)
     this.renderPlayhead();
+  }
+
+  private renderBeatgrid(): void {
+    if (!this.beatTimes || !this.waveformData) return;
+
+    const gl = this.gl;
+    const duration = this.waveformData.duration;
+    const canvasHeight = this.canvas.height;
+
+    // Filter beats to visible window and build geometry
+    const vertices: number[] = [];
+    const lineWidth = 1 * this.pixelRatio;
+    const downbeatWidth = 2 * this.pixelRatio;
+
+    for (let i = 0; i < this.beatTimes.length; i++) {
+      const beatTime = this.beatTimes[i];
+      const beatProgress = beatTime / duration;
+
+      // Calculate x position based on mode
+      let beatX: number;
+
+      if (this.isMinimapMode) {
+        // Minimap: direct mapping
+        beatX = beatProgress * this.canvas.width;
+      } else {
+        // Main waveform: check if in visible window
+        if (beatProgress < this.firstDisplayedPosition ||
+            beatProgress > this.lastDisplayedPosition) {
+          continue;  // Skip beat outside visible range
+        }
+
+        const visibleRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
+        const positionInWindow = (beatProgress - this.firstDisplayedPosition) / visibleRange;
+        beatX = positionInWindow * this.canvas.width;
+
+        // Apply manual drag offset
+        beatX += this.manualDragOffset * this.pixelRatio;
+      }
+
+      // Skip if outside canvas bounds
+      if (beatX < 0 || beatX >= this.canvas.width) continue;
+
+      // Determine if downbeat using index
+      const isDownbeat = this.downbeatIndices.has(i);
+      const width = isDownbeat ? downbeatWidth : lineWidth;
+
+      // Color: Very light transparent grey for beats, slightly lighter for downbeats
+      // Using white with low alpha for transparency
+      const r = 1.0;
+      const g = 1.0;
+      const b = 1.0;
+      const alpha = isDownbeat ? 0.3 : 0.15;  // Downbeats slightly more visible
+
+      // Create vertical line (two triangles)
+      // Note: We're using RGB without alpha in vertices since blending is handled by WebGL
+      // The alpha will be applied via the color values (r*alpha, g*alpha, b*alpha)
+      const rFinal = r * alpha;
+      const gFinal = g * alpha;
+      const bFinal = b * alpha;
+
+      vertices.push(
+        // Triangle 1
+        beatX, 0, rFinal, gFinal, bFinal,
+        beatX + width, 0, rFinal, gFinal, bFinal,
+        beatX, canvasHeight, rFinal, gFinal, bFinal,
+        // Triangle 2
+        beatX + width, 0, rFinal, gFinal, bFinal,
+        beatX + width, canvasHeight, rFinal, gFinal, bFinal,
+        beatX, canvasHeight, rFinal, gFinal, bFinal
+      );
+    }
+
+    if (vertices.length === 0) return;
+
+    // Render all beat lines in single draw call
+    const vertexArray = new Float32Array(vertices);
+    gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertexArray, gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 5);
+    gl.bindVertexArray(null);
   }
 
   private renderPlayhead(): void {

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from .database import engine
 from .models import Base
-from .routers import tracks, tags, waveforms, playlists
+from .routers import tracks, tags, waveforms, playlists, beatgrids
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -29,6 +29,7 @@ app.include_router(tracks.router, prefix="/api/tracks", tags=["tracks"])
 app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
 app.include_router(waveforms.router, prefix="/api/waveforms", tags=["waveforms"])
 app.include_router(playlists.router, prefix="/api/playlists", tags=["playlists"])
+app.include_router(beatgrids.router, prefix="/api/beatgrids", tags=["beatgrids"])
 
 # Mount static files for PNG waveforms
 app.mount("/waveforms", StaticFiles(directory="waveforms"), name="waveforms")

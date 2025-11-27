@@ -93,3 +93,25 @@ export interface PlaylistTrackAdd {
 export interface PlaylistTrackReorder {
   track_positions: Array<{ id: number; position: number }>;
 }
+
+export interface TempoChange {
+  start_time: number;
+  bpm: number;
+  time_signature_num: number;
+  time_signature_den: number;
+  bar_position: number;
+}
+
+export interface BeatgridData {
+  tempo_changes: TempoChange[];
+  beat_times: number[];
+  downbeat_times: number[];
+}
+
+export interface BeatgridResponse {
+  id: number;
+  track_id: number;
+  data: BeatgridData;
+  created_at: string;
+  updated_at: string;
+}

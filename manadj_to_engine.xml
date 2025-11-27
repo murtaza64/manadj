@@ -1,0 +1,260 @@
+<?xml version='1.0' encoding='utf-8'?>
+<DJ_PLAYLISTS Version="1.0.0">
+	<PRODUCT Name="manadj" Version="1.0" Company="manadj" />
+	<COLLECTION Entries="124">
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20-%20FUNKONAUT.mp3" Name="FUNKONAUT" Artist="Griz" AverageBpm="90.0" Tonality="None" TrackID="1" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Gosh.flac" Name="Gosh" Artist="Jamie xx" AverageBpm="139.0" Tonality="Ab" TrackID="2" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Idontknow.flac" Name="Idontknow" Artist="Jamie xx" AverageBpm="160.0" Tonality="Bbm" TrackID="3" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Itvara.flac" Name="Itvara" Artist="Fractal" AverageBpm="128.0" Tonality="G" TrackID="4" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Leave%20Me%20Like%20This.flac" Name="Leave Me Like This" Artist="Skrillex &amp; Bobby Raps" AverageBpm="None" Tonality="None" TrackID="5" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Never%20Walk%20Alone%20%28original%20mix%29.mp3" Name="Never Walk Alone (original mix)" Artist="Blond:ish &amp; Stevie Appleton" AverageBpm="130.0" Tonality="None" TrackID="6" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Passionfruit.flac" Name="Passionfruit" Artist="Aaron Richards &amp; Mr FijiWiji" AverageBpm="111.0" Tonality="G#m" TrackID="7" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Right%20In.flac" Name="Right In" Artist="Skrillex" AverageBpm="None" Tonality="None" TrackID="8" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Speak%20in%20Symphony.flac" Name="Speak in Symphony" Artist="Tourist" AverageBpm="134.0" Tonality="Ab" TrackID="9" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20Speak.flac" Name="Speak" Artist="Corporate feat. Mickey Shiloh" AverageBpm="92.0" Tonality="Am" TrackID="10" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01%20The%20Meaning%20of%20Love.flac" Name="The Meaning of Love" Artist="Chrome Sparks" AverageBpm="83.0" Tonality="F" TrackID="11" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/01_tom_dune_-_all_you_need_is_me.flac" Name="All You Need Is Me" Artist="Tom Dune" AverageBpm="86.0" Tonality="Am" TrackID="12" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/02%20Bangarang.flac" Name="Bangarang" Artist="Skrillex feat. Sirah" AverageBpm="110.0" Tonality="Gm" TrackID="13" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/02%20Emerald%20Rush.flac" Name="Emerald Rush" Artist="Jon Hopkins" AverageBpm="107.0" Tonality="C#m" TrackID="14" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/02%20Key103.flac" Name="Key103" Artist="Floating Points" AverageBpm="135.0" Tonality="Dm" TrackID="15" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/02%20Open%20Eye%20Signal.flac" Name="Open Eye Signal" Artist="Jon Hopkins" AverageBpm="122.0" Tonality="Fm" TrackID="16" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/02%20RATATA.flac" Name="RATATA" Artist="Skrillex, Missy Elliott &amp; Mr. Oizo" AverageBpm="124.0" Tonality="Am" TrackID="17" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/02%20Treat%20Each%20Other%20Right.flac" Name="Treat Each Other Right" Artist="Jamie xx" AverageBpm="130.0" Tonality="F#m" TrackID="18" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/02.%20Pyro%20%28feat.%20Emski%29.mp3" Name="Pyro (feat. Emski)" Artist="Feed Me" AverageBpm="132.0" Tonality="None" TrackID="19" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/03%20Avalanche.flac" Name="Avalanche" Artist="Tourist" AverageBpm="131.0" Tonality="Cm" TrackID="20" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/03%20Breakn%E2%80%99%20a%20Sweat.flac" Name="Breakn’ a Sweat" Artist="Skrillex &amp; The Doors" AverageBpm="None" Tonality="None" TrackID="21" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/03%20Kill%20EVERYBODY.flac" Name="Kill EVERYBODY" Artist="Skrillex" AverageBpm="127.0" Tonality="Dm" TrackID="22" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/03%20Valentine.flac" Name="Valentine" Artist="Tourist" AverageBpm="123.0" Tonality="E" TrackID="23" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20By%20Design.flac" Name="By Design" Artist="Kid Cudi feat. André 3000" AverageBpm="100.0" Tonality="Am" TrackID="24" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20Everything%20Connected.flac" Name="Everything Connected" Artist="Jon Hopkins" AverageBpm="125.0" Tonality="C" TrackID="25" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20Flower.flac" Name="Flower" Artist="Super Duper" AverageBpm="154.0" Tonality="G" TrackID="26" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20Frame%20of%20Mind.flac" Name="Frame of Mind" Artist="Tristam &amp; Braken" AverageBpm="175.0" Tonality="F#" TrackID="27" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20Lost%20in%20the%20Chrome%20Forest.flac" Name="Lost in the Chrome Forest" Artist="Chrome Sparks" AverageBpm="110.0" Tonality="G" TrackID="28" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20The%20Devil%E2%80%99s%20Den.flac" Name="The Devil’s Den" Artist="Skrillex &amp; Wolfgang Gartner" AverageBpm="None" Tonality="None" TrackID="29" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20Trigger.flac" Name="Trigger" Artist="Kavinsky" AverageBpm="88.0" Tonality="Dm" TrackID="30" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20Vandalism.mp3" Name="Vandalism" Artist="Porter Robinson feat. Amba Shepherd" AverageBpm="127.0" Tonality="None" TrackID="31" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/04%20life%20imitates%20life.flac" Name="life imitates life" Artist="quannnic" AverageBpm="170.0" Tonality="Cm" TrackID="32" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/047%20-%20Silcrow%20-%20TAKE%20ME%20DOWN.mp3" Name="TAKE ME DOWN" Artist="Silcrow" AverageBpm="142.0" Tonality="None" TrackID="33" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/05%20Butterflies.flac" Name="Butterflies" Artist="Skrillex, Starrah &amp; Four Tet" AverageBpm="None" Tonality="None" TrackID="34" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/05%20Ithaca.flac" Name="Ithaca" Artist="Tourist" AverageBpm="100.0" Tonality="Am" TrackID="35" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/05%20Right%20on%20Time.flac" Name="Right on Time" Artist="Skrillex, 12th Planet &amp; Kill the Noise" AverageBpm="None" Tonality="None" TrackID="36" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/06%20Blink.flac" Name="Blink" Artist="Tourist" AverageBpm="130.0" Tonality="F#m" TrackID="37" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/06%20Goddess.flac" Name="Goddess" Artist="Chrome Sparks" AverageBpm="87.0" Tonality="Cm" TrackID="38" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/06%20Inhale%20Exhale.flac" Name="Inhale Exhale" Artist="Skrillex, Aluna &amp; Kito" AverageBpm="145.0" Tonality="Cm" TrackID="39" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/06%20Strong.flac" Name="Strong" Artist="Romy feat. Fred again.." AverageBpm="134.0" Tonality="E" TrackID="40" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/07%20A%20Street%20I%20Know.flac" Name="A Street I Know" Artist="Skrillex &amp; Eli Keszler" AverageBpm="145.0" Tonality="Ab" TrackID="41" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/07%20Cameo.flac" Name="Cameo" Artist="Kavinsky feat. Kareen Lomax" AverageBpm="102.0" Tonality="D" TrackID="42" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/07%20Summit.flac" Name="Summit" Artist="Skrillex feat. Ellie Goulding" AverageBpm="93.0" Tonality="F#" TrackID="43" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/07%20Who%20I%E2%80%99m%20Not.flac" Name="Who I’m Not" Artist="Tinlicker feat. CLOVES" AverageBpm="124.0" Tonality="Dm" TrackID="44" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/08%20Glitter%20Freeze.flac" Name="Glitter Freeze" Artist="Gorillaz &amp; Mark E. Smith" AverageBpm="120.0" Tonality="Cm" TrackID="45" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/08%20Loud%20Places.flac" Name="Loud Places" Artist="Jamie xx feat. Romy" AverageBpm="109.0" Tonality="B" TrackID="46" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/08%20The%20Island%2C%20Pt.%20I_%20Dawn.flac" Name="The Island, Pt. I: Dawn" Artist="Pendulum" AverageBpm="126.0" Tonality="Am" TrackID="47" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/08%20XENA.flac" Name="XENA" Artist="Skrillex &amp; ناي برغوثي" AverageBpm="None" Tonality="None" TrackID="48" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/08.%20Stonebank%20-%20Who%27s%20Got%20Your%20Love.flac" Name="Who's Got Your Love" Artist="Stonebank" AverageBpm="170.0" Tonality="D" TrackID="49" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/09%20Silent%20Letter.flac" Name="Silent Letter" Artist="Tourist" AverageBpm="123.0" Tonality="C#m" TrackID="50" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/09%20Surge.flac" Name="Surge" Artist="Noisestorm" AverageBpm="128.0" Tonality="B" TrackID="51" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/09%20TOO%20BIZARRE%20%28juked%29.flac" Name="TOO BIZARRE (juked)" Artist="Skrillex, Swae Lee, Siiickbrain &amp; Posij" AverageBpm="None" Tonality="None" TrackID="52" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/09%20The%20Island%2C%20Pt.%20II_%20Dusk.flac" Name="The Island, Pt. II: Dusk" Artist="Pendulum" AverageBpm="126.0" Tonality="Am" TrackID="53" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/10%20All%20You%20Children.flac" Name="All You Children" Artist="Jamie xx ft. The Avalanches" AverageBpm="120.0" Tonality="Db" TrackID="54" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/10%20Hydrate.flac" Name="Hydrate" Artist="Skrillex, Flowdan, BEAM &amp; PEEKABOO" AverageBpm="None" Tonality="None" TrackID="55" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/10%20Light%20Beam.mp3" Name="Light Beam" Artist="Tinlicker" AverageBpm="124.0" Tonality="None" TrackID="56" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/11%20Dance%204%20Eternity.flac" Name="Dance 4 Eternity" Artist="Kid Cudi" AverageBpm="121.0" Tonality="C" TrackID="57" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/11%20She%E2%80%99s%20On%20My%20Mind.flac" Name="She’s On My Mind" Artist="Romy" AverageBpm="118.0" Tonality="A" TrackID="58" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/11%20Warped%20Tour%20%E2%80%9905%20with%20pete%20WENTZ.flac" Name="Warped Tour ’05 with pete WENTZ" Artist="Skrillex" AverageBpm="129.0" Tonality="E" TrackID="59" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/11%20We%20Go%20On.flac" Name="We Go On" Artist="The Avalanches feat. Cola Boyy &amp; Mick Jones" AverageBpm="108.0" Tonality="F#" TrackID="60" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/12%20Good%20Space.flac" Name="Good Space" Artist="Skrillex &amp; Starrah" AverageBpm="None" Tonality="None" TrackID="61" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/12%20Witchcraft.flac" Name="Witchcraft" Artist="Pendulum" AverageBpm="87.0" Tonality="Fm" TrackID="62" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/13%20Supersonic%20%28My%20Existence%29.flac" Name="Supersonic (My Existence)" Artist="Skrillex, Noisia, josh pan &amp; Dylan Brady" AverageBpm="None" Tonality="None" TrackID="63" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/14%20Hazel%20Theme.flac" Name="Hazel Theme" Artist="Skrillex" AverageBpm="None" Tonality="None" TrackID="64" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/15%20Quantum%20%28Virtual%20Riot%20remix%29.flac" Name="Quantum (Virtual Riot remix)" Artist="Astronaut" AverageBpm="93.0" Tonality="Db" TrackID="65" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/15%20Still%20Here%20%28With%20the%20Ones%20That%20I%20Came%20With%29.flac" Name="Still Here (With the Ones That I Came With)" Artist="Skrillex, Porter Robinson &amp; Bibi Bourelly" AverageBpm="130.0" Tonality="F" TrackID="66" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/28%20Moonlight.flac" Name="Moonlight" Artist="Varien &amp; SirensCeol feat. Aloma Steele" AverageBpm="93.0" Tonality="G#m" TrackID="67" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/2hollis%20-%20sidekick%20%28official%20audio%29%20%5BJSHzLIRwfpc%5D.m4a" Name="sidekick (official audio) [JSHzLIRwfpc]" Artist="2hollis" AverageBpm="150.0" Tonality="None" TrackID="68" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/A%20Little%20Bit%20Further%20%28Chrome%20Sparks%20Remix%29.flac" Name="A Little Bit Further (Chrome Sparks Remix)" Artist="Tourist" AverageBpm="139.0" Tonality="A" TrackID="69" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Ace%20Aura%2C%20Voicians%20-%20UMBRA%20%28Original%20Mix%29.mp3" Name="UMBRA (Original Mix)" Artist="Ace Aura, Voicians" AverageBpm="150.0" Tonality="None" TrackID="70" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Alison%20Wonderland%20x%20MEMBA%20-%20Fight%20or%20Flight%20%28Visualizer%29%20%5BP-lexBtqQOs%5D.m4a" Name="Fight or Flight (Visualizer) [P-lexBtqQOs]" Artist="Alison Wonderland x MEMBA" AverageBpm="156.0" Tonality="None" TrackID="71" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/All%20That%E2%80%99s%20Left%20%28The%20M%20Machine%20remix%29.mp3" Name="All That’s Left (The M Machine remix)" Artist="Manila Killa feat. Joni Fatora" AverageBpm="120.0" Tonality="None" TrackID="72" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Anjunabeats%20Volume%2015-010-Tinlicker-Sleepwalker.flac" Name="Sleepwalker" Artist="Tinlicker" AverageBpm="124.0" Tonality="C" TrackID="73" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Ariel%20Shalom%20-%20Switch.mp3" Name="Switch" Artist="Ariel Shalom" AverageBpm="148.0" Tonality="None" TrackID="74" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Atmosphere.flac" Name="Atmosphere" Artist="FISHER &amp; Kita Alexander" AverageBpm="126.0" Tonality="Cm" TrackID="75" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Be%20Strong.mp3" Name="Be Strong" Artist="Spada &amp; Korolova" AverageBpm="121.0" Tonality="None" TrackID="76" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Boreta%20-%20Back%20to%20Life%20%5BOfficial%20Visualizer%5D%20%5Byt7X3i3tX40%5D.mp3" Name="Back to Life [Official Visualizer] [yt7X3i3tX40]" Artist="Boreta" AverageBpm="95.0" Tonality="None" TrackID="77" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Borgore%2C%20LEVEL%20UP%20%26%20Eloise%20Keeble%20-%20Palm%20Of%20Your%20Hand%20%5BDubstep%20%EF%BD%9C%20Monstercat%5D%20%5BNl0TTFaFMbU%5D.m4a" Name="Palm Of Your Hand" Artist="Borgore, LEVEL UP &amp; Eloise Keeble" AverageBpm="145.0" Tonality="None" TrackID="78" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Children.flac" Name="Children" Artist="Tinlicker &amp; Robert Miles" AverageBpm="124.0" Tonality="Fm" TrackID="79" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Correct_Answer_Duolingo.mp3" Name="Correct_Answer_Duolingo" Artist="None" AverageBpm="None" Tonality="None" TrackID="80" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Crush%20%28Eskei83%20Remix%29%20%5BDark%20Machine%20Records%5D%20%5B2085644796%5D.m4a" Name="Crush (Eskei83 Remix)" Artist="blkout., Eskei83" AverageBpm="175.0" Tonality="None" TrackID="81" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Dark%20Places.mp3" Name="Dark Places" Artist="Manila Killa &amp; Kwesi" AverageBpm="125.0" Tonality="None" TrackID="82" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/David%20Feldman%20-%20Edge.mp3" Name="Edge by The Light" Artist="None" AverageBpm="150.0" Tonality="None" TrackID="83" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Devault%20%26%20Njomza%20-%20Fire%20To%20Stone.mp3" Name="Fire To Stone" Artist="Devault &amp; Njomza" AverageBpm="132.0" Tonality="None" TrackID="84" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Dreamland%20%28Mindchatter%20remix%29.flac" Name="Dreamland (Mindchatter remix)" Artist="Glass Animals" AverageBpm="118.0" Tonality="Ab" TrackID="85" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Duolingo%20x%20Squid%20Game%20Choreo%281%29.wav" Name="Duolingo x Squid Game Choreo(1)" Artist="None" AverageBpm="None" Tonality="None" TrackID="86" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Everen%20Maxwell%20-%20Wanderlust%20%5BNCS%20Release%5D.mp3" Name="Wanderlust [NCS Release]" Artist="Everen Maxwell" AverageBpm="None" Tonality="None" TrackID="87" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Evolving.mp3" Name="Evolving" Artist="Ahrix" AverageBpm="128.0" Tonality="None" TrackID="88" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Feed%20Me%20From%20The%20Clouds%20EP%20-%2002%20-%20Love%20Control.mp3" Name="Love Control" Artist="Feed Me" AverageBpm="128.0" Tonality="None" TrackID="89" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Find%20You.flac" Name="Find You" Artist="Baynk" AverageBpm="123.0" Tonality="C#m" TrackID="90" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Fungal%20%5BjtoUov5u9Vs%5D.mp3" Name="Fungal [jtoUov5u9Vs]" Artist="None" AverageBpm="100.0" Tonality="None" TrackID="91" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Gespona%20%26%20Last%20Men%20On%20Earth%20-%20The%20Deer.mp3" Name="The Deer" Artist="Gespona &amp; Last Men On Earth" AverageBpm="123.0" Tonality="None" TrackID="92" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Get%20To%20Me.flac" Name="Get To Me" Artist="Jauz" AverageBpm="128.0" Tonality="Fm" TrackID="93" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Glowal%20-%20Real.flac" Name="Real" Artist="Glowal" AverageBpm="125.0" Tonality="F" TrackID="94" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Happy%20Birthday%20Song%21%21%21%20%5B5u4xTa3LR2U%5D.m4a" Name="Happy Birthday Song!!! [5u4xTa3LR2U]" Artist="None" AverageBpm="140.0" Tonality="None" TrackID="95" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Hide%20U%20%28Tinlicker%20extended%20remix%29.flac" Name="Hide U (Tinlicker extended remix)" Artist="Sian Evans" AverageBpm="124.0" Tonality="Cm" TrackID="96" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ILLENIUM%2C%20HAYLA%20-%20In%20My%20Arms%20%28Wooli%20Remix%29%20%28Visualizer%29%20%5BNOtCBbcUP0c%5D.mp3" Name="In My Arms (Wooli Remix) (Visualizer) [NOtCBbcUP0c]" Artist="ILLENIUM, HAYLA" AverageBpm="145.0" Tonality="None" TrackID="97" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ISOxo%20-%20kidsgonemad%21%20%28Official%20Visualizer%29%20%5BIkboEK0ff8M%5D.m4a" Name="kidsgonemad! (Official Visualizer) [IkboEK0ff8M]" Artist="ISOxo" AverageBpm="150.0" Tonality="None" TrackID="98" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/IVORY%20-%20Mindbreak%20%5B1478723953%5D.m4a" Name="IVORY - Mindbreak [1478723953]" Artist="None" AverageBpm="None" Tonality="None" TrackID="99" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/International%20%28Skrillex%20remix%29.flac" Name="International (Skrillex remix)" Artist="Chase &amp; Status" AverageBpm="92.0" Tonality="G#m" TrackID="100" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Killin%27%20Void%20-%20empty%20eyes%20%28feat.%20Polos%CC%8Cywa%29%20%5Bg-lIenAASAE%5D.mp3" Name="empty eyes (feat. Pološywa)" Artist="Killin' Void" AverageBpm="172.0" Tonality="None" TrackID="101" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Lesson_Complete.mp3" Name="Lesson_Complete" Artist="None" AverageBpm="None" Tonality="None" TrackID="102" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/MUTO%20-%20Sleeping%20On%20Silver%20%5BM-INS-002%5D%20%5BAy2qQj-Psx4%5D.mp3" Name="Sleeping On Silver [M-INS-002] [Ay2qQj-Psx4]" Artist="MUTO" AverageBpm="120.0" Tonality="None" TrackID="103" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Meduza%20-%20Piece%20Of%20Your%20Heart.mp3" Name="Piece Of Your Heart" Artist="Meduza" AverageBpm="124.0" Tonality="None" TrackID="104" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/PHASEONE%20-%20PULSE%20w%E2%A7%B8%20BANKS%20ARCADE%20%5B2052156088%5D.m4a" Name="PHASEONE - PULSE w/ BANKS ARCADE" Artist="PhaseOne" AverageBpm="None" Tonality="None" TrackID="105" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Passionfruit.flac" Name="Passionfruit" Artist="Paper Idol" AverageBpm="110.0" Tonality="C" TrackID="106" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Raidek%20-%20Brotherhood.mp3" Name="Brotherhood by Game Changer" Artist="None" AverageBpm="145.0" Tonality="None" TrackID="107" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Raidek%20-%20Cockroach%20Party%20-%20Remix%20version.mp3" Name="Cockroach Party by Game Changer" Artist="None" AverageBpm="150.0" Tonality="None" TrackID="108" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Run%20%5B2021707541%5D.m4a" Name="Run" Artist="GENESI， Meduza" AverageBpm="None" Tonality="None" TrackID="109" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Ru%CC%88fu%CC%88s%20Du%20Sol%20-%20Innerbloom%20%28Pirapus%20Bootleg%29%20%5B1277644240%5D.m4a" Name="Innerbloom (Pirapus Bootleg)" Artist="Rüfüs Du Sol" AverageBpm="172.0" Tonality="None" TrackID="110" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Skylar%20Grey%2C%20Seven%20Lions%2C%20Subtronics%20-%20I%27ll%20Wait%20For%20You%20Feat.%20Skylar%20Grey%20%28Original%20Mix%29%20%5BOphelia%5D.mp3" Name="I'll Wait For You feat. Skylar Grey (Original Mix)" Artist="Skylar Grey, Seven Lions, Subtronics" AverageBpm="145.0" Tonality="None" TrackID="111" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Stranger%20To%20Your%20Love%20%28extended%20mix%29.flac" Name="Stranger To Your Love (extended mix)" Artist="ilan Bluestone feat. Ellen Smith" AverageBpm="124.0" Tonality="C#m" TrackID="112" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Swedish%20House%20Mafia%20-%20Wait%20So%20Long%20%28Agents%20Of%20Time%20Remix%29.mp3" Name="Wait So Long (Agents Of Time Remix)" Artist="Swedish House Mafia" AverageBpm="130.0" Tonality="None" TrackID="113" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Swedish%20House%20Mafia%20With%20The%20Weeknd%20-%20Moth%20To%20A%20Flame.mp3" Name="Moth To A Flame" Artist="Swedish House Mafia With The Weeknd" AverageBpm="120.0" Tonality="None" TrackID="114" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Ternion%20Sound%20-%20Digital%20Artifice%20-%2002%20-%20Heaven%20Sent.flac" Name="Heaven Sent" Artist="Ternion Sound And Emz" AverageBpm="140.0" Tonality="Bbm" TrackID="115" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Thousands%20of%20Summer%20Twilights%20%28Sanjaux%20Remix%29.flac" Name="Thousands of Summer Twilights (Sanjaux Remix)" Artist="Owsey" AverageBpm="134.0" Tonality="Bb" TrackID="116" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Tigerblind%20-%20BATTERY%20OPERATED%20%28Extended%29.flac" Name="BATTERY OPERATED (Extended)" Artist="Tigerblind" AverageBpm="130.0" Tonality="C" TrackID="117" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Viperactive%20-%20Angels%20Crest%20%28Original%20Mix%29.mp3" Name="Viperactive - Angels Crest (Original Mix)" Artist="None" AverageBpm="None" Tonality="None" TrackID="118" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/You%20Don%E2%80%99t%20Have%20a%20Clue.flac" Name="You Don’t Have a Clue" Artist="Röyksopp" AverageBpm="116.0" Tonality="Bb" TrackID="119" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/born_for_this%202025-06-27%201252.mp3" Name="born_for_this 2025-06-27 1252" Artist="None" AverageBpm="177.0" Tonality="None" TrackID="120" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/casso%CC%88%2C%20RAYE%2C%20D-Block%20Europe%20-%20PRADA%20%28Changing%20Faces%20Edit%29%20%5B1692895134%5D.m4a" Name="Prada (Changing Faces Edit)" Artist="cassö, RAYE, D-Block Europe, Changing Faces" AverageBpm="174.0" Tonality="None" TrackID="121" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/glaive%20-%20We%20Don%27t%20Leave%20The%20House%20%28Official%20Video%29%20%5BYwbR_ZMb9FA%5D.m4a" Name="We Don't Leave The House (Official Video) [YwbR_ZMb9FA]" Artist="glaive" AverageBpm="149.0" Tonality="None" TrackID="122" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/scruz%20-%20keep%20%5BS45QAqd4dik%5D.m4a" Name="keep" Artist="scruz" AverageBpm="138.0" Tonality="None" TrackID="123" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/wrong_answer.mp3" Name="wrong_answer" Artist="None" AverageBpm="None" Tonality="None" TrackID="124" />
+	</COLLECTION>
+	<PLAYLISTS>
+		<NODE Name="ROOT" Type="0" Count="1">
+			<NODE Name="manadj - Needs Analysis [2025-11-26]" Type="1" KeyType="0" Entries="124">
+				<TRACK Key="1" />
+				<TRACK Key="2" />
+				<TRACK Key="3" />
+				<TRACK Key="4" />
+				<TRACK Key="5" />
+				<TRACK Key="6" />
+				<TRACK Key="7" />
+				<TRACK Key="8" />
+				<TRACK Key="9" />
+				<TRACK Key="10" />
+				<TRACK Key="11" />
+				<TRACK Key="12" />
+				<TRACK Key="13" />
+				<TRACK Key="14" />
+				<TRACK Key="15" />
+				<TRACK Key="16" />
+				<TRACK Key="17" />
+				<TRACK Key="18" />
+				<TRACK Key="19" />
+				<TRACK Key="20" />
+				<TRACK Key="21" />
+				<TRACK Key="22" />
+				<TRACK Key="23" />
+				<TRACK Key="24" />
+				<TRACK Key="25" />
+				<TRACK Key="26" />
+				<TRACK Key="27" />
+				<TRACK Key="28" />
+				<TRACK Key="29" />
+				<TRACK Key="30" />
+				<TRACK Key="31" />
+				<TRACK Key="32" />
+				<TRACK Key="33" />
+				<TRACK Key="34" />
+				<TRACK Key="35" />
+				<TRACK Key="36" />
+				<TRACK Key="37" />
+				<TRACK Key="38" />
+				<TRACK Key="39" />
+				<TRACK Key="40" />
+				<TRACK Key="41" />
+				<TRACK Key="42" />
+				<TRACK Key="43" />
+				<TRACK Key="44" />
+				<TRACK Key="45" />
+				<TRACK Key="46" />
+				<TRACK Key="47" />
+				<TRACK Key="48" />
+				<TRACK Key="49" />
+				<TRACK Key="50" />
+				<TRACK Key="51" />
+				<TRACK Key="52" />
+				<TRACK Key="53" />
+				<TRACK Key="54" />
+				<TRACK Key="55" />
+				<TRACK Key="56" />
+				<TRACK Key="57" />
+				<TRACK Key="58" />
+				<TRACK Key="59" />
+				<TRACK Key="60" />
+				<TRACK Key="61" />
+				<TRACK Key="62" />
+				<TRACK Key="63" />
+				<TRACK Key="64" />
+				<TRACK Key="65" />
+				<TRACK Key="66" />
+				<TRACK Key="67" />
+				<TRACK Key="68" />
+				<TRACK Key="69" />
+				<TRACK Key="70" />
+				<TRACK Key="71" />
+				<TRACK Key="72" />
+				<TRACK Key="73" />
+				<TRACK Key="74" />
+				<TRACK Key="75" />
+				<TRACK Key="76" />
+				<TRACK Key="77" />
+				<TRACK Key="78" />
+				<TRACK Key="79" />
+				<TRACK Key="80" />
+				<TRACK Key="81" />
+				<TRACK Key="82" />
+				<TRACK Key="83" />
+				<TRACK Key="84" />
+				<TRACK Key="85" />
+				<TRACK Key="86" />
+				<TRACK Key="87" />
+				<TRACK Key="88" />
+				<TRACK Key="89" />
+				<TRACK Key="90" />
+				<TRACK Key="91" />
+				<TRACK Key="92" />
+				<TRACK Key="93" />
+				<TRACK Key="94" />
+				<TRACK Key="95" />
+				<TRACK Key="96" />
+				<TRACK Key="97" />
+				<TRACK Key="98" />
+				<TRACK Key="99" />
+				<TRACK Key="100" />
+				<TRACK Key="101" />
+				<TRACK Key="102" />
+				<TRACK Key="103" />
+				<TRACK Key="104" />
+				<TRACK Key="105" />
+				<TRACK Key="106" />
+				<TRACK Key="107" />
+				<TRACK Key="108" />
+				<TRACK Key="109" />
+				<TRACK Key="110" />
+				<TRACK Key="111" />
+				<TRACK Key="112" />
+				<TRACK Key="113" />
+				<TRACK Key="114" />
+				<TRACK Key="115" />
+				<TRACK Key="116" />
+				<TRACK Key="117" />
+				<TRACK Key="118" />
+				<TRACK Key="119" />
+				<TRACK Key="120" />
+				<TRACK Key="121" />
+				<TRACK Key="122" />
+				<TRACK Key="123" />
+				<TRACK Key="124" />
+			</NODE>
+		</NODE>
+	</PLAYLISTS>
+</DJ_PLAYLISTS>

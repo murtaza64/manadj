@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { WebGLWaveformRenderer } from '../utils/WebGLWaveformRenderer';
 import { useAudio } from '../hooks/useAudio';
 import { useWaveformData } from '../hooks/useWaveformData';
+import { useBeatgridData } from '../hooks/useBeatgridData';
 import './Waveform.css';
 
 interface WebGLWaveformProps {
@@ -19,6 +20,9 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
 
   // Fetch waveform data
   const { data: waveformData, isLoading, error: fetchError } = useWaveformData(trackId);
+
+  // Fetch beatgrid data
+  const { data: beatgridData } = useBeatgridData(trackId);
 
   // Drag state
   const isDragging = useRef(false);
@@ -42,6 +46,14 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
       // Set initial cue point if available
       if (audio.cuePoint !== null) {
         renderer.setCuePoint(audio.cuePoint);
+      }
+
+      // Set initial beatgrid if already loaded
+      if (beatgridData) {
+        renderer.setBeatgrid(
+          beatgridData.data.beat_times,
+          beatgridData.data.downbeat_times
+        );
       }
 
       // Start render loop
@@ -70,6 +82,18 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
       rendererRef.current.setCuePoint(audio.cuePoint);
     }
   }, [audio.cuePoint]);
+
+  // Update beatgrid when data changes
+  useEffect(() => {
+    if (rendererRef.current && beatgridData) {
+      rendererRef.current.setBeatgrid(
+        beatgridData.data.beat_times,
+        beatgridData.data.downbeat_times
+      );
+      // Force a render to show the beatgrid immediately
+      rendererRef.current.render();
+    }
+  }, [beatgridData]);
 
   // Sync renderer position when audio is paused and currentTime changes (e.g., from cue button seeking)
   useEffect(() => {

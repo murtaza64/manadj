@@ -129,3 +129,16 @@ class PlaylistTrack(Base):
         Index("idx_playlist_tracks_track", "track_id"),
         Index("idx_playlist_tracks_position", "playlist_id", "position"),
     )
+
+
+class Beatgrid(Base):
+    __tablename__ = "beatgrids"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
+    tempo_changes_json = Column(Text, nullable=False)  # JSON array of tempo changes
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationship
+    track = relationship("Track", backref="beatgrid", uselist=False)

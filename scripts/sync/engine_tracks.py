@@ -7,9 +7,10 @@ Syncs tracks in both directions:
 - Imports new tracks from Engine DJ to manadj
 
 Usage:
-    python scripts/sync_tracks_engine.py --dry-run
-    python scripts/sync_tracks_engine.py --apply
-    python scripts/sync_tracks_engine.py --apply --no-import
+    python scripts/sync_tracks_engine.py                              # Dry-run (both directions)
+    python scripts/sync_tracks_engine.py --apply                      # Apply changes (both directions)
+    python scripts/sync_tracks_engine.py --apply --skip-import        # Only export to Engine DJ
+    python scripts/sync_tracks_engine.py --apply --skip-export        # Only import from Engine DJ
     python scripts/sync_tracks_engine.py --apply --playlist-name "Custom Name"
 """
 
@@ -31,6 +32,11 @@ from enginedj.models.information import Information as EDJInformation
 
 from backend.database import SessionLocal
 from backend.models import Track as ManAdjTrack
+from enginedj.sync import (
+    find_missing_tracks_in_enginedj,
+    find_missing_tracks_in_manadj,
+)
+from backend.sync_common.formats import format_track_preview
 
 
 @dataclass
@@ -46,122 +52,6 @@ class SyncStats:
     playlist_created: bool = False
 
 
-def match_track(manadj_track: ManAdjTrack, edj_tracks_by_path: dict, edj_tracks_by_filename: dict) -> EDJTrack | None:
-    """
-    Match a manadj track to an Engine DJ track.
-
-    Priority:
-    1. Full path match
-    2. Filename-only match
-
-    Args:
-        manadj_track: manadj track to match
-        edj_tracks_by_path: Engine DJ tracks indexed by full path
-        edj_tracks_by_filename: Engine DJ tracks indexed by filename only
-
-    Returns:
-        Matching Engine DJ track or None
-    """
-    # Priority 1: Full path match
-    if manadj_track.filename in edj_tracks_by_path:
-        return edj_tracks_by_path[manadj_track.filename]
-
-    # Priority 2: Filename-only match
-    filename = Path(manadj_track.filename).name
-    if filename in edj_tracks_by_filename:
-        return edj_tracks_by_filename[filename]
-
-    return None
-
-
-def find_missing_tracks_in_enginedj(
-    manadj_session,
-    edj_session,
-    validate_paths: bool = True
-) -> tuple[list[ManAdjTrack], SyncStats]:
-    """
-    Find tracks that exist in manadj but not in Engine DJ.
-
-    Args:
-        manadj_session: manadj database session
-        edj_session: Engine DJ database session
-        validate_paths: Whether to validate file paths exist
-
-    Returns:
-        Tuple of (missing tracks, stats)
-    """
-    stats = SyncStats()
-
-    # Get all tracks from manadj
-    manadj_tracks = manadj_session.query(ManAdjTrack).all()
-    stats.manadj_tracks = len(manadj_tracks)
-
-    # Get all tracks from Engine DJ
-    edj_tracks = edj_session.query(EDJTrack).all()
-    stats.enginedj_tracks = len(edj_tracks)
-
-    # Index Engine DJ tracks
-    edj_tracks_by_path = {t.path: t for t in edj_tracks if t.path}
-    edj_tracks_by_filename = {Path(t.filename).name: t for t in edj_tracks if t.filename}
-
-    # Find missing tracks
-    missing = []
-    for track in manadj_tracks:
-        matched = match_track(track, edj_tracks_by_path, edj_tracks_by_filename)
-        if not matched:
-            # Validate file exists if requested
-            if validate_paths:
-                path = Path(track.filename)
-                if not path.exists():
-                    stats.skipped_file_not_found += 1
-                    continue
-            missing.append(track)
-
-    stats.missing_in_enginedj = len(missing)
-    return missing, stats
-
-
-def find_missing_tracks_in_manadj(
-    manadj_session,
-    edj_session
-) -> tuple[list[EDJTrack], SyncStats]:
-    """
-    Find tracks that exist in Engine DJ but not in manadj.
-
-    Args:
-        manadj_session: manadj database session
-        edj_session: Engine DJ database session
-
-    Returns:
-        Tuple of (missing tracks, partial stats)
-    """
-    stats = SyncStats()
-
-    # Get all tracks
-    manadj_tracks = manadj_session.query(ManAdjTrack).all()
-    edj_tracks = edj_session.query(EDJTrack).all()
-
-    # Index manadj tracks
-    manadj_tracks_by_path = {t.filename: t for t in manadj_tracks}
-    manadj_tracks_by_filename = {Path(t.filename).name: t for t in manadj_tracks}
-
-    # Find missing tracks
-    missing = []
-    for edj_track in edj_tracks:
-        # Try full path match
-        if edj_track.path and edj_track.path in manadj_tracks_by_path:
-            continue
-
-        # Try filename match
-        if edj_track.filename:
-            filename = Path(edj_track.filename).name
-            if filename in manadj_tracks_by_filename:
-                continue
-
-        missing.append(edj_track)
-
-    stats.missing_in_manadj = len(missing)
-    return missing, stats
 
 
 def export_tracks_to_enginedj(
@@ -187,23 +77,53 @@ def export_tracks_to_enginedj(
     exported = 0
 
     for track in tracks:
+        # Get file metadata
+        file_path = Path(track.filename)
+        file_stat = file_path.stat() if file_path.exists() else None
+
+        # Convert absolute path to relative path (Engine DJ uses relative paths)
+        # Assume tracks are in ../Tracks relative to the database
+        relative_path = f"../Tracks/{file_path.name}"
+
+        # Convert centiBPM to actual BPM (Engine DJ stores actual BPM, not centiBPM!)
+        bpm_value = track.bpm // 100 if track.bpm else None
+
         # Create Engine DJ track record
         edj_track = EDJTrack(
-            path=track.filename,
-            filename=Path(track.filename).name,
-            title=track.title or Path(track.filename).stem,
+            # File info
+            path=relative_path,  # Use relative path, not absolute
+            filename=file_path.name,
+            fileType=file_path.suffix.lower().lstrip('.') if file_path.suffix else None,
+            fileBytes=file_stat.st_size if file_stat else None,
+
+            # Metadata
+            title=track.title or file_path.stem,
             artist=track.artist,
-            bpm=track.bpm,  # manadj stores centiBPM, Engine DJ expects integer BPM
+            bpm=bpm_value,  # Convert from centiBPM to actual BPM
             key=track.key,  # Both use 0-23 Engine DJ format
             length=None,  # Don't have duration in manadj
-            isAnalyzed=False,  # Needs analysis in Engine DJ
-            isMetadataImported=track.title is not None or track.artist is not None,
+
+            # Playback
+            playOrder=1,  # CRITICAL: Must be 1, not NULL
+
+            # Status flags - CRITICAL: Must be 0, not NULL
+            isAnalyzed=0,  # Needs analysis in Engine DJ
+            isAvailable=1,  # File exists
+            isPlayed=0,
+            isMetadataImported=0,
+
+            # Packed track flags - MUST be 0, not NULL
+            isMetadataOfPackedTrackChanged=0,
+            isPerfomanceDataOfPackedTrackChanged=0,
+            pdbImportKey=0,
+            isBeatGridLocked=0,
+            explicitLyrics=0,
+            streamingFlags=0,
+
+            # Timestamps
             dateCreated=current_time,
             dateAdded=current_time,
             lastEditTime=current_time,
-            isAvailable=True,
-            isPlayed=False,
-            # Leave other fields as None/default
         )
 
         edj_session.add(edj_track)
@@ -335,24 +255,6 @@ def import_tracks_from_enginedj(
     return imported
 
 
-def format_track_preview(track: ManAdjTrack | EDJTrack, limit: int = 10) -> str:
-    """Format track info for preview display."""
-    if isinstance(track, ManAdjTrack):
-        bpm_str = f"{track.bpm} BPM" if track.bpm else "? BPM"
-        key_str = str(track.key) if track.key is not None else "?"
-        title = track.title or Path(track.filename).stem
-        artist = track.artist or "Unknown"
-        path = track.filename
-    else:  # EDJTrack
-        bpm_str = f"{track.bpm} BPM" if track.bpm else "? BPM"
-        key_str = str(track.key) if track.key is not None else "?"
-        title = track.title or Path(track.filename or "").stem
-        artist = track.artist or "Unknown"
-        path = track.path or track.filename or "?"
-
-    return f"{title} - {artist} ({bpm_str}, Key {key_str}) [{path}]"
-
-
 def main():
     parser = argparse.ArgumentParser(
         description='Bidirectional track sync between manadj and Engine DJ'
@@ -369,7 +271,12 @@ def main():
         help='Apply changes (default is dry-run mode)'
     )
     parser.add_argument(
-        '--no-import',
+        '--skip-export',
+        action='store_true',
+        help='Skip exporting tracks from manadj to Engine DJ'
+    )
+    parser.add_argument(
+        '--skip-import',
         action='store_true',
         help='Skip importing tracks from Engine DJ to manadj'
     )
@@ -403,32 +310,47 @@ def main():
         return 1
 
     try:
-        # Phase 1: Find tracks in manadj but NOT in Engine DJ
+        # Phase 1: Find tracks in manadj but NOT in Engine DJ (if not --skip-export)
         print("📊 Analyzing libraries...")
-        with edj_db.session_m() as edj_session:
-            missing_in_edj, stats = find_missing_tracks_in_enginedj(
-                manadj_db, edj_session, validate_paths=True
-            )
+        missing_in_edj = []
+        stats = SyncStats()
 
-        print(f"  manadj tracks: {stats.manadj_tracks}")
-        print(f"  Engine DJ tracks: {stats.enginedj_tracks}")
-        print()
-        print(f"  Tracks in manadj but NOT in Engine DJ: {stats.missing_in_enginedj}")
-        if stats.skipped_file_not_found > 0:
-            print(f"  ⚠️  Skipped (file not found): {stats.skipped_file_not_found}")
-
-        # Phase 2: Find tracks in Engine DJ but NOT in manadj (if not --no-import)
-        missing_in_manadj = []
-        if not args.no_import:
+        if not args.skip_export:
             with edj_db.session_m() as edj_session:
-                missing_in_manadj, import_stats = find_missing_tracks_in_manadj(
+                missing_in_edj, stats_dict = find_missing_tracks_in_enginedj(
+                    manadj_db, edj_session, validate_paths=True
+                )
+                # Convert dict stats to SyncStats
+                stats = SyncStats()
+                stats.manadj_tracks = stats_dict['manadj_tracks']
+                stats.enginedj_tracks = stats_dict['enginedj_tracks']
+                stats.missing_in_enginedj = stats_dict['missing_count']
+                stats.skipped_file_not_found = stats_dict['skipped_file_not_found']
+
+            print(f"  manadj tracks: {stats.manadj_tracks}")
+            print(f"  Engine DJ tracks: {stats.enginedj_tracks}")
+            print()
+            print(f"  Tracks in manadj but NOT in Engine DJ: {stats.missing_in_enginedj}")
+            if stats.skipped_file_not_found > 0:
+                print(f"  ⚠️  Skipped (file not found): {stats.skipped_file_not_found}")
+        else:
+            print("  ⏭️  Skipping export phase (--skip-export)")
+            print()
+
+        # Phase 2: Find tracks in Engine DJ but NOT in manadj (if not --skip-import)
+        missing_in_manadj = []
+        if not args.skip_import:
+            with edj_db.session_m() as edj_session:
+                missing_in_manadj, import_stats_dict = find_missing_tracks_in_manadj(
                     manadj_db, edj_session
                 )
-            print(f"  Tracks in Engine DJ but NOT in manadj: {import_stats.missing_in_manadj}")
+            print(f"  Tracks in Engine DJ but NOT in manadj: {import_stats_dict['missing_count']}")
+        else:
+            print("  ⏭️  Skipping import phase (--skip-import)")
         print()
 
         # Show preview of tracks to export
-        if missing_in_edj:
+        if missing_in_edj and not args.skip_export:
             print(f"📋 Preview: Tracks to add to Engine DJ (showing first 10):")
             for i, track in enumerate(missing_in_edj[:10], 1):
                 print(f"  {i}. {format_track_preview(track)}")
@@ -437,7 +359,7 @@ def main():
             print()
 
         # Show preview of tracks to import
-        if missing_in_manadj:
+        if missing_in_manadj and not args.skip_import:
             print(f"📋 Preview: Tracks to import to manadj (showing first 10):")
             for i, track in enumerate(missing_in_manadj[:10], 1):
                 print(f"  {i}. {format_track_preview(track)}")
@@ -445,8 +367,8 @@ def main():
                 print(f"  ... and {len(missing_in_manadj) - 10} more")
             print()
 
-        # Phase 3: Export tracks to Engine DJ (if --apply)
-        if missing_in_edj:
+        # Phase 3: Export tracks to Engine DJ (if --apply and not --skip-export)
+        if missing_in_edj and not args.skip_export:
             if args.apply:
                 print(f"✅ Exporting {len(missing_in_edj)} tracks to Engine DJ...")
                 with edj_db.session_m_write() as edj_session:
@@ -468,8 +390,8 @@ def main():
                 playlist_name = args.playlist_name or f"manadj - Needs Analysis [{datetime.now().strftime('%Y-%m-%d')}]"
                 print(f"   Would create playlist: \"{playlist_name}\"")
 
-        # Phase 4: Import tracks from Engine DJ (if --apply and not --no-import)
-        if missing_in_manadj and not args.no_import:
+        # Phase 4: Import tracks from Engine DJ (if --apply and not --skip-import)
+        if missing_in_manadj and not args.skip_import:
             if args.apply:
                 print(f"✅ Importing {len(missing_in_manadj)} tracks to manadj...")
                 imported = import_tracks_from_enginedj(missing_in_manadj, manadj_db, dry_run=False)
@@ -483,16 +405,18 @@ def main():
         print("=" * 70)
         print("📊 Summary:")
         if args.apply:
-            print(f"  Exported to Engine DJ: {stats.exported_to_enginedj}")
-            if stats.playlist_created:
-                print(f"  Playlist created: Yes")
-            if not args.no_import:
+            if not args.skip_export:
+                print(f"  Exported to Engine DJ: {stats.exported_to_enginedj}")
+                if stats.playlist_created:
+                    print(f"  Playlist created: Yes")
+            if not args.skip_import:
                 print(f"  Imported to manadj: {stats.imported_to_manadj}")
         else:
-            print(f"  Would export to Engine DJ: {len(missing_in_edj)}")
-            if missing_in_edj:
-                print(f"  Would create playlist: Yes")
-            if not args.no_import and missing_in_manadj:
+            if not args.skip_export:
+                print(f"  Would export to Engine DJ: {len(missing_in_edj)}")
+                if missing_in_edj:
+                    print(f"  Would create playlist: Yes")
+            if not args.skip_import and missing_in_manadj:
                 print(f"  Would import to manadj: {len(missing_in_manadj)}")
             print()
             print("Use --apply to execute these changes.")
