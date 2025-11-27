@@ -4,7 +4,6 @@ import { formatKeyDisplay } from '../utils/keyUtils';
 import WebGLWaveform from './WebGLWaveform';
 import { useAudio } from '../hooks/useAudio';
 import { useWaveformData } from '../hooks/useWaveformData';
-import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import './Player.css';
 
 interface PlayerProps {
@@ -21,10 +20,6 @@ export interface PlayerHandle {
 const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
   // Get audio state and controls from context
   const audio = useAudio();
-
-  // Beatgrid editing mutations
-  const setDownbeat = useSetBeatgridDownbeat();
-  const nudgeGrid = useNudgeBeatgrid();
 
   // Fetch waveform data to get cue point
   const { rawData: waveformData } = useWaveformData(track?.id ?? null);
@@ -60,24 +55,6 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Handler for set downbeat button
-  const handleSetDownbeat = () => {
-    if (!track) return;
-    setDownbeat.mutate({
-      trackId: track.id,
-      downbeatTime: audio.currentTime
-    });
-  };
-
-  // Handler for nudge buttons
-  const handleNudge = (offsetMs: number) => {
-    if (!track) return;
-    nudgeGrid.mutate({
-      trackId: track.id,
-      offsetMs
-    });
-  };
-
   // Check if at cue point for button styling
   const atCuePoint = audio.cuePoint !== null && Math.abs(audio.currentTime - audio.cuePoint) < 0.1;
 
@@ -88,19 +65,8 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
         <WebGLWaveform trackId={track?.id ?? null} />
 
         {/* Controls overlay - top left */}
-        <div style={{
-          position: 'absolute',
-          top: '8px',
-          left: '8px',
-          display: 'grid',
-          gridTemplateColumns: 'auto auto',
-          gridTemplateRows: 'auto auto auto',
-          gap: '4px',
-          padding: '8px',
-          background: 'rgba(17, 17, 17, 0.8)',
-          backdropFilter: 'blur(4px)',
-        }}>
-          {/* Row 1: CUE button */}
+        <div className="player-controls-overlay">
+          {/* Row 1: CUE button spanning all columns */}
           <button
             onMouseDown={audio.handleCueDown}
             onMouseUp={audio.handleCueUp}
@@ -120,19 +86,7 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
             CUE
           </button>
 
-          {/* Row 1: Time display */}
-          <div className="player-time" style={{
-            fontSize: '12px',
-            color: 'var(--subtext1)',
-            display: 'flex',
-            alignItems: 'center',
-          }}>
-            <span>{formatTime(audio.currentTime)}</span>
-            <span className="player-time-separator">/</span>
-            <span>{formatTime(audio.duration)}</span>
-          </div>
-
-          {/* Row 2: Play button */}
+          {/* Row 2: PLAY button spanning all columns */}
           <button
             onClick={audio.togglePlayPause}
             disabled={!track}
@@ -142,113 +96,60 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
             ⏯
           </button>
 
-          {/* Row 2: Key and BPM */}
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '2px',
-            fontSize: '12px',
-            color: 'var(--subtext1)',
-            justifyContent: 'center',
-          }}>
-            {track && (
-              <>
-                <div style={{ color: 'var(--text)' }}>
-                  {formatKeyDisplay(track.key)}
-                </div>
-                <div style={{ color: 'var(--text)' }}>
-                  {track.bpm ? `${track.bpm} BPM` : '-'}
-                </div>
-              </>
-            )}
-          </div>
+          {/* Row 3: Jump back and forward buttons */}
+          <button
+            onClick={() => {
+              const bpm = track?.bpm ?? 120;
+              const beatsToJump = 32;
+              const secondsPerBeat = 60 / bpm;
+              const jumpTime = beatsToJump * secondsPerBeat;
+              console.log('[Beatjump] Backward:', {
+                bpm,
+                beats: beatsToJump,
+                secondsPerBeat,
+                jumpTime,
+                currentTime: audio.currentTime,
+                newTime: audio.currentTime - jumpTime
+              });
+              const newTime = Math.max(0, Math.min(audio.duration, audio.currentTime - jumpTime));
+              audio.seek(newTime);
+            }}
+            disabled={!track}
+            className="player-button"
+            title="Jump back 32 beats"
+          >
+            ◄◄
+          </button>
 
-          {/* Row 3: Beat jump buttons */}
-          <div style={{ display: 'flex', gap: '4px' }}>
-            <button
-              onClick={() => {
-                const bpm = track?.bpm ?? 120;
-                const beatsToJump = 32;
-                const secondsPerBeat = 60 / bpm;
-                const jumpTime = beatsToJump * secondsPerBeat;
-                console.log('[Beatjump] Backward:', {
-                  bpm,
-                  beats: beatsToJump,
-                  secondsPerBeat,
-                  jumpTime,
-                  currentTime: audio.currentTime,
-                  newTime: audio.currentTime - jumpTime
-                });
-                const newTime = Math.max(0, Math.min(audio.duration, audio.currentTime - jumpTime));
-                audio.seek(newTime);
-              }}
-              disabled={!track}
-              className="player-button"
-              title="Jump back 32 beats"
-              style={{ flex: 1 }}
-            >
-              ◄◄
-            </button>
+          <button
+            onClick={() => {
+              const bpm = track?.bpm ?? 120;
+              const beatsToJump = 32;
+              const secondsPerBeat = 60 / bpm;
+              const jumpTime = beatsToJump * secondsPerBeat;
+              console.log('[Beatjump] Forward:', {
+                bpm,
+                beats: beatsToJump,
+                secondsPerBeat,
+                jumpTime,
+                currentTime: audio.currentTime,
+                newTime: audio.currentTime + jumpTime
+              });
+              const newTime = Math.max(0, Math.min(audio.duration, audio.currentTime + jumpTime));
+              audio.seek(newTime);
+            }}
+            disabled={!track}
+            className="player-button"
+            title="Jump forward 32 beats"
+          >
+            ►►
+          </button>
 
-            <button
-              onClick={() => {
-                const bpm = track?.bpm ?? 120;
-                const beatsToJump = 32;
-                const secondsPerBeat = 60 / bpm;
-                const jumpTime = beatsToJump * secondsPerBeat;
-                console.log('[Beatjump] Forward:', {
-                  bpm,
-                  beats: beatsToJump,
-                  secondsPerBeat,
-                  jumpTime,
-                  currentTime: audio.currentTime,
-                  newTime: audio.currentTime + jumpTime
-                });
-                const newTime = Math.max(0, Math.min(audio.duration, audio.currentTime + jumpTime));
-                audio.seek(newTime);
-              }}
-              disabled={!track}
-              className="player-button"
-              title="Jump forward 32 beats"
-              style={{ flex: 1 }}
-            >
-              ►►
-            </button>
-          </div>
-
-          {/* Row 3: Beatgrid editing controls */}
-          <div style={{ display: 'flex', gap: '4px' }}>
-            <button
-              onClick={() => handleNudge(-10)}
-              disabled={!track || nudgeGrid.isPending}
-              className="player-button"
-              title="Nudge grid 10ms earlier"
-              style={{ flex: 1 }}
-            >
-              ◄
-            </button>
-            <button
-              onClick={handleSetDownbeat}
-              disabled={!track || setDownbeat.isPending}
-              className="player-button"
-              style={{
-                color: 'var(--blue)',
-                borderColor: 'var(--blue)',
-                flex: 1,
-              }}
-              title="Set downbeat at current position"
-            >
-              D
-            </button>
-            <button
-              onClick={() => handleNudge(10)}
-              disabled={!track || nudgeGrid.isPending}
-              className="player-button"
-              title="Nudge grid 10ms later"
-              style={{ flex: 1 }}
-            >
-              ►
-            </button>
+          {/* Row 4: Time display - spanning all columns */}
+          <div className="player-time">
+            <span>{formatTime(audio.currentTime)}</span>
+            <span className="player-time-separator">/</span>
+            <span>{formatTime(audio.duration)}</span>
           </div>
         </div>
       </div>

@@ -25,6 +25,7 @@ def list_tracks(
     bpm_center: int | None = Query(None, ge=1, le=300),
     bpm_threshold_percent: int | None = Query(None, ge=0, le=100),
     key_camelot_ids: List[str] | None = Query(None),
+    unprocessed: bool | None = Query(None),
     db: Session = Depends(get_db)
 ):
     # Validate energy range
@@ -50,7 +51,8 @@ def list_tracks(
         tag_match_mode=tag_match_mode,
         bpm_center=bpm_center,
         bpm_threshold_percent=bpm_threshold_percent,
-        key_camelot_ids=key_camelot_ids
+        key_camelot_ids=key_camelot_ids,
+        unprocessed=unprocessed
     )
 
     return {

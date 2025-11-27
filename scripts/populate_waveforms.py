@@ -5,12 +5,18 @@ This script generates waveform data for any tracks that don't already have it.
 Run this to avoid on-demand generation during playback.
 
 Usage:
-    uv run -m backend.populate_waveforms
+    uv run -m backend.populate_waveforms [--jobs N]
+
+Options:
+    --jobs N    Number of parallel workers (default: auto, max: CPU count)
 """
 
 import sys
 from pathlib import Path
 import time
+import argparse
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # Add parent directory to path so we can import backend modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -20,8 +26,43 @@ from backend.crud import create_waveform
 from backend.database import SessionLocal
 
 
-def populate_waveforms():
-    """Generate waveforms for all tracks that don't have them."""
+def process_track(track_data):
+    """
+    Worker function to process a single track.
+
+    Args:
+        track_data: Tuple of (track_id, track_filename, track_display_name)
+
+    Returns:
+        Tuple of (success: bool, track_display_name: str, elapsed_time: float or None, error: str or None)
+    """
+    track_id, track_filename, track_display_name = track_data
+
+    # Check if file exists
+    if not Path(track_filename).exists():
+        return (False, track_display_name, None, "File not found")
+
+    # Create new DB session for this worker
+    db = SessionLocal()
+
+    try:
+        start_time = time.time()
+        create_waveform(db, track_id, track_filename)
+        elapsed = time.time() - start_time
+        return (True, track_display_name, elapsed, None)
+    except Exception as e:
+        return (False, track_display_name, None, str(e))
+    finally:
+        db.close()
+
+
+def populate_waveforms(num_jobs=None):
+    """
+    Generate waveforms for all tracks that don't have them.
+
+    Args:
+        num_jobs: Number of parallel workers. If None, uses min(cpu_count(), 8).
+    """
     db = SessionLocal()
 
     try:
@@ -52,34 +93,41 @@ def populate_waveforms():
             print("✓ All tracks already have waveforms!")
             return
 
-        print(f"Found {missing_count} tracks without waveforms.")
-        print(f"Generating waveforms for {missing_count}/{total_tracks} tracks...\n")
+        # Determine number of workers
+        if num_jobs is None:
+            # Default: use all CPUs, but cap at reasonable limit
+            num_workers = min(cpu_count(), 8)
+        else:
+            # User-specified, but cap at CPU count
+            num_workers = min(num_jobs, cpu_count())
 
-        # Generate waveforms
+        print(f"Found {missing_count} tracks without waveforms.")
+        print(f"Generating waveforms for {missing_count}/{total_tracks} tracks using {num_workers} workers...\n")
+
+        # Prepare track data for parallel processing
+        track_data_list = [
+            (track.id, track.filename, track.title or Path(track.filename).name)
+            for track in tracks_without_waveforms
+        ]
+
+        # Generate waveforms in parallel
         success_count = 0
         failed_tracks = []
+        start_time = time.time()
 
-        for i, track in enumerate(tracks_without_waveforms, 1):
-            track_name = track.title or Path(track.filename).name
-            print(f"[{i}/{missing_count}] Generating waveform for: {track_name}")
+        with Pool(processes=num_workers) as pool:
+            # Process tracks and show progress
+            for i, result in enumerate(pool.imap(process_track, track_data_list), 1):
+                success, track_name, elapsed, error = result
 
-            # Check if file exists
-            if not Path(track.filename).exists():
-                print(f"  ✗ File not found: {track.filename}")
-                failed_tracks.append((track, "File not found"))
-                continue
+                if success:
+                    print(f"[{i}/{missing_count}] ✓ {track_name} ({elapsed:.2f}s)")
+                    success_count += 1
+                else:
+                    print(f"[{i}/{missing_count}] ✗ {track_name}: {error}")
+                    failed_tracks.append((track_name, error))
 
-            try:
-                start_time = time.time()
-                waveform = create_waveform(db, track.id, track.filename)
-                elapsed = time.time() - start_time
-
-                print(f"  ✓ Generated in {elapsed:.2f}s")
-                success_count += 1
-
-            except Exception as e:
-                print(f"  ✗ Failed: {str(e)}")
-                failed_tracks.append((track, str(e)))
+        total_elapsed = time.time() - start_time
 
         # Print summary
         print("\n" + "=" * 60)
@@ -89,11 +137,16 @@ def populate_waveforms():
         print(f"Tracks with existing waveforms: {total_tracks - missing_count}")
         print(f"Newly generated waveforms: {success_count}")
         print(f"Failed: {len(failed_tracks)}")
+        print(f"Total time: {total_elapsed:.2f}s")
+        if success_count > 0:
+            avg_time = total_elapsed / missing_count
+            rate = success_count / total_elapsed
+            print(f"Average time per track: {avg_time:.2f}s")
+            print(f"Processing rate: {rate:.2f} tracks/second")
 
         if failed_tracks:
             print("\nFailed tracks:")
-            for track, error in failed_tracks:
-                track_name = track.title or Path(track.filename).name
+            for track_name, error in failed_tracks:
                 print(f"  - {track_name}: {error}")
 
         print("\n✓ Waveform population complete!")
@@ -106,8 +159,26 @@ def populate_waveforms():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Pre-populate waveform data for all tracks in the library."
+    )
+    parser.add_argument(
+        "--jobs", "-j",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Number of parallel workers (default: auto-detect, max 8)"
+    )
+
+    args = parser.parse_args()
+
+    # Validate jobs argument
+    if args.jobs is not None and args.jobs < 1:
+        print("Error: --jobs must be at least 1")
+        sys.exit(1)
+
     try:
-        populate_waveforms()
+        populate_waveforms(num_jobs=args.jobs)
     except KeyboardInterrupt:
         print("\n\nInterrupted by user. Exiting...")
         sys.exit(1)

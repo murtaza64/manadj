@@ -146,6 +146,31 @@
   color: var(--overlay0);
 }
 
+/* Player controls overlay */
+.player-controls-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 8px;
+  background: rgba(17, 17, 17, 0.8);
+  backdrop-filter: blur(4px);
+  width: 140px;
+}
+
+.player-controls-overlay .player-button-cue,
+.player-controls-overlay .player-button-playing,
+.player-controls-overlay .player-button-paused {
+  grid-column: 1 / -1;
+}
+
+.player-controls-overlay .player-time {
+  grid-column: 1 / -1;
+  justify-content: center;
+}
+
 .player-error {
   font-size: 12px;
   color: var(--red);

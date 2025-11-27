@@ -4,7 +4,8 @@
 import sys
 import argparse
 from pathlib import Path
-from enginedj import EngineDJDatabase, Track as EDJTrack
+from enginedj import EngineDJDatabase
+from enginedj.sync import match_manadj_track_to_engine
 from backend.database import SessionLocal
 from backend.models import Track as DBTrack
 from backend.key import Key
@@ -81,18 +82,13 @@ def sync_keys(engine_db_path: str, apply: bool = False, verbose: bool = False):
             stats.scanned = len(db_tracks)
 
             for db_track in db_tracks:
-                # Extract filename
-                filename = Path(db_track.filename).name
-
-                # Find in Engine DJ
-                edj_track = edj_session.query(EDJTrack).filter(
-                    EDJTrack.filename == filename
-                ).first()
+                # Find matching Engine DJ track
+                edj_track = match_manadj_track_to_engine(db_track, edj_session)
 
                 if edj_track is None:
                     stats.not_in_engine += 1
                     if verbose:
-                        print(f"Not in Engine DJ: {filename}")
+                        print(f"Not in Engine DJ: {Path(db_track.filename).name}")
                     continue
 
                 # Engine DJ has no key

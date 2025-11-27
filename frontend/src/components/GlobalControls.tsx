@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import TagManagementModal from './TagManagementModal';
 import FindRelatedTracksModal from './FindRelatedTracksModal';
 import { SearchIcon } from './icons';
 import { type RelatedTracksSettings } from './TrackList';
@@ -13,7 +12,6 @@ interface GlobalControlsProps {
 }
 
 export default function GlobalControls({ selectedTrack, onFindRelated, onApplySettings }: GlobalControlsProps) {
-  const [showManagementModal, setShowManagementModal] = useState(false);
   const [showRelatedModal, setShowRelatedModal] = useState(false);
   const [relatedModalPosition, setRelatedModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
 
@@ -32,13 +30,6 @@ export default function GlobalControls({ selectedTrack, onFindRelated, onApplySe
 
   return (
     <div className="global-controls">
-      <button
-        onClick={() => setShowManagementModal(true)}
-        className="global-controls-btn"
-      >
-        Manage Tags
-      </button>
-
       <div className="find-related-button-group">
         <button
           onClick={handleQuickApply}
@@ -57,11 +48,6 @@ export default function GlobalControls({ selectedTrack, onFindRelated, onApplySe
           ⚙
         </button>
       </div>
-
-      <TagManagementModal
-        isOpen={showManagementModal}
-        onClose={() => setShowManagementModal(false)}
-      />
 
       <FindRelatedTracksModal
         isOpen={showRelatedModal}

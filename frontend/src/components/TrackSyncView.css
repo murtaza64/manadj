@@ -1,0 +1,117 @@
+.track-sync-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--base);
+}
+
+.track-sync-loading,
+.track-sync-error,
+.track-sync-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--subtext1);
+  font-size: var(--font-sm);
+}
+
+.track-sync-error {
+  color: var(--red);
+}
+
+/* Stats Cards */
+.track-sync-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 20px;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.stat-card {
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: var(--font-xs);
+  color: var(--subtext1);
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: var(--font-xxl);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.stat-sublabel {
+  font-size: var(--font-xs);
+  color: var(--overlay1);
+  margin-top: 4px;
+}
+
+.stat-card.stat-export {
+  border-left: 3px solid var(--blue);
+}
+
+.stat-card.stat-export .stat-value {
+  color: var(--blue);
+}
+
+.stat-card.stat-import {
+  border-left: 3px solid var(--green);
+}
+
+.stat-card.stat-import .stat-value {
+  color: var(--green);
+}
+
+.stat-card.stat-warning {
+  border-left: 3px solid var(--yellow);
+}
+
+.stat-card.stat-warning .stat-value {
+  color: var(--yellow);
+}
+
+/* Options Bar */
+.track-sync-options {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.refresh-button {
+  padding: 6px 12px;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--font-xs);
+  transition: background var(--transition-normal);
+}
+
+.refresh-button:hover {
+  background: var(--surface1);
+}

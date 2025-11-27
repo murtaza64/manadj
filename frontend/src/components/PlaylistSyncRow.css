@@ -1,0 +1,67 @@
+/* Row */
+.playlist-sync-row {
+  height: 32px;
+  border-bottom: 1px solid var(--surface0);
+  transition: background var(--transition-normal);
+}
+
+.playlist-sync-row:hover {
+  background: #1f1f1f;
+}
+
+.playlist-sync-row-clickable {
+  cursor: pointer;
+}
+
+.playlist-sync-row-clickable:hover {
+  background: #252525;
+}
+
+.playlist-sync-row-clickable:active {
+  background: #2a2a2a;
+}
+
+/* Cells */
+.playlist-sync-cell {
+  padding: 2px 12px;
+  vertical-align: middle;
+  font-size: var(--font-xs);
+}
+
+.playlist-name-cell {
+  overflow: hidden;
+}
+
+.playlist-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.track-count-cell {
+  text-align: center;
+  color: var(--subtext1);
+}
+
+.status-cell {
+  padding: 4px 12px;
+}
+
+/* Status Badge */
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-label {
+  font-size: 13px;
+  color: var(--text);
+}

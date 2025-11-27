@@ -1,0 +1,63 @@
+.track-sync-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--base);
+}
+
+.track-sync-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--mantle);
+  border-bottom: 2px solid var(--surface0);
+}
+
+.track-sync-header h2 {
+  margin: 0;
+  font-size: var(--font-lg);
+  color: var(--text);
+}
+
+.target-selector {
+  display: flex;
+  gap: 4px;
+  background: var(--surface0);
+  padding: 4px;
+}
+
+.target-selector button {
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  color: var(--subtext1);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  font-weight: 500;
+  transition: all var(--transition-normal);
+}
+
+.target-selector button:hover {
+  color: var(--text);
+  background: var(--surface1);
+}
+
+.target-selector button.active {
+  background: var(--blue);
+  color: var(--base);
+}
+
+.close-button {
+  padding: 6px 12px;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  transition: background var(--transition-normal);
+}
+
+.close-button:hover {
+  background: var(--surface1);
+}

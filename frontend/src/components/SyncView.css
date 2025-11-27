@@ -1,0 +1,92 @@
+/* Main container */
+.sync-view-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--base);
+  color: var(--text);
+  padding: var(--space-md);
+}
+
+/* Top bar with title, tabs, and close button */
+.sync-view-top-bar {
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+  margin-bottom: var(--space-md);
+  background: var(--mantle);
+  padding: var(--space-lg);
+  border: 1px solid var(--surface0);
+}
+
+.sync-view-title {
+  font-size: var(--font-xl);
+  margin: 0;
+  color: var(--text);
+}
+
+/* Tab container */
+.sync-view-tabs {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  margin-left: var(--space-lg);
+}
+
+/* Individual tab button */
+.sync-view-tab {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-right: none;
+  color: var(--subtext1);
+  cursor: pointer;
+  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: var(--font-sm);
+  transition: all var(--transition-normal);
+}
+
+.sync-view-tab:first-child {
+  border-left: 1px solid var(--surface1);
+}
+
+.sync-view-tab:last-child {
+  border-right: 1px solid var(--surface1);
+}
+
+.sync-view-tab:hover {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+/* Active tab */
+.sync-view-tab-active {
+  background: var(--base);
+  color: var(--lavender);
+  border-bottom-color: var(--lavender);
+  border-bottom-width: 2px;
+  font-weight: 600;
+}
+
+.sync-view-tab-active:hover {
+  background: var(--base);
+  color: var(--lavender);
+}
+
+/* Close button */
+.sync-view-close-button {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: var(--font-sm);
+  transition: all var(--transition-normal);
+}
+
+.sync-view-close-button:hover {
+  background: var(--surface1);
+  border-color: var(--red);
+  color: var(--red);
+}

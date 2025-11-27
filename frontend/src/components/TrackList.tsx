@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackRow from './TrackRow';
@@ -8,10 +8,12 @@ import GlobalControls from './GlobalControls';
 import Player, { type PlayerHandle } from './Player';
 import PlaylistSidebar from './PlaylistSidebar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon } from './icons';
 import type { Track } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
+import { useAudio } from '../hooks/useAudio';
 
 // Related tracks feature - types and constants
 export interface RelatedTracksSettings {
@@ -175,16 +177,28 @@ function deriveRelatedFilters(
   return filters;
 }
 
-export default function TrackList() {
+type ViewType = 'all' | 'unprocessed' | 'playlist';
+
+interface TrackListProps {
+  onOpenPlaylistSync: () => void;
+}
+
+export default function TrackList({ onOpenPlaylistSync }: TrackListProps) {
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
+  const [selectedView, setSelectedView] = useState<ViewType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const playerRef = useRef<PlayerHandle>(null);
   const { filters, setFilters } = useFilters();
+  const audio = useAudio();
 
-  // Fetch all tracks (when no playlist selected)
+  // Beatgrid mutation hooks
+  const setDownbeat = useSetBeatgridDownbeat();
+  const nudgeGrid = useNudgeBeatgrid();
+
+  // Fetch all tracks (when 'all' or 'unprocessed' view selected)
   const { data: allTracksData, isLoading: isLoadingAllTracks, error: allTracksError } = useQuery({
-    queryKey: ['tracks', filters],
+    queryKey: ['tracks', filters, selectedView],
     queryFn: () => api.tracks.list(1, 1000, {
       tagIds: filters.selectedTagIds,
       search: filters.search,
@@ -194,15 +208,16 @@ export default function TrackList() {
       bpmCenter: filters.bpmCenter,
       bpmThresholdPercent: filters.bpmCenter !== null ? filters.bpmThresholdPercent : null,
       keyCamelotIds: filters.selectedKeyCamelotIds,
+      unprocessed: selectedView === 'unprocessed' ? true : undefined,
     }),
-    enabled: selectedPlaylistId === null,
+    enabled: selectedView === 'all' || selectedView === 'unprocessed',
   });
 
-  // Fetch playlist tracks (when playlist selected)
+  // Fetch playlist tracks (when playlist view selected)
   const { data: playlistData, isLoading: isLoadingPlaylist, error: playlistError } = useQuery({
     queryKey: ['playlist', selectedPlaylistId],
     queryFn: () => api.playlists.get(selectedPlaylistId!),
-    enabled: selectedPlaylistId !== null,
+    enabled: selectedView === 'playlist' && selectedPlaylistId !== null,
   });
 
   // Add track to playlist mutation
@@ -220,15 +235,30 @@ export default function TrackList() {
       return api.tracks.update(selectedTrack.id, data);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['tracks'] });
-      await queryClient.invalidateQueries({ queryKey: ['playlist'] });
+      // Refetch queries and wait for them to complete
+      await queryClient.refetchQueries({ queryKey: ['tracks'] });
+      await queryClient.refetchQueries({ queryKey: ['playlist'] });
 
+      // Fetch the specific track to get its fresh state
       if (selectedTrack) {
-        const currentData = selectedPlaylistId === null ? allTracksData : playlistData;
-        const items = selectedPlaylistId === null ? currentData?.items : currentData?.tracks;
-        const updatedTrack = items?.find((t: Track) => t.id === selectedTrack.id);
-        if (updatedTrack) {
-          setSelectedTrack(updatedTrack);
+        try {
+          const freshTrack = await api.tracks.get(selectedTrack.id);
+          setSelectedTrack(freshTrack);
+        } catch (error) {
+          console.error('Failed to refetch selected track:', error);
+          // Fallback to finding it in the list
+          const currentData = selectedView === 'playlist'
+            ? queryClient.getQueryData(['playlist', selectedPlaylistId])
+            : queryClient.getQueryData(['tracks', filters, selectedView]);
+
+          const items = selectedView === 'playlist'
+            ? (currentData as any)?.tracks
+            : (currentData as any)?.items;
+
+          const updatedTrack = items?.find((t: Track) => t.id === selectedTrack.id);
+          if (updatedTrack) {
+            setSelectedTrack(updatedTrack);
+          }
         }
       }
     },
@@ -278,20 +308,54 @@ export default function TrackList() {
     setFilters(newFilters);
   };
 
+  const handleNudgeBeatgrid = (offsetMs: number) => {
+    if (!selectedTrack) return;
+    nudgeGrid.mutate({ trackId: selectedTrack.id, offsetMs });
+  };
+
+  const handleSetDownbeat = () => {
+    if (!selectedTrack) return;
+    setDownbeat.mutate({ trackId: selectedTrack.id, downbeatTime: audio.currentTime });
+  };
+
   // Determine current tracks and loading state
-  const isLoading = selectedPlaylistId === null ? isLoadingAllTracks : isLoadingPlaylist;
-  const error = selectedPlaylistId === null ? allTracksError : playlistError;
-  const currentTracks = selectedPlaylistId === null
-    ? allTracksData?.items || []
-    : playlistData?.tracks || [];
-  const totalTracks = selectedPlaylistId === null ? allTracksData?.total || 0 : playlistData?.tracks?.length || 0;
+  const isLoading = selectedView === 'playlist' ? isLoadingPlaylist : isLoadingAllTracks;
+  const error = selectedView === 'playlist' ? playlistError : allTracksError;
+  let currentTracks = selectedView === 'playlist'
+    ? playlistData?.tracks || []
+    : allTracksData?.items || [];
+
+  // Keep selected track in list at its original position even if it no longer matches filter
+  // (e.g., in Unprocessed view after tagging)
+  const [selectedTrackPosition, setSelectedTrackPosition] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (selectedTrack) {
+      const index = currentTracks.findIndex((t: Track) => t.id === selectedTrack.id);
+      if (index !== -1) {
+        setSelectedTrackPosition(index);
+      }
+    }
+  }, [selectedTrack, currentTracks]);
+
+  if (selectedTrack && !currentTracks.find((t: Track) => t.id === selectedTrack.id) && selectedTrackPosition !== null) {
+    const newTracks = [...currentTracks];
+    newTracks.splice(selectedTrackPosition, 0, selectedTrack);
+    currentTracks = newTracks;
+  }
+
+  const totalTracks = selectedView === 'playlist'
+    ? playlistData?.tracks?.length || 0
+    : allTracksData?.total || 0;
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts({
     tracks: currentTracks,
     selectedTrack,
     onSelectTrack: setSelectedTrack,
-    playerRef
+    playerRef,
+    onNudgeBeatgrid: handleNudgeBeatgrid,
+    onSetDownbeat: handleSetDownbeat
   });
 
   return (
@@ -315,6 +379,7 @@ export default function TrackList() {
             track={selectedTrack}
             onSave={mutation.mutate}
             onUpdate={handleFieldUpdate}
+            currentTime={audio.currentTime}
           />
         </div>
       </div>
@@ -332,9 +397,15 @@ export default function TrackList() {
       }}>
         {/* Sidebar */}
         <PlaylistSidebar
+          selectedView={selectedView}
           selectedPlaylistId={selectedPlaylistId}
-          onSelectPlaylist={setSelectedPlaylistId}
+          onSelectView={setSelectedView}
+          onSelectPlaylist={(id) => {
+            setSelectedView('playlist');
+            setSelectedPlaylistId(id);
+          }}
           onTrackDrop={handleTrackDrop}
+          onOpenPlaylistSync={onOpenPlaylistSync}
         />
 
         {/* Main library area (filter + table) */}

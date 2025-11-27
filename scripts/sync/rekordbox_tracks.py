@@ -22,10 +22,9 @@ from dataclasses import dataclass
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pyrekordbox.db6 import Rekordbox6Database
-
 from backend.database import SessionLocal
 from backend.models import Track as ManAdjTrack
+from rekordbox.connection import get_rekordbox_db
 from rekordbox.sync import (
     find_missing_tracks_in_rekordbox,
     find_missing_tracks_in_manadj_from_rekordbox,
@@ -244,10 +243,7 @@ def main():
             return 1
 
         # Open Rekordbox database (auto-detects location)
-        if args.rekordbox_db:
-            rb_db = Rekordbox6Database(db_dir=args.rekordbox_db)
-        else:
-            rb_db = Rekordbox6Database()
+        rb_db = get_rekordbox_db(args.rekordbox_db)
         manadj_db = SessionLocal()
 
         print(f"Rekordbox database: {rb_db.db_directory}")

@@ -1,23 +1,30 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import type { Track } from '../types';
 import type { PlayerHandle } from '../components/Player';
+import { useAudio } from './useAudio';
 
 interface UseKeyboardShortcutsProps {
   tracks: Track[];
   selectedTrack: Track | null;
   onSelectTrack: (track: Track | null) => void;
   playerRef: RefObject<PlayerHandle>;
+  onNudgeBeatgrid?: (offsetMs: number) => void;
+  onSetDownbeat?: () => void;
 }
 
 export function useKeyboardShortcuts({
   tracks,
   selectedTrack,
   onSelectTrack,
-  playerRef
+  playerRef,
+  onNudgeBeatgrid,
+  onSetDownbeat
 }: UseKeyboardShortcutsProps) {
+  const audio = useAudio();
+  const [seekDirection, setSeekDirection] = useState<number>(0); // -1, 0, or 1
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Conflict prevention: ignore if typing in inputs or using modifiers
+      // Conflict prevention: ignore if typing in inputs or using certain modifiers
       const target = event.target as HTMLElement;
       const isInputFocused =
         target.tagName === 'INPUT' ||
@@ -80,6 +87,42 @@ export function useKeyboardShortcuts({
           playerRef.current?.handleCueDown();
         }
       }
+
+      // Beatgrid controls: Shift+H/L for nudge, G for set downbeat
+      if ((key === 'h' || key === 'l') && event.shiftKey) {
+        if (!selectedTrack) return;
+
+        event.preventDefault();
+
+        if (key === 'h' && onNudgeBeatgrid) {
+          onNudgeBeatgrid(-10);  // Nudge left 10ms
+        } else if (key === 'l' && onNudgeBeatgrid) {
+          onNudgeBeatgrid(10);   // Nudge right 10ms
+        }
+      }
+
+      if (key === 'g') {
+        if (!selectedTrack) return;
+
+        event.preventDefault();
+
+        if (onSetDownbeat) {
+          onSetDownbeat();
+        }
+      }
+
+      // Slow seek: h/l (continuous when held, but not with Shift)
+      if ((key === 'h' || key === 'l') && !event.shiftKey) {
+        if (!selectedTrack) return;
+
+        event.preventDefault();
+
+        if (key === 'h') {
+          setSeekDirection(-1);  // Seek backward
+        } else if (key === 'l') {
+          setSeekDirection(1);   // Seek forward
+        }
+      }
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -89,7 +132,7 @@ export function useKeyboardShortcuts({
         target.tagName === 'TEXTAREA' ||
         target.contentEditable === 'true';
 
-      if (isInputFocused || event.ctrlKey || event.metaKey || event.altKey) {
+      if (isInputFocused) {
         return;
       }
 
@@ -101,6 +144,12 @@ export function useKeyboardShortcuts({
         event.preventDefault();
         playerRef.current?.handleCueUp();
       }
+
+      // Stop slow seek on H/L key up (only if not holding Shift)
+      if ((key === 'h' || key === 'l') && !event.shiftKey) {
+        event.preventDefault();
+        setSeekDirection(0);
+      }
     };
 
     document.addEventListener('keydown', handleKeyDown);
@@ -109,7 +158,35 @@ export function useKeyboardShortcuts({
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
     };
-  }, [tracks, selectedTrack, onSelectTrack, playerRef]);
+  }, [tracks, selectedTrack, onSelectTrack, playerRef, onNudgeBeatgrid, onSetDownbeat]);
+
+  // Continuous seek effect for H/L keys
+  useEffect(() => {
+    if (seekDirection === 0) return;
+
+    const SEEK_SPEED = 0.01; // seconds per frame at 60fps
+    let lastTimestamp = 0;
+    let animationFrameId: number;
+
+    const seek = (timestamp: number) => {
+      if (lastTimestamp === 0) lastTimestamp = timestamp;
+      const delta = (timestamp - lastTimestamp) / 1000; // Convert to seconds
+      lastTimestamp = timestamp;
+
+      // Read directly from audio element to avoid React state lag
+      const audioEl = audio.audioRef.current;
+      if (!audioEl) return;
+
+      const seekAmount = seekDirection * SEEK_SPEED * (delta * 60); // Normalize to 60fps
+      const newTime = Math.max(0, Math.min(audioEl.duration, audioEl.currentTime + seekAmount));
+      audioEl.currentTime = newTime;
+
+      animationFrameId = requestAnimationFrame(seek);
+    };
+
+    animationFrameId = requestAnimationFrame(seek);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [seekDirection, audio]);
 }
 
 // Helper function for scrolling selected track into view

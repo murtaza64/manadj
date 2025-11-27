@@ -1,9 +1,9 @@
 """Read Rekordbox database and extract MyTag data."""
 
 from pathlib import Path
-from pyrekordbox import Rekordbox6Database
 from pyrekordbox.db6.tables import DjmdMyTag
 from .models import RekordboxTrack, MyTagStructure
+from .connection import get_rekordbox_db
 
 
 class RekordboxReader:
@@ -11,7 +11,7 @@ class RekordboxReader:
 
     def __init__(self):
         """Initialize Rekordbox database connection."""
-        self.db = Rekordbox6Database()
+        self.db = get_rekordbox_db()
 
     def get_mytag_structure(self) -> MyTagStructure:
         """

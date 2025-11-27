@@ -1,6 +1,7 @@
 """Engine DJ sync utilities."""
 
 from pathlib import Path
+from typing import Any
 
 from backend.models import Track as ManAdjTrack
 from enginedj.models.track import Track as EDJTrack
@@ -148,3 +149,42 @@ def find_missing_tracks_in_manadj(
     }
 
     return missing, stats
+
+
+def match_manadj_track_to_engine(
+    manadj_track: ManAdjTrack,
+    edj_session: Any
+) -> EDJTrack | None:
+    """
+    Match a manadj track to an Engine DJ track by querying the Engine DJ database.
+
+    This is a convenience function for scripts that need to match individual tracks
+    without pre-indexing the entire Engine DJ library. For bulk operations,
+    prefer using index_engine_tracks() + match_track() for better performance.
+
+    Matching strategy:
+    1. Query by full path (EDJTrack.path)
+    2. Query by filename only
+
+    Args:
+        manadj_track: manadj track to match
+        edj_session: Engine DJ database session
+
+    Returns:
+        Matching Engine DJ track or None
+    """
+    # Try full path match first
+    edj_track = edj_session.query(EDJTrack).filter(
+        EDJTrack.path == manadj_track.filename
+    ).first()
+
+    if edj_track:
+        return edj_track
+
+    # Fall back to filename-only match
+    filename = Path(manadj_track.filename).name
+    edj_track = edj_session.query(EDJTrack).filter(
+        EDJTrack.filename == filename
+    ).first()
+
+    return edj_track

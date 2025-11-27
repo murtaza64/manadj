@@ -23,7 +23,8 @@ export function useWaveformData(trackId: number | null) {
     queryFn: () => api.waveforms.get(trackId!),
     enabled: trackId !== null,
     staleTime: Infinity,  // Waveforms don't change
-    retry: 1,
+    retry: 5,  // Retry up to 5 times for background generation
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),  // Exponential backoff: 1s, 2s, 4s, 8s, 10s
   });
 
   // Transform waveform data from number[] to Float32Array for WebGL

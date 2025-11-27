@@ -20,7 +20,8 @@ def get_tracks(
     tag_match_mode: str = "ANY",
     bpm_center: int | None = None,
     bpm_threshold_percent: int | None = None,
-    key_camelot_ids: list[str] | None = None
+    key_camelot_ids: list[str] | None = None,
+    unprocessed: bool | None = None
 ):
     query = db.query(models.Track).options(
         joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category)
@@ -45,6 +46,13 @@ def get_tracks(
                 query = query.filter(models.Track.energy >= energy_min, models.Track.energy.isnot(None))
             if energy_max is not None:
                 query = query.filter(models.Track.energy <= energy_max, models.Track.energy.isnot(None))
+
+    # Unprocessed tracks filter - tracks with no tags OR no energy
+    if unprocessed:
+        query = query.filter(
+            (models.Track.energy.is_(None)) |
+            (~models.Track.track_tags.any())
+        )
 
     # Tag filtering with ANY/ALL logic
     if tag_ids:

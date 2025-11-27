@@ -7,22 +7,31 @@ import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import HotCue from './HotCue';
 import WaveformMinimap from './WaveformMinimap';
-import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon } from './icons';
+import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, BeatgridIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
+import TagManagementModal from './TagManagementModal';
+import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
+import { formatKeyDisplay } from '../utils/keyUtils';
 import './TagEditor.css';
 
 interface Props {
   track: Track | null;
   onSave: (data: { energy?: number; tag_ids?: number[] }) => void;
   onUpdate?: (trackId: number, field: 'title' | 'artist', value: string) => void;
+  currentTime: number;
 }
 
-export default function TagEditor({ track, onSave, onUpdate }: Props) {
+export default function TagEditor({ track, onSave, onUpdate, currentTime }: Props) {
   const isDisabled = !track;
 
   const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(
     new Set(track?.tags.map(t => t.id) || [])
   );
   const [energy, setEnergy] = useState<number | undefined>(track?.energy);
+  const [showManagementModal, setShowManagementModal] = useState(false);
+
+  // Beatgrid editing mutations
+  const setDownbeat = useSetBeatgridDownbeat();
+  const nudgeGrid = useNudgeBeatgrid();
 
   // Sync internal state when track prop changes
   useEffect(() => {
@@ -58,6 +67,24 @@ export default function TagEditor({ track, onSave, onUpdate }: Props) {
     onSave({
       energy: newEnergy,
       tag_ids: Array.from(selectedTagIds),
+    });
+  };
+
+  // Handler for set downbeat button
+  const handleSetDownbeat = () => {
+    if (!track) return;
+    setDownbeat.mutate({
+      trackId: track.id,
+      downbeatTime: currentTime
+    });
+  };
+
+  // Handler for nudge buttons
+  const handleNudge = (offsetMs: number) => {
+    if (!track) return;
+    nudgeGrid.mutate({
+      trackId: track.id,
+      offsetMs
     });
   };
 
@@ -127,10 +154,67 @@ export default function TagEditor({ track, onSave, onUpdate }: Props) {
           </div>
         </div>
 
-        {/* Right side: Hot Cues with Minimap, and Tags in separate rows */}
+        {/* Right side: Beatgrid controls with Key/BPM, Hot Cues with Minimap, and Tags in separate rows */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-          {/* Row 1: Hot Cues and Minimap side by side */}
+          {/* Row 1: Beatgrid controls, Key, BPM, Hot Cues, and Minimap side by side */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <BeatgridIcon />
+            <button
+              onClick={() => handleNudge(-10)}
+              disabled={isDisabled || nudgeGrid.isPending}
+              className="player-button"
+              title="Nudge grid 10ms earlier"
+              style={{
+                padding: '4px 8px',
+                minWidth: '32px',
+                fontSize: '12px',
+                height: '24px',
+              }}
+            >
+              ◄
+            </button>
+            <button
+              onClick={handleSetDownbeat}
+              disabled={isDisabled || setDownbeat.isPending}
+              className="player-button"
+              style={{
+                color: 'var(--blue)',
+                borderColor: 'var(--blue)',
+                padding: '4px 8px',
+                minWidth: '32px',
+                fontSize: '12px',
+                height: '24px',
+              }}
+              title="Set downbeat at current position"
+            >
+              D
+            </button>
+            <button
+              onClick={() => handleNudge(10)}
+              disabled={isDisabled || nudgeGrid.isPending}
+              className="player-button"
+              title="Nudge grid 10ms later"
+              style={{
+                padding: '4px 8px',
+                minWidth: '32px',
+                fontSize: '12px',
+                height: '24px',
+              }}
+            >
+              ►
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px' }}>
+              <KeyIcon />
+              <span style={{ color: isDisabled ? 'var(--overlay0)' : 'var(--text)', fontSize: '12px' }}>
+                {track ? formatKeyDisplay(track.key) : '-'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <SpeedIcon />
+              <span style={{ color: isDisabled ? 'var(--overlay0)' : 'var(--text)', fontSize: '12px' }}>
+                {track?.bpm ? `${track.bpm} BPM` : '-'}
+              </span>
+            </div>
             <NeedleIcon />
             {[1, 2, 3, 4, 5, 6, 7, 8].map(cueNum => (
               <HotCue
@@ -178,9 +262,28 @@ export default function TagEditor({ track, onSave, onUpdate }: Props) {
                 </button>
               );
             })}
+            <button
+              onClick={() => setShowManagementModal(true)}
+              disabled={isDisabled}
+              className="tag-editor-manage-button"
+              style={{
+                border: '1px solid var(--surface0)',
+                background: 'transparent',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <SettingsIcon width={12} height={12} opacity={0.6} />
+              <span>Manage...</span>
+            </button>
           </div>
         </div>
       </div>
+      <TagManagementModal
+        isOpen={showManagementModal}
+        onClose={() => setShowManagementModal(false)}
+      />
     </div>
   );
 }

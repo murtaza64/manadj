@@ -3,16 +3,24 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Playlist } from '../types';
 
+type ViewType = 'all' | 'unprocessed' | 'playlist';
+
 interface PlaylistSidebarProps {
+  selectedView: ViewType;
   selectedPlaylistId: number | null;
-  onSelectPlaylist: (playlistId: number | null) => void;
+  onSelectView: (view: ViewType) => void;
+  onSelectPlaylist: (playlistId: number) => void;
   onTrackDrop: (playlistId: number, trackId: number) => void;
+  onOpenPlaylistSync: () => void;
 }
 
 export default function PlaylistSidebar({
+  selectedView,
   selectedPlaylistId,
+  onSelectView,
   onSelectPlaylist,
   onTrackDrop,
+  onOpenPlaylistSync,
 }: PlaylistSidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
@@ -36,8 +44,8 @@ export default function PlaylistSidebar({
     mutationFn: api.playlists.delete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
-      if (selectedPlaylistId) {
-        onSelectPlaylist(null);
+      if (selectedView === 'playlist') {
+        onSelectView('all');
       }
     },
   });
@@ -88,16 +96,30 @@ export default function PlaylistSidebar({
 
       {/* "All tracks" special view */}
       <div
-        onClick={() => onSelectPlaylist(null)}
+        onClick={() => onSelectView('all')}
         style={{
           padding: '8px 12px',
           cursor: 'pointer',
-          background: selectedPlaylistId === null ? 'var(--surface0)' : 'transparent',
+          background: selectedView === 'all' ? 'var(--surface0)' : 'transparent',
           color: 'var(--text)',
           borderBottom: '1px solid var(--surface0)',
         }}
       >
         All tracks
+      </div>
+
+      {/* "Unprocessed" special view */}
+      <div
+        onClick={() => onSelectView('unprocessed')}
+        style={{
+          padding: '8px 12px',
+          cursor: 'pointer',
+          background: selectedView === 'unprocessed' ? 'var(--surface0)' : 'transparent',
+          color: 'var(--text)',
+          borderBottom: '1px solid var(--surface0)',
+        }}
+      >
+        Unprocessed
       </div>
 
       {/* Playlist list */}
@@ -114,7 +136,7 @@ export default function PlaylistSidebar({
               style={{
                 padding: '8px 12px',
                 cursor: 'pointer',
-                background: selectedPlaylistId === playlist.id ? 'var(--surface0)' : 'transparent',
+                background: selectedView === 'playlist' && selectedPlaylistId === playlist.id ? 'var(--surface0)' : 'transparent',
                 color: 'var(--text)',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -205,6 +227,26 @@ export default function PlaylistSidebar({
             + New Playlist
           </button>
         )}
+      </div>
+
+      {/* Sync playlists button */}
+      <div style={{
+        padding: '8px',
+        borderTop: '1px solid var(--surface0)',
+      }}>
+        <button
+          onClick={onOpenPlaylistSync}
+          style={{
+            width: '100%',
+            padding: '6px',
+            background: 'var(--surface0)',
+            border: '1px solid var(--surface1)',
+            color: 'var(--text)',
+            cursor: 'pointer',
+          }}
+        >
+          Sync playlists...
+        </button>
       </div>
     </div>
   );

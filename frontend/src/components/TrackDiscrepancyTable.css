@@ -1,0 +1,78 @@
+.track-discrepancy-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.discrepancy-section {
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  padding: 16px;
+}
+
+.discrepancy-section h3 {
+  margin: 0 0 8px 0;
+  color: var(--text);
+  font-size: var(--font-md);
+}
+
+.discrepancy-subtitle {
+  color: var(--subtext1);
+  font-size: var(--font-xs);
+  margin-bottom: 16px;
+}
+
+.empty-state {
+  color: var(--overlay1);
+  font-size: var(--font-sm);
+  padding: 40px;
+  text-align: center;
+  background: var(--base);
+  border: 1px dashed var(--surface0);
+}
+
+.discrepancy-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--base);
+  font-size: var(--font-xs);
+}
+
+.discrepancy-table thead {
+  background: var(--surface0);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.discrepancy-table th {
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--subtext1);
+  font-weight: 600;
+  border-bottom: 2px solid var(--surface1);
+}
+
+.discrepancy-table tbody tr {
+  border-bottom: 1px solid var(--surface0);
+}
+
+.discrepancy-table tbody tr:hover {
+  background: var(--crust);
+}
+
+.discrepancy-table td {
+  padding: 10px 12px;
+  color: var(--text);
+}
+
+.discrepancy-table td.filename {
+  font-family: 'UbuntuMono Nerd Font', monospace;
+  color: var(--blue);
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

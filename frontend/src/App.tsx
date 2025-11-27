@@ -1,20 +1,24 @@
+import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import TrackList from './components/TrackList';
+import { SyncView } from './components/SyncView';
 import { FilterProvider } from './contexts/FilterContext';
 import { AudioProvider } from './contexts/AudioContext';
 
 const queryClient = new QueryClient();
 
 function App() {
+  const [showSyncView, setShowSyncView] = useState(false);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AudioProvider>
         <FilterProvider>
-          <div className="w-full h-full flex flex-col container-base">
-            <main className="p-0 flex-1 overflow-auto">
-              <TrackList />
-            </main>
-          </div>
+          {showSyncView ? (
+            <SyncView onClose={() => setShowSyncView(false)} />
+          ) : (
+            <TrackList onOpenPlaylistSync={() => setShowSyncView(true)} />
+          )}
         </FilterProvider>
       </AudioProvider>
     </QueryClientProvider>

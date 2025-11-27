@@ -115,3 +115,119 @@ export interface BeatgridResponse {
   created_at: string;
   updated_at: string;
 }
+
+export interface TrackEntry {
+  filename: string;
+  track_id?: number | string | null;
+}
+
+export interface UnifiedPlaylist {
+  name: string;
+  manadj: TrackEntry[] | null;
+  engine: TrackEntry[] | null;
+  rekordbox: TrackEntry[] | null;
+  synced: boolean;
+}
+
+export interface PlaylistSyncStats {
+  manadj_playlists_loaded: number;
+  engine_playlists_loaded: number;
+  rekordbox_playlists_loaded: number;
+  playlists_matched: number;
+  playlists_unique_manadj: number;
+  playlists_unique_engine: number;
+  playlists_unique_rekordbox: number;
+  conflicts_detected: number;
+}
+
+export interface TagInfo {
+  name: string;
+  category_name: string;
+  source: string;
+  tag_id: number | string;
+  category_id: number | string;
+  display_order: number | null;
+  color: string | null;
+  track_count: number;
+}
+
+export interface UnifiedTagView {
+  category_name: string;
+  tag_name: string;
+  manadj: TagInfo | null;
+  engine: TagInfo | null;
+  rekordbox: TagInfo | null;
+  synced: boolean;
+}
+
+export interface TagSyncStats {
+  manadj_categories_loaded: number;
+  manadj_tags_loaded: number;
+  engine_playlists_scanned: number;
+  engine_tags_found: number;
+  rekordbox_categories_loaded: number;
+  rekordbox_tags_loaded: number;
+  categories_matched: number;
+  tags_matched: number;
+  categories_unique_manadj: number;
+  tags_unique_manadj: number;
+  categories_unique_engine: number;
+  tags_unique_engine: number;
+  categories_unique_rekordbox: number;
+  tags_unique_rekordbox: number;
+  categories_created: number;
+  categories_updated: number;
+  tags_created: number;
+  tags_updated: number;
+  tracks_matched: number;
+  tracks_unmatched: number;
+  tracks_updated: number;
+  tracks_colored: number;
+}
+
+export interface TagSyncRequest {
+  target: 'engine' | 'rekordbox';
+  dry_run: boolean;
+  fresh?: boolean;
+  include_energy?: boolean;
+}
+
+export interface SyncResult {
+  target: string;  // 'manadj', 'engine', or 'rekordbox'
+  success: boolean;
+  created: boolean;  // True if playlist was created, False if updated
+  tracks_synced: number;
+  tracks_unmatched: string[];  // Filenames that couldn't be matched
+  error?: string | null;
+}
+
+export interface SyncPlaylistRequest {
+  source: string;  // 'manadj', 'engine', or 'rekordbox'
+  target?: string | null;  // Single target, or null to sync to all
+  ignore_missing_tracks: boolean;
+  dry_run: boolean;
+}
+
+export interface TrackDiscrepancy {
+  filename: string;
+  title?: string | null;
+  artist?: string | null;
+  bpm?: number | null;
+  key?: number | null;
+  source_system: string;  // 'manadj', 'engine', or 'rekordbox'
+}
+
+export interface TrackSyncStats {
+  manadj_total: number;
+  target_total: number;
+  missing_in_target_count: number;
+  missing_in_manadj_count: number;
+  skipped_file_not_found: number;
+}
+
+export interface TrackSyncResult {
+  target: string;  // 'engine' or 'rekordbox'
+  stats: TrackSyncStats;
+  missing_in_target: TrackDiscrepancy[];  // Export candidates
+  missing_in_manadj: TrackDiscrepancy[];  // Import candidates
+}

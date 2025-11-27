@@ -1,0 +1,118 @@
+/* Content area (no longer top-level container) */
+.playlist-sync-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Stats bar */
+.playlist-sync-stats-bar {
+  margin-bottom: var(--space-md);
+}
+
+/* Loading & Error States */
+.playlist-sync-loading,
+.playlist-sync-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: var(--font-lg);
+  color: var(--subtext1);
+}
+
+.playlist-sync-error {
+  color: var(--red);
+}
+
+/* Header */
+.playlist-sync-header {
+  background: var(--mantle);
+  padding: var(--space-lg);
+  border: 1px solid var(--surface0);
+}
+
+.playlist-sync-header h1 {
+  font-size: var(--font-lg);
+  margin: 0 0 var(--space-md) 0;
+  color: var(--text);
+}
+
+.sync-stats {
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+  font-size: var(--font-sm);
+  color: var(--subtext1);
+}
+
+.sync-stat {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.sync-stat-label {
+  color: var(--subtext0);
+}
+
+.sync-stat-value {
+  color: var(--text);
+  font-weight: bold;
+}
+
+.sync-stat-divider {
+  color: var(--surface1);
+}
+
+/* Table Container */
+.playlist-sync-table-container {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--surface0);
+  background: var(--base);
+}
+
+/* Table */
+.playlist-sync-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+/* Header Row */
+.playlist-sync-header-row {
+  position: sticky;
+  top: 0;
+  background: var(--base);
+  z-index: 10;
+  border-bottom: 2px solid var(--surface1);
+}
+
+.playlist-sync-header-row th {
+  padding: var(--space-md);
+  text-align: left;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--subtext1);
+  border-bottom: 2px solid var(--surface1);
+}
+
+/* Column Widths */
+.playlist-sync-header-row th:nth-child(1) {
+  /* Playlist Name - flexible */
+  width: auto;
+}
+
+.playlist-sync-header-row th:nth-child(2),
+.playlist-sync-header-row th:nth-child(3),
+.playlist-sync-header-row th:nth-child(4) {
+  /* manadj, Engine, Rekordbox - fixed width */
+  width: 80px;
+  text-align: center;
+}
+
+.playlist-sync-header-row th:nth-child(5) {
+  /* Status - fixed width */
+  width: 120px;
+}

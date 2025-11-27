@@ -1,0 +1,54 @@
+/* Tag row */
+.tag-sync-row {
+  border-bottom: 1px solid var(--surface0);
+  transition: background-color var(--transition-normal);
+}
+
+.tag-sync-row:hover {
+  background: var(--mantle);
+}
+
+.tag-sync-row-unsynced {
+  background: rgba(243, 139, 168, 0.05);
+}
+
+/* Tag name cell */
+.tag-name-cell {
+  padding: var(--space-md);
+  color: var(--text);
+}
+
+.tag-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.tag-track-count {
+  margin-left: var(--space-sm);
+  color: var(--subtext0);
+  font-size: var(--font-sm);
+}
+
+/* Sync status cell */
+.tag-sync-status-cell {
+  padding: var(--space-md);
+  text-align: center;
+}
+
+.sync-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: var(--font-lg);
+  font-weight: 700;
+}
+
+.sync-indicator-synced {
+  color: var(--green);
+}
+
+.sync-indicator-unsynced {
+  color: var(--red);
+}

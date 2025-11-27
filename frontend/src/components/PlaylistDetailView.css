@@ -1,0 +1,247 @@
+.playlist-detail-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--base);
+}
+
+/* Header */
+.playlist-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.playlist-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.playlist-detail-title h2 {
+  margin: 0;
+  font-size: var(--font-lg);
+  color: var(--text);
+}
+
+.playlist-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.sync-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync-label {
+  color: var(--subtext1);
+  font-size: var(--font-xs);
+  margin-right: 4px;
+}
+
+.sync-button {
+  padding: 6px 12px;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  font-size: var(--font-xs);
+  font-weight: 500;
+}
+
+.sync-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sync-button-manadj {
+  background: var(--mauve);
+  border-color: var(--mauve);
+}
+
+.sync-button-manadj:hover:not(:disabled) {
+  background: var(--pink);
+  border-color: var(--pink);
+}
+
+.sync-button-engine {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.sync-button-engine:hover:not(:disabled) {
+  background: var(--sapphire);
+  border-color: var(--sapphire);
+}
+
+.sync-button-rekordbox {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.sync-button-rekordbox:hover:not(:disabled) {
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
+.detail-back-button,
+.detail-close-button {
+  padding: 6px 12px;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--transition-normal);
+  font-size: var(--font-sm);
+}
+
+.detail-back-button:hover,
+.detail-close-button:hover {
+  background: var(--surface1);
+}
+
+/* Sync Status Messages */
+.sync-status {
+  padding: 12px 20px;
+  font-size: var(--font-sm);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.sync-status-loading {
+  background: var(--surface0);
+  color: var(--blue);
+}
+
+.sync-status-error {
+  background: var(--maroon);
+  color: var(--text);
+}
+
+.sync-status-success {
+  background: var(--green);
+  color: var(--base);
+  font-weight: 500;
+}
+
+.sync-status-success > div {
+  font-size: var(--font-xs);
+  margin-top: 4px;
+  opacity: 0.9;
+}
+
+/* Grid Layout */
+.playlist-detail-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 1px;
+  background: var(--surface0);
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Column Headers */
+.detail-column-header {
+  position: sticky;
+  top: 0;
+  background: var(--mantle);
+  padding: 12px 16px;
+  border-bottom: 2px solid var(--surface1);
+  z-index: 10;
+}
+
+.detail-column-header h3 {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--subtext1);
+  font-weight: 600;
+}
+
+/* Track Cells */
+.detail-track-cell {
+  background: var(--base);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--surface0);
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+}
+
+.detail-track-manadj {
+  background: var(--crust);
+}
+
+.detail-track-empty {
+  color: var(--overlay0);
+  font-size: var(--font-sm);
+}
+
+.detail-track-loading {
+  color: var(--overlay1);
+  font-size: var(--font-xs);
+}
+
+/* Full Track Display (manadj) */
+.detail-track-full {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-track-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-track-title {
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-weight: 500;
+}
+
+.detail-track-artist {
+  color: var(--subtext1);
+  font-size: var(--font-xs);
+}
+
+.detail-track-meta {
+  display: flex;
+  gap: 12px;
+  font-size: var(--font-xs);
+}
+
+.detail-track-key {
+  color: var(--mauve);
+  font-weight: 600;
+}
+
+.detail-track-bpm {
+  color: var(--blue);
+}
+
+.detail-track-energy {
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* Simple Track Display (Engine/Rekordbox) */
+.detail-track-simple {
+  color: var(--text);
+  font-size: var(--font-xs);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-track-warning {
+  color: var(--yellow);
+  font-size: 14px;
+  cursor: help;
+}

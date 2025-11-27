@@ -17,7 +17,7 @@
   background: var(--mantle);
   border: 1px solid var(--surface0);
   width: 90%;
-  max-width: 800px;
+  max-width: 1000px;
   max-height: 85vh;
   display: flex;
   flex-direction: column;
@@ -79,97 +79,76 @@
   font-weight: bold;
 }
 
-/* Tag List */
-.tag-list {
-  display: flex;
-  flex-direction: column;
+/* Tag Grid - 3 columns */
+.tag-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  margin-bottom: 12px;
 }
 
-/* Tag Item */
-.tag-item {
+/* Tag Grid Item */
+.tag-grid-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 6px;
+  padding: 6px;
   background: var(--crust);
   border: 1px solid var(--surface0);
 }
 
+.tag-grid-item-new {
+  border-color: var(--mauve);
+  border-style: dashed;
+}
+
 .tag-color-swatch {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border: 1px solid var(--surface0);
   cursor: pointer;
   flex-shrink: 0;
 }
 
-.tag-name {
-  flex: 1;
-  color: var(--text);
-  font-size: 12px;
+.tag-color-swatch.invalid {
+  border: 2px solid var(--red);
 }
 
-/* Buttons */
-.btn-edit,
-.btn-delete,
-.btn-save,
-.btn-cancel,
-.btn-create {
-  padding: 4px 12px;
+.tag-color-swatch:hover {
+  border-color: var(--text);
+}
+
+/* Small Delete Button */
+.btn-delete-small {
+  width: 20px;
+  height: 20px;
+  padding: 0;
   border: 1px solid var(--surface0);
+  background: var(--red);
+  color: var(--base);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
   font-weight: bold;
 }
 
-.btn-edit {
-  background: var(--blue);
-  color: var(--base);
-}
-
-.btn-delete {
-  background: var(--red);
-  color: var(--base);
-}
-
-.btn-save {
-  background: var(--green);
-  color: var(--base);
-}
-
-.btn-cancel {
-  background: var(--surface1);
-  color: var(--text);
-}
-
-.btn-create {
-  background: var(--mauve);
-  color: var(--base);
-}
-
-.btn-create:disabled {
-  background: var(--surface0);
-  color: var(--overlay0);
-  cursor: not-allowed;
-}
-
-/* Edit Form */
-.tag-edit-form {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
+.btn-delete-small:hover {
+  background: var(--maroon);
 }
 
 .tag-name-input {
   flex: 1;
-  padding: 6px 8px;
+  padding: 4px 6px;
   background: var(--base);
   border: 1px solid var(--surface0);
   color: var(--text);
-  font-size: 12px;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.tag-name-input:focus {
+  outline: none;
+  border-color: var(--lavender);
 }
 
 /* Color Picker */
@@ -232,6 +211,88 @@
 /* Create Form */
 .tag-create-form {
   display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.btn-create {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--surface0);
+  background: var(--mauve);
+  color: var(--base);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.btn-create:hover:not(:disabled) {
+  background: var(--pink);
+}
+
+.btn-create:disabled {
+  background: var(--surface0);
+  color: var(--overlay0);
+  cursor: not-allowed;
+}
+
+/* Modal Footer */
+.modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid var(--surface0);
+  background: var(--crust);
+}
+
+.modal-footer-status {
+  flex: 1;
+}
+
+.changes-indicator {
+  color: var(--yellow);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.modal-footer-actions {
+  display: flex;
   gap: 8px;
-  margin-top: 12px;
+}
+
+.btn-cancel-footer,
+.btn-save-footer {
+  padding: 6px 16px;
+  border: 1px solid var(--surface0);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.btn-cancel-footer {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+.btn-cancel-footer:hover:not(:disabled) {
+  background: var(--surface2);
+}
+
+.btn-save-footer {
+  background: var(--green);
+  color: var(--base);
+}
+
+.btn-save-footer:hover:not(:disabled) {
+  background: var(--teal);
+}
+
+.btn-cancel-footer:disabled,
+.btn-save-footer:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

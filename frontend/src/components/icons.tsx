@@ -72,3 +72,20 @@ export const SearchIcon = ({ width = 16, height = 16, opacity = 0.7, className }
           fill="var(--text)" opacity={opacity}/>
   </svg>
 );
+
+export const BeatgridIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
+  <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
+    {/* Four vertical bars with the first slightly bolder */}
+    <rect x="2" y="2" width="1.5" height="12" fill="var(--text)" opacity={opacity}/>
+    <rect x="6" y="2" width="1" height="12" fill="var(--text)" opacity={opacity}/>
+    <rect x="10" y="2" width="1" height="12" fill="var(--text)" opacity={opacity}/>
+    <rect x="14" y="2" width="1" height="12" fill="var(--text)" opacity={opacity}/>
+  </svg>
+);
+
+export const SettingsIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
+  <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
+    <path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="var(--text)" opacity={opacity}/>
+    <path d="M14 7h-1.5a4.5 4.5 0 0 0-.5-1.2l1.1-1.1-.7-.7-1.1 1.1A4.5 4.5 0 0 0 10 4.5V3H9v1.5a4.5 4.5 0 0 0-1.3.6L6.6 4 6 4.7l1.1 1.1A4.5 4.5 0 0 0 6.5 7H5v1h1.5c.1.4.3.8.5 1.2L6 10.3l.7.7 1.1-1.1c.4.2.8.4 1.2.5V12h1v-1.5c.4-.1.8-.3 1.2-.5l1.1 1.1.7-.7-1.1-1.1c.2-.4.4-.8.5-1.2H14V7z" fill="var(--text)" opacity={opacity}/>
+  </svg>
+);

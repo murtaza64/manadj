@@ -24,6 +24,7 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
   const [keyModalPosition, setKeyModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
   const [isBpmModalOpen, setIsBpmModalOpen] = useState(false);
   const [bpmModalPosition, setBpmModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
+  const [showTagFilters, setShowTagFilters] = useState(false);
 
   // Fetch all tags
   const { data: allTags } = useQuery({
@@ -73,10 +74,13 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
     <div style={{
       background: 'var(--mantle)',
       borderBottom: '1px solid var(--surface0)',
-      padding: '12px'
+      padding: '12px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px'
     }}>
       {/* Search, Energy, and BPM on same line */}
-      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         {/* Result Count */}
         <div style={{
           fontSize: '14px',
@@ -85,6 +89,31 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
           flexShrink: 0
         }}>
           {filteredCount} / {totalTracks}
+        </div>
+
+        {/* Tag Toggle Icon with Red Dot Indicator */}
+        <div
+          onClick={() => setShowTagFilters(!showTagFilters)}
+          style={{
+            position: 'relative',
+            cursor: 'pointer',
+            width: '16px',
+            flexShrink: 0,
+            color: showTagFilters ? 'var(--blue)' : 'var(--text)'
+          }}
+        >
+          <TagIcon />
+          {filters.selectedTagIds.length > 0 && !showTagFilters && (
+            <div style={{
+              position: 'absolute',
+              top: '-2px',
+              right: '-2px',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: 'var(--red)'
+            }} />
+          )}
         </div>
 
         {/* Clear All Filters Button */}
@@ -269,82 +298,71 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
         </button>
       </div>
 
-      {/* Tags with Match Mode Toggle */}
-      <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <div style={{ width: '16px', flexShrink: 0 }}>
-          {filters.selectedTagIds.length > 0 ? (
-            <button
-              onClick={() => setFilters({ ...filters, selectedTagIds: [] })}
-              className="filter-bar-x-btn"
-              style={{ padding: 0, width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              ×
-            </button>
-          ) : (
-            <TagIcon />
-          )}
+      {/* Tags with Match Mode Toggle - Collapsible */}
+      {showTagFilters && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={toggleMatchMode}
+            style={{
+              padding: '4px 12px',
+              background: filters.tagMatchMode === 'ANY' ? 'var(--blue)' : 'var(--surface1)',
+              color: filters.tagMatchMode === 'ANY' ? 'var(--base)' : 'var(--text)',
+              border: '1px solid var(--surface0)',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 'bold'
+            }}
+          >
+            ANY
+          </button>
+          <button
+            onClick={toggleMatchMode}
+            style={{
+              padding: '4px 12px',
+              background: filters.tagMatchMode === 'ALL' ? 'var(--blue)' : 'var(--surface1)',
+              color: filters.tagMatchMode === 'ALL' ? 'var(--base)' : 'var(--text)',
+              border: '1px solid var(--surface0)',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 'bold'
+            }}
+          >
+            ALL
+          </button>
+          {allTags?.map((tag: Tag) => {
+            const isSelected = filters.selectedTagIds.includes(tag.id);
+            const borderColor = isSelected
+              ? getTagColor(tag)
+              : 'var(--surface0)';
+            return (
+              <button
+                key={tag.id}
+                onClick={() => toggleTag(tag.id)}
+                style={{
+                  padding: '4px 8px',
+                  border: `1px solid ${borderColor}`,
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  background: 'transparent',
+                  color: 'var(--text)'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) {
+                    e.currentTarget.style.borderColor = 'var(--text)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) {
+                    e.currentTarget.style.borderColor = 'var(--surface0)';
+                  }
+                }}
+              >
+                {tag.name}
+              </button>
+            );
+          })}
         </div>
-        <button
-          onClick={toggleMatchMode}
-          style={{
-            padding: '4px 12px',
-            background: filters.tagMatchMode === 'ANY' ? 'var(--blue)' : 'var(--surface1)',
-            color: filters.tagMatchMode === 'ANY' ? 'var(--base)' : 'var(--text)',
-            border: '1px solid var(--surface0)',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: 'bold'
-          }}
-        >
-          ANY
-        </button>
-        <button
-          onClick={toggleMatchMode}
-          style={{
-            padding: '4px 12px',
-            background: filters.tagMatchMode === 'ALL' ? 'var(--blue)' : 'var(--surface1)',
-            color: filters.tagMatchMode === 'ALL' ? 'var(--base)' : 'var(--text)',
-            border: '1px solid var(--surface0)',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: 'bold'
-          }}
-        >
-          ALL
-        </button>
-        {allTags?.map((tag: Tag) => {
-          const isSelected = filters.selectedTagIds.includes(tag.id);
-          const borderColor = isSelected
-            ? getTagColor(tag)
-            : 'var(--surface0)';
-          return (
-            <button
-              key={tag.id}
-              onClick={() => toggleTag(tag.id)}
-              style={{
-                padding: '4px 8px',
-                border: `1px solid ${borderColor}`,
-                cursor: 'pointer',
-                fontSize: '13px',
-                background: 'transparent',
-                color: 'var(--text)'
-              }}
-              onMouseEnter={(e) => {
-                if (!isSelected) {
-                  e.currentTarget.style.borderColor = 'var(--text)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected) {
-                  e.currentTarget.style.borderColor = 'var(--surface0)';
-                }
-              }}
-            >
-              {tag.name}
-            </button>
-          );
-        })}
-      </div>
+      )}
 
       <CircleOfFifthsModal
         isOpen={isKeyModalOpen}

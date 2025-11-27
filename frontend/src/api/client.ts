@@ -1,4 +1,4 @@
-import type { PlaylistTrackAdd } from '../types';
+import type { PlaylistTrackAdd, UnifiedPlaylist, PlaylistSyncStats, UnifiedTagView, TagSyncStats, TagSyncRequest, SyncResult, SyncPlaylistRequest, TrackSyncResult } from '../types';
 
 // Backend URL configuration - can be overridden with VITE_API_URL env var
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -9,6 +9,12 @@ export { BACKEND_URL };
 
 export const api = {
   tracks: {
+    getById: async (id: number) => {
+      const res = await fetch(`${API_BASE}/tracks/${id}`);
+      if (!res.ok) throw new Error('Failed to fetch track');
+      return res.json();
+    },
+
     list: async (
       page: number = 1,
       perPage: number = 1000,
@@ -21,6 +27,7 @@ export const api = {
         bpmCenter?: number | null;
         bpmThresholdPercent?: number | null;
         keyCamelotIds?: string[];
+        unprocessed?: boolean;
       }
     ) => {
       const params = new URLSearchParams({
@@ -54,6 +61,10 @@ export const api = {
         // Key filter (repeating parameter pattern like tags)
         if (filters.keyCamelotIds && filters.keyCamelotIds.length > 0) {
           filters.keyCamelotIds.forEach(id => params.append('key_camelot_ids', id));
+        }
+        // Unprocessed filter
+        if (filters.unprocessed) {
+          params.append('unprocessed', 'true');
         }
       }
 
@@ -257,6 +268,88 @@ export const api = {
         body: JSON.stringify(playlistOrder),
       });
       return response.json();
+    },
+  },
+
+  playlistSync: {
+    getUnified: async (): Promise<UnifiedPlaylist[]> => {
+      const res = await fetch(`${API_BASE}/sync/playlists/`);
+      if (!res.ok) throw new Error('Failed to fetch unified playlists');
+      return res.json();
+    },
+
+    getStats: async (): Promise<PlaylistSyncStats> => {
+      const res = await fetch(`${API_BASE}/sync/playlists/stats`);
+      if (!res.ok) throw new Error('Failed to fetch sync stats');
+      return res.json();
+    },
+
+    sync: async (playlistName: string, request: SyncPlaylistRequest): Promise<SyncResult | SyncResult[]> => {
+      const encodedName = encodeURIComponent(playlistName);
+      const res = await fetch(`${API_BASE}/sync/playlists/${encodedName}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || 'Failed to sync playlist');
+      }
+      return res.json();
+    },
+  },
+
+  tagSync: {
+    getUnified: async (): Promise<UnifiedTagView[]> => {
+      const res = await fetch(`${API_BASE}/sync/tags/`);
+      if (!res.ok) throw new Error('Failed to fetch unified tags');
+      return res.json();
+    },
+
+    getStats: async (): Promise<TagSyncStats> => {
+      const res = await fetch(`${API_BASE}/sync/tags/stats`);
+      if (!res.ok) throw new Error('Failed to fetch tag sync stats');
+      return res.json();
+    },
+
+    syncToEngine: async (req: TagSyncRequest): Promise<TagSyncStats> => {
+      const res = await fetch(`${API_BASE}/sync/tags/sync/engine`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      });
+      if (!res.ok) throw new Error('Failed to sync tags to Engine DJ');
+      return res.json();
+    },
+
+    syncToRekordbox: async (req: TagSyncRequest): Promise<TagSyncStats> => {
+      const res = await fetch(`${API_BASE}/sync/tags/sync/rekordbox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      });
+      if (!res.ok) throw new Error('Failed to sync tags to Rekordbox');
+      return res.json();
+    },
+  },
+
+  trackSync: {
+    getEngineDiscrepancies: async (validateFiles: boolean = false): Promise<TrackSyncResult> => {
+      const params = new URLSearchParams();
+      if (validateFiles) params.append('validate_files', 'true');
+
+      const res = await fetch(`${API_BASE}/sync/tracks/engine?${params}`);
+      if (!res.ok) throw new Error('Failed to fetch Engine track discrepancies');
+      return res.json();
+    },
+
+    getRekordboxDiscrepancies: async (validateFiles: boolean = false): Promise<TrackSyncResult> => {
+      const params = new URLSearchParams();
+      if (validateFiles) params.append('validate_files', 'true');
+
+      const res = await fetch(`${API_BASE}/sync/tracks/rekordbox?${params}`);
+      if (!res.ok) throw new Error('Failed to fetch Rekordbox track discrepancies');
+      return res.json();
     },
   },
 };
