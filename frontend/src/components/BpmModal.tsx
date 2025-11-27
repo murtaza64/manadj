@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import './BpmModal.css';
 
 interface BpmModalProps {
@@ -22,6 +22,7 @@ export default function BpmModal({
   onClear,
   openPosition,
 }: BpmModalProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
   // Clamp modal position to viewport bounds
   const getClampedPosition = (pos: { x: number; y: number }) => {
     // Approximate modal dimensions (will adjust based on content)
@@ -55,6 +56,13 @@ export default function BpmModal({
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
+
+  // Focus input when modal opens
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -106,6 +114,7 @@ export default function BpmModal({
             Center BPM
           </label>
           <input
+            ref={inputRef}
             id="bpm-center-input"
             type="number"
             placeholder="e.g., 120"

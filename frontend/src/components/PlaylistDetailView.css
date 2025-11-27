@@ -3,6 +3,7 @@
   flex-direction: column;
   height: 100%;
   background: var(--base);
+  overflow: hidden;
 }
 
 /* Header */
@@ -124,15 +125,16 @@
 }
 
 .sync-status-success {
-  background: var(--green);
-  color: var(--base);
+  background: var(--surface0);
+  color: var(--green);
   font-weight: 500;
+  border-left: 3px solid var(--green);
 }
 
 .sync-status-success > div {
   font-size: var(--font-xs);
   margin-top: 4px;
-  opacity: 0.9;
+  color: var(--text);
 }
 
 /* Grid Layout */
@@ -143,6 +145,7 @@
   background: var(--surface0);
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 /* Column Headers */

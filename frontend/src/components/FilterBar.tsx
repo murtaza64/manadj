@@ -1,23 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Tag } from '../types';
+import type { Tag, Track } from '../types';
 import { getTagColor } from '../utils/colorUtils';
 import { getAllCamelotKeys } from '../utils/keyUtils';
 import { getBpmColor, getAverageKeyColor } from '../utils/displayColors';
 import EnergySquare from './EnergySquare';
-import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon } from './icons';
+import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon, ArrowDownIcon } from './icons';
 import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
+import FindRelatedTracksModal from './FindRelatedTracksModal';
 import { useFilters } from '../contexts/FilterContext';
+import type { RelatedTracksSettings } from './TrackList';
 import './FilterBar.css';
 
 interface FilterBarProps {
   totalTracks: number;
   filteredCount: number;
+  selectedTrack: Track | null;
+  onFindRelated: () => void;
+  onApplySettings: (settings: RelatedTracksSettings) => void;
 }
 
-export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps) {
+export default function FilterBar({ totalTracks, filteredCount, selectedTrack, onFindRelated, onApplySettings }: FilterBarProps) {
   const { filters, setFilters } = useFilters();
   const [searchInput, setSearchInput] = useState(filters.search);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
@@ -25,6 +30,8 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
   const [isBpmModalOpen, setIsBpmModalOpen] = useState(false);
   const [bpmModalPosition, setBpmModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
   const [showTagFilters, setShowTagFilters] = useState(false);
+  const [showRelatedModal, setShowRelatedModal] = useState(false);
+  const [relatedModalPosition, setRelatedModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
 
   // Fetch all tags
   const { data: allTags } = useQuery({
@@ -62,6 +69,21 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
     setFilters({ ...filters, search: '' });
   };
 
+  const handleQuickApply = () => {
+    if (!selectedTrack) return;
+    onFindRelated();
+  };
+
+  const handleOpenSettings = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!selectedTrack) return;
+    setRelatedModalPosition({ x: e.clientX, y: e.clientY });
+    setShowRelatedModal(true);
+  };
+
+  const handleApplySettings = (settings: RelatedTracksSettings) => {
+    onApplySettings(settings);
+  };
+
   // Group tags by category
   const tagsByCategory = allTags?.reduce((acc: Record<string, Tag[]>, tag: Tag) => {
     const categoryName = tag.category.name;
@@ -79,18 +101,8 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
       flexDirection: 'column',
       gap: '12px'
     }}>
-      {/* Search, Energy, and BPM on same line */}
+      {/* Filter bar - new order: Tag, Search, Energy, Key, BPM, Find Related, Clear All, Result Count */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {/* Result Count */}
-        <div style={{
-          fontSize: '14px',
-          color: 'var(--subtext1)',
-          minWidth: '80px',
-          flexShrink: 0
-        }}>
-          {filteredCount} / {totalTracks}
-        </div>
-
         {/* Tag Toggle Icon with Red Dot Indicator */}
         <div
           onClick={() => setShowTagFilters(!showTagFilters)}
@@ -115,26 +127,6 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
             }} />
           )}
         </div>
-
-        {/* Clear All Filters Button */}
-        <button
-          onClick={() => {
-            setSearchInput('');
-            setFilters({
-              search: '',
-              selectedTagIds: [],
-              energyMin: 1,
-              energyMax: 5,
-              tagMatchMode: 'ANY',
-              bpmCenter: null,
-              bpmThresholdPercent: 5,
-              selectedKeyCamelotIds: [],
-            });
-          }}
-          className="filter-bar-clear-all-btn"
-        >
-          Clear All
-        </button>
 
         {/* Search Input */}
         <div style={{ width: '16px', flexShrink: 0 }}>
@@ -249,6 +241,7 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
             setKeyModalPosition({ x: e.clientX, y: e.clientY });
             setIsKeyModalOpen(true);
           }}
+          className="filter-bar-key-btn"
           style={{
             padding: '4px 12px',
             border: `1px solid ${filters.selectedKeyCamelotIds.length > 0 ? getAverageKeyColor(filters.selectedKeyCamelotIds) || 'var(--mauve)' : 'var(--surface0)'}`,
@@ -281,14 +274,15 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
             setBpmModalPosition({ x: e.clientX, y: e.clientY });
             setIsBpmModalOpen(true);
           }}
+          className="filter-bar-bpm-btn"
           style={{
-            padding: '4px 12px',
+            padding: '4px 8px',
             border: `1px solid ${filters.bpmCenter !== null ? getBpmColor(filters.bpmCenter) || 'var(--mauve)' : 'var(--surface0)'}`,
             cursor: 'pointer',
             fontSize: '13px',
             background: 'transparent',
             color: 'var(--text)',
-            minWidth: '110px'
+            minWidth: '60px'
           }}
         >
           {filters.bpmCenter !== null
@@ -296,6 +290,106 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
             : 'BPM'
           }
         </button>
+
+        {/* Find Related Button Group */}
+        <div style={{ display: 'flex', gap: 0 }}>
+          <button
+            onClick={handleOpenSettings}
+            disabled={selectedTrack === null}
+            className="find-related-settings"
+            style={{
+              padding: '4px 10px',
+              background: 'var(--surface0)',
+              color: selectedTrack ? 'var(--text)' : 'var(--overlay0)',
+              border: '1px solid var(--surface0)',
+              cursor: selectedTrack ? 'pointer' : 'not-allowed',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+          >
+            <span>Find Related</span>
+          </button>
+
+          <button
+            onClick={handleQuickApply}
+            disabled={selectedTrack === null}
+            className="find-related-quick"
+            style={{
+              background: 'var(--surface0)',
+              color: selectedTrack ? 'var(--text)' : 'var(--overlay0)',
+              border: '1px solid var(--surface0)',
+              padding: '4px 8px',
+              minWidth: '28px',
+              cursor: selectedTrack ? 'pointer' : 'not-allowed',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <ArrowDownIcon width={14} height={14} opacity={1} />
+          </button>
+        </div>
+
+        {/* Clear All Filters Button */}
+        <button
+          onClick={() => {
+            setSearchInput('');
+            setFilters({
+              search: '',
+              selectedTagIds: [],
+              energyMin: 1,
+              energyMax: 5,
+              tagMatchMode: 'ANY',
+              bpmCenter: null,
+              bpmThresholdPercent: 5,
+              selectedKeyCamelotIds: [],
+            });
+          }}
+          disabled={
+            filters.search === '' &&
+            filters.selectedTagIds.length === 0 &&
+            filters.energyMin === 1 &&
+            filters.energyMax === 5 &&
+            filters.bpmCenter === null &&
+            filters.selectedKeyCamelotIds.length === 0
+          }
+          className="filter-bar-clear-all-btn"
+          style={{
+            padding: '4px 8px',
+            background: 'var(--surface0)',
+            color: (filters.search === '' &&
+              filters.selectedTagIds.length === 0 &&
+              filters.energyMin === 1 &&
+              filters.energyMax === 5 &&
+              filters.bpmCenter === null &&
+              filters.selectedKeyCamelotIds.length === 0) ? 'var(--overlay0)' : 'var(--text)',
+            border: '1px solid var(--surface0)',
+            cursor: (filters.search === '' &&
+              filters.selectedTagIds.length === 0 &&
+              filters.energyMin === 1 &&
+              filters.energyMax === 5 &&
+              filters.bpmCenter === null &&
+              filters.selectedKeyCamelotIds.length === 0) ? 'not-allowed' : 'pointer',
+            fontSize: '12px',
+            fontWeight: 'bold',
+          }}
+        >
+          Clear All
+        </button>
+
+        {/* Result Count */}
+        <div style={{
+          fontSize: '14px',
+          color: 'var(--subtext1)',
+          minWidth: '80px',
+          flexShrink: 0
+        }}>
+          {filteredCount} / {totalTracks}
+        </div>
       </div>
 
       {/* Tags with Match Mode Toggle - Collapsible */}
@@ -390,6 +484,14 @@ export default function FilterBar({ totalTracks, filteredCount }: FilterBarProps
         onThresholdChange={(value) => setFilters({ ...filters, bpmThresholdPercent: value })}
         onClear={() => setFilters({ ...filters, bpmCenter: null })}
         openPosition={bpmModalPosition}
+      />
+
+      <FindRelatedTracksModal
+        isOpen={showRelatedModal}
+        onClose={() => setShowRelatedModal(false)}
+        selectedTrack={selectedTrack}
+        onApply={handleApplySettings}
+        openPosition={relatedModalPosition}
       />
     </div>
   );

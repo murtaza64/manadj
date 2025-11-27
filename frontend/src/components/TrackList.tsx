@@ -4,7 +4,6 @@ import { api } from '../api/client';
 import TrackRow from './TrackRow';
 import FilterBar from './FilterBar';
 import TagEditor from './TagEditor';
-import GlobalControls from './GlobalControls';
 import Player, { type PlayerHandle } from './Player';
 import PlaylistSidebar from './PlaylistSidebar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -189,6 +188,7 @@ export default function TrackList({ onOpenPlaylistSync }: TrackListProps) {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const playerRef = useRef<PlayerHandle>(null);
+  const tagEditorRef = useRef<{ enterTagEditMode: () => void } | null>(null);
   const { filters, setFilters } = useFilters();
   const audio = useAudio();
 
@@ -238,6 +238,8 @@ export default function TrackList({ onOpenPlaylistSync }: TrackListProps) {
       // Refetch queries and wait for them to complete
       await queryClient.refetchQueries({ queryKey: ['tracks'] });
       await queryClient.refetchQueries({ queryKey: ['playlist'] });
+      // Invalidate tags to update track counts
+      await queryClient.invalidateQueries({ queryKey: ['tags'] });
 
       // Fetch the specific track to get its fresh state
       if (selectedTrack) {
@@ -346,7 +348,7 @@ export default function TrackList({ onOpenPlaylistSync }: TrackListProps) {
 
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0
-    : allTracksData?.total || 0;
+    : allTracksData?.library_total || 0;
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts({
@@ -355,7 +357,9 @@ export default function TrackList({ onOpenPlaylistSync }: TrackListProps) {
     onSelectTrack: setSelectedTrack,
     playerRef,
     onNudgeBeatgrid: handleNudgeBeatgrid,
-    onSetDownbeat: handleSetDownbeat
+    onSetDownbeat: handleSetDownbeat,
+    onEnterTagEditMode: () => tagEditorRef.current?.enterTagEditMode(),
+    onEnterEnergyEditMode: () => tagEditorRef.current?.toggleEnergyEditMode()
   });
 
   return (
@@ -376,6 +380,7 @@ export default function TrackList({ onOpenPlaylistSync }: TrackListProps) {
           display: 'flex'
         }}>
           <TagEditor
+            ref={tagEditorRef}
             track={selectedTrack}
             onSave={mutation.mutate}
             onUpdate={handleFieldUpdate}
@@ -383,11 +388,6 @@ export default function TrackList({ onOpenPlaylistSync }: TrackListProps) {
           />
         </div>
       </div>
-      <GlobalControls
-        selectedTrack={selectedTrack}
-        onFindRelated={handleFindRelated}
-        onApplySettings={handleApplySettings}
-      />
 
       {/* Library section with sidebar */}
       <div style={{
@@ -418,6 +418,9 @@ export default function TrackList({ onOpenPlaylistSync }: TrackListProps) {
           <FilterBar
             totalTracks={totalTracks}
             filteredCount={currentTracks.length}
+            selectedTrack={selectedTrack}
+            onFindRelated={handleFindRelated}
+            onApplySettings={handleApplySettings}
           />
 
           {/* Track table */}

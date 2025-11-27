@@ -124,3 +124,107 @@
   cursor: not-allowed;
   opacity: 0.5;
 }
+
+/* Tag Edit Mode Overlay */
+.tag-edit-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 1000;
+  padding-top: 120px;
+}
+
+.tag-edit-panel {
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  width: 90%;
+  max-width: 900px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Search Input */
+.tag-edit-search {
+  padding: 16px;
+  border-bottom: 1px solid var(--surface0);
+}
+
+.tag-edit-search-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  color: var(--text);
+  font-size: 14px;
+  font-family: 'UbuntuMono Nerd Font', monospace;
+}
+
+.tag-edit-search-input:focus {
+  outline: none;
+  border-color: var(--lavender);
+}
+
+/* Categories Container */
+.tag-edit-categories {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Category Section */
+.tag-edit-category {
+  margin-bottom: 20px;
+}
+
+.tag-edit-category:last-child {
+  margin-bottom: 0;
+}
+
+.tag-edit-category-title {
+  color: var(--text);
+  font-size: 13px;
+  margin: 0 0 8px 0;
+  font-weight: bold;
+}
+
+/* Tag Grid */
+.tag-edit-tag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+/* Individual Tag Button */
+.tag-edit-tag {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+  background: transparent;
+  transition: background 0.1s;
+}
+
+.tag-edit-tag:hover {
+  border-color: var(--text) !important;
+}
+
+/* Selected Tag (via arrow keys) */
+.tag-edit-tag-selected {
+  background: var(--surface1) !important;
+}
+
+/* No Results Message */
+.tag-edit-no-results {
+  text-align: center;
+  padding: 40px;
+  color: var(--subtext0);
+  font-style: italic;
+}

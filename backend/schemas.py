@@ -41,6 +41,7 @@ class TagUpdate(BaseModel):
 class Tag(TagBase):
     id: int
     category: TagCategory
+    track_count: int = 0
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -96,6 +97,7 @@ class Track(TrackBase):
 class PaginatedTracks(BaseModel):
     items: list[Track]
     total: int
+    library_total: int
     page: int
     per_page: int
     total_pages: int

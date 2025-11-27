@@ -30,7 +30,10 @@ def get_rekordbox_db(db_dir: str | Path | None = None) -> Rekordbox6Database:
             db_dir = config.database.rekordbox_path
         else:
             # Auto-detect (uses default Rekordbox location)
-            return Rekordbox6Database()
+            raise ValueError(
+                "Rekordbox database path not specified in config.toml. "
+                "Please provide a path."
+            )
 
     # Convert to Path if string
     db_path = Path(db_dir) if isinstance(db_dir, str) else db_dir

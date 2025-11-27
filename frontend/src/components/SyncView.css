@@ -6,6 +6,7 @@
   background: var(--base);
   color: var(--text);
   padding: var(--space-md);
+  overflow: hidden;
 }
 
 /* Top bar with title, tabs, and close button */

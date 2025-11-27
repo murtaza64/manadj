@@ -137,6 +137,8 @@ def create_or_update_playlist(
 
     if existing:
         # Update existing playlist
+        # Ensure isPersisted is True (in case playlist was soft-deleted before)
+        existing.isPersisted = True
         update_playlist_tracks(edj_session, existing.id, edj_tracks, db_uuid)
         return existing, False
     else:

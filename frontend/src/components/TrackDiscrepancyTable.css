@@ -4,6 +4,8 @@
   gap: 24px;
   padding: 20px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .discrepancy-section {

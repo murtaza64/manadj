@@ -27,7 +27,7 @@ export function PlaylistSyncHeader({ stats }: PlaylistSyncHeaderProps) {
         </div>
         <span className="sync-stat-divider">|</span>
         <div className="sync-stat">
-          <span className="sync-stat-label">Total:</span>
+          <span className="sync-stat-label">Unique:</span>
           <span className="sync-stat-value">{stats.playlists_matched}</span>
         </div>
       </div>

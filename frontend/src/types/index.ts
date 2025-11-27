@@ -12,6 +12,7 @@ export interface Tag {
   display_order: number;
   color?: string;
   category: TagCategory;
+  track_count?: number;
 }
 
 export interface TagUpdate {

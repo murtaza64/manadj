@@ -20,9 +20,14 @@ def find_playlist_by_name_and_parent(
     Returns:
         DjmdPlaylist object if found, None otherwise
     """
+    # Normalize parent IDs: Rekordbox uses 'root' for root playlists
+    # but we pass empty string, so treat them as equivalent
+    normalized_parent_id = 'root' if parent_id == "" else parent_id
+
     playlists = list(rb_db.get_playlist())
     for playlist in playlists:
-        if playlist.Name == name and (playlist.ParentID or "") == parent_id:
+        playlist_parent = playlist.ParentID or 'root'
+        if playlist.Name == name and playlist_parent == normalized_parent_id:
             return playlist
     return None
 
@@ -54,14 +59,13 @@ def update_playlist_tracks(
     # Create new DjmdSongPlaylist records with sequential TrackNo
     for i, track in enumerate(rb_tracks, start=1):
         song_playlist = DjmdSongPlaylist(
-            ID=rb_db.generate_unused_id(),
+            ID=rb_db.generate_unused_id(DjmdSongPlaylist),
             PlaylistID=playlist.ID,
             ContentID=track.ID,
             TrackNo=i,
             rb_local_usn=0,  # Will be updated by commit(autoinc=True)
             rb_local_deleted=0,
-            rb_local_synced=0,
-            Seq=0
+            rb_local_synced=0
         )
         rb_db.session.add(song_playlist)
 

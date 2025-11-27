@@ -101,6 +101,16 @@
   border-style: dashed;
 }
 
+.tag-grid-item-deleted {
+  opacity: 0.5;
+  background: var(--base);
+}
+
+.tag-grid-item-deleted .tag-name-input {
+  text-decoration: line-through;
+  color: var(--overlay0);
+}
+
 .tag-color-swatch {
   width: 20px;
   height: 20px;
@@ -136,6 +146,24 @@
   background: var(--maroon);
 }
 
+.btn-restore-small {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--surface0);
+  background: var(--blue);
+  color: var(--base);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+  font-weight: bold;
+}
+
+.btn-restore-small:hover {
+  background: var(--sapphire);
+}
+
 .tag-name-input {
   flex: 1;
   padding: 4px 6px;
@@ -149,6 +177,15 @@
 .tag-name-input:focus {
   outline: none;
   border-color: var(--lavender);
+}
+
+.tag-track-count {
+  font-size: 10px;
+  color: var(--overlay1);
+  min-width: 20px;
+  text-align: right;
+  flex-shrink: 0;
+  font-weight: bold;
 }
 
 /* Color Picker */

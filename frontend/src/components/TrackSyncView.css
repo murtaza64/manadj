@@ -3,6 +3,9 @@
   flex-direction: column;
   height: 100%;
   background: var(--base);
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
 }
 
 .track-sync-loading,

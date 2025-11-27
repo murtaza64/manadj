@@ -265,20 +265,23 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
                 {/* Existing Tags */}
                 {tagsByCategory[category.id]?.map((tag) => {
                   const isColorInvalid = tag.color && !isValidHexColor(tag.color);
+                  const isDeleted = deletedTagIds.has(tag.id);
                   return (
-                    <div key={tag.id} className="tag-grid-item">
+                    <div key={tag.id} className={`tag-grid-item ${isDeleted ? 'tag-grid-item-deleted' : ''}`}>
                       {/* Color Picker */}
                       <div className="tag-color-picker">
                         <div
                           className={`tag-color-swatch ${isColorInvalid ? 'invalid' : ''}`}
                           style={{ background: isValidHexColor(tag.color) ? tag.color : 'var(--surface0)' }}
-                          onClick={() =>
-                            setShowColorPicker(showColorPicker === tag.id ? null : tag.id)
-                          }
-                          title="Click to change color"
+                          onClick={() => {
+                            if (!isDeleted) {
+                              setShowColorPicker(showColorPicker === tag.id ? null : tag.id);
+                            }
+                          }}
+                          title={isDeleted ? 'Will be deleted' : 'Click to change color'}
                         />
 
-                        {showColorPicker === tag.id && (
+                        {showColorPicker === tag.id && !isDeleted && (
                           <div className="color-picker-dropdown">
                             {/* Palette Grid */}
                             <div className="color-palette-grid">
@@ -320,15 +323,39 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
                         value={tag.name}
                         onChange={(e) => handleTagChange(tag.id, 'name', e.target.value)}
                         className="tag-name-input"
+                        disabled={isDeleted}
                       />
 
-                      {/* Delete Button */}
+                      {/* Track Count */}
+                      {(() => {
+                        const originalTag = allTags?.find((t: Tag) => t.id === tag.id);
+                        const count = originalTag?.track_count ?? 0;
+                        return (
+                          <span className="tag-track-count" title={`${count} track${count !== 1 ? 's' : ''}`}>
+                            {count}
+                          </span>
+                        );
+                      })()}
+
+                      {/* Delete/Restore Button */}
                       <button
-                        onClick={() => handleDeleteExistingTag(tag.id)}
-                        className="btn-delete-small"
-                        title="Delete tag"
+                        onClick={() => {
+                          if (isDeleted) {
+                            // Restore tag
+                            setDeletedTagIds((prev) => {
+                              const newSet = new Set(prev);
+                              newSet.delete(tag.id);
+                              return newSet;
+                            });
+                            setHasChanges(true);
+                          } else {
+                            handleDeleteExistingTag(tag.id);
+                          }
+                        }}
+                        className={isDeleted ? 'btn-restore-small' : 'btn-delete-small'}
+                        title={isDeleted ? 'Restore tag' : 'Delete tag'}
                       >
-                        ×
+                        {isDeleted ? '↶' : '×'}
                       </button>
                     </div>
                   );
@@ -393,6 +420,11 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
                         onChange={(e) => handleNewTagChange(tag.tempId, 'name', e.target.value)}
                         className="tag-name-input"
                       />
+
+                      {/* Track Count (always 0 for new tags) */}
+                      <span className="tag-track-count" title="0 tracks">
+                        0
+                      </span>
 
                       {/* Delete Button */}
                       <button

@@ -40,7 +40,7 @@ def list_tracks(
         )
 
     skip = (page - 1) * per_page
-    items, total = crud.get_tracks(
+    items, total, library_total = crud.get_tracks(
         db,
         skip=skip,
         limit=per_page,
@@ -58,6 +58,7 @@ def list_tracks(
     return {
         "items": items,
         "total": total,
+        "library_total": library_total,
         "page": page,
         "per_page": per_page,
         "total_pages": (total + per_page - 1) // per_page

@@ -1,5 +1,6 @@
 """Rekordbox playlist reader."""
 
+import re
 from pathlib import Path
 
 from pyrekordbox.db6 import Rekordbox6Database
@@ -38,6 +39,10 @@ class RekordboxPlaylistReader:
         for playlist in playlists:
             # Skip system playlists or folders (attribute field might indicate this)
             if not playlist.Name:
+                continue
+
+            # Skip specific playlists: manadj* and "CUE Analysis Playlist"
+            if re.match(r'^manadj', playlist.Name, re.IGNORECASE) or playlist.Name == 'CUE Analysis Playlist':
                 continue
 
             # Get flattened hierarchy name

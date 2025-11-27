@@ -37,58 +37,60 @@ class TrackSyncManager:
             find_missing_tracks_in_manadj
         )
 
-        # Direction 1: manadj → Engine DJ (export candidates)
-        missing_in_edj, export_stats = find_missing_tracks_in_enginedj(
-            self.manadj_session,
-            self.engine_db,
-            validate_paths=validate_files
-        )
-
-        # Direction 2: Engine DJ → manadj (import candidates)
-        missing_in_manadj, import_stats = find_missing_tracks_in_manadj(
-            self.manadj_session,
-            self.engine_db
-        )
-
-        # Convert to TrackDiscrepancy objects
-        export_discrepancies = [
-            TrackDiscrepancy(
-                filename=t.filename,
-                title=t.title,
-                artist=t.artist,
-                bpm=t.bpm,
-                key=t.key,
-                source_system='manadj'
+        # Use Engine DJ session context manager
+        with self.engine_db.session_m() as edj_session:
+            # Direction 1: manadj → Engine DJ (export candidates)
+            missing_in_edj, export_stats = find_missing_tracks_in_enginedj(
+                self.manadj_session,
+                edj_session,
+                validate_paths=validate_files
             )
-            for t in missing_in_edj
-        ]
 
-        import_discrepancies = [
-            TrackDiscrepancy(
-                filename=t.path,
-                title=t.title,
-                artist=t.artist,
-                bpm=t.bpm,
-                key=t.key,
-                source_system='engine'
+            # Direction 2: Engine DJ → manadj (import candidates)
+            missing_in_manadj, import_stats = find_missing_tracks_in_manadj(
+                self.manadj_session,
+                edj_session
             )
-            for t in missing_in_manadj
-        ]
 
-        stats = TrackSyncStats(
-            manadj_total=export_stats['manadj_tracks'],
-            target_total=export_stats['enginedj_tracks'],
-            missing_in_target_count=export_stats['missing_count'],
-            missing_in_manadj_count=import_stats['missing_count'],
-            skipped_file_not_found=export_stats.get('skipped_file_not_found', 0)
-        )
+            # Convert to TrackDiscrepancy objects
+            export_discrepancies = [
+                TrackDiscrepancy(
+                    filename=t.filename,
+                    title=t.title,
+                    artist=t.artist,
+                    bpm=t.bpm,
+                    key=t.key,
+                    source_system='manadj'
+                )
+                for t in missing_in_edj
+            ]
 
-        return TrackSyncResult(
-            target='engine',
-            stats=stats,
-            missing_in_target=export_discrepancies,
-            missing_in_manadj=import_discrepancies
-        )
+            import_discrepancies = [
+                TrackDiscrepancy(
+                    filename=t.path,
+                    title=t.title,
+                    artist=t.artist,
+                    bpm=t.bpm,
+                    key=t.key,
+                    source_system='engine'
+                )
+                for t in missing_in_manadj
+            ]
+
+            stats = TrackSyncStats(
+                manadj_total=export_stats['manadj_tracks'],
+                target_total=export_stats['enginedj_tracks'],
+                missing_in_target_count=export_stats['missing_count'],
+                missing_in_manadj_count=import_stats['missing_count'],
+                skipped_file_not_found=export_stats.get('skipped_file_not_found', 0)
+            )
+
+            return TrackSyncResult(
+                target='engine',
+                stats=stats,
+                missing_in_target=export_discrepancies,
+                missing_in_manadj=import_discrepancies
+            )
 
     def get_rekordbox_discrepancies(
         self,
@@ -137,9 +139,9 @@ class TrackSyncManager:
             TrackDiscrepancy(
                 filename=t.FolderPath,
                 title=t.Title,
-                artist=t.ArtistName,
-                bpm=int(t.Tempo * 100) if t.Tempo else None,  # Convert to centiBPM
-                key=t.mixxx_key_id if hasattr(t, 'mixxx_key_id') else None,
+                artist=t.Artist.Name if hasattr(t, 'Artist') and t.Artist else None,
+                bpm=t.BPM if t.BPM else None,  # Rekordbox stores BPM in centiBPM format
+                key=t.KeyID if hasattr(t, 'KeyID') and t.KeyID else None,
                 source_system='rekordbox'
             )
             for t in missing_in_manadj

@@ -389,28 +389,29 @@ class PlaylistSyncManager:
 
         from enginedj.models.track import Track as EDJTrack
 
-        # Load all Engine DJ tracks
-        all_tracks = list(self.engine_db.get_track())
+        # Load all Engine DJ tracks using session
+        with self.engine_db.session_m() as edj_session:
+            all_tracks = edj_session.query(EDJTrack).all()
 
-        # Index by path and filename
-        tracks_by_path, tracks_by_filename = index_tracks_by_path(
-            all_tracks,
-            lambda t: t.path,
-            lambda t: t.path
-        )
+            # Index by path and filename
+            tracks_by_path, tracks_by_filename = index_tracks_by_path(
+                all_tracks,
+                lambda t: t.path,
+                lambda t: t.path
+            )
 
-        matched = []
-        unmatched = []
+            matched = []
+            unmatched = []
 
-        for ref in track_refs:
-            # Try two-tier matching
-            track = match_track_two_tier(ref.path, tracks_by_path, tracks_by_filename)
-            if track:
-                matched.append(track)
-            else:
-                unmatched.append(ref.filename)
+            for ref in track_refs:
+                # Try two-tier matching
+                track = match_track_two_tier(ref.path, tracks_by_path, tracks_by_filename)
+                if track:
+                    matched.append(track)
+                else:
+                    unmatched.append(ref.filename)
 
-        return matched, unmatched
+            return matched, unmatched
 
     def _match_tracks_to_rekordbox(self, track_refs: list[TrackReference]) -> tuple[list, list[str]]:
         """Match TrackReferences to Rekordbox DjmdContent objects.
@@ -524,15 +525,19 @@ class PlaylistSyncManager:
         parent_id = self._ensure_parent_playlists_engine(parent_names)
 
         # Create or update playlist
-        with self.engine_db.session() as edj_session:
+        with self.engine_db.session_m_write() as edj_session:
+            # Get database UUID
+            from enginedj.models.information import Information
+            info = edj_session.query(Information).first()
+            db_uuid = info.uuid if info else None
+
             playlist, was_created = create_or_update_playlist(
                 edj_session=edj_session,
                 title=leaf_name,
                 parent_id=parent_id,
                 edj_tracks=tracks,
-                db_uuid=self.engine_db.db_uuid
+                db_uuid=db_uuid
             )
-            edj_session.commit()
 
         return True, was_created
 
@@ -602,7 +607,12 @@ class PlaylistSyncManager:
 
         current_parent_id = 0
 
-        with self.engine_db.session() as edj_session:
+        with self.engine_db.session_m_write() as edj_session:
+            # Get database UUID
+            from enginedj.models.information import Information
+            info = edj_session.query(Information).first()
+            db_uuid = info.uuid if info else None
+
             for name in parent_names:
                 # Check if this level exists
                 existing = find_playlist_by_title_and_parent(edj_session, name, current_parent_id)
@@ -616,11 +626,9 @@ class PlaylistSyncManager:
                         title=name,
                         parent_id=current_parent_id,
                         edj_tracks=[],
-                        db_uuid=self.engine_db.db_uuid
+                        db_uuid=db_uuid
                     )
                     current_parent_id = playlist.id
-
-            edj_session.commit()
 
         return current_parent_id
 

@@ -109,7 +109,10 @@ def get_tracks(
     for item in items:
         item.tags = [tt.tag for tt in item.track_tags]
 
-    return items, total
+    # Get total library size (unfiltered count)
+    total_library_size = db.query(models.Track).count()
+
+    return items, total, total_library_size
 
 
 def get_track(db: Session, track_id: int):
@@ -180,9 +183,26 @@ def get_tags_by_category(db: Session, category_id: int):
 
 
 def get_all_tags(db: Session):
-    return db.query(models.Tag).options(
+    from sqlalchemy import func
+    tags = db.query(
+        models.Tag,
+        func.count(models.TrackTag.track_id).label('track_count')
+    ).outerjoin(
+        models.TrackTag, models.Tag.id == models.TrackTag.tag_id
+    ).options(
         joinedload(models.Tag.category)
-    ).order_by(models.Tag.category_id, models.Tag.display_order).all()
+    ).group_by(
+        models.Tag.id
+    ).order_by(
+        models.Tag.category_id, models.Tag.display_order
+    ).all()
+
+    # Convert to list of Tag objects with track_count attribute
+    result = []
+    for tag, track_count in tags:
+        tag.track_count = track_count
+        result.append(tag)
+    return result
 
 
 def create_tag_category(db: Session, category: schemas.TagCategoryCreate):

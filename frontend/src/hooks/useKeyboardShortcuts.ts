@@ -10,6 +10,8 @@ interface UseKeyboardShortcutsProps {
   playerRef: RefObject<PlayerHandle>;
   onNudgeBeatgrid?: (offsetMs: number) => void;
   onSetDownbeat?: () => void;
+  onEnterTagEditMode?: () => void;
+  onEnterEnergyEditMode?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -18,7 +20,9 @@ export function useKeyboardShortcuts({
   onSelectTrack,
   playerRef,
   onNudgeBeatgrid,
-  onSetDownbeat
+  onSetDownbeat,
+  onEnterTagEditMode,
+  onEnterEnergyEditMode
 }: UseKeyboardShortcutsProps) {
   const audio = useAudio();
   const [seekDirection, setSeekDirection] = useState<number>(0); // -1, 0, or 1
@@ -108,6 +112,28 @@ export function useKeyboardShortcuts({
 
         if (onSetDownbeat) {
           onSetDownbeat();
+        }
+      }
+
+      // Tag editing mode: T
+      if (key === 't') {
+        if (!selectedTrack) return;
+
+        event.preventDefault();
+
+        if (onEnterTagEditMode) {
+          onEnterTagEditMode();
+        }
+      }
+
+      // Energy editing mode: E
+      if (key === 'e') {
+        if (!selectedTrack) return;
+
+        event.preventDefault();
+
+        if (onEnterEnergyEditMode) {
+          onEnterEnergyEditMode();
         }
       }
 
