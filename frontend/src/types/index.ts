@@ -232,3 +232,135 @@ export interface TrackSyncResult {
   missing_in_target: TrackDiscrepancy[];  // Export candidates
   missing_in_manadj: TrackDiscrepancy[];  // Import candidates
 }
+
+// Library import types
+export interface LibraryTrackCandidate {
+  filepath: string;
+  filename: string;
+  title: string | null;
+  artist: string | null;
+  bpm: number | null;
+  key: string | null;
+  has_metadata: boolean;
+}
+
+export interface LibraryImportStats {
+  files_scanned: number;
+  already_in_db: number;
+  new_tracks: number;
+  with_metadata: number;
+  without_metadata: number;
+}
+
+export interface LibraryImportResult {
+  candidates: LibraryTrackCandidate[];
+  stats: LibraryImportStats;
+}
+
+export interface LibraryImportRequest {
+  candidate_filepaths?: string[] | null;
+}
+
+export interface LibraryImportExecutionResult {
+  imported: number;
+  skipped_no_metadata: number;
+  errors: number;
+  error_messages: string[];
+}
+
+export interface BPMEstimate {
+  method: string;
+  bpm: number;
+  confidence: number | null;
+}
+
+export interface BPMAnalysisResponse {
+  track_id: number;
+  estimates: BPMEstimate[];
+  recommended_bpms: number[];
+  recommended_bpm: number;
+  metadata: {
+    duration: number;
+    analyzed_at: string;
+  };
+}
+
+export interface KeyAnalysisResponse {
+  track_id: number;
+  key: string;
+  formats: {
+    musical: string;
+    openkey: string | null;
+    camelot: string | null;
+    engine_id: number | null;
+  };
+  confidence: number;
+  metadata: {
+    scale: string;
+    analyzed_at: string;
+  };
+}
+
+// Metadata Sync types
+export interface MetadataValues {
+  title: string | null;
+  artist: string | null;
+  bpm: number | null;
+  key: string | null;  // Musical notation
+}
+
+export interface MetadataComparison {
+  track_id: number;
+  filename: string;
+  current: MetadataValues;  // From DB
+  file: MetadataValues;  // From ID3 tags
+  differences: string[];  // ["title", "artist", "bpm", "key"]
+  conflict_type: string;  // "only_in_file", "only_in_db", "conflict", "match"
+}
+
+export interface MetadataComparisonStats {
+  total_tracks: number;
+  tracks_with_changes: number;
+  tracks_with_conflicts: number;
+  missing_files: number;
+}
+
+export interface MetadataComparisonResult {
+  stats: MetadataComparisonStats;
+  comparisons: MetadataComparison[];
+}
+
+export interface TrackMetadataUpdate {
+  track_id: number;
+  fields: Record<string, string | number | null>;
+}
+
+export interface MetadataSyncRequest {
+  updates: TrackMetadataUpdate[];
+  dry_run: boolean;
+}
+
+export interface MetadataSyncStats {
+  total_requested: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  error_messages: string[];
+}
+
+export interface MetadataSyncResult {
+  stats: MetadataSyncStats;
+  dry_run: boolean;
+}
+
+// Hot Cue types
+export interface HotCue {
+  id: number;
+  track_id: number;
+  slot_number: number;  // 1-8
+  time_seconds: number;
+  label?: string;
+  color?: string;
+  created_at: string;
+  updated_at: string;
+}

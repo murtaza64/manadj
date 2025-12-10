@@ -1,4 +1,4 @@
-"""Utilities for extracting ID3 metadata from audio files."""
+"""Utilities for extracting and writing ID3 metadata to/from audio files."""
 
 from mutagen import File
 from typing import Dict, Optional
@@ -74,3 +74,58 @@ def extract_id3_metadata(filepath: str) -> Dict[str, Optional[str | int]]:
             "key": None,
             "bpm": None
         }
+
+
+def write_id3_metadata(
+    filepath: str,
+    title: Optional[str] = None,
+    artist: Optional[str] = None,
+    key: Optional[int] = None,  # Engine DJ ID (0-23)
+    bpm: Optional[float] = None
+) -> bool:
+    """
+    Write ID3 metadata to an audio file.
+
+    Args:
+        filepath: Absolute path to the audio file
+        title: Track title (None to skip)
+        artist: Artist name (None to skip)
+        key: Engine DJ key ID (0-23) (None to skip)
+        bpm: BPM as float (None to skip)
+
+    Returns:
+        True if successful, False if error occurred
+    """
+    try:
+        audio = File(filepath, easy=True)
+        if audio is None:
+            return False
+
+        # Write title
+        if title is not None:
+            audio["title"] = title
+
+        # Write artist
+        if artist is not None:
+            audio["artist"] = artist
+
+        # Write key (convert from Engine DJ ID to musical notation)
+        if key is not None:
+            try:
+                key_obj = Key(key)
+                musical_key = key_obj.to_musical()
+                audio["initialkey"] = musical_key
+            except Exception:
+                pass  # Skip if key conversion fails
+
+        # Write BPM
+        if bpm is not None:
+            audio["bpm"] = str(int(bpm))
+
+        # Save changes
+        audio.save()
+        return True
+
+    except Exception as e:
+        print(f"Error writing ID3 metadata to {filepath}: {e}")
+        return False

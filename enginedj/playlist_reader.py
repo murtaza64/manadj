@@ -49,8 +49,8 @@ class EnginePlaylistReader:
                 # Get flattened hierarchy name
                 name = self.flatten_hierarchy_name(playlist.id)
 
-                # Filter out playlists under "manadj Tags" hierarchy
-                if name.startswith('manadj Tags'):
+                # Filter out playlists under "manaDJ Tags" hierarchy
+                if name.startswith('manaDJ Tags'):
                     continue
 
                 # Get tracks

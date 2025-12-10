@@ -171,6 +171,19 @@
   justify-content: center;
 }
 
+/* Hot cues overlay - positioned on top right */
+.player-hotcues-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 8px;
+  background: rgba(17, 17, 17, 0.8);
+  backdrop-filter: blur(4px);
+}
+
 .player-error {
   font-size: 12px;
   color: var(--red);

@@ -11,7 +11,7 @@ import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
 import FindRelatedTracksModal from './FindRelatedTracksModal';
 import { useFilters } from '../contexts/FilterContext';
-import type { RelatedTracksSettings } from './TrackList';
+import type { RelatedTracksSettings } from './Library';
 import './FilterBar.css';
 
 interface FilterBarProps {
@@ -347,6 +347,8 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
               bpmCenter: null,
               bpmThresholdPercent: 5,
               selectedKeyCamelotIds: [],
+              sortColumn: 'created_at',
+              sortDirection: 'desc',
             });
           }}
           disabled={

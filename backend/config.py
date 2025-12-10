@@ -13,9 +13,23 @@ class DatabaseConfig:
 
 
 @dataclass
+class LibraryConfig:
+    """Library configuration."""
+    tracks_directory: str | None
+
+
+@dataclass
+class AnalysisConfig:
+    """Analysis configuration."""
+    key_detection_backend: str = "essentia"  # "essentia" or "keyfinder"
+
+
+@dataclass
 class Config:
     """Application configuration."""
     database: DatabaseConfig
+    library: LibraryConfig
+    analysis: AnalysisConfig
 
 
 def load_config() -> Config:
@@ -35,7 +49,11 @@ def load_config() -> Config:
             database=DatabaseConfig(
                 engine_dj_path=None,
                 rekordbox_path=None
-            )
+            ),
+            library=LibraryConfig(
+                tracks_directory=None
+            ),
+            analysis=AnalysisConfig()
         )
 
     with open(config_path, "rb") as f:
@@ -50,10 +68,33 @@ def load_config() -> Config:
     engine_path = engine_path if engine_path else None
     rekordbox_path = rekordbox_path if rekordbox_path else None
 
+    # Parse library config
+    lib_config = data.get("library", {})
+    tracks_dir = lib_config.get("tracks_directory", "")
+    tracks_dir = tracks_dir if tracks_dir else None
+
+    # Parse analysis config
+    analysis_config = data.get("analysis", {})
+    key_backend = analysis_config.get("key_detection_backend", "essentia")
+
+    # Validate key detection backend
+    valid_backends = ["essentia", "keyfinder"]
+    if key_backend not in valid_backends:
+        raise ValueError(
+            f"Invalid key_detection_backend: '{key_backend}'. "
+            f"Must be one of: {', '.join(valid_backends)}"
+        )
+
     return Config(
         database=DatabaseConfig(
             engine_dj_path=engine_path,
             rekordbox_path=rekordbox_path
+        ),
+        library=LibraryConfig(
+            tracks_directory=tracks_dir
+        ),
+        analysis=AnalysisConfig(
+            key_detection_backend=key_backend
         )
     )
 

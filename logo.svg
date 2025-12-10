@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <!-- Clip path to constrain liquid to circular body -->
+    <clipPath id="bottleClip">
+      <circle cx="100" cy="130" r="55"/>
+    </clipPath>
+  </defs>
+
+  <g transform="rotate(45 100 100)">
+    <!-- Cork/stopper (tapered trapezoid) -->
+    <polygon points="82,35 118,35 113,50 87,50" fill="#8b4513" stroke="#1e1e1e" stroke-width="2"/>
+
+    <!-- Bottle neck - empty -->
+    <rect x="87" y="50" width="26" height="30" fill="#003366" stroke="#1e1e1e" stroke-width="2"/>
+
+    <!-- Main vinyl disk body (the potion bottle) - empty part -->
+    <circle cx="100" cy="130" r="55" fill="#003366" stroke="#1e1e1e" stroke-width="3"/>
+
+    <!-- Liquid fill (rotated to be horizontal in final view) -->
+    <g clip-path="url(#bottleClip)">
+      <g transform="rotate(-45 100 130)">
+        <rect x="0" y="108" width="200" height="200" fill="#0088ff"/>
+        <!-- Liquid surface line -->
+        <line x1="0" y1="108" x2="200" y2="108" stroke="#00ccff" stroke-width="2"/>
+        <!-- Bubbles in the liquid -->
+        <circle cx="85" cy="150" r="3" fill="#00ccff" opacity="0.7"/>
+        <circle cx="120" cy="160" r="2" fill="#00ccff" opacity="0.8"/>
+        <circle cx="95" cy="170" r="2.5" fill="#00ccff" opacity="0.6"/>
+        <circle cx="110" cy="145" r="2" fill="#00ccff" opacity="0.75"/>
+        <circle cx="75" cy="165" r="1.5" fill="#00ccff" opacity="0.8"/>
+      </g>
+    </g>
+
+    <!-- Vinyl grooves -->
+    <circle cx="100" cy="130" r="45" fill="none" stroke="#1e1e1e" stroke-width="1" opacity="0.3"/>
+    <circle cx="100" cy="130" r="35" fill="none" stroke="#1e1e1e" stroke-width="1" opacity="0.3"/>
+
+    <!-- Center label -->
+    <circle cx="100" cy="130" r="20" fill="#1e1e1e" stroke="#0088ff" stroke-width="1"/>
+
+    <!-- Center hole -->
+    <circle cx="100" cy="130" r="5" fill="#0088ff"/>
+  </g>
+</svg>

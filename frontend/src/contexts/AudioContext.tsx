@@ -6,7 +6,6 @@ export interface AudioContextState {
 
   // Playback state
   isPlaying: boolean;
-  currentTime: number;
   duration: number;
   volume: number;
 
@@ -16,6 +15,12 @@ export interface AudioContextState {
   // Cue point (time in seconds)
   cuePoint: number | null;
   isPreviewing: boolean;
+
+  // Hot cue preview states (indexed by slot 1-8)
+  hotCuePreviewing: Record<number, boolean>;
+
+  // Seek trigger (increments on each seek to trigger waveform sync)
+  seekVersion: number;
 
   // Playback controls
   play: () => void;
@@ -30,6 +35,10 @@ export interface AudioContextState {
   // Cue button behaviors
   handleCueDown: () => void;
   handleCueUp: () => void;
+
+  // Hot cue behaviors
+  handleHotCueDown: (slotNumber: number, hotCueTime: number | null) => void;
+  handleHotCueUp: (slotNumber: number, hotCueTime: number | null) => void;
 }
 
 const AudioContext = createContext<AudioContextState | undefined>(undefined);
@@ -43,7 +52,6 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(1.0);
 
@@ -51,13 +59,16 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
   const [currentTrackId, setCurrentTrackId] = useState<number | null>(null);
   const [cuePoint, setCuePoint] = useState<number | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const [hotCuePreviewing, setHotCuePreviewing] = useState<Record<number, boolean>>({});
+
+  // Seek trigger (increments on each seek)
+  const [seekVersion, setSeekVersion] = useState(0);
 
   // Audio event listeners
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
     const handleDurationChange = () => setDuration(audio.duration);
     const handleEnded = () => {
       setIsPlaying(false);
@@ -72,13 +83,11 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
       console.error('[AudioContext] Audio element error:', audio.error);
     };
 
-    audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('error', handleError);
 
     return () => {
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('durationchange', handleDurationChange);
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('error', handleError);
@@ -112,7 +121,7 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
   const seek = (time: number) => {
     if (audioRef.current) {
       audioRef.current.currentTime = time;
-      setCurrentTime(time);
+      setSeekVersion(prev => prev + 1);  // Increment to trigger waveform sync
     }
   };
 
@@ -125,6 +134,12 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
 
   // Track loading
   const loadTrack = (trackId: number, cuePointTime: number | null) => {
+    // Pause playback if currently playing
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+
     setCurrentTrackId(trackId);
     setCuePoint(cuePointTime);
     setIsPreviewing(false);
@@ -180,21 +195,62 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
       // If previewing and deck still paused, return to cue
       audio.pause();
       if (cuePoint !== null) {
-        audio.currentTime = cuePoint;
+        seek(cuePoint);  // Use seek() to trigger waveform sync
       }
       setIsPreviewing(false);
+    }
+  };
+
+  // Hot cue behaviors
+  const handleHotCueDown = (slotNumber: number, hotCueTime: number | null) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // If hot cue is not set, it will be set by the component calling the API
+    // This handler only handles playback behavior when hot cue exists
+    if (hotCueTime === null) return;
+
+    if (isPlaying) {
+      // While playing: seek to hot cue and continue playing
+      audio.currentTime = hotCueTime;
+      setSeekVersion(prev => prev + 1);  // Trigger waveform sync
+    } else {
+      // While paused: preview mode (play while held)
+      setHotCuePreviewing(prev => ({ ...prev, [slotNumber]: true }));
+      audio.currentTime = hotCueTime;
+      audio.play().catch(() => {});
+    }
+  };
+
+  const handleHotCueUp = (slotNumber: number, hotCueTime: number | null) => {
+    const audio = audioRef.current;
+    if (!audio || hotCueTime === null) return;
+
+    // If was previewing this hot cue slot
+    if (hotCuePreviewing[slotNumber]) {
+      // If deck is now playing (play was pressed during preview), just end preview
+      if (isPlaying) {
+        setHotCuePreviewing(prev => ({ ...prev, [slotNumber]: false }));
+        // Audio keeps playing
+      } else {
+        // If deck still paused, return to hot cue and pause
+        audio.pause();
+        seek(hotCueTime);  // Use seek() to trigger waveform sync
+        setHotCuePreviewing(prev => ({ ...prev, [slotNumber]: false }));
+      }
     }
   };
 
   const value: AudioContextState = {
     audioRef,
     isPlaying,
-    currentTime,
     duration,
     volume,
     currentTrackId,
     cuePoint,
     isPreviewing,
+    hotCuePreviewing,
+    seekVersion,
     play,
     pause,
     togglePlayPause,
@@ -203,6 +259,8 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
     loadTrack,
     handleCueDown,
     handleCueUp,
+    handleHotCueDown,
+    handleHotCueUp,
   };
 
   return (

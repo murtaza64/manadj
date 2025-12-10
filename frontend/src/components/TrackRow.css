@@ -1,6 +1,7 @@
 .track-row {
   height: 28px;
   border-bottom: 1px solid var(--surface0);
+  background: var(--base);
   transition: background var(--transition-normal);
   cursor: pointer;
 }
@@ -17,10 +18,66 @@
   background: #32324a !important;
 }
 
+/* Sticky cell backgrounds that match row state */
+.track-row:hover .sticky-col-cell {
+  background: #1f1f1f !important;
+}
+
+.track-row-selected .sticky-col-cell {
+  background: #2a2a3e !important;
+}
+
+.track-row-selected:hover .sticky-col-cell {
+  background: #32324a !important;
+}
+
 .track-cell {
-  padding: 2px 12px;
+  padding: 2px 8px;
   vertical-align: middle;
   overflow: hidden;
+}
+
+/* Sticky column cell styles */
+.track-cell.sticky-col {
+  position: sticky;
+  background: var(--base);
+  z-index: 1;
+}
+
+.track-cell.sticky-col-key {
+  left: var(--col-key-left);
+  width: var(--col-key-width);
+  min-width: var(--col-key-width);
+  max-width: var(--col-key-width);
+  text-align: right;
+}
+
+.track-cell.sticky-col-bpm {
+  left: var(--col-bpm-left);
+  width: var(--col-bpm-width);
+  min-width: var(--col-bpm-width);
+  max-width: var(--col-bpm-width);
+}
+
+.track-cell.sticky-col-title {
+  left: var(--col-title-left);
+  width: var(--col-title-width);
+  min-width: var(--col-title-width);
+  max-width: var(--col-title-width);
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.track-energy-cell.sticky-col {
+  position: sticky;
+  background: var(--base);
+  z-index: 1;
+}
+
+.track-energy-cell.sticky-col-energy {
+  left: var(--col-energy-left);
+  width: var(--col-energy-width);
+  min-width: var(--col-energy-width);
+  max-width: var(--col-energy-width);
 }
 
 /* Text cells - single line only */

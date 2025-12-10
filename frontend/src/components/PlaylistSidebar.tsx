@@ -77,22 +77,59 @@ export default function PlaylistSidebar({
   };
 
   return (
-    <div style={{
-      width: '200px',
-      background: 'var(--crust)',
-      borderRight: '1px solid var(--surface0)',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-    }}>
+    <>
+      <style>{`
+        .sync-button {
+          flex: 1;
+          padding: 6px 8px;
+          background: transparent;
+          border: 1px solid var(--blue);
+          color: var(--blue);
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          transition: background 0.2s, color 0.2s;
+        }
+        .sync-button:hover {
+          background: var(--blue);
+          color: var(--base);
+        }
+      `}</style>
       <div style={{
-        padding: '12px',
-        borderBottom: '1px solid var(--surface0)',
-        fontWeight: 'bold',
-        color: 'var(--text)',
+        width: '200px',
+        background: 'var(--crust)',
+        borderRight: '1px solid var(--surface0)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
       }}>
-        Playlists
-      </div>
+        <div style={{
+          padding: '12px',
+          borderBottom: '1px solid var(--surface0)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}>
+          <img
+            src="/logo.png"
+            alt="manaDJ logo"
+            style={{
+              width: '32px',
+              height: '32px',
+              objectFit: 'contain'
+            }}
+          />
+          <button
+            onClick={onOpenPlaylistSync}
+            className="sync-button"
+          >
+            <span style={{ fontSize: '16px' }}>⟳</span> Sync
+          </button>
+        </div>
 
       {/* "All tracks" special view */}
       <div
@@ -229,25 +266,7 @@ export default function PlaylistSidebar({
         )}
       </div>
 
-      {/* Sync playlists button */}
-      <div style={{
-        padding: '8px',
-        borderTop: '1px solid var(--surface0)',
-      }}>
-        <button
-          onClick={onOpenPlaylistSync}
-          style={{
-            width: '100%',
-            padding: '6px',
-            background: 'var(--surface0)',
-            border: '1px solid var(--surface1)',
-            color: 'var(--text)',
-            cursor: 'pointer',
-          }}
-        >
-          Sync playlists...
-        </button>
       </div>
-    </div>
+    </>
   );
 }

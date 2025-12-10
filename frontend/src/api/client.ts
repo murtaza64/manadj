@@ -1,4 +1,4 @@
-import type { PlaylistTrackAdd, UnifiedPlaylist, PlaylistSyncStats, UnifiedTagView, TagSyncStats, TagSyncRequest, SyncResult, SyncPlaylistRequest, TrackSyncResult } from '../types';
+import type { PlaylistTrackAdd, UnifiedPlaylist, PlaylistSyncStats, UnifiedTagView, TagSyncStats, TagSyncRequest, SyncResult, SyncPlaylistRequest, TrackSyncResult, LibraryImportResult, LibraryImportRequest, LibraryImportExecutionResult } from '../types';
 
 // Backend URL configuration - can be overridden with VITE_API_URL env var
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -28,6 +28,8 @@ export const api = {
         bpmThresholdPercent?: number | null;
         keyCamelotIds?: string[];
         unprocessed?: boolean;
+        sortColumn?: string | null;
+        sortDirection?: 'asc' | 'desc';
       }
     ) => {
       const params = new URLSearchParams({
@@ -66,6 +68,13 @@ export const api = {
         if (filters.unprocessed) {
           params.append('unprocessed', 'true');
         }
+        // Sort parameters
+        if (filters.sortColumn) {
+          params.append('sort_column', filters.sortColumn);
+        }
+        if (filters.sortDirection) {
+          params.append('sort_direction', filters.sortDirection);
+        }
       }
 
       const response = await fetch(`${API_BASE}/tracks/?${params}`);
@@ -88,6 +97,44 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
+      return response.json();
+    },
+
+    compareMetadata: async () => {
+      const response = await fetch(`${API_BASE}/tracks/metadata/compare`);
+      if (!response.ok) throw new Error('Failed to compare metadata');
+      return response.json();
+    },
+
+    syncMetadata: async (request: {
+      updates: Array<{
+        track_id: number;
+        fields: Record<string, string | number | null>;
+      }>;
+      dry_run: boolean;
+    }) => {
+      const response = await fetch(`${API_BASE}/tracks/metadata/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) throw new Error('Failed to sync metadata');
+      return response.json();
+    },
+
+    writeMetadataToFiles: async (request: {
+      updates: Array<{
+        track_id: number;
+        fields: Record<string, string | number | null>;
+      }>;
+      dry_run: boolean;
+    }) => {
+      const response = await fetch(`${API_BASE}/tracks/metadata/write-to-files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) throw new Error('Failed to write metadata to files');
       return response.json();
     },
   },
@@ -193,6 +240,86 @@ export const api = {
       });
       if (!response.ok) {
         throw new Error(`Failed to nudge beatgrid: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    delete: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/beatgrids/${trackId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to delete beatgrid: ${response.statusText}`);
+      }
+      return response.json();
+    },
+  },
+
+  hotcues: {
+    get: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/hotcues/${trackId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch hot cues: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    set: async (trackId: number, slotNumber: number, data: {
+      time_seconds: number;
+      label?: string;
+      color?: string;
+    }) => {
+      const response = await fetch(
+        `${API_BASE}/hotcues/${trackId}/${slotNumber}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to set hot cue: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    delete: async (trackId: number, slotNumber: number) => {
+      const response = await fetch(
+        `${API_BASE}/hotcues/${trackId}/${slotNumber}`,
+        { method: 'DELETE' }
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to delete hot cue: ${response.statusText}`);
+      }
+      return response.json();
+    },
+  },
+
+  analyze: {
+    bpm: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/analyze/bpm/${trackId}`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to analyze BPM: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    key: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/analyze/key/${trackId}`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to analyze key: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    getBpm: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/analyze/bpm/${trackId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch BPM analysis: ${response.statusText}`);
       }
       return response.json();
     },
@@ -350,6 +477,24 @@ export const api = {
       const res = await fetch(`${API_BASE}/sync/tracks/rekordbox?${params}`);
       if (!res.ok) throw new Error('Failed to fetch Rekordbox track discrepancies');
       return res.json();
+    },
+  },
+
+  libraryImport: {
+    getCandidates: async (recursive: boolean = false): Promise<LibraryImportResult> => {
+      const response = await fetch(`${API_BASE}/sync/library/candidates?recursive=${recursive}`);
+      if (!response.ok) throw new Error('Failed to fetch import candidates');
+      return response.json();
+    },
+
+    import: async (request: LibraryImportRequest): Promise<LibraryImportExecutionResult> => {
+      const response = await fetch(`${API_BASE}/sync/library/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) throw new Error('Failed to import tracks');
+      return response.json();
     },
   },
 };

@@ -3,7 +3,13 @@ import { WebGLWaveformRenderer } from '../utils/WebGLWaveformRenderer';
 import { useAudio } from '../hooks/useAudio';
 import { useWaveformData } from '../hooks/useWaveformData';
 import { useBeatgridData } from '../hooks/useBeatgridData';
+import { useHotCues } from '../hooks/useHotCues';
 import './Waveform.css';
+
+// Expose renderer class globally for debugging
+if (typeof window !== 'undefined') {
+  (window as any).WebGLWaveformRenderer = WebGLWaveformRenderer;
+}
 
 interface WebGLWaveformProps {
   trackId: number | null;
@@ -23,6 +29,9 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
 
   // Fetch beatgrid data
   const { data: beatgridData } = useBeatgridData(trackId);
+
+  // Fetch hot cues
+  const { data: hotCuesArray = [] } = useHotCues(trackId);
 
   // Drag state
   const isDragging = useRef(false);
@@ -46,6 +55,11 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
       // Set initial cue point if available
       if (audio.cuePoint !== null) {
         renderer.setCuePoint(audio.cuePoint);
+      }
+
+      // Set initial hot cues if already loaded
+      if (hotCuesArray && hotCuesArray.length > 0) {
+        renderer.setHotCues(hotCuesArray);
       }
 
       // Set initial beatgrid if already loaded
@@ -95,12 +109,21 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
     }
   }, [beatgridData]);
 
-  // Sync renderer position when audio is paused and currentTime changes (e.g., from cue button seeking)
+  // Update hot cues when data changes
+  useEffect(() => {
+    if (rendererRef.current && hotCuesArray) {
+      rendererRef.current.setHotCues(hotCuesArray);
+      // Force a render to show hot cues immediately
+      rendererRef.current.render();
+    }
+  }, [hotCuesArray]);
+
+  // Sync renderer position when audio is paused (for seeking/cue button)
   useEffect(() => {
     if (rendererRef.current && !audio.isPlaying && audio.audioRef.current) {
       rendererRef.current.setPlayPosition(audio.audioRef.current.currentTime);
     }
-  }, [audio.currentTime, audio.isPlaying, audio.audioRef]);
+  }, [audio.isPlaying, audio.cuePoint, audio.seekVersion, audio.audioRef]);
 
   // Drag-to-scrub handlers
   const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -169,6 +192,11 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
       // Seek audio
       const seekTime = renderer.playPosition * renderer.waveformData.duration;
       audio.seek(Math.max(0, Math.min(audio.duration, seekTime)));
+
+      // Manually sync renderer position immediately
+      if (audio.audioRef.current) {
+        renderer.setPlayPosition(audio.audioRef.current.currentTime);
+      }
 
       // Resume playback if it was playing before drag
       if (wasPlaying.current) {

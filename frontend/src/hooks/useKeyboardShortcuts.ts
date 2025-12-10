@@ -12,6 +12,9 @@ interface UseKeyboardShortcutsProps {
   onSetDownbeat?: () => void;
   onEnterTagEditMode?: () => void;
   onEnterEnergyEditMode?: () => void;
+  onHotCueDown?: (slotNumber: number) => void;
+  onHotCueUp?: (slotNumber: number) => void;
+  onHotCueDelete?: (slotNumber: number) => void;
 }
 
 export function useKeyboardShortcuts({
@@ -22,7 +25,10 @@ export function useKeyboardShortcuts({
   onNudgeBeatgrid,
   onSetDownbeat,
   onEnterTagEditMode,
-  onEnterEnergyEditMode
+  onEnterEnergyEditMode,
+  onHotCueDown,
+  onHotCueUp,
+  onHotCueDelete
 }: UseKeyboardShortcutsProps) {
   const audio = useAudio();
   const [seekDirection, setSeekDirection] = useState<number>(0); // -1, 0, or 1
@@ -149,6 +155,46 @@ export function useKeyboardShortcuts({
           setSeekDirection(1);   // Seek forward
         }
       }
+
+      // Hot cue keys: 1-8 (prevent key repeat like F key)
+      // Use event.code to detect Digit1-8 regardless of Shift state
+      if (/^Digit[1-8]$/.test(event.code) && !event.shiftKey) {
+        if (!selectedTrack) return;
+
+        // Prevent key repeat for hot cue buttons
+        if (event.repeat) {
+          event.preventDefault();
+          return;
+        }
+
+        event.preventDefault();
+
+        // Extract digit from 'Digit1' -> 1
+        const slotNumber = parseInt(event.code.slice(-1), 10);
+        if (onHotCueDown) {
+          onHotCueDown(slotNumber);
+        }
+      }
+
+      // Hot cue delete: Shift+1-8 (single press only, no repeat)
+      // Use event.code to detect Digit1-8 regardless of Shift state
+      if (/^Digit[1-8]$/.test(event.code) && event.shiftKey) {
+        if (!selectedTrack) return;
+
+        // Prevent key repeat
+        if (event.repeat) {
+          event.preventDefault();
+          return;
+        }
+
+        event.preventDefault();
+
+        // Extract digit from 'Digit1' -> 1
+        const slotNumber = parseInt(event.code.slice(-1), 10);
+        if (onHotCueDelete) {
+          onHotCueDelete(slotNumber);
+        }
+      }
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -175,6 +221,20 @@ export function useKeyboardShortcuts({
       if ((key === 'h' || key === 'l') && !event.shiftKey) {
         event.preventDefault();
         setSeekDirection(0);
+      }
+
+      // Hot cue key up: 1-8 (only for non-Shift, since Shift deletes)
+      // Use event.code to detect Digit1-8 regardless of Shift state
+      if (/^Digit[1-8]$/.test(event.code) && !event.shiftKey) {
+        if (!selectedTrack) return;
+
+        event.preventDefault();
+
+        // Extract digit from 'Digit1' -> 1
+        const slotNumber = parseInt(event.code.slice(-1), 10);
+        if (onHotCueUp) {
+          onHotCueUp(slotNumber);
+        }
       }
     };
 

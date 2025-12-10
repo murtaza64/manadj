@@ -4,8 +4,12 @@ version = "0.1.0"
 description = "Engine DJ database access library"
 requires-python = ">=3.13"
 dependencies = [
+    "beatnet>=1.1.1",
+    "essentia>=2.1b6.dev1389",
     "fastapi>=0.122.0",
     "librosa>=0.11.0",
+    "madmom",
+    "matplotlib>=3.10.7",
     "mutagen>=1.47.0",
     "numpy>=2.3.5",
     "pillow>=12.0.0",
@@ -13,6 +17,7 @@ dependencies = [
     "scipy>=1.16.3",
     "soundfile>=0.13.1",
     "sqlalchemy>=2.0.0,<3.0.0",
+    "tensorflow>=2.20.0",
     "uvicorn>=0.38.0",
 ]
 
@@ -33,3 +38,6 @@ warn_unused_configs = true
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.uv.sources]
+madmom = { git = "https://github.com/CPJKU/madmom" }

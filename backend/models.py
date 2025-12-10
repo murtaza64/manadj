@@ -142,3 +142,59 @@ class Beatgrid(Base):
 
     # Relationship
     track = relationship("Track", backref="beatgrid", uselist=False)
+
+
+class BPMAnalysis(Base):
+    __tablename__ = "bpm_analyses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
+    estimates_json = Column(Text, nullable=False)  # JSON array of {method, bpm, confidence}
+    recommended_bpms_json = Column(Text, nullable=False)  # JSON array of deduplicated BPMs
+    recommended_bpm = Column(Integer, nullable=False)  # Most accurate BPM
+    duration = Column(Float, nullable=False)  # Track duration in seconds
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationship
+    track = relationship("Track", backref="bpm_analysis", uselist=False)
+
+
+class KeyAnalysis(Base):
+    __tablename__ = "key_analyses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
+    key = Column(String, nullable=False)  # Musical notation (e.g., "Am", "C")
+    musical = Column(String, nullable=False)  # Musical notation
+    openkey = Column(String, nullable=True)  # OpenKey notation
+    camelot = Column(String, nullable=True)  # Camelot notation
+    engine_id = Column(Integer, nullable=True)  # Engine DJ key ID (0-23)
+    confidence = Column(Float, nullable=False)  # Detection confidence
+    scale = Column(String, nullable=False)  # "major" or "minor"
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationship
+    track = relationship("Track", backref="key_analysis", uselist=False)
+
+
+class HotCue(Base):
+    __tablename__ = "hotcues"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False)
+    slot_number = Column(Integer, nullable=False)  # 1-8
+    time_seconds = Column(Float, nullable=False)
+    label = Column(String, nullable=True)
+    color = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationship
+    track = relationship("Track", backref="hotcues")
+
+    __table_args__ = (
+        Index("idx_hotcues_track", "track_id"),
+        Index("idx_hotcues_unique", "track_id", "slot_number", unique=True),
+    )

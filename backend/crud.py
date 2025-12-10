@@ -21,7 +21,9 @@ def get_tracks(
     bpm_center: int | None = None,
     bpm_threshold_percent: int | None = None,
     key_camelot_ids: list[str] | None = None,
-    unprocessed: bool | None = None
+    unprocessed: bool | None = None,
+    sort_column: str | None = None,
+    sort_direction: str = "desc"
 ):
     query = db.query(models.Track).options(
         joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category)
@@ -102,6 +104,23 @@ def get_tracks(
         if key_ids:
             query = query.filter(models.Track.key.in_(key_ids))
 
+    # Apply sorting
+    if sort_column:
+        order_column = getattr(models.Track, sort_column)
+
+        # Handle string columns with case-insensitive sorting
+        if sort_column in ['title', 'artist']:
+            order_column = func.lower(order_column)
+
+        # Apply sort direction with NULL values always last
+        if sort_direction == "asc":
+            query = query.order_by(order_column.asc().nullslast())
+        else:
+            query = query.order_by(order_column.desc().nullslast())
+    else:
+        # Default sort: newest first
+        query = query.order_by(models.Track.created_at.desc())
+
     total = query.count()
     items = query.offset(skip).limit(limit).all()
 
@@ -124,6 +143,11 @@ def get_track(db: Session, track_id: int):
         track.tags = [tt.tag for tt in track.track_tags]
 
     return track
+
+
+def get_all_tracks(db: Session):
+    """Get all tracks without pagination."""
+    return db.query(models.Track).all()
 
 
 def create_track(db: Session, track: schemas.TrackCreate):
@@ -588,4 +612,195 @@ def update_beatgrid_tempo_changes(
     db.commit()
     db.refresh(beatgrid)
     return beatgrid
+
+
+# BPM Analysis CRUD operations
+
+def get_bpm_analysis(db: Session, track_id: int):
+    """Get BPM analysis for a track."""
+    return db.query(models.BPMAnalysis).filter(models.BPMAnalysis.track_id == track_id).first()
+
+
+def create_or_update_bpm_analysis(
+    db: Session,
+    track_id: int,
+    estimates: list[dict],
+    recommended_bpms: list[int],
+    recommended_bpm: int,
+    duration: float
+):
+    """Create or update BPM analysis for a track."""
+    analysis = db.query(models.BPMAnalysis).filter(models.BPMAnalysis.track_id == track_id).first()
+
+    if analysis:
+        # Update existing
+        analysis.estimates_json = json.dumps(estimates)
+        analysis.recommended_bpms_json = json.dumps(recommended_bpms)
+        analysis.recommended_bpm = recommended_bpm
+        analysis.duration = duration
+    else:
+        # Create new
+        analysis = models.BPMAnalysis(
+            track_id=track_id,
+            estimates_json=json.dumps(estimates),
+            recommended_bpms_json=json.dumps(recommended_bpms),
+            recommended_bpm=recommended_bpm,
+            duration=duration
+        )
+        db.add(analysis)
+
+    db.commit()
+    db.refresh(analysis)
+    return analysis
+
+
+# Key Analysis CRUD operations
+
+def get_key_analysis(db: Session, track_id: int):
+    """Get key analysis for a track."""
+    return db.query(models.KeyAnalysis).filter(models.KeyAnalysis.track_id == track_id).first()
+
+
+def create_or_update_key_analysis(
+    db: Session,
+    track_id: int,
+    key: str,
+    formats: dict,
+    confidence: float,
+    scale: str
+):
+    """Create or update key analysis for a track."""
+    analysis = db.query(models.KeyAnalysis).filter(models.KeyAnalysis.track_id == track_id).first()
+
+    if analysis:
+        # Update existing
+        analysis.key = key
+        analysis.musical = formats['musical']
+        analysis.openkey = formats['openkey']
+        analysis.camelot = formats['camelot']
+        analysis.engine_id = formats['engine_id']
+        analysis.confidence = confidence
+        analysis.scale = scale
+    else:
+        # Create new
+        analysis = models.KeyAnalysis(
+            track_id=track_id,
+            key=key,
+            musical=formats['musical'],
+            openkey=formats['openkey'],
+            camelot=formats['camelot'],
+            engine_id=formats['engine_id'],
+            confidence=confidence,
+            scale=scale
+        )
+        db.add(analysis)
+
+    db.commit()
+    db.refresh(analysis)
+    return analysis
+
+
+# Hot Cue Functions
+
+def quantize_to_nearest_beat(
+    db: Session,
+    track_id: int,
+    time_seconds: float
+) -> float:
+    """
+    Quantize time to nearest beat from beatgrid.
+    Falls back to unquantized if:
+    - No beatgrid exists
+    - Quantized position exceeds track duration
+    """
+    import json
+    from .beatgrid_utils import calculate_beats_from_tempo_changes
+
+    beatgrid = get_beatgrid(db, track_id)
+    if not beatgrid:
+        return time_seconds
+
+    waveform = get_waveform(db, track_id)
+    if not waveform:
+        return time_seconds
+
+    tempo_changes = json.loads(beatgrid.tempo_changes_json)
+    beat_times, _ = calculate_beats_from_tempo_changes(
+        tempo_changes,
+        waveform.duration
+    )
+
+    if not beat_times:
+        return time_seconds
+
+    # Find nearest beat
+    nearest_beat = min(beat_times, key=lambda bt: abs(bt - time_seconds))
+
+    # Edge case: quantized position beyond track duration
+    if nearest_beat > waveform.duration:
+        return time_seconds
+
+    return nearest_beat
+
+
+def get_hotcues(db: Session, track_id: int):
+    """Get all hot cues for a track."""
+    return db.query(models.HotCue).filter(
+        models.HotCue.track_id == track_id
+    ).order_by(models.HotCue.slot_number).all()
+
+
+def set_hotcue(
+    db: Session,
+    track_id: int,
+    slot_number: int,
+    time_seconds: float,
+    label: str | None = None,
+    color: str | None = None
+):
+    """Set or update a hot cue (auto-quantized to beat)."""
+    # Quantize to nearest beat
+    quantized_time = quantize_to_nearest_beat(db, track_id, time_seconds)
+
+    # Get existing hot cue if it exists
+    hotcue = db.query(models.HotCue).filter(
+        models.HotCue.track_id == track_id,
+        models.HotCue.slot_number == slot_number
+    ).first()
+
+    if hotcue:
+        # Update existing
+        hotcue.time_seconds = quantized_time
+        if label is not None:
+            hotcue.label = label
+        if color is not None:
+            hotcue.color = color
+    else:
+        # Create new
+        hotcue = models.HotCue(
+            track_id=track_id,
+            slot_number=slot_number,
+            time_seconds=quantized_time,
+            label=label,
+            color=color
+        )
+        db.add(hotcue)
+
+    db.commit()
+    db.refresh(hotcue)
+    return hotcue
+
+
+def delete_hotcue(db: Session, track_id: int, slot_number: int):
+    """Delete a hot cue."""
+    hotcue = db.query(models.HotCue).filter(
+        models.HotCue.track_id == track_id,
+        models.HotCue.slot_number == slot_number
+    ).first()
+
+    if hotcue:
+        db.delete(hotcue)
+        db.commit()
+        return True
+    return False
 

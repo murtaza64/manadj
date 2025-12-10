@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from .database import engine
 from .models import Base
-from .routers import tracks, tags, waveforms, playlists, beatgrids, sync_playlists, sync_tags, sync_tracks
+from .routers import tracks, tags, waveforms, playlists, beatgrids, hotcues, sync_playlists, sync_tags, sync_tracks, sync_library, analyze
 from .waveform_worker import start_waveform_worker, stop_waveform_worker
 from .logging_config import setup_logging
 
@@ -36,9 +36,12 @@ app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
 app.include_router(waveforms.router, prefix="/api/waveforms", tags=["waveforms"])
 app.include_router(playlists.router, prefix="/api/playlists", tags=["playlists"])
 app.include_router(beatgrids.router, prefix="/api/beatgrids", tags=["beatgrids"])
+app.include_router(hotcues.router, prefix="/api/hotcues", tags=["hotcues"])
+app.include_router(analyze.router, prefix="/api/analyze", tags=["analyze"])
 app.include_router(sync_playlists.router, prefix="/api")
 app.include_router(sync_tags.router, prefix="/api")
 app.include_router(sync_tracks.router, prefix="/api")
+app.include_router(sync_library.router, prefix="/api")
 
 # Mount static files for PNG waveforms
 app.mount("/waveforms", StaticFiles(directory="waveforms"), name="waveforms")

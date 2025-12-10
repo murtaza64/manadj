@@ -197,3 +197,134 @@ class BeatgridResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# Analysis Schemas
+
+class BPMEstimate(BaseModel):
+    """Single BPM estimate from a detection method."""
+    method: str
+    bpm: int
+    confidence: float | None = None
+
+
+class BPMAnalysisMetadata(BaseModel):
+    """Metadata about BPM analysis."""
+    duration: float
+    analyzed_at: str
+
+
+class BPMAnalysisResponse(BaseModel):
+    """BPM analysis response with multiple estimates."""
+    track_id: int
+    estimates: list[BPMEstimate]
+    recommended_bpms: list[int]
+    recommended_bpm: int
+    metadata: BPMAnalysisMetadata
+
+
+class KeyFormats(BaseModel):
+    """Musical key in different notation formats."""
+    musical: str
+    openkey: str | None
+    camelot: str | None
+    engine_id: int | None
+
+
+class KeyAnalysisMetadata(BaseModel):
+    """Metadata about key analysis."""
+    scale: str
+    analyzed_at: str
+
+
+class KeyAnalysisResponse(BaseModel):
+    """Key analysis response."""
+    track_id: int
+    key: str
+    formats: KeyFormats
+    confidence: float
+    metadata: KeyAnalysisMetadata
+
+
+# Metadata Sync Schemas
+
+class MetadataValues(BaseModel):
+    """Metadata values for comparison."""
+    title: str | None = None
+    artist: str | None = None
+    bpm: float | None = None  # Display format
+    key: str | None = None  # Musical notation (e.g., "Am", "C")
+
+
+class MetadataComparison(BaseModel):
+    """Comparison of database vs file metadata for a single track."""
+    track_id: int
+    filename: str
+    current: MetadataValues  # From DB
+    file: MetadataValues  # From ID3 tags
+    differences: list[str]  # ["title", "artist", "bpm", "key"]
+    conflict_type: str  # "only_in_file", "only_in_db", "conflict", "match"
+
+
+class MetadataComparisonStats(BaseModel):
+    """Statistics for metadata comparison."""
+    total_tracks: int
+    tracks_with_changes: int
+    tracks_with_conflicts: int
+    missing_files: int
+
+
+class MetadataComparisonResult(BaseModel):
+    """Result of comparing database metadata with ID3 tags."""
+    stats: MetadataComparisonStats
+    comparisons: list[MetadataComparison]
+
+
+class TrackMetadataUpdate(BaseModel):
+    """Update request for a single track's metadata."""
+    track_id: int
+    fields: dict[str, str | float | None]  # {"title": "New Title", "artist": "New Artist", etc.}
+
+
+class MetadataSyncRequest(BaseModel):
+    """Request to sync metadata from files to database."""
+    updates: list[TrackMetadataUpdate]
+    dry_run: bool = True
+
+
+class MetadataSyncStats(BaseModel):
+    """Statistics for metadata sync operation."""
+    total_requested: int
+    updated: int
+    skipped: int
+    errors: int
+    error_messages: list[str] = []
+
+
+class MetadataSyncResult(BaseModel):
+    """Result of metadata sync operation."""
+    stats: MetadataSyncStats
+    dry_run: bool
+
+
+# Hot Cue Schemas
+
+class HotCueSet(BaseModel):
+    """Request to set a hot cue."""
+    time_seconds: float
+    label: str | None = None
+    color: str | None = None
+
+
+class HotCue(BaseModel):
+    """Hot cue response."""
+    id: int
+    track_id: int
+    slot_number: int
+    time_seconds: float
+    label: str | None
+    color: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

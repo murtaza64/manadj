@@ -1,14 +1,10 @@
-"""Write manadj tags to Engine DJ as playlist hierarchy."""
-
-from dataclasses import dataclass, field
-from pathlib import Path
+"""Write manadj tags to Engine DJ as flat playlist structure."""
 
 from sqlalchemy.orm import Session
 
 from enginedj.connection import EngineDJDatabase
 from enginedj.models.track import Track as EDJTrack
 from enginedj.models.information import Information as EDJInformation
-from backend.models import Track as ManAdjTrack
 from backend.crud import get_tag_categories, get_tags_by_category
 from enginedj.sync import index_engine_tracks, match_track
 from enginedj.playlist import (
@@ -20,10 +16,10 @@ from .models import TagSyncStats
 
 
 class EngineTagWriter:
-    """Write manadj tags to Engine DJ as playlist hierarchy.
+    """Write manadj tags to Engine DJ as flat playlist structure.
 
-    Creates/updates 3-level hierarchy:
-    "manadj Tags" > Category > Tag (with tracks)
+    Creates/updates flat structure:
+    "manaDJ Tags" > Tag1, Tag2, Tag3, ... (all tags directly under root)
     """
 
     def __init__(self, manadj_session: Session, engine_db: EngineDJDatabase):
@@ -39,16 +35,12 @@ class EngineTagWriter:
 
         Args:
             dry_run: Preview without writing
-            fresh: Delete existing "manadj Tags" and recreate
+            fresh: Delete existing "manaDJ Tags" and recreate
 
         Returns:
             Statistics about the sync operation
         """
         stats = TagSyncStats()
-
-        # Track matching indices (cached)
-        edj_tracks_by_path = {}
-        edj_tracks_by_filename = {}
 
         # Get all categories
         categories = get_tag_categories(self.manadj_session)
@@ -76,12 +68,21 @@ class EngineTagWriter:
                 edj_session, db_uuid, dry_run, fresh, stats
             )
 
-            # Sync each category
+            # Collect all tags from all categories
+            all_tags = []
             for category in categories:
-                self._sync_category(
+                tags = get_tags_by_category(self.manadj_session, category.id)
+                all_tags.extend(tags)
+
+            # Sort alphabetically by name
+            all_tags.sort(key=lambda t: t.name.lower())
+
+            # Sync all tags directly under root
+            for tag in all_tags:
+                self._sync_tag(
                     edj_session,
-                    category,
-                    root_id or 0,
+                    tag,
+                    root_id,
                     db_uuid,
                     dry_run,
                     edj_tracks_by_path,
@@ -99,22 +100,18 @@ class EngineTagWriter:
         fresh: bool,
         stats: TagSyncStats
     ) -> int | None:
-        """Find or create root "manadj Tags" playlist.
+        """Find or create root "manaDJ Tags" playlist.
 
         Returns:
             Playlist ID or None if dry_run
         """
         if dry_run:
-            # Check if exists for reporting
-            existing = find_playlist_by_title_and_parent(
-                edj_session, "manadj Tags", 0
-            )
             return None
 
         # Check if fresh mode - delete existing
         if fresh:
             existing = find_playlist_by_title_and_parent(
-                edj_session, "manadj Tags", 0
+                edj_session, "manaDJ Tags", 0
             )
             if existing:
                 # Delete will cascade to children via Engine DJ constraints
@@ -124,79 +121,26 @@ class EngineTagWriter:
         # Find or create
         playlist, created = create_or_update_playlist(
             edj_session,
-            title="manadj Tags",
+            title="manaDJ Tags",
             parent_id=0,
             edj_tracks=[],  # Root has no tracks
             db_uuid=db_uuid
         )
 
-        if created:
-            stats.categories_created += 1
-
         return playlist.id
-
-    def _sync_category(
-        self,
-        edj_session,
-        category,
-        root_id: int,
-        db_uuid: str,
-        dry_run: bool,
-        edj_tracks_by_path: dict,
-        edj_tracks_by_filename: dict,
-        stats: TagSyncStats
-    ):
-        """Sync a single tag category to Engine DJ."""
-        # Get all tags in this category
-        tags = get_tags_by_category(self.manadj_session, category.id)
-
-        if not tags:
-            return
-
-        # Find or create category playlist
-        if not dry_run:
-            category_playlist, cat_created = create_or_update_playlist(
-                edj_session,
-                title=category.name,
-                parent_id=root_id,
-                edj_tracks=[],  # Category playlist has no tracks
-                db_uuid=db_uuid
-            )
-
-            if cat_created:
-                stats.categories_created += 1
-            else:
-                stats.categories_updated += 1
-
-            category_id = category_playlist.id
-        else:
-            category_id = None
-
-        # Sync each tag in this category
-        for tag in tags:
-            self._sync_tag(
-                edj_session,
-                tag,
-                category_id,
-                db_uuid,
-                dry_run,
-                edj_tracks_by_path,
-                edj_tracks_by_filename,
-                stats
-            )
 
     def _sync_tag(
         self,
         edj_session,
         tag,
-        category_playlist_id: int | None,
+        root_id: int | None,
         db_uuid: str,
         dry_run: bool,
         edj_tracks_by_path: dict,
         edj_tracks_by_filename: dict,
         stats: TagSyncStats
     ):
-        """Sync a single tag to Engine DJ."""
+        """Sync a single tag to Engine DJ directly under root."""
         # Get tracks with this tag
         manadj_tracks = get_tracks_by_tag(self.manadj_session, tag.id)
 
@@ -221,12 +165,12 @@ class EngineTagWriter:
         stats.tracks_matched += len(matched_edj_tracks)
         stats.tracks_unmatched += len(unmatched)
 
-        # Create/update playlist
-        if not dry_run and category_playlist_id and matched_edj_tracks:
+        # Create/update playlist directly under root
+        if not dry_run and root_id and matched_edj_tracks:
             tag_playlist, tag_created = create_or_update_playlist(
                 edj_session,
                 title=tag.name,
-                parent_id=category_playlist_id,
+                parent_id=root_id,
                 edj_tracks=matched_edj_tracks,
                 db_uuid=db_uuid
             )

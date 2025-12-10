@@ -100,3 +100,10 @@ export const ArrowDownIcon = ({ width = 16, height = 16, opacity = 0.7, classNam
           opacity={opacity}/>
   </svg>
 );
+
+export const CalendarIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
+  <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
+    <path d="M2 3h12v10H2V3zm1 1v8h10V4H3zm2-2v2h1V2H5zm5 0v2h1V2h-1zM3 6h10v1H3V6z"
+          fill="var(--text)" opacity={opacity}/>
+  </svg>
+);

@@ -1,0 +1,99 @@
+/* Column widths are set dynamically via inline styles from columnConfig.ts */
+
+.track-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.track-table thead {
+  border-bottom: 1px solid var(--surface0);
+  position: sticky;
+  top: 0;
+  background: var(--mantle);
+  z-index: 10;
+}
+
+/* Sortable header base styles */
+.sortable-header {
+  padding: 6px 6px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text);
+  transition: color 0.2s;
+}
+
+.sortable-header:hover {
+  color: var(--lavender);
+}
+
+.sortable-header.sorted {
+  color: var(--mauve);
+}
+
+.sortable-header-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sortable-header-content.align-right {
+  justify-content: flex-end;
+}
+
+.sort-indicator {
+  font-size: 10px;
+}
+
+/* Generic sticky column styles */
+.sticky-col-header {
+  position: sticky;
+  background: var(--mantle);
+  z-index: 11;
+}
+
+.sticky-col-cell {
+  position: sticky;
+  background: var(--base);
+  z-index: 1;
+}
+
+.sticky-shadow {
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Loading/error states */
+.track-table-message {
+  padding: 20px;
+}
+
+.track-table-loading {
+  color: var(--subtext1);
+}
+
+.track-table-error {
+  color: var(--red);
+}
+
+/* Fetching overlay */
+.track-table-fetching-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.track-table-fetching-message {
+  background: var(--surface0);
+  color: var(--text);
+  padding: 8px 16px;
+  border: 1px solid var(--surface1);
+  font-size: 13px;
+}

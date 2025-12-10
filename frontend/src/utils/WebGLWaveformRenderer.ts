@@ -25,6 +25,13 @@ export interface WebGLRendererConfig {
 }
 
 export class WebGLWaveformRenderer {
+  // Static counters for debugging
+  private static instanceCount = 0;
+  private static activeRenderLoops = 0;
+  public static SIMULATE_PLAYBACK = false; // Set to true to test without audio (accessible from console)
+  public static SKIP_RENDERING = false; // Set to true to test RAF + audio without rendering
+  private instanceId: number;
+
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext;
 
@@ -37,6 +44,7 @@ export class WebGLWaveformRenderer {
   private a_position: number;
   private a_color: number;
   private u_matrix: WebGLUniformLocation;
+  private u_pixelOffset: WebGLUniformLocation;
 
   // Rendering state
   public waveformData: WaveformDataWebGL | null = null;
@@ -62,6 +70,11 @@ export class WebGLWaveformRenderer {
   // Animation loop
   private animationFrameId: number | null = null;
 
+  // Interpolation tracking for smooth playback
+  private lastKnownTime: number = 0;
+  private lastTimeUpdate: number = 0;  // DOMHighResTimeStamp
+  private smoothedPlayPosition: number = 0;  // Exponentially smoothed position
+
   // Zoom limits
   private maxZoom: number;
   private minZoom: number;
@@ -69,11 +82,44 @@ export class WebGLWaveformRenderer {
   // Cue point (time in seconds)
   public cuePoint: number | null = null;
 
+  // Hot cues (slot number -> time in seconds)
+  private hotCues: Map<number, { time: number; color?: string }> = new Map();
+
   // Beatgrid data
   private beatTimes: Float32Array | null = null;
   private downbeatIndices: Set<number> = new Set();
 
+  // Geometry caching for performance
+  private cachedWaveformGeometry: Float32Array | null = null;
+  private cacheValidation: {
+    firstDisplayedPosition: number;
+    lastDisplayedPosition: number;
+    canvasWidth: number;
+    canvasHeight: number;
+  } | null = null;
+
+  // Current pixel offset for shader-based translation (updated every frame)
+  private currentPixelOffset: number = 0;
+
+  // Performance monitoring
+  private cacheHits: number = 0;
+  private cacheMisses: number = 0;
+  private lastFrameTime: number = 0;
+  private frameTimeSamples: number[] = [];
+
+  // Debug scrolling
+  private lastPixelOffset: number = 0;
+  private pixelOffsetDeltas: number[] = [];
+  private playPositionDeltas: number[] = [];
+  private lastActualTime: number = 0;
+  private lastTimestamp: number = 0;
+  private lastRenderStart: number = 0;
+  private frameDeltaSamples: number[] = [];
+
   constructor(canvas: HTMLCanvasElement, config: WebGLRendererConfig = {}) {
+    // Track instance for debugging
+    this.instanceId = ++WebGLWaveformRenderer.instanceCount;
+
     this.canvas = canvas;
 
     const gl = canvas.getContext('webgl2');
@@ -94,6 +140,8 @@ export class WebGLWaveformRenderer {
     // Initialize WebGL
     this.initShaders();
     this.initBuffers();
+
+    console.log(`[Renderer #${this.instanceId}] Created (${this.isMinimapMode ? 'minimap' : 'main'}), total instances: ${WebGLWaveformRenderer.instanceCount}`);
   }
 
   private setupHighDPI(): void {
@@ -106,8 +154,16 @@ export class WebGLWaveformRenderer {
     const displayHeight = rect.height;
 
     // Set canvas buffer size to actual display size * DPR
-    this.canvas.width = displayWidth * dpr;
-    this.canvas.height = displayHeight * dpr;
+    const newWidth = displayWidth * dpr;
+    const newHeight = displayHeight * dpr;
+
+    // Invalidate cache if dimensions changed
+    if (this.canvas.width !== newWidth || this.canvas.height !== newHeight) {
+      this.invalidateWaveformCache();
+    }
+
+    this.canvas.width = newWidth;
+    this.canvas.height = newHeight;
 
     // Store display dimensions for pixel-aligned calculations
     this.displayWidth = displayWidth;
@@ -135,11 +191,14 @@ export class WebGLWaveformRenderer {
     in vec3 a_color;
 
     uniform mat4 u_matrix;
+    uniform float u_pixelOffset;
 
     out vec3 v_color;
 
     void main() {
-        gl_Position = u_matrix * vec4(a_position, 0.0, 1.0);
+        // Apply horizontal pixel offset translation in shader
+        vec2 translatedPosition = vec2(a_position.x + u_pixelOffset, a_position.y);
+        gl_Position = u_matrix * vec4(translatedPosition, 0.0, 1.0);
         v_color = a_color;
     }
     `;
@@ -161,11 +220,18 @@ export class WebGLWaveformRenderer {
     // Get attribute/uniform locations
     this.a_position = this.gl.getAttribLocation(this.program, 'a_position');
     this.a_color = this.gl.getAttribLocation(this.program, 'a_color');
+
     const u_matrix = this.gl.getUniformLocation(this.program, 'u_matrix');
     if (u_matrix === null) {
       throw new Error('Failed to get u_matrix uniform location');
     }
     this.u_matrix = u_matrix;
+
+    const u_pixelOffset = this.gl.getUniformLocation(this.program, 'u_pixelOffset');
+    if (u_pixelOffset === null) {
+      throw new Error('Failed to get u_pixelOffset uniform location');
+    }
+    this.u_pixelOffset = u_pixelOffset;
   }
 
   private createProgram(vertexSource: string, fragmentSource: string): WebGLProgram {
@@ -245,6 +311,7 @@ export class WebGLWaveformRenderer {
 
   public setWaveformData(data: WaveformDataWebGL): void {
     this.waveformData = data;
+    this.invalidateWaveformCache();
     this.calculateDisplayWindow();
   }
 
@@ -252,12 +319,23 @@ export class WebGLWaveformRenderer {
     // position in seconds
     if (this.waveformData) {
       this.playPosition = position / this.waveformData.duration;
+      // Reset interpolation and smoothing state to prevent jumps after seeking
+      this.lastKnownTime = position;
+      this.smoothedPlayPosition = this.playPosition;
+      this.lastTimeUpdate = 0;  // Force re-initialization on next frame
       this.calculateDisplayWindow();
     }
   }
 
   public setCuePoint(cueTime: number | null): void {
     this.cuePoint = cueTime;
+  }
+
+  public setHotCues(hotCues: Array<{ slot_number: number; time_seconds: number; color?: string }>): void {
+    this.hotCues.clear();
+    for (const hc of hotCues) {
+      this.hotCues.set(hc.slot_number, { time: hc.time_seconds, color: hc.color });
+    }
   }
 
   public setBeatgrid(beatTimes: number[], downbeatTimes: number[]): void {
@@ -271,6 +349,82 @@ export class WebGLWaveformRenderer {
         this.downbeatIndices.add(i);
       }
     }
+  }
+
+  /**
+   * Check if cached waveform geometry is still valid
+   * Cache is valid as long as zoom level and canvas dimensions haven't changed
+   * Position changes are handled by shader translation (u_pixelOffset)
+   */
+  private isCacheValid(): boolean {
+    if (!this.cachedWaveformGeometry || !this.cacheValidation) return false;
+
+    const cache = this.cacheValidation;
+
+    // Check canvas dimensions (exact match required)
+    if (cache.canvasWidth !== this.canvas.width || cache.canvasHeight !== this.canvas.height) {
+      return false;
+    }
+
+    // Check that zoom level hasn't changed significantly (which changes the display range)
+    // Compare the width of the display window rather than absolute positions
+    const cachedRange = cache.lastDisplayedPosition - cache.firstDisplayedPosition;
+    const currentRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
+    const rangeDiff = Math.abs(cachedRange - currentRange);
+
+    // If range changed by more than 0.1%, zoom changed - invalidate cache
+    const rangeEpsilon = currentRange * 0.001;
+
+    return rangeDiff < rangeEpsilon;
+  }
+
+  /**
+   * Update cache validation parameters to current state
+   */
+  private updateCacheValidation(): void {
+    this.cacheValidation = {
+      firstDisplayedPosition: this.firstDisplayedPosition,
+      lastDisplayedPosition: this.lastDisplayedPosition,
+      canvasWidth: this.canvas.width,
+      canvasHeight: this.canvas.height,
+    };
+  }
+
+  /**
+   * Invalidate cached waveform geometry
+   */
+  private invalidateWaveformCache(): void {
+    this.cachedWaveformGeometry = null;
+    this.cacheValidation = null;
+  }
+
+  /**
+   * Calculate the pixel offset for shader-based translation
+   * Maps the entire cached waveform geometry to show the current view window
+   */
+  private calculatePixelOffset(): number {
+    if (!this.waveformData || this.isMinimapMode) return 0;
+
+    // Use buffer width (includes DPI scaling) to match geometry coordinates
+    const canvasWidth = this.canvas.width;
+    const totalDataPoints = this.waveformData.low.length;
+
+    // Get the zoom level (display range) used when geometry was cached
+    const cachedRange = this.cacheValidation?.lastDisplayedPosition - (this.cacheValidation?.firstDisplayedPosition ?? 0) || this.lastDisplayedPosition - this.firstDisplayedPosition;
+    const samplesPerPixel = (cachedRange * totalDataPoints) / canvasWidth;
+
+    // Calculate pixel position of firstDisplayedPosition in the entire waveform geometry
+    // (This is the left edge of what should be visible)
+    const firstDisplayedPixel = (this.firstDisplayedPosition * totalDataPoints) / samplesPerPixel;
+
+    // We want firstDisplayedPosition to appear at pixel 0 on the left edge of screen
+    // So offset = 0 - firstDisplayedPixel = -firstDisplayedPixel
+    let pixelOffset = -firstDisplayedPixel;
+
+    // Apply manual drag offset (for smooth dragging without recalculating display window)
+    pixelOffset += this.manualDragOffset * this.pixelRatio;
+
+    return pixelOffset;
   }
 
   public calculateDisplayWindow(): void {
@@ -303,62 +457,46 @@ export class WebGLWaveformRenderer {
     const canvasHeight = this.canvas.height;
     const halfHeight = canvasHeight / 2.0;
 
-    // Calculate sampling parameters
+    // For minimap: render entire track
+    // For normal mode: also render entire track, use shader to translate visible portion
+    // This allows infinite scrolling without regenerating geometry (only on zoom)
     const totalDataPoints = this.waveformData.low.length;
-    const firstIndex = Math.floor(this.firstDisplayedPosition * totalDataPoints);
-    const lastIndex = Math.floor(this.lastDisplayedPosition * totalDataPoints);
-    const dataPointsToRender = lastIndex - firstIndex;
+    const firstIndex = 0;
+    const lastIndex = totalDataPoints;
+    const dataPointsToRender = totalDataPoints;
 
-    // Calculate pixel offset for waveform scrolling
-    let pixelOffset = 0;
+    // Calculate samples per pixel based on current zoom level
+    const visibleRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
+    const samplesPerPixel = (visibleRange * totalDataPoints) / canvasWidth;
 
-    if (this.isMinimapMode) {
-      // Minimap: no offset, waveform stays still
-      pixelOffset = 0;
-    } else {
-      // Normal mode: calculate offset so playPosition aligns with fixed playhead
-      const displayRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
-      const playPositionInRange = (this.playPosition - this.firstDisplayedPosition) / displayRange;
-      const playheadPixel = this.canvas.width * this.playMarkerPosition;
-
-      // Calculate pixel offset so playPosition aligns with playhead
-      // Round to nearest pixel to prevent sub-pixel rendering glitches
-      pixelOffset = Math.round(playheadPixel - (playPositionInRange * canvasWidth));
-
-      // Apply manual drag offset (for smooth dragging without recalculating display window)
-      // Scale from display pixels to buffer pixels
-      pixelOffset += this.manualDragOffset * this.pixelRatio;
-    }
-
-    // Samples per pixel
-    const samplesPerPixel = dataPointsToRender / canvasWidth;
+    // Render the entire waveform at current zoom resolution
+    const renderWidth = dataPointsToRender / samplesPerPixel;
 
     // Vertex array: [x, y, r, g, b] * 6 vertices per pixel * 3 bands
     const vertices: number[] = [];
 
     // Band colors - RGB for bass/mid/treble
+    // Darker colors for minimap mode to make markers more visible
+    const colorScale = this.isMinimapMode ? 0.5 : 1.0;
     const colors: Record<string, [number, number, number]> = {
-      low: [0.95, 0.38, 0.38],   // Mild red (maroon) - bass
-      mid: [0.0, 1.0, 0.0],      // Green - mids
-      high: [0.53, 0.87, 0.93]   // Light blue (sky) - highs
+      low: [0.95 * colorScale, 0.38 * colorScale, 0.38 * colorScale],   // Mild red (maroon) - bass
+      mid: [0.0, 1.0 * colorScale, 0.0],      // Green - mids
+      high: [0.53 * colorScale, 0.87 * colorScale, 0.93 * colorScale]   // Light blue (sky) - highs
     };
 
     // Band opacity for additive blending
     // Lower opacity prevents oversaturation where bands overlap
+    // Reduce opacity further for minimap
+    const opacityScale = this.isMinimapMode ? 0.5 : 1.0;
     const opacities: Record<string, number> = {
-      low: 0.7,    // Red bass
-      mid: 0.7,    // Green mids
-      high: 0.7    // Blue highs
+      low: 0.7 * opacityScale,    // Red bass
+      mid: 0.7 * opacityScale,    // Green mids
+      high: 0.7 * opacityScale    // Blue highs
     };
 
-    // Render each pixel column
-    for (let pixelX = 0; pixelX < canvasWidth; pixelX++) {
-      // Calculate actual pixel position with offset
-      const actualPixelX = pixelX + pixelOffset;
-
-      // Skip if outside canvas bounds
-      if (actualPixelX < 0 || actualPixelX >= canvasWidth) continue;
-
+    // Render each pixel column for the entire waveform
+    // Shader will translate to show only the visible portion
+    for (let pixelX = 0; pixelX < renderWidth; pixelX++) {
       // Calculate center position and sampling radius for this pixel (Mixxx approach)
       // Use center ± radius instead of discrete edges for better anti-aliasing
       const centerDataIndex = firstIndex + (pixelX + 0.5) * samplesPerPixel;
@@ -411,8 +549,8 @@ export class WebGLWaveformRenderer {
         // Triangle 1: top-left, top-right, bottom-left
         // Triangle 2: top-right, bottom-right, bottom-left
 
-        const x1 = actualPixelX;
-        const x2 = actualPixelX + 1;
+        const x1 = pixelX;
+        const x2 = pixelX + 1;
 
         // For minimap mode, only render top half (amplitude upward from bottom)
         // For normal mode, render full waveform (centered)
@@ -444,8 +582,8 @@ export class WebGLWaveformRenderer {
     return new Float32Array(vertices);
   }
 
-  private renderVertices(vertices: Float32Array): void {
-    // Upload and render a vertex array
+  private renderVertices(vertices: Float32Array, pixelOffset: number = 0): void {
+    // Upload and render a vertex array with optional pixel offset for translation
     if (!vertices || vertices.length === 0) return;
 
     const gl = this.gl;
@@ -466,6 +604,7 @@ export class WebGLWaveformRenderer {
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
     gl.uniformMatrix4fv(this.u_matrix, false, matrix);
+    gl.uniform1f(this.u_pixelOffset, pixelOffset);
 
     // Enable additive blending for proper RGB compositing
     // Red + Green = Yellow, Red + Blue = Magenta, Green + Blue = Cyan
@@ -479,6 +618,7 @@ export class WebGLWaveformRenderer {
   }
 
   public render(): void {
+    const frameStart = performance.now();
     const gl = this.gl;
 
     // Set viewport to match canvas size (important for high DPI)
@@ -490,11 +630,48 @@ export class WebGLWaveformRenderer {
 
     if (!this.waveformData) return;
 
-    // Render main waveform
-    const mainVertices = this.generateGeometry();
-    if (mainVertices) {
-      this.renderVertices(mainVertices);
+    // Calculate pixel offset for shader-based translation
+    this.currentPixelOffset = this.calculatePixelOffset();
+
+    // Track scrolling behavior for debugging
+    const offsetDelta = this.currentPixelOffset - this.lastPixelOffset;
+    this.pixelOffsetDeltas.push(offsetDelta);
+
+    // Log individual frames with unusual scroll behavior (only for main waveform)
+    if (!this.isMinimapMode) {
+      const avgDelta = this.pixelOffsetDeltas.length > 10
+        ? this.pixelOffsetDeltas.slice(-10).reduce((a, b) => a + b, 0) / 10
+        : offsetDelta;
+
+      // Log if this frame deviates significantly from recent average
+      const deviation = Math.abs(offsetDelta - avgDelta);
+      if (deviation > 2.0 && this.pixelOffsetDeltas.length > 10) {
+        console.log(`[Frame Anomaly] offset Δ: ${offsetDelta.toFixed(3)}px (avg: ${avgDelta.toFixed(3)}) | deviation: ${deviation.toFixed(3)}px | playPos: ${this.playPosition.toFixed(6)} | firstDisplayed: ${this.firstDisplayedPosition.toFixed(6)}`);
+      }
     }
+
+    this.lastPixelOffset = this.currentPixelOffset;
+
+    // Render main waveform (with caching)
+    let mainVertices: Float32Array | null;
+    const cacheValid = this.isCacheValid();
+    if (cacheValid) {
+      mainVertices = this.cachedWaveformGeometry;
+      this.cacheHits++;
+    } else {
+      mainVertices = this.generateGeometry();
+      this.cachedWaveformGeometry = mainVertices;
+      this.updateCacheValidation();
+      this.cacheMisses++;
+    }
+
+    if (mainVertices) {
+      this.renderVertices(mainVertices, this.currentPixelOffset);
+    }
+
+    // Reset pixel offset to 0 for other elements (they calculate their own positions)
+    gl.useProgram(this.program);
+    gl.uniform1f(this.u_pixelOffset, 0);
 
     // Render beatgrid
     this.renderBeatgrid();
@@ -504,8 +681,69 @@ export class WebGLWaveformRenderer {
       this.renderCuePoint(this.cuePoint);
     }
 
+    // Render hot cues
+    this.renderHotCues();
+
     // Render playhead (fixed vertical line at 25%)
     this.renderPlayhead();
+
+    // Performance logging
+    const frameTime = performance.now() - frameStart;
+    this.frameTimeSamples.push(frameTime);
+
+    // Log stats every 120 frames (~2 seconds at 60fps)
+    // Only log for main waveform (not minimap)
+    if (this.frameTimeSamples.length >= 120 && !this.isMinimapMode) {
+      const avgFrameTime = this.frameTimeSamples.reduce((a, b) => a + b, 0) / this.frameTimeSamples.length;
+      const maxFrameTime = Math.max(...this.frameTimeSamples);
+      const minFrameTime = Math.min(...this.frameTimeSamples);
+
+      // Calculate hit rate for this window only
+      const windowHits = this.cacheHits - (this.lastFrameTime > 0 ? Math.floor(this.lastFrameTime) : 0);
+      const windowTotal = this.frameTimeSamples.length;
+      const windowHitRate = windowTotal > 0 ? (windowHits / windowTotal * 100).toFixed(1) : '0.0';
+
+      // Overall cumulative stats
+      const totalFrames = this.cacheHits + this.cacheMisses;
+      const overallHitRate = totalFrames > 0 ? (this.cacheHits / totalFrames * 100).toFixed(1) : '0.0';
+
+      // Scrolling statistics
+      const avgOffsetDelta = this.pixelOffsetDeltas.length > 0
+        ? this.pixelOffsetDeltas.reduce((a, b) => a + b, 0) / this.pixelOffsetDeltas.length
+        : 0;
+      const maxOffsetDelta = this.pixelOffsetDeltas.length > 0 ? Math.max(...this.pixelOffsetDeltas) : 0;
+      const minOffsetDelta = this.pixelOffsetDeltas.length > 0 ? Math.min(...this.pixelOffsetDeltas) : 0;
+
+      // Standard deviation of offset deltas (measure of jitter)
+      const offsetVariance = this.pixelOffsetDeltas.length > 0
+        ? this.pixelOffsetDeltas.reduce((sum, val) => sum + Math.pow(val - avgOffsetDelta, 2), 0) / this.pixelOffsetDeltas.length
+        : 0;
+      const offsetStdDev = Math.sqrt(offsetVariance);
+
+      // Frame scheduling statistics
+      const avgFrameDelta = this.frameDeltaSamples.length > 0
+        ? this.frameDeltaSamples.reduce((a, b) => a + b, 0) / this.frameDeltaSamples.length
+        : 0;
+      const maxFrameDelta = this.frameDeltaSamples.length > 0 ? Math.max(...this.frameDeltaSamples) : 0;
+      const lateFrames = this.frameDeltaSamples.filter(d => d > 20).length; // Frames > 20ms (slower than 50fps)
+
+      const lateFramePercent = (lateFrames / this.frameDeltaSamples.length * 100).toFixed(1);
+      console.log(`[Renderer #${this.instanceId}] Render: ${avgFrameTime.toFixed(2)}ms (${minFrameTime.toFixed(2)}-${maxFrameTime.toFixed(2)}) | RAF Δ: ${avgFrameDelta.toFixed(1)}ms avg, ${maxFrameDelta.toFixed(1)}ms max (${lateFramePercent}% late) | Cache: ${windowHitRate}% | Scroll: ${offsetStdDev.toFixed(3)}px stddev`);
+
+      // Store cache hits at start of next window
+      this.lastFrameTime = this.cacheHits;
+
+      // Reset samples
+      this.frameTimeSamples = [];
+      this.pixelOffsetDeltas = [];
+      this.frameDeltaSamples = [];
+    }
+
+    // Always reset samples for minimap to avoid memory buildup
+    if (this.isMinimapMode && this.frameTimeSamples.length >= 120) {
+      this.frameTimeSamples = [];
+      this.pixelOffsetDeltas = [];
+    }
   }
 
   private renderBeatgrid(): void {
@@ -652,7 +890,7 @@ export class WebGLWaveformRenderer {
     const cueColor = [0.79, 0.86, 0.26];  // var(--yellow) - yellowish for cue
 
     // Triangle size based on mode
-    const triangleHeight = this.isMinimapMode ? this.canvas.height * 0.30 : this.canvas.height * 0.05;
+    const triangleHeight = this.isMinimapMode ? 12 * this.pixelRatio : this.canvas.height * 0.05;
     const triangleWidth = triangleHeight; // Make it equilateral-ish
 
     // Vertical line: 2 triangles forming thin rectangle
@@ -669,15 +907,26 @@ export class WebGLWaveformRenderer {
       cueX, this.canvas.height, ...cueColor
     ]);
 
-    // Upward-pointing triangle at bottom
+    // Triangle position based on mode
     const triangleCenterX = cueX + lineWidth / 2;
-    const triangleY = this.canvas.height;
-    const triangleVertices = new Float32Array([
-      // Triangle pointing up from bottom
-      triangleCenterX - triangleWidth / 2, triangleY, ...cueColor,
-      triangleCenterX + triangleWidth / 2, triangleY, ...cueColor,
-      triangleCenterX, triangleY - triangleHeight, ...cueColor
-    ]);
+    let triangleVertices: Float32Array;
+
+    if (this.isMinimapMode) {
+      // Downward-pointing triangle at top for minimap
+      triangleVertices = new Float32Array([
+        triangleCenterX - triangleWidth / 2, 0, ...cueColor,
+        triangleCenterX + triangleWidth / 2, 0, ...cueColor,
+        triangleCenterX, triangleHeight, ...cueColor
+      ]);
+    } else {
+      // Upward-pointing triangle at bottom for main waveform
+      const triangleY = this.canvas.height;
+      triangleVertices = new Float32Array([
+        triangleCenterX - triangleWidth / 2, triangleY, ...cueColor,
+        triangleCenterX + triangleWidth / 2, triangleY, ...cueColor,
+        triangleCenterX, triangleY - triangleHeight, ...cueColor
+      ]);
+    }
 
     // Combine vertices
     const vertices = new Float32Array(lineVertices.length + triangleVertices.length);
@@ -690,6 +939,208 @@ export class WebGLWaveformRenderer {
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
     gl.drawArrays(gl.TRIANGLES, 0, 9); // 6 vertices for line + 3 for triangle
     gl.bindVertexArray(null);
+  }
+
+  private renderHotCues(): void {
+    if (!this.waveformData || this.hotCues.size === 0) return;
+
+    const gl = this.gl;
+
+    // Hot cue colors (default if no custom color)
+    const HOT_CUE_COLORS: Record<number, [number, number, number]> = {
+      1: [0.54, 0.71, 0.98],  // blue
+      2: [0.98, 0.89, 0.69],  // yellow
+      3: [0.98, 0.70, 0.53],  // peach (orange)
+      4: [0.95, 0.54, 0.66],  // red
+      5: [0.65, 0.89, 0.63],  // green
+      6: [0.96, 0.76, 0.91],  // pink
+      7: [0.80, 0.65, 0.97],  // mauve
+      8: [0.58, 0.89, 0.84],  // teal
+    };
+
+    const allVertices: number[] = [];
+
+    for (const [slotNumber, hotCue] of this.hotCues.entries()) {
+      const cueTime = hotCue.time;
+      const cuePosition = cueTime / this.waveformData.duration;
+
+      // Calculate pixel position based on mode
+      let cueX: number;
+
+      if (this.isMinimapMode) {
+        // Minimap: direct mapping
+        cueX = cuePosition * this.canvas.width;
+      } else {
+        // Main waveform: account for display window
+        const visibleRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
+        const positionInWindow = (cuePosition - this.firstDisplayedPosition) / visibleRange;
+        cueX = positionInWindow * this.canvas.width;
+
+        // Apply manual drag offset
+        cueX += this.manualDragOffset * this.pixelRatio;
+      }
+
+      // Skip if outside visible area
+      if (cueX < 0 || cueX >= this.canvas.width) continue;
+
+      // Get color (default or custom)
+      const color = HOT_CUE_COLORS[slotNumber] || [1.0, 1.0, 1.0];
+
+      if (this.isMinimapMode) {
+        // Minimap mode: render full-height vertical bar
+        const barWidth = 2 * this.pixelRatio;
+        allVertices.push(
+          // Triangle 1
+          cueX, 0, ...color,
+          cueX + barWidth, 0, ...color,
+          cueX, this.canvas.height, ...color,
+
+          // Triangle 2
+          cueX + barWidth, 0, ...color,
+          cueX + barWidth, this.canvas.height, ...color,
+          cueX, this.canvas.height, ...color
+        );
+      } else {
+        // Main waveform mode: render wider vertical line
+        const lineWidth = 3 * this.pixelRatio;
+        allVertices.push(
+          // Triangle 1
+          cueX, 0, ...color,
+          cueX + lineWidth, 0, ...color,
+          cueX, this.canvas.height, ...color,
+
+          // Triangle 2
+          cueX + lineWidth, 0, ...color,
+          cueX + lineWidth, this.canvas.height, ...color,
+          cueX, this.canvas.height, ...color
+        );
+
+        // Dark square with colored border at the bottom (drawn on overlay canvas)
+        // We'll draw this in renderHotCueNumbers() on the overlay
+      }
+    }
+
+    // Render all hot cues in one draw call (only if there are vertices to render)
+    if (allVertices.length > 0) {
+      const vertices = new Float32Array(allVertices);
+
+      // Use standard alpha blending for hot cues (not additive) for accurate colors
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      gl.bindVertexArray(this.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, allVertices.length / 5); // 5 values per vertex (x, y, r, g, b)
+      gl.bindVertexArray(null);
+
+      // Restore additive blending for other elements
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    }
+
+    // Always render/clear the text overlay (even if no hot cues are visible)
+    this.renderHotCueNumbers();
+  }
+
+  private renderHotCueNumbers(): void {
+    // Skip text rendering for minimap mode
+    if (this.isMinimapMode || !this.waveformData) return;
+
+    const gl = this.gl;
+
+    // Preserve WebGL state
+    gl.flush();
+
+    // Get or create overlay canvas for text (unique per renderer instance)
+    const overlayId = `waveform-text-overlay-${this.canvas.id || 'default'}`;
+    let overlayCanvas = document.getElementById(overlayId) as HTMLCanvasElement;
+    if (!overlayCanvas) {
+      overlayCanvas = document.createElement('canvas');
+      overlayCanvas.id = overlayId;
+      overlayCanvas.style.position = 'absolute';
+      overlayCanvas.style.top = '0';
+      overlayCanvas.style.left = '0';
+      overlayCanvas.style.pointerEvents = 'none';
+      overlayCanvas.style.zIndex = '1';
+      this.canvas.parentElement?.appendChild(overlayCanvas);
+    }
+
+    // Match canvas size
+    if (overlayCanvas.width !== this.canvas.width || overlayCanvas.height !== this.canvas.height) {
+      overlayCanvas.width = this.canvas.width;
+      overlayCanvas.height = this.canvas.height;
+      overlayCanvas.style.width = this.canvas.style.width;
+      overlayCanvas.style.height = this.canvas.style.height;
+    }
+
+    const ctx = overlayCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Always clear previous text (even if no hot cues to draw)
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    // If no hot cues, we're done (but we cleared the canvas)
+    if (this.hotCues.size === 0) return;
+
+    const squareSize = 16 * this.pixelRatio;
+    const squareY = this.canvas.height - squareSize - (4 * this.pixelRatio);
+
+    ctx.font = `bold ${12 * this.pixelRatio}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Hot cue colors (RGB -> CSS, matching WebGL colors)
+    const HOT_CUE_CSS_COLORS: Record<number, string> = {
+      1: 'rgb(137, 180, 250)',  // blue
+      2: 'rgb(249, 226, 175)',  // yellow
+      3: 'rgb(250, 179, 135)',  // peach (orange)
+      4: 'rgb(243, 139, 168)',  // red
+      5: 'rgb(166, 227, 161)',  // green
+      6: 'rgb(245, 194, 231)',  // pink
+      7: 'rgb(203, 166, 247)',  // mauve
+      8: 'rgb(148, 226, 213)',  // teal
+    };
+
+    for (const [slotNumber, hotCue] of this.hotCues.entries()) {
+      const cueTime = hotCue.time;
+      const cuePosition = cueTime / this.waveformData.duration;
+
+      // Calculate pixel position based on mode
+      let cueX: number;
+
+      if (this.isMinimapMode) {
+        cueX = cuePosition * this.canvas.width;
+      } else {
+        const visibleRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
+        const positionInWindow = (cuePosition - this.firstDisplayedPosition) / visibleRange;
+        cueX = positionInWindow * this.canvas.width;
+        cueX += this.manualDragOffset * this.pixelRatio;
+      }
+
+      // Skip if outside visible area
+      if (cueX < 0 || cueX >= this.canvas.width) continue;
+
+      const lineWidth = 3 * this.pixelRatio;
+      const squareX = cueX + lineWidth + (2 * this.pixelRatio);
+      const textX = squareX + squareSize / 2;
+      const textY = squareY + squareSize / 2;
+
+      // Get color for this hot cue
+      const color = HOT_CUE_CSS_COLORS[slotNumber] || 'rgb(255, 255, 255)';
+
+      // Draw dark background (matching --crust)
+      ctx.fillStyle = 'rgb(17, 17, 17)';
+      ctx.fillRect(squareX, squareY, squareSize, squareSize);
+
+      // Draw colored border (1px)
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(squareX + 0.5, squareY + 0.5, squareSize - 1, squareSize - 1);
+
+      // Draw number with colored text
+      ctx.fillStyle = color;
+      ctx.fillText(slotNumber.toString(), textX, textY);
+    }
   }
 
   private createOrthoMatrix(
@@ -714,27 +1165,212 @@ export class WebGLWaveformRenderer {
   }
 
   // Animation loop
+  //
+  // RAF TIMING INVESTIGATION:
+  // Chrome exhibits periodic 50-224ms delays in requestAnimationFrame callbacks.
+  // This is NOT due to our render work (which takes <2ms).
+  //
+  // CONFIRMED: Audio playback causes the RAF delays!
+  //
+  // Test modes to isolate the issue:
+  // 1. SIMULATE_PLAYBACK = true: Test RAF + rendering WITHOUT audio
+  //    - If smooth: audio is the culprit
+  //    - If still choppy: something else is causing delays
+  //
+  // 2. SKIP_RENDERING = true: Test RAF + audio WITHOUT rendering
+  //    - If smooth: rendering is contributing to delays
+  //    - If still choppy: audio alone causes the problem
+  //
+  // To enable from console:
+  //   WebGLWaveformRenderer.SIMULATE_PLAYBACK = true  // No audio
+  //   WebGLWaveformRenderer.SKIP_RENDERING = true     // No rendering
+  //   Then reload the waveform
+  //
+  // Other potential causes still being investigated:
+  // - DevTools overhead (console logging can delay RAF)
+  // - Multiple RAF loops competing (we have 2: main + minimap)
+  // - Chrome's internal frame scheduling heuristics
+  //
+  // Diagnostics added:
+  // - Instance tracking to count active RAF loops
+  // - Frame delay warnings with missed frame counts
+  // - Render time tracking to separate RAF delay from render work
+  // - DevTools detection
+  // - Test modes for audio/rendering isolation
   public startRenderLoop(audioElement: HTMLAudioElement): void {
-    const animate = () => {
-      if (audioElement && !audioElement.paused) {
-        this.setPlayPosition(audioElement.currentTime);
+    WebGLWaveformRenderer.activeRenderLoops++;
+    let frameCount = 0;
+
+    // Check if DevTools is affecting performance
+    const devToolsOpen = /./;
+    devToolsOpen.toString = function() {
+      WebGLWaveformRenderer.prototype['devToolsDetected'] = true;
+      return 'devtools';
+    };
+    console.log('%c', devToolsOpen);
+
+    console.log(`[Renderer #${this.instanceId}] Starting render loop, active loops: ${WebGLWaveformRenderer.activeRenderLoops}`);
+    if ((this as any).devToolsDetected) {
+      console.warn('[Performance] DevTools detected - this may affect RAF timing');
+    }
+    if (WebGLWaveformRenderer.SIMULATE_PLAYBACK) {
+      console.warn('[TEST MODE] Simulating playback without audio - pure RAF-based animation');
+      console.log('To enable in console: WebGLWaveformRenderer.SIMULATE_PLAYBACK = true (then reload waveform)');
+    }
+    if (WebGLWaveformRenderer.SKIP_RENDERING) {
+      console.warn('[TEST MODE] Skipping all rendering - RAF loop + audio only');
+      console.log('To enable in console: WebGLWaveformRenderer.SKIP_RENDERING = true (then reload waveform)');
+    }
+
+    const animate = (timestamp: DOMHighResTimeStamp) => {
+      frameCount++;
+      const frameStartTime = performance.now();
+
+      // Track frame scheduling delays
+      const frameDeltaMs = this.lastRenderStart > 0 ? timestamp - this.lastRenderStart : 0;
+      this.lastRenderStart = timestamp;
+
+      if (frameDeltaMs > 0 && !this.isMinimapMode) {
+        this.frameDeltaSamples.push(frameDeltaMs);
+
+        // Log frames with significant delays (> 25ms = missed 60fps target)
+        if (frameDeltaMs > 25) {
+          const missedFrames = Math.round(frameDeltaMs / 16.7) - 1;
+          // RAF callback was delayed - this is a browser scheduling issue
+          console.warn(`[Renderer #${this.instanceId} RAF Delay] ${frameDeltaMs.toFixed(1)}ms since last frame (${missedFrames} frames missed) - browser scheduling delay`);
+        }
       }
-      this.render();
+
+      // TEST MODE: Simulate playback without audio to test RAF delays
+      const isPlaying = WebGLWaveformRenderer.SIMULATE_PLAYBACK || (audioElement && !audioElement.paused);
+
+      if (isPlaying) {
+        let actualTime: number;
+        let playbackRate: number;
+
+        if (WebGLWaveformRenderer.SIMULATE_PLAYBACK) {
+          // Simulate audio playback with pure timestamp-based movement
+          if (this.lastTimeUpdate === 0) {
+            this.lastTimeUpdate = timestamp;
+            this.lastKnownTime = 0;
+          }
+          const deltaMs = timestamp - this.lastTimeUpdate;
+          const deltaSec = deltaMs / 1000.0;
+          actualTime = this.lastKnownTime + deltaSec;
+          playbackRate = 1.0;
+
+          // Update for next frame
+          this.lastKnownTime = actualTime;
+          this.lastTimeUpdate = timestamp;
+
+          // Log occasionally to verify simulation is working (every 2 seconds)
+          if (frameCount % 120 === 0) {
+            console.log(`[Simulated Playback] avg timestamp delta: ${(deltaMs / 120).toFixed(2)}ms, simulated time: ${actualTime.toFixed(3)}s`);
+          }
+        } else {
+          // Normal audio playback
+          actualTime = audioElement.currentTime;
+          playbackRate = audioElement.playbackRate;
+          const audioTimeChanged = actualTime !== this.lastActualTime;
+
+          // Smooth interpolation for 60fps playback
+          // Audio currentTime only updates ~4ms (250Hz), causing visible stepping
+          if (actualTime !== this.lastKnownTime) {
+            // Audio currentTime has updated - reset interpolation baseline
+            this.lastKnownTime = actualTime;
+            this.lastTimeUpdate = timestamp;
+          }
+
+          // If lastTimeUpdate is 0 (after seek), initialize it
+          if (this.lastTimeUpdate === 0) {
+            this.lastTimeUpdate = timestamp;
+          }
+
+          // Always interpolate for smoothness
+          const deltaMs = timestamp - this.lastTimeUpdate;
+          const deltaSec = deltaMs / 1000.0;
+          actualTime = this.lastKnownTime + (deltaSec * playbackRate);
+
+          // Very generous clamping to allow smooth interpolation through timing hiccups
+          // This prevents jarring resets when audio updates lag
+          const maxAhead = 1.0; // 1 second max interpolation ahead
+          actualTime = Math.min(actualTime, this.lastKnownTime + maxAhead);
+        }
+
+        // Simple linear interpolation - if we missed frames, move proportionally more
+        // This naturally handles frame delays without complex smoothing
+        const targetPosition = actualTime / (this.waveformData?.duration || 1);
+
+        // Initialize smoothed position on first frame or if it's very far off (after seek)
+        const positionDiff = Math.abs(targetPosition - this.smoothedPlayPosition);
+        if (this.smoothedPlayPosition === 0 || positionDiff > 0.1) {
+          // Jump immediately if difference is > 10% of track (indicates seek/jump)
+          this.smoothedPlayPosition = targetPosition;
+        }
+
+        const beforeSmoothing = this.smoothedPlayPosition;
+
+        // Move toward target position
+        // For 60fps (16.7ms), move at normal speed
+        // For delayed frames, move proportionally faster to catch up
+        const normalFrameTime = 16.7;
+        const frameRatio = frameDeltaMs / normalFrameTime;
+        const step = (targetPosition - this.smoothedPlayPosition) * 0.2 * frameRatio;
+        this.smoothedPlayPosition += step;
+
+        const positionChange = this.smoothedPlayPosition - beforeSmoothing;
+
+        // Update display position with smoothed value
+        if (this.waveformData) {
+          this.playPosition = this.smoothedPlayPosition;
+          this.calculateDisplayWindow();
+        }
+
+        // Debug: log frame details when there are anomalies
+        // Store for next frame comparison
+        this.lastActualTime = actualTime;
+        this.lastTimestamp = timestamp;
+      }
+
+      // TEST MODE: Skip rendering if requested
+      if (!WebGLWaveformRenderer.SKIP_RENDERING) {
+        const renderStartTime = performance.now();
+        this.render();
+        const renderEndTime = performance.now();
+        const renderTime = renderEndTime - renderStartTime;
+
+        // Track total frame time (RAF callback to next RAF request)
+        const totalFrameTime = renderEndTime - frameStartTime;
+
+        // Log if our rendering work is taking too long
+        if (!this.isMinimapMode && renderTime > 5) {
+          console.warn(`[Slow Render] Render took ${renderTime.toFixed(2)}ms (total frame: ${totalFrameTime.toFixed(2)}ms)`);
+        }
+      } else {
+        // In skip-rendering mode, just log that we're alive
+        if (frameCount % 60 === 0) {
+          console.log(`[Skip Render Mode] Frame ${frameCount} - RAF + audio only, no rendering`);
+        }
+      }
+
       this.animationFrameId = requestAnimationFrame(animate);
     };
-    animate();
+    animate(performance.now());
   }
 
   public stopRenderLoop(): void {
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
+      WebGLWaveformRenderer.activeRenderLoops--;
+      console.log(`[Renderer #${this.instanceId}] Stopped render loop, active loops: ${WebGLWaveformRenderer.activeRenderLoops}`);
     }
   }
 
   // Zoom controls
   public setZoom(newZoom: number): void {
     this.zoomFactor = Math.max(this.minZoom, Math.min(this.maxZoom, newZoom));
+    this.invalidateWaveformCache();
     this.calculateDisplayWindow();
   }
 
@@ -788,5 +1424,15 @@ export class WebGLWaveformRenderer {
     if (this.program) gl.deleteProgram(this.program);
     if (this.vertexBuffer) gl.deleteBuffer(this.vertexBuffer);
     if (this.vao) gl.deleteVertexArray(this.vao);
+
+    // Clean up cached geometry
+    this.invalidateWaveformCache();
+
+    // Remove overlay canvas (use unique ID)
+    const overlayId = `waveform-text-overlay-${this.canvas.id || 'default'}`;
+    const overlayCanvas = document.getElementById(overlayId);
+    if (overlayCanvas) {
+      overlayCanvas.remove();
+    }
   }
 }

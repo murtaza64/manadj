@@ -157,3 +157,13 @@ def nudge_beatgrid_endpoint(
     beatgrid = crud.update_beatgrid_tempo_changes(db, track_id, new_tempo_changes)
 
     return _format_beatgrid_response(beatgrid, db)
+
+
+@router.delete("/{track_id}")
+def delete_beatgrid(track_id: int, db: Session = Depends(get_db)):
+    """Delete beatgrid to force regeneration on next GET."""
+    beatgrid = crud.get_beatgrid(db, track_id)
+    if beatgrid:
+        db.delete(beatgrid)
+        db.commit()
+    return {"message": "Beatgrid deleted"}

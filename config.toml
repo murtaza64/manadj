@@ -6,3 +6,11 @@ engine_dj_path = "/Users/murtaza/manadj/data/Engine Library/Database2"
 
 # Path to Rekordbox database folder (leave empty to disable)
 rekordbox_path = "/Users/murtaza/manadj/data/rekordbox"
+
+[library]
+# Path to music library directory for importing tracks
+tracks_directory = "/Users/murtaza/Music/Tracks"
+
+[analysis]
+# Key detection backend: "essentia" (default) or "keyfinder" (DJ-optimized)
+key_detection_backend = "essentia"

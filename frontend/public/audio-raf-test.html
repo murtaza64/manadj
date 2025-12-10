@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio + RAF Timing Test</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #cdd6f4;
+      font-family: 'UbuntuMono Nerd Font', monospace;
+    }
+    h1 {
+      color: #4a9eff;
+    }
+    .controls {
+      background: #181818;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    button {
+      background: #313136;
+      color: #cdd6f4;
+      border: 1px solid #45454f;
+      padding: 12px 24px;
+      margin: 5px;
+      cursor: pointer;
+      font-family: 'UbuntuMono Nerd Font', monospace;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #45454f;
+    }
+    button:active {
+      background: #58585b;
+    }
+    #stats {
+      background: #181818;
+      padding: 20px;
+      margin: 20px 0;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .warning { color: #ff4466; }
+    .good { color: #5ed75e; }
+    .label { color: #a6adc8; }
+    input[type="file"] {
+      margin: 10px 0;
+      color: #cdd6f4;
+    }
+    #audioStatus {
+      margin: 10px 0;
+      padding: 10px;
+      background: #111111;
+      border-left: 3px solid #4a9eff;
+    }
+  </style>
+</head>
+<body>
+  <h1>Audio + RAF Timing Test</h1>
+  <p>Minimal test to check if HTML5 Audio playback interferes with requestAnimationFrame timing.</p>
+
+  <div class="controls">
+    <h3>Audio Controls</h3>
+    <input type="file" id="audioFile" accept="audio/*">
+    <br>
+    <button id="playBtn">Play</button>
+    <button id="pauseBtn">Pause</button>
+    <button id="resetBtn">Reset Stats</button>
+    <div id="audioStatus">No audio loaded</div>
+  </div>
+
+  <div id="stats">
+    <div><span class="label">Test Duration:</span> <span id="testDuration">0.0</span>s</div>
+    <div><span class="label">Frame Count:</span> <span id="frameCount">0</span></div>
+    <div><span class="label">Audio Playing:</span> <span id="audioPlaying">No</span></div>
+    <div><span class="label">Audio Time:</span> <span id="audioTime">-</span></div>
+    <hr style="border-color: #313136; margin: 15px 0;">
+    <div><span class="label">Current Frame Δ:</span> <span id="currentDelta">-</span></div>
+    <div><span class="label">Average Frame Δ:</span> <span id="avgDelta">-</span></div>
+    <div><span class="label">Max Frame Δ:</span> <span id="maxDelta">-</span></div>
+    <div><span class="label">Late Frames (&gt;20ms):</span> <span id="lateFrames">0</span> (<span id="latePercent">0.0</span>%)</div>
+    <div><span class="label">Severe Delays (&gt;50ms):</span> <span id="severeFrames">0</span></div>
+  </div>
+
+  <audio id="audio" style="display: none;"></audio>
+
+  <script>
+    const audio = document.getElementById('audio');
+    const audioFile = document.getElementById('audioFile');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const audioStatus = document.getElementById('audioStatus');
+
+    // Stats tracking
+    let frameCount = 0;
+    let lastTimestamp = 0;
+    let frameDeltas = [];
+    let lateFrameCount = 0;
+    let severeFrameCount = 0;
+    let testStartTime = 0;
+
+    // Load audio file
+    audioFile.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const url = URL.createObjectURL(file);
+        audio.src = url;
+        audioStatus.textContent = `Loaded: ${file.name}`;
+        audioStatus.style.borderLeftColor = '#5ed75e';
+        console.log('Audio loaded:', file.name);
+      }
+    });
+
+    // Play button
+    playBtn.addEventListener('click', () => {
+      if (!audio.src) {
+        alert('Please load an audio file first');
+        return;
+      }
+      audio.play();
+      console.log('▶ Audio playback started');
+      console.log('Watch for RAF delays in the stats above');
+    });
+
+    // Pause button
+    pauseBtn.addEventListener('click', () => {
+      audio.pause();
+      console.log('⏸ Audio paused');
+    });
+
+    // Reset stats
+    resetBtn.addEventListener('click', () => {
+      frameCount = 0;
+      lastTimestamp = 0;
+      frameDeltas = [];
+      lateFrameCount = 0;
+      severeFrameCount = 0;
+      testStartTime = performance.now();
+      console.log('Stats reset');
+    });
+
+    // Update stats display
+    function updateStatsDisplay() {
+      const testDuration = (performance.now() - testStartTime) / 1000;
+      document.getElementById('testDuration').textContent = testDuration.toFixed(1);
+      document.getElementById('frameCount').textContent = frameCount;
+
+      const audioPlayingEl = document.getElementById('audioPlaying');
+      audioPlayingEl.textContent = audio.paused ? 'No' : 'Yes';
+      audioPlayingEl.className = audio.paused ? '' : 'good';
+
+      const audioTimeEl = document.getElementById('audioTime');
+      if (audio.src && audio.duration) {
+        audioTimeEl.textContent = `${audio.currentTime.toFixed(2)}s / ${audio.duration.toFixed(2)}s`;
+      } else {
+        audioTimeEl.textContent = '-';
+      }
+
+      if (frameDeltas.length > 0) {
+        const current = frameDeltas[frameDeltas.length - 1];
+        const avg = frameDeltas.reduce((a, b) => a + b, 0) / frameDeltas.length;
+        const max = Math.max(...frameDeltas);
+        const latePercent = (lateFrameCount / frameDeltas.length * 100).toFixed(1);
+
+        const currentEl = document.getElementById('currentDelta');
+        currentEl.textContent = current.toFixed(2) + 'ms';
+        currentEl.className = current > 20 ? 'warning' : 'good';
+
+        document.getElementById('avgDelta').textContent = avg.toFixed(2) + 'ms';
+
+        const maxEl = document.getElementById('maxDelta');
+        maxEl.textContent = max.toFixed(2) + 'ms';
+        maxEl.className = max > 50 ? 'warning' : '';
+
+        document.getElementById('lateFrames').textContent = lateFrameCount;
+
+        const latePercentEl = document.getElementById('latePercent');
+        latePercentEl.textContent = latePercent;
+        latePercentEl.className = parseFloat(latePercent) > 5 ? 'warning' : 'good';
+
+        const severeEl = document.getElementById('severeFrames');
+        severeEl.textContent = severeFrameCount;
+        severeEl.className = severeFrameCount > 0 ? 'warning' : '';
+      }
+    }
+
+    // RAF animation loop - absolutely minimal
+    function animate(timestamp) {
+      // Track frame delta
+      if (lastTimestamp > 0) {
+        const delta = timestamp - lastTimestamp;
+        frameDeltas.push(delta);
+
+        if (delta > 20) {
+          lateFrameCount++;
+          console.warn(`[RAF Delay] ${delta.toFixed(1)}ms (audio playing: ${!audio.paused})`);
+        }
+
+        if (delta > 50) {
+          severeFrameCount++;
+          console.error(`[SEVERE RAF Delay] ${delta.toFixed(1)}ms - ${Math.round(delta / 16.7)} frames missed`);
+        }
+
+        // Keep only last 300 frames (5 seconds at 60fps)
+        if (frameDeltas.length > 300) {
+          const removed = frameDeltas.shift();
+          if (removed > 20) lateFrameCount--;
+          if (removed > 50) severeFrameCount--;
+        }
+      } else {
+        // First frame
+        testStartTime = timestamp;
+      }
+
+      lastTimestamp = timestamp;
+      frameCount++;
+
+      // Update display every 30 frames (twice per second at 60fps)
+      if (frameCount % 30 === 0) {
+        updateStatsDisplay();
+      }
+
+      requestAnimationFrame(animate);
+    }
+
+    // Start RAF loop immediately
+    requestAnimationFrame(animate);
+
+    console.log('=== Audio + RAF Timing Test ===');
+    console.log('');
+    console.log('This test runs a minimal RAF loop alongside HTML5 Audio playback.');
+    console.log('');
+    console.log('Setup:');
+    console.log('1. Load an audio file using the file input');
+    console.log('2. Watch the stats with audio PAUSED (baseline)');
+    console.log('3. Click Play and observe RAF delays');
+    console.log('');
+    console.log('Expected results:');
+    console.log('- Paused: ~16.7ms frame deltas, <1% late frames');
+    console.log('- Playing: If you see delays, audio playback interferes with RAF');
+    console.log('');
+    console.log('This is a MINIMAL test with:');
+    console.log('- No WebGL rendering');
+    console.log('- No React');
+    console.log('- No complex UI');
+    console.log('- Just: HTMLAudioElement + requestAnimationFrame');
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import './FindRelatedTracksModal.css';
 import type { Track } from '../types';
-import { type RelatedTracksSettings, DEFAULT_SETTINGS, saveSettings as saveSettingsToStorage, getEnergyRange } from './TrackList';
+import { type RelatedTracksSettings, DEFAULT_SETTINGS, saveSettings as saveSettingsToStorage, getEnergyRange } from './Library';
 import { formatKeyDisplay } from '../utils/keyUtils';
 
 interface FindRelatedTracksModalProps {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { WebGLWaveformRenderer } from '../utils/WebGLWaveformRenderer';
 import { useAudio } from '../hooks/useAudio';
 import { useWaveformData } from '../hooks/useWaveformData';
+import { useHotCues } from '../hooks/useHotCues';
 import './Waveform.css';
 
 interface WaveformMinimapProps {
@@ -19,6 +20,9 @@ export default function WaveformMinimap({ trackId, className }: WaveformMinimapP
 
   // Fetch waveform data
   const { data: waveformData, isLoading, error: fetchError } = useWaveformData(trackId);
+
+  // Fetch hot cues
+  const { data: hotCuesArray = [] } = useHotCues(trackId);
 
   // Initialize renderer
   useEffect(() => {
@@ -44,6 +48,11 @@ export default function WaveformMinimap({ trackId, className }: WaveformMinimapP
         renderer.setCuePoint(audio.cuePoint);
       }
 
+      // Set initial hot cues if already loaded
+      if (hotCuesArray && hotCuesArray.length > 0) {
+        renderer.setHotCues(hotCuesArray);
+      }
+
       // Start render loop
       if (audio.audioRef.current) {
         renderer.startRenderLoop(audio.audioRef.current);
@@ -61,7 +70,8 @@ export default function WaveformMinimap({ trackId, className }: WaveformMinimapP
       setError('Failed to initialize minimap renderer');
       console.error('Minimap renderer error:', err);
     }
-  }, [waveformData, audio.audioRef, audio.cuePoint]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waveformData]);
 
   // Update cue point when it changes
   useEffect(() => {
@@ -70,12 +80,20 @@ export default function WaveformMinimap({ trackId, className }: WaveformMinimapP
     }
   }, [audio.cuePoint]);
 
-  // Sync renderer position when audio is paused and currentTime changes
+  // Update hot cues when data changes
+  useEffect(() => {
+    if (rendererRef.current && hotCuesArray) {
+      rendererRef.current.setHotCues(hotCuesArray);
+      rendererRef.current.render();
+    }
+  }, [hotCuesArray]);
+
+  // Sync renderer position when audio is paused (for seeking/cue button)
   useEffect(() => {
     if (rendererRef.current && !audio.isPlaying && audio.audioRef.current) {
       rendererRef.current.setPlayPosition(audio.audioRef.current.currentTime);
     }
-  }, [audio.currentTime, audio.isPlaying, audio.audioRef, audio.isPreviewing, audio.cuePoint]);
+  }, [audio.isPlaying, audio.cuePoint, audio.seekVersion, audio.audioRef]);
 
   // Click-to-seek handler
   const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -85,6 +103,12 @@ export default function WaveformMinimap({ trackId, className }: WaveformMinimapP
     const seekTime = renderer.handleClick(event.nativeEvent);
     if (seekTime !== undefined && audio.duration) {
       audio.seek(seekTime);
+
+      // Manually sync minimap renderer position immediately
+      if (audio.audioRef.current) {
+        renderer.setPlayPosition(audio.audioRef.current.currentTime);
+      }
+      // Main waveform sync happens via useEffect triggered by seekVersion change
     }
   };
 

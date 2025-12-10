@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import TrackList from './components/TrackList';
+import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { FilterProvider } from './contexts/FilterContext';
 import { AudioProvider } from './contexts/AudioContext';
@@ -17,7 +17,7 @@ function App() {
           {showSyncView ? (
             <SyncView onClose={() => setShowSyncView(false)} />
           ) : (
-            <TrackList onOpenPlaylistSync={() => setShowSyncView(true)} />
+            <Library onOpenPlaylistSync={() => setShowSyncView(true)} />
           )}
         </FilterProvider>
       </AudioProvider>

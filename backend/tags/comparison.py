@@ -8,6 +8,10 @@ def match_tags_by_name(
 ) -> dict[tuple[str, str], dict[str, TagInfo | None]]:
     """Match tags by (category_name, tag_name) across all sources.
 
+    Engine DJ uses a flat structure (no categories), so matching is done
+    by tag name only for Engine. For manadj and rekordbox, full
+    (category_name, tag_name) pairs are used.
+
     Args:
         structures: Dictionary with 'manadj', 'engine', 'rekordbox' keys
 
@@ -21,11 +25,11 @@ def match_tags_by_name(
             }
         }
     """
-    # Collect all unique (category, tag) pairs
+    # Collect all unique (category, tag) pairs from manadj/rekordbox
     all_pairs = set()
 
     for source_name, structure in structures.items():
-        if structure is None:
+        if structure is None or source_name == 'engine':
             continue
         for category in structure.categories:
             for tag in category.tags:
@@ -38,14 +42,20 @@ def match_tags_by_name(
         if structure:
             for category in structure.categories:
                 for tag in category.tags:
-                    lookups[source_name][(category.name, tag.name)] = tag
+                    if source_name == 'engine':
+                        # Engine uses flat structure - index by tag name only
+                        lookups[source_name][tag.name] = tag
+                    else:
+                        lookups[source_name][(category.name, tag.name)] = tag
 
     # Match across sources
     matched = {}
     for pair in all_pairs:
+        tag_name = pair[1]
         matched[pair] = {
             'manadj': lookups.get('manadj', {}).get(pair),
-            'engine': lookups.get('engine', {}).get(pair),
+            # Engine matches by tag name only (flat structure)
+            'engine': lookups.get('engine', {}).get(tag_name),
             'rekordbox': lookups.get('rekordbox', {}).get(pair),
         }
 

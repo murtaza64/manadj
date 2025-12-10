@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Track, Tag } from '../types';
+import type { Track, Tag, BPMAnalysisResponse, KeyAnalysisResponse } from '../types';
 import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
-import HotCue from './HotCue';
 import WaveformMinimap from './WaveformMinimap';
+import BpmInput from './BpmInput';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, BeatgridIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
@@ -15,7 +15,7 @@ import './TagEditor.css';
 
 interface Props {
   track: Track | null;
-  onSave: (data: { energy?: number; tag_ids?: number[] }) => void;
+  onSave: (data: { energy?: number; tag_ids?: number[]; bpm?: number; key?: number }) => void;
   onUpdate?: (trackId: number, field: 'title' | 'artist', value: string) => void;
   currentTime: number;
 }
@@ -27,6 +27,7 @@ export interface TagEditorHandle {
 
 const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate, currentTime }, ref) => {
   const isDisabled = !track;
+  const queryClient = useQueryClient();
 
   const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(
     new Set(track?.tags.map(t => t.id) || [])
@@ -47,11 +48,32 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
   const setDownbeat = useSetBeatgridDownbeat();
   const nudgeGrid = useNudgeBeatgrid();
 
+  // Analysis state
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResults, setAnalysisResults] = useState<{
+    bpm?: BPMAnalysisResponse;
+    key?: KeyAnalysisResponse;
+  } | null>(null);
+  const [selectedBpm, setSelectedBpm] = useState<number | null>(null);
+
   // Sync internal state when track prop changes
   useEffect(() => {
     setSelectedTagIds(new Set(track?.tags.map(t => t.id) || []));
     setEnergy(track?.energy);
-  }, [track]);
+    setAnalysisResults(null);
+    setSelectedBpm(track?.bpm ?? null);
+
+    // Try to load existing BPM analysis for the track
+    if (track?.id) {
+      api.analyze.getBpm(track.id)
+        .then(bpmResult => {
+          setAnalysisResults(prev => ({ ...prev, bpm: bpmResult }));
+        })
+        .catch(() => {
+          // No analysis exists yet, that's ok
+        });
+    }
+  }, [track?.id]);
 
   const { data: allTags } = useQuery({
     queryKey: ['tags'],
@@ -129,6 +151,80 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
     });
   };
 
+  // Handler for analyze button
+  const handleAnalyze = async () => {
+    if (!track) return;
+
+    setIsAnalyzing(true);
+    try {
+      // Run both analyses in parallel
+      const [bpmResult, keyResult] = await Promise.all([
+        api.analyze.bpm(track.id),
+        api.analyze.key(track.id)
+      ]);
+
+      setAnalysisResults({ bpm: bpmResult, key: keyResult });
+      setSelectedBpm(bpmResult.recommended_bpm);
+
+      // Update track with analysis results via parent's onSave callback
+      // This uses the same mutation pattern as energy/tags, which properly updates selectedTrack
+      onSave({
+        bpm: bpmResult.recommended_bpm,
+        key: keyResult.formats.engine_id ?? undefined
+      });
+
+      // Regenerate beatgrid with new BPM
+      await api.beatgrids.delete(track.id);
+      await api.beatgrids.get(track.id);
+
+      // Invalidate beatgrid query to trigger refetch in waveform
+      queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
+
+    } catch (error) {
+      console.error('Analysis failed:', error);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Handler for BPM change
+  const handleBpmChange = async (newBpm: number) => {
+    if (!track) return;
+
+    setSelectedBpm(newBpm);
+
+    // Update track BPM via parent's onSave callback
+    onSave({ bpm: newBpm });
+
+    // Regenerate beatgrid
+    await api.beatgrids.delete(track.id);
+    await api.beatgrids.get(track.id);
+
+    // Invalidate beatgrid query to trigger refetch in waveform
+    queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
+  };
+
+  // Handler for fine BPM adjustments
+  const handleBpmNudge = (direction: 1 | -1) => {
+    if (!track) return;
+
+    const currentBpm = selectedBpm ?? track.bpm;
+    if (!currentBpm) return;
+
+    let newBpm = currentBpm + (direction * 0.03);
+
+    // Snap to integer at x.99 or x.01
+    const decimal = Math.abs(newBpm % 1);
+    if (decimal >= 0.99 || decimal <= 0.01) {
+      newBpm = Math.round(newBpm);
+    }
+
+    // Round to 2 decimal places
+    newBpm = Math.round(newBpm * 100) / 100;
+
+    handleBpmChange(newBpm);
+  };
+
   // Keyboard handler for tag edit mode
   useEffect(() => {
     if (!isTagEditMode) return;
@@ -204,7 +300,9 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '200px', minWidth: 0, flexShrink: 0 }}>
           {/* Row 1: Title */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <MusicIcon />
+            <div style={{ flexShrink: 0 }}>
+              <MusicIcon />
+            </div>
             {track && onUpdate ? (
               <div style={{ minWidth: 0 }}>
                 <EditableCell
@@ -222,7 +320,9 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
           {/* Row 2: Artist */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <PersonIcon />
+            <div style={{ flexShrink: 0 }}>
+              <PersonIcon />
+            </div>
             {track && onUpdate ? (
               <div style={{ minWidth: 0 }}>
                 <EditableCell
@@ -315,27 +415,75 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             >
               ►
             </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
+              <SpeedIcon />
+              <BpmInput
+                value={selectedBpm ?? track?.bpm ?? null}
+                recommendedBpms={analysisResults?.bpm?.recommended_bpms}
+                onChange={handleBpmChange}
+                disabled={isDisabled}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                <button
+                  onClick={() => handleBpmNudge(1)}
+                  disabled={isDisabled}
+                  className="player-button"
+                  title="Increase BPM by 0.03"
+                  style={{
+                    padding: '0px 4px',
+                    minWidth: '20px',
+                    fontSize: '10px',
+                    height: '11px',
+                    lineHeight: '11px',
+                  }}
+                >
+                  +
+                </button>
+                <button
+                  onClick={() => handleBpmNudge(-1)}
+                  disabled={isDisabled}
+                  className="player-button"
+                  title="Decrease BPM by 0.03"
+                  style={{
+                    padding: '0px 4px',
+                    minWidth: '20px',
+                    fontSize: '10px',
+                    height: '11px',
+                    lineHeight: '11px',
+                  }}
+                >
+                  −
+                </button>
+              </div>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px' }}>
               <KeyIcon />
-              <span style={{ color: isDisabled ? 'var(--overlay0)' : 'var(--text)', fontSize: '12px' }}>
+              <span style={{
+                color: isDisabled ? 'var(--overlay0)' : 'var(--text)',
+                fontSize: '12px',
+                opacity: analysisResults?.key ? 1 : 0.6
+              }}>
                 {track ? formatKeyDisplay(track.key) : '-'}
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <SpeedIcon />
-              <span style={{ color: isDisabled ? 'var(--overlay0)' : 'var(--text)', fontSize: '12px' }}>
-                {track?.bpm ? `${track.bpm} BPM` : '-'}
-              </span>
-            </div>
+            <button
+              onClick={handleAnalyze}
+              disabled={isDisabled || isAnalyzing}
+              className="player-button"
+              style={{
+                color: 'var(--green)',
+                borderColor: 'var(--green)',
+                padding: '4px 8px',
+                minWidth: '32px',
+                fontSize: '12px',
+                height: '24px',
+                marginLeft: '4px',
+              }}
+              title="Analyze BPM and key"
+            >
+              {isAnalyzing ? '...' : 'A'}
+            </button>
             <NeedleIcon />
-            {[1, 2, 3, 4, 5, 6, 7, 8].map(cueNum => (
-              <HotCue
-                key={cueNum}
-                number={cueNum}
-                isSet={false}
-                disabled={isDisabled}
-              />
-            ))}
             <div style={{ flex: 1, minWidth: 0 }}>
               <WaveformMinimap trackId={track?.id ?? null} />
             </div>
