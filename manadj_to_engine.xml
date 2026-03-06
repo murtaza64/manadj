@@ -1,74 +1,36 @@
 <?xml version='1.0' encoding='utf-8'?>
 <DJ_PLAYLISTS Version="1.0.0">
 	<PRODUCT Name="manadj" Version="1.0" Company="manadj" />
-	<COLLECTION Entries="63">
-		<TRACK Location="file://localhost/Users/murtaza/Music/rekordbox/Sampler/GROOVE%20CIRCUIT/PRESET/4-Floor%20Breaks%20Kit/House1.wav" Name="House 1" Artist="rekordbox" AverageBpm="123.0" Tonality="None" TrackID="1" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/rekordbox/Sampler/GROOVE%20CIRCUIT/PRESET/4-Floor%20Breaks%20Kit/House2.wav" Name="House 2" Artist="rekordbox" AverageBpm="125.0" Tonality="None" TrackID="2" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/rekordbox/Sampler/GROOVE%20CIRCUIT/PRESET/4-Floor%20Breaks%20Kit/Techno1.wav" Name="Techno 1" Artist="rekordbox" AverageBpm="136.0" Tonality="None" TrackID="3" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/rekordbox/Sampler/GROOVE%20CIRCUIT/PRESET/4-Floor%20Breaks%20Kit/Breaks1.wav" Name="Breaks 1" Artist="rekordbox" AverageBpm="130.0" Tonality="None" TrackID="4" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/rekordbox/Sampler/GROOVE%20CIRCUIT/PRESET/4-Floor%20Breaks%20Kit/House3.wav" Name="House 3" Artist="rekordbox" AverageBpm="140.0" Tonality="None" TrackID="5" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/rekordbox/Sampler/GROOVE%20CIRCUIT/PRESET/4-Floor%20Breaks%20Kit/House4.wav" Name="House 4" Artist="rekordbox" AverageBpm="150.0" Tonality="None" TrackID="6" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/rekordbox/Sampler/GROOVE%20CIRCUIT/PRESET/4-Floor%20Breaks%20Kit/Breaks2.wav" Name="Breaks 2" Artist="rekordbox" AverageBpm="140.0" Tonality="None" TrackID="7" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/rekordbox/Sampler/GROOVE%20CIRCUIT/PRESET/4-Floor%20Breaks%20Kit/Breaks3.wav" Name="Breaks 3" Artist="rekordbox" AverageBpm="121.0" Tonality="None" TrackID="8" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/A.M.C%20-%20Brazil%20%5B1158788995%5D.m4a" Name="Brazil" Artist="A.M.C" AverageBpm="None" Tonality="None" TrackID="9" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/A.M.C%20-%20Mind%20The%20Gap%20%28BRAN.CHI%20EDIT%29%20%5BFREE%20DOWNLOAD%5D%20%5B1701232689%5D.m4a" Name="Mind The Gap (BRAN.CHI EDIT)" Artist="A.M.C, BRAN.CHI" AverageBpm="None" Tonality="None" TrackID="10" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/AVICII%20-%20SILLOUETTES%20%28AKTIVE%20DNB%20BOOTLEG%29%20FREE%20DOWNLOAD%21%21%20%5B1375777657%5D.mp3" Name="Silhouettes (Aktive DNB Bootleg)" Artist="Avicii, Aktive" AverageBpm="None" Tonality="None" TrackID="11" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Artemas%20-%20i%20like%20the%20way%20you%20kiss%20me%20%28Culture%20Shock%27s%20d%26b%20flip%29%20%5BFREE%20DOWNLOAD%5D%20%5B1805561742%5D.m4a" Name="i like the way you kiss me (Culture Shock's d&amp;b flip)" Artist="Artemas, Culture Shock" AverageBpm="None" Tonality="None" TrackID="12" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/BEYOND%20%28x%20MYLK%29%20%5B1585853183%5D.m4a" Name="BEYOND" Artist="Feint, MYLK" AverageBpm="174.0" Tonality="Am" TrackID="13" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Bicep%20-%20Glue%20%28Kanine%20Remix%29%20%5BFree%20Download%5D%20%5B1687881444%5D.m4a" Name="Glue (Kanine Remix)" Artist="Bicep, Kanine" AverageBpm="None" Tonality="None" TrackID="14" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Big%20Shaq%20-%20Mans%20Not%20Hot%20%28Full%20DNB%20Mix%29%20%5B345129941%5D.m4a" Name="Mans Not Hot (Full DNB Mix)" Artist="Big Shaq, Kritix" AverageBpm="None" Tonality="None" TrackID="15" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/CRUSHCRUSHCRUSH%20%28FINALFORM%20DNB%20FLIP%29%20%5B1803375096%5D.m4a" Name="CRUSHCRUSHCRUSH (FINALFORM DNB FLIP)" Artist="Paramore, FinalForm" AverageBpm="None" Tonality="None" TrackID="16" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Dabin%20%26%20Blanke%20-%20Night%20Bloom%20%28MUZZ%20Remix%29%20%5B2164329108%5D.m4a" Name="Night Bloom (MUZZ Remix)" Artist="Dabin, Blanke, MUZZ" AverageBpm="None" Tonality="None" TrackID="17" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Delta%20Heavy%20-%20Substance%20%5B2206211887%5D.m4a" Name="Substance" Artist="Delta Heavy" AverageBpm="None" Tonality="None" TrackID="18" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Delta%20Heavy%20x%20Muzzy%20-%20Revenge%20%5B593427069%5D.m4a" Name="Revenge" Artist="Delta Heavy, MUZZ" AverageBpm="None" Tonality="None" TrackID="19" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Eliminate%20-%20Weeble%20Wobble%20VIP%20-%20Circadian%27s%20VIP%20Of%20The%20VIP%20%5B1874645454%5D.m4a" Name="Weeble Wobble VIP - Circadian's VIP Of The VIP" Artist="Eliminate, Circadian" AverageBpm="None" Tonality="None" TrackID="20" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Enigma%20%5B2208674741%5D.m4a" Name="Enigma" Artist="MUZZ" AverageBpm="None" Tonality="None" TrackID="21" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Eric%20Prydz%20-%20Call%20On%20Me%20%28Sullivan%20Bootleg%29%5BFree%20Download%5D%20%5B1266830893%5D.m4a" Name="Call On Me (Sullivan Bootleg)" Artist="Eric Prydz, Sullivan" AverageBpm="None" Tonality="None" TrackID="22" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Evacuate%20The%20Dancefloor%20%28SUUNE%20Bootleg%29%20%5B2219755199%5D.m4a" Name="Evacuate The Dancefloor (SUUNE Bootleg)" Artist="SUUNE" AverageBpm="None" Tonality="None" TrackID="23" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/F%20Minor%20Simulator%20%5B1552845355%5D.m4a" Name="F Minor Simulator" Artist="MUZZ" AverageBpm="None" Tonality="None" TrackID="24" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Fall%20Away%20%5B234331645%5D.m4a" Name="Fall Away" Artist="Feint" AverageBpm="None" Tonality="None" TrackID="25" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Hybrid%20-%20Power%20Curve%20%28Noisia%20Driveclub%20Remix%29%20%5B171055579%5D.m4a" Name="Power Curve (Noisia Driveclub Remix)" Artist="Hybrid, Noisia" AverageBpm="None" Tonality="None" TrackID="26" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Jungle%20%28Arcando%20Remix%29%20%5B1731431028%5D.m4a" Name="Jungle (Arcando Remix)" Artist="Alok, The Chainsmokers, Mae Stephens" AverageBpm="None" Tonality="None" TrackID="27" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Kanine%20%26%20Arcando%20-%20Lost%20Tonight%20%28ft.%20HEIGHTS%29%20%5B2216578493%5D.m4a" Name="Kanine &amp; Arcando - Lost Tonight (ft. HEIGHTS)" Artist="Kanine &amp; Arcando" AverageBpm="None" Tonality="None" TrackID="28" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Krasia%20-%20I%20Could%20Be%20The%20One%20%28Free%20Download%29%20%5B2098107171%5D.m4a" Name="I Could Be The One" Artist="Krasia" AverageBpm="None" Tonality="None" TrackID="29" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Krasia%20-%20Only%20One%20%5B2153645496%5D.m4a" Name="Krasia - Only One" Artist="Krasia" AverageBpm="None" Tonality="None" TrackID="30" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Marshmello%20%26%20Space%20Laces%20-%20Rave%20Repeater%20%28%C3%86ON%EF%BC%9AMODE%20%C3%86DIT%29%20%5B2061317036%5D.m4a" Name="Rave Repeater (ÆON:MODE ÆDIT)" Artist="Marshmello, Space Laces, ÆON:MODE" AverageBpm="None" Tonality="None" TrackID="31" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Mau%20P%20-%20Gimme%20That%20Bounce%20%28%C3%86ON%EF%BC%9AMODE%20%C3%86DIT%29%20%5B1698283128%5D.m4a" Name="Gimme That Bounce (ÆON:MODE ÆDIT)" Artist="Mau P, ÆON:MODE" AverageBpm="None" Tonality="None" TrackID="32" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Milkshake%20%28Borgore%20X%20Templah%20Bootleg%29%20%5B1280599312%5D.m4a" Name="Milkshake (Borgore X Templah Bootleg)" Artist="Borgore, Templah" AverageBpm="None" Tonality="None" TrackID="33" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Muzzy%20%26%20Koven%20%26%20Feint%20-%20Worth%20The%20Lie%20%5B353920865%5D.m4a" Name="Worth The Lie" Artist="Muzzy, Koven, Feint" AverageBpm="None" Tonality="None" TrackID="34" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/NELLY%20FURTADO%20-%20SAY%20IT%20RIGHT%20%28BASS%20ENTITY%20BOOTLEG%29%20%5B1218272410%5D.m4a" Name="NELLY FURTADO - SAY IT RIGHT (BASS ENTITY BOOTLEG)" Artist="BASS ENTITY" AverageBpm="None" Tonality="None" TrackID="35" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Prdk%20-%20FREE%20%28VIP%29%20%5BPRDKMUSIC004%5D%20%28FREE%20DOWNLOAD%29%20%5B2012779411%5D.m4a" Name="FREE (VIP)" Artist="Prdk" AverageBpm="None" Tonality="None" TrackID="36" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Prdk%20-%20Make%20The%20Crowd%20%5B1690350222%5D.m4a" Name="Make The Crowd" Artist="Prdk" AverageBpm="None" Tonality="None" TrackID="37" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Prdk%20-%20Pop%20Dat%20%28VIP%29%20%5BPRDKMUSIC002%5D%20%28FREE%20DOWNLOAD%29%20%5B1667387124%5D.m4a" Name="Pop Dat (VIP)" Artist="Prdk" AverageBpm="None" Tonality="None" TrackID="38" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Pythius%20-%20Sovereign%20%28Neonlight%20Remix%29%20%5B642853266%5D.m4a" Name="Sovereign" Artist="Pythius, Neonlight" AverageBpm="None" Tonality="None" TrackID="39" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/QO%20%26%20Trilo%20-%20Push%20It%20To%20The%20Limit%20%5B626461431%5D.m4a" Name="Push It To The Limit" Artist="QO &amp; Trilo" AverageBpm="None" Tonality="None" TrackID="40" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ROVA%20-%20LEFT%202%20RIGHT%20%5B2115424164%5D.m4a" Name="LEFT 2 RIGHT" Artist="Rova" AverageBpm="None" Tonality="None" TrackID="41" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/SKRILLEX%20%26%20NOISIA%20-%20SUPERSONIC%20%28SAM%20SHB%2C%20TEMPLE%20%26%20DRZ%20EDIT%29%5B20K%20FREE%20DOWNLOAD%5D%20%5B1292331952%5D.m4a" Name="SUPERSONIC (SAM SHB, TEMPLE &amp; DRZ EDIT)" Artist="Skrillex, Noisia" AverageBpm="None" Tonality="None" TrackID="42" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/SWEDISH%20HOUSE%20MAFIA%20-%20SAVE%20THE%20WORLD%20%28SCARFIE%20REMIX%29%20%5B1394554642%5D.m4a" Name="Save The World (SCARFIE Remix)" Artist="Swedish House Mafia, SCARFIE" AverageBpm="None" Tonality="None" TrackID="43" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Slipknot%20-%20Duality%20%5BWunjan%E2%80%99s%20Drum%20%26%20Bass%20Remix%5D%20%5BFREE%20DOWNLOAD%5D%20%5B1650692046%5D.wav" Name="Duality (Wunjan's D&amp;B remix)" Artist="Slipknot, Wunjan" AverageBpm="None" Tonality="None" TrackID="44" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Stonebank%20-%20Stronger%20%28feat.%20EMEL%29%20%5B184630755%5D.m4a" Name="Stronger (feat. EMEL)" Artist="Stonebank" AverageBpm="None" Tonality="None" TrackID="45" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Twenty%20One%20Pilots%20-%20Heathens%20%5BAudio%20Remix%5D%20%5B280741635%5D.m4a" Name="Heathens [Audio Remix]" Artist="Twenty One Pilots, Aud!o" AverageBpm="None" Tonality="None" TrackID="46" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Virtual%20Self%20-%20Particle%20Arts%20%5B362545112%5D.m4a" Name="Particle Arts" Artist="Virtual Self" AverageBpm="None" Tonality="None" TrackID="47" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Weavers%20%5B975344605%5D.m4a" Name="Weavers" Artist="Feint" AverageBpm="None" Tonality="None" TrackID="48" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/BODY%20DROP%20%28Won%27t%20Stop%29%20%5B2119429707%5D.m4a" Name="BODY DROP (Won't Stop)" Artist="Pirapus" AverageBpm="None" Tonality="None" TrackID="49" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Delerium%2C%20Sarah%20McLachlan%20%26%20John%20Summit%20-%20Silence%20%28Dimension%20Remix%29%20%5B2216419757%5D.m4a" Name="Silence (Dimension Remix)" Artist="Delerium, Sarah McLachlan, John Summit, Dimension" AverageBpm="None" Tonality="None" TrackID="50" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Dizzee%20Rascal%20-%20Bonkers%20%28Millbrook%20Bootleg%29%20%5B1259525161%5D.m4a" Name="Dizzee Rascal - Bonkers (Millbrook Bootleg)" Artist="Millbrook" AverageBpm="None" Tonality="None" TrackID="51" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ISOxo%20-%20kidsgonemad%21%20%28FEISTLING%20DnB%20Flip%29%20%5BFREE%20DL%5D%20%5B1779834249%5D.m4a" Name="kidsgonemad! (FEISTLING DnB Flip)" Artist="ISOxo, FEISTLING" AverageBpm="None" Tonality="None" TrackID="52" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ISOxo%20-%20kidsgonemad%21%20%28FEISTLING%20VIP%20Flip%29%20%5BFREE%20DL%5D%20%5B1973248547%5D.m4a" Name="kidsgonemad! (FEISTLING VIP Flip)" Artist="ISOxo, FEISTLING" AverageBpm="None" Tonality="None" TrackID="53" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Nightraider%20%28UTM-Records%29with%20TR.Tactics%20%5B635511894%5D.m4a" Name="Nightraider" Artist="Disphonia, TR.Tactics" AverageBpm="None" Tonality="None" TrackID="54" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/The%20Island%2C%20Pt.%201%20%28Dawn%29%20%28Skrillex%20Remix%29%20%5B451534794%5D.m4a" Name="The Island, Pt. 1 (Dawn) (Skrillex Remix)" Artist="Pendulum, Skrillex" AverageBpm="None" Tonality="None" TrackID="55" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/The%20Red%20Jumpsuit%20Apparatus%20-%20Face%20Down%20%28RIOT%20Remix%29%20%5B1964028831%5D.m4a" Name="The Red Jumpsuit Apparatus - Face Down (RIOT Remix)" Artist="RIOT" AverageBpm="None" Tonality="None" TrackID="56" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/crush%20%28Entity%20Remix%29%20%5B2180695099%5D.m4a" Name="crush (Entity Remix)" Artist="blkout., Entity" AverageBpm="None" Tonality="None" TrackID="57" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Disappear%20%28VIP%29%20%5B2149949550%5D.mp3" Name="Disappear (VIP)" Artist="Mozey, WHAT EVA" AverageBpm="175.0" Tonality="Fm" TrackID="58" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Implant%20%5B1489999921%5D.mp3" Name="Implant" Artist="Pythius" AverageBpm="174.0" Tonality="Gm" TrackID="59" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/LOUDER%20%5B2079050960%5D.mp3" Name="LOUDER" Artist="Circadian, Mozey" AverageBpm="174.0" Tonality="F" TrackID="60" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Need%20You%20Now%20%5B2206140155%5D.mp3" Name="Need You Now" Artist="Mozey, Primate" AverageBpm="87.0" Tonality="Fm" TrackID="61" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Nerdy%20Roller%20%5B2126582124%5D.mp3" Name="Nerdy Roller" Artist="Mozey" AverageBpm="175.0" Tonality="Eb" TrackID="62" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Setting%20Sun%20%5B2119293273%5D.mp3" Name="Setting Sun" Artist="Metrik" AverageBpm="87.0" Tonality="Fm" TrackID="63" />
+	<COLLECTION Entries="25">
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/A.M.C%20-%202%20Much%20%5B1975088111%5D.m4a" Name="2 Much" Artist="A.M.C" AverageBpm="None" Tonality="None" TrackID="1" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/All%20You%20Need%20%5B1974541259%5D.m4a" Name="All You Need" Artist="Blooom, Maksim MC" AverageBpm="None" Tonality="None" TrackID="2" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Audio%20-%20From%20The%20Ashes%20%28Neonlight%20Remix%29%20%EF%BC%8AOUT%20NOW%EF%BC%8A%20%5B2015141083%5D.m4a" Name="From The Ashes (Neonlight Remix)" Artist="Audio, Neonlight" AverageBpm="None" Tonality="None" TrackID="3" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Automata%20%5B806645470%5D.mp3" Name="Automata" Artist="Metrik" AverageBpm="None" Tonality="None" TrackID="4" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/BADDADAN%20%28CRANKDAT%20REMIX%29%20%5B1897670310%5D.m4a" Name="BADDADAN (CRANKDAT REMIX)" Artist="Crankdat" AverageBpm="None" Tonality="None" TrackID="5" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Black%20Sun%20Empire%20%26%20State%20Of%20Mind%20feat.%20Thomas%20Oliver%20-%20Stranger%20%28Neonlight%20Remix%29%20%5B389422584%5D.m4a" Name="Stranger (Neonlight Remix)" Artist="Black Sun Empire &amp; State Of Mind feat. Thomas Oliver, NEONLIGHT" AverageBpm="None" Tonality="None" TrackID="6" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Bubble%20-%20Mefjus%20%26%20Phace%20%5B726802108%5D.m4a" Name="Bubble" Artist="Mefjus, Phace" AverageBpm="None" Tonality="None" TrackID="7" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Camo%20%26%20Krooked%20-%20Atlas%20VIP%20%5B731359840%5D.m4a" Name="Atlas VIP" Artist="Camo &amp; Krooked" AverageBpm="None" Tonality="None" TrackID="8" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Crankdat%20-%20Movement%20%28HISSTERIA%20DnB%20Flip%29%20%5B2K%20FREE%20DOWNLOAD%20%F0%9F%99%8C%5D%20%5B2260217819%5D.m4a" Name="Movement (HISSTERIA DnB Flip)" Artist="Crankdat, HISSTERIA " AverageBpm="None" Tonality="None" TrackID="9" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/EWA%20FARNA%20-%20NA%20OST%C5%98%C3%8D%20NOZ%CC%8CE%20%28YANNICK%20REMIX%29%20%5B2106566835%5D.m4a" Name="NA OSTŘÍ NOŽE (YANNICK REMIX)" Artist="EWA FARNA, YANNICK" AverageBpm="None" Tonality="None" TrackID="10" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Excision%20%26%20Sullivan%20King%20-%20Wake%20Up%20%28KRVNG%20Remix%29%20%5B683052570%5D.m4a" Name="Wake Up (KRVNG Remix)" Artist="Excision &amp; Sullivan King, KRVNG" AverageBpm="None" Tonality="None" TrackID="11" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Falling%20Down%20%28Phibes%20Remix%29%20%5B1288612468%5D.m4a" Name="Falling Down (Phibes Remix)" Artist="Jammez, 4K, Phibes" AverageBpm="None" Tonality="None" TrackID="12" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Hold%20That%20Sucker%20Down%20%5B2197115343%5D.m4a" Name="Hold That Sucker Down" Artist="Circadian" AverageBpm="None" Tonality="None" TrackID="13" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/How%20Deep%20Is%20Your%20Love%20%5BWIMBO%20BOOTLEG%5D%20%5B1923483491%5D.m4a" Name="How Deep Is Your Love [WIMBO BOOTLEG]" Artist="WIMBO" AverageBpm="None" Tonality="None" TrackID="14" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Mirage%20%5B2039283044%5D.m4a" Name="Mirage" Artist="SYNERGY" AverageBpm="None" Tonality="None" TrackID="15" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Mr.%20Frenkie%20-%20Bass%20Symptom%20%28Audio%20Remix%29%20%5B1400978998%5D.m4a" Name="Bass Symptom (Audio Remix)" Artist="Mr. Frenkie, Audio" AverageBpm="None" Tonality="None" TrackID="16" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Myselor%20%26%20Neonlight%20-%20Retro%20Future%20%5B2041753856%5D.m4a" Name="Retro Future" Artist="Myselor, Neonlight" AverageBpm="None" Tonality="None" TrackID="17" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Neonlight%20%26%20flowanastasia%20-%20Desire%20%28Killbox%20Remix%29%20%5B1541924821%5D.m4a" Name="Desire (Killbox Remix)" Artist="Neonlight &amp; flowanastasia, Killbox" AverageBpm="None" Tonality="None" TrackID="18" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Neonlight%20-%20Triumph%20%28Burr%20Oak%20Remix%29%20%5BBlackout%5D%20OUT%20NOW%20%5B1546911910%5D.m4a" Name="Triumph (Burr Oak Remix)" Artist="Neonlight, Burr Oak" AverageBpm="None" Tonality="None" TrackID="19" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Noisia%20-%20Into%20Dust%20%28Neonlight%20Remix%29%20%5B316588547%5D.m4a" Name="Into Dust (Neonlight Remix)" Artist="Noisia, Neonlight" AverageBpm="None" Tonality="None" TrackID="20" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Pendulum%20-%20Hold%20Your%20Colour%20%28Noisia%20Remix%29%20%5B418319384%5D.m4a" Name="Hold Your Colour (Noisia Remix)" Artist="Pendulum, Noisia" AverageBpm="None" Tonality="None" TrackID="21" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Ruhepuls%20%28Grey%20Code%20Remix%29%20%5B1649329218%5D.mp3" Name="Ruhepuls (Grey Code Remix)" Artist="Camo &amp; Krooked, Grey Code" AverageBpm="None" Tonality="None" TrackID="22" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Shag%20%5B714838669%5D.m4a" Name="Shag" Artist="Dossa  &amp; Locuzzed" AverageBpm="None" Tonality="None" TrackID="23" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Skrimor%20-%20Chicken%20Sick%20%5B2137313193%5D.m4a" Name="Chicken Sick" Artist="Skirmor" AverageBpm="None" Tonality="None" TrackID="24" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Yue%20-%20Break%20It%20Down%20%5B2202351867%5D.m4a" Name="Break It Down" Artist="Yue" AverageBpm="None" Tonality="None" TrackID="25" />
 	</COLLECTION>
 	<PLAYLISTS>
 		<NODE Name="ROOT" Type="0" Count="1">
-			<NODE Name="manadj - Needs Analysis [2025-12-08]" Type="1" KeyType="0" Entries="63">
+			<NODE Name="manadj - Needs Analysis [2026-03-06]" Type="1" KeyType="0" Entries="25">
 				<TRACK Key="1" />
 				<TRACK Key="2" />
 				<TRACK Key="3" />
@@ -94,44 +56,6 @@
 				<TRACK Key="23" />
 				<TRACK Key="24" />
 				<TRACK Key="25" />
-				<TRACK Key="26" />
-				<TRACK Key="27" />
-				<TRACK Key="28" />
-				<TRACK Key="29" />
-				<TRACK Key="30" />
-				<TRACK Key="31" />
-				<TRACK Key="32" />
-				<TRACK Key="33" />
-				<TRACK Key="34" />
-				<TRACK Key="35" />
-				<TRACK Key="36" />
-				<TRACK Key="37" />
-				<TRACK Key="38" />
-				<TRACK Key="39" />
-				<TRACK Key="40" />
-				<TRACK Key="41" />
-				<TRACK Key="42" />
-				<TRACK Key="43" />
-				<TRACK Key="44" />
-				<TRACK Key="45" />
-				<TRACK Key="46" />
-				<TRACK Key="47" />
-				<TRACK Key="48" />
-				<TRACK Key="49" />
-				<TRACK Key="50" />
-				<TRACK Key="51" />
-				<TRACK Key="52" />
-				<TRACK Key="53" />
-				<TRACK Key="54" />
-				<TRACK Key="55" />
-				<TRACK Key="56" />
-				<TRACK Key="57" />
-				<TRACK Key="58" />
-				<TRACK Key="59" />
-				<TRACK Key="60" />
-				<TRACK Key="61" />
-				<TRACK Key="62" />
-				<TRACK Key="63" />
 			</NODE>
 		</NODE>
 	</PLAYLISTS>

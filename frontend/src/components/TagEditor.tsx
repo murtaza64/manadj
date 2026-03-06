@@ -18,6 +18,7 @@ interface Props {
   onSave: (data: { energy?: number; tag_ids?: number[]; bpm?: number; key?: number }) => void;
   onUpdate?: (trackId: number, field: 'title' | 'artist', value: string) => void;
   currentTime: number;
+  onEnergyEditModeChange?: (isActive: boolean) => void;
 }
 
 export interface TagEditorHandle {
@@ -25,7 +26,7 @@ export interface TagEditorHandle {
   toggleEnergyEditMode: () => void;
 }
 
-const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate, currentTime }, ref) => {
+const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate, currentTime, onEnergyEditModeChange }, ref) => {
   const isDisabled = !track;
   const queryClient = useQueryClient();
 
@@ -43,6 +44,11 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
   // Energy edit mode state
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
+
+  // Notify parent when energy edit mode changes
+  useEffect(() => {
+    onEnergyEditModeChange?.(isEnergyEditMode);
+  }, [isEnergyEditMode, onEnergyEditModeChange]);
 
   // Beatgrid editing mutations
   const setDownbeat = useSetBeatgridDownbeat();

@@ -2,10 +2,9 @@
 """
 CLI wrapper for syncing manadj tags to Engine DJ playlists.
 
-Creates a 3-level nested playlist structure:
-- Root: "manadj Tags"
-- Level 2: Tag categories (Genre, Vibe, Energy, etc.)
-- Level 3: Individual tags with tracks
+Creates a flat playlist structure:
+- Root: "manaDJ Tags"
+- All tags directly under root (alphabetically sorted)
 
 Usage:
     python scripts/export/tags_to_engine_playlists.py                    # Dry-run
@@ -43,7 +42,7 @@ def main():
     parser.add_argument(
         '--fresh',
         action='store_true',
-        help='Delete existing "manadj Tags" hierarchy and recreate'
+        help='Delete existing "manaDJ Tags" folder and recreate'
     )
 
     args = parser.parse_args()

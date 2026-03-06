@@ -37,6 +37,7 @@ def process_track(track_data):
         Tuple of (success: bool, track_display_name: str, elapsed_time: float or None, error: str or None)
     """
     track_id, track_filename, track_display_name = track_data
+    print(f"Processing track: {track_display_name} (ID: {track_id})")
 
     # Check if file exists
     if not Path(track_filename).exists():
@@ -49,8 +50,10 @@ def process_track(track_data):
         start_time = time.time()
         create_waveform(db, track_id, track_filename)
         elapsed = time.time() - start_time
+        print(f"✓ Generated waveform for {track_display_name} in {elapsed:.2f}s")
         return (True, track_display_name, elapsed, None)
     except Exception as e:
+        print(f"✗ Error processing {track_display_name}: {e}")
         return (False, track_display_name, None, str(e))
     finally:
         db.close()

@@ -15,6 +15,7 @@ interface UseKeyboardShortcutsProps {
   onHotCueDown?: (slotNumber: number) => void;
   onHotCueUp?: (slotNumber: number) => void;
   onHotCueDelete?: (slotNumber: number) => void;
+  isEnergyEditMode?: boolean;
 }
 
 export function useKeyboardShortcuts({
@@ -28,7 +29,8 @@ export function useKeyboardShortcuts({
   onEnterEnergyEditMode,
   onHotCueDown,
   onHotCueUp,
-  onHotCueDelete
+  onHotCueDelete,
+  isEnergyEditMode
 }: UseKeyboardShortcutsProps) {
   const audio = useAudio();
   const [seekDirection, setSeekDirection] = useState<number>(0); // -1, 0, or 1
@@ -158,8 +160,9 @@ export function useKeyboardShortcuts({
 
       // Hot cue keys: 1-8 (prevent key repeat like F key)
       // Use event.code to detect Digit1-8 regardless of Shift state
+      // Skip if in energy edit mode (numbers 1-5 set energy level)
       if (/^Digit[1-8]$/.test(event.code) && !event.shiftKey) {
-        if (!selectedTrack) return;
+        if (!selectedTrack || isEnergyEditMode) return;
 
         // Prevent key repeat for hot cue buttons
         if (event.repeat) {
@@ -178,8 +181,9 @@ export function useKeyboardShortcuts({
 
       // Hot cue delete: Shift+1-8 (single press only, no repeat)
       // Use event.code to detect Digit1-8 regardless of Shift state
+      // Skip if in energy edit mode
       if (/^Digit[1-8]$/.test(event.code) && event.shiftKey) {
-        if (!selectedTrack) return;
+        if (!selectedTrack || isEnergyEditMode) return;
 
         // Prevent key repeat
         if (event.repeat) {
@@ -225,8 +229,9 @@ export function useKeyboardShortcuts({
 
       // Hot cue key up: 1-8 (only for non-Shift, since Shift deletes)
       // Use event.code to detect Digit1-8 regardless of Shift state
+      // Skip if in energy edit mode
       if (/^Digit[1-8]$/.test(event.code) && !event.shiftKey) {
-        if (!selectedTrack) return;
+        if (!selectedTrack || isEnergyEditMode) return;
 
         event.preventDefault();
 
@@ -244,7 +249,7 @@ export function useKeyboardShortcuts({
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
     };
-  }, [tracks, selectedTrack, onSelectTrack, playerRef, onNudgeBeatgrid, onSetDownbeat]);
+  }, [tracks, selectedTrack, onSelectTrack, playerRef, onNudgeBeatgrid, onSetDownbeat, isEnergyEditMode]);
 
   // Continuous seek effect for H/L keys
   useEffect(() => {

@@ -190,6 +190,7 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [selectedView, setSelectedView] = useState<ViewType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
+  const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
   const queryClient = useQueryClient();
   const playerRef = useRef<PlayerHandle>(null);
   const tagEditorRef = useRef<{ enterTagEditMode: () => void } | null>(null);
@@ -433,6 +434,7 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
     onHotCueDown: handleHotCueDown,
     onHotCueUp: handleHotCueUp,
     onHotCueDelete: handleHotCueDelete,
+    isEnergyEditMode,
   });
 
   return (
@@ -458,6 +460,7 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
             onSave={mutation.mutate}
             onUpdate={handleFieldUpdate}
             currentTime={audio.currentTime}
+            onEnergyEditModeChange={setIsEnergyEditMode}
           />
         </div>
       </div>

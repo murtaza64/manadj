@@ -2,10 +2,10 @@
 
 [database]
 # Path to Engine DJ Database2 folder (leave empty to disable)
-engine_dj_path = "/Users/murtaza/manadj/data/Engine Library/Database2"
+engine_dj_path = "/Users/murtaza/Music/Engine Library/Database2"
 
 # Path to Rekordbox database folder (leave empty to disable)
-rekordbox_path = "/Users/murtaza/manadj/data/rekordbox"
+rekordbox_path = "/Users/murtaza/Library/Pioneer/rekordbox"
 
 [library]
 # Path to music library directory for importing tracks
