@@ -1,17 +1,21 @@
 """API routes for tracks."""
 
+import logging
+import mimetypes
+from pathlib import Path
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List
-from pathlib import Path
-import mimetypes
+
 from .. import crud, schemas, models
 from ..database import get_db
 from ..id3_utils import extract_id3_metadata, write_id3_metadata
 from ..key import Key
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=schemas.PaginatedTracks)
@@ -93,12 +97,21 @@ def update_track(
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
+    title_or_artist_updated = False
+    write_kwargs: dict[str, str | None] = {}
+
     # Update title if provided
     if update_data.title is not None:
+        if track.title != update_data.title:
+            title_or_artist_updated = True
+            write_kwargs["title"] = update_data.title
         track.title = update_data.title
 
     # Update artist if provided
     if update_data.artist is not None:
+        if track.artist != update_data.artist:
+            title_or_artist_updated = True
+            write_kwargs["artist"] = update_data.artist
         track.artist = update_data.artist
 
     # Update energy if provided
@@ -118,6 +131,24 @@ def update_track(
     # Update tags if provided
     if update_data.tag_ids is not None:
         track = crud.update_track_tags(db, track_id, update_data.tag_ids)
+
+    # Best-effort: write title/artist to file metadata immediately.
+    # DB commit still proceeds if file write fails.
+    if title_or_artist_updated and write_kwargs:
+        try:
+            success = write_id3_metadata(track.filename, **write_kwargs)
+            if not success:
+                logger.warning(
+                    "Best-effort metadata write failed for track_id=%s file=%s",
+                    track.id,
+                    track.filename,
+                )
+        except Exception:
+            logger.exception(
+                "Unexpected error during best-effort metadata write for track_id=%s file=%s",
+                track.id,
+                track.filename,
+            )
 
     db.commit()
     db.refresh(track)

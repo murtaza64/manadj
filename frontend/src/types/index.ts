@@ -233,6 +233,41 @@ export interface TrackSyncResult {
   missing_in_manadj: TrackDiscrepancy[];  // Import candidates
 }
 
+export interface EngineRBXMLSyncRequest {
+  playlist_name?: string;
+  output_path?: string;
+  validate_files?: boolean;
+  skip_import?: boolean;
+}
+
+export interface EngineRBXMLSyncResult {
+  target: 'engine';
+  exported_to_target: number;
+  skipped_file_not_found: number;
+  playlist_name: string | null;
+  output_path: string | null;
+}
+
+export interface RekordboxTrackSyncRequest {
+  dry_run: boolean;
+  skip_export: boolean;
+  skip_import: boolean;
+  validate_files: boolean;
+  playlist_name?: string;
+}
+
+export interface RekordboxTrackSyncResult {
+  target: 'rekordbox';
+  dry_run: boolean;
+  skipped_file_not_found: number;
+  missing_in_target_count: number;
+  missing_in_manadj_count: number;
+  exported_to_target: number;
+  imported_to_manadj: number;
+  playlist_name: string | null;
+  playlist_created: boolean;
+}
+
 // Library import types
 export interface LibraryTrackCandidate {
   filepath: string;

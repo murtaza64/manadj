@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { PlaylistSync } from './PlaylistSync';
 import { TagSync } from './TagSync';
 import { TrackSync } from './TrackSync';
-import { LibraryImport } from './LibraryImport';
 import { MetadataSync } from './MetadataSync';
 import './SyncView.css';
 
@@ -10,7 +9,7 @@ interface SyncViewProps {
   onClose: () => void;
 }
 
-type TabType = 'playlists' | 'tags' | 'tracks' | 'library' | 'metadata';
+type TabType = 'playlists' | 'tags' | 'tracks' | 'metadata';
 
 export function SyncView({ onClose }: SyncViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>('playlists');
@@ -39,12 +38,6 @@ export function SyncView({ onClose }: SyncViewProps) {
             Tracks
           </button>
           <button
-            className={`sync-view-tab ${activeTab === 'library' ? 'sync-view-tab-active' : ''}`}
-            onClick={() => setActiveTab('library')}
-          >
-            Library
-          </button>
-          <button
             className={`sync-view-tab ${activeTab === 'metadata' ? 'sync-view-tab-active' : ''}`}
             onClick={() => setActiveTab('metadata')}
           >
@@ -59,7 +52,6 @@ export function SyncView({ onClose }: SyncViewProps) {
       {activeTab === 'playlists' && <PlaylistSync onClose={onClose} />}
       {activeTab === 'tags' && <TagSync />}
       {activeTab === 'tracks' && <TrackSync onClose={onClose} />}
-      {activeTab === 'library' && <LibraryImport />}
       {activeTab === 'metadata' && <MetadataSync />}
     </div>
   );

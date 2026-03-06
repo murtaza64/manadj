@@ -62,3 +62,8 @@
 .close-button:hover {
   background: var(--surface1);
 }
+
+.track-sync-disk-panel {
+  flex: 1;
+  overflow: auto;
+}

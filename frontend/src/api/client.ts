@@ -1,4 +1,21 @@
-import type { PlaylistTrackAdd, UnifiedPlaylist, PlaylistSyncStats, UnifiedTagView, TagSyncStats, TagSyncRequest, SyncResult, SyncPlaylistRequest, TrackSyncResult, LibraryImportResult, LibraryImportRequest, LibraryImportExecutionResult } from '../types';
+import type {
+  PlaylistTrackAdd,
+  UnifiedPlaylist,
+  PlaylistSyncStats,
+  UnifiedTagView,
+  TagSyncStats,
+  TagSyncRequest,
+  SyncResult,
+  SyncPlaylistRequest,
+  TrackSyncResult,
+  EngineRBXMLSyncRequest,
+  EngineRBXMLSyncResult,
+  RekordboxTrackSyncRequest,
+  RekordboxTrackSyncResult,
+  LibraryImportResult,
+  LibraryImportRequest,
+  LibraryImportExecutionResult,
+} from '../types';
 
 // Backend URL configuration - can be overridden with VITE_API_URL env var
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -476,6 +493,26 @@ export const api = {
 
       const res = await fetch(`${API_BASE}/sync/tracks/rekordbox?${params}`);
       if (!res.ok) throw new Error('Failed to fetch Rekordbox track discrepancies');
+      return res.json();
+    },
+
+    syncEngineRBXML: async (request: EngineRBXMLSyncRequest): Promise<EngineRBXMLSyncResult> => {
+      const res = await fetch(`${API_BASE}/sync/tracks/engine/sync-rbxml`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) throw new Error('Failed to export Engine DJ RBXML');
+      return res.json();
+    },
+
+    syncRekordbox: async (request: RekordboxTrackSyncRequest): Promise<RekordboxTrackSyncResult> => {
+      const res = await fetch(`${API_BASE}/sync/tracks/rekordbox/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) throw new Error('Failed to sync tracks with Rekordbox');
       return res.json();
     },
   },

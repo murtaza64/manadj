@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { TrackSyncView } from './TrackSyncView';
+import { LibraryImport } from './LibraryImport';
 import './TrackSync.css';
 
 interface TrackSyncProps {
@@ -7,7 +8,7 @@ interface TrackSyncProps {
 }
 
 export function TrackSync({ onClose }: TrackSyncProps) {
-  const [selectedTarget, setSelectedTarget] = useState<'engine' | 'rekordbox'>('engine');
+  const [selectedTarget, setSelectedTarget] = useState<'engine' | 'rekordbox' | 'disk'>('engine');
 
   return (
     <div className="track-sync-container">
@@ -26,13 +27,25 @@ export function TrackSync({ onClose }: TrackSyncProps) {
           >
             Rekordbox
           </button>
+          <button
+            className={selectedTarget === 'disk' ? 'active' : ''}
+            onClick={() => setSelectedTarget('disk')}
+          >
+            Disk
+          </button>
         </div>
         <button onClick={onClose} className="close-button">
           Close
         </button>
       </div>
 
-      <TrackSyncView target={selectedTarget} />
+      {selectedTarget === 'disk' ? (
+        <div className="track-sync-disk-panel">
+          <LibraryImport />
+        </div>
+      ) : (
+        <TrackSyncView target={selectedTarget} />
+      )}
     </div>
   );
 }

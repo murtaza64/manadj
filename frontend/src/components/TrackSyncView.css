@@ -87,9 +87,63 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   padding: 12px 20px;
   background: var(--mantle);
   border-bottom: 1px solid var(--surface0);
+}
+
+.track-sync-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.track-sync-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.track-sync-input {
+  padding: 6px 8px;
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  min-width: 220px;
+}
+
+.run-sync-button {
+  padding: 6px 12px;
+  background: var(--blue);
+  border: 1px solid var(--blue);
+  color: var(--base);
+  cursor: pointer;
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+
+.run-sync-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.track-sync-action-result {
+  padding: 8px 20px;
+  font-size: var(--font-sm);
+  border-bottom: 1px solid var(--surface0);
+}
+
+.track-sync-action-success {
+  color: var(--green);
+  background: var(--mantle);
+}
+
+.track-sync-action-error {
+  color: var(--red);
+  background: var(--mantle);
 }
 
 .checkbox-label {
