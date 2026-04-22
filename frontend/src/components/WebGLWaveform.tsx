@@ -118,9 +118,9 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
     }
   }, [hotCuesArray]);
 
-  // Sync renderer position when audio is paused (for seeking/cue button)
+  // Sync renderer position on seeks/cue updates and play state changes
   useEffect(() => {
-    if (rendererRef.current && !audio.isPlaying && audio.audioRef.current) {
+    if (rendererRef.current && audio.audioRef.current) {
       rendererRef.current.setPlayPosition(audio.audioRef.current.currentTime);
     }
   }, [audio.isPlaying, audio.cuePoint, audio.seekVersion, audio.audioRef]);

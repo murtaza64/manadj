@@ -31,6 +31,10 @@ export class WebGLWaveformRenderer {
   public static SIMULATE_PLAYBACK = false; // Set to true to test without audio (accessible from console)
   public static SKIP_RENDERING = false; // Set to true to test RAF + audio without rendering
   public static DEBUG_STARTUP_JITTER = true; // Logs first 2s after playback starts/resumes
+  public static FULL_STARTUP_FRAME_LOG = true; // Log every startup frame for first 2s
+  public static STARTUP_BLEND_MS = 150; // Blend prediction -> audio target after first tick
+  public static STARTUP_PREDICTION_DELAY_MS = 70; // Delay only pre-first-audio-tick prediction
+  public static ANOMALY_SUPPRESS_FRAMES = 24; // Ignore anomaly logs right after jumps
   private instanceId: number;
 
   private canvas: HTMLCanvasElement;
@@ -112,6 +116,7 @@ export class WebGLWaveformRenderer {
   private lastRenderStart: number = 0;
   private frameDeltaSamples: number[] = [];
   private devToolsDetected: boolean = false;
+  private suppressAnomalyLogsFrames: number = 0;
 
   // Playback-start jitter diagnostics (main waveform only)
   private wasPlayingLastFrame: boolean = false;
@@ -130,6 +135,10 @@ export class WebGLWaveformRenderer {
   private startupPrevAudioTime: number | null = null;
   private startupPrevTargetPos: number | null = null;
   private startupPrevSmoothedPos: number | null = null;
+  private startupBaseAudioTime: number = 0;
+  private startupObservedFirstAudioTick: boolean = false;
+  private startupHandoffActive: boolean = false;
+  private startupHandoffStartMs: number = 0;
 
   constructor(canvas: HTMLCanvasElement, config: WebGLRendererConfig = {}) {
     // Track instance for debugging
@@ -336,6 +345,7 @@ export class WebGLWaveformRenderer {
       this.lastKnownTime = position;
       this.smoothedPlayPosition = this.playPosition;
       this.lastTimeUpdate = 0;  // Force re-initialization on next frame
+      this.suppressAnomalyLogsFrames = WebGLWaveformRenderer.ANOMALY_SUPPRESS_FRAMES;
       this.calculateDisplayWindow();
     }
   }
@@ -652,15 +662,33 @@ export class WebGLWaveformRenderer {
     this.pixelOffsetDeltas.push(offsetDelta);
 
     // Log individual frames with unusual scroll behavior (only for main waveform)
+    // Large deltas are expected after seeks/playback jumps, so suppress shortly after jumps.
     if (!this.isMinimapMode) {
-      const avgDelta = this.pixelOffsetDeltas.length > 10
-        ? this.pixelOffsetDeltas.slice(-10).reduce((a, b) => a + b, 0) / 10
-        : offsetDelta;
+      if (this.suppressAnomalyLogsFrames > 0) {
+        this.suppressAnomalyLogsFrames--;
+      } else {
+        const recent = this.pixelOffsetDeltas.length > 10
+          ? this.pixelOffsetDeltas.slice(-10)
+          : this.pixelOffsetDeltas;
+        const avgDelta = recent.length > 0
+          ? recent.reduce((a, b) => a + b, 0) / recent.length
+          : 0;
+        const absAvgDelta = recent.length > 0
+          ? recent.reduce((a, b) => a + Math.abs(b), 0) / recent.length
+          : 0;
 
-      // Log if this frame deviates significantly from recent average
-      const deviation = Math.abs(offsetDelta - avgDelta);
-      if (deviation > 2.0 && this.pixelOffsetDeltas.length > 10) {
-        console.log(`[Frame Anomaly] offset Δ: ${offsetDelta.toFixed(3)}px (avg: ${avgDelta.toFixed(3)}) | deviation: ${deviation.toFixed(3)}px | playPos: ${this.playPosition.toFixed(6)} | firstDisplayed: ${this.firstDisplayedPosition.toFixed(6)}`);
+        const absDelta = Math.abs(offsetDelta);
+        const deviation = Math.abs(offsetDelta - avgDelta);
+        const absoluteThreshold = 3.0;
+        const relativeThreshold = Math.max(absoluteThreshold, absAvgDelta * 3.0);
+
+        if (absDelta > absoluteThreshold && deviation > relativeThreshold) {
+          console.log(
+            `[Frame Anomaly] offset Δ: ${offsetDelta.toFixed(3)}px (avg: ${avgDelta.toFixed(3)}) ` +
+            `| deviation: ${deviation.toFixed(3)}px | playPos: ${this.playPosition.toFixed(6)} ` +
+            `| firstDisplayed: ${this.firstDisplayedPosition.toFixed(6)}`
+          );
+        }
       }
     }
 
@@ -1254,7 +1282,12 @@ export class WebGLWaveformRenderer {
 
       // Playback transition diagnostics
       if (isPlaying && !this.wasPlayingLastFrame) {
+        this.suppressAnomalyLogsFrames = WebGLWaveformRenderer.ANOMALY_SUPPRESS_FRAMES;
         this.playbackStartTimestamp = timestamp;
+        this.startupBaseAudioTime = audioElement.currentTime;
+        this.startupObservedFirstAudioTick = false;
+        this.startupHandoffActive = false;
+        this.startupHandoffStartMs = 0;
         this.startupSummaryLogged = false;
         this.startupFrameCount = 0;
         this.startupFrameDeltaSum = 0;
@@ -1282,6 +1315,7 @@ export class WebGLWaveformRenderer {
       }
 
       if (!isPlaying && this.wasPlayingLastFrame && !this.isMinimapMode && WebGLWaveformRenderer.DEBUG_STARTUP_JITTER) {
+        this.suppressAnomalyLogsFrames = WebGLWaveformRenderer.ANOMALY_SUPPRESS_FRAMES;
         console.log(
           `[Renderer #${this.instanceId}] PLAY_PAUSE ` +
           `audio=${audioElement.currentTime.toFixed(3)}s ` +
@@ -1292,9 +1326,16 @@ export class WebGLWaveformRenderer {
       this.wasPlayingLastFrame = isPlaying;
 
       if (isPlaying) {
+        const previousLastKnownTime = this.lastKnownTime;
         let actualTime: number;
         let playbackRate: number;
         let sourceAudioTime: number;
+        let audioSampleAdvanced = false;
+        let firstAudioTickThisFrame = false;
+        let backwardDiscontinuityDetected = false;
+        const previousSmoothedPosition = this.smoothedPlayPosition;
+        const wasAwaitingTimeSync = this.lastTimeUpdate === 0;
+        let monotonicClampApplied = false;
 
         if (WebGLWaveformRenderer.SIMULATE_PLAYBACK) {
           // Simulate audio playback with pure timestamp-based movement
@@ -1321,10 +1362,23 @@ export class WebGLWaveformRenderer {
           actualTime = audioElement.currentTime;
           playbackRate = audioElement.playbackRate;
           sourceAudioTime = actualTime;
+
+          if (previousLastKnownTime - actualTime > 0.02) {
+            backwardDiscontinuityDetected = true;
+            this.lastTimeUpdate = 0;
+            this.suppressAnomalyLogsFrames = WebGLWaveformRenderer.ANOMALY_SUPPRESS_FRAMES;
+          }
+
           // Smooth interpolation for 60fps playback
           // Audio currentTime only updates ~4ms (250Hz), causing visible stepping
-          if (actualTime !== this.lastKnownTime) {
+          if (Math.abs(actualTime - this.lastKnownTime) > 0.0001) {
             // Audio currentTime has updated - reset interpolation baseline
+            audioSampleAdvanced = true;
+            if (!this.startupObservedFirstAudioTick) {
+              firstAudioTickThisFrame = true;
+              this.startupObservedFirstAudioTick = true;
+            }
+
             this.lastKnownTime = actualTime;
             this.lastTimeUpdate = timestamp;
           }
@@ -1345,9 +1399,50 @@ export class WebGLWaveformRenderer {
           actualTime = Math.min(actualTime, this.lastKnownTime + maxAhead);
         }
 
-        // Simple linear interpolation - if we missed frames, move proportionally more
-        // This naturally handles frame delays without complex smoothing
-        const targetPosition = actualTime / (this.waveformData?.duration || 1);
+        const duration = this.waveformData?.duration || 1;
+        const audioTargetPosition = Math.max(0, Math.min(1, actualTime / duration));
+        let targetPosition = audioTargetPosition;
+        const startupElapsedMs = timestamp - this.playbackStartTimestamp;
+        const useStartupDelayedPrediction =
+          !WebGLWaveformRenderer.SIMULATE_PLAYBACK &&
+          !this.startupObservedFirstAudioTick;
+
+        let predictedTargetPosition = audioTargetPosition;
+        if (this.waveformData) {
+          const delayedElapsedMs = Math.max(0, startupElapsedMs - WebGLWaveformRenderer.STARTUP_PREDICTION_DELAY_MS);
+          const predictedTime = this.startupBaseAudioTime + (delayedElapsedMs / 1000.0) * playbackRate;
+          predictedTargetPosition = Math.max(0, Math.min(1, predictedTime / this.waveformData.duration));
+        }
+
+        if (firstAudioTickThisFrame) {
+          this.startupHandoffActive = true;
+          this.startupHandoffStartMs = startupElapsedMs;
+        }
+
+        let startupBlendAlpha = 0;
+        let inStartupBlendMode = false;
+        if (this.startupHandoffActive) {
+          const blendProgress = (startupElapsedMs - this.startupHandoffStartMs) / WebGLWaveformRenderer.STARTUP_BLEND_MS;
+          if (blendProgress >= 1) {
+            this.startupHandoffActive = false;
+            startupBlendAlpha = 1;
+          } else {
+            inStartupBlendMode = blendProgress >= 0;
+            startupBlendAlpha = Math.max(0, blendProgress);
+          }
+        }
+
+        if (useStartupDelayedPrediction) {
+          targetPosition = predictedTargetPosition;
+        } else if (inStartupBlendMode) {
+          targetPosition = (predictedTargetPosition * (1 - startupBlendAlpha)) + (audioTargetPosition * startupBlendAlpha);
+        } else {
+          targetPosition = audioTargetPosition;
+        }
+
+        if (backwardDiscontinuityDetected) {
+          this.smoothedPlayPosition = targetPosition;
+        }
 
         // Initialize smoothed position on first frame or if it's very far off (after seek)
         const positionDiff = Math.abs(targetPosition - this.smoothedPlayPosition);
@@ -1357,17 +1452,24 @@ export class WebGLWaveformRenderer {
         }
 
         // Move toward target position
-        // For 60fps (16.7ms), move at normal speed
-        // For delayed frames, move proportionally faster to catch up
+        // For delayed frames, gain can spike; clamp to avoid startup overshoot.
         const normalFrameTime = 16.7;
         const frameRatio = frameDeltaMs / normalFrameTime;
-        const smoothingGain = 0.2 * frameRatio;
+        const rawGain = 0.2 * frameRatio;
+        const gainCap = startupElapsedMs <= 2000 ? 0.35 : 1.0;
+        const smoothingGain = Math.max(0, Math.min(rawGain, gainCap));
         const errorBeforeStep = targetPosition - this.smoothedPlayPosition;
-        const step = (targetPosition - this.smoothedPlayPosition) * 0.2 * frameRatio;
+        const step = errorBeforeStep * smoothingGain;
         this.smoothedPlayPosition += step;
 
+        // Prevent backward visual motion during normal playback.
+        // Allow backward movement only on explicit hard sync frames (e.g. seek/cue).
+        if (!wasAwaitingTimeSync && !backwardDiscontinuityDetected && this.smoothedPlayPosition < previousSmoothedPosition) {
+          this.smoothedPlayPosition = previousSmoothedPosition;
+          monotonicClampApplied = true;
+        }
+
         // Startup jitter diagnostics (first 2s after play/resume)
-        const startupElapsedMs = timestamp - this.playbackStartTimestamp;
         if (
           !this.isMinimapMode &&
           WebGLWaveformRenderer.DEBUG_STARTUP_JITTER &&
@@ -1405,18 +1507,52 @@ export class WebGLWaveformRenderer {
           this.startupPrevSmoothedPos = this.smoothedPlayPosition;
           this.startupPrevTargetPos = targetPosition;
           this.startupPrevAudioTime = sourceAudioTime;
+          const startupMode = useStartupDelayedPrediction
+            ? 'predict'
+            : (inStartupBlendMode ? 'smooth-blend' : 'smooth');
 
-          if (this.startupFrameCount % 15 === 0) {
-            console.log(
-              `[Renderer #${this.instanceId}] STARTUP_SAMPLE ` +
-              `t=${startupElapsedMs.toFixed(0)}ms ` +
-              `audio=${sourceAudioTime.toFixed(3)}s ` +
+          if (WebGLWaveformRenderer.FULL_STARTUP_FRAME_LOG) {
+            const previewPixelOffset = this.waveformData ? this.calculatePixelOffset() : 0;
+            const previewOffsetDelta = previewPixelOffset - this.lastPixelOffset;
+
+            console.debug(
+              `[Renderer #${this.instanceId}] STARTUP_FRAME ` +
+              `i=${this.startupFrameCount} ` +
+              `t=${startupElapsedMs.toFixed(1)}ms ` +
+              `mode=${startupMode} ` +
+              `audio=${sourceAudioTime.toFixed(6)}s ` +
               `target=${targetPosition.toFixed(6)} ` +
               `smoothed=${this.smoothedPlayPosition.toFixed(6)} ` +
               `err=${errorBeforeStep.toFixed(6)} ` +
+              `alpha=${startupBlendAlpha.toFixed(3)} ` +
               `gain=${smoothingGain.toFixed(3)} ` +
-              `frameDelta=${frameDeltaMs.toFixed(1)}ms`
+              `frameDelta=${frameDeltaMs.toFixed(3)}ms ` +
+              `audioTick=${audioSampleAdvanced ? '1' : '0'} ` +
+              `awaitSync=${wasAwaitingTimeSync ? '1' : '0'} ` +
+              `monoClamp=${monotonicClampApplied ? '1' : '0'} ` +
+              `playPos=${this.playPosition.toFixed(6)} ` +
+              `firstDisp=${this.firstDisplayedPosition.toFixed(6)} ` +
+              `pixOffset=${previewPixelOffset.toFixed(3)} ` +
+              `offsetDelta=${previewOffsetDelta.toFixed(3)}`
             );
+          } else {
+            const sampleEveryFrame = startupElapsedMs <= 200;
+            const samplePeriodic = this.startupFrameCount % 15 === 0;
+            if (sampleEveryFrame || samplePeriodic) {
+              console.log(
+                `[Renderer #${this.instanceId}] STARTUP_SAMPLE ` +
+                `t=${startupElapsedMs.toFixed(0)}ms ` +
+                `audio=${sourceAudioTime.toFixed(3)}s ` +
+                `target=${targetPosition.toFixed(6)} ` +
+                `smoothed=${this.smoothedPlayPosition.toFixed(6)} ` +
+                `err=${errorBeforeStep.toFixed(6)} ` +
+                `mode=${startupMode} ` +
+                `alpha=${startupBlendAlpha.toFixed(3)} ` +
+                `delayPred=${useStartupDelayedPrediction ? '1' : '0'} ` +
+                `gain=${smoothingGain.toFixed(3)} ` +
+                `frameDelta=${frameDeltaMs.toFixed(1)}ms`
+              );
+            }
           }
         }
 
