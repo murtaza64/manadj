@@ -74,7 +74,7 @@ export function useSetHotCue() {
 
       return { previousHotCues };
     },
-    onError: (err, variables, context) => {
+    onError: (_err, variables, context) => {
       // Rollback on error
       if (context?.previousHotCues) {
         queryClient.setQueryData(['hotcues', variables.trackId], context.previousHotCues);
@@ -113,7 +113,7 @@ export function useDeleteHotCue() {
 
       return { previousHotCues };
     },
-    onError: (err, variables, context) => {
+    onError: (_err, variables, context) => {
       // Rollback on error
       if (context?.previousHotCues) {
         queryClient.setQueryData(['hotcues', variables.trackId], context.previousHotCues);

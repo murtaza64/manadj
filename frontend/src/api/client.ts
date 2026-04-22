@@ -114,6 +114,10 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to update track (${response.status}): ${errorText}`);
+      }
       return response.json();
     },
 

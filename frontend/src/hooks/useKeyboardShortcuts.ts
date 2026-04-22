@@ -7,7 +7,7 @@ interface UseKeyboardShortcutsProps {
   tracks: Track[];
   selectedTrack: Track | null;
   onSelectTrack: (track: Track | null) => void;
-  playerRef: RefObject<PlayerHandle>;
+  playerRef: RefObject<PlayerHandle | null>;
   onNudgeBeatgrid?: (offsetMs: number) => void;
   onSetDownbeat?: () => void;
   onEnterTagEditMode?: () => void;

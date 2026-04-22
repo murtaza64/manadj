@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { WaveformResponse, WaveformData } from '../types';
+import type { WaveformResponse } from '../types';
 import type { WaveformDataWebGL } from '../utils/WebGLWaveformRenderer';
 
 /**

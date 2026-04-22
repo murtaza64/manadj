@@ -92,13 +92,16 @@
   align-items: center;
   gap: 6px;
   padding: 6px;
-  background: var(--crust);
-  border: 1px solid var(--surface0);
+  background: transparent;
+  border: none;
 }
 
 .tag-grid-item-new {
-  border-color: var(--mauve);
-  border-style: dashed;
+  background: transparent;
+}
+
+.tag-grid-item-draft {
+  opacity: 0.95;
 }
 
 .tag-grid-item-deleted {
@@ -129,21 +132,21 @@
 
 /* Small Delete Button */
 .btn-delete-small {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   padding: 0;
-  border: 1px solid var(--surface0);
-  background: var(--red);
-  color: var(--base);
+  border: none;
+  background: transparent;
+  color: var(--red);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
   flex-shrink: 0;
-  font-weight: bold;
+  font-weight: 700;
 }
 
 .btn-delete-small:hover {
-  background: var(--maroon);
+  color: var(--maroon);
 }
 
 .btn-restore-small {
@@ -162,6 +165,30 @@
 
 .btn-restore-small:hover {
   background: var(--sapphire);
+}
+
+.btn-create-small {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--surface0);
+  background: var(--green);
+  color: var(--base);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+  font-weight: bold;
+}
+
+.btn-create-small:hover:not(:disabled) {
+  background: var(--teal);
+}
+
+.btn-create-small:disabled {
+  background: var(--surface0);
+  color: var(--overlay0);
+  cursor: not-allowed;
 }
 
 .tag-name-input {
@@ -193,16 +220,19 @@
   position: relative;
 }
 
-.color-picker-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
+.color-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1100;
+}
+
+.color-modal {
+  position: fixed;
+  width: min(320px, 100%);
   background: var(--crust);
   border: 1px solid var(--surface0);
   padding: 12px;
-  z-index: 1001;
-  min-width: 240px;
 }
 
 .color-palette-grid {
@@ -210,6 +240,70 @@
   grid-template-columns: repeat(6, 1fr);
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.color-randomize-btn {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--surface0);
+  background: var(--surface1);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.color-randomize-btn:hover {
+  border-color: var(--text);
+  background: var(--surface2);
+}
+
+.color-action-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.color-choose-btn {
+  flex: 1;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  border: 1px solid var(--surface0);
+  background: var(--surface1);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.color-choose-btn:hover {
+  border-color: var(--text);
+  background: var(--surface2);
+}
+
+.native-color-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.color-done-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--surface0);
+  background: var(--surface1);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.color-done-btn:hover {
+  border-color: var(--text);
+  background: var(--surface2);
 }
 
 .color-palette-item {
@@ -243,37 +337,6 @@
 .hex-error {
   color: var(--red);
   font-size: 10px;
-}
-
-/* Create Form */
-.tag-create-form {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.btn-create {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--surface0);
-  background: var(--mauve);
-  color: var(--base);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  font-weight: bold;
-  flex-shrink: 0;
-}
-
-.btn-create:hover:not(:disabled) {
-  background: var(--pink);
-}
-
-.btn-create:disabled {
-  background: var(--surface0);
-  color: var(--overlay0);
-  cursor: not-allowed;
 }
 
 /* Modal Footer */

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Tag, TagCategory, TagCreate, TagUpdate } from '../types';
-import { COLOR_PALETTE, getNextColor, isValidHexColor } from '../utils/colorUtils';
+import type { Tag, TagCategory } from '../types';
+import { COLOR_PALETTE, NEUTRAL_COLOR_PALETTE, getNextColor, isValidHexColor } from '../utils/colorUtils';
 import './TagManagementModal.css';
 
 interface Props {
@@ -24,16 +24,58 @@ interface NewTag {
   category_id: number;
 }
 
+interface NewTagDraft {
+  name: string;
+  color: string;
+}
+
+interface PickerAnchor {
+  top: number;
+  bottom: number;
+  left: number;
+}
+
+type ActiveColorPicker =
+  | { type: 'existing'; tagId: number; anchor: PickerAnchor }
+  | { type: 'new'; tempId: string; anchor: PickerAnchor }
+  | { type: 'draft'; categoryId: number; anchor: PickerAnchor };
+
 export default function TagManagementModal({ isOpen, onClose }: Props) {
   const queryClient = useQueryClient();
+  const getNativeColorValue = (color: string): string => (isValidHexColor(color) ? color : '#e55f85');
+
+  const getPickerAnchor = (el: HTMLElement): PickerAnchor => {
+    const rect = el.getBoundingClientRect();
+    return {
+      top: rect.top,
+      bottom: rect.bottom,
+      left: rect.left,
+    };
+  };
+
+  const getColorModalPosition = (anchor: PickerAnchor) => {
+    const modalWidth = 320;
+    const modalHeight = 320;
+    const gap = 8;
+    const edge = 8;
+
+    const left = Math.max(edge, Math.min(anchor.left, window.innerWidth - modalWidth - edge));
+
+    const canShowBelow = anchor.bottom + gap + modalHeight <= window.innerHeight - edge;
+    const top = canShowBelow
+      ? anchor.bottom + gap
+      : Math.max(edge, anchor.top - modalHeight - gap);
+
+    return { top, left };
+  };
 
   // State for batch editing
   const [editedTags, setEditedTags] = useState<{ [id: number]: TagEdit }>({});
   const [newTags, setNewTags] = useState<NewTag[]>([]);
+  const [newTagDrafts, setNewTagDrafts] = useState<{ [categoryId: number]: NewTagDraft }>({});
   const [deletedTagIds, setDeletedTagIds] = useState<Set<number>>(new Set());
-  const [showColorPicker, setShowColorPicker] = useState<number | string | null>(null);
+  const [activeColorPicker, setActiveColorPicker] = useState<ActiveColorPicker | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
-  const [newTagName, setNewTagName] = useState<{ [categoryId: number]: string }>({});
 
   // Fetch data
   const { data: categories } = useQuery({
@@ -62,10 +104,29 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
       });
       setEditedTags(initialEdits);
       setNewTags([]);
+      setNewTagDrafts({});
       setDeletedTagIds(new Set());
       setHasChanges(false);
     }
   }, [isOpen, allTags]);
+
+  useEffect(() => {
+    if (!isOpen || !categories) return;
+
+    setNewTagDrafts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      categories.forEach((category: TagCategory) => {
+        if (!next[category.id]) {
+          next[category.id] = { name: '', color: getNextColor() };
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [isOpen, categories]);
 
   // Batch save mutation - handles creates, updates, and deletes
   const batchSaveMutation = useMutation({
@@ -99,8 +160,15 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tags'] });
       setHasChanges(false);
-      setShowColorPicker(null);
-      setNewTagName({});
+      setActiveColorPicker(null);
+      setNewTagDrafts((prev) => {
+        const reset: { [categoryId: number]: NewTagDraft } = {};
+        Object.keys(prev).forEach((key) => {
+          const categoryId = Number(key);
+          reset[categoryId] = { name: '', color: getNextColor() };
+        });
+        return reset;
+      });
     },
   });
 
@@ -116,18 +184,20 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
     setHasChanges(true);
   };
 
-  const handleSave = () => {
+  const savePendingChanges = (createsOverride?: NewTag[]) => {
+    const creates = createsOverride ?? newTags;
+
     // Validate all colors (existing and new tags)
     const invalidExistingColors = Object.values(editedTags).filter(
       (tag) => tag.color && !isValidHexColor(tag.color)
     );
-    const invalidNewColors = newTags.filter(
+    const invalidNewColors = creates.filter(
       (tag) => tag.color && !isValidHexColor(tag.color)
     );
 
     if (invalidExistingColors.length > 0 || invalidNewColors.length > 0) {
       alert('Some tags have invalid hex colors. Please fix them before saving.');
-      return;
+      return false;
     }
 
     // Find changed tags
@@ -141,9 +211,9 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
     });
 
     const hasAnyChanges =
-      changedTags.length > 0 || newTags.length > 0 || deletedTagIds.size > 0;
+      changedTags.length > 0 || creates.length > 0 || deletedTagIds.size > 0;
 
-    if (!hasAnyChanges) return;
+    if (!hasAnyChanges) return false;
 
     // Confirm deletions if any
     if (deletedTagIds.size > 0) {
@@ -160,15 +230,20 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
           : `Delete ${deletedTagIds.size} tags (${deletedTagNames})? They will be removed from all tracks.`;
 
       if (!confirm(confirmMessage)) {
-        return;
+        return false;
       }
     }
 
     batchSaveMutation.mutate({
-      creates: newTags,
+      creates,
       updates: changedTags,
       deletes: Array.from(deletedTagIds),
     });
+    return true;
+  };
+
+  const handleSave = () => {
+    savePendingChanges();
   };
 
   const handleCancel = () => {
@@ -185,27 +260,68 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
       });
       setEditedTags(resetEdits);
       setNewTags([]);
+      setNewTagDrafts({});
       setDeletedTagIds(new Set());
       setHasChanges(false);
-      setShowColorPicker(null);
-      setNewTagName({});
+      setActiveColorPicker(null);
     }
   };
 
   const handleAddNewTag = (categoryId: number) => {
-    const name = newTagName[categoryId]?.trim();
+    const draft = newTagDrafts[categoryId];
+    const name = draft?.name?.trim();
     if (!name) return;
 
     const newTag: NewTag = {
       tempId: `temp-${Date.now()}-${Math.random()}`,
       name,
-      color: getNextColor(),
+      color: draft?.color || getNextColor(),
       category_id: categoryId,
     };
 
     setNewTags((prev) => [...prev, newTag]);
-    setNewTagName({ ...newTagName, [categoryId]: '' });
+    setNewTagDrafts((prev) => ({
+      ...prev,
+      [categoryId]: { name: '', color: getNextColor() },
+    }));
     setHasChanges(true);
+  };
+
+  const handleAddAndSaveNewTag = (categoryId: number) => {
+    const draft = newTagDrafts[categoryId];
+    const name = draft?.name?.trim();
+    if (!name) return;
+
+    const newTag: NewTag = {
+      tempId: `temp-${Date.now()}-${Math.random()}`,
+      name,
+      color: draft?.color || getNextColor(),
+      category_id: categoryId,
+    };
+
+    setNewTags((prev) => [...prev, newTag]);
+    setNewTagDrafts((prev) => ({
+      ...prev,
+      [categoryId]: { name: '', color: getNextColor() },
+    }));
+    setHasChanges(true);
+
+    savePendingChanges([...newTags, newTag]);
+  };
+
+  const handleDraftTagChange = (
+    categoryId: number,
+    field: 'name' | 'color',
+    value: string
+  ) => {
+    setNewTagDrafts((prev) => ({
+      ...prev,
+      [categoryId]: {
+        name: prev[categoryId]?.name || '',
+        color: prev[categoryId]?.color || getNextColor(),
+        [field]: value,
+      },
+    }));
   };
 
   const handleDeleteNewTag = (tempId: string) => {
@@ -225,6 +341,49 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
       )
     );
     setHasChanges(true);
+  };
+
+  const getActiveColorValue = (): string => {
+    if (!activeColorPicker) return '#e55f85';
+
+    if (activeColorPicker.type === 'existing') {
+      return editedTags[activeColorPicker.tagId]?.color || '#e55f85';
+    }
+
+    if (activeColorPicker.type === 'new') {
+      return newTags.find((tag) => tag.tempId === activeColorPicker.tempId)?.color || '#e55f85';
+    }
+
+    return newTagDrafts[activeColorPicker.categoryId]?.color || '#e55f85';
+  };
+
+  const setActiveColorValue = (color: string) => {
+    if (!activeColorPicker) return;
+
+    if (activeColorPicker.type === 'existing') {
+      handleTagChange(activeColorPicker.tagId, 'color', color);
+      return;
+    }
+
+    if (activeColorPicker.type === 'new') {
+      handleNewTagChange(activeColorPicker.tempId, 'color', color);
+      return;
+    }
+
+    handleDraftTagChange(activeColorPicker.categoryId, 'color', color);
+  };
+
+  const handleRequestClose = () => {
+    if (activeColorPicker) {
+      setActiveColorPicker(null);
+      return;
+    }
+
+    if (hasChanges) {
+      const shouldClose = confirm('Discard unsaved changes and close?');
+      if (!shouldClose) return;
+    }
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -247,12 +406,18 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
     newTagsByCategory[tag.category_id].push(tag);
   });
 
+  const activeColor = getActiveColorValue();
+  const isActiveColorInvalid = activeColor && !isValidHexColor(activeColor);
+  const activeColorModalPosition = activeColorPicker
+    ? getColorModalPosition(activeColorPicker.anchor)
+    : null;
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={handleRequestClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Manage Tags</h2>
-          <button onClick={onClose} className="modal-close-btn">×</button>
+          <button onClick={handleRequestClose} className="modal-close-btn">×</button>
         </div>
 
         <div className="modal-body">
@@ -273,48 +438,17 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
                         <div
                           className={`tag-color-swatch ${isColorInvalid ? 'invalid' : ''}`}
                           style={{ background: isValidHexColor(tag.color) ? tag.color : 'var(--surface0)' }}
-                          onClick={() => {
+                          onClick={(e) => {
                             if (!isDeleted) {
-                              setShowColorPicker(showColorPicker === tag.id ? null : tag.id);
+                              setActiveColorPicker({
+                                type: 'existing',
+                                tagId: tag.id,
+                                anchor: getPickerAnchor(e.currentTarget),
+                              });
                             }
                           }}
                           title={isDeleted ? 'Will be deleted' : 'Click to change color'}
                         />
-
-                        {showColorPicker === tag.id && !isDeleted && (
-                          <div className="color-picker-dropdown">
-                            {/* Palette Grid */}
-                            <div className="color-palette-grid">
-                              {COLOR_PALETTE.map((color) => (
-                                <div
-                                  key={color.hex}
-                                  className="color-palette-item"
-                                  style={{ background: color.hex }}
-                                  onClick={() => {
-                                    handleTagChange(tag.id, 'color', color.hex);
-                                    setShowColorPicker(null);
-                                  }}
-                                  title={color.name}
-                                />
-                              ))}
-                            </div>
-
-                            {/* Custom Hex Input */}
-                            <div className="color-hex-input">
-                              <input
-                                type="text"
-                                value={tag.color}
-                                onChange={(e) => handleTagChange(tag.id, 'color', e.target.value)}
-                                placeholder="#cba6f7"
-                                className="hex-input"
-                                maxLength={7}
-                              />
-                              {isColorInvalid && (
-                                <span className="hex-error">Invalid format</span>
-                              )}
-                            </div>
-                          </div>
-                        )}
                       </div>
 
                       {/* Tag Name Input */}
@@ -371,46 +505,13 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
                         <div
                           className={`tag-color-swatch ${isColorInvalid ? 'invalid' : ''}`}
                           style={{ background: isValidHexColor(tag.color) ? tag.color : 'var(--surface0)' }}
-                          onClick={() =>
-                            setShowColorPicker(showColorPicker === tag.tempId ? null : tag.tempId)
-                          }
+                          onClick={(e) => setActiveColorPicker({
+                            type: 'new',
+                            tempId: tag.tempId,
+                            anchor: getPickerAnchor(e.currentTarget),
+                          })}
                           title="Click to change color"
                         />
-
-                        {showColorPicker === tag.tempId && (
-                          <div className="color-picker-dropdown">
-                            {/* Palette Grid */}
-                            <div className="color-palette-grid">
-                              {COLOR_PALETTE.map((color) => (
-                                <div
-                                  key={color.hex}
-                                  className="color-palette-item"
-                                  style={{ background: color.hex }}
-                                  onClick={() => {
-                                    handleNewTagChange(tag.tempId, 'color', color.hex);
-                                    setShowColorPicker(null);
-                                  }}
-                                  title={color.name}
-                                />
-                              ))}
-                            </div>
-
-                            {/* Custom Hex Input */}
-                            <div className="color-hex-input">
-                              <input
-                                type="text"
-                                value={tag.color}
-                                onChange={(e) => handleNewTagChange(tag.tempId, 'color', e.target.value)}
-                                placeholder="#cba6f7"
-                                className="hex-input"
-                                maxLength={7}
-                              />
-                              {isColorInvalid && (
-                                <span className="hex-error">Invalid format</span>
-                              )}
-                            </div>
-                          </div>
-                        )}
                       </div>
 
                       {/* Tag Name Input */}
@@ -437,35 +538,136 @@ export default function TagManagementModal({ isOpen, onClose }: Props) {
                     </div>
                   );
                 })}
-              </div>
 
-              {/* Create New Tag Form */}
-              <div className="tag-create-form">
-                <input
-                  type="text"
-                  placeholder="New tag name..."
-                  value={newTagName[category.id] || ''}
-                  onChange={(e) =>
-                    setNewTagName({ ...newTagName, [category.id]: e.target.value })
-                  }
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      handleAddNewTag(category.id);
-                    }
-                  }}
-                  className="tag-name-input"
-                />
-                <button
-                  onClick={() => handleAddNewTag(category.id)}
-                  className="btn-create"
-                  disabled={!newTagName[category.id]?.trim()}
-                >
-                  +
-                </button>
+                {(() => {
+                  const draft = newTagDrafts[category.id] || { name: '', color: '#e55f85' };
+                  const isDraftColorInvalid = draft.color && !isValidHexColor(draft.color);
+
+                  return (
+                    <div className="tag-grid-item tag-grid-item-draft">
+                      <div className="tag-color-picker">
+                        <div
+                          className={`tag-color-swatch ${isDraftColorInvalid ? 'invalid' : ''}`}
+                          style={{ background: isValidHexColor(draft.color) ? draft.color : 'var(--surface0)' }}
+                          onClick={(e) => setActiveColorPicker({
+                            type: 'draft',
+                            categoryId: category.id,
+                            anchor: getPickerAnchor(e.currentTarget),
+                          })}
+                          title="Click to change color"
+                        />
+                      </div>
+
+                      <input
+                        type="text"
+                        value={draft.name}
+                        onChange={(e) => handleDraftTagChange(category.id, 'name', e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleAddNewTag(category.id);
+                          }
+                        }}
+                        className="tag-name-input"
+                        placeholder="new tag"
+                      />
+
+                      <span className="tag-track-count" title="New tag">-</span>
+
+                      <button
+                        onClick={() => handleAddAndSaveNewTag(category.id)}
+                        className="btn-create-small"
+                        disabled={!draft.name.trim() || batchSaveMutation.isPending}
+                        title="Create tag"
+                      >
+                        {batchSaveMutation.isPending ? '…' : '+'}
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}
         </div>
+
+        {activeColorPicker && (
+          <div
+            className="color-modal-overlay"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveColorPicker(null);
+            }}
+          >
+            <div
+              className="color-modal"
+              style={activeColorModalPosition || undefined}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="color-palette-grid">
+                {COLOR_PALETTE.map((color) => (
+                  <div
+                    key={color.hex}
+                    className="color-palette-item"
+                    style={{ background: color.hex }}
+                    onClick={() => setActiveColorValue(color.hex)}
+                    title={color.name}
+                  />
+                ))}
+                {NEUTRAL_COLOR_PALETTE.map((color) => (
+                  <div
+                    key={color.hex}
+                    className="color-palette-item"
+                    style={{ background: color.hex }}
+                    onClick={() => setActiveColorValue(color.hex)}
+                    title={color.name}
+                  />
+                ))}
+              </div>
+
+              <div className="color-action-row">
+                <button
+                  type="button"
+                  className="color-randomize-btn"
+                  onClick={() => setActiveColorValue(getNextColor())}
+                >
+                  Randomize
+                </button>
+
+                <label className="color-choose-btn">
+                  Choose...
+                  <input
+                    type="color"
+                    className="native-color-input"
+                    value={getNativeColorValue(activeColor)}
+                    onChange={(e) => setActiveColorValue(e.target.value)}
+                    aria-label="Choose custom tag color"
+                  />
+                </label>
+              </div>
+
+              <div className="color-hex-input">
+                <input
+                  type="text"
+                  value={activeColor}
+                  onChange={(e) => setActiveColorValue(e.target.value)}
+                  placeholder="#e55f85"
+                  className="hex-input"
+                  maxLength={7}
+                />
+                {isActiveColorInvalid && (
+                  <span className="hex-error">Invalid format</span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="color-done-btn"
+                onClick={() => setActiveColorPicker(null)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Modal Footer with Save/Cancel */}
         <div className="modal-footer">

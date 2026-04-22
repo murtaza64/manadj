@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
 import FilterBar from './FilterBar';
-import TagEditor from './TagEditor';
+import TagEditor, { type TagEditorHandle } from './TagEditor';
 import Player, { type PlayerHandle } from './Player';
 import PlaylistSidebar from './PlaylistSidebar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -192,8 +192,8 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
   const queryClient = useQueryClient();
-  const playerRef = useRef<PlayerHandle>(null);
-  const tagEditorRef = useRef<{ enterTagEditMode: () => void } | null>(null);
+  const playerRef = useRef<PlayerHandle | null>(null);
+  const tagEditorRef = useRef<TagEditorHandle | null>(null);
   const { filters, setFilters } = useFilters();
   const audio = useAudio();
 
@@ -290,6 +290,10 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
       }
 
       await api.tracks.update(trackId, { [field]: value });
+      if (selectedTrack?.id === trackId) {
+        const freshTrack = await api.tracks.get(trackId);
+        setSelectedTrack(freshTrack);
+      }
       await queryClient.invalidateQueries({ queryKey: ['tracks'] });
       await queryClient.invalidateQueries({ queryKey: ['playlist'] });
     } catch (error) {
@@ -341,7 +345,10 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
 
   const handleSetDownbeat = () => {
     if (!selectedTrack) return;
-    setDownbeat.mutate({ trackId: selectedTrack.id, downbeatTime: audio.currentTime });
+    setDownbeat.mutate({
+      trackId: selectedTrack.id,
+      downbeatTime: audio.audioRef.current?.currentTime ?? 0,
+    });
   };
 
   // Hot cue management
@@ -358,7 +365,7 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
     const hotCue = hotCuesMap.get(slotNumber);
     if (!hotCue) {
       // Hot cue not set: set it at current position
-      const currentTime = audio.currentTime;
+      const currentTime = audio.audioRef.current?.currentTime ?? 0;
       setHotCueMutation.mutate({
         trackId: selectedTrack.id,
         slotNumber,
@@ -459,7 +466,7 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
             track={selectedTrack}
             onSave={mutation.mutate}
             onUpdate={handleFieldUpdate}
-            currentTime={audio.currentTime}
+            currentTime={audio.audioRef.current?.currentTime ?? 0}
             onEnergyEditModeChange={setIsEnergyEditMode}
           />
         </div>

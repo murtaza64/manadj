@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, Track } from '../types';
 import { getTagColor } from '../utils/colorUtils';
-import { getAllCamelotKeys } from '../utils/keyUtils';
 import { getBpmColor, getAverageKeyColor } from '../utils/displayColors';
 import EnergySquare from './EnergySquare';
 import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon, ArrowDownIcon } from './icons';
@@ -83,14 +82,6 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
   const handleApplySettings = (settings: RelatedTracksSettings) => {
     onApplySettings(settings);
   };
-
-  // Group tags by category
-  const tagsByCategory = allTags?.reduce((acc: Record<string, Tag[]>, tag: Tag) => {
-    const categoryName = tag.category.name;
-    if (!acc[categoryName]) acc[categoryName] = [];
-    acc[categoryName].push(tag);
-    return acc;
-  }, {}) || {};
 
   return (
     <div style={{

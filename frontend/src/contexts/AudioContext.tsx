@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useRef, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, useEffect } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
 export interface AudioContextState {
   // Audio element ref (managed centrally)
-  audioRef: React.RefObject<HTMLAudioElement>;
+  audioRef: RefObject<HTMLAudioElement | null>;
 
   // Playback state
   isPlaying: boolean;
@@ -47,7 +48,7 @@ interface AudioProviderProps {
   children: ReactNode;
 }
 
-export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
+export function AudioProvider({ children }: AudioProviderProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   // Playback state
@@ -270,7 +271,7 @@ export const AudioProvider: React.FC<AudioProviderProps> = ({ children }) => {
       <audio ref={audioRef} style={{ display: 'none' }} />
     </AudioContext.Provider>
   );
-};
+}
 
 export const useAudioContext = () => {
   const context = useContext(AudioContext);

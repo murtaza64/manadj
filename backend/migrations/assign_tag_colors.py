@@ -9,18 +9,18 @@ DB_PATH = Path(__file__).parent.parent.parent / "data" / "library.db"
 
 # Color palette (same as frontend)
 COLORS = [
-    '#cba6f7',  # mauve
-    '#b4befe',  # lavender
-    '#f38ba8',  # red
-    '#eba0ac',  # maroon
-    '#fab387',  # peach
-    '#f9e2af',  # yellow
-    '#a6e3a1',  # green
-    '#89b4fa',  # blue
-    '#74c7ec',  # sapphire
-    '#f5c2e7',  # pink
-    '#89dceb',  # sky
-    '#94e2d5',  # teal
+    '#aa76e9',  # mauve
+    '#7b8aea',  # lavender
+    '#e55f85',  # red
+    '#e36d80',  # maroon
+    '#e59461',  # peach
+    '#eac77b',  # yellow
+    '#7ad872',  # green
+    '#6495e6',  # blue
+    '#50b5e2',  # sapphire
+    '#ea7bcb',  # pink
+    '#58cfe4',  # sky
+    '#66d9c5',  # teal
 ]
 
 def assign_colors():

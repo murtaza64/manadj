@@ -176,7 +176,7 @@ export const MetadataSync: React.FC = () => {
             <div className="error-messages">
               <h4>Errors:</h4>
               <ul>
-                {syncMutation.data.stats.error_messages.map((msg, idx) => (
+                {syncMutation.data.stats.error_messages.map((msg: string, idx: number) => (
                   <li key={idx}>{msg}</li>
                 ))}
               </ul>
@@ -198,7 +198,7 @@ export const MetadataSync: React.FC = () => {
             <div className="error-messages">
               <h4>Errors:</h4>
               <ul>
-                {writeToFilesMutation.data.stats.error_messages.map((msg, idx) => (
+                {writeToFilesMutation.data.stats.error_messages.map((msg: string, idx: number) => (
                   <li key={idx}>{msg}</li>
                 ))}
               </ul>

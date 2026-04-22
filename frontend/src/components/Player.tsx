@@ -1,6 +1,5 @@
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 import type { Track } from '../types';
-import { formatKeyDisplay } from '../utils/keyUtils';
 import WebGLWaveform from './WebGLWaveform';
 import { useAudio } from '../hooks/useAudio';
 import { useWaveformData } from '../hooks/useWaveformData';
@@ -130,10 +129,11 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
                 beats: beatsToJump,
                 secondsPerBeat,
                 jumpTime,
-                currentTime: audio.currentTime,
-                newTime: audio.currentTime - jumpTime
+                currentTime: audio.audioRef.current?.currentTime ?? 0,
+                newTime: (audio.audioRef.current?.currentTime ?? 0) - jumpTime
               });
-              const newTime = Math.max(0, Math.min(audio.duration, audio.currentTime - jumpTime));
+              const currentTime = audio.audioRef.current?.currentTime ?? 0;
+              const newTime = Math.max(0, Math.min(audio.duration, currentTime - jumpTime));
               audio.seek(newTime);
             }}
             disabled={!track}
@@ -154,10 +154,11 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
                 beats: beatsToJump,
                 secondsPerBeat,
                 jumpTime,
-                currentTime: audio.currentTime,
-                newTime: audio.currentTime + jumpTime
+                currentTime: audio.audioRef.current?.currentTime ?? 0,
+                newTime: (audio.audioRef.current?.currentTime ?? 0) + jumpTime
               });
-              const newTime = Math.max(0, Math.min(audio.duration, audio.currentTime + jumpTime));
+              const currentTime = audio.audioRef.current?.currentTime ?? 0;
+              const newTime = Math.max(0, Math.min(audio.duration, currentTime + jumpTime));
               audio.seek(newTime);
             }}
             disabled={!track}
@@ -194,4 +195,3 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
 Player.displayName = 'Player';
 
 export default Player;
-export type { PlayerHandle };

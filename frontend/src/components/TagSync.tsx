@@ -14,12 +14,6 @@ export function TagSync() {
     refetchInterval: 30000,
   });
 
-  const { data: stats } = useQuery({
-    queryKey: ['tagSyncStats'],
-    queryFn: api.tagSync.getStats,
-    refetchInterval: 30000,
-  });
-
   // Group tags by category (only manadj tags, ignore Energy from rekordbox)
   const tagsByCategory = useMemo(() => {
     if (!tags) return {};
@@ -85,7 +79,6 @@ export function TagSync() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tagSync'] });
-      queryClient.invalidateQueries({ queryKey: ['tagSyncStats'] });
     },
   });
 

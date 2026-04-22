@@ -1,35 +1,73 @@
-// Color palette from user preferences - bright, fully saturated colors
-export const COLOR_PALETTE = [
-  { name: 'mauve', hex: '#cba6f7' },
-  { name: 'lavender', hex: '#b4befe' },
-  { name: 'red', hex: '#f38ba8' },
-  { name: 'maroon', hex: '#eba0ac' },
-  { name: 'peach', hex: '#fab387' },
-  { name: 'yellow', hex: '#f9e2af' },
-  { name: 'green', hex: '#a6e3a1' },
-  { name: 'blue', hex: '#89b4fa' },
-  { name: 'sapphire', hex: '#74c7ec' },
-  { name: 'pink', hex: '#f5c2e7' },
-  { name: 'sky', hex: '#89dceb' },
-  { name: 'teal', hex: '#94e2d5' },
+// Tag color palette and generators
+
+function hslToHex(hue: number, saturation: number, lightness: number): string {
+  const s = saturation / 100;
+  const l = lightness / 100;
+
+  const c = (1 - Math.abs((2 * l) - 1)) * s;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = l - c / 2;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (hue < 60) {
+    r = c;
+    g = x;
+  } else if (hue < 120) {
+    r = x;
+    g = c;
+  } else if (hue < 180) {
+    g = c;
+    b = x;
+  } else if (hue < 240) {
+    g = x;
+    b = c;
+  } else if (hue < 300) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  const toHex = (channel: number) => {
+    const value = Math.round((channel + m) * 255);
+    return value.toString(16).padStart(2, '0');
+  };
+
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+export const COLOR_PALETTE = Array.from({ length: 16 }, (_, i) => {
+  const hue = Math.round((i * 360) / 16) % 360;
+  return {
+    name: `hue-${hue}`,
+    hex: hslToHex(hue, 68, 62),
+  };
+});
+
+export const NEUTRAL_COLOR_PALETTE = [
+  { name: 'grey', hex: '#9ca3af' },
+  { name: 'white', hex: '#ffffff' },
 ];
 
-let colorIndex = 0;
-
 /**
- * Generate next color from palette in round-robin fashion
+ * Generate a random colorful tag color.
  */
 export function getNextColor(): string {
-  const color = COLOR_PALETTE[colorIndex % COLOR_PALETTE.length];
-  colorIndex++;
-  return color.hex;
+  const hue = Math.floor(Math.random() * 360);
+  const saturation = 56 + Math.floor(Math.random() * 21); // 56-76
+  const lightness = 56 + Math.floor(Math.random() * 13); // 56-68
+  return hslToHex(hue, saturation, lightness);
 }
 
 /**
- * Reset color generator (useful for testing)
+ * Kept for compatibility with older imports.
  */
 export function resetColorGenerator() {
-  colorIndex = 0;
+  return;
 }
 
 /**

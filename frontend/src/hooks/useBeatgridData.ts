@@ -33,7 +33,7 @@ export function useSetBeatgridDownbeat() {
   return useMutation({
     mutationFn: ({ trackId, downbeatTime }: { trackId: number; downbeatTime: number }) =>
       api.beatgrids.setDownbeat(trackId, downbeatTime),
-    onSuccess: (data, variables) => {
+    onSuccess: (_data, variables) => {
       // Invalidate beatgrid query to trigger refetch
       queryClient.invalidateQueries({ queryKey: ['beatgrid', variables.trackId] });
     },
@@ -49,7 +49,7 @@ export function useNudgeBeatgrid() {
   return useMutation({
     mutationFn: ({ trackId, offsetMs }: { trackId: number; offsetMs: number }) =>
       api.beatgrids.nudge(trackId, offsetMs),
-    onSuccess: (data, variables) => {
+    onSuccess: (_data, variables) => {
       // Invalidate beatgrid query to trigger refetch
       queryClient.invalidateQueries({ queryKey: ['beatgrid', variables.trackId] });
     },

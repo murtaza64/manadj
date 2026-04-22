@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { UnifiedPlaylist, Track, SyncResult } from '../types';
+import { formatKeyDisplay } from '../utils/keyUtils';
 import './PlaylistDetailView.css';
 
 interface PlaylistDetailViewProps {
@@ -78,7 +79,7 @@ export function PlaylistDetailView({ playlist, onBack, onClose }: PlaylistDetail
     // Check if there might be missing tracks
     const hasUnmatched = Array.isArray(syncResult)
       ? syncResult.some(r => r.tracks_unmatched.length > 0)
-      : syncResult?.tracks_unmatched?.length > 0;
+      : (syncResult?.tracks_unmatched?.length ?? 0) > 0;
 
     // If we already tried and there are unmatched, ask user to confirm
     if (hasUnmatched && !syncResult) {
@@ -216,7 +217,7 @@ export function PlaylistDetailView({ playlist, onBack, onClose }: PlaylistDetail
                         <div className="detail-track-artist">{manadjTrack.artist || '—'}</div>
                       </div>
                       <div className="detail-track-meta">
-                        <span className="detail-track-key">{manadjTrack.key_camelot || '—'}</span>
+                        <span className="detail-track-key">{manadjTrack.key !== undefined ? formatKeyDisplay(manadjTrack.key) : '—'}</span>
                         <span className="detail-track-bpm">{manadjTrack.bpm ? `${manadjTrack.bpm.toFixed(1)} BPM` : '—'}</span>
                         <span className="detail-track-energy">E{manadjTrack.energy || '—'}</span>
                       </div>
