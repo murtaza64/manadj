@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Architecture review — manadj</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+</script>
+<style>
+  .seam { stroke-dasharray: 4 4; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+  .chip { font-size: 10px; line-height: 1.1; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+<header class="space-y-3">
+  <h1 class="text-3xl font-serif font-bold">Architecture review — manadj</h1>
+  <p class="text-sm text-slate-500">2026-07-02 · zero automated tests · ~5,000 lines of Sync code, ~1,150 dead or superseded</p>
+  <div class="flex gap-5 text-xs text-slate-600 items-center flex-wrap">
+    <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-3 border border-slate-500 bg-white"></span> module</span>
+    <span class="flex items-center gap-1.5"><svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke="#475569" stroke-width="1.5" class="seam"/></svg> seam</span>
+    <span class="flex items-center gap-1.5"><svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke="#dc2626" stroke-width="2"/></svg> leakage</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-3 deep"></span> deep module</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block w-4 h-3 bg-red-100 border border-red-400"></span> live bug</span>
+  </div>
+</header>
+
+<section id="candidates" class="space-y-10">
+
+<!-- ══════════════ 1. DELETE DEAD GENERATIONS ══════════════ -->
+<article id="c1" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h2 class="text-xl font-serif font-semibold">1 · Delete Sync generations 1 &amp; 2</h2>
+    <div class="flex gap-2">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">deletion</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-500">sync/ · scripts/sync/rekordbox_tracks.py · scripts/sync/engine_tracks.py</p>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Before — three generations coexist</p>
+      <div class="space-y-1.5">
+        <div class="flex items-center gap-2">
+          <div class="h-7 bg-red-50 border border-red-300 rounded flex items-center px-2 chip text-red-700" style="width:30%">sync/ · 326 ln · dead</div>
+          <span class="chip text-red-500">0 importers · obsolete direction (RB→Engine)</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="h-7 bg-amber-50 border border-amber-300 rounded flex items-center px-2 chip text-amber-700" style="width:52%">scripts/sync/ · ~1,350 ln · half-dead</div>
+          <span class="chip text-amber-600">copied into executor.py, drifting</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="h-7 bg-white border border-slate-400 rounded flex items-center px-2 chip" style="width:70%">backend/*/sync_manager.py · live API path</div>
+        </div>
+      </div>
+      <p class="chip text-slate-500 pt-1">Two copies of Rekordbox write logic (scripts/sync/rekordbox_tracks.py:51–198 ≡ backend/tracks/executor.py:61–152) fixed independently; engine_tracks.py keeps a direct-insert Export strategy the live path already abandoned for RBXML.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-400">After — one implementation, thin CLIs</p>
+      <div class="space-y-1.5">
+        <div class="flex items-center gap-2">
+          <div class="h-7 deep text-white rounded flex items-center px-2 chip" style="width:70%">backend/*/sync_manager.py — sole implementation</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="h-5 bg-white border border-slate-300 rounded flex items-center px-2 chip text-slate-500" style="width:34%">CLI wrappers → managers</div>
+          <span class="chip text-slate-400">pattern already proven: scripts/export/tags_to_engine_playlists.py:24</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="h-5 bg-white border border-slate-300 rounded flex items-center px-2 chip text-slate-500" style="width:28%">engine_keys/bpm.py survive*</div>
+          <span class="chip text-slate-400">*only live External Import for key/BPM</span>
+        </div>
+      </div>
+      <p class="chip text-emerald-700 pt-1">≈1,150 lines gone. Aligned with ADR-0001: bidirectional machinery is legacy.</p>
+    </div>
+  </div>
+
+  <p class="text-sm"><span class="font-semibold">Problem —</span> two dead/superseded Sync generations drift alongside the live one, and bug fixes land in one copy only.</p>
+  <p class="text-sm"><span class="font-semibold">Solution —</span> delete <span class="font-mono text-xs">sync/</span> and the superseded scripts; re-point surviving CLIs at the managers.</p>
+  <ul class="text-sm text-slate-700 grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+    <li>locality: one write path per target</li>
+    <li>deletes a semantic fork in Match</li>
+    <li>zero interface change for callers</li>
+    <li>licensed by ADR-0001</li>
+  </ul>
+</article>
+
+<!-- ══════════════ 2. ONE MATCH MODULE ══════════════ -->
+<article id="c2" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h2 class="text-xl font-serif font-semibold">2 · One home for Match</h2>
+    <div class="flex gap-2">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-500">backend/sync_common/matching.py · enginedj/sync.py · rekordbox/sync.py · sync/matcher.py</p>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Before — 7 copies of the identity algorithm</p>
+      <div class="grid grid-cols-2 gap-1.5">
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">sync_common/matching.py:9–74<br/><span class="text-slate-400">generic, getter-param'd ✓</span></div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">enginedj/sync.py:10–56<br/><span class="text-slate-400">hardcoded EDJTrack</span></div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">enginedj/sync.py:125–143<br/><span class="text-slate-400">re-inlined by hand</span></div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">enginedj/sync.py:154–190<br/><span class="text-slate-400">per-track SQL variant</span></div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">rekordbox/sync.py:9–55<br/><span class="text-slate-400">verbatim clone</span></div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">rekordbox/sync.py:128–143<br/><span class="text-slate-400">re-inlined again</span></div>
+        <div class="border border-red-300 bg-red-50 rounded p-1.5 chip text-red-700">sync/matcher.py:11–96 (dead)<br/><span class="text-red-500">semantics disagree: case-insensitive + metadata fallback</span></div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-400">After — one deep module</p>
+      <div class="relative pt-2">
+        <div class="deep text-white rounded-lg p-3 space-y-1">
+          <p class="chip uppercase tracking-wider text-slate-300">match module</p>
+          <p class="font-mono chip">index_by_path(tracks, path_of)</p>
+          <p class="font-mono chip">match(track, index) → hit | miss</p>
+          <p class="font-mono chip">diff_libraries(source, target_index)</p>
+          <p class="chip text-slate-400 pt-1">two-tier path→filename semantics, defined once</p>
+        </div>
+        <div class="flex justify-around mt-1">
+          <svg width="2" height="18"><line x1="1" y1="0" x2="1" y2="18" stroke="#475569" stroke-width="1.5" class="seam"/></svg>
+          <svg width="2" height="18"><line x1="1" y1="0" x2="1" y2="18" stroke="#475569" stroke-width="1.5" class="seam"/></svg>
+          <svg width="2" height="18"><line x1="1" y1="0" x2="1" y2="18" stroke="#475569" stroke-width="1.5" class="seam"/></svg>
+        </div>
+        <div class="flex gap-1.5 justify-around">
+          <div class="border border-slate-300 rounded p-1.5 chip bg-white grow text-center">enginedj: path_of = t.path</div>
+          <div class="border border-slate-300 rounded p-1.5 chip bg-white grow text-center">rekordbox: path_of = t.FolderPath</div>
+          <div class="border border-slate-300 rounded p-1.5 chip bg-white grow text-center">manadj: path_of = t.filename</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-sm"><span class="font-semibold">Problem —</span> Match is the identity function of the whole Sync domain, and it has five live implementations plus a dead one with <em>different</em> semantics.</p>
+  <p class="text-sm"><span class="font-semibold">Solution —</span> promote <span class="font-mono text-xs">sync_common/matching.py</span> to sole matcher; external packages contribute only a <span class="font-mono text-xs">path_of</span> getter; four <span class="font-mono text-xs">find_missing_*</span> clones collapse into one <span class="font-mono text-xs">diff_libraries</span>.</p>
+  <ul class="text-sm text-slate-700 grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+    <li>locality: one place Match can be wrong</li>
+    <li>leverage: 1 implementation, 5+ call sites</li>
+    <li>pure function — testable today, no I/O</li>
+    <li>prerequisite for the Link ticket (.scratch/track-identity/01)</li>
+  </ul>
+</article>
+
+<!-- ══════════════ 3. EXTERNAL LIBRARY SEAM ══════════════ -->
+<article id="c3" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h2 class="text-xl font-serif font-semibold">3 · An External-library seam — enginedj/ and rekordbox/ become adapters</h2>
+    <div class="flex gap-2">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">ports &amp; adapters</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-500">backend/{tags,playlists,tracks}/sync_manager.py · backend/sync_common/ · enginedj/ · rekordbox/</p>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-white p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Before — mutual embrace, no seam</p>
+      <pre class="mermaid">
+flowchart TB
+  M[backend sync managers<br/>per-target method pairs ×3] --> E[enginedj/]
+  M --> R[rekordbox/]
+  M -. imports EDJTrack, DjmdContent,<br/>Engine UUID ritual .-> ES[(Engine schema)]
+  M -. string-vs-int parent IDs .-> RS[(Rekordbox schema)]
+  E -. imports backend.models,<br/>queries manadj DB .-> B[backend.models]
+  R -. tag_sync.py queries<br/>manadj tables .-> B
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class ES,RS,B leak
+  linkStyle 2,3,4,5 stroke:#dc2626,stroke-width:2px
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">After — one interface, three adapters</p>
+      <pre class="mermaid">
+flowchart TB
+  M[backend sync managers<br/>single loop over adapters] --> P{{ExternalLibrary interface<br/>all_tracks · read/write_playlist<br/>read/write_tag_structure}}
+  P --- E[enginedj adapter<br/>UUID ritual, linked lists<br/>hidden inside]
+  P --- R[rekordbox adapter<br/>FolderPath, DjmdSongMyTag<br/>hidden inside]
+  P --- F[FakeExternalLibrary<br/>in-memory, for tests]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class E,R deep
+  classDef fake fill:#ecfdf5,stroke:#10b981;
+  class F fake
+      </pre>
+    </div>
+  </div>
+
+  <p class="text-sm"><span class="font-semibold">Problem —</span> no <span class="font-mono text-xs">Protocol</span>/<span class="font-mono text-xs">ABC</span> exists anywhere in the repo; backend imports both external schemas upward, both external packages import <span class="font-mono text-xs">backend.models</span> downward, and every Sync algorithm is written twice (or three times: <span class="font-mono text-xs">playlists/sync_manager.py:344–451, 506–574, 591–672</span>).</p>
+  <p class="text-sm"><span class="font-semibold">Solution —</span> one <span class="font-mono text-xs">ExternalLibrary</span> interface covering what managers actually call; adapters receive plain refs (path, title, bpm, key), never manadj ORM types; Engine's corruption-prone playlist linked-list ritual (5 copies today) collapses into the enginedj adapter.</p>
+  <ul class="text-sm text-slate-700 grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+    <li>playlists/sync_manager.py: 672 → ~250 lines</li>
+    <li>two adapters justify the seam — it's real</li>
+    <li>third adapter (fake) makes Export testable</li>
+    <li>locality: schema knowledge stops leaking</li>
+    <li>fixes the layering inversion</li>
+    <li>linked-list writes: 5 copies → 1</li>
+  </ul>
+</article>
+
+<!-- ══════════════ 4. TRACK METADATA MODULE ══════════════ -->
+<article id="c4" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h2 class="text-xl font-serif font-semibold">4 · A Track-metadata module owning units and Key conversion</h2>
+    <div class="flex gap-2">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">3 live bugs</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-500">schemas.py · crud.py · routers/tracks.py · id3_utils.py · library/import_manager.py · beatgrid_utils.py</p>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Before — centiBPM &amp; Key knowledge scattered</p>
+      <div class="grid grid-cols-3 gap-1.5">
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">schemas.py:72–93<br/><span class="text-slate-400">×100 validator (Update only)</span></div>
+        <div class="border border-red-300 bg-red-50 rounded p-1.5 chip text-red-700">crud.create_track:166<br/>stores raw BPM — wrong units</div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">routers/tracks.py ×5<br/><span class="text-slate-400">183, 201, 296, 389, 472</span></div>
+        <div class="border border-red-300 bg-red-50 rounded p-1.5 chip text-red-700">tracks.py:281,288<br/>.to_musical() doesn't exist → compare always None</div>
+        <div class="border border-red-300 bg-red-50 rounded p-1.5 chip text-red-700">id3_utils.py:115<br/>.to_musical() → keys never written to files</div>
+        <div class="border border-amber-300 bg-amber-50 rounded p-1.5 chip text-amber-700">beatgrid_utils.py:57<br/>if bpm &gt; 500: /100 — unit guessing</div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">import_manager.py:160<br/><span class="text-slate-400">own ×100 conversion</span></div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">sync_common/formats.py:27</div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white">+ frontend components</div>
+      </div>
+      <p class="chip text-slate-500">All three red cells sit inside bare <span class="font-mono">except: pass</span> — silent for months.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-400">After — units cross one seam, once</p>
+      <div class="space-y-1">
+        <div class="flex gap-1.5">
+          <div class="border border-slate-300 rounded p-1.5 chip bg-white grow text-center">router PATCH</div>
+          <div class="border border-slate-300 rounded p-1.5 chip bg-white grow text-center">Disk Import</div>
+          <div class="border border-slate-300 rounded p-1.5 chip bg-white grow text-center">ID3 refresh</div>
+        </div>
+        <div class="flex justify-center"><svg width="2" height="14"><line x1="1" y1="0" x2="1" y2="14" stroke="#475569" stroke-width="1.5" class="seam"/></svg></div>
+        <div class="deep text-white rounded-lg p-3 space-y-1">
+          <p class="chip uppercase tracking-wider text-slate-300">track metadata module</p>
+          <p class="font-mono chip">apply(track, changes) — every write path</p>
+          <p class="chip text-slate-400">centiBPM converted exactly once at this interface · Key via key.py properties (.musical, .engine_id) · ID3 write-back policy lives here</p>
+        </div>
+        <div class="flex justify-center"><svg width="2" height="14"><line x1="1" y1="0" x2="1" y2="14" stroke="#475569" stroke-width="1.5"/></svg></div>
+        <div class="border border-slate-300 rounded p-1.5 chip bg-white text-center">Track rows — always centiBPM, always canonical Key ID</div>
+      </div>
+      <p class="chip text-emerald-700">beatgrid_utils.py:57 heuristic deleted — the interface carries its units.</p>
+    </div>
+  </div>
+
+  <p class="text-sm"><span class="font-semibold">Problem —</span> BPM units and Key conversion are conventions, not an interface: ≥10 files each convert by hand, one write path stores wrong units, and three call sites invoke methods <span class="font-mono text-xs">key.py</span> never had — silently disabling key compare, key sync, and key file-write.</p>
+  <p class="text-sm"><span class="font-semibold">Solution —</span> one module every Track create/update flows through; <span class="font-mono text-xs">key.py</span> (already the repo's deepest module) becomes its only Key authority.</p>
+  <ul class="text-sm text-slate-700 grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+    <li>fixes 3 silent bugs, 1 unit bug</li>
+    <li>locality: units defined in one place</li>
+    <li>deletion test: removing it re-scatters 10 files</li>
+    <li>natural first pytest fixture</li>
+  </ul>
+</article>
+
+<!-- ══════════════ 5. ANALYSIS MODULE ══════════════ -->
+<article id="c5" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h2 class="text-xl font-serif font-semibold">5 · Make Analysis an actual module</h2>
+    <div class="flex gap-2">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">local-substitutable</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-500">analysis.py · waveform_utils.py · waveform_worker.py · crud.py:299–355, 553–700 · routers/analyze.py</p>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-white p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Before — 4 kinds, 4 orchestration styles</p>
+      <pre class="mermaid">
+flowchart LR
+  H[HTTP POST /analyze] -->|sync, blocks event loop| BK[BPM / Key<br/>analysis.py]
+  W[worker thread] -->|polls DB every 5s| WF[Waveform]
+  G[GET /beatgrids] -->|lazy create-on-read| BG[Beatgrid]
+  BK & WF & BG -->|persistence exiled| C[crud.py<br/>imports audio libs]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class C leak
+  linkStyle 3,4,5 stroke:#dc2626,stroke-width:2px
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">After — one interface, one queue</p>
+      <pre class="mermaid">
+flowchart LR
+  R[thin router] --> A{{analysis package<br/>request · status · result}}
+  A --> Q[[explicit job queue]]
+  Q --> WK[worker]
+  WK --> P[persist — owned internally]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class A,WK deep
+      </pre>
+    </div>
+  </div>
+
+  <p class="text-sm"><span class="font-semibold">Problem —</span> the domain's central concept has no home: its interface spans analysis.py dicts, crud functions, a router, and a DB-polling thread with a module-level global (<span class="font-mono text-xs">waveform_worker.py:92</span>).</p>
+  <p class="text-sm"><span class="font-semibold">Solution —</span> one <span class="font-mono text-xs">analysis</span> package (request/status/result); worker consumes an explicit queue; <span class="font-mono text-xs">crud.create_waveform</span>'s generation logic moves in; crud stops importing audio libraries.</p>
+  <ul class="text-sm text-slate-700 grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+    <li>locality restored to a CONTEXT.md concept</li>
+    <li>Essentia off the request thread</li>
+    <li>interface: 3 operations, not 4 styles</li>
+    <li>worker becomes substitutable in tests</li>
+  </ul>
+</article>
+
+<!-- ══════════════ 6. METADATA SYNC OUT OF HTTP ══════════════ -->
+<article id="c6" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h2 class="text-xl font-serif font-semibold">6 · Pull metadata compare/sync out of the HTTP layer</h2>
+    <div class="flex gap-2">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-500">backend/routers/tracks.py:90–158, 246–498</p>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — cross-section of routers/tracks.py (498 ln)</p>
+      <div class="space-y-0.5">
+        <div class="h-6 border-l-4 border-slate-300 bg-slate-50 flex items-center px-2 chip">route handlers proper — ~150 ln</div>
+        <div class="h-9 border-l-4 border-red-400 bg-red-50 flex items-center px-2 chip text-red-700">update_track: ORM mutation + ID3 policy + commit (90–158)</div>
+        <div class="h-6 border-l-4 border-red-400 bg-red-50 flex items-center px-2 chip text-red-700">refresh_metadata: raw queries, centiBPM inline (161–206)</div>
+        <div class="h-14 border-l-4 border-red-400 bg-red-50 flex items-center px-2 chip text-red-700">compare / sync / write_metadata: ~250 ln of diffing, conflict classification, dry-run semantics (246–498) — where the dead-Key bug hides</div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After — the shape library/ already proved</p>
+      <div class="space-y-0.5">
+        <div class="h-6 border-l-4 border-slate-300 bg-slate-50 flex items-center px-2 chip">thin router — ~150 ln of adapters</div>
+        <div class="h-16 deep text-white flex items-center px-2 chip rounded-r">metadata-sync module: manager + Pydantic result models — testable through its interface, no FastAPI needed</div>
+      </div>
+      <p class="chip text-slate-500 mt-2">Mirror of backend/library/: scanner + import_manager + models + thin router — the repo's own best pattern.</p>
+    </div>
+  </div>
+
+  <p class="text-sm"><span class="font-semibold">Problem —</span> ~300 lines of domain logic are trapped behind an HTTP interface — untestable without spinning up FastAPI, which is why its bugs went unseen.</p>
+  <p class="text-sm"><span class="font-semibold">Solution —</span> extract a metadata-sync module; pairs naturally with candidate 4 (same files, same seam).</p>
+  <ul class="text-sm text-slate-700 grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+    <li>interface becomes the test surface</li>
+    <li>routers/tracks.py: 498 → ~150 ln</li>
+    <li>reuses proven in-repo shape</li>
+  </ul>
+</article>
+
+<!-- ══════════════ 7. WAVEFORM RENDERERS ══════════════ -->
+<article id="c7" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h2 class="text-xl font-serif font-semibold">7 · Consolidate the Waveform renderers (frontend)</h2>
+    <div class="flex gap-2">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-500">frontend/src/utils/WebGLWaveformRenderer.ts · WebGLWaveform.tsx · WaveformMinimap.tsx · frontend/waveform-webgl/ · backend/main.py:27</p>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Before — three copies of renderer knowledge</p>
+      <div class="flex items-end gap-2 h-40">
+        <div class="flex flex-col justify-end grow" style="height:100%">
+          <div class="bg-slate-200 border border-slate-400 border-b-0 rounded-t flex items-center justify-center chip text-slate-500" style="height:33%">debug telemetry ~⅓</div>
+          <div class="bg-white border border-slate-400 flex items-center justify-center chip" style="height:67%">WebGLWaveformRenderer.ts<br/>1,698 ln</div>
+        </div>
+        <div class="bg-red-50 border border-red-300 rounded flex items-center justify-center chip text-red-700 grow text-center" style="height:52%">waveform-webgl/<br/>860 ln — abandoned prototype,<br/>still CORS-whitelisted</div>
+        <div class="flex flex-col gap-1 grow" style="height:32%">
+          <div class="bg-amber-50 border border-amber-300 rounded flex items-center justify-center chip text-amber-700 grow text-center">WebGLWaveform.tsx 42–126</div>
+          <div class="bg-amber-50 border border-amber-300 rounded flex items-center justify-center chip text-amber-700 grow text-center">WaveformMinimap.tsx 28–96<br/>≈ line-for-line twin lifecycle</div>
+        </div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400">After</p>
+      <div class="flex items-end gap-2 h-40">
+        <div class="deep text-white rounded flex flex-col items-center justify-center chip grow text-center" style="height:75%">renderer module<br/>telemetry split out behind<br/>an internal seam</div>
+        <div class="bg-white border border-slate-400 rounded flex items-center justify-center chip grow text-center" style="height:30%">useWaveformRenderer hook<br/>one lifecycle, two callers</div>
+        <div class="border border-dashed border-slate-300 rounded flex items-center justify-center chip text-slate-300 grow text-center" style="height:20%">prototype deleted</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-sm"><span class="font-semibold">Problem —</span> every renderer lifecycle fix must land twice (main + minimap), a 860-line dead prototype rots as a trap, and a third of the production renderer is debug telemetry interleaved with rendering.</p>
+  <p class="text-sm"><span class="font-semibold">Solution —</span> extract a shared <span class="font-mono text-xs">useWaveformRenderer</span> hook, split telemetry behind an internal seam, delete the prototype and its CORS entry.</p>
+  <ul class="text-sm text-slate-700 grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside">
+    <li>locality: one lifecycle, two callers</li>
+    <li>~900 lines deleted outright</li>
+    <li>renderer interface shrinks</li>
+  </ul>
+</article>
+
+<!-- ══════════════ 8. MIGRATIONS ══════════════ -->
+<article id="c8" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <h2 class="text-xl font-serif font-semibold">8 · Squash the ad-hoc migrations</h2>
+    <div class="flex gap-2">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-200 text-slate-600">Speculative</span>
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-500">backend/migrations/ (11 scripts) · backend/main.py:17 · backend/database.py</p>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Before — 11 one-shot scripts, no version record</p>
+      <div class="flex flex-wrap gap-1.5">
+        <span class="chip border border-slate-300 rounded px-1.5 py-1 bg-white">raw sqlite3</span>
+        <span class="chip border border-slate-300 rounded px-1.5 py-1 bg-white">SQLAlchemy text()</span>
+        <span class="chip border border-slate-300 rounded px-1.5 py-1 bg-white">ORM + live code imports</span>
+        <span class="chip border border-red-300 bg-red-50 text-red-700 rounded px-1.5 py-1">migrate_add_band_columns.py:6 → phantom DB path</span>
+        <span class="chip border border-amber-300 bg-amber-50 text-amber-700 rounded px-1.5 py-1">"values &lt; 500 are likely not converted" — applied-state guessed from data</span>
+        <span class="chip border border-slate-300 rounded px-1.5 py-1 bg-white">create_all masks column drift</span>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400">After</p>
+      <div class="deep text-white rounded-lg p-3">
+        <p class="chip">Pre-alpha + no-backward-compat policy ⇒ squash to "current schema = version 1", delete the directory. Add a ~50-line versioned runner (or Alembic) only when the next migration is actually needed.</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-sm"><span class="font-semibold">Problem —</span> nothing records what ran; one script would silently migrate a phantom database.</p>
+  <p class="text-sm"><span class="font-semibold">Solution —</span> squash now, version later. Speculative only because the pain is latent until the next schema change.</p>
+</article>
+
+</section>
+
+<!-- ══════════════ TOP RECOMMENDATION ══════════════ -->
+<section id="top-recommendation" class="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-6 space-y-2">
+  <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold">Top recommendation</p>
+  <h2 class="text-2xl font-serif font-bold"><a href="#c4" class="hover:underline">4 · Track-metadata module</a> — then <a href="#c2" class="hover:underline">2 · Match</a> as the opener for the Sync work</h2>
+  <p class="text-sm text-slate-700">Candidate 4 is the only one fixing shipped defects (key compare/sync/file-write silently dead, one write path storing wrong BPM units), it's small, and it creates the repo's first natural test fixture. Candidates 1→2→3 form a sequence — delete the dead generations, deepen Match, then cut the External-library seam — and that sequence is also the groundwork the Link ticket (.scratch/track-identity/01) needs.</p>
+</section>
+
+</main>
+</body>
+</html>
