@@ -1,0 +1,3 @@
+# Tests exercise module interfaces, not mocks
+
+Backend tests are written against each module's public interface with real internals — a real in-memory SQLite session, real temp files for ID3 — substituting only at true seams (external-library DBs, audio analysis). No mocking library: the bugs this codebase actually produced (nonexistent `Key.to_musical()` calls, a centiBPM units fork between endpoints) lived in how modules were *called*, which mocks would have hidden. A thin layer of FastAPI TestClient smoke tests (status + shape only) covers the routers; pure logic (`key.py`, `beatgrid_utils`, scanner) is unit-tested directly since its unit and interface coincide.
