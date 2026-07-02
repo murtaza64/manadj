@@ -10,7 +10,7 @@ Status: ready-for-agent
 
 The tracer bullet. A Refresh action pulls the user's SoundCloud likes and persists them as Source Items (stable SoundCloud ID, title, uploader, duration, permalink, state — all start `new`). An Acquisition section appears in the existing Sync view with a Refresh button and a plain list of Source Items showing title, uploader, duration, and state.
 
-The Source boundary is the feature's single seam: a SoundCloud source interface with a list operation (metadata only), implemented per the outcome of the likes-scanning research (issue 01), authenticated via OAuth token from config.toml. Refresh upserts by SoundCloud ID and never deletes.
+The Source boundary is the feature's single seam: a SoundCloud source interface with a list operation (metadata only), implemented per the outcome of the likes-scanning research (issue 01), authenticated via OAuth token from config.toml. Refresh inserts by SoundCloud ID if absent; it never rewrites existing rows and never deletes (upstream metadata edits do not propagate — local state is authoritative once fetched).
 
 Endpoint and module naming: use Acquisition vocabulary, not generic "sync" (see CONTEXT.md).
 

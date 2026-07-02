@@ -1,8 +1,10 @@
 """Configuration management for manadj."""
 
+import os
 import tomllib
 from pathlib import Path
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -25,11 +27,41 @@ class AnalysisConfig:
 
 
 @dataclass
+class SoundCloudConfig:
+    """SoundCloud Source configuration."""
+    oauth_token: str | None = None
+
+
+@dataclass
 class Config:
     """Application configuration."""
     database: DatabaseConfig
     library: LibraryConfig
     analysis: AnalysisConfig
+    soundcloud: SoundCloudConfig
+
+
+def _load_dotenv() -> None:
+    """Load KEY=VALUE lines from repo-root .env into the environment.
+
+    Secrets live in .env (gitignored) because config.toml is committed.
+    Real environment variables take precedence over .env values.
+    """
+    dotenv_path = Path(__file__).parent.parent / ".env"
+    if not dotenv_path.exists():
+        return
+    for line in dotenv_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+def _soundcloud_token(data: dict[str, Any]) -> str | None:
+    """Token from the environment (or .env); config.toml fallback for convenience."""
+    section: dict[str, Any] = data.get("soundcloud", {})
+    return os.environ.get("SOUNDCLOUD_OAUTH_TOKEN") or section.get("oauth_token") or None
 
 
 def load_config() -> Config:
@@ -41,6 +73,7 @@ def load_config() -> Config:
     Raises:
         FileNotFoundError: If config.toml doesn't exist
     """
+    _load_dotenv()
     config_path = Path(__file__).parent.parent / "config.toml"
 
     if not config_path.exists():
@@ -53,7 +86,8 @@ def load_config() -> Config:
             library=LibraryConfig(
                 tracks_directory=None
             ),
-            analysis=AnalysisConfig()
+            analysis=AnalysisConfig(),
+            soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token({}))
         )
 
     with open(config_path, "rb") as f:
@@ -95,7 +129,8 @@ def load_config() -> Config:
         ),
         analysis=AnalysisConfig(
             key_detection_backend=key_backend
-        )
+        ),
+        soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data))
     )
 
 

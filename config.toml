@@ -14,3 +14,11 @@ tracks_directory = "/Users/murtaza/Music/Tracks"
 [analysis]
 # Key detection backend: "essentia" (default) or "keyfinder" (DJ-optimized)
 key_detection_backend = "essentia"
+
+[soundcloud]
+# Personal OAuth token for the SoundCloud Source (Acquisition).
+# This file is committed — do NOT put the real token here. Put it in the
+# gitignored .env file at the repo root instead:
+#   SOUNDCLOUD_OAUTH_TOKEN=...
+# (A real environment variable takes precedence over .env.)
+oauth_token = ""

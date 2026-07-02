@@ -399,3 +399,24 @@ export interface HotCue {
   created_at: string;
   updated_at: string;
 }
+
+// Acquisition types (see CONTEXT.md: Source Item)
+export type SourceItemState = 'new' | 'queued' | 'fulfilled' | 'ignored';
+
+export interface SourceItem {
+  id: number;
+  source: string;
+  external_id: string;
+  title: string;
+  uploader: string;
+  duration_ms: number;
+  permalink_url: string;
+  state: SourceItemState;
+  liked_at: string | null;
+}
+
+export interface AcquisitionRefreshStats {
+  added: number;
+  total_remote: number;
+  total_local: number;
+}

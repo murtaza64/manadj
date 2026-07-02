@@ -9,6 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from .routers import tracks, tags, waveforms, playlists, beatgrids, hotcues, sync_playlists, sync_tags, sync_tracks, sync_library, analyze
+from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
+from .acquisition.router import router as acquisition_router
 from .waveform_worker import start_waveform_worker, stop_waveform_worker
 from .logging_config import setup_logging
 
@@ -45,6 +47,7 @@ app.include_router(sync_playlists.router, prefix="/api")
 app.include_router(sync_tags.router, prefix="/api")
 app.include_router(sync_tracks.router, prefix="/api")
 app.include_router(sync_library.router, prefix="/api")
+app.include_router(acquisition_router, prefix="/api/acquisition", tags=["acquisition"])
 
 # Mount static files for PNG waveforms
 app.mount("/waveforms", StaticFiles(directory="waveforms"), name="waveforms")

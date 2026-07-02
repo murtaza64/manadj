@@ -15,6 +15,8 @@ import type {
   LibraryImportResult,
   LibraryImportRequest,
   LibraryImportExecutionResult,
+  SourceItem,
+  AcquisitionRefreshStats,
 } from '../types';
 
 // Backend URL configuration - can be overridden with VITE_API_URL env var
@@ -536,6 +538,23 @@ export const api = {
       });
       if (!response.ok) throw new Error('Failed to import tracks');
       return response.json();
+    },
+  },
+
+  acquisition: {
+    getItems: async (): Promise<SourceItem[]> => {
+      const res = await fetch(`${API_BASE}/acquisition/items`);
+      if (!res.ok) throw new Error('Failed to fetch source items');
+      return res.json();
+    },
+
+    refresh: async (): Promise<AcquisitionRefreshStats> => {
+      const res = await fetch(`${API_BASE}/acquisition/refresh`, { method: 'POST' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to refresh source items');
+      }
+      return res.json();
     },
   },
 };

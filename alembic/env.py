@@ -18,6 +18,9 @@ from alembic import context
 
 from backend.models import Base
 
+# Model modules that register tables on Base (autogenerate must see them all)
+import backend.acquisition.models  # noqa: F401
+
 config = context.config
 
 if config.config_file_name is not None:
