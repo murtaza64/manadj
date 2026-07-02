@@ -4,7 +4,8 @@ import re
 from pathlib import Path
 from sqlalchemy.orm import Session
 from ..models import Track
-from ..id3_utils import extract_id3_metadata
+from ..track_metadata import FileMetadataError, read_file_metadata
+from ..track_metadata.units import bpm_to_centibpm
 from .models import (
     LibraryTrackCandidate, LibraryImportStats,
     LibraryImportResult, LibraryImportExecutionResult
@@ -98,12 +99,14 @@ class LibraryImportManager:
 
             stats.new_tracks += 1
 
-            # Extract metadata from ID3 tags
-            metadata = extract_id3_metadata(file_path_str)
+            # Extract metadata from file tags (unreadable file -> no metadata)
+            try:
+                metadata = read_file_metadata(file_path_str)
+            except FileMetadataError:
+                metadata = None
 
-            # Use ID3 metadata if available, otherwise parse from filename
-            title = metadata.get('title') if metadata else None
-            artist = metadata.get('artist') if metadata else None
+            title = metadata.title if metadata else None
+            artist = metadata.artist if metadata else None
 
             # Fallback to filename parsing if no title in metadata
             if not title:
@@ -126,8 +129,8 @@ class LibraryImportManager:
                 filename=file_path.name,
                 title=title,
                 artist=artist,
-                bpm=metadata.get('bpm') if metadata else None,
-                key=metadata.get('key') if metadata else None,
+                bpm=metadata.bpm if metadata else None,
+                key=metadata.key if metadata else None,
                 has_metadata=has_metadata
             )
             candidates.append(candidate)
@@ -156,8 +159,7 @@ class LibraryImportManager:
 
         for candidate in candidates:
             try:
-                # Convert BPM to centiBPM for database
-                bpm_centi = int(candidate.bpm * 100) if candidate.bpm else None
+                bpm_centi = bpm_to_centibpm(candidate.bpm)
 
                 # Create track record (use filename as fallback for title if somehow missing)
                 track = Track(

@@ -13,7 +13,7 @@ def migrate():
     try:
         # Delete all existing waveforms (they need to be regenerated with multiband data)
         cursor.execute("DELETE FROM waveforms")
-        print(f"Deleted all waveforms (they will regenerate with 3-band data)")
+        print("Deleted all waveforms (they will regenerate with 3-band data)")
 
         # Check if peaks_json column exists
         cursor.execute("PRAGMA table_info(waveforms)")

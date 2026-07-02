@@ -231,10 +231,10 @@ def compare_with_id3(audio_path: str, detected_bpm: float):
     """Compare detected BPM with ID3 tag."""
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
-        from backend.id3_utils import extract_id3_metadata
+        from backend.track_metadata import read_file_metadata
 
-        metadata = extract_id3_metadata(audio_path)
-        id3_bpm = metadata.get('bpm') if metadata else None
+        metadata = read_file_metadata(audio_path)
+        id3_bpm = metadata.bpm if metadata else None
 
         if id3_bpm and detected_bpm:
             diff = abs(detected_bpm - id3_bpm)

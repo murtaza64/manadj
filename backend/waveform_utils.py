@@ -5,7 +5,6 @@ import numpy as np
 import json
 from typing import Dict, Optional
 from scipy import signal
-from pathlib import Path
 from PIL import Image, ImageDraw
 
 

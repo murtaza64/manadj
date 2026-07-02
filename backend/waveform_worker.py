@@ -4,7 +4,6 @@ import threading
 import time
 import logging
 from pathlib import Path
-from sqlalchemy.orm import Session
 from .database import SessionLocal
 from . import crud, models
 

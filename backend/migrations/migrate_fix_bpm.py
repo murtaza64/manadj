@@ -16,7 +16,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.database import SessionLocal, engine
+from backend.database import SessionLocal
 from backend.models import Track
 
 

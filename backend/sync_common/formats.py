@@ -4,8 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.models import Track as ManAdjTrack
-    from enginedj.models.track import Track as EDJTrack
+    pass
 
 
 def format_track_preview(track, source: str = "manadj") -> str:

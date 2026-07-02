@@ -1,7 +1,7 @@
 """Generic track matching utilities."""
 
 from pathlib import Path
-from typing import TypeVar, Generic, Callable
+from typing import TypeVar, Callable
 
 T = TypeVar('T')  # Generic track type
 

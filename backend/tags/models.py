@@ -1,7 +1,6 @@
 """Data models for tag synchronization."""
 
 from dataclasses import dataclass
-from typing import Any
 
 
 @dataclass(frozen=True)

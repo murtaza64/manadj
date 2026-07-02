@@ -1,7 +1,7 @@
 """API router for audio analysis endpoints (BPM and key detection)."""
 
 import json
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pathlib import Path
 

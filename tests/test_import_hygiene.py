@@ -14,11 +14,11 @@ def test_no_heavy_audio_deps_in_import_chain():
     # Import everything the suite legitimately touches.
     import backend.beatgrid_utils  # noqa: F401
     import backend.crud  # noqa: F401
-    import backend.id3_utils  # noqa: F401
     import backend.key  # noqa: F401
     import backend.library.import_manager  # noqa: F401
     import backend.routers.tracks  # noqa: F401
     import backend.schemas  # noqa: F401
+    import backend.track_metadata  # noqa: F401
 
     loaded = [m for m in HEAVY_MODULES if m in sys.modules]
     assert not loaded, (

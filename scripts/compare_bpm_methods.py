@@ -40,9 +40,9 @@ def compare_methods(audio_path: str):
     # Get ID3 BPM for comparison
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
-        from backend.id3_utils import extract_id3_metadata
-        metadata = extract_id3_metadata(audio_path)
-        id3_bpm = metadata.get('bpm') if metadata else None
+        from backend.track_metadata import read_file_metadata
+        metadata = read_file_metadata(audio_path)
+        id3_bpm = metadata.bpm if metadata else None
     except:
         id3_bpm = None
 

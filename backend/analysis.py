@@ -6,7 +6,6 @@ and musical key using multiple strategies.
 
 from datetime import datetime
 from collections import Counter
-from typing import Optional
 import numpy as np
 import essentia.standard as es
 import subprocess

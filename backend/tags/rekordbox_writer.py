@@ -3,7 +3,7 @@
 from sqlalchemy.orm import Session
 from pyrekordbox.db6 import Rekordbox6Database
 
-from rekordbox.tag_sync import RekordboxTagSyncer, TagSyncStats as RBTagSyncStats
+from rekordbox.tag_sync import RekordboxTagSyncer
 from .models import TagSyncStats
 
 

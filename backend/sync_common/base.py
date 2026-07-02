@@ -1,6 +1,6 @@
 """Base classes and common utilities for sync operations."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

@@ -1,7 +1,6 @@
 """Playlist sync manager - orchestration class."""
 
 from sqlalchemy.orm import Session
-from pathlib import Path
 
 from .models import PlaylistInfo, UnifiedPlaylist, PlaylistSyncStats, TrackEntry, SyncResult, TrackReference
 from .comparison import are_playlists_equivalent
@@ -425,7 +424,6 @@ class PlaylistSyncManager:
         if not self.rb_db:
             return [], [ref.filename for ref in track_refs]
 
-        from pyrekordbox.db6.tables import DjmdContent
 
         # Load all Rekordbox tracks
         all_tracks = list(self.rb_db.get_content())

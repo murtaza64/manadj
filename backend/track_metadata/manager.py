@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from backend import crud, models
+from backend import models
 from backend.key import Key
 
 from .file_metadata import FileMetadataError, read_file_metadata, write_file_metadata
@@ -57,7 +57,9 @@ def apply_update(
     if changes.bpm is not None:
         track.bpm = bpm_to_centibpm(changes.bpm)
     if changes.tag_ids is not None:
-        crud.update_track_tags(db, track.id, changes.tag_ids)
+        db.query(models.TrackTag).filter(models.TrackTag.track_id == track.id).delete()
+        for tag_id in set(changes.tag_ids):
+            db.add(models.TrackTag(track_id=track.id, tag_id=tag_id))
 
     if write_files and file_updates:
         try:
@@ -86,7 +88,7 @@ def refresh_from_files(db: Session, track_id: int | None = None) -> int:
     skipped and logged. Raises ValueError for an unknown track_id.
     """
     if track_id is not None:
-        track = crud.get_track(db, track_id)
+        track = _get_track(db, track_id)
         if not track:
             raise ValueError(f"track {track_id} not found")
         tracks = [track]
@@ -112,7 +114,7 @@ def refresh_from_files(db: Session, track_id: int | None = None) -> int:
 
 def compare_with_files(db: Session) -> MetadataComparisonResult:
     """Compare DB metadata with file tags for all tracks; report differences."""
-    tracks = crud.get_all_tracks(db)
+    tracks = db.query(models.Track).all()
     stats = MetadataComparisonStats(
         total_tracks=len(tracks),
         tracks_with_changes=0,
@@ -188,7 +190,7 @@ def sync_to_db(db: Session, request: MetadataSyncRequest) -> MetadataSyncResult:
     stats = _new_sync_stats(len(request.updates))
 
     for update in request.updates:
-        track = crud.get_track(db, update.track_id)
+        track = _get_track(db, update.track_id)
         if not track:
             stats.skipped += 1
             stats.error_messages.append(f"Track {update.track_id} not found")
@@ -237,7 +239,7 @@ def write_to_files(db: Session, request: MetadataSyncRequest) -> MetadataSyncRes
     stats = _new_sync_stats(len(request.updates))
 
     for update in request.updates:
-        track = crud.get_track(db, update.track_id)
+        track = _get_track(db, update.track_id)
         if not track:
             stats.skipped += 1
             stats.error_messages.append(f"Track {update.track_id} not found")
@@ -274,6 +276,10 @@ def write_to_files(db: Session, request: MetadataSyncRequest) -> MetadataSyncRes
         stats.updated += 1
 
     return MetadataSyncResult(stats=stats, dry_run=request.dry_run)
+
+
+def _get_track(db: Session, track_id: int) -> models.Track | None:
+    return db.query(models.Track).filter(models.Track.id == track_id).first()
 
 
 def _musical(engine_id: int | None) -> str | None:

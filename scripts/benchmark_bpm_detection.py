@@ -20,7 +20,7 @@ from typing import Optional
 
 # Import BPM analysis functions
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from backend.id3_utils import extract_id3_metadata
+from backend.track_metadata import read_file_metadata
 
 # Import the analysis modules
 import numpy as np
@@ -142,11 +142,11 @@ def analyze_track(audio_path: Path) -> Optional[dict]:
     """Run full BPM analysis on a track."""
     try:
         # Get ID3 BPM
-        metadata = extract_id3_metadata(str(audio_path))
-        if not metadata or 'bpm' not in metadata or metadata['bpm'] is None:
+        metadata = read_file_metadata(str(audio_path))
+        if not metadata or metadata.bpm is None:
             return None
 
-        id3_bpm = float(metadata['bpm'])
+        id3_bpm = float(metadata.bpm)
 
         # Run detection
         full = detect_bpm_full(str(audio_path))

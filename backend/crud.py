@@ -4,8 +4,9 @@ import json
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql import func
 from . import models, schemas
-from .id3_utils import extract_id3_metadata
 from .beatgrid_utils import generate_beatgrid_from_bpm
+from .track_metadata import FileMetadataError, read_file_metadata
+from .track_metadata.units import bpm_to_centibpm, centibpm_to_bpm
 
 
 # Tracks
@@ -152,19 +153,24 @@ def get_all_tracks(db: Session):
 
 def create_track(db: Session, track: schemas.TrackCreate):
     track_data = track.model_dump()
+    # API carries float BPM; the column stores centiBPM.
+    track_data["bpm"] = bpm_to_centibpm(track_data.get("bpm"))
 
-    # Extract ID3 metadata from the file if it exists
+    # Fall back to file tags for fields not provided
     if track_data.get("filename"):
-        metadata = extract_id3_metadata(track_data["filename"])
-        # Only set metadata if not already provided in track_data
-        if track_data.get("title") is None:
-            track_data["title"] = metadata["title"]
-        if track_data.get("artist") is None:
-            track_data["artist"] = metadata["artist"]
-        if track_data.get("key") is None:
-            track_data["key"] = metadata["key"]
-        if track_data.get("bpm") is None:
-            track_data["bpm"] = metadata["bpm"]
+        try:
+            metadata = read_file_metadata(track_data["filename"])
+        except FileMetadataError:
+            metadata = None
+        if metadata is not None:
+            if track_data.get("title") is None:
+                track_data["title"] = metadata.title
+            if track_data.get("artist") is None:
+                track_data["artist"] = metadata.artist
+            if track_data.get("key") is None:
+                track_data["key"] = metadata.key
+            if track_data.get("bpm") is None:
+                track_data["bpm"] = bpm_to_centibpm(metadata.bpm)
 
     db_track = models.Track(**track_data)
     db.add(db_track)
@@ -566,7 +572,7 @@ def create_beatgrid_from_track_bpm(db: Session, track_id: int):
     if not waveform:
         raise ValueError("Waveform must exist before generating beatgrid")
 
-    beatgrid_data = generate_beatgrid_from_bpm(track.bpm, waveform.duration)
+    beatgrid_data = generate_beatgrid_from_bpm(centibpm_to_bpm(track.bpm), waveform.duration)
 
     db_beatgrid = models.Beatgrid(
         track_id=track_id,

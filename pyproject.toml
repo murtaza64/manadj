@@ -47,5 +47,6 @@ madmom = { git = "https://github.com/CPJKU/madmom" }
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=9.0.1",
 ]

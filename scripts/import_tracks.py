@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.database import SessionLocal
 from backend.models import Track
-from backend.id3_utils import extract_id3_metadata
+from backend.track_metadata import read_file_metadata
 
 
 # Supported audio file extensions
@@ -130,7 +130,7 @@ def import_tracks(
                 print(f"  [{i}/{len(track_paths)}] Processing: {file_path.name}")
 
             # Extract metadata from ID3 tags
-            metadata = extract_id3_metadata(str(file_path))
+            metadata = read_file_metadata(str(file_path))
 
             # Skip if no metadata could be extracted
             if not metadata:
@@ -142,15 +142,15 @@ def import_tracks(
             if not dry_run:
                 # Create track record
                 # BPM is stored as centiBPM (BPM * 100) in database
-                bpm = metadata.get('bpm')
+                bpm = metadata.bpm
                 bpm_centi = bpm * 100 if bpm else None
 
                 track = Track(
                     filename=str(file_path),
-                    title=metadata.get('title'),
-                    artist=metadata.get('artist'),
+                    title=metadata.title,
+                    artist=metadata.artist,
                     bpm=bpm_centi,
-                    key=metadata.get('key'),
+                    key=metadata.key,
                     energy=None,  # User will set manually
                     file_hash=None  # Will be generated if needed
                 )
@@ -159,16 +159,16 @@ def import_tracks(
                 stats.imported += 1
 
                 if verbose:
-                    title = metadata.get('title', 'Unknown')
-                    artist = metadata.get('artist', 'Unknown')
-                    bpm = metadata.get('bpm', '?')
-                    key = metadata.get('key', '?')
+                    title = metadata.title or 'Unknown'
+                    artist = metadata.artist or 'Unknown'
+                    bpm = metadata.bpm or '?'
+                    key = metadata.key if metadata.key is not None else '?'
                     print(f"      ✅ {title} - {artist} ({bpm} BPM, Key {key})")
             else:
                 stats.imported += 1
                 if verbose:
-                    title = metadata.get('title', 'Unknown')
-                    artist = metadata.get('artist', 'Unknown')
+                    title = metadata.title or 'Unknown'
+                    artist = metadata.artist or 'Unknown'
                     print(f"      Would import: {title} - {artist}")
 
         except Exception as e:

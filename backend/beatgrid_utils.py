@@ -48,16 +48,12 @@ def generate_beatgrid_from_bpm(bpm: float, duration: float) -> dict:
     Generate beatgrid data from a single BPM value.
 
     Args:
-        bpm: Beats per minute (will be divided by 100 if centiBPM format)
+        bpm: Beats per minute (float BPM — callers convert from centiBPM)
         duration: Track duration in seconds
 
     Returns:
         Dict with tempo_changes, beat_times, downbeat_times
     """
-    # Handle centiBPM format (stored as int * 100)
-    if bpm > 500:
-        bpm = bpm / 100.0
-
     tempo_changes = [{
         "start_time": 0.0,
         "bpm": bpm,

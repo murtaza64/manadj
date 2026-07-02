@@ -1,7 +1,6 @@
 """Playlist comparison logic."""
 
-from pathlib import Path
-from .models import PlaylistInfo, PlaylistDiff, TrackReference
+from .models import PlaylistInfo, PlaylistDiff
 from backend.sync_common.matching import index_tracks_by_path, match_track_two_tier
 
 
