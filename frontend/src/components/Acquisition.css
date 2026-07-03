@@ -135,3 +135,30 @@
   padding: var(--space-sm);
   font-size: var(--font-xs);
 }
+
+.acquisition-chip {
+  border: none;
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  cursor: pointer;
+  color: var(--crust);
+  font-weight: bold;
+  font-family: inherit;
+}
+
+.acquisition-chip-track { background: var(--green); }
+.acquisition-chip-mix { background: var(--mauve); }
+.acquisition-chip-clip { background: var(--yellow); }
+.acquisition-chip-other { background: var(--overlay1); }
+.acquisition-chip-none { background: var(--surface1); color: var(--subtext1); }
+
+.acquisition-class-filter {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--space-xs);
+  cursor: pointer;
+}
+
+.acquisition-class-filter .acquisition-count {
+  margin-left: auto;
+}

@@ -18,11 +18,11 @@ UI direction: the review-split layout chosen by prototype — sidebar (Refresh +
 
 ## Acceptance criteria
 
-- [ ] Refresh from the UI populates Source Items from the real SoundCloud account
-- [ ] Source Items persist across app restarts; re-Refresh is idempotent and only adds
-- [ ] Unliked-upstream items remain locally
-- [ ] Acquisition section renders in the Sync view with the item list and Refresh button
-- [ ] Module-interface tests with a fake SoundCloud source (Refresh persistence, idempotency, add-only); thin router smoke test (per ADR-0002 posture)
+- [x] Refresh from the UI populates Source Items from the real SoundCloud account
+- [x] Source Items persist across app restarts; re-Refresh is idempotent and only adds
+- [x] Unliked-upstream items remain locally
+- [x] Acquisition section renders in the Sync view with the item list and Refresh button
+- [x] Module-interface tests with a fake SoundCloud source (Refresh persistence, idempotency, add-only); thin router smoke test (per ADR-0002 posture)
 
 ## Blocked by
 

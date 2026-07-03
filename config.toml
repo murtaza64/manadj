@@ -15,6 +15,18 @@ tracks_directory = "/Users/murtaza/Music/Tracks"
 # Key detection backend: "essentia" (default) or "keyfinder" (DJ-optimized)
 key_detection_backend = "essentia"
 
+[acquisition.classification]
+# Heuristics that classify Source Items as track / mix / clip.
+# Items shorter than clip_max_duration_secs are clips; longer than
+# mix_min_duration_secs are mixes; otherwise title keywords decide
+# (word-boundary, case-insensitive — "remix" does not match "mix").
+# Bare "mix"/"set" are deliberately absent: "(Original Mix)", "VIP Mix",
+# "Set Me Free" are ordinary tracks. Long DJ mixes are caught by duration.
+clip_max_duration_secs = 90
+mix_min_duration_secs = 1200
+mix_keywords = ["mixtape", "podcast", "radio show", "b2b", "dj set", "live set", "guest mix", "dj mix", "minimix", "mini mix"]
+clip_keywords = ["preview", "snippet", "clip", "teaser"]
+
 [soundcloud]
 # Personal OAuth token for the SoundCloud Source (Acquisition).
 # This file is committed — do NOT put the real token here. Put it in the

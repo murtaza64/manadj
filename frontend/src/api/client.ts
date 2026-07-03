@@ -17,6 +17,7 @@ import type {
   LibraryImportExecutionResult,
   SourceItem,
   AcquisitionRefreshStats,
+  Classification,
 } from '../types';
 
 // Backend URL configuration - can be overridden with VITE_API_URL env var
@@ -554,6 +555,16 @@ export const api = {
         const error = await res.json().catch(() => ({}));
         throw new Error(error.detail || 'Failed to refresh source items');
       }
+      return res.json();
+    },
+
+    setClassification: async (itemId: number, classification: Classification): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/classification`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ classification }),
+      });
+      if (!res.ok) throw new Error('Failed to set classification');
       return res.json();
     },
   },

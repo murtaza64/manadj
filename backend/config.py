@@ -3,8 +3,10 @@
 import os
 import tomllib
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+from backend.acquisition.classification import ClassificationConfig
 
 
 @dataclass
@@ -33,12 +35,19 @@ class SoundCloudConfig:
 
 
 @dataclass
+class AcquisitionConfig:
+    """Acquisition configuration."""
+    classification: "ClassificationConfig" = field(default_factory=lambda: ClassificationConfig())
+
+
+@dataclass
 class Config:
     """Application configuration."""
     database: DatabaseConfig
     library: LibraryConfig
     analysis: AnalysisConfig
     soundcloud: SoundCloudConfig
+    acquisition: AcquisitionConfig
 
 
 def _load_dotenv() -> None:
@@ -56,6 +65,18 @@ def _load_dotenv() -> None:
             continue
         key, _, value = line.partition("=")
         os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+def _classification_config(data: dict[str, Any]) -> ClassificationConfig:
+    """Classification heuristics from [acquisition.classification], defaults otherwise."""
+    section: dict[str, Any] = data.get("acquisition", {}).get("classification", {})
+    defaults = ClassificationConfig()
+    return ClassificationConfig(
+        clip_max_duration_secs=section.get("clip_max_duration_secs", defaults.clip_max_duration_secs),
+        mix_min_duration_secs=section.get("mix_min_duration_secs", defaults.mix_min_duration_secs),
+        mix_keywords=section.get("mix_keywords", defaults.mix_keywords),
+        clip_keywords=section.get("clip_keywords", defaults.clip_keywords),
+    )
 
 
 def _soundcloud_token(data: dict[str, Any]) -> str | None:
@@ -87,7 +108,8 @@ def load_config() -> Config:
                 tracks_directory=None
             ),
             analysis=AnalysisConfig(),
-            soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token({}))
+            soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token({})),
+            acquisition=AcquisitionConfig()
         )
 
     with open(config_path, "rb") as f:
@@ -130,7 +152,8 @@ def load_config() -> Config:
         analysis=AnalysisConfig(
             key_detection_backend=key_backend
         ),
-        soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data))
+        soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data)),
+        acquisition=AcquisitionConfig(classification=_classification_config(data))
     )
 
 

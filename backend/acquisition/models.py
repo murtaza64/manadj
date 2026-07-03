@@ -23,5 +23,8 @@ class SourceItem(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     permalink_url: Mapped[str] = mapped_column(String, nullable=False)
     state: Mapped[str] = mapped_column(String, nullable=False, default="new", index=True)
+    # Classification: track/mix/clip/other. NULL = not yet classified; Refresh
+    # fills NULLs from heuristics, so overrides (always non-NULL) are never touched.
+    classification: Mapped[str | None] = mapped_column(String, nullable=True)
     liked_at: Mapped[str | None] = mapped_column(String, nullable=True)  # ISO ts from the Source
     first_fetched_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())

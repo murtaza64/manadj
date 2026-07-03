@@ -14,11 +14,11 @@ UI: classification shown on each row; suspected mixes/clips hidden by default be
 
 ## Acceptance criteria
 
-- [ ] Classifications assigned on Refresh from config-driven duration bounds and title keywords
-- [ ] Default view hides mix/clip; toggle reveals them
-- [ ] User override persists and wins over heuristics (re-Refresh doesn't clobber it)
-- [ ] Nothing is ever auto-ignored by Classification alone
-- [ ] Heuristics unit-tested directly; override + filtering covered at the module interface
+- [x] Classifications assigned on Refresh from config-driven duration bounds and title keywords
+- [x] Default view hides mix/clip; toggle reveals them
+- [x] User override persists and wins over heuristics (re-Refresh doesn't clobber it)
+- [x] Nothing is ever auto-ignored by Classification alone
+- [x] Heuristics unit-tested directly; override + filtering covered at the module interface
 
 ## Blocked by
 

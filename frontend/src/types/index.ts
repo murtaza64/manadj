@@ -412,6 +412,7 @@ export interface SourceItem {
   duration_ms: number;
   permalink_url: string;
   state: SourceItemState;
+  classification: Classification | null;
   liked_at: string | null;
 }
 
@@ -420,3 +421,5 @@ export interface AcquisitionRefreshStats {
   total_remote: number;
   total_local: number;
 }
+
+export type Classification = 'track' | 'mix' | 'clip' | 'other';

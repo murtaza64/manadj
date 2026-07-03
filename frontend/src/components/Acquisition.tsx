@@ -1,15 +1,24 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { SourceItem, SourceItemState } from '../types';
+import type { Classification, SourceItem, SourceItemState } from '../types';
 import './Acquisition.css';
 
-// Review-split layout skeleton (chosen via UI prototype, see
-// .scratch/soundcloud-acquisition/PRD.md): sidebar (Refresh + state filters)
-// and the Source Item list. Detail panel and bottom action bar arrive with
-// later slices (issues 04/06).
+// Review-split layout (chosen via UI prototype, see
+// .scratch/soundcloud-acquisition/PRD.md): sidebar (Refresh + state and
+// classification filters) and the Source Item list. Detail panel and bottom
+// action bar arrive with later slices (issues 04/06).
 
 const STATES: SourceItemState[] = ['new', 'queued', 'fulfilled', 'ignored'];
+const CLASSIFICATIONS: Classification[] = ['track', 'mix', 'clip', 'other'];
+// Suspected mixes/clips are hidden by default; a Classification never
+// auto-ignores anything (see CONTEXT.md: Classification).
+const DEFAULT_CLASS_FILTER: Record<Classification, boolean> = {
+  track: true,
+  mix: false,
+  clip: false,
+  other: true,
+};
 
 function formatDuration(ms: number): string {
   const totalSecs = Math.round(ms / 1000);
@@ -21,6 +30,7 @@ function formatDuration(ms: number): string {
 export function Acquisition() {
   const queryClient = useQueryClient();
   const [stateFilter, setStateFilter] = useState<SourceItemState | 'all'>('all');
+  const [classFilter, setClassFilter] = useState<Record<Classification, boolean>>(DEFAULT_CLASS_FILTER);
 
   const { data: items, isLoading, error } = useQuery({
     queryKey: ['acquisitionItems'],
@@ -34,6 +44,20 @@ export function Acquisition() {
     },
   });
 
+  const classificationMutation = useMutation({
+    mutationFn: ({ itemId, classification }: { itemId: number; classification: Classification }) =>
+      api.acquisition.setClassification(itemId, classification),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] });
+    },
+  });
+
+  const cycleClassification = (item: SourceItem) => {
+    const current = item.classification ?? 'track';
+    const next = CLASSIFICATIONS[(CLASSIFICATIONS.indexOf(current) + 1) % CLASSIFICATIONS.length];
+    classificationMutation.mutate({ itemId: item.id, classification: next });
+  };
+
   const stateCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const s of STATES) counts[s] = 0;
@@ -42,8 +66,13 @@ export function Acquisition() {
   }, [items]);
 
   const visible: SourceItem[] = useMemo(
-    () => (items ?? []).filter(i => stateFilter === 'all' || i.state === stateFilter),
-    [items, stateFilter],
+    () =>
+      (items ?? []).filter(
+        i =>
+          (stateFilter === 'all' || i.state === stateFilter) &&
+          (i.classification === null || classFilter[i.classification]),
+      ),
+    [items, stateFilter, classFilter],
   );
 
   return (
@@ -81,6 +110,20 @@ export function Acquisition() {
             <span className="acquisition-count">{stateCounts[s]}</span>
           </button>
         ))}
+        <div className="acquisition-sidebar-heading">classification</div>
+        {CLASSIFICATIONS.map(c => (
+          <label key={c} className="acquisition-filter-row acquisition-class-filter">
+            <input
+              type="checkbox"
+              checked={classFilter[c]}
+              onChange={e => setClassFilter({ ...classFilter, [c]: e.target.checked })}
+            />
+            <span className={`acquisition-chip acquisition-chip-${c}`}>{c}</span>
+            <span className="acquisition-count">
+              {(items ?? []).filter(i => i.classification === c).length}
+            </span>
+          </label>
+        ))}
       </div>
       <div className="acquisition-main">
         {isLoading && <div className="acquisition-empty">Loading…</div>}
@@ -97,6 +140,13 @@ export function Acquisition() {
               <span className="acquisition-item-sub">
                 {item.uploader} · {formatDuration(item.duration_ms)}
               </span>
+              <button
+                className={`acquisition-chip acquisition-chip-${item.classification ?? 'none'}`}
+                title="Click to override classification"
+                onClick={() => cycleClassification(item)}
+              >
+                {item.classification ?? '?'}
+              </button>
               <span className={`acquisition-state acquisition-state-${item.state}`}>
                 {item.state}
               </span>

@@ -50,4 +50,16 @@ def test_list_items_endpoint_smoke(client: TestClient) -> None:
     assert resp.status_code == 200
     items = resp.json()
     assert len(items) == 1
-    assert {"id", "external_id", "title", "uploader", "duration_ms", "permalink_url", "state", "liked_at"} <= set(items[0])
+    assert {"id", "external_id", "title", "uploader", "duration_ms", "permalink_url", "state", "classification", "liked_at"} <= set(items[0])
+
+
+def test_override_classification_endpoint_smoke(client: TestClient) -> None:
+    client.post("/api/acquisition/refresh")
+    item_id = client.get("/api/acquisition/items").json()[0]["id"]
+
+    resp = client.patch(f"/api/acquisition/items/{item_id}/classification", json={"classification": "mix"})
+    assert resp.status_code == 200
+    assert resp.json()["classification"] == "mix"
+
+    resp = client.patch(f"/api/acquisition/items/{item_id}/classification", json={"classification": "banger"})
+    assert resp.status_code == 422
