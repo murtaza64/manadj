@@ -59,10 +59,13 @@ An independent playback unit: one loaded Track plus its transport state (playhea
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on safety limiter. Mirrors a hardware DJ mixer.
 
 **Performance view**:
-The two-deck view for practicing and performing mixes: stacked full-width waveforms with linked zoom, symmetric Deck A/B panels, a central Mixer panel, and a compact browse strip. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
+The two-deck view for practicing and performing mixes: stacked full-width waveforms with linked zoom, symmetric Deck A/B panels, a central Mixer panel, and the Library's browse surface embedded below. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
 
 **Load**:
 Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it. In the Performance view, Loading onto a playing Deck is blocked (protecting the mix); in the library it simply replaces what's playing.
+
+**Nudge**:
+A momentary tempo bend on a Deck, held to ride phase alignment against the other Deck; releasing restores the Deck's pitch exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now.
 
 **Hot Cue**:
 One of 8 persistent saved positions in a Track, used to jump to during performance.
