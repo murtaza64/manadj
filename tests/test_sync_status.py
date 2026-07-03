@@ -225,6 +225,19 @@ class TestNoOverwriteRule:
         assert d.no_overwrite is False
 
 
+class TestUnavailableSurfaces:
+    def test_absent_reader_does_not_count_as_missing_downstream(self, db, make_track):
+        """A Surface that isn't configured/reachable is unknown, not missing:
+        it must not put every track into the attention queue."""
+        make_track(filename="/m/x.mp3", title="X", artist=None)
+        result = compute_sync_status(
+            db, {"engine": FakeSurfaceReader([ref("/m/x.mp3", title="X")], ENGINE_FIELDS)}
+        )  # no rekordbox/disk readers at all
+        row = row_for(result, title="X")
+        assert row.status == "in-sync"
+        assert row.presence["rekordbox"] is False  # still reported absent
+
+
 class TestPathlessRefs:
     def test_pathless_surface_refs_are_ignored(self, db):
         result = compute_sync_status(db, surfaces(engine=[ref(None, title="ghost")]))

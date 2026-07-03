@@ -112,7 +112,11 @@ def _library_row(
         presence.setdefault(sid, False)
 
     unprocessed = not lib.tags
-    missing_downstream = not presence["engine"] or not presence["rekordbox"]
+    # only surfaces we can actually see count toward "missing downstream" —
+    # an unavailable reader means unknown, not missing
+    missing_downstream = any(
+        sid in surfaces and not presence[sid] for sid in ("engine", "rekordbox")
+    )
     # rollup priority: diverged > missing-downstream > in-sync
     status: RowStatus
     if diverged:
