@@ -42,3 +42,18 @@ export function useDeckSnapshot<T>(selector: (s: DeckSnapshot) => T): T {
     () => selector(engine.getSnapshot())
   );
 }
+
+/**
+ * True when the Deck can play the loaded Track: audio is decoded AND belongs
+ * to that Track. The trackId check closes the load window — between a Load
+ * being requested and the engine finishing, the engine still holds the
+ * previous track's audio, and controls must not act on it in the new
+ * track's name.
+ */
+export function useDeckReady(): boolean {
+  const { loadedTrack } = useDeck();
+  const id = loadedTrack?.id ?? null;
+  return useDeckSnapshot(
+    (s) => id !== null && s.loadState === 'ready' && s.trackId === id
+  );
+}

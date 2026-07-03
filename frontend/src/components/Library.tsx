@@ -12,7 +12,7 @@ import { useHotCueActions } from '../hooks/useHotCueActions';
 import type { Track } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
-import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckReady } from '../hooks/useDeck';
 
 // Related tracks feature - types and constants
 export interface RelatedTracksSettings {
@@ -199,7 +199,7 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryP
   // selection. Narrow snapshot selector so transport events don't re-render
   // the (large) library tree.
   const { engine, loadedTrack, loadTrack } = useDeck();
-  const deckReady = useDeckSnapshot((s) => s.loadState === 'ready');
+  const deckReady = useDeckReady();
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();

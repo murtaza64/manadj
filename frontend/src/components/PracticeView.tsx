@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
 import { useScrubLoop } from '../hooks/useScrubLoop';
 import { BEATJUMP_BEATS } from '../playback/constants';
 import type { EqBand } from '../playback/graph';
@@ -105,7 +105,7 @@ export function PracticeView({ onClose }: PracticeViewProps) {
   // Continuous scrub while h/l is held (shared with the library hub).
   useScrubLoop(engine, scrubDirection);
 
-  const ready = snapshot.loadState === 'ready';
+  const ready = useDeckReady();
 
   // Transport adapter for waveform drag-to-scrub. isPlaying uses
   // isAudioRunning so a drag during a held preview also pauses — the commit
@@ -177,12 +177,14 @@ export function PracticeView({ onClose }: PracticeViewProps) {
             clock={engine}
             cuePoint={snapshot.cuePoint}
             transport={scrubTransport}
+            dimmed={loadedTrack !== null && !ready}
           />
           <WaveformMinimap
             trackId={loadedTrack?.id ?? null}
             clock={engine}
             cuePoint={snapshot.cuePoint}
             onSeek={(t) => engine.seek(t)}
+            dimmed={loadedTrack !== null && !ready}
           />
           {/* Transport */}
           <div className="deck-transport">
@@ -199,11 +201,11 @@ export function PracticeView({ onClose }: PracticeViewProps) {
               CUE
             </button>
             <button
-              className={`deck-btn play${snapshot.playing ? ' active' : ''}`}
-              disabled={!ready}
+              className={`deck-btn play${snapshot.playing || snapshot.pendingPlay ? ' active' : ''}`}
+              disabled={!(ready || snapshot.loadState === 'fetching' || snapshot.loadState === 'decoding')}
               onClick={() => engine.togglePlay()}
             >
-              {snapshot.playing ? 'PAUSE' : 'PLAY'}
+              {snapshot.pendingPlay ? 'PLAY…' : snapshot.playing ? 'PAUSE' : 'PLAY'}
             </button>
             <button
               className="deck-btn jump"

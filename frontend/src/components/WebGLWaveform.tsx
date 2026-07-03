@@ -19,6 +19,8 @@ interface WebGLWaveformProps {
   clock: PlaybackClock;
   cuePoint: number | null;
   transport: ScrubTransport;
+  /** Grey out (and ignore input) while the deck can't play — e.g. decoding. */
+  dimmed?: boolean;
   className?: string;
 }
 
@@ -27,6 +29,7 @@ export default function WebGLWaveform({
   clock,
   cuePoint,
   transport,
+  dimmed = false,
   className,
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformData(trackId);
@@ -119,7 +122,7 @@ export default function WebGLWaveform({
   }
 
   return (
-    <div className={`waveform-container ${className || ''}`}>
+    <div className={`waveform-container ${dimmed ? 'waveform-dimmed' : ''} ${className || ''}`}>
       <canvas
         ref={canvasRef}
         className="waveform-canvas"

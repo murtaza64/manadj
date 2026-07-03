@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Track } from '../types';
-import { useDeck, useDeckSnapshot } from './useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot } from './useDeck';
 import { useScrubLoop } from './useScrubLoop';
 import { BEATJUMP_BEATS } from '../playback/constants';
 
@@ -43,7 +43,11 @@ export function useKeyboardShortcuts({
   isEnergyEditMode
 }: UseKeyboardShortcutsProps) {
   const { engine } = useDeck();
-  const deckReady = useDeckSnapshot((s) => s.loadState === 'ready');
+  const deckReady = useDeckReady();
+  // Space is allowed while loading — the engine latches play intent.
+  const deckCanPlay = useDeckSnapshot(
+    (s) => s.loadState === 'ready' || s.loadState === 'fetching' || s.loadState === 'decoding'
+  );
   const [scrubDirection, setScrubDirection] = useState<number>(0); // -1, 0, or 1
 
   useEffect(() => {
@@ -106,7 +110,8 @@ export function useKeyboardShortcuts({
 
       // Deck transport: Space/a/s/f
       if (key === ' ' || key === 'a' || key === 's' || key === 'f') {
-        if (!deckReady) return;
+        // Space latches play intent during a load; the rest need audio.
+        if (key === ' ' ? !deckCanPlay : !deckReady) return;
 
         event.preventDefault();
 
@@ -281,6 +286,7 @@ export function useKeyboardShortcuts({
     isEnergyEditMode,
     engine,
     deckReady,
+    deckCanPlay,
   ]);
 
   // Continuous scrub while h/l is held

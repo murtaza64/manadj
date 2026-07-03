@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useDeck, useDeckSnapshot } from './useDeck';
+import { useDeck, useDeckReady } from './useDeck';
 import { useHotCues, useSetHotCue, useDeleteHotCue } from './useHotCues';
 import type { HotCue } from '../types';
 
@@ -25,7 +25,7 @@ export interface HotCueActions {
  */
 export function useHotCueActions(trackId: number | null): HotCueActions {
   const { engine } = useDeck();
-  const ready = useDeckSnapshot((s) => s.loadState === 'ready');
+  const ready = useDeckReady();
   const { data: hotCues = [] } = useHotCues(trackId);
   const setHotCue = useSetHotCue();
   const deleteHotCue = useDeleteHotCue();

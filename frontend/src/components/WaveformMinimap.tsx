@@ -9,6 +9,8 @@ interface WaveformMinimapProps {
   clock: PlaybackClock;
   cuePoint: number | null;
   onSeek: (time: number) => void;
+  /** Grey out (and ignore input) while the deck can't play — e.g. decoding. */
+  dimmed?: boolean;
   className?: string;
 }
 
@@ -17,6 +19,7 @@ export default function WaveformMinimap({
   clock,
   cuePoint,
   onSeek,
+  dimmed = false,
   className,
 }: WaveformMinimapProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformData(trackId);
@@ -69,7 +72,7 @@ export default function WaveformMinimap({
   }
 
   return (
-    <div className={`minimap-container ${className || ''}`}>
+    <div className={`minimap-container ${dimmed ? 'waveform-dimmed' : ''} ${className || ''}`}>
       <canvas
         ref={canvasRef}
         className="minimap-canvas"

@@ -22,6 +22,16 @@
   display: block;
 }
 
+/* Deck can't play this audio yet (fetching/decoding/error): grey out and
+   ignore input. Opacity + grayscale composite on the canvas layer — no
+   layout/paint cost. */
+.waveform-dimmed {
+  opacity: 0.4;
+  filter: grayscale(0.7);
+  pointer-events: none;
+  transition: opacity 150ms ease, filter 150ms ease;
+}
+
 .waveform-loading,
 .waveform-error {
   display: flex;

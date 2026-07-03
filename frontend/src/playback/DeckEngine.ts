@@ -14,13 +14,28 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportEvent, TransportState } from './transport';
 import { DeckGraph, DECLICK_S } from './graph';
 import type { EqBand } from './graph';
+import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
+
+export interface CueDefaultsInfo {
+  /** Persisted Main cue, if any (CDJ memory-cue behavior). */
+  savedCuePoint: number | null;
+  /** First beat time from the Beatgrid, if any (cue default fallback). */
+  firstBeatTime: number | null;
+}
 
 export interface DeckTrackInfo {
   trackId: number;
   audioUrl: string;
   bpm: number | null;
+  /**
+   * Saved-cue / first-beat lookup, fetched by the caller in parallel with
+   * the audio. A promise so load() can start immediately — the engine knows
+   * about the new track from the first instant, and audio + cue metadata
+   * download concurrently. Rejections fall through to engine defaults.
+   */
+  cueDefaults?: Promise<CueDefaultsInfo>;
 }
 
 export interface DeckSnapshot {
@@ -31,6 +46,8 @@ export interface DeckSnapshot {
   /** Track duration in seconds (0 until ready). */
   duration: number;
   playing: boolean;
+  /** Play was pressed while loading: playback starts when decode completes. */
+  pendingPlay: boolean;
   previewing: boolean;
   hotCuePreviewSlot: number | null;
   cuePoint: number | null;
@@ -66,6 +83,8 @@ export class DeckEngine {
 
   private transport: TransportState = initialTransportState();
   private source: ActiveSource | null = null;
+  /** Play pressed while loading — fires as soon as decode completes. */
+  private pendingPlay = false;
 
   /** Clock anchor: playhead position (s) at ctx time `anchorCtxTime`. */
   private anchorPosition = 0;
@@ -77,6 +96,21 @@ export class DeckEngine {
 
   private listeners = new Set<() => void>();
   private snapshot: DeckSnapshot;
+
+  /**
+   * Invoked when the user sets the Main cue (cue button while paused away
+   * from the cue) — the persistence hook, called with the engine's own
+   * loaded trackId so a cue can never persist against a track that is
+   * merely *about* to load. The engine stays API-ignorant; the React layer
+   * wires this to the backend. Defaults applied at load do NOT fire it.
+   */
+  private onCueSet: ((trackId: number, timeSeconds: number) => void) | null = null;
+
+  setCueSetHandler(
+    handler: ((trackId: number, timeSeconds: number) => void) | null
+  ): void {
+    this.onCueSet = handler;
+  }
 
   constructor() {
     this.snapshot = this.buildSnapshot();
@@ -109,6 +143,7 @@ export class DeckEngine {
     this.transport = initialTransportState();
     this.buffer = null;
     this.trackInfo = info;
+    this.pendingPlay = false;
     this.loadState = 'fetching';
     this.loadError = null;
     this.emit();
@@ -124,28 +159,87 @@ export class DeckEngine {
       const buffer = await this.ensureAudio().ctx.decodeAudioData(bytes);
       if (abort.signal.aborted) return;
 
+      // Cue metadata was fetched concurrently with the audio; absence (or a
+      // failed lookup) falls through the default precedence.
+      const cueInfo = await (info.cueDefaults ?? Promise.resolve(null)).catch(
+        () => null
+      );
+      if (abort.signal.aborted) return;
+
       this.buffer = buffer;
+
+      // Resolve the initial Main cue (saved → first beat → first
+      // non-silence → 0) and park the deck at it, CDJ-style. Non-silence
+      // considers every channel (earliest sound in any).
+      let firstNonSilence: number | null = null;
+      for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const t = firstNonSilentTime(buffer.getChannelData(c), buffer.sampleRate);
+        if (t !== null && (firstNonSilence === null || t < firstNonSilence)) {
+          firstNonSilence = t;
+        }
+      }
+      const cue = resolveInitialCue({
+        saved: cueInfo?.savedCuePoint ?? null,
+        firstBeat: cueInfo?.firstBeatTime ?? null,
+        firstNonSilence,
+      });
+      this.transport = {
+        ...this.transport,
+        cuePoint: this.clampTime(cue),
+        playhead: this.clampTime(cue),
+      };
+
       this.loadState = 'ready';
       this.emit();
+
+      // Play pressed during the load: start now, from the cue.
+      if (this.pendingPlay) {
+        this.pendingPlay = false;
+        this.dispatch({ type: 'play' });
+      }
     } catch (err) {
       if (abort.signal.aborted) return;
       this.loadState = 'error';
       this.loadError = err instanceof Error ? err.message : String(err);
+      this.pendingPlay = false;
       this.emit();
     }
   }
 
   // ── Transport interface ────────────────────────────────────────────────
 
+  /** True while a load is in flight and play intent can be latched. */
+  private isLoading(): boolean {
+    return this.loadState === 'fetching' || this.loadState === 'decoding';
+  }
+
   play(): void {
+    if (this.isLoading()) {
+      // Latch the intent; load() fires it when decode completes.
+      if (!this.pendingPlay) {
+        this.pendingPlay = true;
+        this.emit();
+      }
+      return;
+    }
     this.dispatch({ type: 'play' });
   }
 
   pause(): void {
+    if (this.pendingPlay) {
+      this.pendingPlay = false;
+      this.emit();
+      return;
+    }
     this.dispatch({ type: 'pause' });
   }
 
   togglePlay(): void {
+    if (this.isLoading()) {
+      this.pendingPlay = !this.pendingPlay;
+      this.emit();
+      return;
+    }
     this.dispatch({ type: 'toggle-play' });
   }
 
@@ -258,12 +352,23 @@ export class DeckEngine {
     if (!this.buffer) return;
     const synced = { ...this.transport, playhead: this.getPlayhead() };
     const [next, effects] = reduceTransport(synced, event);
+    const cueChanged = next.cuePoint !== synced.cuePoint;
     this.transport = next;
     for (const effect of effects) {
       if (effect.type === 'start') this.startAudio(effect.at);
       else this.stopAudio(effect.at);
     }
     this.emit();
+
+    // A cue-down that moved the cue is the user setting it — persistence hook.
+    if (
+      event.type === 'cue-down' &&
+      cueChanged &&
+      next.cuePoint !== null &&
+      this.trackInfo
+    ) {
+      this.onCueSet?.(this.trackInfo.trackId, next.cuePoint);
+    }
   }
 
   private startAudio(at: number): void {
@@ -347,6 +452,7 @@ export class DeckEngine {
       bpm: this.trackInfo?.bpm ?? null,
       duration: this.buffer?.duration ?? 0,
       playing: this.transport.playing,
+      pendingPlay: this.pendingPlay,
       previewing: this.transport.previewing,
       hotCuePreviewSlot: this.transport.hotCuePreviewSlot,
       cuePoint: this.transport.cuePoint,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import WebGLWaveform from './WebGLWaveform';
 import type { ScrubTransport } from './WebGLWaveform';
-import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { BEATJUMP_BEATS } from '../playback/constants';
 import HotCue from './HotCue';
@@ -14,7 +14,10 @@ import './Player.css';
 export default function Player() {
   const { engine, loadedTrack } = useDeck();
   const snapshot = useDeckSnapshot((s) => s);
-  const ready = snapshot.loadState === 'ready';
+  const ready = useDeckReady();
+  // Play can be pressed while loading — the engine latches the intent and
+  // starts as soon as decoding finishes.
+  const canPlay = ready || snapshot.loadState === 'fetching' || snapshot.loadState === 'decoding';
   const trackId = loadedTrack?.id ?? null;
 
   const hotCues = useHotCueActions(trackId);
@@ -48,6 +51,7 @@ export default function Player() {
           clock={engine}
           cuePoint={snapshot.cuePoint}
           transport={scrubTransport}
+          dimmed={trackId !== null && !ready}
         />
 
         {/* Controls overlay - top left */}
@@ -75,12 +79,23 @@ export default function Player() {
             CUE
           </button>
 
-          {/* Row 2: PLAY button spanning all columns */}
+          {/* Row 2: PLAY button spanning all columns (usable while loading:
+              intent latches and playback starts when decoding finishes) */}
           <button
             onClick={() => engine.togglePlay()}
-            disabled={!ready}
-            className={`player-button ${snapshot.playing ? 'player-button-playing' : 'player-button-paused'}`}
-            title={snapshot.playing ? 'Pause' : 'Play'}
+            disabled={!canPlay}
+            className={`player-button ${
+              snapshot.playing || snapshot.pendingPlay
+                ? 'player-button-playing'
+                : 'player-button-paused'
+            }`}
+            title={
+              snapshot.pendingPlay
+                ? 'Will play when loaded'
+                : snapshot.playing
+                ? 'Pause'
+                : 'Play'
+            }
           >
             ⏯
           </button>

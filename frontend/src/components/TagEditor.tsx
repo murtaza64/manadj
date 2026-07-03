@@ -6,7 +6,7 @@ import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
-import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
 import BpmInput from './BpmInput';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, BeatgridIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
@@ -33,7 +33,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
   // being edited is the one on the Deck. Narrow selectors keep transport
   // events from re-rendering the editor.
   const { engine, loadedTrack } = useDeck();
-  const deckReady = useDeckSnapshot((s) => s.loadState === 'ready');
+  const deckReady = useDeckReady();
   const deckCuePoint = useDeckSnapshot((s) => s.cuePoint);
   const isBeatgridEditable = !!track && loadedTrack?.id === track.id && deckReady;
 
@@ -504,6 +504,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 clock={engine}
                 cuePoint={deckCuePoint}
                 onSeek={(t) => engine.seek(t)}
+                dimmed={loadedTrack !== null && !deckReady}
               />
             </div>
           </div>
