@@ -104,7 +104,7 @@ Colloquially — and in the UI — the broad umbrella for everything that moves 
 _Avoid_: generic "sync" in module/function names
 
 **Export**:
-A Sync operation that pushes Library state out to another Surface — creating missing tracks downstream, or writing diverged fields (including ID3 tags on the Disk Surface). The common case; manadj's state wins.
+A Sync operation that pushes Library state out to another Surface — creating missing tracks downstream, or writing diverged fields (including ID3 tags on the Disk Surface). The common case; manadj's state wins — except that an empty Library value never overwrites a Surface's value: Export skips that field, surfaces a warning, and the operator resolves it manually (usually by Importing).
 _Avoid_: publish, push, write-to-files (that's Export to Disk)
 
 **Import**:
