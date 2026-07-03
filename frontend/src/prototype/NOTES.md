@@ -183,6 +183,29 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   Modifier tension resolved: shift on a breakpoint = fine drag; shift on
   empty lane = chop.
 
+- v17 (issue 11): deck slides groundwork + deck B controls. Model hygiene:
+  `bInSec` moved INTO `ProtoTransition` (pair knowledge rides the named
+  artifact; localStorage pair-store migrated on load, legacy sibling field
+  folded in and deleted). Negative entry anchor first-class: `bInSec < 0`
+  = silent lead gap — `arrangementAt` keeps B inactive until `bTrackTime ≥
+  0` (the player's deferral falls out of that one predicate), the B block
+  frame draws from the true audio start, `startSec ≥ 0` stays the only
+  clamp (B-entry input accepts negatives). Pure slide math in
+  mixProtoModel (`slideB`, `slideBToCue`, `bTrackTimeAt`) under vitest:
+  unlocked mutates `bInSec`, locked mutates `startSec` (÷rateB), cue
+  slides land exactly (the startSec clamp is the one exactness breaker).
+  UI: "locked window" toggle beside snap; deck B card gains a slide row —
+  Performance beatjump idiom (◄◄ − [n] + ►►, halve/double 1–128, B's own
+  beats via base BPM) + one button per hot cue (slide so the cue lands
+  under the playhead). Slides push the new mix into the player
+  synchronously and re-park paused decks (`seek(playhead)`); playing decks
+  re-cue via the soft-sync drift path — A never hiccups, the playhead's
+  mix position never moves. Deck A's mirrored controls are issue 12.
+  bMove drag respects the lock too (user follow-up): locked = window rides
+  B (startSec, the old behavior); unlocked = B's content slides under a
+  fixed window (bInSec only; snap puts a B beat on the window start, or —
+  in the lead-gap regime — B's audio start on A's grid).
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

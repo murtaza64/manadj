@@ -35,9 +35,15 @@ export const DEFAULT_LANE_IDS: LaneId[] = ['faderA', 'faderB', 'eqLowA', 'eqLowB
 export type Lanes = Partial<Record<LaneId, LanePoint[]>>;
 
 export interface ProtoTransition {
-  /** Mix-time (s) when the incoming track enters and the transition begins. */
+  /** Mix-time (s) when the transition window begins. The only clamp in the
+   * model: startSec ≥ 0 (a transition can't begin before A exists). */
   startSec: number;
   durationSec: number;
+  /** B's track-time at the window start (s). Pair knowledge — lives on the
+   * Transition so it switches with the named artifact (issue 11). Negative
+   * = silent lead gap (B's audio begins partway into the window); large
+   * positive = virtual content-origin before mix 0. No clamps either way. */
+  bInSec: number;
   /** BPM-match the incoming track to the outgoing for the whole mix. */
   tempoMatch: boolean;
   lanes: Lanes;
@@ -46,8 +52,6 @@ export interface ProtoTransition {
 export interface ProtoMix {
   trackAId: number | null;
   trackBId: number | null;
-  /** Where B enters within B (s). A always plays from its start in this prototype. */
-  bInSec: number;
   transition: ProtoTransition;
 }
 
@@ -55,10 +59,10 @@ export function defaultMix(): ProtoMix {
   return {
     trackAId: null,
     trackBId: null,
-    bInSec: 0,
     transition: {
       startSec: 30,
       durationSec: 20,
+      bInSec: 0,
       tempoMatch: true,
       lanes: {},
     },
@@ -146,15 +150,61 @@ export function arrangementAt(
 } {
   const tr = mix.transition;
   const aEnd = Math.min(tr.startSec + tr.durationSec, durations.a);
-  const bTrackTime = mix.bInSec + (mixTime - tr.startSec) * rateB;
-  const bEndMixTime = tr.startSec + (durations.b - mix.bInSec) / rateB;
+  const bTrackTime = bTrackTimeAt(tr, mixTime, rateB);
+  const bEndMixTime = tr.startSec + (durations.b - tr.bInSec) / rateB;
   return {
     aActive: mixTime >= 0 && mixTime < aEnd,
     aTrackTime: mixTime,
-    bActive: mixTime >= tr.startSec && bTrackTime < durations.b,
+    // bTrackTime ≥ 0 defers B past a negative entry anchor's silent lead
+    // gap: the deck stays inactive until B's true audio start.
+    bActive: mixTime >= tr.startSec && bTrackTime >= 0 && bTrackTime < durations.b,
     bTrackTime,
     mixDuration: Math.max(aEnd, bEndMixTime),
   };
+}
+
+// ── Deck slides (issue 11) ─────────────────────────────────────────────
+// A Slide realigns the pair: it re-cues exactly one deck and never moves
+// the playhead's mix position. The lock chooses which track the window
+// sticks to. PRD § Deck slides — the quadrant table is the spec.
+
+/** B's track-time under the playhead at mix-time t. */
+export function bTrackTimeAt(
+  tr: Pick<ProtoTransition, 'startSec' | 'bInSec'>,
+  mixTime: number,
+  rateB: number
+): number {
+  return tr.bInSec + (mixTime - tr.startSec) * rateB;
+}
+
+/**
+ * Slide deck B by `deltaB` seconds of B's OWN track time (+ = B's content
+ * later under the playhead, i.e. re-cue forward). Unlocked, the window
+ * stays with A and `bInSec` absorbs the slide; locked, the window rides
+ * B — `startSec` moves by the mix-time equivalent (÷rateB) and the same B
+ * audio stays under the window. `startSec ≥ 0` is the only clamp.
+ */
+export function slideB(
+  tr: ProtoTransition,
+  deltaB: number,
+  locked: boolean,
+  rateB: number
+): { startSec: number; bInSec: number } {
+  if (locked) {
+    return { startSec: Math.max(0, tr.startSec - deltaB / rateB), bInSec: tr.bInSec };
+  }
+  return { startSec: tr.startSec, bInSec: tr.bInSec + deltaB };
+}
+
+/** Slide deck B so `cueSec` (B track time) lands under the playhead. */
+export function slideBToCue(
+  tr: ProtoTransition,
+  cueSec: number,
+  playheadMix: number,
+  locked: boolean,
+  rateB: number
+): { startSec: number; bInSec: number } {
+  return slideB(tr, cueSec - bTrackTimeAt(tr, playheadMix, rateB), locked, rateB);
 }
 
 /**

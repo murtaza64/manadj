@@ -469,6 +469,32 @@
   color: #ffe600;
 }
 
+.mixproto-deckcard-row button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Slide controls (issue 11): pair-alignment gestures, not transport. */
+.mixproto-slidelabel {
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--subtext0, #a6adc8);
+}
+
+.mixproto-slidesize {
+  min-width: 24px;
+  text-align: center;
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: bold;
+}
+
+.mixproto-cueslide {
+  font-family: monospace;
+  font-weight: bold;
+  min-width: 22px;
+}
+
 .mixproto-center {
   display: flex;
   flex-direction: column;

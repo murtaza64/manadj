@@ -1,8 +1,18 @@
 /**
- * PROTOTYPE (mix-editor) — chop-stamp math (issue 04).
+ * PROTOTYPE (mix-editor) — chop-stamp math (issue 04), slide math (issue 11).
  */
 import { describe, expect, it } from 'vitest';
-import { evalLane, insertChop, type LanePoint } from './mixProtoModel';
+import {
+  arrangementAt,
+  bTrackTimeAt,
+  evalLane,
+  insertChop,
+  slideB,
+  slideBToCue,
+  type LanePoint,
+  type ProtoMix,
+  type ProtoTransition,
+} from './mixProtoModel';
 
 /** faderA default: full → silent ramp. */
 const ramp: LanePoint[] = [
@@ -66,5 +76,90 @@ describe('insertChop', () => {
       expect(p.x).toBeGreaterThanOrEqual(0);
       expect(p.x).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+const tr = (over: Partial<ProtoTransition> = {}): ProtoTransition => ({
+  startSec: 30,
+  durationSec: 20,
+  bInSec: 10,
+  tempoMatch: true,
+  lanes: {},
+  ...over,
+});
+
+describe('slideB (PRD quadrant table, B side)', () => {
+  it('unlocked: window stays with A — bInSec absorbs the slide', () => {
+    expect(slideB(tr(), 4, false, 1)).toEqual({ startSec: 30, bInSec: 14 });
+    expect(slideB(tr(), -4, false, 1)).toEqual({ startSec: 30, bInSec: 6 });
+  });
+
+  it('locked: window rides B — startSec moves by the mix-time equivalent', () => {
+    expect(slideB(tr(), 4, true, 1)).toEqual({ startSec: 26, bInSec: 10 });
+    // rateB scaling: 4 B-seconds = 2 mix-seconds at rateB 2.
+    expect(slideB(tr(), 4, true, 2)).toEqual({ startSec: 28, bInSec: 10 });
+  });
+
+  it('locked: startSec ≥ 0 is the only clamp', () => {
+    expect(slideB(tr(), 100, true, 1)).toEqual({ startSec: 0, bInSec: 10 });
+  });
+
+  it('unlocked: negative entry anchor is first-class (no clamp)', () => {
+    expect(slideB(tr(), -25, false, 1)).toEqual({ startSec: 30, bInSec: -15 });
+  });
+});
+
+describe('slideBToCue', () => {
+  it('lands the cue under the playhead (unlocked and locked, any rate)', () => {
+    for (const locked of [false, true]) {
+      for (const rateB of [1, 1.04]) {
+        for (const cue of [15, 21.5]) {
+          const t = tr();
+          const playhead = 38; // mid-window, 8s in
+          const out = slideBToCue(t, cue, playhead, locked, rateB);
+          expect(bTrackTimeAt({ ...t, ...out }, playhead, rateB)).toBeCloseTo(cue, 9);
+        }
+      }
+    }
+  });
+
+  it('locked landing breaks exactness only at the startSec ≥ 0 clamp', () => {
+    const out = slideBToCue(tr(), 55.5, 38, true, 1); // would need startSec −7.5
+    expect(out.startSec).toBe(0);
+  });
+
+  it('cue-slide near B start overshoots into bInSec < 0 cleanly', () => {
+    const t = tr({ bInSec: 0 });
+    // Standing at the window start, pull a cue 5s into B... backwards: aim
+    // a cue BEFORE the current position → negative anchor.
+    const out = slideBToCue(t, 2, 40, false, 1); // playhead 10s into window
+    expect(out.bInSec).toBe(-8);
+  });
+});
+
+describe('arrangementAt with negative entry anchor', () => {
+  const mix: ProtoMix = {
+    trackAId: 1,
+    trackBId: 2,
+    transition: tr({ startSec: 30, durationSec: 20, bInSec: -10 }),
+  };
+  const durations = { a: 100, b: 60 };
+
+  it('defers B through the silent lead gap to its true audio start', () => {
+    expect(arrangementAt(mix, 35, durations, 1).bActive).toBe(false); // gap
+    expect(arrangementAt(mix, 41, durations, 1).bActive).toBe(true);
+    expect(arrangementAt(mix, 41, durations, 1).bTrackTime).toBeCloseTo(1);
+  });
+
+  it('true audio start scales with rateB', () => {
+    // Gap is 10 B-seconds = 5 mix-seconds at rateB 2.
+    expect(arrangementAt(mix, 34, durations, 2).bActive).toBe(false);
+    expect(arrangementAt(mix, 36, durations, 2).bActive).toBe(true);
+  });
+
+  it('mix duration extends by the gap', () => {
+    expect(arrangementAt(mix, 0, durations, 1).mixDuration).toBe(100);
+    const long = { ...mix, transition: tr({ startSec: 60, durationSec: 20, bInSec: -10 }) };
+    expect(arrangementAt(long, 0, durations, 1).mixDuration).toBe(130);
   });
 });

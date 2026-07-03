@@ -1,6 +1,10 @@
 # 11 — Deck slides: groundwork + deck B controls
 
-Status: ready-for-agent
+Status: ready-for-human (implemented 2026-07-03, change `roxuvwyx`; awaiting
+user verification — cue-slide feel unlocked/locked, negative-anchor gap
+playback on a real pair, slides during playback. Known soft spot: waveform
+row B's display window goes negative during a lead gap; verify the renderer
+draws blank there rather than garbage.)
 
 ## Parent
 

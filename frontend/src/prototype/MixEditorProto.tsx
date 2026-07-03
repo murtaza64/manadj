@@ -26,6 +26,11 @@ import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
 import { formatKeyDisplay } from '../utils/keyUtils';
+import {
+  PERFORMANCE_BEATJUMP_DEFAULT,
+  doubleBeatjump,
+  halveBeatjump,
+} from '../playback/beatjump';
 import { MixProtoPlayer } from './MixProtoPlayer';
 import {
   DEFAULT_LANE_IDS,
@@ -37,6 +42,8 @@ import {
   lanePoints,
   laneValuesAt,
   nearestTime,
+  slideB,
+  slideBToCue,
   tempoMatchPitch,
 } from './mixProtoModel';
 import type { LaneId, LanePoint, Lanes, ProtoMix } from './mixProtoModel';
@@ -52,10 +59,11 @@ const LEGACY_MIX_KEY = 'PROTOTYPE-mix-editor-mix';
 /** Default working pair while prototyping: Weeble Wobble VIP → Last Time. */
 const DEFAULT_PAIR = { a: 549, b: 171 };
 
-/** A saved Transition (first-class, per ordered track pair). */
+/** A saved Transition (first-class, per ordered track pair). `bInSec` lives
+ * INSIDE the transition (issue 11 — pair knowledge switches with the named
+ * artifact); older saves carried it as a sibling field (migrated on load). */
 interface SavedTransition {
   name: string;
-  bInSec: number;
   transition: ProtoMix['transition'];
 }
 
@@ -73,6 +81,18 @@ function loadPairStore(): PairStore {
   } catch {
     store = {};
   }
+  // Migrate pre-issue-11 saves: bInSec was a sibling of the transition.
+  let migrated = false;
+  for (const entry of Object.values(store)) {
+    for (const item of entry.items as (SavedTransition & { bInSec?: number })[]) {
+      if (item.transition.bInSec === undefined) {
+        item.transition.bInSec = item.bInSec ?? 0;
+        migrated = true;
+      }
+      delete item.bInSec;
+    }
+  }
+  if (migrated) savePairStore(store);
   // Migrate the pre-rework single-mix draft into the pair store, so work
   // saved before the transition-per-pair model isn't lost.
   try {
@@ -82,9 +102,13 @@ function loadPairStore(): PairStore {
       if (legacy.trackAId !== null && legacy.trackBId !== null && legacy.transition) {
         const key = `${legacy.trackAId}:${legacy.trackBId}`;
         if (!store[key]) {
+          const legacyBIn = (legacy as ProtoMix & { bInSec?: number }).bInSec ?? 0;
           store[key] = {
             items: [
-              { name: 'Transition 1', bInSec: legacy.bInSec ?? 0, transition: legacy.transition },
+              {
+                name: 'Transition 1',
+                transition: { ...legacy.transition, bInSec: legacy.transition.bInSec ?? legacyBIn },
+              },
             ],
             active: 0,
           };
@@ -143,6 +167,9 @@ export default function MixEditorProto() {
   const [trackA, setTrackA] = useState<Track | null>(null);
   const [trackB, setTrackB] = useState<Track | null>(null);
   const [snap, setSnap] = useState(true);
+  /** Locked window (glossary): during a Slide the window rides the slid
+   * track; unlocked it stays with the other track. */
+  const [lockedWindow, setLockedWindow] = useState(false);
 
   const { data: beatgridA } = useBeatgridData(trackA?.id ?? null);
   const { data: beatgridB } = useBeatgridData(trackB?.id ?? null);
@@ -174,13 +201,12 @@ export default function MixEditorProto() {
     if (!pairKey) return;
     setPairStore((store) => {
       const entry = store[pairKey] ?? {
-        items: [{ name: 'Transition 1', bInSec: mix.bInSec, transition: mix.transition }],
+        items: [{ name: 'Transition 1', transition: mix.transition }],
         active: 0,
       };
       const items = [...entry.items];
       items[entry.active] = {
         ...items[entry.active],
-        bInSec: mix.bInSec,
         transition: mix.transition,
       };
       const next = { ...store, [pairKey]: { ...entry, items } };
@@ -211,6 +237,27 @@ export default function MixEditorProto() {
     [player]
   );
 
+  // Deck B slides (issue 11): hot cue / beat jump gestures realign the
+  // pair — exactly one deck re-cues, the playhead's mix position never
+  // moves. The lock decides which side the window sticks to (PRD table).
+  // Slides are exact: the snap toggle does not quantize them.
+  const slideDeckB = useCallback(
+    (kind: 'cue' | 'beats', value: number) => {
+      const playhead = player.getMixTime();
+      const mut =
+        kind === 'cue'
+          ? slideBToCue(mix.transition, value, playhead, lockedWindow, rateB)
+          : slideB(mix.transition, value, lockedWindow, rateB);
+      const next = { ...mix, transition: { ...mix.transition, ...mut } };
+      setMix(next);
+      // Push to the player NOW (not on the next render) so the re-park
+      // below sees the new alignment. Playing decks re-cue via soft sync.
+      player.setMix(next);
+      if (!player.isPlaying()) player.seek(playhead);
+    },
+    [player, mix, lockedWindow, rateB]
+  );
+
   // Fine alignment nudge (issue 09): move a track ±deltaSec relative to the
   // other. B moves together with the transition frame (bMove-drag
   // semantics: startSec shifts, bInSec stays). A anchors the mix axis and
@@ -234,10 +281,9 @@ export default function MixEditorProto() {
     const entry = pairStore[pairKey];
     if (entry) {
       const item = entry.items[entry.active];
-      setMix((m) => ({ ...m, bInSec: item.bInSec, transition: structuredClone(item.transition) }));
+      setMix((m) => ({ ...m, transition: structuredClone(item.transition) }));
     } else {
-      const fresh = defaultMix();
-      setMix((m) => ({ ...m, bInSec: fresh.bInSec, transition: fresh.transition }));
+      setMix((m) => ({ ...m, transition: defaultMix().transition }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pairKey]);
@@ -251,16 +297,14 @@ export default function MixEditorProto() {
       savePairStore(next);
       return next;
     });
-    setMix((m) => ({ ...m, bInSec: item.bInSec, transition: structuredClone(item.transition) }));
+    setMix((m) => ({ ...m, transition: structuredClone(item.transition) }));
   };
 
   const createTransition = () => {
     if (!pairKey || !pairEntry) return;
-    const fresh = defaultMix();
     const item: SavedTransition = {
       name: `Transition ${pairEntry.items.length + 1}`,
-      bInSec: fresh.bInSec,
-      transition: fresh.transition,
+      transition: defaultMix().transition,
     };
     setPairStore((store) => {
       const entry = store[pairKey];
@@ -271,7 +315,7 @@ export default function MixEditorProto() {
       savePairStore(next);
       return next;
     });
-    setMix((m) => ({ ...m, bInSec: item.bInSec, transition: structuredClone(item.transition) }));
+    setMix((m) => ({ ...m, transition: structuredClone(item.transition) }));
   };
 
   // One audible surface AND one running audio clock at a time (issue 08):
@@ -405,6 +449,7 @@ export default function MixEditorProto() {
             beatgridB={beatgridB?.data ?? null}
             rateB={rateB}
             snap={snap}
+            lockedWindow={lockedWindow}
             visibleLanes={visibleLanes}
             onLaneChange={setLane}
             onChange={setMix}
@@ -487,10 +532,14 @@ export default function MixEditorProto() {
                   B entry
                   <input
                     type="number"
-                    min={0}
                     step={0.5}
-                    value={mix.bInSec.toFixed(1)}
-                    onChange={(e) => setMix((m) => ({ ...m, bInSec: Number(e.target.value) }))}
+                    value={tr.bInSec.toFixed(1)}
+                    onChange={(e) =>
+                      setMix((m) => ({
+                        ...m,
+                        transition: { ...m.transition, bInSec: Number(e.target.value) },
+                      }))
+                    }
                   />
                 </label>
               </div>
@@ -515,6 +564,14 @@ export default function MixEditorProto() {
                     onChange={(e) => setSnap(e.target.checked)}
                   />
                   snap
+                </label>
+                <label title="Slides: locked = the window rides the slid track; unlocked = it stays with the other track">
+                  <input
+                    type="checkbox"
+                    checked={lockedWindow}
+                    onChange={(e) => setLockedWindow(e.target.checked)}
+                  />
+                  locked window
                 </label>
                 <button
                   className="mixproto-cutbtn"
@@ -562,6 +619,12 @@ export default function MixEditorProto() {
               pitchPercent={(rateB - 1) * 100}
               onBpmSaved={(bpm) => setTrackB((t) => (t ? { ...t, bpm } : t))}
               onNudgeTrack={(d) => nudgeTrack('B', d)}
+              slides={{
+                toCue: (cueSec) => slideDeckB('cue', cueSec),
+                // n of B's OWN beats → B-track seconds via base BPM.
+                beats: (n) => bpmB && slideDeckB('beats', (n * 60) / bpmB),
+                enabled: bpmB !== null && bpmB > 0,
+              }}
             />
           </div>
         </div>
@@ -592,6 +655,7 @@ function DawTimeline({
   beatgridB,
   rateB,
   snap,
+  lockedWindow,
   visibleLanes,
   onLaneChange,
   onChange,
@@ -606,6 +670,9 @@ function DawTimeline({
   beatgridB: BeatgridData | null;
   rateB: number;
   snap: boolean;
+  /** Slide-lock (glossary): dragging B moves the window with it only when
+   * locked; unlocked, B's content slides under a fixed window. */
+  lockedWindow: boolean;
   visibleLanes: LaneId[];
   onLaneChange: (id: LaneId, points: LanePoint[] | null) => void;
   onChange: React.Dispatch<React.SetStateAction<ProtoMix>>;
@@ -648,16 +715,19 @@ function DawTimeline({
   const durB = player.engineB.getSnapshot().duration;
   const tr = mix.transition;
   const aEnd = durA > 0 ? Math.min(tr.startSec + tr.durationSec, durA) : tr.startSec + tr.durationSec;
-  // B is time-stretched on the mix axis by its playback rate.
-  const bBlockLenMix = Math.max(durB - mix.bInSec, 0) / rateB;
+  // B is time-stretched on the mix axis by its playback rate. The block
+  // starts at B's TRUE audio start: a negative entry anchor (bInSec < 0)
+  // opens a silent lead gap after the window start before audio begins.
+  const bAudioStartMix = tr.startSec + Math.max(0, -tr.bInSec) / rateB;
+  const bBlockLenMix = Math.max(durB - Math.max(tr.bInSec, 0), 0) / rateB;
   /** Rightmost content edge: end of the last track. Nothing renders past it. */
-  const contentEnd = Math.max(durA, tr.startSec + bBlockLenMix, 10);
+  const contentEnd = Math.max(durA, bAudioStartMix + bBlockLenMix, 10);
 
   const beatsA = beatgridA?.beat_times;
   const beatsB = beatgridB?.beat_times;
-  const snapRef = useRef({ snap, beatsA, beatsB, rateB });
+  const snapRef = useRef({ snap, beatsA, beatsB, rateB, lockedWindow });
   useEffect(() => {
-    snapRef.current = { snap, beatsA, beatsB, rateB };
+    snapRef.current = { snap, beatsA, beatsB, rateB, lockedWindow };
   });
 
   // Waveform renderers: one viewport-sized canvas per row, windowed to the
@@ -768,7 +838,7 @@ function DawTimeline({
       }
       const dB = player.engineB.getSnapshot().duration;
       if (dB > 0) {
-        const first = (m.bInSec + (scrollSec - m.transition.startSec) * s.rateB) / dB;
+        const first = (m.transition.bInSec + (scrollSec - m.transition.startSec) * s.rateB) / dB;
         rendB.rendererRef.current?.setDisplayWindow(first, first + (viewSec * s.rateB) / dB);
       }
       // Paint both rows NOW — same frame as the transforms above.
@@ -871,8 +941,10 @@ function DawTimeline({
     if (aTrimOk) return 'aTrim';
     if (row === 'B') {
       if (trackBId === null) return 'seek';
-      const lenMix = Math.max(durB - m.bInSec, 0) / snapRef.current.rateB;
-      if (sec > m.transition.startSec && sec < m.transition.startSec + lenMix) return 'bMove';
+      const bStart =
+        m.transition.startSec + Math.max(0, -m.transition.bInSec) / snapRef.current.rateB;
+      const lenMix = Math.max(durB - Math.max(m.transition.bInSec, 0), 0) / snapRef.current.rateB;
+      if (sec > bStart && sec < bStart + lenMix) return 'bMove';
     }
     return 'seek';
   };
@@ -886,12 +958,17 @@ function DawTimeline({
       player.seek(sec);
       return;
     }
+    // bMove grabs the window start when locked (window rides B), or B's
+    // content origin when unlocked (content slides under a fixed window).
+    const tr0 = mixRef.current.transition;
+    const originMix = tr0.startSec - tr0.bInSec / snapRef.current.rateB;
     drag.current = {
       kind: zone,
-      grabOffsetSec: zone === 'bMove' ? sec - mixRef.current.transition.startSec : 0,
-      origLanes: structuredClone(mixRef.current.transition.lanes),
-      origDur: mixRef.current.transition.durationSec,
-      origStart: mixRef.current.transition.startSec,
+      grabOffsetSec:
+        zone === 'bMove' ? sec - (snapRef.current.lockedWindow ? tr0.startSec : originMix) : 0,
+      origLanes: structuredClone(tr0.lanes),
+      origDur: tr0.durationSec,
+      origStart: tr0.startSec,
     };
   };
 
@@ -909,6 +986,25 @@ function DawTimeline({
     const snapOn = s.snap && !e.shiftKey;
     onChange((m) => {
       if (d.kind === 'bMove') {
+        if (!s.lockedWindow) {
+          // Unlocked: the window stays with A — the drag slides B's content
+          // origin, mutating bInSec only. Snap puts a B beat on the window
+          // start; in the negative-anchor regime (silent lead gap) that
+          // would jam at B's first beat, so snap B's audio start to A's
+          // grid instead.
+          const newOrigin = sec - d.grabOffsetSec;
+          let bIn = (m.transition.startSec - newOrigin) * s.rateB;
+          if (snapOn) {
+            if (bIn >= 0 && s.beatsB) {
+              bIn = nearestTime(s.beatsB, bIn) ?? bIn;
+            } else if (bIn < 0 && s.beatsA) {
+              const audioStart = m.transition.startSec - bIn / s.rateB;
+              const snapped = nearestTime(s.beatsA, audioStart) ?? audioStart;
+              bIn = (m.transition.startSec - snapped) * s.rateB;
+            }
+          }
+          return { ...m, transition: { ...m.transition, bInSec: bIn } };
+        }
         let start = Math.max(0, sec - d.grabOffsetSec);
         if (snapOn && s.beatsA) {
           start = nearestTime(s.beatsA, start) ?? start;
@@ -919,7 +1015,7 @@ function DawTimeline({
         // Left-edge resize: the transition END stays anchored; B's content
         // stays anchored (entry trims with the edge, DAW clip-trim style).
         const origEnd = d.origStart + d.origDur;
-        const originMix = m.transition.startSec - m.bInSec / s.rateB;
+        const originMix = m.transition.startSec - m.transition.bInSec / s.rateB;
         let bIn = Math.max(0, (sec - originMix) * s.rateB);
         if (snapOn && s.beatsB) {
           bIn = nearestTime(s.beatsB, bIn) ?? bIn;
@@ -933,11 +1029,11 @@ function DawTimeline({
           : cropRemapLanesLeft(d.origLanes, d.origDur, newDur);
         return {
           ...m,
-          bInSec: bIn,
           transition: {
             ...m.transition,
             startSec: newStart,
             durationSec: newDur,
+            bInSec: bIn,
             lanes: structuredClone(lanes),
           },
         };
@@ -1003,7 +1099,7 @@ function DawTimeline({
           : 1;
       const showWeak = (spb / rateB) * pxPerSec >= 12;
       for (const bt of beatgridB.beat_times) {
-        const mixT = tr.startSec + (bt - mix.bInSec) / rateB;
+        const mixT = tr.startSec + (bt - tr.bInSec) / rateB;
         if (mixT < tr.startSec || mixT > tr.startSec + dur) continue;
         const strong = downs.has(bt);
         if (!strong && !showWeak) continue;
@@ -1011,12 +1107,12 @@ function DawTimeline({
       }
     }
     for (const c of hotCuesB) {
-      const mixT = tr.startSec + (c.time_seconds - mix.bInSec) / rateB;
+      const mixT = tr.startSec + (c.time_seconds - tr.bInSec) / rateB;
       if (mixT < tr.startSec || mixT > tr.startSec + dur) continue;
       out.push({ x: (mixT - tr.startSec) / dur, strong: true, color: c.color || '#39ff14' });
     }
     return out;
-  }, [beatgridB, hotCuesB, tr.startSec, tr.durationSec, mix.bInSec, rateB, pxPerSec]);
+  }, [beatgridB, hotCuesB, tr.startSec, tr.durationSec, tr.bInSec, rateB, pxPerSec]);
 
   const laneStrip = (id: LaneId) => (
     <div key={id} className={`mixproto-lanestrip ${id.endsWith('A') ? 'a' : 'b'}`}>
@@ -1111,7 +1207,7 @@ function DawTimeline({
             {trackBId !== null && durB > 0 && (
               <div
                 className="mixproto-blockframe b"
-                style={{ left: tr.startSec * pxPerSec, width: bBlockLenMix * pxPerSec }}
+                style={{ left: bAudioStartMix * pxPerSec, width: bBlockLenMix * pxPerSec }}
               />
             )}
           </div>
@@ -1456,6 +1552,7 @@ function DeckCard({
   pitchPercent,
   onBpmSaved,
   onNudgeTrack,
+  slides,
 }: {
   deck: 'A' | 'B';
   track: Track | null;
@@ -1467,10 +1564,20 @@ function DeckCard({
   onBpmSaved: (bpm: number) => void;
   /** Fine alignment: move this track ±deltaSec relative to the other. */
   onNudgeTrack: (deltaSec: number) => void;
+  /** Slide gestures (issue 11 — deck B for now): hot cue / beat jump
+   * controls realign the pair instead of moving the playhead. */
+  slides?: {
+    toCue: (cueSec: number) => void;
+    beats: (n: number) => void;
+    enabled: boolean;
+  };
 }) {
   const queryClient = useQueryClient();
   const nudge = useNudgeBeatgrid();
   const setDownbeat = useSetBeatgridDownbeat();
+  const { data: hotCues = [] } = useHotCues(track?.id ?? null);
+  /** Slide size in this deck's own beats (Performance beatjump idiom). */
+  const [slideBeats, setSlideBeats] = useState(PERFORMANCE_BEATJUMP_DEFAULT);
   const [bpmDraft, setBpmDraft] = useState('');
   // Reset the draft when the track (or its saved BPM) changes.
   const [draftKey, setDraftKey] = useState('');
@@ -1574,6 +1681,50 @@ function DeckCard({
           downbeat @ playhead
         </button>
       </div>
+      {slides && (
+        <div className="mixproto-deckcard-row mixproto-slides">
+          <span
+            className="mixproto-slidelabel"
+            title="Slides realign the pair: this deck re-cues, the playhead and the other deck stay put"
+          >
+            slide
+          </span>
+          <button
+            disabled={!slides.enabled}
+            title={`Slide ${deck} ${slideBeats} of its beats earlier`}
+            onClick={() => slides.beats(-slideBeats)}
+          >
+            ◄◄
+          </button>
+          <button title="Halve slide size" onClick={() => setSlideBeats(halveBeatjump(slideBeats))}>
+            −
+          </button>
+          <span className="mixproto-slidesize" title="Slide size (this deck's beats)">
+            {slideBeats}
+          </span>
+          <button title="Double slide size" onClick={() => setSlideBeats(doubleBeatjump(slideBeats))}>
+            +
+          </button>
+          <button
+            disabled={!slides.enabled}
+            title={`Slide ${deck} ${slideBeats} of its beats later`}
+            onClick={() => slides.beats(slideBeats)}
+          >
+            ►►
+          </button>
+          {hotCues.map((c) => (
+            <button
+              key={c.slot_number}
+              className="mixproto-cueslide"
+              style={{ borderColor: c.color || '#39ff14', color: c.color || '#39ff14' }}
+              title={`Slide so cue ${c.slot_number} lands under the playhead`}
+              onClick={() => slides.toCue(c.time_seconds)}
+            >
+              {c.slot_number}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1646,7 +1797,7 @@ function GlobalMinimap({
       for (let x = 0; x < w; x++) {
         const t = (x / w) * contentEnd;
         const v = laneValuesAt(tr, t);
-        const bTrack = mix.bInSec + (t - tr.startSec) * rateB;
+        const bTrack = tr.bInSec + (t - tr.startSec) * rateB;
         const aOn = durA > 0 && t >= 0 && t < aEnd;
         const bOn = durB > 0 && t >= tr.startSec && bTrack >= 0 && bTrack < durB;
 
