@@ -53,7 +53,9 @@ app.include_router(sync_status.router, prefix="/api")
 app.include_router(sync_library.router, prefix="/api")
 app.include_router(acquisition_router, prefix="/api/acquisition", tags=["acquisition"])
 
-# Mount static files for PNG waveforms
+# Mount static files for PNG waveforms (create the dir if absent — it is
+# gitignored, so fresh checkouts/workspaces don't have it)
+Path("waveforms").mkdir(exist_ok=True)
 app.mount("/waveforms", StaticFiles(directory="waveforms"), name="waveforms")
 
 
