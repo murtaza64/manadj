@@ -285,3 +285,64 @@ def queue_item(db: Session, item_id: int) -> "Task":
     item.state = "queued"
     db.commit()
     return task
+
+
+@dataclass(frozen=True)
+class BulkQueueStats:
+    queued: int
+    skipped: int
+
+
+def _has_failed_task(db: Session, item_id: int) -> bool:
+    from ..tasks.manager import list_tasks
+
+    tasks = list_tasks(db, ref=f"source_item:{item_id}")
+    return bool(tasks) and tasks[0].state == "failed"
+
+
+def queue_bulk(db: Session, item_ids: list[int]) -> BulkQueueStats:
+    """Queue every queueable item; skip the rest.
+
+    Skipped: fulfilled, ignored, failed (a bulk catch-up never hammers
+    permanent failures — retry is an explicit per-item action), and items
+    with a pending proposal (resolve it instead of downloading a duplicate).
+    """
+    queued = 0
+    skipped = 0
+    for item_id in item_ids:
+        item = db.query(SourceItem).filter(SourceItem.id == item_id).one_or_none()
+        if (
+            item is None
+            or item.state not in ("new", "queued")
+            or _has_failed_task(db, item_id)
+            or get_correspondence(db, item_id) is not None
+        ):
+            skipped += 1
+            continue
+        queue_item(db, item_id)
+        queued += 1
+    logger.info("bulk queue: %d queued, %d skipped", queued, skipped)
+    return BulkQueueStats(queued=queued, skipped=skipped)
+
+
+def ignore_item(db: Session, item_id: int) -> SourceItem:
+    """Mark an item ignored: allowed from new, or queued whose download failed.
+
+    The failed-queued case is the permanent-failure resolution (e.g. DRM).
+    """
+    item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    if item.state == "new" or (item.state == "queued" and _has_failed_task(db, item_id)):
+        item.state = "ignored"
+        db.commit()
+        return item
+    raise ValueError(f"source item {item_id} is {item.state}; cannot ignore")
+
+
+def restore_item(db: Session, item_id: int) -> SourceItem:
+    """Bring an ignored item back to new."""
+    item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    if item.state != "ignored":
+        raise ValueError(f"source item {item_id} is {item.state}; only ignored items restore")
+    item.state = "new"
+    db.commit()
+    return item

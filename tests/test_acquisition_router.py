@@ -109,3 +109,19 @@ def test_queue_endpoint_smoke(client: TestClient) -> None:
     client.patch(f"/api/acquisition/items/{item['id']}/classification", json={"classification": "other"})
     resp = client.post(f"/api/acquisition/items/{item['id']}/queue")
     assert resp.status_code == 200  # still queued -> idempotent
+
+
+def test_bulk_ignore_restore_endpoints_smoke(client: TestClient) -> None:
+    client.post("/api/acquisition/refresh")
+    item = client.get("/api/acquisition/items").json()[0]
+
+    resp = client.post("/api/acquisition/items/queue-bulk", json={"item_ids": [item["id"], 99999]})
+    assert resp.status_code == 200
+    assert resp.json() == {"queued": 1, "skipped": 1}
+
+    # queued with a live (pending) task -> cannot ignore
+    resp = client.post(f"/api/acquisition/items/{item['id']}/ignore")
+    assert resp.status_code == 409
+
+    resp = client.post(f"/api/acquisition/items/{item['id']}/restore")
+    assert resp.status_code == 409

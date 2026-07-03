@@ -416,6 +416,7 @@ export interface SourceItem {
   liked_at: string | null;
   correspondence: SourceCorrespondenceInfo | null;
   download: DownloadStatus | null;
+  downloaded_at: string | null;
 }
 
 export interface DownloadStatus {

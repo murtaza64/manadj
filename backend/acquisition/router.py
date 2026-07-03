@@ -11,15 +11,18 @@ from ..models import Track
 from ..tasks.manager import list_tasks
 from .manager import (
     accept_proposal,
+    ignore_item,
     link_item_to_track,
     link_track_by_url,
     list_source_items,
+    queue_bulk,
     queue_item,
     refresh,
     reject_proposal,
+    restore_item,
     set_classification,
 )
-from .models import SourceCorrespondence, SourceItem
+from .models import AudioProvenance, SourceCorrespondence, SourceItem
 from .source import SoundCloudSource, Source
 
 router = APIRouter()
@@ -55,6 +58,8 @@ class SourceItemResponse(BaseModel):
     liked_at: str | None
     correspondence: "CorrespondenceInfo | None" = None
     download: "DownloadStatus | None" = None
+    # when manadj downloaded this item's audio: the Audio Provenance timestamp
+    downloaded_at: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -84,6 +89,15 @@ class LinkByUrlRequest(BaseModel):
 class DownloadStatus(BaseModel):
     task_state: str
     error: str | None
+
+
+class BulkQueueRequest(BaseModel):
+    item_ids: list[int]
+
+
+class BulkQueueResponse(BaseModel):
+    queued: int
+    skipped: int
 
 
 @router.post("/refresh", response_model=RefreshResponse)
@@ -130,15 +144,27 @@ def _download_map(db: Session) -> dict[int, DownloadStatus]:
     return statuses
 
 
+def _provenance_map(db: Session) -> dict[int, str]:
+    """track_id -> downloaded_at (ISO) for manadj-downloaded audio."""
+    return {
+        p.track_id: p.downloaded_at.isoformat()
+        for p in db.query(AudioProvenance).all()
+        if p.downloaded_at is not None
+    }
+
+
 @router.get("/items", response_model=list[SourceItemResponse])
 def get_source_items(db: Session = Depends(get_db)) -> list[SourceItemResponse]:
     correspondences = _correspondence_map(db)
     downloads = _download_map(db)
+    provenances = _provenance_map(db)
     responses = []
     for item in list_source_items(db):
         resp = SourceItemResponse.model_validate(item)
         resp.correspondence = correspondences.get(item.id)
         resp.download = downloads.get(item.id)
+        if resp.correspondence is not None:
+            resp.downloaded_at = provenances.get(resp.correspondence.track_id)
         responses.append(resp)
     return responses
 
@@ -157,6 +183,34 @@ def _item_response(db: Session, item_id: int) -> SourceItemResponse:
 def queue_download(item_id: int, db: Session = Depends(get_db)) -> SourceItemResponse:
     try:
         queue_item(db, item_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="source item not found")
+    return _item_response(db, item_id)
+
+
+@router.post("/items/queue-bulk", response_model=BulkQueueResponse)
+def queue_bulk_downloads(body: BulkQueueRequest, db: Session = Depends(get_db)) -> BulkQueueResponse:
+    stats = queue_bulk(db, body.item_ids)
+    return BulkQueueResponse(queued=stats.queued, skipped=stats.skipped)
+
+
+@router.post("/items/{item_id}/ignore", response_model=SourceItemResponse)
+def ignore_source_item(item_id: int, db: Session = Depends(get_db)) -> SourceItemResponse:
+    try:
+        ignore_item(db, item_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="source item not found")
+    return _item_response(db, item_id)
+
+
+@router.post("/items/{item_id}/restore", response_model=SourceItemResponse)
+def restore_source_item(item_id: int, db: Session = Depends(get_db)) -> SourceItemResponse:
+    try:
+        restore_item(db, item_id)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except NoResultFound:

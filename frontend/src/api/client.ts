@@ -580,6 +580,34 @@ export const api = {
       return res.json();
     },
 
+    queueBulk: async (itemIds: number[]): Promise<{ queued: number; skipped: number }> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/queue-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error('Failed to bulk queue');
+      return res.json();
+    },
+
+    ignoreItem: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/ignore`, { method: 'POST' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to ignore item');
+      }
+      return res.json();
+    },
+
+    restoreItem: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/restore`, { method: 'POST' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to restore item');
+      }
+      return res.json();
+    },
+
     queueDownload: async (itemId: number): Promise<SourceItem> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/queue`, { method: 'POST' });
       if (!res.ok) {

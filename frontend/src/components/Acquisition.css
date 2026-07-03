@@ -293,3 +293,29 @@
 .acquisition-task-done { color: var(--yellow); border-color: var(--yellow); }
 
 .acquisition-action-queue { border-color: var(--blue); color: var(--blue); }
+
+.acquisition-bottom-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  border-top: 1px solid var(--surface1);
+  background: var(--mantle);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-xs);
+  color: var(--subtext1);
+  flex-shrink: 0;
+}
+
+.acquisition-bottom-spacer { flex: 1; }
+
+.acquisition-bulk-result { color: var(--green); }
+
+.acquisition-drm-hint {
+  color: var(--subtext0);
+  margin-top: var(--space-xs);
+}
+
+.acquisition-row-check {
+  flex-shrink: 0;
+  accent-color: var(--blue);
+}

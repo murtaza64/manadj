@@ -30,9 +30,12 @@ function formatDuration(ms: number): string {
 export function Acquisition() {
   const queryClient = useQueryClient();
   // default view = needs-download: new items, mixes/clips hidden
-  const [stateFilter, setStateFilter] = useState<SourceItemState | 'all'>('new');
+  // 'failed' is a pseudo-filter: queued items whose latest download task failed
+  const [stateFilter, setStateFilter] = useState<SourceItemState | 'all' | 'failed'>('new');
   const [classFilter, setClassFilter] = useState<Record<Classification, boolean>>(DEFAULT_CLASS_FILTER);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // checkbox multi-selection for bulk actions (independent of the detail-panel focus)
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
   const { data: items, isLoading, error } = useQuery({
     queryKey: ['acquisitionItems'],
@@ -74,15 +77,64 @@ export function Acquisition() {
     return counts;
   }, [items]);
 
-  const visible: SourceItem[] = useMemo(
-    () =>
-      (items ?? []).filter(
-        i =>
-          (stateFilter === 'all' || i.state === stateFilter) &&
-          (i.classification === null || classFilter[i.classification]),
-      ),
-    [items, stateFilter, classFilter],
+  const isFailed = (i: SourceItem) => i.state === 'queued' && i.download?.task_state === 'failed';
+
+  const visible: SourceItem[] = useMemo(() => {
+    const filtered = (items ?? []).filter(
+      i =>
+        (stateFilter === 'all' ||
+          (stateFilter === 'failed' ? isFailed(i) : i.state === stateFilter)) &&
+        (i.classification === null || classFilter[i.classification]),
+    );
+    if (stateFilter === 'fulfilled') {
+      // manadj-downloaded first (newest download first), then matched items by liked date
+      return [...filtered].sort((a, b) => {
+        if (a.downloaded_at && b.downloaded_at) return b.downloaded_at.localeCompare(a.downloaded_at);
+        if (a.downloaded_at) return -1;
+        if (b.downloaded_at) return 1;
+        return (b.liked_at ?? '').localeCompare(a.liked_at ?? '');
+      });
+    }
+    return filtered;
+  }, [items, stateFilter, classFilter]);
+
+  const failedCount = useMemo(() => (items ?? []).filter(isFailed).length, [items]);
+  const queueable = useMemo(
+    () => visible.filter(i => i.state === 'new' && !i.correspondence),
+    [visible],
   );
+
+  const bulkQueueMutation = useMutation({
+    mutationFn: (ids: number[]) => api.acquisition.queueBulk(ids),
+    onSuccess: () => {
+      setCheckedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] });
+    },
+  });
+
+  const toggleChecked = (id: number) => {
+    setCheckedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const visibleChecked = useMemo(
+    () => visible.filter(i => checkedIds.has(i.id)),
+    [visible, checkedIds],
+  );
+  const allVisibleChecked = visible.length > 0 && visibleChecked.length === visible.length;
+
+  const toggleAllVisible = () => {
+    setCheckedIds(prev => {
+      const next = new Set(prev);
+      if (allVisibleChecked) visible.forEach(i => next.delete(i.id));
+      else visible.forEach(i => next.add(i.id));
+      return next;
+    });
+  };
 
   const selected = useMemo(
     () => (items ?? []).find(i => i.id === selectedId) ?? null,
@@ -124,6 +176,13 @@ export function Acquisition() {
             <span className="acquisition-count">{stateCounts[s]}</span>
           </button>
         ))}
+        <button
+          className={`acquisition-filter-row ${stateFilter === 'failed' ? 'active' : ''}`}
+          onClick={() => setStateFilter('failed')}
+        >
+          <span className="acquisition-state acquisition-task-failed">failed</span>
+          <span className="acquisition-count">{failedCount}</span>
+        </button>
         <div className="acquisition-sidebar-heading">classification</div>
         {CLASSIFICATIONS.map(c => (
           <label key={c} className="acquisition-filter-row acquisition-class-filter">
@@ -154,6 +213,13 @@ export function Acquisition() {
               className={`acquisition-list-row ${selectedId === item.id ? 'selected' : ''}`}
               onClick={() => setSelectedId(item.id)}
             >
+              <input
+                type="checkbox"
+                className="acquisition-row-check"
+                checked={checkedIds.has(item.id)}
+                onChange={() => toggleChecked(item.id)}
+                onClick={e => e.stopPropagation()}
+              />
               <span className="acquisition-item-title" title={item.title}>{item.title}</span>
               {item.correspondence?.status === 'proposed' && (
                 <span className="acquisition-score">
@@ -162,6 +228,7 @@ export function Acquisition() {
               )}
               <span className="acquisition-item-sub">
                 {item.uploader} · {formatDuration(item.duration_ms)}
+                {item.downloaded_at && ` · dl ${item.downloaded_at.slice(0, 10)}`}
               </span>
               <button
                 className={`acquisition-chip acquisition-chip-${item.classification ?? 'none'}`}
@@ -183,6 +250,36 @@ export function Acquisition() {
           ))}
         </div>
         {selected && <ItemDetail item={selected} onClose={() => setSelectedId(null)} />}
+        <div className="acquisition-bottom-bar">
+          <label className="acquisition-check">
+            <input type="checkbox" checked={allVisibleChecked} onChange={toggleAllVisible} />
+            {checkedIds.size > 0 ? `${visibleChecked.length} selected` : 'select all'}
+          </label>
+          <span>{visible.length} visible</span>
+          {bulkQueueMutation.isSuccess && (
+            <span className="acquisition-bulk-result">
+              queued {bulkQueueMutation.data.queued}, skipped {bulkQueueMutation.data.skipped}
+            </span>
+          )}
+          <div className="acquisition-bottom-spacer" />
+          {visibleChecked.length > 0 ? (
+            <button
+              className="acquisition-action-button acquisition-action-queue"
+              disabled={bulkQueueMutation.isPending}
+              onClick={() => bulkQueueMutation.mutate(visibleChecked.map(i => i.id))}
+            >
+              ⇣ queue selected ({visibleChecked.length})
+            </button>
+          ) : (
+            <button
+              className="acquisition-action-button acquisition-action-queue"
+              disabled={queueable.length === 0 || bulkQueueMutation.isPending}
+              onClick={() => bulkQueueMutation.mutate(queueable.map(i => i.id))}
+            >
+              ⇣ queue all visible ({queueable.length})
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -207,6 +304,14 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
   });
   const queueMutation = useMutation({
     mutationFn: () => api.acquisition.queueDownload(item.id),
+    onSuccess: invalidate,
+  });
+  const ignoreMutation = useMutation({
+    mutationFn: () => api.acquisition.ignoreItem(item.id),
+    onSuccess: invalidate,
+  });
+  const restoreMutation = useMutation({
+    mutationFn: () => api.acquisition.restoreItem(item.id),
     onSuccess: invalidate,
   });
 
@@ -274,7 +379,15 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
       )}
 
       {item.download?.error && (
-        <div className="acquisition-error">download failed: {item.download.error}</div>
+        <div className="acquisition-error">
+          download failed: {item.download.error}
+          {/drm/i.test(item.download.error) && (
+            <div className="acquisition-drm-hint">
+              DRM-protected (SoundCloud Go+) tracks can never be downloaded — ignore this item,
+              or acquire the audio elsewhere and link it manually.
+            </div>
+          )}
+        </div>
       )}
 
       {(item.state === 'new' || (item.state === 'queued' && item.download?.task_state === 'failed')) && (
@@ -285,6 +398,25 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
             disabled={queueMutation.isPending}
           >
             ⇣ {item.download?.task_state === 'failed' ? 'retry download' : 'queue download'}
+          </button>
+          <button
+            className="acquisition-action-button"
+            onClick={() => ignoreMutation.mutate()}
+            disabled={ignoreMutation.isPending}
+          >
+            ignore
+          </button>
+        </div>
+      )}
+
+      {item.state === 'ignored' && (
+        <div className="acquisition-detail-actions">
+          <button
+            className="acquisition-action-button"
+            onClick={() => restoreMutation.mutate()}
+            disabled={restoreMutation.isPending}
+          >
+            restore to new
           </button>
         </div>
       )}
