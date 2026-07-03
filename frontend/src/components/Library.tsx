@@ -185,9 +185,13 @@ type ViewType = 'all' | 'unprocessed' | 'playlist';
 interface LibraryProps {
   onOpenPlaylistSync: () => void;
   onOpenPractice: () => void;
+  /** Render only the browse surface (sidebar/filter/table) without the
+   * Player/TagEditor block — used when a deck surface is shown elsewhere
+   * (performance-view prototype). */
+  browseOnly?: boolean;
 }
 
-export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryProps) {
+export default function Library({ onOpenPlaylistSync, onOpenPractice, browseOnly = false }: LibraryProps) {
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [selectedView, setSelectedView] = useState<ViewType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
@@ -414,24 +418,26 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryP
       background: 'var(--mantle)'
     }}>
       {/* Waveform at top (full width), controls and editor below */}
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        borderBottom: '1px solid var(--surface0)'
-      }}>
-        <Player />
+      {!browseOnly && (
         <div style={{
-          display: 'flex'
+          display: 'flex',
+          flexDirection: 'column',
+          borderBottom: '1px solid var(--surface0)'
         }}>
-          <TagEditor
-            ref={tagEditorRef}
-            track={selectedTrack}
-            onSave={mutation.mutate}
-            onUpdate={handleFieldUpdate}
-            onEnergyEditModeChange={setIsEnergyEditMode}
-          />
+          <Player />
+          <div style={{
+            display: 'flex'
+          }}>
+            <TagEditor
+              ref={tagEditorRef}
+              track={selectedTrack}
+              onSave={mutation.mutate}
+              onUpdate={handleFieldUpdate}
+              onEnergyEditModeChange={setIsEnergyEditMode}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Library section with sidebar */}
       <div style={{

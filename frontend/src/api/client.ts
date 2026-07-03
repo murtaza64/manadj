@@ -114,6 +114,8 @@ export const api = {
       tag_ids?: number[];
       title?: string;
       artist?: string;
+      bpm?: number;
+      key?: number;
     }) => {
       const response = await fetch(`${API_BASE}/tracks/${id}`, {
         method: 'PATCH',

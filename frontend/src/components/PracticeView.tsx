@@ -11,7 +11,16 @@ import WaveformMinimap from './WaveformMinimap';
 import { useHotCues } from '../hooks/useHotCues';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import type { HotCue, PaginatedTracks } from '../types';
+import { PerformanceViewPrototype } from './prototype/PerformanceViewPrototype';
+import { PrototypeSwitcher, useVariantParam } from './prototype/PrototypeSwitcher';
 import './PracticeView.css';
+
+/** PROTOTYPE — performance-view layout on this route (?variant=). */
+const PROTOTYPE_VARIANTS = ['solo', 'A'];
+const PROTOTYPE_LABELS: Record<string, string> = {
+  solo: 'Practice view (current)',
+  A: 'Performance: hardware mirror + library',
+};
 
 interface PracticeViewProps {
   onClose: () => void;
@@ -40,10 +49,17 @@ export function PracticeView({ onClose }: PracticeViewProps) {
     return map;
   }, [hotCues]);
 
+  // PROTOTYPE — performance-view layout exploration on this route. Declared
+  // before the keyboard effect so it can disable these handlers when the
+  // prototype (which mounts the Library and its own keyboard hub) is shown.
+  const [protoVariant, setProtoVariant] = useVariantParam('solo');
+  const prototypeActive = protoVariant !== 'solo';
+
   // Keyboard shortcuts — playback keys from the library hub (useKeyboardShortcuts):
   // space = play/pause, f = cue (hold), a/s = beatjump, h/l = scrub (hold), 1-8 = hot cues (hold).
   const [scrubDirection, setScrubDirection] = useState(0);
   useEffect(() => {
+    if (prototypeActive) return; // Library's hub handles keys in the prototype
     const isTyping = (target: EventTarget | null) => {
       const el = target as HTMLElement | null;
       return (
@@ -100,7 +116,7 @@ export function PracticeView({ onClose }: PracticeViewProps) {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [engine, cuesBySlot]);
+  }, [engine, cuesBySlot, prototypeActive]);
 
   // Continuous scrub while h/l is held (shared with the library hub).
   useScrubLoop(engine, scrubDirection);
@@ -117,8 +133,28 @@ export function PracticeView({ onClose }: PracticeViewProps) {
     seek: (t) => engine.seek(t),
   };
 
+  if (prototypeActive) {
+    return (
+      <>
+        <PerformanceViewPrototype />
+        <PrototypeSwitcher
+          variants={PROTOTYPE_VARIANTS}
+          current={protoVariant}
+          onChange={setProtoVariant}
+          labels={PROTOTYPE_LABELS}
+        />
+      </>
+    );
+  }
+
   return (
     <div className="practice-view">
+      <PrototypeSwitcher
+        variants={PROTOTYPE_VARIANTS}
+        current={protoVariant}
+        onChange={setProtoVariant}
+        labels={PROTOTYPE_LABELS}
+      />
       <div className="practice-header">
         <h1>Practice</h1>
         <button className="practice-close" onClick={onClose}>← Library</button>
