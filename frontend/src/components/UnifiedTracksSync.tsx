@@ -3,8 +3,9 @@
  *
  * One row per track matched across Surfaces (disk / library / engine /
  * rekordbox), inbox-style: attention rows grouped by status, expandable
- * divergence matrix, per-section bulk actions. Replaces the old Tracks,
- * Metadata, and Tag Sync tabs.
+ * divergence matrix, per-section actions with a scope-confirm flow
+ * (the view is the preview; post-apply refresh is the verification —
+ * PRD Story 15, revised).
  */
 
 import { useMemo, useState } from 'react';
@@ -52,12 +53,22 @@ const EXTERNAL_SURFACES: { id: SurfaceId; label: string }[] = [
 ];
 const PRESENCE_ORDER: PresenceId[] = ['disk', 'library', 'engine', 'rekordbox'];
 
+// fields whose "← import" path is actually wired in this UI
+// (tags import is deliberately deferred — see PRD out-of-scope + issues/02)
+const IMPORTABLE_UI_FIELDS = new Set(['title', 'artist', 'bpm', 'key', 'energy']);
+
 const GROUPS: { status: RowStatus; label: string; chip: string }[] = [
   { status: 'missing-downstream', label: 'Missing downstream', chip: 'missing' },
   { status: 'diverged', label: 'Diverged fields', chip: 'diverged' },
   { status: 'not-in-library', label: 'Not in Library', chip: 'import' },
   { status: 'unimported', label: 'Unimported files', chip: 'unimported' },
 ];
+
+interface PendingAction {
+  scope: string; // what will be acted on
+  sideEffects: string; // what kind of writes happen where
+  run: () => void;
+}
 
 // ------------------------------------------------------------------- utils
 
@@ -85,33 +96,37 @@ export function UnifiedTracksSync() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sync-status'] });
   const done = (msg: string) => {
     setNotice(msg);
+    setPending(null);
     setSelected(new Set());
     refresh();
   };
 
-  const exportEngine = useMutation({
+  const generateRbxml = useMutation({
     mutationFn: () => api.syncTracks.syncEngineRBXML({ validate_files: true }),
-    onSuccess: (r) => done(`RBXML written: ${JSON.stringify(r.stats ?? r)}`),
+    onSuccess: (r) =>
+      done(
+        `RBXML generated${r.output_path ? ` at ${r.output_path}` : ''} (${r.missing_in_target_count ?? '?'} tracks). ` +
+        'Import it in Engine DJ (Import → Rekordbox XML); rows stay "missing downstream" until then.',
+      ),
   });
-  const exportRekordbox = useMutation({
-    mutationFn: (dryRun: boolean) =>
-      api.syncTracks.syncRekordbox({ dry_run: dryRun, skip_import: true }),
-    onSuccess: (r, dryRun) =>
-      dryRun ? setNotice(`Dry-run: ${JSON.stringify(r.stats ?? r)}`) : done('Exported to Rekordbox'),
-  });
-  const importRekordbox = useMutation({
-    mutationFn: (dryRun: boolean) =>
-      api.syncTracks.syncRekordbox({ dry_run: dryRun, skip_export: true }),
-    onSuccess: (r, dryRun) =>
-      dryRun ? setNotice(`Dry-run: ${JSON.stringify(r.stats ?? r)}`) : done('Imported from Rekordbox'),
+  const rekordboxSync = useMutation({
+    mutationFn: (direction: 'export' | 'import') =>
+      api.syncTracks.syncRekordbox({
+        dry_run: false,
+        skip_import: direction === 'export',
+        skip_export: direction === 'import',
+      }),
+    onSuccess: (_r, direction) =>
+      done(direction === 'export' ? 'Exported to Rekordbox' : 'Imported from Rekordbox'),
   });
   const importFiles = useMutation({
     mutationFn: (filepaths: string[]) => api.libraryImport.import({ candidate_filepaths: filepaths }),
-    onSuccess: (r) => done(`Imported ${r.imported} files`),
+    onSuccess: (r) => done(`Imported ${r.imported} files into the Library`),
   });
   const importField = useMutation({
     mutationFn: ({ row, field, value }: { row: StatusRow; field: string; value: unknown }) => {
@@ -128,6 +143,8 @@ export function UnifiedTracksSync() {
   });
   const exportRowToDisk = useMutation({
     mutationFn: (row: StatusRow) => {
+      // mirrors the Export rule (CONTEXT.md): empty Library values are
+      // skipped (no_overwrite) — never blanked downstream
       const fields: Record<string, string | number | null> = {};
       for (const d of row.diverged) {
         if (d.no_overwrite || !('disk' in d.surface_values)) continue;
@@ -140,7 +157,7 @@ export function UnifiedTracksSync() {
         dry_run: false,
       });
     },
-    onSuccess: () => done('Written to file'),
+    onSuccess: () => done('Fields written to file'),
   });
   const exportTags = useMutation({
     mutationFn: (target: 'engine' | 'rekordbox') =>
@@ -168,8 +185,78 @@ export function UnifiedTracksSync() {
     return next;
   };
 
-  const groupRows = (status: RowStatus) =>
-    attention.filter((r) => r.status === status);
+  const groupRows = (status: RowStatus) => attention.filter((r) => r.status === status);
+
+  const groupActions = (status: RowStatus, list: StatusRow[], selectedHere: StatusRow[]) => {
+    if (status === 'missing-downstream') {
+      const missingRb = list.filter((r) => !r.presence.rekordbox).length;
+      return (
+        <span className="uts-group-actions">
+          {/* nondestructive: generates a file, imported manually in Engine (ADR-0006) */}
+          <button className="uts-btn" onClick={() => generateRbxml.mutate()}>
+            Generate RBXML for Engine import
+          </button>
+          {missingRb > 0 && (
+            <button
+              className="uts-btn"
+              onClick={() =>
+                setPending({
+                  scope: `Export ${missingRb} tracks to Rekordbox (all missing — selection not supported yet)`,
+                  sideEffects: `creates ${missingRb} rows in the Rekordbox database`,
+                  run: () => rekordboxSync.mutate('export'),
+                })
+              }
+            >
+              Export all → Rekordbox
+            </button>
+          )}
+        </span>
+      );
+    }
+    if (status === 'not-in-library') {
+      const fromRb = list.filter((r) => r.presence.rekordbox).length;
+      return (
+        <span className="uts-group-actions">
+          {fromRb > 0 && (
+            <button
+              className="uts-btn"
+              onClick={() =>
+                setPending({
+                  scope: `Import ${fromRb} Rekordbox-only tracks into the Library (all — selection not supported yet)`,
+                  sideEffects: `creates ${fromRb} Library tracks`,
+                  run: () => rekordboxSync.mutate('import'),
+                })
+              }
+            >
+              Import all ← Rekordbox
+            </button>
+          )}
+          {list.some((r) => r.presence.engine && !r.presence.rekordbox) && (
+            <span className="uts-hint">engine-only tracks have no import operation yet</span>
+          )}
+        </span>
+      );
+    }
+    if (status === 'unimported' && selectedHere.length > 0) {
+      return (
+        <span className="uts-group-actions">
+          <button
+            className="uts-btn"
+            onClick={() =>
+              setPending({
+                scope: `Import ${selectedHere.length} selected files into the Library`,
+                sideEffects: 'creates Library tracks (metadata read from file tags)',
+                run: () => importFiles.mutate(selectedHere.map((r) => r.path)),
+              })
+            }
+          >
+            Import {selectedHere.length} selected
+          </button>
+        </span>
+      );
+    }
+    return null;
+  };
 
   return (
     <div className="uts-root">
@@ -183,46 +270,56 @@ export function UnifiedTracksSync() {
             <b>{data.counts[g.status]}</b> {g.label.toLowerCase()}
           </button>
         ))}
-        <span className="uts-chip uts-chip-insync"><b>{data.counts['in-sync']}</b> in sync</span>
+        <button
+          className={`uts-chip uts-chip-insync ${showInSync ? 'uts-chip-active' : ''}`}
+          onClick={() => setShowInSync(!showInSync)}
+        >
+          <b>{data.counts['in-sync']}</b> in sync
+        </button>
         <span className="uts-surfaces-note">
           surfaces: {data.surfaces_available.join(', ') || 'none reachable'}
         </span>
       </div>
 
-      {notice && (
-        <div className="uts-notice" onClick={() => setNotice(null)}>{notice} ✕</div>
+      {pending && (
+        <div className="uts-pending">
+          <div>
+            <b>{pending.scope}</b>
+            <div className="uts-pending-side">{pending.sideEffects}</div>
+          </div>
+          <button className="uts-btn" onClick={pending.run}>Apply</button>
+          <button className="uts-btn uts-btn-ghost" onClick={() => setPending(null)}>Cancel</button>
+        </div>
       )}
+      {notice && <div className="uts-notice" onClick={() => setNotice(null)}>{notice} ✕</div>}
 
       {GROUPS.filter((g) => (!filter || filter === g.status) && groupRows(g.status).length > 0).map((g) => {
         const list = groupRows(g.status);
+        const selectable = g.status === 'unimported'; // only op that honors selection
         const selectedHere = list.filter((r) => selected.has(r.path));
         return (
           <section key={g.status} className="uts-group">
             <h3>
-              <input
-                type="checkbox"
-                checked={list.every((r) => selected.has(r.path))}
-                onChange={() => {
-                  const all = list.every((r) => selected.has(r.path));
-                  const next = new Set(selected);
-                  list.forEach((r) => (all ? next.delete(r.path) : next.add(r.path)));
-                  setSelected(next);
-                }}
-              />
+              {selectable && (
+                <input
+                  type="checkbox"
+                  checked={list.every((r) => selected.has(r.path))}
+                  onChange={() => {
+                    const all = list.every((r) => selected.has(r.path));
+                    const next = new Set(selected);
+                    list.forEach((r) => (all ? next.delete(r.path) : next.add(r.path)));
+                    setSelected(next);
+                  }}
+                />
+              )}
               {g.label} <span className="uts-count">{list.length}</span>
-              <GroupActions
-                status={g.status}
-                selected={selectedHere}
-                onExportEngine={() => exportEngine.mutate()}
-                onExportRekordbox={(dry) => exportRekordbox.mutate(dry)}
-                onImportRekordbox={(dry) => importRekordbox.mutate(dry)}
-                onImportFiles={(paths) => importFiles.mutate(paths)}
-              />
+              {groupActions(g.status, list, selectedHere)}
             </h3>
             {list.map((row) => (
               <RowCard
                 key={row.path}
                 row={row}
+                selectable={selectable}
                 selected={selected.has(row.path)}
                 onSelect={() => setSelected(toggle(selected, row.path))}
                 expanded={expanded.has(row.path)}
@@ -236,13 +333,9 @@ export function UnifiedTracksSync() {
         );
       })}
 
-      <button className="uts-showall" onClick={() => setShowInSync(!showInSync)}>
-        {showInSync ? 'Hide' : 'Show'} {inSync.length} in-sync tracks
-      </button>
       {showInSync && inSync.map((row) => (
         <div key={row.path} className="uts-card">
           <div className="uts-row uts-row-insync">
-            <span className="uts-checkbox-spacer" />
             <PresenceBadges row={row} />
             <div className="uts-track">
               <div className="uts-title">{row.title || row.path}</div>
@@ -256,7 +349,13 @@ export function UnifiedTracksSync() {
       <div className="uts-maintenance">
         <button
           className="uts-btn uts-btn-ghost"
-          onClick={() => window.confirm('Delete and recreate the Engine "manaDJ Tags" playlist tree?') && rebuildTagTree.mutate()}
+          onClick={() =>
+            setPending({
+              scope: 'Rebuild the Engine "manaDJ Tags" playlist tree from scratch',
+              sideEffects: 'deletes and recreates the tag playlists in the Engine DJ database',
+              run: () => rebuildTagTree.mutate(),
+            })
+          }
         >
           Rebuild Engine tag tree
         </button>
@@ -279,46 +378,9 @@ function PresenceBadges({ row }: { row: StatusRow }) {
   );
 }
 
-function GroupActions({ status, selected, onExportEngine, onExportRekordbox, onImportRekordbox, onImportFiles }: {
-  status: RowStatus;
-  selected: StatusRow[];
-  onExportEngine: () => void;
-  onExportRekordbox: (dry: boolean) => void;
-  onImportRekordbox: (dry: boolean) => void;
-  onImportFiles: (paths: string[]) => void;
-}) {
-  if (status === 'missing-downstream') {
-    // existing export operations act on all missing tracks, not a selection
-    return (
-      <span className="uts-group-actions">
-        <button className="uts-btn" onClick={onExportEngine}>Export all → Engine (RBXML)</button>
-        <button className="uts-btn" onClick={() => onExportRekordbox(true)}>Export all → Rekordbox (dry-run)</button>
-        <button className="uts-btn" onClick={() => window.confirm('Export all missing tracks to Rekordbox?') && onExportRekordbox(false)}>apply</button>
-      </span>
-    );
-  }
-  if (status === 'not-in-library') {
-    return (
-      <span className="uts-group-actions">
-        <button className="uts-btn" onClick={() => onImportRekordbox(true)}>Import all ← Rekordbox (dry-run)</button>
-        <button className="uts-btn" onClick={() => window.confirm('Import all Rekordbox-only tracks into the Library?') && onImportRekordbox(false)}>apply</button>
-      </span>
-    );
-  }
-  if (status === 'unimported' && selected.length > 0) {
-    return (
-      <span className="uts-group-actions">
-        <button className="uts-btn" onClick={() => onImportFiles(selected.map((r) => r.path))}>
-          Import {selected.length} selected
-        </button>
-      </span>
-    );
-  }
-  return null;
-}
-
-function RowCard({ row, selected, onSelect, expanded, onToggleExpand, onImportField, onExportToDisk, onExportTags }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onExportToDisk, onExportTags }: {
   row: StatusRow;
+  selectable: boolean;
   selected: boolean;
   onSelect: () => void;
   expanded: boolean;
@@ -331,7 +393,9 @@ function RowCard({ row, selected, onSelect, expanded, onToggleExpand, onImportFi
   return (
     <div className={`uts-card ${row.unprocessed ? 'uts-warn' : ''}`}>
       <div className={`uts-row ${expandable ? 'uts-row-expandable' : ''}`} onClick={expandable ? onToggleExpand : undefined}>
-        <input type="checkbox" checked={selected} onChange={onSelect} onClick={(e) => e.stopPropagation()} />
+        {selectable && (
+          <input type="checkbox" checked={selected} onChange={onSelect} onClick={(e) => e.stopPropagation()} />
+        )}
         {expandable && <span className={`uts-chevron ${expanded ? 'uts-chevron-open' : ''}`}>▸</span>}
         <PresenceBadges row={row} />
         <div className="uts-track">
@@ -396,13 +460,17 @@ function DivergenceMatrix({ row, onImportField }: {
               if (!row.presence[s.id]) return <td key={s.id} className="uts-na">·</td>;
               if (!(s.id in d.surface_values)) return <td key={s.id} className="uts-agree">✓</td>;
               const v = d.surface_values[s.id];
+              const canImport =
+                row.track_id !== null &&
+                d.importable_from.includes(s.id) &&
+                IMPORTABLE_UI_FIELDS.has(d.field);
               if (d.field === 'tags') {
                 return <td key={s.id}><TagDiff library={d.library_value as string[]} here={v as string[]} /></td>;
               }
               return (
                 <td key={s.id} className="uts-conflict">
                   {fmtValue(d.field, v) || <span className="uts-novalue">no value</span>}
-                  {row.track_id !== null && v !== null && (
+                  {canImport && (
                     <button className="uts-microbtn" onClick={() => onImportField(d.field, v)}>← import</button>
                   )}
                 </td>

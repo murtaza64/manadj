@@ -7,6 +7,7 @@ This seam is a read-only down payment on the ExternalLibrary seam
 (architecture review candidate 3).
 """
 
+from pathlib import Path
 from typing import Mapping, Protocol
 
 from sqlalchemy.orm import Session, joinedload
@@ -16,7 +17,9 @@ from backend.sync_common.matching import TrackIndex
 from backend.track_metadata.units import centibpm_to_bpm
 
 from .models import (
+    EXTERNAL_LIBRARY_IDS,
     SCALAR_FIELDS,
+    SURFACE_IDS,
     FieldDivergence,
     RowStatus,
     SurfaceTrackRef,
@@ -108,14 +111,14 @@ def _library_row(
         _collect_divergences(sid, reader, lib, ref.fields, diverged, warnings)
 
     # every known surface key must exist in presence even if reader missing
-    for sid in ("disk", "engine", "rekordbox"):
+    for sid in SURFACE_IDS:
         presence.setdefault(sid, False)
 
     unprocessed = not lib.tags
     # only surfaces we can actually see count toward "missing downstream" —
     # an unavailable reader means unknown, not missing
     missing_downstream = any(
-        sid in surfaces and not presence[sid] for sid in ("engine", "rekordbox")
+        sid in surfaces and not presence[sid] for sid in EXTERNAL_LIBRARY_IDS
     )
     # rollup priority: diverged > missing-downstream > in-sync
     status: RowStatus
@@ -154,14 +157,14 @@ def _collect_divergences(
         surf_v = getattr(surface, fname)
         if _values_equal(fname, lib_v, surf_v):
             continue
-        _record(sid, reader, fname, lib_v, surf_v, diverged, warnings)
+        _record_divergence(sid, reader, fname, lib_v, surf_v, diverged, warnings)
 
     if "tags" in reader.fields and surface.tags is not None:
         if sorted(surface.tags) != (lib.tags or []):
-            _record(sid, reader, "tags", lib.tags or [], surface.tags, diverged, warnings)
+            _record_divergence(sid, reader, "tags", lib.tags or [], surface.tags, diverged, warnings)
 
 
-def _record(
+def _record_divergence(
     sid: str,
     reader: SurfaceReader,
     fname: str,
@@ -187,7 +190,9 @@ def _record(
             )
         diverged[fname] = d
     d.surface_values[sid] = surf_v
-    if fname in reader.fields and sid not in d.importable_from:
+    # a surface can supply the field on Import only if it actually has a value
+    has_value = surf_v is not None and surf_v != []
+    if has_value and sid not in d.importable_from:
         d.importable_from.append(sid)
 
 
@@ -208,22 +213,26 @@ def _orphan_rows(
     matched_ref_ids: set[int],
 ) -> list[SyncStatusRow]:
     """Rows for tracks that exist on Surfaces but not in the Library.
-    A track on several external Surfaces merges into one row (matched by path)."""
+    A track on several Surfaces merges into one row (matched by path).
+    Disk is iterated first so a merged orphan that exists on disk rolls up as
+    "unimported" — the actionable path is Disk Import."""
     orphans: list[SyncStatusRow] = []
-    orphan_index: TrackIndex[SyncStatusRow] | None = None
+    by_path: dict[str, SyncStatusRow] = {}
+    by_filename: dict[str, SyncStatusRow] = {}
 
-    for sid in ("engine", "rekordbox", "disk"):
+    for sid in SURFACE_IDS:  # disk first
         if sid not in surfaces:
             continue
         for ref in surface_refs[sid]:
             if id(ref) in matched_ref_ids:
                 continue
-            existing = orphan_index.match(ref.path) if orphan_index else None
+            path = ref.path or ""
+            existing = by_path.get(path) or by_filename.get(Path(path).name)
             if existing is not None:
                 existing.presence[sid] = True
                 continue
             row = SyncStatusRow(
-                path=ref.path or "",
+                path=path,
                 title=ref.fields.title,
                 artist=ref.fields.artist,
                 track_id=None,
@@ -238,6 +247,7 @@ def _orphan_rows(
                 unprocessed=False,
             )
             orphans.append(row)
-            orphan_index = TrackIndex.build(orphans, lambda r: r.path)
+            by_path[path] = row
+            by_filename[Path(path).name] = row
 
     return orphans

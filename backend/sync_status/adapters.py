@@ -12,6 +12,7 @@ from backend.key import Key
 from backend.library.scanner import scan_directory
 from backend.track_metadata import FileMetadataError, read_file_metadata
 
+from .aggregator import SurfaceReader
 from .models import SurfaceTrackRef, TrackFields
 
 logger = logging.getLogger(__name__)
@@ -146,26 +147,29 @@ class RekordboxSurfaceReader:
         return refs
 
 
-def _rb_artist_name(content) -> str | None:
+def _rb_related(content, relation: str, attr: str) -> str | None:
+    """Safely walk a DjmdContent relationship that may be unset or broken."""
     try:
-        return content.Artist.Name if content.Artist else None
+        related = getattr(content, relation)
+        return getattr(related, attr) if related else None
     except Exception:
         return None
+
+
+def _rb_artist_name(content) -> str | None:
+    return _rb_related(content, "Artist", "Name")
 
 
 def _rb_key_name(content) -> str | None:
-    try:
-        return content.Key.ScaleName if content.Key else None
-    except Exception:
-        return None
+    return _rb_related(content, "Key", "ScaleName")
 
 
-def build_surfaces() -> dict[str, object]:
+def build_surfaces() -> dict[str, SurfaceReader]:
     """Construct whatever SurfaceReaders the current config allows.
     A Surface that can't be reached is simply absent from the result."""
     from backend.config import get_config
 
-    surfaces: dict[str, object] = {}
+    surfaces: dict[str, SurfaceReader] = {}
     config = get_config()
 
     if config.library.tracks_directory:

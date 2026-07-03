@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 SurfaceId = Literal["disk", "engine", "rekordbox"]
+SURFACE_IDS: tuple[SurfaceId, ...] = ("disk", "engine", "rekordbox")
+EXTERNAL_LIBRARY_IDS: tuple[SurfaceId, ...] = ("engine", "rekordbox")
 FieldName = Literal["title", "artist", "key", "bpm", "energy", "tags"]
 RowStatus = Literal[
     "missing-downstream", "diverged", "not-in-library", "unimported", "in-sync"

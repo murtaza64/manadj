@@ -87,6 +87,19 @@ class TestPresenceAndRollup:
         row = row_for(result, path="/m/new.flac")
         assert row.status == "unimported"
 
+    def test_orphan_on_disk_and_engine_is_unimported(self, db):
+        """Disk presence wins the orphan rollup: the file can be Disk
+        Imported, which is the actionable path."""
+        s = surfaces(
+            disk=[ref("/m/dual.mp3", title="Dual")],
+            engine=[ref("/m/dual.mp3", title="Dual")],
+        )
+        result = compute_sync_status(db, s)
+        row = row_for(result, path="/m/dual.mp3")
+        assert row.status == "unimported"
+        assert row.presence["disk"] is True
+        assert row.presence["engine"] is True
+
     def test_match_uses_filename_fallback(self, db, make_track):
         make_track(filename="/library/d.mp3", title="D")
         result = compute_sync_status(db, surfaces(engine=[ref("/usb/music/d.mp3", title="D")]))
@@ -156,6 +169,18 @@ class TestDivergence:
         row = row_for(result, title="I")
         d = next(x for x in row.diverged if x.field == "key")
         assert "engine" in d.importable_from
+
+    def test_surface_with_no_value_is_not_importable(self, db, make_track):
+        """A surface that carries the field but holds nothing can't supply it:
+        it diverges (library has a value, surface is empty) but must not be
+        offered as an import source."""
+        make_track(filename="/m/j.mp3", title="J", key=3)
+        result = compute_sync_status(
+            db, surfaces(engine=[ref("/m/j.mp3", title="J", key=None)])
+        )
+        row = row_for(result, title="J")
+        d = next(x for x in row.diverged if x.field == "key")
+        assert d.importable_from == []
 
 
 class TestTagAssignments:

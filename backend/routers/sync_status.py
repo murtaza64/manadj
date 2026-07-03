@@ -16,7 +16,7 @@ def get_sync_status(db: Session = Depends(get_db)):
     Surfaces that are unreachable are simply absent (their presence reads
     as missing)."""
     surfaces = build_surfaces()
-    result = compute_sync_status(db, surfaces)  # type: ignore[arg-type]
+    result = compute_sync_status(db, surfaces)
     return {
         "surfaces_available": sorted(surfaces),
         "counts": result.counts,

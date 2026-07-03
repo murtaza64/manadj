@@ -115,3 +115,12 @@
   padding: 8px 16px; cursor: pointer; width: 100%;
 }
 .uts-maintenance { margin-top: 24px; display: flex; justify-content: flex-end; }
+
+/* scope-confirm flow */
+.uts-pending {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid #007aff88; background: #007aff12;
+  padding: 10px 14px; margin-bottom: 12px; font-size: 13px;
+}
+.uts-pending-side { color: var(--subtext0, #999); font-size: 12px; }
+.uts-hint { font-size: 11px; color: var(--subtext0, #999); font-style: italic; }
