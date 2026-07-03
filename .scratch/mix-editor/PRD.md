@@ -33,7 +33,7 @@ Named escalations, not built: LOD/mipmap geometry pyramid if fit-zoom aggregatio
 - Apply fallback chain, no silent guessing: cue slot → hard-coded convention heuristic (e.g. missing cue 4 → drop ≈ beat 128 from first downbeat; constant table next to the code) → current values + one-line notice. Out-of-range resolutions clamp + notice. Partial application always proceeds (lanes/length/tempo-match stamp regardless).
 - Authoring: save-from-Transition only, no separate abstract editor. "Save as template" normalizes lanes, derives `lengthBeats` from the grid, and asks one explicit question per side: which cue anchors it (delta auto-derived from actual placement, rounded to whole beats with confirmation). Editing later = load onto a pair, edit, re-save. Management = dropdown (rename/delete).
 
-### Deck slides (grill 2026-07-03 #2; issues 06–07, prototype iterations)
+### Deck slides (grill 2026-07-03 #2; issues 11–12, prototype iterations)
 
 Hot cue and beat jump controls on both editor decks act as **Slides** (glossary), not transport: they realign the pair. Axiom: **the sketch origin is A's start** (glossary: Sketch origin) — no A content-offset exists; A-side gestures execute as their mirror.
 
