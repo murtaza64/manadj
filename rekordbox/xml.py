@@ -36,12 +36,15 @@ def manadj_track_to_rekordbox_xml_fields(track: ManAdjTrack) -> dict:
     # Get title (use filename stem as fallback)
     name = track.title if track.title else file_path.stem
 
-    return {
+    fields = {
         'Name': name,
         'Artist': track.artist,
         'AverageBpm': average_bpm,
         'Tonality': tonality
     }
+    # Omit empty fields entirely: passing None stringifies into the XML as
+    # the literal word "None", which Engine DJ then imports as a real value.
+    return {k: v for k, v in fields.items() if v is not None}
 
 
 def create_rekordbox_xml_from_tracks(
