@@ -16,6 +16,11 @@ import { arrangementAt, laneValuesAt, tempoMatchPitch } from './mixProtoModel';
 
 const DRIFT_TOLERANCE_S = 0.12;
 
+/** Diagnosis logging (?protoperf): every corrective action is an audible
+ * artifact suspect — log which deck, why, and the numbers. Remove with the
+ * other protoperf instrumentation. */
+const DEBUG = new URLSearchParams(window.location.search).has('protoperf');
+
 export interface MixProtoTrackInfo {
   id: number;
   bpm: number | null;
@@ -185,22 +190,53 @@ export class MixProtoPlayer {
    * exact re-positioning; otherwise re-seek only past the drift tolerance. */
   private syncDecks(t: number, hard: boolean): void {
     const arr = arrangementAt(this.mix, t, this.durations, this.getRateB());
-    this.syncDeck(this.engineA, arr.aActive, arr.aTrackTime, hard);
-    this.syncDeck(this.engineB, arr.bActive, arr.bTrackTime, hard);
+    this.syncDeck('A', this.engineA, arr.aActive, arr.aTrackTime, hard);
+    this.syncDeck('B', this.engineB, arr.bActive, arr.bTrackTime, hard);
   }
 
-  private syncDeck(engine: DeckEngine, active: boolean, trackTime: number, hard: boolean): void {
+  private debugState(deck: 'A' | 'B', engine: DeckEngine): string {
+    const snap = engine.getSnapshot();
+    return (
+      `deck=${deck} enginePlayhead=${engine.getPlayhead().toFixed(3)} ` +
+      `pitch=${snap.pitchPercent} rateB=${this.getRateB().toFixed(4)} ` +
+      `bpm=${this.bpm.a}/${this.bpm.b} dur=${this.durations.a.toFixed(1)}/${this.durations.b.toFixed(1)} ` +
+      `loadState=${snap.loadState} playing=${snap.playing} pendingPlay=${snap.pendingPlay}`
+    );
+  }
+
+  private syncDeck(
+    deck: 'A' | 'B',
+    engine: DeckEngine,
+    active: boolean,
+    trackTime: number,
+    hard: boolean
+  ): void {
     const snap = engine.getSnapshot();
     if (!active) {
-      if (snap.playing) engine.pause();
+      if (snap.playing) {
+        if (DEBUG) console.log(`[protoperf] deactivate: ${this.debugState(deck, engine)}`);
+        engine.pause();
+      }
       return;
     }
     if (!snap.playing) {
+      if (DEBUG) {
+        console.log(
+          `[protoperf] (re)start at ${trackTime.toFixed(3)}: ${this.debugState(deck, engine)}`
+        );
+      }
       engine.seek(trackTime);
       engine.play();
       return;
     }
-    if (hard || Math.abs(engine.getPlayhead() - trackTime) > DRIFT_TOLERANCE_S) {
+    const drift = engine.getPlayhead() - trackTime;
+    if (hard || Math.abs(drift) > DRIFT_TOLERANCE_S) {
+      if (DEBUG && !hard) {
+        console.log(
+          `[protoperf] drift reseek ${drift.toFixed(3)}s → ${trackTime.toFixed(3)}: ` +
+            this.debugState(deck, engine)
+        );
+      }
       engine.seek(trackTime);
     }
   }
