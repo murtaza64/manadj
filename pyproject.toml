@@ -24,9 +24,6 @@ dependencies = [
     "uvicorn>=0.38.0",
 ]
 
-[project.scripts]
-sync-rekordbox-mytags = "scripts.sync_rekordbox_mytags:main"
-
 [project.optional-dependencies]
 dev = [
     "httpx>=0.28.1",
