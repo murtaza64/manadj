@@ -363,6 +363,16 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   from trim drags. TEMP ?protoperf worst-tick readout re-added — strip
   after verification.
 
+- v26 (file split, production-bound structure): the 2300-line
+  MixEditorProto.tsx became modules — `pairStore.ts` (persistence +
+  migrations; the DB-graduation seam), `DawTimeline.tsx` (rows, lanes
+  layout, drags, guides, the rAF tick), `LaneCanvas.tsx` (breakpoint
+  editor), `laneColors.ts`, `DeckCard.tsx`, `GlobalMinimap.tsx`, with
+  MixEditorProto.tsx as the ~570-line shell (state, persistence glue,
+  controls, keyboard, library). Pure moves — no behavior change; the
+  planned player `parkDecks` extraction turned out moot (its duplicate
+  died with the mirror-slide revert).
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;
