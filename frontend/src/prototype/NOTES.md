@@ -247,6 +247,24 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   meeting line), transition highlight + playhead span the stack. Lane
   editing untouched by the relocation (strips are self-contained).
 
+- v21 (issue 14): marker readability. Renderer: hot cue triangles
+  (10 CSS px fixed, cue-colored) at the baseline edge pointing toward the
+  seam on edge-anchored rows only ('center' surfaces untouched); downbeat
+  thinning — once weak beats are density-culled, downbeats drop to 1px @
+  0.15 alpha (they're the only lines left), full weight returns on zoom-in.
+  Editor: DOM playhead 3px → 1.5px (matches the renderer playhead's
+  apparent width at DPR 2). GlobalMinimap: per-track hot cue triangles
+  (A top edge / B bottom edge, cue colors, hotCues props added) and the
+  transition window is now a translucent pink tint instead of a bordered
+  box. Row height halved (56→28px min, 8→4vh) — polarized halves carry
+  the same information in half the space (user call); the freed space
+  went to the lane strips (26→30px min, 3.6→4vh — first cut at 6vh pushed
+  the controls out of the top panel; budget is 6 strips + 2 waves within
+  ~32vh), and filterA/filterB joined the default lane set (six strips
+  standard). Inaudible waveform spans (A past the transition end, B's
+  drawn head before the window start) grey out via a backdrop-filter
+  overlay in content coordinates.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

@@ -149,7 +149,9 @@
 
 .mixproto-timeline-row {
   position: relative;
-  height: max(56px, 8vh);
+  /* Half the pre-stack height: polarized half-waveforms carry the same
+     information in half the space (issue 13 proportions pass). */
+  height: max(28px, 4vh);
   touch-action: none;
 }
 
@@ -196,7 +198,10 @@
 
 .mixproto-lanestrip {
   position: relative;
-  height: max(26px, 3.6vh);
+  /* Taller than the pre-stack 3.6vh (waveform halving freed space), but
+     budgeted so six default strips + both waves keep the info bar visible
+     inside the 50% top panel: 6×4vh + 2×4vh ≈ the old footprint. */
+  height: max(30px, 4vh);
   border-bottom: 2px solid #1b1b28;
   touch-action: none;
 }
@@ -270,6 +275,18 @@
   pointer-events: none;
 }
 
+/* Drawn-but-silent waveform spans (A past the transition end, B's content
+   before the window start): desaturated + dimmed via backdrop-filter so
+   the audible zone pops. */
+.mixproto-inaudible {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  backdrop-filter: grayscale(1) brightness(0.55);
+  background: rgba(11, 11, 18, 0.25);
+}
+
 .mixproto-overlap {
   position: absolute;
   top: 0;
@@ -286,9 +303,10 @@
   top: 0;
   bottom: 0;
   left: 0; /* driven per frame via transform: translateX (issue 10) */
-  /* Same look as .waveform-playhead (library/performance) for consistency;
+  /* Matches the APPARENT width of the renderer playhead (3 buffer px =
+     1.5 CSS px at DPR 2) — a raw 3 CSS px read double-weight (issue 14).
      z-index above the lane canvases (1) and labels (2). */
-  width: 3px;
+  width: 1.5px;
   background: var(--pink);
   pointer-events: none;
   z-index: 100;

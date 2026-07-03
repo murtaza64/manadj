@@ -64,6 +64,17 @@ export interface WebGLRendererConfig {
   amplitudeAnchor?: 'center' | 'top' | 'bottom';
 }
 
+/** Per-column visual modulation from drawn automation (transition-editor
+ * rows): as a function of TRACK time, `gain` scales bar height (fader) and
+ * `low`/`mid`/`high` scale each band's color (EQ — a bass kill visibly
+ * removes the red band, minimap parity). */
+export type WaveformModulation = (trackTimeSec: number) => {
+  gain: number;
+  low: number;
+  mid: number;
+  high: number;
+};
+
 export class WebGLWaveformRenderer {
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext;
@@ -102,6 +113,7 @@ export class WebGLWaveformRenderer {
   private showTimeReadout: boolean;
   private waveformBrightness: number;
   private amplitudeAnchor: 'center' | 'top' | 'bottom';
+  private modulation: WaveformModulation | null = null;
 
   // Manual drag offset (CSS pixels) - applied during drag operations
   private manualDragOffset: number = 0;
@@ -838,14 +850,17 @@ export class WebGLWaveformRenderer {
 
       // Determine if downbeat using index
       const isDownbeat = this.downbeatIndices.has(i);
-      const width = isDownbeat ? downbeatWidth : lineWidth;
+      // Downbeat thinning (issue 14): once weak beats are density-culled,
+      // downbeats are the only lines left and don't need to shout — draw
+      // them thin and light; full width/alpha returns as you zoom in.
+      const width = isDownbeat && showWeakBeats ? downbeatWidth : lineWidth;
 
       // Color: Very light transparent grey for beats, slightly lighter for downbeats
       // Using white with low alpha for transparency
       const r = 1.0;
       const g = 1.0;
       const b = 1.0;
-      const alpha = isDownbeat ? 0.3 : 0.15;  // Downbeats slightly more visible
+      const alpha = isDownbeat ? (showWeakBeats ? 0.3 : 0.15) : 0.15;
 
       // Create vertical line (two triangles)
       // Note: We're using RGB without alpha in vertices since blending is handled by WebGL
@@ -1065,6 +1080,29 @@ export class WebGLWaveformRenderer {
           cueX + lineWidth, this.canvas.height, ...color,
           cueX, this.canvas.height, ...color
         );
+
+        // Edge-anchored rows (issue 14): a fixed-screen-size triangle at
+        // the baseline (outer) edge pointing toward the seam — findable at
+        // any zoom, cue-point triangle convention. Center-anchored
+        // surfaces keep today's rendering.
+        if (this.amplitudeAnchor !== 'center') {
+          const tri = 10 * this.pixelRatio;
+          const cx = cueX + lineWidth / 2;
+          const h = this.canvas.height;
+          if (this.amplitudeAnchor === 'top') {
+            allVertices.push(
+              cx - tri / 2, 0, ...color,
+              cx + tri / 2, 0, ...color,
+              cx, tri, ...color
+            );
+          } else {
+            allVertices.push(
+              cx - tri / 2, h, ...color,
+              cx + tri / 2, h, ...color,
+              cx, h - tri, ...color
+            );
+          }
+        }
       }
     }
 

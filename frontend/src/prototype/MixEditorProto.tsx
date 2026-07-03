@@ -49,7 +49,7 @@ import {
 import type { LaneId, LanePoint, Lanes, ProtoMix } from './mixProtoModel';
 import type { PlaybackClock } from '../playback/clock';
 import type { WaveformDataWebGL } from '../utils/WebGLWaveformRenderer';
-import type { BeatgridData, Track } from '../types';
+import type { BeatgridData, HotCue, Track } from '../types';
 import './mixEditorProto.css';
 
 const PAIR_STORE_KEY = 'PROTOTYPE-transition-editor-pairs';
@@ -730,6 +730,9 @@ function DawTimeline({
   // opens a silent lead gap after the window start before audio begins.
   const bAudioStartMix = tr.startSec + Math.max(0, -tr.bInSec) / rateB;
   const bBlockLenMix = Math.max(durB - Math.max(tr.bInSec, 0), 0) / rateB;
+  /** Leftmost drawn B content (track 0 mapped to mix time, clipped at 0) —
+   * drawn-but-inaudible head before the window start gets greyed. */
+  const bHeadStartMix = Math.max(0, tr.startSec - tr.bInSec / rateB);
   /** Rightmost content edge: end of the last track. Nothing renders past it. */
   const contentEnd = Math.max(durA, bAudioStartMix + bBlockLenMix, 10);
 
@@ -1174,6 +1177,8 @@ function DawTimeline({
         rateB={rateB}
         contentEnd={contentEnd}
         pxPerSec={pxPerSec}
+        hotCuesA={hotCuesA}
+        hotCuesB={hotCuesB}
         getScrollPx={() => scrollPxRef.current}
         setScrollPx={(px) => {
           scrollPxRef.current = Math.max(0, px);
@@ -1205,6 +1210,13 @@ function DawTimeline({
             {trackAId !== null && durA > 0 && (
               <div className="mixproto-blockframe a" style={{ left: 0, width: aEnd * pxPerSec }} />
             )}
+            {/* A goes silent at the transition end: grey the tail. */}
+            {trackAId !== null && durA > aEnd && (
+              <div
+                className="mixproto-inaudible"
+                style={{ left: aEnd * pxPerSec, width: (durA - aEnd) * pxPerSec }}
+              />
+            )}
           </div>
 
           {/* Row B — flush under A, forming the seam. */}
@@ -1222,6 +1234,17 @@ function DawTimeline({
               <div
                 className="mixproto-blockframe b"
                 style={{ left: bAudioStartMix * pxPerSec, width: bBlockLenMix * pxPerSec }}
+              />
+            )}
+            {/* B's content before the window start is drawn for context
+                but never plays: grey the head. */}
+            {trackBId !== null && durB > 0 && bAudioStartMix > bHeadStartMix && (
+              <div
+                className="mixproto-inaudible"
+                style={{
+                  left: bHeadStartMix * pxPerSec,
+                  width: (bAudioStartMix - bHeadStartMix) * pxPerSec,
+                }}
               />
             )}
           </div>
@@ -1812,6 +1835,8 @@ function GlobalMinimap({
   rateB,
   contentEnd,
   pxPerSec,
+  hotCuesA,
+  hotCuesB,
   getScrollPx,
   setScrollPx,
   getViewPx,
@@ -1823,6 +1848,8 @@ function GlobalMinimap({
   rateB: number;
   contentEnd: number;
   pxPerSec: number;
+  hotCuesA: HotCue[];
+  hotCuesB: HotCue[];
   getScrollPx: () => number;
   setScrollPx: (px: number) => void;
   getViewPx: () => number;
@@ -1893,15 +1920,44 @@ function GlobalMinimap({
         }
       }
 
-      // Transition frame.
+      // Transition window: a translucent tint, not a bordered box — the
+      // border lines read as markers at minimap scale (issue 14).
       const fx = (tr.startSec / contentEnd) * w;
       const fw = Math.max((tr.durationSec / contentEnd) * w, 2);
-      ctx.strokeStyle = 'rgba(255,45,149,0.8)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(fx, 0.75, fw, h - 1.5);
+      ctx.fillStyle = 'rgba(255,45,149,0.14)';
+      ctx.fillRect(fx, 0, fw, h);
+
+      // Hot cue triangles (issue 14): A's along the top edge, B's along the
+      // bottom — same convention as the main rows' baseline triangles.
+      const cueTri = (x: number, edge: 'top' | 'bottom', color: string) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        if (edge === 'top') {
+          ctx.moveTo(x - 4, 0);
+          ctx.lineTo(x + 4, 0);
+          ctx.lineTo(x, 5);
+        } else {
+          ctx.moveTo(x - 4, h);
+          ctx.lineTo(x + 4, h);
+          ctx.lineTo(x, h - 5);
+        }
+        ctx.closePath();
+        ctx.fill();
+      };
+      for (const c of hotCuesA) {
+        if (c.time_seconds >= 0 && c.time_seconds <= contentEnd) {
+          cueTri((c.time_seconds / contentEnd) * w, 'top', c.color || '#39ff14');
+        }
+      }
+      for (const c of hotCuesB) {
+        const mixT = tr.startSec + (c.time_seconds - tr.bInSec) / rateB;
+        if (mixT >= 0 && mixT <= contentEnd) {
+          cueTri((mixT / contentEnd) * w, 'bottom', c.color || '#39ff14');
+        }
+      }
     }, 100);
     return () => clearTimeout(timer);
-  }, [mix, waveA, waveB, rateB, contentEnd]);
+  }, [mix, waveA, waveB, rateB, contentEnd, hotCuesA, hotCuesB]);
 
   // ── Overlay layer: viewport rect + playhead (rAF) ──
   useEffect(() => {

@@ -30,7 +30,14 @@ export const LANE_IDS = [
 ] as const;
 export type LaneId = (typeof LANE_IDS)[number];
 
-export const DEFAULT_LANE_IDS: LaneId[] = ['faderA', 'faderB', 'eqLowA', 'eqLowB'];
+export const DEFAULT_LANE_IDS: LaneId[] = [
+  'faderA',
+  'faderB',
+  'eqLowA',
+  'eqLowB',
+  'filterA',
+  'filterB',
+];
 
 export type Lanes = Partial<Record<LaneId, LanePoint[]>>;
 
