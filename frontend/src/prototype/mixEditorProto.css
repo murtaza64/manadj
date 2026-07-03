@@ -56,26 +56,6 @@
   white-space: nowrap;
 }
 
-.mixproto-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--surface0, #313244);
-  background: var(--crust, #11111b);
-}
-
-.mixproto-header h1 {
-  margin: 0;
-  font-size: 16px;
-  color: #ff2d95;
-}
-
-.mixproto-hint {
-  font-size: 11px;
-  color: var(--subtext0, #a6adc8);
-}
-
 .mixproto-body {
   display: flex;
   flex: 1;

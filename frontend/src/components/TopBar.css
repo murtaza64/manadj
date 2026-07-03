@@ -38,12 +38,14 @@
 }
 
 .topbar-mode {
-  padding: 4px 12px;
+  width: 30px;
+  padding: 3px 0;
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--subtext0);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
+  line-height: 1;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
@@ -57,6 +59,15 @@
   background: var(--blue);
   border-color: var(--blue);
   color: var(--base);
+}
+
+.topbar-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
 }
 
 .topbar-sync {

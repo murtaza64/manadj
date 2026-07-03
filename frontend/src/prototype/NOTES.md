@@ -133,6 +133,16 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   the canonical pair; editor adoption on entry now prefers shared decks per
   slot → saved last-pair → default pair.
 
+- v14 (issue 09): TopBar now carries the section identity — icon mode switch
+  (≡ ▸ ⋈) + active section title; the editor's own header (h1 + help text)
+  deleted. Deck cards gained "track ◀ ▶" nudge buttons (±10ms relative
+  alignment: B shifts startSec with the frame, bMove-style; A is the mix
+  anchor so its nudge shifts frame+B the opposite way). Shift-drag
+  suspends beat snap on all three drag kinds (bMove/bTrim/aTrim).
+- Issue 08 filed: pair-dependent drift-corrector artifacts (Weeble+Never
+  Alone; fixed by reloading B) — needs-info, `?protoperf` instrumentation
+  in MixProtoPlayer.syncDeck awaits a repro.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

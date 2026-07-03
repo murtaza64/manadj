@@ -205,6 +205,19 @@ export default function MixEditorProto() {
     [player]
   );
 
+  // Fine alignment nudge (issue 09): move a track ±deltaSec relative to the
+  // other. B moves together with the transition frame (bMove-drag
+  // semantics: startSec shifts, bInSec stays). A anchors the mix axis and
+  // cannot move, so nudging A shifts frame+B the opposite way — the same
+  // relative alignment change, seen from A.
+  const nudgeTrack = useCallback((deck: 'A' | 'B', deltaSec: number) => {
+    const shift = deck === 'B' ? deltaSec : -deltaSec;
+    setMix((m) => ({
+      ...m,
+      transition: { ...m.transition, startSec: Math.max(0, m.transition.startSec + shift) },
+    }));
+  }, []);
+
   // When a (new) pair is assembled, load its active saved Transition —
   // creating "Transition 1" from the defaults if the pair is fresh.
   const loadedPairKey = useRef<string | null>(null);
@@ -350,15 +363,6 @@ export default function MixEditorProto() {
     <div className="mixproto">
       {/* Top panel: the transition editor (sibling of Library / Performance) */}
       <div className="mixproto-top">
-        <div className="mixproto-header">
-          <h1>TRANSITION EDITOR</h1>
-          <span className="mixproto-hint">
-            space = play · ↑↓ browse, ←/→ load A/B (or hover a row) · drag B block = move · trim
-            edges = resize (alt = crop lanes) · wheel = zoom · lanes: click add / drag / dblclick
-            remove
-          </span>
-        </div>
-
         <div className="mixproto-arranger">
           <DawTimeline
             mix={mix}
@@ -386,6 +390,7 @@ export default function MixEditorProto() {
               effectiveBpm={bpmA}
               pitchPercent={0}
               onBpmSaved={(bpm) => setTrackA((t) => (t ? { ...t, bpm } : t))}
+              onNudgeTrack={(d) => nudgeTrack('A', d)}
             />
 
             <div className="mixproto-center">
@@ -508,6 +513,7 @@ export default function MixEditorProto() {
               effectiveBpm={bpmB !== null ? bpmB * rateB : null}
               pitchPercent={(rateB - 1) * 100}
               onBpmSaved={(bpm) => setTrackB((t) => (t ? { ...t, bpm } : t))}
+              onNudgeTrack={(d) => nudgeTrack('B', d)}
             />
           </div>
         </div>
@@ -840,10 +846,12 @@ function DawTimeline({
     const sec = secAtClientX(e.clientX);
     const d = drag.current;
     const s = snapRef.current;
+    // Shift = fine drag: beat snap suspended while held (issue 09).
+    const snapOn = s.snap && !e.shiftKey;
     onChange((m) => {
       if (d.kind === 'bMove') {
         let start = Math.max(0, sec - d.grabOffsetSec);
-        if (s.snap && s.beatsA) {
+        if (snapOn && s.beatsA) {
           start = nearestTime(s.beatsA, start) ?? start;
         }
         return { ...m, transition: { ...m.transition, startSec: start } };
@@ -854,7 +862,7 @@ function DawTimeline({
         const origEnd = d.origStart + d.origDur;
         const originMix = m.transition.startSec - m.bInSec / s.rateB;
         let bIn = Math.max(0, (sec - originMix) * s.rateB);
-        if (s.snap && s.beatsB) {
+        if (snapOn && s.beatsB) {
           bIn = nearestTime(s.beatsB, bIn) ?? bIn;
         }
         bIn = Math.min(Math.max(bIn, 0), Math.max(durB - 0.1, 0));
@@ -877,7 +885,7 @@ function DawTimeline({
       }
       const maxEnd = durA > 0 ? durA : Infinity;
       let newEnd = Math.min(Math.max(sec, m.transition.startSec), maxEnd);
-      if (s.snap && s.beatsA) {
+      if (snapOn && s.beatsA) {
         const snapped = nearestTime(s.beatsA, newEnd);
         if (snapped !== null) newEnd = Math.min(Math.max(snapped, m.transition.startSec), maxEnd);
       }
@@ -1241,6 +1249,7 @@ function DeckCard({
   effectiveBpm,
   pitchPercent,
   onBpmSaved,
+  onNudgeTrack,
 }: {
   deck: 'A' | 'B';
   track: Track | null;
@@ -1250,6 +1259,8 @@ function DeckCard({
   effectiveBpm: number | null;
   pitchPercent: number;
   onBpmSaved: (bpm: number) => void;
+  /** Fine alignment: move this track ±deltaSec relative to the other. */
+  onNudgeTrack: (deltaSec: number) => void;
 }) {
   const queryClient = useQueryClient();
   const nudge = useNudgeBeatgrid();
@@ -1324,6 +1335,18 @@ function DeckCard({
         <span className="mixproto-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
       </div>
       <div className="mixproto-deckcard-row">
+        <button
+          title={`Nudge ${deck} 10ms earlier (relative to the other track)`}
+          onClick={() => onNudgeTrack(-0.01)}
+        >
+          track ◀
+        </button>
+        <button
+          title={`Nudge ${deck} 10ms later (relative to the other track)`}
+          onClick={() => onNudgeTrack(0.01)}
+        >
+          ▶
+        </button>
         <button
           title="Nudge beatgrid 10ms earlier"
           onClick={() => nudge.mutate({ trackId: track.id, offsetMs: -10 })}
