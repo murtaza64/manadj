@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Engine DJ database access library"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.18.5",
     "beatnet>=1.1.1",
     "essentia>=2.1b6.dev1389",
     "fastapi>=0.122.0",

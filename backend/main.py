@@ -1,11 +1,13 @@
 """Main FastAPI application."""
 
 import os
+from pathlib import Path
+
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .database import engine
-from .models import Base
 from .routers import tracks, tags, waveforms, playlists, beatgrids, hotcues, sync_playlists, sync_tags, sync_tracks, sync_library, analyze
 from .waveform_worker import start_waveform_worker, stop_waveform_worker
 from .logging_config import setup_logging
@@ -13,8 +15,8 @@ from .logging_config import setup_logging
 # Configure logging with colors and override uvicorn handlers
 setup_logging()
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+# Migrate the database to the latest revision (replaces Base.metadata.create_all)
+alembic_command.upgrade(AlembicConfig(str(Path(__file__).parent.parent / "alembic.ini")), "head")
 
 app = FastAPI(title="Music Library Manager", version="1.0.0")
 

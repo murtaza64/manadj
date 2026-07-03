@@ -16,6 +16,10 @@ Issues and PRDs are local markdown files under `.scratch/<feature>/`. See `docs/
 
 This repo uses jj. One jj change per issue; change description = `<feature-slug>: <issue-file-stem>`, e.g. `soundcloud-acquisition: 01-investigate-likes-scanning`.
 
+### Database migrations
+
+Alembic (see `docs/adr/0005-alembic-migrations.md`). Generate revisions with `uv run alembic revision [--autogenerate] --rev-id <NNNN>_<jj-short-id> -m "<slug>"` — sequential number, suffixed with the jj change short ID of the change the migration belongs to. Parallel duplicates of a number are fine: alembic flags multiple heads; re-parent one. Startup auto-migrates (`upgrade head`). Never use `Base.metadata.create_all` for the app DB.
+
 ### Triage labels
 
 Default vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), recorded as `Status:` lines in issue files. See `docs/agents/triage-labels.md`.
