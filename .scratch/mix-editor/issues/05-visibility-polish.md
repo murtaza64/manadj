@@ -1,6 +1,6 @@
 # 05 — Visibility polish: lane endpoints + hotcue clarity
 
-Status: ready-for-agent
+Status: done (2026-07-03, user-verified)
 
 ## Parent
 

@@ -92,8 +92,9 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   full-track = zoom-gesture jank), built into a preallocated Float32Array;
   waveform GPU upload only on regen (was every frame, ~MBs); beatgrid
   vertices cached keyed on window; separate GL buffers for
-  waveform/beatgrid/markers; overlay canvas lookup cached. `?protoperf` logs
-  worst tick per second (remove at ride-back). Two follow-up fixes to land
+  waveform/beatgrid/markers; overlay canvas lookup cached. `?protoperf`
+  logged worst tick per second (stripped 2026-07-03 after 08/10 verified).
+  Two follow-up fixes to land
   the feel: exact (1e-9) cache range epsilon for external windows (the 0.1%
   guard reused stale-scale geometry during smooth sub-0.1%/frame zooms —
   drift-and-snap), and `calculatePixelOffset()` moved AFTER the cache

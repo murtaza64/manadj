@@ -1,6 +1,6 @@
 # 08 — BUG: drift-corrector artifacts on some pairs (playhead stutter + ~0.5s clicks)
 
-Status: done (2026-07-03 — root-caused from protoperf log, fixed; user verification pending)
+Status: done (2026-07-03 — root-caused from protoperf log, fixed, user-verified; protoperf instrumentation stripped)
 
 ## Symptom
 

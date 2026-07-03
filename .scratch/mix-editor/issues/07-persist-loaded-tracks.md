@@ -1,6 +1,6 @@
 # 07 — Loaded tracks persist across refreshes and mode switches
 
-Status: ready-for-agent (claimed 2026-07-03, in progress)
+Status: done (2026-07-03, user-verified)
 
 ## Parent
 

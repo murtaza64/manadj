@@ -1,6 +1,6 @@
 # 10 — BUG: visual jitter at playback start (Performance + Transition editor)
 
-Status: ready-for-agent (claimed 2026-07-03, in progress)
+Status: done (2026-07-03, user-verified)
 
 ## Symptom
 

@@ -780,15 +780,9 @@ function DawTimeline({
   // ahead of the rAF-painted waveforms (visible tearing); a detached
   // scrollbar + same-frame transforms keeps every layer in lockstep.
   useEffect(() => {
-    // Frame-time readout for zoom-lag work (?protoperf) — logs the slowest
-    // tick each second. Inert without the flag; remove at ride-back.
-    const perf = new URLSearchParams(window.location.search).has('protoperf');
-    let perfMax = 0;
-    let perfLast = performance.now();
     let raf = 0;
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const t0 = perf ? performance.now() : 0;
       const viewport = viewportRef.current;
       if (!viewport) return;
       // Apply at most one accumulated wheel-zoom step per frame. flushSync
@@ -844,14 +838,6 @@ function DawTimeline({
       // Paint both rows NOW — same frame as the transforms above.
       drawRowsRef.current.a();
       drawRowsRef.current.b();
-      if (perf) {
-        perfMax = Math.max(perfMax, performance.now() - t0);
-        if (t0 - perfLast >= 1000) {
-          console.log(`[protoperf] worst tick last 1s: ${perfMax.toFixed(1)}ms`);
-          perfMax = 0;
-          perfLast = t0;
-        }
-      }
     };
     tick();
     return () => cancelAnimationFrame(raf);
