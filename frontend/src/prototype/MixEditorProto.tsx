@@ -183,12 +183,24 @@ export default function MixEditorProto() {
     });
   }, [mix, player, pairKey]);
 
+  // Shared decks: the canonical loaded pair across modes. Editor loads
+  // mirror onto them (issue 07) so Performance/Library show the same tracks;
+  // read through a ref so assignTrack stays identity-stable for the
+  // keyboard effect.
+  const sharedDecks = useDecks();
+  const sharedDecksRef = useRef(sharedDecks);
+  useEffect(() => {
+    sharedDecksRef.current = sharedDecks;
+  });
+
   const assignTrack = useCallback(
     (deck: 'A' | 'B', track: Track) => {
       if (deck === 'A') setTrackA(track);
       else setTrackB(track);
       setMix((m) => ({ ...m, [deck === 'A' ? 'trackAId' : 'trackBId']: track.id }));
       void player.loadTrack(deck, { id: track.id, bpm: track.bpm ?? null });
+      const shared = sharedDecksRef.current[deck];
+      if (shared.loadedTrack?.id !== track.id) shared.loadTrack(track);
     },
     [player]
   );
@@ -243,25 +255,26 @@ export default function MixEditorProto() {
     setMix((m) => ({ ...m, bInSec: item.bInSec, transition: structuredClone(item.transition) }));
   };
 
-  // Restore the last pair on mount; adopt the shared decks' tracks for empty
-  // slots (entering the editor from another mode: shared A → slot A, shared
-  // B → slot B); pause both shared decks — one audible surface at a time.
-  const sharedDecks = useDecks();
+  // Adopt tracks on entry, per slot: the shared deck's loaded track wins
+  // (mode switches carry the pair), else the saved last pair (refresh
+  // straight into the editor — provider restore may still be in flight),
+  // else the prototyping default pair. Pause both shared decks — one
+  // audible surface at a time.
   useEffect(() => {
     sharedDecks.A.engine.pause();
     sharedDecks.B.engine.pause();
     const last = localStorage.getItem(LAST_PAIR_KEY);
-    if (last) {
-      const [aId, bId] = last.split(':').map(Number);
-      api.tracks.getById(aId).then((t: Track) => assignTrack('A', t)).catch(() => undefined);
-      api.tracks.getById(bId).then((t: Track) => assignTrack('B', t)).catch(() => undefined);
-    } else if (sharedDecks.A.loadedTrack || sharedDecks.B.loadedTrack) {
-      if (sharedDecks.A.loadedTrack) assignTrack('A', sharedDecks.A.loadedTrack);
-      if (sharedDecks.B.loadedTrack) assignTrack('B', sharedDecks.B.loadedTrack);
-    } else {
-      // Prototyping default pair.
-      api.tracks.getById(DEFAULT_PAIR.a).then((t: Track) => assignTrack('A', t)).catch(() => undefined);
-      api.tracks.getById(DEFAULT_PAIR.b).then((t: Track) => assignTrack('B', t)).catch(() => undefined);
+    const lastIds = last ? last.split(':').map(Number) : null;
+    const anySource =
+      sharedDecks.A.loadedTrack || sharedDecks.B.loadedTrack || lastIds !== null;
+    for (const [deck, i] of [['A', 0], ['B', 1]] as const) {
+      const shared = sharedDecks[deck].loadedTrack;
+      const fallbackId = anySource ? lastIds?.[i] : DEFAULT_PAIR[deck === 'A' ? 'a' : 'b'];
+      if (shared) {
+        assignTrack(deck, shared);
+      } else if (fallbackId !== undefined && fallbackId !== null && !Number.isNaN(fallbackId)) {
+        api.tracks.getById(fallbackId).then((t: Track) => assignTrack(deck, t)).catch(() => undefined);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -124,6 +124,15 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   left alone); header load→A/B buttons and `onBrowseSelect` removed
   (Library prop deleted too).
 
+- v13 (issue 07): loaded tracks persist across refreshes and mode switches.
+  DeckProvider persists the shared decks' loaded ids
+  (`manadj-loaded-tracks`) and restores them on boot (fetch + Load, paused;
+  StrictMode-guarded; all-null boot state never written; a Load that lands
+  during the restore fetch wins). Editor `assignTrack` mirrors onto the
+  shared decks (id-guarded, via ref so identity stays stable), making them
+  the canonical pair; editor adoption on entry now prefers shared decks per
+  slot → saved last-pair → default pair.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;
