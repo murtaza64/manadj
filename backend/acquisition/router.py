@@ -11,6 +11,7 @@ from ..models import Track
 from ..tasks.manager import list_tasks
 from .manager import (
     accept_proposal,
+    assert_provenance,
     ignore_item,
     link_item_to_track,
     link_track_by_url,
@@ -58,8 +59,8 @@ class SourceItemResponse(BaseModel):
     liked_at: str | None
     correspondence: "CorrespondenceInfo | None" = None
     download: "DownloadStatus | None" = None
-    # when manadj downloaded this item's audio: the Audio Provenance timestamp
-    downloaded_at: str | None = None
+    # Audio Provenance of the corresponding Track, when one exists
+    provenance: "ProvenanceInfo | None" = None
 
     model_config = {"from_attributes": True}
 
@@ -79,6 +80,15 @@ class CorrespondenceInfo(BaseModel):
 
 class LinkRequest(BaseModel):
     track_id: int
+    # optional Audio Provenance assertion: a URL or a bare origin label
+    audio_from: str | None = None
+
+
+class ProvenanceInfo(BaseModel):
+    label: str
+    url: str | None
+    asserted: bool
+    acquired_at: str | None
 
 
 class LinkByUrlRequest(BaseModel):
@@ -144,12 +154,16 @@ def _download_map(db: Session) -> dict[int, DownloadStatus]:
     return statuses
 
 
-def _provenance_map(db: Session) -> dict[int, str]:
-    """track_id -> downloaded_at (ISO) for manadj-downloaded audio."""
+def _provenance_map(db: Session) -> dict[int, ProvenanceInfo]:
+    """track_id -> Audio Provenance info."""
     return {
-        p.track_id: p.downloaded_at.isoformat()
+        p.track_id: ProvenanceInfo(
+            label=p.source,
+            url=p.url,
+            asserted=p.asserted,
+            acquired_at=p.acquired_at.isoformat() if p.acquired_at else None,
+        )
         for p in db.query(AudioProvenance).all()
-        if p.downloaded_at is not None
     }
 
 
@@ -164,7 +178,7 @@ def get_source_items(db: Session = Depends(get_db)) -> list[SourceItemResponse]:
         resp.correspondence = correspondences.get(item.id)
         resp.download = downloads.get(item.id)
         if resp.correspondence is not None:
-            resp.downloaded_at = provenances.get(resp.correspondence.track_id)
+            resp.provenance = provenances.get(resp.correspondence.track_id)
         responses.append(resp)
     return responses
 
@@ -173,6 +187,8 @@ def _item_response(db: Session, item_id: int) -> SourceItemResponse:
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
     resp = SourceItemResponse.model_validate(item)
     resp.correspondence = _correspondence_map(db).get(item.id)
+    if resp.correspondence is not None:
+        resp.provenance = _provenance_map(db).get(resp.correspondence.track_id)
     tasks = list_tasks(db, ref=f"source_item:{item_id}")
     if tasks:
         resp.download = DownloadStatus(task_state=tasks[0].state, error=tasks[0].error)
@@ -218,6 +234,24 @@ def restore_source_item(item_id: int, db: Session = Depends(get_db)) -> SourceIt
     return _item_response(db, item_id)
 
 
+class ProvenanceUpdate(BaseModel):
+    audio_from: str
+
+
+@router.post("/items/{item_id}/provenance", response_model=SourceItemResponse)
+def set_provenance(
+    item_id: int, body: ProvenanceUpdate, db: Session = Depends(get_db)
+) -> SourceItemResponse:
+    """Set/update asserted provenance on a fulfilled item's Track."""
+    try:
+        assert_provenance(db, item_id, body.audio_from)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _item_response(db, item_id)
+
+
 @router.post("/items/{item_id}/accept-match", response_model=SourceItemResponse)
 def accept_match(item_id: int, db: Session = Depends(get_db)) -> SourceItemResponse:
     try:
@@ -239,7 +273,7 @@ def reject_match(item_id: int, db: Session = Depends(get_db)) -> SourceItemRespo
 @router.post("/items/{item_id}/link", response_model=SourceItemResponse)
 def link_item(item_id: int, body: LinkRequest, db: Session = Depends(get_db)) -> SourceItemResponse:
     try:
-        link_item_to_track(db, item_id, body.track_id)
+        link_item_to_track(db, item_id, body.track_id, audio_from=body.audio_from)
     except NoResultFound:
         raise HTTPException(status_code=404, detail="source item or track not found")
     return _item_response(db, item_id)

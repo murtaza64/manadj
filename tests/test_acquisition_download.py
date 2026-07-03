@@ -98,7 +98,9 @@ class TestDownloadChain:
         prov = db_session.query(AudioProvenance).filter_by(track_id=track.id).one()
         assert prov.source == "soundcloud"
         assert prov.external_id == "111"
-        assert prov.downloaded_at is not None
+        assert prov.asserted is False
+        assert prov.url == "https://soundcloud.com/hoaxdnb/wake-up"
+        assert prov.acquired_at is not None
 
     def test_filename_collision_fails_task(
         self,

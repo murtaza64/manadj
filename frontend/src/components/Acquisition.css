@@ -323,3 +323,19 @@
 .acquisition-link-duration {
   color: var(--overlay1);
 }
+
+.acquisition-audio-from {
+  margin-top: var(--space-xs);
+}
+
+.acquisition-provenance-editor {
+  display: flex;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+  align-items: center;
+}
+
+.acquisition-provenance-editor .acquisition-link-input {
+  flex: 1;
+  width: auto;
+}

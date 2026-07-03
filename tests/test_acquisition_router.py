@@ -125,3 +125,42 @@ def test_bulk_ignore_restore_endpoints_smoke(client: TestClient) -> None:
 
     resp = client.post(f"/api/acquisition/items/{item['id']}/restore")
     assert resp.status_code == 409
+
+
+def test_link_with_audio_from_smoke(client: TestClient, db_session: Session) -> None:
+    from backend.models import Track
+
+    track = Track(filename="/tracks/x.mp3", title="X", artist="Y")
+    db_session.add(track)
+    db_session.commit()
+    client.post("/api/acquisition/refresh")
+    item = client.get("/api/acquisition/items").json()[0]
+
+    resp = client.post(
+        f"/api/acquisition/items/{item['id']}/link",
+        json={"track_id": track.id, "audio_from": "https://www.beatport.com/track/x/1"},
+    )
+    assert resp.status_code == 200
+    prov = resp.json()["provenance"]
+    assert prov["label"] == "beatport"
+    assert prov["asserted"] is True
+    assert prov["acquired_at"] is not None
+
+
+def test_set_provenance_endpoint_smoke(client: TestClient, db_session: Session) -> None:
+    from backend.models import Track
+
+    track = Track(filename="/tracks/y.mp3", title="Y", artist="Z")
+    db_session.add(track)
+    db_session.commit()
+    client.post("/api/acquisition/refresh")
+    item = client.get("/api/acquisition/items").json()[0]
+
+    # not fulfilled yet -> 404
+    resp = client.post(f"/api/acquisition/items/{item['id']}/provenance", json={"audio_from": "cd-rip"})
+    assert resp.status_code == 404
+
+    client.post(f"/api/acquisition/items/{item['id']}/link", json={"track_id": track.id})
+    resp = client.post(f"/api/acquisition/items/{item['id']}/provenance", json={"audio_from": "cd-rip"})
+    assert resp.status_code == 200
+    assert resp.json()["provenance"]["label"] == "cd-rip"

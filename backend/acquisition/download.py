@@ -74,7 +74,13 @@ def download_handler(
             )
         )
         db.add(
-            AudioProvenance(track_id=track.id, source=item.source, external_id=item.external_id)
+            AudioProvenance(
+                track_id=track.id,
+                source=item.source,
+                external_id=item.external_id,
+                url=item.permalink_url,
+                asserted=False,
+            )
         )
         item.state = "fulfilled"
         db.commit()

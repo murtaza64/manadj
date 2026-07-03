@@ -417,7 +417,14 @@ export interface SourceItem {
   liked_at: string | null;
   correspondence: SourceCorrespondenceInfo | null;
   download: DownloadStatus | null;
-  downloaded_at: string | null;
+  provenance: ProvenanceInfo | null;
+}
+
+export interface ProvenanceInfo {
+  label: string;
+  url: string | null;
+  asserted: boolean;
+  acquired_at: string | null;
 }
 
 export interface DownloadStatus {

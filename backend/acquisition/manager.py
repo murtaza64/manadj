@@ -234,8 +234,14 @@ def reject_proposal(db: Session, item_id: int) -> None:
     db.commit()
 
 
-def link_item_to_track(db: Session, item_id: int, track_id: int) -> SourceCorrespondence:
-    """Manually link a Source Item to a Track (escape hatch for missed matches)."""
+def link_item_to_track(
+    db: Session, item_id: int, track_id: int, audio_from: str | None = None
+) -> SourceCorrespondence:
+    """Manually link a Source Item to a Track (escape hatch for missed matches).
+
+    audio_from optionally asserts Audio Provenance for the Track's audio: a
+    URL (origin label derived from its host) or a bare label like "cd-rip".
+    """
     db.query(Track).filter(Track.id == track_id).one()  # existence check
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
     existing = (
@@ -252,8 +258,50 @@ def link_item_to_track(db: Session, item_id: int, track_id: int) -> SourceCorres
         corr = SourceCorrespondence(source_item_id=item_id, track_id=track_id, status="confirmed")
         db.add(corr)
     item.state = "fulfilled"
+
+    if audio_from:
+        _write_asserted_provenance(db, track_id, audio_from)
     db.commit()
     return corr
+
+
+def _write_asserted_provenance(db: Session, track_id: int, audio_from: str) -> None:
+    """Overwrite a Track's provenance with a user assertion.
+
+    Recorded provenance (asserted=False) is manadj's own download receipt —
+    ground truth, never overwritable by an assertion.
+    """
+    from .models import AudioProvenance
+    from .provenance import derive_label, is_url
+
+    existing = (
+        db.query(AudioProvenance).filter(AudioProvenance.track_id == track_id).one_or_none()
+    )
+    if existing is not None and not existing.asserted:
+        raise ValueError(
+            f"track {track_id} has recorded provenance ({existing.source}) — "
+            "manadj downloaded this audio itself; assertion refused"
+        )
+    if existing is not None:
+        db.delete(existing)
+        db.flush()
+    if is_url(audio_from):
+        db.add(
+            AudioProvenance(
+                track_id=track_id, source=derive_label(audio_from), url=audio_from, asserted=True
+            )
+        )
+    else:
+        db.add(AudioProvenance(track_id=track_id, source=audio_from.strip(), asserted=True))
+
+
+def assert_provenance(db: Session, item_id: int, audio_from: str) -> None:
+    """Set/update asserted provenance for a fulfilled item's Track."""
+    corr = get_correspondence(db, item_id)
+    if corr is None or corr.status != "confirmed":
+        raise LookupError(f"source item {item_id} has no confirmed correspondence")
+    _write_asserted_provenance(db, corr.track_id, audio_from)
+    db.commit()
 
 
 def link_track_by_url(db: Session, url: str, track_id: int) -> SourceCorrespondence:

@@ -17,11 +17,13 @@ The acquired-elsewhere story: a Source Item is unavailable on SoundCloud (DRM, d
 
 ## Acceptance criteria
 
-- [ ] Migration renames/extends `audio_provenances`; existing recorded rows keep working (recorded marker, acquired_at backfilled from downloaded_at)
-- [ ] Manual link with a URL writes correspondence + asserted provenance (label derived from host); with a bare label, label-only provenance; with neither, association only
-- [ ] Label derivation unit-tested (youtube.com/watch?v=… → youtube + URL kept; unknown host → host as label)
-- [ ] Fulfilled view sorts by acquired_at; `via <label>` badge for asserted rows
-- [ ] Module-interface tests for the link+assert flow; router smoke for the extended link endpoint
+- [x] Migration renames/extends `audio_provenances`; existing recorded rows keep working (recorded marker, acquired_at backfilled from downloaded_at)
+- [x] Manual link with a URL writes correspondence + asserted provenance (label derived from host); with a bare label, label-only provenance; with neither, association only
+- [x] Label derivation unit-tested (youtube.com/watch?v=… → youtube + URL kept; unknown host → host as label)
+- [x] Fulfilled view sorts by acquired_at; `via <label>` badge for asserted rows
+- [x] Module-interface tests for the link+assert flow; router smoke for the extended link endpoint
+
+- [x] (gap fix, post-review) Asserted provenance stays editable on fulfilled items — set/update via the detail panel; recorded provenance is immutable (assertion refused with 409), including via re-link
 
 ## Notes
 

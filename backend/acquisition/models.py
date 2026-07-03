@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -31,11 +31,13 @@ class SourceItem(Base):
 
 
 class AudioProvenance(Base):
-    """Audio Provenance: where a Track's audio file came from (see CONTEXT.md).
+    """Audio Provenance: where a Track's current audio file came from.
 
-    Distinct from Source Correspondence — a Track can correspond to a Source
-    track while its audio was bought elsewhere. This row exists only when
-    manadj itself performed the download.
+    Recorded (asserted=False) when manadj performed the download from a
+    Native Source; asserted (asserted=True) by the user for audio acquired
+    from an External Source, identified by URL only (ADR-0006). One row per
+    Track — replacing the audio replaces the provenance. Distinct from Source
+    Correspondence (see CONTEXT.md).
     """
 
     __tablename__ = "audio_provenances"
@@ -44,9 +46,11 @@ class AudioProvenance(Base):
     track_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True
     )
-    source: Mapped[str] = mapped_column(String, nullable=False)
-    external_id: Mapped[str] = mapped_column(String, nullable=False)
-    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
+    source: Mapped[str] = mapped_column(String, nullable=False)  # origin label
+    external_id: Mapped[str | None] = mapped_column(String, nullable=True)  # Native only
+    url: Mapped[str | None] = mapped_column(String, nullable=True)
+    asserted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    acquired_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
 
 
 # Correspondence statuses: 'proposed' awaits user review; 'confirmed' fulfills

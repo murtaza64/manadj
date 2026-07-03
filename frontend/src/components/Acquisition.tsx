@@ -87,11 +87,13 @@ export function Acquisition() {
         (i.classification === null || classFilter[i.classification]),
     );
     if (stateFilter === 'fulfilled') {
-      // manadj-downloaded first (newest download first), then matched items by liked date
+      // acquired-by-date first (recorded or asserted), then matched items by liked date
+      const acq = (i: SourceItem) => i.provenance?.acquired_at ?? null;
       return [...filtered].sort((a, b) => {
-        if (a.downloaded_at && b.downloaded_at) return b.downloaded_at.localeCompare(a.downloaded_at);
-        if (a.downloaded_at) return -1;
-        if (b.downloaded_at) return 1;
+        const ad = acq(a), bd = acq(b);
+        if (ad && bd) return bd.localeCompare(ad);
+        if (ad) return -1;
+        if (bd) return 1;
         return (b.liked_at ?? '').localeCompare(a.liked_at ?? '');
       });
     }
@@ -228,7 +230,8 @@ export function Acquisition() {
               )}
               <span className="acquisition-item-sub">
                 {item.uploader} · {formatDuration(item.duration_ms)}
-                {item.downloaded_at && ` · dl ${item.downloaded_at.slice(0, 10)}`}
+                {item.provenance?.acquired_at &&
+                  ` · ${item.provenance.asserted ? `via ${item.provenance.label}` : 'dl'} ${item.provenance.acquired_at.slice(0, 10)}`}
               </span>
               <button
                 className={`acquisition-chip acquisition-chip-${item.classification ?? 'none'}`}
@@ -285,9 +288,41 @@ export function Acquisition() {
   );
 }
 
+function ProvenanceEditor({ item }: { item: SourceItem }) {
+  const queryClient = useQueryClient();
+  const [audioFrom, setAudioFrom] = useState(
+    item.provenance?.url ?? item.provenance?.label ?? '',
+  );
+  const mutation = useMutation({
+    mutationFn: () => api.acquisition.setProvenance(item.id, audioFrom.trim()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] }),
+  });
+  return (
+    <div className="acquisition-provenance-editor">
+      <input
+        className="acquisition-link-input"
+        placeholder="audio from: paste a URL, or a label like cd-rip…"
+        value={audioFrom}
+        onChange={e => setAudioFrom(e.target.value)}
+      />
+      <button
+        className="acquisition-action-button"
+        disabled={!audioFrom.trim() || mutation.isPending}
+        onClick={() => mutation.mutate()}
+      >
+        {item.provenance ? 'update' : 'set'}
+      </button>
+      {mutation.isError && (
+        <span className="acquisition-error">{(mutation.error as Error).message}</span>
+      )}
+    </div>
+  );
+}
+
 function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [linkSearch, setLinkSearch] = useState('');
+  const [audioFrom, setAudioFrom] = useState('');
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] });
 
   const acceptMutation = useMutation({
@@ -299,8 +334,8 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
     onSuccess: invalidate,
   });
   const linkMutation = useMutation({
-    mutationFn: (trackId: number) => api.acquisition.linkToTrack(item.id, trackId),
-    onSuccess: () => { setLinkSearch(''); invalidate(); },
+    mutationFn: (trackId: number) => api.acquisition.linkToTrack(item.id, trackId, audioFrom.trim() || undefined),
+    onSuccess: () => { setLinkSearch(''); setAudioFrom(''); invalidate(); },
   });
   const queueMutation = useMutation({
     mutationFn: () => api.acquisition.queueDownload(item.id),
@@ -375,6 +410,19 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
       {corr?.status === 'confirmed' && (
         <div className="acquisition-detail-linked">
           ✓ corresponds to <b>{corr.track_artist} - {corr.track_title}</b>
+          {item.provenance && (
+            <span className="acquisition-item-sub">
+              {' · audio '}
+              {item.provenance.asserted ? `via ${item.provenance.label}` : `downloaded by manadj`}
+              {item.provenance.url && (
+                <> (<a href={item.provenance.url} target="_blank" rel="noreferrer">link</a>)</>
+              )}
+            </span>
+          )}
+          {/* asserted (or missing) provenance stays editable; recorded is ground truth */}
+          {(!item.provenance || item.provenance.asserted) && (
+            <ProvenanceEditor item={item} />
+          )}
         </div>
       )}
 
@@ -431,6 +479,13 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
             placeholder="search library tracks by title, artist, or filename…"
             value={linkSearch}
             onChange={e => setLinkSearch(e.target.value)}
+          />
+          <input
+            className="acquisition-link-input acquisition-audio-from"
+            placeholder="audio from (optional): paste a URL, or a label like cd-rip…"
+            title="Asserts Audio Provenance: where this Track's audio actually came from"
+            value={audioFrom}
+            onChange={e => setAudioFrom(e.target.value)}
           />
           {(searchResults?.items ?? []).slice(0, 8).map((track: Track) => (
             <button
