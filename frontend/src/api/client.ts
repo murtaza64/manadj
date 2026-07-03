@@ -580,6 +580,15 @@ export const api = {
       return res.json();
     },
 
+    queueDownload: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/queue`, { method: 'POST' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to queue download');
+      }
+      return res.json();
+    },
+
     linkToTrack: async (itemId: number, trackId: number): Promise<SourceItem> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/link`, {
         method: 'POST',

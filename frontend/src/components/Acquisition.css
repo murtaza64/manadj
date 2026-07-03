@@ -286,3 +286,10 @@
 }
 
 .acquisition-detail a { color: var(--blue); }
+
+.acquisition-task-pending { color: var(--yellow); border-color: var(--yellow); }
+.acquisition-task-running { color: var(--sapphire); border-color: var(--sapphire); }
+.acquisition-task-failed { color: var(--red); border-color: var(--red); }
+.acquisition-task-done { color: var(--yellow); border-color: var(--yellow); }
+
+.acquisition-action-queue { border-color: var(--blue); color: var(--blue); }

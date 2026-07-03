@@ -415,6 +415,12 @@ export interface SourceItem {
   classification: Classification | null;
   liked_at: string | null;
   correspondence: SourceCorrespondenceInfo | null;
+  download: DownloadStatus | null;
+}
+
+export interface DownloadStatus {
+  task_state: 'pending' | 'running' | 'done' | 'failed';
+  error: string | null;
 }
 
 export interface SourceCorrespondenceInfo {

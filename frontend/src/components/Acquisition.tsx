@@ -37,6 +37,13 @@ export function Acquisition() {
   const { data: items, isLoading, error } = useQuery({
     queryKey: ['acquisitionItems'],
     queryFn: api.acquisition.getItems,
+    // poll while downloads are in flight so task states stay live
+    refetchInterval: query =>
+      (query.state.data ?? []).some(
+        i => i.download && (i.download.task_state === 'pending' || i.download.task_state === 'running'),
+      )
+        ? 3000
+        : false,
   });
 
   const refreshMutation = useMutation({
@@ -163,9 +170,15 @@ export function Acquisition() {
               >
                 {item.classification ?? '?'}
               </button>
-              <span className={`acquisition-state acquisition-state-${item.state}`}>
-                {item.state}
-              </span>
+              {item.state === 'queued' && item.download ? (
+                <span className={`acquisition-state acquisition-task-${item.download.task_state}`}>
+                  {item.download.task_state === 'done' ? 'queued' : item.download.task_state}
+                </span>
+              ) : (
+                <span className={`acquisition-state acquisition-state-${item.state}`}>
+                  {item.state}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -191,6 +204,10 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
   const linkMutation = useMutation({
     mutationFn: (trackId: number) => api.acquisition.linkToTrack(item.id, trackId),
     onSuccess: () => { setLinkSearch(''); invalidate(); },
+  });
+  const queueMutation = useMutation({
+    mutationFn: () => api.acquisition.queueDownload(item.id),
+    onSuccess: invalidate,
   });
 
   const { data: searchResults } = useQuery({
@@ -253,6 +270,22 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
       {corr?.status === 'confirmed' && (
         <div className="acquisition-detail-linked">
           ✓ corresponds to <b>{corr.track_artist} - {corr.track_title}</b>
+        </div>
+      )}
+
+      {item.download?.error && (
+        <div className="acquisition-error">download failed: {item.download.error}</div>
+      )}
+
+      {(item.state === 'new' || (item.state === 'queued' && item.download?.task_state === 'failed')) && (
+        <div className="acquisition-detail-actions">
+          <button
+            className="acquisition-action-button acquisition-action-queue"
+            onClick={() => queueMutation.mutate()}
+            disabled={queueMutation.isPending}
+          >
+            ⇣ {item.download?.task_state === 'failed' ? 'retry download' : 'queue download'}
+          </button>
         </div>
       )}
 

@@ -22,6 +22,7 @@ dependencies = [
     "tensorflow>=2.20.0",
     "types-requests>=2.33.0.20260518",
     "uvicorn>=0.38.0",
+    "yt-dlp>=2026.6.9",
 ]
 
 [project.scripts]
@@ -33,6 +34,7 @@ dev = [
     "mypy>=1.7.0",
     "pytest>=9.0.1",
     "ruff>=0.1.0",
+    "types-yt-dlp>=2026.3.17.20260605",
 ]
 
 [tool.pytest.ini_options]

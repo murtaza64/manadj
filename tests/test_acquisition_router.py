@@ -93,3 +93,19 @@ def test_match_endpoints_smoke(client: TestClient, db_session: Session) -> None:
         json={"url": "https://soundcloud.com/nobody/nothing", "track_id": track.id},
     )
     assert resp.status_code == 404
+
+
+def test_queue_endpoint_smoke(client: TestClient) -> None:
+    client.post("/api/acquisition/refresh")
+    item = client.get("/api/acquisition/items").json()[0]
+
+    resp = client.post(f"/api/acquisition/items/{item['id']}/queue")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["state"] == "queued"
+    assert body["download"]["task_state"] == "pending"
+
+    # queueing a fulfilled/ignored item is a conflict
+    client.patch(f"/api/acquisition/items/{item['id']}/classification", json={"classification": "other"})
+    resp = client.post(f"/api/acquisition/items/{item['id']}/queue")
+    assert resp.status_code == 200  # still queued -> idempotent

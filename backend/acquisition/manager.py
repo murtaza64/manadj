@@ -6,9 +6,12 @@ state, and existing items are never rewritten (see CONTEXT.md: Refresh).
 
 import logging
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from ..tasks.models import Task
 
 from ..models import Track
 from ..track_metadata.file_metadata import FileMetadataError, read_file_metadata
@@ -264,3 +267,21 @@ def link_track_by_url(db: Session, url: str, track_id: int) -> SourceCorresponde
     if item is None:
         raise LookupError(f"no source item with permalink {normalized!r} — refresh first?")
     return link_item_to_track(db, item.id, track_id)
+
+
+def queue_item(db: Session, item_id: int) -> "Task":
+    """Queue a Source Item for download. Idempotent while a task is in flight."""
+    from ..tasks.manager import create_task, list_tasks
+
+    item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    if item.state not in ("new", "queued"):
+        raise ValueError(f"source item {item_id} is {item.state}; only new items can be queued")
+
+    ref = f"source_item:{item_id}"
+    for task in list_tasks(db, ref=ref):
+        if task.state in ("pending", "running"):
+            return task
+    task = create_task(db, "download", {"source_item_id": item_id}, ref=ref)
+    item.state = "queued"
+    db.commit()
+    return task

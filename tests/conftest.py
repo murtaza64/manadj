@@ -97,10 +97,29 @@ def audio_file(tmp_path: Path) -> Callable[..., Path]:
 
 
 class FakeSource:
-    """Fake at the Source seam: canned metadata, no network (ADR-0002)."""
+    """Fake at the Source seam: canned metadata, no network (ADR-0002).
 
-    def __init__(self, items: list[SourceItemData]) -> None:
+    "Downloads" by copying a committed audio fixture into the target dir;
+    configure with download_file, or download_error to simulate failures.
+    """
+
+    def __init__(
+        self,
+        items: list[SourceItemData],
+        download_file: Path | None = None,
+        download_error: Exception | None = None,
+    ) -> None:
         self._items = items
+        self._download_file = download_file
+        self._download_error = download_error
 
     def list_items(self) -> list[SourceItemData]:
         return self._items
+
+    def download(self, permalink_url: str, dest_dir: Path, basename: str) -> Path:
+        if self._download_error is not None:
+            raise self._download_error
+        assert self._download_file is not None, "FakeSource not configured for downloads"
+        dest = dest_dir / f"{basename}{self._download_file.suffix}"
+        shutil.copy(self._download_file, dest)
+        return dest

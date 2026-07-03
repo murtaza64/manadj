@@ -30,6 +30,25 @@ class SourceItem(Base):
     first_fetched_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
 
 
+class AudioProvenance(Base):
+    """Audio Provenance: where a Track's audio file came from (see CONTEXT.md).
+
+    Distinct from Source Correspondence — a Track can correspond to a Source
+    track while its audio was bought elsewhere. This row exists only when
+    manadj itself performed the download.
+    """
+
+    __tablename__ = "audio_provenances"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    track_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True
+    )
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
+
+
 # Correspondence statuses: 'proposed' awaits user review; 'confirmed' fulfills
 # the Source Item; 'rejected' is remembered so matching never re-proposes it.
 CORRESPONDENCE_STATUSES = ("proposed", "confirmed", "rejected")

@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 from ..config import get_config
 from ..database import get_db
 from ..models import Track
+from ..tasks.manager import list_tasks
 from .manager import (
     accept_proposal,
     link_item_to_track,
     link_track_by_url,
     list_source_items,
+    queue_item,
     refresh,
     reject_proposal,
     set_classification,
@@ -52,6 +54,7 @@ class SourceItemResponse(BaseModel):
     classification: str | None
     liked_at: str | None
     correspondence: "CorrespondenceInfo | None" = None
+    download: "DownloadStatus | None" = None
 
     model_config = {"from_attributes": True}
 
@@ -76,6 +79,11 @@ class LinkRequest(BaseModel):
 class LinkByUrlRequest(BaseModel):
     url: str
     track_id: int
+
+
+class DownloadStatus(BaseModel):
+    task_state: str
+    error: str | None
 
 
 @router.post("/refresh", response_model=RefreshResponse)
@@ -109,13 +117,28 @@ def _correspondence_map(db: Session) -> dict[int, CorrespondenceInfo]:
     }
 
 
+def _download_map(db: Session) -> dict[int, DownloadStatus]:
+    """source_item_id -> latest download-task status."""
+    statuses: dict[int, DownloadStatus] = {}
+    from ..tasks.models import Task
+
+    for task in db.query(Task).filter(Task.type == "download").order_by(Task.id).all():
+        if task.ref and task.ref.startswith("source_item:"):
+            statuses[int(task.ref.split(":", 1)[1])] = DownloadStatus(
+                task_state=task.state, error=task.error
+            )
+    return statuses
+
+
 @router.get("/items", response_model=list[SourceItemResponse])
 def get_source_items(db: Session = Depends(get_db)) -> list[SourceItemResponse]:
     correspondences = _correspondence_map(db)
+    downloads = _download_map(db)
     responses = []
     for item in list_source_items(db):
         resp = SourceItemResponse.model_validate(item)
         resp.correspondence = correspondences.get(item.id)
+        resp.download = downloads.get(item.id)
         responses.append(resp)
     return responses
 
@@ -124,7 +147,21 @@ def _item_response(db: Session, item_id: int) -> SourceItemResponse:
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
     resp = SourceItemResponse.model_validate(item)
     resp.correspondence = _correspondence_map(db).get(item.id)
+    tasks = list_tasks(db, ref=f"source_item:{item_id}")
+    if tasks:
+        resp.download = DownloadStatus(task_state=tasks[0].state, error=tasks[0].error)
     return resp
+
+
+@router.post("/items/{item_id}/queue", response_model=SourceItemResponse)
+def queue_download(item_id: int, db: Session = Depends(get_db)) -> SourceItemResponse:
+    try:
+        queue_item(db, item_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="source item not found")
+    return _item_response(db, item_id)
 
 
 @router.post("/items/{item_id}/accept-match", response_model=SourceItemResponse)

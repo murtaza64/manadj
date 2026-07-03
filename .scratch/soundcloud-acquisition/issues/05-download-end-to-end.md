@@ -18,12 +18,12 @@ UI: queue action per Source Item; per-item status on the row (queued/running/don
 
 ## Acceptance criteria
 
-- [ ] Queueing a Source Item from the UI produces a persisted task; the worker downloads and completes the chain
-- [ ] New Track has Cleanup-applied title/artist, duration, Correspondence, Provenance; Source Item is `fulfilled`
-- [ ] Track creation goes through the normal Disk Import path (no parallel code path)
-- [ ] Filename collision fails the task with a visible error
-- [ ] Tasks survive restart; interrupted `running` tasks recovered on startup
-- [ ] Task system tested via its module interface with a synchronous run-pending entry point; download chain tested with the fake source copying audio fixtures; Cleanup rules unit-tested; heavy-dep guard stays green
+- [x] Queueing a Source Item from the UI produces a persisted task; the worker downloads and completes the chain
+- [x] New Track has Cleanup-applied title/artist, duration, Correspondence, Provenance; Source Item is `fulfilled`
+- [x] Track creation goes through the normal Disk Import path (no parallel code path)
+- [x] Filename collision fails the task with a visible error
+- [x] Tasks survive restart; interrupted `running` tasks recovered on startup
+- [x] Task system tested via its module interface with a synchronous run-pending entry point; download chain tested with the fake source copying audio fixtures; Cleanup rules unit-tested; heavy-dep guard stays green
 
 ## Blocked by
 
