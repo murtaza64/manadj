@@ -6,6 +6,8 @@ import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
+import { elementClock } from '../playback/clock';
+import { useAudio } from '../hooks/useAudio';
 import BpmInput from './BpmInput';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, BeatgridIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
@@ -29,6 +31,8 @@ export interface TagEditorHandle {
 const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate, currentTime, onEnergyEditModeChange }, ref) => {
   const isDisabled = !track;
   const queryClient = useQueryClient();
+  const audio = useAudio();
+  const minimapClock = useMemo(() => elementClock(audio.audioRef), [audio.audioRef]);
 
   const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(
     new Set(track?.tags.map(t => t.id) || [])
@@ -491,7 +495,12 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             </button>
             <NeedleIcon />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <WaveformMinimap trackId={track?.id ?? null} />
+              <WaveformMinimap
+                trackId={track?.id ?? null}
+                clock={minimapClock}
+                cuePoint={audio.cuePoint}
+                onSeek={audio.seek}
+              />
             </div>
           </div>
 

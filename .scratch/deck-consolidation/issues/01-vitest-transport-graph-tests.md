@@ -26,3 +26,7 @@ No Web Audio mocking, no engine/renderer/view tests — pure modules only, per A
 ## Blocked by
 
 None - can start immediately.
+
+## Comments
+
+Implemented in jj change `prywqsxu` (deck-consolidation: 01-vitest-transport-graph-tests). 46 tests, all green; typecheck/eslint/pytest green.

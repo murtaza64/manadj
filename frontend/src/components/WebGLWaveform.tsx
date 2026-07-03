@@ -1,222 +1,93 @@
-import { useEffect, useRef, useState } from 'react';
-import { WebGLWaveformRenderer } from '../utils/WebGLWaveformRenderer';
-import { useAudio } from '../hooks/useAudio';
+import { useRef } from 'react';
+import { useWaveformRenderer } from '../hooks/useWaveformRenderer';
 import { useWaveformData } from '../hooks/useWaveformData';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useHotCues } from '../hooks/useHotCues';
+import type { PlaybackClock } from '../playback/clock';
 import './Waveform.css';
 
-// Expose renderer class globally for debugging
-if (typeof window !== 'undefined') {
-  (window as any).WebGLWaveformRenderer = WebGLWaveformRenderer;
+/** The transport operations drag-to-scrub needs. */
+export interface ScrubTransport {
+  isPlaying(): boolean;
+  pause(): void;
+  play(): void;
+  seek(time: number): void;
 }
 
 interface WebGLWaveformProps {
   trackId: number | null;
+  clock: PlaybackClock;
+  cuePoint: number | null;
+  transport: ScrubTransport;
   className?: string;
 }
 
-export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rendererRef = useRef<WebGLWaveformRenderer | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Get audio state and controls from context
-  const audio = useAudio();
-
-  // Fetch waveform data
+export default function WebGLWaveform({
+  trackId,
+  clock,
+  cuePoint,
+  transport,
+  className,
+}: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformData(trackId);
-
-  // Fetch beatgrid data
   const { data: beatgridData } = useBeatgridData(trackId);
+  const { data: hotCues = [] } = useHotCues(trackId);
 
-  // Fetch hot cues
-  const { data: hotCuesArray = [] } = useHotCues(trackId);
+  const { canvasRef, rendererRef, initError } = useWaveformRenderer({
+    clock,
+    waveformData,
+    config: {
+      isMinimapMode: false,
+      playMarkerPosition: 0.25,
+      maxZoom: 50.0,
+      minZoom: 0.5,
+    },
+    cuePoint,
+    hotCues,
+    beatgrid: beatgridData?.data ?? null,
+  });
 
-  // Drag state
+  // Drag-to-scrub state
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const wasPlaying = useRef(false);
 
-  // Initialize renderer (only when waveform data changes)
-  useEffect(() => {
-    if (!canvasRef.current || !waveformData) return;
-
-    try {
-      const renderer = new WebGLWaveformRenderer(canvasRef.current, {
-        isMinimapMode: false,
-        playMarkerPosition: 0.25,
-        maxZoom: 50.0,
-        minZoom: 0.5,
-      });
-
-      renderer.setWaveformData(waveformData);
-
-      // Set initial cue point if available
-      if (audio.cuePoint !== null) {
-        renderer.setCuePoint(audio.cuePoint);
-      }
-
-      // Set initial hot cues if already loaded
-      if (hotCuesArray && hotCuesArray.length > 0) {
-        renderer.setHotCues(hotCuesArray);
-      }
-
-      // Set initial beatgrid if already loaded
-      if (beatgridData) {
-        renderer.setBeatgrid(
-          beatgridData.data.beat_times,
-          beatgridData.data.downbeat_times
-        );
-      }
-
-      // Start render loop
-      if (audio.audioRef.current) {
-        renderer.startRenderLoop(audio.audioRef.current);
-      }
-
-      rendererRef.current = renderer;
-      setError(null);
-
-      return () => {
-        renderer.stopRenderLoop();
-        renderer.dispose();
-        rendererRef.current = null;
-      };
-    } catch (err) {
-      setError('Failed to initialize WebGL waveform renderer');
-      console.error('WebGL waveform renderer error:', err);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waveformData]);
-
-  // Update cue point when it changes
-  useEffect(() => {
-    if (rendererRef.current) {
-      rendererRef.current.setCuePoint(audio.cuePoint);
-    }
-  }, [audio.cuePoint]);
-
-  // Update beatgrid when data changes
-  useEffect(() => {
-    if (rendererRef.current && beatgridData) {
-      rendererRef.current.setBeatgrid(
-        beatgridData.data.beat_times,
-        beatgridData.data.downbeat_times
-      );
-      // Force a render to show the beatgrid immediately
-      rendererRef.current.render();
-    }
-  }, [beatgridData]);
-
-  // Update hot cues when data changes
-  useEffect(() => {
-    if (rendererRef.current && hotCuesArray) {
-      rendererRef.current.setHotCues(hotCuesArray);
-      // Force a render to show hot cues immediately
-      rendererRef.current.render();
-    }
-  }, [hotCuesArray]);
-
-  // Sync renderer position on seeks/cue updates and play state changes
-  useEffect(() => {
-    if (rendererRef.current && audio.audioRef.current) {
-      rendererRef.current.setPlayPosition(audio.audioRef.current.currentTime);
-    }
-  }, [audio.isPlaying, audio.cuePoint, audio.seekVersion, audio.audioRef]);
-
-  // Drag-to-scrub handlers
   const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!rendererRef.current?.waveformData) return;
-
-    const renderer = rendererRef.current;
+    if (!rendererRef.current) return;
 
     isDragging.current = true;
     dragStartX.current = event.clientX;
+    event.currentTarget.style.cursor = 'grabbing';
 
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.style.cursor = 'grabbing';
-    }
-
-    // Pause playback during drag if playing
-    wasPlaying.current = audio.isPlaying;
+    // Pause playback during the drag; the clock then holds still while the
+    // drag offset shifts the visible content.
+    wasPlaying.current = transport.isPlaying();
     if (wasPlaying.current) {
-      audio.pause();
-
-      // Sync renderer position with current audio time before starting drag
-      // (render loop only updates position when playing)
-      if (audio.audioRef.current && renderer.waveformData) {
-        renderer.setPlayPosition(audio.audioRef.current.currentTime);
-      }
+      transport.pause();
     }
   };
 
   const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDragging.current || !rendererRef.current?.waveformData) return;
-
-    const deltaX = event.clientX - dragStartX.current;
-
-    // Apply drag offset directly (natural scroll: drag right = move forward in time)
-    rendererRef.current.manualDragOffset = deltaX;
+    if (!isDragging.current || !rendererRef.current) return;
+    rendererRef.current.setDragOffset(event.clientX - dragStartX.current);
   };
 
-  const handleMouseUp = () => {
+  const endDrag = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDragging.current) return;
-
     isDragging.current = false;
+    event.currentTarget.style.cursor = 'grab';
 
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.style.cursor = 'grab';
+    const seekTime = rendererRef.current?.commitDrag();
+    if (seekTime !== undefined) {
+      transport.seek(seekTime);
     }
-
-    // Calculate new playPosition based on drag offset
-    const renderer = rendererRef.current;
-    if (renderer?.waveformData && canvas && audio.audioRef.current) {
-      // Convert pixel offset to position delta (use display width, not buffer width)
-      const rect = canvas.getBoundingClientRect();
-      const visibleRange = renderer.lastDisplayedPosition - renderer.firstDisplayedPosition;
-      const pixelDelta = renderer.manualDragOffset;
-      const positionDelta = (pixelDelta / rect.width) * visibleRange;
-
-      // Update playPosition
-      renderer.playPosition -= positionDelta;
-
-      // Clear manual offset (now baked into playPosition and display window)
-      renderer.manualDragOffset = 0;
-
-      // Recalculate display window for the new playPosition
-      renderer.calculateDisplayWindow();
-
-      // Seek audio
-      const seekTime = renderer.playPosition * renderer.waveformData.duration;
-      audio.seek(Math.max(0, Math.min(audio.duration, seekTime)));
-
-      // Manually sync renderer position immediately
-      if (audio.audioRef.current) {
-        renderer.setPlayPosition(audio.audioRef.current.currentTime);
-      }
-
-      // Resume playback if it was playing before drag
-      if (wasPlaying.current) {
-        audio.play();
-      }
+    if (wasPlaying.current) {
+      transport.play();
     }
   };
 
-  const handleMouseLeave = () => {
-    if (!isDragging.current) return;
-
-    // Same as mouse up
-    handleMouseUp();
-  };
-
-  // Wheel zoom handler
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    if (rendererRef.current) {
-      rendererRef.current.handleWheel(event.nativeEvent);
-    }
+    rendererRef.current?.handleWheel(event.nativeEvent);
   };
 
   // Loading and error states
@@ -228,11 +99,11 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
     );
   }
 
-  if (fetchError || error) {
+  if (fetchError || initError) {
     return (
       <div className={`waveform-container ${className || ''}`}>
         <div className="waveform-error">
-          {error || 'Failed to load waveform'}
+          {initError || 'Failed to load waveform'}
         </div>
       </div>
     );
@@ -254,8 +125,8 @@ export default function WebGLWaveform({ trackId, className }: WebGLWaveformProps
         style={{ cursor: 'grab' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseLeave}
+        onMouseUp={endDrag}
+        onMouseLeave={endDrag}
         onWheel={handleWheel}
       />
     </div>

@@ -30,3 +30,7 @@ Make the waveform renderer depend on a clock interface instead of an audio eleme
 ## Blocked by
 
 None - can start immediately (01 recommended first as the safety net).
+
+## Comments
+
+Implemented in jj change `uovsqlyx` (deck-consolidation: 02-renderer-clock-seam-practice-waveforms). Renderer 1698 → ~1080 lines (all clock-jitter/telemetry machinery deleted); shared useWaveformRenderer hook; Practice view has waveform + minimap; library on elementClock adapter until issue 03; prototype + CORS entry deleted. Note: PlaybackClock ended up narrower than the issue sketch (getPlayhead only) — running-state/rate proved unnecessary since the loop reads the playhead every frame; drag gets running-state via ScrubTransport.

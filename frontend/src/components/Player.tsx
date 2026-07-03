@@ -1,6 +1,8 @@
-import { useEffect, useState, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
 import type { Track } from '../types';
 import WebGLWaveform from './WebGLWaveform';
+import type { ScrubTransport } from './WebGLWaveform';
+import { elementClock } from '../playback/clock';
 import { useAudio } from '../hooks/useAudio';
 import { useWaveformData } from '../hooks/useWaveformData';
 import { useHotCues } from '../hooks/useHotCues';
@@ -79,11 +81,26 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
   // Check if at cue point for button styling
   const atCuePoint = audio.cuePoint !== null && Math.abs(displayTime - audio.cuePoint) < 0.1;
 
+  // Clock + transport for the waveform (element-backed until the library
+  // moves onto the shared DeckEngine — see deck-consolidation issue 03).
+  const clock = useMemo(() => elementClock(audio.audioRef), [audio.audioRef]);
+  const scrubTransport: ScrubTransport = {
+    isPlaying: () => audio.isPlaying,
+    pause: audio.pause,
+    play: audio.play,
+    seek: audio.seek,
+  };
+
   return (
     <>
       {/* Waveform with controls overlays */}
       <div style={{ position: 'relative' }}>
-        <WebGLWaveform trackId={track?.id ?? null} />
+        <WebGLWaveform
+          trackId={track?.id ?? null}
+          clock={clock}
+          cuePoint={audio.cuePoint}
+          transport={scrubTransport}
+        />
 
         {/* Controls overlay - top left */}
         <div className="player-controls-overlay">

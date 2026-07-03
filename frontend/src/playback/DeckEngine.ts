@@ -10,7 +10,7 @@
  * interprets its AudioEffects against the graph (graph.ts).
  */
 
-import { initialTransportState, reduceTransport } from './transport';
+import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportEvent, TransportState } from './transport';
 import { DeckGraph, DECLICK_S } from './graph';
 import type { EqBand } from './graph';
@@ -212,6 +212,11 @@ export class DeckEngine {
   }
 
   // ── Reads ──────────────────────────────────────────────────────────────
+
+  /** True if the deck's audio is audibly running (playing or any preview). */
+  isAudioRunning(): boolean {
+    return isAudioRunning(this.transport);
+  }
 
   /** Current playhead in seconds. Cheap; safe to poll per animation frame. */
   getPlayhead(): number {

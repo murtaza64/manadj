@@ -3,6 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { DeckEngine } from '../playback/DeckEngine';
 import type { EqBand } from '../playback/graph';
+import WebGLWaveform from './WebGLWaveform';
+import type { ScrubTransport } from './WebGLWaveform';
+import WaveformMinimap from './WaveformMinimap';
 import { useHotCues } from '../hooks/useHotCues';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { formatKeyDisplay } from '../utils/keyUtils';
@@ -16,6 +19,8 @@ interface PracticeViewProps {
 const BEATJUMP_BEATS = 32;
 const EQ_BANDS: EqBand[] = ['high', 'mid', 'low'];
 const HOT_CUE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
+/** Stable identity so effects keyed on downbeats don't churn without a beatgrid. */
+const NO_DOWNBEATS: number[] = [];
 
 /** 1-based bar number at `time`, or null before the first downbeat / without a grid. */
 function barNumberAt(downbeats: number[], time: number): number | null {
@@ -153,6 +158,16 @@ export function PracticeView({ onClose }: PracticeViewProps) {
 
   const ready = snapshot.loadState === 'ready';
 
+  // Transport adapter for waveform drag-to-scrub. isPlaying uses
+  // isAudioRunning so a drag during a held preview also pauses — the commit
+  // math needs a stationary playhead.
+  const scrubTransport: ScrubTransport = {
+    isPlaying: () => engine.isAudioRunning(),
+    pause: () => engine.pause(),
+    play: () => engine.play(),
+    seek: (t) => engine.seek(t),
+  };
+
   return (
     <div className="practice-view">
       <div className="practice-header">
@@ -208,12 +223,22 @@ export function PracticeView({ onClose }: PracticeViewProps) {
             )}
           </div>
 
-          <Timeline
+          <WebGLWaveform
+            trackId={loadedTrack?.id ?? null}
+            clock={engine}
+            cuePoint={snapshot.cuePoint}
+            transport={scrubTransport}
+          />
+          <WaveformMinimap
+            trackId={loadedTrack?.id ?? null}
+            clock={engine}
+            cuePoint={snapshot.cuePoint}
+            onSeek={(t) => engine.seek(t)}
+          />
+          <DeckReadout
             engine={engine}
             duration={snapshot.duration}
-            cuePoint={snapshot.cuePoint}
-            downbeats={beatgrid?.data.downbeat_times ?? []}
-            hotCues={hotCues ?? []}
+            downbeats={beatgrid?.data.downbeat_times ?? NO_DOWNBEATS}
           />
 
           {/* Transport */}
@@ -338,108 +363,33 @@ export function PracticeView({ onClose }: PracticeViewProps) {
 }
 
 /**
- * Dumb seekable timeline: playhead, downbeat bar ticks, cue + hot cue markers,
- * time readout. Runs its own rAF loop against the engine clock so playhead
- * motion doesn't re-render the view.
+ * Time + bar readout. Runs its own rAF loop against the engine clock and
+ * writes text directly so playhead motion doesn't re-render the view.
  */
-function Timeline({
+function DeckReadout({
   engine,
   duration,
-  cuePoint,
   downbeats,
-  hotCues,
 }: {
   engine: DeckEngine;
   duration: number;
-  cuePoint: number | null;
   downbeats: number[];
-  hotCues: HotCue[];
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Latest props readable from inside the rAF loop without restarting it.
-  const drawProps = useRef({ duration, cuePoint, downbeats, hotCues });
-  useEffect(() => {
-    drawProps.current = { duration, cuePoint, downbeats, hotCues };
-  });
+  const spanRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
     let raf = 0;
-    const draw = () => {
-      raf = requestAnimationFrame(draw);
-      const { duration, cuePoint, downbeats, hotCues } = drawProps.current;
-
-      const dpr = window.devicePixelRatio || 1;
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
-      if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-      }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      ctx.fillStyle = '#11111b';
-      ctx.fillRect(0, 0, w, h);
-      if (duration <= 0) return;
-
-      const x = (t: number) => (t / duration) * w;
-
-      // Downbeat (bar) ticks, decimated to >= 2px spacing.
-      ctx.fillStyle = '#45475a';
-      let lastX = -Infinity;
-      for (const t of downbeats) {
-        const px = x(t);
-        if (px - lastX < 2) continue;
-        lastX = px;
-        ctx.fillRect(px, h * 0.35, 1, h * 0.65);
-      }
-
-      // Hot cue markers.
-      for (const cue of hotCues) {
-        ctx.fillStyle = cue.color || '#39ff14';
-        ctx.fillRect(x(cue.time_seconds) - 1.5, 0, 3, h);
-      }
-
-      // Main cue marker.
-      if (cuePoint !== null) {
-        ctx.fillStyle = '#ff6b00';
-        ctx.fillRect(x(cuePoint) - 1.5, 0, 3, h);
-      }
-
-      // Playhead.
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      if (!spanRef.current) return;
       const playhead = engine.getPlayhead();
-      ctx.fillStyle = '#00e5ff';
-      ctx.fillRect(x(playhead) - 1, 0, 2, h);
-
-      // Time + bar readout.
       const bar = barNumberAt(downbeats, playhead);
-      ctx.fillStyle = '#cdd6f4';
-      ctx.font = '12px monospace';
-      ctx.textBaseline = 'top';
-      ctx.fillText(
-        `${formatTime(playhead)} / ${formatTime(duration)}${bar !== null ? `  bar ${bar}` : ''}`,
-        6,
-        4
-      );
+      spanRef.current.textContent =
+        `${formatTime(playhead)} / ${formatTime(duration)}${bar !== null ? `  bar ${bar}` : ''}`;
     };
-    draw();
+    tick();
     return () => cancelAnimationFrame(raf);
-  }, [engine]);
+  }, [engine, duration, downbeats]);
 
-  return (
-    <canvas
-      ref={canvasRef}
-      className="deck-timeline"
-      onClick={(e) => {
-        const { duration } = drawProps.current;
-        if (duration <= 0) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        engine.seek(((e.clientX - rect.left) / rect.width) * duration);
-      }}
-    />
-  );
+  return <span className="deck-readout" ref={spanRef} />;
 }
