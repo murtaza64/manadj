@@ -17,6 +17,7 @@
  */
 
 import type { PlaybackClock } from '../playback/clock';
+import { zoomFactorForVisibleSeconds } from './waveformZoom';
 
 /** m:ss.t with tenths — matches DJ-deck display convention. */
 function formatReadoutTime(seconds: number): string {
@@ -1120,6 +1121,20 @@ export class WebGLWaveformRenderer {
   // Zoom controls
   public setZoom(newZoom: number): void {
     this.zoomFactor = Math.max(this.minZoom, Math.min(this.maxZoom, newZoom));
+    this.invalidateWaveformCache();
+    this.calculateDisplayWindow();
+  }
+
+  /**
+   * Time-based zoom: make `seconds` of track fill the canvas regardless of
+   * duration (linked cross-deck zoom, performance-mode issue 05). Clamped in
+   * seconds by the pure conversion; deliberately bypasses the track-relative
+   * min/max factor clamps, which would reintroduce the duration dependence
+   * this operation exists to remove.
+   */
+  public setVisibleSeconds(seconds: number): void {
+    if (!this.waveformData) return;
+    this.zoomFactor = zoomFactorForVisibleSeconds(this.waveformData.duration, seconds);
     this.invalidateWaveformCache();
     this.calculateDisplayWindow();
   }

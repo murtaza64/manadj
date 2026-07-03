@@ -5,7 +5,7 @@
  * bottom 50vh: the real Library browse surface (browseOnly) with per-row
  * load-to-A/B buttons. Mouse-only in this slice; the keyboard hub is issue 04.
  */
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import Library from '../Library';
 import { DeckScope } from '../../contexts/DeckContext';
 import { useDecks } from '../../hooks/useDeck';
@@ -13,6 +13,7 @@ import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
 import { MixerPanel } from './MixerPanel';
+import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
 import './PerformanceView.css';
 
 export function PerformanceView({ onClose }: { onClose: () => void }) {
@@ -26,6 +27,11 @@ export function PerformanceView({ onClose }: { onClose: () => void }) {
     [loadA, loadB]
   );
 
+  // One zoom for both waveforms, in visible seconds (issue 05): equal
+  // effective BPM must mean equal beat spacing on screen. Survives loads —
+  // each waveform re-derives its track-relative factor from this value.
+  const [visibleSeconds, setVisibleSeconds] = useState(DEFAULT_VISIBLE_SECONDS);
+
   return (
     <div className="perf-root">
       <button className="player-button perf-back" onClick={onClose}>
@@ -36,10 +42,16 @@ export function PerformanceView({ onClose }: { onClose: () => void }) {
       <div className="perf-surface">
         <div className="perf-waves">
           <DeckScope deck="A">
-            <DeckWaveform />
+            <DeckWaveform
+              visibleSeconds={visibleSeconds}
+              onVisibleSecondsChange={setVisibleSeconds}
+            />
           </DeckScope>
           <DeckScope deck="B">
-            <DeckWaveform />
+            <DeckWaveform
+              visibleSeconds={visibleSeconds}
+              onVisibleSecondsChange={setVisibleSeconds}
+            />
           </DeckScope>
         </div>
         <div className="perf-middle">

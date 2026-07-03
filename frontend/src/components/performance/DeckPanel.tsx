@@ -70,7 +70,14 @@ function useTrackEdit(track: Track | null) {
 
 // ── Waveform ─────────────────────────────────────────────────────────────
 
-export function DeckWaveform() {
+export function DeckWaveform({
+  visibleSeconds,
+  onVisibleSecondsChange,
+}: {
+  /** The one zoom both decks share (seconds visible) — held by the view. */
+  visibleSeconds: number;
+  onVisibleSecondsChange: (seconds: number) => void;
+}) {
   const { engine, loadedTrack } = useDeck();
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
@@ -91,6 +98,8 @@ export function DeckWaveform() {
       cuePoint={cuePoint}
       transport={transport}
       dimmed={loadedTrack !== null && !ready}
+      visibleSeconds={visibleSeconds}
+      onVisibleSecondsChange={onVisibleSecondsChange}
     />
   );
 }
