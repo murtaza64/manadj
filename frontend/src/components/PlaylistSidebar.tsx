@@ -12,6 +12,7 @@ interface PlaylistSidebarProps {
   onSelectPlaylist: (playlistId: number) => void;
   onTrackDrop: (playlistId: number, trackId: number) => void;
   onOpenPlaylistSync: () => void;
+  onOpenPractice: () => void;
 }
 
 export default function PlaylistSidebar({
@@ -21,6 +22,7 @@ export default function PlaylistSidebar({
   onSelectPlaylist,
   onTrackDrop,
   onOpenPlaylistSync,
+  onOpenPractice,
 }: PlaylistSidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
@@ -128,6 +130,13 @@ export default function PlaylistSidebar({
             className="sync-button"
           >
             <span style={{ fontSize: '16px' }}>⟳</span> Sync
+          </button>
+          <button
+            onClick={onOpenPractice}
+            className="sync-button"
+            title="Practice view"
+          >
+            <span style={{ fontSize: '16px' }}>▸</span>
           </button>
         </div>
 

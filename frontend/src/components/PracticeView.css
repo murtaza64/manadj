@@ -1,0 +1,303 @@
+.practice-view {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--base, #1e1e2e);
+  color: var(--text, #cdd6f4);
+}
+
+.practice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--surface0, #313244);
+  background: var(--crust, #11111b);
+}
+
+.practice-header h1 {
+  margin: 0;
+  font-size: 18px;
+  color: #ff2d95;
+}
+
+.practice-close {
+  background: none;
+  border: 1px solid var(--surface0, #313244);
+  color: var(--text, #cdd6f4);
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.practice-close:hover {
+  border-color: #00e5ff;
+}
+
+.practice-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Track picker ─────────────────────────────────────────────── */
+
+.practice-picker {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--surface0, #313244);
+  background: var(--crust, #11111b);
+}
+
+.practice-picker input {
+  margin: 10px;
+  padding: 8px;
+  background: var(--base, #1e1e2e);
+  border: 1px solid var(--surface0, #313244);
+  border-radius: 4px;
+  color: var(--text, #cdd6f4);
+}
+
+.practice-picker input:focus {
+  outline: none;
+  border-color: #00e5ff;
+}
+
+.practice-picker-results {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.practice-picker-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--surface0, #313244);
+}
+
+.practice-picker-row:hover {
+  background: var(--surface0, #313244);
+}
+
+.practice-picker-row.loaded {
+  border-left: 3px solid #ff2d95;
+  background: var(--surface0, #313244);
+}
+
+.picker-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-artist {
+  font-size: 12px;
+  color: var(--subtext0, #a6adc8);
+}
+
+.picker-meta {
+  font-size: 11px;
+  color: #00e5ff;
+}
+
+/* ── Deck ─────────────────────────────────────────────────────── */
+
+.practice-deck {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  min-width: 0;
+}
+
+.deck-trackinfo {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 24px;
+}
+
+.deck-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.deck-title.empty {
+  color: var(--subtext0, #a6adc8);
+  font-weight: 400;
+}
+
+.deck-artist {
+  color: var(--subtext0, #a6adc8);
+}
+
+.deck-meta {
+  color: #00e5ff;
+  font-size: 13px;
+}
+
+.deck-loadstate {
+  color: #ffe600;
+  font-size: 13px;
+}
+
+.deck-loadstate.error {
+  color: #ff2d55;
+}
+
+.deck-timeline {
+  width: 100%;
+  height: 72px;
+  border: 1px solid var(--surface0, #313244);
+  border-radius: 4px;
+  cursor: crosshair;
+}
+
+/* ── Transport ────────────────────────────────────────────────── */
+
+.deck-transport {
+  display: flex;
+  gap: 8px;
+}
+
+.deck-btn {
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  background: var(--crust, #11111b);
+  border: 2px solid var(--surface0, #313244);
+  border-radius: 6px;
+  color: var(--text, #cdd6f4);
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+
+.deck-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.deck-btn.cue {
+  border-color: #ff6b00;
+  color: #ff6b00;
+}
+
+.deck-btn.cue.active {
+  background: #ff6b00;
+  color: #11111b;
+}
+
+.deck-btn.play {
+  border-color: #39ff14;
+  color: #39ff14;
+}
+
+.deck-btn.play.active {
+  background: #39ff14;
+  color: #11111b;
+}
+
+/* ── Hot cues ─────────────────────────────────────────────────── */
+
+.deck-hotcues {
+  display: flex;
+  gap: 6px;
+}
+
+.hotcue-btn {
+  width: 56px;
+  height: 40px;
+  background: var(--crust, #11111b);
+  border: 2px solid #39ff14;
+  border-radius: 4px;
+  color: #39ff14;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hotcue-btn:disabled {
+  border-color: var(--surface0, #313244);
+  color: var(--surface0, #313244);
+  cursor: default;
+}
+
+.hotcue-btn.active {
+  background: currentColor;
+}
+
+/* ── Sound controls ───────────────────────────────────────────── */
+
+.deck-sound {
+  display: flex;
+  gap: 40px;
+  align-items: flex-end;
+}
+
+.deck-eq {
+  display: flex;
+  gap: 16px;
+}
+
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #ffe600;
+}
+
+.eq-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  height: 120px;
+  accent-color: #ffe600;
+}
+
+.deck-filter,
+.deck-pitch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.deck-filter {
+  color: #ff2d95;
+}
+
+.deck-filter input {
+  width: 180px;
+  accent-color: #ff2d95;
+}
+
+.deck-pitch {
+  color: #00e5ff;
+}
+
+.deck-pitch input {
+  width: 180px;
+  accent-color: #00e5ff;
+}
+
+.pitch-reset {
+  padding: 2px 10px;
+  background: none;
+  border: 1px solid #00e5ff;
+  border-radius: 3px;
+  color: #00e5ff;
+  cursor: pointer;
+  font-size: 11px;
+}

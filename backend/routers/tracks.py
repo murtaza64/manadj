@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas, track_metadata
@@ -131,7 +131,7 @@ def refresh_metadata(
 
 @router.get("/{track_id}/audio")
 def get_track_audio(track_id: int, db: Session = Depends(get_db)):
-    """Stream audio file for a track."""
+    """Serve a track's audio file (with HTTP Range support)."""
     track = crud.get_track(db, track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
@@ -140,29 +140,18 @@ def get_track_audio(track_id: int, db: Session = Depends(get_db)):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
 
-    # Detect MIME type
     mime_type, _ = mimetypes.guess_type(str(file_path))
     if mime_type is None:
         mime_type = "audio/mpeg"
 
-    # Stream file
-    def iterfile():
-        with open(file_path, "rb") as f:
-            yield from f
-
-    # Encode filename for Content-Disposition header (RFC 5987)
-    # Use ASCII-safe filename and add UTF-8 encoded filename* parameter
-    from urllib.parse import quote
-    ascii_filename = file_path.name.encode('ascii', 'ignore').decode('ascii')
-    utf8_filename = quote(file_path.name.encode('utf-8'))
-
-    return StreamingResponse(
-        iterfile(),
+    # FileResponse does efficient chunked sends and real 206 Range responses.
+    # (Its predecessor here iterated the file *by line*, which shredded audio
+    # into a huge number of tiny chunks and made fetches extremely slow.)
+    return FileResponse(
+        file_path,
         media_type=mime_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Disposition": f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{utf8_filename}"
-        }
+        filename=file_path.name,
+        content_disposition_type="inline",
     )
 
 

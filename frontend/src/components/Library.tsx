@@ -184,9 +184,10 @@ type ViewType = 'all' | 'unprocessed' | 'playlist';
 
 interface LibraryProps {
   onOpenPlaylistSync: () => void;
+  onOpenPractice: () => void;
 }
 
-export default function Library({ onOpenPlaylistSync }: LibraryProps) {
+export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryProps) {
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [selectedView, setSelectedView] = useState<ViewType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
@@ -489,6 +490,7 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
           }}
           onTrackDrop={handleTrackDrop}
           onOpenPlaylistSync={onOpenPlaylistSync}
+          onOpenPractice={onOpenPractice}
         />
 
         {/* Main library area (filter + table) */}

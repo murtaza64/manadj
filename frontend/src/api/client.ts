@@ -35,6 +35,9 @@ export const api = {
       return res.json();
     },
 
+    /** URL of a track's audio stream (for audio elements / direct fetch). */
+    audioUrl: (id: number) => `${API_BASE}/tracks/${id}/audio`,
+
     list: async (
       page: number = 1,
       perPage: number = 1000,

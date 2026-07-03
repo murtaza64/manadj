@@ -1,0 +1,445 @@
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../api/client';
+import { DeckEngine } from '../playback/DeckEngine';
+import type { EqBand } from '../playback/graph';
+import { useHotCues } from '../hooks/useHotCues';
+import { useBeatgridData } from '../hooks/useBeatgridData';
+import { formatKeyDisplay } from '../utils/keyUtils';
+import type { HotCue, PaginatedTracks, Track } from '../types';
+import './PracticeView.css';
+
+interface PracticeViewProps {
+  onClose: () => void;
+}
+
+const BEATJUMP_BEATS = 32;
+const EQ_BANDS: EqBand[] = ['high', 'mid', 'low'];
+const HOT_CUE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+/** 1-based bar number at `time`, or null before the first downbeat / without a grid. */
+function barNumberAt(downbeats: number[], time: number): number | null {
+  if (downbeats.length === 0 || time < downbeats[0]) return null;
+  // Binary search: count of downbeats <= time.
+  let lo = 0;
+  let hi = downbeats.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (downbeats[mid] <= time) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function formatTime(seconds: number): string {
+  const s = Math.max(0, seconds);
+  const m = Math.floor(s / 60);
+  const rest = s - m * 60;
+  return `${m}:${rest.toFixed(1).padStart(4, '0')}`;
+}
+
+export function PracticeView({ onClose }: PracticeViewProps) {
+  const [engine] = useState(() => new DeckEngine());
+  useEffect(() => () => engine.dispose(), [engine]);
+
+  const snapshot = useSyncExternalStore(
+    (cb) => engine.subscribe(cb),
+    () => engine.getSnapshot()
+  );
+
+  const [search, setSearch] = useState('');
+  const [loadedTrack, setLoadedTrack] = useState<Track | null>(null);
+
+  const { data: results } = useQuery<PaginatedTracks>({
+    queryKey: ['practice-track-search', search],
+    queryFn: () => api.tracks.list(1, 20, { search: search || undefined }),
+  });
+
+  const { data: hotCues } = useHotCues(loadedTrack?.id ?? null);
+  const { data: beatgrid } = useBeatgridData(loadedTrack?.id ?? null);
+
+  const cuesBySlot = useMemo(() => {
+    const map = new Map<number, HotCue>();
+    for (const cue of hotCues ?? []) map.set(cue.slot_number, cue);
+    return map;
+  }, [hotCues]);
+
+  // Keyboard shortcuts — playback keys from the library hub (useKeyboardShortcuts):
+  // space = play/pause, f = cue (hold), a/s = beatjump, h/l = scrub (hold), 1-8 = hot cues (hold).
+  const [scrubDirection, setScrubDirection] = useState(0);
+  useEffect(() => {
+    const isTyping = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      return (
+        !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      );
+    };
+    const hotCueTime = (slot: number) => cuesBySlot.get(slot)?.time_seconds ?? null;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === ' ') {
+        e.preventDefault();
+        engine.togglePlay();
+      } else if (key === 'f') {
+        e.preventDefault();
+        if (!e.repeat) engine.cueDown();
+      } else if (key === 'a') {
+        e.preventDefault();
+        engine.jumpBeats(-BEATJUMP_BEATS);
+      } else if (key === 's') {
+        e.preventDefault();
+        engine.jumpBeats(BEATJUMP_BEATS);
+      } else if ((key === 'h' || key === 'l') && !e.shiftKey) {
+        e.preventDefault();
+        setScrubDirection(key === 'h' ? -1 : 1);
+      } else if (/^Digit[1-8]$/.test(e.code) && !e.shiftKey) {
+        e.preventDefault();
+        if (e.repeat) return;
+        const slot = Number(e.code.slice(-1));
+        engine.hotCueDown(slot, hotCueTime(slot));
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return;
+      const key = e.key.toLowerCase();
+      if (key === 'f') {
+        e.preventDefault();
+        engine.cueUp();
+      } else if ((key === 'h' || key === 'l') && !e.shiftKey) {
+        e.preventDefault();
+        setScrubDirection(0);
+      } else if (/^Digit[1-8]$/.test(e.code) && !e.shiftKey) {
+        e.preventDefault();
+        const slot = Number(e.code.slice(-1));
+        engine.hotCueUp(slot, hotCueTime(slot));
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keyup', onKeyUp);
+    };
+  }, [engine, cuesBySlot]);
+
+  // Continuous scrub while h/l is held (library parity: ~0.6s of track per second).
+  useEffect(() => {
+    if (scrubDirection === 0) return;
+    const SCRUB_RATE = 0.6;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = (now - last) / 1000;
+      last = now;
+      engine.seek(engine.getPlayhead() + scrubDirection * SCRUB_RATE * dt);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [scrubDirection, engine]);
+
+  const loadTrack = (track: Track) => {
+    setLoadedTrack(track);
+    void engine.load({
+      trackId: track.id,
+      audioUrl: api.tracks.audioUrl(track.id),
+      bpm: track.bpm ?? null,
+    });
+  };
+
+  const ready = snapshot.loadState === 'ready';
+
+  return (
+    <div className="practice-view">
+      <div className="practice-header">
+        <h1>Practice</h1>
+        <button className="practice-close" onClick={onClose}>← Library</button>
+      </div>
+
+      <div className="practice-body">
+        {/* Track picker */}
+        <div className="practice-picker">
+          <input
+            type="text"
+            placeholder="Search tracks…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <div className="practice-picker-results">
+            {(results?.items ?? []).map((track) => (
+              <div
+                key={track.id}
+                className={`practice-picker-row${loadedTrack?.id === track.id ? ' loaded' : ''}`}
+                onClick={() => loadTrack(track)}
+              >
+                <span className="picker-title">{track.title || track.filename}</span>
+                <span className="picker-artist">{track.artist || '—'}</span>
+                <span className="picker-meta">
+                  {track.bpm ? track.bpm.toFixed(1) : '—'} · {formatKeyDisplay(track.key)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Deck */}
+        <div className="practice-deck">
+          <div className="deck-trackinfo">
+            {loadedTrack ? (
+              <>
+                <span className="deck-title">{loadedTrack.title || loadedTrack.filename}</span>
+                <span className="deck-artist">{loadedTrack.artist || '—'}</span>
+                <span className="deck-meta">
+                  {loadedTrack.bpm ? `${loadedTrack.bpm.toFixed(1)} BPM` : 'no BPM'} ·{' '}
+                  {formatKeyDisplay(loadedTrack.key)}
+                </span>
+                {snapshot.loadState === 'fetching' && <span className="deck-loadstate">fetching…</span>}
+                {snapshot.loadState === 'decoding' && <span className="deck-loadstate">decoding…</span>}
+                {snapshot.loadState === 'error' && (
+                  <span className="deck-loadstate error">error: {snapshot.loadError}</span>
+                )}
+              </>
+            ) : (
+              <span className="deck-title empty">No track loaded</span>
+            )}
+          </div>
+
+          <Timeline
+            engine={engine}
+            duration={snapshot.duration}
+            cuePoint={snapshot.cuePoint}
+            downbeats={beatgrid?.data.downbeat_times ?? []}
+            hotCues={hotCues ?? []}
+          />
+
+          {/* Transport */}
+          <div className="deck-transport">
+            <button
+              className={`deck-btn cue${snapshot.previewing ? ' active' : ''}`}
+              disabled={!ready}
+              onPointerDown={(e) => {
+                e.currentTarget.setPointerCapture(e.pointerId);
+                engine.cueDown();
+              }}
+              onPointerUp={() => engine.cueUp()}
+              onPointerCancel={() => engine.cueUp()}
+            >
+              CUE
+            </button>
+            <button
+              className={`deck-btn play${snapshot.playing ? ' active' : ''}`}
+              disabled={!ready}
+              onClick={() => engine.togglePlay()}
+            >
+              {snapshot.playing ? 'PAUSE' : 'PLAY'}
+            </button>
+            <button
+              className="deck-btn jump"
+              disabled={!ready}
+              onClick={() => engine.jumpBeats(-BEATJUMP_BEATS)}
+            >
+              ◀ {BEATJUMP_BEATS}
+            </button>
+            <button
+              className="deck-btn jump"
+              disabled={!ready}
+              onClick={() => engine.jumpBeats(BEATJUMP_BEATS)}
+            >
+              {BEATJUMP_BEATS} ▶
+            </button>
+          </div>
+
+          {/* Hot cues (read-only: jump/preview) */}
+          <div className="deck-hotcues">
+            {HOT_CUE_SLOTS.map((slot) => {
+              const cue = cuesBySlot.get(slot) ?? null;
+              const previewingThis = snapshot.hotCuePreviewSlot === slot;
+              return (
+                <button
+                  key={slot}
+                  className={`hotcue-btn${previewingThis ? ' active' : ''}`}
+                  disabled={!ready || !cue}
+                  style={cue?.color ? { borderColor: cue.color, color: cue.color } : undefined}
+                  onPointerDown={(e) => {
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    engine.hotCueDown(slot, cue?.time_seconds ?? null);
+                  }}
+                  onPointerUp={() => engine.hotCueUp(slot, cue?.time_seconds ?? null)}
+                  onPointerCancel={() => engine.hotCueUp(slot, cue?.time_seconds ?? null)}
+                >
+                  {cue?.label || slot}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Sound controls */}
+          <div className="deck-sound">
+            <div className="deck-eq">
+              {EQ_BANDS.map((band) => (
+                <label key={band} className="eq-band">
+                  <input
+                    className="eq-slider"
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round(snapshot.eq[band] * 100)}
+                    onChange={(e) => engine.setEqValue(band, Number(e.target.value) / 100)}
+                    onDoubleClick={() => engine.setEqValue(band, 0.5)}
+                  />
+                  <span>{band.toUpperCase()}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="deck-filter">
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={Math.round(snapshot.filterPosition * 100)}
+                onChange={(e) => engine.setFilterPosition(Number(e.target.value) / 100)}
+                onDoubleClick={() => engine.setFilterPosition(0)}
+              />
+              <span>
+                FILTER{' '}
+                {Math.abs(snapshot.filterPosition) < 0.05
+                  ? 'off'
+                  : snapshot.filterPosition < 0
+                    ? 'LP'
+                    : 'HP'}
+              </span>
+            </div>
+
+            <div className="deck-pitch">
+              <input
+                type="range"
+                min={-80}
+                max={80}
+                value={Math.round(snapshot.pitchPercent * 10)}
+                onChange={(e) => engine.setPitch(Number(e.target.value) / 10)}
+                onDoubleClick={() => engine.setPitch(0)}
+              />
+              <span>
+                PITCH {snapshot.pitchPercent >= 0 ? '+' : ''}
+                {snapshot.pitchPercent.toFixed(1)}%
+              </span>
+              <button className="pitch-reset" onClick={() => engine.setPitch(0)}>0</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Dumb seekable timeline: playhead, downbeat bar ticks, cue + hot cue markers,
+ * time readout. Runs its own rAF loop against the engine clock so playhead
+ * motion doesn't re-render the view.
+ */
+function Timeline({
+  engine,
+  duration,
+  cuePoint,
+  downbeats,
+  hotCues,
+}: {
+  engine: DeckEngine;
+  duration: number;
+  cuePoint: number | null;
+  downbeats: number[];
+  hotCues: HotCue[];
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Latest props readable from inside the rAF loop without restarting it.
+  const drawProps = useRef({ duration, cuePoint, downbeats, hotCues });
+  useEffect(() => {
+    drawProps.current = { duration, cuePoint, downbeats, hotCues };
+  });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let raf = 0;
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      const { duration, cuePoint, downbeats, hotCues } = drawProps.current;
+
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      ctx.fillStyle = '#11111b';
+      ctx.fillRect(0, 0, w, h);
+      if (duration <= 0) return;
+
+      const x = (t: number) => (t / duration) * w;
+
+      // Downbeat (bar) ticks, decimated to >= 2px spacing.
+      ctx.fillStyle = '#45475a';
+      let lastX = -Infinity;
+      for (const t of downbeats) {
+        const px = x(t);
+        if (px - lastX < 2) continue;
+        lastX = px;
+        ctx.fillRect(px, h * 0.35, 1, h * 0.65);
+      }
+
+      // Hot cue markers.
+      for (const cue of hotCues) {
+        ctx.fillStyle = cue.color || '#39ff14';
+        ctx.fillRect(x(cue.time_seconds) - 1.5, 0, 3, h);
+      }
+
+      // Main cue marker.
+      if (cuePoint !== null) {
+        ctx.fillStyle = '#ff6b00';
+        ctx.fillRect(x(cuePoint) - 1.5, 0, 3, h);
+      }
+
+      // Playhead.
+      const playhead = engine.getPlayhead();
+      ctx.fillStyle = '#00e5ff';
+      ctx.fillRect(x(playhead) - 1, 0, 2, h);
+
+      // Time + bar readout.
+      const bar = barNumberAt(downbeats, playhead);
+      ctx.fillStyle = '#cdd6f4';
+      ctx.font = '12px monospace';
+      ctx.textBaseline = 'top';
+      ctx.fillText(
+        `${formatTime(playhead)} / ${formatTime(duration)}${bar !== null ? `  bar ${bar}` : ''}`,
+        6,
+        4
+      );
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, [engine]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="deck-timeline"
+      onClick={(e) => {
+        const { duration } = drawProps.current;
+        if (duration <= 0) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        engine.seek(((e.clientX - rect.left) / rect.width) * duration);
+      }}
+    />
+  );
+}

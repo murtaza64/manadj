@@ -52,11 +52,17 @@ _Avoid_: related (too vague — could mean same artist, genre, etc.)
 **Analysis**:
 Automatically determining a property of a Track from its audio — key, BPM, beatgrid, waveform. Manual edits to those properties are orthogonal to Analysis.
 
+**Deck**:
+An independent playback unit: one loaded Track plus its transport state (playhead, playing/paused, Main cue) and sound controls (EQ, filter, pitch). A Deck outlives any view: views render whichever of its controls they need, and the same Deck can be shown by several views. There is one Deck today; mixing features introduce a second one deliberately (Deck A / Deck B), not as a view artifact.
+
+**Load**:
+Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it.
+
 **Hot Cue**:
 One of 8 persistent saved positions in a Track, used to jump to during performance.
 
 **Main cue**:
-The single dynamic cue position on a deck, moved with the "cue" button while DJing. Typically transient, unlike Hot Cues.
+The single repositionable cue position of a Track, moved with the "cue" button while DJing — distinct from Hot Cues by being one slot that moves freely during performance. Persisted with the Track (CDJ memory-cue behavior). When unset, it defaults to the Track's first beat if a Beatgrid exists, else the first non-silent audio.
 
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis.
