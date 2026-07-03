@@ -19,6 +19,7 @@ import HotCue from '../HotCue';
 import { doubleBeatjump, halveBeatjump } from '../../playback/beatjump';
 import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
 import { formatKeyDisplay } from '../../utils/keyUtils';
+import { DECK_KEYS } from './performanceKeys';
 import type { Track } from '../../types';
 
 /** How long the MATCH out-of-reach hint stays up. */
@@ -106,23 +107,32 @@ export function DeckWaveform({
 
 // ── Deck column: pads / beatjump / transport ─────────────────────────────
 
+/** On-control hint for this deck's key (from the shared map — can't drift). */
+function Kbd({ k }: { k: string }) {
+  return <kbd className="perf-kbd">{k.toUpperCase()}</kbd>;
+}
+
 function DeckPads({ trackId }: { trackId: number | null }) {
+  const { deck } = useDeck();
+  const keys = DECK_KEYS[deck];
   const actions = useHotCueActions(trackId);
   const previewingSlot = useDeckSnapshot((s) => s.hotCuePreviewSlot);
 
   return (
     <div className="perf-pads">
       {[1, 2, 3, 4, 5, 6, 7, 8].map((slot) => (
-        <HotCue
-          key={slot}
-          slotNumber={slot}
-          hotCue={actions.bySlot.get(slot)}
-          disabled={!actions.enabled}
-          isPreviewing={previewingSlot === slot}
-          onDown={actions.down}
-          onUp={actions.up}
-          onDelete={actions.remove}
-        />
+        <span key={slot} className="perf-pad-wrap">
+          <HotCue
+            slotNumber={slot}
+            hotCue={actions.bySlot.get(slot)}
+            disabled={!actions.enabled}
+            isPreviewing={previewingSlot === slot}
+            onDown={actions.down}
+            onUp={actions.up}
+            onDelete={actions.remove}
+          />
+          {slot <= 4 && <Kbd k={keys.pads[slot - 1]} />}
+        </span>
       ))}
     </div>
   );
@@ -130,7 +140,8 @@ function DeckPads({ trackId }: { trackId: number | null }) {
 
 /** Beatjump row: jump back, halve size, [size], double size, jump forward. */
 function BeatjumpRow() {
-  const { engine, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { deck, engine, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const keys = DECK_KEYS[deck];
   const ready = useDeckReady();
 
   return (
@@ -142,6 +153,7 @@ function BeatjumpRow() {
         title={`Jump back ${beatjumpBeats} beats`}
       >
         ◄◄
+        <Kbd k={keys.jumpBack} />
       </button>
       <button
         className="player-button"
@@ -167,13 +179,15 @@ function BeatjumpRow() {
         title={`Jump forward ${beatjumpBeats} beats`}
       >
         ►►
+        <Kbd k={keys.jumpForward} />
       </button>
     </div>
   );
 }
 
 function TransportBlock() {
-  const { engine } = useDeck();
+  const { deck, engine } = useDeck();
+  const keys = DECK_KEYS[deck];
   const ready = useDeckReady();
   const previewing = useDeckSnapshot((s) => s.previewing);
   const playing = useDeckSnapshot((s) => s.playing || s.pendingPlay);
@@ -191,6 +205,7 @@ function TransportBlock() {
         onPointerUp={() => ready && engine.cueUp()}
       >
         CUE
+        <Kbd k={keys.cue} />
       </button>
       <button
         className={`player-button ${playing ? 'player-button-playing' : 'player-button-paused'}`}
@@ -198,6 +213,7 @@ function TransportBlock() {
         onClick={() => engine.togglePlay()}
       >
         ⏯
+        <Kbd k={keys.play} />
       </button>
     </div>
   );
@@ -301,6 +317,7 @@ function BeatgridBlock({ track }: { track: Track | null }) {
 
 function TempoCluster({ track }: { track: Track | null }) {
   const { deck, engine } = useDeck();
+  const keys = DECK_KEYS[deck];
   const decks = useDecks();
   const ready = useDeckReady();
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
@@ -377,6 +394,7 @@ function TempoCluster({ track }: { track: Track | null }) {
           onPointerCancel={bendEnd}
         >
           ◄
+          <Kbd k={keys.nudgeBack} />
         </button>
         <button
           className={`player-button perf-mini${bend > 0 ? ' perf-nudge-held' : ''}`}
@@ -387,6 +405,7 @@ function TempoCluster({ track }: { track: Track | null }) {
           onPointerCancel={bendEnd}
         >
           ►
+          <Kbd k={keys.nudgeForward} />
         </button>
       </div>
     </div>
@@ -471,7 +490,14 @@ function InlineEdit({
 
 // ── Panel ────────────────────────────────────────────────────────────────
 
-export function DeckPanel({ mirrored = false }: { mirrored?: boolean }) {
+export function DeckPanel({
+  mirrored = false,
+  lockHint = false,
+}: {
+  mirrored?: boolean;
+  /** Flash the load-lock refusal hint (view policy — a running deck). */
+  lockHint?: boolean;
+}) {
   const { deck, engine } = useDeck();
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
@@ -481,6 +507,7 @@ export function DeckPanel({ mirrored = false }: { mirrored?: boolean }) {
     <section className={`perf-deckpanel${mirrored ? ' mirrored' : ''}`}>
       <div className="perf-deck-minimap">
         <span className="perf-decktag">{deck}</span>
+        {lockHint && <span className="perf-lock-hint">PLAYING — LOAD BLOCKED</span>}
         <WaveformMinimap
           trackId={track?.id ?? null}
           clock={engine}

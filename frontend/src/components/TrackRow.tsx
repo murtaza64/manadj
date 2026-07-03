@@ -121,7 +121,7 @@ const TrackRow = memo(function TrackRow({
               {(['A', 'B'] as const).map((deck) => (
                 <button
                   key={deck}
-                  className="track-load-button"
+                  className={`track-load-button track-load-button-${deck}`}
                   title={`Load to Deck ${deck}`}
                   onClick={(e) => {
                     e.stopPropagation();

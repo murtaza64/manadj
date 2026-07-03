@@ -28,3 +28,15 @@ The Performance view's own keyboard hub and the view's load policy. Each view ow
 ## Blocked by
 
 - 03-performance-view-surface
+
+## Comments
+
+Implemented in jj change `krkmyxuk` (performance-mode: 04-performance-keyboard-load-lock).
+- `performance/performanceKeys.ts`: `DECK_KEYS` (A: f/d/a/s, w/e, zxcv; B: j/k/l/;, i/o, m,./) — one table shared by bindings and the on-control kbd hints so they can't drift. Guards: `isGuardedKeyEvent` (keydown: typing + ctrl/meta/alt) and `isTypingTarget` (keyup: typing only — a modifier held at release must not eat a cue keyup; library-hub parity).
+- `performance/DeckKeys.tsx`: null-rendering per-deck hub mounted inside each `<DeckScope>` — deck-blind, data-driven from the map. Repeat suppression on holds (cue/nudge/pads), play latches during load (same selector as library space), jumps use scope beatjump size, window-blur releases bend.
+- Table keys in `PerformanceView`: ↑/↓ navigate (scroll-into-view), ← load A, → load B, Enter = A (skips focused buttons). **Space claimed and unbound** (preventDefault so it neither scrolls nor re-activates a focused control). No curation keys.
+- Load lock (view policy): every load path (row A/B buttons, double-click, ←/→/Enter) goes through `tryLoad`; refused when `isAudioRunning() || pendingPlay` with a 1.5s "PLAYING — LOAD BLOCKED" hint on the deck panel; row affordances dim via `lock-A/B` container classes (pure CSS, no row re-renders). Library view keeps replace-freely.
+- Library: `browseOnly` mounts NO hub (`LibraryHub` extracted as a conditionally-rendered null component — faithful prop extraction); new `LibraryBrowseHandle` (`navigate`, `getSelectedTrack`) via `browseRef`; embedded double-click routes through the lock (memoized wrapper, rows stay memo-clean).
+- Kbd hints rendered on CUE/PLAY/jump/nudge buttons and pads 1–4.
+- Review fixes: keyup modifier-guard parity (stuck-cue hazard), memoized embedded double-click path.
+- Ear/hand verification pending user: both decks by keys while both play; space dead; arrows drive the table; load refusal hint.

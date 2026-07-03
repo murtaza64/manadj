@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useImperativeHandle, useMemo } from 'react';
+import type { Ref } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
@@ -6,7 +7,7 @@ import FilterBar from './FilterBar';
 import TagEditor, { type TagEditorHandle } from './TagEditor';
 import Player from './Player';
 import PlaylistSidebar from './PlaylistSidebar';
-import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { useKeyboardShortcuts, scrollTrackIntoView } from '../hooks/useKeyboardShortcuts';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import type { Track } from '../types';
@@ -183,15 +184,30 @@ function deriveRelatedFilters(
 
 type ViewType = 'all' | 'unprocessed' | 'playlist';
 
+/**
+ * The embedded library's browse surface, driven from outside (issue 04):
+ * browseOnly mode does NOT mount the library keyboard hub — the Performance
+ * view owns its keys outright and drives the table through this handle.
+ */
+export interface LibraryBrowseHandle {
+  /** Move the selection up (-1) / down (+1), scrolling it into view. */
+  navigate: (delta: 1 | -1) => void;
+  getSelectedTrack: () => Track | null;
+}
+
 interface LibraryProps {
   onOpenPlaylistSync?: () => void;
   onOpenPerformance?: () => void;
   /** Render only the browse surface (sidebar/filter/table) without the
    * Player/TagEditor block — used when a deck surface is shown elsewhere
-   * (the Performance view embeds the library this way). */
+   * (the Performance view embeds the library this way). Implies: the
+   * library keyboard hub is not mounted (each view owns its hub). */
   browseOnly?: boolean;
-  /** Per-row hover load-to-A/B buttons (Performance view). */
+  /** Per-row hover load-to-A/B buttons (Performance view). Double-click
+   * also routes through this (deck A), so the view's load policy applies. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
+  /** Selection access for the embedding view's keyboard hub. */
+  browseRef?: Ref<LibraryBrowseHandle>;
 }
 
 export default function Library({
@@ -199,6 +215,7 @@ export default function Library({
   onOpenPerformance,
   browseOnly = false,
   onLoadToDeck,
+  browseRef,
 }: LibraryProps) {
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [selectedView, setSelectedView] = useState<ViewType>('all');
@@ -368,10 +385,6 @@ export default function Library({
     });
   };
 
-  // Hot cue actions (deck-scoped: hot cues belong to the loaded Track);
-  // same implementation the Player's pads use.
-  const hotCueActions = useHotCueActions(loadedTrack?.id ?? null);
-
   // Determine current tracks and loading state
   const isLoading = selectedView === 'playlist' ? isLoadingPlaylist : isLoadingAllTracks;
   const error = selectedView === 'playlist' ? playlistError : allTracksError;
@@ -402,23 +415,55 @@ export default function Library({
     ? playlistData?.tracks?.length || 0
     : allTracksData?.library_total || 0;
 
-  // Enable keyboard shortcuts
-  useKeyboardShortcuts({
-    tracks: currentTracks,
-    selectedTrack,
-    onSelectTrack: setSelectedTrack,
-    onLoadTrack: loadTrack,
-    onNudgeBeatgrid: handleNudgeBeatgrid,
-    onSetDownbeat: handleSetDownbeat,
-    onEnterTagEditMode: () => tagEditorRef.current?.enterTagEditMode(),
-    onEnterEnergyEditMode: () => tagEditorRef.current?.toggleEnergyEditMode(),
-    onHotCueDown: hotCueActions.down,
-    onHotCueUp: hotCueActions.up,
-    onHotCueDelete: hotCueActions.remove,
-    isEnergyEditMode,
-  });
+  // Embedded, double-click routes through the view's load policy (deck A)
+  // instead of loading directly. Memoized — the rows are.
+  const loadForTable = useMemo(
+    () =>
+      browseOnly && onLoadToDeck
+        ? (t: Track) => onLoadToDeck('A', t)
+        : loadTrack,
+    [browseOnly, onLoadToDeck, loadTrack]
+  );
+
+  // Selection access for an embedding view's own keyboard hub (issue 04).
+  useImperativeHandle(
+    browseRef,
+    () => ({
+      navigate: (delta: 1 | -1) => {
+        if (currentTracks.length === 0) return;
+        const currentIndex = selectedTrack
+          ? currentTracks.findIndex((t: Track) => t.id === selectedTrack.id)
+          : -1;
+        const nextIndex =
+          currentIndex === -1
+            ? 0
+            : Math.max(0, Math.min(currentTracks.length - 1, currentIndex + delta));
+        const next = currentTracks[nextIndex];
+        setSelectedTrack(next);
+        scrollTrackIntoView(next.id);
+      },
+      getSelectedTrack: () => selectedTrack,
+    }),
+    [currentTracks, selectedTrack]
+  );
 
   return (
+    <>
+    {/* The library keyboard hub — only when this view owns the keyboard.
+        Embedded (browseOnly), the Performance hub drives everything. */}
+    {!browseOnly && (
+      <LibraryHub
+        tracks={currentTracks}
+        selectedTrack={selectedTrack}
+        onSelectTrack={setSelectedTrack}
+        onLoadTrack={loadTrack}
+        onNudgeBeatgrid={handleNudgeBeatgrid}
+        onSetDownbeat={handleSetDownbeat}
+        onEnterTagEditMode={() => tagEditorRef.current?.enterTagEditMode()}
+        onEnterEnergyEditMode={() => tagEditorRef.current?.toggleEnergyEditMode()}
+        isEnergyEditMode={isEnergyEditMode}
+      />
+    )}
     <div style={{
       height: '100%',
       display: 'flex',
@@ -493,7 +538,7 @@ export default function Library({
               error={error}
               selectedTrack={selectedTrack}
               onSelectTrack={setSelectedTrack}
-              onLoadTrack={loadTrack}
+              onLoadTrack={loadForTable}
               loadedTrackId={loadedTrack?.id ?? null}
               onLoadToDeck={onLoadToDeck}
               sortColumn={filters.sortColumn}
@@ -504,5 +549,54 @@ export default function Library({
         </div>
       </div>
     </div>
+    </>
   );
+}
+
+/**
+ * The library keyboard hub as a mountable unit: hooks can't be called
+ * conditionally, but a component can be conditionally rendered. Also owns
+ * the hub's hot-cue wiring (deck-scoped, for the loaded Track — the same
+ * implementation the Player's pads use).
+ */
+function LibraryHub({
+  tracks,
+  selectedTrack,
+  onSelectTrack,
+  onLoadTrack,
+  onNudgeBeatgrid,
+  onSetDownbeat,
+  onEnterTagEditMode,
+  onEnterEnergyEditMode,
+  isEnergyEditMode,
+}: {
+  tracks: Track[];
+  selectedTrack: Track | null;
+  onSelectTrack: (track: Track | null) => void;
+  onLoadTrack: (track: Track) => void;
+  onNudgeBeatgrid: (offsetMs: number) => void;
+  onSetDownbeat: () => void;
+  onEnterTagEditMode: () => void;
+  onEnterEnergyEditMode: () => void;
+  isEnergyEditMode: boolean;
+}) {
+  const { loadedTrack } = useDeck();
+  const hotCueActions = useHotCueActions(loadedTrack?.id ?? null);
+
+  useKeyboardShortcuts({
+    tracks,
+    selectedTrack,
+    onSelectTrack,
+    onLoadTrack,
+    onNudgeBeatgrid,
+    onSetDownbeat,
+    onEnterTagEditMode,
+    onEnterEnergyEditMode,
+    onHotCueDown: hotCueActions.down,
+    onHotCueUp: hotCueActions.up,
+    onHotCueDelete: hotCueActions.remove,
+    isEnergyEditMode,
+  });
+
+  return null;
 }
