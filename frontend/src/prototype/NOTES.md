@@ -225,6 +225,18 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   dashed style; right-click deletes) and always reads 1-8 left-to-right —
   deck B's mirrored card layout is overridden for the gesture row.
 
+- v19 (issues 15/17/19, design pass): `user-select: none` on the editor
+  surface (inputs/titles opt back in) — stray lane drags no longer
+  highlight labels. Live selects + number inputs restyled to the site
+  control idiom (transparent, 1px border, bold, square; native chrome +
+  spinners suppressed, drawn select caret, sapphire focus ring); dead CSS
+  swept (.mixproto-play/-picker*/-body/-deckrow/-controls*/-lanes old
+  layout). Deck-card clusters became segmented pairs: `track ‹◀|▶›`,
+  `grid ‹◀|▶›`, and the slide/jump gesture row all share the
+  `.mixproto-pair` one-border grouping (label as prefix segment, step in
+  tooltip); uniform 22px control height; downbeat button weighted yellow
+  as a distinct action. Screenshot round with the user pending.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

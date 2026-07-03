@@ -1648,31 +1648,34 @@ function DeckCard({
         <span className="mixproto-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
       </div>
       <div className="mixproto-deckcard-row">
+        {/* Segmented pairs (issue 19): label + ◀ + ▶ share one border and
+            read as a single control; the step lives in the tooltip. */}
+        <span className="mixproto-pair" title={`Nudge ${deck} ±10ms relative to the other track`}>
+          <span className="mixproto-pair-label">track</span>
+          <button title={`Nudge ${deck} 10ms earlier`} onClick={() => onNudgeTrack(-0.01)}>
+            ◀
+          </button>
+          <button title={`Nudge ${deck} 10ms later`} onClick={() => onNudgeTrack(0.01)}>
+            ▶
+          </button>
+        </span>
+        <span className="mixproto-pair" title="Nudge beatgrid ±10ms (persists to the track)">
+          <span className="mixproto-pair-label">grid</span>
+          <button
+            title="Nudge beatgrid 10ms earlier"
+            onClick={() => nudge.mutate({ trackId: track.id, offsetMs: -10 })}
+          >
+            ◀
+          </button>
+          <button
+            title="Nudge beatgrid 10ms later"
+            onClick={() => nudge.mutate({ trackId: track.id, offsetMs: 10 })}
+          >
+            ▶
+          </button>
+        </span>
         <button
-          title={`Nudge ${deck} 10ms earlier (relative to the other track)`}
-          onClick={() => onNudgeTrack(-0.01)}
-        >
-          track ◀
-        </button>
-        <button
-          title={`Nudge ${deck} 10ms later (relative to the other track)`}
-          onClick={() => onNudgeTrack(0.01)}
-        >
-          ▶
-        </button>
-        <button
-          title="Nudge beatgrid 10ms earlier"
-          onClick={() => nudge.mutate({ trackId: track.id, offsetMs: -10 })}
-        >
-          grid ◀
-        </button>
-        <button
-          title="Nudge beatgrid 10ms later"
-          onClick={() => nudge.mutate({ trackId: track.id, offsetMs: 10 })}
-        >
-          ▶
-        </button>
-        <button
+          className="mixproto-action"
           title="Set downbeat at this deck's playhead"
           onClick={() =>
             setDownbeat.mutate({ trackId: track.id, downbeatTime: player.getTrackTime(deck) })
@@ -1684,46 +1687,46 @@ function DeckCard({
       {gestures && (
         <div className="mixproto-deckcard-row mixproto-slides">
           <span
-            className="mixproto-slidelabel"
+            className="mixproto-pair"
             title={
               gestures.kind === 'slide'
                 ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put'
                 : 'Transport: moves the playhead — both decks follow, alignment untouched'
             }
           >
-            {gestures.kind}
+            <span className="mixproto-pair-label">{gestures.kind}</span>
+            <button
+              disabled={!gestures.enabled}
+              title={
+                gestures.kind === 'slide'
+                  ? `Slide ${deck} ${gestureBeats} of its beats earlier`
+                  : `Jump the playhead ${gestureBeats} of ${deck}'s beats back`
+              }
+              onClick={() => gestures.beats(-gestureBeats)}
+            >
+              ◄◄
+            </button>
+            <button title="Halve size" onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}>
+              −
+            </button>
+            <span className="mixproto-slidesize" title={`Size (${deck}'s beats)`}>
+              {gestureBeats}
+            </span>
+            <button title="Double size" onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}>
+              +
+            </button>
+            <button
+              disabled={!gestures.enabled}
+              title={
+                gestures.kind === 'slide'
+                  ? `Slide ${deck} ${gestureBeats} of its beats later`
+                  : `Jump the playhead ${gestureBeats} of ${deck}'s beats forward`
+              }
+              onClick={() => gestures.beats(gestureBeats)}
+            >
+              ►►
+            </button>
           </span>
-          <button
-            disabled={!gestures.enabled}
-            title={
-              gestures.kind === 'slide'
-                ? `Slide ${deck} ${gestureBeats} of its beats earlier`
-                : `Jump the playhead ${gestureBeats} of ${deck}'s beats back`
-            }
-            onClick={() => gestures.beats(-gestureBeats)}
-          >
-            ◄◄
-          </button>
-          <button title="Halve size" onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}>
-            −
-          </button>
-          <span className="mixproto-slidesize" title={`Size (${deck}'s beats)`}>
-            {gestureBeats}
-          </span>
-          <button title="Double size" onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}>
-            +
-          </button>
-          <button
-            disabled={!gestures.enabled}
-            title={
-              gestures.kind === 'slide'
-                ? `Slide ${deck} ${gestureBeats} of its beats later`
-                : `Jump the playhead ${gestureBeats} of ${deck}'s beats forward`
-            }
-            onClick={() => gestures.beats(gestureBeats)}
-          >
-            ►►
-          </button>
           {/* All 8 slots, Performance pad semantics: set cues act (slide/
               jump), empty ones SET at this deck's playhead; right-click
               deletes. Always reads 1-8 left-to-right (B un-mirrored). */}
