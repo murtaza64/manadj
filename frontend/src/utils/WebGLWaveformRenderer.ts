@@ -17,6 +17,7 @@
  */
 
 import type { PlaybackClock } from '../playback/clock';
+import { zoomFactorForVisibleSeconds } from './waveformZoom';
 
 /** m:ss.t with tenths — matches DJ-deck display convention. */
 function formatReadoutTime(seconds: number): string {
@@ -76,6 +77,10 @@ export class WebGLWaveformRenderer {
 
   // Manual drag offset (CSS pixels) - applied during drag operations
   private manualDragOffset: number = 0;
+
+  // When true, the display window is set externally (setDisplayWindow) and
+  // does not follow the playhead — e.g. DAW-style scrolled/zoomed views.
+  private externalWindow: boolean = false;
 
   // High DPI support
   private pixelRatio: number = 1;
@@ -389,11 +394,26 @@ export class WebGLWaveformRenderer {
     return pixelOffset;
   }
 
+  /**
+   * Externally control the visible window as normalized track positions
+   * (values may extend past [0, 1]; blank space renders outside the track).
+   * Disables playhead-following: the render loop keeps reading the clock,
+   * but only to draw the playhead marker inside the window.
+   */
+  public setDisplayWindow(first: number, last: number): void {
+    this.externalWindow = true;
+    this.firstDisplayedPosition = first;
+    this.lastDisplayedPosition = last;
+  }
+
   private calculateDisplayWindow(): void {
     if (!this.waveformData) return;
 
     // Minimap always shows full track - don't recalculate
     if (this.isMinimapMode) return;
+
+    // Externally-windowed views position themselves.
+    if (this.externalWindow) return;
 
     // At zoom 1.0, show entire track
     // At zoom 2.0, show half the track, etc.
@@ -650,7 +670,19 @@ export class WebGLWaveformRenderer {
     const lineWidth = 1 * this.pixelRatio;
     const downbeatWidth = 2 * this.pixelRatio;
 
+    // Density culling: hide non-downbeats when beats are closer than ~12px
+    // (they read as noise at distant zooms), and everything below ~2.5px.
+    const visibleFraction = this.isMinimapMode
+      ? 1
+      : Math.max(this.lastDisplayedPosition - this.firstDisplayedPosition, 1e-6);
+    const secPerBeat =
+      this.beatTimes.length > 1 ? this.beatTimes[1] - this.beatTimes[0] : duration;
+    const pxPerBeat = (secPerBeat / (visibleFraction * duration)) * this.canvas.width;
+    const showWeakBeats = pxPerBeat >= 12 * this.pixelRatio;
+    if (pxPerBeat * 4 < 2.5 * this.pixelRatio) return;
+
     for (let i = 0; i < this.beatTimes.length; i++) {
+      if (!showWeakBeats && !this.downbeatIndices.has(i)) continue;
       const beatTime = this.beatTimes[i];
       const beatProgress = beatTime / duration;
 
@@ -722,11 +754,20 @@ export class WebGLWaveformRenderer {
   private renderPlayhead(): void {
     const gl = this.gl;
 
-    // For minimap: playhead moves across width
-    // For main view: playhead stays fixed at playMarkerPosition
-    const playheadX = this.isMinimapMode
-      ? this.playPosition * this.canvas.width
-      : this.canvas.width * this.playMarkerPosition;
+    // Minimap: playhead moves across width. External window: playhead at its
+    // actual position within the window. Main view: fixed at playMarkerPosition.
+    let playheadX: number;
+    if (this.isMinimapMode) {
+      playheadX = this.playPosition * this.canvas.width;
+    } else if (this.externalWindow) {
+      const range = this.lastDisplayedPosition - this.firstDisplayedPosition;
+      if (range <= 0) return;
+      playheadX =
+        ((this.playPosition - this.firstDisplayedPosition) / range) * this.canvas.width;
+      if (playheadX < 0 || playheadX >= this.canvas.width) return;
+    } else {
+      playheadX = this.canvas.width * this.playMarkerPosition;
+    }
 
     const playheadColor = [0.96, 0.76, 0.91];  // var(--pink)
 
@@ -1099,6 +1140,16 @@ export class WebGLWaveformRenderer {
    */
   public startRenderLoop(clock: PlaybackClock): void {
     const animate = () => {
+      // Track CSS size changes (e.g. zoomable containers): resize the buffer
+      // and invalidate cached geometry when the element is resized.
+      const dpr = window.devicePixelRatio || 1;
+      if (
+        Math.abs(this.canvas.width - this.canvas.clientWidth * dpr) >= 1 ||
+        Math.abs(this.canvas.height - this.canvas.clientHeight * dpr) >= 1
+      ) {
+        this.setupHighDPI();
+        this.calculateDisplayWindow();
+      }
       if (this.waveformData) {
         const position = clock.getPlayhead() / this.waveformData.duration;
         this.playPosition = Math.max(0, Math.min(1, position));
@@ -1120,6 +1171,20 @@ export class WebGLWaveformRenderer {
   // Zoom controls
   public setZoom(newZoom: number): void {
     this.zoomFactor = Math.max(this.minZoom, Math.min(this.maxZoom, newZoom));
+    this.invalidateWaveformCache();
+    this.calculateDisplayWindow();
+  }
+
+  /**
+   * Time-based zoom: make `seconds` of track fill the canvas regardless of
+   * duration (linked cross-deck zoom, performance-mode issue 05). Clamped in
+   * seconds by the pure conversion; deliberately bypasses the track-relative
+   * min/max factor clamps, which would reintroduce the duration dependence
+   * this operation exists to remove.
+   */
+  public setVisibleSeconds(seconds: number): void {
+    if (!this.waveformData) return;
+    this.zoomFactor = zoomFactorForVisibleSeconds(this.waveformData.duration, seconds);
     this.invalidateWaveformCache();
     this.calculateDisplayWindow();
   }

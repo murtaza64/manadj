@@ -1,9 +1,10 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useWaveformRenderer } from '../hooks/useWaveformRenderer';
 import { useWaveformData } from '../hooks/useWaveformData';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useHotCues } from '../hooks/useHotCues';
 import type { PlaybackClock } from '../playback/clock';
+import { stepVisibleSeconds } from '../utils/waveformZoom';
 import './Waveform.css';
 
 /** The transport operations drag-to-scrub needs. */
@@ -21,6 +22,15 @@ interface WebGLWaveformProps {
   transport: ScrubTransport;
   /** Grey out (and ignore input) while the deck can't play — e.g. decoding. */
   dimmed?: boolean;
+  /**
+   * Linked time-zoom (Performance view): when set, the waveform shows this
+   * many seconds regardless of track duration, and wheel zoom reports the
+   * new value through onVisibleSecondsChange instead of zooming locally —
+   * the parent owns the one zoom both decks share. When absent (library),
+   * the renderer keeps its own track-relative zoom.
+   */
+  visibleSeconds?: number;
+  onVisibleSecondsChange?: (seconds: number) => void;
   className?: string;
 }
 
@@ -30,6 +40,8 @@ export default function WebGLWaveform({
   cuePoint,
   transport,
   dimmed = false,
+  visibleSeconds,
+  onVisibleSecondsChange,
   className,
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformData(trackId);
@@ -50,6 +62,13 @@ export default function WebGLWaveform({
     hotCues,
     beatgrid: beatgridData?.data ?? null,
   });
+
+  // Apply the shared time-zoom (also after re-init when new data lands).
+  useEffect(() => {
+    if (visibleSeconds !== undefined) {
+      rendererRef.current?.setVisibleSeconds(visibleSeconds);
+    }
+  }, [visibleSeconds, waveformData, rendererRef]);
 
   // Drag-to-scrub state
   const isDragging = useRef(false);
@@ -91,6 +110,14 @@ export default function WebGLWaveform({
   };
 
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
+    if (visibleSeconds !== undefined && onVisibleSecondsChange) {
+      // Linked zoom: report the step; the shared value comes back as a prop.
+      event.nativeEvent.preventDefault();
+      onVisibleSecondsChange(
+        stepVisibleSeconds(visibleSeconds, event.deltaY < 0 ? 'in' : 'out')
+      );
+      return;
+    }
     rendererRef.current?.handleWheel(event.nativeEvent);
   };
 

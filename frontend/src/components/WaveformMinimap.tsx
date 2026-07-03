@@ -2,6 +2,7 @@ import { useWaveformRenderer } from '../hooks/useWaveformRenderer';
 import { useWaveformData } from '../hooks/useWaveformData';
 import { useHotCues } from '../hooks/useHotCues';
 import type { PlaybackClock } from '../playback/clock';
+import type { BeatgridData } from '../types';
 import './Waveform.css';
 
 interface WaveformMinimapProps {
@@ -11,6 +12,8 @@ interface WaveformMinimapProps {
   onSeek: (time: number) => void;
   /** Grey out (and ignore input) while the deck can't play — e.g. decoding. */
   dimmed?: boolean;
+  /** Optional beat/downbeat ticks (useful at DAW-style zoom levels). */
+  beatgrid?: BeatgridData | null;
   className?: string;
 }
 
@@ -20,6 +23,7 @@ export default function WaveformMinimap({
   cuePoint,
   onSeek,
   dimmed = false,
+  beatgrid = null,
   className,
 }: WaveformMinimapProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformData(trackId);
@@ -35,6 +39,7 @@ export default function WaveformMinimap({
     },
     cuePoint,
     hotCues,
+    beatgrid,
   });
 
   const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {

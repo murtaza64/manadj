@@ -11,8 +11,8 @@ interface PlaylistSidebarProps {
   onSelectView: (view: ViewType) => void;
   onSelectPlaylist: (playlistId: number) => void;
   onTrackDrop: (playlistId: number, trackId: number) => void;
-  onOpenPlaylistSync: () => void;
-  onOpenPractice: () => void;
+  onOpenPlaylistSync?: () => void;
+  onOpenPerformance?: () => void;
 }
 
 export default function PlaylistSidebar({
@@ -22,7 +22,7 @@ export default function PlaylistSidebar({
   onSelectPlaylist,
   onTrackDrop,
   onOpenPlaylistSync,
-  onOpenPractice,
+  onOpenPerformance,
 }: PlaylistSidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
@@ -125,19 +125,23 @@ export default function PlaylistSidebar({
               objectFit: 'contain'
             }}
           />
-          <button
-            onClick={onOpenPlaylistSync}
-            className="sync-button"
-          >
-            <span style={{ fontSize: '16px' }}>⟳</span> Sync
-          </button>
-          <button
-            onClick={onOpenPractice}
-            className="sync-button"
-            title="Practice view"
-          >
-            <span style={{ fontSize: '16px' }}>▸</span>
-          </button>
+          {onOpenPlaylistSync && (
+            <button
+              onClick={onOpenPlaylistSync}
+              className="sync-button"
+            >
+              <span style={{ fontSize: '16px' }}>⟳</span> Sync
+            </button>
+          )}
+          {onOpenPerformance && (
+            <button
+              onClick={onOpenPerformance}
+              className="sync-button"
+              title="Performance view"
+            >
+              <span style={{ fontSize: '16px' }}>▸</span>
+            </button>
+          )}
         </div>
 
       {/* "All tracks" special view */}

@@ -293,8 +293,9 @@ export function useKeyboardShortcuts({
   useScrubLoop(engine, scrubDirection);
 }
 
-// Helper function for scrolling selected track into view
-function scrollTrackIntoView(trackId: number) {
+// Helper function for scrolling selected track into view (also used by the
+// Library's imperative browse handle for the Performance view's table keys)
+export function scrollTrackIntoView(trackId: number) {
   const rowElement = document.querySelector(`[data-track-id="${trackId}"]`);
   if (rowElement) {
     rowElement.scrollIntoView({

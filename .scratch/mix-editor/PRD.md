@@ -1,6 +1,26 @@
-# PRD: Mix editor — arrange tracks with drawn transitions
+# PRD: Transition editor — two tracks, drawn saved Transitions
 
-Status: ready-for-agent
+Status: ready-for-agent (re-scoped 2026-07-03; see Re-scope below)
+
+## Re-scope (supersedes conflicting statements below)
+
+Prototype iteration inverted the model (ADR 0010 amendment):
+
+- The **Transition is the first-class persisted artifact**: ordered Track pair + anchors + duration + tempo-match + drawn lanes. Directional. A pair usually has one ("Transition 1", auto-created), occasionally more via a create-new dropdown; edits autosave to the active one — no save ceremony.
+- The editor is the **third top-panel mode** — cycle Library (one deck) / Performance (two decks) / Transition editor — over the shared bottom library-browse panel (`Library browseOnly` + selection-based load → A/B).
+- **Audio isolation + handoff**: the editor keeps its own deck pair; entering it pauses the shared decks (one audible surface at a time) and adopts their loaded track(s) as a load shortcut.
+- **Deferred**: sequenced Mixes (a later feature composing saved Transitions), Transition templates, arbitrary-length arrangements.
+- Real/effective BPM shown per deck (editable base + tempo-matched effective).
+
+### Graduation (decided 2026-07-03)
+
+The prototype **is graduating** (user verdict; NOTES.md). Graduation is incremental, render/motion layer first:
+
+1. Productionize the timeline render/motion layer in place (issue 01): `WebGLWaveformRenderer` gains a driven-draw mode (the editor's single rAF motion clock calls `draw()` after writing DOM transforms — no independent renderer loops) and visible-window geometry when externally windowed (constant cost in zoom, replacing full-track regen per zoom step). The prototype shell keeps running on top; other surfaces are unaffected.
+2. Remaining real-module fixes from the prototype ride back to the main line (issue 02).
+3. Shell graduation (DB persistence, third top-panel mode integration) — slices to be cut after the remaining verdict details (drawing feel, playback conviction) are recorded.
+
+Named escalations, not built: LOD/mipmap geometry pyramid if fit-zoom aggregation on long tracks is still hot; imperative per-frame timeline styles if the per-zoom-frame React commit blows frame budget.
 Blocked by: nothing hard — the two-track prototype runs on today's modules; graduation aligns with the ADR 0009 Mixer module (see Implementation Decisions)
 
 ## Problem Statement

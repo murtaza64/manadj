@@ -1,0 +1,41 @@
+/**
+ * Pure mixer math (ADR 0009 / performance-mode issue 01). The audible
+ * semantics of the mixer's controls live here, unit-tested; the Mixer module
+ * applies them to gain nodes.
+ */
+
+const TRIM_RANGE_DB = 12;
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+/**
+ * Channel fader position [0,1] → linear gain. Audio taper (quadratic): the
+ * lower half of the throw stays quiet, like a hardware channel fader.
+ */
+export function channelFaderToGain(value: number): number {
+  const v = clamp01(value);
+  return v * v;
+}
+
+/** Trim position [0,1] → linear gain. Center = unity; ±12 dB at the ends. */
+export function trimToGain(value: number): number {
+  const v = clamp01(value);
+  return Math.pow(10, ((v - 0.5) * 2 * TRIM_RANGE_DB) / 20);
+}
+
+/**
+ * Crossfader position [-1 (full A), 1 (full B)] → per-channel gains.
+ * Dipless curve: a channel is at unity anywhere in its own half INCLUDING
+ * center, and fades linearly to a full kill at the opposite end. Center is
+ * transparent (no -3 dB dip — the library's single-deck loudness must not
+ * change), and the summed center case is the limiter's job.
+ */
+export function crossfaderGains(position: number): { a: number; b: number } {
+  const x = Math.max(-1, Math.min(1, position));
+  return {
+    a: clamp01(1 - x),
+    b: clamp01(1 + x),
+  };
+}

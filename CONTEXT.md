@@ -40,14 +40,17 @@ A first-class Track attribute (1–5) expressing intensity. Not a Tag. External 
 **Playlist**:
 A hand-curated, ordered list of Tracks. Curated in manadj and Exported to external libraries. Distinct from the generated playlists that encode Tags in Engine DJ, and from a Mix (which adds performance data).
 
-**Mix**:
-An arranged sequence of Tracks with a Transition between each adjacent pair — a persisted ideation artifact for planning real mixing sessions. Which part of a Track plays is implied by its surrounding Transitions; there is no separate clip/region concept. Distinct from a Playlist, and from the Classification value "mix" (an externally recorded DJ mix on a Source).
-
 **Transition**:
-The handover from one Track in a Mix to the next: anchor points (seconds into the outgoing and incoming Track), a duration, and drawn automation lanes for mixer controls. Times are seconds — beat-snapping and tempo-matching are editing affordances, not the model.
+A first-class persisted artifact: the handover between an ordered pair of Tracks — entry/exit anchors (in seconds), a duration, an optional tempo-match, and drawn automation lanes for mixer controls. Directional (A→B is not B→A); a pair usually has one Transition, occasionally several. Beat-snapping and tempo-matching are editing affordances, not the model. The accumulating set of saved Transitions is the library of "what mixes well into what" — the seed of track-association features.
+
+**Transition editor**:
+The top-panel mode (a sibling of the library and Performance views) for editing the saved Transition between two loaded Tracks on a DAW-style timeline. Entering it pauses other playback surfaces: one audible surface at a time.
+
+**Mix**:
+Future concept: an ordered sequence of Tracks whose adjacencies reference saved Transitions. Deferred until the Transition library exists. Distinct from a Playlist, and from the Classification value "mix" (an externally recorded DJ mix on a Source).
 
 **Transition template**:
-A saved, duration-normalized set of automation lanes (e.g. "bass swap"), applicable to any Transition regardless of its length.
+A saved, duration-normalized set of automation lanes (e.g. "bass swap"), applicable to any Transition regardless of its length. Deferred.
 
 **Key**:
 One of 24 key centers (12 tonics × major/minor) assigned to a Track. OpenKey is the preferred notation for display and discussion; Camelot, musical, and external libraries' notations are conversions from the same canonical value.
@@ -68,10 +71,13 @@ An independent playback unit: one loaded Track plus its transport state (playhea
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on safety limiter. Mirrors a hardware DJ mixer.
 
 **Performance view**:
-The two-deck view for practicing and performing mixes: stacked full-width waveforms with linked zoom, symmetric Deck A/B panels, a central Mixer panel, and a compact browse strip. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
+The two-deck view for practicing and performing mixes: stacked full-width waveforms with linked zoom, symmetric Deck A/B panels, a central Mixer panel, and the Library's browse surface embedded below. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
 
 **Load**:
 Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it. In the Performance view, Loading onto a playing Deck is blocked (protecting the mix); in the library it simply replaces what's playing.
+
+**Nudge**:
+A momentary tempo bend on a Deck, held to ride phase alignment against the other Deck; releasing restores the Deck's pitch exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now.
 
 **Hot Cue**:
 One of 8 persistent saved positions in a Track, used to jump to during performance.

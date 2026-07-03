@@ -1,0 +1,568 @@
+/* PROTOTYPE (mix-editor) — throwaway. */
+
+.mixproto {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--base, #1e1e2e);
+  color: var(--text, #cdd6f4);
+}
+
+/* Top panel: the transition-editor surface (sibling of Library/Performance
+   top panels); bottom half is the shared library browse surface. */
+.mixproto-top {
+  height: 50vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--crust, #11111b);
+  border-bottom: 2px solid var(--surface1, #45475a);
+  overflow: hidden;
+}
+
+.mixproto-library {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mixproto-library > div {
+  height: 100%;
+}
+
+.mixproto-loadbtns {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mixproto-selname {
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixproto-loadbtns button {
+  background: none;
+  border: 1px solid #39ff14;
+  color: #39ff14;
+
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+.mixproto-loadbtns button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.mixproto-bpm-base {
+  color: var(--yellow, #f9e2af);
+  font-weight: 700;
+}
+
+.mixproto-bpm-eff {
+  color: var(--sapphire, #74c7ec);
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mixproto-bpm-eff em {
+  font-style: normal;
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.mixproto-tweaktitle {
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixproto-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--surface0, #313244);
+  background: var(--crust, #11111b);
+}
+
+.mixproto-header h1 {
+  margin: 0;
+  font-size: 16px;
+  color: #ff2d95;
+}
+
+.mixproto-hint {
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+}
+
+.mixproto-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.mixproto-picker {
+  width: 300px;
+  overflow-y: auto;
+  border-right: 1px solid var(--surface0, #313244);
+  background: var(--crust, #11111b);
+  padding: 8px;
+}
+
+.mixproto-picker input {
+  width: 100%;
+  padding: 6px;
+  margin-bottom: 8px;
+  background: var(--base, #1e1e2e);
+  border: 1px solid var(--surface0, #313244);
+
+  color: var(--text, #cdd6f4);
+}
+
+.mixproto-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--surface0, #313244);
+}
+
+.mixproto-picker-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixproto-picker-row button {
+  background: none;
+  border: 1px solid #00e5ff;
+  color: #00e5ff;
+
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.mixproto-arranger {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.mixproto-deckrow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mixproto-decklabel {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mixproto-decklabel.a {
+  color: #00e5ff;
+}
+
+.mixproto-decklabel.b {
+  color: #ff2d95;
+}
+
+.mixproto-decklabels {
+  display: flex;
+  gap: 24px;
+}
+
+.mixproto-timeline-wrap {
+  position: relative;
+}
+
+/* No native scrolling and no scrollbar: horizontal motion is applied as a
+   transform from a single rAF (wheel + minimap viewport are the pan inputs),
+   keeping the JS-painted waveforms and the DOM layers in the same frame. */
+.mixproto-timeline {
+  overflow: hidden;
+  border: 1px solid var(--surface0, #313244);
+  background: #0b0b12;
+}
+
+.mixproto-timeline-content {
+  position: relative;
+  min-width: 100%;
+  will-change: transform;
+}
+
+.mixproto-fit {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  padding: 2px 10px;
+  background: var(--crust);
+  border: 1px solid var(--sapphire);
+  color: var(--sapphire);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.mixproto-fit:hover {
+  color: var(--subtext1);
+  border-color: var(--subtext1);
+}
+
+.mixproto-timeline-row {
+  position: relative;
+  height: max(56px, 8vh);
+  border-bottom: 1px solid var(--surface0, #313244);
+  touch-action: none;
+}
+
+.mixproto-timeline-row:last-of-type {
+  border-bottom: none;
+}
+
+.mixproto-wavecanvas {
+  /* Counter-transformed each frame to stay viewport-fixed while the content
+     translates (was position: sticky, which lives outside the rAF clock). */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  height: 100%;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.mixproto-wavecanvas canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.mixproto-blockframe {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border: 1px solid;
+
+  pointer-events: none;
+}
+
+.mixproto-blockframe.a {
+  border-color: #00e5ff;
+}
+
+.mixproto-blockframe.b {
+  border-color: #ff2d95;
+}
+
+.mixproto-lanestrip {
+  position: relative;
+  height: max(26px, 3.6vh);
+  border-bottom: 2px solid #1b1b28;
+  touch-action: none;
+}
+
+/* Deck-tinted strip backgrounds + accent edge: A lanes read as A's, B as B's. */
+/* Deck accent via inset shadow, NOT border-left: a border would shift the
+   absolutely-positioned lane windows off the shared time axis. */
+.mixproto-lanestrip.a {
+  background: linear-gradient(rgba(0, 229, 255, 0.06), rgba(0, 229, 255, 0.02)), #0e0e16;
+  box-shadow: inset 3px 0 0 rgba(0, 229, 255, 0.6);
+}
+
+.mixproto-lanestrip.b {
+  background: linear-gradient(rgba(255, 45, 149, 0.06), rgba(255, 45, 149, 0.02)), #0e0e16;
+  box-shadow: inset 3px 0 0 rgba(255, 45, 149, 0.6);
+}
+
+.mixproto-lanestrip .mixproto-lanelabel {
+  position: sticky;
+  left: 4px;
+  top: 2px;
+  width: auto;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-family: monospace;
+  background: rgba(11, 11, 18, 0.8);
+  padding: 1px 4px;
+
+}
+
+.mixproto-lanewindow {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  /* The editable region stands out from the rest of the strip. */
+  background: rgba(49, 50, 68, 0.35);
+}
+
+.mixproto-lanewindow canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* Outline instead of border: borders inset the drawing surface, skewing
+     guide/curve x-coordinates off the shared time axis. */
+  outline: 1px solid #45475a;
+  touch-action: none;
+}
+
+.mixproto-overlap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* No fill: the lane strips make the transition region obvious; the two
+     edge lines remain as trim-handle markers. */
+  border-left: 2px solid rgba(255, 45, 149, 0.55);
+  border-right: 2px solid rgba(255, 45, 149, 0.55);
+  pointer-events: none;
+}
+
+.mixproto-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #00e5ff;
+  pointer-events: none;
+}
+
+.mixproto-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.mixproto-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mixproto-controls input[type='number'] {
+  width: 64px;
+  background: var(--crust, #11111b);
+  border: 1px solid var(--surface0, #313244);
+  color: var(--text, #cdd6f4);
+
+  padding: 3px;
+}
+
+.mixproto-play {
+  padding: 4px 18px;
+  font-weight: 700;
+  background: var(--crust, #11111b);
+  border: 2px solid #39ff14;
+  color: #39ff14;
+
+  cursor: pointer;
+}
+
+.mixproto-play:disabled {
+  opacity: 0.35;
+}
+
+/* ── Info bar: deck A | transition center | deck B ── */
+
+.mixproto-infobar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.mixproto-deckcard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 8px;
+
+  border: 1px solid var(--surface0, #313244);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.mixproto-deckcard.a {
+  border-left: 3px solid #00e5ff;
+}
+
+.mixproto-deckcard.b {
+  border-right: 3px solid #ff2d95;
+  text-align: right;
+}
+
+.mixproto-deckcard.b .mixproto-deckcard-head,
+.mixproto-deckcard.b .mixproto-deckcard-row {
+  flex-direction: row-reverse;
+}
+
+.mixproto-deckcard-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mixproto-deckcard-artist {
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mixproto-deckcard-key {
+  color: var(--mauve, #cba6f7);
+  font-family: monospace;
+  font-weight: 700;
+}
+
+.mixproto-deckcard-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mixproto-deckcard-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mixproto-deckcard-row input {
+  width: 72px;
+  background: var(--crust, #11111b);
+  border: 1px solid var(--surface0, #313244);
+  color: var(--text, #cdd6f4);
+
+  padding: 2px 3px;
+}
+
+.mixproto-deckcard-row button {
+  background: none;
+  border: 1px solid var(--surface0, #313244);
+  color: var(--text, #cdd6f4);
+
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.mixproto-deckcard-row button:hover {
+  border-color: #ffe600;
+  color: #ffe600;
+}
+
+.mixproto-center {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--surface0, #313244);
+
+  font-size: 12px;
+}
+
+.mixproto-center-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mixproto-center-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mixproto-center-row input[type='number'] {
+  width: 56px;
+  background: var(--crust, #11111b);
+  border: 1px solid var(--surface0, #313244);
+  color: var(--text, #cdd6f4);
+
+  padding: 2px 3px;
+}
+
+.mixproto-globalminimap {
+  width: 100%;
+  height: 26px;
+  display: block;
+  border: 1px solid var(--surface0, #313244);
+
+  margin-bottom: 4px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.mixproto-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mixproto-lane {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.mixproto-lanelabel {
+  width: 80px;
+  font-size: 11px;
+  font-family: monospace;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mixproto-laneclear {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.mixproto-lane canvas {
+  flex: 1;
+  height: 56px;
+  border: 1px solid var(--surface0, #313244);
+
+  touch-action: none;
+}
+
+.mixproto-lanes select,
+.mixproto-controls select {
+  align-self: flex-start;
+  background: var(--crust, #11111b);
+  color: var(--text, #cdd6f4);
+  border: 1px solid var(--surface0, #313244);
+
+  padding: 4px;
+}

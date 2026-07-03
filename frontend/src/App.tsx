@@ -2,16 +2,32 @@ import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
-import { PracticeView } from './components/PracticeView';
+import { PerformanceView } from './components/performance/PerformanceView';
 import { FilterProvider } from './contexts/FilterContext';
-import { DeckProvider } from './contexts/DeckContext';
+import { DeckProvider, DeckScope } from './contexts/DeckContext';
+import MixEditorProto from './prototype/MixEditorProto';
 
 const queryClient = new QueryClient();
 
-type View = 'library' | 'sync' | 'practice';
+type View = 'library' | 'sync' | 'performance';
+
+// PROTOTYPE (mix-editor): ?proto=mix renders the throwaway two-track arranger.
+const showMixProto = new URLSearchParams(window.location.search).get('proto') === 'mix';
 
 function App() {
   const [view, setView] = useState<View>('library');
+
+  if (showMixProto) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <DeckProvider>
+          <FilterProvider>
+            <MixEditorProto />
+          </FilterProvider>
+        </DeckProvider>
+      </QueryClientProvider>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -19,13 +35,16 @@ function App() {
         <FilterProvider>
           {view === 'sync' ? (
             <SyncView onClose={() => setView('library')} />
-          ) : view === 'practice' ? (
-            <PracticeView onClose={() => setView('library')} />
+          ) : view === 'performance' ? (
+            <PerformanceView onClose={() => setView('library')} />
           ) : (
-            <Library
-              onOpenPlaylistSync={() => setView('sync')}
-              onOpenPractice={() => setView('practice')}
-            />
+            /* The library view is Deck A (performance-mode issue 02). */
+            <DeckScope deck="A">
+              <Library
+                onOpenPlaylistSync={() => setView('sync')}
+                onOpenPerformance={() => setView('performance')}
+              />
+            </DeckScope>
           )}
         </FilterProvider>
       </DeckProvider>

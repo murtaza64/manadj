@@ -215,3 +215,36 @@ a.provenance-chip:hover {
   color: var(--text);
   text-decoration: underline;
 }
+
+/* Load-to-deck hover buttons (Performance view's embedded library). The
+   title cell is position: sticky, so the absolute overlay anchors to it. */
+.track-load-buttons {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  gap: 3px;
+}
+
+.track-row:hover .track-load-buttons { display: inline-flex; }
+
+.track-load-button {
+  width: 22px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--overlay0);
+  cursor: pointer;
+  padding: 0;
+}
+
+.track-load-button:hover {
+  background: var(--surface1);
+  border-color: var(--text);
+}
