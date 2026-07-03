@@ -1,12 +1,18 @@
 /* Column widths are set dynamically via inline styles from columnConfig.ts */
 
 .track-table {
-  /* grows past the container (sum of column widths); container scrolls
-     horizontally, key/bpm/energy/title stay sticky */
+  /* definite width (sum of column widths, from useColumnWidths) so
+     table-layout: fixed actually engages; grows past the container and the
+     container scrolls horizontally, key/bpm/energy/title stay sticky */
   min-width: 100%;
-  width: max-content;
+  width: var(--table-width);
   border-collapse: collapse;
   table-layout: fixed;
+}
+
+.track-table th,
+.track-table td {
+  box-sizing: border-box;
 }
 
 .track-table thead {
@@ -100,3 +106,24 @@
   border: 1px solid var(--surface1);
   font-size: 13px;
 }
+
+/* Column resize handles */
+/* NOTE: sticky headers are already positioned (position: sticky) — do not
+   override them to relative or they stop sticking */
+.sortable-header:not(.sticky-col-header), .tags-header { position: relative; }
+.col-resize-handle {
+  position: absolute; top: 0; right: -4px; width: 9px; height: 100%;
+  cursor: col-resize; z-index: 12;
+  /* visible 1px line centered in the hit area */
+  background: linear-gradient(
+    to right,
+    transparent 4px, var(--surface0) 4px, var(--surface0) 5px, transparent 5px
+  );
+}
+.col-resize-handle:hover, body.col-resizing .col-resize-handle {
+  background: linear-gradient(
+    to right,
+    transparent 3px, #007aff 3px, #007aff 6px, transparent 6px
+  );
+}
+body.col-resizing { cursor: col-resize; user-select: none; }

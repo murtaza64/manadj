@@ -2,7 +2,9 @@ import { type JSX } from 'react';
 import TrackRow from './TrackRow';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon } from './icons';
 import type { Track } from '../types';
-import { COLUMN_CONFIG, getStickyLeft } from './columnConfig';
+import { COLUMN_CONFIG } from './columnConfig';
+import { ColumnResizeHandle } from './ColumnResizeHandle';
+import { useColumnWidths } from '../hooks/useColumnWidths';
 import './TrackList.css';
 
 type SortColumn = 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance';
@@ -28,6 +30,8 @@ export default function TrackList({
   sortDirection,
   onSort
 }: TrackListProps) {
+  const { widths, setWidth, resetWidth, cssVars } = useColumnWidths();
+
   const SortableHeader = ({
     column,
     icon,
@@ -48,11 +52,11 @@ export default function TrackList({
     ].filter(Boolean).join(' ');
 
     const style: React.CSSProperties = {
-      width: config.width,
-      minWidth: config.width,
-      maxWidth: config.width,
+      width: `var(--colw-${config.id})`,
+      minWidth: `var(--colw-${config.id})`,
+      maxWidth: `var(--colw-${config.id})`,
       textAlign: config.align || 'left',
-      ...(config.sticky ? { left: getStickyLeft(columnIndex) } : {})
+      ...(config.sticky ? { left: `var(--colleft-${config.id})` } : {})
     };
 
     return (
@@ -65,12 +69,18 @@ export default function TrackList({
             </span>
           )}
         </div>
+        <ColumnResizeHandle
+          columnId={config.id}
+          currentWidth={widths[config.id]}
+          onResize={setWidth}
+          onReset={resetWidth}
+        />
       </th>
     );
   };
 
   return (
-    <div style={{ position: 'relative', height: '100%', width: '100%' }}>
+    <div style={{ position: 'relative', height: '100%', width: '100%', ...cssVars }}>
       <table className="track-table">
         <thead>
           <tr>
@@ -80,8 +90,14 @@ export default function TrackList({
             <SortableHeader column="title" icon={<MusicIcon />} columnIndex={3} />
             <SortableHeader column="artist" icon={<PersonIcon />} columnIndex={4} />
             <SortableHeader column="created_at" icon={<CalendarIcon />} columnIndex={5} />
-            <th style={{ textAlign: 'left', padding: '6px 12px', width: COLUMN_CONFIG[6].width }}>
+            <th className="tags-header" style={{ textAlign: 'left', padding: '6px 12px', width: 'var(--colw-tags)', minWidth: 'var(--colw-tags)', maxWidth: 'var(--colw-tags)' }}>
               <TagIcon />
+              <ColumnResizeHandle
+                columnId="tags"
+                currentWidth={widths.tags}
+                onResize={setWidth}
+                onReset={resetWidth}
+              />
             </th>
             <SortableHeader column="bitrate_kbps" label="quality" columnIndex={7} />
             <SortableHeader column="filesize_bytes" label="size" columnIndex={8} />

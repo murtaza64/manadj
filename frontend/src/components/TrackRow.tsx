@@ -4,7 +4,7 @@ import BPMDisplay from './BPMDisplay';
 import KeyDisplay from './KeyDisplay';
 import { formatRelativeTime } from '../utils/dateUtils';
 import type { Track } from '../types';
-import { COLUMN_CONFIG, getStickyLeft } from './columnConfig';
+import { COLUMN_CONFIG } from './columnConfig';
 import './TrackRow.css';
 
 interface Props {
@@ -41,11 +41,11 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
   const getCellStyle = (columnIndex: number) => {
     const config = COLUMN_CONFIG[columnIndex];
     return {
-      width: config.width,
-      minWidth: config.width,
-      maxWidth: config.width,
+      width: `var(--colw-${config.id})`,
+      minWidth: `var(--colw-${config.id})`,
+      maxWidth: `var(--colw-${config.id})`,
       textAlign: config.align || ('left' as const),
-      ...(config.sticky ? { left: getStickyLeft(columnIndex) } : {})
+      ...(config.sticky ? { left: `var(--colleft-${config.id})` } : {})
     };
   };
 

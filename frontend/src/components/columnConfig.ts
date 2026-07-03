@@ -20,17 +20,6 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
   { id: 'provenance', width: 90 },
 ];
 
-// Calculate sticky left positions
-export function getStickyLeft(columnIndex: number): number {
-  let left = 0;
-  for (let i = 0; i < columnIndex; i++) {
-    if (COLUMN_CONFIG[i].sticky) {
-      left += COLUMN_CONFIG[i].width;
-    }
-  }
-  return left;
-}
-
 // Get column by id
 export function getColumnConfig(id: string): ColumnConfig | undefined {
   return COLUMN_CONFIG.find(col => col.id === id);
