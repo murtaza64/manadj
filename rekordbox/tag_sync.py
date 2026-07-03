@@ -6,7 +6,8 @@ from pyrekordbox.db6 import Rekordbox6Database
 from pyrekordbox.db6.tables import DjmdMyTag, DjmdSongMyTag
 
 from backend.models import Tag, TagCategory, Track, TrackTag
-from rekordbox.sync import index_rekordbox_tracks, match_track_rekordbox
+from backend.sync_common.matching import TrackIndex
+from rekordbox.sync import rb_path
 
 
 @dataclass
@@ -188,7 +189,7 @@ class RekordboxTagSyncer:
 
         # Index Rekordbox tracks
         rb_contents = list(self.rb_db.get_content())
-        rb_tracks_by_path, rb_tracks_by_filename = index_rekordbox_tracks(rb_contents)
+        rb_index = TrackIndex.build(rb_contents, rb_path)
 
         # Get all manadj tracks with tags OR energy values
         tracks = self.manadj_session.query(Track).filter(
@@ -200,7 +201,7 @@ class RekordboxTagSyncer:
 
         for track in tracks:
             # Match to Rekordbox track
-            rb_track = match_track_rekordbox(track, rb_tracks_by_path, rb_tracks_by_filename)
+            rb_track = rb_index.match(track.filename)
             if not rb_track:
                 stats.tracks_unmatched += 1
                 print(f"  ⚠️  Unmatched: {track.title} - {track.artist}")

@@ -25,6 +25,12 @@ _Avoid_: MyTag (Rekordbox's term — only use when talking about the Rekordbox b
 **Tag Category**:
 A named, ordered, colored grouping of Tags (e.g. Genre, Vibe, Role).
 
+**Tag structure**:
+The Tag Categories and Tags themselves — names, colors, ordering — independent of any Track. Its downstream encodings (Engine's "ManaDJ Tags" playlist tree, Rekordbox's MyTag tree) are created automatically in service of Export, not synced as a user-facing activity.
+
+**Tag assignment**:
+Which Tags a given Track has. A per-track field, like key or energy; it can agree or diverge across manadj and external libraries.
+
 **Genre**:
 A Tag Category. A Track's genre means its Tags in this category; the ID3 genre field in the file is untrusted and not the real genre.
 
@@ -87,6 +93,9 @@ A record of where a Track's audio file came from (e.g. downloaded by manadj from
 
 ### Sync
 
+**Surface**:
+A place a track can exist: Disk (a file in the tracks directory), Library (a manadj Track), Engine DJ, or Rekordbox. The unified sync view shows one row per track matched across Surfaces; row identity comes from Match, so it inherits Match's limits (a renamed file appears as two rows until a Link concept exists).
+
 **External library**:
 A library owned by another program (Engine DJ or Rekordbox) that manadj reads from and writes to. Both are live Export targets.
 
@@ -95,8 +104,8 @@ Colloquially — and in the UI — the broad umbrella for everything that moves 
 _Avoid_: generic "sync" in module/function names
 
 **Export**:
-A Sync operation that pushes library state out to an external library. The common case; manadj's state wins.
-_Avoid_: publish, push
+A Sync operation that pushes Library state out to another Surface — creating missing tracks downstream, or writing diverged fields (including ID3 tags on the Disk Surface). The common case; manadj's state wins.
+_Avoid_: publish, push, write-to-files (that's Export to Disk)
 
 **Import**:
 Any operation that brings tracks or track data into manadj. Two kinds: Disk Import and External Import.
@@ -110,6 +119,10 @@ _Avoid_: pull, Library Import
 
 **Scan**:
 The discovery step of a Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates.
+
+**Diverged**:
+A track field (title, artist, key, BPM, energy, Tag assignment) whose value differs between the Library and another Surface. The default resolution is Export (manadj wins); Import is the explicit exception.
+_Avoid_: discrepancy (implementation term)
 
 **Match**:
 The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Recomputed each run; not persisted.

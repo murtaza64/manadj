@@ -15,9 +15,6 @@ from the path's basename.
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar
-
-T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -49,10 +46,10 @@ class TrackIndex[T]:
         return self.by_filename.get(Path(path).name)
 
 
-def find_unmatched(
+def find_unmatched[T, U](
     tracks: Iterable[T],
     path_of: Callable[[T], str | None],
-    target: TrackIndex,
+    target: "TrackIndex[U]",
 ) -> list[T]:
     """Tracks with no counterpart in the target index (pathless rows included)."""
     return [t for t in tracks if target.match(path_of(t)) is None]

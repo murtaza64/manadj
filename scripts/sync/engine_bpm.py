@@ -5,7 +5,9 @@ import sys
 import argparse
 from pathlib import Path
 from enginedj import EngineDJDatabase
-from enginedj.sync import match_manadj_track_to_engine
+from backend.sync_common.matching import TrackIndex
+from enginedj.models.track import Track as EDJTrack
+from enginedj.sync import edj_path
 from backend.database import SessionLocal
 from backend.models import Track as DBTrack
 
@@ -87,9 +89,11 @@ def sync_bpms(engine_db_path: str, apply: bool = False, verbose: bool = False, t
             db_tracks = db.query(DBTrack).all()
             stats.scanned = len(db_tracks)
 
+            # Index the Engine DJ library once; match in memory
+            edj_index = TrackIndex.build(edj_session.query(EDJTrack).all(), edj_path)
+
             for db_track in db_tracks:
-                # Find matching Engine DJ track
-                edj_track = match_manadj_track_to_engine(db_track, edj_session)
+                edj_track = edj_index.match(db_track.filename)
 
                 if edj_track is None:
                     stats.not_in_engine += 1
@@ -204,7 +208,7 @@ def sync_bpms(engine_db_path: str, apply: bool = False, verbose: bool = False, t
         print(f"  - Skipped: {stats.skipped}")
 
         if not apply and (updates or conflicts):
-            print(f"\nMode: DRY RUN (use --apply to commit changes)")
+            print("\nMode: DRY RUN (use --apply to commit changes)")
             print(f"\nProposed changes ({len(updates)} total):")
             for db_track, new_bpm_centi, old_bpm, new_bpm in updates[:20]:
                 artist = db_track.artist or "Unknown"
@@ -216,7 +220,7 @@ def sync_bpms(engine_db_path: str, apply: bool = False, verbose: bool = False, t
             if len(updates) > 20:
                 print(f"  ... and {len(updates) - 20} more")
         elif apply and updates:
-            print(f"\nApplied changes:")
+            print("\nApplied changes:")
             for db_track, new_bpm_centi, old_bpm, new_bpm in updates[:20]:
                 artist = db_track.artist or "Unknown"
                 title = db_track.title or "Unknown"

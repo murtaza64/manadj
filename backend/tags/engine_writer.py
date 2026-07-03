@@ -6,7 +6,8 @@ from enginedj.connection import EngineDJDatabase
 from enginedj.models.track import Track as EDJTrack
 from enginedj.models.information import Information as EDJInformation
 from backend.crud import get_tag_categories, get_tags_by_category
-from enginedj.sync import index_engine_tracks, match_track
+from backend.sync_common.matching import TrackIndex
+from enginedj.sync import edj_path
 from enginedj.playlist import (
     get_tracks_by_tag,
     find_playlist_by_title_and_parent,
@@ -56,8 +57,7 @@ class EngineTagWriter:
         with session_context as edj_session:
             # Initialize track matching
             edj_tracks = edj_session.query(EDJTrack).all()
-            edj_tracks_by_path, edj_tracks_by_filename = \
-                index_engine_tracks(edj_tracks)
+            edj_index = TrackIndex.build(edj_tracks, edj_path)
 
             # Get database UUID
             info = edj_session.query(EDJInformation).first()
@@ -85,8 +85,7 @@ class EngineTagWriter:
                     root_id,
                     db_uuid,
                     dry_run,
-                    edj_tracks_by_path,
-                    edj_tracks_by_filename,
+                    edj_index,
                     stats
                 )
 
@@ -136,8 +135,7 @@ class EngineTagWriter:
         root_id: int | None,
         db_uuid: str,
         dry_run: bool,
-        edj_tracks_by_path: dict,
-        edj_tracks_by_filename: dict,
+        edj_index: TrackIndex,
         stats: TagSyncStats
     ):
         """Sync a single tag to Engine DJ directly under root."""
@@ -152,11 +150,7 @@ class EngineTagWriter:
         unmatched = []
 
         for track in manadj_tracks:
-            edj_track = match_track(
-                track,
-                edj_tracks_by_path,
-                edj_tracks_by_filename
-            )
+            edj_track = edj_index.match(track.filename)
             if edj_track:
                 matched_edj_tracks.append(edj_track)
             else:

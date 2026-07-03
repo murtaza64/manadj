@@ -9,10 +9,8 @@ For platform-specific utilities, see:
 - rekordbox.sync - Rekordbox sync utilities
 """
 
-from backend.sync_common.base import SyncStats
 from backend.sync_common.formats import format_track_preview
 
 __all__ = [
-    'SyncStats',
     'format_track_preview',
 ]
