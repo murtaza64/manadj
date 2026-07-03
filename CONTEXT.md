@@ -81,6 +81,9 @@ One of 24 key centers (12 tonics × major/minor) assigned to a Track. OpenKey is
 The relation between two Keys that mix well together. The basis of harmonic-mixing features (Circle of Fifths, finding tracks to mix into).
 _Avoid_: related (too vague — could mean same artist, genre, etc.)
 
+**Compatible**:
+A heuristic relation between Tracks: key, tempo, energy, and tag agreement suggest they would mix well. One of discovery's two evidence tiers — heuristics propose, the Transition library confirms (proven, Favorite-ranked). "Find Compatible" is the feature surfacing this tier (renamed from "Find Related", which the glossary forbids).
+
 ### Performance data
 
 **Analysis**:

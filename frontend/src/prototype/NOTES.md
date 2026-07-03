@@ -342,6 +342,27 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   through refs). Pointer math untouched (the hit div still spans the
   full window). Bitmaps are now ≤ ~2 viewports regardless of zoom.
 
+- v25 (deep perf pass, production-bound): (1) autosave DEBOUNCED 300ms —
+  it stringified the whole pair store into localStorage at drag rate
+  (biggest drag-path cost); pending edits flush before transition
+  switch/create and on unmount (a late flush would write the old mix into
+  the newly-active slot). (2) Beatgrid vertices now live in GEOMETRY
+  space and ride u_pixelOffset like the waveform — scrolling stopped
+  rebuilding+uploading them every frame (cache keys on extent+zoom, not
+  scroll position; REAL-MODULE fix, benefits the library player too).
+  (3) generateGeometry reuses a persistent scratch Float32Array (fresh
+  multi-MB allocs per zoom frame were GC churn — the NOTES claim from
+  slice 01 had regressed). (4) The rAF tick is dirty-keyed (scroll, zoom,
+  mix time, durations, viewport, model version): an idle editor skips
+  every transform write and both WebGL passes. (5) Default-lane point
+  identities memoized (fresh arrays per render redrew every undrawn lane
+  canvas on any model edit). (6) Modulation LUTs keyed on lane shapes
+  only — window moves/slides skip the 8k-evalLane rebuild. (7) Guide
+  memos binary-search the window slice instead of scanning all beats per
+  zoom frame. (8) beatXs memoized; (9) redundant structuredClones dropped
+  from trim drags. TEMP ?protoperf worst-tick readout re-added — strip
+  after verification.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

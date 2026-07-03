@@ -136,6 +136,21 @@ function savePairStore(store: PairStore): void {
  * to place breakpoints between beats. */
 const MAX_PX_PER_SEC = 240;
 
+/** Envelope-preview LUT resolution (samples across the window). */
+const MOD_LUT_N = 2048;
+
+/** First index with arr[i] >= v (arr ascending). */
+function lowerBound(arr: number[], v: number): number {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < v) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 const LANE_COLORS: Record<LaneId, string> = {
   faderA: '#00e5ff',
   faderB: '#ff2d95',
@@ -847,7 +862,10 @@ function DawTimeline({
   // SAMPLED ONCE into a LUT here (they only vary inside the window —
   // evalLane clamps outside, so index clamping covers the constant tails)
   // and the callback is a clamped array lookup into a reused object.
-  useEffect(() => {
+  // LUTs depend on lane SHAPES only (normalized x) — window moves and
+  // slides must not pay the 8k-evalLane rebuild, just the cheap remap
+  // below.
+  const modLuts = useMemo(() => {
     const eqVis = (v: number) => Math.min(v * 2, 1.15);
     const laneY = (id: LaneId, x: number) =>
       evalLane(
@@ -856,11 +874,10 @@ function DawTimeline({
           : lanePoints(tr.lanes, id, tr.durationSec),
         x
       );
-    const N = 2048;
     const buildLut = (fader: LaneId, low: LaneId, mid: LaneId, high: LaneId) => {
-      const lut = new Float32Array(N * 4);
-      for (let i = 0; i < N; i++) {
-        const x = i / (N - 1);
+      const lut = new Float32Array(MOD_LUT_N * 4);
+      for (let i = 0; i < MOD_LUT_N; i++) {
+        const x = i / (MOD_LUT_N - 1);
         lut[i * 4] = laneY(fader, x);
         lut[i * 4 + 1] = eqVis(laneY(low, x));
         lut[i * 4 + 2] = eqVis(laneY(mid, x));
@@ -868,11 +885,18 @@ function DawTimeline({
       }
       return lut;
     };
+    return {
+      a: buildLut('faderA', 'eqLowA', 'eqMidA', 'eqHighA'),
+      b: buildLut('faderB', 'eqLowB', 'eqMidB', 'eqHighB'),
+    };
+  }, [tr.lanes, tr.hiddenLanes, tr.durationSec]);
+
+  useEffect(() => {
     const mkMod = (lut: Float32Array, xAt: (t: number) => number) => {
       const out = { gain: 1, low: 1, mid: 1, high: 1 };
       return (t: number) => {
         const x = xAt(t);
-        const i = 4 * Math.max(0, Math.min(N - 1, Math.round(x * (N - 1))));
+        const i = 4 * Math.max(0, Math.min(MOD_LUT_N - 1, Math.round(x * (MOD_LUT_N - 1))));
         out.gain = lut[i];
         out.low = lut[i + 1];
         out.mid = lut[i + 2];
@@ -882,18 +906,15 @@ function DawTimeline({
     };
     const dur = tr.durationSec;
     rendA.rendererRef.current?.setModulation(
-      mkMod(
-        buildLut('faderA', 'eqLowA', 'eqMidA', 'eqHighA'),
-        dur <= 0 ? (t) => (t < tr.startSec ? 0 : 1) : (t) => (t - tr.startSec) / dur
-      )
+      mkMod(modLuts.a, dur <= 0 ? (t) => (t < tr.startSec ? 0 : 1) : (t) => (t - tr.startSec) / dur)
     );
     rendB.rendererRef.current?.setModulation(
       mkMod(
-        buildLut('faderB', 'eqLowB', 'eqMidB', 'eqHighB'),
+        modLuts.b,
         dur <= 0 ? (bt) => (bt < tr.bInSec ? 0 : 1) : (bt) => (bt - tr.bInSec) / (rateB * dur)
       )
     );
-  }, [tr, rateB, waveA, waveB, rendA.rendererRef, rendB.rendererRef]);
+  }, [modLuts, tr.startSec, tr.durationSec, tr.bInSec, rateB, waveA, waveB, rendA.rendererRef, rendB.rendererRef]);
 
   // Mirrors so the tick effect (keyed on [player]) never holds stale draws.
   const drawRowsRef = useRef({ a: rendA.draw, b: rendB.draw });
@@ -1205,7 +1226,10 @@ function DawTimeline({
             startSec: newStart,
             durationSec: newDur,
             bInSec: bIn,
-            lanes: structuredClone(lanes),
+            // No clone: cropRemap output is fresh; the alt path aliases the
+            // drag-start snapshot, which is itself a private clone and lane
+            // edits never mutate point arrays in place.
+            lanes,
           },
         };
       }
@@ -1224,7 +1248,7 @@ function DawTimeline({
         : cropRemapLanes(d.origLanes, d.origDur, newDur);
       return {
         ...m,
-        transition: { ...m.transition, durationSec: newDur, lanes: structuredClone(lanes) },
+        transition: { ...m.transition, durationSec: newDur, lanes },
       };
     });
   };
@@ -1244,8 +1268,12 @@ function DawTimeline({
           ? beatgridA.beat_times[1] - beatgridA.beat_times[0]
           : 1;
       const showWeak = spb * pxPerSec >= 12;
-      for (const b of beatgridA.beat_times) {
-        if (b < tr.startSec || b > tr.startSec + dur) continue;
+      // Binary-search the window slice instead of scanning every beat
+      // (this memo re-runs per zoom frame).
+      const beats = beatgridA.beat_times;
+      for (let i = lowerBound(beats, tr.startSec); i < beats.length; i++) {
+        const b = beats[i];
+        if (b > tr.startSec + dur) break;
         const strong = downs.has(b);
         if (!strong && !showWeak) continue;
         out.push({ x: (b - tr.startSec) / dur, strong });
@@ -1269,12 +1297,16 @@ function DawTimeline({
           ? beatgridB.beat_times[1] - beatgridB.beat_times[0]
           : 1;
       const showWeak = (spb / rateB) * pxPerSec >= 12;
-      for (const bt of beatgridB.beat_times) {
-        const mixT = tr.startSec + (bt - tr.bInSec) / rateB;
-        if (mixT < tr.startSec || mixT > tr.startSec + dur) continue;
+      // Window ⇔ B-track bounds: mixT ∈ [start, start+dur] ⇔ bt ∈
+      // [bIn, bIn + dur·rateB] — binary-search the slice.
+      const beats = beatgridB.beat_times;
+      const btEnd = tr.bInSec + dur * rateB;
+      for (let i = lowerBound(beats, tr.bInSec); i < beats.length; i++) {
+        const bt = beats[i];
+        if (bt > btEnd) break;
         const strong = downs.has(bt);
         if (!strong && !showWeak) continue;
-        out.push({ x: (mixT - tr.startSec) / dur, strong });
+        out.push({ x: (bt - tr.bInSec) / (rateB * dur), strong });
       }
     }
     for (const c of hotCuesB) {
@@ -1529,7 +1561,7 @@ function LaneCanvas({
   const [chopPreview, setChopPreview] = useState<{ x0: number; x1: number } | null>(null);
 
   /** Beat guide positions (cue markers excluded), ascending. */
-  const beatXs = guides.filter((g) => !g.color).map((g) => g.x);
+  const beatXs = useMemo(() => guides.filter((g) => !g.color).map((g) => g.x), [guides]);
   /** Chop edges snap to the beat lines themselves; `insertChop` centers
    * each wall on its line, so the cut-out opens just before the beat. */
   const snapCutX = (x: number) => (beatXs.length ? (nearestTime(beatXs, x) ?? x) : x);

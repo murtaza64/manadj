@@ -23,7 +23,9 @@ loaded:
   accent color; starred variant when that ordered pair is Preferred (≥1
   favorited Transition). No counts in v1.
 - **Filter**: "has transition from loaded decks" toggle in the existing
-  library filter bar.
+  library filter bar. Design the toggle's state as a first-class filter
+  axis — issue 22 binds a second control to it (Find Compatible modal
+  switch) and requires compatible-criteria application to preserve it.
 - Marks update live on load/unload, save, favorite, delete.
 
 ## Acceptance criteria

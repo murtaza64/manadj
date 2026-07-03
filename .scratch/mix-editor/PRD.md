@@ -73,6 +73,14 @@ Activates the deferred track-association layer (glossary: Favorite, Preferred pa
 - **Library marks**: outgoing-only, from **either** loaded deck (alternating-deck workflow: next track loads into the free deck) — one compact glyph per source deck in that deck's accent color; starred variant when the pair is Preferred. Filter "has transition from loaded decks" joins the existing library filter bar. No counts in v1.
 - **Index**: direction-aware API (`transitionsFrom` / `transitionsInto`); prototype-scale = in-memory scan over localStorage rebuilt on editor events. These features raise the urgency of the DB-persistence slice (which unblocks issue 03) without blocking on it.
 
+**Discovery unification (grill 2026-07-03 #5; issue 22).** Two evidence tiers, one surface: *heuristic* (Compatible — key/tempo/energy/tags predict a mix) and *proven* (Transition library — Favorite-ranked records of actual mixes). Consequences:
+
+- **"Find Related" → "Find Compatible"** (the glossary forbade "related" all along); glossary gains Compatible.
+- **Reference model switches to loaded decks**: Find Compatible becomes a loaded-track action — the modal carries A/B buttons choosing which deck's track to match from (selection-based derivation retired). Disabled with nothing loaded.
+- **Modal gains a "has transition" switch** bound to the same filter state as the library filter-bar toggle (one source of truth, two controls) — the modal becomes the one-stop discovery config: four heuristic criteria + the proven tier.
+- Find Compatible writes only its own four criteria; the transition toggle is an orthogonal axis; Clear All clears both. Marks render on any filtered list. Union preset ("proven ∨ compatible") named as future, not built.
+- Adjacent, not this work: the hand-rolled harmonic expansion (`Library.tsx`) is already flagged for consolidation in `.scratch/key-authority/issues/01-single-key-authority.md`.
+
 ### Marker readability (2026-07-03; issue 14, prototype iteration)
 
 De-noising the timeline's vertical lines; hot cues become findable at distant zoom:
