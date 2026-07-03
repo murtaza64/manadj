@@ -10,11 +10,9 @@ item is independently shippable.
 
 ## Items
 
-- [ ] **Lane labels get text-selected**: clicking/dragging around the
-      automation lane editors sometimes highlights/selects the lane label
-      text (and possibly other editor chrome). Suppress selection on editor
-      UI (`user-select: none` on labels/controls; keep any genuinely
-      selectable text like track titles selectable deliberately).
+- [x] **Lane labels get text-selected** (2026-07-03): `user-select: none`
+      on `.mixproto-top`; inputs, track titles, and artist lines opt back
+      in with `user-select: text`.
 
 ## Acceptance criteria
 

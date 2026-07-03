@@ -17,6 +17,15 @@
   background: var(--crust, #11111b);
   border-bottom: 2px solid var(--surface1, #45475a);
   overflow: hidden;
+  /* Drag-heavy surface: stray lane/region drags must not text-select
+     labels or controls (issue 15). Readable text opts back in below. */
+  user-select: none;
+}
+
+.mixproto-top input,
+.mixproto-tweaktitle,
+.mixproto-deckcard-artist {
+  user-select: text;
 }
 
 .mixproto-library {
