@@ -1,0 +1,239 @@
+"""The unified sync view aggregator.
+
+One interface: compute_sync_status(db, surfaces) -> SyncStatusResult.
+`surfaces` maps a SurfaceId to a SurfaceReader — the seam at which external
+libraries and the disk are read (fakes in tests; adapters in production).
+This seam is a read-only down payment on the ExternalLibrary seam
+(architecture review candidate 3).
+"""
+
+from typing import Mapping, Protocol
+
+from sqlalchemy.orm import Session, joinedload
+
+from backend import models
+from backend.sync_common.matching import TrackIndex
+from backend.track_metadata.units import centibpm_to_bpm
+
+from .models import (
+    SCALAR_FIELDS,
+    FieldDivergence,
+    RowStatus,
+    SurfaceTrackRef,
+    SyncStatusResult,
+    SyncStatusRow,
+    TrackFields,
+)
+
+BPM_TOLERANCE = 0.01
+
+
+class SurfaceReader(Protocol):
+    """What the aggregator needs from a Surface: its tracks and which fields
+    it carries."""
+
+    fields: frozenset[str]
+
+    def list_tracks(self) -> list[SurfaceTrackRef]: ...
+
+
+def compute_sync_status(
+    db: Session, surfaces: Mapping[str, SurfaceReader]
+) -> SyncStatusResult:
+    """One row per track matched across Surfaces, with rollup status,
+    diverged fields, capability info, and no-overwrite warnings."""
+    surface_refs: dict[str, list[SurfaceTrackRef]] = {
+        sid: [r for r in reader.list_tracks() if r.path] for sid, reader in surfaces.items()
+    }
+    surface_index: dict[str, TrackIndex[SurfaceTrackRef]] = {
+        sid: TrackIndex.build(refs, lambda r: r.path) for sid, refs in surface_refs.items()
+    }
+
+    rows: list[SyncStatusRow] = []
+    matched_ref_ids: set[int] = set()
+
+    library_tracks = (
+        db.query(models.Track)
+        .options(joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag))
+        .all()
+    )
+
+    for track in library_tracks:
+        rows.append(
+            _library_row(track, surfaces, surface_index, matched_ref_ids)
+        )
+
+    rows.extend(_orphan_rows(surfaces, surface_refs, matched_ref_ids))
+
+    counts: dict[str, int] = {
+        s: 0
+        for s in ("missing-downstream", "diverged", "not-in-library", "unimported", "in-sync")
+    }
+    for row in rows:
+        counts[row.status] += 1
+    return SyncStatusResult(rows=rows, counts=counts)
+
+
+# ---------------------------------------------------------------- library rows
+
+
+def _library_fields(track: models.Track) -> TrackFields:
+    return TrackFields(
+        title=track.title,
+        artist=track.artist,
+        key=track.key,
+        bpm=centibpm_to_bpm(track.bpm),
+        energy=track.energy,
+        tags=sorted(tt.tag.name for tt in track.track_tags),
+    )
+
+
+def _library_row(
+    track: models.Track,
+    surfaces: Mapping[str, SurfaceReader],
+    surface_index: dict[str, TrackIndex[SurfaceTrackRef]],
+    matched_ref_ids: set[int],
+) -> SyncStatusRow:
+    lib = _library_fields(track)
+    presence: dict[str, bool] = {"library": True}
+    diverged: dict[str, FieldDivergence] = {}
+    warnings: list[str] = []
+
+    for sid, reader in surfaces.items():
+        ref = surface_index[sid].match(track.filename)
+        presence[sid] = ref is not None
+        if ref is None:
+            continue
+        matched_ref_ids.add(id(ref))
+        _collect_divergences(sid, reader, lib, ref.fields, diverged, warnings)
+
+    # every known surface key must exist in presence even if reader missing
+    for sid in ("disk", "engine", "rekordbox"):
+        presence.setdefault(sid, False)
+
+    unprocessed = not lib.tags
+    missing_downstream = not presence["engine"] or not presence["rekordbox"]
+    # rollup priority: diverged > missing-downstream > in-sync
+    status: RowStatus
+    if diverged:
+        status = "diverged"
+    elif missing_downstream:
+        status = "missing-downstream"
+    else:
+        status = "in-sync"
+
+    return SyncStatusRow(
+        path=track.filename,
+        title=track.title,
+        artist=track.artist,
+        track_id=track.id,
+        presence=presence,
+        status=status,
+        unprocessed=unprocessed,
+        diverged=list(diverged.values()),
+        warnings=warnings,
+    )
+
+
+def _collect_divergences(
+    sid: str,
+    reader: SurfaceReader,
+    lib: TrackFields,
+    surface: TrackFields,
+    diverged: dict[str, FieldDivergence],
+    warnings: list[str],
+) -> None:
+    for fname in SCALAR_FIELDS:
+        if fname not in reader.fields:
+            continue
+        lib_v = getattr(lib, fname)
+        surf_v = getattr(surface, fname)
+        if _values_equal(fname, lib_v, surf_v):
+            continue
+        _record(sid, reader, fname, lib_v, surf_v, diverged, warnings)
+
+    if "tags" in reader.fields and surface.tags is not None:
+        if sorted(surface.tags) != (lib.tags or []):
+            _record(sid, reader, "tags", lib.tags or [], surface.tags, diverged, warnings)
+
+
+def _record(
+    sid: str,
+    reader: SurfaceReader,
+    fname: str,
+    lib_v: object,
+    surf_v: object,
+    diverged: dict[str, FieldDivergence],
+    warnings: list[str],
+) -> None:
+    d = diverged.get(fname)
+    if d is None:
+        empty = lib_v is None or lib_v == []
+        d = FieldDivergence(
+            field=fname,
+            library_value=lib_v,
+            surface_values={},
+            importable_from=[],
+            no_overwrite=empty,
+        )
+        if empty:
+            warnings.append(
+                f"Library has no {fname}; Export will skip it — "
+                f"import manually if the downstream value is right"
+            )
+        diverged[fname] = d
+    d.surface_values[sid] = surf_v
+    if fname in reader.fields and sid not in d.importable_from:
+        d.importable_from.append(sid)
+
+
+def _values_equal(fname: str, a: object, b: object) -> bool:
+    if fname == "bpm" and a is not None and b is not None:
+        return abs(float(a) - float(b)) <= BPM_TOLERANCE  # type: ignore[arg-type]
+    # a surface with no value where the library also has none is agreement;
+    # asymmetric emptiness is a divergence (handled by caller via _record)
+    return a == b
+
+
+# ---------------------------------------------------------------- orphan rows
+
+
+def _orphan_rows(
+    surfaces: Mapping[str, SurfaceReader],
+    surface_refs: dict[str, list[SurfaceTrackRef]],
+    matched_ref_ids: set[int],
+) -> list[SyncStatusRow]:
+    """Rows for tracks that exist on Surfaces but not in the Library.
+    A track on several external Surfaces merges into one row (matched by path)."""
+    orphans: list[SyncStatusRow] = []
+    orphan_index: TrackIndex[SyncStatusRow] | None = None
+
+    for sid in ("engine", "rekordbox", "disk"):
+        if sid not in surfaces:
+            continue
+        for ref in surface_refs[sid]:
+            if id(ref) in matched_ref_ids:
+                continue
+            existing = orphan_index.match(ref.path) if orphan_index else None
+            if existing is not None:
+                existing.presence[sid] = True
+                continue
+            row = SyncStatusRow(
+                path=ref.path or "",
+                title=ref.fields.title,
+                artist=ref.fields.artist,
+                track_id=None,
+                presence={
+                    "library": False,
+                    "disk": False,
+                    "engine": False,
+                    "rekordbox": False,
+                    sid: True,
+                },
+                status="unimported" if sid == "disk" else "not-in-library",
+                unprocessed=False,
+            )
+            orphans.append(row)
+            orphan_index = TrackIndex.build(orphans, lambda r: r.path)
+
+    return orphans
