@@ -81,6 +81,27 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   sprinkling pans between steps. LaneCanvas `key={pxPerSec}` remount replaced
   with a `widthPx` draw-effect dependency.
 
+- v10 (graduation slice 01, real-module work in change
+  `mix-editor: 01-renderer-driven-draw-windowed-geometry`): renderer
+  driven-draw + windowed geometry. `WebGLWaveformRenderer.renderFrame(clock)`
+  renders one frame synchronously (`startRenderLoop` is now a wrapper); the
+  hook grew `driven: true` + stable `draw()`; the proto tick draws rows A/B
+  right after writing transforms/windows — layer order by construction, the
+  remaining waveform-shift source. Externally-windowed geometry now covers
+  only the visible window ±1 viewport (regen cost constant in zoom, was
+  full-track = zoom-gesture jank), built into a preallocated Float32Array;
+  waveform GPU upload only on regen (was every frame, ~MBs); beatgrid
+  vertices cached keyed on window; separate GL buffers for
+  waveform/beatgrid/markers; overlay canvas lookup cached. `?protoperf` logs
+  worst tick per second (remove at ride-back). Two follow-up fixes to land
+  the feel: exact (1e-9) cache range epsilon for external windows (the 0.1%
+  guard reused stale-scale geometry during smooth sub-0.1%/frame zooms —
+  drift-and-snap), and `calculatePixelOffset()` moved AFTER the cache
+  refresh in `render()` (it read the previous frame's cacheValidation, so
+  regenerated geometry drew with a one-frame-stale zoom mapping — a latent
+  main-line bug: one mispositioned frame per Player zoom step). Verdict:
+  zoom smooth and anchored ("perfect now").
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 - `graph.ts` `rampGain` (read computed value BEFORE cancelScheduledValues):

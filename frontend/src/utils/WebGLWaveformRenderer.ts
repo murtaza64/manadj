@@ -1,11 +1,18 @@
 /**
  * WebGL-based waveform renderer with hardware acceleration.
  *
- * Driven by a PlaybackClock (see playback/clock.ts): the render loop reads the
- * playhead once per frame and draws. The clock is sample-accurate and
- * monotonic, so there is no interpolation, smoothing, or startup-prediction
- * machinery here (ADR 0008 — the element-clock compensation code was deleted
- * with the `<audio>` stack consolidation).
+ * Driven by a PlaybackClock (see playback/clock.ts): each frame reads the
+ * playhead once and draws. The clock is sample-accurate and monotonic, so
+ * there is no interpolation, smoothing, or startup-prediction machinery here
+ * (ADR 0008 — the element-clock compensation code was deleted with the
+ * `<audio>` stack consolidation).
+ *
+ * Two drive modes:
+ * - Self-driving (default): `startRenderLoop(clock)` runs its own rAF loop.
+ * - Driven: an external motion clock calls `renderFrame(clock)` once per
+ *   frame — used by multi-layer views (the transition editor) that must
+ *   commit DOM transforms and canvas paints in the same frame, in a
+ *   guaranteed order.
  *
  * Features:
  * - 3-band frequency visualization (bass/mid/treble)
@@ -50,10 +57,18 @@ export class WebGLWaveformRenderer {
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext;
 
-  // WebGL resources
+  // WebGL resources. Three geometry buffers so uploads happen only when
+  // content changes: the (large) waveform buffer on geometry regeneration,
+  // the beatgrid buffer when the visible window moves, and a scratch buffer
+  // for the small per-frame marker geometry (playhead, cues).
   private program!: WebGLProgram;
   private vertexBuffer!: WebGLBuffer;
   private vao!: WebGLVertexArrayObject;
+  private waveformBuffer!: WebGLBuffer;
+  private waveformVao!: WebGLVertexArrayObject;
+  private beatgridBuffer!: WebGLBuffer;
+  private beatgridVao!: WebGLVertexArrayObject;
+  private waveformUploadNeeded = false;
 
   // Shader locations
   private a_position!: number;
@@ -110,7 +125,23 @@ export class WebGLWaveformRenderer {
     lastDisplayedPosition: number;
     canvasWidth: number;
     canvasHeight: number;
+    /** Normalized track extent the cached geometry covers (externally
+     * windowed views generate only the visible window + margin). */
+    geometryStart: number;
+    geometryEnd: number;
   } | null = null;
+  /** Extent of the most recently generated geometry (mirrors into
+   * cacheValidation; used by pixel-offset math). */
+  private lastGeometryStart = 0;
+  private lastGeometryEnd = 1;
+
+  // Beatgrid geometry cache: rebuilt only when the visible window,
+  // canvas size, or grid data change (previously rebuilt every frame).
+  private beatgridCache: { key: string; vertices: Float32Array } | null = null;
+
+  // Text overlay canvas (cached — was a getElementById per frame).
+  private overlayCanvas: HTMLCanvasElement | null = null;
+  private overlayCtx: CanvasRenderingContext2D | null = null;
 
   constructor(canvas: HTMLCanvasElement, config: WebGLRendererConfig = {}) {
     this.canvas = canvas;
@@ -257,22 +288,31 @@ export class WebGLWaveformRenderer {
   }
 
   private initBuffers(): void {
+    const scratch = this.createGeometryBuffer();
+    this.vertexBuffer = scratch.buffer;
+    this.vao = scratch.vao;
+
+    const waveform = this.createGeometryBuffer();
+    this.waveformBuffer = waveform.buffer;
+    this.waveformVao = waveform.vao;
+
+    const beatgrid = this.createGeometryBuffer();
+    this.beatgridBuffer = beatgrid.buffer;
+    this.beatgridVao = beatgrid.vao;
+  }
+
+  /** A VAO + vertex buffer pair with the standard [x, y, r, g, b] layout. */
+  private createGeometryBuffer(): { vao: WebGLVertexArrayObject; buffer: WebGLBuffer } {
     const gl = this.gl;
 
-    // Create vertex buffer
-    const vertexBuffer = gl.createBuffer();
-    if (!vertexBuffer) throw new Error('Failed to create vertex buffer');
-    this.vertexBuffer = vertexBuffer;
+    const buffer = gl.createBuffer();
+    if (!buffer) throw new Error('Failed to create vertex buffer');
 
-    // Create VAO
     const vao = gl.createVertexArray();
     if (!vao) throw new Error('Failed to create VAO');
-    this.vao = vao;
 
-    gl.bindVertexArray(this.vao);
-
-    // Set up vertex attributes
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 
     // Position attribute (2 floats)
     gl.enableVertexAttribArray(this.a_position);
@@ -283,11 +323,13 @@ export class WebGLWaveformRenderer {
     gl.vertexAttribPointer(this.a_color, 3, gl.FLOAT, false, 20, 8);
 
     gl.bindVertexArray(null);
+    return { vao, buffer };
   }
 
   public setWaveformData(data: WaveformDataWebGL): void {
     this.waveformData = data;
     this.invalidateWaveformCache();
+    this.beatgridCache = null; // beat x-positions depend on track duration
     this.calculateDisplayWindow();
   }
 
@@ -314,12 +356,17 @@ export class WebGLWaveformRenderer {
         this.downbeatIndices.add(i);
       }
     }
+
+    this.beatgridCache = null;
   }
 
   /**
-   * Check if cached waveform geometry is still valid
-   * Cache is valid as long as zoom level and canvas dimensions haven't changed
-   * Position changes are handled by shader translation (u_pixelOffset)
+   * Check if cached waveform geometry is still valid.
+   * Cache is valid as long as zoom level and canvas dimensions haven't
+   * changed AND the visible track portion is inside the cached geometry's
+   * extent (windowed geometry covers the window + margin; full-track
+   * geometry covers [0, 1]). Position changes within the extent are handled
+   * by shader translation (u_pixelOffset).
    */
   private isCacheValid(): boolean {
     if (!this.cachedWaveformGeometry || !this.cacheValidation) return false;
@@ -331,16 +378,28 @@ export class WebGLWaveformRenderer {
       return false;
     }
 
-    // Check that zoom level hasn't changed significantly (which changes the display range)
-    // Compare the width of the display window rather than absolute positions
+    // Check that zoom level hasn't changed (which changes the display range)
+    // Compare the width of the display window rather than absolute positions.
+    // Externally-windowed views regenerate on any real range change: their
+    // regen is cheap (windowed), and geometry cached at a ±0.1%-stale scale
+    // renders the waveform at the wrong zoom against the DOM-positioned
+    // timeline around it — a visible sideways drift-and-snap during smooth
+    // (sub-0.1%-per-frame) zoom gestures. Playhead-following views keep the
+    // looser guard: full-track regen is expensive and their zoom changes
+    // arrive via setZoom, which invalidates explicitly.
     const cachedRange = cache.lastDisplayedPosition - cache.firstDisplayedPosition;
     const currentRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
     const rangeDiff = Math.abs(cachedRange - currentRange);
+    const rangeEpsilon = currentRange * (this.externalWindow ? 1e-9 : 0.001);
+    if (rangeDiff >= rangeEpsilon) return false;
 
-    // If range changed by more than 0.1%, zoom changed - invalidate cache
-    const rangeEpsilon = currentRange * 0.001;
-
-    return rangeDiff < rangeEpsilon;
+    // Visible track portion must be covered by the cached geometry (the
+    // window itself may extend past [0, 1]; blank space needs no geometry).
+    const visibleStart = Math.max(this.firstDisplayedPosition, 0);
+    const visibleEnd = Math.min(this.lastDisplayedPosition, 1);
+    return (
+      visibleStart >= cache.geometryStart - 1e-9 && visibleEnd <= cache.geometryEnd + 1e-9
+    );
   }
 
   /**
@@ -352,6 +411,8 @@ export class WebGLWaveformRenderer {
       lastDisplayedPosition: this.lastDisplayedPosition,
       canvasWidth: this.canvas.width,
       canvasHeight: this.canvas.height,
+      geometryStart: this.lastGeometryStart,
+      geometryEnd: this.lastGeometryEnd,
     };
   }
 
@@ -380,9 +441,13 @@ export class WebGLWaveformRenderer {
       : this.lastDisplayedPosition - this.firstDisplayedPosition;
     const samplesPerPixel = (cachedRange * totalDataPoints) / canvasWidth;
 
-    // Calculate pixel position of firstDisplayedPosition in the entire waveform geometry
-    // (This is the left edge of what should be visible)
-    const firstDisplayedPixel = (this.firstDisplayedPosition * totalDataPoints) / samplesPerPixel;
+    // Calculate pixel position of firstDisplayedPosition within the cached
+    // geometry, whose x=0 is at geometryStart (0 for full-track geometry).
+    const geometryStart = this.cacheValidation
+      ? this.cacheValidation.geometryStart
+      : this.lastGeometryStart;
+    const firstDisplayedPixel =
+      ((this.firstDisplayedPosition - geometryStart) * totalDataPoints) / samplesPerPixel;
 
     // We want firstDisplayedPosition to appear at pixel 0 on the left edge of screen
     // So offset = 0 - firstDisplayedPixel = -firstDisplayedPixel
@@ -438,45 +503,64 @@ export class WebGLWaveformRenderer {
     const canvasWidth = this.canvas.width;
     const canvasHeight = this.canvas.height;
     const halfHeight = canvasHeight / 2.0;
-
-    // For minimap: render entire track
-    // For normal mode: also render entire track, use shader to translate visible portion
-    // This allows infinite scrolling without regenerating geometry (only on zoom)
     const totalDataPoints = this.waveformData.low.length;
-    const firstIndex = 0;
-    const dataPointsToRender = totalDataPoints;
 
     // Calculate samples per pixel based on current zoom level
     const visibleRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
     const samplesPerPixel = (visibleRange * totalDataPoints) / canvasWidth;
 
-    // Render the entire waveform at current zoom resolution
-    const renderWidth = dataPointsToRender / samplesPerPixel;
+    // Geometry extent (normalized track positions):
+    // - Minimap / playhead-following views: the full track. Panning is a
+    //   shader translation (u_pixelOffset); only zoom regenerates.
+    // - Externally windowed views (DAW timeline): the visible window plus
+    //   one viewport of margin each side — regeneration cost is constant in
+    //   zoom level instead of scaling with 1/visibleRange, making
+    //   per-frame regen during zoom gestures affordable. Panning
+    //   regenerates only when the view exits the margin (isCacheValid).
+    let geometryStart = 0;
+    let geometryEnd = 1;
+    if (this.externalWindow && !this.isMinimapMode) {
+      geometryStart = Math.min(Math.max(this.firstDisplayedPosition - visibleRange, 0), 1);
+      geometryEnd = Math.max(Math.min(this.lastDisplayedPosition + visibleRange, 1), 0);
+    }
+    this.lastGeometryStart = geometryStart;
+    this.lastGeometryEnd = geometryEnd;
 
-    // Vertex array: [x, y, r, g, b] * 6 vertices per pixel * 3 bands
-    const vertices: number[] = [];
+    const firstIndex = geometryStart * totalDataPoints;
+    const dataPointsToRender = (geometryEnd - geometryStart) * totalDataPoints;
+    const renderWidth = Math.ceil(dataPointsToRender / samplesPerPixel);
+    if (!Number.isFinite(renderWidth) || renderWidth <= 0) {
+      return new Float32Array(0);
+    }
 
     // Band colors - RGB for bass/mid/treble
     // Darker colors for minimap mode to make markers more visible
     const colorScale = this.isMinimapMode ? 0.5 : 1.0;
-    const colors: Record<string, [number, number, number]> = {
-      low: [0.95 * colorScale, 0.38 * colorScale, 0.38 * colorScale],   // Mild red (maroon) - bass
-      mid: [0.0, 1.0 * colorScale, 0.0],      // Green - mids
-      high: [0.53 * colorScale, 0.87 * colorScale, 0.93 * colorScale]   // Light blue (sky) - highs
-    };
+    // Band opacity for additive blending: lower opacity prevents
+    // oversaturation where bands overlap; reduced further for minimap.
+    const opacityScale = (this.isMinimapMode ? 0.5 : 1.0) * 0.7 * opacityMultiplier;
+    // Final per-band colors, premultiplied once (constant across columns).
+    const bandColors: [number, number, number][] = [
+      [0.95 * colorScale * opacityScale, 0.38 * colorScale * opacityScale, 0.38 * colorScale * opacityScale], // low: mild red (maroon) - bass
+      [0.0, 1.0 * colorScale * opacityScale, 0.0], // mid: green
+      [0.53 * colorScale * opacityScale, 0.87 * colorScale * opacityScale, 0.93 * colorScale * opacityScale], // high: light blue (sky)
+    ];
 
-    // Band opacity for additive blending
-    // Lower opacity prevents oversaturation where bands overlap
-    // Reduce opacity further for minimap
-    const opacityScale = this.isMinimapMode ? 0.5 : 1.0;
-    const opacities: Record<string, number> = {
-      low: 0.7 * opacityScale,    // Red bass
-      mid: 0.7 * opacityScale,    // Green mids
-      high: 0.7 * opacityScale    // Blue highs
+    // Preallocated vertex array: [x, y, r, g, b] × 6 vertices × 3 bands per
+    // pixel column (a growing number[] here caused multi-MB GC churn).
+    const FLOATS_PER_COLUMN = 90;
+    const vertices = new Float32Array(renderWidth * FLOATS_PER_COLUMN);
+    let w = 0;
+    const put = (x: number, y: number, r: number, g: number, b: number) => {
+      vertices[w++] = x;
+      vertices[w++] = y;
+      vertices[w++] = r;
+      vertices[w++] = g;
+      vertices[w++] = b;
     };
+    const bandAmplitudes = [0, 0, 0];
 
-    // Render each pixel column for the entire waveform
-    // Shader will translate to show only the visible portion
+    // Render each pixel column of the geometry extent
     for (let pixelX = 0; pixelX < renderWidth; pixelX++) {
       // Calculate center position and sampling radius for this pixel (Mixxx approach)
       // Use center ± radius instead of discrete edges for better anti-aliasing
@@ -514,24 +598,16 @@ export class WebGLWaveformRenderer {
       }
 
       // Render bands (overlayed, back to front)
-      for (const [bandName, bandValue] of [
-        ['low', low] as const,
-        ['mid', mid] as const,
-        ['high', high] as const
-      ]) {
-        const amplitude = bandValue * halfHeight;
-        const color = colors[bandName];
-        const opacity = opacities[bandName];
+      bandAmplitudes[0] = low;
+      bandAmplitudes[1] = mid;
+      bandAmplitudes[2] = high;
 
-        // Apply opacity to color (band opacity * global opacity multiplier)
-        const finalColor = color.map(c => c * opacity * opacityMultiplier);
+      const x1 = pixelX;
+      const x2 = pixelX + 1;
 
-        // Two triangles forming a vertical bar
-        // Triangle 1: top-left, top-right, bottom-left
-        // Triangle 2: top-right, bottom-right, bottom-left
-
-        const x1 = pixelX;
-        const x2 = pixelX + 1;
+      for (let band = 0; band < 3; band++) {
+        const amplitude = bandAmplitudes[band] * halfHeight;
+        const [r, g, b] = bandColors[band];
 
         // For minimap mode, only render top half (amplitude upward from bottom)
         // For normal mode, render full waveform (centered)
@@ -544,53 +620,33 @@ export class WebGLWaveformRenderer {
           y2 = halfHeight + amplitude;  // Bottom (centered)
         }
 
-        // Triangle 1
-        vertices.push(
-          x1, y1, ...finalColor,  // Top-left
-          x2, y1, ...finalColor,  // Top-right
-          x1, y2, ...finalColor   // Bottom-left
-        );
-
-        // Triangle 2
-        vertices.push(
-          x2, y1, ...finalColor,  // Top-right
-          x2, y2, ...finalColor,  // Bottom-right
-          x1, y2, ...finalColor   // Bottom-left
-        );
+        // Two triangles forming a vertical bar
+        put(x1, y1, r, g, b);
+        put(x2, y1, r, g, b);
+        put(x1, y2, r, g, b);
+        put(x2, y1, r, g, b);
+        put(x2, y2, r, g, b);
+        put(x1, y2, r, g, b);
       }
     }
 
-    return new Float32Array(vertices);
+    return vertices;
   }
 
-  private renderVertices(vertices: Float32Array, pixelOffset: number = 0): void {
-    // Upload and render a vertex array with optional pixel offset for translation
-    if (!vertices || vertices.length === 0) return;
+  /** Draw the cached waveform geometry, uploading it only when it changed. */
+  private renderWaveformGeometry(vertices: Float32Array, pixelOffset: number): void {
+    if (vertices.length === 0) return;
 
     const gl = this.gl;
 
-    // Upload to GPU
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+    if (this.waveformUploadNeeded) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.waveformBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+      this.waveformUploadNeeded = false;
+    }
 
-    // Set up orthographic projection matrix
-    // Maps canvas pixels to clip space [-1, 1]
-    const matrix = this.createOrthoMatrix(
-      0, this.canvas.width,    // left, right
-      this.canvas.height, 0,   // bottom, top (flipped for canvas coords)
-      -1, 1                    // near, far
-    );
-
-    // Render
-    gl.useProgram(this.program);
-    gl.bindVertexArray(this.vao);
-    gl.uniformMatrix4fv(this.u_matrix, false, matrix);
+    gl.bindVertexArray(this.waveformVao);
     gl.uniform1f(this.u_pixelOffset, pixelOffset);
-
-    // Enable additive blending for proper RGB compositing
-    // Red + Green = Yellow, Red + Blue = Magenta, Green + Blue = Cyan
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
     const vertexCount = vertices.length / 5;  // 5 floats per vertex
     gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
@@ -610,25 +666,43 @@ export class WebGLWaveformRenderer {
 
     if (!this.waveformData) return;
 
-    // Calculate pixel offset for shader-based translation
+    // Render main waveform (with caching)
+    if (!this.isCacheValid()) {
+      this.cachedWaveformGeometry = this.generateGeometry();
+      this.updateCacheValidation();
+      this.waveformUploadNeeded = true;
+    }
+    const mainVertices = this.cachedWaveformGeometry;
+
+    // Calculate pixel offset for shader-based translation. MUST happen after
+    // the cache refresh above: the offset maps the window onto the cached
+    // geometry via cacheValidation's range/origin, and computing it against
+    // the previous frame's cache placed freshly regenerated geometry with a
+    // one-frame-stale zoom mapping (waveform visibly lagging the DOM
+    // timeline around it during zoom gestures).
     const pixelOffset = this.calculatePixelOffset();
 
-    // Render main waveform (with caching)
-    let mainVertices: Float32Array | null;
-    if (this.isCacheValid()) {
-      mainVertices = this.cachedWaveformGeometry;
-    } else {
-      mainVertices = this.generateGeometry();
-      this.cachedWaveformGeometry = mainVertices;
-      this.updateCacheValidation();
-    }
+    // Shared program state for everything drawn this frame.
+    gl.useProgram(this.program);
+    gl.uniformMatrix4fv(
+      this.u_matrix,
+      false,
+      this.createOrthoMatrix(
+        0, this.canvas.width,    // left, right
+        this.canvas.height, 0,   // bottom, top (flipped for canvas coords)
+        -1, 1                    // near, far
+      )
+    );
+    // Additive blending for proper RGB band compositing
+    // Red + Green = Yellow, Red + Blue = Magenta, Green + Blue = Cyan
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
     if (mainVertices) {
-      this.renderVertices(mainVertices, pixelOffset);
+      this.renderWaveformGeometry(mainVertices, pixelOffset);
     }
 
     // Reset pixel offset to 0 for other elements (they calculate their own positions)
-    gl.useProgram(this.program);
     gl.uniform1f(this.u_pixelOffset, 0);
 
     // Render beatgrid
@@ -662,6 +736,33 @@ export class WebGLWaveformRenderer {
     if (!this.beatTimes || !this.waveformData) return;
 
     const gl = this.gl;
+
+    // Beat-line geometry depends only on the visible window, canvas size,
+    // and drag offset — cache it (and its GPU upload) keyed on those, so
+    // steady frames skip the rebuild entirely.
+    const key =
+      `${this.canvas.width}x${this.canvas.height}:` +
+      `${this.firstDisplayedPosition}:${this.lastDisplayedPosition}:${this.manualDragOffset}`;
+    if (!this.beatgridCache || this.beatgridCache.key !== key) {
+      const vertices = this.buildBeatgridVertices();
+      this.beatgridCache = { key, vertices };
+      if (vertices.length > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.beatgridBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+      }
+    }
+
+    const vertexCount = this.beatgridCache.vertices.length / 5;
+    if (vertexCount === 0) return;
+
+    gl.bindVertexArray(this.beatgridVao);
+    gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
+    gl.bindVertexArray(null);
+  }
+
+  private buildBeatgridVertices(): Float32Array {
+    if (!this.beatTimes || !this.waveformData) return new Float32Array(0);
+
     const duration = this.waveformData.duration;
     const canvasHeight = this.canvas.height;
 
@@ -679,7 +780,7 @@ export class WebGLWaveformRenderer {
       this.beatTimes.length > 1 ? this.beatTimes[1] - this.beatTimes[0] : duration;
     const pxPerBeat = (secPerBeat / (visibleFraction * duration)) * this.canvas.width;
     const showWeakBeats = pxPerBeat >= 12 * this.pixelRatio;
-    if (pxPerBeat * 4 < 2.5 * this.pixelRatio) return;
+    if (pxPerBeat * 4 < 2.5 * this.pixelRatio) return new Float32Array(0);
 
     for (let i = 0; i < this.beatTimes.length; i++) {
       if (!showWeakBeats && !this.downbeatIndices.has(i)) continue;
@@ -740,15 +841,7 @@ export class WebGLWaveformRenderer {
       );
     }
 
-    if (vertices.length === 0) return;
-
-    // Render all beat lines in single draw call
-    const vertexArray = new Float32Array(vertices);
-    gl.bindVertexArray(this.vao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertexArray, gl.DYNAMIC_DRAW);
-    gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 5);
-    gl.bindVertexArray(null);
+    return new Float32Array(vertices);
   }
 
   private renderPlayhead(): void {
@@ -979,17 +1072,22 @@ export class WebGLWaveformRenderer {
     // Preserve WebGL state before 2D drawing
     this.gl.flush();
 
-    const overlayId = `waveform-text-overlay-${this.canvas.id || 'default'}`;
-    let overlayCanvas = document.getElementById(overlayId) as HTMLCanvasElement;
-    if (!overlayCanvas) {
-      overlayCanvas = document.createElement('canvas');
-      overlayCanvas.id = overlayId;
-      overlayCanvas.style.position = 'absolute';
-      overlayCanvas.style.top = '0';
-      overlayCanvas.style.left = '0';
-      overlayCanvas.style.pointerEvents = 'none';
-      overlayCanvas.style.zIndex = '1';
-      this.canvas.parentElement?.appendChild(overlayCanvas);
+    let overlayCanvas = this.overlayCanvas;
+    if (!overlayCanvas || !overlayCanvas.isConnected) {
+      const overlayId = `waveform-text-overlay-${this.canvas.id || 'default'}`;
+      overlayCanvas = document.getElementById(overlayId) as HTMLCanvasElement;
+      if (!overlayCanvas) {
+        overlayCanvas = document.createElement('canvas');
+        overlayCanvas.id = overlayId;
+        overlayCanvas.style.position = 'absolute';
+        overlayCanvas.style.top = '0';
+        overlayCanvas.style.left = '0';
+        overlayCanvas.style.pointerEvents = 'none';
+        overlayCanvas.style.zIndex = '1';
+        this.canvas.parentElement?.appendChild(overlayCanvas);
+      }
+      this.overlayCanvas = overlayCanvas;
+      this.overlayCtx = overlayCanvas.getContext('2d');
     }
 
     // Match canvas size
@@ -1000,7 +1098,7 @@ export class WebGLWaveformRenderer {
       overlayCanvas.style.height = this.canvas.style.height;
     }
 
-    return overlayCanvas.getContext('2d');
+    return this.overlayCtx;
   }
 
   private renderHotCueNumbers(ctx: CanvasRenderingContext2D): void {
@@ -1135,27 +1233,36 @@ export class WebGLWaveformRenderer {
   }
 
   /**
-   * Drive the renderer from a playback clock: one playhead read + one draw
-   * per animation frame. The clock is authoritative — no interpolation.
+   * Render exactly one frame now: CSS-resize check, one playhead read from
+   * the clock (authoritative — no interpolation), one draw.
+   *
+   * Driven mode: an external motion clock (e.g. the transition editor's rAF
+   * tick) calls this after writing its DOM transforms and display windows,
+   * so every layer commits in the same frame in a guaranteed order.
    */
+  public renderFrame(clock: PlaybackClock): void {
+    // Track CSS size changes (e.g. zoomable containers): resize the buffer
+    // and invalidate cached geometry when the element is resized.
+    const dpr = window.devicePixelRatio || 1;
+    if (
+      Math.abs(this.canvas.width - this.canvas.clientWidth * dpr) >= 1 ||
+      Math.abs(this.canvas.height - this.canvas.clientHeight * dpr) >= 1
+    ) {
+      this.setupHighDPI();
+      this.calculateDisplayWindow();
+    }
+    if (this.waveformData) {
+      const position = clock.getPlayhead() / this.waveformData.duration;
+      this.playPosition = Math.max(0, Math.min(1, position));
+      this.calculateDisplayWindow();
+    }
+    this.render();
+  }
+
+  /** Self-driving convenience: renderFrame on an own rAF loop. */
   public startRenderLoop(clock: PlaybackClock): void {
     const animate = () => {
-      // Track CSS size changes (e.g. zoomable containers): resize the buffer
-      // and invalidate cached geometry when the element is resized.
-      const dpr = window.devicePixelRatio || 1;
-      if (
-        Math.abs(this.canvas.width - this.canvas.clientWidth * dpr) >= 1 ||
-        Math.abs(this.canvas.height - this.canvas.clientHeight * dpr) >= 1
-      ) {
-        this.setupHighDPI();
-        this.calculateDisplayWindow();
-      }
-      if (this.waveformData) {
-        const position = clock.getPlayhead() / this.waveformData.duration;
-        this.playPosition = Math.max(0, Math.min(1, position));
-        this.calculateDisplayWindow();
-      }
-      this.render();
+      this.renderFrame(clock);
       this.animationFrameId = requestAnimationFrame(animate);
     };
     animate();
@@ -1270,9 +1377,14 @@ export class WebGLWaveformRenderer {
     if (this.program) gl.deleteProgram(this.program);
     if (this.vertexBuffer) gl.deleteBuffer(this.vertexBuffer);
     if (this.vao) gl.deleteVertexArray(this.vao);
+    if (this.waveformBuffer) gl.deleteBuffer(this.waveformBuffer);
+    if (this.waveformVao) gl.deleteVertexArray(this.waveformVao);
+    if (this.beatgridBuffer) gl.deleteBuffer(this.beatgridBuffer);
+    if (this.beatgridVao) gl.deleteVertexArray(this.beatgridVao);
 
     // Clean up cached geometry
     this.invalidateWaveformCache();
+    this.beatgridCache = null;
 
     // Remove overlay canvas (use unique ID)
     const overlayId = `waveform-text-overlay-${this.canvas.id || 'default'}`;
@@ -1280,5 +1392,7 @@ export class WebGLWaveformRenderer {
     if (overlayCanvas) {
       overlayCanvas.remove();
     }
+    this.overlayCanvas = null;
+    this.overlayCtx = null;
   }
 }

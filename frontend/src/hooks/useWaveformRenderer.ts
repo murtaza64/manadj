@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { WebGLWaveformRenderer } from '../utils/WebGLWaveformRenderer';
 import type { WaveformDataWebGL, WebGLRendererConfig } from '../utils/WebGLWaveformRenderer';
 import type { PlaybackClock } from '../playback/clock';
@@ -12,6 +12,11 @@ interface UseWaveformRendererOptions {
   cuePoint?: number | null;
   hotCues?: HotCue[];
   beatgrid?: BeatgridData | null;
+  /** Driven mode: no self-running render loop — the caller's own motion
+   * clock calls the returned `draw()` once per frame (multi-layer views
+   * that must commit DOM writes and canvas paints in the same frame).
+   * Applied at construction only, like `config`. */
+  driven?: boolean;
 }
 
 /**
@@ -28,6 +33,7 @@ export function useWaveformRenderer({
   cuePoint = null,
   hotCues,
   beatgrid,
+  driven = false,
 }: UseWaveformRendererOptions) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WebGLWaveformRenderer | null>(null);
@@ -41,7 +47,7 @@ export function useWaveformRenderer({
     try {
       const renderer = new WebGLWaveformRenderer(canvasRef.current, config);
       renderer.setWaveformData(waveformData);
-      renderer.startRenderLoop(clock);
+      if (!driven) renderer.startRenderLoop(clock);
       rendererRef.current = renderer;
       setInitError(null);
 
@@ -55,6 +61,12 @@ export function useWaveformRenderer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waveformData, clock]);
+
+  /** Driven mode: render one frame now. No-op until the renderer exists
+   * (waveform data still loading) or after disposal. Stable identity. */
+  const draw = useCallback(() => {
+    rendererRef.current?.renderFrame(clock);
+  }, [clock]);
 
   // Marker/grid data (also re-applied after re-init via the waveformData dep).
   useEffect(() => {
@@ -71,5 +83,5 @@ export function useWaveformRenderer({
     }
   }, [beatgrid, waveformData]);
 
-  return { canvasRef, rendererRef, initError };
+  return { canvasRef, rendererRef, initError, draw };
 }

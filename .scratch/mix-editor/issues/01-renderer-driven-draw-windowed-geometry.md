@@ -1,6 +1,6 @@
 # 01 — Timeline render/motion layer: driven draw + windowed geometry
 
-Status: ready-for-agent (claimed 2026-07-03, in progress)
+Status: done (2026-07-03)
 
 ## Parent
 
@@ -50,3 +50,19 @@ stays and is re-measured after this lands.
 ## Blocked by
 
 None - can start immediately.
+
+## Comments
+
+Done in jj change `mix-editor: 01-renderer-driven-draw-windowed-geometry`
+(okrnmltp). All criteria met; user-verified zoom feel ("perfect now").
+Two extra renderer fixes surfaced during verification and are included:
+
+- Exact cache range epsilon for externally-windowed views (0.1% guard reused
+  stale-scale geometry during smooth zoom gestures → drift-and-snap).
+- `calculatePixelOffset()` computed after cache refresh in `render()` — was
+  read from the previous frame's cacheValidation, drawing fresh geometry
+  with a one-frame-stale zoom mapping. Latent main-line bug (one bad frame
+  per Player zoom step); rides back with this renderer work.
+
+`?protoperf` frame-time readout left inert behind the URL flag; strip at
+ride-back review.
