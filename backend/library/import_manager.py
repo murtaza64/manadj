@@ -139,13 +139,17 @@ class LibraryImportManager:
 
     def import_tracks(
         self,
-        candidates: list[LibraryTrackCandidate] | None = None
+        candidates: list[LibraryTrackCandidate] | None = None,
+        derive_provenance: bool = True,
     ) -> LibraryImportExecutionResult:
         """
         Import tracks into database.
 
         Args:
             candidates: Specific candidates to import (None = reimport all)
+            derive_provenance: derive asserted Audio Provenance from file
+                hints (backfill rules). The acquisition download path opts
+                out — it records provenance itself.
 
         Returns:
             LibraryImportExecutionResult with import statistics
@@ -186,6 +190,16 @@ class LibraryImportManager:
                 # fill file-derived fields (codec/bitrate/filesize/duration)
                 from ..track_metadata.file_facts import refresh_file_facts
                 refresh_file_facts(self.manadj_session)
+                if derive_provenance:
+                    from ..acquisition.provenance import derive_and_write_provenance
+                    imported_paths = [c.filepath for c in candidates]
+                    tracks = (
+                        self.manadj_session.query(Track)
+                        .filter(Track.filename.in_(imported_paths))
+                        .all()
+                    )
+                    derive_and_write_provenance(self.manadj_session, tracks)
+                    self.manadj_session.commit()
             except Exception as e:
                 self.manadj_session.rollback()
                 result.error_messages.append(f"Commit failed: {str(e)}")

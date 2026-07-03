@@ -79,7 +79,8 @@ def download_handler(
         ]
         if len(candidates) != 1:
             raise RuntimeError(f"downloaded file {path.name!r} not found by Disk Import scan")
-        result = importer.import_tracks(candidates)
+        # provenance is recorded below by this handler — don't derive
+        result = importer.import_tracks(candidates, derive_provenance=False)
         if result.errors:
             raise RuntimeError(f"Disk Import failed: {'; '.join(result.error_messages)}")
 

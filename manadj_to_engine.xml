@@ -1,68 +1,27 @@
 <?xml version='1.0' encoding='utf-8'?>
 <DJ_PLAYLISTS Version="1.0.0">
 	<PRODUCT Name="manadj" Version="1.0" Company="manadj" />
-	<COLLECTION Entries="57">
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ENERGY%20%28I%20Feel%29%20%5BCOMING%20SOON%5D%20%5B2305274027%5D.m4a" Name="ENERGY (I Feel) (preview)" Artist="Pirapus" AverageBpm="None" Tonality="None" TrackID="1" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Under%20the%20Waves%20%5B256065630%5D.mp3" Name="Under the Waves" Artist="None" AverageBpm="None" Tonality="None" TrackID="2" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Jack%20U%CC%88%20-%20Mind%20%28feat.%20Kai%29%20%5BDrvmmer%20Remix%5D%20%5B966082249%5D.m4a" Name="Mind (feat. Kai) [Drvmmer Remix]" Artist="Jack Ü" AverageBpm="None" Tonality="None" TrackID="3" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/PENDULUM%20-%20WATERCOLOUR%20%5BBENNIE%20EDIT%5D.m4a" Name="WATERCOLOUR [BENNIE EDIT]" Artist="PENDULUM" AverageBpm="None" Tonality="None" TrackID="4" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/REAPER%20%26%20Pirapus%20-%20BLOW%20THE%20ROOF.m4a" Name="BLOW THE ROOF" Artist="REAPER &amp; Pirapus" AverageBpm="None" Tonality="None" TrackID="5" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/1991%20-%20Full%20Send%20%28Pirapus%20Remix%29.m4a" Name="Full Send (Pirapus Remix)" Artist="1991" AverageBpm="None" Tonality="None" TrackID="6" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Synergy%20%26%20RIENK%20-%20Stay.m4a" Name="Stay" Artist="Synergy &amp; RIENK" AverageBpm="None" Tonality="None" TrackID="7" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/KRITIKAL%20-%20Run%20It%20Back%20%28feat.%20Jman%29.m4a" Name="Run It Back (feat. Jman)" Artist="KRITIKAL" AverageBpm="None" Tonality="None" TrackID="8" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/KRITIKAL%20-%20Muevete.m4a" Name="Muevete" Artist="KRITIKAL" AverageBpm="None" Tonality="None" TrackID="9" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/The%20Prodigy%20-%20Omen%20%28Gray%20%26%20Crossy%20Bootleg%29.m4a" Name="Omen (Gray &amp; Crossy Bootleg)" Artist="The Prodigy" AverageBpm="None" Tonality="None" TrackID="10" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Sota%20-%20Machete%20%28A.M.C%20Remix%29.m4a" Name="Machete (A.M.C Remix)" Artist="Sota" AverageBpm="None" Tonality="None" TrackID="11" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Jennifer%20Lopez%20%26%20Pitbull%20-%20On%20The%20Floor%20%28Entity%20Bootleg%29.m4a" Name="On The Floor (Entity Bootleg)" Artist="Jennifer Lopez &amp; Pitbull" AverageBpm="None" Tonality="None" TrackID="12" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Kanine%20-%20Want%20You.m4a" Name="Want You" Artist="Kanine" AverageBpm="None" Tonality="None" TrackID="13" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Skrimor%20-%20Blow.m4a" Name="Blow" Artist="Skrimor" AverageBpm="None" Tonality="None" TrackID="14" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/KRITIKAL%20-%20WATCHDIS%21.m4a" Name="WATCHDIS!" Artist="KRITIKAL" AverageBpm="None" Tonality="None" TrackID="15" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Oliver%20Tree%20-%20Miss%20You%20%28Georgie%20Riot%20Remix%29.m4a" Name="Miss You (Georgie Riot Remix)" Artist="Oliver Tree" AverageBpm="None" Tonality="None" TrackID="16" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Quyver%20-%20Singularity.m4a" Name="Singularity" Artist="Quyver" AverageBpm="None" Tonality="None" TrackID="17" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/QO%20%26%20Prdk%20-%20Propaganda%20%28Neonlight%20Remix%29%20%5BHoofbeats%5D.m4a" Name="Propaganda (Neonlight Remix) [Hoofbeats]" Artist="QO &amp; Prdk" AverageBpm="None" Tonality="None" TrackID="18" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Venjent%20-%20Wild%20Like%20That%20%28feat.%20Oktae%29.m4a" Name="Wild Like That (feat. Oktae)" Artist="Venjent" AverageBpm="None" Tonality="None" TrackID="19" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Cause4Concern%20-%20Mean%20Teeth%20--%20Keepin%20It%20Dirty%20%28MNDSCP%20Remix%29%20--%20C4CDIGUK079%20--%20%21.m4a" Name="Mean Teeth // Keepin It Dirty (MNDSCP Remix) // C4CDIGUK079 // !" Artist="Cause4Concern" AverageBpm="None" Tonality="None" TrackID="20" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Mela%20-%20You%20Don%27t%20Know.m4a" Name="You Don't Know" Artist="Mela" AverageBpm="None" Tonality="None" TrackID="21" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Zeds%20Dead%20X%20REAPER%20-%20Back%20Bus.m4a" Name="Back Bus" Artist="Zeds Dead X REAPER" AverageBpm="None" Tonality="None" TrackID="22" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Camo%20%26%20Krooked%20%26%20Mefjus%20-%20Nebula.m4a" Name="Nebula" Artist="Camo &amp; Krooked &amp; Mefjus" AverageBpm="None" Tonality="None" TrackID="23" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Pola%20%26%20Bryson%20-%20Want%20It%20ft.%20IYAMAH%20%28Mefjus%20Remix%29.m4a" Name="Want It ft. IYAMAH (Mefjus Remix)" Artist="Pola &amp; Bryson" AverageBpm="None" Tonality="None" TrackID="24" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Neksus%20Sound%20-%20Shai%20Hulud%20%28RageMode%20Remix%29.m4a" Name="Shai Hulud (RageMode Remix)" Artist="Neksus Sound" AverageBpm="None" Tonality="None" TrackID="25" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Shockone%20-%20Voices.m4a" Name="Voices" Artist="Shockone" AverageBpm="None" Tonality="None" TrackID="26" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Arcando%20%26%20Charlotte%20Haining%20-%20Release%20Me%20%5BMonstercat%5D.m4a" Name="Release Me [Monstercat]" Artist="Arcando &amp; Charlotte Haining" AverageBpm="None" Tonality="None" TrackID="27" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Despersion%20-%20Warhead.m4a" Name="Warhead" Artist="Despersion" AverageBpm="None" Tonality="None" TrackID="28" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Ganja%20White%20Night%20x%20Pav4n%20x%20Jamakabi%20-%20Push%20It%20Up.m4a" Name="Push It Up" Artist="Ganja White Night x Pav4n x Jamakabi" AverageBpm="None" Tonality="None" TrackID="29" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Excision%20x%20Wooli%20x%20Ganja%20White%20Night%20-%20Rapid%20Fire%20%28Ft.%20Eksman%29.m4a" Name="Rapid Fire (Ft. Eksman)" Artist="Excision x Wooli x Ganja White Night" AverageBpm="None" Tonality="None" TrackID="30" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/LYNY%20-%20Jump%20Bros%21.m4a" Name="Jump Bros!" Artist="LYNY" AverageBpm="None" Tonality="None" TrackID="31" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ISOxo%20-%20OK%21OK%21OK%21%20%28with%20Wavedash%29.m4a" Name="OK!OK!OK! (with Wavedash)" Artist="ISOxo" AverageBpm="None" Tonality="None" TrackID="32" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ISOKNOCK%20-%20THRASH%20%28PARTY%20STARTER%29.m4a" Name="THRASH (PARTY STARTER)" Artist="ISOKNOCK" AverageBpm="None" Tonality="None" TrackID="33" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Syzy%20-%20DOPE1%20%28with%20Olswel%29.m4a" Name="DOPE1 (with Olswel)" Artist="Syzy" AverageBpm="None" Tonality="None" TrackID="34" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/LYNY%20-%20Step%202%20It.m4a" Name="Step 2 It" Artist="LYNY" AverageBpm="None" Tonality="None" TrackID="35" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ISOxo%20X%20Knock2%20-%20Radial.m4a" Name="Radial" Artist="ISOxo X Knock2" AverageBpm="None" Tonality="None" TrackID="36" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/NUFORM%20-%20Pjanoo%20%28Changing%20Faces%20Edit%29%20%5BFree%5D.m4a" Name="Pjanoo (Changing Faces Edit) [Free]" Artist="NUFORM" AverageBpm="None" Tonality="None" TrackID="37" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Pythius%20-%20Implant%20%28Audio%20Remix%29.m4a" Name="Implant (Audio Remix)" Artist="Pythius" AverageBpm="None" Tonality="None" TrackID="38" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Yaeji%20-%20Raingurl%20%28Ship%20Wrek%20Remix%29.m4a" Name="Raingurl (Ship Wrek Remix)" Artist="Yaeji" AverageBpm="None" Tonality="None" TrackID="39" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Bensley%20-%20It%27s%20True%20ft.%20Rachel%20Leo.m4a" Name="It's True ft. Rachel Leo" Artist="Bensley" AverageBpm="None" Tonality="None" TrackID="40" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Kanine%2C%20Sota%20%26%20Mila%20Falls%20-%20Touchdown.m4a" Name="Touchdown" Artist="Kanine, Sota &amp; Mila Falls" AverageBpm="None" Tonality="None" TrackID="41" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Georgie%20Riot%2C%20Medii%20%26%20Gracie%20Van%20Brunt%20-%20Hear%20That%20Sound.m4a" Name="Hear That Sound" Artist="Georgie Riot, Medii &amp; Gracie Van Brunt" AverageBpm="None" Tonality="None" TrackID="42" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Rova%20-%20Octane.m4a" Name="Octane" Artist="Rova" AverageBpm="None" Tonality="None" TrackID="43" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Sub%20Focus%20-%20Airplane%20%28Culture%20Shock%20Remix%29.m4a" Name="Airplane (Culture Shock Remix)" Artist="Sub Focus" AverageBpm="None" Tonality="None" TrackID="44" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Arcando%20-%20Mr.%20Brightside%20%28with%20Livingston%20Crain%29%20%5B%20on%20Spotify%5D.m4a" Name="Mr. Brightside (with Livingston Crain) [ on Spotify]" Artist="Arcando" AverageBpm="None" Tonality="None" TrackID="45" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Ray%20Volpe%20-%20Song%20Request%20%28Sean%20%26%20Jimbo%20Remix%29.m4a" Name="Song Request (Sean &amp; Jimbo Remix)" Artist="Ray Volpe" AverageBpm="None" Tonality="None" TrackID="46" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Sean%20%26%20Jimbo%20-%20Victory%20Lap%20%28Sean%20%26%20Jimbo%20Bootleg%29.m4a" Name="Victory Lap (Sean &amp; Jimbo Bootleg)" Artist="Sean &amp; Jimbo" AverageBpm="None" Tonality="None" TrackID="47" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Sean%20%26%20Jimbo%20-%20Opus%20Dnb%20%28Sean%20%26%20Jimbo%20Remix%29.m4a" Name="Opus Dnb (Sean &amp; Jimbo Remix)" Artist="Sean &amp; Jimbo" AverageBpm="None" Tonality="None" TrackID="48" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Sota%20-%20See%20The%20Sun.m4a" Name="See The Sun" Artist="Sota" AverageBpm="None" Tonality="None" TrackID="49" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Eric%20Prydz%20-%20Opus%20%28Mr.%20Frenkie%20Remix%29.mp3" Name="Opus (Mr. Frenkie Remix)" Artist="Eric Prydz" AverageBpm="None" Tonality="None" TrackID="50" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ShockOne%20-%20Polygon%20Ft%20Rejia%20Lee%20-%20Circadian%20Remix%20%5BVPR339%5D.m4a" Name="Polygon Ft Rejia Lee - Circadian Remix [VPR339]" Artist="ShockOne" AverageBpm="None" Tonality="None" TrackID="51" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Jessee%20-%20Cry%20For%20You.m4a" Name="Cry For You" Artist="Jessee" AverageBpm="None" Tonality="None" TrackID="52" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Mob%20Tactics%20-%209mm.m4a" Name="9mm" Artist="Mob Tactics" AverageBpm="None" Tonality="None" TrackID="53" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Mob%20Tactics%20-%20Labyrinth.m4a" Name="Labyrinth" Artist="Mob Tactics" AverageBpm="None" Tonality="None" TrackID="54" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Circadian%2C%20Nu-La%20-%20ReBirth.m4a" Name="ReBirth" Artist="Circadian, Nu-La" AverageBpm="None" Tonality="None" TrackID="55" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Andy%20C%20-%20Who%20Like%20The%20What_%20%28Extended%20Mix%29.mp3" Name="Who Like The What? (Extended Mix)" Artist="Andy C" AverageBpm="109.0" Tonality="None" TrackID="56" />
-		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Changing%20Faces%2C%20MONSS%20-%20Higher%20%28Original%20Mix%29.mp3" Name="Higher (Original Mix)" Artist="Changing Faces, MONSS" AverageBpm="108.0" Tonality="None" TrackID="57" />
+	<COLLECTION Entries="16">
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/ENERGY%20%28I%20Feel%29%20%5BCOMING%20SOON%5D%20%5B2305274027%5D.m4a" Name="ENERGY (I Feel) (preview)" Artist="Pirapus" TrackID="1" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Under%20the%20Waves%20%5B256065630%5D.mp3" Name="Under the Waves" TrackID="2" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Jack%20U%CC%88%20-%20Mind%20%28feat.%20Kai%29%20%5BDrvmmer%20Remix%5D%20%5B966082249%5D.m4a" Name="Mind (feat. Kai) [Drvmmer Remix]" Artist="Jack Ü" TrackID="3" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/JRM%20-%20What%20It%20Feels%20Like.m4a" Name="What It Feels Like" Artist="JRM" TrackID="4" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/FRED%20AGAIN%20%26%20BABY%20KEEM%20-%20LEAVEMEALONE%20%5BLOBOSKI%20BOOTLEG%5D.m4a" Name="LEAVEMEALONE [LOBOSKI BOOTLEG]" Artist="FRED AGAIN &amp; BABY KEEM" TrackID="5" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Waeys%20-%20Amnesia.m4a" Name="Amnesia" Artist="Waeys" TrackID="6" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Justice%20-%20Stress%20%28Dirtyphonics%20%26%20SampliFire%20Remix%29.m4a" Name="Stress (Dirtyphonics &amp; SampliFire Remix)" Artist="Justice" TrackID="7" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Eric%20Prydz%20-%20Nopus%20-%20The%20Prototypes%20Bootpus%20Mix.m4a" Name="Nopus - The Prototypes Bootpus Mix" Artist="Eric Prydz" TrackID="8" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Nero%20-%20Guilt%20%28Bennie%20Bootleg%29.m4a" Name="Guilt (Bennie Bootleg)" Artist="Nero" TrackID="9" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/DNMO%20%26%20Wolfy%20Lights%20-%20Bombalaya%20%28Blooom%20Remix%29.m4a" Name="Bombalaya (Blooom Remix)" Artist="DNMO &amp; Wolfy Lights" TrackID="10" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Andy%20C%20-%20Home%20In%20That%20Bass%20%28Original%20Mix%29.mp3" Name="Home In That Bass (Original Mix)" Artist="Andy C" AverageBpm="97.0" TrackID="11" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Bugwell%20-%20Everything%20In%20Its%20Right%20Place%20%28Original%20Mix%29.mp3" Name="Everything In Its Right Place (Original Mix)" Artist="Bugwell" AverageBpm="87.0" TrackID="12" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Grafix%2C%20Madishu%20-%20We_re%20On%20Fire%20%28Original%20Mix%29.mp3" Name="We're On Fire (Original Mix)" Artist="Grafix, Madishu" AverageBpm="87.0" TrackID="13" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Marie%20Vaunt%20-%20That%20Acid%20%28Dimension%20%26%20Subsonic%20Extended%20Remix%29.mp3" Name="That Acid (Dimension &amp; Subsonic Extended Remix)" Artist="Marie Vaunt" AverageBpm="87.0" TrackID="14" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Signum%2C%20Pirapus%20-%20What%20Ya%20Got%204%20Me%20%28Original%20Mix%29.mp3" Name="What Ya Got 4 Me (Original Mix)" Artist="Signum, Pirapus" AverageBpm="87.0" TrackID="15" />
+		<TRACK Location="file://localhost/Users/murtaza/Music/Tracks/Unglued%20-%20Downslider%20%28Original%20Mix%29.mp3" Name="Downslider (Original Mix)" Artist="Unglued" AverageBpm="101.0" TrackID="16" />
 	</COLLECTION>
 	<PLAYLISTS>
 		<NODE Name="ROOT" Type="0" Count="1">
-			<NODE Name="manadj - Needs Analysis [2026-07-02]" Type="1" KeyType="0" Entries="57">
+			<NODE Name="manadj - Needs Analysis [2026-07-03]" Type="1" KeyType="0" Entries="16">
 				<TRACK Key="1" />
 				<TRACK Key="2" />
 				<TRACK Key="3" />
@@ -79,47 +38,6 @@
 				<TRACK Key="14" />
 				<TRACK Key="15" />
 				<TRACK Key="16" />
-				<TRACK Key="17" />
-				<TRACK Key="18" />
-				<TRACK Key="19" />
-				<TRACK Key="20" />
-				<TRACK Key="21" />
-				<TRACK Key="22" />
-				<TRACK Key="23" />
-				<TRACK Key="24" />
-				<TRACK Key="25" />
-				<TRACK Key="26" />
-				<TRACK Key="27" />
-				<TRACK Key="28" />
-				<TRACK Key="29" />
-				<TRACK Key="30" />
-				<TRACK Key="31" />
-				<TRACK Key="32" />
-				<TRACK Key="33" />
-				<TRACK Key="34" />
-				<TRACK Key="35" />
-				<TRACK Key="36" />
-				<TRACK Key="37" />
-				<TRACK Key="38" />
-				<TRACK Key="39" />
-				<TRACK Key="40" />
-				<TRACK Key="41" />
-				<TRACK Key="42" />
-				<TRACK Key="43" />
-				<TRACK Key="44" />
-				<TRACK Key="45" />
-				<TRACK Key="46" />
-				<TRACK Key="47" />
-				<TRACK Key="48" />
-				<TRACK Key="49" />
-				<TRACK Key="50" />
-				<TRACK Key="51" />
-				<TRACK Key="52" />
-				<TRACK Key="53" />
-				<TRACK Key="54" />
-				<TRACK Key="55" />
-				<TRACK Key="56" />
-				<TRACK Key="57" />
 			</NODE>
 		</NODE>
 	</PLAYLISTS>
