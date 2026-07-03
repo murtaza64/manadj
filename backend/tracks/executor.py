@@ -54,7 +54,7 @@ def sync_engine_via_rbxml(
         exported_to_target=exported,
         skipped_file_not_found=stats.get('skipped_file_not_found', 0),
         playlist_name=final_playlist_name,
-        output_path=str(final_output_path),
+        output_path=str(final_output_path.resolve()),
     )
 
 

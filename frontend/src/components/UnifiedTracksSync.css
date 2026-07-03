@@ -127,3 +127,10 @@
 
 /* surface unreachable: unknown, not missing */
 .uts-badge-unknown { background: transparent; color: var(--subtext0, #777); border: 1px dashed var(--surface0); }
+
+/* action feedback */
+.uts-notice, .uts-pending, .uts-busy { position: sticky; top: 0; z-index: 10; }
+.uts-busy {
+  border: 1px solid #ffcc0066; background: #ffcc0012; color: #ffcc00;
+  padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
+}

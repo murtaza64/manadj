@@ -89,7 +89,7 @@ async function fetchStatus(): Promise<StatusResponse> {
 
 export function UnifiedTracksSync() {
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ['sync-status'], queryFn: fetchStatus });
+  const { data, isLoading, error, isFetching } = useQuery({ queryKey: ['sync-status'], queryFn: fetchStatus });
 
   const [filter, setFilter] = useState<string | null>(null);
   const [showInSync, setShowInSync] = useState(false);
@@ -105,28 +105,36 @@ export function UnifiedTracksSync() {
     setSelected(new Set());
     refresh();
   };
+  const failed = (e: unknown) => {
+    setNotice(`⚠ ${e instanceof Error ? e.message : String(e)}`);
+    setPending(null);
+  };
 
   const generateRbxml = useMutation({
-    mutationFn: () => api.syncTracks.syncEngineRBXML({ validate_files: true }),
+    mutationFn: () => api.trackSync.syncEngineRBXML({ validate_files: true }),
     onSuccess: (r) =>
       done(
-        `RBXML generated${r.output_path ? ` at ${r.output_path}` : ''} (${r.missing_in_target_count ?? '?'} tracks). ` +
+        `RBXML generated${r.output_path ? ` at ${r.output_path}` : ''} (${r.exported_to_target ?? '?'} tracks). ` +
         'Import it in Engine DJ (Import → Rekordbox XML); rows stay "missing downstream" until then.',
       ),
+    onError: failed,
   });
   const rekordboxSync = useMutation({
     mutationFn: (direction: 'export' | 'import') =>
-      api.syncTracks.syncRekordbox({
+      api.trackSync.syncRekordbox({
         dry_run: false,
+        validate_files: true,
         skip_import: direction === 'export',
         skip_export: direction === 'import',
       }),
     onSuccess: (_r, direction) =>
       done(direction === 'export' ? 'Exported to Rekordbox' : 'Imported from Rekordbox'),
+    onError: failed,
   });
   const importFiles = useMutation({
     mutationFn: (filepaths: string[]) => api.libraryImport.import({ candidate_filepaths: filepaths }),
     onSuccess: (r) => done(`Imported ${r.imported} files into the Library`),
+    onError: failed,
   });
   const importField = useMutation({
     mutationFn: ({ row, field, value }: { row: StatusRow; field: string; value: unknown }) => {
@@ -140,6 +148,7 @@ export function UnifiedTracksSync() {
       });
     },
     onSuccess: () => done('Field imported'),
+    onError: failed,
   });
   const exportRowToDisk = useMutation({
     mutationFn: (row: StatusRow) => {
@@ -152,24 +161,32 @@ export function UnifiedTracksSync() {
           fields[d.field] = fmtValue(d.field, d.library_value) || null;
         }
       }
-      return api.tracks.writeToFiles({
+      return api.tracks.writeMetadataToFiles({
         updates: [{ track_id: row.track_id!, fields }],
         dry_run: false,
       });
     },
     onSuccess: () => done('Fields written to file'),
+    onError: failed,
   });
   const exportTags = useMutation({
     mutationFn: (target: 'engine' | 'rekordbox') =>
       target === 'engine'
-        ? api.tags.syncToEngine({ target, dry_run: false })
-        : api.tags.syncToRekordbox({ target, dry_run: false }),
+        ? api.tagSync.syncToEngine({ target, dry_run: false })
+        : api.tagSync.syncToRekordbox({ target, dry_run: false }),
     onSuccess: () => done('Tags exported'),
+    onError: failed,
   });
   const rebuildTagTree = useMutation({
-    mutationFn: () => api.tags.syncToEngine({ target: 'engine', dry_run: false, fresh: true }),
+    mutationFn: () => api.tagSync.syncToEngine({ target: 'engine', dry_run: false, fresh: true }),
     onSuccess: () => done('Engine tag tree rebuilt'),
+    onError: failed,
   });
+
+  const busy =
+    generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
+    importField.isPending || exportRowToDisk.isPending || exportTags.isPending ||
+    rebuildTagTree.isPending;
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const attention = useMemo(() => rows.filter((r) => r.status !== 'in-sync'), [rows]);
@@ -279,8 +296,12 @@ export function UnifiedTracksSync() {
         <span className="uts-surfaces-note">
           surfaces: {data.surfaces_available.join(', ') || 'none reachable'}
         </span>
+        <button className="uts-btn uts-btn-ghost" onClick={() => refresh()} disabled={isFetching}>
+          {isFetching ? 'refreshing…' : '↻ refresh'}
+        </button>
       </div>
 
+      {busy && <div className="uts-busy">working…</div>}
       {pending && (
         <div className="uts-pending">
           <div>

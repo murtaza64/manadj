@@ -8,3 +8,6 @@ frontend/node_modules/.package-lock.json: frontend/package.json frontend/package
 
 test:
 	uv run -m pytest
+
+typecheck:
+	cd frontend && npx tsc -b
