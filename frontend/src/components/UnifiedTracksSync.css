@@ -134,3 +134,10 @@
   border: 1px solid #ffcc0066; background: #ffcc0012; color: #ffcc00;
   padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
 }
+
+/* section collapse + low-priority chip */
+.uts-collapse-toggle {
+  background: none; border: none; color: var(--subtext0, #999); cursor: pointer;
+  font-size: 11px; padding: 0 2px;
+}
+.uts-chip-diverged-low b { color: #8e8e93; }

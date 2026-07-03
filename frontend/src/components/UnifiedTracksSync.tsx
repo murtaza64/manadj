@@ -57,12 +57,32 @@ const PRESENCE_ORDER: PresenceId[] = ['disk', 'library', 'engine', 'rekordbox'];
 // (tags import is deliberately deferred — see PRD out-of-scope + issues/02)
 const IMPORTABLE_UI_FIELDS = new Set(['title', 'artist', 'bpm', 'key', 'energy']);
 
-const GROUPS: { status: RowStatus; label: string; chip: string }[] = [
-  { status: 'missing-downstream', label: 'Missing downstream', chip: 'missing' },
-  { status: 'diverged', label: 'Diverged fields', chip: 'diverged' },
-  { status: 'not-in-library', label: 'Not in Library', chip: 'import' },
-  { status: 'unimported', label: 'Unimported files', chip: 'unimported' },
+type GroupKey =
+  | 'missing-downstream' | 'div-tags' | 'unimported'
+  | 'div-title-artist' | 'not-in-library' | 'div-bpm-key';
+
+// priority order agreed 2026-07-02: tags > unimported > title/artist >
+// not-in-library > bpm/key (lowest, collapsed by default)
+const GROUPS: { key: GroupKey; label: string; chip: string; collapsedByDefault?: boolean }[] = [
+  { key: 'missing-downstream', label: 'Missing downstream', chip: 'missing' },
+  { key: 'div-tags', label: 'Tags diverged', chip: 'diverged' },
+  { key: 'unimported', label: 'Unimported files', chip: 'unimported' },
+  { key: 'div-title-artist', label: 'Title / artist diverged', chip: 'diverged' },
+  { key: 'not-in-library', label: 'Not in Library', chip: 'import' },
+  { key: 'div-bpm-key', label: 'BPM / key diverged', chip: 'diverged-low', collapsedByDefault: true },
 ];
+
+/** Which section a row belongs to. Diverged rows go to their highest-priority
+ * category (a row appears exactly once). */
+function groupKeyFor(row: StatusRow): GroupKey | null {
+  if (row.status === 'in-sync') return null;
+  if (row.status !== 'diverged') return row.status;
+  const fields = new Set(row.diverged.map((d) => d.field));
+  // energy rides with tags: the Rekordbox tag-export op writes energy colors
+  if (fields.has('tags') || fields.has('energy')) return 'div-tags';
+  if (fields.has('title') || fields.has('artist')) return 'div-title-artist';
+  return 'div-bpm-key';
+}
 
 interface PendingAction {
   scope: string; // what will be acted on
@@ -96,6 +116,9 @@ export function UnifiedTracksSync() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    new Set(GROUPS.filter((g) => g.collapsedByDefault).map((g) => g.key)),
+  );
   const [pending, setPending] = useState<PendingAction | null>(null);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sync-status'] });
@@ -202,10 +225,41 @@ export function UnifiedTracksSync() {
     return next;
   };
 
-  const groupRows = (status: RowStatus) => attention.filter((r) => r.status === status);
+  const groupRows = (key: GroupKey) => attention.filter((r) => groupKeyFor(r) === key);
 
-  const groupActions = (status: RowStatus, list: StatusRow[], selectedHere: StatusRow[]) => {
-    if (status === 'missing-downstream') {
+  const groupActions = (key: GroupKey, list: StatusRow[], selectedHere: StatusRow[]) => {
+    if (key === 'div-tags') {
+      const forTarget = (t: 'engine' | 'rekordbox') =>
+        list.filter((r) => r.diverged.some((d) => d.field === 'tags' && t in d.surface_values)).length;
+      return (
+        <span className="uts-group-actions">
+          {(['engine', 'rekordbox'] as const).map((t) => {
+            const n = forTarget(t);
+            if (n === 0) return null;
+            const label = t === 'engine' ? 'Engine' : 'Rekordbox';
+            return (
+              <button
+                key={t}
+                className="uts-btn"
+                onClick={() =>
+                  setPending({
+                    scope: `Export all tag assignments to ${label} (whole-library operation; clears ${n} rows here)`,
+                    sideEffects:
+                      t === 'engine'
+                        ? 'updates the "manaDJ Tags" playlist tree in the Engine DJ database'
+                        : 'updates MyTags (and energy colors) in the Rekordbox database',
+                    run: () => exportTags.mutate(t),
+                  })
+                }
+              >
+                Export tags → {label}
+              </button>
+            );
+          })}
+        </span>
+      );
+    }
+    if (key === 'missing-downstream') {
       const missingRb = list.filter((r) => !r.presence.rekordbox).length;
       return (
         <span className="uts-group-actions">
@@ -230,7 +284,7 @@ export function UnifiedTracksSync() {
         </span>
       );
     }
-    if (status === 'not-in-library') {
+    if (key === 'not-in-library') {
       const fromRb = list.filter((r) => r.presence.rekordbox).length;
       return (
         <span className="uts-group-actions">
@@ -254,7 +308,7 @@ export function UnifiedTracksSync() {
         </span>
       );
     }
-    if (status === 'unimported' && selectedHere.length > 0) {
+    if (key === 'unimported' && selectedHere.length > 0) {
       return (
         <span className="uts-group-actions">
           <button
@@ -280,11 +334,11 @@ export function UnifiedTracksSync() {
       <div className="uts-chipbar">
         {GROUPS.map((g) => (
           <button
-            key={g.status}
-            className={`uts-chip uts-chip-${g.chip} ${filter === g.status ? 'uts-chip-active' : ''}`}
-            onClick={() => setFilter(filter === g.status ? null : g.status)}
+            key={g.key}
+            className={`uts-chip uts-chip-${g.chip} ${filter === g.key ? 'uts-chip-active' : ''}`}
+            onClick={() => setFilter(filter === g.key ? null : g.key)}
           >
-            <b>{data.counts[g.status]}</b> {g.label.toLowerCase()}
+            <b>{groupRows(g.key).length}</b> {g.label.toLowerCase()}
           </button>
         ))}
         <button
@@ -314,13 +368,21 @@ export function UnifiedTracksSync() {
       )}
       {notice && <div className="uts-notice" onClick={() => setNotice(null)}>{notice} ✕</div>}
 
-      {GROUPS.filter((g) => (!filter || filter === g.status) && groupRows(g.status).length > 0).map((g) => {
-        const list = groupRows(g.status);
-        const selectable = g.status === 'unimported'; // only op that honors selection
+      {GROUPS.filter((g) => (!filter || filter === g.key) && groupRows(g.key).length > 0).map((g) => {
+        const list = groupRows(g.key);
+        const selectable = g.key === 'unimported'; // only op that honors selection
         const selectedHere = list.filter((r) => selected.has(r.path));
+        const isCollapsed = collapsed.has(g.key);
         return (
-          <section key={g.status} className="uts-group">
+          <section key={g.key} className="uts-group">
             <h3>
+              <button
+                className="uts-collapse-toggle"
+                onClick={() => setCollapsed(toggle(collapsed, g.key))}
+                title={isCollapsed ? 'Expand section' : 'Collapse section'}
+              >
+                {isCollapsed ? '▸' : '▾'}
+              </button>
               {selectable && (
                 <input
                   type="checkbox"
@@ -334,9 +396,9 @@ export function UnifiedTracksSync() {
                 />
               )}
               {g.label} <span className="uts-count">{list.length}</span>
-              {groupActions(g.status, list, selectedHere)}
+              {groupActions(g.key, list, selectedHere)}
             </h3>
-            {list.map((row) => (
+            {!isCollapsed && list.map((row) => (
               <RowCard
                 key={row.path}
                 row={row}
@@ -347,7 +409,6 @@ export function UnifiedTracksSync() {
                 onToggleExpand={() => setExpanded(toggle(expanded, row.path))}
                 onImportField={(field, value) => importField.mutate({ row, field, value })}
                 onExportToDisk={() => exportRowToDisk.mutate(row)}
-                onExportTags={(target) => exportTags.mutate(target)}
                 surfacesAvailable={data.surfaces_available}
               />
             ))}
@@ -410,7 +471,7 @@ function PresenceBadges({ row, available }: { row: StatusRow; available: Surface
   );
 }
 
-function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onExportToDisk, onExportTags, surfacesAvailable }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onExportToDisk, surfacesAvailable }: {
   row: StatusRow;
   surfacesAvailable: SurfaceId[];
   selectable: boolean;
@@ -420,7 +481,6 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   onToggleExpand: () => void;
   onImportField: (field: string, value: unknown) => void;
   onExportToDisk: () => void;
-  onExportTags: (target: 'engine' | 'rekordbox') => void;
 }) {
   const expandable = row.diverged.length > 0;
   return (
@@ -437,13 +497,21 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
             {row.artist}
             {row.diverged.length > 0 && (
               <span className="uts-field-tags">
-                {row.diverged.map((d) => <code key={d.field}>{d.field}</code>)}
+                {row.diverged.map((d) => (
+                  <code
+                    key={d.field}
+                    title={d.no_overwrite
+                      ? `Library has no ${d.field}; Export skips it — import manually if the downstream value is right`
+                      : undefined}
+                  >
+                    {d.field}{d.no_overwrite ? ' ⚠' : ''}
+                  </code>
+                ))}
               </span>
             )}
             {row.unprocessed && row.track_id !== null && (
               <span className="uts-unprocessed">unprocessed — exports with no tags</span>
             )}
-            {row.warnings.map((w) => <span key={w} className="uts-warning-text">⚠ {w}</span>)}
           </div>
         </div>
       </div>
@@ -454,11 +522,8 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
             {row.diverged.some((d) => !d.no_overwrite && 'disk' in d.surface_values) && (
               <button className="uts-btn" onClick={onExportToDisk}>Export fields → Disk</button>
             )}
-            {row.diverged.some((d) => d.field === 'tags' && 'engine' in d.surface_values) && (
-              <button className="uts-btn" onClick={() => onExportTags('engine')}>Export tags → Engine</button>
-            )}
-            {row.diverged.some((d) => d.field === 'tags' && 'rekordbox' in d.surface_values) && (
-              <button className="uts-btn" onClick={() => onExportTags('rekordbox')}>Export tags → Rekordbox</button>
+            {row.diverged.some((d) => d.field === 'tags') && (
+              <span className="uts-hint">tag fixes: use the section's "Export tags" buttons (whole-library op)</span>
             )}
           </div>
         </div>
@@ -491,7 +556,13 @@ function DivergenceMatrix({ row, onImportField }: {
             </td>
             {EXTERNAL_SURFACES.map((s) => {
               if (!row.presence[s.id]) return <td key={s.id} className="uts-na">·</td>;
-              if (!(s.id in d.surface_values)) return <td key={s.id} className="uts-agree">✓</td>;
+              if (!(s.id in d.surface_values)) {
+                // agrees with the Library — but "agreeing" with an empty
+                // Library value just means both are empty
+                return d.no_overwrite
+                  ? <td key={s.id} className="uts-na" title="also has no value">—</td>
+                  : <td key={s.id} className="uts-agree">✓</td>;
+              }
               const v = d.surface_values[s.id];
               const canImport =
                 row.track_id !== null &&
