@@ -209,6 +209,34 @@ export function cropRemapLanesLeft(lanes: Lanes, oldDur: number, newDur: number)
   return out;
 }
 
+/**
+ * Stamp a rectangular full-cut into a lane between normalized x1 and x2:
+ * the value drops to 0 with near-vertical walls and recovers to the pre-cut
+ * curve at the far edge. Pure LanePoint insertion — the 4 stamped points are
+ * ordinary breakpoints (draggable/deletable); interior points are removed.
+ * Argument order is normalized; spans too narrow for both walls are a no-op.
+ */
+export function insertChop(
+  points: LanePoint[],
+  x1: number,
+  x2: number,
+  wall = 0.004
+): LanePoint[] {
+  const lo = Math.max(0, Math.min(x1, x2));
+  const hi = Math.min(1, Math.max(x1, x2));
+  if (hi - lo <= wall * 2) return points;
+  const entryY = evalLane(points, lo);
+  const exitY = evalLane(points, hi);
+  const out = points.filter((p) => p.x < lo || p.x > hi);
+  out.push(
+    { x: lo, y: entryY },
+    { x: lo + wall, y: 0 },
+    { x: hi - wall, y: 0 },
+    { x: hi, y: exitY }
+  );
+  return out.sort((a, b) => a.x - b.x);
+}
+
 /** Nearest value in a sorted array (binary search), or null if empty. */
 export function nearestTime(sorted: number[], t: number): number | null {
   if (sorted.length === 0) return null;

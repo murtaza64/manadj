@@ -158,6 +158,22 @@
   will-change: transform;
 }
 
+/* Zero-length shortcut: same square 1px-border bold idiom as the fit button. */
+.mixproto-cutbtn {
+  padding: 2px 10px;
+  background: var(--crust);
+  border: 1px solid var(--red);
+  color: var(--red);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.mixproto-cutbtn:hover {
+  color: var(--subtext1);
+  border-color: var(--subtext1);
+}
+
 .mixproto-fit {
   position: absolute;
   top: 6px;
@@ -273,11 +289,13 @@
   outline: 1px solid #45475a;
 }
 
-/* Pointer target: coincides exactly with the editable lane rect, so hit
-   coordinates map 1:1 to lane values. */
+/* Pointer target: overhangs the lane rect by LANE_PAD on the SIDES ONLY
+   (x=0/x=1 breakpoints grabbable across their whole circle) — vertically it
+   matches the lane rect exactly so it never steals pointer events from the
+   strips stacked above/below. */
 .mixproto-lanehit {
   position: absolute;
-  inset: 0;
+  inset: 0 -7px;
   touch-action: none;
 }
 
@@ -288,9 +306,9 @@
      coordinates stay on the shared time axis). Visual only: pointer events
      land on the hit div, never on the overhang. */
   position: absolute;
-  left: -7px;
+  left: 0;
   top: -7px;
-  width: calc(100% + 14px);
+  width: 100%;
   height: calc(100% + 14px);
   display: block;
   z-index: 1;

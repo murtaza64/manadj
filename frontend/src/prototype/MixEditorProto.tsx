@@ -33,6 +33,7 @@ import {
   cropRemapLanes,
   cropRemapLanesLeft,
   defaultMix,
+  insertChop,
   lanePoints,
   laneValuesAt,
   nearestTime,
@@ -104,6 +105,10 @@ function loadPairStore(): PairStore {
 function savePairStore(store: PairStore): void {
   localStorage.setItem(PAIR_STORE_KEY, JSON.stringify(store));
 }
+
+/** Zoom-in ceiling. At 240 px/s a 128 BPM beat spans ~112px — enough room
+ * to place breakpoints between beats. */
+const MAX_PX_PER_SEC = 240;
 
 const LANE_COLORS: Record<LaneId, string> = {
   faderA: '#00e5ff',
@@ -511,6 +516,24 @@ export default function MixEditorProto() {
                   />
                   snap
                 </label>
+                <button
+                  className="mixproto-cutbtn"
+                  title="Zero-length Transition: hard cut A→B on the nearest beat"
+                  onClick={() =>
+                    setMix((m) => {
+                      const beats = beatgridA?.data.beat_times;
+                      const start =
+                        (beats?.length ? nearestTime(beats, m.transition.startSec) : null) ??
+                        m.transition.startSec;
+                      return {
+                        ...m,
+                        transition: { ...m.transition, startSec: start, durationSec: 0 },
+                      };
+                    })
+                  }
+                >
+                  cut
+                </button>
                 {addableLanes.length > 0 && (
                   <select
                     value=""
@@ -597,6 +620,9 @@ function DawTimeline({
   const waveWrapARef = useRef<HTMLDivElement>(null);
   const waveWrapBRef = useRef<HTMLDivElement>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
+  /** Lane label elements, counter-transformed per frame so they pin to the
+   * viewport's left edge (CSS sticky is blind to transform-based scroll). */
+  const laneLabelRefs = useRef(new Map<LaneId, HTMLSpanElement>());
   const drag = useRef<null | {
     kind: 'bMove' | 'bTrim' | 'aTrim';
     grabOffsetSec: number;
@@ -704,7 +730,7 @@ function DawTimeline({
         const rect = viewport.getBoundingClientRect();
         const px = pxRef.current;
         const minPx = (rect.width - 2) / contentEndRef.current; // fit = floor
-        const next = Math.min(60, Math.max(minPx, px * zoom.factor));
+        const next = Math.min(MAX_PX_PER_SEC, Math.max(minPx, px * zoom.factor));
         if (next !== px) {
           const cursorX = zoom.clientX - rect.left;
           const cursorSec = (cursorX + scrollPxRef.current) / px;
@@ -723,6 +749,9 @@ function DawTimeline({
       }
       if (waveWrapARef.current) waveWrapARef.current.style.transform = `translateX(${scrollPx}px)`;
       if (waveWrapBRef.current) waveWrapBRef.current.style.transform = `translateX(${scrollPx}px)`;
+      for (const el of laneLabelRefs.current.values()) {
+        el.style.transform = `translateX(${scrollPx}px)`;
+      }
       if (playheadRef.current) {
         // transform, not `left`: a layout-property write per frame forces
         // style/layout recalc scaling with the whole document (the embedded
@@ -830,16 +859,21 @@ function DawTimeline({
     const sec = secAtClientX(clientX);
     const m = mixRef.current;
     const edgeSec = EDGE_PX / pxRef.current;
-    if (row === 'A') {
-      if (trackAId !== null && Math.abs(sec - (m.transition.startSec + m.transition.durationSec)) < edgeSec) {
-        return 'aTrim';
-      }
-      return 'seek';
+    // Both transition edges are grabbable from EITHER row (the edge lines
+    // span the full timeline height, so the affordance shouldn't care which
+    // track the pointer happens to be over). Nearest edge wins when the
+    // window is narrow enough for both to be in range.
+    const dStart = Math.abs(sec - m.transition.startSec);
+    const dEnd = Math.abs(sec - (m.transition.startSec + m.transition.durationSec));
+    const bTrimOk = trackBId !== null && dStart < edgeSec;
+    const aTrimOk = trackAId !== null && dEnd < edgeSec;
+    if (bTrimOk && (!aTrimOk || dStart <= dEnd)) return 'bTrim';
+    if (aTrimOk) return 'aTrim';
+    if (row === 'B') {
+      if (trackBId === null) return 'seek';
+      const lenMix = Math.max(durB - m.bInSec, 0) / snapRef.current.rateB;
+      if (sec > m.transition.startSec && sec < m.transition.startSec + lenMix) return 'bMove';
     }
-    if (trackBId === null) return 'seek';
-    if (Math.abs(sec - m.transition.startSec) < edgeSec) return 'bTrim';
-    const lenMix = Math.max(durB - m.bInSec, 0) / snapRef.current.rateB;
-    if (sec > m.transition.startSec && sec < m.transition.startSec + lenMix) return 'bMove';
     return 'seek';
   };
 
@@ -893,10 +927,10 @@ function DawTimeline({
         bIn = Math.min(Math.max(bIn, 0), Math.max(durB - 0.1, 0));
         const newStart = originMix + bIn / s.rateB;
         const newDur = Math.max(origEnd - newStart, 0);
-        // Alt = crop (lanes keep absolute timing); default = stretch.
+        // Default = crop (lanes keep absolute timing); alt = stretch.
         const lanes = e.altKey
-          ? cropRemapLanesLeft(d.origLanes, d.origDur, newDur)
-          : d.origLanes;
+          ? d.origLanes
+          : cropRemapLanesLeft(d.origLanes, d.origDur, newDur);
         return {
           ...m,
           bInSec: bIn,
@@ -915,12 +949,12 @@ function DawTimeline({
         if (snapped !== null) newEnd = Math.min(Math.max(snapped, m.transition.startSec), maxEnd);
       }
       const newDur = newEnd - m.transition.startSec;
-      // Alt = crop (lanes keep absolute timing); default = stretch (shapes
+      // Default = crop (lanes keep absolute timing); alt = stretch (shapes
       // scale with the region — normalized points, no remap). Both derive
       // from the drag-start snapshot.
       const lanes = e.altKey
-        ? cropRemapLanes(d.origLanes, d.origDur, newDur)
-        : d.origLanes;
+        ? d.origLanes
+        : cropRemapLanes(d.origLanes, d.origDur, newDur);
       return {
         ...m,
         transition: { ...m.transition, durationSec: newDur, lanes: structuredClone(lanes) },
@@ -986,7 +1020,14 @@ function DawTimeline({
 
   const laneStrip = (id: LaneId) => (
     <div key={id} className={`mixproto-lanestrip ${id.endsWith('A') ? 'a' : 'b'}`}>
-      <span className="mixproto-lanelabel" style={{ color: LANE_COLORS[id] }}>
+      <span
+        className="mixproto-lanelabel"
+        style={{ color: LANE_COLORS[id] }}
+        ref={(el) => {
+          if (el) laneLabelRefs.current.set(id, el);
+          else laneLabelRefs.current.delete(id);
+        }}
+      >
         {id}
         {id in tr.lanes && (
           <button
@@ -1107,6 +1148,10 @@ interface LaneGuide {
 
 /** Breakpoint circle radius (uniform for all points). */
 const LANE_POINT_R = 5;
+/** Grab tolerance around a breakpoint (px). */
+const LANE_GRAB_PX = 13;
+/** Beat-line magnet radius (px) — loose: outside it placement is free. */
+const LANE_SNAP_PX = 6;
 /** Canvas overhang past the editable lane rect on every side, so breakpoint
  * circles at the extremes render complete, floating over the window borders.
  * Must match the canvas inset/size in mixEditorProto.css. */
@@ -1135,6 +1180,23 @@ function LaneCanvas({
   const dragIndex = useRef<number | null>(null);
   /** Hovered breakpoint index (shows its value readout). */
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  /** In-flight chop stamp gesture (shift+drag on empty lane space). */
+  const chopStart = useRef<number | null>(null);
+  const [chopPreview, setChopPreview] = useState<{ x0: number; x1: number } | null>(null);
+
+  /** Beat guide positions (cue markers excluded), ascending. */
+  const beatXs = guides.filter((g) => !g.color).map((g) => g.x);
+  /** Hard snap to the nearest beat line (chop edges are always on beats). */
+  const snapBeatX = (x: number) => (beatXs.length ? (nearestTime(beatXs, x) ?? x) : x);
+  /** The visible beat interval containing x (for the 1-beat click cut). */
+  const beatIntervalAt = (x: number): [number, number] | null => {
+    let lo: number | null = null;
+    for (const b of beatXs) {
+      if (b <= x) lo = b;
+      else return lo !== null ? [lo, b] : null;
+    }
+    return null;
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1172,6 +1234,14 @@ function LaneCanvas({
         ctx.fillStyle = g.strong ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)';
         ctx.fillRect(gx, LANE_PAD, g.strong ? 1.5 : 1, lh);
       }
+    }
+
+    // Chop stamp preview: the beat-snapped span about to be cut.
+    if (chopPreview) {
+      const a = lx(Math.min(chopPreview.x0, chopPreview.x1));
+      const b = lx(Math.max(chopPreview.x0, chopPreview.x1));
+      ctx.fillStyle = 'rgba(255, 45, 85, 0.3)';
+      ctx.fillRect(a, LANE_PAD, Math.max(b - a, 1.5), lh);
     }
 
     const color = LANE_COLORS[id];
@@ -1233,23 +1303,41 @@ function LaneCanvas({
       ctx.fillStyle = '#cdd6f4';
       ctx.fillText(text, tx, cy);
     }
-  }, [points, id, guides, widthPx, hoverIndex]);
+  }, [points, id, guides, widthPx, hoverIndex, chopPreview]);
 
   const pointAt = (e: React.PointerEvent | React.MouseEvent) => {
-    // The hit div coincides exactly with the editable lane rect (the canvas
-    // pads around it for visuals only), so pointer coords map 1:1 — hit
-    // targets line up with the drawn circles.
+    // The hit div overhangs the lane rect by LANE_PAD on the sides (grabbing
+    // the x=0/x=1 breakpoints from either half of their circle); vertically
+    // it stays exact so it never steals clicks from the strips above/below.
     const rect = e.currentTarget.getBoundingClientRect();
+    const lw = rect.width - LANE_PAD * 2;
     const ex = e.clientX - rect.left;
     const ey = e.clientY - rect.top;
+    let x = Math.max(0, Math.min(1, (ex - LANE_PAD) / lw));
+    // Loose beat-line magnet: within a few px the point snaps onto the
+    // guide; beyond that placement is free (fine control between beats).
+    // Shift suspends it, like every other snap.
+    if (!e.shiftKey) {
+      let bestD = LANE_SNAP_PX / lw;
+      let bestX: number | null = null;
+      for (const g of guides) {
+        if (g.color) continue; // beat lines only, not cue markers
+        const d = Math.abs(g.x - x);
+        if (d < bestD) {
+          bestD = d;
+          bestX = g.x;
+        }
+      }
+      if (bestX !== null) x = bestX;
+    }
     return {
-      x: Math.max(0, Math.min(1, ex / rect.width)),
+      x,
       y: Math.max(0, Math.min(1, 1 - ey / rect.height)),
       nearestIndex: (() => {
         let best = -1;
         let bestDist = Infinity;
         pointsRef.current.forEach((p, i) => {
-          const dx = p.x * rect.width - ex;
+          const dx = LANE_PAD + p.x * lw - ex;
           const dy = (1 - p.y) * rect.height - ey;
           const d = Math.hypot(dx, dy);
           if (d < bestDist) {
@@ -1257,7 +1345,7 @@ function LaneCanvas({
             best = i;
           }
         });
-        return bestDist < 10 ? best : -1;
+        return bestDist < LANE_GRAB_PX ? best : -1;
       })(),
     };
   };
@@ -1280,7 +1368,13 @@ function LaneCanvas({
         e.currentTarget.setPointerCapture(e.pointerId);
         const hit = pointAt(e);
         if (hit.nearestIndex >= 0) {
+          // Grabbing a breakpoint wins over the chop gesture: shift+drag ON
+          // a point stays the fine-drag (snap suspended) from issue 09.
           dragIndex.current = hit.nearestIndex;
+        } else if (e.shiftKey) {
+          // Chop stamp: shift+drag spans a cut, shift+click cuts one beat.
+          chopStart.current = hit.x;
+          setChopPreview({ x0: snapBeatX(hit.x), x1: snapBeatX(hit.x) });
         } else {
           const y = snapValue(hit.y, e);
           const pts = [...pointsRef.current, { x: hit.x, y }].sort((a, b) => a.x - b.x);
@@ -1289,12 +1383,15 @@ function LaneCanvas({
         }
       }}
       onPointerMove={(e) => {
+        const hit = pointAt(e);
+        if (chopStart.current !== null) {
+          setChopPreview({ x0: snapBeatX(chopStart.current), x1: snapBeatX(hit.x) });
+          return;
+        }
         if (dragIndex.current === null) {
-          const hit = pointAt(e);
           setHoverIndex(hit.nearestIndex >= 0 ? hit.nearestIndex : null);
           return;
         }
-        const hit = pointAt(e);
         const pts = [...pointsRef.current];
         pts[dragIndex.current] = { x: hit.x, y: snapValue(hit.y, e) };
         const i = dragIndex.current;
@@ -1302,8 +1399,27 @@ function LaneCanvas({
         if (i < pts.length - 1) pts[i].x = Math.min(pts[i].x, pts[i + 1].x);
         onChange(pts);
       }}
-      onPointerUp={() => (dragIndex.current = null)}
-      onPointerCancel={() => (dragIndex.current = null)}
+      onPointerUp={(e) => {
+        dragIndex.current = null;
+        const x0 = chopStart.current;
+        chopStart.current = null;
+        setChopPreview(null);
+        if (x0 === null) return;
+        const hit = pointAt(e);
+        const rect = e.currentTarget.getBoundingClientRect();
+        const dragPx = Math.abs(hit.x - x0) * (rect.width - LANE_PAD * 2);
+        const lo = snapBeatX(x0);
+        const hi = snapBeatX(hit.x);
+        // A click (or a drag whose edges snap to the same beat) cuts the
+        // single beat interval under the pointer.
+        const span = dragPx < 4 || lo === hi ? beatIntervalAt(hit.x) : ([lo, hi] as const);
+        if (span) commit(insertChop(pointsRef.current, span[0], span[1]));
+      }}
+      onPointerCancel={() => {
+        dragIndex.current = null;
+        chopStart.current = null;
+        setChopPreview(null);
+      }}
       onPointerLeave={() => setHoverIndex(null)}
       onDoubleClick={(e) => {
         e.stopPropagation();

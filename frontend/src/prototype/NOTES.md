@@ -161,6 +161,24 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   emit → full editor re-render per event). Escalation if still jittery:
   narrow the editor's whole-tree emit bump into per-widget subscriptions.
 
+- v16 (issue 05 rework + 04): breakpoints redrawn per user feedback —
+  uniform size, centered on their true curve position (the clamped-offset
+  version misaligned circle vs click target); value readout hover-only; the
+  lane canvas overhangs the window by `LANE_PAD` so edge circles float over
+  the borders (pointer events live on a hit div that matches the lane rect,
+  overhanging sides-only so stacked strips don't steal each other's clicks).
+  Filter lanes magnet y to 0.5; breakpoint x magnets loosely (6px) to beat
+  guides; crop is now the DEFAULT trim semantics (alt = stretch); both
+  transition edges grabbable from either row. Cut tools (issue 04):
+  `insertChop` pure stamp in mixProtoModel (4 points, near-vertical walls
+  to 0, interior points removed — under vitest), shift+drag on a lane chops
+  between beat-snapped edges with a live preview, shift+click cuts the one
+  visible beat interval under the pointer (culled guides ⇒ interval may be
+  >1 true beat at low zoom — acceptable), and a "cut" button collapses the
+  Transition to zero length on A's nearest beat (model already hard-swaps).
+  Modifier tension resolved: shift on a breakpoint = fine drag; shift on
+  empty lane = chop.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;
