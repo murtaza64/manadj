@@ -237,6 +237,16 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   tooltip); uniform 22px control height; downbeat button weighted yellow
   as a distinct action. Screenshot round with the user pending.
 
+- v20 (issue 13): stacked half-waveforms. Renderer gains
+  `amplitudeAnchor: 'center'|'top'|'bottom'` (config-only, construction
+  like brightness; minimap branch untouched; every non-editor surface
+  stays `center` by default) — edge anchors draw double-amplitude halves
+  growing from the baseline edge. Editor restacked: A lanes / A wave
+  (anchor top, peaks down) / seam / B wave (anchor bottom, peaks up) /
+  B lanes; rows flush (border between them removed — the seam IS the
+  meeting line), transition highlight + playhead span the stack. Lane
+  editing untouched by the relocation (strips are self-contained).
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

@@ -747,7 +747,21 @@ function DawTimeline({
   const { data: hotCuesA = [] } = useHotCues(trackAId);
   const { data: hotCuesB = [] } = useHotCues(trackBId);
   // Dimmed bands so hot cues / beatgrid pop in the editor rows (issue 05).
-  const rowConfig = { isMinimapMode: false, playMarkerPosition: 0, waveformBrightness: 0.6 };
+  // Stacked half-waveforms (issue 13): A's baseline at its top edge (peaks
+  // grow down), B's at its bottom edge (peaks grow up) — loud peaks meet at
+  // the seam between the two rows for transient-vs-transient beat reading.
+  const rowConfigA = {
+    isMinimapMode: false,
+    playMarkerPosition: 0,
+    waveformBrightness: 0.6,
+    amplitudeAnchor: 'top' as const,
+  };
+  const rowConfigB = {
+    isMinimapMode: false,
+    playMarkerPosition: 0,
+    waveformBrightness: 0.6,
+    amplitudeAnchor: 'bottom' as const,
+  };
   // Driven mode: the rAF tick below calls draw() for both rows right after
   // writing transforms + display windows — one motion clock, layer order
   // guaranteed (self-running renderer loops only aligned by rAF
@@ -755,7 +769,7 @@ function DawTimeline({
   const rendA = useWaveformRenderer({
     clock: clockA,
     waveformData: waveA,
-    config: rowConfig,
+    config: rowConfigA,
     hotCues: hotCuesA,
     beatgrid: beatgridA,
     driven: true,
@@ -763,7 +777,7 @@ function DawTimeline({
   const rendB = useWaveformRenderer({
     clock: clockB,
     waveformData: waveB,
-    config: rowConfig,
+    config: rowConfigB,
     hotCues: hotCuesB,
     beatgrid: beatgridB,
     driven: true,
@@ -1172,9 +1186,14 @@ function DawTimeline({
           className="mixproto-timeline-content"
           style={{ width: contentEnd * pxPerSec }}
         >
+          {/* Stacked halves (issue 13): A lanes / A wave (peaks down) /
+              seam / B wave (peaks up) / B lanes — quiet audio hugs the
+              outer edges, loud peaks meet at the seam. */}
+          {lanesA.map(laneStrip)}
+
           {/* Row A */}
           <div
-            className="mixproto-timeline-row"
+            className="mixproto-timeline-row a"
             onPointerDown={onRowPointerDown('A')}
             onPointerMove={onRowPointerMove('A')}
             onPointerUp={endDrag}
@@ -1187,11 +1206,10 @@ function DawTimeline({
               <div className="mixproto-blockframe a" style={{ left: 0, width: aEnd * pxPerSec }} />
             )}
           </div>
-          {lanesA.map(laneStrip)}
 
-          {/* Row B */}
+          {/* Row B — flush under A, forming the seam. */}
           <div
-            className="mixproto-timeline-row"
+            className="mixproto-timeline-row b"
             onPointerDown={onRowPointerDown('B')}
             onPointerMove={onRowPointerMove('B')}
             onPointerUp={endDrag}

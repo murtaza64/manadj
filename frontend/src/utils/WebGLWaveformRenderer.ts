@@ -55,6 +55,13 @@ export interface WebGLRendererConfig {
    * beatgrid, playhead) stay full-strength, so they pop over a dimmed
    * waveform (transition-editor rows use ~0.6). */
   waveformBrightness?: number;
+  /** Where the amplitude baseline sits (default 'center', the classic
+   * mirrored waveform). 'top'/'bottom' draw half-waveforms growing from
+   * that edge at double amplitude — the editor's stacked rows anchor A at
+   * 'top' (peaks grow down) and B at 'bottom' (peaks grow up) so loud
+   * peaks meet at the seam between them (issue 13). Ignored in minimap
+   * mode (which has its own bottom-anchored layout). */
+  amplitudeAnchor?: 'center' | 'top' | 'bottom';
 }
 
 export class WebGLWaveformRenderer {
@@ -94,6 +101,7 @@ export class WebGLWaveformRenderer {
   private isMinimapMode: boolean;
   private showTimeReadout: boolean;
   private waveformBrightness: number;
+  private amplitudeAnchor: 'center' | 'top' | 'bottom';
 
   // Manual drag offset (CSS pixels) - applied during drag operations
   private manualDragOffset: number = 0;
@@ -161,6 +169,7 @@ export class WebGLWaveformRenderer {
     this.isMinimapMode = config.isMinimapMode ?? false;
     this.showTimeReadout = (config.showTimeReadout ?? false) && !this.isMinimapMode;
     this.waveformBrightness = Math.max(0, Math.min(1, config.waveformBrightness ?? 1));
+    this.amplitudeAnchor = config.amplitudeAnchor ?? 'center';
     this.playMarkerPosition = config.playMarkerPosition ?? 0.25;
     this.maxZoom = config.maxZoom ?? 50.0;
     this.minZoom = config.minZoom ?? 0.5;
@@ -617,12 +626,20 @@ export class WebGLWaveformRenderer {
         const amplitude = bandAmplitudes[band] * halfHeight;
         const [r, g, b] = bandColors[band];
 
-        // For minimap mode, only render top half (amplitude upward from bottom)
-        // For normal mode, render full waveform (centered)
+        // Minimap: amplitude upward from the bottom. Edge anchors ('top'/
+        // 'bottom'): half-waveforms at double amplitude growing from the
+        // baseline edge (stacked editor rows — peaks meet at the seam).
+        // Default: the classic mirrored waveform around the centerline.
         let y1: number, y2: number;
         if (this.isMinimapMode) {
           y1 = canvasHeight - amplitude * 2;  // Top (amplitude doubled to fill half height)
           y2 = canvasHeight;                   // Bottom (fixed at canvas bottom)
+        } else if (this.amplitudeAnchor === 'top') {
+          y1 = 0;
+          y2 = amplitude * 2;
+        } else if (this.amplitudeAnchor === 'bottom') {
+          y1 = canvasHeight - amplitude * 2;
+          y2 = canvasHeight;
         } else {
           y1 = halfHeight - amplitude;  // Top (centered)
           y2 = halfHeight + amplitude;  // Bottom (centered)

@@ -1,6 +1,7 @@
 # 13 — Timeline waveform redesign: stacked half-waveforms
 
-Status: ready-for-agent
+Status: ready-for-human (implemented 2026-07-03, change `kzsnnmwu`; verify
+seam reading on a tempo-matched pair + proportions taste pass)
 
 ## Parent
 

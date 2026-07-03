@@ -150,12 +150,13 @@
 .mixproto-timeline-row {
   position: relative;
   height: max(56px, 8vh);
-  border-bottom: 1px solid var(--surface0, #313244);
   touch-action: none;
 }
 
-.mixproto-timeline-row:last-of-type {
-  border-bottom: none;
+/* The seam (issue 13): rows sit flush — no border/gap between A and B, so
+   peak-vs-peak beat alignment reads exactly at the meeting line. */
+.mixproto-timeline-row.b {
+  border-bottom: 1px solid var(--surface0, #313244);
 }
 
 .mixproto-wavecanvas {
