@@ -53,10 +53,16 @@ _Avoid_: related (too vague — could mean same artist, genre, etc.)
 Automatically determining a property of a Track from its audio — key, BPM, beatgrid, waveform. Manual edits to those properties are orthogonal to Analysis.
 
 **Deck**:
-An independent playback unit: one loaded Track plus its transport state (playhead, playing/paused, Main cue) and sound controls (EQ, filter, pitch). A Deck outlives any view: views render whichever of its controls they need, and the same Deck can be shown by several views. There is one Deck today; mixing features introduce a second one deliberately (Deck A / Deck B), not as a view artifact.
+An independent playback unit: one loaded Track plus its transport state (playhead, playing/paused, Main cue) and pitch. Two Decks exist — Deck A and Deck B — owned by the application, not by any view: a Deck outlives views and keeps playing across them. The library player shows Deck A; the Performance view shows both. Per-Deck sound shaping (trim, EQ, filter, volume) belongs to the Mixer's channel strips, as on hardware.
+
+**Mixer**:
+The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on safety limiter. Mirrors a hardware DJ mixer.
+
+**Performance view**:
+The two-deck view for practicing and performing mixes: stacked full-width waveforms with linked zoom, symmetric Deck A/B panels, a central Mixer panel, and a compact browse strip. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
 
 **Load**:
-Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it.
+Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it. In the Performance view, Loading onto a playing Deck is blocked (protecting the mix); in the library it simply replaces what's playing.
 
 **Hot Cue**:
 One of 8 persistent saved positions in a Track, used to jump to during performance.
