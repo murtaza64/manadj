@@ -38,7 +38,16 @@ A Tag Category. A Track's genre means its Tags in this category; the ID3 genre f
 A first-class Track attribute (1–5) expressing intensity. Not a Tag. External libraries encode it differently (e.g. Rekordbox track color, star ratings); those encodings are Sync-boundary details.
 
 **Playlist**:
-A hand-curated, ordered list of Tracks. Curated in manadj and Exported to external libraries. Distinct from the generated playlists that encode Tags in Engine DJ.
+A hand-curated, ordered list of Tracks. Curated in manadj and Exported to external libraries. Distinct from the generated playlists that encode Tags in Engine DJ, and from a Mix (which adds performance data).
+
+**Mix**:
+An arranged sequence of Tracks with a Transition between each adjacent pair — a persisted ideation artifact for planning real mixing sessions. Which part of a Track plays is implied by its surrounding Transitions; there is no separate clip/region concept. Distinct from a Playlist, and from the Classification value "mix" (an externally recorded DJ mix on a Source).
+
+**Transition**:
+The handover from one Track in a Mix to the next: anchor points (seconds into the outgoing and incoming Track), a duration, and drawn automation lanes for mixer controls. Times are seconds — beat-snapping and tempo-matching are editing affordances, not the model.
+
+**Transition template**:
+A saved, duration-normalized set of automation lanes (e.g. "bass swap"), applicable to any Transition regardless of its length.
 
 **Key**:
 One of 24 key centers (12 tonics × major/minor) assigned to a Track. OpenKey is the preferred notation for display and discussion; Camelot, musical, and external libraries' notations are conversions from the same canonical value.
