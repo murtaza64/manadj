@@ -3,13 +3,14 @@ import { PlaylistSync } from './PlaylistSync';
 import { TagSync } from './TagSync';
 import { TrackSync } from './TrackSync';
 import { MetadataSync } from './MetadataSync';
+import { Acquisition } from './Acquisition';
 import './SyncView.css';
 
 interface SyncViewProps {
   onClose: () => void;
 }
 
-type TabType = 'playlists' | 'tags' | 'tracks' | 'metadata';
+type TabType = 'playlists' | 'tags' | 'tracks' | 'metadata' | 'acquisition';
 
 export function SyncView({ onClose }: SyncViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>('playlists');
@@ -43,6 +44,12 @@ export function SyncView({ onClose }: SyncViewProps) {
           >
             Metadata
           </button>
+          <button
+            className={`sync-view-tab ${activeTab === 'acquisition' ? 'sync-view-tab-active' : ''}`}
+            onClick={() => setActiveTab('acquisition')}
+          >
+            Acquisition
+          </button>
         </div>
         <button onClick={onClose} className="sync-view-close-button">
           Close
@@ -53,6 +60,7 @@ export function SyncView({ onClose }: SyncViewProps) {
       {activeTab === 'tags' && <TagSync />}
       {activeTab === 'tracks' && <TrackSync onClose={onClose} />}
       {activeTab === 'metadata' && <MetadataSync />}
+      {activeTab === 'acquisition' && <Acquisition />}
     </div>
   );
 }

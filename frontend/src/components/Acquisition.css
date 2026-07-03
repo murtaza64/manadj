@@ -1,0 +1,164 @@
+/* Acquisition section — review-split layout (sidebar / list). */
+
+.acquisition-container {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-md);
+  flex: 1;
+  min-height: 0;
+}
+
+.acquisition-sidebar {
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  padding: var(--space-sm);
+  overflow-y: auto;
+}
+
+.acquisition-refresh-button {
+  width: 100%;
+  padding: var(--space-sm);
+  background: var(--surface0);
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  font-family: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+  margin-bottom: var(--space-sm);
+}
+
+.acquisition-refresh-button:hover:not(:disabled) {
+  background: var(--surface1);
+}
+
+.acquisition-refresh-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.acquisition-refresh-result {
+  color: var(--green);
+  font-size: var(--font-xs);
+  margin-bottom: var(--space-sm);
+}
+
+.acquisition-sidebar-heading {
+  color: var(--overlay2);
+  font-size: var(--font-xs);
+  text-transform: uppercase;
+  margin: var(--space-md) 0 var(--space-xs);
+}
+
+.acquisition-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--subtext1);
+  font-family: inherit;
+  font-size: var(--font-xs);
+  padding: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.acquisition-filter-row:hover {
+  background: var(--surface0);
+}
+
+.acquisition-filter-row.active {
+  background: var(--surface0);
+  border-left: 2px solid var(--blue);
+}
+
+.acquisition-count {
+  color: var(--overlay1);
+}
+
+.acquisition-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--surface0);
+  overflow-y: auto;
+}
+
+.acquisition-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.acquisition-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--surface0);
+  font-size: var(--font-xs);
+}
+
+.acquisition-item-title {
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acquisition-item-sub {
+  color: var(--overlay1);
+  white-space: nowrap;
+}
+
+.acquisition-state {
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  border: 1px solid;
+}
+
+.acquisition-state-new { color: var(--blue); border-color: var(--blue); }
+.acquisition-state-queued { color: var(--yellow); border-color: var(--yellow); }
+.acquisition-state-fulfilled { color: var(--green); border-color: var(--green); }
+.acquisition-state-ignored { color: var(--overlay0); border-color: var(--overlay0); }
+
+.acquisition-empty {
+  color: var(--overlay1);
+  padding: var(--space-lg);
+  font-size: var(--font-sm);
+}
+
+.acquisition-error {
+  color: var(--red);
+  padding: var(--space-sm);
+  font-size: var(--font-xs);
+}
+
+.acquisition-chip {
+  border: none;
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  cursor: pointer;
+  color: var(--crust);
+  font-weight: bold;
+  font-family: inherit;
+}
+
+.acquisition-chip-track { background: var(--green); }
+.acquisition-chip-mix { background: var(--mauve); }
+.acquisition-chip-clip { background: var(--yellow); }
+.acquisition-chip-other { background: var(--overlay1); }
+.acquisition-chip-none { background: var(--surface1); color: var(--subtext1); }
+
+.acquisition-class-filter {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--space-xs);
+  cursor: pointer;
+}
+
+.acquisition-class-filter .acquisition-count {
+  margin-left: auto;
+}

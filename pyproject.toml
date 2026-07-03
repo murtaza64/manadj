@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Engine DJ database access library"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.18.5",
     "beatnet>=1.1.1",
     "essentia>=2.1b6.dev1389",
     "fastapi>=0.122.0",
@@ -14,10 +15,12 @@ dependencies = [
     "numpy>=2.3.5",
     "pillow>=12.0.0",
     "pyrekordbox>=0.4.4",
+    "requests>=2.32.5",
     "scipy>=1.16.3",
     "soundfile>=0.13.1",
     "sqlalchemy>=2.0.0,<3.0.0",
     "tensorflow>=2.20.0",
+    "types-requests>=2.33.0.20260518",
     "uvicorn>=0.38.0",
 ]
 
@@ -26,7 +29,9 @@ sync-rekordbox-mytags = "scripts.sync_rekordbox_mytags:main"
 
 [project.optional-dependencies]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=1.7.0",
+    "pytest>=9.0.1",
     "ruff>=0.1.0",
 ]
 
