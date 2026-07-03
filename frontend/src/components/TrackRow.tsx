@@ -124,7 +124,7 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
           {track.provenance ? (
             track.provenance.url ? (
               <a
-                className={`provenance-chip provenance-${track.provenance.label}`}
+                className="provenance-chip"
                 href={track.provenance.url}
                 target="_blank"
                 rel="noreferrer"
@@ -134,7 +134,7 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
                 {track.provenance.label}
               </a>
             ) : (
-              <span className={`provenance-chip provenance-${track.provenance.label}`}>
+              <span className="provenance-chip">
                 {track.provenance.label}
               </span>
             )
