@@ -451,6 +451,14 @@ export class WebGLWaveformRenderer {
     this.cacheValidation = null;
   }
 
+  /** Set/clear the per-column automation modulation. Regenerates geometry
+   * on the next frame (windowed regen is constant-cost — the same budget
+   * zoom gestures already spend every frame). */
+  public setModulation(fn: WaveformModulation | null): void {
+    this.modulation = fn;
+    this.invalidateWaveformCache();
+  }
+
   /**
    * Calculate the pixel offset for shader-based translation
    * Maps the entire cached waveform geometry to show the current view window
@@ -631,12 +639,32 @@ export class WebGLWaveformRenderer {
       bandAmplitudes[1] = mid;
       bandAmplitudes[2] = high;
 
+      // Drawn-automation modulation: fader gain scales bar heights, EQ
+      // values scale band colors — the row previews the mix's energy
+      // shape, like the minimap.
+      let gain = 1;
+      let eqLow = 1;
+      let eqMid = 1;
+      let eqHigh = 1;
+      if (this.modulation) {
+        const t = (centerDataIndex / totalDataPoints) * this.waveformData.duration;
+        const m = this.modulation(t);
+        gain = m.gain;
+        eqLow = m.low;
+        eqMid = m.mid;
+        eqHigh = m.high;
+      }
+
       const x1 = pixelX;
       const x2 = pixelX + 1;
 
       for (let band = 0; band < 3; band++) {
-        const amplitude = bandAmplitudes[band] * halfHeight;
-        const [r, g, b] = bandColors[band];
+        const amplitude = bandAmplitudes[band] * gain * halfHeight;
+        const eq = band === 0 ? eqLow : band === 1 ? eqMid : eqHigh;
+        const [r0, g0, b0] = bandColors[band];
+        const r = r0 * eq;
+        const g = g0 * eq;
+        const b = b0 * eq;
 
         // Minimap: amplitude upward from the bottom. Edge anchors ('top'/
         // 'bottom'): half-waveforms at double amplitude growing from the
@@ -1137,28 +1165,35 @@ export class WebGLWaveformRenderer {
 
     let overlayCanvas = this.overlayCanvas;
     if (!overlayCanvas || !overlayCanvas.isConnected) {
-      const overlayId = `waveform-text-overlay-${this.canvas.id || 'default'}`;
-      overlayCanvas = document.getElementById(overlayId) as HTMLCanvasElement;
+      // Reuse scoped to THIS canvas's parent: a document-wide id lookup
+      // made multiple id-less canvases (the editor's two rows) share one
+      // overlay and fight over it every frame.
+      const parent = this.canvas.parentElement;
+      overlayCanvas = parent?.querySelector<HTMLCanvasElement>(
+        ':scope > canvas.waveform-text-overlay'
+      ) ?? null!;
       if (!overlayCanvas) {
         overlayCanvas = document.createElement('canvas');
-        overlayCanvas.id = overlayId;
+        overlayCanvas.className = 'waveform-text-overlay';
         overlayCanvas.style.position = 'absolute';
         overlayCanvas.style.top = '0';
         overlayCanvas.style.left = '0';
         overlayCanvas.style.pointerEvents = 'none';
         overlayCanvas.style.zIndex = '1';
-        this.canvas.parentElement?.appendChild(overlayCanvas);
+        parent?.appendChild(overlayCanvas);
       }
       this.overlayCanvas = overlayCanvas;
       this.overlayCtx = overlayCanvas.getContext('2d');
     }
 
-    // Match canvas size
+    // Match canvas size. CSS size comes from the LAYOUT size, not
+    // canvas.style (CSS-sized canvases have empty style.* — the overlay
+    // then fell back to its bitmap size, a 2×-scale layer at DPR 2).
     if (overlayCanvas.width !== this.canvas.width || overlayCanvas.height !== this.canvas.height) {
       overlayCanvas.width = this.canvas.width;
       overlayCanvas.height = this.canvas.height;
-      overlayCanvas.style.width = this.canvas.style.width;
-      overlayCanvas.style.height = this.canvas.style.height;
+      overlayCanvas.style.width = `${this.canvas.clientWidth}px`;
+      overlayCanvas.style.height = `${this.canvas.clientHeight}px`;
     }
 
     return this.overlayCtx;
@@ -1168,7 +1203,12 @@ export class WebGLWaveformRenderer {
     if (!this.waveformData || this.hotCues.size === 0) return;
 
     const squareSize = 16 * this.pixelRatio;
-    const squareY = this.canvas.height - squareSize - (4 * this.pixelRatio);
+    // Badges sit at the baseline (outer) edge on edge-anchored rows, with
+    // the cue triangles; bottom edge on classic centered waveforms.
+    const squareY =
+      this.amplitudeAnchor === 'top'
+        ? 4 * this.pixelRatio
+        : this.canvas.height - squareSize - (4 * this.pixelRatio);
 
     ctx.font = `bold ${12 * this.pixelRatio}px monospace`;
     ctx.textAlign = 'center';
@@ -1449,12 +1489,9 @@ export class WebGLWaveformRenderer {
     this.invalidateWaveformCache();
     this.beatgridCache = null;
 
-    // Remove overlay canvas (use unique ID)
-    const overlayId = `waveform-text-overlay-${this.canvas.id || 'default'}`;
-    const overlayCanvas = document.getElementById(overlayId);
-    if (overlayCanvas) {
-      overlayCanvas.remove();
-    }
+    // Remove OUR overlay canvas only (a document-wide id lookup could
+    // remove another renderer's).
+    this.overlayCanvas?.remove();
     this.overlayCanvas = null;
     this.overlayCtx = null;
   }

@@ -265,6 +265,83 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   drawn head before the window start) grey out via a backdrop-filter
   overlay in content coordinates.
 
+- v22 (user iterations): envelope preview on the main rows — renderer
+  `setModulation((trackTime) => {gain, low, mid, high})` scales bar
+  heights by the fader lane and band colors by the EQ lanes inside
+  `generateGeometry` (minimap parity: a bass kill visibly removes red);
+  editor feeds `laneValuesAt` through it per row (B via the tempo-stretch
+  mapping), re-applied on model change (windowed regen = zoom-frame
+  budget). All lanes removable now, defaults included: × hides (envelope
+  KEPT in `lanes`, restored on re-add via the add-lane dropdown); hidden
+  lanes read as their default during playback (`hiddenLanes` on the
+  Transition — an invisible bass-kill must not duck the mix). Inaudible
+  waveform spans grey out (backdrop-filter overlays: A past transition
+  end, B's drawn head before the window). Timeline height is FIXED
+  (max(280px, 34vh)): waveform rows flex-fixed, lane strips flex-share
+  the rest — add/remove redistributes instead of growing the stack;
+  LaneCanvas got a ResizeObserver redraw (flexing strips resize sibling
+  canvases without any React dep changing). Default envelopes redesigned
+  (user call): flat single-point shapes — faderA full, EQs/filters 0.5 —
+  and faderB ramps 0→full over the first 2 SECONDS of the window
+  (`defaultLanePoints`/`lanePoints` now take `durationSec` for the
+  normalized x; windows ≤2s ramp across their whole length). The old
+  defaults (A ramp-down / B full-length ramp-up) implied a full crossfade
+  nobody asked for. "reset" button restores the default transition; the
+  zero-length "cut" button removed (design revisit noted in issue 04).
+  Value axis inset 6px inside the lane rect (`LANE_VPAD`): y=0/1
+  breakpoints no longer sit ON the strip boundary (bottom-edge grabs
+  fought the adjacent strip's hit zone), draw + pointer mappings share
+  the inset.
+
+- v23 (user batch): locked-window moved onto deck B's card as a pressed-
+  state `lock` button (it scopes to B gestures; checkbox removed from
+  center controls). Clicking B's block without dragging now seeks (drag
+  handlers gained a 4px move threshold — micro-wobbles no longer mutate
+  the model either). Hot cue number badges now render on BOTH rows: the
+  overlay canvas was reused via a document-wide id lookup, so the two
+  id-less row canvases shared one overlay and fought (parent-scoped class
+  lookup now; dispose removes only its own overlay — REAL-MODULE fix);
+  badges sit at the baseline (outer) edge on anchored rows. Deck mute
+  buttons (player `setMuted` overrides the fader lane inside applyLanes —
+  a one-shot fader write would be re-overwritten per tick). Minimap moved
+  below the timeline, above the controls.
+
+- v24 (regression hunt: "everything sluggish, even the library"): two
+  self-inflicted wounds from v22. (1) The inaudible-span overlays used
+  `backdrop-filter` — the row canvases repaint every rAF tick, so the
+  compositor re-ran grayscale+brightness passes over large regions EVERY
+  frame, degrading the whole app; replaced with a plain translucent
+  overlay (lesson: never park a backdrop-filter over an animating
+  canvas). (2) The envelope-modulation callback ran `laneValuesAt` (all
+  10 lanes) and allocated a result object per pixel column — ~10k+
+  calls/frame during zoom regens; now evaluates only the row's 4 lanes
+  via a direct evalLane helper and mutates one reused object per row.
+  Round 2 (still sluggish): modulation is now a 2048-sample Float32Array
+  LUT built once per model change — the per-column callback is a clamped
+  index (evalLane fell off the hot path entirely); and the LaneCanvas
+  ResizeObserver reacts to HEIGHT only — zoom changes lane widths every
+  frame, and the observer was scheduling a second React commit + a
+  duplicate redraw of all six lanes per zoom frame (the `widthPx` draw
+  dep already handles widths). Escalation if zoom still lags: move
+  modulation into the vertex shader (LUT as a texture) — named, not
+  built. Round 3 (scroll jitter over the window): lane canvases span the
+  whole window — at 240px/s a 35s window = 16.8k buffer px, PAST the 16k
+  GPU canvas limit, and 6 taller strips ≈ 10× yesterday's moving-layer
+  area; bitmap now capped at 8192 buffer px (effective DPR shrinks past
+  that — flat line art degrades gracefully). Also the editor rows' badge
+  overlays were DOUBLE-sized (style.width copied from a CSS-sized
+  canvas's empty style → bitmap-size fallback at 2×): overlay now sized
+  from clientWidth — REAL-MODULE fix, also corrects badge positions.
+  Round 4 (still hitching as the window entered/left the frame): the
+  named escalation got built — lane canvases are now VIEWPORT-WINDOWED:
+  each covers only the visible slice of its window + half-viewport
+  margins, positioned inline within the lane window; scrolling inside
+  the margin is pure layer translation, exiting it repositions+redraws
+  imperatively (the rAF tick feeds every lane the visible range via a
+  registry; React redraw effect and scroll redraw share one draw closure
+  through refs). Pointer math untouched (the hit div still spans the
+  full window). Bitmaps are now ≤ ~2 viewports regardless of zoom.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

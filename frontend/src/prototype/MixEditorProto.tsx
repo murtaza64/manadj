@@ -40,6 +40,8 @@ import {
   defaultMix,
   insertChop,
   lanePoints,
+  defaultLanePoints,
+  evalLane,
   laneValuesAt,
   nearestTime,
   slideB,
@@ -422,10 +424,39 @@ export default function MixEditorProto() {
     });
   }, []);
 
+  /** Remove a lane from the editor: the envelope stays in `lanes` (re-add
+   * restores it) but reads as default during playback (model semantics). */
+  const hideLane = useCallback((id: LaneId) => {
+    setMix((m) => ({
+      ...m,
+      transition: {
+        ...m.transition,
+        hiddenLanes: [...new Set([...(m.transition.hiddenLanes ?? []), id])],
+      },
+    }));
+  }, []);
+
+  /** (Re-)add a lane: unhide, and materialize its points so it's drawn-on
+   * (existing envelope wins over the default shape). */
+  const addLane = useCallback((id: LaneId) => {
+    setMix((m) => ({
+      ...m,
+      transition: {
+        ...m.transition,
+        hiddenLanes: (m.transition.hiddenLanes ?? []).filter((h) => h !== id),
+        lanes: {
+          ...m.transition.lanes,
+          [id]: lanePoints(m.transition.lanes, id, m.transition.durationSec),
+        },
+      },
+    }));
+  }, []);
+
   const visibleLanes = useMemo(() => {
     const drawn = Object.keys(mix.transition.lanes) as LaneId[];
-    return [...new Set([...DEFAULT_LANE_IDS, ...drawn])];
-  }, [mix.transition.lanes]);
+    const hidden = new Set(mix.transition.hiddenLanes ?? []);
+    return [...new Set([...DEFAULT_LANE_IDS, ...drawn])].filter((id) => !hidden.has(id));
+  }, [mix.transition.lanes, mix.transition.hiddenLanes]);
 
   const addableLanes = LANE_IDS.filter((id) => !visibleLanes.includes(id));
 
@@ -452,6 +483,7 @@ export default function MixEditorProto() {
             lockedWindow={lockedWindow}
             visibleLanes={visibleLanes}
             onLaneChange={setLane}
+            onLaneHide={hideLane}
             onChange={setMix}
           />
 
@@ -574,38 +606,20 @@ export default function MixEditorProto() {
                   />
                   snap
                 </label>
-                <label title="Slides: locked = the window rides the slid track; unlocked = it stays with the other track">
-                  <input
-                    type="checkbox"
-                    checked={lockedWindow}
-                    onChange={(e) => setLockedWindow(e.target.checked)}
-                  />
-                  locked window
-                </label>
                 <button
-                  className="mixproto-cutbtn"
-                  title="Zero-length Transition: hard cut A→B on the nearest beat"
-                  onClick={() =>
-                    setMix((m) => {
-                      const beats = beatgridA?.data.beat_times;
-                      const start =
-                        (beats?.length ? nearestTime(beats, m.transition.startSec) : null) ??
-                        m.transition.startSec;
-                      return {
-                        ...m,
-                        transition: { ...m.transition, startSec: start, durationSec: 0 },
-                      };
-                    })
-                  }
+                  className="mixproto-resetbtn"
+                  title="Reset this Transition to the defaults (envelopes, window, entry)"
+                  onClick={() => setMix((m) => ({ ...m, transition: defaultMix().transition }))}
                 >
-                  cut
+                  reset
                 </button>
+
                 {addableLanes.length > 0 && (
                   <select
                     value=""
                     onChange={(e) => {
                       const id = e.target.value as LaneId;
-                      if (id) setLane(id, lanePoints(mix.transition.lanes, id));
+                      if (id) addLane(id);
                     }}
                   >
                     <option value="">add lane…</option>
@@ -635,6 +649,7 @@ export default function MixEditorProto() {
                 beats: (n) => bpmB && slideDeckB('beats', (n * 60) / bpmB),
                 enabled: bpmB !== null && bpmB > 0,
               }}
+              lock={{ on: lockedWindow, toggle: () => setLockedWindow((v) => !v) }}
             />
           </div>
         </div>
@@ -668,6 +683,7 @@ function DawTimeline({
   lockedWindow,
   visibleLanes,
   onLaneChange,
+  onLaneHide,
   onChange,
 }: {
   mix: ProtoMix;
@@ -685,6 +701,8 @@ function DawTimeline({
   lockedWindow: boolean;
   visibleLanes: LaneId[];
   onLaneChange: (id: LaneId, points: LanePoint[] | null) => void;
+  /** Remove the lane from the editor (envelope kept; re-add restores). */
+  onLaneHide: (id: LaneId) => void;
   onChange: React.Dispatch<React.SetStateAction<ProtoMix>>;
 }) {
   const [pxPerSec, setPxPerSec] = useState(4);
@@ -700,8 +718,23 @@ function DawTimeline({
   /** Lane label elements, counter-transformed per frame so they pin to the
    * viewport's left edge (CSS sticky is blind to transform-based scroll). */
   const laneLabelRefs = useRef(new Map<LaneId, HTMLSpanElement>());
+  /** Lane canvas scroll hooks: the tick feeds each one the visible content
+   * range; a canvas repositions/redraws only when the view exits its drawn
+   * span (viewport-windowed lane canvases — scroll-jitter fix). */
+  const laneScrollDraws = useRef(new Map<LaneId, (l: number, r: number) => void>());
+  const registerScrollDraw = useCallback(
+    (id: LaneId, fn: ((l: number, r: number) => void) | null) => {
+      if (fn) laneScrollDraws.current.set(id, fn);
+      else laneScrollDraws.current.delete(id);
+    },
+    []
+  );
   const drag = useRef<null | {
     kind: 'bMove' | 'bTrim' | 'aTrim';
+    /** Pointer-down x; a release without real movement (≤4px) is a CLICK —
+     * bMove clicks seek, like clicking anywhere on row A. */
+    downClientX: number;
+    moved: boolean;
     grabOffsetSec: number;
     /** Lane/duration snapshot at drag start — crop remaps derive from these
      * so incremental moves never compound (and toggling alt mid-drag works). */
@@ -785,6 +818,61 @@ function DawTimeline({
     beatgrid: beatgridB,
     driven: true,
   });
+  // Envelope preview on the rows (minimap parity): fader lanes scale bar
+  // heights, EQ lanes scale band colors — a drawn bass kill visibly removes
+  // the red band. HOT PATH: the renderer calls the modulation per pixel
+  // column during zoom-gesture regens (~10k+/frame), so the envelopes are
+  // SAMPLED ONCE into a LUT here (they only vary inside the window —
+  // evalLane clamps outside, so index clamping covers the constant tails)
+  // and the callback is a clamped array lookup into a reused object.
+  useEffect(() => {
+    const eqVis = (v: number) => Math.min(v * 2, 1.15);
+    const laneY = (id: LaneId, x: number) =>
+      evalLane(
+        tr.hiddenLanes?.includes(id)
+          ? defaultLanePoints(id, tr.durationSec)
+          : lanePoints(tr.lanes, id, tr.durationSec),
+        x
+      );
+    const N = 2048;
+    const buildLut = (fader: LaneId, low: LaneId, mid: LaneId, high: LaneId) => {
+      const lut = new Float32Array(N * 4);
+      for (let i = 0; i < N; i++) {
+        const x = i / (N - 1);
+        lut[i * 4] = laneY(fader, x);
+        lut[i * 4 + 1] = eqVis(laneY(low, x));
+        lut[i * 4 + 2] = eqVis(laneY(mid, x));
+        lut[i * 4 + 3] = eqVis(laneY(high, x));
+      }
+      return lut;
+    };
+    const mkMod = (lut: Float32Array, xAt: (t: number) => number) => {
+      const out = { gain: 1, low: 1, mid: 1, high: 1 };
+      return (t: number) => {
+        const x = xAt(t);
+        const i = 4 * Math.max(0, Math.min(N - 1, Math.round(x * (N - 1))));
+        out.gain = lut[i];
+        out.low = lut[i + 1];
+        out.mid = lut[i + 2];
+        out.high = lut[i + 3];
+        return out;
+      };
+    };
+    const dur = tr.durationSec;
+    rendA.rendererRef.current?.setModulation(
+      mkMod(
+        buildLut('faderA', 'eqLowA', 'eqMidA', 'eqHighA'),
+        dur <= 0 ? (t) => (t < tr.startSec ? 0 : 1) : (t) => (t - tr.startSec) / dur
+      )
+    );
+    rendB.rendererRef.current?.setModulation(
+      mkMod(
+        buildLut('faderB', 'eqLowB', 'eqMidB', 'eqHighB'),
+        dur <= 0 ? (bt) => (bt < tr.bInSec ? 0 : 1) : (bt) => (bt - tr.bInSec) / (rateB * dur)
+      )
+    );
+  }, [tr, rateB, waveA, waveB, rendA.rendererRef, rendB.rendererRef]);
+
   // Mirrors so the tick effect (keyed on [player]) never holds stale draws.
   const drawRowsRef = useRef({ a: rendA.draw, b: rendB.draw });
   useEffect(() => {
@@ -842,6 +930,9 @@ function DawTimeline({
       if (waveWrapBRef.current) waveWrapBRef.current.style.transform = `translateX(${scrollPx}px)`;
       for (const el of laneLabelRefs.current.values()) {
         el.style.transform = `translateX(${scrollPx}px)`;
+      }
+      for (const fn of laneScrollDraws.current.values()) {
+        fn(scrollPx, scrollPx + viewport.clientWidth);
       }
       if (playheadRef.current) {
         // transform, not `left`: a layout-property write per frame forces
@@ -977,12 +1068,21 @@ function DawTimeline({
     const originMix = tr0.startSec - tr0.bInSec / snapRef.current.rateB;
     drag.current = {
       kind: zone,
+      downClientX: e.clientX,
+      moved: false,
       grabOffsetSec:
         zone === 'bMove' ? sec - (snapRef.current.lockedWindow ? tr0.startSec : originMix) : 0,
       origLanes: structuredClone(tr0.lanes),
       origDur: tr0.durationSec,
       origStart: tr0.startSec,
     };
+  };
+
+  /** Release: a bMove that never moved is a click — seek (row-A parity). */
+  const onRowPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    drag.current = null;
+    if (d && d.kind === 'bMove' && !d.moved) player.seek(secAtClientX(e.clientX));
   };
 
   const onRowPointerMove = (row: 'A' | 'B') => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -995,6 +1095,10 @@ function DawTimeline({
     const sec = secAtClientX(e.clientX);
     const d = drag.current;
     const s = snapRef.current;
+    // Ignore sub-threshold jitter so a click stays a click (and micro
+    // wobbles don't mutate the model); past it, the drag is committed.
+    if (!d.moved && Math.abs(e.clientX - d.downClientX) <= 4) return;
+    d.moved = true;
     // Shift = fine drag: beat snap suspended while held (issue 09).
     const snapOn = s.snap && !e.shiftKey;
     onChange((m) => {
@@ -1138,15 +1242,13 @@ function DawTimeline({
         }}
       >
         {id}
-        {id in tr.lanes && (
-          <button
-            className="mixproto-laneclear"
-            title="reset lane"
-            onClick={() => onLaneChange(id, null)}
-          >
-            ×
-          </button>
-        )}
+        <button
+          className="mixproto-laneclear"
+          title="Remove lane (envelope kept — re-add restores it)"
+          onClick={() => onLaneHide(id)}
+        >
+          ×
+        </button>
       </span>
       <div
         className="mixproto-lanewindow"
@@ -1155,9 +1257,11 @@ function DawTimeline({
         <LaneCanvas
           id={id}
           widthPx={Math.max(tr.durationSec * pxPerSec, 4)}
-          points={lanePoints(tr.lanes, id)}
+          points={lanePoints(tr.lanes, id, tr.durationSec)}
           guides={id.endsWith('A') ? guidesA : guidesB}
           chopWall={0.02 / Math.max(tr.durationSec, 0.01)}
+          windowLeftPx={tr.startSec * pxPerSec}
+          registerScrollDraw={registerScrollDraw}
           onChange={(pts) => onLaneChange(id, pts)}
         />
       </div>
@@ -1169,22 +1273,6 @@ function DawTimeline({
 
   return (
     <div className="mixproto-timeline-wrap">
-      <GlobalMinimap
-        player={player}
-        mix={mix}
-        waveA={waveA ?? null}
-        waveB={waveB ?? null}
-        rateB={rateB}
-        contentEnd={contentEnd}
-        pxPerSec={pxPerSec}
-        hotCuesA={hotCuesA}
-        hotCuesB={hotCuesB}
-        getScrollPx={() => scrollPxRef.current}
-        setScrollPx={(px) => {
-          scrollPxRef.current = Math.max(0, px);
-        }}
-        getViewPx={() => viewportRef.current?.clientWidth ?? 800}
-      />
       <div ref={viewportRef} className="mixproto-timeline">
         <div
           ref={contentRef}
@@ -1201,7 +1289,7 @@ function DawTimeline({
             className="mixproto-timeline-row a"
             onPointerDown={onRowPointerDown('A')}
             onPointerMove={onRowPointerMove('A')}
-            onPointerUp={endDrag}
+            onPointerUp={onRowPointerUp}
             onPointerCancel={endDrag}
           >
             <div ref={waveWrapARef} className="mixproto-wavecanvas" style={{ width: viewW }}>
@@ -1224,7 +1312,7 @@ function DawTimeline({
             className="mixproto-timeline-row b"
             onPointerDown={onRowPointerDown('B')}
             onPointerMove={onRowPointerMove('B')}
-            onPointerUp={endDrag}
+            onPointerUp={onRowPointerUp}
             onPointerCancel={endDrag}
           >
             <div ref={waveWrapBRef} className="mixproto-wavecanvas" style={{ width: viewW }}>
@@ -1263,6 +1351,24 @@ function DawTimeline({
         </div>
       </div>
 
+      {/* Whole-mix overview under the detail view, above the controls. */}
+      <GlobalMinimap
+        player={player}
+        mix={mix}
+        waveA={waveA ?? null}
+        waveB={waveB ?? null}
+        rateB={rateB}
+        contentEnd={contentEnd}
+        pxPerSec={pxPerSec}
+        hotCuesA={hotCuesA}
+        hotCuesB={hotCuesB}
+        getScrollPx={() => scrollPxRef.current}
+        setScrollPx={(px) => {
+          scrollPxRef.current = Math.max(0, px);
+        }}
+        getViewPx={() => viewportRef.current?.clientWidth ?? 800}
+      />
+
       <button className="mixproto-fit" onClick={fit} title="Zoom to fit">
         fit
       </button>
@@ -1284,6 +1390,15 @@ interface LaneGuide {
 const LANE_POINT_R = 5;
 /** Grab tolerance around a breakpoint (px). */
 const LANE_GRAB_PX = 13;
+/** Vertical inset of the VALUE range inside the lane rect: y=0/y=1
+ * breakpoints sit this far from the strip boundary instead of ON it —
+ * without this, bottom-edge points were half outside the hit div and hard
+ * to grab (and grabbing them fought the adjacent strip). */
+const LANE_VPAD = 6;
+/** Lane canvas bitmap width cap (buffer px): effective DPR shrinks once a
+ * window's CSS width exceeds this, keeping deep-zoom canvases inside GPU
+ * limits and the compositor budget. */
+const LANE_MAX_BITMAP_PX = 8192;
 /** Beat-line magnet radius (px) — loose: outside it placement is free. */
 const LANE_SNAP_PX = 6;
 /** Canvas overhang past the editable lane rect on every side, so breakpoint
@@ -1297,6 +1412,8 @@ function LaneCanvas({
   points,
   guides,
   chopWall,
+  windowLeftPx,
+  registerScrollDraw,
   onChange,
 }: {
   id: LaneId;
@@ -1309,6 +1426,11 @@ function LaneCanvas({
    * window length; a duration-proportional wall audibly ramped on long
    * transitions). */
   chopWall: number;
+  /** The lane window's left edge in content px (for view→window mapping). */
+  windowLeftPx: number;
+  /** Scroll hookup: the rAF tick feeds the visible content range so the
+   * canvas can reposition/redraw when the view leaves its drawn span. */
+  registerScrollDraw: (id: LaneId, fn: ((viewL: number, viewR: number) => void) | null) => void;
   onChange: (points: LanePoint[]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1319,6 +1441,26 @@ function LaneCanvas({
   const dragIndex = useRef<number | null>(null);
   /** Hovered breakpoint index (shows its value readout). */
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  /** Redraw on HEIGHT changes only: strips flex-share the timeline height,
+   * so adding/removing ANY lane resizes this one (a stale bitmap would
+   * stretch). Width changes are already covered by the `widthPx` draw dep —
+   * reacting to them here doubled the per-frame work during zoom gestures
+   * (a second React commit + redraw of every lane, v24 regression hunt). */
+  const [resizeTick, setResizeTick] = useState(0);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let lastH = canvas.clientHeight;
+    const ro = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height ?? 0;
+      if (h !== lastH) {
+        lastH = h;
+        setResizeTick((n) => n + 1);
+      }
+    });
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
   /** In-flight chop stamp gesture (shift+drag on empty lane space). */
   const chopStart = useRef<number | null>(null);
   const [chopPreview, setChopPreview] = useState<{ x0: number; x1: number } | null>(null);
@@ -1338,33 +1480,64 @@ function LaneCanvas({
     return null;
   };
 
+  // ── Viewport-windowed canvas (scroll-jitter fix) ──
+  // The canvas covers only the visible slice of the lane window plus a
+  // half-viewport margin each side — full-window canvases at deep zoom were
+  // giant compositor surfaces that hitched when scrolled into/out of frame.
+  // Scrolling inside the margin just translates (with the content layer);
+  // leaving it repositions + redraws imperatively via the rAF tick.
+  const geomRef = useRef({ widthPx, windowLeftPx });
   useEffect(() => {
+    geomRef.current = { widthPx, windowLeftPx };
+  });
+  /** Last visible range in window-local CSS px (fed by the tick). */
+  const lastViewRef = useRef<{ l: number; r: number } | null>(null);
+  /** The span currently drawn (window-local), and the window width it was
+   * computed against (zoom changes invalidate it). */
+  const spanRef = useRef<{ left: number; width: number; forWidth: number } | null>(null);
+
+  const draw = () => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
+    const lw = geomRef.current.widthPx; // full window width = value-axis x scale
+    const view = lastViewRef.current ?? { l: 0, r: Math.min(lw, 1600) };
+    const margin = Math.max((view.r - view.l) / 2, 200);
+    const spanL = Math.max(0, view.l - margin);
+    const spanR = Math.min(lw, view.r + margin);
+    const spanW = Math.max(spanR - spanL, 4);
+    spanRef.current = { left: spanL, width: spanW, forWidth: lw };
+    canvas.style.left = `${spanL}px`;
+    canvas.style.width = `${spanW + LANE_PAD * 2}px`;
+    const w = spanW + LANE_PAD * 2;
     const h = canvas.clientHeight;
-    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
+    const dpr = Math.min(window.devicePixelRatio || 1, LANE_MAX_BITMAP_PX / Math.max(w, 1));
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     // The editable lane rect sits inset by LANE_PAD; the pad ring stays
     // transparent except where breakpoint circles overflow into it.
-    const lw = w - LANE_PAD * 2;
     const lh = h - LANE_PAD * 2;
-    const lx = (nx: number) => LANE_PAD + nx * lw;
-    const ly = (ny: number) => LANE_PAD + (1 - ny) * lh;
-    ctx.fillStyle = 'rgba(24, 24, 37, 0.85)';
-    ctx.fillRect(LANE_PAD, LANE_PAD, lw, lh);
-    ctx.fillStyle = '#313244';
-    ctx.fillRect(LANE_PAD, LANE_PAD + lh / 2, lw, 1);
+    const lx = (nx: number) => LANE_PAD + nx * lw - spanL;
+    // Value axis inset by LANE_VPAD: extremes stay grabbable (see const).
+    const ly = (ny: number) => LANE_PAD + LANE_VPAD + (1 - ny) * (lh - LANE_VPAD * 2);
+    // Background/midline clipped to the lane rect ∩ this canvas.
+    const bx1 = Math.max(lx(0), 0);
+    const bx2 = Math.min(lx(1), w);
+    if (bx2 > bx1) {
+      ctx.fillStyle = 'rgba(24, 24, 37, 0.85)';
+      ctx.fillRect(bx1, LANE_PAD, bx2 - bx1, lh);
+      ctx.fillStyle = '#313244';
+      ctx.fillRect(bx1, LANE_PAD + lh / 2, bx2 - bx1, 1);
+    }
 
     // Beat/cue guides continue through the lanes (beatmatching alignment).
     for (const g of guides) {
       const gx = lx(g.x);
+      if (gx < -2 || gx > w + 2) continue;
       if (g.color) {
         ctx.fillStyle = g.color;
         ctx.globalAlpha = 0.5;
@@ -1385,7 +1558,8 @@ function LaneCanvas({
     }
 
     const color = LANE_COLORS[id];
-    // Curve path (with flat extensions to the window edges).
+    // Curve path (with flat extensions to the window edges; off-canvas
+    // coordinates clip harmlessly).
     const tracePath = () => {
       ctx.beginPath();
       points.forEach((p, i) => {
@@ -1403,8 +1577,8 @@ function LaneCanvas({
     // Translucent fill under the curve (DAW-style) — makes each lane's shape
     // read at a glance even when several strips are stacked.
     tracePath();
-    ctx.lineTo(lx(1), LANE_PAD + lh);
-    ctx.lineTo(lx(0), LANE_PAD + lh);
+    ctx.lineTo(lx(1), ly(0));
+    ctx.lineTo(lx(0), ly(0));
     ctx.closePath();
     ctx.globalAlpha = 0.18;
     ctx.fillStyle = color;
@@ -1436,14 +1610,39 @@ function LaneCanvas({
       const cy = Math.max(LANE_PAD + 7, Math.min(LANE_PAD + lh - 7, ly(p.y)));
       const tw = ctx.measureText(text).width;
       // Label to whichever side has room.
-      const rightward = cx + 14 + tw < LANE_PAD + lw;
+      const rightward = cx + 14 + tw < w;
       const tx = rightward ? cx + 12 : cx - 12 - tw;
       ctx.fillStyle = 'rgba(17, 17, 27, 0.85)';
       ctx.fillRect(tx - 2, cy - 7, tw + 4, 14);
       ctx.fillStyle = '#cdd6f4';
       ctx.fillText(text, tx, cy);
     }
-  }, [points, id, guides, widthPx, hoverIndex, chopPreview]);
+  };
+  const drawRef = useRef(draw);
+  useEffect(() => {
+    drawRef.current = draw;
+  });
+
+  // React-triggered redraws (model/hover/zoom/height changes).
+  useEffect(() => {
+    drawRef.current();
+  }, [points, id, guides, widthPx, hoverIndex, chopPreview, resizeTick]);
+
+  // Scroll-triggered redraws: reposition only when the view leaves the
+  // drawn span (or the zoom it was drawn at changed).
+  useEffect(() => {
+    registerScrollDraw(id, (viewL, viewR) => {
+      const { widthPx: lw, windowLeftPx: left } = geomRef.current;
+      const l = Math.max(0, viewL - left);
+      const r = Math.min(lw, viewR - left);
+      lastViewRef.current = { l, r };
+      const s = spanRef.current;
+      if (!s || s.forWidth !== lw || l < s.left || r > s.left + s.width) {
+        drawRef.current();
+      }
+    });
+    return () => registerScrollDraw(id, null);
+  }, [id, registerScrollDraw]);
 
   const pointAt = (e: React.PointerEvent | React.MouseEvent) => {
     // The hit div overhangs the lane rect by LANE_PAD on the sides (grabbing
@@ -1470,15 +1669,17 @@ function LaneCanvas({
       }
       if (bestX !== null) x = bestX;
     }
+    // Same LANE_VPAD-inset value axis as the draw effect.
+    const vh = rect.height - LANE_VPAD * 2;
     return {
       x,
-      y: Math.max(0, Math.min(1, 1 - ey / rect.height)),
+      y: Math.max(0, Math.min(1, 1 - (ey - LANE_VPAD) / vh)),
       nearestIndex: (() => {
         let best = -1;
         let bestDist = Infinity;
         pointsRef.current.forEach((p, i) => {
           const dx = LANE_PAD + p.x * lw - ex;
-          const dy = (1 - p.y) * rect.height - ey;
+          const dy = LANE_VPAD + (1 - p.y) * vh - ey;
           const d = Math.hypot(dx, dy);
           if (d < bestDist) {
             bestDist = d;
@@ -1590,6 +1791,7 @@ function DeckCard({
   onBpmSaved,
   onNudgeTrack,
   gestures,
+  lock,
 }: {
   deck: 'A' | 'B';
   track: Track | null;
@@ -1610,6 +1812,8 @@ function DeckCard({
     beats: (n: number) => void;
     enabled: boolean;
   };
+  /** Locked-window toggle (B card only — the lock scopes to B gestures). */
+  lock?: { on: boolean; toggle: () => void };
 }) {
   const queryClient = useQueryClient();
   const nudge = useNudgeBeatgrid();
@@ -1686,6 +1890,14 @@ function DeckCard({
           )}
         </span>
         <span className="mixproto-deckcard-key">{formatKeyDisplay(track.key)}</span>
+        <button
+          className={`mixproto-mutebtn${player.isMuted(deck) ? ' on' : ''}`}
+          aria-pressed={player.isMuted(deck)}
+          title={`Mute deck ${deck} (overrides the fader lane)`}
+          onClick={() => player.setMuted(deck, !player.isMuted(deck))}
+        >
+          mute
+        </button>
         <span className="mixproto-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
       </div>
       <div className="mixproto-deckcard-row">
@@ -1768,6 +1980,16 @@ function DeckCard({
               ►►
             </button>
           </span>
+          {lock && (
+            <button
+              className={`mixproto-lockbtn${lock.on ? ' on' : ''}`}
+              aria-pressed={lock.on}
+              title="Locked window: slides carry the window WITH this track (same audio stays under it); unlocked, the window stays with the other track"
+              onClick={lock.toggle}
+            >
+              lock
+            </button>
+          )}
           {/* All 8 slots, Performance pad semantics: set cues act (slide/
               jump), empty ones SET at this deck's playhead; right-click
               deletes. Always reads 1-8 left-to-right (B un-mirrored). */}

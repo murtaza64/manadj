@@ -54,6 +54,11 @@ export interface ProtoTransition {
   /** BPM-match the incoming track to the outgoing for the whole mix. */
   tempoMatch: boolean;
   lanes: Lanes;
+  /** Lanes removed from the editor (any lane is removable, defaults too).
+   * Hidden lanes keep their drawn envelope in `lanes` — re-adding restores
+   * it — but read as their DEFAULT value during playback (an invisible
+   * bass-kill still ducking the mix would be a lie). */
+  hiddenLanes?: LaneId[];
 }
 
 export interface ProtoMix {
@@ -76,31 +81,29 @@ export function defaultMix(): ProtoMix {
   };
 }
 
-/** Default lane shapes when the user hasn't drawn one. */
-export function defaultLanePoints(id: LaneId): LanePoint[] {
+/** Default lane shapes when the user hasn't drawn one: flat single-point
+ * envelopes (faderA full, EQs/filters neutral 0.5 — evalLane holds a lone
+ * point's value everywhere), except faderB which ramps 0→full over the
+ * first 2 SECONDS of the window (hence `durationSec` for the normalized
+ * x). A stays audible throughout; B fades in quickly and rides at full. */
+export function defaultLanePoints(id: LaneId, durationSec: number): LanePoint[] {
   switch (id) {
     case 'faderA':
-      return [
-        { x: 0, y: 1 },
-        { x: 1, y: 0 },
-      ];
+      return [{ x: 0, y: 1 }];
     case 'faderB':
       return [
         { x: 0, y: 0 },
-        { x: 1, y: 1 },
+        { x: durationSec > 2 ? 2 / durationSec : 1, y: 1 },
       ];
     default:
       // EQ flat / filter centered.
-      return [
-        { x: 0, y: 0.5 },
-        { x: 1, y: 0.5 },
-      ];
+      return [{ x: 0, y: 0.5 }];
   }
 }
 
-export function lanePoints(lanes: Lanes, id: LaneId): LanePoint[] {
+export function lanePoints(lanes: Lanes, id: LaneId, durationSec: number): LanePoint[] {
   const pts = lanes[id];
-  return pts && pts.length > 0 ? pts : defaultLanePoints(id);
+  return pts && pts.length > 0 ? pts : defaultLanePoints(id, durationSec);
 }
 
 /** Piecewise-linear evaluation at normalized x. Points must be x-sorted. */
@@ -133,7 +136,10 @@ export function laneValuesAt(transition: ProtoTransition, mixTime: number): Reco
       : (mixTime - transition.startSec) / transition.durationSec;
   const out = {} as Record<LaneId, number>;
   for (const id of LANE_IDS) {
-    out[id] = evalLane(lanePoints(transition.lanes, id), x);
+    const points = transition.hiddenLanes?.includes(id)
+      ? defaultLanePoints(id, transition.durationSec)
+      : lanePoints(transition.lanes, id, transition.durationSec);
+    out[id] = evalLane(points, x);
   }
   return out;
 }

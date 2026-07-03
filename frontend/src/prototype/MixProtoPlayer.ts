@@ -37,6 +37,10 @@ export class MixProtoPlayer {
   private durations = { a: 0, b: 0 };
   private bpm: { a: number | null; b: number | null } = { a: null, b: null };
 
+  /** Deck mutes override the drawn fader lanes (applyLanes runs per tick,
+   * so a plain one-shot fader write would be overwritten next frame). */
+  private muted = { A: false, B: false };
+
   private playing = false;
   private mixTimeAtAnchor = 0;
   /** Audio-clock time (mixer.now()) at the anchor — NOT wall time. */
@@ -115,6 +119,16 @@ export class MixProtoPlayer {
 
   isPlaying(): boolean {
     return this.playing;
+  }
+
+  isMuted(deck: 'A' | 'B'): boolean {
+    return this.muted[deck];
+  }
+
+  setMuted(deck: 'A' | 'B', on: boolean): void {
+    this.muted[deck] = on;
+    this.applyLanes(this.getMixTime());
+    this.emit();
   }
 
   play(): void {
@@ -220,8 +234,8 @@ export class MixProtoPlayer {
 
   private applyLanes(t: number): void {
     const v = laneValuesAt(this.mix.transition, t);
-    this.mixer.setFader('A', v.faderA);
-    this.mixer.setFader('B', v.faderB);
+    this.mixer.setFader('A', this.muted.A ? 0 : v.faderA);
+    this.mixer.setFader('B', this.muted.B ? 0 : v.faderB);
     this.mixer.setEq('A', 'low', v.eqLowA);
     this.mixer.setEq('B', 'low', v.eqLowB);
     this.mixer.setEq('A', 'mid', v.eqMidA);

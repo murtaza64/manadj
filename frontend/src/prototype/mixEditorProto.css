@@ -104,28 +104,34 @@
   overflow: hidden;
   border: 1px solid var(--surface0, #313244);
   background: #0b0b12;
+  /* Fixed stack height: adding/removing lanes redistributes THIS space
+     (strips flex below) instead of growing the timeline vertically. */
+  height: max(280px, 34vh);
 }
 
 .mixproto-timeline-content {
   position: relative;
   min-width: 100%;
   will-change: transform;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
-/* Zero-length shortcut: same square 1px-border bold idiom as the fit button. */
-.mixproto-cutbtn {
+/* Reset-to-defaults: same square idiom, neutral color. */
+.mixproto-resetbtn {
   padding: 2px 10px;
   background: var(--crust);
-  border: 1px solid var(--red);
-  color: var(--red);
+  border: 1px solid var(--surface1, #45475a);
+  color: var(--subtext1, #bac2de);
   cursor: pointer;
   font-size: 11px;
   font-weight: bold;
 }
 
-.mixproto-cutbtn:hover {
-  color: var(--subtext1);
-  border-color: var(--subtext1);
+.mixproto-resetbtn:hover {
+  color: var(--yellow, #f9e2af);
+  border-color: var(--yellow, #f9e2af);
 }
 
 .mixproto-fit {
@@ -150,8 +156,9 @@
 .mixproto-timeline-row {
   position: relative;
   /* Half the pre-stack height: polarized half-waveforms carry the same
-     information in half the space (issue 13 proportions pass). */
-  height: max(28px, 4vh);
+     information in half the space (issue 13 proportions pass). Fixed —
+     lane strips flex around them. */
+  flex: 0 0 max(28px, 4vh);
   touch-action: none;
 }
 
@@ -198,10 +205,11 @@
 
 .mixproto-lanestrip {
   position: relative;
-  /* Taller than the pre-stack 3.6vh (waveform halving freed space), but
-     budgeted so six default strips + both waves keep the info bar visible
-     inside the 50% top panel: 6×4vh + 2×4vh ≈ the old footprint. */
-  height: max(30px, 4vh);
+  /* Strips SHARE the timeline's fixed height equally: removing a lane
+     makes the rest taller, adding one shrinks them — the stack never
+     grows. min-height keeps a strip editable in crowded stacks. */
+  flex: 1 1 0;
+  min-height: 22px;
   border-bottom: 2px solid #1b1b28;
   touch-action: none;
 }
@@ -260,15 +268,16 @@
 }
 
 .mixproto-lanehit canvas {
-  /* The canvas extends LANE_PAD px past the editable region on every side
-     so breakpoint circles at the extremes draw complete, floating over the
-     window borders (the lane rect itself is drawn inset by the same pad —
-     coordinates stay on the shared time axis). Visual only: pointer events
-     land on the hit div, never on the overhang. */
+  /* Viewport-windowed: the draw code positions/sizes the canvas (inline
+     left/width) to cover only the visible slice of the window + margin —
+     full-window canvases were giant compositor surfaces (scroll jitter).
+     Vertically it overhangs LANE_PAD px so breakpoint circles at the
+     extremes draw complete. Visual only: pointer events land on the hit
+     div, never on the canvas. */
   position: absolute;
   left: 0;
   top: -7px;
-  width: 100%;
+  width: 0;
   height: calc(100% + 14px);
   display: block;
   z-index: 1;
@@ -276,15 +285,16 @@
 }
 
 /* Drawn-but-silent waveform spans (A past the transition end, B's content
-   before the window start): desaturated + dimmed via backdrop-filter so
-   the audible zone pops. */
+   before the window start): dimmed by a plain translucent overlay. NOT
+   backdrop-filter — the canvases beneath repaint every rAF tick, so a
+   filter here ran a GPU filter pass over big regions every frame and made
+   the WHOLE app sluggish (v24 regression hunt). */
 .mixproto-inaudible {
   position: absolute;
   top: 0;
   bottom: 0;
   pointer-events: none;
-  backdrop-filter: grayscale(1) brightness(0.55);
-  background: rgba(11, 11, 18, 0.25);
+  background: rgba(11, 11, 18, 0.6);
 }
 
 .mixproto-overlap {
@@ -560,9 +570,21 @@
   display: block;
   border: 1px solid var(--surface0, #313244);
 
-  margin-bottom: 4px;
+  margin-top: 4px;
   cursor: pointer;
   touch-action: none;
+}
+
+/* Toggle buttons (locked window on B, deck mutes): pressed = functional
+   color, matching the site's square-button idiom. */
+.mixproto-lockbtn.on {
+  color: var(--sapphire, #74c7ec);
+  border-color: var(--sapphire, #74c7ec);
+}
+
+.mixproto-mutebtn.on {
+  color: var(--red, #f38ba8);
+  border-color: var(--red, #f38ba8);
 }
 
 .mixproto-laneclear {

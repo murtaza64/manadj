@@ -7,6 +7,7 @@ import {
   bTrackTimeAt,
   evalLane,
   insertChop,
+  laneValuesAt,
   slideB,
   slideBToCue,
   type LanePoint,
@@ -134,6 +135,23 @@ describe('slideBToCue', () => {
     // a cue BEFORE the current position → negative anchor.
     const out = slideBToCue(t, 2, 40, false, 1); // playhead 10s into window
     expect(out.bInSec).toBe(-8);
+  });
+});
+
+describe('laneValuesAt with hidden lanes', () => {
+  it('hidden lanes keep their envelope in the model but read as default', () => {
+    const kill: LanePoint[] = [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+    ];
+    const t = tr({ lanes: { eqLowA: kill } });
+    expect(evalLane(kill, 0.5)).toBe(0);
+    // Visible: the drawn kill applies.
+    expect(laneValuesAt(t, 40).eqLowA).toBe(0);
+    // Hidden: default (flat 0.5) applies; the envelope stays in `lanes`.
+    const hidden = { ...t, hiddenLanes: ['eqLowA' as const] };
+    expect(laneValuesAt(hidden, 40).eqLowA).toBe(0.5);
+    expect(hidden.lanes.eqLowA).toBe(kill);
   });
 });
 
