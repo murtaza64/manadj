@@ -1,6 +1,9 @@
 # 04 — Cut tools: lane chop stamp + zero-length Transition shortcut
 
-Status: ready-for-agent
+Status: ready-for-human (implemented 2026-07-03, change `xxlnqlul`; awaiting
+user verification — chop feel, EQ lanes, cut button. Note: shift+click's
+1-beat interval uses the VISIBLE guides, so at low zoom a culled grid makes
+the cut span the visible interval, not one true beat.)
 
 ## Parent
 

@@ -210,11 +210,14 @@ export function cropRemapLanesLeft(lanes: Lanes, oldDur: number, newDur: number)
 }
 
 /**
- * Stamp a rectangular full-cut into a lane between normalized x1 and x2:
- * the value drops to 0 with near-vertical walls and recovers to the pre-cut
- * curve at the far edge. Pure LanePoint insertion — the 4 stamped points are
+ * Stamp a rectangular full-cut into a lane between normalized x1 and x2
+ * (beat positions): the value drops to 0 with near-vertical walls and
+ * recovers to the pre-cut curve at the far edge. Each wall is CENTERED on
+ * its edge — the cut-out opens wall/2 before x1 (killing the transient of
+ * the beat on the line, not the tail of the note before it) and closes
+ * wall/2 after x2. Pure LanePoint insertion — the 4 stamped points are
  * ordinary breakpoints (draggable/deletable); interior points are removed.
- * Argument order is normalized; spans too narrow for both walls are a no-op.
+ * Argument order is normalized; spans narrower than one wall are a no-op.
  */
 export function insertChop(
   points: LanePoint[],
@@ -222,16 +225,21 @@ export function insertChop(
   x2: number,
   wall = 0.004
 ): LanePoint[] {
-  const lo = Math.max(0, Math.min(x1, x2));
-  const hi = Math.min(1, Math.max(x1, x2));
-  if (hi - lo <= wall * 2) return points;
+  const c1 = Math.min(x1, x2);
+  const c2 = Math.max(x1, x2);
+  if (c2 - c1 <= wall) return points;
+  const half = wall / 2;
+  const lo = Math.max(0, c1 - half);
+  const hi = Math.min(1, c2 + half);
+  const loIn = Math.max(0, c1 + half);
+  const hiIn = Math.min(1, c2 - half);
   const entryY = evalLane(points, lo);
   const exitY = evalLane(points, hi);
   const out = points.filter((p) => p.x < lo || p.x > hi);
   out.push(
     { x: lo, y: entryY },
-    { x: lo + wall, y: 0 },
-    { x: hi - wall, y: 0 },
+    { x: loIn, y: 0 },
+    { x: hiIn, y: 0 },
     { x: hi, y: exitY }
   );
   return out.sort((a, b) => a.x - b.x);

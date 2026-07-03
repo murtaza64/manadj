@@ -171,10 +171,14 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   guides; crop is now the DEFAULT trim semantics (alt = stretch); both
   transition edges grabbable from either row. Cut tools (issue 04):
   `insertChop` pure stamp in mixProtoModel (4 points, near-vertical walls
-  to 0, interior points removed — under vitest), shift+drag on a lane chops
-  between beat-snapped edges with a live preview, shift+click cuts the one
-  visible beat interval under the pointer (culled guides ⇒ interval may be
-  >1 true beat at low zoom — acceptable), and a "cut" button collapses the
+  to 0, interior points removed — under vitest; walls fixed-TIME 20ms via
+  prop — user-tuned from 10 — not duration-proportional), shift+drag on a
+  lane chops with a live preview, shift+click cuts one beat. Cut edges snap
+  to the beat lines; each WALL is centered on its line (cut-out opens
+  wall/2 before the beat — user-corrected twice: on-the-beat edges, then
+  midpoint-snapped edges, were both wrong; beats align, walls straddle);
+  culled guides ⇒ interval may be >1 true beat at low zoom — acceptable.
+  A "cut" button collapses the
   Transition to zero length on A's nearest beat (model already hard-swaps).
   Modifier tension resolved: shift on a breakpoint = fine drag; shift on
   empty lane = chop.

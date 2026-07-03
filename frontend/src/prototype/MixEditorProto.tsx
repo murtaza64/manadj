@@ -1048,6 +1048,7 @@ function DawTimeline({
           widthPx={Math.max(tr.durationSec * pxPerSec, 4)}
           points={lanePoints(tr.lanes, id)}
           guides={id.endsWith('A') ? guidesA : guidesB}
+          chopWall={0.02 / Math.max(tr.durationSec, 0.01)}
           onChange={(pts) => onLaneChange(id, pts)}
         />
       </div>
@@ -1162,6 +1163,7 @@ function LaneCanvas({
   widthPx,
   points,
   guides,
+  chopWall,
   onChange,
 }: {
   id: LaneId;
@@ -1170,6 +1172,10 @@ function LaneCanvas({
   widthPx: number;
   points: LanePoint[];
   guides: LaneGuide[];
+  /** Chop wall width, normalized — fixed TIME upstream (steep at any
+   * window length; a duration-proportional wall audibly ramped on long
+   * transitions). */
+  chopWall: number;
   onChange: (points: LanePoint[]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1186,8 +1192,9 @@ function LaneCanvas({
 
   /** Beat guide positions (cue markers excluded), ascending. */
   const beatXs = guides.filter((g) => !g.color).map((g) => g.x);
-  /** Hard snap to the nearest beat line (chop edges are always on beats). */
-  const snapBeatX = (x: number) => (beatXs.length ? (nearestTime(beatXs, x) ?? x) : x);
+  /** Chop edges snap to the beat lines themselves; `insertChop` centers
+   * each wall on its line, so the cut-out opens just before the beat. */
+  const snapCutX = (x: number) => (beatXs.length ? (nearestTime(beatXs, x) ?? x) : x);
   /** The visible beat interval containing x (for the 1-beat click cut). */
   const beatIntervalAt = (x: number): [number, number] | null => {
     let lo: number | null = null;
@@ -1374,7 +1381,7 @@ function LaneCanvas({
         } else if (e.shiftKey) {
           // Chop stamp: shift+drag spans a cut, shift+click cuts one beat.
           chopStart.current = hit.x;
-          setChopPreview({ x0: snapBeatX(hit.x), x1: snapBeatX(hit.x) });
+          setChopPreview({ x0: snapCutX(hit.x), x1: snapCutX(hit.x) });
         } else {
           const y = snapValue(hit.y, e);
           const pts = [...pointsRef.current, { x: hit.x, y }].sort((a, b) => a.x - b.x);
@@ -1385,7 +1392,7 @@ function LaneCanvas({
       onPointerMove={(e) => {
         const hit = pointAt(e);
         if (chopStart.current !== null) {
-          setChopPreview({ x0: snapBeatX(chopStart.current), x1: snapBeatX(hit.x) });
+          setChopPreview({ x0: snapCutX(chopStart.current), x1: snapCutX(hit.x) });
           return;
         }
         if (dragIndex.current === null) {
@@ -1408,12 +1415,12 @@ function LaneCanvas({
         const hit = pointAt(e);
         const rect = e.currentTarget.getBoundingClientRect();
         const dragPx = Math.abs(hit.x - x0) * (rect.width - LANE_PAD * 2);
-        const lo = snapBeatX(x0);
-        const hi = snapBeatX(hit.x);
+        const lo = snapCutX(x0);
+        const hi = snapCutX(hit.x);
         // A click (or a drag whose edges snap to the same beat) cuts the
         // single beat interval under the pointer.
         const span = dragPx < 4 || lo === hi ? beatIntervalAt(hit.x) : ([lo, hi] as const);
-        if (span) commit(insertChop(pointsRef.current, span[0], span[1]));
+        if (span) commit(insertChop(pointsRef.current, span[0], span[1], chopWall));
       }}
       onPointerCancel={() => {
         dragIndex.current = null;

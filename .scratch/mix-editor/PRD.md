@@ -55,12 +55,32 @@ Hot cue and beat jump controls on both editor decks act as **Slides** (glossary)
 - **Model hygiene rider**: `bInSec` moves from `ProtoMix` into `ProtoTransition` — B's entry is pair knowledge and must switch with the named Transition (latent bug under multiple Transitions per pair).
 - Slides are exact; the global snap toggle does not quantize slide results (snap the playhead first if you want quantized aims).
 
+### Timeline waveform redesign (2026-07-03; issue 13, prototype iteration)
+
+Stacked half-waveforms in the main timeline, echoing the global minimap's visual language and reclaiming vertical space:
+
+- Layout top-to-bottom: **A lanes / A half-waveform / seam / B half-waveform / B lanes** (lane strips move from under-row to the outer sides; waveforms stack in the center).
+- **Peaks face the seam** (minimap convention): A anchored at its top edge growing down, B anchored at its bottom edge growing up — transient-vs-transient beat alignment reads exactly at the seam.
+- **Strictly stacked, no overlap**: rows keep separate canvases and time mappings (B is tempo-stretched); the transition-window highlight spanning both rows ties them together. Overlap stays a minimap-only effect.
+- Renderer change is config-only: amplitude anchor (`center` default / `top` / `bottom`) alongside `waveformBrightness`; all non-editor surfaces stay `center`. Beat ticks, cue lines, and badges render within each half.
+
+### Marker readability (2026-07-03; issue 14, prototype iteration)
+
+De-noising the timeline's vertical lines; hot cues become findable at distant zoom:
+
+- **Hot cue triangles**: fixed-screen-size colored triangles at each half's baseline (outer) edge pointing toward the seam — the cue-point triangle convention; readable at any zoom. Lines and numbered badges unchanged.
+- **Downbeat thinning**: at distant zooms (once weak beats are density-culled), downbeats render narrower (1px) and lighter — they're the only lines left and don't need to shout.
+- **Playhead width**: the editor's DOM playhead is 3 CSS px; the renderer's is 3 buffer px (= 1.5 CSS px at DPR 2) — the "same look" comment in the CSS is wrong by the device-pixel ratio. Thin the editor playhead to match the other views' apparent width.
+- **Minimap hot cues**: colored triangle markers in the global minimap (A top edge, B bottom edge), consistent with the main canvas.
+- **Minimap transition window**: replace the bordered frame with a slight translucent tint, no border.
+
 ### Editor tools (grill 2026-07-03; issues 04–05, prototype iterations)
 
 - **Chop stamp** (issue 04): shift+drag on any lane = rectangular full-cut between beat-snapped drag edges (4 inserted breakpoints, near-vertical walls); shift+click = 1-beat cut. Works on EQ lanes too (2-beat bass kill). Pure breakpoint insertion — no new model, editable like hand-drawn points. Lanes remain transition-window-only (no clip/region concept — reaffirmed).
 - **Zero-length Transition shortcut** (issue 04): "cut" button sets `durationSec = 0` with beat-snapped `startSec` (model already treats zero-length as a hard cut).
 - **Lane endpoint visibility** (issue 05): endpoint breakpoints (= entry/exit values) rendered larger with dark outline ring, clamped inset so they never clip at strip edges; hover shows breakpoint value, endpoints show it persistently.
 - **Hotcue clarity** (issue 05): renderer config `waveformBrightness: 0–1` (default 1) scaling band colors only — markers/beatgrid full-strength; editor rows ~0.6; Player/Practice/minimaps unchanged. Rides slice 01's premultiplied-color path.
+- **Node group selection** (issue 16): cmd/ctrl rubber-band + toggle select within a lane; group drag preserving shape; Delete removes selection. Per-lane in v1; cross-lane group time-shift is the named v2.
 Blocked by: nothing hard — the two-track prototype runs on today's modules; graduation aligns with the ADR 0009 Mixer module (see Implementation Decisions)
 
 ## Problem Statement
