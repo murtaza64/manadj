@@ -63,23 +63,9 @@ Stacked half-waveforms in the main timeline, echoing the global minimap's visual
 - **Strictly stacked, no overlap**: rows keep separate canvases and time mappings (B is tempo-stretched); the transition-window highlight spanning both rows ties them together. Overlap stays a minimap-only effect.
 - Renderer change is config-only: amplitude anchor (`center` default / `top` / `bottom`) alongside `waveformBrightness`; all non-editor surfaces stay `center`. Beat ticks, cue lines, and badges render within each half.
 
-### Library discovery & transition management (grill 2026-07-03 #4; issues 20–21)
+### Library discovery & transition management → own PRD
 
-Activates the deferred track-association layer (glossary: Favorite, Preferred pair, Transition library).
-
-- **Favorite**: boolean on the Transition artifact only; pair-level "star" is always derived (Preferred pair), never stored. A star means proven-move — compatible-but-unsketched pairs correctly stay unstarred (work remains). If bookmarking unsketched pairings becomes a felt need, that's a new worklist concept — do not widen Favorite.
-- **Lazy persistence**: auto-created and newly-created Transitions live in memory and hit storage only on first real edit (lane point, anchor change, rename, favorite). Untouched ones evaporate on navigate-away — this keeps the discovery index honest (no marks from merely-opened pairs) and gives the first discard tier for free.
-- **Switcher** (replaces the saved-Transition dropdown): `◀ [name] ▶` + position hint, creation-ordered; `▶` past the end = new (pristine "Transition n"). Inline rename (click name; Enter/Esc); star toggle beside it; rename/favorite materialize a pristine Transition. **Delete replaces the reset button**: inline two-step confirm, no modal; deleting the last Transition re-inits a blank one (same feel as reset), otherwise navigate to the next.
-- **Library marks**: outgoing-only, from **either** loaded deck (alternating-deck workflow: next track loads into the free deck) — one compact glyph per source deck in that deck's accent color; starred variant when the pair is Preferred. Filter "has transition from loaded decks" joins the existing library filter bar. No counts in v1.
-- **Index**: direction-aware API (`transitionsFrom` / `transitionsInto`); prototype-scale = in-memory scan over localStorage rebuilt on editor events. These features raise the urgency of the DB-persistence slice (which unblocks issue 03) without blocking on it.
-
-**Discovery unification (grill 2026-07-03 #5; issue 22).** Two evidence tiers, one surface: *heuristic* (Compatible — key/tempo/energy/tags predict a mix) and *proven* (Transition library — Favorite-ranked records of actual mixes). Consequences:
-
-- **"Find Related" → "Find Compatible"** (the glossary forbade "related" all along); glossary gains Compatible.
-- **Reference model switches to loaded decks**: Find Compatible becomes a loaded-track action — the modal carries A/B buttons choosing which deck's track to match from (selection-based derivation retired). Disabled with nothing loaded.
-- **Modal gains a "has transition" switch** bound to the same filter state as the library filter-bar toggle (one source of truth, two controls) — the modal becomes the one-stop discovery config: four heuristic criteria + the proven tier.
-- Find Compatible writes only its own four criteria; the transition toggle is an orthogonal axis; Clear All clears both. Marks render on any filtered list. Union preset ("proven ∨ compatible") named as future, not built.
-- Adjacent, not this work: the hand-rolled harmonic expansion (`Library.tsx`) is already flagged for consolidation in `.scratch/key-authority/issues/01-single-key-authority.md`.
+Extracted 2026-07-03 to `.scratch/transition-library/PRD.md` (grills #4–#5: Favorite/Preferred pair/lazy persistence/switcher, library marks + filter, Find Compatible unification). Former mix-editor issues 20–22 moved there as transition-library issues 01–03.
 
 ### Marker readability (2026-07-03; issue 14, prototype iteration)
 

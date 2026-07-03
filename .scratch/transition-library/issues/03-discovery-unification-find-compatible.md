@@ -1,11 +1,11 @@
-# 22 — Discovery unification: Find Compatible from loaded decks + proven-tier switch
+# 03 — Discovery unification: Find Compatible from loaded decks + proven-tier switch
 
 Status: ready-for-agent
 
 ## Parent
 
-`.scratch/mix-editor/PRD.md` (Library discovery — Discovery unification).
-Glossary: Compatible, Transition library, Preferred pair.
+`.scratch/transition-library/PRD.md`. Glossary: Compatible, Transition
+library, Preferred pair.
 
 ## What to build
 
@@ -19,7 +19,7 @@ frame:
   selection-based reference is retired. Button disabled when no deck is
   loaded. The quick-apply arrow reuses last settings + last chosen deck.
 - **Proven-tier switch in the modal**: a "has transition" switch bound to
-  the same filter state as the library filter-bar toggle (issue 21) — one
+  the same filter state as the library filter-bar toggle (issue 02) — one
   source of truth, two controls; changing either updates both.
 - **Composition**: applying Find Compatible writes only its four criteria
   (keys/BPM/tags/energy); the transition toggle survives. "Clear All"
@@ -43,5 +43,5 @@ frame:
 
 ## Blocked by
 
-- `21-transition-library-discovery.md` (filter toggle + marks must exist
+- `02-transition-library-discovery.md` (filter toggle + marks must exist
   for the switch/composition work)

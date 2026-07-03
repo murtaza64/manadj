@@ -1,11 +1,11 @@
-# 21 — Transition library: discovery marks and filter in the library view
+# 02 — Transition library: discovery marks and filter in the library view
 
 Status: ready-for-agent
 
 ## Parent
 
-`.scratch/mix-editor/PRD.md` (Library discovery & transition management).
-Glossary: Transition library, Preferred pair.
+`.scratch/transition-library/PRD.md`. Glossary: Transition library,
+Preferred pair.
 
 ## What to build
 
@@ -24,7 +24,7 @@ loaded:
   favorited Transition). No counts in v1.
 - **Filter**: "has transition from loaded decks" toggle in the existing
   library filter bar. Design the toggle's state as a first-class filter
-  axis — issue 22 binds a second control to it (Find Compatible modal
+  axis — issue 03 binds a second control to it (Find Compatible modal
   switch) and requires compatible-criteria application to preserve it.
 - Marks update live on load/unload, save, favorite, delete.
 
@@ -42,5 +42,5 @@ loaded:
 
 ## Blocked by
 
-- `20-transition-switcher-lazy-persistence.md` (favorite flag +
+- `01-transition-switcher-lazy-persistence.md` (favorite flag +
   materialization rules feed the index)

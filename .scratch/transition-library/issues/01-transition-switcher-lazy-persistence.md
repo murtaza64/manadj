@@ -1,11 +1,10 @@
-# 20 — Transition switcher: navigation, rename, favorite, delete, lazy persistence
+# 01 — Transition switcher: navigation, rename, favorite, delete, lazy persistence
 
 Status: ready-for-agent
 
 ## Parent
 
-`.scratch/mix-editor/PRD.md` (Library discovery & transition management).
-Glossary: Favorite, Preferred pair.
+`.scratch/transition-library/PRD.md`. Glossary: Favorite, Preferred pair.
 
 ## What to build
 
