@@ -24,7 +24,7 @@ python scripts/import/rekordbox_initial.py
 
 **Notes:**
 - This is a one-time operation for initial setup
-- For ongoing sync, use `scripts/sync/rekordbox_tracks.py`
+- For ongoing sync, use the SyncView UI (or the `/api/sync/tracks` endpoints)
 - Requires Rekordbox database path configuration
 
 ### rekordbox_energy.py
@@ -70,10 +70,7 @@ Typical workflow for new manadj users coming from Rekordbox:
    Migrate color-coded energy levels
 
 3. **Ongoing Sync:**
-   ```bash
-   python scripts/sync/rekordbox_tracks.py --apply
-   ```
-   Use sync scripts for ongoing bidirectional synchronization
+   Use the SyncView UI (or the `/api/sync/tracks` endpoints)
 
 ## Important Notes
 
