@@ -1,0 +1,297 @@
+/**
+ * The Mixer owns the one AudioContext (ADR 0009). Decks are channel inputs.
+ *
+ * Signal chain per channel:
+ *   deck envelopes -> channel input -> trim -> 3-band isolator EQ ->
+ *   sweep filter -> channel fader -> crossfader gain -> master gain ->
+ *   safety limiter (always on) -> destination
+ *
+ * The context is created lazily and revived if closed (StrictMode dev
+ * double-mount disposes once before the real mount) — this responsibility
+ * moved up from DeckEngine. On revival the whole graph is rebuilt and all
+ * control settings are reapplied.
+ *
+ * Decks reach their channel through a DeckAudioPort, so DeckEngine depends on
+ * an interface, not on the Mixer.
+ */
+
+import {
+  BUTTERWORTH_Q_DB,
+  SWEEP_BYPASS_HZ,
+  eqValueToGain,
+  sweepPositionToFilter,
+} from './graph';
+import type { EqBand } from './graph';
+import { channelFaderToGain, crossfaderGains, trimToGain } from './mixerMath';
+
+export type ChannelId = 'A' | 'B';
+
+/** What a deck needs from the audio layer: a live context and its channel input. */
+export interface DeckAudioPort {
+  ensureAudio(): { ctx: AudioContext; input: AudioNode };
+}
+
+/** Per-channel control state, [0,1] except filter [-1,1]. */
+export interface ChannelState {
+  trim: number;
+  eq: Record<EqBand, number>;
+  filter: number;
+  fader: number;
+}
+
+const FLAT_CHANNEL: ChannelState = {
+  trim: 0.5,
+  eq: { low: 0.5, mid: 0.5, high: 0.5 },
+  filter: 0,
+  fader: 1,
+};
+
+/** Crossover frequencies — tweak by ear. */
+const CROSSOVER_LOW_MID_HZ = 250;
+const CROSSOVER_MID_HIGH_HZ = 2500;
+
+/** Time constant for filter parameter smoothing (zipper-noise avoidance). */
+const PARAM_SMOOTHING_S = 0.015;
+
+/** Linear ramp length for gain moves (reaches the target exactly). */
+const GAIN_RAMP_S = 0.05;
+
+function makeFilter(
+  ctx: AudioContext,
+  type: 'lowpass' | 'highpass',
+  frequency: number
+): BiquadFilterNode {
+  const f = ctx.createBiquadFilter();
+  f.type = type;
+  f.frequency.value = frequency;
+  f.Q.value = BUTTERWORTH_Q_DB;
+  return f;
+}
+
+function chain(nodes: AudioNode[]): void {
+  for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
+}
+
+function rampGain(ctx: AudioContext, param: AudioParam, target: number): void {
+  const now = ctx.currentTime;
+  param.cancelScheduledValues(now);
+  param.setValueAtTime(param.value, now);
+  param.linearRampToValueAtTime(target, now + GAIN_RAMP_S);
+}
+
+/** One channel strip: input -> trim -> isolator EQ -> sweep -> fader -> crossfader gain. */
+class ChannelStrip {
+  readonly input: GainNode;
+  readonly trimGain: GainNode;
+  readonly bandGains: Record<EqBand, GainNode>;
+  readonly sweep: BiquadFilterNode;
+  readonly faderGain: GainNode;
+  readonly crossfadeGain: GainNode;
+
+  constructor(ctx: AudioContext, state: ChannelState) {
+    this.input = ctx.createGain();
+    this.trimGain = ctx.createGain();
+    this.trimGain.gain.value = trimToGain(state.trim);
+    const sum = ctx.createGain();
+
+    const low = [
+      makeFilter(ctx, 'lowpass', CROSSOVER_LOW_MID_HZ),
+      makeFilter(ctx, 'lowpass', CROSSOVER_LOW_MID_HZ),
+      ctx.createGain(),
+    ];
+    const mid = [
+      makeFilter(ctx, 'highpass', CROSSOVER_LOW_MID_HZ),
+      makeFilter(ctx, 'highpass', CROSSOVER_LOW_MID_HZ),
+      makeFilter(ctx, 'lowpass', CROSSOVER_MID_HIGH_HZ),
+      makeFilter(ctx, 'lowpass', CROSSOVER_MID_HIGH_HZ),
+      ctx.createGain(),
+    ];
+    const high = [
+      makeFilter(ctx, 'highpass', CROSSOVER_MID_HIGH_HZ),
+      makeFilter(ctx, 'highpass', CROSSOVER_MID_HIGH_HZ),
+      ctx.createGain(),
+    ];
+
+    this.input.connect(this.trimGain);
+    for (const band of [low, mid, high]) {
+      this.trimGain.connect(band[0]);
+      chain(band);
+      band[band.length - 1].connect(sum);
+    }
+
+    this.bandGains = {
+      low: low[low.length - 1] as GainNode,
+      mid: mid[mid.length - 1] as GainNode,
+      high: high[high.length - 1] as GainNode,
+    };
+    for (const band of ['low', 'mid', 'high'] as const) {
+      this.bandGains[band].gain.value = eqValueToGain(state.eq[band]);
+    }
+
+    this.sweep = ctx.createBiquadFilter();
+    this.sweep.type = 'lowpass';
+    this.sweep.frequency.value = SWEEP_BYPASS_HZ;
+    this.sweep.Q.value = BUTTERWORTH_Q_DB;
+
+    this.faderGain = ctx.createGain();
+    this.faderGain.gain.value = channelFaderToGain(state.fader);
+    this.crossfadeGain = ctx.createGain();
+
+    sum.connect(this.sweep);
+    this.sweep.connect(this.faderGain);
+    this.faderGain.connect(this.crossfadeGain);
+  }
+}
+
+export class Mixer {
+  private ctx: AudioContext | null = null;
+  private strips: Record<ChannelId, ChannelStrip> | null = null;
+  private masterGain: GainNode | null = null;
+
+  // Control state survives graph rebuilds (StrictMode revival).
+  private channels: Record<ChannelId, ChannelState> = {
+    A: structuredClone(FLAT_CHANNEL),
+    B: structuredClone(FLAT_CHANNEL),
+  };
+  private crossfader = 0; // -1 (A) .. 1 (B)
+  private master = 1; // 0..1
+
+  /** Get (lazily creating / reviving) the live context and graph. */
+  private ensure(): { ctx: AudioContext; strips: Record<ChannelId, ChannelStrip> } {
+    if (!this.ctx || !this.strips || this.ctx.state === 'closed') {
+      console.debug('[Mixer] creating AudioContext + graph');
+      const ctx = new AudioContext();
+
+      const strips: Record<ChannelId, ChannelStrip> = {
+        A: new ChannelStrip(ctx, this.channels.A),
+        B: new ChannelStrip(ctx, this.channels.B),
+      };
+      const masterGain = ctx.createGain();
+      masterGain.gain.value = this.master;
+
+      // Always-on safety limiter: two summed full-scale tracks clip otherwise.
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -3;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.25;
+
+      strips.A.crossfadeGain.connect(masterGain);
+      strips.B.crossfadeGain.connect(masterGain);
+      masterGain.connect(limiter);
+      limiter.connect(ctx.destination);
+
+      this.ctx = ctx;
+      this.strips = strips;
+      this.masterGain = masterGain;
+
+      // Reapply position-dependent settings on the fresh graph.
+      this.applyCrossfader(false);
+      this.applyFilter('A');
+      this.applyFilter('B');
+    }
+    return { ctx: this.ctx, strips: this.strips };
+  }
+
+  /** The audio access a deck is constructed against. */
+  portFor(channel: ChannelId): DeckAudioPort {
+    return {
+      ensureAudio: () => {
+        const { ctx, strips } = this.ensure();
+        return { ctx, input: strips[channel].input };
+      },
+    };
+  }
+
+  getChannelState(channel: ChannelId): ChannelState {
+    return this.channels[channel];
+  }
+
+  getCrossfader(): number {
+    return this.crossfader;
+  }
+
+  getMaster(): number {
+    return this.master;
+  }
+
+  setTrim(channel: ChannelId, value: number): void {
+    this.channels[channel] = { ...this.channels[channel], trim: value };
+    const { ctx, strips } = this.ensure();
+    rampGain(ctx, strips[channel].trimGain.gain, trimToGain(value));
+  }
+
+  /** value in [0, 1]: 0 = kill, 0.5 = flat, 1 = +6 dB. */
+  setEq(channel: ChannelId, band: EqBand, value: number): void {
+    const ch = this.channels[channel];
+    this.channels[channel] = { ...ch, eq: { ...ch.eq, [band]: value } };
+    const { ctx, strips } = this.ensure();
+    rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(value));
+  }
+
+  /** position in [-1, 1]: negative = LPF, positive = HPF, center = bypass. */
+  setFilter(channel: ChannelId, position: number): void {
+    this.channels[channel] = { ...this.channels[channel], filter: position };
+    this.ensure();
+    this.applyFilter(channel);
+  }
+
+  setFader(channel: ChannelId, value: number): void {
+    this.channels[channel] = { ...this.channels[channel], fader: value };
+    const { ctx, strips } = this.ensure();
+    rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(value));
+  }
+
+  /** position in [-1 (full A), 1 (full B)]. */
+  setCrossfader(position: number): void {
+    this.crossfader = position;
+    this.ensure();
+    this.applyCrossfader(true);
+  }
+
+  setMaster(value: number): void {
+    this.master = value;
+    const { ctx } = this.ensure();
+    if (this.masterGain) rampGain(ctx, this.masterGain.gain, value);
+  }
+
+  /** Tear down. Safe to keep using — the graph revives on demand. */
+  dispose(): void {
+    if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
+    this.ctx = null;
+    this.strips = null;
+    this.masterGain = null;
+  }
+
+  private applyCrossfader(ramp: boolean): void {
+    if (!this.ctx || !this.strips) return;
+    const { a, b } = crossfaderGains(this.crossfader);
+    if (ramp) {
+      rampGain(this.ctx, this.strips.A.crossfadeGain.gain, a);
+      rampGain(this.ctx, this.strips.B.crossfadeGain.gain, b);
+    } else {
+      this.strips.A.crossfadeGain.gain.value = a;
+      this.strips.B.crossfadeGain.gain.value = b;
+    }
+  }
+
+  private applyFilter(channel: ChannelId): void {
+    if (!this.ctx || !this.strips) return;
+    const sweep = this.strips[channel].sweep;
+    const { type, frequency, qDb } = sweepPositionToFilter(this.channels[channel].filter);
+    const now = this.ctx.currentTime;
+    if (sweep.type !== type) {
+      // `type` is not an AudioParam and flips instantaneously. Make the new
+      // filter transparent at the flip, then ramp — avoids a pop mid-sweep.
+      sweep.type = type;
+      const transparentHz = type === 'lowpass' ? SWEEP_BYPASS_HZ : 20;
+      sweep.frequency.cancelScheduledValues(now);
+      sweep.frequency.setValueAtTime(transparentHz, now);
+      sweep.Q.cancelScheduledValues(now);
+      sweep.Q.setValueAtTime(BUTTERWORTH_Q_DB, now);
+    }
+    sweep.frequency.setTargetAtTime(frequency, now, PARAM_SMOOTHING_S);
+    sweep.Q.setTargetAtTime(qDb, now, PARAM_SMOOTHING_S);
+  }
+}

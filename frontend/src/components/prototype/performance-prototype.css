@@ -418,3 +418,10 @@
 }
 
 .pp-library > div { height: 100%; }
+
+.pp-back {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  z-index: 500;
+}

@@ -1,19 +1,23 @@
 /**
- * DeckEngine — framework-free playback engine for the Practice view's Deck.
+ * DeckEngine — framework-free playback engine for one Deck.
  *
  * Buffer-based Web Audio (ADR 0007): the whole track is fetched and decoded
  * into an AudioBuffer; seeks/cues/beatjumps are sample-accurate. Source nodes
  * are one-shot, so every start recreates one and the engine keeps its own
  * playhead clock against AudioContext.currentTime.
  *
+ * The deck does not own an AudioContext or any sound-shaping (ADR 0009): it
+ * is constructed against a DeckAudioPort (the Mixer's channel input) and
+ * keeps only transport, declick envelopes, and varispeed.
+ *
  * Transport/cue semantics live in the pure reducer (transport.ts); this class
- * interprets its AudioEffects against the graph (graph.ts).
+ * interprets its AudioEffects against its channel input.
  */
 
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportEvent, TransportState } from './transport';
-import { DeckGraph, DECLICK_S } from './graph';
-import type { EqBand } from './graph';
+import { DECLICK_S } from './graph';
+import type { DeckAudioPort } from './mixer';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
@@ -53,10 +57,6 @@ export interface DeckSnapshot {
   cuePoint: number | null;
   /** Varispeed, percent (±). */
   pitchPercent: number;
-  /** EQ control values in [0,1]; 0.5 = flat. */
-  eq: Record<EqBand, number>;
-  /** Sweep filter position in [-1,1]; 0 = off. */
-  filterPosition: number;
 }
 
 interface ActiveSource {
@@ -69,11 +69,8 @@ interface ActiveSource {
 const PITCH_RANGE_PERCENT = 8;
 
 export class DeckEngine {
-  // Created lazily and recreated if closed: React StrictMode dev double-mount
-  // disposes the engine once before the real mount, and a closed AudioContext
-  // is unusable (frozen currentTime, failing resume).
-  private ctx: AudioContext | null = null;
-  private graph: DeckGraph | null = null;
+  /** Last audio access from the port (context may be revived by the Mixer). */
+  private audio: { ctx: AudioContext; input: AudioNode } | null = null;
 
   private buffer: AudioBuffer | null = null;
   private trackInfo: DeckTrackInfo | null = null;
@@ -91,8 +88,6 @@ export class DeckEngine {
   private anchorCtxTime = 0;
 
   private pitchPercent = 0;
-  private eq: Record<EqBand, number> = { low: 0.5, mid: 0.5, high: 0.5 };
-  private filterPosition = 0;
 
   private listeners = new Set<() => void>();
   private snapshot: DeckSnapshot;
@@ -112,23 +107,17 @@ export class DeckEngine {
     this.onCueSet = handler;
   }
 
-  constructor() {
+  private readonly port: DeckAudioPort;
+
+  constructor(port: DeckAudioPort) {
+    this.port = port;
     this.snapshot = this.buildSnapshot();
   }
 
-  /** Get a usable context+graph, (re)creating them if absent or closed. */
-  private ensureAudio(): { ctx: AudioContext; graph: DeckGraph } {
-    if (!this.ctx || !this.graph || this.ctx.state === 'closed') {
-      console.debug('[DeckEngine] creating AudioContext');
-      this.ctx = new AudioContext();
-      this.graph = new DeckGraph(this.ctx);
-      // Reapply sound-control state to the fresh graph.
-      for (const band of ['low', 'mid', 'high'] as const) {
-        this.graph.setEqValue(band, this.eq[band]);
-      }
-      this.graph.setFilterPosition(this.filterPosition);
-    }
-    return { ctx: this.ctx, graph: this.graph };
+  /** Get the live context and this deck's channel input from the Mixer. */
+  private ensureAudio(): { ctx: AudioContext; input: AudioNode } {
+    this.audio = this.port.ensureAudio();
+    return this.audio;
   }
 
   // ── Loading ────────────────────────────────────────────────────────────
@@ -278,27 +267,16 @@ export class DeckEngine {
   }
 
   // ── Sound controls ─────────────────────────────────────────────────────
-
-  setEqValue(band: EqBand, value: number): void {
-    this.eq = { ...this.eq, [band]: value };
-    // Applied to the live graph if one exists; ensureAudio reapplies otherwise.
-    this.graph?.setEqValue(band, value);
-    this.emit();
-  }
-
-  setFilterPosition(position: number): void {
-    this.filterPosition = position;
-    this.graph?.setFilterPosition(position);
-    this.emit();
-  }
+  // (EQ/filter live on the Mixer's channel strip — ADR 0009. The deck keeps
+  // only varispeed.)
 
   setPitch(percent: number): void {
     const clamped = Math.max(-PITCH_RANGE_PERCENT, Math.min(PITCH_RANGE_PERCENT, percent));
     // Re-anchor the clock at the old rate, then step the rate at the same
     // instant. An instant rate set (no smoothing) keeps the playhead clock
     // exact — a smoothed rate would drift against the anchor math.
-    if (this.source && !this.source.stopped && this.ctx) {
-      const now = this.ctx.currentTime;
+    if (this.source && !this.source.stopped && this.audio) {
+      const now = this.audio.ctx.currentTime;
       this.anchorPosition = this.getPlayhead();
       this.anchorCtxTime = now;
       this.source.node.playbackRate.setValueAtTime(this.rateFor(clamped), now);
@@ -316,8 +294,9 @@ export class DeckEngine {
 
   /** Current playhead in seconds. Cheap; safe to poll per animation frame. */
   getPlayhead(): number {
-    if (this.source && !this.source.stopped && this.ctx) {
-      const elapsed = (this.ctx.currentTime - this.anchorCtxTime) * this.rateFor(this.pitchPercent);
+    if (this.source && !this.source.stopped && this.audio) {
+      const elapsed =
+        (this.audio.ctx.currentTime - this.anchorCtxTime) * this.rateFor(this.pitchPercent);
       return this.clampTime(this.anchorPosition + elapsed);
     }
     return this.transport.playhead;
@@ -333,16 +312,13 @@ export class DeckEngine {
   }
 
   /**
-   * Tear down audio resources. Safe to keep using the engine afterwards —
-   * the context is recreated on demand (React StrictMode dev double-mount
-   * disposes once before the real mount).
+   * Stop and release. Safe to keep using the engine afterwards — the audio
+   * context belongs to the Mixer, which revives it on demand.
    */
   dispose(): void {
     this.loadAbort?.abort();
     this.stopAudio(this.getPlayhead());
-    if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
-    this.ctx = null;
-    this.graph = null;
+    this.audio = null;
     this.listeners.clear();
   }
 
@@ -373,7 +349,7 @@ export class DeckEngine {
 
   private startAudio(at: number): void {
     if (!this.buffer) return;
-    const { ctx, graph } = this.ensureAudio();
+    const { ctx, input } = this.ensureAudio();
     if (ctx.state === 'suspended') {
       ctx.resume().catch((err) => {
         console.warn('[DeckEngine] AudioContext.resume() failed:', err);
@@ -386,7 +362,12 @@ export class DeckEngine {
     node.buffer = this.buffer;
     node.playbackRate.value = this.rateFor(this.pitchPercent);
 
-    const envelope = graph.createEnvelope();
+    // Declick fade-in envelope into this deck's mixer channel.
+    const envelope = ctx.createGain();
+    const now = ctx.currentTime;
+    envelope.gain.setValueAtTime(0, now);
+    envelope.gain.linearRampToValueAtTime(1, now + DECLICK_S);
+    envelope.connect(input);
     node.connect(envelope);
 
     const active: ActiveSource = { node, envelope, stopped: false };
@@ -423,11 +404,15 @@ export class DeckEngine {
       return;
     }
     active.stopped = true;
-    // An active source implies a live graph/context.
-    if (this.graph && this.ctx) {
-      this.graph.releaseEnvelope(active.envelope);
+    // An active source implies live audio access.
+    if (this.audio) {
+      const now = this.audio.ctx.currentTime;
+      // Declick fade-out, then stop the source.
+      active.envelope.gain.cancelScheduledValues(now);
+      active.envelope.gain.setValueAtTime(active.envelope.gain.value, now);
+      active.envelope.gain.linearRampToValueAtTime(0, now + DECLICK_S);
       try {
-        active.node.stop(this.ctx.currentTime + DECLICK_S * 1.5);
+        active.node.stop(now + DECLICK_S * 1.5);
       } catch {
         // Source may never have started or already ended; nothing to do.
       }
@@ -457,8 +442,6 @@ export class DeckEngine {
       hotCuePreviewSlot: this.transport.hotCuePreviewSlot,
       cuePoint: this.transport.cuePoint,
       pitchPercent: this.pitchPercent,
-      eq: this.eq,
-      filterPosition: this.filterPosition,
     };
   }
 

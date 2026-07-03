@@ -29,3 +29,13 @@ The one-graph refactor: a Mixer module owns the single `AudioContext`; decks bec
 ## Blocked by
 
 None - can start immediately.
+
+## Comments
+
+Implemented in jj change `vmyttqqw` (performance-mode: 01-mixer-owns-audio-graph).
+- `playback/mixer.ts`: Mixer owns/revives the AudioContext (moved up from DeckEngine); ChannelStrip per deck (input → trim → LR4 isolator EQ → sweep → fader → crossfader gain), master gain + always-on limiter (threshold -3dB, ratio 20:1); all control state survives graph revival. `DeckAudioPort` is the deck-facing seam.
+- `playback/mixerMath.ts` (+14 tests): quadratic channel-fader taper, ±12dB trim, **dipless crossfader** (unity through center — deliberate deviation from constant-power after review flagged a -3dB level drop vs the pre-mixer chain; summed-center headroom is the limiter's job).
+- `DeckEngine`: constructed against a port; keeps transport/envelopes/varispeed; EQ/filter/context ownership removed. `graph.ts` reduced to pure DSP mappings (shared constants exported — no duplication with mixer).
+- Provider: Mixer + two eager decks (A exposed via existing API; B idle until issue 02; both disposed before the mixer closes the context).
+- Practice view + PrototypeSwitcher deleted; ▸ route renders the prototype placeholder with a back button.
+- Ear-verification pending user: library parity through the mixer chain, limiter behavior.

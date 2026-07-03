@@ -434,7 +434,7 @@ function Mixer() {
 
 // ── Layout ───────────────────────────────────────────────────────────────
 
-export function PerformanceViewPrototype() {
+export function PerformanceViewPrototype({ onClose }: { onClose?: () => void }) {
   const { engine, loadedTrack } = useDeck();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const ready = useDeckReady();
@@ -456,6 +456,11 @@ export function PerformanceViewPrototype() {
 
   return (
     <div className="pp-root">
+      {onClose && (
+        <button className="player-button pp-back" onClick={onClose}>
+          ← Library
+        </button>
+      )}
       {/* Performance surface — top half of the viewport */}
       <div className="pp-perf">
         <div className="pp-waves">

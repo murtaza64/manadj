@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
-import { PracticeView } from './components/PracticeView';
+import { PerformanceViewPrototype } from './components/prototype/PerformanceViewPrototype';
 import { FilterProvider } from './contexts/FilterContext';
 import { DeckProvider } from './contexts/DeckContext';
 
@@ -20,7 +20,9 @@ function App() {
           {view === 'sync' ? (
             <SyncView onClose={() => setView('library')} />
           ) : view === 'practice' ? (
-            <PracticeView onClose={() => setView('library')} />
+            /* Placeholder until the real Performance view (issue 03) — the
+               Practice view is deleted (performance-mode issue 01) */
+            <PerformanceViewPrototype onClose={() => setView('library')} />
           ) : (
             <Library
               onOpenPlaylistSync={() => setView('sync')}

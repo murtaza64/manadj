@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
+import { Mixer } from '../playback/mixer';
 import { DeckContext } from '../hooks/useDeck';
 import { api } from '../api/client';
 import type { BeatgridResponse, Track, WaveformResponse } from '../types';
@@ -21,8 +22,28 @@ import type { BeatgridResponse, Track, WaveformResponse } from '../types';
  * useDeckSnapshot so transport events only re-render components that care.
  */
 export function DeckProvider({ children }: { children: ReactNode }) {
-  const [engine] = useState(() => new DeckEngine());
-  useEffect(() => () => engine.dispose(), [engine]);
+  // The Mixer owns the one AudioContext (ADR 0009); both decks are created
+  // eagerly as its channel inputs (graph nodes only — no audio memory until
+  // Load). Deck B has no consumers yet (performance-mode issue 02 adds deck
+  // scopes); the provider still exposes Deck A through the existing API.
+  const [{ mixer, deckA, deckB }] = useState(() => {
+    const m = new Mixer();
+    return {
+      mixer: m,
+      deckA: new DeckEngine(m.portFor('A')),
+      deckB: new DeckEngine(m.portFor('B')),
+    };
+  });
+  const engine = deckA;
+  useEffect(
+    () => () => {
+      // Decks stop against the still-open context, then the Mixer closes it.
+      engine.dispose();
+      deckB.dispose();
+      mixer.dispose();
+    },
+    [engine, deckB, mixer]
+  );
 
   const queryClient = useQueryClient();
   const [loadedTrack, setLoadedTrack] = useState<Track | null>(null);
