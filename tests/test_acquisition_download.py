@@ -146,3 +146,60 @@ class TestDownloadChain:
         task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
         assert task.state == "failed"
         assert task.error is not None and "geo-blocked" in task.error
+
+
+class TestMetadataEmbedding:
+    def test_cleaned_metadata_embedded_in_file(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        """The cleaned title/artist are Exported to Disk at acquisition: the
+        downloaded file's tags carry what the Library asserts, not the raw
+        SoundCloud strings."""
+        from backend.track_metadata import read_file_metadata
+
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        source = FakeSource(
+            [item_data("222", title="Hoax - Wake Up [FREE DL]", uploader="hoaxdnb")],
+            download_file=audio_file("m4a"),  # majority library format
+        )
+        refresh(db_session, source)
+        item = list_source_items(db_session)[0]
+        queue_item(db_session, item.id)
+
+        run_pending(db_session, make_handlers(source, tracks_dir))
+
+        landed = list(tracks_dir.glob("Hoax - Wake Up.*"))
+        assert len(landed) == 1
+        meta = read_file_metadata(landed[0])
+        assert meta.title == "Wake Up"
+        assert meta.artist == "Hoax"
+
+    def test_unreadable_file_does_not_fail_acquisition(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+    ) -> None:
+        """Embedding is best-effort: a file mutagen can't tag must not lose
+        the acquisition."""
+        garbage = tmp_path / "garbage.mp3"
+        garbage.write_bytes(b"not really audio")
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        source = FakeSource(
+            [item_data("333", title="Ghost - Track", uploader="x")],
+            download_file=garbage,
+        )
+        refresh(db_session, source)
+        item = list_source_items(db_session)[0]
+        queue_item(db_session, item.id)
+
+        run_pending(db_session, make_handlers(source, tracks_dir))
+
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "done", task.error
+        db_session.refresh(item)
+        assert item.state == "fulfilled"

@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session
 
 from ..library.import_manager import LibraryImportManager
 from ..models import Track
-from .cleanup import CleanupConfig, clean_metadata, safe_basename
+from ..track_metadata import FileMetadataError, write_file_metadata
 from ..track_metadata.file_facts import refresh_file_facts
+from .cleanup import CleanupConfig, clean_metadata, safe_basename
 from .models import AudioProvenance, SourceCorrespondence, SourceItem
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,15 @@ def download_handler(
 
         path = source.download(item.permalink_url, tracks_dir, basename)
         logger.info("downloaded %s -> %s", item.permalink_url, path)
+
+        # Export the cleaned metadata to Disk before the import scan: the
+        # file carries what the Library will assert, and Disk Import + file
+        # facts see the final bytes. Best-effort — a file mutagen can't tag
+        # must not lose the acquisition.
+        try:
+            write_file_metadata(path, title=meta.title, artist=meta.artist)
+        except FileMetadataError as e:
+            logger.warning("could not embed metadata in %s: %s", path, e)
 
         # the normal Disk Import path (no parallel track-creation code)
         importer = LibraryImportManager(db, str(tracks_dir))
