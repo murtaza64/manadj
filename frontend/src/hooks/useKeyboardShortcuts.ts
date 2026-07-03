@@ -1,13 +1,23 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useState } from 'react';
 import type { Track } from '../types';
-import type { PlayerHandle } from '../components/Player';
-import { useAudio } from './useAudio';
+import { useDeck, useDeckSnapshot } from './useDeck';
+import { useScrubLoop } from './useScrubLoop';
+import { BEATJUMP_BEATS } from '../playback/constants';
+
+/**
+ * Library keyboard hub. Keys split by scope (ADR 0008):
+ * - Selection-scoped (the highlighted row): j/k navigate, t tags, e energy
+ * - Deck-scoped (the loaded Track): space play/pause, f cue (hold),
+ *   a/s beatjump, h/l scrub (hold), 1-8 hot cues, Shift+1-8 delete hot cue,
+ *   g set downbeat, Shift+H/L nudge beatgrid
+ * - The bridge: Enter loads the selection onto the Deck
+ */
 
 interface UseKeyboardShortcutsProps {
   tracks: Track[];
   selectedTrack: Track | null;
   onSelectTrack: (track: Track | null) => void;
-  playerRef: RefObject<PlayerHandle | null>;
+  onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid?: (offsetMs: number) => void;
   onSetDownbeat?: () => void;
   onEnterTagEditMode?: () => void;
@@ -22,7 +32,7 @@ export function useKeyboardShortcuts({
   tracks,
   selectedTrack,
   onSelectTrack,
-  playerRef,
+  onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
   onEnterTagEditMode,
@@ -32,8 +42,10 @@ export function useKeyboardShortcuts({
   onHotCueDelete,
   isEnergyEditMode
 }: UseKeyboardShortcutsProps) {
-  const audio = useAudio();
-  const [seekDirection, setSeekDirection] = useState<number>(0); // -1, 0, or 1
+  const { engine } = useDeck();
+  const deckReady = useDeckSnapshot((s) => s.loadState === 'ready');
+  const [scrubDirection, setScrubDirection] = useState<number>(0); // -1, 0, or 1
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       // Conflict prevention: ignore if typing in inputs or using certain modifiers
@@ -55,7 +67,7 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // Navigation: j/k
+      // Navigation: j/k (selection-scoped)
       if (key === 'j' || key === 'k') {
         event.preventDefault();
 
@@ -83,26 +95,35 @@ export function useKeyboardShortcuts({
         scrollTrackIntoView(nextTrack.id);
       }
 
-      // Player controls: Space/a/s/f
+      // Load: Enter puts the selection on the Deck (the browse -> Deck bridge).
+      // Skip when a button has focus (e.g. after clicking a player control) —
+      // Enter there should not surprise-load the selection.
+      if (event.key === 'Enter') {
+        if (!selectedTrack || target.tagName === 'BUTTON') return;
+        event.preventDefault();
+        onLoadTrack(selectedTrack);
+      }
+
+      // Deck transport: Space/a/s/f
       if (key === ' ' || key === 'a' || key === 's' || key === 'f') {
-        if (!selectedTrack) return;
+        if (!deckReady) return;
 
         event.preventDefault();
 
         if (key === ' ') {
-          playerRef.current?.togglePlay();
+          engine.togglePlay();
         } else if (key === 'a') {
-          playerRef.current?.skip(-32);  // Jump back 32 beats
+          engine.jumpBeats(-BEATJUMP_BEATS);
         } else if (key === 's') {
-          playerRef.current?.skip(32);   // Jump forward 32 beats
+          engine.jumpBeats(BEATJUMP_BEATS);
         } else if (key === 'f') {
-          playerRef.current?.handleCueDown();
+          engine.cueDown();
         }
       }
 
-      // Beatgrid controls: Shift+H/L for nudge, G for set downbeat
+      // Beatgrid controls (deck-scoped): Shift+H/L nudge, G set downbeat
       if ((key === 'h' || key === 'l') && event.shiftKey) {
-        if (!selectedTrack) return;
+        if (!deckReady) return;
 
         event.preventDefault();
 
@@ -114,7 +135,7 @@ export function useKeyboardShortcuts({
       }
 
       if (key === 'g') {
-        if (!selectedTrack) return;
+        if (!deckReady) return;
 
         event.preventDefault();
 
@@ -123,7 +144,7 @@ export function useKeyboardShortcuts({
         }
       }
 
-      // Tag editing mode: T
+      // Tag editing mode: T (selection-scoped)
       if (key === 't') {
         if (!selectedTrack) return;
 
@@ -134,7 +155,7 @@ export function useKeyboardShortcuts({
         }
       }
 
-      // Energy editing mode: E
+      // Energy editing mode: E (selection-scoped)
       if (key === 'e') {
         if (!selectedTrack) return;
 
@@ -145,24 +166,24 @@ export function useKeyboardShortcuts({
         }
       }
 
-      // Slow seek: h/l (continuous when held, but not with Shift)
+      // Scrub: h/l held (deck-scoped, continuous, but not with Shift)
       if ((key === 'h' || key === 'l') && !event.shiftKey) {
-        if (!selectedTrack) return;
+        if (!deckReady) return;
 
         event.preventDefault();
 
         if (key === 'h') {
-          setSeekDirection(-1);  // Seek backward
+          setScrubDirection(-1);  // Scrub backward
         } else if (key === 'l') {
-          setSeekDirection(1);   // Seek forward
+          setScrubDirection(1);   // Scrub forward
         }
       }
 
-      // Hot cue keys: 1-8 (prevent key repeat like F key)
+      // Hot cue keys: 1-8 (deck-scoped; prevent key repeat like F key)
       // Use event.code to detect Digit1-8 regardless of Shift state
       // Skip if in energy edit mode (numbers 1-5 set energy level)
       if (/^Digit[1-8]$/.test(event.code) && !event.shiftKey) {
-        if (!selectedTrack || isEnergyEditMode) return;
+        if (!deckReady || isEnergyEditMode) return;
 
         // Prevent key repeat for hot cue buttons
         if (event.repeat) {
@@ -179,11 +200,9 @@ export function useKeyboardShortcuts({
         }
       }
 
-      // Hot cue delete: Shift+1-8 (single press only, no repeat)
-      // Use event.code to detect Digit1-8 regardless of Shift state
-      // Skip if in energy edit mode
+      // Hot cue delete: Shift+1-8 (deck-scoped, single press only, no repeat)
       if (/^Digit[1-8]$/.test(event.code) && event.shiftKey) {
-        if (!selectedTrack || isEnergyEditMode) return;
+        if (!deckReady || isEnergyEditMode) return;
 
         // Prevent key repeat
         if (event.repeat) {
@@ -216,22 +235,20 @@ export function useKeyboardShortcuts({
 
       // Release cue on F key up
       if (key === 'f') {
-        if (!selectedTrack) return;
+        if (!deckReady) return;
         event.preventDefault();
-        playerRef.current?.handleCueUp();
+        engine.cueUp();
       }
 
-      // Stop slow seek on H/L key up (only if not holding Shift)
+      // Stop scrub on H/L key up (only if not holding Shift)
       if ((key === 'h' || key === 'l') && !event.shiftKey) {
         event.preventDefault();
-        setSeekDirection(0);
+        setScrubDirection(0);
       }
 
       // Hot cue key up: 1-8 (only for non-Shift, since Shift deletes)
-      // Use event.code to detect Digit1-8 regardless of Shift state
-      // Skip if in energy edit mode
       if (/^Digit[1-8]$/.test(event.code) && !event.shiftKey) {
-        if (!selectedTrack || isEnergyEditMode) return;
+        if (!deckReady || isEnergyEditMode) return;
 
         event.preventDefault();
 
@@ -249,35 +266,25 @@ export function useKeyboardShortcuts({
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
     };
-  }, [tracks, selectedTrack, onSelectTrack, playerRef, onNudgeBeatgrid, onSetDownbeat, isEnergyEditMode]);
+  }, [
+    tracks,
+    selectedTrack,
+    onSelectTrack,
+    onLoadTrack,
+    onNudgeBeatgrid,
+    onSetDownbeat,
+    onEnterTagEditMode,
+    onEnterEnergyEditMode,
+    onHotCueDown,
+    onHotCueUp,
+    onHotCueDelete,
+    isEnergyEditMode,
+    engine,
+    deckReady,
+  ]);
 
-  // Continuous seek effect for H/L keys
-  useEffect(() => {
-    if (seekDirection === 0) return;
-
-    const SEEK_SPEED = 0.01; // seconds per frame at 60fps
-    let lastTimestamp = 0;
-    let animationFrameId: number;
-
-    const seek = (timestamp: number) => {
-      if (lastTimestamp === 0) lastTimestamp = timestamp;
-      const delta = (timestamp - lastTimestamp) / 1000; // Convert to seconds
-      lastTimestamp = timestamp;
-
-      // Read directly from audio element to avoid React state lag
-      const audioEl = audio.audioRef.current;
-      if (!audioEl) return;
-
-      const seekAmount = seekDirection * SEEK_SPEED * (delta * 60); // Normalize to 60fps
-      const newTime = Math.max(0, Math.min(audioEl.duration, audioEl.currentTime + seekAmount));
-      audioEl.currentTime = newTime;
-
-      animationFrameId = requestAnimationFrame(seek);
-    };
-
-    animationFrameId = requestAnimationFrame(seek);
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [seekDirection, audio]);
+  // Continuous scrub while h/l is held
+  useScrubLoop(engine, scrubDirection);
 }
 
 // Helper function for scrolling selected track into view

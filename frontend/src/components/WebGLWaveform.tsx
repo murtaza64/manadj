@@ -41,6 +41,7 @@ export default function WebGLWaveform({
       playMarkerPosition: 0.25,
       maxZoom: 50.0,
       minZoom: 0.5,
+      showTimeReadout: true,
     },
     cuePoint,
     hotCues,

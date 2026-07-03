@@ -18,6 +18,11 @@
   background: #32324a !important;
 }
 
+/* Loaded on the Deck: left accent stripe, independent of selection */
+.track-row-loaded {
+  box-shadow: inset 3px 0 0 0 var(--pink, #f5c2e7);
+}
+
 /* Sticky cell backgrounds that match row state */
 .track-row:hover .sticky-col-cell {
   background: #1f1f1f !important;

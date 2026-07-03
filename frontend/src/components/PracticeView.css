@@ -150,11 +150,7 @@
   color: #ff2d55;
 }
 
-.deck-readout {
-  font-family: monospace;
-  font-size: 13px;
-  color: var(--text, #cdd6f4);
-}
+
 
 /* ── Transport ────────────────────────────────────────────────── */
 

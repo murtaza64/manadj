@@ -4,15 +4,15 @@ import { api } from '../api/client';
 import TrackList from './TrackList';
 import FilterBar from './FilterBar';
 import TagEditor, { type TagEditorHandle } from './TagEditor';
-import Player, { type PlayerHandle } from './Player';
+import Player from './Player';
 import PlaylistSidebar from './PlaylistSidebar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
-import { useHotCues, useSetHotCue, useDeleteHotCue } from '../hooks/useHotCues';
+import { useHotCueActions } from '../hooks/useHotCueActions';
 import type { Track } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
-import { useAudio } from '../hooks/useAudio';
+import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
 
 // Related tracks feature - types and constants
 export interface RelatedTracksSettings {
@@ -193,10 +193,13 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryP
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
   const queryClient = useQueryClient();
-  const playerRef = useRef<PlayerHandle | null>(null);
   const tagEditorRef = useRef<TagEditorHandle | null>(null);
   const { filters, setFilters } = useFilters();
-  const audio = useAudio();
+  // The shared Deck: performance actions target the loaded Track, not the
+  // selection. Narrow snapshot selector so transport events don't re-render
+  // the (large) library tree.
+  const { engine, loadedTrack, loadTrack } = useDeck();
+  const deckReady = useDeckSnapshot((s) => s.loadState === 'ready');
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
@@ -339,65 +342,23 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryP
     setFilters(newFilters);
   };
 
+  // Beatgrid edits are playhead-dependent, so they act on the loaded Track
   const handleNudgeBeatgrid = (offsetMs: number) => {
-    if (!selectedTrack) return;
-    nudgeGrid.mutate({ trackId: selectedTrack.id, offsetMs });
+    if (!loadedTrack || !deckReady) return;
+    nudgeGrid.mutate({ trackId: loadedTrack.id, offsetMs });
   };
 
   const handleSetDownbeat = () => {
-    if (!selectedTrack) return;
+    if (!loadedTrack || !deckReady) return;
     setDownbeat.mutate({
-      trackId: selectedTrack.id,
-      downbeatTime: audio.audioRef.current?.currentTime ?? 0,
+      trackId: loadedTrack.id,
+      downbeatTime: engine.getPlayhead(),
     });
   };
 
-  // Hot cue management
-  const { data: hotCuesArray = [] } = useHotCues(selectedTrack?.id ?? null);
-  const setHotCueMutation = useSetHotCue();
-  const deleteHotCueMutation = useDeleteHotCue();
-
-  // Create a map from slot number to hot cue for easy lookup
-  const hotCuesMap = new Map(hotCuesArray.map(hc => [hc.slot_number, hc]));
-
-  const handleHotCueDown = (slotNumber: number) => {
-    if (!selectedTrack) return;
-
-    const hotCue = hotCuesMap.get(slotNumber);
-    if (!hotCue) {
-      // Hot cue not set: set it at current position
-      const currentTime = audio.audioRef.current?.currentTime ?? 0;
-      setHotCueMutation.mutate({
-        trackId: selectedTrack.id,
-        slotNumber,
-        data: { time_seconds: currentTime },
-      });
-    } else {
-      // Hot cue is set: trigger playback behavior
-      audio.handleHotCueDown(slotNumber, hotCue.time_seconds);
-    }
-  };
-
-  const handleHotCueUp = (slotNumber: number) => {
-    if (!selectedTrack) return;
-
-    const hotCue = hotCuesMap.get(slotNumber);
-    if (hotCue) {
-      audio.handleHotCueUp(slotNumber, hotCue.time_seconds);
-    }
-  };
-
-  const handleHotCueDelete = (slotNumber: number) => {
-    if (!selectedTrack) return;
-
-    const hotCue = hotCuesMap.get(slotNumber);
-    if (hotCue) {
-      deleteHotCueMutation.mutate({
-        trackId: selectedTrack.id,
-        slotNumber,
-      });
-    }
-  };
+  // Hot cue actions (deck-scoped: hot cues belong to the loaded Track);
+  // same implementation the Player's pads use.
+  const hotCueActions = useHotCueActions(loadedTrack?.id ?? null);
 
   // Determine current tracks and loading state
   const isLoading = selectedView === 'playlist' ? isLoadingPlaylist : isLoadingAllTracks;
@@ -434,14 +395,14 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryP
     tracks: currentTracks,
     selectedTrack,
     onSelectTrack: setSelectedTrack,
-    playerRef,
+    onLoadTrack: loadTrack,
     onNudgeBeatgrid: handleNudgeBeatgrid,
     onSetDownbeat: handleSetDownbeat,
     onEnterTagEditMode: () => tagEditorRef.current?.enterTagEditMode(),
     onEnterEnergyEditMode: () => tagEditorRef.current?.toggleEnergyEditMode(),
-    onHotCueDown: handleHotCueDown,
-    onHotCueUp: handleHotCueUp,
-    onHotCueDelete: handleHotCueDelete,
+    onHotCueDown: hotCueActions.down,
+    onHotCueUp: hotCueActions.up,
+    onHotCueDelete: hotCueActions.remove,
     isEnergyEditMode,
   });
 
@@ -458,7 +419,7 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryP
         flexDirection: 'column',
         borderBottom: '1px solid var(--surface0)'
       }}>
-        <Player ref={playerRef} track={selectedTrack} />
+        <Player />
         <div style={{
           display: 'flex'
         }}>
@@ -467,7 +428,6 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryP
             track={selectedTrack}
             onSave={mutation.mutate}
             onUpdate={handleFieldUpdate}
-            currentTime={audio.audioRef.current?.currentTime ?? 0}
             onEnergyEditModeChange={setIsEnergyEditMode}
           />
         </div>
@@ -519,6 +479,8 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice }: LibraryP
               error={error}
               selectedTrack={selectedTrack}
               onSelectTrack={setSelectedTrack}
+              onLoadTrack={loadTrack}
+              loadedTrackId={loadedTrack?.id ?? null}
               sortColumn={filters.sortColumn}
               sortDirection={filters.sortDirection}
               onSort={handleSort}

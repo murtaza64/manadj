@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import TagPill from './TagPill';
 import EnergySquare from './EnergySquare';
 import BPMDisplay from './BPMDisplay';
@@ -10,7 +11,11 @@ import './TrackRow.css';
 interface Props {
   track: Track;
   isSelected: boolean;
+  /** True when this track is on the Deck. */
+  isLoaded: boolean;
   onSelect: (track: Track) => void;
+  /** Load this track onto the Deck (double-click). */
+  onLoad: (track: Track) => void;
 }
 
 const LOSSLESS = new Set(['flac', 'alac', 'pcm']);
@@ -33,7 +38,9 @@ function formatSize(bytes?: number | null): string {
   return `${(bytes / 1_000_000).toFixed(1)}M`;
 }
 
-export default function TrackRow({ track, isSelected, onSelect }: Props) {
+/** Memoized: the table is large, and rows must not re-render on deck/selection
+ * churn unless their own props changed. */
+const TrackRow = memo(function TrackRow({ track, isSelected, isLoaded, onSelect, onLoad }: Props) {
   // Extract just the filename from the full path
   const filename = track.filename.split('/').pop() || track.filename;
 
@@ -61,8 +68,9 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
 
   return (
     <tr
-      className={`track-row ${isSelected ? 'track-row-selected' : ''}`}
+      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${isLoaded ? 'track-row-loaded' : ''}`}
       onClick={() => onSelect(track)}
+      onDoubleClick={() => onLoad(track)}
       data-track-id={track.id}
       style={{ cursor: 'pointer' }}
       draggable={true}
@@ -152,4 +160,6 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
 
       </tr>
   );
-}
+});
+
+export default TrackRow;

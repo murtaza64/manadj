@@ -4,7 +4,7 @@ import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { PracticeView } from './components/PracticeView';
 import { FilterProvider } from './contexts/FilterContext';
-import { AudioProvider } from './contexts/AudioContext';
+import { DeckProvider } from './contexts/DeckContext';
 
 const queryClient = new QueryClient();
 
@@ -15,7 +15,7 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AudioProvider>
+      <DeckProvider>
         <FilterProvider>
           {view === 'sync' ? (
             <SyncView onClose={() => setView('library')} />
@@ -28,7 +28,7 @@ function App() {
             />
           )}
         </FilterProvider>
-      </AudioProvider>
+      </DeckProvider>
     </QueryClientProvider>
   );
 }

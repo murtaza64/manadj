@@ -1,59 +1,31 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { DeckEngine } from '../playback/DeckEngine';
+import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
+import { useScrubLoop } from '../hooks/useScrubLoop';
+import { BEATJUMP_BEATS } from '../playback/constants';
 import type { EqBand } from '../playback/graph';
 import WebGLWaveform from './WebGLWaveform';
 import type { ScrubTransport } from './WebGLWaveform';
 import WaveformMinimap from './WaveformMinimap';
 import { useHotCues } from '../hooks/useHotCues';
-import { useBeatgridData } from '../hooks/useBeatgridData';
 import { formatKeyDisplay } from '../utils/keyUtils';
-import type { HotCue, PaginatedTracks, Track } from '../types';
+import type { HotCue, PaginatedTracks } from '../types';
 import './PracticeView.css';
 
 interface PracticeViewProps {
   onClose: () => void;
 }
 
-const BEATJUMP_BEATS = 32;
 const EQ_BANDS: EqBand[] = ['high', 'mid', 'low'];
 const HOT_CUE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
-/** Stable identity so effects keyed on downbeats don't churn without a beatgrid. */
-const NO_DOWNBEATS: number[] = [];
-
-/** 1-based bar number at `time`, or null before the first downbeat / without a grid. */
-function barNumberAt(downbeats: number[], time: number): number | null {
-  if (downbeats.length === 0 || time < downbeats[0]) return null;
-  // Binary search: count of downbeats <= time.
-  let lo = 0;
-  let hi = downbeats.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (downbeats[mid] <= time) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
-
-function formatTime(seconds: number): string {
-  const s = Math.max(0, seconds);
-  const m = Math.floor(s / 60);
-  const rest = s - m * 60;
-  return `${m}:${rest.toFixed(1).padStart(4, '0')}`;
-}
-
 export function PracticeView({ onClose }: PracticeViewProps) {
-  const [engine] = useState(() => new DeckEngine());
-  useEffect(() => () => engine.dispose(), [engine]);
-
-  const snapshot = useSyncExternalStore(
-    (cb) => engine.subscribe(cb),
-    () => engine.getSnapshot()
-  );
+  // The shared Deck (same one the Library renders). Whole-snapshot selector
+  // is fine here — this tree is small.
+  const { engine, loadedTrack, loadTrack } = useDeck();
+  const snapshot = useDeckSnapshot((s) => s);
 
   const [search, setSearch] = useState('');
-  const [loadedTrack, setLoadedTrack] = useState<Track | null>(null);
 
   const { data: results } = useQuery<PaginatedTracks>({
     queryKey: ['practice-track-search', search],
@@ -61,7 +33,6 @@ export function PracticeView({ onClose }: PracticeViewProps) {
   });
 
   const { data: hotCues } = useHotCues(loadedTrack?.id ?? null);
-  const { data: beatgrid } = useBeatgridData(loadedTrack?.id ?? null);
 
   const cuesBySlot = useMemo(() => {
     const map = new Map<number, HotCue>();
@@ -131,30 +102,8 @@ export function PracticeView({ onClose }: PracticeViewProps) {
     };
   }, [engine, cuesBySlot]);
 
-  // Continuous scrub while h/l is held (library parity: ~0.6s of track per second).
-  useEffect(() => {
-    if (scrubDirection === 0) return;
-    const SCRUB_RATE = 0.6;
-    let raf = 0;
-    let last = performance.now();
-    const tick = (now: number) => {
-      raf = requestAnimationFrame(tick);
-      const dt = (now - last) / 1000;
-      last = now;
-      engine.seek(engine.getPlayhead() + scrubDirection * SCRUB_RATE * dt);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [scrubDirection, engine]);
-
-  const loadTrack = (track: Track) => {
-    setLoadedTrack(track);
-    void engine.load({
-      trackId: track.id,
-      audioUrl: api.tracks.audioUrl(track.id),
-      bpm: track.bpm ?? null,
-    });
-  };
+  // Continuous scrub while h/l is held (shared with the library hub).
+  useScrubLoop(engine, scrubDirection);
 
   const ready = snapshot.loadState === 'ready';
 
@@ -235,12 +184,6 @@ export function PracticeView({ onClose }: PracticeViewProps) {
             cuePoint={snapshot.cuePoint}
             onSeek={(t) => engine.seek(t)}
           />
-          <DeckReadout
-            engine={engine}
-            duration={snapshot.duration}
-            downbeats={beatgrid?.data.downbeat_times ?? NO_DOWNBEATS}
-          />
-
           {/* Transport */}
           <div className="deck-transport">
             <button
@@ -360,36 +303,4 @@ export function PracticeView({ onClose }: PracticeViewProps) {
       </div>
     </div>
   );
-}
-
-/**
- * Time + bar readout. Runs its own rAF loop against the engine clock and
- * writes text directly so playhead motion doesn't re-render the view.
- */
-function DeckReadout({
-  engine,
-  duration,
-  downbeats,
-}: {
-  engine: DeckEngine;
-  duration: number;
-  downbeats: number[];
-}) {
-  const spanRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    let raf = 0;
-    const tick = () => {
-      raf = requestAnimationFrame(tick);
-      if (!spanRef.current) return;
-      const playhead = engine.getPlayhead();
-      const bar = barNumberAt(downbeats, playhead);
-      spanRef.current.textContent =
-        `${formatTime(playhead)} / ${formatTime(duration)}${bar !== null ? `  bar ${bar}` : ''}`;
-    };
-    tick();
-    return () => cancelAnimationFrame(raf);
-  }, [engine, duration, downbeats]);
-
-  return <span className="deck-readout" ref={spanRef} />;
 }

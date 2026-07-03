@@ -29,3 +29,17 @@ Replace the library's `<audio>`-element stack with the shared buffer engine, and
 ## Blocked by
 
 - 02-renderer-clock-seam-practice-waveforms
+
+## Comments
+
+Implemented in jj change `snpqzttm` (deck-consolidation: 03-shared-deck-library-port-explicit-load).
+- DeckProvider above the view switch; context carries stable refs only; deck state read via `useDeckSnapshot(selector)` so transport events don't re-render the library tree (fixes play-start jitter caused by main-thread render bursts starving the rAF loop — confirmed by filtering the table).
+- Player/HotCue/keyboard hub on the engine; explicit Load (Enter + double-click, loaded-row accent); keyboard scope split; TagEditor beatgrid gating with hint; minimap follows the Deck.
+- Deleted: AudioContext.tsx, useAudio.ts, elementClock, PlayerHandle, seekVersion. Not ported: volume, hotCuePreviewing record.
+- Review fixes: Enter ignored when a button has focus; jumpBeats falls back to 120 BPM (library parity); scrub loop and hot-cue set-or-trigger deduplicated (useScrubLoop, useHotCueActions); BEATJUMP_BEATS shared constant; TrackRow memoized; Player time readout moved to rAF-textContent.
+- Saved-cue restore intentionally absent (issue 04).
+
+Perf follow-ups landed in the same change after user testing:
+- Narrowed deck-state consumption (`useDeckSnapshot(selector)`, stable-ref context value) — transport events no longer re-render the library tree (verified with render probes: zero renders during scroll/playback).
+- Remaining jitter traced to clock-driven DOM text writes (readouts): a DOM text mutation forces style/layout/display-list work that scales with document size (Firefox, 1000-row table). Fix: time/bar readout moved onto the renderer's per-frame 2D overlay canvas (`showTimeReadout` config); PlayerTime/DeckReadout DOM readouts deleted. Rule going forward: DOM for event-driven UI, canvas for clock-driven display.
+- TrackRow memoized; probes removed after confirmation.

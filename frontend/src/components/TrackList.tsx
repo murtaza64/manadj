@@ -15,6 +15,10 @@ interface TrackListProps {
   error: Error | null;
   selectedTrack: Track | null;
   onSelectTrack: (track: Track) => void;
+  /** Load a track onto the Deck (double-click; Enter goes via the keyboard hub). */
+  onLoadTrack: (track: Track) => void;
+  /** The Deck's loaded track, for row highlighting. */
+  loadedTrackId: number | null;
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
@@ -26,6 +30,8 @@ export default function TrackList({
   error,
   selectedTrack,
   onSelectTrack,
+  onLoadTrack,
+  loadedTrackId,
   sortColumn,
   sortDirection,
   onSort
@@ -123,7 +129,9 @@ export default function TrackList({
                 key={track.id}
                 track={track}
                 isSelected={selectedTrack?.id === track.id}
+                isLoaded={loadedTrackId === track.id}
                 onSelect={onSelectTrack}
+                onLoad={onLoadTrack}
               />
             ))
           )}

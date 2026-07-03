@@ -155,8 +155,10 @@ export class DeckEngine {
   }
 
   jumpBeats(beats: number): void {
-    const bpm = this.trackInfo?.bpm;
-    if (!this.buffer || !bpm) return;
+    if (!this.buffer) return;
+    // BPM-less tracks assume 120 (library-player parity): a usable jump beats
+    // a silently dead control.
+    const bpm = this.trackInfo?.bpm ?? 120;
     const target = this.getPlayhead() + beats * (60 / bpm);
     this.dispatch({ type: 'seek', time: this.clampTime(target) });
   }

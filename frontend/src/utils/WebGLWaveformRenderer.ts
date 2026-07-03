@@ -18,6 +18,14 @@
 
 import type { PlaybackClock } from '../playback/clock';
 
+/** m:ss.t with tenths — matches DJ-deck display convention. */
+function formatReadoutTime(seconds: number): string {
+  const s = Math.max(0, seconds);
+  const m = Math.floor(s / 60);
+  const rest = s - m * 60;
+  return `${m}:${rest.toFixed(1).padStart(4, '0')}`;
+}
+
 export interface WaveformDataWebGL {
   low: Float32Array;
   mid: Float32Array;
@@ -30,6 +38,11 @@ export interface WebGLRendererConfig {
   playMarkerPosition?: number;  // Position of fixed playhead (0.0-1.0)
   maxZoom?: number;
   minZoom?: number;
+  /** Draw a time/bar readout on the overlay canvas (main waveform only).
+   * Canvas, not DOM: clock-driven text in the DOM forces style/layout work
+   * that scales with document size (the library table), throttling the
+   * render loop. Canvas contents are a single compositor layer. */
+  showTimeReadout?: boolean;
 }
 
 export class WebGLWaveformRenderer {
@@ -59,6 +72,7 @@ export class WebGLWaveformRenderer {
 
   // Mode flags
   private isMinimapMode: boolean;
+  private showTimeReadout: boolean;
 
   // Manual drag offset (CSS pixels) - applied during drag operations
   private manualDragOffset: number = 0;
@@ -82,6 +96,7 @@ export class WebGLWaveformRenderer {
   // Beatgrid data
   private beatTimes: Float32Array | null = null;
   private downbeatIndices: Set<number> = new Set();
+  private downbeatTimes: Float32Array | null = null;
 
   // Geometry caching for performance
   private cachedWaveformGeometry: Float32Array | null = null;
@@ -103,6 +118,7 @@ export class WebGLWaveformRenderer {
 
     // Apply configuration
     this.isMinimapMode = config.isMinimapMode ?? false;
+    this.showTimeReadout = (config.showTimeReadout ?? false) && !this.isMinimapMode;
     this.playMarkerPosition = config.playMarkerPosition ?? 0.25;
     this.maxZoom = config.maxZoom ?? 50.0;
     this.minZoom = config.minZoom ?? 0.5;
@@ -283,6 +299,7 @@ export class WebGLWaveformRenderer {
 
   public setBeatgrid(beatTimes: number[], downbeatTimes: number[]): void {
     this.beatTimes = new Float32Array(beatTimes);
+    this.downbeatTimes = new Float32Array(downbeatTimes);
 
     // Convert downbeat times to indices for reliable lookup
     this.downbeatIndices = new Set();
@@ -607,6 +624,18 @@ export class WebGLWaveformRenderer {
 
     // Render playhead (fixed vertical line for main view, moving for minimap)
     this.renderPlayhead();
+
+    // Text overlay (2D canvas): hot cue badges + time/bar readout.
+    // Cleared and redrawn every frame — canvas text is a compositor-layer
+    // update, unlike DOM text which forces document-scaled layout work.
+    const overlayCtx = this.ensureOverlayContext();
+    if (overlayCtx) {
+      overlayCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      this.renderHotCueNumbers(overlayCtx);
+      if (this.showTimeReadout) {
+        this.renderTimeReadout(overlayCtx);
+      }
+    }
   }
 
   private renderBeatgrid(): void {
@@ -897,21 +926,18 @@ export class WebGLWaveformRenderer {
       // Restore additive blending for other elements
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     }
-
-    // Always render/clear the text overlay (even if no hot cues are visible)
-    this.renderHotCueNumbers();
   }
 
-  private renderHotCueNumbers(): void {
-    // Skip text rendering for minimap mode
-    if (this.isMinimapMode || !this.waveformData) return;
+  /**
+   * Get (lazily creating) the 2D text-overlay canvas context. The overlay
+   * sits absolutely over the WebGL canvas; main waveform only.
+   */
+  private ensureOverlayContext(): CanvasRenderingContext2D | null {
+    if (this.isMinimapMode || !this.waveformData) return null;
 
-    const gl = this.gl;
+    // Preserve WebGL state before 2D drawing
+    this.gl.flush();
 
-    // Preserve WebGL state
-    gl.flush();
-
-    // Get or create overlay canvas for text (unique per renderer instance)
     const overlayId = `waveform-text-overlay-${this.canvas.id || 'default'}`;
     let overlayCanvas = document.getElementById(overlayId) as HTMLCanvasElement;
     if (!overlayCanvas) {
@@ -933,14 +959,11 @@ export class WebGLWaveformRenderer {
       overlayCanvas.style.height = this.canvas.style.height;
     }
 
-    const ctx = overlayCanvas.getContext('2d');
-    if (!ctx) return;
+    return overlayCanvas.getContext('2d');
+  }
 
-    // Always clear previous text (even if no hot cues to draw)
-    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-
-    // If no hot cues, we're done (but we cleared the canvas)
-    if (this.hotCues.size === 0) return;
+  private renderHotCueNumbers(ctx: CanvasRenderingContext2D): void {
+    if (!this.waveformData || this.hotCues.size === 0) return;
 
     const squareSize = 16 * this.pixelRatio;
     const squareY = this.canvas.height - squareSize - (4 * this.pixelRatio);
@@ -1001,6 +1024,52 @@ export class WebGLWaveformRenderer {
       ctx.fillStyle = color;
       ctx.fillText(slotNumber.toString(), textX, textY);
     }
+  }
+
+  /** Time (elapsed / total) and bar-number readout, bottom-right of the overlay. */
+  private renderTimeReadout(ctx: CanvasRenderingContext2D): void {
+    if (!this.waveformData) return;
+
+    const duration = this.waveformData.duration;
+    const playhead = this.playPosition * duration;
+    const bar = this.barNumberAt(playhead);
+    const text =
+      `${formatReadoutTime(playhead)} / ${formatReadoutTime(duration)}` +
+      (bar !== null ? `  bar ${bar}` : '');
+
+    const pad = 6 * this.pixelRatio;
+    ctx.font = `bold ${12 * this.pixelRatio}px monospace`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+
+    // Translucent backing for legibility over the waveform
+    const metrics = ctx.measureText(text);
+    const textHeight = 14 * this.pixelRatio;
+    ctx.fillStyle = 'rgba(17, 17, 17, 0.7)';
+    ctx.fillRect(
+      this.canvas.width - pad * 2 - metrics.width,
+      this.canvas.height - pad * 1.5 - textHeight,
+      metrics.width + pad * 2,
+      textHeight + pad
+    );
+
+    ctx.fillStyle = 'rgb(205, 214, 244)';  // var(--text)
+    ctx.fillText(text, this.canvas.width - pad, this.canvas.height - pad);
+  }
+
+  /** 1-based bar number at `time`, or null before the first downbeat / without a grid. */
+  private barNumberAt(time: number): number | null {
+    const downbeats = this.downbeatTimes;
+    if (!downbeats || downbeats.length === 0 || time < downbeats[0]) return null;
+    // Binary search: count of downbeats <= time.
+    let lo = 0;
+    let hi = downbeats.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (downbeats[mid] <= time) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
   }
 
   private createOrthoMatrix(

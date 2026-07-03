@@ -6,8 +6,7 @@ import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
-import { elementClock } from '../playback/clock';
-import { useAudio } from '../hooks/useAudio';
+import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
 import BpmInput from './BpmInput';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, BeatgridIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
@@ -19,7 +18,6 @@ interface Props {
   track: Track | null;
   onSave: (data: { energy?: number; tag_ids?: number[]; bpm?: number; key?: number }) => void;
   onUpdate?: (trackId: number, field: 'title' | 'artist', value: string) => void;
-  currentTime: number;
   onEnergyEditModeChange?: (isActive: boolean) => void;
 }
 
@@ -28,11 +26,16 @@ export interface TagEditorHandle {
   toggleEnergyEditMode: () => void;
 }
 
-const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate, currentTime, onEnergyEditModeChange }, ref) => {
+const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate, onEnergyEditModeChange }, ref) => {
   const isDisabled = !track;
   const queryClient = useQueryClient();
-  const audio = useAudio();
-  const minimapClock = useMemo(() => elementClock(audio.audioRef), [audio.audioRef]);
+  // Beatgrid edits are playhead-dependent: they only apply when the track
+  // being edited is the one on the Deck. Narrow selectors keep transport
+  // events from re-rendering the editor.
+  const { engine, loadedTrack } = useDeck();
+  const deckReady = useDeckSnapshot((s) => s.loadState === 'ready');
+  const deckCuePoint = useDeckSnapshot((s) => s.cuePoint);
+  const isBeatgridEditable = !!track && loadedTrack?.id === track.id && deckReady;
 
   const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(
     new Set(track?.tags.map(t => t.id) || [])
@@ -145,16 +148,16 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
   // Handler for set downbeat button
   const handleSetDownbeat = () => {
-    if (!track) return;
+    if (!track || !isBeatgridEditable) return;
     setDownbeat.mutate({
       trackId: track.id,
-      downbeatTime: currentTime
+      downbeatTime: engine.getPlayhead()
     });
   };
 
   // Handler for nudge buttons
   const handleNudge = (offsetMs: number) => {
-    if (!track) return;
+    if (!track || !isBeatgridEditable) return;
     nudgeGrid.mutate({
       trackId: track.id,
       offsetMs
@@ -383,9 +386,9 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             <BeatgridIcon />
             <button
               onClick={() => handleNudge(-10)}
-              disabled={isDisabled || nudgeGrid.isPending}
+              disabled={!isBeatgridEditable || nudgeGrid.isPending}
               className="player-button"
-              title="Nudge grid 10ms earlier"
+              title={isBeatgridEditable ? 'Nudge grid 10ms earlier' : 'Load this track to edit its beatgrid'}
               style={{
                 padding: '4px 8px',
                 minWidth: '32px',
@@ -397,7 +400,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             </button>
             <button
               onClick={handleSetDownbeat}
-              disabled={isDisabled || setDownbeat.isPending}
+              disabled={!isBeatgridEditable || setDownbeat.isPending}
               className="player-button"
               style={{
                 color: 'var(--blue)',
@@ -407,15 +410,15 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 fontSize: '12px',
                 height: '24px',
               }}
-              title="Set downbeat at current position"
+              title={isBeatgridEditable ? 'Set downbeat at current position (G)' : 'Load this track to edit its beatgrid'}
             >
               D
             </button>
             <button
               onClick={() => handleNudge(10)}
-              disabled={isDisabled || nudgeGrid.isPending}
+              disabled={!isBeatgridEditable || nudgeGrid.isPending}
               className="player-button"
-              title="Nudge grid 10ms later"
+              title={isBeatgridEditable ? 'Nudge grid 10ms later' : 'Load this track to edit its beatgrid'}
               style={{
                 padding: '4px 8px',
                 minWidth: '32px',
@@ -495,11 +498,12 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             </button>
             <NeedleIcon />
             <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Minimap follows the Deck (loaded Track), not the selection */}
               <WaveformMinimap
-                trackId={track?.id ?? null}
-                clock={minimapClock}
-                cuePoint={audio.cuePoint}
-                onSeek={audio.seek}
+                trackId={loadedTrack?.id ?? null}
+                clock={engine}
+                cuePoint={deckCuePoint}
+                onSeek={(t) => engine.seek(t)}
               />
             </div>
           </div>

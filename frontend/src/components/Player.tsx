@@ -1,94 +1,42 @@
-import { useEffect, useMemo, useState, forwardRef, useImperativeHandle } from 'react';
-import type { Track } from '../types';
+import { useEffect, useState } from 'react';
 import WebGLWaveform from './WebGLWaveform';
 import type { ScrubTransport } from './WebGLWaveform';
-import { elementClock } from '../playback/clock';
-import { useAudio } from '../hooks/useAudio';
-import { useWaveformData } from '../hooks/useWaveformData';
-import { useHotCues } from '../hooks/useHotCues';
+import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
+import { useHotCueActions } from '../hooks/useHotCueActions';
+import { BEATJUMP_BEATS } from '../playback/constants';
 import HotCue from './HotCue';
 import './Player.css';
 
-interface PlayerProps {
-  track: Track | null;
-}
+/**
+ * The library's view of the Deck: waveform, transport, hot cues, time.
+ * Follows the loaded Track (glossary: Load), not the selection.
+ */
+export default function Player() {
+  const { engine, loadedTrack } = useDeck();
+  const snapshot = useDeckSnapshot((s) => s);
+  const ready = snapshot.loadState === 'ready';
+  const trackId = loadedTrack?.id ?? null;
 
-export interface PlayerHandle {
-  togglePlay: () => void;
-  skip: (beats: number) => void;
-  handleCueDown: () => void;
-  handleCueUp: () => void;
-}
+  const hotCues = useHotCueActions(trackId);
 
-const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
-  // Get audio state and controls from context
-  const audio = useAudio();
-
-  // Local state for time display (updated via setInterval, not React state from context)
-  const [displayTime, setDisplayTime] = useState(0);
-
-  // Fetch waveform data to get cue point
-  const { rawData: waveformData } = useWaveformData(track?.id ?? null);
-
-  // Fetch hot cues for current track
-  const { data: hotCuesArray = [] } = useHotCues(track?.id ?? null);
-
-  // Create a map from slot number to hot cue for easy lookup
-  const hotCuesMap = new Map(hotCuesArray.map(hc => [hc.slot_number, hc]));
-
-  // Update time display periodically (10 times per second)
+  // At-cue styling: polled coarsely, but setState only on boolean flips so
+  // steady playback causes zero re-renders.
+  const [atCuePoint, setAtCuePoint] = useState(false);
   useEffect(() => {
     const interval = setInterval(() => {
-      if (audio.audioRef.current) {
-        setDisplayTime(audio.audioRef.current.currentTime);
-      }
-    }, 100); // 10 updates/sec - sufficient for time display
-
+      const s = engine.getSnapshot();
+      const next =
+        s.cuePoint !== null && Math.abs(engine.getPlayhead() - s.cuePoint) < 0.1;
+      setAtCuePoint((prev) => (prev === next ? prev : next));
+    }, 100);
     return () => clearInterval(interval);
-  }, [audio.audioRef]);
+  }, [engine]);
 
-  // Load track when it changes (only when track ID or waveform data changes)
-  useEffect(() => {
-    if (track) {
-      const cuePointTime = waveformData?.cue_point_time ?? null;
-      audio.loadTrack(track.id, cuePointTime);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track?.id, waveformData?.cue_point_time]);
-
-  // Expose controls to parent via ref
-  useImperativeHandle(ref, () => ({
-    togglePlay: audio.togglePlayPause,
-    skip: (beats: number) => {
-      // Skip by beats instead of seconds
-      const bpm = track?.bpm ?? 120;
-      const secondsPerBeat = 60 / bpm;
-      const jumpTime = beats * secondsPerBeat;
-      const newTime = Math.max(0, Math.min(audio.duration, displayTime + jumpTime));
-      audio.seek(newTime);
-    },
-    handleCueDown: audio.handleCueDown,
-    handleCueUp: audio.handleCueUp,
-  }));
-
-  const formatTime = (seconds: number): string => {
-    if (!isFinite(seconds)) return '--:--';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Check if at cue point for button styling
-  const atCuePoint = audio.cuePoint !== null && Math.abs(displayTime - audio.cuePoint) < 0.1;
-
-  // Clock + transport for the waveform (element-backed until the library
-  // moves onto the shared DeckEngine — see deck-consolidation issue 03).
-  const clock = useMemo(() => elementClock(audio.audioRef), [audio.audioRef]);
   const scrubTransport: ScrubTransport = {
-    isPlaying: () => audio.isPlaying,
-    pause: audio.pause,
-    play: audio.play,
-    seek: audio.seek,
+    isPlaying: () => engine.isAudioRunning(),
+    pause: () => engine.pause(),
+    play: () => engine.play(),
+    seek: (t) => engine.seek(t),
   };
 
   return (
@@ -96,9 +44,9 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
       {/* Waveform with controls overlays */}
       <div style={{ position: 'relative' }}>
         <WebGLWaveform
-          trackId={track?.id ?? null}
-          clock={clock}
-          cuePoint={audio.cuePoint}
+          trackId={trackId}
+          clock={engine}
+          cuePoint={snapshot.cuePoint}
           transport={scrubTransport}
         />
 
@@ -106,14 +54,17 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
         <div className="player-controls-overlay">
           {/* Row 1: CUE button spanning all columns */}
           <button
-            onMouseDown={audio.handleCueDown}
-            onMouseUp={audio.handleCueUp}
-            onMouseLeave={audio.handleCueUp}
-            disabled={!track}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              engine.cueDown();
+            }}
+            onPointerUp={() => engine.cueUp()}
+            onPointerCancel={() => engine.cueUp()}
+            disabled={!ready}
             className={`player-button player-button-cue ${
-              audio.isPreviewing
+              snapshot.previewing
                 ? 'player-button-cue-held'
-                : !audio.isPlaying && audio.cuePoint !== null
+                : !snapshot.playing && snapshot.cuePoint !== null
                 ? atCuePoint
                   ? 'player-button-cue-at-cue'
                   : 'player-button-cue-away-from-cue'
@@ -126,71 +77,43 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
 
           {/* Row 2: PLAY button spanning all columns */}
           <button
-            onClick={audio.togglePlayPause}
-            disabled={!track}
-            className={`player-button ${audio.isPlaying ? 'player-button-playing' : 'player-button-paused'}`}
-            title={audio.isPlaying ? 'Pause' : 'Play'}
+            onClick={() => engine.togglePlay()}
+            disabled={!ready}
+            className={`player-button ${snapshot.playing ? 'player-button-playing' : 'player-button-paused'}`}
+            title={snapshot.playing ? 'Pause' : 'Play'}
           >
             ⏯
           </button>
 
           {/* Row 3: Jump back and forward buttons */}
           <button
-            onClick={() => {
-              const bpm = track?.bpm ?? 120;
-              const beatsToJump = 32;
-              const secondsPerBeat = 60 / bpm;
-              const jumpTime = beatsToJump * secondsPerBeat;
-              console.log('[Beatjump] Backward:', {
-                bpm,
-                beats: beatsToJump,
-                secondsPerBeat,
-                jumpTime,
-                currentTime: audio.audioRef.current?.currentTime ?? 0,
-                newTime: (audio.audioRef.current?.currentTime ?? 0) - jumpTime
-              });
-              const currentTime = audio.audioRef.current?.currentTime ?? 0;
-              const newTime = Math.max(0, Math.min(audio.duration, currentTime - jumpTime));
-              audio.seek(newTime);
-            }}
-            disabled={!track}
+            onClick={() => engine.jumpBeats(-BEATJUMP_BEATS)}
+            disabled={!ready}
             className="player-button"
-            title="Jump back 32 beats"
+            title={`Jump back ${BEATJUMP_BEATS} beats (A)`}
           >
             ◄◄
           </button>
 
           <button
-            onClick={() => {
-              const bpm = track?.bpm ?? 120;
-              const beatsToJump = 32;
-              const secondsPerBeat = 60 / bpm;
-              const jumpTime = beatsToJump * secondsPerBeat;
-              console.log('[Beatjump] Forward:', {
-                bpm,
-                beats: beatsToJump,
-                secondsPerBeat,
-                jumpTime,
-                currentTime: audio.audioRef.current?.currentTime ?? 0,
-                newTime: (audio.audioRef.current?.currentTime ?? 0) + jumpTime
-              });
-              const currentTime = audio.audioRef.current?.currentTime ?? 0;
-              const newTime = Math.max(0, Math.min(audio.duration, currentTime + jumpTime));
-              audio.seek(newTime);
-            }}
-            disabled={!track}
+            onClick={() => engine.jumpBeats(BEATJUMP_BEATS)}
+            disabled={!ready}
             className="player-button"
-            title="Jump forward 32 beats"
+            title={`Jump forward ${BEATJUMP_BEATS} beats (S)`}
           >
             ►►
           </button>
 
-          {/* Row 4: Time display - spanning all columns */}
-          <div className="player-time">
-            <span>{formatTime(displayTime)}</span>
-            <span className="player-time-separator">/</span>
-            <span>{formatTime(audio.duration)}</span>
-          </div>
+          {/* Row 4: Load state (time/bar readout is drawn on the waveform overlay) */}
+          {snapshot.loadState !== 'ready' && snapshot.loadState !== 'empty' && (
+            <div className="player-time">
+              {snapshot.loadState === 'error' ? (
+                <span title={snapshot.loadError ?? undefined}>load error</span>
+              ) : (
+                <span>{snapshot.loadState}…</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Hot cues overlay - top right */}
@@ -199,16 +122,18 @@ const Player = forwardRef<PlayerHandle, PlayerProps>(({ track }, ref) => {
             <HotCue
               key={slot}
               slotNumber={slot}
-              trackId={track?.id ?? null}
-              hotCue={hotCuesMap.get(slot)}
+              hotCue={hotCues.bySlot.get(slot)}
+              disabled={!hotCues.enabled}
+              isPreviewing={snapshot.hotCuePreviewSlot === slot}
+              onDown={hotCues.down}
+              onUp={hotCues.up}
+              onDelete={hotCues.remove}
             />
           ))}
         </div>
       </div>
     </>
   );
-});
+}
 
-Player.displayName = 'Player';
 
-export default Player;
