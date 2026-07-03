@@ -65,13 +65,19 @@ The two-deck view for practicing and performing mixes: stacked full-width wavefo
 Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it. In the Performance view, Loading onto a playing Deck is blocked (protecting the mix); in the library it simply replaces what's playing.
 
 **Nudge**:
-A momentary tempo bend on a Deck, held to ride phase alignment against the other Deck; releasing restores the Deck's pitch exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now.
+A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Jog rotation on a paused Deck is a seek, not a Nudge.
 
 **Hot Cue**:
 One of 8 persistent saved positions in a Track, used to jump to during performance.
 
 **Main cue**:
 The single repositionable cue position of a Track, moved with the "cue" button while DJing — distinct from Hot Cues by being one slot that moves freely during performance. Persisted with the Track (CDJ memory-cue behavior). When unset, it defaults to the Track's first beat if a Beatgrid exists, else the first non-silent audio.
+
+**Controller**:
+A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Decks, Mixer, and library browsing. An alternative input alongside keyboard and pointer — a Controller adds no new capabilities, only physical access to existing actions. Active app-wide, like the Decks it controls, not tied to any view.
+
+**Mapping**:
+The device-specific translation from a Controller's physical controls to manadj actions. One Mapping per device model; controls with no manadj counterpart are simply absent from it and do nothing.
 
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis.
