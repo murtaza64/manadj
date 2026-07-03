@@ -100,7 +100,7 @@
 .track-tags-cell {
   padding: 2px 12px;
   vertical-align: middle;
-  max-width: 300px;
+  /* width comes from columnConfig via inline style */
 }
 
 .track-tags-container {

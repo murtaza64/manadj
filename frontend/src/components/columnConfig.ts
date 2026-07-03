@@ -14,10 +14,10 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
   { id: 'title', width: 180, sticky: true, showShadow: true },
   { id: 'artist', width: 180 },
   { id: 'created_at', width: 75, align: 'right' },
+  { id: 'tags', width: 700 },
   { id: 'quality', width: 80, align: 'right' },
   { id: 'size', width: 60, align: 'right' },
   { id: 'provenance', width: 90 },
-  { id: 'tags', width: 300 },
 ];
 
 // Calculate sticky left positions

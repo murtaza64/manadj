@@ -1,7 +1,10 @@
 /* Column widths are set dynamically via inline styles from columnConfig.ts */
 
 .track-table {
-  width: 100%;
+  /* grows past the container (sum of column widths); container scrolls
+     horizontally, key/bpm/energy/title stay sticky */
+  min-width: 100%;
+  width: max-content;
   border-collapse: collapse;
   table-layout: fixed;
 }

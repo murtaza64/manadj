@@ -112,15 +112,22 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
         }}>
           {formatRelativeTime(track.created_at)}
         </td>
-        <td className="track-cell" style={getCellStyle(6)}>
+        <td className="track-tags-cell" style={getCellStyle(6)}>
+          <div className="track-tags-container">
+            {track.tags.map(tag => (
+              <TagPill key={tag.id} tag={tag} />
+            ))}
+          </div>
+        </td>
+        <td className="track-cell" style={getCellStyle(7)}>
           <span className={`quality-display ${isLowQuality(track) ? 'quality-low' : ''}`}>
             {formatQuality(track.codec, track.bitrate_kbps)}
           </span>
         </td>
-        <td className="track-cell" style={getCellStyle(7)}>
+        <td className="track-cell" style={getCellStyle(8)}>
           <span className="size-display">{formatSize(track.filesize_bytes)}</span>
         </td>
-        <td className="track-cell" style={getCellStyle(8)}>
+        <td className="track-cell" style={getCellStyle(9)}>
           {track.provenance ? (
             track.provenance.url ? (
               <a
@@ -142,13 +149,7 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
             <span style={{ color: 'var(--overlay0)' }}>-</span>
           )}
         </td>
-        <td className="track-tags-cell">
-          <div className="track-tags-container">
-            {track.tags.map(tag => (
-              <TagPill key={tag.id} tag={tag} />
-            ))}
-          </div>
-        </td>
+
       </tr>
   );
 }

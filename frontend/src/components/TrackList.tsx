@@ -80,12 +80,12 @@ export default function TrackList({
             <SortableHeader column="title" icon={<MusicIcon />} columnIndex={3} />
             <SortableHeader column="artist" icon={<PersonIcon />} columnIndex={4} />
             <SortableHeader column="created_at" icon={<CalendarIcon />} columnIndex={5} />
-            <SortableHeader column="bitrate_kbps" label="quality" columnIndex={6} />
-            <SortableHeader column="filesize_bytes" label="size" columnIndex={7} />
-            <SortableHeader column="provenance" label="from" columnIndex={8} />
-            <th style={{ textAlign: 'left', padding: '6px 12px', width: COLUMN_CONFIG[9].width }}>
+            <th style={{ textAlign: 'left', padding: '6px 12px', width: COLUMN_CONFIG[6].width }}>
               <TagIcon />
             </th>
+            <SortableHeader column="bitrate_kbps" label="quality" columnIndex={7} />
+            <SortableHeader column="filesize_bytes" label="size" columnIndex={8} />
+            <SortableHeader column="provenance" label="from" columnIndex={9} />
           </tr>
         </thead>
         <tbody>
