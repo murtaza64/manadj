@@ -80,7 +80,7 @@ A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Dec
 The device-specific translation from a Controller's physical controls to manadj actions. One Mapping per device model; controls with no manadj counterpart are simply absent from it and do nothing.
 
 **Beatgrid**:
-The mapping of beat positions across a Track, including tempo changes. Produced by Analysis.
+The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid.
 
 **Waveform**:
 The 3-band (low/mid/high) rendering of a Track's audio, used by manadj's own player UI. Internal to manadj — never transferred by Sync; each external library renders its own.
@@ -151,7 +151,7 @@ _Avoid_: pull, Library Import
 The discovery step of a Disk Import: finding audio files in the tracks directory that are not yet Tracks and proposing them as candidates.
 
 **Diverged**:
-A track field (title, artist, key, BPM, energy, Tag assignment) whose value differs between the Library and another Surface. The default resolution is Export (manadj wins); Import is the explicit exception.
+A track field (title, artist, key, BPM, energy, Tag assignment, Hot Cues, Beatgrid, Main cue) whose value differs between the Library and another Surface. The default resolution is Export (manadj wins); Import is the explicit exception. Set-valued fields (Tag assignment, Hot Cues) compare as whole sets; a placeholder grid counts as absent, not as a value that can diverge.
 _Avoid_: discrepancy (implementation term)
 
 **Match**:

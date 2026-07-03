@@ -1,6 +1,6 @@
 # Sync Hot Cues and Beatgrids
 
-Status: needs-triage (Engine→manadj backfill DONE via standalone script; remaining scope below)
+Status: needs-triage (Engine→manadj backfill DONE via standalone script; import half superseded by ../PRD.md — remaining scope here is the Export direction and Rekordbox)
 
 ## Problem
 
@@ -33,3 +33,5 @@ Implement both directions for Hot Cues and Beatgrids:
   - Loops: decoded format known, no manadj model — future concept.
   - Export direction (manadj → Engine/Rekordbox PerformanceData) — untouched.
   - Rekordbox import — untouched.
+
+**2026-07-03 — Import half superseded by `../PRD.md`** (performance-data-sync PRD, ready-for-agent). The PRD reifies the Engine→manadj import into the app (divergence fields + bulk action + overlay diff viewer), resolves main-cue precedence (overridden-flag-only, fill-empty auto, overwrites confirmed), and imports variable-tempo grids with a flag. Still owned by this issue: Export direction, Rekordbox, loops, and the 2 BPM-drift grids (also noted in the PRD's Further Notes).
