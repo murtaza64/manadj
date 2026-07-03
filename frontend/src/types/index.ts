@@ -37,6 +37,7 @@ export interface Track {
   artist?: string;
   key?: number;  // Engine DJ key ID (0-23)
   bpm?: number;
+  duration_secs?: number | null;
   created_at: string;
   updated_at: string;
   tags: Tag[];

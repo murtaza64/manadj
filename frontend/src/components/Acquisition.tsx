@@ -421,12 +421,14 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
         </div>
       )}
 
-      {!corr && (
+      {corr?.status !== 'confirmed' && (
         <div className="acquisition-manual-link">
-          <div className="acquisition-sidebar-heading">manual link</div>
+          <div className="acquisition-sidebar-heading">
+            {corr?.status === 'proposed' ? 'or link a different library track' : 'manual link'}
+          </div>
           <input
             className="acquisition-link-input"
-            placeholder="search library tracks…"
+            placeholder="search library tracks by title, artist, or filename…"
             value={linkSearch}
             onChange={e => setLinkSearch(e.target.value)}
           />
@@ -437,8 +439,16 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
               onClick={() => linkMutation.mutate(track.id)}
             >
               {track.artist ?? '?'} - {track.title ?? track.filename}
+              {track.duration_secs != null && (
+                <span className="acquisition-link-duration">
+                  {' · '}{formatDuration(track.duration_secs * 1000)}
+                </span>
+              )}
             </button>
           ))}
+          {linkSearch.length >= 2 && searchResults && searchResults.items.length === 0 && (
+            <div className="acquisition-item-sub">no library tracks match</div>
+          )}
         </div>
       )}
     </div>

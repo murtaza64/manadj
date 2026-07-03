@@ -1,6 +1,7 @@
 """CRUD operations for database."""
 
 import json
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql import func
 from . import models, schemas
@@ -30,10 +31,15 @@ def get_tracks(
         joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category)
     )
 
-    # Text search on filename
+    # Text search on filename, title, or artist
     if search:
+        pattern = f"%{search}%"
         query = query.filter(
-            models.Track.filename.ilike(f"%{search}%")
+            or_(
+                models.Track.filename.ilike(pattern),
+                models.Track.title.ilike(pattern),
+                models.Track.artist.ilike(pattern),
+            )
         )
 
     # Energy range filter

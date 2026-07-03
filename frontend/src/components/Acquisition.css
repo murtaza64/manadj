@@ -319,3 +319,7 @@
   flex-shrink: 0;
   accent-color: var(--blue);
 }
+
+.acquisition-link-duration {
+  color: var(--overlay1);
+}

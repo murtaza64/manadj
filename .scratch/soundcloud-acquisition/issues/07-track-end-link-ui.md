@@ -15,6 +15,10 @@ The Track-side manual-link affordance: paste a SoundCloud URL on a Track in the 
 - [ ] A Track's context/detail UI in the Library view accepts a pasted SoundCloud permalink URL
 - [ ] Linking marks the matching Source Item fulfilled; unknown URLs surface the 404 detail ("refresh first?")
 
+## Notes
+
+- 2026-07-02: when this is picked up, consider folding in the track-side **provenance editor** (set/edit Audio Provenance on any Track) — deferred from issue 09 (asserted provenance); same Library-view surface.
+
 ## Blocked by
 
 None - can start immediately

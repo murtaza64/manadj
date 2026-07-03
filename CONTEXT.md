@@ -61,7 +61,13 @@ The 3-band (low/mid/high) rendering of a Track's audio, used by manadj's own pla
 ### Acquisition
 
 **Source**:
-An external place audio is acquired from (e.g. SoundCloud). Unlike an External library, a Source holds no copy of manadj's library state — it supplies new audio and provenance.
+A place audio is acquired from. Unlike an External library, a Source holds no copy of manadj's library state — it supplies new audio and provenance. Either Native or External.
+
+**Native Source**:
+A Source manadj is integrated with: it can Refresh Source Items from it and download from it (SoundCloud today). Provenance from a Native Source is recorded automatically with a structured external ID.
+
+**External Source**:
+A Source manadj recognizes but is not integrated with (e.g. Beatport, YouTube, Bandcamp). Identified by URL only — the URL carries whatever identity exists (video ID, Beatport ID). Provenance from an External Source is asserted by the user. An External Source can be promoted to Native later; its provenance URLs remain parseable.
 
 **Acquisition**:
 The pipeline that turns Source Items into Tracks: Refresh, classification and queueing, download, Disk Import, and creation of the Source Correspondence. Distinct from Export/External Import, which transfer state about existing Tracks.
@@ -83,7 +89,7 @@ Fetching the current list of Source Items from a Source. Only ever adds new Sour
 Normalizing raw metadata from a Source or filename into canonical Track title and artist — junk-token stripping, `Artist - Title` splitting, uploader fallback.
 
 **Audio Provenance**:
-A record of where a Track's audio file came from (e.g. downloaded by manadj from SoundCloud on a given date). Distinct from Source Correspondence: a Track can correspond to a SoundCloud track while its audio was bought elsewhere.
+A record of where a Track's current audio file came from: an origin label (the Source's name, derived from the URL host for External Sources), an optional URL, and when it was acquired. Recorded automatically for Native Source downloads; asserted by the user otherwise. Label-only provenance is allowed for URL-less origins (cd-rip, unknown). Replacing a Track's audio replaces its provenance. Distinct from Source Correspondence: a Track can correspond to a SoundCloud track while its audio was bought elsewhere.
 
 ### Sync
 

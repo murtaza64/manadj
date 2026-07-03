@@ -56,6 +56,7 @@ class TrackBase(BaseModel):
     artist: str | None = None
     key: int | None = None  # Engine DJ key ID (0-23)
     bpm: float | None = None  # Exposed as float, stored as int * 100
+    duration_secs: float | None = None  # audio duration, read from the file
 
 
 class TrackCreate(TrackBase):
