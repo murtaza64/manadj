@@ -51,6 +51,10 @@ export interface WebGLRendererConfig {
    * that scales with document size (the library table), throttling the
    * render loop. Canvas contents are a single compositor layer. */
   showTimeReadout?: boolean;
+  /** Scale waveform band colors only (0–1, default 1) — markers (hot cues,
+   * beatgrid, playhead) stay full-strength, so they pop over a dimmed
+   * waveform (transition-editor rows use ~0.6). */
+  waveformBrightness?: number;
 }
 
 export class WebGLWaveformRenderer {
@@ -89,6 +93,7 @@ export class WebGLWaveformRenderer {
   // Mode flags
   private isMinimapMode: boolean;
   private showTimeReadout: boolean;
+  private waveformBrightness: number;
 
   // Manual drag offset (CSS pixels) - applied during drag operations
   private manualDragOffset: number = 0;
@@ -155,6 +160,7 @@ export class WebGLWaveformRenderer {
     // Apply configuration
     this.isMinimapMode = config.isMinimapMode ?? false;
     this.showTimeReadout = (config.showTimeReadout ?? false) && !this.isMinimapMode;
+    this.waveformBrightness = Math.max(0, Math.min(1, config.waveformBrightness ?? 1));
     this.playMarkerPosition = config.playMarkerPosition ?? 0.25;
     this.maxZoom = config.maxZoom ?? 50.0;
     this.minZoom = config.minZoom ?? 0.5;
@@ -538,7 +544,9 @@ export class WebGLWaveformRenderer {
     const colorScale = this.isMinimapMode ? 0.5 : 1.0;
     // Band opacity for additive blending: lower opacity prevents
     // oversaturation where bands overlap; reduced further for minimap.
-    const opacityScale = (this.isMinimapMode ? 0.5 : 1.0) * 0.7 * opacityMultiplier;
+    // waveformBrightness dims the bands only — markers draw full-strength.
+    const opacityScale =
+      (this.isMinimapMode ? 0.5 : 1.0) * 0.7 * opacityMultiplier * this.waveformBrightness;
     // Final per-band colors, premultiplied once (constant across columns).
     const bandColors: [number, number, number][] = [
       [0.95 * colorScale * opacityScale, 0.38 * colorScale * opacityScale, 0.38 * colorScale * opacityScale], // low: mild red (maroon) - bass

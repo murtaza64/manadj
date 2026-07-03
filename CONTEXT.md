@@ -41,7 +41,10 @@ A first-class Track attribute (1–5) expressing intensity. Not a Tag. External 
 A hand-curated, ordered list of Tracks. Curated in manadj and Exported to external libraries. Distinct from the generated playlists that encode Tags in Engine DJ, and from a Mix (which adds performance data).
 
 **Transition**:
-A first-class persisted artifact: the handover between an ordered pair of Tracks — entry/exit anchors (in seconds), a duration, an optional tempo-match, and drawn automation lanes for mixer controls. Directional (A→B is not B→A); a pair usually has one Transition, occasionally several. Beat-snapping and tempo-matching are editing affordances, not the model. The accumulating set of saved Transitions is the library of "what mixes well into what" — the seed of track-association features.
+A first-class persisted artifact: the handover between an ordered pair of Tracks — entry/exit anchors (in seconds), a duration, an optional tempo-match, and drawn automation lanes for mixer controls. Directional (A→B is not B→A); a pair usually has one Transition, occasionally several. The incoming entry anchor may be negative: the incoming Track's audio then begins partway into the Transition (a silent lead gap). Beat-snapping and tempo-matching are editing affordances, not the model. The accumulating set of saved Transitions is the library of "what mixes well into what" — the seed of track-association features.
+
+**Sketch origin**:
+The Transition editor's timeline starts at the outgoing Track's start — an invariant, not a setting. The outgoing Track never moves on the timeline; every alignment gesture is expressible as a Slide of the incoming Track, the window, or both.
 
 **Transition editor**:
 The top-panel mode (a sibling of the library and Performance views) for editing the saved Transition between two loaded Tracks on a DAW-style timeline. Entering it pauses other playback surfaces: one audible surface at a time.
@@ -53,10 +56,10 @@ Future concept: an ordered sequence of Tracks whose adjacencies reference saved 
 A named beat-domain recipe for producing a Transition: per-side anchor rules (cue slot + beat delta on each track's own grid), a length in beats (fixed or scalable at apply time), and normalized automation lanes (e.g. "bass swap"). Applying one translates beats to seconds via the tempo-matched beatgrids and yields an ordinary seconds-based Transition — the recipe is an editing affordance, not a runtime concept. Designed; built behind DB persistence.
 
 **Slide**:
-Moving one Track's audio relative to the mix frame in the Transition editor — the other Track, the Transition window, the lanes, and the playhead stay fixed; the slid Track's content shifts under them. The editor's deck controls re-purpose transport gestures as Slides: beat jump = slide by ±N of the deck's own beats; hot cue = slide so that cue lands on the playhead. Distinct from the transport meaning of those gestures on other surfaces (which move the playhead within a fixed track).
+Realigning the Track pair in the Transition editor by moving one Track's content relative to the rest. Every Slide changes the pair alignment and re-cues only the slid Track: the playhead stays pinned to the un-slid Track's content, so the other deck never hiccups. (The outgoing Track is pinned to the sketch origin, so sliding it moves the playhead in mix time by the mirrored amount — including landing it on the activated cue.) The editor's deck controls re-purpose transport gestures as Slides: beat jump = slide by ±N of the deck's own beats; hot cue = slide so that cue and the playhead coincide. Distinct from the transport meaning of those gestures on other surfaces (which move the playhead within a fixed track).
 
 **Locked window**:
-A Transition-editor mode inverting Slide semantics: when locked, the Transition window travels with whichever Track is slid (keeping the same audio under the window); when unlocked, the window holds its mix-frame position and content slides under it. Conceptually the lock chooses the window's home frame — the mix timeline, or the slid Track's content.
+A Transition-editor toggle choosing which Track the Transition window sticks to during a Slide: locked, the window rides the slid Track (the same audio stays under it); unlocked, it stays with the other Track. Standing on the incoming Track's drop and hot-cueing the outgoing Track's drop with the window locked aligns the two drops in one gesture.
 
 **Cue-slot convention**:
 A library convention (not a code concept) giving hot cue slots stable musical meaning so Transition templates can anchor to them: 1 = first buildup, 4 = drop. Missing slots fall back to hard-coded heuristic beat positions at template-apply time.

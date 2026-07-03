@@ -640,7 +640,8 @@ function DawTimeline({
   const { data: waveB } = useWaveformData(trackBId);
   const { data: hotCuesA = [] } = useHotCues(trackAId);
   const { data: hotCuesB = [] } = useHotCues(trackBId);
-  const rowConfig = { isMinimapMode: false, playMarkerPosition: 0 };
+  // Dimmed bands so hot cues / beatgrid pop in the editor rows (issue 05).
+  const rowConfig = { isMinimapMode: false, playMarkerPosition: 0, waveformBrightness: 0.6 };
   // Driven mode: the rAF tick below calls draw() for both rows right after
   // writing transforms + display windows — one motion clock, layer order
   // guaranteed (self-running renderer loops only aligned by rAF
@@ -1104,6 +1105,13 @@ interface LaneGuide {
   color?: string;
 }
 
+/** Breakpoint circle radius (uniform for all points). */
+const LANE_POINT_R = 5;
+/** Canvas overhang past the editable lane rect on every side, so breakpoint
+ * circles at the extremes render complete, floating over the window borders.
+ * Must match the canvas inset/size in mixEditorProto.css. */
+const LANE_PAD = 7;
+
 function LaneCanvas({
   id,
   widthPx,
@@ -1125,6 +1133,8 @@ function LaneCanvas({
     pointsRef.current = points;
   });
   const dragIndex = useRef<number | null>(null);
+  /** Hovered breakpoint index (shows its value readout). */
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1138,22 +1148,29 @@ function LaneCanvas({
       canvas.height = h * dpr;
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    // The editable lane rect sits inset by LANE_PAD; the pad ring stays
+    // transparent except where breakpoint circles overflow into it.
+    const lw = w - LANE_PAD * 2;
+    const lh = h - LANE_PAD * 2;
+    const lx = (nx: number) => LANE_PAD + nx * lw;
+    const ly = (ny: number) => LANE_PAD + (1 - ny) * lh;
     ctx.fillStyle = 'rgba(24, 24, 37, 0.85)';
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(LANE_PAD, LANE_PAD, lw, lh);
     ctx.fillStyle = '#313244';
-    ctx.fillRect(0, h / 2, w, 1);
+    ctx.fillRect(LANE_PAD, LANE_PAD + lh / 2, lw, 1);
 
     // Beat/cue guides continue through the lanes (beatmatching alignment).
     for (const g of guides) {
-      const gx = g.x * w;
+      const gx = lx(g.x);
       if (g.color) {
         ctx.fillStyle = g.color;
         ctx.globalAlpha = 0.5;
-        ctx.fillRect(gx - 0.5, 0, 1.5, h);
+        ctx.fillRect(gx - 0.5, LANE_PAD, 1.5, lh);
         ctx.globalAlpha = 1;
       } else {
         ctx.fillStyle = g.strong ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)';
-        ctx.fillRect(gx, 0, g.strong ? 1.5 : 1, h);
+        ctx.fillRect(gx, LANE_PAD, g.strong ? 1.5 : 1, lh);
       }
     }
 
@@ -1162,22 +1179,22 @@ function LaneCanvas({
     const tracePath = () => {
       ctx.beginPath();
       points.forEach((p, i) => {
-        const px = p.x * w;
-        const py = (1 - p.y) * h;
+        const px = lx(p.x);
+        const py = ly(p.y);
         if (i === 0) {
-          ctx.moveTo(0, py);
+          ctx.moveTo(lx(0), py);
           ctx.lineTo(px, py);
         }
         ctx.lineTo(px, py);
-        if (i === points.length - 1) ctx.lineTo(w, py);
+        if (i === points.length - 1) ctx.lineTo(lx(1), py);
       });
     };
 
     // Translucent fill under the curve (DAW-style) — makes each lane's shape
     // read at a glance even when several strips are stacked.
     tracePath();
-    ctx.lineTo(w, h);
-    ctx.lineTo(0, h);
+    ctx.lineTo(lx(1), LANE_PAD + lh);
+    ctx.lineTo(lx(0), LANE_PAD + lh);
     ctx.closePath();
     ctx.globalAlpha = 0.18;
     ctx.fillStyle = color;
@@ -1189,25 +1206,51 @@ function LaneCanvas({
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    ctx.fillStyle = color;
-    for (const p of points) {
+    // Breakpoints: uniform size, centered on their true curve position —
+    // circles at the extremes overflow into the pad, floating over the
+    // window borders instead of getting cut off or nudged inward.
+    points.forEach((p) => {
       ctx.beginPath();
-      ctx.arc(p.x * w, (1 - p.y) * h, 5, 0, Math.PI * 2);
+      ctx.arc(lx(p.x), ly(p.y), LANE_POINT_R, 0, Math.PI * 2);
+      ctx.fillStyle = color;
       ctx.fill();
+    });
+
+    // Value readout: hovered breakpoint only.
+    if (hoverIndex !== null && points[hoverIndex]) {
+      const p = points[hoverIndex];
+      const text = p.y.toFixed(2);
+      ctx.font = 'bold 10px monospace';
+      ctx.textBaseline = 'middle';
+      const cx = lx(p.x);
+      const cy = Math.max(LANE_PAD + 7, Math.min(LANE_PAD + lh - 7, ly(p.y)));
+      const tw = ctx.measureText(text).width;
+      // Label to whichever side has room.
+      const rightward = cx + 14 + tw < LANE_PAD + lw;
+      const tx = rightward ? cx + 12 : cx - 12 - tw;
+      ctx.fillStyle = 'rgba(17, 17, 27, 0.85)';
+      ctx.fillRect(tx - 2, cy - 7, tw + 4, 14);
+      ctx.fillStyle = '#cdd6f4';
+      ctx.fillText(text, tx, cy);
     }
-  }, [points, id, guides, widthPx]);
+  }, [points, id, guides, widthPx, hoverIndex]);
 
   const pointAt = (e: React.PointerEvent | React.MouseEvent) => {
+    // The hit div coincides exactly with the editable lane rect (the canvas
+    // pads around it for visuals only), so pointer coords map 1:1 — hit
+    // targets line up with the drawn circles.
     const rect = e.currentTarget.getBoundingClientRect();
+    const ex = e.clientX - rect.left;
+    const ey = e.clientY - rect.top;
     return {
-      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / rect.height)),
+      x: Math.max(0, Math.min(1, ex / rect.width)),
+      y: Math.max(0, Math.min(1, 1 - ey / rect.height)),
       nearestIndex: (() => {
         let best = -1;
         let bestDist = Infinity;
         pointsRef.current.forEach((p, i) => {
-          const dx = (p.x * rect.width) - (e.clientX - rect.left);
-          const dy = ((1 - p.y) * rect.height) - (e.clientY - rect.top);
+          const dx = p.x * rect.width - ex;
+          const dy = (1 - p.y) * rect.height - ey;
           const d = Math.hypot(dx, dy);
           if (d < bestDist) {
             bestDist = d;
@@ -1221,9 +1264,17 @@ function LaneCanvas({
 
   const commit = (pts: LanePoint[]) => onChange([...pts].sort((a, b) => a.x - b.x));
 
+  /** Filter lanes magnet to 0.5 (= filter off) so a curve can return to
+   * exactly neutral. Shift suspends it, like every other snap. */
+  const snapValue = (y: number, e: { shiftKey: boolean }) =>
+    id.startsWith('filter') && !e.shiftKey && Math.abs(y - 0.5) < 0.08 ? 0.5 : y;
+
+  // The hit div fills the lane rect exactly; the canvas (pointer-events:
+  // none) pads past it so edge breakpoints render as full circles floating
+  // over the window borders without stealing clicks from neighboring strips.
   return (
-    <canvas
-      ref={canvasRef}
+    <div
+      className="mixproto-lanehit"
       onPointerDown={(e) => {
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -1231,16 +1282,21 @@ function LaneCanvas({
         if (hit.nearestIndex >= 0) {
           dragIndex.current = hit.nearestIndex;
         } else {
-          const pts = [...pointsRef.current, { x: hit.x, y: hit.y }].sort((a, b) => a.x - b.x);
-          dragIndex.current = pts.findIndex((p) => p.x === hit.x && p.y === hit.y);
+          const y = snapValue(hit.y, e);
+          const pts = [...pointsRef.current, { x: hit.x, y }].sort((a, b) => a.x - b.x);
+          dragIndex.current = pts.findIndex((p) => p.x === hit.x && p.y === y);
           commit(pts);
         }
       }}
       onPointerMove={(e) => {
-        if (dragIndex.current === null) return;
+        if (dragIndex.current === null) {
+          const hit = pointAt(e);
+          setHoverIndex(hit.nearestIndex >= 0 ? hit.nearestIndex : null);
+          return;
+        }
         const hit = pointAt(e);
         const pts = [...pointsRef.current];
-        pts[dragIndex.current] = { x: hit.x, y: hit.y };
+        pts[dragIndex.current] = { x: hit.x, y: snapValue(hit.y, e) };
         const i = dragIndex.current;
         if (i > 0) pts[i].x = Math.max(pts[i].x, pts[i - 1].x);
         if (i < pts.length - 1) pts[i].x = Math.min(pts[i].x, pts[i + 1].x);
@@ -1248,6 +1304,7 @@ function LaneCanvas({
       }}
       onPointerUp={() => (dragIndex.current = null)}
       onPointerCancel={() => (dragIndex.current = null)}
+      onPointerLeave={() => setHoverIndex(null)}
       onDoubleClick={(e) => {
         e.stopPropagation();
         const hit = pointAt(e);
@@ -1256,7 +1313,9 @@ function LaneCanvas({
           commit(pts);
         }
       }}
-    />
+    >
+      <canvas ref={canvasRef} />
+    </div>
   );
 }
 
