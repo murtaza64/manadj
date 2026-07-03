@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from ..library.import_manager import LibraryImportManager
 from ..models import Track
 from .cleanup import CleanupConfig, clean_metadata, safe_basename
-from .manager import backfill_track_durations
+from ..track_metadata.file_facts import refresh_file_facts
 from .models import AudioProvenance, SourceCorrespondence, SourceItem
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ def download_handler(
         # Cleanup output is authoritative for a fresh acquisition
         track.title = meta.title  # type: ignore[assignment]
         track.artist = meta.artist  # type: ignore[assignment]
-        backfill_track_durations(db)
+        refresh_file_facts(db)
 
         db.add(
             SourceCorrespondence(

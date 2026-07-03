@@ -137,7 +137,7 @@ function deriveRelatedFilters(
   bpmCenter: number | null;
   bpmThresholdPercent: number;
   selectedKeyCamelotIds: string[];
-  sortColumn: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | null;
+  sortColumn: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance' | null;
   sortDirection: 'asc' | 'desc';
 } {
   const filters = {
@@ -149,7 +149,7 @@ function deriveRelatedFilters(
     bpmCenter: null as number | null,
     bpmThresholdPercent: 5,
     selectedKeyCamelotIds: [] as string[],
-    sortColumn: 'created_at' as 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | null,
+    sortColumn: 'created_at' as 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance' | null,
     sortDirection: 'desc' as 'asc' | 'desc',
   };
 
@@ -304,7 +304,7 @@ export default function Library({ onOpenPlaylistSync }: LibraryProps) {
     }
   };
 
-  const handleSort = (column: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at') => {
+  const handleSort = (column: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance') => {
     setFilters(prev => {
       // Toggle direction if same column, otherwise default to desc
       const newDirection = prev.sortColumn === column && prev.sortDirection === 'desc'

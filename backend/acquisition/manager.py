@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ..tasks.models import Task
 
 from ..models import Track
-from ..track_metadata.file_metadata import FileMetadataError, read_file_metadata
+from ..track_metadata.file_facts import refresh_file_facts
 from .classification import CLASSIFICATIONS, ClassificationConfig, classify
 from .matching import MatchingConfig, duration_status, score_pair
 from .models import SourceCorrespondence, SourceItem
@@ -79,7 +79,7 @@ def refresh(
         item.classification = classify(item.title, item.duration_ms, cfg)
     db.commit()
 
-    backfill_track_durations(db)
+    refresh_file_facts(db)
     run_matching(db, matching_config or MatchingConfig(), source_name=source_name)
 
     total_local = db.query(SourceItem).filter(SourceItem.source == source_name).count()
@@ -112,24 +112,6 @@ def list_source_items(db: Session, source_name: str = "soundcloud") -> list[Sour
 class MatchStats:
     auto_confirmed: int
     proposed: int
-
-
-def backfill_track_durations(db: Session) -> int:
-    """Fill Track.duration_secs from audio files for Tracks that lack it."""
-    updated = 0
-    tracks = db.query(Track).filter(Track.duration_secs.is_(None)).all()
-    for track in tracks:
-        try:
-            meta = read_file_metadata(str(track.filename))
-        except FileMetadataError:
-            continue
-        if meta.duration_secs is not None:
-            track.duration_secs = meta.duration_secs  # type: ignore[assignment]
-            updated += 1
-    db.commit()
-    if updated:
-        logger.info("backfilled duration for %d tracks", updated)
-    return updated
 
 
 def run_matching(

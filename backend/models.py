@@ -21,6 +21,9 @@ class Track(Base):
     key = Column(Integer, nullable=True)  # Engine DJ key ID (0-23)
     bpm = Column(Integer, nullable=True)  # Beats per minute
     duration_secs = Column(Float, nullable=True)  # audio duration, read from the file
+    codec = Column(String, nullable=True)  # mp3/aac/alac/flac/pcm, from the file
+    bitrate_kbps = Column(Integer, nullable=True)  # from the file
+    filesize_bytes = Column(Integer, nullable=True)  # from the file
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

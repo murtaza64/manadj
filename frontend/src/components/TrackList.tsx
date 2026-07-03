@@ -5,7 +5,7 @@ import type { Track } from '../types';
 import { COLUMN_CONFIG, getStickyLeft } from './columnConfig';
 import './TrackList.css';
 
-type SortColumn = 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at';
+type SortColumn = 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance';
 
 interface TrackListProps {
   tracks: Track[];
@@ -80,7 +80,10 @@ export default function TrackList({
             <SortableHeader column="title" icon={<MusicIcon />} columnIndex={3} />
             <SortableHeader column="artist" icon={<PersonIcon />} columnIndex={4} />
             <SortableHeader column="created_at" icon={<CalendarIcon />} columnIndex={5} />
-            <th style={{ textAlign: 'left', padding: '6px 12px', width: COLUMN_CONFIG[6].width }}>
+            <SortableHeader column="bitrate_kbps" label="quality" columnIndex={6} />
+            <SortableHeader column="filesize_bytes" label="size" columnIndex={7} />
+            <SortableHeader column="provenance" label="from" columnIndex={8} />
+            <th style={{ textAlign: 'left', padding: '6px 12px', width: COLUMN_CONFIG[9].width }}>
               <TagIcon />
             </th>
           </tr>
@@ -88,13 +91,13 @@ export default function TrackList({
         <tbody>
           {isLoading && tracks.length === 0 ? (
             <tr>
-              <td colSpan={7} className="track-table-message track-table-loading">
+              <td colSpan={10} className="track-table-message track-table-loading">
                 Loading tracks...
               </td>
             </tr>
           ) : error ? (
             <tr>
-              <td colSpan={7} className="track-table-message track-table-error">
+              <td colSpan={10} className="track-table-message track-table-error">
                 Error loading tracks
               </td>
             </tr>

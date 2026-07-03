@@ -10,7 +10,7 @@ interface FilterState {
   bpmCenter: number | null;
   bpmThresholdPercent: number;
   selectedKeyCamelotIds: string[];
-  sortColumn: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | null;
+  sortColumn: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance' | null;
   sortDirection: 'asc' | 'desc';
 }
 

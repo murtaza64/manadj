@@ -183,6 +183,9 @@ class LibraryImportManager:
         if result.imported > 0:
             try:
                 self.manadj_session.commit()
+                # fill file-derived fields (codec/bitrate/filesize/duration)
+                from ..track_metadata.file_facts import refresh_file_facts
+                refresh_file_facts(self.manadj_session)
             except Exception as e:
                 self.manadj_session.rollback()
                 result.error_messages.append(f"Commit failed: {str(e)}")

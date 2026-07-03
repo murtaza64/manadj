@@ -21,12 +21,12 @@ Surface per-track audio quality facts in the Library track list so low-quality t
 
 ## Acceptance criteria
 
-- [ ] Migration adds codec/bitrate_kbps/filesize_bytes; Disk Import fills them for new tracks
-- [ ] Backfill script fills existing tracks (~979); idempotent + `--force`
-- [ ] Bitrate is codec-aware in display (lossless shows codec name, not a number)
-- [ ] Tracks API exposes the fields + provenance; all three columns sortable
-- [ ] Library table renders Quality / Size / From; provenance chip links out
-- [ ] Module-interface tests: file-facts pass against real audio fixtures (all four formats); duration backfill relocated without regression; thin router smoke for new fields
+- [x] Migration adds codec/bitrate_kbps/filesize_bytes; Disk Import fills them for new tracks
+- [x] Backfill script fills existing tracks (~979); idempotent + `--force`
+- [x] Bitrate is codec-aware in display (lossless shows codec name, not a number)
+- [x] Tracks API exposes the fields + provenance; all three columns sortable
+- [x] Library table renders Quality / Size / From; provenance chip links out
+- [x] Module-interface tests: file-facts pass against real audio fixtures (all four formats); duration backfill relocated without regression; thin router smoke for new fields
 
 ## Blocked by
 
