@@ -1,3 +1,5 @@
+.PHONY: dev test typecheck waveforms
+
 dev: frontend/node_modules/.package-lock.json
 	uv run scripts/dev.py
 
@@ -11,3 +13,6 @@ test:
 
 typecheck:
 	cd frontend && npx tsc -b
+
+waveforms:
+	uv run scripts/populate_waveforms.py
