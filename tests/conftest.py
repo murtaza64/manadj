@@ -37,6 +37,7 @@ def _make_engine() -> Engine:
     with engine.connect() as connection:
         cfg = AlembicConfig(str(ALEMBIC_INI))
         cfg.attributes["connection"] = connection
+        cfg.attributes["configure_logger"] = False  # keep pytest output clean
         alembic_command.upgrade(cfg, "head")
     return engine
 

@@ -20,7 +20,9 @@ from .logging_config import setup_logging
 setup_logging()
 
 # Migrate the database to the latest revision (replaces Base.metadata.create_all)
-alembic_command.upgrade(AlembicConfig(str(Path(__file__).parent.parent / "alembic.ini")), "head")
+_alembic_cfg = AlembicConfig(str(Path(__file__).parent.parent / "alembic.ini"))
+_alembic_cfg.attributes["configure_logger"] = False  # don't clobber app logging
+alembic_command.upgrade(_alembic_cfg, "head")
 
 app = FastAPI(title="Music Library Manager", version="1.0.0")
 

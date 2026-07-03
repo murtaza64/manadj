@@ -25,7 +25,10 @@ import backend.tasks.models  # noqa: F401
 
 config = context.config
 
-if config.config_file_name is not None:
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
+    # Skipped when invoked programmatically (app startup, tests): alembic.ini's
+    # logger config sets root to WARNING and would clobber the app's logging —
+    # it silenced uvicorn access logs entirely.
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
