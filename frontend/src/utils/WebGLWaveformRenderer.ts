@@ -145,6 +145,9 @@ export class WebGLWaveformRenderer {
 
   // Geometry caching for performance
   private cachedWaveformGeometry: Float32Array | null = null;
+  /** Reused vertex scratch: allocating multi-MB arrays per regen (every
+   * zoom-gesture frame) was measurable GC churn. */
+  private geometryScratch: Float32Array | null = null;
   private cacheValidation: {
     firstDisplayedPosition: number;
     lastDisplayedPosition: number;
@@ -583,10 +586,15 @@ export class WebGLWaveformRenderer {
       [0.53 * colorScale * opacityScale, 0.87 * colorScale * opacityScale, 0.93 * colorScale * opacityScale], // high: light blue (sky)
     ];
 
-    // Preallocated vertex array: [x, y, r, g, b] × 6 vertices × 3 bands per
-    // pixel column (a growing number[] here caused multi-MB GC churn).
+    // Reused vertex scratch: [x, y, r, g, b] × 6 vertices × 3 bands per
+    // pixel column. Every slot is rewritten below, so reuse is safe; the
+    // cache and the GPU upload both consume it before the next regen.
     const FLOATS_PER_COLUMN = 90;
-    const vertices = new Float32Array(renderWidth * FLOATS_PER_COLUMN);
+    const needed = renderWidth * FLOATS_PER_COLUMN;
+    if (!this.geometryScratch || this.geometryScratch.length < needed) {
+      this.geometryScratch = new Float32Array(Math.ceil(needed * 1.25));
+    }
+    const vertices = this.geometryScratch.subarray(0, needed);
     let w = 0;
     const put = (x: number, y: number, r: number, g: number, b: number) => {
       vertices[w++] = x;
@@ -767,11 +775,14 @@ export class WebGLWaveformRenderer {
       this.renderWaveformGeometry(mainVertices, pixelOffset);
     }
 
+    // Beatgrid vertices live in the SAME geometry space as the waveform and
+    // ride the same shader translation — scrolling no longer rebuilds and
+    // re-uploads them every frame (the old cache keyed on scroll position).
+    gl.uniform1f(this.u_pixelOffset, pixelOffset);
+    this.renderBeatgrid();
+
     // Reset pixel offset to 0 for other elements (they calculate their own positions)
     gl.uniform1f(this.u_pixelOffset, 0);
-
-    // Render beatgrid
-    this.renderBeatgrid();
 
     // Render cue point if set
     if (this.cuePoint !== null) {
@@ -802,12 +813,13 @@ export class WebGLWaveformRenderer {
 
     const gl = this.gl;
 
-    // Beat-line geometry depends only on the visible window, canvas size,
-    // and drag offset — cache it (and its GPU upload) keyed on those, so
-    // steady frames skip the rebuild entirely.
+    // Beat-line geometry depends only on the GEOMETRY extent and zoom (it
+    // is drawn through u_pixelOffset like the waveform), so it survives
+    // scrolling untouched and rebuilds only on regen/zoom/resize.
     const key =
       `${this.canvas.width}x${this.canvas.height}:` +
-      `${this.firstDisplayedPosition}:${this.lastDisplayedPosition}:${this.manualDragOffset}`;
+      `${this.lastGeometryStart}:${this.lastGeometryEnd}:` +
+      `${this.lastDisplayedPosition - this.firstDisplayedPosition}`;
     if (!this.beatgridCache || this.beatgridCache.key !== key) {
       const vertices = this.buildBeatgridVertices();
       this.beatgridCache = { key, vertices };
@@ -847,34 +859,23 @@ export class WebGLWaveformRenderer {
     const showWeakBeats = pxPerBeat >= 12 * this.pixelRatio;
     if (pxPerBeat * 4 < 2.5 * this.pixelRatio) return new Float32Array(0);
 
+    // GEOMETRY-space mapping (identical to generateGeometry's): x is pixels
+    // from the geometry origin at the current zoom; the draw call translates
+    // via u_pixelOffset and the GPU clips off-canvas lines. Beats over the
+    // whole extent (not just the window) so scrolling needs no rebuild.
+    const geomStart = this.isMinimapMode ? 0 : this.lastGeometryStart;
+    const geomEnd = this.isMinimapMode ? 1 : this.lastGeometryEnd;
+    const range = this.isMinimapMode
+      ? 1
+      : Math.max(this.lastDisplayedPosition - this.firstDisplayedPosition, 1e-9);
+    const pxPerNormalized = this.canvas.width / range;
+
     for (let i = 0; i < this.beatTimes.length; i++) {
       if (!showWeakBeats && !this.downbeatIndices.has(i)) continue;
       const beatTime = this.beatTimes[i];
       const beatProgress = beatTime / duration;
-
-      // Calculate x position based on mode
-      let beatX: number;
-
-      if (this.isMinimapMode) {
-        // Minimap: direct mapping
-        beatX = beatProgress * this.canvas.width;
-      } else {
-        // Main waveform: check if in visible window
-        if (beatProgress < this.firstDisplayedPosition ||
-            beatProgress > this.lastDisplayedPosition) {
-          continue;  // Skip beat outside visible range
-        }
-
-        const visibleRange = this.lastDisplayedPosition - this.firstDisplayedPosition;
-        const positionInWindow = (beatProgress - this.firstDisplayedPosition) / visibleRange;
-        beatX = positionInWindow * this.canvas.width;
-
-        // Apply manual drag offset
-        beatX += this.manualDragOffset * this.pixelRatio;
-      }
-
-      // Skip if outside canvas bounds
-      if (beatX < 0 || beatX >= this.canvas.width) continue;
+      if (beatProgress < geomStart || beatProgress > geomEnd) continue;
+      const beatX = (beatProgress - geomStart) * pxPerNormalized;
 
       // Determine if downbeat using index
       const isDownbeat = this.downbeatIndices.has(i);

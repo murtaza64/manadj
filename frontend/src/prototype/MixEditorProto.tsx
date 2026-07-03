@@ -197,25 +197,44 @@ export default function MixEditorProto() {
   const pairKey = trackA && trackB ? `${trackA.id}:${trackB.id}` : null;
   const pairEntry = pairKey ? pairStore[pairKey] : undefined;
 
-  // Keep the player's model current + autosave to the active saved Transition.
+  // Keep the player's model current (immediately — audio correctness).
   useEffect(() => {
     player.setMix(mix);
-    if (!pairKey) return;
+  }, [mix, player]);
+
+  // Autosave to the active saved Transition, DEBOUNCED: the store write
+  // stringifies the whole pair store into localStorage, and doing that at
+  // drag rate (~60Hz) was the biggest main-thread cost during any drag.
+  // The pending edit is flushed before anything reads or repoints the
+  // store (transition switch/create, unmount).
+  const pendingSaveRef = useRef<{ pairKey: string; mix: ProtoMix } | null>(null);
+  const flushAutosave = useCallback(() => {
+    const p = pendingSaveRef.current;
+    if (!p) return;
+    pendingSaveRef.current = null;
     setPairStore((store) => {
-      const entry = store[pairKey] ?? {
-        items: [{ name: 'Transition 1', transition: mix.transition }],
+      const entry = store[p.pairKey] ?? {
+        items: [{ name: 'Transition 1', transition: p.mix.transition }],
         active: 0,
       };
       const items = [...entry.items];
       items[entry.active] = {
         ...items[entry.active],
-        transition: mix.transition,
+        transition: p.mix.transition,
       };
-      const next = { ...store, [pairKey]: { ...entry, items } };
+      const next = { ...store, [p.pairKey]: { ...entry, items } };
       savePairStore(next);
       return next;
     });
-  }, [mix, player, pairKey]);
+  }, []);
+  useEffect(() => {
+    if (!pairKey) return;
+    pendingSaveRef.current = { pairKey, mix };
+    const t = setTimeout(flushAutosave, 300);
+    return () => clearTimeout(t);
+  }, [mix, pairKey, flushAutosave]);
+  // Unmount: don't lose the last ≤300ms of edits.
+  useEffect(() => () => flushAutosave(), [flushAutosave]);
 
   // Shared decks: the canonical loaded pair across modes. Editor loads
   // mirror onto them (issue 07) so Performance/Library show the same tracks;
@@ -278,6 +297,7 @@ export default function MixEditorProto() {
   const loadedPairKey = useRef<string | null>(null);
   useEffect(() => {
     if (!pairKey || pairKey === loadedPairKey.current) return;
+    flushAutosave(); // pending edits belong to the previous pair
     loadedPairKey.current = pairKey;
     localStorage.setItem(LAST_PAIR_KEY, pairKey);
     const entry = pairStore[pairKey];
@@ -294,6 +314,7 @@ export default function MixEditorProto() {
     if (!pairKey || !pairEntry) return;
     const item = pairEntry.items[index];
     if (!item) return;
+    flushAutosave(); // a pending edit targets the OLD active slot
     setPairStore((store) => {
       const next = { ...store, [pairKey]: { ...store[pairKey], active: index } };
       savePairStore(next);
@@ -304,6 +325,7 @@ export default function MixEditorProto() {
 
   const createTransition = () => {
     if (!pairKey || !pairEntry) return;
+    flushAutosave(); // a pending edit targets the OLD active slot
     const item: SavedTransition = {
       name: `Transition ${pairEntry.items.length + 1}`,
       transition: defaultMix().transition,
@@ -888,6 +910,15 @@ function DawTimeline({
     return () => window.removeEventListener('resize', measure);
   }, []);
 
+  // Dirty tracking for the tick: bump on any React-side change that affects
+  // what the rows draw. The tick skips ALL per-frame writes + draws when its
+  // key (scroll, zoom, mix time, durations, this version) is unchanged — an
+  // idle editor costs ~nothing instead of two full WebGL passes per frame.
+  const modelVersionRef = useRef(0);
+  useEffect(() => {
+    modelVersionRef.current++;
+  }, [mix, rateB, waveA, waveB, hotCuesA, hotCuesB, beatgridA, beatgridB, viewW]);
+
   // Per-frame, single motion clock: read the scrollbar strip's position once
   // and apply it to EVERYTHING horizontal — content transform, canvas
   // counter-transforms, display windows, playhead. Native scrolling of the
@@ -895,9 +926,16 @@ function DawTimeline({
   // ahead of the rAF-painted waveforms (visible tearing); a detached
   // scrollbar + same-frame transforms keeps every layer in lockstep.
   useEffect(() => {
+    // TEMP instrumentation (?protoperf): worst tick per second — remove
+    // after the perf pass is verified.
+    const perf = new URLSearchParams(window.location.search).has('protoperf');
+    let perfMax = 0;
+    let perfLast = performance.now();
     let raf = 0;
+    let lastDrawKey = '';
     const tick = () => {
       raf = requestAnimationFrame(tick);
+      const t0 = perf ? performance.now() : 0;
       const viewport = viewportRef.current;
       if (!viewport) return;
       // Apply at most one accumulated wheel-zoom step per frame. flushSync
@@ -923,39 +961,55 @@ function DawTimeline({
       const maxScroll = Math.max(0, contentEndRef.current * px - viewport.clientWidth);
       scrollPxRef.current = Math.max(0, Math.min(scrollPxRef.current, maxScroll));
       const scrollPx = scrollPxRef.current;
-      if (contentRef.current) {
-        contentRef.current.style.transform = `translateX(${-scrollPx}px)`;
-      }
-      if (waveWrapARef.current) waveWrapARef.current.style.transform = `translateX(${scrollPx}px)`;
-      if (waveWrapBRef.current) waveWrapBRef.current.style.transform = `translateX(${scrollPx}px)`;
-      for (const el of laneLabelRefs.current.values()) {
-        el.style.transform = `translateX(${scrollPx}px)`;
-      }
-      for (const fn of laneScrollDraws.current.values()) {
-        fn(scrollPx, scrollPx + viewport.clientWidth);
-      }
-      if (playheadRef.current) {
-        // transform, not `left`: a layout-property write per frame forces
-        // style/layout recalc scaling with the whole document (the embedded
-        // library table) — the library-mode jitter disease (issue 10).
-        playheadRef.current.style.transform = `translateX(${player.getMixTime() * px}px)`;
-      }
-      const scrollSec = scrollPx / px;
-      const viewSec = viewport.clientWidth / px;
-      const m = mixRef.current;
-      const s = snapRef.current;
+      // Dirty check: skip every write/draw below when nothing that feeds
+      // them changed since the last frame (idle editor = idle GPU).
       const dA = player.engineA.getSnapshot().duration;
-      if (dA > 0) {
-        rendA.rendererRef.current?.setDisplayWindow(scrollSec / dA, (scrollSec + viewSec) / dA);
-      }
       const dB = player.engineB.getSnapshot().duration;
-      if (dB > 0) {
-        const first = (m.transition.bInSec + (scrollSec - m.transition.startSec) * s.rateB) / dB;
-        rendB.rendererRef.current?.setDisplayWindow(first, first + (viewSec * s.rateB) / dB);
+      const drawKey =
+        `${scrollPx}:${px}:${player.getMixTime()}:${viewport.clientWidth}:` +
+        `${dA}:${dB}:${modelVersionRef.current}`;
+      if (drawKey !== lastDrawKey) {
+        lastDrawKey = drawKey;
+        if (contentRef.current) {
+          contentRef.current.style.transform = `translateX(${-scrollPx}px)`;
+        }
+        if (waveWrapARef.current) waveWrapARef.current.style.transform = `translateX(${scrollPx}px)`;
+        if (waveWrapBRef.current) waveWrapBRef.current.style.transform = `translateX(${scrollPx}px)`;
+        for (const el of laneLabelRefs.current.values()) {
+          el.style.transform = `translateX(${scrollPx}px)`;
+        }
+        for (const fn of laneScrollDraws.current.values()) {
+          fn(scrollPx, scrollPx + viewport.clientWidth);
+        }
+        if (playheadRef.current) {
+          // transform, not `left`: a layout-property write per frame forces
+          // style/layout recalc scaling with the whole document (the embedded
+          // library table) — the library-mode jitter disease (issue 10).
+          playheadRef.current.style.transform = `translateX(${player.getMixTime() * px}px)`;
+        }
+        const scrollSec = scrollPx / px;
+        const viewSec = viewport.clientWidth / px;
+        const m = mixRef.current;
+        const s = snapRef.current;
+        if (dA > 0) {
+          rendA.rendererRef.current?.setDisplayWindow(scrollSec / dA, (scrollSec + viewSec) / dA);
+        }
+        if (dB > 0) {
+          const first = (m.transition.bInSec + (scrollSec - m.transition.startSec) * s.rateB) / dB;
+          rendB.rendererRef.current?.setDisplayWindow(first, first + (viewSec * s.rateB) / dB);
+        }
+        // Paint both rows NOW — same frame as the transforms above.
+        drawRowsRef.current.a();
+        drawRowsRef.current.b();
       }
-      // Paint both rows NOW — same frame as the transforms above.
-      drawRowsRef.current.a();
-      drawRowsRef.current.b();
+      if (perf) {
+        perfMax = Math.max(perfMax, performance.now() - t0);
+        if (t0 - perfLast >= 1000) {
+          console.log(`[protoperf] worst tick last 1s: ${perfMax.toFixed(1)}ms`);
+          perfMax = 0;
+          perfLast = t0;
+        }
+      }
     };
     tick();
     return () => cancelAnimationFrame(raf);
@@ -1257,7 +1311,7 @@ function DawTimeline({
         <LaneCanvas
           id={id}
           widthPx={Math.max(tr.durationSec * pxPerSec, 4)}
-          points={lanePoints(tr.lanes, id, tr.durationSec)}
+          points={tr.lanes[id]?.length ? tr.lanes[id] : defaultPts.get(id)!}
           guides={id.endsWith('A') ? guidesA : guidesB}
           chopWall={0.02 / Math.max(tr.durationSec, 0.01)}
           windowLeftPx={tr.startSec * pxPerSec}
@@ -1270,6 +1324,15 @@ function DawTimeline({
 
   const lanesA = visibleLanes.filter((id) => id.endsWith('A'));
   const lanesB = visibleLanes.filter((id) => id.endsWith('B'));
+
+  // Stable default-shape identities: lanePoints() mints a fresh default
+  // array per call, which made every DawTimeline render redraw every
+  // undrawn lane's canvas (the draw effect keys on points identity).
+  const defaultPts = useMemo(() => {
+    const m = new Map<LaneId, LanePoint[]>();
+    for (const id of LANE_IDS) m.set(id, defaultLanePoints(id, tr.durationSec));
+    return m;
+  }, [tr.durationSec]);
 
   return (
     <div className="mixproto-timeline-wrap">
