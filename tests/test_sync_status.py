@@ -105,6 +105,19 @@ class TestPresenceAndRollup:
         result = compute_sync_status(db, surfaces(engine=[ref("/usb/music/d.mp3", title="D")]))
         assert row_for(result, title="D").presence["engine"] is True
 
+    def test_missing_downstream_outranks_diverged(self, db, make_track):
+        """A track absent from an external library rolls up as
+        missing-downstream even when fields disagree with its disk copy —
+        presence Export is the primary action; the divergences stay on the
+        row for the matrix."""
+        make_track(filename="/m/w.mp3", title="WATERCOLOUR [BENNIE EDIT]", artist="PENDULUM")
+        s = surfaces(disk=[ref("/m/w.mp3", title="watercolour bennie edit v3", artist="pendulum")])
+        result = compute_sync_status(db, s)
+        row = row_for(result, path="/m/w.mp3")
+        assert row.presence["engine"] is False
+        assert row.status == "missing-downstream"
+        assert {d.field for d in row.diverged} == {"title", "artist"}
+
     def test_counts(self, db, make_track):
         make_track(filename="/m/a.mp3", title="A")  # missing downstream
         s = surfaces(engine=[ref("/m/z.mp3", title="Z")])  # not in library

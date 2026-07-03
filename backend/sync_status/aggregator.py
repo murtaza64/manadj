@@ -120,12 +120,15 @@ def _library_row(
     missing_downstream = any(
         sid in surfaces and not presence[sid] for sid in EXTERNAL_LIBRARY_IDS
     )
-    # rollup priority: diverged > missing-downstream > in-sync
+    # rollup priority: missing-downstream > diverged > in-sync.
+    # Presence beats field agreement — you can't reconcile fields with a
+    # Surface the track isn't on, so presence Export is the primary action;
+    # divergences remain on the row for the matrix.
     status: RowStatus
-    if diverged:
-        status = "diverged"
-    elif missing_downstream:
+    if missing_downstream:
         status = "missing-downstream"
+    elif diverged:
+        status = "diverged"
     else:
         status = "in-sync"
 

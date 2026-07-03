@@ -124,3 +124,6 @@
 }
 .uts-pending-side { color: var(--subtext0, #999); font-size: 12px; }
 .uts-hint { font-size: 11px; color: var(--subtext0, #999); font-style: italic; }
+
+/* surface unreachable: unknown, not missing */
+.uts-badge-unknown { background: transparent; color: var(--subtext0, #777); border: 1px dashed var(--surface0); }

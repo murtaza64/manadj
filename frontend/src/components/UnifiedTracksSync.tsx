@@ -327,6 +327,7 @@ export function UnifiedTracksSync() {
                 onImportField={(field, value) => importField.mutate({ row, field, value })}
                 onExportToDisk={() => exportRowToDisk.mutate(row)}
                 onExportTags={(target) => exportTags.mutate(target)}
+                surfacesAvailable={data.surfaces_available}
               />
             ))}
           </section>
@@ -336,7 +337,7 @@ export function UnifiedTracksSync() {
       {showInSync && inSync.map((row) => (
         <div key={row.path} className="uts-card">
           <div className="uts-row uts-row-insync">
-            <PresenceBadges row={row} />
+            <PresenceBadges row={row} available={data.surfaces_available} />
             <div className="uts-track">
               <div className="uts-title">{row.title || row.path}</div>
               <div className="uts-sub">{row.artist}</div>
@@ -366,20 +367,31 @@ export function UnifiedTracksSync() {
 
 // ------------------------------------------------------------------- pieces
 
-function PresenceBadges({ row }: { row: StatusRow }) {
+function PresenceBadges({ row, available }: { row: StatusRow; available: SurfaceId[] }) {
   return (
     <span className="uts-badges">
-      {PRESENCE_ORDER.map((sid) => (
-        <span key={sid} className={`uts-badge ${row.presence[sid] ? 'uts-badge-present' : 'uts-badge-missing'}`}>
-          {sid}
-        </span>
-      ))}
+      {PRESENCE_ORDER.map((sid) => {
+        const unknown = sid !== 'library' && !available.includes(sid as SurfaceId);
+        const cls = unknown
+          ? 'uts-badge-unknown'
+          : row.presence[sid] ? 'uts-badge-present' : 'uts-badge-missing';
+        return (
+          <span
+            key={sid}
+            title={unknown ? `${sid}: unreachable (close the app holding its database?)` : `${sid}: ${row.presence[sid] ? 'present' : 'missing'}`}
+            className={`uts-badge ${cls}`}
+          >
+            {sid}
+          </span>
+        );
+      })}
     </span>
   );
 }
 
-function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onExportToDisk, onExportTags }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onExportToDisk, onExportTags, surfacesAvailable }: {
   row: StatusRow;
+  surfacesAvailable: SurfaceId[];
   selectable: boolean;
   selected: boolean;
   onSelect: () => void;
@@ -397,7 +409,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
           <input type="checkbox" checked={selected} onChange={onSelect} onClick={(e) => e.stopPropagation()} />
         )}
         {expandable && <span className={`uts-chevron ${expanded ? 'uts-chevron-open' : ''}`}>▸</span>}
-        <PresenceBadges row={row} />
+        <PresenceBadges row={row} available={surfacesAvailable} />
         <div className="uts-track">
           <div className="uts-title">{row.title || row.path}</div>
           <div className="uts-sub">
