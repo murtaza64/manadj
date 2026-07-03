@@ -149,6 +149,18 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   (`Mixer.suspend()/resume()`). Corrector kept as safety net;
   instrumentation kept until verified on the bad pair.
 
+- v15 (issue 10): playback-start visual jitter in editor + Performance —
+  library-mode's old disease (main-thread style/layout/React work stalling
+  the render loops). Fixes: editor's embedded Library is a memoized element
+  (whole-tree emit re-renders no longer re-diff the table); mix playhead
+  driven by `transform` instead of per-frame `style.left` (layout-property
+  writes recalc layout across the whole document); PerformanceView's deck-
+  lock booleans moved into a self-subscribing `LockDimmedLibrary` wrapper
+  (play/pause no longer re-renders the view); `DeckEngine.setRateComponents`
+  no-ops without emit when pitch/bend unchanged (lane drags had spammed
+  emit → full editor re-render per event). Escalation if still jittery:
+  narrow the editor's whole-tree emit bump into per-widget subscriptions.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

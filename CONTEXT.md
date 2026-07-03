@@ -52,6 +52,12 @@ Future concept: an ordered sequence of Tracks whose adjacencies reference saved 
 **Transition template**:
 A named beat-domain recipe for producing a Transition: per-side anchor rules (cue slot + beat delta on each track's own grid), a length in beats (fixed or scalable at apply time), and normalized automation lanes (e.g. "bass swap"). Applying one translates beats to seconds via the tempo-matched beatgrids and yields an ordinary seconds-based Transition — the recipe is an editing affordance, not a runtime concept. Designed; built behind DB persistence.
 
+**Slide**:
+Moving one Track's audio relative to the mix frame in the Transition editor — the other Track, the Transition window, the lanes, and the playhead stay fixed; the slid Track's content shifts under them. The editor's deck controls re-purpose transport gestures as Slides: beat jump = slide by ±N of the deck's own beats; hot cue = slide so that cue lands on the playhead. Distinct from the transport meaning of those gestures on other surfaces (which move the playhead within a fixed track).
+
+**Locked window**:
+A Transition-editor mode inverting Slide semantics: when locked, the Transition window travels with whichever Track is slid (keeping the same audio under the window); when unlocked, the window holds its mix-frame position and content slides under it. Conceptually the lock chooses the window's home frame — the mix timeline, or the slid Track's content.
+
 **Cue-slot convention**:
 A library convention (not a code concept) giving hot cue slots stable musical meaning so Transition templates can anchor to them: 1 = first buildup, 4 = drop. Missing slots fall back to hard-coded heuristic beat positions at template-apply time.
 

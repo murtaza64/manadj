@@ -307,6 +307,19 @@ export default function MixEditorProto() {
   // Selection/navigation handle into the embedded library panel.
   const libraryRef = useRef<LibraryBrowseHandle>(null);
 
+  // Memoized element: the editor re-renders on every player/engine emit
+  // (transport, loads) — a stable element identity lets React skip the
+  // embedded library table on those renders (issue 10: re-diffing the
+  // table right as a deck started was visible as playback-start jitter).
+  const browsePanel = useMemo(
+    () => (
+      <DeckScope deck="A">
+        <Library browseOnly onLoadToDeck={assignTrack} browseRef={libraryRef} />
+      </DeckScope>
+    ),
+    [assignTrack]
+  );
+
   // Per-deck clocks for the row canvases (stable identities).
   const clockA = useMemo(() => ({ getPlayhead: () => player.getTrackTime('A') }), [player]);
   const clockB = useMemo(() => ({ getPlayhead: () => player.getTrackTime('B') }), [player]);
@@ -535,11 +548,7 @@ export default function MixEditorProto() {
           deck A — the editor's own audio runs on its private Mixer). Load
           affordances match the Performance view: hover row buttons,
           double-click → A, arrow keys. */}
-      <div className="mixproto-library">
-        <DeckScope deck="A">
-          <Library browseOnly onLoadToDeck={assignTrack} browseRef={libraryRef} />
-        </DeckScope>
-      </div>
+      <div className="mixproto-library">{browsePanel}</div>
     </div>
   );
 }
@@ -714,7 +723,10 @@ function DawTimeline({
       if (waveWrapARef.current) waveWrapARef.current.style.transform = `translateX(${scrollPx}px)`;
       if (waveWrapBRef.current) waveWrapBRef.current.style.transform = `translateX(${scrollPx}px)`;
       if (playheadRef.current) {
-        playheadRef.current.style.left = `${player.getMixTime() * px}px`;
+        // transform, not `left`: a layout-property write per frame forces
+        // style/layout recalc scaling with the whole document (the embedded
+        // library table) — the library-mode jitter disease (issue 10).
+        playheadRef.current.style.transform = `translateX(${player.getMixTime() * px}px)`;
       }
       const scrollSec = scrollPx / px;
       const viewSec = viewport.clientWidth / px;

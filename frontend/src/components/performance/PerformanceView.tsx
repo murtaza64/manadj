@@ -15,6 +15,7 @@
  * deliberately. The library view keeps replace-freely.
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
 import Library from '../Library';
 import type { LibraryBrowseHandle } from '../Library';
 import { DeckScope } from '../../contexts/DeckContext';
@@ -41,6 +42,32 @@ function useDeckLocked(engine: DeckEngine): boolean {
   return useSyncExternalStore(
     (cb) => engine.subscribe(cb),
     () => isDeckLocked(engine)
+  );
+}
+
+/**
+ * Self-subscribing lock-dim wrapper: the lock booleans flip exactly when a
+ * deck starts/stops, so subscribing at view level re-rendered the whole
+ * view — embedded library table included — right as playback started
+ * (visible jitter, issue 10). Here a flip restyles only this div; the
+ * children element (created by the parent) is identity-stable, so React
+ * skips the table.
+ */
+function LockDimmedLibrary({
+  engineA,
+  engineB,
+  children,
+}: {
+  engineA: DeckEngine;
+  engineB: DeckEngine;
+  children: ReactNode;
+}) {
+  const lockedA = useDeckLocked(engineA);
+  const lockedB = useDeckLocked(engineB);
+  return (
+    <div className={`perf-library${lockedA ? ' lock-A' : ''}${lockedB ? ' lock-B' : ''}`}>
+      {children}
+    </div>
   );
 }
 
@@ -75,10 +102,6 @@ export function PerformanceView() {
     },
     [engineA, engineB, loadA, loadB]
   );
-
-  // Reactive lock state dims the matching row affordances (pure CSS below).
-  const lockedA = useDeckLocked(engineA);
-  const lockedB = useDeckLocked(engineB);
 
   // ── Table keys: ↑/↓ navigate, ← load A, → load B, Enter = A ───────────
   useEffect(() => {
@@ -159,13 +182,11 @@ export function PerformanceView() {
 
       {/* Browse surface — the real Library, bottom half. All loads (hover
           buttons, double-click, arrow keys) go through the load lock. */}
-      <div
-        className={`perf-library${lockedA ? ' lock-A' : ''}${lockedB ? ' lock-B' : ''}`}
-      >
+      <LockDimmedLibrary engineA={engineA} engineB={engineB}>
         <DeckScope deck="A">
           <Library browseOnly onLoadToDeck={tryLoad} browseRef={libraryRef} />
         </DeckScope>
-      </div>
+      </LockDimmedLibrary>
     </div>
   );
 }

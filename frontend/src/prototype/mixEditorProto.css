@@ -292,9 +292,11 @@
   position: absolute;
   top: 0;
   bottom: 0;
+  left: 0; /* driven per frame via transform: translateX (issue 10) */
   width: 2px;
   background: #00e5ff;
   pointer-events: none;
+  will-change: transform;
 }
 
 .mixproto-controls {
