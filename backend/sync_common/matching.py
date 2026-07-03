@@ -1,74 +1,58 @@
-"""Generic track matching utilities."""
+"""Track matching: the single home of Match (see CONTEXT.md).
 
+Match associates a track with its counterpart in another library by file
+path, falling back to filename. Canonical semantics, defined once here:
+
+- two tiers: exact full-path match, then basename match
+- case-sensitive
+- rows without a path are excluded from the index (and never match)
+- duplicate paths: last row wins
+
+Callers provide a single ``path_of`` getter; the filename tier is derived
+from the path's basename.
+"""
+
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar, Callable
+from typing import TypeVar
 
-T = TypeVar('T')  # Generic track type
-
-
-def index_tracks_by_path(
-    tracks: list[T],
-    path_getter: Callable[[T], str | None],
-    filename_getter: Callable[[T], str | None]
-) -> tuple[dict[str, T], dict[str, T]]:
-    """
-    Index tracks by full path and filename for fast lookup.
-
-    This is a generic function that works with any track type.
-
-    Args:
-        tracks: List of track objects
-        path_getter: Function to extract path from track
-        filename_getter: Function to extract filename from track
-
-    Returns:
-        Tuple of (tracks_by_path, tracks_by_filename)
-    """
-    tracks_by_path = {}
-    tracks_by_filename = {}
-
-    for track in tracks:
-        # Index by full path
-        path = path_getter(track)
-        if path:
-            tracks_by_path[path] = track
-
-        # Index by filename only
-        filename = filename_getter(track)
-        if filename:
-            name_only = Path(filename).name
-            tracks_by_filename[name_only] = track
-
-    return tracks_by_path, tracks_by_filename
+T = TypeVar("T")
 
 
-def match_track_two_tier(
-    source_path: str,
-    target_by_path: dict[str, T],
-    target_by_filename: dict[str, T]
-) -> T | None:
-    """
-    Match a track using two-tier matching strategy.
+@dataclass(frozen=True)
+class TrackIndex[T]:
+    """An index of tracks supporting two-tier path matching."""
 
-    Priority:
-    1. Full path match
-    2. Filename-only match
+    by_path: dict[str, T]
+    by_filename: dict[str, T]
 
-    Args:
-        source_path: Path of track to match
-        target_by_path: Target tracks indexed by full path
-        target_by_filename: Target tracks indexed by filename only
+    @classmethod
+    def build(cls, tracks: Iterable[T], path_of: Callable[[T], str | None]) -> "TrackIndex[T]":
+        by_path: dict[str, T] = {}
+        by_filename: dict[str, T] = {}
+        for track in tracks:
+            path = path_of(track)
+            if not path:
+                continue
+            by_path[path] = track
+            by_filename[Path(path).name] = track
+        return cls(by_path=by_path, by_filename=by_filename)
 
-    Returns:
-        Matched track or None
-    """
-    # Priority 1: Full path match
-    if source_path in target_by_path:
-        return target_by_path[source_path]
+    def match(self, path: str | None) -> T | None:
+        """Two-tier match: full path, then basename. None for no match."""
+        if not path:
+            return None
+        hit = self.by_path.get(path)
+        if hit is not None:
+            return hit
+        return self.by_filename.get(Path(path).name)
 
-    # Priority 2: Filename-only match
-    filename = Path(source_path).name
-    if filename in target_by_filename:
-        return target_by_filename[filename]
 
-    return None
+def find_unmatched(
+    tracks: Iterable[T],
+    path_of: Callable[[T], str | None],
+    target: TrackIndex,
+) -> list[T]:
+    """Tracks with no counterpart in the target index (pathless rows included)."""
+    return [t for t in tracks if target.match(path_of(t)) is None]

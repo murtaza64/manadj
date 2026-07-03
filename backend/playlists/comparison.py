@@ -1,7 +1,7 @@
 """Playlist comparison logic."""
 
 from .models import PlaylistInfo, PlaylistDiff
-from backend.sync_common.matching import index_tracks_by_path, match_track_two_tier
+from backend.sync_common.matching import TrackIndex
 
 
 def are_playlists_equivalent(
@@ -22,17 +22,11 @@ def are_playlists_equivalent(
     if len(playlist_a.tracks) != len(playlist_b.tracks):
         return False
 
-    # Index playlist_b tracks for matching
-    tracks_b_by_path, tracks_b_by_filename = index_tracks_by_path(
-        playlist_b.tracks,
-        lambda t: t.path,
-        lambda t: t.path
-    )
+    index_b = TrackIndex.build(playlist_b.tracks, lambda t: t.path)
 
     # Check if each track in playlist_a matches playlist_b in order
     for track_a, track_b in zip(playlist_a.tracks, playlist_b.tracks):
-        # Use two-tier matching to find equivalent track
-        matched = match_track_two_tier(track_a.path, tracks_b_by_path, tracks_b_by_filename)
+        matched = index_b.match(track_a.path)
 
         # Must match the same position track in playlist_b
         if matched != track_b:

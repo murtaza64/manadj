@@ -6,7 +6,7 @@ from .models import PlaylistInfo, UnifiedPlaylist, PlaylistSyncStats, TrackEntry
 from .comparison import are_playlists_equivalent
 from .matching import match_playlists_by_name
 from .manadj_reader import ManAdjPlaylistReader
-from backend.sync_common.matching import index_tracks_by_path, match_track_two_tier
+from backend.sync_common.matching import TrackIndex
 
 
 class PlaylistSyncManager:
@@ -354,19 +354,13 @@ class PlaylistSyncManager:
         # Load all manadj tracks
         all_tracks = self.manadj_session.query(Track).all()
 
-        # Index by path and filename
-        tracks_by_path, tracks_by_filename = index_tracks_by_path(
-            all_tracks,
-            lambda t: t.filename,
-            lambda t: t.filename
-        )
+        index = TrackIndex.build(all_tracks, lambda t: t.filename)
 
         matched = []
         unmatched = []
 
         for ref in track_refs:
-            # Try two-tier matching
-            track = match_track_two_tier(ref.path, tracks_by_path, tracks_by_filename)
+            track = index.match(ref.path)
             if track:
                 matched.append(track)
             else:
@@ -392,19 +386,13 @@ class PlaylistSyncManager:
         with self.engine_db.session_m() as edj_session:
             all_tracks = edj_session.query(EDJTrack).all()
 
-            # Index by path and filename
-            tracks_by_path, tracks_by_filename = index_tracks_by_path(
-                all_tracks,
-                lambda t: t.path,
-                lambda t: t.path
-            )
+            index = TrackIndex.build(all_tracks, lambda t: t.path)
 
             matched = []
             unmatched = []
 
             for ref in track_refs:
-                # Try two-tier matching
-                track = match_track_two_tier(ref.path, tracks_by_path, tracks_by_filename)
+                track = index.match(ref.path)
                 if track:
                     matched.append(track)
                 else:
@@ -428,19 +416,13 @@ class PlaylistSyncManager:
         # Load all Rekordbox tracks
         all_tracks = list(self.rb_db.get_content())
 
-        # Index by path and filename
-        tracks_by_path, tracks_by_filename = index_tracks_by_path(
-            all_tracks,
-            lambda t: t.FolderPath,
-            lambda t: t.FolderPath
-        )
+        index = TrackIndex.build(all_tracks, lambda t: t.FolderPath)
 
         matched = []
         unmatched = []
 
         for ref in track_refs:
-            # Try two-tier matching
-            track = match_track_two_tier(ref.path, tracks_by_path, tracks_by_filename)
+            track = index.match(ref.path)
             if track:
                 matched.append(track)
             else:
