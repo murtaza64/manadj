@@ -26,7 +26,7 @@ A single, smart "Tracks" view inside Sync: an inbox-style work queue showing one
 12. As a DJ, I want tag divergences shown as a color-coded chip diff (green = in both, red struck-through = in Library but missing on that Surface, orange = extra on that Surface), so that tag drift is readable without a mental diff.
 13. As a DJ, I want checkboxes on rows and a select-all per section, so that I can act on many tracks at once.
 14. As a DJ, I want a bulk action button per section (Export N selected / Import N selected), so that clearing a section is one operation.
-15. As a DJ, I want every bulk action to dry-run first and show me the result before applying, so that I never write blind.
+15. As a DJ, I want every bulk action to disclose its scope and side effects before applying (from data the view already has — e.g. "Import 13 tracks from Rekordbox: creates 13 rows in the Rekordbox DB"), and to verify by auto-refreshing the view after apply, so that I never write blind. (Revised 2026-07-02: API dry-runs return counters only and duplicate what the view shows; dry-run round-trips are dropped from the UI. The view is the preview; post-apply refresh is the verification. Backend dry_run flags remain for CLI/API use. RBXML generation is nondestructive and needs no confirmation.)
 16. As a DJ, I want unprocessed tracks flagged inline ("exports with no tags"), so that I don't publish uncurated tracks by accident.
 17. As a DJ, I want Export to never overwrite a Surface's value with an empty Library value — skip the field and warn me instead — so that data I only have downstream is never destroyed.
 18. As a DJ, I want the warning from (17) to point me at manual Import as the resolution, so that the fix is discoverable.
