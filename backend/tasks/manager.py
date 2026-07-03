@@ -7,7 +7,7 @@ backend.tasks.worker just calls it in a loop.
 import json
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -44,7 +44,7 @@ def run_pending(db: Session, handlers: dict[str, Handler]) -> int:
         if task is None:
             return processed
         task.state = "running"
-        task.started_at = datetime.now()
+        task.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
         try:
             handler = handlers.get(task.type)
@@ -58,7 +58,7 @@ def run_pending(db: Session, handlers: dict[str, Handler]) -> int:
             logger.warning("task %d (%s) failed: %s", task.id, task.type, e)
         else:
             task.state = "done"
-        task.finished_at = datetime.now()
+        task.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
         processed += 1
 

@@ -1,5 +1,7 @@
 """Acquisition API endpoints."""
 
+from datetime import timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.exc import NoResultFound
@@ -155,13 +157,16 @@ def _download_map(db: Session) -> dict[int, DownloadStatus]:
 
 
 def _provenance_map(db: Session) -> dict[int, ProvenanceInfo]:
-    """track_id -> Audio Provenance info."""
+    """track_id -> Audio Provenance info. acquired_at is stored naive-UTC;
+    serialize with an explicit offset so clients can render local time."""
     return {
         p.track_id: ProvenanceInfo(
             label=p.source,
             url=p.url,
             asserted=p.asserted,
-            acquired_at=p.acquired_at.isoformat() if p.acquired_at else None,
+            acquired_at=(
+                p.acquired_at.replace(tzinfo=timezone.utc).isoformat() if p.acquired_at else None
+            ),
         )
         for p in db.query(AudioProvenance).all()
     }

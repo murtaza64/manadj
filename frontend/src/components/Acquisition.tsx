@@ -231,7 +231,7 @@ export function Acquisition() {
               <span className="acquisition-item-sub">
                 {item.uploader} · {formatDuration(item.duration_ms)}
                 {item.provenance?.acquired_at &&
-                  ` · ${item.provenance.asserted ? `via ${item.provenance.label}` : 'dl'} ${item.provenance.acquired_at.slice(0, 10)}`}
+                  ` · ${item.provenance.asserted ? `via ${item.provenance.label}` : 'dl'} ${new Date(item.provenance.acquired_at).toLocaleDateString('sv')}`}
               </span>
               <button
                 className={`acquisition-chip acquisition-chip-${item.classification ?? 'none'}`}
