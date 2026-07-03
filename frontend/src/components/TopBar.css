@@ -1,0 +1,84 @@
+/* Persistent top bar. Design language: library player — square 1px-border
+   bold buttons, catppuccin vars. */
+
+/* App shell: top bar + mode surface filling the rest of the viewport. */
+.app-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 10px;
+  background: var(--crust);
+  border-bottom: 1px solid var(--surface1);
+  flex-shrink: 0;
+}
+
+.topbar-logo {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+.topbar-modes {
+  display: flex;
+  gap: 6px;
+}
+
+.topbar-mode {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--subtext0);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.topbar-mode:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.topbar-mode.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: var(--base);
+}
+
+.topbar-sync {
+  margin-left: auto;
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--blue);
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.topbar-sync:hover {
+  background: var(--blue);
+  color: var(--base);
+}
+
+.topbar-sync-icon {
+  font-size: 14px;
+}

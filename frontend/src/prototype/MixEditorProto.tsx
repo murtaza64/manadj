@@ -20,6 +20,8 @@ import { useWaveformRenderer } from '../hooks/useWaveformRenderer';
 import { useHotCues } from '../hooks/useHotCues';
 import { useQueryClient } from '@tanstack/react-query';
 import Library from '../components/Library';
+import type { LibraryBrowseHandle } from '../components/Library';
+import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import { formatKeyDisplay } from '../utils/keyUtils';
@@ -264,28 +266,51 @@ export default function MixEditorProto() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Selection in the embedded library panel (load-to-deck source).
-  const [browseSel, setBrowseSel] = useState<Track | null>(null);
+  // Selection/navigation handle into the embedded library panel.
+  const libraryRef = useRef<LibraryBrowseHandle>(null);
 
   // Per-deck clocks for the row canvases (stable identities).
   const clockA = useMemo(() => ({ getPlayhead: () => player.getTrackTime('A') }), [player]);
   const clockB = useMemo(() => ({ getPlayhead: () => player.getTrackTime('B') }), [player]);
 
-  // Space = play/pause. Capture phase + stopPropagation: the embedded
-  // library's keyboard hub would otherwise toggle the (invisible) shared
-  // deck on the same keypress.
+  // Keyboard: space = editor play/pause (capture + stopPropagation so no
+  // other surface sees it); table keys match the Performance view — ↑/↓
+  // browse, ← / → load selection to A / B, Enter loads A.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT')) return;
-      if (e.key === ' ') {
-        e.preventDefault();
-        e.stopPropagation();
-        player.togglePlay();
+      if (isGuardedKeyEvent(e)) return;
+      // The editor's selects (saved-Transition dropdown, add-lane) keep
+      // their native arrow/space behavior.
+      if ((e.target as HTMLElement | null)?.tagName === 'SELECT') return;
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          e.stopPropagation();
+          player.togglePlay();
+          break;
+        case 'ArrowDown':
+        case 'ArrowUp':
+          e.preventDefault();
+          libraryRef.current?.navigate(e.key === 'ArrowDown' ? 1 : -1);
+          break;
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+          e.preventDefault();
+          const sel = libraryRef.current?.getSelectedTrack();
+          if (sel) assignTrack(e.key === 'ArrowLeft' ? 'A' : 'B', sel);
+          break;
+        }
+        case 'Enter': {
+          if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') break;
+          const sel = libraryRef.current?.getSelectedTrack();
+          if (sel) assignTrack('A', sel);
+          break;
+        }
       }
     };
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player]);
 
   const setLane = useCallback((id: LaneId, points: LanePoint[] | null) => {
@@ -315,20 +340,10 @@ export default function MixEditorProto() {
         <div className="mixproto-header">
           <h1>TRANSITION EDITOR</h1>
           <span className="mixproto-hint">
-            space = play · drag B block = move · trim edges = resize (alt = crop lanes, default
-            stretches) · wheel = zoom · lanes: click add / drag / dblclick remove
+            space = play · ↑↓ browse, ←/→ load A/B (or hover a row) · drag B block = move · trim
+            edges = resize (alt = crop lanes) · wheel = zoom · lanes: click add / drag / dblclick
+            remove
           </span>
-          <div className="mixproto-loadbtns">
-            <span className="mixproto-selname">
-              {browseSel ? browseSel.title || browseSel.filename : 'select a track below'}
-            </span>
-            <button disabled={!browseSel} onClick={() => browseSel && assignTrack('A', browseSel)}>
-              load → A
-            </button>
-            <button disabled={!browseSel} onClick={() => browseSel && assignTrack('B', browseSel)}>
-              load → B
-            </button>
-          </div>
         </div>
 
         <div className="mixproto-arranger">
@@ -486,14 +501,12 @@ export default function MixEditorProto() {
       </div>
 
       {/* Bottom panel: the shared library browse surface (scoped to shared
-          deck A — the editor's own audio runs on its private Mixer). */}
+          deck A — the editor's own audio runs on its private Mixer). Load
+          affordances match the Performance view: hover row buttons,
+          double-click → A, arrow keys. */}
       <div className="mixproto-library">
         <DeckScope deck="A">
-          <Library
-            browseOnly
-            onBrowseSelect={setBrowseSel}
-            onOpenPlaylistSync={() => undefined}
-          />
+          <Library browseOnly onLoadToDeck={assignTrack} browseRef={libraryRef} />
         </DeckScope>
       </div>
     </div>

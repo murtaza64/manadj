@@ -3,7 +3,7 @@
    palette from styles/variables.css. Layout per the prototype verdict. */
 
 .perf-root {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--base);
@@ -12,17 +12,10 @@
   font-size: 12px;
 }
 
-.perf-back {
-  position: fixed;
-  top: 6px;
-  right: 10px;
-  z-index: 500;
-}
-
-/* ── Performance surface: top 50vh ────────────────────────────── */
+/* ── Performance surface: top half ────────────────────────────── */
 
 .perf-surface {
-  height: 50vh;
+  height: 50%;
   display: flex;
   flex-direction: column;
   background: var(--crust);
@@ -446,7 +439,7 @@
 /* ── Library below ────────────────────────────────────────────── */
 
 .perf-library {
-  height: 50vh;
+  flex: 1;
   min-height: 0;
   overflow: hidden;
 }

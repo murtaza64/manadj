@@ -44,7 +44,7 @@ function useDeckLocked(engine: DeckEngine): boolean {
   );
 }
 
-export function PerformanceView({ onClose }: { onClose: () => void }) {
+export function PerformanceView() {
   const { A, B } = useDecks();
   const libraryRef = useRef<LibraryBrowseHandle>(null);
 
@@ -128,10 +128,6 @@ export function PerformanceView({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="perf-root">
-      <button className="player-button perf-back" onClick={onClose}>
-        ← Library
-      </button>
-
       {/* Performance surface — top half of the viewport */}
       <div className="perf-surface">
         <div className="perf-waves">

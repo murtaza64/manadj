@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useImperativeHandle, useMemo } from 'react';
 import type { Ref } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -196,8 +196,6 @@ export interface LibraryBrowseHandle {
 }
 
 interface LibraryProps {
-  onOpenPlaylistSync?: () => void;
-  onOpenPerformance?: () => void;
   /** Render only the browse surface (sidebar/filter/table) without the
    * Player/TagEditor block — used when a deck surface is shown elsewhere
    * (the Performance view embeds the library this way). Implies: the
@@ -208,30 +206,14 @@ interface LibraryProps {
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
   /** Selection access for the embedding view's keyboard hub. */
   browseRef?: Ref<LibraryBrowseHandle>;
-  /** Notifies the embedding surface of row selection (browseOnly hosts that
-   * offer their own load-to-deck affordances — transition-editor prototype). */
-  onBrowseSelect?: (track: Track | null) => void;
 }
 
 export default function Library({
-  onOpenPlaylistSync,
-  onOpenPerformance,
   browseOnly = false,
   onLoadToDeck,
   browseRef,
-  onBrowseSelect,
 }: LibraryProps) {
-  const [selectedTrack, setSelectedTrackState] = useState<Track | null>(null);
-  const setSelectedTrack = useCallback(
-    (track: Track | null | ((prev: Track | null) => Track | null)) => {
-      setSelectedTrackState((prev) => {
-        const next = typeof track === 'function' ? track(prev) : track;
-        onBrowseSelect?.(next);
-        return next;
-      });
-    },
-    [onBrowseSelect]
-  );
+  const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [selectedView, setSelectedView] = useState<ViewType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
@@ -458,7 +440,7 @@ export default function Library({
       },
       getSelectedTrack: () => selectedTrack,
     }),
-    [currentTracks, selectedTrack, setSelectedTrack]
+    [currentTracks, selectedTrack]
   );
 
   return (
@@ -523,8 +505,6 @@ export default function Library({
             setSelectedPlaylistId(id);
           }}
           onTrackDrop={handleTrackDrop}
-          onOpenPlaylistSync={onOpenPlaylistSync}
-          onOpenPerformance={onOpenPerformance}
         />
 
         {/* Main library area (filter + table) */}

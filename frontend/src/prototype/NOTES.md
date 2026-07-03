@@ -113,6 +113,17 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   exists). Library gained perf-mode's `onLoadToDeck`/`browseRef` alongside
   our `onBrowseSelect`.
 
+- v12 (issue 06): persistent TopBar (new `components/TopBar.tsx` + CSS) with
+  logo, Library/Performance/Transition-editor mode switch, and Sync — App
+  gained an `app-shell` column and the `transition` view; `?proto=mix` now
+  just opens that mode. Sidebar logo/sync/▸ header removed; PerformanceView
+  lost its floating back button and `onClose`; 100vh/50vh layouts became
+  100%/50% under the bar. Editor load mechanics unified with Performance:
+  embedded Library gets `onLoadToDeck` (hover A/B buttons, dblclick → A) +
+  `browseRef`; ↑↓ navigate, ←/→ load A/B, Enter → A (SELECT-focused events
+  left alone); header load→A/B buttons and `onBrowseSelect` removed
+  (Library prop deleted too).
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;
