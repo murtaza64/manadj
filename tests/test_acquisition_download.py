@@ -102,33 +102,9 @@ class TestDownloadChain:
         assert prov.url == "https://soundcloud.com/hoaxdnb/wake-up"
         assert prov.acquired_at is not None
 
-    def test_filename_collision_fails_task(
-        self,
-        db_session: Session,
-        tmp_path: Path,
-        audio_file: Callable[..., Path],
-    ) -> None:
-        tracks_dir = tmp_path / "tracks"
-        tracks_dir.mkdir()
-        (tracks_dir / "Hoax - Wake Up.flac").write_bytes(b"existing")
-        fixture = audio_file("mp3")
-        source = FakeSource(
-            [item_data("111", title="Hoax - Wake Up", uploader="hoaxdnb")],
-            download_file=fixture,
-        )
-        refresh(db_session, source)
-        item = list_source_items(db_session)[0]
-        queue_item(db_session, item.id)
-
-        run_pending(db_session, make_handlers(source, tracks_dir))
-
-        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
-        assert task.state == "failed"
-        assert task.error is not None and "Hoax - Wake Up" in task.error
-        db_session.refresh(item)
-        assert item.state == "queued"  # still queued; retry possible after cleanup
-        assert db_session.query(Track).count() == 0
-
+    # (test_filename_collision_fails_task removed 2026-07-02: unreferenced
+    # collisions are now adopted as crashed-attempt recovery; the referenced-
+    # collision failure is covered by TestRetryAfterCrashedAttempt.)
     def test_download_failure_marks_task_failed(
         self, db_session: Session, tmp_path: Path
     ) -> None:
@@ -203,3 +179,108 @@ class TestMetadataEmbedding:
         assert task.state == "done", task.error
         db_session.refresh(item)
         assert item.state == "fulfilled"
+
+
+class TestDownloadOverExistingCorrespondence:
+    def test_download_repoints_proposed_correspondence(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+        make_track,
+    ) -> None:
+        """Regression: a proposed match + "download anyway" crashed with a
+        UNIQUE violation on source_correspondences.source_item_id. The
+        download must repoint the existing correspondence to the new track
+        and confirm it."""
+        from backend.acquisition.models import SourceCorrespondence
+
+        suggested = make_track(title="leavemealone (old rip)")
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        source = FakeSource(
+            [item_data("444", title="Loboski - LEAVEMEALONE [FREE DL]", uploader="loboski")],
+            download_file=audio_file("mp3"),
+        )
+        refresh(db_session, source)
+        item = list_source_items(db_session)[0]
+        db_session.add(
+            SourceCorrespondence(
+                source_item_id=item.id, track_id=suggested.id, status="proposed", score=0.8
+            )
+        )
+        db_session.commit()
+
+        queue_item(db_session, item.id)
+        run_pending(db_session, make_handlers(source, tracks_dir))
+
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "done", task.error
+        corr = get_correspondence(db_session, item.id)
+        assert corr is not None
+        assert corr.status == "confirmed"
+        assert corr.score is None
+        assert corr.track_id != suggested.id  # points at the downloaded track
+        new_track = db_session.query(Track).filter(Track.id == corr.track_id).one()
+        assert new_track.title == "LEAVEMEALONE"
+
+
+class TestRetryAfterCrashedAttempt:
+    def test_orphaned_file_is_adopted(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        """A crashed attempt leaves the downloaded file on disk with no Track.
+        Retry must adopt the file (not re-download, not raise FileExists)."""
+        import shutil
+
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        # orphaned file from the "previous attempt"
+        shutil.copy(audio_file("mp3"), tracks_dir / "Hoax - Wake Up.mp3")
+        source = FakeSource(
+            [item_data("555", title="Hoax - Wake Up [FREE DL]", uploader="hoaxdnb")],
+            download_error=AssertionError("download must not be called on adoption"),
+        )
+        refresh(db_session, source)
+        item = list_source_items(db_session)[0]
+        queue_item(db_session, item.id)
+
+        run_pending(db_session, make_handlers(source, tracks_dir))
+
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "done", task.error
+        corr = get_correspondence(db_session, item.id)
+        assert corr is not None and corr.status == "confirmed"
+
+    def test_file_referenced_by_track_still_raises(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+        make_track,
+    ) -> None:
+        """A collision file already owned by a Track is a missed
+        correspondence — still an error, not silent adoption."""
+        import shutil
+
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        existing = tracks_dir / "Hoax - Wake Up.mp3"
+        shutil.copy(audio_file("mp3"), existing)
+        make_track(filename=str(existing), title="Wake Up")
+        source = FakeSource(
+            [item_data("666", title="Hoax - Wake Up [FREE DL]", uploader="hoaxdnb")],
+            download_file=audio_file("mp3"),
+        )
+        refresh(db_session, source)
+        item = list_source_items(db_session)[0]
+        queue_item(db_session, item.id)
+
+        run_pending(db_session, make_handlers(source, tracks_dir))
+
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "failed"
+        assert "correspondence" in (task.error or "")

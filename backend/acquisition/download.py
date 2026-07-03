@@ -17,7 +17,8 @@ from ..models import Track
 from ..track_metadata import FileMetadataError, write_file_metadata
 from ..track_metadata.file_facts import refresh_file_facts
 from .cleanup import CleanupConfig, clean_metadata, safe_basename
-from .models import AudioProvenance, SourceCorrespondence, SourceItem
+from .manager import upsert_confirmed_correspondence
+from .models import AudioProvenance, SourceItem
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +43,23 @@ def download_handler(
 
         collisions = list(tracks_dir.glob(f"{basename}.*"))
         if collisions:
-            raise FileExistsError(
-                f"file already exists for {basename!r}: {collisions[0].name} "
-                "— probably a missed correspondence; link it manually or remove the file"
+            referenced = (
+                db.query(Track)
+                .filter(Track.filename.in_([str(c) for c in collisions]))
+                .first()
             )
-
-        path = source.download(item.permalink_url, tracks_dir, basename)
-        logger.info("downloaded %s -> %s", item.permalink_url, path)
+            if referenced is not None:
+                raise FileExistsError(
+                    f"file already exists for {basename!r}: {collisions[0].name} "
+                    "— probably a missed correspondence; link it manually or remove the file"
+                )
+            # orphaned file (a previous attempt downloaded it, then crashed
+            # before the Track landed) — adopt it instead of re-downloading
+            path = collisions[0]
+            logger.info("adopting orphaned file from previous attempt: %s", path)
+        else:
+            path = source.download(item.permalink_url, tracks_dir, basename)
+            logger.info("downloaded %s -> %s", item.permalink_url, path)
 
         # Export the cleaned metadata to Disk before the import scan: the
         # file carries what the Library will assert, and Disk Import + file
@@ -78,11 +89,9 @@ def download_handler(
         track.artist = meta.artist  # type: ignore[assignment]
         refresh_file_facts(db)
 
-        db.add(
-            SourceCorrespondence(
-                source_item_id=item.id, track_id=track.id, status="confirmed"
-            )
-        )
+        # repoints any existing proposal — INSERTing here crashed on the
+        # unique source_item_id when the operator downloaded despite a match
+        upsert_confirmed_correspondence(db, item.id, track.id)
         db.add(
             AudioProvenance(
                 track_id=track.id,

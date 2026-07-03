@@ -216,6 +216,26 @@ def reject_proposal(db: Session, item_id: int) -> None:
     db.commit()
 
 
+def upsert_confirmed_correspondence(
+    db: Session, item_id: int, track_id: int
+) -> SourceCorrespondence:
+    """Confirm a correspondence for the item, repointing any existing row
+    (a proposal, or an earlier confirmation) — source_item_id is unique."""
+    existing = (
+        db.query(SourceCorrespondence)
+        .filter(SourceCorrespondence.source_item_id == item_id)
+        .one_or_none()
+    )
+    if existing is not None:
+        existing.track_id = track_id
+        existing.status = "confirmed"
+        existing.score = None
+        return existing
+    corr = SourceCorrespondence(source_item_id=item_id, track_id=track_id, status="confirmed")
+    db.add(corr)
+    return corr
+
+
 def link_item_to_track(
     db: Session, item_id: int, track_id: int, audio_from: str | None = None
 ) -> SourceCorrespondence:
@@ -226,19 +246,7 @@ def link_item_to_track(
     """
     db.query(Track).filter(Track.id == track_id).one()  # existence check
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
-    existing = (
-        db.query(SourceCorrespondence)
-        .filter(SourceCorrespondence.source_item_id == item_id)
-        .one_or_none()
-    )
-    if existing is not None:
-        existing.track_id = track_id
-        existing.status = "confirmed"
-        existing.score = None
-        corr = existing
-    else:
-        corr = SourceCorrespondence(source_item_id=item_id, track_id=track_id, status="confirmed")
-        db.add(corr)
+    corr = upsert_confirmed_correspondence(db, item_id, track_id)
     item.state = "fulfilled"
 
     if audio_from:
