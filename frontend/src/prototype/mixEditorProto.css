@@ -65,55 +65,6 @@
   white-space: nowrap;
 }
 
-.mixproto-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.mixproto-picker {
-  width: 300px;
-  overflow-y: auto;
-  border-right: 1px solid var(--surface0, #313244);
-  background: var(--crust, #11111b);
-  padding: 8px;
-}
-
-.mixproto-picker input {
-  width: 100%;
-  padding: 6px;
-  margin-bottom: 8px;
-  background: var(--base, #1e1e2e);
-  border: 1px solid var(--surface0, #313244);
-
-  color: var(--text, #cdd6f4);
-}
-
-.mixproto-picker-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 0;
-  font-size: 12px;
-  border-bottom: 1px solid var(--surface0, #313244);
-}
-
-.mixproto-picker-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mixproto-picker-row button {
-  background: none;
-  border: 1px solid #00e5ff;
-  color: #00e5ff;
-
-  cursor: pointer;
-  font-size: 11px;
-}
-
 .mixproto-arranger {
   flex: 1;
   display: flex;
@@ -122,12 +73,6 @@
   padding: 6px 12px;
   overflow-y: auto;
   min-width: 0;
-}
-
-.mixproto-deckrow {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 .mixproto-decklabel {
@@ -349,43 +294,6 @@
   will-change: transform;
 }
 
-.mixproto-controls {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  font-size: 12px;
-}
-
-.mixproto-controls label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.mixproto-controls input[type='number'] {
-  width: 64px;
-  background: var(--crust, #11111b);
-  border: 1px solid var(--surface0, #313244);
-  color: var(--text, #cdd6f4);
-
-  padding: 3px;
-}
-
-.mixproto-play {
-  padding: 4px 18px;
-  font-weight: 700;
-  background: var(--crust, #11111b);
-  border: 2px solid #39ff14;
-  color: #39ff14;
-
-  cursor: pointer;
-}
-
-.mixproto-play:disabled {
-  opacity: 0.35;
-}
-
 /* ── Info bar: deck A | transition center | deck B ── */
 
 .mixproto-infobar {
@@ -455,12 +363,7 @@
 }
 
 .mixproto-deckcard-row input {
-  width: 72px;
-  background: var(--crust, #11111b);
-  border: 1px solid var(--surface0, #313244);
-  color: var(--text, #cdd6f4);
-
-  padding: 2px 3px;
+  width: 72px; /* look comes from the shared control idiom below */
 }
 
 .mixproto-deckcard-row button {
@@ -539,13 +442,51 @@
   gap: 4px;
 }
 
+/* Site control idiom (player-button): transparent background, 1px border,
+   bold, square corners. Selects lose native chrome and gain a drawn caret;
+   number inputs lose their spinners (keyboard/wheel entry unchanged). */
+.mixproto-center-row input[type='number'],
+.mixproto-deckcard-row input[type='number'],
+.mixproto-center-row select {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--surface1, #45475a);
+  border-radius: 0;
+  color: var(--text, #cdd6f4);
+  font-weight: bold;
+  font-size: 11px;
+  padding: 2px 5px;
+}
+
+.mixproto-center-row input[type='number']::-webkit-outer-spin-button,
+.mixproto-center-row input[type='number']::-webkit-inner-spin-button,
+.mixproto-deckcard-row input[type='number']::-webkit-outer-spin-button,
+.mixproto-deckcard-row input[type='number']::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.mixproto-center-row select {
+  cursor: pointer;
+  padding-right: 18px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path d='M0 0l4 5 4-5z' fill='%23a6adc8'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+}
+
+.mixproto-center-row input:focus-visible,
+.mixproto-deckcard-row input:focus-visible,
+.mixproto-center-row select:focus-visible {
+  outline: none;
+  border-color: var(--sapphire, #74c7ec);
+}
+
 .mixproto-center-row input[type='number'] {
   width: 56px;
-  background: var(--crust, #11111b);
-  border: 1px solid var(--surface0, #313244);
-  color: var(--text, #cdd6f4);
+}
 
-  padding: 2px 3px;
+.mixproto-center-row input[type='checkbox'] {
+  accent-color: var(--sapphire, #74c7ec);
 }
 
 .mixproto-globalminimap {
@@ -559,49 +500,10 @@
   touch-action: none;
 }
 
-.mixproto-lanes {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.mixproto-lane {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.mixproto-lanelabel {
-  width: 80px;
-  font-size: 11px;
-  font-family: monospace;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .mixproto-laneclear {
   background: none;
   border: none;
   color: inherit;
   cursor: pointer;
   font-size: 12px;
-}
-
-.mixproto-lane canvas {
-  flex: 1;
-  height: 56px;
-  border: 1px solid var(--surface0, #313244);
-
-  touch-action: none;
-}
-
-.mixproto-lanes select,
-.mixproto-controls select {
-  align-self: flex-start;
-  background: var(--crust, #11111b);
-  color: var(--text, #cdd6f4);
-  border: 1px solid var(--surface0, #313244);
-
-  padding: 4px;
 }
