@@ -18,3 +18,9 @@ A first-class **Replace Audio** operation: point an existing Track at a new file
 
 - Blocked by: 01
 - Requires that manadj internals never use path as a foreign key — audit for violations.
+
+## Comments
+
+2026-07-02: The Soulseek Supplier PRD (.scratch/soulseek-supplier/PRD.md) names
+this ticket as the proper recovery path for wrong Soulseek picks — raises the
+priority of this work once that feature is in use.

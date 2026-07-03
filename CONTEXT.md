@@ -67,10 +67,13 @@ The 3-band (low/mid/high) rendering of a Track's audio, used by manadj's own pla
 ### Acquisition
 
 **Source**:
-A place audio is acquired from. Unlike an External library, a Source holds no copy of manadj's library state — it supplies new audio and provenance. Either Native or External.
+A place Source Items come from — where demand for tracks originates (SoundCloud likes today). Unlike an External library, a Source holds no copy of manadj's library state. Either Native or External. Distinct from a Supplier: a Source is where wanted tracks are discovered; a Supplier is where audio is obtained. SoundCloud is both.
+
+**Supplier**:
+A place manadj can obtain audio from. SoundCloud (direct download) and Soulseek (peer search) are Suppliers; Soulseek is supply-only — it has no Source Items. A Source Item may be fulfilled through any Supplier; Audio Provenance records which one actually supplied the audio.
 
 **Native Source**:
-A Source manadj is integrated with: it can Refresh Source Items from it and download from it (SoundCloud today). Provenance from a Native Source is recorded automatically with a structured external ID.
+A Source manadj is integrated with: it can Refresh Source Items from it (SoundCloud today). Provenance recorded from its downloads carries a structured external ID. Whether it can also supply audio is a Supplier question, not a Source one.
 
 **External Source**:
 A Source manadj recognizes but is not integrated with (e.g. Beatport, YouTube, Bandcamp). Identified by URL only — the URL carries whatever identity exists (video ID, Beatport ID). Provenance from an External Source is asserted by the user. An External Source can be promoted to Native later; its provenance URLs remain parseable.
@@ -95,7 +98,7 @@ Fetching the current list of Source Items from a Source. Only ever adds new Sour
 Normalizing raw metadata from a Source or filename into canonical Track title and artist — junk-token stripping, `Artist - Title` splitting, uploader fallback.
 
 **Audio Provenance**:
-A record of where a Track's current audio file came from: an origin label (the Source's name, derived from the URL host for External Sources), an optional URL, and when it was acquired. Recorded automatically for Native Source downloads; asserted by the user otherwise. Label-only provenance is allowed for URL-less origins (cd-rip, unknown). Asserted provenance stays editable; recorded provenance is ground truth and cannot be overwritten by an assertion. Replacing a Track's audio replaces its provenance. Distinct from Source Correspondence: a Track can correspond to a SoundCloud track while its audio was bought elsewhere.
+A record of where a Track's current audio file came from: an origin label (the Source's name, derived from the URL host for External Sources), an optional URL, and when it was acquired. Recorded automatically for downloads manadj performs; asserted otherwise — by the user, or derived automatically from file hints at Disk Import (yt-dlp IDs, purchase tag URLs). Label-only provenance is allowed for URL-less origins (cd-rip, unknown). Asserted provenance stays editable; recorded provenance is ground truth and cannot be overwritten by an assertion. Replacing a Track's audio replaces its provenance. Distinct from Source Correspondence: a Track can correspond to a SoundCloud track while its audio was bought elsewhere.
 
 ### Sync
 
@@ -120,7 +123,7 @@ Any operation that brings tracks or track data into manadj. Two kinds: Disk Impo
 New audio files from the tracks directory becoming Tracks: a Scan discovers candidates, accepting a candidate creates a Track.
 
 **External Import**:
-A Sync operation that pulls state from an external library into manadj, for the edge case where a track or its data was added or edited downstream first. The counterpart of Export.
+A Sync operation that pulls state from an external library into manadj, for data that originated downstream — keys/BPM analyzed in Engine, hot cues set at a gig, tracks added elsewhere first. Less common than Export but routine, not exceptional. The counterpart of Export.
 _Avoid_: pull, Library Import
 
 **Scan**:

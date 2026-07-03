@@ -77,3 +77,23 @@ A single, smart "Tracks" view inside Sync: an inbox-style work queue showing one
 - Sample data and real dry-run numbers (925 tracks; 3 missing on Engine, 4 not in Library) from 2026-07-02 validated the inbox-first layout choice; the matrix-first variant was explicitly rejected as 99% noise.
 - The SurfaceReader seam should be designed so candidate 3 (full ExternalLibrary seam) can absorb it rather than replace it.
 - Delete frontend/src/components/UnifiedSyncPrototype.{tsx,css} and the dev-only SyncView tab when the real view lands.
+
+## Post-implementation revisions (2026-07-02, e2e session)
+
+Decisions made after the initial implementation, superseding parts of the above:
+
+- **Rollup priority**: missing-downstream outranks diverged (presence beats field
+  agreement; you can't reconcile fields with a Surface the track isn't on).
+- **Diverged split into three sections** (frontend-derived, highest wins):
+  Tags diverged > Title/artist diverged > BPM/key diverged (collapsed by default).
+  Energy rides with tags (the Rekordbox tag export writes energy colors). Order:
+  missing-downstream, tags, unimported, title/artist, not-in-library, bpm/key.
+- **Story 15 revised in place**: dry-run round-trips dropped; the view is the
+  preview; scope-confirm panel + post-apply refresh.
+- **Engine/Rekordbox Export asymmetry**: ADR-0006 — Engine presence Export
+  generates RBXML for manual import; rows honestly stay missing until done.
+- **Unreachable Surfaces render as unknown (dashed), never missing.**
+- **Empty-Library agreement cells render as a dash, not ✓**; no-overwrite
+  warnings live on field chips as ⚠ + tooltip, not prose.
+- **Per-row tag-export buttons removed** (misleadingly whole-library); section
+  header buttons are the honest affordance until issues/01 lands selection-scoped ops.
