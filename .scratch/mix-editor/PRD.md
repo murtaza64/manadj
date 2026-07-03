@@ -63,6 +63,16 @@ Stacked half-waveforms in the main timeline, echoing the global minimap's visual
 - **Strictly stacked, no overlap**: rows keep separate canvases and time mappings (B is tempo-stretched); the transition-window highlight spanning both rows ties them together. Overlap stays a minimap-only effect.
 - Renderer change is config-only: amplitude anchor (`center` default / `top` / `bottom`) alongside `waveformBrightness`; all non-editor surfaces stay `center`. Beat ticks, cue lines, and badges render within each half.
 
+### Library discovery & transition management (grill 2026-07-03 #4; issues 20–21)
+
+Activates the deferred track-association layer (glossary: Favorite, Preferred pair, Transition library).
+
+- **Favorite**: boolean on the Transition artifact only; pair-level "star" is always derived (Preferred pair), never stored. A star means proven-move — compatible-but-unsketched pairs correctly stay unstarred (work remains). If bookmarking unsketched pairings becomes a felt need, that's a new worklist concept — do not widen Favorite.
+- **Lazy persistence**: auto-created and newly-created Transitions live in memory and hit storage only on first real edit (lane point, anchor change, rename, favorite). Untouched ones evaporate on navigate-away — this keeps the discovery index honest (no marks from merely-opened pairs) and gives the first discard tier for free.
+- **Switcher** (replaces the saved-Transition dropdown): `◀ [name] ▶` + position hint, creation-ordered; `▶` past the end = new (pristine "Transition n"). Inline rename (click name; Enter/Esc); star toggle beside it; rename/favorite materialize a pristine Transition. **Delete replaces the reset button**: inline two-step confirm, no modal; deleting the last Transition re-inits a blank one (same feel as reset), otherwise navigate to the next.
+- **Library marks**: outgoing-only, from **either** loaded deck (alternating-deck workflow: next track loads into the free deck) — one compact glyph per source deck in that deck's accent color; starred variant when the pair is Preferred. Filter "has transition from loaded decks" joins the existing library filter bar. No counts in v1.
+- **Index**: direction-aware API (`transitionsFrom` / `transitionsInto`); prototype-scale = in-memory scan over localStorage rebuilt on editor events. These features raise the urgency of the DB-persistence slice (which unblocks issue 03) without blocking on it.
+
 ### Marker readability (2026-07-03; issue 14, prototype iteration)
 
 De-noising the timeline's vertical lines; hot cues become findable at distant zoom:
@@ -133,7 +143,7 @@ A **Mix editor** mode: arrange Tracks on a horizontal timeline, where each adjac
 - More than two simultaneous tracks / non-pairwise overlaps
 - Offline render/export to file (future: OfflineAudioContext over the same lane data)
 - Keylock/time-stretch (tempo-matched blends detune under varispeed — same named gap as everywhere)
-- Track-association/transition-library features (future index over Transitions)
+- ~~Track-association/transition-library features (future index over Transitions)~~ — activated 2026-07-03 (see Library discovery & transition management); auto set-building stays out
 - Curve types beyond piecewise-linear; lane editing outside transitions (full-mix automation)
 - Master tempo curve (DJ.STUDIO-style); per-mix master EQ/effects
 - Seeding a Mix from a Playlist (obvious future flow, one line here so it isn't forgotten)

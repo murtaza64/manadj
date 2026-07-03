@@ -52,6 +52,16 @@ The top-panel mode (a sibling of the library and Performance views) for editing 
 **Mix**:
 Future concept: an ordered sequence of Tracks whose adjacencies reference saved Transitions. Deferred until the Transition library exists. Distinct from a Playlist, and from the Classification value "mix" (an externally recorded DJ mix on a Source).
 
+**Favorite**:
+A boolean on a Transition marking a proven move — asserting both "these Tracks go well together" and "this specific Transition is good." The unit discovery ranks by. Distinct from a Track's Rating.
+_Avoid_: like (social-app connotation).
+
+**Preferred pair**:
+A derived, never-stored property: an ordered Track pair with at least one favorited Transition. Surfaces as the starred variant of Transition-library marks. Bookmarking a pairing with no sketched Transition is deliberately NOT this — that would be a worklist concept, not a Favorite variant.
+
+**Transition library**:
+The queryable index over saved Transitions — "what mixes out of / into this Track" — surfaced as library-row marks and discovery filters. Directional, like the Transitions it indexes.
+
 **Transition template**:
 A named beat-domain recipe for producing a Transition: per-side anchor rules (cue slot + beat delta on each track's own grid), a length in beats (fixed or scalable at apply time), and normalized automation lanes (e.g. "bass swap"). Applying one translates beats to seconds via the tempo-matched beatgrids and yields an ordinary seconds-based Transition — the recipe is an editing affordance, not a runtime concept. Designed; built behind DB persistence.
 
