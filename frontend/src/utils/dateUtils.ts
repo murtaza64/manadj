@@ -18,7 +18,10 @@ export function formatRelativeTime(dateString: string): string {
   if (diffMin < 60) return `${diffMin}m ago`;
   if (diffHour < 24) return `${diffHour}h ago`;
   if (diffDay < 7) return `${diffDay}d ago`;
-  if (diffWeek < 4) return `${diffWeek}w ago`;
-  if (diffMonth < 12) return `${diffMonth}mo ago`;
+  // Each unit applies until a full quantity of the next unit has elapsed —
+  // otherwise boundary days fall in a gap and floor to zero (e.g. day 28
+  // was "0mo ago", day 364 "0y ago").
+  if (diffMonth < 1) return `${diffWeek}w ago`;
+  if (diffYear < 1) return `${diffMonth}mo ago`;
   return `${diffYear}y ago`;
 }
