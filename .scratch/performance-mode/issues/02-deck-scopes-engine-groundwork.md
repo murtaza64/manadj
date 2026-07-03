@@ -27,3 +27,17 @@ The addressing and engine primitives the Performance view needs, with the librar
 ## Blocked by
 
 - 01-mixer-owns-audio-graph
+
+## Comments
+
+Implemented in jj change `ltzwtqqo` (performance-mode: 02-deck-scopes-engine-groundwork).
+- `playback/tempo.ts` (+ tests): `composeRate` (rate = (1+pitch/100)×(1+bend/100)), `effectiveBpm`, `bpmMatch` (candidates {other, ×2, ½} vs the other deck's effective BPM, ±8% with edge epsilon, direct preferred, out-of-reach verdict), `PITCH_RANGE_PERCENT` moved here, `NUDGE_BEND_PERCENT = 2`.
+- `playback/beatjump.ts` (+ tests): halve/double/clamp within 1–128, default 32; library keeps `constants.BEATJUMP_BEATS`.
+- `DeckEngine`: `setBend(percent)` — shared `setRateComponents` re-anchors the clock at the old rate before stepping to the composed rate; `bendPercent` in the snapshot; auto-cleared on Load (pitch persists). Engine-level vitest via public interface with an untouched port (no Web Audio).
+- `DeckProvider` now owns both decks + registry + `MixerContext`; new `<DeckScope deck="A|B">` provides the unchanged `DeckContext` — all deck hooks keep their signatures. Per-deck loadedTrack/loadTrack/beatjump size; scope values memoized per deck so A's loads never re-render B's subtree. Cue persistence wired for both engines.
+- `useMixer()` (hooks/useMixer.ts) returns the Mixer instance (strip setters, crossfader, master).
+- Library + prototype wrapped in `<DeckScope deck="A">` (App.tsx) — library behavior unchanged.
+- Deck B dev verification (throwaway, DEV-only): in the console,
+  `__manadj.loadTrackById('B', <id>).then(() => __manadj.engines.B.play())`
+  — then e.g. `__manadj.mixer.setFader('B', 0.5)` / `setCrossfader(1)` to hear it on channel B.
+- Ear-verification pending user: library parity under scope A; deck B audible through channel B.

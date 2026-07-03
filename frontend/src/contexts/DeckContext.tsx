@@ -1,16 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
 import { Mixer } from '../playback/mixer';
-import { DeckContext } from '../hooks/useDeck';
+import type { ChannelId } from '../playback/mixer';
+import { PERFORMANCE_BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
+import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
+import type { DeckContextValue } from '../hooks/useDeck';
+import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
 import type { BeatgridResponse, Track, WaveformResponse } from '../types';
 
+const DECK_IDS = ['A', 'B'] as const;
+
 /**
- * The one shared Deck (ADR 0008). Sits above the view switch, so the Deck
- * outlives any view: Library and Practice render the same engine, playback
- * survives view changes, and only one thing can ever play.
+ * Both Decks and the Mixer (ADRs 0008/0009). Sits above the view switch, so
+ * they outlive any view: a mix keeps playing while you flip to the library.
+ * The Mixer owns the one AudioContext; each deck is one of its channel
+ * inputs (graph nodes only — no audio memory until Load).
+ *
+ * Components address a deck through <DeckScope deck="A|B"> — the provider
+ * itself only publishes the registry (both decks) and the Mixer.
  *
  * Loading is explicit (glossary: Load) — views call loadTrack deliberately
  * (Enter / double-click); selection never loads. Loading also resolves the
@@ -18,39 +28,43 @@ import type { BeatgridResponse, Track, WaveformResponse } from '../types';
  * cue persistence: a cue the user sets is written back (CDJ memory-cue
  * behavior); defaults are not.
  *
- * Deck *state* is not part of the context value — consumers subscribe via
+ * Deck *state* is not part of any context value — consumers subscribe via
  * useDeckSnapshot so transport events only re-render components that care.
  */
 export function DeckProvider({ children }: { children: ReactNode }) {
-  // The Mixer owns the one AudioContext (ADR 0009); both decks are created
-  // eagerly as its channel inputs (graph nodes only — no audio memory until
-  // Load). Deck B has no consumers yet (performance-mode issue 02 adds deck
-  // scopes); the provider still exposes Deck A through the existing API.
-  const [{ mixer, deckA, deckB }] = useState(() => {
+  const [{ mixer, engines }] = useState(() => {
     const m = new Mixer();
     return {
       mixer: m,
-      deckA: new DeckEngine(m.portFor('A')),
-      deckB: new DeckEngine(m.portFor('B')),
+      engines: {
+        A: new DeckEngine(m.portFor('A')),
+        B: new DeckEngine(m.portFor('B')),
+      } as Record<ChannelId, DeckEngine>,
     };
   });
-  const engine = deckA;
   useEffect(
     () => () => {
       // Decks stop against the still-open context, then the Mixer closes it.
-      engine.dispose();
-      deckB.dispose();
+      engines.A.dispose();
+      engines.B.dispose();
       mixer.dispose();
     },
-    [engine, deckB, mixer]
+    [engines, mixer]
   );
 
   const queryClient = useQueryClient();
-  const [loadedTrack, setLoadedTrack] = useState<Track | null>(null);
+  const [loadedTracks, setLoadedTracks] = useState<Record<ChannelId, Track | null>>({
+    A: null,
+    B: null,
+  });
+  const [beatjumps, setBeatjumps] = useState<Record<ChannelId, number>>({
+    A: PERFORMANCE_BEATJUMP_DEFAULT,
+    B: PERFORMANCE_BEATJUMP_DEFAULT,
+  });
 
-  const loadTrack = useCallback(
-    (track: Track) => {
-      setLoadedTrack(track);
+  const loadTrackOnto = useCallback(
+    (deck: ChannelId, track: Track) => {
+      setLoadedTracks((prev) => ({ ...prev, [deck]: track }));
 
       // Saved cue + first beat, fetched concurrently with the audio through
       // the same query cache the waveform/beatgrid components use (usually
@@ -80,36 +94,101 @@ export function DeckProvider({ children }: { children: ReactNode }) {
         };
       })();
 
-      void engine.load({
+      void engines[deck].load({
         trackId: track.id,
         audioUrl: api.tracks.audioUrl(track.id),
         bpm: track.bpm ?? null,
         cueDefaults,
       });
     },
-    [engine, queryClient]
+    [engines, queryClient]
   );
 
-  // Persist user-set cues (engine fires this only for deliberate cue sets,
-  // never for load defaults, and reports its own loaded trackId) and keep
-  // the cached waveform's cue in sync without refetching band data.
+  // Persist user-set cues (an engine fires this only for deliberate cue
+  // sets, never for load defaults, and reports its own loaded trackId) and
+  // keep the cached waveform's cue in sync without refetching band data.
   useEffect(() => {
-    engine.setCueSetHandler((trackId, timeSeconds) => {
-      void api.waveforms.updateCuePoint(trackId, timeSeconds).then(() => {
-        queryClient.setQueryData<WaveformResponse>(['waveform', trackId], (old) =>
-          old ? { ...old, data: { ...old.data, cue_point_time: timeSeconds } } : old
-        );
+    for (const deck of DECK_IDS) {
+      engines[deck].setCueSetHandler((trackId, timeSeconds) => {
+        void api.waveforms.updateCuePoint(trackId, timeSeconds).then(() => {
+          queryClient.setQueryData<WaveformResponse>(['waveform', trackId], (old) =>
+            old ? { ...old, data: { ...old.data, cue_point_time: timeSeconds } } : old
+          );
+        });
       });
-    });
+    }
     return () => {
-      engine.setCueSetHandler(null);
+      for (const deck of DECK_IDS) engines[deck].setCueSetHandler(null);
     };
-  }, [engine, queryClient]);
+  }, [engines, queryClient]);
 
-  const value = useMemo(
-    () => ({ engine, loadedTrack, loadTrack }),
-    [engine, loadedTrack, loadTrack]
+  // Each scope value is memoized on its own deck's slice, so a Load or
+  // beatjump change on A never re-renders B's subtree (and vice versa).
+  const makeScope = useCallback(
+    (
+      deck: ChannelId,
+      loadedTrack: Track | null,
+      beatjumpBeats: number
+    ): DeckContextValue => ({
+      deck,
+      engine: engines[deck],
+      loadedTrack,
+      loadTrack: (track) => loadTrackOnto(deck, track),
+      beatjumpBeats,
+      setBeatjumpBeats: (beats) =>
+        setBeatjumps((prev) => ({ ...prev, [deck]: clampBeatjump(beats) })),
+    }),
+    [engines, loadTrackOnto]
+  );
+  const scopeA = useMemo(
+    () => makeScope('A', loadedTracks.A, beatjumps.A),
+    [makeScope, loadedTracks.A, beatjumps.A]
+  );
+  const scopeB = useMemo(
+    () => makeScope('B', loadedTracks.B, beatjumps.B),
+    [makeScope, loadedTracks.B, beatjumps.B]
+  );
+  const registry = useMemo<Record<ChannelId, DeckContextValue>>(
+    () => ({ A: scopeA, B: scopeB }),
+    [scopeA, scopeB]
   );
 
-  return <DeckContext.Provider value={value}>{children}</DeckContext.Provider>;
+  // Throwaway dev handle (performance-mode issue 02): deck B has no UI until
+  // issue 03, so it is verified from the console, e.g.
+  //   __manadj.loadTrackById('B', 42).then(() => __manadj.engines.B.play())
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const handle = {
+      mixer,
+      engines,
+      loadTrackById: async (deck: ChannelId, id: number) => {
+        loadTrackOnto(deck, await api.tracks.getById(id));
+      },
+    };
+    const devGlobals = window as unknown as Record<string, unknown>;
+    devGlobals.__manadj = handle;
+    return () => {
+      delete devGlobals.__manadj;
+    };
+  }, [mixer, engines, loadTrackOnto]);
+
+  return (
+    <MixerContext.Provider value={mixer}>
+      <DeckRegistryContext.Provider value={registry}>
+        {children}
+      </DeckRegistryContext.Provider>
+    </MixerContext.Provider>
+  );
+}
+
+/**
+ * Address a Deck: everything below reads this deck through the deck-blind
+ * hooks (useDeck, useDeckSnapshot, useDeckReady, useHotCueActions). The
+ * library view wraps its whole tree in scope A; the Performance view mounts
+ * one scope per panel.
+ */
+export function DeckScope({ deck, children }: { deck: ChannelId; children: ReactNode }) {
+  const registry = useContext(DeckRegistryContext);
+  if (!registry) throw new Error('DeckScope must be used within DeckProvider');
+  return <DeckContext.Provider value={registry[deck]}>{children}</DeckContext.Provider>;
 }

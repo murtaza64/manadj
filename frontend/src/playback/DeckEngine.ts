@@ -19,6 +19,7 @@ import type { TransportEvent, TransportState } from './transport';
 import { DECLICK_S } from './graph';
 import type { DeckAudioPort } from './mixer';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
+import { PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
 
@@ -57,6 +58,8 @@ export interface DeckSnapshot {
   cuePoint: number | null;
   /** Varispeed, percent (±). */
   pitchPercent: number;
+  /** Momentary nudge, percent (± — stacked on pitch, 0 when released). */
+  bendPercent: number;
 }
 
 interface ActiveSource {
@@ -65,8 +68,6 @@ interface ActiveSource {
   /** Set when the engine stops it deliberately, so onended isn't a natural end. */
   stopped: boolean;
 }
-
-const PITCH_RANGE_PERCENT = 8;
 
 export class DeckEngine {
   /** Last audio access from the port (context may be revived by the Mixer). */
@@ -88,6 +89,8 @@ export class DeckEngine {
   private anchorCtxTime = 0;
 
   private pitchPercent = 0;
+  /** Momentary nudge multiplier on top of pitch; 0 when released. */
+  private bendPercent = 0;
 
   private listeners = new Set<() => void>();
   private snapshot: DeckSnapshot;
@@ -133,6 +136,9 @@ export class DeckEngine {
     this.buffer = null;
     this.trackInfo = info;
     this.pendingPlay = false;
+    // A nudge is a momentary correction against the *previous* pairing —
+    // never carried onto a fresh track. Pitch persists (deliberate setting).
+    this.bendPercent = 0;
     this.loadState = 'fetching';
     this.loadError = null;
     this.emit();
@@ -272,16 +278,38 @@ export class DeckEngine {
 
   setPitch(percent: number): void {
     const clamped = Math.max(-PITCH_RANGE_PERCENT, Math.min(PITCH_RANGE_PERCENT, percent));
-    // Re-anchor the clock at the old rate, then step the rate at the same
-    // instant. An instant rate set (no smoothing) keeps the playhead clock
-    // exact — a smoothed rate would drift against the anchor math.
+    this.setRateComponents(clamped, this.bendPercent);
+  }
+
+  /**
+   * Momentary tempo bend (Nudge): a rate multiplier stacked on pitch —
+   * rate = (1 + pitch/100) × (1 + bend/100). setBend(0) releases, restoring
+   * the exact pitch-only rate. Auto-cleared on Load. The ±2% UI amount is
+   * the caller's constant (tempo.NUDGE_BEND_PERCENT); the engine takes any
+   * percent.
+   */
+  setBend(percent: number): void {
+    this.setRateComponents(this.pitchPercent, percent);
+  }
+
+  /**
+   * Adopt new rate components and apply the composed rate to a live source.
+   * Re-anchor the clock at the OLD rate first, then step the rate at the
+   * same instant. An instant rate set (no smoothing) keeps the playhead
+   * clock exact — a smoothed rate would drift against the anchor math.
+   */
+  private setRateComponents(pitchPercent: number, bendPercent: number): void {
     if (this.source && !this.source.stopped && this.audio) {
       const now = this.audio.ctx.currentTime;
-      this.anchorPosition = this.getPlayhead();
+      this.anchorPosition = this.getPlayhead(); // still at the old rate
       this.anchorCtxTime = now;
-      this.source.node.playbackRate.setValueAtTime(this.rateFor(clamped), now);
+      this.pitchPercent = pitchPercent;
+      this.bendPercent = bendPercent;
+      this.source.node.playbackRate.setValueAtTime(this.currentRate(), now);
+    } else {
+      this.pitchPercent = pitchPercent;
+      this.bendPercent = bendPercent;
     }
-    this.pitchPercent = clamped;
     this.emit();
   }
 
@@ -296,7 +324,7 @@ export class DeckEngine {
   getPlayhead(): number {
     if (this.source && !this.source.stopped && this.audio) {
       const elapsed =
-        (this.audio.ctx.currentTime - this.anchorCtxTime) * this.rateFor(this.pitchPercent);
+        (this.audio.ctx.currentTime - this.anchorCtxTime) * this.currentRate();
       return this.clampTime(this.anchorPosition + elapsed);
     }
     return this.transport.playhead;
@@ -360,7 +388,7 @@ export class DeckEngine {
     const offset = Math.max(0, Math.min(at, this.buffer.duration - 0.001));
     const node = ctx.createBufferSource();
     node.buffer = this.buffer;
-    node.playbackRate.value = this.rateFor(this.pitchPercent);
+    node.playbackRate.value = this.currentRate();
 
     // Declick fade-in envelope into this deck's mixer channel.
     const envelope = ctx.createGain();
@@ -420,8 +448,8 @@ export class DeckEngine {
     this.source = null;
   }
 
-  private rateFor(pitchPercent: number): number {
-    return 1 + pitchPercent / 100;
+  private currentRate(): number {
+    return composeRate(this.pitchPercent, this.bendPercent);
   }
 
   private clampTime(seconds: number): number {
@@ -442,6 +470,7 @@ export class DeckEngine {
       hotCuePreviewSlot: this.transport.hotCuePreviewSlot,
       cuePoint: this.transport.cuePoint,
       pitchPercent: this.pitchPercent,
+      bendPercent: this.bendPercent,
     };
   }
 
