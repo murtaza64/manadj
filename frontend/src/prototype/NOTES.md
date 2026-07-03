@@ -139,9 +139,15 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   alignment: B shifts startSec with the frame, bMove-style; A is the mix
   anchor so its nudge shifts frame+B the opposite way). Shift-drag
   suspends beat snap on all three drag kinds (bMove/bTrim/aTrim).
-- Issue 08 filed: pair-dependent drift-corrector artifacts (Weeble+Never
-  Alone; fixed by reloading B) — needs-info, `?protoperf` instrumentation
-  in MixProtoPlayer.syncDeck awaits a repro.
+- Issue 08 root-caused via the protoperf log: the mix timeline ran on wall
+  time while deck playheads ran on ctx time; two live AudioContexts (issue
+  07's mirrored loads spin up the shared Mixer) made the clocks stutter
+  against each other and the drift corrector re-seeked audibly every few
+  hundred ms. Fix: MixProtoPlayer's timeline anchors to its own Mixer's
+  audio clock (`Mixer.now()` — REAL-MODULE pattern worth keeping), and the
+  editor suspends the shared Mixer's context while mounted
+  (`Mixer.suspend()/resume()`). Corrector kept as safety net;
+  instrumentation kept until verified on the bad pair.
 
 ## Real-module fixes made here that MUST ride back to the main line
 

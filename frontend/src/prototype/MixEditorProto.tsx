@@ -24,6 +24,7 @@ import type { LibraryBrowseHandle } from '../components/Library';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
+import { useMixer } from '../hooks/useMixer';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { MixProtoPlayer } from './MixProtoPlayer';
 import {
@@ -267,6 +268,17 @@ export default function MixEditorProto() {
     });
     setMix((m) => ({ ...m, bInSec: item.bInSec, transition: structuredClone(item.transition) }));
   };
+
+  // One audible surface AND one running audio clock at a time (issue 08):
+  // a second live AudioContext makes both contexts' clocks stutter, which
+  // the drift corrector converts into audible re-seeks. Suspend the shared
+  // Mixer's context while the editor is mounted; deck play resumes it on
+  // demand after we leave.
+  const sharedMixer = useMixer();
+  useEffect(() => {
+    sharedMixer.suspend();
+    return () => sharedMixer.resume();
+  }, [sharedMixer]);
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh

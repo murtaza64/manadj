@@ -4,8 +4,14 @@
  * Deterministic playback of a two-track ProtoMix on two DeckEngines fed into
  * the editor's own private Mixer (ADR 0009 one-graph architecture — a single
  * AudioContext, real channel strips, master bus + limiter; audio-isolated
- * from the shared decks by being a separate Mixer instance). Wall-clock mix
- * timeline, drift correction by re-seek only when off by > 120ms.
+ * from the shared decks by being a separate Mixer instance).
+ *
+ * The mix timeline runs on the Mixer's AUDIO clock (issue 08): the decks'
+ * playheads derive from the same ctx.currentTime, so mix time and deck time
+ * cannot drift apart by construction. (The original wall-clock timeline
+ * skewed against the audio clock — badly once a second context was alive —
+ * and the drift corrector "fixed" the skew with audible re-seeks every few
+ * hundred ms.) The corrector remains as a rare safety net.
  */
 
 import { DeckEngine } from '../playback/DeckEngine';
@@ -38,7 +44,8 @@ export class MixProtoPlayer {
 
   private playing = false;
   private mixTimeAtAnchor = 0;
-  private anchorWallMs = 0;
+  /** Audio-clock time (mixer.now()) at the anchor — NOT wall time. */
+  private anchorAudioTime = 0;
   private raf = 0;
   private listeners = new Set<() => void>();
 
@@ -99,7 +106,7 @@ export class MixProtoPlayer {
 
   getMixTime(): number {
     if (!this.playing) return this.mixTimeAtAnchor;
-    return this.mixTimeAtAnchor + (performance.now() - this.anchorWallMs) / 1000;
+    return this.mixTimeAtAnchor + (this.mixer.now() - this.anchorAudioTime);
   }
 
   getMixDuration(): number {
@@ -118,7 +125,7 @@ export class MixProtoPlayer {
   play(): void {
     if (!this.ready() || this.playing) return;
     this.playing = true;
-    this.anchorWallMs = performance.now();
+    this.anchorAudioTime = this.mixer.now();
     this.applyPitch();
     // Apply lane values before audio starts so mid-transition playback
     // begins at the drawn gains, not the previous ones.
@@ -141,7 +148,7 @@ export class MixProtoPlayer {
   seek(mixTime: number): void {
     const t = Math.max(0, Math.min(mixTime, this.getMixDuration()));
     this.mixTimeAtAnchor = t;
-    this.anchorWallMs = performance.now();
+    this.anchorAudioTime = this.mixer.now();
     this.applyLanes(t);
     if (this.playing) {
       this.syncDecks(t, true);
