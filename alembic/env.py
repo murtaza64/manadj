@@ -13,6 +13,7 @@ import os
 from logging.config import fileConfig
 
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Connection
 
 from alembic import context
 
@@ -20,6 +21,7 @@ from backend.models import Base
 
 # Model modules that register tables on Base (autogenerate must see them all)
 import backend.acquisition.models  # noqa: F401
+import backend.tasks.models  # noqa: F401
 
 config = context.config
 
@@ -52,7 +54,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def _run(connection) -> None:  # type: ignore[no-untyped-def]
+def _run(connection: "Connection") -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,

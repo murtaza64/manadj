@@ -37,6 +37,7 @@ export interface Track {
   artist?: string;
   key?: number;  // Engine DJ key ID (0-23)
   bpm?: number;
+  duration_secs?: number | null;
   created_at: string;
   updated_at: string;
   tags: Tag[];
@@ -414,6 +415,30 @@ export interface SourceItem {
   state: SourceItemState;
   classification: Classification | null;
   liked_at: string | null;
+  correspondence: SourceCorrespondenceInfo | null;
+  download: DownloadStatus | null;
+  provenance: ProvenanceInfo | null;
+}
+
+export interface ProvenanceInfo {
+  label: string;
+  url: string | null;
+  asserted: boolean;
+  acquired_at: string | null;
+}
+
+export interface DownloadStatus {
+  task_state: 'pending' | 'running' | 'done' | 'failed';
+  error: string | null;
+}
+
+export interface SourceCorrespondenceInfo {
+  track_id: number;
+  status: 'proposed' | 'confirmed';
+  score: number | null;
+  track_title: string | null;
+  track_artist: string | null;
+  track_duration_secs: number | null;
 }
 
 export interface AcquisitionRefreshStats {

@@ -36,6 +36,7 @@ class FileMetadata(BaseModel):
     artist: str | None = None
     key: int | None = None
     bpm: float | None = None
+    duration_secs: float | None = None  # from the audio stream, not tags
 
 
 def read_file_metadata(path: str | Path) -> FileMetadata:
@@ -118,6 +119,7 @@ def _read_easy(path: Path) -> FileMetadata:
         artist=first("artist"),
         key=key.engine_id if key else None,
         bpm=bpm,
+        duration_secs=audio.info.length if audio.info else None,
     )
 
 
@@ -164,6 +166,7 @@ def _read_wav(path: Path) -> FileMetadata:
         artist=frame_text("TPE1"),
         key=key.engine_id if key else None,
         bpm=bpm,
+        duration_secs=audio.info.length if audio.info else None,
     )
 
 

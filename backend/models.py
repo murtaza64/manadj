@@ -20,6 +20,7 @@ class Track(Base):
     artist = Column(String, nullable=True)
     key = Column(Integer, nullable=True)  # Engine DJ key ID (0-23)
     bpm = Column(Integer, nullable=True)  # Beats per minute
+    duration_secs = Column(Float, nullable=True)  # audio duration, read from the file
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

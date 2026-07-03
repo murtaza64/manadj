@@ -4,6 +4,7 @@ Pure-logic unit tests for the heuristic + module-interface tests for
 assignment at Refresh, backfill, and override persistence (ADR-0002).
 """
 
+import pytest
 from sqlalchemy.orm import Session
 
 from backend.acquisition.classification import ClassificationConfig, classify
@@ -97,8 +98,6 @@ class TestClassificationAtRefresh:
     def test_set_classification_rejects_unknown_value(self, db_session: Session) -> None:
         refresh(db_session, FakeSource([item_data("1")]), classification_config=CFG)
         item = list_source_items(db_session)[0]
-
-        import pytest
 
         with pytest.raises(ValueError):
             set_classification(db_session, item.id, "banger")

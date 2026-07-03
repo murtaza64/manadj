@@ -8,7 +8,8 @@ for why API v2 (not yt-dlp) is used for enumeration.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, Protocol, cast
 
 import requests
 
@@ -43,11 +44,16 @@ class Source(Protocol):
         """Return all items (e.g. likes) currently on the Source."""
         ...
 
+    def download(self, permalink_url: str, dest_dir: Path, basename: str) -> Path:
+        """Download an item's audio to dest_dir as `basename.<ext>`; return the path."""
+        ...
+
 
 class SoundCloudSource:
-    """SoundCloud likes via API v2, authenticated with a personal OAuth token."""
+    """SoundCloud likes via API v2, downloads via yt-dlp; personal OAuth token."""
 
     def __init__(self, oauth_token: str) -> None:
+        self._oauth_token = oauth_token
         self._session = requests.Session()
         self._session.headers["Authorization"] = f"OAuth {oauth_token}"
         self._session.headers["User-Agent"] = USER_AGENT
@@ -87,3 +93,24 @@ class SoundCloudSource:
             url = page.get("next_href")
         logger.info("SoundCloud: listed %d liked tracks", len(items))
         return items
+
+    def download(self, permalink_url: str, dest_dir: Path, basename: str) -> Path:
+        """Download best non-opus audio via yt-dlp (the user's proven incantation)."""
+        from yt_dlp import YoutubeDL  # heavy import, keep it out of module load
+
+        options = {
+            "format": "ba[acodec!=opus]/ba",
+            "outtmpl": str(dest_dir / f"{basename}.%(ext)s"),
+            "username": "oauth",
+            "password": self._oauth_token,
+            "quiet": True,
+            "noprogress": True,
+        }
+        with YoutubeDL(cast(Any, options)) as ydl:
+            info = cast("dict[str, Any] | None", ydl.extract_info(permalink_url, download=True))
+        if info is None:
+            raise RuntimeError(f"yt-dlp returned no info for {permalink_url}")
+        downloads: list[dict[str, Any]] = info.get("requested_downloads") or []
+        if not downloads or not downloads[0].get("filepath"):
+            raise RuntimeError(f"yt-dlp reported no downloaded file for {permalink_url}")
+        return Path(downloads[0]["filepath"])

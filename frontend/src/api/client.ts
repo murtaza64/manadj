@@ -567,5 +567,77 @@ export const api = {
       if (!res.ok) throw new Error('Failed to set classification');
       return res.json();
     },
+
+    acceptMatch: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/accept-match`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to accept match');
+      return res.json();
+    },
+
+    rejectMatch: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/reject-match`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to reject match');
+      return res.json();
+    },
+
+    queueBulk: async (itemIds: number[]): Promise<{ queued: number; skipped: number }> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/queue-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds }),
+      });
+      if (!res.ok) throw new Error('Failed to bulk queue');
+      return res.json();
+    },
+
+    ignoreItem: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/ignore`, { method: 'POST' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to ignore item');
+      }
+      return res.json();
+    },
+
+    restoreItem: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/restore`, { method: 'POST' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to restore item');
+      }
+      return res.json();
+    },
+
+    setProvenance: async (itemId: number, audioFrom: string): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/provenance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio_from: audioFrom }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to set provenance');
+      }
+      return res.json();
+    },
+
+    queueDownload: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/queue`, { method: 'POST' });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Failed to queue download');
+      }
+      return res.json();
+    },
+
+    linkToTrack: async (itemId: number, trackId: number, audioFrom?: string): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_id: trackId, audio_from: audioFrom || null }),
+      });
+      if (!res.ok) throw new Error('Failed to link track');
+      return res.json();
+    },
   },
 };

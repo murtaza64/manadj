@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from backend.acquisition.classification import ClassificationConfig
+from backend.acquisition.cleanup import CleanupConfig
 
 
 @dataclass
@@ -37,7 +38,8 @@ class SoundCloudConfig:
 @dataclass
 class AcquisitionConfig:
     """Acquisition configuration."""
-    classification: "ClassificationConfig" = field(default_factory=lambda: ClassificationConfig())
+    classification: ClassificationConfig = field(default_factory=ClassificationConfig)
+    cleanup: CleanupConfig = field(default_factory=CleanupConfig)
 
 
 @dataclass
@@ -77,6 +79,13 @@ def _classification_config(data: dict[str, Any]) -> ClassificationConfig:
         mix_keywords=section.get("mix_keywords", defaults.mix_keywords),
         clip_keywords=section.get("clip_keywords", defaults.clip_keywords),
     )
+
+
+def _cleanup_config(data: dict[str, Any]) -> CleanupConfig:
+    """Cleanup rules from [acquisition.cleanup], defaults otherwise."""
+    section: dict[str, Any] = data.get("acquisition", {}).get("cleanup", {})
+    defaults = CleanupConfig()
+    return CleanupConfig(junk_patterns=section.get("junk_patterns", defaults.junk_patterns))
 
 
 def _soundcloud_token(data: dict[str, Any]) -> str | None:
@@ -153,7 +162,10 @@ def load_config() -> Config:
             key_detection_backend=key_backend
         ),
         soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data)),
-        acquisition=AcquisitionConfig(classification=_classification_config(data))
+        acquisition=AcquisitionConfig(
+            classification=_classification_config(data),
+            cleanup=_cleanup_config(data),
+        )
     )
 
 

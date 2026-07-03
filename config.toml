@@ -27,6 +27,11 @@ mix_min_duration_secs = 1200
 mix_keywords = ["mixtape", "podcast", "radio show", "b2b", "dj set", "live set", "guest mix", "dj mix", "minimix", "mini mix"]
 clip_keywords = ["preview", "snippet", "clip", "teaser"]
 
+[acquisition.cleanup]
+# Regex junk patterns stripped from Source titles during Cleanup
+# (case-insensitive; defaults shown).
+junk_patterns = ["free\\s+(download|dl)", "out\\s+now", "coming\\s+soon", "ncs\\s+release", "premiere"]
+
 [soundcloud]
 # Personal OAuth token for the SoundCloud Source (Acquisition).
 # This file is committed — do NOT put the real token here. Put it in the
