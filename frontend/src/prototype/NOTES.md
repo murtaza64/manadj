@@ -102,7 +102,21 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   main-line bug: one mispositioned frame per Player zoom step). Verdict:
   zoom smooth and anchored ("perfect now").
 
+- v11 (stack merge): the mix-editor stack was rebased onto the
+  performance-mode head (its agent paused) — one unified lineage now.
+  Notable prototype-side consequences: `MixProtoPlayer` runs on its own
+  private `Mixer` (single context, channel strips, master limiter — replaces
+  two-context OS summing; audio isolation preserved by instance separation);
+  DeckEngine lost EQ/filter/volume (Mixer owns them, ADR 0009); the shared
+  `rampGain` streamed-automation fix lives in `mixer.ts`; PracticeView and
+  the old performance prototype files are gone (real Performance view
+  exists). Library gained perf-mode's `onLoadToDeck`/`browseRef` alongside
+  our `onBrowseSelect`.
+
 ## Real-module fixes made here that MUST ride back to the main line
+
+_(all landed on the unified line via the v11 merge — issue 02 closed;
+list kept for history)_
 
 - `graph.ts` `rampGain` (read computed value BEFORE cancelScheduledValues):
   the previous cancel-then-read order froze gains at their old anchor and

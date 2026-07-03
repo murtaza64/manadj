@@ -50,7 +50,10 @@ The top-panel mode (a sibling of the library and Performance views) for editing 
 Future concept: an ordered sequence of Tracks whose adjacencies reference saved Transitions. Deferred until the Transition library exists. Distinct from a Playlist, and from the Classification value "mix" (an externally recorded DJ mix on a Source).
 
 **Transition template**:
-A saved, duration-normalized set of automation lanes (e.g. "bass swap"), applicable to any Transition regardless of its length. Deferred.
+A named beat-domain recipe for producing a Transition: per-side anchor rules (cue slot + beat delta on each track's own grid), a length in beats (fixed or scalable at apply time), and normalized automation lanes (e.g. "bass swap"). Applying one translates beats to seconds via the tempo-matched beatgrids and yields an ordinary seconds-based Transition — the recipe is an editing affordance, not a runtime concept. Designed; built behind DB persistence.
+
+**Cue-slot convention**:
+A library convention (not a code concept) giving hot cue slots stable musical meaning so Transition templates can anchor to them: 1 = first buildup, 4 = drop. Missing slots fall back to hard-coded heuristic beat positions at template-apply time.
 
 **Key**:
 One of 24 key centers (12 tonics × major/minor) assigned to a Track. OpenKey is the preferred notation for display and discussion; Camelot, musical, and external libraries' notations are conversions from the same canonical value.

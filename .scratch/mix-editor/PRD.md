@@ -9,7 +9,7 @@ Prototype iteration inverted the model (ADR 0010 amendment):
 - The **Transition is the first-class persisted artifact**: ordered Track pair + anchors + duration + tempo-match + drawn lanes. Directional. A pair usually has one ("Transition 1", auto-created), occasionally more via a create-new dropdown; edits autosave to the active one — no save ceremony.
 - The editor is the **third top-panel mode** — cycle Library (one deck) / Performance (two decks) / Transition editor — over the shared bottom library-browse panel (`Library browseOnly` + selection-based load → A/B).
 - **Audio isolation + handoff**: the editor keeps its own deck pair; entering it pauses the shared decks (one audible surface at a time) and adopts their loaded track(s) as a load shortcut.
-- **Deferred**: sequenced Mixes (a later feature composing saved Transitions), Transition templates, arbitrary-length arrangements.
+- **Deferred**: sequenced Mixes (a later feature composing saved Transitions), arbitrary-length arrangements. Transition templates were deferred here originally; they are now designed (see Transition templates below) and scheduled behind DB persistence.
 - Real/effective BPM shown per deck (editable base + tempo-matched effective).
 
 ### Graduation (decided 2026-07-03)
@@ -21,6 +21,24 @@ The prototype **is graduating** (user verdict; NOTES.md). Graduation is incremen
 3. Shell graduation (DB persistence, third top-panel mode integration) — slices to be cut after the remaining verdict details (drawing feel, playback conviction) are recorded.
 
 Named escalations, not built: LOD/mipmap geometry pyramid if fit-zoom aggregation on long tracks is still hot; imperative per-frame timeline styles if the per-zoom-frame React commit blows frame budget.
+
+### Transition templates (designed 2026-07-03, grill session; issue 03)
+
+**Template = beat-domain recipe; Transition = seconds instance.** Instantiation translates beats → seconds via the tempo-matched beatgrids, keeping ADR 0010's seconds-based model intact (anchor rules are edit-time affordances).
+
+- Contents: `alignA = (cueSlot, beatDelta)` on the outgoing track, `alignB = (cueSlot, beatDelta)` on the incoming track, `lengthBeats`, `scalable: boolean`, lanes (normalized 0→1, same `LanePoint[]` as Transitions), tempo-match implied true.
+- Applying: the two resolved align points coincide and that instant is the transition start — `startSec` = A-local time of alignA, `bInSec` = B-local time of alignB; each delta resolves on its own track's grid. Drop-alignment-with-lead-in needs no extra field: shift both deltas by −lead (e.g. drop+64-beat phrase offset with 32-beat lead-in = `alignA(cue4, +32)`, `alignB(cue4, −32)`).
+- Length classes: fixed (applies at exactly `lengthBeats`; choreographed moves) vs scalable (apply-time beat count, default `lengthBeats`); both resolve beats → seconds. Lanes stored normalized in both cases.
+- Cue-slot convention (library convention, one glossary line, no code concept): 1 = first buildup, 4 = drop.
+- Apply fallback chain, no silent guessing: cue slot → hard-coded convention heuristic (e.g. missing cue 4 → drop ≈ beat 128 from first downbeat; constant table next to the code) → current values + one-line notice. Out-of-range resolutions clamp + notice. Partial application always proceeds (lanes/length/tempo-match stamp regardless).
+- Authoring: save-from-Transition only, no separate abstract editor. "Save as template" normalizes lanes, derives `lengthBeats` from the grid, and asks one explicit question per side: which cue anchors it (delta auto-derived from actual placement, rounded to whole beats with confirmation). Editing later = load onto a pair, edit, re-save. Management = dropdown (rename/delete).
+
+### Editor tools (grill 2026-07-03; issues 04–05, prototype iterations)
+
+- **Chop stamp** (issue 04): shift+drag on any lane = rectangular full-cut between beat-snapped drag edges (4 inserted breakpoints, near-vertical walls); shift+click = 1-beat cut. Works on EQ lanes too (2-beat bass kill). Pure breakpoint insertion — no new model, editable like hand-drawn points. Lanes remain transition-window-only (no clip/region concept — reaffirmed).
+- **Zero-length Transition shortcut** (issue 04): "cut" button sets `durationSec = 0` with beat-snapped `startSec` (model already treats zero-length as a hard cut).
+- **Lane endpoint visibility** (issue 05): endpoint breakpoints (= entry/exit values) rendered larger with dark outline ring, clamped inset so they never clip at strip edges; hover shows breakpoint value, endpoints show it persistently.
+- **Hotcue clarity** (issue 05): renderer config `waveformBrightness: 0–1` (default 1) scaling band colors only — markers/beatgrid full-strength; editor rows ~0.6; Player/Practice/minimaps unchanged. Rides slice 01's premultiplied-color path.
 Blocked by: nothing hard — the two-track prototype runs on today's modules; graduation aligns with the ADR 0009 Mixer module (see Implementation Decisions)
 
 ## Problem Statement
