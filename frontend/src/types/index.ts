@@ -38,9 +38,19 @@ export interface Track {
   key?: number;  // Engine DJ key ID (0-23)
   bpm?: number;
   duration_secs?: number | null;
+  codec?: string | null;
+  bitrate_kbps?: number | null;
+  filesize_bytes?: number | null;
   created_at: string;
   updated_at: string;
   tags: Tag[];
+  provenance?: TrackProvenance | null;
+}
+
+export interface TrackProvenance {
+  label: string;
+  url: string | null;
+  asserted: boolean;
 }
 
 export interface PaginatedTracks {

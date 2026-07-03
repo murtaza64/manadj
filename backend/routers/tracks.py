@@ -30,7 +30,10 @@ def list_tracks(
     bpm_threshold_percent: int | None = Query(None, ge=0, le=100),
     key_camelot_ids: List[str] | None = Query(None),
     unprocessed: bool | None = Query(None),
-    sort_column: str | None = Query(None, pattern="^(key|bpm|energy|title|artist|created_at)$"),
+    sort_column: str | None = Query(
+        None,
+        pattern="^(key|bpm|energy|title|artist|created_at|bitrate_kbps|filesize_bytes|provenance)$",
+    ),
     sort_direction: str = Query("desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db)
 ):
@@ -62,6 +65,11 @@ def list_tracks(
         sort_column=sort_column,
         sort_direction=sort_direction
     )
+
+    # attach Audio Provenance (schemas.Track.provenance)
+    provenance_map = crud.get_provenance_map(db, [t.id for t in items])
+    for item in items:
+        item.provenance = provenance_map.get(item.id)
 
     return {
         "items": items,

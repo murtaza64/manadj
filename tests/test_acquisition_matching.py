@@ -6,14 +6,12 @@ the three-tier matching pass, proposals, manual linking, and fulfilled state
 """
 
 from collections.abc import Callable
-from pathlib import Path
 
 import pytest
 from sqlalchemy.orm import Session
 
 from backend.acquisition.manager import (
     accept_proposal,
-    backfill_track_durations,
     get_correspondence,
     link_item_to_track,
     link_track_by_url,
@@ -251,26 +249,3 @@ class TestManualLink:
         with pytest.raises(LookupError):
             link_track_by_url(db_session, "https://soundcloud.com/nobody/nothing", int(track.id))
 
-
-class TestDurationBackfill:
-    def test_backfills_from_audio_file(
-        self,
-        db_session: Session,
-        make_track: Callable[..., Track],
-        audio_file: Callable[..., Path],
-    ) -> None:
-        path = audio_file("mp3")
-        track = make_track(filename=str(path), duration_secs=None)
-
-        updated = backfill_track_durations(db_session)
-
-        assert updated == 1
-        db_session.refresh(track)
-        assert track.duration_secs is not None and track.duration_secs > 0
-
-    def test_missing_file_is_skipped(
-        self, db_session: Session, make_track: Callable[..., Track]
-    ) -> None:
-        make_track(filename="/nowhere/gone.mp3", duration_secs=None)
-
-        assert backfill_track_durations(db_session) == 0

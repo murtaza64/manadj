@@ -57,10 +57,20 @@ class TrackBase(BaseModel):
     key: int | None = None  # Engine DJ key ID (0-23)
     bpm: float | None = None  # Exposed as float, stored as int * 100
     duration_secs: float | None = None  # audio duration, read from the file
+    codec: str | None = None  # mp3/aac/alac/flac/pcm, from the file
+    bitrate_kbps: int | None = None  # from the file
+    filesize_bytes: int | None = None  # from the file
 
 
 class TrackCreate(TrackBase):
     """bpm is float BPM; conversion to the storage unit happens in crud.create_track."""
+
+
+class TrackProvenance(BaseModel):
+    """Audio Provenance summary for track list responses."""
+    label: str
+    url: str | None = None
+    asserted: bool = True
 
 
 class Track(TrackBase):
@@ -68,6 +78,7 @@ class Track(TrackBase):
     created_at: datetime
     updated_at: datetime
     tags: list[Tag] = []
+    provenance: TrackProvenance | None = None
     model_config = ConfigDict(from_attributes=True)
 
     @field_serializer('bpm')

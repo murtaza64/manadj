@@ -13,6 +13,26 @@ interface Props {
   onSelect: (track: Track) => void;
 }
 
+const LOSSLESS = new Set(['flac', 'alac', 'pcm']);
+
+function formatQuality(codec?: string | null, bitrateKbps?: number | null): string {
+  if (!codec) return '-';
+  if (LOSSLESS.has(codec)) return codec.toUpperCase();
+  return bitrateKbps ? `${codec.toUpperCase()} ${bitrateKbps}k` : codec.toUpperCase();
+}
+
+function isLowQuality(track: Track): boolean {
+  if (!track.codec || LOSSLESS.has(track.codec)) return false;
+  if (!track.bitrate_kbps) return false;
+  // AAC transparency threshold is lower than MP3's
+  return track.bitrate_kbps < (track.codec === 'aac' ? 128 : 192);
+}
+
+function formatSize(bytes?: number | null): string {
+  if (!bytes) return '-';
+  return `${(bytes / 1_000_000).toFixed(1)}M`;
+}
+
 export default function TrackRow({ track, isSelected, onSelect }: Props) {
   // Extract just the filename from the full path
   const filename = track.filename.split('/').pop() || track.filename;
@@ -91,6 +111,36 @@ export default function TrackRow({ track, isSelected, onSelect }: Props) {
           color: 'var(--subtext1)'
         }}>
           {formatRelativeTime(track.created_at)}
+        </td>
+        <td className="track-cell" style={getCellStyle(6)}>
+          <span className={`quality-display ${isLowQuality(track) ? 'quality-low' : ''}`}>
+            {formatQuality(track.codec, track.bitrate_kbps)}
+          </span>
+        </td>
+        <td className="track-cell" style={getCellStyle(7)}>
+          <span className="size-display">{formatSize(track.filesize_bytes)}</span>
+        </td>
+        <td className="track-cell" style={getCellStyle(8)}>
+          {track.provenance ? (
+            track.provenance.url ? (
+              <a
+                className={`provenance-chip provenance-${track.provenance.label}`}
+                href={track.provenance.url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={e => e.stopPropagation()}
+                title={track.provenance.url}
+              >
+                {track.provenance.label}
+              </a>
+            ) : (
+              <span className={`provenance-chip provenance-${track.provenance.label}`}>
+                {track.provenance.label}
+              </span>
+            )
+          ) : (
+            <span style={{ color: 'var(--overlay0)' }}>-</span>
+          )}
         </td>
         <td className="track-tags-cell">
           <div className="track-tags-container">

@@ -112,13 +112,20 @@ def get_tracks(
             query = query.filter(models.Track.key.in_(key_ids))
 
     # Apply sorting
-    if sort_column:
+    if sort_column == "provenance":
+        # sort by Audio Provenance origin label
+        from backend.acquisition.models import AudioProvenance
+
+        query = query.outerjoin(AudioProvenance, AudioProvenance.track_id == models.Track.id)
+        order_column = func.lower(AudioProvenance.source)
+    elif sort_column:
         order_column = getattr(models.Track, sort_column)
 
         # Handle string columns with case-insensitive sorting
         if sort_column in ['title', 'artist']:
             order_column = func.lower(order_column)
 
+    if sort_column:
         # Apply sort direction with NULL values always last
         if sort_direction == "asc":
             query = query.order_by(order_column.asc().nullslast())
@@ -816,3 +823,22 @@ def delete_hotcue(db: Session, track_id: int, slot_number: int):
         return True
     return False
 
+
+
+def get_provenance_map(db: Session, track_ids: list[int]) -> dict:
+    """track_id -> Audio Provenance dict for attaching to track responses."""
+    from backend.acquisition.models import AudioProvenance
+
+    if not track_ids:
+        return {}
+    rows = (
+        db.query(AudioProvenance).filter(AudioProvenance.track_id.in_(track_ids)).all()
+    )
+    return {
+        p.track_id: {
+            "label": p.source,
+            "url": p.url,
+            "asserted": p.asserted,
+        }
+        for p in rows
+    }
