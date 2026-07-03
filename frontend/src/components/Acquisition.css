@@ -82,12 +82,15 @@
   flex-direction: column;
   min-height: 0;
   border: 1px solid var(--surface0);
-  overflow-y: auto;
+  overflow: hidden; /* the list scrolls; the detail panel stays pinned below it */
 }
 
 .acquisition-list {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .acquisition-list-row {
@@ -162,3 +165,124 @@
 .acquisition-class-filter .acquisition-count {
   margin-left: auto;
 }
+
+.acquisition-list-row {
+  cursor: pointer;
+}
+
+.acquisition-list-row:hover {
+  background: var(--surface0);
+}
+
+.acquisition-list-row.selected {
+  background: var(--surface0);
+  border-left: 2px solid var(--blue);
+}
+
+.acquisition-score {
+  color: var(--sapphire);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.acquisition-detail {
+  border-top: 2px solid var(--surface1);
+  background: var(--mantle);
+  padding: var(--space-md);
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow-y: auto;
+}
+
+.acquisition-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.acquisition-detail-title {
+  color: var(--text);
+  font-size: var(--font-md);
+}
+
+.acquisition-detail-close {
+  background: none;
+  border: none;
+  color: var(--overlay1);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.acquisition-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.acquisition-compare-col {
+  border: 1px solid var(--surface1);
+  padding: var(--space-sm);
+  font-size: var(--font-sm);
+  color: var(--text);
+}
+
+.acquisition-detail-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.acquisition-action-button {
+  padding: var(--space-xs) var(--space-md);
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+
+.acquisition-action-button:hover { background: var(--surface1); }
+.acquisition-action-accept { border-color: var(--green); color: var(--green); }
+
+.acquisition-detail-linked {
+  margin-top: var(--space-md);
+  color: var(--green);
+  font-size: var(--font-sm);
+}
+
+.acquisition-manual-link {
+  margin-top: var(--space-sm);
+}
+
+.acquisition-link-input {
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-xs);
+}
+
+.acquisition-link-result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--base);
+  border: none;
+  border-bottom: 1px solid var(--surface0);
+  color: var(--subtext1);
+  font-family: inherit;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+
+.acquisition-link-result:hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.acquisition-detail a { color: var(--blue); }

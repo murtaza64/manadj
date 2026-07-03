@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Classification, SourceItem, SourceItemState } from '../types';
+import type { Classification, SourceItem, SourceItemState, Track } from '../types';
 import './Acquisition.css';
 
 // Review-split layout (chosen via UI prototype, see
@@ -29,8 +29,10 @@ function formatDuration(ms: number): string {
 
 export function Acquisition() {
   const queryClient = useQueryClient();
-  const [stateFilter, setStateFilter] = useState<SourceItemState | 'all'>('all');
+  // default view = needs-download: new items, mixes/clips hidden
+  const [stateFilter, setStateFilter] = useState<SourceItemState | 'all'>('new');
   const [classFilter, setClassFilter] = useState<Record<Classification, boolean>>(DEFAULT_CLASS_FILTER);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const { data: items, isLoading, error } = useQuery({
     queryKey: ['acquisitionItems'],
@@ -73,6 +75,11 @@ export function Acquisition() {
           (i.classification === null || classFilter[i.classification]),
       ),
     [items, stateFilter, classFilter],
+  );
+
+  const selected = useMemo(
+    () => (items ?? []).find(i => i.id === selectedId) ?? null,
+    [items, selectedId],
   );
 
   return (
@@ -135,15 +142,24 @@ export function Acquisition() {
         )}
         <div className="acquisition-list">
           {visible.map(item => (
-            <div key={item.id} className="acquisition-list-row">
+            <div
+              key={item.id}
+              className={`acquisition-list-row ${selectedId === item.id ? 'selected' : ''}`}
+              onClick={() => setSelectedId(item.id)}
+            >
               <span className="acquisition-item-title" title={item.title}>{item.title}</span>
+              {item.correspondence?.status === 'proposed' && (
+                <span className="acquisition-score">
+                  match {Math.round((item.correspondence.score ?? 0) * 100)}%
+                </span>
+              )}
               <span className="acquisition-item-sub">
                 {item.uploader} · {formatDuration(item.duration_ms)}
               </span>
               <button
                 className={`acquisition-chip acquisition-chip-${item.classification ?? 'none'}`}
                 title="Click to override classification"
-                onClick={() => cycleClassification(item)}
+                onClick={e => { e.stopPropagation(); cycleClassification(item); }}
               >
                 {item.classification ?? '?'}
               </button>
@@ -153,7 +169,113 @@ export function Acquisition() {
             </div>
           ))}
         </div>
+        {selected && <ItemDetail item={selected} onClose={() => setSelectedId(null)} />}
       </div>
+    </div>
+  );
+}
+
+function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [linkSearch, setLinkSearch] = useState('');
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] });
+
+  const acceptMutation = useMutation({
+    mutationFn: () => api.acquisition.acceptMatch(item.id),
+    onSuccess: invalidate,
+  });
+  const rejectMutation = useMutation({
+    mutationFn: () => api.acquisition.rejectMatch(item.id),
+    onSuccess: invalidate,
+  });
+  const linkMutation = useMutation({
+    mutationFn: (trackId: number) => api.acquisition.linkToTrack(item.id, trackId),
+    onSuccess: () => { setLinkSearch(''); invalidate(); },
+  });
+
+  const { data: searchResults } = useQuery({
+    queryKey: ['acquisitionLinkSearch', linkSearch],
+    queryFn: () => api.tracks.list(1, 20, { search: linkSearch }),
+    enabled: linkSearch.length >= 2,
+  });
+
+  const corr = item.correspondence;
+  return (
+    <div className="acquisition-detail">
+      <div className="acquisition-detail-header">
+        <span className="acquisition-detail-title">{item.title}</span>
+        <button className="acquisition-detail-close" onClick={onClose}>✕</button>
+      </div>
+      <div className="acquisition-item-sub">
+        {item.uploader} · {formatDuration(item.duration_ms)} ·{' '}
+        <a href={item.permalink_url} target="_blank" rel="noreferrer">soundcloud ↗</a>
+      </div>
+
+      {corr?.status === 'proposed' && (
+        <>
+          <div className="acquisition-compare">
+            <div className="acquisition-compare-col">
+              <div className="acquisition-sidebar-heading">soundcloud</div>
+              <div>{item.title}</div>
+              <div className="acquisition-item-sub">{item.uploader}</div>
+              <div className="acquisition-item-sub">{formatDuration(item.duration_ms)}</div>
+            </div>
+            <div className="acquisition-compare-col">
+              <div className="acquisition-sidebar-heading">library track</div>
+              <div>{corr.track_artist} - {corr.track_title}</div>
+              <div className="acquisition-item-sub">
+                {corr.track_duration_secs != null
+                  ? formatDuration(corr.track_duration_secs * 1000)
+                  : 'unknown duration'}
+              </div>
+              <div className="acquisition-score">
+                similarity {Math.round((corr.score ?? 0) * 100)}%
+              </div>
+            </div>
+          </div>
+          <div className="acquisition-detail-actions">
+            <button
+              className="acquisition-action-button acquisition-action-accept"
+              onClick={() => acceptMutation.mutate()}
+            >
+              accept match
+            </button>
+            <button
+              className="acquisition-action-button"
+              onClick={() => rejectMutation.mutate()}
+            >
+              reject
+            </button>
+          </div>
+        </>
+      )}
+
+      {corr?.status === 'confirmed' && (
+        <div className="acquisition-detail-linked">
+          ✓ corresponds to <b>{corr.track_artist} - {corr.track_title}</b>
+        </div>
+      )}
+
+      {!corr && (
+        <div className="acquisition-manual-link">
+          <div className="acquisition-sidebar-heading">manual link</div>
+          <input
+            className="acquisition-link-input"
+            placeholder="search library tracks…"
+            value={linkSearch}
+            onChange={e => setLinkSearch(e.target.value)}
+          />
+          {(searchResults?.items ?? []).slice(0, 8).map((track: Track) => (
+            <button
+              key={track.id}
+              className="acquisition-link-result"
+              onClick={() => linkMutation.mutate(track.id)}
+            >
+              {track.artist ?? '?'} - {track.title ?? track.filename}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

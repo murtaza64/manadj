@@ -414,6 +414,16 @@ export interface SourceItem {
   state: SourceItemState;
   classification: Classification | null;
   liked_at: string | null;
+  correspondence: SourceCorrespondenceInfo | null;
+}
+
+export interface SourceCorrespondenceInfo {
+  track_id: number;
+  status: 'proposed' | 'confirmed';
+  score: number | null;
+  track_title: string | null;
+  track_artist: string | null;
+  track_duration_secs: number | null;
 }
 
 export interface AcquisitionRefreshStats {

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -28,3 +28,32 @@ class SourceItem(Base):
     classification: Mapped[str | None] = mapped_column(String, nullable=True)
     liked_at: Mapped[str | None] = mapped_column(String, nullable=True)  # ISO ts from the Source
     first_fetched_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
+
+
+# Correspondence statuses: 'proposed' awaits user review; 'confirmed' fulfills
+# the Source Item; 'rejected' is remembered so matching never re-proposes it.
+CORRESPONDENCE_STATUSES = ("proposed", "confirmed", "rejected")
+
+
+class SourceCorrespondence(Base):
+    """Source Correspondence: 'this Track is that Source track' (see CONTEXT.md).
+
+    Keyed to the Source Item row (which carries the Source's stable external
+    ID). Independent of where the Track's audio came from.
+    """
+
+    __tablename__ = "source_correspondences"
+    __table_args__ = (
+        UniqueConstraint("source_item_id", name="uq_correspondence_source_item"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    source_item_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("source_items.id"), nullable=False, index=True
+    )
+    track_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tracks.id"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="proposed")
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())

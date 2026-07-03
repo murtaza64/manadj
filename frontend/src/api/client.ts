@@ -567,5 +567,27 @@ export const api = {
       if (!res.ok) throw new Error('Failed to set classification');
       return res.json();
     },
+
+    acceptMatch: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/accept-match`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to accept match');
+      return res.json();
+    },
+
+    rejectMatch: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/reject-match`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to reject match');
+      return res.json();
+    },
+
+    linkToTrack: async (itemId: number, trackId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_id: trackId }),
+      });
+      if (!res.ok) throw new Error('Failed to link track');
+      return res.json();
+    },
   },
 };

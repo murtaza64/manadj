@@ -37,7 +37,7 @@ class SoundCloudConfig:
 @dataclass
 class AcquisitionConfig:
     """Acquisition configuration."""
-    classification: "ClassificationConfig" = field(default_factory=lambda: ClassificationConfig())
+    classification: ClassificationConfig = field(default_factory=ClassificationConfig)
 
 
 @dataclass

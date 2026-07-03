@@ -22,11 +22,12 @@ UI: per the review-split layout (see the UI decision in the PRD) — proposal re
 
 ## Acceptance criteria
 
-- [ ] Track duration stored and backfilled from audio files
-- [ ] Exact matches auto-create Correspondences; fuzzy matches create proposals; below-threshold items stay `new`
-- [ ] Accept/reject proposals and manual linking from both ends work in the UI
-- [ ] Fulfilled Source Items excluded from the needs-download view
-- [ ] Matcher scoring/normalization unit-tested; three-tier flow + fulfillment covered at the module interface with factory-seeded Tracks
+- [x] Track duration stored and backfilled from audio files
+- [x] Exact matches auto-create Correspondences; fuzzy matches create proposals; below-threshold items stay `new`
+- [x] Accept/reject proposals and manual linking (Source Item → Track) work in the UI
+- [ ] Track-end manual link (paste SoundCloud URL on a Track in the Library view) — endpoint exists (`/api/acquisition/link-by-url`); UI deferred to `.scratch/soundcloud-acquisition/issues/07-track-end-link-ui.md`
+- [x] Fulfilled Source Items excluded from the needs-download view
+- [x] Matcher scoring/normalization unit-tested; three-tier flow + fulfillment covered at the module interface with factory-seeded Tracks
 
 ## Blocked by
 

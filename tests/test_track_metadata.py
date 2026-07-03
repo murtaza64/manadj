@@ -51,12 +51,22 @@ class TestFileMetadata:
         path = audio_file(fmt)
         write_file_metadata(path, title="Title", artist="Artist", key=1, bpm=128.0)
         meta = read_file_metadata(path)
-        assert meta == FileMetadata(title="Title", artist="Artist", key=1, bpm=128.0)
+        expected = FileMetadata(
+            title="Title", artist="Artist", key=1, bpm=128.0, duration_secs=meta.duration_secs
+        )
+        assert meta == expected
 
     @pytest.mark.parametrize("fmt", AUDIO_FORMATS)
     def test_untagged_file_reads_all_none(self, audio_file, fmt):
         meta = read_file_metadata(audio_file(fmt))
-        assert meta == FileMetadata(title=None, artist=None, key=None, bpm=None)
+        assert meta.title is None and meta.artist is None
+        assert meta.key is None and meta.bpm is None
+
+    @pytest.mark.parametrize("fmt", AUDIO_FORMATS)
+    def test_duration_comes_from_the_audio_stream(self, audio_file, fmt):
+        meta = read_file_metadata(audio_file(fmt))
+        assert meta.duration_secs is not None
+        assert 0 < meta.duration_secs < 2  # fixtures are ~0.5s of silence
 
     def test_read_missing_file_raises(self, tmp_path):
         with pytest.raises(FileMetadataError):
