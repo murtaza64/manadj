@@ -2,6 +2,7 @@ import { type JSX } from 'react';
 import TrackRow from './TrackRow';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon } from './icons';
 import type { Track } from '../types';
+import type { ChannelId } from '../playback/mixer';
 import { COLUMN_CONFIG } from './columnConfig';
 import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { useColumnWidths } from '../hooks/useColumnWidths';
@@ -19,6 +20,8 @@ interface TrackListProps {
   onLoadTrack: (track: Track) => void;
   /** The Deck's loaded track, for row highlighting. */
   loadedTrackId: number | null;
+  /** When set (Performance view), rows get hover load-to-A/B buttons. */
+  onLoadToDeck?: (deck: ChannelId, track: Track) => void;
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
@@ -32,6 +35,7 @@ export default function TrackList({
   onSelectTrack,
   onLoadTrack,
   loadedTrackId,
+  onLoadToDeck,
   sortColumn,
   sortDirection,
   onSort
@@ -132,6 +136,7 @@ export default function TrackList({
                 isLoaded={loadedTrackId === track.id}
                 onSelect={onSelectTrack}
                 onLoad={onLoadTrack}
+                onLoadToDeck={onLoadToDeck}
               />
             ))
           )}

@@ -5,6 +5,7 @@ import BPMDisplay from './BPMDisplay';
 import KeyDisplay from './KeyDisplay';
 import { formatRelativeTime } from '../utils/dateUtils';
 import type { Track } from '../types';
+import type { ChannelId } from '../playback/mixer';
 import { COLUMN_CONFIG } from './columnConfig';
 import './TrackRow.css';
 
@@ -16,6 +17,8 @@ interface Props {
   onSelect: (track: Track) => void;
   /** Load this track onto the Deck (double-click). */
   onLoad: (track: Track) => void;
+  /** When set (Performance view), show hover load-to-A/B buttons. */
+  onLoadToDeck?: (deck: ChannelId, track: Track) => void;
 }
 
 const LOSSLESS = new Set(['flac', 'alac', 'pcm']);
@@ -40,7 +43,14 @@ function formatSize(bytes?: number | null): string {
 
 /** Memoized: the table is large, and rows must not re-render on deck/selection
  * churn unless their own props changed. */
-const TrackRow = memo(function TrackRow({ track, isSelected, isLoaded, onSelect, onLoad }: Props) {
+const TrackRow = memo(function TrackRow({
+  track,
+  isSelected,
+  isLoaded,
+  onSelect,
+  onLoad,
+  onLoadToDeck,
+}: Props) {
   // Extract just the filename from the full path
   const filename = track.filename.split('/').pop() || track.filename;
 
@@ -106,6 +116,24 @@ const TrackRow = memo(function TrackRow({ track, isSelected, isLoaded, onSelect,
           <div className="track-cell-text">
             {track.title || filename}
           </div>
+          {onLoadToDeck && (
+            <span className="track-load-buttons">
+              {(['A', 'B'] as const).map((deck) => (
+                <button
+                  key={deck}
+                  className="track-load-button"
+                  title={`Load to Deck ${deck}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onLoadToDeck(deck, track);
+                  }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  {deck}
+                </button>
+              ))}
+            </span>
+          )}
         </td>
         <td className="track-cell">
           <div className="track-cell-text">

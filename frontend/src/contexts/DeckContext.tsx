@@ -122,6 +122,11 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     };
   }, [engines, queryClient]);
 
+  // Per-deck loadTrack functions stay identity-stable across state changes
+  // (memoized rows key their re-renders on them).
+  const loadTrackA = useCallback((t: Track) => loadTrackOnto('A', t), [loadTrackOnto]);
+  const loadTrackB = useCallback((t: Track) => loadTrackOnto('B', t), [loadTrackOnto]);
+
   // Each scope value is memoized on its own deck's slice, so a Load or
   // beatjump change on A never re-renders B's subtree (and vice versa).
   const makeScope = useCallback(
@@ -133,12 +138,12 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       deck,
       engine: engines[deck],
       loadedTrack,
-      loadTrack: (track) => loadTrackOnto(deck, track),
+      loadTrack: deck === 'A' ? loadTrackA : loadTrackB,
       beatjumpBeats,
       setBeatjumpBeats: (beats) =>
         setBeatjumps((prev) => ({ ...prev, [deck]: clampBeatjump(beats) })),
     }),
-    [engines, loadTrackOnto]
+    [engines, loadTrackA, loadTrackB]
   );
   const scopeA = useMemo(
     () => makeScope('A', loadedTracks.A, beatjumps.A),

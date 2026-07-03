@@ -48,6 +48,17 @@ export function useDeck(): DeckContextValue {
 }
 
 /**
+ * Both decks at once — for the few cross-deck spots (BPM match, load-to-A/B
+ * buttons) that can't live inside a single scope. Everything else should
+ * stay deck-blind and use useDeck.
+ */
+export function useDecks(): Record<ChannelId, DeckContextValue> {
+  const registry = useContext(DeckRegistryContext);
+  if (!registry) throw new Error('useDecks must be used within DeckProvider');
+  return registry;
+}
+
+/**
  * Subscribe to a slice of the deck snapshot. Re-renders only when the
  * selected value changes (Object.is), so cheap selectors like
  * `s => s.loadState === 'ready'` insulate large components from unrelated

@@ -32,3 +32,16 @@ The real Performance view, replacing the prototype placeholder on the route. Lay
 ## Blocked by
 
 - 02-deck-scopes-engine-groundwork
+
+## Comments
+
+Implemented in jj change `qspqpmkw` (performance-mode: 03-performance-view-surface).
+- `components/performance/`: `PerformanceView` (top 50vh surface + bottom 50vh `Library browseOnly`), `DeckPanel` (+`DeckWaveform`), `MixerPanel`, CSS per the prototype verdict. One deck-blind `DeckPanel` rendered twice under `<DeckScope>`; `mirrored` is CSS-only.
+- Deck panel: minimap + deck tag; 2×4 hot pads; beatjump row wired to scope size (halve/double 1–128); CUE/PLAY; BPM edit + ½/×2 (delete + re-get beatgrid to force regeneration — TagEditor parity — then invalidate `['beatgrid']`/`['track']`/`['tracks']`/`['playlist']`); grid nudge ◄ D ► at the deck's own playhead; MATCH via `bpmMatch` (fresh other-deck BPM from the query cache, out-of-reach hint for 2s); vertical pitch fader (down = faster) + hold-to-nudge (`setBend(±2)`, lit from snapshot.bendPercent); effective BPM = bpm × composeRate(pitch, bend); metadata footer (energy 1–5 picker, inline title/artist, key) saving immediately.
+- Panels read the track through `['track', id]` (placeholder = loadedTrack) so edits refresh in place.
+- `MixerPanel`: rotary knobs (drag, double-click reset) + VOL faders + crossfader + master, straight against `useMixer()`; positions seeded from Mixer getters (survive view switches).
+- Library: `onLoadToDeck` → TrackList → TrackRow hover A/B buttons (title cell overlay); `onOpenPractice`→`onOpenPerformance` (optional; sidebar buttons hidden when absent); sidebar tooltip "Performance view".
+- Per-deck `loadTrack` made identity-stable in the provider so memoized rows don't churn.
+- Prototype deleted (`components/prototype/`); PRD verdict marked done; route/view renamed `performance`.
+- Known (issue 04 scope): the embedded library still mounts the library keyboard hub bound to Deck A — space/f/etc. drive Deck A inside the Performance view until issue 04 replaces the hubs.
+- Ear/eye verification pending user: full two-deck mix by mouse (criterion 1), kills/crossfader/limiter, scrub on both waveforms, MATCH/nudge feel.

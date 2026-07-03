@@ -10,6 +10,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import type { Track } from '../types';
+import type { ChannelId } from '../playback/mixer';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady } from '../hooks/useDeck';
@@ -183,15 +184,22 @@ function deriveRelatedFilters(
 type ViewType = 'all' | 'unprocessed' | 'playlist';
 
 interface LibraryProps {
-  onOpenPlaylistSync: () => void;
-  onOpenPractice: () => void;
+  onOpenPlaylistSync?: () => void;
+  onOpenPerformance?: () => void;
   /** Render only the browse surface (sidebar/filter/table) without the
    * Player/TagEditor block — used when a deck surface is shown elsewhere
-   * (performance-view prototype). */
+   * (the Performance view embeds the library this way). */
   browseOnly?: boolean;
+  /** Per-row hover load-to-A/B buttons (Performance view). */
+  onLoadToDeck?: (deck: ChannelId, track: Track) => void;
 }
 
-export default function Library({ onOpenPlaylistSync, onOpenPractice, browseOnly = false }: LibraryProps) {
+export default function Library({
+  onOpenPlaylistSync,
+  onOpenPerformance,
+  browseOnly = false,
+  onLoadToDeck,
+}: LibraryProps) {
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [selectedView, setSelectedView] = useState<ViewType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
@@ -456,7 +464,7 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice, browseOnly
           }}
           onTrackDrop={handleTrackDrop}
           onOpenPlaylistSync={onOpenPlaylistSync}
-          onOpenPractice={onOpenPractice}
+          onOpenPerformance={onOpenPerformance}
         />
 
         {/* Main library area (filter + table) */}
@@ -487,6 +495,7 @@ export default function Library({ onOpenPlaylistSync, onOpenPractice, browseOnly
               onSelectTrack={setSelectedTrack}
               onLoadTrack={loadTrack}
               loadedTrackId={loadedTrack?.id ?? null}
+              onLoadToDeck={onLoadToDeck}
               sortColumn={filters.sortColumn}
               sortDirection={filters.sortDirection}
               onSort={handleSort}

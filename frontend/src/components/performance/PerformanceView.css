@@ -1,8 +1,8 @@
-/* PROTOTYPE — Performance view layout (iteration 3). Delete with the prototype.
-   Design language: 1-player mode — square 1px-border buttons, hot-cue squares,
-   muted catppuccin palette from styles/variables.css. */
+/* Performance view (performance-mode issue 03). Design language: library
+   player — square 1px-border buttons, hot-cue squares, muted catppuccin
+   palette from styles/variables.css. Layout per the prototype verdict. */
 
-.pp-root {
+.perf-root {
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -12,9 +12,16 @@
   font-size: 12px;
 }
 
+.perf-back {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  z-index: 500;
+}
+
 /* ── Performance surface: top 50vh ────────────────────────────── */
 
-.pp-perf {
+.perf-surface {
   height: 50vh;
   display: flex;
   flex-direction: column;
@@ -23,11 +30,11 @@
   min-height: 0;
 }
 
-.pp-waves { flex-shrink: 0; }
-.pp-waves .waveform-container,
-.pp-waves .waveform-container canvas { height: 76px; }
+.perf-waves { flex-shrink: 0; }
+.perf-waves .waveform-container,
+.perf-waves .waveform-container canvas { height: 76px; }
 
-.pp-middle {
+.perf-middle {
   flex: 1;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -39,7 +46,7 @@
 
 /* ── Deck panels ──────────────────────────────────────────────── */
 
-.pp-deckpanel {
+.perf-deckpanel {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -49,17 +56,17 @@
   border: 1px solid var(--surface0);
 }
 
-.pp-deck-minimap {
+.perf-deck-minimap {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.pp-deck-minimap .minimap-container { flex: 1; }
+.perf-deck-minimap .minimap-container { flex: 1; }
 
-.pp-deckpanel.mirrored .pp-deck-minimap { flex-direction: row-reverse; }
+.perf-deckpanel.mirrored .perf-deck-minimap { flex-direction: row-reverse; }
 
-.pp-decktag {
+.perf-decktag {
   font-size: 15px;
   font-weight: 800;
   color: var(--text);
@@ -68,7 +75,7 @@
   flex-shrink: 0;
 }
 
-.pp-deck-controls {
+.perf-deck-controls {
   flex: 1;
   display: flex;
   align-items: stretch;
@@ -76,10 +83,10 @@
   min-height: 0;
 }
 
-.pp-deckpanel.mirrored .pp-deck-controls { flex-direction: row-reverse; }
+.perf-deckpanel.mirrored .perf-deck-controls { flex-direction: row-reverse; }
 
 /* Deck column: pads stacked over beatjump row over transport */
-.pp-deck-column {
+.perf-deck-column {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -88,21 +95,34 @@
   min-height: 0;
 }
 
+/* Hot cue pads: 2 x 4 grid */
+.perf-pads {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: minmax(30px, 1fr);
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.perf-pads .hot-cue {
+  width: auto;
+  border: 1px solid var(--surface1);
+}
+
 /* Beatjump row: jump / halve / [size] / double / jump */
-.pp-jumprow {
+.perf-jumprow {
   display: grid;
   grid-template-columns: 1fr auto auto auto 1fr;
   gap: 4px;
   align-items: stretch;
 }
 
-.pp-jumprow .player-button {
-  position: relative;
+.perf-jumprow .player-button {
   min-width: 24px;
   font-size: 12px;
 }
 
-.pp-jumpsize {
+.perf-jumpsize {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -114,7 +134,7 @@
 }
 
 /* Square transport block (library-player style): CUE / PLAY rows */
-.pp-transport-block {
+.perf-transport-block {
   flex: 1;
   display: grid;
   grid-template-columns: 1fr;
@@ -123,43 +143,13 @@
   min-height: 64px;
 }
 
-.pp-transport-block .player-button {
-  position: relative;
+.perf-transport-block .player-button {
   font-size: 13px;
   min-width: 0;
 }
 
-.pp-kbd {
-  position: absolute;
-  bottom: -6px;
-  right: -4px;
-  font-size: 8px;
-  background: var(--surface1);
-  color: var(--text);
-  padding: 0 3px;
-  font-weight: 700;
-  border: 1px solid var(--overlay0);
-}
-
-/* Hot cue pads: 2 x 4 grid */
-.pp-pads {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: minmax(30px, 1fr);
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.pp-pad-wrap { position: relative; display: flex; }
-
-.pp-pad-wrap .hot-cue {
-  width: 34px;
-  flex: 1;
-  border: 1px solid var(--surface1);
-}
-
-/* Beatgrid + BPM tweaking */
-.pp-beatgrid-panel {
+/* Beatgrid + BPM block */
+.perf-beatgrid-block {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -167,13 +157,13 @@
   min-width: 0;
 }
 
-.pp-beatgrid-row {
+.perf-beatgrid-row {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.pp-beatgrid-label {
+.perf-beatgrid-label {
   width: 34px;
   font-size: 10px;
   font-weight: 700;
@@ -181,7 +171,7 @@
   flex-shrink: 0;
 }
 
-.pp-bpm-input {
+.perf-bpm-input {
   width: 56px;
   background: transparent;
   border: 1px solid var(--surface1);
@@ -192,19 +182,18 @@
   text-align: right;
 }
 
-.pp-bpm-input:disabled { opacity: 0.4; }
+.perf-bpm-input:disabled { opacity: 0.4; }
 
-.pp-mini {
+.perf-mini {
   padding: 2px 6px;
   min-width: 26px;
   font-size: 11px;
   height: 24px;
 }
 
-.pp-downbeat { color: var(--blue); border-color: var(--blue); }
-.pp-match { font-size: 9px; }
+.perf-downbeat { color: var(--blue); border-color: var(--blue); }
 
-.pp-effbpm {
+.perf-effbpm {
   color: var(--sapphire);
   font-size: 12px;
   font-weight: 700;
@@ -212,7 +201,7 @@
 }
 
 /* Tempo cluster: MATCH / vertical pitch fader / nudge */
-.pp-pitch-cluster {
+.perf-tempo-cluster {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -221,7 +210,10 @@
   min-height: 0;
 }
 
-.pp-pitch {
+.perf-match { font-size: 9px; min-width: 52px; }
+.perf-match-hint { color: var(--red); border-color: var(--red); }
+
+.perf-pitch {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -233,17 +225,23 @@
 }
 
 /* Polarity mirrors hardware: pushing the fader DOWN raises tempo (+). */
-.pp-pitch input {
+.perf-pitch input {
   writing-mode: vertical-lr;
   flex: 1;
   width: 18px;
   accent-color: var(--blue);
 }
 
-.pp-nudge { display: flex; gap: 4px; }
+.perf-nudge { display: flex; gap: 4px; }
+
+.perf-nudge-held {
+  background: var(--surface1);
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
 
 /* Metadata footer */
-.pp-meta-footer {
+.perf-meta-footer {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -252,20 +250,17 @@
   padding-top: 5px;
 }
 
-.pp-meta-footer.mirrored {
-  flex-direction: row-reverse;
-}
+.perf-deckpanel.mirrored .perf-meta-footer { flex-direction: row-reverse; }
+.perf-deckpanel.mirrored .perf-inline-edit { text-align: right; }
 
-.pp-meta-footer.mirrored .pp-inline-edit { text-align: right; }
-
-.pp-deckmeta {
+.perf-deckmeta {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
 }
 
-.pp-inline-edit {
+.perf-inline-edit {
   background: transparent;
   border: 1px solid transparent;
   color: var(--subtext1);
@@ -274,33 +269,40 @@
   min-width: 0;
 }
 
-.pp-inline-edit:hover { border-color: var(--surface1); }
-.pp-inline-edit.pp-title { font-weight: 700; font-size: 12px; color: var(--text); }
+.perf-inline-edit:hover:not(:disabled) { border-color: var(--surface1); }
+.perf-inline-edit.perf-title { font-weight: 700; font-size: 12px; color: var(--text); }
 
-.pp-energy {
-  width: 20px;
-  height: 20px;
+/* Energy picker: five mini squares, the set one lit */
+.perf-energy-picker { display: flex; gap: 2px; flex-shrink: 0; }
+
+.perf-energy {
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 10px;
   border: 1px solid var(--surface1);
+  background: transparent;
   color: var(--overlay0);
-  flex-shrink: 0;
+  cursor: pointer;
+  padding: 0;
 }
 
-.pp-energy.energy-1 { color: var(--energy-1); border-color: var(--energy-1); }
-.pp-energy.energy-2 { color: var(--energy-2); border-color: var(--energy-2); }
-.pp-energy.energy-3 { color: var(--energy-3); border-color: var(--energy-3); }
-.pp-energy.energy-4 { color: var(--energy-4); border-color: var(--energy-4); }
-.pp-energy.energy-5 { color: var(--energy-5); border-color: var(--energy-5); }
+.perf-energy:disabled { opacity: 0.4; cursor: default; }
 
-.pp-key { color: var(--sapphire); font-size: 11px; flex-shrink: 0; }
+.perf-energy.set.energy-1 { color: var(--energy-1); border-color: var(--energy-1); }
+.perf-energy.set.energy-2 { color: var(--energy-2); border-color: var(--energy-2); }
+.perf-energy.set.energy-3 { color: var(--energy-3); border-color: var(--energy-3); }
+.perf-energy.set.energy-4 { color: var(--energy-4); border-color: var(--energy-4); }
+.perf-energy.set.energy-5 { color: var(--energy-5); border-color: var(--energy-5); }
+
+.perf-key { color: var(--sapphire); font-size: 11px; flex-shrink: 0; }
 
 /* ── Mixer: columnar channels, crossfader below ───────────────── */
 
-.pp-mixer {
+.perf-mixer {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -311,14 +313,14 @@
   min-height: 0;
 }
 
-.pp-mixer-channels {
+.perf-mixer-channels {
   flex: 1;
   display: flex;
   gap: 18px;
   min-height: 0;
 }
 
-.pp-channel {
+.perf-channel {
   display: flex;
   flex-direction: row;
   align-items: stretch;
@@ -326,9 +328,9 @@
   min-height: 0;
 }
 
-.pp-channel.mirrored { flex-direction: row-reverse; }
+.perf-channel.mirrored { flex-direction: row-reverse; }
 
-.pp-knob-col {
+.perf-knob-col {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -336,13 +338,13 @@
   min-height: 0;
 }
 
-.pp-channel-name {
+.perf-channel-name {
   font-weight: 800;
   font-size: 11px;
   color: var(--subtext0);
 }
 
-.pp-knob {
+.perf-knob {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -351,7 +353,7 @@
   color: var(--subtext0);
 }
 
-.pp-knob-dial {
+.perf-knob-dial {
   width: 26px;
   height: 26px;
   border-radius: 50%;
@@ -362,12 +364,12 @@
   touch-action: none;
 }
 
-.pp-knob-pointer {
+.perf-knob-pointer {
   position: absolute;
   inset: 0;
 }
 
-.pp-knob-pointer::after {
+.perf-knob-pointer::after {
   content: '';
   position: absolute;
   top: 1px;
@@ -378,7 +380,7 @@
   transform: translateX(-50%);
 }
 
-.pp-vfader {
+.perf-vfader {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -389,7 +391,7 @@
   min-height: 40px;
 }
 
-.pp-vfader input {
+.perf-vfader input {
   writing-mode: vertical-lr;
   direction: rtl;
   flex: 1;
@@ -397,7 +399,7 @@
   accent-color: var(--overlay2);
 }
 
-.pp-hfader {
+.perf-hfader {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -406,22 +408,15 @@
   color: var(--subtext0);
 }
 
-.pp-hfader input { width: 110px; accent-color: var(--overlay2); }
-.pp-hfader.wide input { width: 170px; accent-color: var(--text); }
+.perf-hfader input { width: 110px; accent-color: var(--overlay2); }
+.perf-hfader.wide input { width: 170px; accent-color: var(--text); }
 
 /* ── Library below ────────────────────────────────────────────── */
 
-.pp-library {
+.perf-library {
   height: 50vh;
   min-height: 0;
   overflow: hidden;
 }
 
-.pp-library > div { height: 100%; }
-
-.pp-back {
-  position: fixed;
-  top: 6px;
-  right: 10px;
-  z-index: 500;
-}
+.perf-library > div { height: 100%; }
