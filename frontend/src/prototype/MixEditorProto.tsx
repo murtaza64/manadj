@@ -17,7 +17,7 @@ import {
 } from '../hooks/useBeatgridData';
 import { useWaveformData } from '../hooks/useWaveformData';
 import { useWaveformRenderer } from '../hooks/useWaveformRenderer';
-import { useHotCues } from '../hooks/useHotCues';
+import { useDeleteHotCue, useHotCues, useSetHotCue } from '../hooks/useHotCues';
 import { useQueryClient } from '@tanstack/react-query';
 import Library from '../components/Library';
 import type { LibraryBrowseHandle } from '../components/Library';
@@ -466,6 +466,15 @@ export default function MixEditorProto() {
               pitchPercent={0}
               onBpmSaved={(bpm) => setTrackA((t) => (t ? { ...t, bpm } : t))}
               onNudgeTrack={(d) => nudgeTrack('A', d)}
+              gestures={{
+                // A ≡ mix axis (sketch origin): its controls are plain
+                // transport, not slides (re-decided 2026-07-03 — mirror-A
+                // slides duplicated B's under the lock toggle).
+                kind: 'jump',
+                toCue: (cueSec) => player.seek(cueSec),
+                beats: (n) => bpmA && player.seek(player.getMixTime() + (n * 60) / bpmA),
+                enabled: bpmA !== null && bpmA > 0,
+              }}
             />
 
             <div className="mixproto-center">
@@ -619,7 +628,8 @@ export default function MixEditorProto() {
               pitchPercent={(rateB - 1) * 100}
               onBpmSaved={(bpm) => setTrackB((t) => (t ? { ...t, bpm } : t))}
               onNudgeTrack={(d) => nudgeTrack('B', d)}
-              slides={{
+              gestures={{
+                kind: 'slide',
                 toCue: (cueSec) => slideDeckB('cue', cueSec),
                 // n of B's OWN beats → B-track seconds via base BPM.
                 beats: (n) => bpmB && slideDeckB('beats', (n * 60) / bpmB),
@@ -1538,7 +1548,7 @@ function DeckCard({
   pitchPercent,
   onBpmSaved,
   onNudgeTrack,
-  slides,
+  gestures,
 }: {
   deck: 'A' | 'B';
   track: Track | null;
@@ -1550,9 +1560,11 @@ function DeckCard({
   onBpmSaved: (bpm: number) => void;
   /** Fine alignment: move this track ±deltaSec relative to the other. */
   onNudgeTrack: (deltaSec: number) => void;
-  /** Slide gestures (issue 11 — deck B for now): hot cue / beat jump
-   * controls realign the pair instead of moving the playhead. */
-  slides?: {
+  /** Hot cue / beat jump row (issues 11–12). Two semantics, one idiom:
+   * B = 'slide' (realign the pair; playhead stays put), A = 'jump' (plain
+   * transport — A's track time ≡ mix time, so jumping A jumps the mix). */
+  gestures?: {
+    kind: 'slide' | 'jump';
     toCue: (cueSec: number) => void;
     beats: (n: number) => void;
     enabled: boolean;
@@ -1562,8 +1574,10 @@ function DeckCard({
   const nudge = useNudgeBeatgrid();
   const setDownbeat = useSetBeatgridDownbeat();
   const { data: hotCues = [] } = useHotCues(track?.id ?? null);
-  /** Slide size in this deck's own beats (Performance beatjump idiom). */
-  const [slideBeats, setSlideBeats] = useState(PERFORMANCE_BEATJUMP_DEFAULT);
+  const setHotCue = useSetHotCue();
+  const deleteHotCue = useDeleteHotCue();
+  /** Gesture size in this deck's own beats (Performance beatjump idiom). */
+  const [gestureBeats, setGestureBeats] = useState(PERFORMANCE_BEATJUMP_DEFAULT);
   const [bpmDraft, setBpmDraft] = useState('');
   // Reset the draft when the track (or its saved BPM) changes.
   const [draftKey, setDraftKey] = useState('');
@@ -1667,48 +1681,93 @@ function DeckCard({
           downbeat @ playhead
         </button>
       </div>
-      {slides && (
+      {gestures && (
         <div className="mixproto-deckcard-row mixproto-slides">
           <span
             className="mixproto-slidelabel"
-            title="Slides realign the pair: this deck re-cues, the playhead and the other deck stay put"
+            title={
+              gestures.kind === 'slide'
+                ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put'
+                : 'Transport: moves the playhead — both decks follow, alignment untouched'
+            }
           >
-            slide
+            {gestures.kind}
           </span>
           <button
-            disabled={!slides.enabled}
-            title={`Slide ${deck} ${slideBeats} of its beats earlier`}
-            onClick={() => slides.beats(-slideBeats)}
+            disabled={!gestures.enabled}
+            title={
+              gestures.kind === 'slide'
+                ? `Slide ${deck} ${gestureBeats} of its beats earlier`
+                : `Jump the playhead ${gestureBeats} of ${deck}'s beats back`
+            }
+            onClick={() => gestures.beats(-gestureBeats)}
           >
             ◄◄
           </button>
-          <button title="Halve slide size" onClick={() => setSlideBeats(halveBeatjump(slideBeats))}>
+          <button title="Halve size" onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}>
             −
           </button>
-          <span className="mixproto-slidesize" title="Slide size (this deck's beats)">
-            {slideBeats}
+          <span className="mixproto-slidesize" title={`Size (${deck}'s beats)`}>
+            {gestureBeats}
           </span>
-          <button title="Double slide size" onClick={() => setSlideBeats(doubleBeatjump(slideBeats))}>
+          <button title="Double size" onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}>
             +
           </button>
           <button
-            disabled={!slides.enabled}
-            title={`Slide ${deck} ${slideBeats} of its beats later`}
-            onClick={() => slides.beats(slideBeats)}
+            disabled={!gestures.enabled}
+            title={
+              gestures.kind === 'slide'
+                ? `Slide ${deck} ${gestureBeats} of its beats later`
+                : `Jump the playhead ${gestureBeats} of ${deck}'s beats forward`
+            }
+            onClick={() => gestures.beats(gestureBeats)}
           >
             ►►
           </button>
-          {hotCues.map((c) => (
-            <button
-              key={c.slot_number}
-              className="mixproto-cueslide"
-              style={{ borderColor: c.color || '#39ff14', color: c.color || '#39ff14' }}
-              title={`Slide so cue ${c.slot_number} lands under the playhead`}
-              onClick={() => slides.toCue(c.time_seconds)}
-            >
-              {c.slot_number}
-            </button>
-          ))}
+          {/* All 8 slots, Performance pad semantics: set cues act (slide/
+              jump), empty ones SET at this deck's playhead; right-click
+              deletes. Always reads 1-8 left-to-right (B un-mirrored). */}
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((slot) => {
+            const cue = hotCues.find((c) => c.slot_number === slot);
+            if (!cue) {
+              return (
+                <button
+                  key={slot}
+                  className="mixproto-cueslide unset"
+                  title={`Set cue ${slot} at ${deck}'s playhead`}
+                  onClick={() =>
+                    setHotCue.mutate({
+                      trackId: track.id,
+                      slotNumber: slot,
+                      data: { time_seconds: player.getTrackTime(deck) },
+                    })
+                  }
+                >
+                  {slot}
+                </button>
+              );
+            }
+            const color = cue.color || '#39ff14';
+            return (
+              <button
+                key={slot}
+                className="mixproto-cueslide"
+                style={{ borderColor: color, color }}
+                title={
+                  (gestures.kind === 'slide'
+                    ? `Slide so cue ${slot} lands under the playhead`
+                    : `Jump the playhead to cue ${slot}`) + ' — right-click to delete'
+                }
+                onClick={() => gestures.toCue(cue.time_seconds)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  deleteHotCue.mutate({ trackId: track.id, slotNumber: slot });
+                }}
+              >
+                {slot}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

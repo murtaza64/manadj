@@ -495,6 +495,18 @@
   min-width: 22px;
 }
 
+/* Empty slot: press to set a cue at this deck's playhead. */
+.mixproto-cueslide.unset {
+  border-style: dashed;
+  color: var(--surface2, #585b70);
+}
+
+/* Cue slots always read 1-8 left-to-right: the card's mirrored layout
+   (row-reverse on deck B) does not apply to the gesture row. */
+.mixproto-deckcard.b .mixproto-deckcard-row.mixproto-slides {
+  flex-direction: row;
+}
+
 .mixproto-center {
   display: flex;
   flex-direction: column;

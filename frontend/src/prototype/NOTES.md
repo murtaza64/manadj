@@ -207,6 +207,24 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   fixed window (bInSec only; snap puts a B beat on the window start, or —
   in the lead-gap regime — B's audio start on A's grid).
 
+- v18 (issue 12, re-grilled): deck A's controls are TRANSPORT, not
+  mirror-slides — user re-opened the quadrant table mid-build: mirror-A
+  added no expressive power (unlocked-A ≡ locked-B, locked-A ≡ unlocked-B)
+  and "move everything else" needed re-explaining every session. New
+  split: one deck slides (B), one deck is the axis you navigate (A ≡ mix
+  time via the sketch origin). A hot cue = `player.seek(cueTime)`; A beat
+  jump = seek ±n·60/bpmA, phase-preserving; plain-seek semantics playing
+  or paused (both decks re-cue, same as a timeline click); the lock
+  toggle scopes to B gestures only. Double-drop is now two comprehensible
+  gestures: A drop cue (jump) → B drop cue unlocked (align). DeckCard's
+  `slides` prop generalized to `gestures {kind: 'slide'|'jump'}` — one
+  row idiom, per-kind labels/tooltips. `slideA` model math reverted
+  before it shipped; PRD quadrant table + glossary (Slide, Locked window)
+  updated to the B-scoped semantics. Cue row shows all 8 slots
+  (Performance pad semantics: empty = set at this deck's playhead,
+  dashed style; right-click deletes) and always reads 1-8 left-to-right —
+  deck B's mirrored card layout is overridden for the gesture row.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

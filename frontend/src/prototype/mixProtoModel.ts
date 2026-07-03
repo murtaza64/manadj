@@ -207,6 +207,11 @@ export function slideBToCue(
   return slideB(tr, cueSec - bTrackTimeAt(tr, playheadMix, rateB), locked, rateB);
 }
 
+// Deck A has no slide math: A is pinned to the sketch origin and its track
+// time ≡ mix time, so A-side "slides" would only mirror B's (the PRD
+// equivalences). Decided 2026-07-03: deck A's editor controls are plain
+// TRANSPORT instead — hot cue / beat jump move the playhead (player.seek).
+
 /**
  * Remap drawn lanes for a duration change with CROP semantics: points keep
  * their absolute time positions. Shrinking drops points past the new end and

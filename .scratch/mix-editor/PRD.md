@@ -33,9 +33,9 @@ Named escalations, not built: LOD/mipmap geometry pyramid if fit-zoom aggregatio
 - Apply fallback chain, no silent guessing: cue slot → hard-coded convention heuristic (e.g. missing cue 4 → drop ≈ beat 128 from first downbeat; constant table next to the code) → current values + one-line notice. Out-of-range resolutions clamp + notice. Partial application always proceeds (lanes/length/tempo-match stamp regardless).
 - Authoring: save-from-Transition only, no separate abstract editor. "Save as template" normalizes lanes, derives `lengthBeats` from the grid, and asks one explicit question per side: which cue anchors it (delta auto-derived from actual placement, rounded to whole beats with confirmation). Editing later = load onto a pair, edit, re-save. Management = dropdown (rename/delete).
 
-### Deck slides (grill 2026-07-03 #2; issues 11–12, prototype iterations)
+### Deck slides (grill 2026-07-03 #2, A-side re-decided #3; issues 11–12, prototype iterations)
 
-Hot cue and beat jump controls on both editor decks act as **Slides** (glossary), not transport: they realign the pair. Axiom: **the sketch origin is A's start** (glossary: Sketch origin) — no A content-offset exists; A-side gestures execute as their mirror.
+Hot cue and beat jump controls on deck B act as **Slides** (glossary), not transport: they realign the pair. Deck A's controls are plain **transport** (jump the playhead). Axiom: **the sketch origin is A's start** (glossary: Sketch origin) — no A content-offset exists, so A ≡ the mix axis and navigating A is navigating the mix.
 
 - Gesture × lock semantics (each Slide changes the A↔B alignment; the lock chooses which side the window sticks to):
 
@@ -43,17 +43,16 @@ Hot cue and beat jump controls on both editor decks act as **Slides** (glossary)
   |---|---|---|
   | B-slide, unlocked | window↔A | `bInSec` |
   | B-slide, locked | window↔B | `startSec` |
-  | A-slide, unlocked | window↔B | `startSec` (mirrored sign) |
-  | A-slide, locked | window↔A | `bInSec` (mirrored, ×rateB) |
+  | A hot cue / beat jump | everything | playhead only (plain seek) |
 
-  Equivalences: unlocked-A ≡ locked-B, locked-A ≡ unlocked-B (mirrored). Both decks get controls anyway — they aim with different landmarks (own cues/beats).
-- **Playhead rule**: the playhead stays pinned to the un-slid track's content — a Slide re-cues exactly one deck engine; the other never hiccups. B-slides leave the playhead's mix position; A-slides move it by the mirrored delta (A-hotcue lands the playhead on the cue literally). Slides while playing are safe: one deck seeks, deterministic.
-- **Signature gestures**: park playhead at window start + tap A.cue (unlocked) = relocate the transition to A's landmark, rig intact. Park playhead on B's drop + tap A's drop cue (locked) = double-drop alignment in one gesture (mirror: stand on A's drop, tap B's drop cue unlocked).
-- **Hot cue slide math**: Δ = cueTime − playhead position (in the deck's local time); applied per the table.
-- **Beat jump controls**: reuse the established idiom (`playback/beatjump.ts`: per-deck size, halve/double, 1–128, `◀ [n] ▶` + readout); jumps are in the deck's own beats (B scales by rateB into mix time).
+  (Re-decided 2026-07-03 #3: the original mirror-A slide rows added no expressive power — unlocked-A ≡ locked-B, locked-A ≡ unlocked-B — and cost a per-session re-explanation. One deck slides; the other is the axis you navigate.)
+- **Playhead rule (B-slides)**: the playhead's mix position never moves and stays pinned to A — a Slide re-cues only deck B; A never hiccups, also while playing. A-side jumps are ordinary seeks (both decks re-cue, same as a timeline click).
+- **Signature gesture**: tap A's drop cue (playhead jumps there) → tap B's drop cue unlocked (B's drop aligns under the playhead) = double-drop in two comprehensible gestures.
+- **Hot cue math**: B-slide Δ = cueTime − B's track-time at the playhead; A-jump target = cueTime (A local ≡ mix time).
+- **Beat jump controls**: reuse the established idiom (`playback/beatjump.ts`: per-deck size, halve/double, 1–128, `◀ [n] ▶` + readout); each deck's own beats (B slides scale by rateB into mix time; A jumps are phase-preserving seeks by n·60/bpmA).
 - **Negative entry anchor is first-class**: `bInSec < 0` = B's audio begins partway into the window (silent lead gap). Player defers deck B's start to `startSec + (−bIn)/rateB`; the timeline draws B's block from its true audio start. Large positive `bInSec` makes B's content-origin virtual (extrapolated before mix 0 for short A into deep B) — only the audible portion exists; no clamps on the B side in either direction. The only clamp: `startSec ≥ 0` (a transition can't begin before A exists).
 - **Model hygiene rider**: `bInSec` moves from `ProtoMix` into `ProtoTransition` — B's entry is pair knowledge and must switch with the named Transition (latent bug under multiple Transitions per pair).
-- Slides are exact; the global snap toggle does not quantize slide results (snap the playhead first if you want quantized aims).
+- Slides are exact; the global snap toggle does not quantize slide results (jump the playhead to a landmark first if you want quantized aims).
 
 ### Timeline waveform redesign (2026-07-03; issue 13, prototype iteration)
 
