@@ -27,7 +27,7 @@ export interface StyleParams {
  * the issue-04 swap). */
 export const DEFAULT_PARAMS: StyleParams = {
   displayGamma: 1.0,
-  master: 0.78,
+  master: 0.85,
   gains: [0.7, 1.05, 1.5],
   b1: 3,
   b2: 5,
