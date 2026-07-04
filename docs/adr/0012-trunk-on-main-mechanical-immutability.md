@@ -22,7 +22,11 @@ named merge commit. Detailed rules in `docs/agents/parallel-work.md`.
 
 `main` was chosen over a new `trunk` bookmark deliberately: jj's `trunk()` revset
 resolves to `main`, and jj treats `trunk()::` as immutable by default — so advancing
-`main` makes integrated history mechanically unrewritable. The "never rewrite landed
+`main` makes integrated history mechanically unrewritable. One config nuance: the
+default alias resolved `trunk()` to `main@origin` (the GitHub remote), which would
+tie immutability to pushes; the repo config re-pins it to local `main`
+(`revset-aliases."trunk()" = "present(main)"`) so immutability is instant and
+offline. Pushing to origin remains backup hygiene, decoupled from the gate. The "never rewrite landed
 changes" rule is enforced by the tool, not by convention; accidental amends/rebases
 of landed work fail instead of silently rebasing other agents' stacks.
 

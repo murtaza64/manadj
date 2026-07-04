@@ -11,7 +11,12 @@ at a time. Named after the feature (workspace `perfdata` ↔ lane perfdata).
 
 **Trunk**: the `main` bookmark. The integrated, verified line of development.
 jj's `trunk()` resolves to it, and jj treats `trunk()::` as immutable — landed
-history mechanically cannot be rewritten (ADR 0012).
+history mechanically cannot be rewritten (ADR 0012). Note: the repo config pins
+`trunk()` to *local* `main` (`jj config set --repo 'revset-aliases."trunk()"'
+'present(main)'`), so immutability applies the moment `main` moves — no push
+required. Pushing `main` to origin is periodic backup hygiene, not part of the
+gate. After advancing `main` from your own head, immediately `jj new` — your
+old `@` just became immutable.
 
 **Landing**: getting a lane's changes behind trunk — by rebase (short lanes) or
 by a named merge commit (long-lived lanes).
