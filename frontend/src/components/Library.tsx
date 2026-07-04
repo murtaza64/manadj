@@ -27,6 +27,9 @@ import {
   type Selection,
 } from '../selection/selectionModel';
 import type { SelectMods } from './TrackRow';
+import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
+import { useToast } from './Toast';
+import type { Playlist } from '../types';
 
 // Find Compatible feature (né Find Related; internal keys unchanged) —
 // types and constants
@@ -246,6 +249,7 @@ export default function Library({
   // the (large) library tree.
   const { engine, loadedTrack, loadTrack } = useDeck();
   const deckReady = useDeckReady();
+  const showToast = useToast();
 
   // Transition-library discovery (transition-library 02): per-row marks for
   // tracks with a saved Transition FROM either loaded deck, starred when
@@ -287,8 +291,15 @@ export default function Library({
     placeholderData: (previousData) => previousData,
   });
 
+  // Playlists for the "Add to playlist ▸" submenu (shares the sidebar's cache).
+  const { data: playlists = [] } = useQuery({
+    queryKey: ['playlists'],
+    queryFn: api.playlists.list,
+  });
+
   // Add tracks to playlist mutation (sequential appends, selection order).
-  // Duplicates are idempotent no-ops server-side (entry identity).
+  // Duplicates are idempotent no-ops server-side (entry identity); skips
+  // are reported with a toast.
   const addToPlaylistMutation = useMutation({
     mutationFn: async ({ playlistId, trackIds }: { playlistId: number; trackIds: number[] }) => {
       let skipped = 0;
@@ -298,8 +309,11 @@ export default function Library({
       }
       return { skipped, total: trackIds.length };
     },
-    onSuccess: () => {
+    onSuccess: ({ skipped }) => {
       queryClient.invalidateQueries({ queryKey: ['playlist'] });
+      if (skipped > 0) {
+        showToast(skipped === 1 ? '1 track already in playlist' : `${skipped} tracks already in playlist`);
+      }
     },
   });
 
@@ -507,6 +521,56 @@ export default function Library({
 
   const selectedIds = useMemo(() => new Set(selection.ids), [selection.ids]);
 
+  // ── Track-row context menu (playlist-editing 03) ───────────────────────
+  const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } = useContextMenuState<Track>();
+
+  const handleRowContextMenu = (track: Track, pos: { x: number; y: number }) => {
+    // Standard behavior: right-clicking outside the selection selects the row.
+    if (!selection.ids.includes(track.id)) {
+      setSelection(click(selection, track.id));
+    }
+    openRowMenu(pos.x, pos.y, track);
+  };
+
+  /** Load target for menu items: route through the embedding view's load
+   * policy when present (Performance view), else the shared Decks. */
+  const loadToDeckFromMenu = (deck: ChannelId, track: Track) => {
+    if (onLoadToDeck) onLoadToDeck(deck, track);
+    else decks[deck].loadTrack(track);
+  };
+
+  const rowMenuItems: MenuItem[] = useMemo(() => {
+    if (!rowMenu) return [];
+    const targetIds = selection.ids.includes(rowMenu.context.id) ? [...selection.ids] : [rowMenu.context.id];
+    const multi = targetIds.length > 1;
+    const loadDisabledTitle = multi ? 'Load acts on a single track' : undefined;
+    return [
+      {
+        label: 'Load to Deck A',
+        disabled: multi,
+        title: loadDisabledTitle,
+        onSelect: () => loadToDeckFromMenu('A', rowMenu.context),
+      },
+      {
+        label: 'Load to Deck B',
+        disabled: multi,
+        title: loadDisabledTitle,
+        onSelect: () => loadToDeckFromMenu('B', rowMenu.context),
+      },
+      {
+        label: multi ? `Add ${targetIds.length} to playlist` : 'Add to playlist',
+        separatorBefore: true,
+        disabled: playlists.length === 0,
+        title: playlists.length === 0 ? 'No playlists yet' : undefined,
+        submenu: playlists.map((p: Playlist) => ({
+          label: p.name,
+          onSelect: () => addToPlaylistMutation.mutate({ playlistId: p.id, trackIds: targetIds }),
+        })),
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowMenu, selection.ids, playlists]);
+
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0
     : allTracksData?.library_total || 0;
@@ -626,6 +690,7 @@ export default function Library({
               selectedIds={selectedIds}
               onSelectTrack={handleRowSelect}
               getDragIds={getDragIds}
+              onRowContextMenu={handleRowContextMenu}
               onLoadTrack={loadForTable}
               loadedTrackId={loadedTrack?.id ?? null}
               onLoadToDeck={onLoadToDeck}
@@ -638,6 +703,10 @@ export default function Library({
           </div>
         </div>
       </div>
+
+      {rowMenu && (
+        <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
+      )}
     </div>
     </>
   );

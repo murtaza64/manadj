@@ -20,6 +20,8 @@ interface TrackListProps {
   onSelectTrack: (track: Track, mods: SelectMods) => void;
   /** Drag payload for a row (whole selection when the row is in it). */
   getDragIds: (trackId: number) => number[];
+  /** Right-click on a row: open the track context menu. */
+  onRowContextMenu?: (track: Track, pos: { x: number; y: number }) => void;
   /** Load a track onto the Deck (double-click; Enter goes via the keyboard hub). */
   onLoadTrack: (track: Track) => void;
   /** The Deck's loaded track, for row highlighting. */
@@ -42,6 +44,7 @@ export default function TrackList({
   selectedIds,
   onSelectTrack,
   getDragIds,
+  onRowContextMenu,
   onLoadTrack,
   loadedTrackId,
   onLoadToDeck,
@@ -154,6 +157,7 @@ export default function TrackList({
                 onLoad={onLoadTrack}
                 onLoadToDeck={onLoadToDeck}
                 getDragIds={getDragIds}
+                onContextMenu={onRowContextMenu}
                 markA={markFor(transitionMarksA, track.id)}
                 markB={markFor(transitionMarksB, track.id)}
               />

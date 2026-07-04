@@ -9,6 +9,7 @@ import { FilterProvider } from './contexts/FilterContext';
 import { DeckProvider, DeckScope } from './contexts/DeckContext';
 import { MidiControllerBridge } from './components/MidiControllerBridge';
 import TransitionEditor from './editor/TransitionEditor';
+import { ToastProvider } from './components/Toast';
 
 const queryClient = new QueryClient();
 
@@ -25,6 +26,7 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ToastProvider>
       <DeckProvider>
         {/* Controller layer: above the view switch, like the Decks it drives. */}
         <MidiControllerBridge />
@@ -48,6 +50,7 @@ function App() {
           </div>
         </FilterProvider>
       </DeckProvider>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

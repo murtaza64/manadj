@@ -40,6 +40,8 @@ interface Props {
    * row memoization survives selection churn.
    */
   getDragIds: (trackId: number) => number[];
+  /** Right-click: open the track context menu (playlist-editing 03). */
+  onContextMenu?: (track: Track, pos: { x: number; y: number }) => void;
   markA?: TransitionMark;
   markB?: TransitionMark;
 }
@@ -74,6 +76,7 @@ const TrackRow = memo(function TrackRow({
   onLoad,
   onLoadToDeck,
   getDragIds,
+  onContextMenu,
   markA = 'none',
   markB = 'none',
 }: Props) {
@@ -113,6 +116,14 @@ const TrackRow = memo(function TrackRow({
       onDragStart={(e) => {
         setTrackDragPayload(e.dataTransfer, getDragIds(track.id));
       }}
+      onContextMenu={
+        onContextMenu
+          ? (e) => {
+              e.preventDefault();
+              onContextMenu(track, { x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
     >
         <td className={getCellClasses(0)} style={getCellStyle(0)}>
           <div className="track-cell-single">

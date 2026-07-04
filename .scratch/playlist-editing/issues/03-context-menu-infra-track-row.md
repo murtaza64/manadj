@@ -36,3 +36,15 @@ Existing narrow `onContextMenu` uses (hot cues, deck cards) are untouched.
 ## Blocked by
 
 None - can start immediately (multi-selection behaviors degrade gracefully to single selection until 02 lands)
+
+## Comments
+
+Done (jj uyzltozy). Generic ContextMenu component (viewport clamp, hover
+submenus with edge flip, disabled/danger/separator items, Escape and
+click-away dismiss) + ToastProvider (bottom-center transient notices,
+mounted app-wide in App.tsx, additive). Track-row menu in Library: Load to
+Deck A/B (disabled for multi-selections, routed through the embedding
+view's load policy when present), Add to playlist ▸ (sidebar-ordered
+submenu, appends the selection, duplicate skips toasted). Right-click
+outside the selection re-selects the clicked row. Unit tests for
+clampToViewport and the drag payload helpers.
