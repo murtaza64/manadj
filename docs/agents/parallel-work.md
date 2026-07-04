@@ -109,6 +109,28 @@ To test lanes together before they land:
   comments; fixes go to the owning lanes; the probe is abandoned the same session.
 - Topology queries (`heads(mutable())`) must ignore `tmp:` changes.
 
+## Docs fast-path and the tracked/ephemeral split
+
+Rule of thumb: **if it needs history, it's tracked and lands via trunk; if it
+needs real-time visibility and no history, it lives in `.lanes/`.**
+
+- **Docs fast-path**: a change touching only docs/tracker files (`.scratch/`,
+  `docs/`, `CONTEXT.md`, `AGENTS.md`) may land on `main` immediately with a
+  reduced gate (nothing to build or test — sanity-read the diff). Any lane may
+  do this for cross-lane-relevant updates: triage, status flips, PRDs, filed
+  issues, convention changes. Change-specific Done comments keep riding their
+  lane's change as before.
+- **Claims are ephemeral**: "this issue is being worked" is a real-time signal,
+  not history — record it in your `.lanes/<lane>.md` file (issue path + started
+  timestamp), not as a tracker `Status:` edit. Tracker `Status:` lines keep the
+  durable states only (`needs-triage`, `ready-for-agent`, `wontfix`, done/
+  verified notes). This removes the two-agents-grab-one-issue race without
+  un-tracking the tracker.
+- Rationale (grilled 2026-07-04): fully un-tracking the tracker would give
+  instant visibility but lose ticket history, Done comments pinned to jj change
+  IDs, docs-with-code atomicity, and merge machinery for concurrent writes.
+  Trunk is the central place now — the fast-path uses it.
+
 ## The default workspace
 
 Reserved for the human and for integration/verification: probes, gates, the real
