@@ -108,6 +108,23 @@ function groupKeyFor(row: StatusRow): GroupKey | null {
   return 'div-maincue'; // maincue-only: lowest tier
 }
 
+// Divergence-filter predicates (CONTEXT.md "Divergence filter"): an active
+// chip matches EVERY row carrying that divergence, regardless of which Sync
+// inbox section claimed it — unlike groupKeyFor, which files each row once.
+const CHIP_FIELDS: Partial<Record<GroupKey, string[]>> = {
+  'div-tags': ['tags', 'energy'],
+  'div-title-artist': ['title', 'artist'],
+  'div-perf': ['beatgrid', 'hotcues'],
+  'div-bpm-key': ['bpm', 'key'],
+  'div-maincue': ['maincue'],
+};
+
+function chipMatches(row: StatusRow, key: GroupKey): boolean {
+  const fields = CHIP_FIELDS[key];
+  if (fields) return row.diverged.some((d) => fields.includes(d.field));
+  return row.status === key; // status chips (missing-downstream, unimported, not-in-library)
+}
+
 interface PendingAction {
   scope: string; // what will be acted on
   sideEffects: string; // what kind of writes happen where
@@ -135,7 +152,7 @@ export function UnifiedTracksSync() {
   const queryClient = useQueryClient();
   const { data, isLoading, error, isFetching } = useQuery({ queryKey: ['sync-status'], queryFn: fetchStatus });
 
-  const [filter, setFilter] = useState<string | null>(null);
+  const [filter, setFilter] = useState<GroupKey | null>(null);
   const [showInSync, setShowInSync] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -296,6 +313,8 @@ export function UnifiedTracksSync() {
   };
 
   const groupRows = (key: GroupKey) => attention.filter((r) => groupKeyFor(r) === key);
+  // predicate counts — the honest "how many tracks are affected" numbers
+  const chipRows = (key: GroupKey) => attention.filter((r) => chipMatches(r, key));
 
   const groupActions = (key: GroupKey, list: StatusRow[], selectedHere: StatusRow[]) => {
     if (key === 'div-tags') {
@@ -417,6 +436,48 @@ export function UnifiedTracksSync() {
     return null;
   };
 
+  const renderRow = (row: StatusRow, selectable: boolean) => (
+    <RowCard
+      key={row.path}
+      row={row}
+      selectable={selectable}
+      selected={selected.has(row.path)}
+      onSelect={() => setSelected(toggle(selected, row.path))}
+      expanded={expanded.has(row.path)}
+      onToggleExpand={() => setExpanded(toggle(expanded, row.path))}
+      onImportField={(field, value) => importField.mutate({ row, field, value })}
+      onImportPerf={(field, mode) => {
+        const d = row.diverged.find((dd) => dd.field === field);
+        const lib = d?.library_value;
+        const overwriting =
+          mode !== 'fill-empty' &&
+          (field === 'hotcues'
+            ? ((lib as HotCueVal[] | undefined)?.length ?? 0) > 0
+            : lib !== null && lib !== undefined);
+        const run = () => importPerf.mutate({ trackId: row.track_id!, field, mode });
+        // no silent overwrites: replacing saved info goes through
+        // the pending-confirm flow; fill-empty never overwrites
+        if (!overwriting) return run();
+        const what =
+          field === 'hotcues'
+            ? `${(lib as HotCueVal[]).length} saved hot cue${(lib as HotCueVal[]).length === 1 ? '' : 's'}`
+            : field === 'beatgrid' ? 'the saved beatgrid' : 'the saved main cue';
+        const engineGrid = field === 'beatgrid'
+          ? (d?.surface_values['engine'] as BeatgridVal | undefined) : undefined;
+        const variable = engineGrid && engineGrid.tempo_changes.length > 1
+          ? ` (variable grid — ${engineGrid.tempo_changes.length} tempo changes; rendering honors only the first for now)` : '';
+        setPending({
+          scope: `Replace ${what} on "${row.title || row.path}" with Engine's${variable}`,
+          sideEffects: 'overwrites saved performance data in the Library',
+          run,
+        });
+      }}
+      onBulkImportPerf={() => bulkImportPerf.mutate({ track_ids: [row.track_id!] })}
+      onExportToDisk={() => exportRowToDisk.mutate(row)}
+      surfacesAvailable={data.surfaces_available}
+    />
+  );
+
   return (
     <div className="uts-root">
       <div className="uts-chipbar">
@@ -425,8 +486,9 @@ export function UnifiedTracksSync() {
             key={g.key}
             className={`uts-chip uts-chip-${g.chip} ${filter === g.key ? 'uts-chip-active' : ''}`}
             onClick={() => setFilter(filter === g.key ? null : g.key)}
+            title="Count of all affected tracks; click to list them regardless of section"
           >
-            <b>{groupRows(g.key).length}</b> {g.label.toLowerCase()}
+            <b>{chipRows(g.key).length}</b> {g.label.toLowerCase()}
           </button>
         ))}
         <button
@@ -469,80 +531,74 @@ export function UnifiedTracksSync() {
         />
       )}
 
-      {GROUPS.filter((g) => (!filter || filter === g.key) && groupRows(g.key).length > 0).map((g) => {
-        const list = groupRows(g.key);
-        const selectable = g.key === 'unimported'; // only op that honors selection
-        const selectedHere = list.filter((r) => selected.has(r.path));
-        const isCollapsed = collapsed.has(g.key);
-        return (
-          <section key={g.key} className="uts-group">
-            <h3>
-              <button
-                className="uts-collapse-toggle"
-                onClick={() => setCollapsed(toggle(collapsed, g.key))}
-                title={isCollapsed ? 'Expand section' : 'Collapse section'}
-              >
-                {isCollapsed ? '▸' : '▾'}
-              </button>
-              {selectable && (
-                <input
-                  type="checkbox"
-                  checked={list.every((r) => selected.has(r.path))}
-                  onChange={() => {
-                    const all = list.every((r) => selected.has(r.path));
-                    const next = new Set(selected);
-                    list.forEach((r) => (all ? next.delete(r.path) : next.add(r.path)));
-                    setSelected(next);
-                  }}
-                />
-              )}
-              {g.label} <span className="uts-count">{list.length}</span>
-              {groupActions(g.key, list, selectedHere)}
-            </h3>
-            {!isCollapsed && list.map((row) => (
-              <RowCard
-                key={row.path}
-                row={row}
-                selectable={selectable}
-                selected={selected.has(row.path)}
-                onSelect={() => setSelected(toggle(selected, row.path))}
-                expanded={expanded.has(row.path)}
-                onToggleExpand={() => setExpanded(toggle(expanded, row.path))}
-                onImportField={(field, value) => importField.mutate({ row, field, value })}
-                onImportPerf={(field, mode) => {
-                  const d = row.diverged.find((dd) => dd.field === field);
-                  const lib = d?.library_value;
-                  const overwriting =
-                    mode !== 'fill-empty' &&
-                    (field === 'hotcues'
-                      ? ((lib as HotCueVal[] | undefined)?.length ?? 0) > 0
-                      : lib !== null && lib !== undefined);
-                  const run = () => importPerf.mutate({ trackId: row.track_id!, field, mode });
-                  // no silent overwrites: replacing saved info goes through
-                  // the pending-confirm flow; fill-empty never overwrites
-                  if (!overwriting) return run();
-                  const what =
-                    field === 'hotcues'
-                      ? `${(lib as HotCueVal[]).length} saved hot cue${(lib as HotCueVal[]).length === 1 ? '' : 's'}`
-                      : field === 'beatgrid' ? 'the saved beatgrid' : 'the saved main cue';
-                  const engineGrid = field === 'beatgrid'
-                    ? (d?.surface_values['engine'] as BeatgridVal | undefined) : undefined;
-                  const variable = engineGrid && engineGrid.tempo_changes.length > 1
-                    ? ` (variable grid — ${engineGrid.tempo_changes.length} tempo changes; rendering honors only the first for now)` : '';
-                  setPending({
-                    scope: `Replace ${what} on "${row.title || row.path}" with Engine's${variable}`,
-                    sideEffects: 'overwrites saved performance data in the Library',
-                    run,
-                  });
-                }}
-                onBulkImportPerf={() => bulkImportPerf.mutate({ track_ids: [row.track_id!] })}
-                onExportToDisk={() => exportRowToDisk.mutate(row)}
-                surfacesAvailable={data.surfaces_available}
-              />
-            ))}
-          </section>
-        );
-      })}
+      {filter ? (
+        /* Divergence filter (glossary): flat predicate view — every matching
+           row, regardless of which inbox section claimed it. */
+        (() => {
+          const g = GROUPS.find((gg) => gg.key === filter)!;
+          const list = chipRows(filter);
+          const selectable = filter === 'unimported';
+          const selectedHere = list.filter((r) => selected.has(r.path));
+          return (
+            <section className="uts-group">
+              <h3>
+                {selectable && (
+                  <input
+                    type="checkbox"
+                    checked={list.every((r) => selected.has(r.path))}
+                    onChange={() => {
+                      const all = list.every((r) => selected.has(r.path));
+                      const next = new Set(selected);
+                      list.forEach((r) => (all ? next.delete(r.path) : next.add(r.path)));
+                      setSelected(next);
+                    }}
+                  />
+                )}
+                {list.length} track{list.length === 1 ? '' : 's'} — {g.label.toLowerCase()}
+                {groupActions(filter, list, selectedHere)}
+              </h3>
+              {list.length === 0 && <div className="uts-empty">nothing matches</div>}
+              {list.map((row) => renderRow(row, selectable))}
+            </section>
+          );
+        })()
+      ) : (
+        /* Sync inbox (glossary): priority sections, each row exactly once. */
+        GROUPS.filter((g) => groupRows(g.key).length > 0).map((g) => {
+          const list = groupRows(g.key);
+          const selectable = g.key === 'unimported'; // only op that honors selection
+          const selectedHere = list.filter((r) => selected.has(r.path));
+          const isCollapsed = collapsed.has(g.key);
+          return (
+            <section key={g.key} className="uts-group">
+              <h3>
+                <button
+                  className="uts-collapse-toggle"
+                  onClick={() => setCollapsed(toggle(collapsed, g.key))}
+                  title={isCollapsed ? 'Expand section' : 'Collapse section'}
+                >
+                  {isCollapsed ? '▸' : '▾'}
+                </button>
+                {selectable && (
+                  <input
+                    type="checkbox"
+                    checked={list.every((r) => selected.has(r.path))}
+                    onChange={() => {
+                      const all = list.every((r) => selected.has(r.path));
+                      const next = new Set(selected);
+                      list.forEach((r) => (all ? next.delete(r.path) : next.add(r.path)));
+                      setSelected(next);
+                    }}
+                  />
+                )}
+                {g.label} <span className="uts-count">{list.length}</span>
+                {groupActions(g.key, list, selectedHere)}
+              </h3>
+              {!isCollapsed && list.map((row) => renderRow(row, selectable))}
+            </section>
+          );
+        })
+      )}
 
       {showInSync && inSync.map((row) => (
         <div key={row.path} className="uts-card">

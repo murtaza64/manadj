@@ -31,3 +31,5 @@ Split the two reads of the unified sync chip bar per the glossary:
 None - can start immediately
 
 ## Comments
+
+**2026-07-04 — Done** (jj change `mxvlnxux`, workspace syncfilter, based on the grill-docs change `qlpsxrtq`). Chips are Divergence filters: `CHIP_FIELDS` predicates (tags|energy, title|artist, beatgrid|hotcues, bpm|key, maincue; status chips match by row status), `chipRows` drives chip counts in both modes, and an active chip renders a flat predicate section ("N tracks — main cue diverged") with full row cards and the group actions scoped to the filtered list. Inbox rendering unchanged when no chip is active (section counts still inbox counts). RowCard invocation extracted to a shared `renderRow` closure used by both branches. Build + 166 vitest green; visual check by the user pending. NOTE: sibling head of `lvnsmuno` (mix-editor 26 grill) — needs rebase/merge by whoever integrates next.
