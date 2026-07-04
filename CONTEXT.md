@@ -115,7 +115,10 @@ The two-deck view for practicing and performing mixes: stacked full-width wavefo
 Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. Selecting a track in the library browses without loading; the Deck keeps its Track until another Load replaces it. In the Performance view, Loading onto a playing Deck is blocked (protecting the mix); in the library it simply replaces what's playing.
 
 **Nudge**:
-A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Jog rotation on a paused Deck is a seek, not a Nudge.
+A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Jog rotation on a paused Deck is a seek, not a Nudge. The Transition editor's counterpart of the same intent is the Alignment nudge.
+
+**Alignment nudge**:
+Realigning the Transition editor's pair by a fixed time step — the editor's counterpart of a performance Nudge: both ride the pair's relative alignment, but a Nudge does it live and leaves nothing behind, while an Alignment nudge edits the sketch (autosaved). A Slide variant. Distinct from a grid nudge, which edits the Track's stored Beatgrid.
 
 **Hot Cue**:
 One of 8 persistent saved positions in a Track, used to jump to during performance.
@@ -130,7 +133,7 @@ A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Dec
 The device-specific translation from a Controller's physical controls to manadj actions. One Mapping per device model; controls with no manadj counterpart are simply absent from it and do nothing.
 
 **Beatgrid**:
-The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid.
+The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid. When a Beatgrid exists it is the authority on tempo: the Track's BPM is its projection (the grid's dominant tempo), not an independent field, and editing BPM is a grid operation (ADR 0016). A grid may carry an *anchor* — the downbeat the user explicitly marked — which re-tempo operations never move.
 
 **Waveform data**:
 The stored Analysis artifact for a Track's audio: broadband peaks plus per-band energies over time, style-agnostic — no aesthetic choices baked in. Internal to manadj — never transferred by Sync; each external library computes its own.
