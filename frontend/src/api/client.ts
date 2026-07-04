@@ -544,6 +544,36 @@ export const api = {
       if (!res.ok) throw new Error('Failed to import hot cues from Engine DJ');
       return res.json();
     },
+
+    /** Import Engine's Beatgrid (origin "imported"). "fill-empty" only lands
+     * on absent/placeholder grids; "replace" is the confirmed overwrite. */
+    importBeatgrid: async (request: {
+      track_id: number;
+      mode: 'fill-empty' | 'replace';
+    }): Promise<{ imported: boolean; reason: string | null }> => {
+      const res = await fetch(`${API_BASE}/sync/performance/beatgrid/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) throw new Error('Failed to import beatgrid from Engine DJ');
+      return res.json();
+    },
+
+    /** Import Engine's user-set Main cue through the normal cue persistence
+     * path. "fill-empty" only when unset; "replace" is the confirmed overwrite. */
+    importMaincue: async (request: {
+      track_id: number;
+      mode: 'fill-empty' | 'replace';
+    }): Promise<{ imported: boolean; reason: string | null }> => {
+      const res = await fetch(`${API_BASE}/sync/performance/maincue/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) throw new Error('Failed to import main cue from Engine DJ');
+      return res.json();
+    },
   },
 
   libraryImport: {

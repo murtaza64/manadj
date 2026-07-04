@@ -50,10 +50,12 @@ class DiskSurfaceReader:
 
 class EngineSurfaceReader:
     """Engine DJ: Track rows plus Tag assignments encoded as the
-    "manaDJ Tags" playlist tree, plus Hot Cues decoded from the
-    PerformanceData blobs."""
+    "manaDJ Tags" playlist tree, plus performance data (Hot Cues, Beatgrid,
+    Main cue) decoded from the PerformanceData blobs."""
 
-    fields = frozenset({"title", "artist", "key", "bpm", "tags", "hotcues"})
+    fields = frozenset(
+        {"title", "artist", "key", "bpm", "tags", "hotcues", "beatgrid", "maincue"}
+    )
 
     def __init__(self, engine_db) -> None:  # EngineDJDatabase
         self._db = engine_db
@@ -61,7 +63,7 @@ class EngineSurfaceReader:
     def list_tracks(self) -> list[SurfaceTrackRef]:
         from sqlalchemy.orm import joinedload
 
-        from backend.sync_performance import hotcues_from_performance_blobs
+        from backend.sync_performance import performance_fields_from_blobs
         from enginedj.models.playlist import Playlist
         from enginedj.models.playlist_entity import PlaylistEntity
         from enginedj.models.track import Track as EDJTrack
@@ -89,6 +91,10 @@ class EngineSurfaceReader:
                     float(t.bpm) if t.bpm is not None else None
                 )
                 perf = t.performance_data
+                perf_fields = performance_fields_from_blobs(
+                    perf.beatData if perf else None,
+                    perf.quickCues if perf else None,
+                )
                 refs.append(
                     SurfaceTrackRef(
                         path=t.path,
@@ -98,10 +104,9 @@ class EngineSurfaceReader:
                             key=t.key,  # already the canonical 0-23 ID
                             bpm=bpm,
                             tags=sorted(tags_by_track.get(t.id, [])),
-                            hotcues=hotcues_from_performance_blobs(
-                                perf.beatData if perf else None,
-                                perf.quickCues if perf else None,
-                            ),
+                            hotcues=perf_fields.hotcues if perf_fields else None,
+                            beatgrid=perf_fields.beatgrid if perf_fields else None,
+                            maincue=perf_fields.maincue if perf_fields else None,
                         ),
                     )
                 )

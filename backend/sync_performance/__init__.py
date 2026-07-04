@@ -6,11 +6,18 @@ rule — this package is about performance-data fields (Hot Cues, Beatgrid,
 Main cue) crossing the Engine boundary into the Library.
 """
 
-from .apply import import_hotcues
-from .engine_source import EnginePerformanceSource, hotcues_from_performance_blobs
+from .apply import import_beatgrid, import_hotcues, import_maincue
+from .engine_source import (
+    EnginePerformanceFields,
+    EnginePerformanceSource,
+    performance_fields_from_blobs,
+)
 
 __all__ = [
+    "EnginePerformanceFields",
     "EnginePerformanceSource",
-    "hotcues_from_performance_blobs",
+    "import_beatgrid",
     "import_hotcues",
+    "import_maincue",
+    "performance_fields_from_blobs",
 ]

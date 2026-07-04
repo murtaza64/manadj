@@ -35,7 +35,18 @@ interface HotCueVal {
   color: string | null;
 }
 
-type HotCueImportMode = 'fill-empty' | 'replace-all';
+interface TempoChangeVal {
+  start_time: number;
+  bpm: number;
+  bar_position: number;
+}
+
+interface BeatgridVal {
+  tempo_changes: TempoChangeVal[];
+}
+
+type PerfField = 'hotcues' | 'beatgrid' | 'maincue';
+type PerfImportMode = 'fill-empty' | 'replace-all' | 'replace';
 
 interface StatusRow {
   path: string;
@@ -92,7 +103,7 @@ function groupKeyFor(row: StatusRow): GroupKey | null {
   // energy rides with tags: the Rekordbox tag-export op writes energy colors
   if (fields.has('tags') || fields.has('energy')) return 'div-tags';
   if (fields.has('title') || fields.has('artist')) return 'div-title-artist';
-  if (fields.has('hotcues')) return 'div-perf';
+  if (fields.has('hotcues') || fields.has('beatgrid') || fields.has('maincue')) return 'div-perf';
   return 'div-bpm-key';
 }
 
@@ -185,15 +196,25 @@ export function UnifiedTracksSync() {
     onSuccess: () => done('Field imported'),
     onError: failed,
   });
-  const importHotcues = useMutation({
-    mutationFn: ({ trackId, mode }: { trackId: number; mode: HotCueImportMode }) =>
-      api.syncPerformance.importHotcues({ track_id: trackId, mode }),
-    onSuccess: (r) =>
-      done(
-        `Hot cues imported: ${r.imported} added` +
-        (r.deleted ? `, ${r.deleted} replaced` : '') +
-        (r.skipped ? `, ${r.skipped} slots kept` : ''),
-      ),
+  const importPerf = useMutation({
+    mutationFn: ({ trackId, field, mode }: { trackId: number; field: PerfField; mode: PerfImportMode }) => {
+      if (field === 'hotcues') {
+        return api.syncPerformance.importHotcues({
+          track_id: trackId, mode: mode as 'fill-empty' | 'replace-all',
+        }).then((r) =>
+          `Hot cues imported: ${r.imported} added` +
+          (r.deleted ? `, ${r.deleted} replaced` : '') +
+          (r.skipped ? `, ${r.skipped} slots kept` : ''));
+      }
+      const call = field === 'beatgrid'
+        ? api.syncPerformance.importBeatgrid
+        : api.syncPerformance.importMaincue;
+      return call({ track_id: trackId, mode: mode as 'fill-empty' | 'replace' }).then((r) =>
+        r.imported
+          ? `${field === 'beatgrid' ? 'Beatgrid' : 'Main cue'} imported from Engine`
+          : `Not imported: ${r.reason}`);
+    },
+    onSuccess: (msg) => done(msg),
     onError: failed,
   });
   const exportRowToDisk = useMutation({
@@ -231,7 +252,7 @@ export function UnifiedTracksSync() {
 
   const busy =
     generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
-    importField.isPending || importHotcues.isPending || exportRowToDisk.isPending ||
+    importField.isPending || importPerf.isPending || exportRowToDisk.isPending ||
     exportTags.isPending || rebuildTagTree.isPending;
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
@@ -431,21 +452,31 @@ export function UnifiedTracksSync() {
                 expanded={expanded.has(row.path)}
                 onToggleExpand={() => setExpanded(toggle(expanded, row.path))}
                 onImportField={(field, value) => importField.mutate({ row, field, value })}
-                onImportHotcues={(mode) => {
-                  const lib = row.diverged.find((d) => d.field === 'hotcues')
-                    ?.library_value as HotCueVal[] | undefined;
-                  const libCount = lib?.length ?? 0;
-                  // no silent overwrites: replacing saved cues goes through
+                onImportPerf={(field, mode) => {
+                  const d = row.diverged.find((dd) => dd.field === field);
+                  const lib = d?.library_value;
+                  const overwriting =
+                    mode !== 'fill-empty' &&
+                    (field === 'hotcues'
+                      ? ((lib as HotCueVal[] | undefined)?.length ?? 0) > 0
+                      : lib !== null && lib !== undefined);
+                  const run = () => importPerf.mutate({ trackId: row.track_id!, field, mode });
+                  // no silent overwrites: replacing saved info goes through
                   // the pending-confirm flow; fill-empty never overwrites
-                  if (mode === 'replace-all' && libCount > 0) {
-                    setPending({
-                      scope: `Replace ${libCount} Library hot cue${libCount === 1 ? '' : 's'} on "${row.title || row.path}" with Engine's set`,
-                      sideEffects: 'deletes the Library\'s saved hot cues for this track and writes Engine\'s',
-                      run: () => importHotcues.mutate({ trackId: row.track_id!, mode }),
-                    });
-                  } else {
-                    importHotcues.mutate({ trackId: row.track_id!, mode });
-                  }
+                  if (!overwriting) return run();
+                  const what =
+                    field === 'hotcues'
+                      ? `${(lib as HotCueVal[]).length} saved hot cue${(lib as HotCueVal[]).length === 1 ? '' : 's'}`
+                      : field === 'beatgrid' ? 'the saved beatgrid' : 'the saved main cue';
+                  const engineGrid = field === 'beatgrid'
+                    ? (d?.surface_values['engine'] as BeatgridVal | undefined) : undefined;
+                  const variable = engineGrid && engineGrid.tempo_changes.length > 1
+                    ? ` (variable grid — ${engineGrid.tempo_changes.length} tempo changes; rendering honors only the first for now)` : '';
+                  setPending({
+                    scope: `Replace ${what} on "${row.title || row.path}" with Engine's${variable}`,
+                    sideEffects: 'overwrites saved performance data in the Library',
+                    run,
+                  });
                 }}
                 onExportToDisk={() => exportRowToDisk.mutate(row)}
                 surfacesAvailable={data.surfaces_available}
@@ -510,7 +541,7 @@ function PresenceBadges({ row, available }: { row: StatusRow; available: Surface
   );
 }
 
-function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportHotcues, onExportToDisk, surfacesAvailable }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onExportToDisk, surfacesAvailable }: {
   row: StatusRow;
   surfacesAvailable: SurfaceId[];
   selectable: boolean;
@@ -519,7 +550,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   expanded: boolean;
   onToggleExpand: () => void;
   onImportField: (field: string, value: unknown) => void;
-  onImportHotcues: (mode: HotCueImportMode) => void;
+  onImportPerf: (field: PerfField, mode: PerfImportMode) => void;
   onExportToDisk: () => void;
 }) {
   const expandable = row.diverged.length > 0;
@@ -557,7 +588,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
       </div>
       {expanded && expandable && (
         <div className="uts-expand">
-          <DivergenceMatrix row={row} onImportField={onImportField} onImportHotcues={onImportHotcues} />
+          <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} />
           <div className="uts-expand-actions">
             {row.diverged.some((d) => !d.no_overwrite && 'disk' in d.surface_values) && (
               <button className="uts-btn" onClick={onExportToDisk}>Export fields → Disk</button>
@@ -572,10 +603,10 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   );
 }
 
-function DivergenceMatrix({ row, onImportField, onImportHotcues }: {
+function DivergenceMatrix({ row, onImportField, onImportPerf }: {
   row: StatusRow;
   onImportField: (field: string, value: unknown) => void;
-  onImportHotcues: (mode: HotCueImportMode) => void;
+  onImportPerf: (field: PerfField, mode: PerfImportMode) => void;
 }) {
   return (
     <table className="uts-matrix">
@@ -595,6 +626,14 @@ function DivergenceMatrix({ row, onImportField, onImportHotcues }: {
                 ? (d.library_value as string[]).map((t) => <span key={t} className="uts-tagchip uts-tagchip-both">{t}</span>)
                 : d.field === 'hotcues'
                 ? <HotCueChips cues={d.library_value as HotCueVal[]} />
+                : d.field === 'beatgrid'
+                ? (d.library_value
+                    ? <GridSummary grid={d.library_value as BeatgridVal} />
+                    : <span className="uts-novalue">no saved grid</span>)
+                : d.field === 'maincue'
+                ? (d.library_value !== null && d.library_value !== undefined
+                    ? fmtCueTime(d.library_value as number)
+                    : <span className="uts-novalue">unset</span>)
                 : fmtValue(d.field, d.library_value) || <span className="uts-novalue">no value</span>}
             </td>
             {EXTERNAL_SURFACES.map((s) => {
@@ -622,13 +661,48 @@ function DivergenceMatrix({ row, onImportField, onImportHotcues }: {
                   <td key={s.id} className="uts-conflict">
                     <HotCueDiff library={lib} here={here} />
                     {importable && (lib.length === 0 ? (
-                      <button className="uts-microbtn" onClick={() => onImportHotcues('fill-empty')}>← import</button>
+                      <button className="uts-microbtn" onClick={() => onImportPerf('hotcues', 'fill-empty')}>← import</button>
                     ) : (
                       <>
-                        <button className="uts-microbtn" onClick={() => onImportHotcues('fill-empty')}>← fill empty slots</button>
-                        <button className="uts-microbtn" onClick={() => onImportHotcues('replace-all')}>← replace all</button>
+                        <button className="uts-microbtn" onClick={() => onImportPerf('hotcues', 'fill-empty')}>← fill empty slots</button>
+                        <button className="uts-microbtn" onClick={() => onImportPerf('hotcues', 'replace-all')}>← replace all</button>
                       </>
                     ))}
+                  </td>
+                );
+              }
+              if (d.field === 'beatgrid') {
+                const grid = v as BeatgridVal;
+                const importable = row.track_id !== null && d.importable_from.includes(s.id);
+                const hasSaved = d.library_value !== null && d.library_value !== undefined;
+                return (
+                  <td key={s.id} className="uts-conflict">
+                    <GridSummary grid={grid} />
+                    {importable && (
+                      <button
+                        className="uts-microbtn"
+                        onClick={() => onImportPerf('beatgrid', hasSaved ? 'replace' : 'fill-empty')}
+                      >
+                        {hasSaved ? '← replace grid' : '← import'}
+                      </button>
+                    )}
+                  </td>
+                );
+              }
+              if (d.field === 'maincue') {
+                const importable = row.track_id !== null && d.importable_from.includes(s.id);
+                const hasSaved = d.library_value !== null && d.library_value !== undefined;
+                return (
+                  <td key={s.id} className="uts-conflict">
+                    {fmtCueTime(v as number)}
+                    {importable && (
+                      <button
+                        className="uts-microbtn"
+                        onClick={() => onImportPerf('maincue', hasSaved ? 'replace' : 'fill-empty')}
+                      >
+                        {hasSaved ? '← replace cue' : '← import'}
+                      </button>
+                    )}
                   </td>
                 );
               }
@@ -670,6 +744,24 @@ function CueChip({ cue, cls }: { cue: HotCueVal; cls: string }) {
     <span className={`uts-tagchip uts-tagchip-${cls}`}>
       {cue.color && <span className="uts-cuedot" style={{ background: cue.color }} />}
       {cue.slot}·{fmtCueTime(cue.time)}{cue.label ? ` ${cue.label}` : ''}
+    </span>
+  );
+}
+
+/** Compact beatgrid rendering: constant grids read as one BPM + start;
+ * variable grids get an explicit warning flag (import-time visibility of
+ * the first-tempo-change rendering limitation). */
+function GridSummary({ grid }: { grid: BeatgridVal }) {
+  const changes = grid.tempo_changes;
+  if (changes.length === 1) {
+    return <span>{changes[0].bpm.toFixed(2)} BPM from {fmtCueTime(changes[0].start_time)}</span>;
+  }
+  return (
+    <span>
+      <span className="uts-tagchip uts-tagchip-extra-here" title="manadj rendering honors only the first tempo change for now">
+        ⚠ variable grid — {changes.length} tempo changes
+      </span>{' '}
+      {changes.map((c) => c.bpm.toFixed(1)).join(' → ')} BPM
     </span>
   );
 }

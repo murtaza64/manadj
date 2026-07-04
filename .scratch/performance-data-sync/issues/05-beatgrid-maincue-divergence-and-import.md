@@ -30,3 +30,7 @@ Beatgrid and Main cue join the divergence model and get per-cell External Import
 
 - 02-decoders-into-enginedj-package
 - 03-beatgrid-origin
+
+## Comments
+
+**2026-07-04 — Done** (jj change `mrsvnwst`, workspace perfdata). `BeatgridValue`/`TempoChangeValue` + `maincue` join the field vocabulary; placeholder (`generated`) grids read as absent at the interface; Engine main cue only crosses when the overridden flag is set (enforced in `performance_fields_from_blobs`, which unifies hotcues/grid/maincue decoding — grid segment-walk math carried over verbatim from the validated script). Comparison: structural grid equality (time tolerance + 0.01 BPM epsilon + bar position), maincue within the shared 1ms tolerance; Library-set + Engine-unset is not a conflict. Import: `POST .../beatgrid/import` and `.../maincue/import` with `fill-empty`/`replace`; grid import writes origin `imported` (later edits flip to `edited`); maincue writes through the waveform cue point (409 without a waveform row). UI: generalized `onImportPerf` callback, GridSummary with "⚠ variable grid — N tempo changes" flag (also in the confirm text), maincue cells, replace verbs confirm via pending flow. Fixed en route: Track.beatgrid/Track.waveform backrefs were accidentally list-valued (now one-to-one); waveform joinedload dragged peaks JSON — replaced with a targeted cue-point column query (real-library status: 21s → 0.27s). Real library: 76 beatgrid / 228 maincue / 7 hotcue divergences; 32 variable grids flagged.

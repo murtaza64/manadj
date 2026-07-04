@@ -13,12 +13,31 @@ from typing import Literal
 SurfaceId = Literal["disk", "engine", "rekordbox"]
 SURFACE_IDS: tuple[SurfaceId, ...] = ("disk", "engine", "rekordbox")
 EXTERNAL_LIBRARY_IDS: tuple[SurfaceId, ...] = ("engine", "rekordbox")
-FieldName = Literal["title", "artist", "key", "bpm", "energy", "tags", "hotcues"]
+FieldName = Literal[
+    "title", "artist", "key", "bpm", "energy", "tags", "hotcues", "beatgrid", "maincue"
+]
 RowStatus = Literal[
     "missing-downstream", "diverged", "not-in-library", "unimported", "in-sync"
 ]
 
 SCALAR_FIELDS: tuple[FieldName, ...] = ("title", "artist", "key", "bpm", "energy")
+
+
+@dataclass(frozen=True)
+class TempoChangeValue:
+    """One tempo change of a Beatgrid as compared across Surfaces."""
+
+    start_time: float  # seconds
+    bpm: float
+    bar_position: int = 1
+
+
+@dataclass(frozen=True)
+class BeatgridValue:
+    """A Beatgrid as compared across Surfaces. A placeholder grid (origin
+    "generated") never crosses this interface — it reads as absent (None)."""
+
+    tempo_changes: list[TempoChangeValue]
 
 
 @dataclass(frozen=True)
@@ -46,6 +65,10 @@ class TrackFields:
     # None = this surface doesn't carry hot cues for this track (no blob /
     # unparseable); [] = it does, and there are none.
     hotcues: list[HotCueValue] | None = None
+    # None = no grid here (missing, unparseable, or a placeholder)
+    beatgrid: BeatgridValue | None = None
+    # None = no user-set Main cue here (manadj: unset; Engine: not overridden)
+    maincue: float | None = None
 
 
 @dataclass(frozen=True)

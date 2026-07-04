@@ -1,17 +1,19 @@
 """Applying performance-data imports to the Library.
 
-Writes HotCue rows directly — Engine positions are ground truth, so the
-set-cue beat-quantization path is deliberately bypassed (PRD).
+Writes rows directly — Engine positions are ground truth, so the set-cue
+beat-quantization path is deliberately bypassed (PRD). "fill-empty" never
+touches saved info; the replace verbs are the confirmed overwrites.
 """
 
 from typing import Literal
 
 from sqlalchemy.orm import Session
 
-from backend import models
-from backend.sync_status.models import HotCueValue
+from backend import crud, models
+from backend.sync_status.models import BeatgridValue, HotCueValue
 
 HotCueImportMode = Literal["fill-empty", "replace-all"]
+SingleValueImportMode = Literal["fill-empty", "replace"]
 
 
 def import_hotcues(
@@ -56,3 +58,55 @@ def import_hotcues(
 
     db.commit()
     return {"imported": imported, "skipped": skipped, "deleted": deleted}
+
+
+def import_beatgrid(
+    db: Session,
+    track_id: int,
+    beatgrid: BeatgridValue,
+    mode: SingleValueImportMode,
+) -> dict[str, bool | str | None]:
+    """Import Engine's Beatgrid onto a Library track (origin "imported").
+
+    fill-empty: only when the Library grid is absent or a generated
+    placeholder. replace: the confirmed overwrite verb.
+    """
+    existing = crud.get_beatgrid(db, track_id)
+    if mode == "fill-empty" and existing is not None and existing.origin != "generated":
+        return {"imported": False, "reason": "saved grid present"}
+
+    tempo_changes = [
+        {
+            "start_time": tc.start_time,
+            "bpm": tc.bpm,
+            "time_signature_num": 4,
+            "time_signature_den": 4,
+            "bar_position": tc.bar_position,
+        }
+        for tc in beatgrid.tempo_changes
+    ]
+    crud.update_beatgrid_tempo_changes(db, track_id, tempo_changes, origin="imported")
+    return {"imported": True, "reason": None}
+
+
+def import_maincue(
+    db: Session,
+    track_id: int,
+    maincue: float,
+    mode: SingleValueImportMode,
+) -> dict[str, bool | str | None]:
+    """Import Engine's user-set Main cue onto a Library track, through the
+    normal persistence home (the waveform's cue point) so an imported cue
+    behaves exactly like one set on a Deck.
+
+    Raises ValueError when the track has no waveform row to persist onto.
+    """
+    waveform = crud.get_waveform(db, track_id)
+    if waveform is None:
+        raise ValueError("Track has no waveform; the Main cue has nowhere to live yet")
+    if mode == "fill-empty" and waveform.cue_point_time is not None:
+        return {"imported": False, "reason": "saved main cue present"}
+
+    waveform.cue_point_time = maincue
+    db.commit()
+    return {"imported": True, "reason": None}

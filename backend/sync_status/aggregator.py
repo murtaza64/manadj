@@ -7,6 +7,7 @@ This seam is a read-only down payment on the ExternalLibrary seam
 (architecture review candidate 3).
 """
 
+import json
 from pathlib import Path
 from typing import Mapping, Protocol
 
@@ -20,20 +21,23 @@ from .models import (
     EXTERNAL_LIBRARY_IDS,
     SCALAR_FIELDS,
     SURFACE_IDS,
+    BeatgridValue,
     FieldDivergence,
     HotCueValue,
     RowStatus,
     SurfaceTrackRef,
     SyncStatusResult,
     SyncStatusRow,
+    TempoChangeValue,
     TrackFields,
 )
 
 BPM_TOLERANCE = 0.01
 # Cue positions compared across Surfaces come from different encodings
 # (Engine: samples at the blob's rate; manadj: seconds) — call them equal
-# within a millisecond. Tunable.
+# within a millisecond. Tunable. Main cue and beatgrid offsets share it.
 HOTCUE_TIME_TOLERANCE = 0.001
+BEATGRID_BPM_TOLERANCE = 0.01
 
 
 class SurfaceReader(Protocol):
@@ -65,13 +69,19 @@ def compute_sync_status(
         .options(
             joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag),
             joinedload(models.Track.hotcues),
+            joinedload(models.Track.beatgrid),
         )
         .all()
+    )
+    # Main cues live on waveform rows, whose peak-JSON columns are huge —
+    # select just the one float instead of joinedloading the relationship.
+    maincue_by_track: dict[int, float | None] = dict(
+        db.query(models.Waveform.track_id, models.Waveform.cue_point_time).all()
     )
 
     for track in library_tracks:
         rows.append(
-            _library_row(track, surfaces, surface_index, matched_ref_ids)
+            _library_row(track, maincue_by_track, surfaces, surface_index, matched_ref_ids)
         )
 
     rows.extend(_orphan_rows(surfaces, surface_refs, matched_ref_ids))
@@ -88,7 +98,7 @@ def compute_sync_status(
 # ---------------------------------------------------------------- library rows
 
 
-def _library_fields(track: models.Track) -> TrackFields:
+def _library_fields(track: models.Track, maincue: float | None) -> TrackFields:
     return TrackFields(
         title=track.title,
         artist=track.artist,
@@ -105,16 +115,38 @@ def _library_fields(track: models.Track) -> TrackFields:
             )
             for hc in sorted(track.hotcues, key=lambda hc: hc.slot_number)
         ],
+        beatgrid=_library_beatgrid(track),
+        maincue=maincue,
+    )
+
+
+def _library_beatgrid(track: models.Track) -> BeatgridValue | None:
+    """The Library's saved grid — a generated placeholder is not saved info
+    (glossary: "placeholder grid") and reads as absent."""
+    grid = track.beatgrid
+    if grid is None or grid.origin == "generated":
+        return None
+    changes = json.loads(grid.tempo_changes_json)
+    return BeatgridValue(
+        tempo_changes=[
+            TempoChangeValue(
+                start_time=tc["start_time"],
+                bpm=tc["bpm"],
+                bar_position=tc.get("bar_position", 1),
+            )
+            for tc in changes
+        ]
     )
 
 
 def _library_row(
     track: models.Track,
+    maincue_by_track: dict[int, float | None],
     surfaces: Mapping[str, SurfaceReader],
     surface_index: dict[str, TrackIndex[SurfaceTrackRef]],
     matched_ref_ids: set[int],
 ) -> SyncStatusRow:
-    lib = _library_fields(track)
+    lib = _library_fields(track, maincue_by_track.get(track.id))
     presence: dict[str, bool] = {"library": True}
     diverged: dict[str, FieldDivergence] = {}
     warnings: list[str] = []
@@ -191,6 +223,22 @@ def _collect_divergences(
                 sid, reader, "hotcues", lib.hotcues or [], surface.hotcues, diverged, warnings
             )
 
+    # beatgrid: structural comparison; surface None (no grid there) is not a
+    # divergence, and the Library's placeholder already reads as None.
+    if "beatgrid" in reader.fields and surface.beatgrid is not None:
+        if not _beatgrids_equal(lib.beatgrid, surface.beatgrid):
+            _record_divergence(
+                sid, reader, "beatgrid", lib.beatgrid, surface.beatgrid, diverged, warnings
+            )
+
+    # maincue: surface None means no user-set cue there (Engine: overridden
+    # flag unset) — nothing to compare.
+    if "maincue" in reader.fields and surface.maincue is not None:
+        if lib.maincue is None or abs(lib.maincue - surface.maincue) > HOTCUE_TIME_TOLERANCE:
+            _record_divergence(
+                sid, reader, "maincue", lib.maincue, surface.maincue, diverged, warnings
+            )
+
 
 def _record_divergence(
     sid: str,
@@ -230,6 +278,23 @@ def _values_equal(fname: str, a: object, b: object) -> bool:
     # a surface with no value where the library also has none is agreement;
     # asymmetric emptiness is a divergence (handled by caller via _record)
     return a == b
+
+
+def _beatgrids_equal(a: BeatgridValue | None, b: BeatgridValue) -> bool:
+    """Structural equality: same tempo-change count, each change agreeing on
+    start time (cue tolerance), BPM (epsilon), and bar position."""
+    if a is None:
+        return False
+    if len(a.tempo_changes) != len(b.tempo_changes):
+        return False
+    for tc_a, tc_b in zip(a.tempo_changes, b.tempo_changes):
+        if abs(tc_a.start_time - tc_b.start_time) > HOTCUE_TIME_TOLERANCE:
+            return False
+        if abs(tc_a.bpm - tc_b.bpm) > BEATGRID_BPM_TOLERANCE:
+            return False
+        if tc_a.bar_position != tc_b.bar_position:
+            return False
+    return True
 
 
 def _hotcue_sets_equal(a: list[HotCueValue], b: list[HotCueValue]) -> bool:

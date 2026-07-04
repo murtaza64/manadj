@@ -152,8 +152,13 @@ class FakeEnginePerformanceSource:
     def __init__(self, hotcues_by_filename: dict[str, list[HotCueValue] | None]):
         self._by_filename = hotcues_by_filename
 
-    def hotcues_for(self, filename: str) -> list[HotCueValue] | None:
-        return self._by_filename.get(filename)
+    def fields_for(self, filename: str):
+        from backend.sync_performance import EnginePerformanceFields
+
+        cues = self._by_filename.get(filename)
+        if cues is None:
+            return None
+        return EnginePerformanceFields(hotcues=cues, beatgrid=None, maincue=None)
 
 
 @pytest.fixture

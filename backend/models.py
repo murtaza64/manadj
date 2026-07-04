@@ -1,7 +1,7 @@
 """SQLAlchemy models for music library database."""
 
 from sqlalchemy import Column, Integer, String, Text, Float, ForeignKey, DateTime, Index
-from sqlalchemy.orm import relationship, DeclarativeBase
+from sqlalchemy.orm import backref, relationship, DeclarativeBase
 from sqlalchemy.sql import func
 
 
@@ -47,8 +47,8 @@ class Waveform(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-    # Relationship
-    track = relationship("Track", backref="waveform", uselist=False)
+    # Relationship (one-to-one: track_id is unique)
+    track = relationship("Track", backref=backref("waveform", uselist=False))
 
 
 class TagCategory(Base):
@@ -146,8 +146,8 @@ class Beatgrid(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-    # Relationship
-    track = relationship("Track", backref="beatgrid", uselist=False)
+    # Relationship (one-to-one: track_id is unique)
+    track = relationship("Track", backref=backref("beatgrid", uselist=False))
 
 
 class BPMAnalysis(Base):
