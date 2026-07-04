@@ -354,6 +354,11 @@ def create_waveform(db: Session, track_id: int, filepath: str):
         # Continue without PNG - Canvas renderer will still work
         png_path = None
 
+    # Waveform data v2 blob (ADR 0014). Extra decode alongside the legacy
+    # JSON/PNG paths — those are deleted in waveform-overhaul issues 04/06.
+    from .waveform_data import generate_blob
+    data_blob = generate_blob(filepath)
+
     # Create database record with multiband data and PNG path
     db_waveform = models.Waveform(
         track_id=track_id,
@@ -364,6 +369,7 @@ def create_waveform(db: Session, track_id: int, filepath: str):
         mid_peaks_json=multiband_waveform_to_json(multiband_data["bands"]["mid"]),
         high_peaks_json=multiband_waveform_to_json(multiband_data["bands"]["high"]),
         png_path=str(png_path) if png_path else None,
+        data_blob=data_blob,
         cue_point_time=None
     )
 

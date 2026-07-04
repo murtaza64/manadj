@@ -92,6 +92,10 @@ _task_worker: "TaskWorker | None" = None
 async def startup_event():
     """Start background workers on server startup."""
     global _task_worker
+
+    # Waveform data generation (ADR 0014) requires ffmpeg; fail loudly at startup.
+    from .waveform_data import ensure_ffmpeg
+    ensure_ffmpeg()
     if os.getenv("DISABLE_TASK_WORKER", "").lower() not in ("true", "1", "yes"):
         _task_worker = _build_task_worker()
         if _task_worker is not None:

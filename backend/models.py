@@ -1,7 +1,7 @@
 """SQLAlchemy models for music library database."""
 
-from sqlalchemy import Boolean, Column, Integer, String, Text, Float, ForeignKey, DateTime, Index
-from sqlalchemy.orm import backref, relationship, DeclarativeBase
+from sqlalchemy import Boolean, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index
+from sqlalchemy.orm import backref, deferred, relationship, DeclarativeBase
 from sqlalchemy.sql import func
 
 
@@ -43,6 +43,9 @@ class Waveform(Base):
     mid_peaks_json = Column(Text, nullable=False)  # JSON array for mid frequency band (250-4000Hz)
     high_peaks_json = Column(Text, nullable=False)  # JSON array for high frequency band (4000-20000Hz)
     png_path = Column(String, nullable=True)  # Relative path to PNG waveform file
+    # Waveform data v2 blob (ADR 0014). Deferred: multi-hundred-KB per row —
+    # never load it via relationship traversal (see the 21s sync-status incident).
+    data_blob = deferred(Column(LargeBinary, nullable=True))
     cue_point_time = Column(Float, nullable=True)  # CUE point in seconds
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

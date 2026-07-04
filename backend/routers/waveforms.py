@@ -1,13 +1,44 @@
 """API routes for waveforms."""
 
-from fastapi import APIRouter, Depends, HTTPException
+import hashlib
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from pathlib import Path
-from .. import crud, schemas
+from .. import crud, models, schemas
 from ..database import get_db
-from ..waveform_utils import json_to_band_peaks
 
 router = APIRouter()
+
+
+@router.get("/{track_id}/data")
+def get_waveform_data(track_id: int, request: Request, db: Session = Depends(get_db)):
+    """Serve the Waveform data v2 blob (ADR 0014) as immutable binary.
+
+    404 until the background generation has produced it; clients retry.
+    Waveform data never changes once generated, hence the immutable caching.
+    """
+    blob = (
+        db.query(models.Waveform.data_blob)  # targeted column: never load JSON peaks here
+        .filter(models.Waveform.track_id == track_id)
+        .scalar()
+    )
+    if blob is None:
+        if not crud.get_track(db, track_id):
+            raise HTTPException(status_code=404, detail="Track not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Waveform data not ready yet, retry in a few seconds",
+        )
+
+    etag = f'"{hashlib.md5(blob).hexdigest()}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "public, max-age=31536000, immutable",
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content=blob, media_type="application/octet-stream", headers=headers)
 
 
 @router.get("/{track_id}", response_model=schemas.WaveformResponse)
@@ -53,6 +84,10 @@ def update_cue_point(
 
 def _format_waveform_response(waveform):
     """Format waveform model for API response."""
+    # Lazy: waveform_utils imports librosa at module level (legacy JSON path,
+    # deleted in waveform-overhaul issue 04); keep it out of the import chain.
+    from ..waveform_utils import json_to_band_peaks
+
     # Parse multiband data
     low_peaks = json_to_band_peaks(waveform.low_peaks_json)
     mid_peaks = json_to_band_peaks(waveform.mid_peaks_json)

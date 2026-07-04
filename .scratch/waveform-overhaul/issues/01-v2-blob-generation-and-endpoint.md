@@ -1,6 +1,6 @@
 # 01 — v2 blob generation, storage, and endpoint
 
-Status: ready-for-agent
+Status: resolved (wfproto lane, 2026-07-04)
 
 ## Parent
 
@@ -25,3 +25,17 @@ The old JSON columns/endpoint stay untouched (the old renderer still reads them 
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+**2026-07-04 (wfproto lane, change `rmzqotxl`)** — Implemented:
+`backend/waveform_data.py` (module: `analyze`/`build_blob`/`generate_blob`/`decode_blob`/`ensure_ffmpeg`,
+with an `on_progress` hook for issue 02); migration `0010_rmzqotxl` adds deferred
+`waveforms.data_blob`; `create_waveform` also stores the blob (extra decode until 04/06);
+`GET /api/waveforms/{id}/data` serves it with ETag + immutable caching and If-None-Match → 304;
+ffmpeg checked at startup. Fixtures: tones 40 Hz/1.5 kHz/8 kHz + impulse, wav+m4a
+(note: sub-band tone is 40 Hz — a 50 Hz Hann main lobe straddles the 60 Hz edge at window 2048;
+ffmpeg's sine source outputs at 1/8 amplitude, fixtures use `volume=4` → −6 dBFS).
+Golden blob at `frontend/src/waveform/fixtures/golden.wfb`. Full suite 445 passed;
+ruff clean; single alembic head. One drive-by: the legacy router's `waveform_utils`
+import went lazy — it was about to drag librosa into the test import chain (hygiene guards).
