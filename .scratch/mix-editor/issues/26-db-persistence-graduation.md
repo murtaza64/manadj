@@ -1,7 +1,9 @@
 # 26 — DB persistence graduation: Transitions move to the app database
 
-Status: ready-for-agent (design fully grilled 2026-07-04 — ADR 0011 is the
-spec; no open decisions)
+Status: ready-for-human (implemented, change rowxlzpw — verify in the
+browser: open the editor once (this runs the one-shot migration of your
+real localStorage store; check the pairs/names/stars survive), then wipe
+site data and reload to confirm everything comes back from the DB)
 
 ## Parent
 
@@ -47,22 +49,25 @@ Saved Transitions persist in the app DB instead of localStorage. Per ADR
 
 - [ ] Transitions survive a full browser-storage wipe (edit → wipe
       localStorage → reload → pair, names, favorites, lanes intact)
-- [ ] Existing localStorage store migrates once: uuids assigned, backup
-      key left behind, second reload does not re-import
-- [ ] Editor behavior is indistinguishable: autosave at drag rate,
-      switcher, favorite/star marks, discovery index and Library marks
-      all work as today (no caller-visible API churn beyond the store
-      module)
-- [ ] Reconcile semantics: rename/favorite update in place (row id
+      — BY EYE (store tests cover the logic; the wipe run is the human
+      check)
+- [x] Existing localStorage store migrates once: uuids assigned, backup
+      key left behind, second reload does not re-import (tested incl.
+      failed-push retry and PROTOTYPE-era keys)
+- [ ] Editor behavior is indistinguishable — BY EYE (drag autosave,
+      switcher, stars, Library marks)
+- [x] Reconcile semantics: rename/favorite update in place (row id
       stable); delete removes only the absent uuid; delete-last removes
-      the pair's rows
-- [ ] Deleting a Track cascades its Transitions (and the note about
-      future soft-delete stands in ADR 0011)
-- [ ] Backend tests at the router seam (reconcile matrix: insert/update/
-      delete/empty/idempotent re-PUT); frontend store tests against a
-      fake fetch (ADR 0002 — no real network, no real localStorage)
-- [ ] tsc, eslint on touched files, vitest + pytest green; alembic
-      single head
+      the pair's rows (router-seam tests)
+- [x] Deleting a Track cascades its Transitions (ORM cascade tested; no
+      track-delete feature exists today — SQLite FK PRAGMA is off, so the
+      DB-level ondelete markers are declarative; ADR 0011 note stands)
+- [x] Backend tests at the router seam (9: reconcile matrix, direction
+      isolation, 404/400); frontend store tests against fake fetch +
+      localStorage (14: boot, migration matrix, optimistic writes)
+- [x] tsc, eslint on touched files, vitest 179 + pytest 433 green;
+      alembic single head 0009_rowxlzpw; backend boots + auto-migrates,
+      GET/PUT exercised live
 
 ## Unblocks
 
@@ -74,3 +79,35 @@ Saved Transitions persist in the app DB instead of localStorage. Per ADR
 ## Blocked by
 
 None.
+
+## Comments
+
+**2026-07-04 — INCIDENT during rollout (data recovered, fix included).**
+First real-store migration pushed successfully, then every saved
+Transition for the loaded pair vanished. Root cause: a pre-existing race
+in TransitionEditor that the DB store ARMED. On the commit where
+`pairKey` becomes set, the debounced-persist effect runs before the
+pair-seed effect (declaration order) and stamped `pendingSaveRef` with
+the new pairKey + the still-pristine unseeded session; the seed effect's
+flush-before-repoint then materialized that to null → `savePairEntry(key,
+null)` → empty-items PUT → DB rows deleted → seed read the now-deleted
+snapshot → blank session. The OLD code had the same race but self-healed:
+its seed effect read the store from a STALE CLOSURE (`pairStore[pairKey]`
+component state captured pre-delete), re-seeded the real items, and the
+next debounce re-wrote them within 300ms. The live `snapshotPairStore()`
+read removed the accidental heal. The same mechanism also caused latent
+cross-pair contamination on in-editor pair switches (old session briefly
+stamped onto the new pairKey), likewise self-healed before, likewise
+fixed now.
+
+Fix: the persist effect only arms when `pairKey === loadedPairKey.current`
+(the session provably belongs to the loaded pair). Recovery: data was
+intact in `manadj-transition-pairs-pre-db-backup`; copying it back to the
+legacy key and reloading re-ran the one-shot migration (3 rows verified
+in the DB, favorite intact).
+
+Lesson recorded: this wiring (seed/flush/debounce ordering) is exactly
+the untestable-at-component-seam logic the architecture review's editor
+store (candidate #2) would make testable — the store-interface test
+"flush-before-switch never deletes an unseeded pair" should be written
+when that lands.

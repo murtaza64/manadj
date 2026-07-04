@@ -7,7 +7,10 @@ import { defaultMix } from './mixModel';
 import { buildTransitionIndex, transitionsFrom, transitionsInto } from './transitionIndex';
 import type { PairStore } from './pairStore';
 
+let uuidCounter = 0;
+
 const item = (name: string, favorite = false) => ({
+  uuid: `u${++uuidCounter}`,
   name,
   transition: { ...defaultMix().transition, durationSec: 8 },
   favorite,

@@ -1,28 +1,42 @@
 /**
- * Transition-editor pair store: saved Transitions per ordered track pair,
- * persisted to localStorage. Graduation target: DB persistence (the
- * Transition library) — this module is the seam.
+ * Transition store: saved Transitions per ordered track pair, persisted in
+ * the app DB (ADR 0011) behind a snapshot interface — async `init()` at
+ * boot, sync `snapshotPairStore()` reads, optimistic write-through on
+ * `savePairEntry()`. Identity is the client-generated `uuid`; the server
+ * reconciles pair-replace PUTs by it. Editor session state (`active` per
+ * pair, last-open pair) stays in localStorage — the DB stores the artifact,
+ * not anybody's screen.
  *
  * LAZY PERSISTENCE (transition-library 01): pristine Transitions — the
  * default shape with a default name, never favorited — exist only in the
- * editor's memory. Persisting filters them out, and loading prunes any
- * legacy pristine-shaped saves, so merely-opened pairs leave no trace and
- * the discovery index (issue 02) stays honest by construction.
+ * editor's memory. Persisting filters them out (toStoredEntry), so
+ * merely-opened pairs leave no trace and the discovery index stays honest
+ * by construction.
+ *
+ * The pre-DB localStorage store migrates once: when the DB is empty and the
+ * legacy key exists, its pairs are pushed up and the key is renamed to a
+ * backup. DB non-empty → legacy data is ignored, never merged.
  */
+import { api } from '../api/client';
 import { defaultMix } from './mixModel';
 import type { EditorMix, Transition } from './mixModel';
 
-const PAIR_STORE_KEY = 'manadj-transition-pairs';
 export const LAST_PAIR_KEY = 'manadj-last-pair';
-/** Pre-graduation storage keys (renamed 2026-07-04, migrated on load). */
+/** Per-pair active-Transition selection (session state, client-only). */
+const ACTIVE_MAP_KEY = 'manadj-transition-active';
+/** Pre-DB store (2026-07-04): one-shot migration input, then a backup. */
+const LEGACY_PAIR_STORE_KEY = 'manadj-transition-pairs';
+const LEGACY_BACKUP_KEY = 'manadj-transition-pairs-pre-db-backup';
+/** Pre-graduation keys (renamed 2026-07-04, migrated on legacy load). */
 const OLD_PAIR_STORE_KEY = 'PROTOTYPE-transition-editor-pairs';
 const OLD_LAST_PAIR_KEY = 'PROTOTYPE-transition-editor-last';
 
 
-/** A saved Transition (first-class, per ordered track pair). `bInSec` lives
- * INSIDE the transition (issue 11 — pair knowledge switches with the named
- * artifact); older saves carried it as a sibling field (migrated on load). */
+/** A saved Transition (first-class, per ordered track pair). `uuid` is the
+ * stable identity (ADR 0011 — survives renames and sibling deletes);
+ * `bInSec` lives INSIDE the transition (issue 11). */
 export interface SavedTransition {
+  uuid: string;
   name: string;
   transition: EditorMix['transition'];
   /** Proven move (glossary: Favorite). A pair with ≥1 favorited Transition
@@ -37,45 +51,132 @@ export interface PairEntry {
 
 export type PairStore = Record<string, PairEntry>;
 
-export function loadPairStore(): PairStore {
-  // Graduation key rename (2026-07-04): one-time move from the PROTOTYPE-
-  // prefixed keys. (The even older single-mix-draft migration was dropped
-  // here — that data was migrated into the pair store long ago.)
-  const old = localStorage.getItem(OLD_PAIR_STORE_KEY);
-  if (old !== null && localStorage.getItem(PAIR_STORE_KEY) === null) {
-    localStorage.setItem(PAIR_STORE_KEY, old);
-  }
-  localStorage.removeItem(OLD_PAIR_STORE_KEY);
-  const oldLast = localStorage.getItem(OLD_LAST_PAIR_KEY);
-  if (oldLast !== null && localStorage.getItem(LAST_PAIR_KEY) === null) {
-    localStorage.setItem(LAST_PAIR_KEY, oldLast);
-  }
-  localStorage.removeItem(OLD_LAST_PAIR_KEY);
+// ── Snapshot store ─────────────────────────────────────────────────────
 
-  let store: PairStore;
+let snapshot: PairStore = {};
+let initPromise: Promise<void> | null = null;
+
+/** Boot the store: one GET, or the one-shot legacy migration. Idempotent;
+ * callers gate on the returned promise. Never rejects — a dead backend
+ * degrades to an empty (or legacy-local) snapshot with a logged error. */
+export function initTransitionStore(): Promise<void> {
+  initPromise ??= doInit();
+  return initPromise;
+}
+
+async function doInit(): Promise<void> {
+  let rows: Awaited<ReturnType<typeof api.transitions.list>>;
   try {
-    store = JSON.parse(localStorage.getItem(PAIR_STORE_KEY) ?? '{}');
-  } catch {
-    store = {};
+    rows = await api.transitions.list();
+  } catch (err) {
+    console.error('transition store: boot load failed — starting from legacy/local', err);
+    snapshot = readLegacyStore() ?? {};
+    notify();
+    return;
   }
-  // Migrate pre-issue-11 saves: bInSec was a sibling of the transition.
-  let migrated = false;
-  for (const entry of Object.values(store)) {
-    for (const item of entry.items as (SavedTransition & { bInSec?: number })[]) {
-      if (item.transition.bInSec === undefined) {
-        item.transition.bInSec = item.bInSec ?? 0;
-        migrated = true;
-      }
-      delete item.bInSec;
+
+  if (rows.length > 0) {
+    snapshot = storeFromRows(rows);
+    notify();
+    return;
+  }
+
+  // DB empty: one-shot migration of the pre-DB localStorage store.
+  const legacy = readLegacyStore();
+  if (legacy && Object.keys(legacy).length > 0) {
+    snapshot = legacy;
+    const results = await Promise.all(
+      Object.entries(legacy).map(([key, entry]) => pushPair(key, entry.items))
+    );
+    if (results.every(Boolean)) {
+      const raw = localStorage.getItem(LEGACY_PAIR_STORE_KEY);
+      if (raw !== null) localStorage.setItem(LEGACY_BACKUP_KEY, raw);
+      localStorage.removeItem(LEGACY_PAIR_STORE_KEY);
     }
+    // Any failed push: keep the legacy key so the next boot retries.
+  } else {
+    snapshot = {};
   }
-  if (migrated) savePairStore(store);
-  // Lazy-persistence honesty: pristine-shaped saves (pre-transition-library
-  // autosave wrote merely-opened pairs) are pruned so they never feed
-  // discovery.
-  const pruned = pruneStore(store);
-  if (pruned.changed) savePairStore(pruned.store);
-  return pruned.store;
+  notify();
+}
+
+/** The current store. Empty until `initTransitionStore()` resolves — the
+ * editor gates on init; the library's index rebuilds via the init notify. */
+export function snapshotPairStore(): PairStore {
+  return snapshot;
+}
+
+/**
+ * Replace one pair's entry (null deletes the pair): snapshot updates and
+ * listeners fire synchronously (optimistic — flush-before-repoint relies
+ * on this); the PUT runs in the background, reconciled by uuid. Write
+ * failures log only (ADR 0011: no retry queue). `active` goes to
+ * localStorage, not the DB.
+ */
+export function savePairEntry(pairKey: string, entry: PairEntry | null): void {
+  const next = { ...snapshot };
+  if (entry) next[pairKey] = entry;
+  else delete next[pairKey];
+  snapshot = next;
+  writeActive(pairKey, entry?.active ?? null);
+  notify();
+  void pushPair(pairKey, entry?.items ?? []);
+}
+
+async function pushPair(pairKey: string, items: SavedTransition[]): Promise<boolean> {
+  const [a, b] = pairKey.split(':').map(Number);
+  try {
+    await api.transitions.replacePair(
+      a,
+      b,
+      items.map((it) => ({
+        uuid: it.uuid,
+        name: it.name,
+        favorite: it.favorite ?? false,
+        data: it.transition as unknown as Record<string, unknown>,
+      }))
+    );
+    return true;
+  } catch (err) {
+    console.error(`transition store: save failed for pair ${pairKey}`, err);
+    return false;
+  }
+}
+
+function storeFromRows(rows: Awaited<ReturnType<typeof api.transitions.list>>): PairStore {
+  const store: PairStore = {};
+  const activeMap = readActiveMap();
+  for (const row of rows) {
+    const key = `${row.a_track_id}:${row.b_track_id}`;
+    (store[key] ??= { items: [], active: 0 }).items.push({
+      uuid: row.uuid,
+      name: row.name,
+      favorite: row.favorite || undefined,
+      transition: row.data as unknown as EditorMix['transition'],
+    });
+  }
+  for (const [key, entry] of Object.entries(store)) {
+    const active = activeMap[key] ?? 0;
+    entry.active = Math.max(0, Math.min(active, entry.items.length - 1));
+  }
+  return store;
+}
+
+// ── Active selection (session state, localStorage) ─────────────────────
+
+function readActiveMap(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(ACTIVE_MAP_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writeActive(pairKey: string, active: number | null): void {
+  const map = readActiveMap();
+  if (active === null) delete map[pairKey];
+  else map[pairKey] = active;
+  localStorage.setItem(ACTIVE_MAP_KEY, JSON.stringify(map));
 }
 
 // ── Change events (same-tab) ───────────────────────────────────────────
@@ -89,16 +190,70 @@ export function subscribePairStore(fn: StoreListener): () => void {
   return () => storeListeners.delete(fn);
 }
 
-export function savePairStore(store: PairStore): void {
-  localStorage.setItem(PAIR_STORE_KEY, JSON.stringify(store));
-  for (const fn of storeListeners) fn(store);
+function notify(): void {
+  for (const fn of storeListeners) fn(snapshot);
+}
+
+// ── Legacy localStorage store (one-shot migration input) ───────────────
+
+/** Read + normalize the pre-DB localStorage store: PROTOTYPE-key rename,
+ * pre-issue-11 `bInSec` relocation, pristine pruning, uuid assignment.
+ * Returns null when no legacy store exists. */
+function readLegacyStore(): PairStore | null {
+  // Graduation key rename (2026-07-04): one-time move from the PROTOTYPE-
+  // prefixed keys.
+  const old = localStorage.getItem(OLD_PAIR_STORE_KEY);
+  if (old !== null && localStorage.getItem(LEGACY_PAIR_STORE_KEY) === null) {
+    localStorage.setItem(LEGACY_PAIR_STORE_KEY, old);
+  }
+  localStorage.removeItem(OLD_PAIR_STORE_KEY);
+  const oldLast = localStorage.getItem(OLD_LAST_PAIR_KEY);
+  if (oldLast !== null && localStorage.getItem(LAST_PAIR_KEY) === null) {
+    localStorage.setItem(LAST_PAIR_KEY, oldLast);
+  }
+  localStorage.removeItem(OLD_LAST_PAIR_KEY);
+
+  const raw = localStorage.getItem(LEGACY_PAIR_STORE_KEY);
+  if (raw === null) return null;
+  let store: PairStore;
+  try {
+    store = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  // Migrate pre-issue-11 saves: bInSec was a sibling of the transition.
+  for (const entry of Object.values(store)) {
+    for (const item of entry.items as (SavedTransition & { bInSec?: number })[]) {
+      if (item.transition.bInSec === undefined) {
+        item.transition.bInSec = item.bInSec ?? 0;
+      }
+      delete item.bInSec;
+      item.uuid ??= newUuid();
+    }
+  }
+  // Lazy-persistence honesty: pristine-shaped saves (pre-transition-library
+  // autosave wrote merely-opened pairs) are pruned so they never feed
+  // discovery.
+  return pruneStore(store).store;
+}
+
+/** Reset module state (tests only). */
+export function _resetTransitionStoreForTests(): void {
+  snapshot = {};
+  initPromise = null;
+  storeListeners.clear();
 }
 
 // ── Materialization rules (pure — under vitest) ────────────────────────
 
+function newUuid(): string {
+  return crypto.randomUUID();
+}
+
 const DEFAULT_NAME_RE = /^Transition \d+$/;
 
-/** Next free "Transition n" number (creation-ordered list, holes reused). */
+/** Next free "Transition n" number (creation-ordered list, holes reused —
+ * cosmetic display numbering; identity is `uuid`, which never reuses). */
 export function nextFreeNumber(items: SavedTransition[]): number {
   const taken = new Set(
     items
@@ -110,9 +265,11 @@ export function nextFreeNumber(items: SavedTransition[]): number {
   return n;
 }
 
-/** A fresh in-memory Transition: default shape, next free default name. */
+/** A fresh in-memory Transition: default shape, next free default name,
+ * fresh identity. */
 export function freshTransition(items: SavedTransition[]): SavedTransition {
   return {
+    uuid: newUuid(),
     name: `Transition ${nextFreeNumber(items)}`,
     transition: defaultMix().transition,
   };

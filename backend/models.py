@@ -1,6 +1,6 @@
 """SQLAlchemy models for music library database."""
 
-from sqlalchemy import Column, Integer, String, Text, Float, ForeignKey, DateTime, Index
+from sqlalchemy import Boolean, Column, Integer, String, Text, Float, ForeignKey, DateTime, Index
 from sqlalchemy.orm import backref, relationship, DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -183,6 +183,49 @@ class KeyAnalysis(Base):
 
     # Relationship
     track = relationship("Track", backref="key_analysis", uselist=False)
+
+
+class Transition(Base):
+    """A saved Transition between an ordered Track pair (ADR 0010/0011).
+
+    Identity is the client-generated `uuid` (stable across renames/deletes);
+    `position` is cosmetic append order within the pair and may renumber.
+    The drawn payload (anchors, lanes, tempo-match, hidden lanes) is opaque
+    JSON — never queried, still churning. Write model is client-authoritative
+    pair-replace (see routers/transitions.py).
+    """
+
+    __tablename__ = "transitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    a_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    b_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    uuid = Column(String, nullable=False)
+    position = Column(Integer, nullable=False)
+    name = Column(String, nullable=False)
+    favorite = Column(Boolean, nullable=False, default=False, server_default="0")
+    data_json = Column(Text, nullable=False)  # anchors + lanes (opaque drawing)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # ORM-level cascade (SQLite FK PRAGMA is off in this app; the ondelete
+    # markers above record intent). ADR 0011: revisit when soft-delete lands.
+    a_track = relationship(
+        "Track",
+        foreign_keys=[a_track_id],
+        backref=backref("transitions_out", cascade="all, delete-orphan"),
+    )
+    b_track = relationship(
+        "Track",
+        foreign_keys=[b_track_id],
+        backref=backref("transitions_in", cascade="all, delete-orphan"),
+    )
+
+    __table_args__ = (
+        Index("idx_transitions_a", "a_track_id"),
+        Index("idx_transitions_b", "b_track_id"),
+        Index("idx_transitions_pair_uuid", "a_track_id", "b_track_id", "uuid", unique=True),
+    )
 
 
 class HotCue(Base):

@@ -12,7 +12,10 @@ import {
 } from './pairStore';
 import type { SavedTransition } from './pairStore';
 
+let uuidCounter = 0;
+
 const pristine = (name = 'Transition 1'): SavedTransition => ({
+  uuid: `u${++uuidCounter}`,
   name,
   transition: defaultMix().transition,
 });
@@ -78,6 +81,7 @@ describe('freshTransition / nextFreeNumber', () => {
 
 describe('toStoredEntry (persisting filters pristine items)', () => {
   const edited = (name: string): SavedTransition => ({
+    uuid: `u${++uuidCounter}`,
     name,
     transition: { ...defaultMix().transition, durationSec: 8 },
   });
@@ -102,6 +106,7 @@ describe('toStoredEntry (persisting filters pristine items)', () => {
 describe('pruneStore (legacy honesty on load)', () => {
   it('drops pristine-shaped saves and empty pairs, keeps edited ones', () => {
     const edited: SavedTransition = {
+      uuid: 'u-edited',
       name: 'Transition 1',
       transition: { ...defaultMix().transition, startSec: 12 },
     };
@@ -115,7 +120,11 @@ describe('pruneStore (legacy honesty on load)', () => {
   });
 
   it('reports unchanged when nothing was pruned', () => {
-    const edited: SavedTransition = { name: 'x', transition: defaultMix().transition };
+    const edited: SavedTransition = {
+      uuid: 'u-x',
+      name: 'x',
+      transition: defaultMix().transition,
+    };
     const { changed } = pruneStore({ '1:2': { items: [edited], active: 0 } });
     expect(changed).toBe(false);
   });

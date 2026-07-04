@@ -604,6 +604,41 @@ export const api = {
     },
   },
 
+  transitions: {
+    /** All saved Transitions (boot load; ADR 0011). Ordered pair, position. */
+    list: async (): Promise<
+      {
+        a_track_id: number;
+        b_track_id: number;
+        uuid: string;
+        position: number;
+        name: string;
+        favorite: boolean;
+        data: Record<string, unknown>;
+      }[]
+    > => {
+      const res = await fetch(`${API_BASE}/transitions`);
+      if (!res.ok) throw new Error('Failed to fetch transitions');
+      return res.json();
+    },
+
+    /** Client-authoritative pair-replace: the server reconciles by uuid.
+     * An empty items list deletes the pair. */
+    replacePair: async (
+      aTrackId: number,
+      bTrackId: number,
+      items: { uuid: string; name: string; favorite: boolean; data: Record<string, unknown> }[]
+    ) => {
+      const res = await fetch(`${API_BASE}/transitions/pair/${aTrackId}/${bTrackId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error(`Failed to save transitions (${res.status})`);
+      return res.json();
+    },
+  },
+
   libraryImport: {
     getCandidates: async (recursive: boolean = false): Promise<LibraryImportResult> => {
       const response = await fetch(`${API_BASE}/sync/library/candidates?recursive=${recursive}`);

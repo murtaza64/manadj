@@ -7,7 +7,7 @@
  * Prototype-scale: in-memory rebuild over the whole store on save events.
  */
 import { useEffect, useState } from 'react';
-import { loadPairStore, subscribePairStore } from './pairStore';
+import { initTransitionStore, snapshotPairStore, subscribePairStore } from './pairStore';
 import type { PairStore } from './pairStore';
 
 /** Per ordered pair: how many saved Transitions, and whether the pair is
@@ -62,14 +62,16 @@ export function transitionsInto(
   return (trackId != null && index.into.get(trackId)) || EMPTY;
 }
 
-/** Live index: rebuilt on every pair-store write (save/favorite/delete). */
+/** Live index: rebuilt on every pair-store write (save/favorite/delete).
+ * Starts from the current snapshot (empty pre-boot) and fills in when the
+ * store's init notify lands — marks appear once the DB load resolves. */
 export function useTransitionIndex(): TransitionIndex {
   const [index, setIndex] = useState<TransitionIndex>(() =>
-    buildTransitionIndex(loadPairStore())
+    buildTransitionIndex(snapshotPairStore())
   );
-  useEffect(
-    () => subscribePairStore((store) => setIndex(buildTransitionIndex(store))),
-    []
-  );
+  useEffect(() => {
+    void initTransitionStore();
+    return subscribePairStore((store) => setIndex(buildTransitionIndex(store)));
+  }, []);
   return index;
 }

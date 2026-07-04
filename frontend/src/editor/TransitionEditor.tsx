@@ -23,12 +23,13 @@ import { TransitionSwitcher } from './TransitionSwitcher';
 import {
   LAST_PAIR_KEY,
   freshTransition,
+  initTransitionStore,
   isPristine,
-  loadPairStore,
-  savePairStore,
+  savePairEntry,
+  snapshotPairStore,
   toStoredEntry,
 } from './pairStore';
-import type { PairStore, SavedTransition } from './pairStore';
+import type { SavedTransition } from './pairStore';
 import {
   DEFAULT_LANE_IDS,
   LANE_IDS,
@@ -42,7 +43,26 @@ import type { LaneId, LanePoint, EditorMix, Transition } from './mixModel';
 import type { Track } from '../types';
 import './transitionEditor.css';
 
+/** Gate on the transition store's boot load (ADR 0011): the inner editor
+ * seeds session state from the snapshot in initializers, so it must not
+ * mount before init resolves (one localhost fetch — imperceptible). init
+ * never rejects; a dead backend degrades to an empty store. */
 export default function TransitionEditor() {
+  const [storeReady, setStoreReady] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    void initTransitionStore().then(() => {
+      if (mounted) setStoreReady(true);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  if (!storeReady) return null;
+  return <TransitionEditorInner />;
+}
+
+function TransitionEditorInner() {
   const [mix, setMix] = useState<EditorMix>(defaultMix);
   const [player] = useState(() => new MixPlayer(defaultMix()));
   useEffect(() => () => player.dispose(), [player]);
@@ -84,11 +104,12 @@ export default function TransitionEditor() {
     player.setBpm('B', bpmB);
   }, [player, bpmA, bpmB]);
 
-  // Saved Transitions per ordered pair. LAZY PERSISTENCE (transition-
-  // library 01): the SESSION list below is the working set — it may hold
-  // pristine (never-edited) Transitions that exist only in memory; the
-  // store only ever receives materialized ones (toStoredEntry filters).
-  const [pairStore, setPairStore] = useState<PairStore>(loadPairStore);
+  // Saved Transitions per ordered pair live in the transition store
+  // (snapshot reads — the mount gate guarantees init has resolved). LAZY
+  // PERSISTENCE (transition-library 01): the SESSION list below is the
+  // working set — it may hold pristine (never-edited) Transitions that
+  // exist only in memory; the store only ever receives materialized ones
+  // (toStoredEntry filters).
   const pairKey = trackA && trackB ? `${trackA.id}:${trackB.id}` : null;
   const [session, setSession] = useState<{ items: SavedTransition[]; active: number }>(() => ({
     items: [freshTransition([])],
@@ -127,10 +148,22 @@ export default function TransitionEditor() {
     player.setMix(mix);
   }, [mix, player]);
 
-  // Persist DEBOUNCED (store writes stringify everything into localStorage;
-  // doing that at drag rate was the biggest main-thread cost during drags),
-  // flushed before pair switches and on unmount. Pristine items never reach
-  // the store; a pair whose session is entirely pristine is deleted.
+  // Persist DEBOUNCED (a store write is a snapshot swap + index rebuild +
+  // background PUT; doing that at drag rate was the biggest main-thread
+  // cost during drags), flushed before pair switches and on unmount.
+  // Pristine items never reach the store; a pair whose session is entirely
+  // pristine is deleted.
+  //
+  // GUARD (post-incident 2026-07-04): only arm the save once the session
+  // has been SEEDED for this pair (pairKey === loadedPairKey). On the
+  // commit where pairKey changes, this effect runs before the seed effect
+  // below with the OLD session still in state — unguarded, it stamped the
+  // new pair with a pristine/foreign session and the seed's flush
+  // materialized that to a DELETE, wiping the pair's saved Transitions.
+  // (Pre-DB, a stale-closure read of the store accidentally self-healed
+  // this within 300ms; the store snapshot is a live read, so the guard is
+  // now load-bearing.)
+  const loadedPairKey = useRef<string | null>(null);
   const pendingSaveRef = useRef<{
     pairKey: string;
     items: SavedTransition[];
@@ -140,17 +173,12 @@ export default function TransitionEditor() {
     const p = pendingSaveRef.current;
     if (!p) return;
     pendingSaveRef.current = null;
-    setPairStore((store) => {
-      const stored = toStoredEntry(p.items, p.active);
-      const next = { ...store };
-      if (stored) next[p.pairKey] = stored;
-      else delete next[p.pairKey];
-      savePairStore(next);
-      return next;
-    });
+    // Synchronous snapshot update (the PUT rides behind) — the pair-switch
+    // effect below reads the snapshot right after flushing.
+    savePairEntry(p.pairKey, toStoredEntry(p.items, p.active));
   }, []);
   useEffect(() => {
-    if (!pairKey) return;
+    if (!pairKey || pairKey !== loadedPairKey.current) return;
     pendingSaveRef.current = { pairKey, items: liveItems(session, mix), active: session.active };
     const t = setTimeout(flushPersist, 300);
     return () => clearTimeout(t);
@@ -217,13 +245,14 @@ export default function TransitionEditor() {
   // When a (new) pair is assembled, seed the session from the store —
   // or with a pristine "Transition 1" that exists only in memory until a
   // real edit materializes it (merely-opened pairs leave no trace).
-  const loadedPairKey = useRef<string | null>(null);
+  // (loadedPairKey is declared with the persist machinery above — the
+  // persist effect keys off it.)
   useEffect(() => {
     if (!pairKey || pairKey === loadedPairKey.current) return;
     flushPersist(); // pending edits belong to the previous pair
     loadedPairKey.current = pairKey;
     localStorage.setItem(LAST_PAIR_KEY, pairKey);
-    const entry = pairStore[pairKey];
+    const entry = snapshotPairStore()[pairKey];
     const items = entry ? structuredClone(entry.items) : [freshTransition([])];
     const active = entry ? Math.min(entry.active, items.length - 1) : 0;
     setSession({ items, active });

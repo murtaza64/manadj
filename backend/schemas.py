@@ -262,3 +262,34 @@ class HotCue(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# Transition Schemas (ADR 0011 — client-authoritative pair-replace)
+
+class TransitionItem(BaseModel):
+    """One saved Transition as the client materializes it.
+
+    `uuid` is the client-generated identity; `data` is the opaque drawn
+    payload (anchors, lanes, tempo-match, hidden lanes) — never queried.
+    Position is NOT in the payload: it is the item's index in the list.
+    """
+    uuid: str
+    name: str
+    favorite: bool = False
+    data: dict
+
+
+class TransitionPairReplace(BaseModel):
+    """Full replacement of an ordered pair's Transition set."""
+    items: list[TransitionItem]
+
+
+class TransitionRow(BaseModel):
+    """A persisted Transition (GET response)."""
+    a_track_id: int
+    b_track_id: int
+    uuid: str
+    position: int
+    name: str
+    favorite: bool
+    data: dict
