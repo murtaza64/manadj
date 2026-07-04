@@ -66,7 +66,10 @@ A derived, never-stored property: an ordered Track pair with at least one favori
 The queryable index over saved Transitions — "what mixes out of / into this Track" — surfaced as library-row marks and discovery filters. Directional, like the Transitions it indexes.
 
 **Transition template**:
-A named beat-domain recipe for producing a Transition: per-side anchor rules (cue slot + beat delta on each track's own grid), a length in beats (fixed or scalable at apply time), and normalized automation lanes (e.g. "bass swap"). Applying one translates beats to seconds via the tempo-matched beatgrids and yields an ordinary seconds-based Transition — the recipe is an editing affordance, not a runtime concept. Designed; built behind DB persistence.
+A named beat-domain recipe for producing a Transition: per-side anchor rules (an anchor base — a cue slot or the Grid origin — plus a whole-beat delta on each track's own grid), a length in beats (fixed or scalable at apply time), and normalized automation lanes (e.g. "bass swap") — only lanes the author gave meaningful content; hidden and untouched lanes are not part of the recipe. Applying one translates beats to seconds via the tempo-matched beatgrids and yields an ordinary seconds-based Transition — the recipe is an editing affordance, not a runtime concept. Application never guesses alignment: an anchor that cannot be resolved leaves anchors untouched, while the rest of the recipe still stamps.
+
+**Grid origin**:
+The true first downbeat of a Track for beat-counting purposes: the earliest downbeat after extending its Beatgrid backward in whole beats toward the track start — correcting grids whose first mark lands a beat or more after the actual first downbeat. An anchor base for Transition templates alongside cue slots.
 
 **Slide**:
 Realigning the Track pair in the Transition editor by moving the incoming Track's content relative to the rest. A Slide changes the pair alignment and re-cues only the incoming deck: the playhead's mix position never moves and stays pinned to the outgoing Track, which never hiccups. The incoming deck's controls re-purpose transport gestures as Slides: beat jump = slide by ±N of its own beats; hot cue = slide so that cue and the playhead coincide. The outgoing deck's controls stay plain transport (its track time ≡ mix time — jumping it IS jumping the mix; re-decided 2026-07-03, replacing the earlier mirrored A-slides which duplicated B's under the lock toggle). Distinct from the transport meaning of those gestures on other surfaces.
@@ -75,7 +78,7 @@ Realigning the Track pair in the Transition editor by moving the incoming Track'
 A Transition-editor toggle choosing which Track the Transition window sticks to during a Slide (incoming-deck gestures and block drags only): locked, the window rides the slid Track (the same audio stays under it); unlocked, it stays with the outgoing Track. Double-drop line-up: jump the playhead to the outgoing Track's drop cue, then hot-cue the incoming Track's drop unlocked — the drops align.
 
 **Cue-slot convention**:
-A library convention (not a code concept) giving hot cue slots stable musical meaning so Transition templates can anchor to them: 1 = first buildup, 4 = drop. Missing slots fall back to hard-coded heuristic beat positions at template-apply time.
+A library convention (not a code concept) giving hot cue slots stable musical meaning so Transition templates can anchor to them — a ladder into the drop: 4 = drop, 3 = 8 bars before 4, 2 = 8 bars before 3, 1 = first buildup, typically 16 bars before 2. **4 = drop is the firmest rung** — the most strongly held convention in actual DJing; the earlier slots are progressively softer ("typically"). Slots 5–8 carry no convention. At template-apply time a missing slot resolves relative to the nearest set ladder slot, falling back to heuristic positions from the Grid origin only when no ladder slot is set.
 
 **Key**:
 One of 24 key centers (12 tonics × major/minor) assigned to a Track. OpenKey is the preferred notation for display and discussion; Camelot, musical, and external libraries' notations are conversions from the same canonical value.
