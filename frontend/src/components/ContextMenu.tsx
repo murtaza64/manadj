@@ -21,6 +21,8 @@ export interface MenuItem {
   submenu?: MenuItem[];
   /** Draw a separator line above this item. */
   separatorBefore?: boolean;
+  /** Color swatch square before the label (e.g. palette items). */
+  swatch?: string;
 }
 
 interface ContextMenuProps {
@@ -83,7 +85,10 @@ function MenuList({
             }
           }}
         >
-          <span className="context-menu-label">{item.label}</span>
+          <span className="context-menu-label">
+            {item.swatch && <span className="context-menu-swatch" style={{ background: item.swatch }} />}
+            {item.label}
+          </span>
           {item.submenu && <span className="context-menu-caret">▸</span>}
           {item.submenu && openSubmenu === i && !item.disabled && (
             <div className={`context-menu-submenu ${submenuSide}`}>

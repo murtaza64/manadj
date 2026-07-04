@@ -34,3 +34,13 @@ The menu applies only to real Playlist rows, not the "All tracks" /
 ## Blocked by
 
 - `.scratch/playlist-editing/issues/03-context-menu-infra-track-row.md`
+
+## Comments
+
+Done (jj xznmxvqt). Right-click menu on real playlist rows only
+(pseudo-views untouched): Rename (inline input — Enter/blur commits,
+Escape cancels), Change color ▸ (10-swatch bright saturated palette;
+ContextMenu gained a `swatch` item option), Delete (confirm kept,
+separator + danger styling). The `×` button is gone; the menu is the only
+delete path. Updates invalidate both the sidebar list and the open
+playlist (header strip name follows a rename).

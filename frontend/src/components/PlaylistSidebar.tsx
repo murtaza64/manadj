@@ -2,9 +2,24 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { readTrackDragPayload } from '../selection/trackDrag';
+import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import type { Playlist } from '../types';
 
 type ViewType = 'all' | 'unprocessed' | 'playlist';
+
+/** Palette for "Change color ▸" — bright, fully saturated (repo preference). */
+const PLAYLIST_COLORS: Array<{ label: string; value: string }> = [
+  { label: 'Red', value: '#ff0000' },
+  { label: 'Orange', value: '#ff8000' },
+  { label: 'Yellow', value: '#ffee00' },
+  { label: 'Green', value: '#00e600' },
+  { label: 'Teal', value: '#00e6b8' },
+  { label: 'Cyan', value: '#00d0ff' },
+  { label: 'Blue', value: '#0055ff' },
+  { label: 'Purple', value: '#9500ff' },
+  { label: 'Magenta', value: '#ff00ff' },
+  { label: 'Pink', value: '#ff0080' },
+];
 
 interface PlaylistSidebarProps {
   selectedView: ViewType;
@@ -24,6 +39,9 @@ export default function PlaylistSidebar({
 }: PlaylistSidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
+  // Inline rename (playlist-editing 07): which row is being renamed + draft.
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const queryClient = useQueryClient();
 
   const { data: playlists = [], isLoading } = useQuery({
@@ -37,6 +55,15 @@ export default function PlaylistSidebar({
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
       setIsCreating(false);
       setNewPlaylistName('');
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: { name?: string; color?: string } }) =>
+      api.playlists.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playlists'] });
+      queryClient.invalidateQueries({ queryKey: ['playlist'] });
     },
   });
 
@@ -56,12 +83,46 @@ export default function PlaylistSidebar({
     }
   };
 
-  const handleDelete = (e: React.MouseEvent, playlistId: number) => {
-    e.stopPropagation();
-    if (confirm('Delete this playlist?')) {
-      deleteMutation.mutate(playlistId);
+  // ── Playlist row context menu (playlist-editing 07) ────────────────────
+  const { menu, openMenu, closeMenu } = useContextMenuState<Playlist>();
+
+  const commitRename = (playlist: Playlist) => {
+    const name = renameDraft.trim();
+    if (name && name !== playlist.name) {
+      updateMutation.mutate({ id: playlist.id, data: { name } });
     }
+    setRenamingId(null);
   };
+
+  const menuItems: MenuItem[] = menu
+    ? [
+        {
+          label: 'Rename',
+          onSelect: () => {
+            setRenameDraft(menu.context.name);
+            setRenamingId(menu.context.id);
+          },
+        },
+        {
+          label: 'Change color',
+          submenu: PLAYLIST_COLORS.map((c) => ({
+            label: c.label,
+            swatch: c.value,
+            onSelect: () => updateMutation.mutate({ id: menu.context.id, data: { color: c.value } }),
+          })),
+        },
+        {
+          label: 'Delete',
+          danger: true,
+          separatorBefore: true,
+          onSelect: () => {
+            if (confirm(`Delete playlist "${menu.context.name}"?`)) {
+              deleteMutation.mutate(menu.context.id);
+            }
+          },
+        },
+      ]
+    : [];
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -123,6 +184,10 @@ export default function PlaylistSidebar({
             <div
               key={playlist.id}
               onClick={() => onSelectPlaylist(playlist.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                openMenu(e.clientX, e.clientY, playlist);
+              }}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, playlist.id)}
               style={{
@@ -136,19 +201,30 @@ export default function PlaylistSidebar({
                 borderLeft: playlist.color ? `3px solid ${playlist.color}` : 'none',
               }}
             >
-              <span>{playlist.name}</span>
-              <button
-                onClick={(e) => handleDelete(e, playlist.id)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--red)',
-                  cursor: 'pointer',
-                  padding: '2px 6px',
-                }}
-              >
-                ×
-              </button>
+              {renamingId === playlist.id ? (
+                <input
+                  type="text"
+                  value={renameDraft}
+                  autoFocus
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename(playlist);
+                    if (e.key === 'Escape') setRenamingId(null);
+                  }}
+                  onBlur={() => commitRename(playlist)}
+                  style={{
+                    flex: 1,
+                    padding: '2px 6px',
+                    background: 'var(--surface0)',
+                    border: '1px solid var(--surface1)',
+                    color: 'var(--text)',
+                    fontSize: 'inherit',
+                  }}
+                />
+              ) : (
+                <span>{playlist.name}</span>
+              )}
             </div>
           ))
         )}
@@ -222,6 +298,8 @@ export default function PlaylistSidebar({
       </div>
 
       </div>
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}
     </>
   );
 }
