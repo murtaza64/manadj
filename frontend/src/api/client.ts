@@ -237,14 +237,6 @@ export const api = {
   },
 
   waveforms: {
-    get: async (trackId: number) => {
-      const response = await fetch(`${API_BASE}/waveforms/${trackId}`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch waveform: ${response.statusText}`);
-      }
-      return response.json();
-    },
-
     /** Waveform data v2 blob (ADR 0014): binary, immutable once generated. */
     getData: async (trackId: number): Promise<ArrayBuffer> => {
       const response = await fetch(`${API_BASE}/waveforms/${trackId}/data`);

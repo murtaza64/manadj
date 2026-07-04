@@ -241,8 +241,7 @@ class TestHotCueImport:
     def test_import_bypasses_beat_quantization(self, db, make_track, make_client):
         t = make_track(filename="/m/a.mp3", bpm=12800)
         db.add(Waveform(track_id=t.id, sample_rate=44100, duration=180.0,
-                        samples_per_peak=1024, low_peaks_json="[]",
-                        mid_peaks_json="[]", high_peaks_json="[]"))
+                        samples_per_peak=1024))
         db.add(Beatgrid(track_id=t.id, origin="edited", tempo_changes_json=json.dumps([{
             "start_time": 0.0, "bpm": 128.0, "time_signature_num": 4,
             "time_signature_den": 4, "bar_position": 1,

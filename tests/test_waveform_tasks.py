@@ -26,9 +26,6 @@ def _seed_waveform_row(db, track, blob=None):
             sample_rate=SAMPLE_RATE,
             duration=2.0,
             samples_per_peak=PEAK_HOP,
-            low_peaks_json="[]",
-            mid_peaks_json="[]",
-            high_peaks_json="[]",
             data_blob=blob,
         )
     )

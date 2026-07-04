@@ -38,6 +38,7 @@ export interface Track {
   key?: number;  // Engine DJ key ID (0-23)
   bpm?: number;
   duration_secs?: number | null;
+  cue_point_time?: number | null;  // Main cue (seconds), performance data
   codec?: string | null;
   bitrate_kbps?: number | null;
   filesize_bytes?: number | null;
@@ -59,29 +60,6 @@ export interface PaginatedTracks {
   page: number;
   per_page: number;
   total_pages: number;
-}
-
-export interface WaveformBands {
-  low: number[];  // Bass: 20-250Hz
-  mid: number[];  // Mids: 250-4000Hz
-  high: number[]; // Highs: 4000-20000Hz
-}
-
-export interface WaveformData {
-  sample_rate: number;
-  duration: number;
-  samples_per_peak: number;
-  cue_point_time: number | null;
-  bands: WaveformBands;
-}
-
-export interface WaveformResponse {
-  id: number;
-  track_id: number;
-  data: WaveformData;
-  png_url: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface Playlist {

@@ -82,10 +82,7 @@ def bulk_import(
         query = query.filter(models.Track.id.in_(track_ids))
     tracks = query.all()
 
-    maincue_by_track: dict[int, float | None] = dict(
-        db.query(models.Waveform.track_id, models.Waveform.cue_point_time).all()
-    )
-    has_waveform = set(maincue_by_track)
+    # Main cues live on the Track itself (waveform-overhaul issue 06).
     authorized = {(o.track_id, o.field): o.mode for o in overwrites}
 
     applied = {"hotcues": 0, "beatgrid": 0, "maincue": 0, "key": 0}
@@ -149,10 +146,10 @@ def bulk_import(
                     pend("beatgrid", f"saved grid vs Engine's {grid_detail}", variable)
 
         # ---- main cue (Engine overridden-only, enforced at the source)
-        if engine.maincue is not None and track.id not in has_waveform:
-            maincue_no_waveform += 1
-        elif engine.maincue is not None:
-            lib_cue = maincue_by_track[track.id]
+        # maincue_no_waveform is retained in the report shape but can no
+        # longer occur: the cue lives on the Track, which always exists.
+        if engine.maincue is not None:
+            lib_cue = track.cue_point_time
             if lib_cue is None:
                 import_maincue(db, track.id, engine.maincue, "fill-empty")
                 applied["maincue"] += 1

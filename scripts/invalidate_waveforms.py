@@ -1,46 +1,27 @@
 #!/usr/bin/env python3
-"""Script to invalidate all waveforms - clears database and deletes PNG files."""
+"""Invalidate all Waveform data: clears the waveforms table.
+
+The task-system sweep re-enqueues generation for every Track at the next
+backend startup (waveform-overhaul issue 02). Full regeneration of a
+~1000-track library takes minutes (~0.3s/track).
+"""
 
 import sqlite3
 from pathlib import Path
-import shutil
 
-# Paths
 PROJECT_ROOT = Path(__file__).parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "library.db"
-WAVEFORMS_DIR = PROJECT_ROOT / "waveforms"
 
 
 def invalidate_waveforms():
-    """Clear waveform database entries and delete PNG files."""
-
-    # Delete database entries
-    print("Clearing waveforms from database...")
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-
     cursor.execute("SELECT COUNT(*) FROM waveforms")
     count = cursor.fetchone()[0]
-    print(f"  Found {count} waveform(s) in database")
-
     cursor.execute("DELETE FROM waveforms")
     conn.commit()
     conn.close()
-    print(f"  ✓ Deleted {count} waveform(s) from database")
-
-    # Delete PNG files
-    print("\nDeleting PNG files...")
-    if WAVEFORMS_DIR.exists():
-        png_files = list(WAVEFORMS_DIR.glob("*.png"))
-        print(f"  Found {len(png_files)} PNG file(s)")
-
-        for png_file in png_files:
-            png_file.unlink()
-            print(f"  ✓ Deleted {png_file.name}")
-    else:
-        print("  Waveforms directory does not exist")
-
-    print("\n✓ All waveforms invalidated - they will be regenerated on next request")
+    print(f"Deleted {count} waveform(s); restart the backend to regenerate.")
 
 
 if __name__ == "__main__":

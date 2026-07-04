@@ -57,6 +57,7 @@ class TrackBase(BaseModel):
     key: int | None = None  # Engine DJ key ID (0-23)
     bpm: float | None = None  # Exposed as float, stored as int * 100
     duration_secs: float | None = None  # audio duration, read from the file
+    cue_point_time: float | None = None  # Main cue (seconds), performance data
     codec: str | None = None  # mp3/aac/alac/flac/pcm, from the file
     bitrate_kbps: int | None = None  # from the file
     filesize_bytes: int | None = None  # from the file
@@ -96,33 +97,6 @@ class PaginatedTracks(BaseModel):
     per_page: int
     total_pages: int
 
-
-# Waveform Schemas
-class WaveformBands(BaseModel):
-    """3-band frequency waveform data."""
-    low: list[float]  # Bass: 20-250Hz
-    mid: list[float]  # Mids: 250-4000Hz
-    high: list[float]  # Highs: 4000-20000Hz
-
-
-class WaveformData(BaseModel):
-    """Waveform data response."""
-    sample_rate: int
-    duration: float
-    samples_per_peak: int
-    cue_point_time: float | None = None
-    bands: WaveformBands
-
-
-class WaveformResponse(BaseModel):
-    """Full waveform response with metadata."""
-    id: int
-    track_id: int
-    data: WaveformData
-    png_url: str | None = None
-    created_at: datetime
-    updated_at: datetime
-    model_config = ConfigDict(from_attributes=True)
 
 
 # Playlist Schemas

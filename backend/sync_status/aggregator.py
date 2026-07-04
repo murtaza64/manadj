@@ -71,11 +71,11 @@ def compute_sync_status(
         )
         .all()
     )
-    # Main cues live on waveform rows, whose peak-JSON columns are huge —
-    # select just the one float instead of joinedloading the relationship.
-    maincue_by_track: dict[int, float | None] = dict(
-        db.query(models.Waveform.track_id, models.Waveform.cue_point_time).all()
-    )
+    # Main cues live on the Track itself (waveform-overhaul issue 06); the
+    # dict shape is kept for _library_row's signature.
+    maincue_by_track: dict[int, float | None] = {
+        t.id: t.cue_point_time for t in library_tracks
+    }
 
     for track in library_tracks:
         rows.append(

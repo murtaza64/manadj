@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import Beatgrid, Waveform
+from backend.models import Beatgrid, Track, Waveform
 from backend.sync_status import (
     BeatgridValue,
     SurfaceTrackRef,
@@ -63,10 +63,11 @@ def add_grid(db: Session, track_id: int, origin: str, *changes: tuple[float, flo
 
 
 def add_waveform(db: Session, track_id: int, cue: float | None = None) -> None:
+    """Seed a waveform row; the Main cue lives on the Track (issue 06)."""
     db.add(Waveform(track_id=track_id, sample_rate=44100, duration=180.0,
-                    samples_per_peak=1024, low_peaks_json="[]",
-                    mid_peaks_json="[]", high_peaks_json="[]",
-                    cue_point_time=cue))
+                    samples_per_peak=1024))
+    if cue is not None:
+        db.query(Track).filter(Track.id == track_id).update({"cue_point_time": cue})
     db.commit()
 
 
@@ -301,8 +302,8 @@ class TestMainCueImport:
                            json={"track_id": t.id, "mode": "fill-empty"})
         assert resp.status_code == 200
         assert resp.json()["imported"] is True
-        wf = db.query(Waveform).filter(Waveform.track_id == t.id).one()
-        assert wf.cue_point_time == 32.125
+        db.expire_all()
+        assert db.query(Track).filter(Track.id == t.id).one().cue_point_time == 32.125
 
     def test_fill_empty_never_touches_saved_cue(self, db, make_track, make_client):
         t = make_track(filename="/m/a.mp3")
@@ -312,8 +313,8 @@ class TestMainCueImport:
         resp = client.post("/api/sync/performance/maincue/import",
                            json={"track_id": t.id, "mode": "fill-empty"})
         assert resp.json()["imported"] is False
-        wf = db.query(Waveform).filter(Waveform.track_id == t.id).one()
-        assert wf.cue_point_time == 15.0
+        db.expire_all()
+        assert db.query(Track).filter(Track.id == t.id).one().cue_point_time == 15.0
 
     def test_replace_overwrites_saved_cue(self, db, make_track, make_client):
         t = make_track(filename="/m/a.mp3")
@@ -323,16 +324,20 @@ class TestMainCueImport:
         resp = client.post("/api/sync/performance/maincue/import",
                            json={"track_id": t.id, "mode": "replace"})
         assert resp.json()["imported"] is True
-        wf = db.query(Waveform).filter(Waveform.track_id == t.id).one()
-        assert wf.cue_point_time == 32.125
+        db.expire_all()
+        assert db.query(Track).filter(Track.id == t.id).one().cue_point_time == 32.125
 
-    def test_no_waveform_row_409(self, db, make_track, make_client):
+    def test_import_without_waveform_row_succeeds(self, db, make_track, make_client):
+        # The Main cue lives on the Track (issue 06): a missing waveform row
+        # no longer blocks the import (previously a 409).
         t = make_track(filename="/m/a.mp3")
         client = make_client(FakeEnginePerformanceSource(
             {"/m/a.mp3": FakePerformanceFields(maincue=32.125)}))
         resp = client.post("/api/sync/performance/maincue/import",
                            json={"track_id": t.id, "mode": "fill-empty"})
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        db.expire_all()
+        assert db.query(Track).filter(Track.id == t.id).one().cue_point_time == 32.125
 
     def test_engine_cue_not_overridden_404(self, db, make_track, make_client):
         t = make_track(filename="/m/a.mp3")

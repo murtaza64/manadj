@@ -11,7 +11,10 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { WaveformResponse } from '../types';
+import type { Track } from '../types';
+import { toThreeBands } from '../waveform/blob';
+import type { ThreeBandWaveform } from '../waveform/blob';
+import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import {
   beatMarkersFromTempoChanges,
   markersInWindow,
@@ -51,18 +54,28 @@ export function PerfDiffViewer({ trackId, sides, onImport }: {
     maincue?: () => void;
   };
 }) {
-  const { data: waveform, isLoading, error } = useQuery<WaveformResponse>({
-    queryKey: ['waveform', trackId],
-    queryFn: () => api.waveforms.get(trackId),
+  const { data: blob, isLoading, error } = useWaveformBlob(trackId);
+  const { data: track } = useQuery<Track>({
+    queryKey: ['track', trackId],
+    queryFn: () => api.tracks.getById(trackId),
   });
+  const waveform = useMemo(() => (blob ? toThreeBands(blob) : null), [blob]);
 
   if (isLoading) return <div className="pdv-empty">Loading waveform…</div>;
   if (error || !waveform) return <div className="pdv-empty">No waveform available for this track yet</div>;
-  return <Viewer waveform={waveform} sides={sides} onImport={onImport} />;
+  return (
+    <Viewer
+      waveform={waveform}
+      savedMaincue={track?.cue_point_time ?? null}
+      sides={sides}
+      onImport={onImport}
+    />
+  );
 }
 
-function Viewer({ waveform, sides, onImport }: {
-  waveform: WaveformResponse;
+function Viewer({ waveform, savedMaincue, sides, onImport }: {
+  waveform: ThreeBandWaveform;
+  savedMaincue: number | null;
   sides: PerfDiffSides;
   onImport: {
     hotcues?: (mode: 'fill-empty' | 'replace-all') => void;
@@ -71,7 +84,7 @@ function Viewer({ waveform, sides, onImport }: {
   };
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const duration = waveform.data.duration;
+  const duration = waveform.duration;
   // The window lives in a ref and drawing goes straight to the canvas on
   // rAF — zoom/pan never re-renders React, which is what keeps it smooth.
   const winRef = useRef({ windowStart: 0, windowSeconds: duration });
@@ -114,11 +127,11 @@ function Viewer({ waveform, sides, onImport }: {
 
     // ---- waveform: per-pixel-column band maxima, three bands overlaid
     // back to front, mirrored around the centerline — same technique and
-    // colors as the deck renderer (WebGLWaveformRenderer bandColors)
-    const { low, mid, high } = waveform.data.bands;
+    // colors as the deck renderer's classic palette
+    const { low, mid, high } = waveform;
     const n = low.length;
     const peaksPerSecond = n / duration;
-    const bands: [number[], string][] = [
+    const bands: [Float32Array, string][] = [
       [low, BAND_LOW_COLOR],
       [mid, BAND_MID_COLOR],
       [high, BAND_HIGH_COLOR],
@@ -215,7 +228,7 @@ function Viewer({ waveform, sides, onImport }: {
     };
     // when the main cue isn't diverged, the Library's saved cue still gives
     // useful context — the waveform response carries it
-    drawMain(sides.libraryMaincue ?? waveform.data.cue_point_time, true, LIBRARY_COLOR);
+    drawMain(sides.libraryMaincue ?? savedMaincue, true, LIBRARY_COLOR);
     drawMain(sides.engineMaincue, false, ENGINE_COLOR);
   }, [waveform, sides, libraryMarkers, engineMarkers, duration]);
 

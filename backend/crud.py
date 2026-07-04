@@ -321,81 +321,35 @@ def get_waveform(db: Session, track_id: int):
 
 
 def create_waveform(db: Session, track_id: int, filepath: str):
+    """Generate and store Waveform data (ADR 0014) for a track.
+
+    Returns the created Waveform model instance; raises on analysis failure.
     """
-    Generate and store waveform data for a track.
+    from .waveform_data import PEAK_HOP, SAMPLE_RATE, analyze, build_blob
 
-    Generates both JSON data (for Canvas renderer) and PNG file (for PNG renderer).
-
-    Returns the created Waveform model instance.
-    Raises Exception if generation fails.
-    """
-    from .waveform_utils import (
-        generate_multiband_waveform_data,
-        multiband_waveform_to_json,
-        generate_waveform_png_file
-    )
-    from pathlib import Path
-
-    # Generate multiband waveform data (128 samples/peak for high detail)
-    multiband_data = generate_multiband_waveform_data(filepath, samples_per_peak=128)
-
-    # Generate PNG waveform file
-    png_filename = f"track_{track_id}.png"
-    png_path = Path("waveforms") / png_filename
-
-    # Ensure waveforms directory exists
-    png_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        generate_waveform_png_file(
-            audio_path=filepath,
-            output_path=str(png_path),
-            samples_per_peak=128,
-            pixels_per_point=2,
-            height_per_band=60
-        )
-    except Exception as e:
-        print(f"Warning: PNG generation failed for track {track_id}: {e}")
-        # Continue without PNG - Canvas renderer will still work
-        png_path = None
-
-    # Waveform data v2 blob (ADR 0014). Extra decode alongside the legacy
-    # JSON/PNG paths — those are deleted in waveform-overhaul issues 04/06.
-    from .waveform_data import generate_blob
-    data_blob = generate_blob(filepath)
-
-    # Create database record with multiband data and PNG path
+    peaks, bands, duration = analyze(filepath)
     db_waveform = models.Waveform(
         track_id=track_id,
-        sample_rate=multiband_data["sample_rate"],
-        duration=multiband_data["duration"],
-        samples_per_peak=multiband_data["samples_per_peak"],
-        low_peaks_json=multiband_waveform_to_json(multiband_data["bands"]["low"]),
-        mid_peaks_json=multiband_waveform_to_json(multiband_data["bands"]["mid"]),
-        high_peaks_json=multiband_waveform_to_json(multiband_data["bands"]["high"]),
-        png_path=str(png_path) if png_path else None,
-        data_blob=data_blob,
-        cue_point_time=None
+        sample_rate=SAMPLE_RATE,
+        duration=duration,
+        samples_per_peak=PEAK_HOP,
+        data_blob=build_blob(peaks, bands, duration),
     )
-
     db.add(db_waveform)
     db.commit()
     db.refresh(db_waveform)
-
     return db_waveform
 
 
-def update_waveform_cue_point(db: Session, track_id: int, cue_point_time: float | None):
-    """Update the CUE point for a waveform."""
-    waveform = get_waveform(db, track_id)
-    if not waveform:
+def update_track_cue_point(db: Session, track_id: int, cue_point_time: float | None):
+    """Update a Track's Main cue (performance data, lives on the Track)."""
+    track = get_track(db, track_id)
+    if not track:
         return None
-
-    waveform.cue_point_time = cue_point_time
+    track.cue_point_time = cue_point_time
     db.commit()
-    db.refresh(waveform)
-
-    return waveform
+    db.refresh(track)
+    return track
 
 
 # Playlists

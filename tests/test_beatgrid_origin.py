@@ -41,9 +41,6 @@ def make_waveform(db: Session):
             sample_rate=44100,
             duration=duration,
             samples_per_peak=1024,
-            low_peaks_json="[]",
-            mid_peaks_json="[]",
-            high_peaks_json="[]",
         )
         db.add(waveform)
         db.commit()

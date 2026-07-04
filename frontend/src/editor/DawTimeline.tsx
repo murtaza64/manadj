@@ -150,8 +150,12 @@ export function DawTimeline({
   // Waveform renderers: one viewport-sized canvas per row, windowed to the
   // visible time range (crisp at any zoom). Fetched before the audio
   // decodes — see the duration fallback below.
-  const { data: waveA } = useWaveformData(trackAId);
-  const { data: waveB } = useWaveformData(trackBId);
+  const { data: waveA } = useWaveformBlob(trackAId);
+  const { data: waveB } = useWaveformBlob(trackBId);
+  // 3-band arrays for the global minimap's own 2D drawing (memoized: new
+  // identities would re-fire its redraw effect every render).
+  const waveA3 = useMemo(() => (waveA ? toThreeBands(waveA) : null), [waveA]);
+  const waveB3 = useMemo(() => (waveB ? toThreeBands(waveB) : null), [waveB]);
 
   // Draw before decode (mix-editor 28): engine durations are 0 until
   // decodeAudioData finishes (seconds for two full tracks), but the
@@ -185,14 +189,6 @@ export function DawTimeline({
     snapRef.current = { snap, beatsA, beatsB, rateB, lockedWindow };
   });
 
-  // Waveform renderers: one viewport-sized canvas per row, windowed to the
-  // visible time range (crisp at any zoom).
-  const { data: waveA } = useWaveformBlob(trackAId);
-  const { data: waveB } = useWaveformBlob(trackBId);
-  // 3-band arrays for the global minimap's own 2D drawing (memoized: new
-  // identities would re-fire its redraw effect every render).
-  const waveA3 = useMemo(() => (waveA ? toThreeBands(waveA) : null), [waveA]);
-  const waveB3 = useMemo(() => (waveB ? toThreeBands(waveB) : null), [waveB]);
   const { data: hotCuesA = [] } = useHotCues(trackAId);
   const { data: hotCuesB = [] } = useHotCues(trackBId);
   // Dimmed bands so hot cues / beatgrid pop in the editor rows (issue 05).

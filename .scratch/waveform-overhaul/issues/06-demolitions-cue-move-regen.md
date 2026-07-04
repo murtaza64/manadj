@@ -1,6 +1,6 @@
 # 06 — demolitions, Main cue move, full-library regeneration
 
-Status: ready-for-agent
+Status: resolved (wfproto lane, 2026-07-04 — post-landing steps below)
 
 ## Parent
 
@@ -33,3 +33,27 @@ duration + cue time), or retire the diagnostic view.
 ## Blocked by
 
 - `04-full-parity-all-surfaces.md`
+
+## Comments
+
+**2026-07-04 (wfproto lane, change `rqwtvtsu`)** — Implemented. Migration `0011_rqwtvtsu`:
+`tracks.cue_point_time` added + values copied from waveform rows; `low/mid/high_peaks_json`,
+`png_path`, `cue_point_time` dropped from waveforms (batch mode). `create_waveform` is
+blob-only (no librosa anywhere — `waveform_utils.py` deleted); cue endpoints/sync paths
+(`apply.import_maincue`, `bulk`, `sync_status.aggregator`) read/write the Track; the
+"track has no waveform row" 409 for Main-cue import is gone (cue no longer needs one) —
+`maincue_no_waveform` retained in the bulk report shape but is always 0. PNG static mount
+removed; `populate_waveforms.py` deleted (task-sweep backfill covers it);
+`invalidate_waveforms.py` simplified. Frontend: legacy waveform JSON types + `api.waveforms.get`
+deleted; `Track.cue_point_time` exposed through schemas + types; DeckContext reads the saved
+cue from the Track row and patches loaded tracks on cue-set; **PerfDiffViewer converted** to
+`toThreeBands()` over the blob (resolving the issue-04 deviation — no JSON consumers remain).
+Sandbox verified: migration ran on startup, cue PATCH round-trips to tracks, blob endpoint
+healthy, **DB 5.0 GB → 225 MB after VACUUM**. 452 pytest / 197 vitest / tsc / build green.
+
+**Post-landing steps (default workspace, real DB)**:
+1. Start the backend once — auto-migrate runs 0010+0011; the startup sweep enqueues blob
+   generation for all ~992 tracks (~5 min; waveform lanes 404 until each blob lands).
+2. `sqlite3 data/library.db "VACUUM;"` — the dropped JSON pages don't shrink the file
+   until vacuumed (5.0 GB → ~225 MB).
+3. `rm -rf waveforms/` — the orphaned PNG directory.

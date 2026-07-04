@@ -59,10 +59,11 @@ def make_client(db: Session):
 
 
 def add_waveform(db: Session, track_id: int, cue_time: float | None = None) -> None:
+    """Seed a waveform row; the Main cue lives on the Track (issue 06)."""
     db.add(Waveform(track_id=track_id, sample_rate=44100, duration=180.0,
-                    samples_per_peak=1024, low_peaks_json="[]",
-                    mid_peaks_json="[]", high_peaks_json="[]",
-                    cue_point_time=cue_time))
+                    samples_per_peak=1024))
+    if cue_time is not None:
+        db.query(Track).filter(Track.id == track_id).update({"cue_point_time": cue_time})
     db.commit()
 
 
@@ -84,7 +85,8 @@ class TestAutomaticTier:
         assert result["pending"] == []
         assert db.query(HotCue).filter_by(track_id=t.id).count() == 2
         assert db.query(Beatgrid).filter_by(track_id=t.id).one().origin == "imported"
-        assert db.query(Waveform).filter_by(track_id=t.id).one().cue_point_time == 15.25
+        db.expire_all()
+        assert db.query(Track).filter_by(id=t.id).one().cue_point_time == 15.25
         db.expire_all()
         assert db.query(Track).get(t.id).key == 7
 
@@ -118,7 +120,8 @@ class TestAutomaticTier:
         # nothing changed
         assert db.query(HotCue).filter_by(track_id=t.id).count() == 1
         assert db.query(Beatgrid).filter_by(track_id=t.id).one().origin == "edited"
-        assert db.query(Waveform).filter_by(track_id=t.id).one().cue_point_time == 99.0
+        db.expire_all()
+        assert db.query(Track).filter_by(id=t.id).one().cue_point_time == 99.0
 
     def test_in_sync_fields_neither_applied_nor_pending(self, db, make_track, make_client):
         t = make_track(filename="/m/a.mp3", key=7)
@@ -136,12 +139,13 @@ class TestAutomaticTier:
         assert result["applied"] == {"hotcues": 0, "beatgrid": 0, "maincue": 0, "key": 0}
         assert result["pending"] == []
 
-    def test_maincue_without_waveform_row_reported_not_dropped(self, db, make_track, make_client):
+    def test_maincue_applies_without_waveform_row(self, db, make_track, make_client):
+        # The Main cue lives on the Track (issue 06): no waveform row needed.
         t = make_track(filename="/m/a.mp3")  # no waveform row
         client = make_client(FakeEnginePerformanceSource({"/m/a.mp3": ENGINE_FULL}))
         result = bulk(client, track_ids=[t.id])
-        assert result["applied"]["maincue"] == 0
-        assert result["maincue_no_waveform"] == 1
+        assert result["applied"]["maincue"] == 1
+        assert result["maincue_no_waveform"] == 0
 
     def test_unmatched_tracks_are_skipped(self, db, make_track, make_client):
         t = make_track(filename="/m/nowhere.mp3")
@@ -202,7 +206,8 @@ class TestConfirmTier:
         assert db.query(Beatgrid).filter_by(track_id=t.id).one().origin == "imported"
         db.expire_all()
         assert db.query(Track).get(t.id).key == 7
-        assert db.query(Waveform).filter_by(track_id=t.id).one().cue_point_time == 99.0
+        db.expire_all()
+        assert db.query(Track).filter_by(id=t.id).one().cue_point_time == 99.0
 
     def test_hotcue_overwrite_modes(self, db, make_track, make_client):
         t = self._saved_track(db, make_track)

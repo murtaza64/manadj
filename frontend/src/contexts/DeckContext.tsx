@@ -10,7 +10,7 @@ import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
-import type { BeatgridResponse, Track, WaveformResponse } from '../types';
+import type { BeatgridResponse, Track } from '../types';
 
 const DECK_IDS = ['A', 'B'] as const;
 
@@ -87,29 +87,21 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     (deck: ChannelId, track: Track) => {
       setLoadedTracks((prev) => ({ ...prev, [deck]: track }));
 
-      // Saved cue + first beat, fetched concurrently with the audio through
-      // the same query cache the waveform/beatgrid components use (usually
-      // already warm). The engine awaits this after decode; failures fall
-      // through the cue-default precedence. Superseded loads are handled by
-      // the engine's own abort.
+      // Saved cue comes with the Track row itself (the Main cue lives on the
+      // Track); the first beat is fetched through the same query cache the
+      // beatgrid components use (usually already warm). The engine awaits
+      // this after decode; failures fall through the cue-default precedence.
       const cueDefaults = (async () => {
-        const [wf, bg] = await Promise.allSettled([
-          queryClient.fetchQuery<WaveformResponse>({
-            queryKey: ['waveform', track.id],
-            queryFn: () => api.waveforms.get(track.id),
-            staleTime: Infinity,
-            retry: false,
-          }),
+        const bg = await Promise.allSettled([
           queryClient.fetchQuery<BeatgridResponse>({
             queryKey: ['beatgrid', track.id],
             queryFn: () => api.beatgrids.get(track.id),
             staleTime: Infinity,
             retry: false,
           }),
-        ]);
+        ]).then(([r]) => r);
         return {
-          savedCuePoint:
-            wf.status === 'fulfilled' ? (wf.value.data.cue_point_time ?? null) : null,
+          savedCuePoint: track.cue_point_time ?? null,
           firstBeatTime:
             bg.status === 'fulfilled' ? (bg.value.data.beat_times[0] ?? null) : null,
         };
@@ -166,21 +158,25 @@ export function DeckProvider({ children }: { children: ReactNode }) {
 
   // Persist user-set cues (an engine fires this only for deliberate cue
   // sets, never for load defaults, and reports its own loaded trackId) and
-  // keep the cached waveform's cue in sync without refetching band data.
+  // keep the loaded Track objects' cue in sync.
   useEffect(() => {
     for (const deck of DECK_IDS) {
       engines[deck].setCueSetHandler((trackId, timeSeconds) => {
-        void api.waveforms.updateCuePoint(trackId, timeSeconds).then(() => {
-          queryClient.setQueryData<WaveformResponse>(['waveform', trackId], (old) =>
-            old ? { ...old, data: { ...old.data, cue_point_time: timeSeconds } } : old
-          );
+        void api.waveforms.updateCuePoint(trackId, timeSeconds);
+        setLoadedTracks((prev) => {
+          const next = { ...prev };
+          for (const d of DECK_IDS) {
+            const t = next[d];
+            if (t && t.id === trackId) next[d] = { ...t, cue_point_time: timeSeconds };
+          }
+          return next;
         });
       });
     }
     return () => {
       for (const deck of DECK_IDS) engines[deck].setCueSetHandler(null);
     };
-  }, [engines, queryClient]);
+  }, [engines]);
 
   // Per-deck loadTrack functions stay identity-stable across state changes
   // (memoized rows key their re-renders on them).

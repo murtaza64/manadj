@@ -21,6 +21,9 @@ class Track(Base):
     key = Column(Integer, nullable=True)  # Engine DJ key ID (0-23)
     bpm = Column(Integer, nullable=True)  # Beats per minute
     duration_secs = Column(Float, nullable=True)  # audio duration, read from the file
+    # Main cue (seconds) — performance data, lives with the Track (moved off
+    # the waveform row in waveform-overhaul issue 06).
+    cue_point_time = Column(Float, nullable=True)
     codec = Column(String, nullable=True)  # mp3/aac/alac/flac/pcm, from the file
     bitrate_kbps = Column(Integer, nullable=True)  # from the file
     filesize_bytes = Column(Integer, nullable=True)  # from the file
@@ -32,6 +35,8 @@ class Track(Base):
 
 
 class Waveform(Base):
+    """Waveform data (ADR 0014): one style-agnostic analysis blob per Track."""
+
     __tablename__ = "waveforms"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -39,14 +44,9 @@ class Waveform(Base):
     sample_rate = Column(Integer, nullable=False)
     duration = Column(Float, nullable=False)
     samples_per_peak = Column(Integer, nullable=False)
-    low_peaks_json = Column(Text, nullable=False)  # JSON array for low frequency band (20-250Hz)
-    mid_peaks_json = Column(Text, nullable=False)  # JSON array for mid frequency band (250-4000Hz)
-    high_peaks_json = Column(Text, nullable=False)  # JSON array for high frequency band (4000-20000Hz)
-    png_path = Column(String, nullable=True)  # Relative path to PNG waveform file
     # Waveform data v2 blob (ADR 0014). Deferred: multi-hundred-KB per row —
     # never load it via relationship traversal (see the 21s sync-status incident).
     data_blob = deferred(Column(LargeBinary, nullable=True))
-    cue_point_time = Column(Float, nullable=True)  # CUE point in seconds
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

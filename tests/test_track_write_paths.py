@@ -51,9 +51,6 @@ class TestBeatgridUnits:
                 sample_rate=44100,
                 duration=60.0,
                 samples_per_peak=512,
-                low_peaks_json="[]",
-                mid_peaks_json="[]",
-                high_peaks_json="[]",
             )
         )
         db.commit()

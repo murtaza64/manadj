@@ -96,17 +96,17 @@ def import_maincue(
     mode: SingleValueImportMode,
 ) -> dict[str, bool | str | None]:
     """Import Engine's user-set Main cue onto a Library track, through the
-    normal persistence home (the waveform's cue point) so an imported cue
+    normal persistence home (the Track's cue point) so an imported cue
     behaves exactly like one set on a Deck.
 
-    Raises ValueError when the track has no waveform row to persist onto.
+    Raises ValueError when the track does not exist.
     """
-    waveform = crud.get_waveform(db, track_id)
-    if waveform is None:
-        raise ValueError("Track has no waveform; the Main cue has nowhere to live yet")
-    if mode == "fill-empty" and waveform.cue_point_time is not None:
+    track = crud.get_track(db, track_id)
+    if track is None:
+        raise ValueError("Track not found; the Main cue has nowhere to live")
+    if mode == "fill-empty" and track.cue_point_time is not None:
         return {"imported": False, "reason": "saved main cue present"}
 
-    waveform.cue_point_time = maincue
+    track.cue_point_time = maincue
     db.commit()
     return {"imported": True, "reason": None}
