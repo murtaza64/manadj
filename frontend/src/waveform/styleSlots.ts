@@ -26,9 +26,10 @@ const STORAGE_VERSION = 1;
 export function defaultSlots(): StyleSlots {
   return {
     full: { styleId: DEFAULT_STYLE_ID, params: { ...DEFAULT_PARAMS } },
-    // Minimap: markers are full-height bars, headroom matters less, and the
-    // strip is short — run near full scale by default.
-    minimap: { styleId: DEFAULT_STYLE_ID, params: { ...DEFAULT_PARAMS, master: 1.0 } },
+    // Minimap: markers are full-height bars (headroom irrelevant) and the
+    // strip is short — scale up hard so structure reads at a glance; kicks
+    // clipping at the top is fine in an overview strip.
+    minimap: { styleId: DEFAULT_STYLE_ID, params: { ...DEFAULT_PARAMS, master: 2.0 } },
   };
 }
 
