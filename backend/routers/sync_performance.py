@@ -11,6 +11,8 @@ from backend import crud, models
 from backend.database import get_db
 from backend.sync_performance import (
     EnginePerformanceSource,
+    OverwriteInstruction,
+    bulk_import,
     import_beatgrid,
     import_hotcues,
     import_maincue,
@@ -86,6 +88,38 @@ def import_beatgrid_endpoint(
             detail="Track not matched in Engine DJ, or it has no beatgrid there",
         )
     return import_beatgrid(db, track.id, fields.beatgrid, request.mode)
+
+
+class BulkOverwrite(BaseModel):
+    track_id: int
+    field: Literal["hotcues", "beatgrid", "maincue", "key"]
+    mode: Literal["fill-empty", "replace-all"] | None = None  # hotcues only
+
+
+class BulkImportRequest(BaseModel):
+    track_ids: list[int] | None = None  # None = the whole Library
+    overwrites: list[BulkOverwrite] = []
+
+
+@router.post("/bulk-import")
+def bulk_import_endpoint(
+    request: BulkImportRequest,
+    db: Session = Depends(get_db),
+    source: EnginePerformanceSource = Depends(get_engine_performance_source),
+):
+    """Bulk performance-data import: the automatic tier fills blanks; every
+    overwrite of saved info comes back as a pending item and is only applied
+    when listed in `overwrites`."""
+    result = bulk_import(
+        db,
+        source,
+        request.track_ids,
+        [
+            OverwriteInstruction(track_id=o.track_id, field=o.field, mode=o.mode)
+            for o in request.overwrites
+        ],
+    )
+    return result
 
 
 @router.post("/maincue/import")

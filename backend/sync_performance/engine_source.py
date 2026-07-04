@@ -8,7 +8,7 @@ exception — one corrupt blob must not take down a whole status computation.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from enginedj.performance_blobs import (
@@ -30,11 +30,16 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class EnginePerformanceFields:
     """Engine's performance data for one track, in Library shapes.
-    Any member may be None: that field isn't usably present there."""
+    Any member may be None: that field isn't usably present there.
+
+    `key` is Track-row data, not blob data — it rides the performance-data
+    bundle per the PRD (Engine's key analysis is trusted) while staying an
+    ordinary Track attribute everywhere else."""
 
     hotcues: list[HotCueValue] | None
     beatgrid: BeatgridValue | None
     maincue: float | None  # seconds; None unless Engine's overridden flag is set
+    key: int | None = None  # canonical Engine key ID (0-23)
 
 
 def performance_fields_from_blobs(
@@ -137,6 +142,7 @@ class _EngineEntry:
     path: str
     beat_blob: bytes | None
     cues_blob: bytes | None
+    key: int | None
 
 
 class EnginePerformanceSource:
@@ -176,6 +182,7 @@ class EnginePerformanceSource:
                             path=path,
                             beat_blob=perf.beatData if perf else None,
                             cues_blob=perf.quickCues if perf else None,
+                            key=t.key,
                         )
                     )
             self._index = TrackIndex.build(entries, lambda e: e.path)
@@ -187,4 +194,8 @@ class EnginePerformanceSource:
         entry = self._load().match(filename)
         if entry is None:
             return None
-        return performance_fields_from_blobs(entry.beat_blob, entry.cues_blob)
+        fields = performance_fields_from_blobs(entry.beat_blob, entry.cues_blob)
+        if fields is None and entry.key is None:
+            return None
+        base = fields or EnginePerformanceFields(hotcues=None, beatgrid=None, maincue=None)
+        return replace(base, key=entry.key)

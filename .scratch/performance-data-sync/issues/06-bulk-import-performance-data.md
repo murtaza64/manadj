@@ -32,3 +32,7 @@ Key rides the bundle but keeps its existing scalar divergence semantics everywhe
 
 - 04-hotcue-divergence-and-import
 - 05-beatgrid-maincue-divergence-and-import
+
+## Comments
+
+**2026-07-04 — Done** (jj change `xxsvrstl`, workspace perfdata). `POST /api/sync/performance/bulk-import` (`backend/sync_performance/bulk.py`): automatic fill-empty tier + pending overwrite items, applied only when listed in `overwrites` (hotcues carry a fill-empty/replace-all mode). Key rides the bundle via `EnginePerformanceFields.key` (Engine Track row) while staying an ordinary Track attribute. Comparison helpers extracted to `backend/sync_status/compare.py` (shared by aggregator + bulk). UI: group action on the div-perf inbox, whole-library button in maintenance, per-row "this track" action, and a `BulkConfirmPanel` (checkboxes, per-item hotcue mode select, variable-grid ⚠). Script `scripts/import/engine_performance_data.py` deleted. 11 router-seam tests. Sandbox real-library rehearsal: 990/992 matched in 3.2s; auto tier filled 60 grids / 228 main cues / 471 keys; 23 overwrites pending; re-run idempotent (0 applied, pending stable).

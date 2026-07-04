@@ -108,6 +108,20 @@
   background: transparent; color: #ff2d55; border: 1px dashed #ff2d55aa; text-decoration: line-through;
 }
 .uts-tagchip-extra-here { background: #ff950018; color: #ff9500; border: 1px solid #ff950066; }
+.uts-bulk-panel { flex-direction: column; align-items: stretch; }
+.uts-bulk-head { display: flex; align-items: center; gap: 12px; }
+.uts-bulk-list { max-height: 40vh; overflow-y: auto; margin: 8px 0; }
+.uts-bulk-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.uts-bulk-track { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32ch; }
+.uts-bulk-detail { opacity: 0.85; }
+.uts-bulk-actions { display: flex; gap: 8px; }
 .uts-cuedot {
   display: inline-block;
   width: 8px;

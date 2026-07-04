@@ -7,6 +7,7 @@ Main cue) crossing the Engine boundary into the Library.
 """
 
 from .apply import import_beatgrid, import_hotcues, import_maincue
+from .bulk import BulkResult, OverwriteInstruction, bulk_import
 from .engine_source import (
     EnginePerformanceFields,
     EnginePerformanceSource,
@@ -14,8 +15,11 @@ from .engine_source import (
 )
 
 __all__ = [
+    "BulkResult",
     "EnginePerformanceFields",
     "EnginePerformanceSource",
+    "OverwriteInstruction",
+    "bulk_import",
     "import_beatgrid",
     "import_hotcues",
     "import_maincue",

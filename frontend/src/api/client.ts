@@ -560,6 +560,34 @@ export const api = {
       return res.json();
     },
 
+    /** Bulk import: the automatic tier fills blanks (cues/grid/main cue/key);
+     * overwrites of saved info come back as pending items and only apply when
+     * listed in `overwrites` on a follow-up call. */
+    bulkImport: async (request: {
+      track_ids: number[] | null;
+      overwrites?: { track_id: number; field: string; mode?: 'fill-empty' | 'replace-all' }[];
+    }): Promise<{
+      scanned: number;
+      matched: number;
+      applied: { hotcues: number; beatgrid: number; maincue: number; key: number };
+      pending: {
+        track_id: number;
+        title: string | null;
+        artist: string | null;
+        field: string;
+        detail: string;
+        variable: boolean | null;
+      }[];
+    }> => {
+      const res = await fetch(`${API_BASE}/sync/performance/bulk-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) throw new Error('Failed to bulk-import performance data from Engine DJ');
+      return res.json();
+    },
+
     /** Import Engine's user-set Main cue through the normal cue persistence
      * path. "fill-empty" only when unset; "replace" is the confirmed overwrite. */
     importMaincue: async (request: {

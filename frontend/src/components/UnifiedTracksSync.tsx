@@ -48,6 +48,15 @@ interface BeatgridVal {
 type PerfField = 'hotcues' | 'beatgrid' | 'maincue';
 type PerfImportMode = 'fill-empty' | 'replace-all' | 'replace';
 
+interface BulkPendingItem {
+  track_id: number;
+  title: string | null;
+  artist: string | null;
+  field: string;
+  detail: string;
+  variable: boolean | null;
+}
+
 interface StatusRow {
   path: string;
   title: string | null;
@@ -143,6 +152,7 @@ export function UnifiedTracksSync() {
     new Set(GROUPS.filter((g) => g.collapsedByDefault).map((g) => g.key)),
   );
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [bulkPanel, setBulkPanel] = useState<BulkPendingItem[] | null>(null);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sync-status'] });
   const done = (msg: string) => {
@@ -217,6 +227,30 @@ export function UnifiedTracksSync() {
     onSuccess: (msg) => done(msg),
     onError: failed,
   });
+  const bulkImportPerf = useMutation({
+    mutationFn: (body: {
+      track_ids: number[] | null;
+      overwrites?: { track_id: number; field: string; mode?: 'fill-empty' | 'replace-all' }[];
+    }) => api.syncPerformance.bulkImport(body),
+    onSuccess: (r, vars) => {
+      const total = r.applied.hotcues + r.applied.beatgrid + r.applied.maincue + r.applied.key;
+      const wasConfirmStep = (vars.overwrites?.length ?? 0) > 0;
+      if (r.pending.length > 0 && !wasConfirmStep) {
+        // automatic tier done; saved info needs per-item confirmation
+        setNotice(
+          `Filled ${total} blank field${total === 1 ? '' : 's'} from Engine ` +
+          `(${r.matched}/${r.scanned} tracks matched); ` +
+          `${r.pending.length} overwrite${r.pending.length === 1 ? '' : 's'} awaiting confirmation below`,
+        );
+        setBulkPanel(r.pending);
+        refresh();
+      } else {
+        setBulkPanel(null);
+        done(`Imported ${total} field${total === 1 ? '' : 's'} from Engine`);
+      }
+    },
+    onError: failed,
+  });
   const exportRowToDisk = useMutation({
     mutationFn: (row: StatusRow) => {
       // mirrors the Export rule (CONTEXT.md): empty Library values are
@@ -252,8 +286,8 @@ export function UnifiedTracksSync() {
 
   const busy =
     generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
-    importField.isPending || importPerf.isPending || exportRowToDisk.isPending ||
-    exportTags.isPending || rebuildTagTree.isPending;
+    importField.isPending || importPerf.isPending || bulkImportPerf.isPending ||
+    exportRowToDisk.isPending || exportTags.isPending || rebuildTagTree.isPending;
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const attention = useMemo(() => rows.filter((r) => r.status !== 'in-sync'), [rows]);
@@ -352,6 +386,24 @@ export function UnifiedTracksSync() {
         </span>
       );
     }
+    if (key === 'div-perf') {
+      // fill-empty tier needs no confirmation (PRD); overwrites come back
+      // as the confirm panel
+      return (
+        <span className="uts-group-actions">
+          <button
+            className="uts-btn"
+            onClick={() =>
+              bulkImportPerf.mutate({
+                track_ids: list.map((r) => r.track_id!).filter((id) => id !== null),
+              })
+            }
+          >
+            Import performance data ← Engine
+          </button>
+        </span>
+      );
+    }
     if (key === 'unimported' && selectedHere.length > 0) {
       return (
         <span className="uts-group-actions">
@@ -411,6 +463,19 @@ export function UnifiedTracksSync() {
         </div>
       )}
       {notice && <div className="uts-notice" onClick={() => setNotice(null)}>{notice} ✕</div>}
+      {bulkPanel && (
+        <BulkConfirmPanel
+          items={bulkPanel}
+          busy={busy}
+          onCancel={() => setBulkPanel(null)}
+          onApply={(overwrites) =>
+            bulkImportPerf.mutate({
+              track_ids: [...new Set(overwrites.map((o) => o.track_id))],
+              overwrites,
+            })
+          }
+        />
+      )}
 
       {GROUPS.filter((g) => (!filter || filter === g.key) && groupRows(g.key).length > 0).map((g) => {
         const list = groupRows(g.key);
@@ -478,6 +543,7 @@ export function UnifiedTracksSync() {
                     run,
                   });
                 }}
+                onBulkImportPerf={() => bulkImportPerf.mutate({ track_ids: [row.track_id!] })}
                 onExportToDisk={() => exportRowToDisk.mutate(row)}
                 surfacesAvailable={data.surfaces_available}
               />
@@ -502,6 +568,13 @@ export function UnifiedTracksSync() {
       <div className="uts-maintenance">
         <button
           className="uts-btn uts-btn-ghost"
+          onClick={() => bulkImportPerf.mutate({ track_ids: null })}
+          title="Fills blanks (hot cues, beatgrids, main cues, keys) from Engine across the whole Library; overwrites of saved info will ask first"
+        >
+          Import performance data ← Engine (whole library)
+        </button>
+        <button
+          className="uts-btn uts-btn-ghost"
           onClick={() =>
             setPending({
               scope: 'Rebuild the Engine "manaDJ Tags" playlist tree from scratch',
@@ -518,6 +591,82 @@ export function UnifiedTracksSync() {
 }
 
 // ------------------------------------------------------------------- pieces
+
+/** The confirm tier of the bulk performance-data import: every item is an
+ * overwrite of saved info — nothing here applies without being checked. */
+function BulkConfirmPanel({ items, busy, onApply, onCancel }: {
+  items: BulkPendingItem[];
+  busy: boolean;
+  onApply: (overwrites: { track_id: number; field: string; mode?: 'fill-empty' | 'replace-all' }[]) => void;
+  onCancel: () => void;
+}) {
+  const [checked, setChecked] = useState<Set<number>>(new Set(items.map((_, i) => i)));
+  const [cueModes, setCueModes] = useState<Record<number, 'fill-empty' | 'replace-all'>>({});
+
+  const toggle = (i: number) => {
+    const next = new Set(checked);
+    if (next.has(i)) { next.delete(i); } else { next.add(i); }
+    setChecked(next);
+  };
+  const allChecked = checked.size === items.length;
+
+  return (
+    <div className="uts-pending uts-bulk-panel">
+      <div className="uts-bulk-head">
+        <b>{items.length} overwrite{items.length === 1 ? '' : 's'} of saved info — confirm to apply</b>
+        <button
+          className="uts-microbtn"
+          onClick={() => setChecked(allChecked ? new Set() : new Set(items.map((_, i) => i)))}
+        >
+          {allChecked ? 'select none' : 'select all'}
+        </button>
+      </div>
+      <div className="uts-bulk-list">
+        {items.map((item, i) => (
+          <label key={`${item.track_id}-${item.field}`} className="uts-bulk-item">
+            <input type="checkbox" checked={checked.has(i)} onChange={() => toggle(i)} />
+            <span className="uts-bulk-track">{item.title || `#${item.track_id}`}{item.artist ? ` — ${item.artist}` : ''}</span>
+            <code>{item.field}</code>
+            <span className="uts-bulk-detail">
+              {item.detail}
+              {item.variable && (
+                <span title="manadj rendering honors only the first tempo change for now"> ⚠</span>
+              )}
+            </span>
+            {item.field === 'hotcues' && checked.has(i) && (
+              <select
+                value={cueModes[i] ?? 'fill-empty'}
+                onChange={(e) => setCueModes({ ...cueModes, [i]: e.target.value as 'fill-empty' | 'replace-all' })}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <option value="fill-empty">fill empty slots</option>
+                <option value="replace-all">replace all</option>
+              </select>
+            )}
+          </label>
+        ))}
+      </div>
+      <div className="uts-bulk-actions">
+        <button
+          className="uts-btn"
+          disabled={busy || checked.size === 0}
+          onClick={() =>
+            onApply(
+              [...checked].map((i) => ({
+                track_id: items[i].track_id,
+                field: items[i].field,
+                ...(items[i].field === 'hotcues' ? { mode: cueModes[i] ?? 'fill-empty' } : {}),
+              })),
+            )
+          }
+        >
+          Apply {checked.size} overwrite{checked.size === 1 ? '' : 's'}
+        </button>
+        <button className="uts-btn uts-btn-ghost" onClick={onCancel}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
 
 function PresenceBadges({ row, available }: { row: StatusRow; available: SurfaceId[] }) {
   return (
@@ -541,7 +690,7 @@ function PresenceBadges({ row, available }: { row: StatusRow; available: Surface
   );
 }
 
-function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onExportToDisk, surfacesAvailable }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onBulkImportPerf, onExportToDisk, surfacesAvailable }: {
   row: StatusRow;
   surfacesAvailable: SurfaceId[];
   selectable: boolean;
@@ -551,6 +700,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   onToggleExpand: () => void;
   onImportField: (field: string, value: unknown) => void;
   onImportPerf: (field: PerfField, mode: PerfImportMode) => void;
+  onBulkImportPerf: () => void;
   onExportToDisk: () => void;
 }) {
   const expandable = row.diverged.length > 0;
@@ -590,6 +740,12 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
         <div className="uts-expand">
           <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} />
           <div className="uts-expand-actions">
+            {row.track_id !== null &&
+              row.diverged.some((d) => ['hotcues', 'beatgrid', 'maincue', 'key'].includes(d.field)) && (
+              <button className="uts-btn" onClick={onBulkImportPerf} title="Fills blanks automatically; overwrites of saved info will ask first">
+                Import performance data ← Engine (this track)
+              </button>
+            )}
             {row.diverged.some((d) => !d.no_overwrite && 'disk' in d.surface_values) && (
               <button className="uts-btn" onClick={onExportToDisk}>Export fields → Disk</button>
             )}

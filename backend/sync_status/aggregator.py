@@ -7,7 +7,6 @@ This seam is a read-only down payment on the ExternalLibrary seam
 (architecture review candidate 3).
 """
 
-import json
 from pathlib import Path
 from typing import Mapping, Protocol
 
@@ -17,27 +16,26 @@ from backend import models
 from backend.sync_common.matching import TrackIndex
 from backend.track_metadata.units import centibpm_to_bpm
 
+from .compare import (
+    HOTCUE_TIME_TOLERANCE,
+    beatgrid_value_from_row,
+    beatgrids_equal,
+    hotcue_sets_equal,
+    hotcue_values_from_rows,
+)
 from .models import (
     EXTERNAL_LIBRARY_IDS,
     SCALAR_FIELDS,
     SURFACE_IDS,
-    BeatgridValue,
     FieldDivergence,
-    HotCueValue,
     RowStatus,
     SurfaceTrackRef,
     SyncStatusResult,
     SyncStatusRow,
-    TempoChangeValue,
     TrackFields,
 )
 
 BPM_TOLERANCE = 0.01
-# Cue positions compared across Surfaces come from different encodings
-# (Engine: samples at the blob's rate; manadj: seconds) — call them equal
-# within a millisecond. Tunable. Main cue and beatgrid offsets share it.
-HOTCUE_TIME_TOLERANCE = 0.001
-BEATGRID_BPM_TOLERANCE = 0.01
 
 
 class SurfaceReader(Protocol):
@@ -106,36 +104,9 @@ def _library_fields(track: models.Track, maincue: float | None) -> TrackFields:
         bpm=centibpm_to_bpm(track.bpm),
         energy=track.energy,
         tags=sorted(tt.tag.name for tt in track.track_tags),
-        hotcues=[
-            HotCueValue(
-                slot=hc.slot_number,
-                time=hc.time_seconds,
-                label=hc.label or None,
-                color=hc.color.upper() if hc.color else None,
-            )
-            for hc in sorted(track.hotcues, key=lambda hc: hc.slot_number)
-        ],
-        beatgrid=_library_beatgrid(track),
+        hotcues=hotcue_values_from_rows(track.hotcues),
+        beatgrid=beatgrid_value_from_row(track.beatgrid),
         maincue=maincue,
-    )
-
-
-def _library_beatgrid(track: models.Track) -> BeatgridValue | None:
-    """The Library's saved grid — a generated placeholder is not saved info
-    (glossary: "placeholder grid") and reads as absent."""
-    grid = track.beatgrid
-    if grid is None or grid.origin == "generated":
-        return None
-    changes = json.loads(grid.tempo_changes_json)
-    return BeatgridValue(
-        tempo_changes=[
-            TempoChangeValue(
-                start_time=tc["start_time"],
-                bpm=tc["bpm"],
-                bar_position=tc.get("bar_position", 1),
-            )
-            for tc in changes
-        ]
     )
 
 
@@ -218,7 +189,7 @@ def _collect_divergences(
     # hotcues: whole-set comparison (glossary "Diverged"). None means the
     # surface doesn't carry cues for this track — not a divergence.
     if "hotcues" in reader.fields and surface.hotcues is not None:
-        if not _hotcue_sets_equal(lib.hotcues or [], surface.hotcues):
+        if not hotcue_sets_equal(lib.hotcues or [], surface.hotcues):
             _record_divergence(
                 sid, reader, "hotcues", lib.hotcues or [], surface.hotcues, diverged, warnings
             )
@@ -226,7 +197,7 @@ def _collect_divergences(
     # beatgrid: structural comparison; surface None (no grid there) is not a
     # divergence, and the Library's placeholder already reads as None.
     if "beatgrid" in reader.fields and surface.beatgrid is not None:
-        if not _beatgrids_equal(lib.beatgrid, surface.beatgrid):
+        if not beatgrids_equal(lib.beatgrid, surface.beatgrid):
             _record_divergence(
                 sid, reader, "beatgrid", lib.beatgrid, surface.beatgrid, diverged, warnings
             )
@@ -278,41 +249,6 @@ def _values_equal(fname: str, a: object, b: object) -> bool:
     # a surface with no value where the library also has none is agreement;
     # asymmetric emptiness is a divergence (handled by caller via _record)
     return a == b
-
-
-def _beatgrids_equal(a: BeatgridValue | None, b: BeatgridValue) -> bool:
-    """Structural equality: same tempo-change count, each change agreeing on
-    start time (cue tolerance), BPM (epsilon), and bar position."""
-    if a is None:
-        return False
-    if len(a.tempo_changes) != len(b.tempo_changes):
-        return False
-    for tc_a, tc_b in zip(a.tempo_changes, b.tempo_changes):
-        if abs(tc_a.start_time - tc_b.start_time) > HOTCUE_TIME_TOLERANCE:
-            return False
-        if abs(tc_a.bpm - tc_b.bpm) > BEATGRID_BPM_TOLERANCE:
-            return False
-        if tc_a.bar_position != tc_b.bar_position:
-            return False
-    return True
-
-
-def _hotcue_sets_equal(a: list[HotCueValue], b: list[HotCueValue]) -> bool:
-    """Whole-set equality: same slots, and per slot the time agrees within
-    tolerance, label agrees (None-normalized), color agrees (case folded)."""
-    by_slot_a = {c.slot: c for c in a}
-    by_slot_b = {c.slot: c for c in b}
-    if by_slot_a.keys() != by_slot_b.keys():
-        return False
-    for slot, cue_a in by_slot_a.items():
-        cue_b = by_slot_b[slot]
-        if abs(cue_a.time - cue_b.time) > HOTCUE_TIME_TOLERANCE:
-            return False
-        if (cue_a.label or None) != (cue_b.label or None):
-            return False
-        if (cue_a.color or "").upper() != (cue_b.color or "").upper():
-            return False
-    return True
 
 
 # ---------------------------------------------------------------- orphan rows
