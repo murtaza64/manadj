@@ -1,6 +1,8 @@
 # 03 — Transition templates: beat-domain recipes
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change qnxmltss — eye/ear-verify:
+apply a saved template to a cued pair, the save modal's anchor defaults,
+fallback notices, and the widened editor tempo-match on an extreme pair)
 Blocked by: nothing (01 and 26 both done).
 
 ## Parent

@@ -646,3 +646,227 @@
   cursor: pointer;
   font-size: 12px;
 }
+
+/* ── Transition templates (issue 03) ─────────────────────────────────── */
+
+.editor-templates {
+  position: relative;
+  display: inline-flex;
+}
+
+.editor-templates-trigger {
+  height: 22px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid var(--surface1, #45475a);
+  color: var(--text, #cdd6f4);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 0 8px;
+}
+
+.editor-templates-trigger:hover,
+.editor-templates-trigger[aria-expanded='true'] {
+  color: var(--sapphire, #74c7ec);
+  border-color: var(--sapphire, #74c7ec);
+}
+
+.editor-templates-panel {
+  position: absolute;
+  top: 24px;
+  left: 0;
+  z-index: 30;
+  min-width: 280px;
+  background: var(--crust, #11111b);
+  border: 1px solid var(--surface1, #45475a);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.editor-templates-empty {
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+}
+
+.editor-templates-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+}
+
+.editor-templates-row button {
+  background: transparent;
+  border: none;
+  color: var(--text, #cdd6f4);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.editor-templates-row button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.editor-templates-row button:hover:not(:disabled) {
+  color: var(--sapphire, #74c7ec);
+}
+
+.editor-templates-name {
+  flex: 1;
+  text-align: left;
+  font-weight: bold;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-templates-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.editor-templates-beats {
+  font-family: monospace;
+  font-size: 10px;
+  color: var(--subtext0, #a6adc8);
+  min-width: 24px;
+  text-align: center;
+}
+
+.editor-templates-apply {
+  color: var(--green, #a6e3a1) !important;
+  font-weight: bold;
+}
+
+.editor-templates-save {
+  margin-top: 2px;
+  border: none;
+  border-top: 1px solid var(--surface1, #45475a);
+  background: transparent;
+  color: var(--sapphire, #74c7ec);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.editor-templates-save:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Apply notices: fallbacks, clamps, extreme tempo match. Click dismisses. */
+.editor-notices {
+  font-size: 11px;
+  color: var(--yellow, #f9e2af);
+  cursor: pointer;
+  padding: 2px 4px;
+  text-align: center;
+}
+
+/* Save-as-template modal (the deliberate act that earns one). */
+.editor-savetpl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.editor-savetpl {
+  background: var(--crust, #11111b);
+  border: 1px solid var(--sapphire, #74c7ec);
+  padding: 14px;
+  min-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text, #cdd6f4);
+}
+
+.editor-savetpl-title {
+  font-weight: bold;
+  color: var(--sapphire, #74c7ec);
+}
+
+.editor-savetpl label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor-savetpl input[type='text'],
+.editor-savetpl input:not([type]),
+.editor-savetpl select {
+  background: var(--mantle, #181825);
+  border: 1px solid var(--surface1, #45475a);
+  color: var(--text, #cdd6f4);
+  font-size: 12px;
+  padding: 3px 6px;
+  flex: 1;
+}
+
+.editor-savetpl-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--surface0, #313244);
+  padding: 6px 8px;
+}
+
+.editor-savetpl-sidehead {
+  font-weight: bold;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-savetpl-delta {
+  font-family: monospace;
+  color: var(--subtext0, #a6adc8);
+  white-space: nowrap;
+}
+
+.editor-savetpl-length {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.editor-savetpl-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.editor-savetpl-actions button {
+  background: transparent;
+  border: 1px solid var(--surface1, #45475a);
+  color: var(--text, #cdd6f4);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.editor-savetpl-confirm {
+  color: var(--green, #a6e3a1) !important;
+  border-color: var(--green, #a6e3a1) !important;
+}
+
+.editor-savetpl-confirm:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

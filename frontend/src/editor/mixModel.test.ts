@@ -3,6 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  EDITOR_PITCH_RANGE_PERCENT,
   arrangementAt,
   bTrackTimeAt,
   evalLane,
@@ -10,6 +11,7 @@ import {
   laneValuesAt,
   slideB,
   slideBToCue,
+  tempoMatchPitch,
   type LanePoint,
   type EditorMix,
   type Transition,
@@ -179,5 +181,26 @@ describe('arrangementAt with negative entry anchor', () => {
     expect(arrangementAt(mix, 0, durations, 1).mixDuration).toBe(100);
     const long = { ...mix, transition: tr({ startSec: 60, durationSec: 20, bInSec: -10 }) };
     expect(arrangementAt(long, 0, durations, 1).mixDuration).toBe(130);
+  });
+});
+
+describe('tempoMatchPitch (editor varispeed)', () => {
+  it('matches B to A within the editor range', () => {
+    expect(tempoMatchPitch(128, 126)).toBeCloseTo((128 / 126 - 1) * 100);
+  });
+
+  it('allows gaps beyond the shared decks\' ±8% (templates 2026-07-04)', () => {
+    // 140 vs 120 needs ~+16.7% — legal in the editor's private player.
+    expect(tempoMatchPitch(140, 120)).toBeCloseTo((140 / 120 - 1) * 100);
+  });
+
+  it('clamps at the editor range', () => {
+    expect(tempoMatchPitch(200, 100)).toBe(EDITOR_PITCH_RANGE_PERCENT);
+    expect(tempoMatchPitch(100, 200)).toBe(-EDITOR_PITCH_RANGE_PERCENT);
+  });
+
+  it('is 0 without both BPMs', () => {
+    expect(tempoMatchPitch(null, 120)).toBe(0);
+    expect(tempoMatchPitch(120, null)).toBe(0);
   });
 });

@@ -198,3 +198,40 @@ describe('view toggles', () => {
     expect(store.getSnapshot().lockedWindow).toBe(true);
   });
 });
+
+describe('stampTemplate (mix-editor 03)', () => {
+  const patch = {
+    tempoMatch: true as const,
+    lanes: { eqLowA: [{ x: 0, y: 0.5 }] },
+    hiddenLanes: [],
+    startSec: 80,
+    durationSec: 32,
+    bInSec: 14.7,
+  };
+
+  it('stamps a pristine session in place, renames it, and arms persistence', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTemplate('bass swap', patch);
+    const s = store.getSnapshot();
+    expect(s.session.items).toHaveLength(1);
+    expect(s.session.items[0].name).toBe('bass swap');
+    expect(s.mix.transition.startSec).toBe(80); // mix follows the stamp
+    vi.runAllTimers();
+    expect(p.saves).toHaveLength(1); // a template apply is a real edit
+    expect(p.saves[0].entry!.items[0].name).toBe('bass swap');
+  });
+
+  it('creates a new take when the active Transition has real edits', () => {
+    const p = fakePersistence({ '1:2': { items: [edited('u1')], active: 0 } });
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTemplate('bass swap', patch);
+    const s = store.getSnapshot();
+    expect(s.session.items).toHaveLength(2);
+    expect(s.session.active).toBe(1);
+    expect(s.session.items[0].name).toBe('drop swap'); // hand-drawn untouched
+    expect(s.session.items[1].name).toBe('bass swap');
+  });
+});

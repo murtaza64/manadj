@@ -333,9 +333,17 @@ export function nearestTime(sorted: number[], t: number): number | null {
   return Math.abs(before - t) <= Math.abs(after - t) ? before : after;
 }
 
-/** Pitch percent to BPM-match B to A, clamped to the deck's ±8% range. */
+/** The editor's private player allows wider varispeed than the shared
+ * decks' hardware-like ±8% (templates decision 2026-07-04): a template
+ * implies tempo-match, and beat alignment should genuinely hold on
+ * extreme pairs — it'll sound rough (the notice says so), but it's real.
+ * Performance-view decks keep tempo.PITCH_RANGE_PERCENT. */
+export const EDITOR_PITCH_RANGE_PERCENT = 25;
+
+/** Pitch percent to BPM-match B to A, clamped to the editor's widened
+ * varispeed range. */
 export function tempoMatchPitch(bpmA: number | null, bpmB: number | null): number {
   if (!bpmA || !bpmB) return 0;
   const percent = (bpmA / bpmB - 1) * 100;
-  return Math.max(-8, Math.min(8, percent));
+  return Math.max(-EDITOR_PITCH_RANGE_PERCENT, Math.min(EDITOR_PITCH_RANGE_PERCENT, percent));
 }

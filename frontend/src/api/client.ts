@@ -20,6 +20,20 @@ import type {
   Classification,
 } from '../types';
 
+/** Wire shape of a Transition template (mix-editor issue 03) — snake_case
+ * anchor-rule columns; `lanes` stays the client's opaque payload. */
+export interface TransitionTemplateWire {
+  uuid: string;
+  name: string;
+  align_a_base: string;
+  align_a_delta_beats: number;
+  align_b_base: string;
+  align_b_delta_beats: number;
+  length_beats: number;
+  scalable: boolean;
+  lanes: Record<string, unknown>;
+}
+
 // Backend URL configuration - can be overridden with VITE_API_URL env var
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_BASE = `${BACKEND_URL}/api`;
@@ -753,6 +767,44 @@ export const api = {
       });
       if (!res.ok) throw new Error('Failed to link track');
       return res.json();
+    },
+  },
+
+  transitionTemplates: {
+    /** All Transition templates, creation-ordered (mix-editor issue 03).
+     * Plain CRUD — templates are explicit saves, unlike Transitions'
+     * autosaved pair-replace. */
+    list: async (): Promise<TransitionTemplateWire[]> => {
+      const res = await fetch(`${API_BASE}/transition-templates`);
+      if (!res.ok) throw new Error('Failed to fetch transition templates');
+      return res.json();
+    },
+
+    create: async (template: TransitionTemplateWire): Promise<TransitionTemplateWire> => {
+      const res = await fetch(`${API_BASE}/transition-templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(template),
+      });
+      if (!res.ok) throw new Error(`Failed to create transition template (${res.status})`);
+      return res.json();
+    },
+
+    update: async (template: TransitionTemplateWire): Promise<TransitionTemplateWire> => {
+      const res = await fetch(`${API_BASE}/transition-templates/${template.uuid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(template),
+      });
+      if (!res.ok) throw new Error(`Failed to update transition template (${res.status})`);
+      return res.json();
+    },
+
+    delete: async (uuid: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/transition-templates/${uuid}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(`Failed to delete transition template (${res.status})`);
     },
   },
 };

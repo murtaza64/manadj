@@ -7,9 +7,10 @@
  * Graduated from prototype 2026-07-04 (ADR 0010; iteration history in
  * .scratch/mix-editor/NOTES.md).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client';
 import { useBeatgridData } from '../hooks/useBeatgridData';
+import { useHotCues } from '../hooks/useHotCues';
 import Library from '../components/Library';
 import type { LibraryBrowseHandle } from '../components/Library';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
@@ -25,22 +26,41 @@ import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
 import { TransitionSwitcher } from './TransitionSwitcher';
+import { TemplatesDropdown } from './TemplatesDropdown';
+import { SaveTemplateModal } from './SaveTemplateModal';
+import type { SaveTemplateResult } from './SaveTemplateModal';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
-import { LANE_IDS, defaultMix, tempoMatchPitch, visibleLaneIds } from './mixModel';
+import { applyTemplate, stripTemplateLanes } from './templateModel';
+import type { TrackSideInfo, TransitionTemplate } from './templateModel';
+import {
+  deleteTemplate,
+  initTemplateStore,
+  saveTemplate,
+  snapshotTemplates,
+  subscribeTemplates,
+} from './templateStore';
+import {
+  EDITOR_PITCH_RANGE_PERCENT,
+  LANE_IDS,
+  defaultMix,
+  tempoMatchPitch,
+  visibleLaneIds,
+} from './mixModel';
 import type { LaneId, Transition } from './mixModel';
 import type { Track } from '../types';
 import './transitionEditor.css';
 
-/** Gate on the transition store's boot load (ADR 0011): the inner editor
- * seeds session state from the snapshot in initializers, so it must not
- * mount before init resolves (one localhost fetch — imperceptible). init
- * never rejects; a dead backend degrades to an empty store. */
+/** Gate on the transition and template stores' boot loads (ADR 0011): the
+ * inner editor seeds session state from the snapshots in initializers, so
+ * it must not mount before init resolves (two localhost fetches —
+ * imperceptible). init never rejects; a dead backend degrades to empty
+ * stores. */
 export default function TransitionEditor() {
   const [storeReady, setStoreReady] = useState(false);
   useEffect(() => {
     let mounted = true;
-    void initTransitionStore().then(() => {
+    void Promise.all([initTransitionStore(), initTemplateStore()]).then(() => {
       if (mounted) setStoreReady(true);
     });
     return () => {
@@ -88,6 +108,24 @@ function TransitionEditorInner() {
 
   const { data: beatgridA } = useBeatgridData(trackA?.id ?? null);
   const { data: beatgridB } = useBeatgridData(trackB?.id ?? null);
+  const { data: hotCuesA = [] } = useHotCues(trackA?.id ?? null);
+  const { data: hotCuesB = [] } = useHotCues(trackB?.id ?? null);
+
+  // What template anchor resolution knows about each side (issue 03).
+  const sideA: TrackSideInfo = useMemo(
+    () => ({
+      beatgrid: beatgridA?.data ?? null,
+      hotCues: hotCuesA.map((c) => ({ slot: c.slot_number, timeSec: c.time_seconds })),
+    }),
+    [beatgridA, hotCuesA]
+  );
+  const sideB: TrackSideInfo = useMemo(
+    () => ({
+      beatgrid: beatgridB?.data ?? null,
+      hotCues: hotCuesB.map((c) => ({ slot: c.slot_number, timeSec: c.time_seconds })),
+    }),
+    [beatgridB, hotCuesB]
+  );
 
   // Grid tempo is the BPM source of truth when a grid exists; track BPM is
   // the fallback (performance-data-sync issue 02).
@@ -327,7 +365,17 @@ function TransitionEditorInner() {
               }}
             />
 
-            <EditorCenterPanel store={store} player={player} />
+            <EditorCenterPanel
+              store={store}
+              player={player}
+              sideA={sideA}
+              sideB={sideB}
+              bpmA={bpmA}
+              bpmB={bpmB}
+              trackATitle={trackA?.title ?? 'A'}
+              trackBTitle={trackB?.title ?? 'B'}
+              pairLoaded={pairKey !== null}
+            />
 
             <DeckCard
               deck="B"
@@ -363,9 +411,30 @@ function TransitionEditorInner() {
 /**
  * Transition controls + switcher: the drag-rate subscriber (reads `mix`),
  * isolated so a lane drag re-renders this small panel and DawTimeline —
- * never the shell (mix-editor 27).
+ * never the shell (mix-editor 27). Also hosts the templates feature
+ * (mix-editor 03): the dropdown, apply notices, and the save modal.
  */
-function EditorCenterPanel({ store, player }: { store: EditorStore; player: MixPlayer }) {
+function EditorCenterPanel({
+  store,
+  player,
+  sideA,
+  sideB,
+  bpmA,
+  bpmB,
+  trackATitle,
+  trackBTitle,
+  pairLoaded,
+}: {
+  store: EditorStore;
+  player: MixPlayer;
+  sideA: TrackSideInfo;
+  sideB: TrackSideInfo;
+  bpmA: number | null;
+  bpmB: number | null;
+  trackATitle: string;
+  trackBTitle: string;
+  pairLoaded: boolean;
+}) {
   // Play-button state rides player/engine emits (transport, loads).
   const [, bump] = useState(0);
   useEffect(() => {
@@ -388,6 +457,70 @@ function EditorCenterPanel({ store, player }: { store: EditorStore; player: MixP
   const setTransitionField = (patch: Partial<Transition>) =>
     store.updateMix((m) => ({ ...m, transition: { ...m.transition, ...patch } }));
 
+  // ── Transition templates (issue 03) ──────────────────────────────────
+
+  const templates = useSyncExternalStore(subscribeTemplates, snapshotTemplates);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  /** One-line notices from template application (fallbacks, clamps,
+   * extreme tempo match). Click dismisses; new applies replace. */
+  const [notices, setNotices] = useState<string[]>([]);
+  useEffect(() => {
+    if (notices.length === 0) return;
+    const t = setTimeout(() => setNotices([]), 10000);
+    return () => clearTimeout(t);
+  }, [notices]);
+
+  /** Apply a template to the loaded pair: resolve the recipe (pure), stamp
+   * it into the session (store — pristine-in-place vs new take is
+   * stampIntoSession's contract), surface the notices. */
+  const applyTemplateToPair = useCallback(
+    (tpl: TransitionTemplate, lengthBeats: number) => {
+      const { patch, notices: applyNotices } = applyTemplate(
+        tpl,
+        { a: sideA, b: sideB },
+        lengthBeats
+      );
+      const gapPct = bpmA && bpmB ? Math.abs((bpmA / bpmB - 1) * 100) : 0;
+      if (gapPct > EDITOR_PITCH_RANGE_PERCENT) {
+        applyNotices.push(
+          `BPM gap exceeds the editor's tempo-match range (±${EDITOR_PITCH_RANGE_PERCENT}%) — beats will drift`
+        );
+      } else if (gapPct > 8) {
+        applyNotices.push('extreme tempo match (>8%) — expect artifacts');
+      }
+      store.stampTemplate(tpl.name, patch);
+      setNotices(applyNotices);
+    },
+    [store, sideA, sideB, bpmA, bpmB]
+  );
+
+  /** Save-from-Transition authoring (the modal asked one question per
+   * side); uuid is fresh — re-saving an edited template is a new row,
+   * management is rename/delete in the dropdown. */
+  const saveCurrentAsTemplate = useCallback(
+    (result: SaveTemplateResult) => {
+      saveTemplate({
+        uuid: crypto.randomUUID(),
+        name: result.name,
+        alignA: result.alignA,
+        alignB: result.alignB,
+        lengthBeats: result.lengthBeats,
+        scalable: result.scalable,
+        lanes: structuredClone(stripTemplateLanes(tr)),
+      });
+      setSaveModalOpen(false);
+    },
+    [tr]
+  );
+
+  // Preconditions: applying needs a loaded pair; authoring additionally
+  // needs beatgrids on both sides (beat-domain recipes are meaningless
+  // without them — hot cues are optional, the modal offers the grid
+  // origin instead).
+  const canSaveTemplate = pairLoaded && sideA.beatgrid !== null && sideB.beatgrid !== null;
+  const saveDisabledReason = !pairLoaded ? 'Load two tracks first' : 'Both tracks need beatgrids';
+  const activeItemName = session.items[session.active]?.name;
+
   return (
     <div className="editor-center">
       <div className="editor-center-row">
@@ -408,7 +541,24 @@ function EditorCenterPanel({ store, player }: { store: EditorStore; player: MixP
           onToggleFavorite={() => store.toggleFavorite()}
           onDelete={() => store.deleteActive()}
         />
+        <TemplatesDropdown
+          templates={templates}
+          canSave={canSaveTemplate}
+          saveDisabledReason={saveDisabledReason}
+          canApply={pairLoaded}
+          onApply={applyTemplateToPair}
+          onSaveCurrent={() => setSaveModalOpen(true)}
+          onRename={(tpl, name) => saveTemplate({ ...tpl, name })}
+          onDelete={deleteTemplate}
+        />
       </div>
+      {notices.length > 0 && (
+        <div className="editor-notices" title="Dismiss" onClick={() => setNotices([])}>
+          {notices.map((n, i) => (
+            <div key={i}>{n}</div>
+          ))}
+        </div>
+      )}
       <div className="editor-center-row">
         <label>
           start
@@ -474,6 +624,21 @@ function EditorCenterPanel({ store, player }: { store: EditorStore; player: MixP
           </select>
         )}
       </div>
+
+      {saveModalOpen && canSaveTemplate && (
+        <SaveTemplateModal
+          defaultName={activeItemName && !/^Transition \d+$/.test(activeItemName) ? activeItemName : ''}
+          sideA={sideA}
+          sideB={sideB}
+          trackATitle={trackATitle}
+          trackBTitle={trackBTitle}
+          anchorASec={tr.startSec}
+          anchorBSec={tr.bInSec}
+          durationSec={tr.durationSec}
+          onSave={saveCurrentAsTemplate}
+          onCancel={() => setSaveModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

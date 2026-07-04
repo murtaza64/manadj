@@ -19,7 +19,7 @@ import { Mixer } from '../playback/mixer';
 import { isAudible } from '../playback/audibleSurface';
 import { api } from '../api/client';
 import type { EditorMix } from './mixModel';
-import { arrangementAt, laneValuesAt, tempoMatchPitch } from './mixModel';
+import { EDITOR_PITCH_RANGE_PERCENT, arrangementAt, laneValuesAt, tempoMatchPitch } from './mixModel';
 
 const DRIFT_TOLERANCE_S = 0.12;
 
@@ -33,8 +33,8 @@ export class MixPlayer {
    * Its ports answer the arbiter tripwire for the 'editor' surface
    * (ADR 0013) — starts are refused unless the editor holds audibility. */
   readonly mixer = new Mixer(() => isAudible('editor'));
-  readonly engineA = new DeckEngine(this.mixer.portFor('A'));
-  readonly engineB = new DeckEngine(this.mixer.portFor('B'));
+  readonly engineA = new DeckEngine(this.mixer.portFor('A'), EDITOR_PITCH_RANGE_PERCENT);
+  readonly engineB = new DeckEngine(this.mixer.portFor('B'), EDITOR_PITCH_RANGE_PERCENT);
 
   private mix: EditorMix;
   private durations = { a: 0, b: 0 };

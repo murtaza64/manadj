@@ -1,6 +1,6 @@
 """Pydantic schemas for API validation."""
 
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from datetime import datetime
 
 from backend.track_metadata.units import centibpm_to_bpm
@@ -293,3 +293,31 @@ class TransitionRow(BaseModel):
     name: str
     favorite: bool
     data: dict
+
+
+# Transition-template Schemas (mix-editor issue 03 — plain CRUD)
+
+ANCHOR_BASE_PATTERN = r"^(cue_[1-8]|grid_origin)$"
+
+
+class TransitionTemplateItem(BaseModel):
+    """A Transition template as the client authors it (POST/PUT payload).
+
+    `uuid` is the client-generated identity. Anchor bases are a cue slot
+    (`cue_1`..`cue_8`) or `grid_origin`; deltas and length are whole beats.
+    `lanes` is the sparse normalized lane payload (opaque, same LanePoint
+    shape as Transitions).
+    """
+    uuid: str
+    name: str
+    align_a_base: str = Field(pattern=ANCHOR_BASE_PATTERN)
+    align_a_delta_beats: int
+    align_b_base: str = Field(pattern=ANCHOR_BASE_PATTERN)
+    align_b_delta_beats: int
+    length_beats: int
+    scalable: bool = False
+    lanes: dict
+
+
+class TransitionTemplateRow(TransitionTemplateItem):
+    """A persisted Transition template (GET/POST/PUT response)."""

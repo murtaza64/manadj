@@ -30,6 +30,8 @@ import {
   toStoredEntry,
 } from './pairStore';
 import type { PairEntry, SavedTransition } from './pairStore';
+import { stampIntoSession } from './templateModel';
+import type { ApplyPatch } from './templateModel';
 
 export interface EditorSession {
   items: SavedTransition[];
@@ -294,6 +296,19 @@ export class EditorStore {
         ),
       },
     });
+  }
+
+  /** Stamp a template's resolved patch into the session (mix-editor 03).
+   * Target semantics are stampIntoSession's contract: pristine active →
+   * in place, else a new take; the receiver carries the template's name. */
+  stampTemplate(templateName: string, patch: ApplyPatch): void {
+    const next = stampIntoSession(
+      this.liveItems(),
+      this.state.session.active,
+      templateName,
+      patch
+    );
+    this.applySession(next.items, next.active);
   }
 
   /** Delete the active Transition (the switcher does the two-step confirm).

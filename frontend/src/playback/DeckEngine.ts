@@ -111,9 +111,14 @@ export class DeckEngine {
   }
 
   private readonly port: DeckAudioPort;
+  /** Varispeed reach, percent. Defaults to the hardware-like fader range;
+   * the Transition editor's private decks pass a wider one (templates
+   * imply tempo-match and must hold beat alignment on extreme pairs). */
+  private readonly pitchRangePercent: number;
 
-  constructor(port: DeckAudioPort) {
+  constructor(port: DeckAudioPort, pitchRangePercent: number = PITCH_RANGE_PERCENT) {
     this.port = port;
+    this.pitchRangePercent = pitchRangePercent;
     this.snapshot = this.buildSnapshot();
   }
 
@@ -291,7 +296,10 @@ export class DeckEngine {
   // keeps only varispeed.)
 
   setPitch(percent: number): void {
-    const clamped = Math.max(-PITCH_RANGE_PERCENT, Math.min(PITCH_RANGE_PERCENT, percent));
+    const clamped = Math.max(
+      -this.pitchRangePercent,
+      Math.min(this.pitchRangePercent, percent)
+    );
     this.setRateComponents(clamped, this.bendPercent);
   }
 
