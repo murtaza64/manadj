@@ -1,8 +1,6 @@
 # 29 — Swap track load order (A ⇄ B)
 
-Status: ready-for-human (implemented, change zkloymkv — verify by eye: ⇄
-button next to the play button; swap, check the reversed pair seeds its
-own Transitions, swap back, original set intact)
+Status: closed (implemented change zkloymkv; user-verified 2026-07-04)
 
 ## Parent
 
@@ -29,12 +27,12 @@ Semantics (Transitions are directional — glossary):
 
 ## Acceptance criteria
 
-- [ ] One click swaps both decks (editor + shared mirror), loads settle,
+- [x] One click swaps both decks (editor + shared mirror), loads settle,
       playhead parks per the normal transition-load choreography — BY EYE
 - [x] Saved Transitions for the ORIGINAL direction are untouched: swap is
       two assignTracks → pairKey reverses → store.loadPair (flush-before-
       reseed already pinned by editorStore tests)
-- [ ] The reversed pair's own saved Transitions (if any) load; otherwise
+- [x] The reversed pair's own saved Transitions (if any) load; otherwise
       a fresh pristine session — BY EYE (store behavior tested)
 - [x] Buffer reuse: swap costs zero re-decodes via issue 28's cache
 - [x] Disabled when fewer than two tracks are loaded

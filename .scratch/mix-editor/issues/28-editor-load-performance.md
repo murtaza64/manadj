@@ -1,8 +1,6 @@
 # 28 — Editor load performance: buffer cache + draw before decode
 
-Status: ready-for-human (implemented, change slnsqunq — verify by eye:
-mode-switch into the editor should render waveforms/envelopes instantly;
-refresh-into-editor should draw the timeline before audio decode lands)
+Status: closed (implemented change slnsqunq; user-verified 2026-07-04)
 
 ## Parent
 
@@ -40,10 +38,10 @@ envelopes render.
 
 ## Acceptance criteria
 
-- [ ] Mode-switch into the editor with both tracks loaded on shared
+- [x] Mode-switch into the editor with both tracks loaded on shared
       decks: waveforms + envelopes render with no perceptible decode wait
       — BY EYE
-- [ ] Refresh straight into the editor: each track fetch+decodes ONCE
+- [x] Refresh straight into the editor: each track fetch+decodes ONCE
       (network tab), timeline draws before decode completes — BY EYE
 - [x] Transport still gated on decoded audio (engine `ready` semantics
       untouched; cached path lands at loadState 'ready' with a real

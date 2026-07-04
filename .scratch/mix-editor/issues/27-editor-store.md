@@ -1,8 +1,6 @@
 # 27 — Editor store: session state behind a snapshot/subscribe seam
 
-Status: ready-for-human (implemented, change rrkluqks — verify by eye:
-drag feel + autosave + switcher + pair adoption unchanged; `?protoperf`
-spot-check during a lane drag should be no worse, likely better)
+Status: closed (implemented change rrkluqks; user-verified 2026-07-04)
 
 ## Parent
 
@@ -40,7 +38,7 @@ style), created by the shell, provided via context:
 
 ## Acceptance criteria
 
-- [ ] Behavior-frozen: editor is indistinguishable by eye (drag feel,
+- [x] Behavior-frozen: editor is indistinguishable by eye (drag feel,
       autosave, switcher, favorites, marks, pair adoption, park/framing)
       — BY EYE
 - [x] Store-interface tests (14, fake persistence + fake timers): the
@@ -56,7 +54,7 @@ style), created by the shell, provided via context:
       1); center panel extracted as the drag-rate subscriber; shell no
       longer subscribes to `mix` (drag re-renders: whole tree → timeline
       + small panel). Drag paths keep `updateMix` (narrows with 16)
-- [ ] No new perf regression at drag rate — `?protoperf` BY EYE
+- [x] No new perf regression at drag rate — `?protoperf` BY EYE
 - [x] tsc, eslint, vitest 211, build green
 
 ## Blocked by

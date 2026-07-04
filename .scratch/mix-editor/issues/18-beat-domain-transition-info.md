@@ -1,9 +1,6 @@
 # 18 — Beat-domain transition readouts (inputs removed)
 
-Status: ready-for-human (implemented, change lmnqxqkq — verify by eye:
-readouts read musically during drags; note the format decision: off-grid
-positions show as ~nearest bar.beat rather than fractional beats — the
-timeline shows exact, readouts orient)
+Status: closed (implemented change lmnqxqkq; user-verified 2026-07-04)
 
 ## Parent
 
@@ -34,7 +31,7 @@ with display-only beat-domain readouts:
 
 - [x] The three inputs are gone (`setTransitionField` survives only for
       the tempo-match checkbox); readouts live in the drag-rate panel
-- [ ] Readouts read usefully during drags — BY EYE
+- [x] Readouts read usefully during drags — BY EYE
 - [x] Whole-beat positions read clean; off-grid = `~nearest` bar.beat
       (format refinement over the spec's one-decimal: `1.1.5` was
       unreadable — lengths still show one decimal, e.g. `3.5 beats`)

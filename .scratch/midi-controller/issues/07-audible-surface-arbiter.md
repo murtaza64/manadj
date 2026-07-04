@@ -1,9 +1,6 @@
 # 07 — Audible-surface arbiter: one owner for the one-clock invariant
 
-Status: ready-for-human (implemented, changes mwwqynuz + nvkwunvl — verify
-by eye: enter the editor mid-playback → shared decks go silent; leave →
-deck play resumes on gesture only. Hardware PLAY-in-editor routing waits
-on the MIDI cable, but the dispatch path is under test.)
+Status: closed (implemented change nvkwunvl; editor silence/restore user-verified 2026-07-04 with the mix-editor tour; hardware transport routing rerun rides midi/01's session — cable pending)
 
 ## Parent
 
@@ -50,7 +47,7 @@ state machine (readable outside React):
       pending the cable (midi/01's session).
 - [x] PLAY/CUE in library/performance route to the shared transport with
       the exact old guards (moved verbatim into the 'shared' handle)
-- [ ] Editor mount/unmount silences/restores the shared surface — BY EYE
+- [x] Editor mount/unmount silences/restores the shared surface — BY EYE
 - [x] `DeckEngine.play()`/`togglePlay()`/`cueDown()` with a false
       `mayStart()` are warned no-ops (port-seam tests); portless behavior
       unchanged

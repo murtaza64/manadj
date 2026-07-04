@@ -1,6 +1,6 @@
 # 04 — Playback cluster: transport/cue, pads, beatjump + size unification
 
-Status: ready-for-human — implemented in `oxqlwkpv` (deck-controls: 04-playback-cluster)
+Status: closed (implemented change oxqlwkpv, playctl lane; user-verified 2026-07-04)
 
 By-eye checklist for the human:
 - [ ] Library: beatjump row shows curved jump arrows + `1/2`/[size]/`x2`; size sticks and A/S jump by it

@@ -1,10 +1,6 @@
 # 01 — BPM⇄Beatgrid anchor model (backend)
 
-Status: ready-for-human (implemented in jj change lvulxzsq — verify by eye:
-mark a downbeat on a deck, edit the track's BPM in the tag editor, and check
-the marked downbeat hasn't moved; note the frontend still runs its own
-delete-grid ritual after BPM edits — see Comments — so eye-verification of
-re-tempo needs the API or waits for slice 02/03)
+Status: closed (implemented change lvulxzsq, gridmodel lane; user-verified 2026-07-04 — anchor pins the marked downbeat through BPM edits; nudge visibility scales with distance from anchor, explained and accepted)
 
 ## Parent
 
