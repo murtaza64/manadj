@@ -547,11 +547,9 @@
   border-left-color: #ff9500;
 }
 
-/* The slide row is a row, not a bordered control — accent its members. */
-.editor-slides.editor-alignment .editor-lockbtn {
-  border-color: #ff9500;
-  color: #ff9500;
-}
+/* The lock is stateful, not passively accented: ENGAGED = alignment
+   accent (it scopes slides), disengaged = default chrome — the color IS
+   the state cue (user feedback: open padlock alone read ambiguously). */
 
 /* Shared HotCue pads sized for the card rows; set pads keep their cue
    colors (identity), the ROW carries the accent. */
