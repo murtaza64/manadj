@@ -1,7 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { readTrackDragPayload } from '../selection/trackDrag';
+import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
+import {
+  isPlaylistDrag,
+  readPlaylistDragPayload,
+  setPlaylistDragPayload,
+} from '../selection/playlistDrag';
+import { applyReorder, indicatorY, insertionIndexFromPointer, type RowRect } from '../selection/dropIndex';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import type { Playlist } from '../types';
 
@@ -124,16 +130,76 @@ export default function PlaylistSidebar({
       ]
     : [];
 
-  const handleDragOver = (e: React.DragEvent) => {
+  // ── Drag & drop: payload branching (playlist-editing 08) ───────────────
+  // Track drags highlight the target row (drop appends); playlist drags
+  // show an insertion line between rows (drop reorders the sidebar).
+  const listRef = useRef<HTMLDivElement>(null);
+  const [dragOverPlaylistId, setDragOverPlaylistId] = useState<number | null>(null);
+  const [reorderIndicator, setReorderIndicator] = useState<{ index: number; y: number } | null>(null);
+
+  const reorderMutation = useMutation({
+    mutationFn: (order: number[]) =>
+      api.playlists.reorder(order.map((id, display_order) => ({ id, display_order }))),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playlists'] });
+    },
+  });
+
+  const handleRowDragOver = (e: React.DragEvent, playlistId: number) => {
+    if (!isTrackDrag(e.dataTransfer) || isPlaylistDrag(e.dataTransfer)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
+    setDragOverPlaylistId(playlistId);
   };
 
-  const handleDrop = (e: React.DragEvent, playlistId: number) => {
+  const handleRowDrop = (e: React.DragEvent, playlistId: number) => {
+    if (isPlaylistDrag(e.dataTransfer)) return; // container handles reorders
     e.preventDefault();
+    setDragOverPlaylistId(null);
     const trackIds = readTrackDragPayload(e.dataTransfer);
     if (trackIds.length > 0) {
       onTrackDrop(playlistId, trackIds);
+    }
+  };
+
+  /** Playlist-row rectangles in the list's content coordinates. */
+  const rowRects = (list: HTMLDivElement): RowRect[] => {
+    const listRect = list.getBoundingClientRect();
+    return Array.from(list.querySelectorAll('[data-playlist-row]')).map((row) => {
+      const r = (row as HTMLElement).getBoundingClientRect();
+      return { top: r.top - listRect.top + list.scrollTop, height: r.height };
+    });
+  };
+
+  const handleListDragOver = (e: React.DragEvent) => {
+    if (!isPlaylistDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const list = listRef.current;
+    if (!list) return;
+    const rects = rowRects(list);
+    const pointerY = e.clientY - list.getBoundingClientRect().top + list.scrollTop;
+    const index = insertionIndexFromPointer(pointerY, rects);
+    setReorderIndicator({ index, y: indicatorY(index, rects) });
+  };
+
+  const handleListDragLeave = (e: React.DragEvent) => {
+    if (!listRef.current?.contains(e.relatedTarget as Node)) {
+      setReorderIndicator(null);
+    }
+  };
+
+  const handleListDrop = (e: React.DragEvent) => {
+    if (!isPlaylistDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    const indicator = reorderIndicator;
+    setReorderIndicator(null);
+    const draggedId = readPlaylistDragPayload(e.dataTransfer);
+    if (draggedId === null || indicator === null) return;
+    const currentOrder = playlists.map((p: Playlist) => p.id);
+    const newOrder = applyReorder(currentOrder, [draggedId], indicator.index);
+    if (newOrder.join(',') !== currentOrder.join(',')) {
+      reorderMutation.mutate(newOrder);
     }
   };
 
@@ -176,24 +242,53 @@ export default function PlaylistSidebar({
       </div>
 
       {/* Playlist list */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div
+        ref={listRef}
+        onDragOver={handleListDragOver}
+        onDragLeave={handleListDragLeave}
+        onDrop={handleListDrop}
+        style={{ flex: 1, overflow: 'auto', position: 'relative' }}
+      >
+        {reorderIndicator && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: Math.max(0, reorderIndicator.y - 1),
+              height: '2px',
+              background: 'var(--blue)',
+              pointerEvents: 'none',
+              zIndex: 10,
+            }}
+          />
+        )}
         {isLoading ? (
           <div style={{ padding: '8px 12px', color: 'var(--subtext1)' }}>Loading...</div>
         ) : (
           playlists.map((playlist: Playlist) => (
             <div
               key={playlist.id}
+              data-playlist-row
+              draggable={renamingId !== playlist.id}
+              onDragStart={(e) => setPlaylistDragPayload(e.dataTransfer, playlist.id)}
               onClick={() => onSelectPlaylist(playlist.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 openMenu(e.clientX, e.clientY, playlist);
               }}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, playlist.id)}
+              onDragOver={(e) => handleRowDragOver(e, playlist.id)}
+              onDragLeave={() => setDragOverPlaylistId((cur) => (cur === playlist.id ? null : cur))}
+              onDrop={(e) => handleRowDrop(e, playlist.id)}
               style={{
                 padding: '8px 12px',
                 cursor: 'pointer',
-                background: selectedView === 'playlist' && selectedPlaylistId === playlist.id ? 'var(--surface0)' : 'transparent',
+                background:
+                  dragOverPlaylistId === playlist.id
+                    ? 'var(--surface1)'
+                    : selectedView === 'playlist' && selectedPlaylistId === playlist.id
+                      ? 'var(--surface0)'
+                      : 'transparent',
                 color: 'var(--text)',
                 display: 'flex',
                 justifyContent: 'space-between',

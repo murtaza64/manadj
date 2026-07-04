@@ -33,3 +33,14 @@ unused).
 ## Blocked by
 
 - `.scratch/playlist-editing/issues/06-drag-insert-reorder.md` (shared drop-indicator/drop-index module)
+
+## Comments
+
+Done (jj rmppuqry). Sidebar playlist rows draggable (payload MIME
+'application/x-manadj-playlist' in selection/playlistDrag.ts, distinct
+from track drags). List container branches on payload: playlist drag →
+shared insertion-line indicator (dropIndex math) and full-order POST to
+/playlists/reorder; track drag → row highlight (new visual) + append, as
+before. Rows aren't draggable mid-rename; pseudo-views sit outside the
+list container and are unaffected. Add to playlist ▸ reflects the new
+order automatically (same ['playlists'] query).
