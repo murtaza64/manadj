@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useImperativeHandle, useMemo } from 'react';
+import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
 import type { Ref } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -210,6 +210,9 @@ function deriveRelatedFilters(
 }
 
 type ViewType = 'all' | 'unprocessed' | 'playlist';
+
+/** Which selection instance a row menu acts on. */
+type MenuPane = 'main' | 'editLibrary';
 
 /** Stable empty list for the dormant edit-pane selection instance. */
 const EMPTY_TRACKS: Track[] = [];
@@ -673,21 +676,36 @@ export default function Library({
   };
 
   // ── Track-row context menu (playlist-editing 03) ───────────────────────
-  type MenuPane = 'main' | 'editLibrary';
   const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } =
     useContextMenuState<{ track: Track; pane: MenuPane }>();
 
   const selForPane = (pane: MenuPane) => (pane === 'editLibrary' ? editLibSel : mainSel);
 
-  const handleRowContextMenuFor = (pane: MenuPane) => (track: Track, pos: { x: number; y: number }) => {
-    // Standard behavior: right-clicking outside the selection selects the row.
-    const sel = selForPane(pane);
-    if (!sel.selection.ids.includes(track.id)) {
-      sel.setSelection(click(sel.selection, track.id));
-    }
-    if (splitView) setFocusedPane(pane === 'editLibrary' ? 'library' : 'playlist');
-    openRowMenu(pos.x, pos.y, { track, pane });
-  };
+  // Ref-backed + stable per pane: these land on every memoized row.
+  const menuDepsRef = useRef({ mainSel, editLibSel, splitView });
+  menuDepsRef.current = { mainSel, editLibSel, splitView };
+
+  const rowContextMenu = useCallback(
+    (pane: MenuPane, track: Track, pos: { x: number; y: number }) => {
+      const deps = menuDepsRef.current;
+      const sel = pane === 'editLibrary' ? deps.editLibSel : deps.mainSel;
+      // Standard behavior: right-clicking outside the selection selects the row.
+      if (!sel.selection.ids.includes(track.id)) {
+        sel.setSelection(click(sel.selection, track.id));
+      }
+      if (deps.splitView) setFocusedPane(pane === 'editLibrary' ? 'library' : 'playlist');
+      openRowMenu(pos.x, pos.y, { track, pane });
+    },
+    [openRowMenu]
+  );
+  const handleRowContextMenuMain = useCallback(
+    (track: Track, pos: { x: number; y: number }) => rowContextMenu('main', track, pos),
+    [rowContextMenu]
+  );
+  const handleRowContextMenuEditLib = useCallback(
+    (track: Track, pos: { x: number; y: number }) => rowContextMenu('editLibrary', track, pos),
+    [rowContextMenu]
+  );
 
   /** Load target for menu items: route through the embedding view's load
    * policy when present (Performance view), else the shared Decks. */
@@ -915,7 +933,7 @@ export default function Library({
                   selectedIds={mainSel.selectedIds}
                   onSelectTrack={mainSel.handleRowSelect}
                   getDragIds={mainSel.getDragIds}
-                  onRowContextMenu={handleRowContextMenuFor('main')}
+                  onRowContextMenu={handleRowContextMenuMain}
                   playOrder={playOrder}
                   dragSource="playlist-pane"
                   onLoadTrack={loadForTable}
@@ -955,7 +973,7 @@ export default function Library({
                   selectedIds={editLibSel.selectedIds}
                   onSelectTrack={editLibSel.handleRowSelect}
                   getDragIds={editLibSel.getDragIds}
-                  onRowContextMenu={handleRowContextMenuFor('editLibrary')}
+                  onRowContextMenu={handleRowContextMenuEditLib}
                   onLoadTrack={loadForTable}
                   loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
@@ -1012,7 +1030,7 @@ export default function Library({
                   selectedIds={mainSel.selectedIds}
                   onSelectTrack={mainSel.handleRowSelect}
                   getDragIds={mainSel.getDragIds}
-                  onRowContextMenu={handleRowContextMenuFor('main')}
+                  onRowContextMenu={handleRowContextMenuMain}
                   playOrder={playOrder}
                   dragSource={selectedView === 'playlist' ? 'playlist-pane' : 'library'}
                   onLoadTrack={loadForTable}

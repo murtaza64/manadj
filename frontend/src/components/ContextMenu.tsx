@@ -1,4 +1,4 @@
-import { useLayoutEffect, useEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useEffect, useRef, useState } from 'react';
 import './ContextMenu.css';
 
 /**
@@ -148,12 +148,12 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
   );
 }
 
-/** Convenience: consumer-side open/close state for a context menu. */
+/** Convenience: consumer-side open/close state for a context menu.
+ * openMenu/closeMenu are identity-stable (they feed memoized rows and
+ * the menu's dismiss-listener effect). */
 export function useContextMenuState<T>() {
   const [state, setState] = useState<{ x: number; y: number; context: T } | null>(null);
-  return {
-    menu: state,
-    openMenu: (x: number, y: number, context: T) => setState({ x, y, context }),
-    closeMenu: () => setState(null),
-  };
+  const openMenu = useCallback((x: number, y: number, context: T) => setState({ x, y, context }), []);
+  const closeMenu = useCallback(() => setState(null), []);
+  return { menu: state, openMenu, closeMenu };
 }

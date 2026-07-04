@@ -94,30 +94,34 @@ export function useTrackSelection(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayedIdsKey]);
 
-  const handleRowSelect = (track: Track, mods: SelectMods) => {
+  // ALL handlers are ref-backed and identity-stable: they end up as props
+  // on hundreds of memoized rows, so a fresh closure per render would
+  // defeat the memo and re-render the whole table on every interaction.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const displayedIdsRef = useRef(displayedIds);
+  displayedIdsRef.current = displayedIds;
+
+  const handleRowSelect = useCallback((track: Track, mods: SelectMods) => {
     setSelection((prev) =>
       mods.shift
-        ? rangeClick(prev, track.id, displayedIds)
+        ? rangeClick(prev, track.id, displayedIdsRef.current)
         : mods.toggle
           ? toggleClick(prev, track.id)
           : click(prev, track.id)
     );
-  };
+  }, []);
 
-  const handleNavigate = (delta: 1 | -1) => {
-    const next = navigateSelection(selection, delta, displayedIds);
+  const handleNavigate = useCallback((delta: 1 | -1) => {
+    const next = navigateSelection(selectionRef.current, delta, displayedIdsRef.current);
     if (next.anchorId !== null) scrollTrackIntoView(next.anchorId);
     setSelection(next);
-  };
+  }, []);
 
-  const handleSelectAll = () => {
-    setSelection((prev) => selectAll(prev, displayedIds));
-  };
+  const handleSelectAll = useCallback(() => {
+    setSelection((prev) => selectAll(prev, displayedIdsRef.current));
+  }, []);
 
-  // Ref-backed so the callback identity is stable and row memoization
-  // survives selection churn.
-  const selectionRef = useRef(selection);
-  selectionRef.current = selection;
   const getDragIds = useCallback((trackId: number) => {
     const sel = selectionRef.current;
     return sel.ids.includes(trackId) ? [...sel.ids] : [trackId];
