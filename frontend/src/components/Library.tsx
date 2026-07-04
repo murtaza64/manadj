@@ -268,23 +268,23 @@ export default function Library({
   const setDownbeat = useSetBeatgridDownbeat();
   const nudgeGrid = useNudgeBeatgrid();
 
-  // ── Split edit mode (playlist-editing 05) ──────────────────────────────
-  // Editing a playlist stacks two panes: the playlist (Play order) on top,
-  // the full library with its FilterBar below. Off, the playlist view is
-  // exactly the single-table layout.
-  const [isEditingPlaylist, setIsEditingPlaylist] = useState(false);
-  const editingSplit =
-    !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null && isEditingPlaylist;
+  // ── Split view (playlist-editing 05) ───────────────────────────────────
+  // The split stacks two panes: the playlist (Play order) on top, the full
+  // library with its FilterBar below. Closed, the playlist view is exactly
+  // the single-table layout (which still supports drag-reordering).
+  const [isSplitViewOpen, setIsSplitViewOpen] = useState(false);
+  const splitView =
+    !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null && isSplitViewOpen;
   useEffect(() => {
-    // Leaving the playlist (or the view) exits edit mode.
-    setIsEditingPlaylist(false);
+    // Leaving the playlist (or the view) closes the split.
+    setIsSplitViewOpen(false);
   }, [selectedView, selectedPlaylistId]);
 
   // Focus model: click focuses a pane; Tab switches; keyboard routes to it.
   const [focusedPane, setFocusedPane] = useState<'playlist' | 'library'>('playlist');
   useEffect(() => {
     setFocusedPane('playlist');
-  }, [editingSplit]);
+  }, [splitView]);
 
   // Fetch all tracks ('all'/'unprocessed' views, and the edit-mode library pane)
   const { data: allTracksData, isLoading: isLoadingAllTracks, error: allTracksError } = useQuery({
@@ -302,7 +302,7 @@ export default function Library({
       sortColumn: filters.sortColumn,
       sortDirection: filters.sortDirection,
     }),
-    enabled: selectedView === 'all' || selectedView === 'unprocessed' || editingSplit,
+    enabled: selectedView === 'all' || selectedView === 'unprocessed' || splitView,
     placeholderData: (previousData) => previousData,
   });
 
@@ -542,7 +542,7 @@ export default function Library({
   // applies only outside edit mode — in the split, the FilterBar belongs
   // to the library pane.
   let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
-  if (filters.hasTransitionFromDecks && !editingSplit) {
+  if (filters.hasTransitionFromDecks && !splitView) {
     playlistTracks = playlistTracks.filter((t: Track) => fromA.has(t.id) || fromB.has(t.id));
   }
 
@@ -554,10 +554,10 @@ export default function Library({
     selectedView === 'playlist' ? playlistTracks : libraryTracks,
     { keepAnchorVisible: true }
   );
-  const editLibSel = useTrackSelection(editingSplit ? libraryTracks : EMPTY_TRACKS);
+  const editLibSel = useTrackSelection(splitView ? libraryTracks : EMPTY_TRACKS);
 
   /** The pane keyboard input acts on. */
-  const activeSel = editingSplit && focusedPane === 'library' ? editLibSel : mainSel;
+  const activeSel = splitView && focusedPane === 'library' ? editLibSel : mainSel;
   const selectedTrack = activeSel.selectedTrack;
 
   // Switching views/playlists clears the main selection (also prevents the
@@ -579,7 +579,7 @@ export default function Library({
     removeFromPlaylistMutation.mutate({ playlistId: selectedPlaylistId!, trackIds });
   };
   const handleRemoveSelected = () => removeTracksFromViewedPlaylist([...mainSel.selection.ids]);
-  const removeEnabled = canRemoveFromPlaylist && (!editingSplit || focusedPane === 'playlist');
+  const removeEnabled = canRemoveFromPlaylist && (!splitView || focusedPane === 'playlist');
 
   // ── Playlist-pane drag & drop (playlist-editing 06) ────────────────────
   // Positional drops only when the pane shows actual Play order; under any
@@ -685,7 +685,7 @@ export default function Library({
     if (!sel.selection.ids.includes(track.id)) {
       sel.setSelection(click(sel.selection, track.id));
     }
-    if (editingSplit) setFocusedPane(pane === 'editLibrary' ? 'library' : 'playlist');
+    if (splitView) setFocusedPane(pane === 'editLibrary' ? 'library' : 'playlist');
     openRowMenu(pos.x, pos.y, { track, pane });
   };
 
@@ -775,7 +775,7 @@ export default function Library({
         onSelectAll={activeSel.handleSelectAll}
         onRemoveSelected={removeEnabled ? handleRemoveSelected : undefined}
         onSwitchPane={
-          editingSplit
+          splitView
             ? () => setFocusedPane((p) => (p === 'playlist' ? 'library' : 'playlist'))
             : undefined
         }
@@ -843,7 +843,7 @@ export default function Library({
           flexDirection: 'column',
           overflow: 'hidden'
         }}>
-          {/* Playlist header strip: name + edit toggle (playlist view only) */}
+          {/* Playlist header strip: name + split-view toggle (playlist view only) */}
           {selectedView === 'playlist' && !browseOnly && (
             <div style={{
               display: 'flex',
@@ -860,23 +860,23 @@ export default function Library({
                 </span>
               </span>
               <button
-                onClick={() => setIsEditingPlaylist((v) => !v)}
+                onClick={() => setIsSplitViewOpen((v) => !v)}
                 style={{
                   padding: '2px 10px',
-                  background: editingSplit ? 'var(--blue)' : 'var(--surface0)',
-                  color: editingSplit ? 'var(--base)' : 'var(--text)',
+                  background: splitView ? 'var(--blue)' : 'var(--surface0)',
+                  color: splitView ? 'var(--base)' : 'var(--text)',
                   border: '1px solid var(--surface1)',
                   borderRadius: '3px',
                   cursor: 'pointer',
                   fontSize: '12px',
                 }}
               >
-                {editingSplit ? 'Done' : 'Edit'}
+                Split view
               </button>
             </div>
           )}
 
-          {editingSplit ? (
+          {splitView ? (
             <>
               {/* Playlist pane (Play order) */}
               <div
@@ -978,11 +978,33 @@ export default function Library({
                 onApplySettings={handleApplySettings}
               />
 
-              {/* Track table */}
-              <div style={{
-                flex: 1,
-                overflow: 'auto'
-              }}>
+              {/* Track table. In playlist view it is the playlist pane:
+                  drag-reordering works without opening the split. */}
+              <div
+                ref={selectedView === 'playlist' ? playlistPaneRef : undefined}
+                onDragOver={selectedView === 'playlist' ? handlePlaylistPaneDragOver : undefined}
+                onDragLeave={selectedView === 'playlist' ? handlePlaylistPaneDragLeave : undefined}
+                onDrop={selectedView === 'playlist' ? handlePlaylistPaneDrop : undefined}
+                style={{
+                  position: 'relative',
+                  flex: 1,
+                  overflow: 'auto'
+                }}
+              >
+                {selectedView === 'playlist' && dropIndicator && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      top: Math.max(0, dropIndicator.y - 1),
+                      height: '2px',
+                      background: 'var(--blue)',
+                      pointerEvents: 'none',
+                      zIndex: 10,
+                    }}
+                  />
+                )}
                 <TrackList
                   tracks={currentTracks}
                   isLoading={isLoading}
