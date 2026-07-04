@@ -209,7 +209,7 @@ function deriveRelatedFilters(
   return filters;
 }
 
-type ViewType = 'all' | 'unprocessed' | 'playlist';
+type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist';
 
 /** Which selection instance a row menu acts on. */
 type MenuPane = 'main' | 'editLibrary';
@@ -302,10 +302,11 @@ export default function Library({
       bpmThresholdPercent: filters.bpmCenter !== null ? filters.bpmThresholdPercent : null,
       keyCamelotIds: filters.selectedKeyCamelotIds,
       unprocessed: selectedView === 'unprocessed' ? true : undefined,
+      archived: selectedView === 'archived' ? true : undefined,
       sortColumn: filters.sortColumn,
       sortDirection: filters.sortDirection,
     }),
-    enabled: selectedView === 'all' || selectedView === 'unprocessed' || splitView,
+    enabled: selectedView !== 'playlist' || splitView,
     placeholderData: (previousData) => previousData,
   });
 
@@ -443,6 +444,50 @@ export default function Library({
 
   const handleTrackDrop = (playlistId: number, trackIds: number[]) => {
     addToPlaylistMutation.mutate({ playlistId, trackIds });
+  };
+
+  // ── Archive / Unarchive (track-archival 01) ────────────────────────────
+  // Archived (CONTEXT.md): curation verdict — removes from all playlists;
+  // record/file persist. Confirm only when playlist entries are affected.
+  const archiveMutation = useMutation({
+    mutationFn: async (trackIds: number[]) => {
+      for (const id of trackIds) {
+        await api.tracks.archive(id);
+      }
+      return trackIds.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['tracks'] });
+      queryClient.invalidateQueries({ queryKey: ['playlist'] });
+      showToast(count === 1 ? 'Track archived' : `${count} tracks archived`);
+    },
+  });
+
+  const unarchiveMutation = useMutation({
+    mutationFn: async (trackIds: number[]) => {
+      for (const id of trackIds) {
+        await api.tracks.unarchive(id);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tracks'] });
+    },
+  });
+
+  const archiveTracks = async (trackIds: number[]) => {
+    const memberships = (
+      await Promise.all(trackIds.map((id) => api.tracks.getPlaylists(id)))
+    ).reduce((n, playlists) => n + playlists.length, 0);
+    const what = trackIds.length === 1 ? 'this track' : `${trackIds.length} tracks`;
+    if (
+      memberships > 0 &&
+      !confirm(
+        `Archive ${what}? Also removes ${memberships} playlist ${memberships === 1 ? 'entry' : 'entries'} (not restored on unarchive).`
+      )
+    ) {
+      return;
+    }
+    archiveMutation.mutate(trackIds);
   };
 
   const handleFieldUpdate = async (trackId: number, field: 'title' | 'artist', value: string) => {
@@ -753,9 +798,23 @@ export default function Library({
             } satisfies MenuItem,
           ]
         : []),
+      // Archived (CONTEXT.md): verdict in normal views; reversal in the
+      // Archived view (which also keeps Load/Add for auditioning).
+      selectedView === 'archived'
+        ? ({
+            label: multi ? `Unarchive ${targetIds.length} tracks` : 'Unarchive',
+            separatorBefore: true,
+            onSelect: () => unarchiveMutation.mutate(targetIds),
+          } satisfies MenuItem)
+        : ({
+            label: multi ? `Archive ${targetIds.length} tracks` : 'Archive track',
+            danger: true,
+            separatorBefore: true,
+            onSelect: () => void archiveTracks(targetIds),
+          } satisfies MenuItem),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowMenu, mainSel.selection.ids, editLibSel.selection.ids, playlists, canRemoveFromPlaylist, selectedPlaylistId]);
+  }, [rowMenu, mainSel.selection.ids, editLibSel.selection.ids, playlists, canRemoveFromPlaylist, selectedPlaylistId, selectedView]);
 
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0

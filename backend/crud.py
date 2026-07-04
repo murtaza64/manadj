@@ -24,12 +24,20 @@ def get_tracks(
     bpm_threshold_percent: int | None = None,
     key_camelot_ids: list[str] | None = None,
     unprocessed: bool | None = None,
+    archived: bool = False,
     sort_column: str | None = None,
     sort_direction: str = "desc"
 ):
     query = db.query(models.Track).options(
         joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category)
     )
+
+    # Archived (CONTEXT.md): out of the active Library. Default listings
+    # exclude archived Tracks; archived=True lists ONLY them (the Archived view).
+    if archived:
+        query = query.filter(models.Track.archived_at.isnot(None))
+    else:
+        query = query.filter(models.Track.archived_at.is_(None))
 
     # Text search on filename, title, or artist
     if search:
@@ -142,10 +150,58 @@ def get_tracks(
     for item in items:
         item.tags = [tt.tag for tt in item.track_tags]
 
-    # Get total library size (unfiltered count)
-    total_library_size = db.query(models.Track).count()
+    # Total ACTIVE library size (archived Tracks are out of the Library)
+    total_library_size = (
+        db.query(models.Track).filter(models.Track.archived_at.is_(None)).count()
+    )
 
     return items, total, total_library_size
+
+
+def get_playlists_containing_track(db: Session, track_id: int):
+    """The Playlists a Track is a member of (sidebar order)."""
+    return (
+        db.query(models.Playlist)
+        .join(models.PlaylistTrack, models.PlaylistTrack.playlist_id == models.Playlist.id)
+        .filter(models.PlaylistTrack.track_id == track_id)
+        .order_by(models.Playlist.display_order)
+        .all()
+    )
+
+
+def archive_track(db: Session, track_id: int):
+    """Archive a Track (CONTEXT.md): curation verdict — out of the active
+    Library. Removes it from every Playlist (positions compact); the
+    record, file, provenance, and correspondences persist. Idempotent.
+
+    Returns (track, removed_from_playlists) or None if the Track is missing.
+    """
+    track = db.query(models.Track).filter(models.Track.id == track_id).first()
+    if not track:
+        return None
+
+    playlists = get_playlists_containing_track(db, track_id)
+    for playlist in playlists:
+        remove_track_from_playlist(db, playlist.id, track_id)
+
+    if track.archived_at is None:
+        track.archived_at = func.now()
+        db.commit()
+        db.refresh(track)
+    return track, len(playlists)
+
+
+def unarchive_track(db: Session, track_id: int):
+    """Reverse the verdict. Playlist membership is NOT restored (stated
+    asymmetry — it was removed at archive time). Idempotent."""
+    track = db.query(models.Track).filter(models.Track.id == track_id).first()
+    if not track:
+        return None
+    if track.archived_at is not None:
+        track.archived_at = None
+        db.commit()
+        db.refresh(track)
+    return track
 
 
 def get_track(db: Session, track_id: int):

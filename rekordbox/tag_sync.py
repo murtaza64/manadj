@@ -191,8 +191,10 @@ class RekordboxTagSyncer:
         rb_contents = list(self.rb_db.get_content())
         rb_index = TrackIndex.build(rb_contents, rb_path)
 
-        # Get all manadj tracks with tags OR energy values
+        # Get all ACTIVE manadj tracks with tags OR energy values
+        # (Archived Tracks leave Export — CONTEXT.md)
         tracks = self.manadj_session.query(Track).filter(
+            Track.archived_at.is_(None),
             (Track.energy.isnot(None)) | (Track.id.in_(
                 self.manadj_session.query(TrackTag.track_id).distinct()
             ))

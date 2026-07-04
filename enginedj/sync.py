@@ -23,8 +23,13 @@ def find_missing_tracks_in_enginedj(
     edj_session: Any,
     validate_paths: bool = True,
 ) -> tuple[list[ManAdjTrack], dict[str, int]]:
-    """Tracks that exist in manadj but not in Engine DJ (Export candidates)."""
-    manadj_tracks = manadj_session.query(ManAdjTrack).all()
+    """Tracks that exist in manadj but not in Engine DJ (Export candidates).
+
+    Archived Tracks are never Export candidates (CONTEXT.md: Archived).
+    """
+    manadj_tracks = (
+        manadj_session.query(ManAdjTrack).filter(ManAdjTrack.archived_at.is_(None)).all()
+    )
     edj_tracks = edj_session.query(EDJTrack).all()
     edj_index: TrackIndex[EDJTrack] = TrackIndex.build(edj_tracks, edj_path)
 

@@ -55,6 +55,9 @@ interface StatusRow {
   presence: Record<PresenceId, boolean>;
   status: RowStatus;
   unprocessed: boolean;
+  /** Archived (CONTEXT.md): Matched but out of the active Library — never
+   * in inbox sections (rolls up in-sync); reachable via divergence chips. */
+  archived: boolean;
   diverged: FieldDivergence[];
   warnings: string[];
 }
@@ -784,6 +787,9 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
             )}
             {row.unprocessed && row.track_id !== null && (
               <span className="uts-unprocessed">unprocessed — exports with no tags</span>
+            )}
+            {row.archived && (
+              <span className="uts-unprocessed">archived — out of the active library, not exported</span>
             )}
           </div>
         </div>

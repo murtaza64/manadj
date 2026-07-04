@@ -11,7 +11,7 @@ import { applyReorder, indicatorY, insertionIndexFromPointer, type RowRect } fro
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import type { Playlist } from '../types';
 
-type ViewType = 'all' | 'unprocessed' | 'playlist';
+type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist';
 
 /** Palette for "Change color ▸" — bright, fully saturated (repo preference). */
 const PLAYLIST_COLORS: Array<{ label: string; value: string }> = [
@@ -240,6 +240,21 @@ export default function PlaylistSidebar({
         }}
       >
         Unprocessed
+      </div>
+
+      {/* "Archived" special view (CONTEXT.md: Archived — out of the active
+          Library; one click away, never mixed in) */}
+      <div
+        onClick={() => onSelectView('archived')}
+        style={{
+          padding: '8px 12px',
+          cursor: 'pointer',
+          background: selectedView === 'archived' ? 'var(--surface0)' : 'transparent',
+          color: 'var(--subtext0)',
+          borderBottom: '1px solid var(--surface0)',
+        }}
+      >
+        Archived
       </div>
 
       {/* Playlist list */}

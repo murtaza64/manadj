@@ -29,6 +29,9 @@ class Track(Base):
     filesize_bytes = Column(Integer, nullable=True)  # from the file
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    # Archived (CONTEXT.md): curation verdict — out of the active Library.
+    # NULL = active. Record/file/provenance persist; nothing is deleted.
+    archived_at = Column(DateTime, nullable=True)
 
     # Relationships
     track_tags = relationship("TrackTag", back_populates="track", cascade="all, delete-orphan")

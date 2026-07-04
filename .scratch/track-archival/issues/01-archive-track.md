@@ -68,3 +68,23 @@ Nothing is deleted; everything is reversible except playlist membership.
 - [ ] Export skips archived Tracks entirely (including ID3 writes); Match still claims their downstream copies; Sync inbox sections exclude them
 - [ ] Scan does not re-propose an archived Track's file; fulfilled Source Items stay fulfilled
 - [ ] Router-seam tests per ADR-0002 for all of the above
+
+## Comments
+
+Done (jj xupryqxp). Migration 0015_xupryqxp adds Track.archived_at
+(re-parented past waveform/templates 0012-0014). Backend: archive/
+unarchive/{track}/playlists endpoints (archive removes from all playlists
+via the compacting remove, idempotent, returns removed count);
+crud.get_tracks gained archived flag (default exclusion + archived-only
+listing; library_total = active only). Export exclusions at each
+enumeration site: enginedj/sync + rekordbox/sync export candidates,
+enginedj tag playlists, rekordbox tag/energy sync, track_metadata
+compare_with_files + apply_update's best-effort ID3 write. Match kept
+unfiltered; sync-status rows carry archived flag, roll up in-sync (never
+attention-worthy, downstream copies still claimed — divergences stay
+visible to opt-in chips). Scan already safe (dedupe by Track filename;
+test pins it). Frontend: Archived pseudo-view (dimmed rows), context-menu
+Archive (membership-count confirm)/Unarchive, sync-card badge. Tests:
+tests/test_track_archival.py (8) + TestArchived in test_sync_status.py
+(2). Runtime-smoked on the sandbox clone (archive/unarchive round-trip,
+totals).

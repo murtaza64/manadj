@@ -78,6 +78,7 @@ class Track(TrackBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    archived_at: datetime | None = None  # Archived verdict; NULL = active
     tags: list[Tag] = []
     provenance: TrackProvenance | None = None
     model_config = ConfigDict(from_attributes=True)
@@ -86,6 +87,13 @@ class Track(TrackBase):
     def serialize_bpm(self, bpm: int | None, _info) -> float | None:
         """Convert stored centiBPM back to float BPM for API responses."""
         return centibpm_to_bpm(bpm)
+
+
+class TrackArchiveResult(BaseModel):
+    """Result of archiving: the verdict timestamp + how many Playlists the
+    Track was removed from."""
+    archived_at: datetime | None
+    removed_from_playlists: int
 
 
 # Pagination

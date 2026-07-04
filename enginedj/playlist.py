@@ -15,11 +15,13 @@ def get_tracks_by_tag(manadj_session, tag_id: int) -> list[ManAdjTrack]:
     Returns:
         List of Track objects with this tag
     """
-    # Query tracks via TrackTag junction
+    # Query tracks via TrackTag junction. Archived Tracks are excluded:
+    # this feeds tag-playlist Export (CONTEXT.md: Archived leaves Export).
     tracks = manadj_session.query(ManAdjTrack).join(
         TrackTag, TrackTag.track_id == ManAdjTrack.id
     ).filter(
-        TrackTag.tag_id == tag_id
+        TrackTag.tag_id == tag_id,
+        ManAdjTrack.archived_at.is_(None),
     ).all()
 
     return tracks

@@ -135,6 +135,7 @@ def _library_row(
         presence.setdefault(sid, False)
 
     unprocessed = not lib.tags
+    archived = track.archived_at is not None
     # only surfaces we can actually see count toward "missing downstream" —
     # an unavailable reader means unknown, not missing
     missing_downstream = any(
@@ -144,8 +145,13 @@ def _library_row(
     # Presence beats field agreement — you can't reconcile fields with a
     # Surface the track isn't on, so presence Export is the primary action;
     # divergences remain on the row for the matrix.
+    # Archived rows always roll up in-sync: they left Export, so nothing
+    # about them is actionable — the row exists only so Match still claims
+    # their downstream copies (which would otherwise look external-only).
     status: RowStatus
-    if missing_downstream:
+    if archived:
+        status = "in-sync"
+    elif missing_downstream:
         status = "missing-downstream"
     elif diverged:
         status = "diverged"
@@ -160,6 +166,7 @@ def _library_row(
         presence=presence,
         status=status,
         unprocessed=unprocessed,
+        archived=archived,
         diverged=list(diverged.values()),
         warnings=warnings,
     )

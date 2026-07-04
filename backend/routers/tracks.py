@@ -30,6 +30,7 @@ def list_tracks(
     bpm_threshold_percent: int | None = Query(None, ge=0, le=100),
     key_camelot_ids: List[str] | None = Query(None),
     unprocessed: bool | None = Query(None),
+    archived: bool = Query(False),
     sort_column: str | None = Query(
         None,
         pattern="^(key|bpm|energy|title|artist|created_at|bitrate_kbps|filesize_bytes|provenance)$",
@@ -62,6 +63,7 @@ def list_tracks(
         bpm_threshold_percent=bpm_threshold_percent,
         key_camelot_ids=key_camelot_ids,
         unprocessed=unprocessed,
+        archived=archived,
         sort_column=sort_column,
         sort_direction=sort_direction
     )
@@ -92,6 +94,34 @@ def get_track(track_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=schemas.Track, status_code=201)
 def create_track(track: schemas.TrackCreate, db: Session = Depends(get_db)):
     return crud.create_track(db, track)
+
+
+@router.get("/{track_id}/playlists", response_model=List[schemas.Playlist])
+def get_track_playlists(track_id: int, db: Session = Depends(get_db)):
+    """The Playlists containing this track (for the archive confirm)."""
+    if not crud.get_track(db, track_id):
+        raise HTTPException(status_code=404, detail="Track not found")
+    return crud.get_playlists_containing_track(db, track_id)
+
+
+@router.post("/{track_id}/archive", response_model=schemas.TrackArchiveResult)
+def archive_track(track_id: int, db: Session = Depends(get_db)):
+    """Archive (CONTEXT.md): curation verdict — out of the active Library.
+    Removes the track from every Playlist; nothing is deleted. Idempotent."""
+    result = crud.archive_track(db, track_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Track not found")
+    track, removed = result
+    return {"archived_at": track.archived_at, "removed_from_playlists": removed}
+
+
+@router.post("/{track_id}/unarchive", response_model=schemas.TrackArchiveResult)
+def unarchive_track(track_id: int, db: Session = Depends(get_db)):
+    """Reverse the Archived verdict. Playlist membership is not restored."""
+    track = crud.unarchive_track(db, track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+    return {"archived_at": track.archived_at, "removed_from_playlists": 0}
 
 
 @router.patch("/{track_id}", response_model=schemas.Track)

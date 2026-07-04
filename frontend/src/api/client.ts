@@ -1,4 +1,5 @@
 import type {
+  Playlist,
   PlaylistTrackAdd,
   PlaylistTrackAddResult,
   UnifiedPlaylist,
@@ -67,6 +68,7 @@ export const api = {
         bpmThresholdPercent?: number | null;
         keyCamelotIds?: string[];
         unprocessed?: boolean;
+        archived?: boolean;
         sortColumn?: string | null;
         sortDirection?: 'asc' | 'desc';
       }
@@ -107,6 +109,10 @@ export const api = {
         if (filters.unprocessed) {
           params.append('unprocessed', 'true');
         }
+        // Archived view (default listings exclude archived server-side)
+        if (filters.archived) {
+          params.append('archived', 'true');
+        }
         // Sort parameters
         if (filters.sortColumn) {
           params.append('sort_column', filters.sortColumn);
@@ -122,6 +128,24 @@ export const api = {
 
     get: async (id: number) => {
       const response = await fetch(`${API_BASE}/tracks/${id}`);
+      return response.json();
+    },
+
+    /** Playlists containing this track (for the archive confirm). */
+    getPlaylists: async (id: number): Promise<Playlist[]> => {
+      const response = await fetch(`${API_BASE}/tracks/${id}/playlists`);
+      return response.json();
+    },
+
+    /** Archive (CONTEXT.md): curation verdict — removes from all playlists. */
+    archive: async (id: number): Promise<{ archived_at: string | null; removed_from_playlists: number }> => {
+      const response = await fetch(`${API_BASE}/tracks/${id}/archive`, { method: 'POST' });
+      return response.json();
+    },
+
+    /** Reverse the verdict (playlist membership is not restored). */
+    unarchive: async (id: number): Promise<{ archived_at: string | null }> => {
+      const response = await fetch(`${API_BASE}/tracks/${id}/unarchive`, { method: 'POST' });
       return response.json();
     },
 

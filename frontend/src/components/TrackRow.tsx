@@ -114,7 +114,7 @@ const TrackRow = memo(function TrackRow({
 
   return (
     <tr
-      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${isLoaded ? 'track-row-loaded' : ''}`}
+      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${isLoaded ? 'track-row-loaded' : ''} ${track.archived_at ? 'track-row-archived' : ''}`}
       onClick={(e) => onSelect(track, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDoubleClick={() => onLoad(track)}
       data-track-id={track.id}

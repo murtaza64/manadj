@@ -278,3 +278,8 @@ a.provenance-chip:hover {
   font-variant-numeric: tabular-nums;
   justify-content: flex-end;
 }
+
+/* Archived rows (CONTEXT.md: Archived) — dimmed as a cue; still loadable */
+.track-row-archived > td {
+  opacity: 0.5;
+}

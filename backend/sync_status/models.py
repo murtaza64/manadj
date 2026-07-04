@@ -99,6 +99,9 @@ class SyncStatusRow:
     presence: dict[str, bool]  # disk / library / engine / rekordbox
     status: RowStatus
     unprocessed: bool
+    # Archived (CONTEXT.md): still Matched (so downstream copies aren't
+    # misread as external-only) but never attention-worthy.
+    archived: bool = False
     diverged: list[FieldDivergence] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 

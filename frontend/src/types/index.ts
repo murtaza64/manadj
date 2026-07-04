@@ -44,6 +44,8 @@ export interface Track {
   filesize_bytes?: number | null;
   created_at: string;
   updated_at: string;
+  /** Archived verdict timestamp; null/absent = active (CONTEXT.md: Archived). */
+  archived_at?: string | null;
   tags: Tag[];
   provenance?: TrackProvenance | null;
 }

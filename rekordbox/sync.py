@@ -22,8 +22,13 @@ def find_missing_tracks_in_rekordbox(
     rb_db: Any,  # Rekordbox6Database
     validate_paths: bool = True,
 ) -> tuple[list[ManAdjTrack], dict[str, int]]:
-    """Tracks that exist in manadj but not in Rekordbox (Export candidates)."""
-    manadj_tracks = manadj_session.query(ManAdjTrack).all()
+    """Tracks that exist in manadj but not in Rekordbox (Export candidates).
+
+    Archived Tracks are never Export candidates (CONTEXT.md: Archived).
+    """
+    manadj_tracks = (
+        manadj_session.query(ManAdjTrack).filter(ManAdjTrack.archived_at.is_(None)).all()
+    )
     rb_contents = list(rb_db.get_content())
     rb_index: TrackIndex[Any] = TrackIndex.build(rb_contents, rb_path)
 

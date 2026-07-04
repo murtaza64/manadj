@@ -280,3 +280,32 @@ class TestPathlessRefs:
     def test_pathless_surface_refs_are_ignored(self, db):
         result = compute_sync_status(db, surfaces(engine=[ref(None, title="ghost")]))
         assert result.rows == []
+
+
+class TestArchived:
+    """Archived (CONTEXT.md): still Matched, never attention-worthy."""
+
+    def test_archived_track_still_claims_downstream_copy(self, db, make_track):
+        from datetime import datetime
+
+        make_track(filename="/m/z.mp3", title="Z", archived_at=datetime.now())
+        result = compute_sync_status(db, surfaces(engine=[ref("/m/z.mp3", title="Z")]))
+        # ONE row: the Engine copy is claimed by Match, not an orphan
+        row = row_for(result, title="Z")
+        assert row.archived is True
+        assert row.presence["engine"] is True
+        assert result.counts["not-in-library"] == 0
+
+    def test_archived_track_is_never_attention_worthy(self, db, make_track):
+        from datetime import datetime
+
+        # Missing downstream AND diverged on disk — but archived: rolls up in-sync
+        make_track(filename="/m/y.mp3", title="Y", archived_at=datetime.now())
+        result = compute_sync_status(
+            db, surfaces(disk=[ref("/m/y.mp3", title="Y (edit)", artist="Test Artist")])
+        )
+        row = row_for(result, path="/m/y.mp3")
+        assert row.status == "in-sync"
+        assert result.counts["missing-downstream"] == 0
+        # the divergence itself stays visible for opt-in chip filters
+        assert [d.field for d in row.diverged] == ["title"]
