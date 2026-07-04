@@ -38,9 +38,12 @@ export function TransitionSwitcher({
     setConfirming(false);
   }
 
+  // Select-all exactly ONCE when editing starts — keying this on the draft
+  // VALUE re-selected on every keystroke, so the next key wiped the field.
+  const editing = draft !== null;
   useEffect(() => {
-    if (draft !== null) inputRef.current?.select();
-  }, [draft]);
+    if (editing) inputRef.current?.select();
+  }, [editing]);
 
   if (!item) return null;
 
@@ -83,6 +86,17 @@ export function TransitionSwitcher({
           }}
         />
       )}
+      {/* ▶ mirrors ◀ directly after the name: `◀ name ▶/+ (1/2) | ★ del` */}
+      <button
+        title={atEnd ? (canNew ? 'New Transition' : 'Already on a fresh Transition') : 'Next Transition'}
+        disabled={atEnd && !canNew}
+        onClick={() => onNavigate(1)}
+      >
+        {atEnd ? '+' : '▶'}
+      </button>
+      <span className="editor-switcher-pos" title="Position (creation order)">
+        ({active + 1}/{items.length})
+      </span>
       <button
         className={`editor-switcher-star${item.favorite ? ' on' : ''}`}
         aria-pressed={!!item.favorite}
@@ -90,16 +104,6 @@ export function TransitionSwitcher({
         onClick={onToggleFavorite}
       >
         {item.favorite ? '★' : '☆'}
-      </button>
-      <span className="editor-switcher-pos" title="Position (creation order)">
-        {active + 1}/{items.length}
-      </span>
-      <button
-        title={atEnd ? (canNew ? 'New Transition' : 'Already on a fresh Transition') : 'Next Transition'}
-        disabled={atEnd && !canNew}
-        onClick={() => onNavigate(1)}
-      >
-        {atEnd ? '+' : '▶'}
       </button>
       <button
         className={`editor-switcher-del${confirming ? ' confirming' : ''}`}

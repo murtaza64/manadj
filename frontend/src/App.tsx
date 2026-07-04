@@ -14,12 +14,10 @@ const queryClient = new QueryClient();
 
 type View = AppMode | 'sync';
 
-// Deep link: ?view=transition opens straight into the Transition editor
-// (`make proto` dev loop). It is otherwise a normal top-bar mode.
-// (?proto=mix kept as a legacy alias for muscle memory.)
-const requestedView = new URLSearchParams(window.location.search);
+// Deep link: ?view=transition opens straight into the Transition editor.
+// It is otherwise a normal top-bar mode.
 const initialView: View =
-  requestedView.get('view') === 'transition' || requestedView.get('proto') === 'mix'
+  new URLSearchParams(window.location.search).get('view') === 'transition'
     ? 'transition'
     : 'library';
 

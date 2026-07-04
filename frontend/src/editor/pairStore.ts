@@ -17,8 +17,7 @@ export const LAST_PAIR_KEY = 'manadj-last-pair';
 /** Pre-graduation storage keys (renamed 2026-07-04, migrated on load). */
 const OLD_PAIR_STORE_KEY = 'PROTOTYPE-transition-editor-pairs';
 const OLD_LAST_PAIR_KEY = 'PROTOTYPE-transition-editor-last';
-/** Default working pair when nothing else is loaded or saved. */
-export const DEFAULT_PAIR = { a: 549, b: 171 };
+
 
 /** A saved Transition (first-class, per ordered track pair). `bInSec` lives
  * INSIDE the transition (issue 11 — pair knowledge switches with the named

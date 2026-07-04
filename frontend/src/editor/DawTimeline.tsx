@@ -64,6 +64,7 @@ export function DawTimeline({
   rateB,
   snap,
   lockedWindow,
+  frameSignal,
   visibleLanes,
   onLaneChange,
   onLaneHide,
@@ -82,6 +83,9 @@ export function DawTimeline({
   /** Slide-lock (glossary): dragging B moves the window with it only when
    * locked; unlocked, B's content slides under a fixed window. */
   lockedWindow: boolean;
+  /** Bumped by the parent when a Transition loads/switches — re-frames the
+   * viewport around the window. */
+  frameSignal: number;
   visibleLanes: LaneId[];
   onLaneChange: (id: LaneId, points: LanePoint[] | null) => void;
   /** Remove the lane from the editor (envelope kept; re-add restores). */
@@ -394,13 +398,33 @@ export function DawTimeline({
     setPxPerSec(Math.max(0.05, (w - 2) / contentEndRef.current));
   }, []);
 
+  /** Frame the Transition window: viewport spans the window plus ~10%
+   * padding each side. The load-time view (frameSignal) and the view when
+   * durations first arrive. */
+  const frameTransition = useCallback(() => {
+    const w = viewportRef.current?.clientWidth ?? 800;
+    const tr = mixRef.current.transition;
+    const dur = Math.max(tr.durationSec, 1);
+    const span = dur * 1.2;
+    const px = Math.min(MAX_PX_PER_SEC, Math.max(0.05, (w - 2) / span));
+    pxRef.current = px;
+    scrollPxRef.current = Math.max(0, (tr.startSec - dur * 0.1) * px);
+    setPxPerSec(px);
+  }, []);
+
+  // Re-frame whenever a Transition is loaded/switched (parent bumps the
+  // signal). Also runs on mount for the initial view.
+  useEffect(() => {
+    frameTransition();
+  }, [frameSignal, frameTransition]);
+
   const didAutoFit = useRef(false);
   useEffect(() => {
     if (!didAutoFit.current && (durA > 0 || durB > 0)) {
       didAutoFit.current = true;
-      fit();
+      frameTransition();
     }
-  }, [durA, durB, fit]);
+  }, [durA, durB, frameTransition]);
 
   const secAtClientX = (clientX: number) => {
     const el = viewportRef.current;

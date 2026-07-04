@@ -21,7 +21,6 @@ import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
 import { TransitionSwitcher } from './TransitionSwitcher';
 import {
-  DEFAULT_PAIR,
   LAST_PAIR_KEY,
   freshTransition,
   isPristine,
@@ -39,7 +38,7 @@ import {
   slideBToCue,
   tempoMatchPitch,
 } from './mixModel';
-import type { LaneId, LanePoint, EditorMix } from './mixModel';
+import type { LaneId, LanePoint, EditorMix, Transition } from './mixModel';
 import type { Track } from '../types';
 import './transitionEditor.css';
 
@@ -101,6 +100,27 @@ export default function TransitionEditor() {
       s.items.map((it, i) => (i === s.active ? { ...it, transition: m.transition } : it)),
     []
   );
+
+  /** Bumped whenever a Transition loads/switches: the timeline re-frames
+   * around the window and the playhead parks at the window start. The park
+   * is deferred until the player is ready — seek() clamps to the mix
+   * duration, which is ~0 while tracks are still loading. */
+  const [frameSignal, setFrameSignal] = useState(0);
+  const pendingParkRef = useRef<number | null>(null);
+  const onTransitionLoaded = useCallback(
+    (transition: Transition) => {
+      if (player.ready()) player.seek(transition.startSec);
+      else pendingParkRef.current = transition.startSec;
+      setFrameSignal((n) => n + 1);
+    },
+    [player]
+  );
+  useEffect(() => {
+    if (pendingParkRef.current !== null && player.ready()) {
+      player.seek(pendingParkRef.current);
+      pendingParkRef.current = null;
+    }
+  });
 
   // Keep the player's model current (immediately — audio correctness).
   useEffect(() => {
@@ -208,6 +228,7 @@ export default function TransitionEditor() {
     const active = entry ? Math.min(entry.active, items.length - 1) : 0;
     setSession({ items, active });
     setMix((m) => ({ ...m, transition: structuredClone(items[active].transition) }));
+    onTransitionLoaded(items[active].transition);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pairKey]);
 
@@ -223,6 +244,7 @@ export default function TransitionEditor() {
       const fresh = freshTransition(items);
       setSession({ items: [...items, fresh], active: items.length });
       setMix((m) => ({ ...m, transition: structuredClone(fresh.transition) }));
+      onTransitionLoaded(fresh.transition);
       return;
     }
     if (target < 0) return;
@@ -235,6 +257,7 @@ export default function TransitionEditor() {
     }
     setSession({ items: nextItems, active: target });
     setMix((m) => ({ ...m, transition: structuredClone(nextItems[target].transition) }));
+    onTransitionLoaded(nextItems[target].transition);
   };
 
   const renameTransition = (name: string) => {
@@ -261,6 +284,7 @@ export default function TransitionEditor() {
     const active = Math.min(session.active, nextItems.length - 1);
     setSession({ items: nextItems, active });
     setMix((m) => ({ ...m, transition: structuredClone(nextItems[active].transition) }));
+    onTransitionLoaded(nextItems[active].transition);
   };
 
   // One audible surface AND one running audio clock at a time (issue 08):
@@ -276,19 +300,17 @@ export default function TransitionEditor() {
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh
-  // straight into the editor — provider restore may still be in flight),
-  // else the prototyping default pair. Pause both shared decks — one
-  // audible surface at a time.
+  // straight into the editor — provider restore may still be in flight);
+  // otherwise the deck stays empty. Pause both shared decks — one audible
+  // surface at a time.
   useEffect(() => {
     sharedDecks.A.engine.pause();
     sharedDecks.B.engine.pause();
     const last = localStorage.getItem(LAST_PAIR_KEY);
     const lastIds = last ? last.split(':').map(Number) : null;
-    const anySource =
-      sharedDecks.A.loadedTrack || sharedDecks.B.loadedTrack || lastIds !== null;
     for (const [deck, i] of [['A', 0], ['B', 1]] as const) {
       const shared = sharedDecks[deck].loadedTrack;
-      const fallbackId = anySource ? lastIds?.[i] : DEFAULT_PAIR[deck === 'A' ? 'a' : 'b'];
+      const fallbackId = lastIds?.[i];
       if (shared) {
         assignTrack(deck, shared);
       } else if (fallbackId !== undefined && fallbackId !== null && !Number.isNaN(fallbackId)) {
@@ -424,6 +446,7 @@ export default function TransitionEditor() {
             rateB={rateB}
             snap={snap}
             lockedWindow={lockedWindow}
+            frameSignal={frameSignal}
             visibleLanes={visibleLanes}
             onLaneChange={setLane}
             onLaneHide={hideLane}

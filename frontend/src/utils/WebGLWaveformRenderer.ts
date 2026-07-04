@@ -377,6 +377,10 @@ export class WebGLWaveformRenderer {
   public setBeatgrid(beatTimes: number[], downbeatTimes: number[]): void {
     this.beatTimes = new Float32Array(beatTimes);
     this.downbeatTimes = new Float32Array(downbeatTimes);
+    // The vertex cache keys on extent/zoom only — NEW BEAT DATA must
+    // invalidate it explicitly, or a nudged grid keeps drawing its stale
+    // lines (snap targets update, the drawn grid doesn't — off-by-a-nudge).
+    this.beatgridCache = null;
 
     // Convert downbeat times to indices for reliable lookup
     this.downbeatIndices = new Set();

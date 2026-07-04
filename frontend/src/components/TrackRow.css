@@ -221,9 +221,9 @@ a.provenance-chip:hover {
 .track-transition-marks {
   float: left;
   display: inline-flex;
-  gap: 2px;
-  margin-right: 5px;
-  font-size: 10px;
+  gap: 3px;
+  margin-right: 6px;
+  font-size: 13px;
   line-height: inherit;
 }
 
