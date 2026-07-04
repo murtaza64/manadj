@@ -1,6 +1,6 @@
 # 04 — Main cue: CDJ memory-cue behavior
 
-Status: ready-for-agent
+Status: done (implemented, change nonvuxll)
 
 ## Parent
 

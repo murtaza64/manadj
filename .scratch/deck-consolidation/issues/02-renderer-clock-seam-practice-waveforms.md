@@ -1,6 +1,6 @@
 # 02 — renderer clock seam + Practice waveforms
 
-Status: ready-for-agent
+Status: done (implemented, change uovsqlyx)
 
 ## Parent
 

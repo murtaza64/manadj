@@ -1,6 +1,6 @@
 # 01 — vitest safety net for playback semantics
 
-Status: ready-for-agent
+Status: done (implemented, change prywqsxu)
 
 ## Parent
 

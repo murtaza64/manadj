@@ -1,6 +1,6 @@
 # 03 — Performance view: decks + mixer surface (mouse-only)
 
-Status: ready-for-agent
+Status: done (implemented, change qspqpmkw)
 
 ## Parent
 

@@ -388,6 +388,22 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   pristine take discards it silently; ▶ past the end is a no-op when the
   current take is already fresh.
 
+- v28 (transition-library 02): discovery surfaced in the library.
+  `transitionIndex.ts`: direction-aware `transitionsFrom/Into` over the
+  pair store (in-memory rebuild; honest by construction — only
+  materialized Transitions exist in storage), `useTransitionIndex` hook
+  fed by new pairStore save events (`subscribePairStore`, notified with
+  the store so no re-parse). Library rows get per-source-deck marks in
+  the title cell (◆ in the deck accent color, ★ when the pair is
+  Preferred — strings through the memoized rows). Filter bar gains the
+  "◆ transitions" toggle: `hasTransitionFromDecks` is a first-class
+  FilterState axis composed CLIENT-side over the server-filtered list
+  (transition knowledge lives in localStorage); Find Related now
+  preserves the axis when applying, Clear All resets via DEFAULT_FILTERS
+  (also de-triplicated its predicate). Index correctness under vitest
+  (direction, Preferred derivation, counts). Note: favorite→star updates
+  ride the 300ms debounced save — near-live.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

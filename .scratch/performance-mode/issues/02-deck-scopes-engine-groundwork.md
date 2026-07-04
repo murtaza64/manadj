@@ -1,6 +1,6 @@
 # 02 — Deck scopes + performance engine groundwork
 
-Status: ready-for-agent
+Status: done (implemented, change ltzwtqqo)
 
 ## Parent
 

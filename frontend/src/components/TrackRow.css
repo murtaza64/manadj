@@ -216,6 +216,25 @@ a.provenance-chip:hover {
   text-decoration: underline;
 }
 
+/* Saved-Transition marks (transition-library 02): per-source-deck glyphs
+   in the deck accent colors; ★ = Preferred pair (has a favorite). */
+.track-transition-marks {
+  float: left;
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 5px;
+  font-size: 10px;
+  line-height: inherit;
+}
+
+.track-transition-mark.mark-a {
+  color: #00e5ff;
+}
+
+.track-transition-mark.mark-b {
+  color: #ff2d95;
+}
+
 /* Load-to-deck hover buttons (Performance view's embedded library). The
    title cell is position: sticky, so the absolute overlay anchors to it. */
 .track-load-buttons {

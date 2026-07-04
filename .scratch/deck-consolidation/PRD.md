@@ -1,6 +1,6 @@
 # PRD: Deck consolidation — buffer engine everywhere, one shared Deck
 
-Status: ready-for-agent
+Status: done (all 4 issues landed; performance-mode built on top)
 
 ## Problem Statement
 

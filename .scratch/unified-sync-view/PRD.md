@@ -1,6 +1,6 @@
 # PRD: Unified Sync View
 
-Status: ready-for-agent
+Status: done (shipped across changes qwsyqlus..rslwsvkp — Tracks tab replaced the Tracks/Metadata/Tags tabs; issues/ are follow-ups, still open)
 
 ## Problem Statement
 

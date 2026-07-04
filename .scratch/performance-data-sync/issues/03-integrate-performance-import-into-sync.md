@@ -1,6 +1,6 @@
 # 03 — Integrate Engine performance-data import into the Sync system
 
-Status: ready-for-agent
+Status: wontfix (superseded — the perfdata-lane grill re-scoped this feature into its new PRD + issues 04–07 on that lane)
 
 ## Parent
 

@@ -1,6 +1,6 @@
 # 02 — Beatgrid tempo is the BPM source of truth wherever a grid exists
 
-Status: ready-for-agent
+Status: wontfix (superseded — the perfdata-lane grill re-scoped this feature; see the re-filed issues in .scratch/performance-data-sync/ on that lane, e.g. 03-beatgrid-origin)
 
 ## Parent
 

@@ -9,6 +9,12 @@ import type { ChannelId } from '../playback/mixer';
 import { COLUMN_CONFIG } from './columnConfig';
 import './TrackRow.css';
 
+/** Saved-Transition mark state for one source deck (transition-library
+ * 02): 'saved' = the loaded deck's track has a Transition into this row;
+ * 'preferred' = that pair has a favorited one. Strings keep the row memo
+ * effective. */
+export type TransitionMark = 'none' | 'saved' | 'preferred';
+
 interface Props {
   track: Track;
   isSelected: boolean;
@@ -19,6 +25,8 @@ interface Props {
   onLoad: (track: Track) => void;
   /** When set (Performance view), show hover load-to-A/B buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
+  markA?: TransitionMark;
+  markB?: TransitionMark;
 }
 
 const LOSSLESS = new Set(['flac', 'alac', 'pcm']);
@@ -50,6 +58,8 @@ const TrackRow = memo(function TrackRow({
   onSelect,
   onLoad,
   onLoadToDeck,
+  markA = 'none',
+  markB = 'none',
 }: Props) {
   // Extract just the filename from the full path
   const filename = track.filename.split('/').pop() || track.filename;
@@ -113,6 +123,28 @@ const TrackRow = memo(function TrackRow({
           )}
         </td>
         <td className={getCellClasses(3)} style={getCellStyle(3)}>
+          {/* Saved-Transition marks: one glyph per source deck, in the
+              deck's accent color; ★ when the pair is Preferred. */}
+          {(markA !== 'none' || markB !== 'none') && (
+            <span className="track-transition-marks">
+              {markA !== 'none' && (
+                <span
+                  className="track-transition-mark mark-a"
+                  title={`Saved transition from deck A's track${markA === 'preferred' ? ' (favorite)' : ''}`}
+                >
+                  {markA === 'preferred' ? '★' : '◆'}
+                </span>
+              )}
+              {markB !== 'none' && (
+                <span
+                  className="track-transition-mark mark-b"
+                  title={`Saved transition from deck B's track${markB === 'preferred' ? ' (favorite)' : ''}`}
+                >
+                  {markB === 'preferred' ? '★' : '◆'}
+                </span>
+              )}
+            </span>
+          )}
           <div className="track-cell-text">
             {track.title || filename}
           </div>

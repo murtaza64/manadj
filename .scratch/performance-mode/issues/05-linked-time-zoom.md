@@ -1,6 +1,6 @@
 # 05 — Linked time-based zoom across both waveforms
 
-Status: ready-for-agent
+Status: done (implemented, change wpmrymwr)
 
 ## Parent
 
