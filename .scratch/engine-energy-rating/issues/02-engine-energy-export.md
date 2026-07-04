@@ -1,6 +1,6 @@
 # Energy export to Engine — star ratings ride the Engine tag export
 
-Status: ready-for-agent
+Status: closed (implemented change vzzwooow)
 
 ## What to build
 
@@ -23,3 +23,9 @@ UI: the "tags diverged" group's "Export tags → Engine" button must also appear
 ## Blocked by
 
 - 01-engine-energy-read
+
+## Comments
+
+**2026-07-04 — Done** (jj change `vzzwooow`, lane energyrating). `EngineTagWriter._export_energy_ratings`: active tracks with energy, matched via the existing TrackIndex, `Track.rating = energy_to_rating(energy)`; only-tracks-with-energy satisfies never-overwrite-with-empty by construction; energy step runs even with zero tag categories. `include_energy` threaded through `sync_to_engine` and the router (`TagSyncRequest.include_energy` no longer Rekordbox-only); new `TagSyncStats.tracks_rated` counts actual writes (0 on re-export = idempotent). UI: div-tags group buttons count `tags|energy` divergences for both targets; Engine side-effect text mentions star ratings. Tests: 9 writer tests on a schema-real in-memory Engine DB (ADR 0004 pattern, first use) incl. an export → `compute_sync_status` round-trip through the real `EngineSurfaceReader`.
+
+Review notes: `tracks_unmatched` can double-count a track unmatched in both the tag and energy passes — pre-existing per-tag inflation, left as is. Negative ratings decode as absent rather than clamping to 1 (saner than the issue's strict wording; documented in `enginedj/ratings.py`).

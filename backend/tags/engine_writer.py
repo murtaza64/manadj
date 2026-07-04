@@ -1,11 +1,14 @@
-"""Write manadj tags to Engine DJ as flat playlist structure."""
+"""Write manadj tags to Engine DJ as flat playlist structure, and energy as
+star ratings."""
 
 from sqlalchemy.orm import Session
 
 from enginedj.connection import EngineDJDatabase
 from enginedj.models.track import Track as EDJTrack
 from enginedj.models.information import Information as EDJInformation
+from enginedj.ratings import energy_to_rating
 from backend.crud import get_tag_categories, get_tags_by_category
+from backend.models import Track
 from backend.sync_common.matching import TrackIndex
 from enginedj.sync import edj_path
 from enginedj.playlist import (
@@ -21,6 +24,10 @@ class EngineTagWriter:
 
     Creates/updates flat structure:
     "manaDJ Tags" > Tag1, Tag2, Tag3, ... (all tags directly under root)
+
+    Also writes each matched track's Energy as Engine's star rating
+    (enginedj.ratings) — energy rides the tag export here exactly as it rides
+    Rekordbox's (colors there, ratings here).
     """
 
     def __init__(self, manadj_session: Session, engine_db: EngineDJDatabase):
@@ -30,22 +37,23 @@ class EngineTagWriter:
     def sync_tag_structure(
         self,
         dry_run: bool = True,
-        fresh: bool = False
+        fresh: bool = False,
+        include_energy: bool = True
     ) -> TagSyncStats:
-        """Sync manadj tags to Engine DJ playlists.
+        """Sync manadj tags to Engine DJ playlists, plus energy as ratings.
 
         Args:
             dry_run: Preview without writing
             fresh: Delete existing "manaDJ Tags" and recreate
+            include_energy: Write track energy as Engine star ratings
 
         Returns:
             Statistics about the sync operation
         """
         stats = TagSyncStats()
 
-        # Get all categories
         categories = get_tag_categories(self.manadj_session)
-        if not categories:
+        if not categories and not include_energy:
             return stats
 
         # Open Engine DJ session
@@ -59,37 +67,70 @@ class EngineTagWriter:
             edj_tracks = edj_session.query(EDJTrack).all()
             edj_index = TrackIndex.build(edj_tracks, edj_path)
 
-            # Get database UUID
-            info = edj_session.query(EDJInformation).first()
-            db_uuid = info.uuid if info else ""
+            if categories:
+                # Get database UUID
+                info = edj_session.query(EDJInformation).first()
+                db_uuid = info.uuid if info else ""
 
-            # Find or create root playlist
-            root_id = self._find_or_create_root(
-                edj_session, db_uuid, dry_run, fresh, stats
-            )
-
-            # Collect all tags from all categories
-            all_tags = []
-            for category in categories:
-                tags = get_tags_by_category(self.manadj_session, category.id)
-                all_tags.extend(tags)
-
-            # Sort alphabetically by name
-            all_tags.sort(key=lambda t: t.name.lower())
-
-            # Sync all tags directly under root
-            for tag in all_tags:
-                self._sync_tag(
-                    edj_session,
-                    tag,
-                    root_id,
-                    db_uuid,
-                    dry_run,
-                    edj_index,
-                    stats
+                # Find or create root playlist
+                root_id = self._find_or_create_root(
+                    edj_session, db_uuid, dry_run, fresh, stats
                 )
 
+                # Collect all tags from all categories
+                all_tags = []
+                for category in categories:
+                    tags = get_tags_by_category(self.manadj_session, category.id)
+                    all_tags.extend(tags)
+
+                # Sort alphabetically by name
+                all_tags.sort(key=lambda t: t.name.lower())
+
+                # Sync all tags directly under root
+                for tag in all_tags:
+                    self._sync_tag(
+                        edj_session,
+                        tag,
+                        root_id,
+                        db_uuid,
+                        dry_run,
+                        edj_index,
+                        stats
+                    )
+
+            if include_energy:
+                self._export_energy_ratings(edj_session, edj_index, dry_run, stats)
+
         return stats
+
+    def _export_energy_ratings(
+        self,
+        edj_session,
+        edj_index: TrackIndex,
+        dry_run: bool,
+        stats: TagSyncStats
+    ) -> None:
+        """Write each active track's Energy as Engine's star rating.
+
+        Only tracks WITH energy participate: an empty Library energy never
+        overwrites an Engine rating (the Export rule). Archived Tracks leave
+        Export (CONTEXT.md)."""
+        tracks = self.manadj_session.query(Track).filter(
+            Track.is_active,
+            Track.energy.isnot(None)
+        ).all()
+
+        for track in tracks:
+            edj_track = edj_index.match(track.filename)
+            if edj_track is None:
+                stats.tracks_unmatched += 1
+                continue
+            target = energy_to_rating(track.energy)
+            if edj_track.rating == target:
+                continue
+            if not dry_run:
+                edj_track.rating = target
+            stats.tracks_rated += 1
 
     def _find_or_create_root(
         self,

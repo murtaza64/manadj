@@ -321,14 +321,13 @@ export function UnifiedTracksSync() {
 
   const groupActions = (key: GroupKey, list: StatusRow[], selectedHere: StatusRow[]) => {
     if (key === 'div-tags') {
-      // energy rides with tags: the Rekordbox tag export also writes energy
-      // colors, so energy-only divergences must still surface that button
+      // energy rides with tags: the tag exports also write energy (Rekordbox
+      // colors, Engine star ratings), so energy-only divergences must still
+      // surface these buttons
       const forTarget = (t: 'engine' | 'rekordbox') =>
         list.filter((r) =>
           r.diverged.some(
-            (d) =>
-              (d.field === 'tags' || (t === 'rekordbox' && d.field === 'energy')) &&
-              t in d.surface_values,
+            (d) => (d.field === 'tags' || d.field === 'energy') && t in d.surface_values,
           ),
         ).length;
       return (
@@ -346,7 +345,7 @@ export function UnifiedTracksSync() {
                     scope: `Export all tag assignments to ${label} (whole-library operation; clears ${n} rows here)`,
                     sideEffects:
                       t === 'engine'
-                        ? 'updates the "manaDJ Tags" playlist tree in the Engine DJ database'
+                        ? 'updates the "manaDJ Tags" playlist tree (and energy star ratings) in the Engine DJ database'
                         : 'updates MyTags (and energy colors) in the Rekordbox database',
                     run: () => exportTags.mutate(t),
                   })

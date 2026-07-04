@@ -91,10 +91,11 @@ def sync_tags_to_engine(
 ):
     """Sync manadj tags to Engine DJ as playlist hierarchy.
 
-    Creates/updates "manadj Tags" > Category > Tag playlists.
+    Creates/updates "manadj Tags" > Category > Tag playlists, and writes
+    track energy as Engine star ratings (include_energy).
 
     Args:
-        request: Sync parameters (dry_run, fresh)
+        request: Sync parameters (dry_run, fresh, include_energy)
         db: manadj database session (injected)
 
     Returns:
@@ -111,7 +112,8 @@ def sync_tags_to_engine(
     manager = TagSyncManager(db, engine_db=engine_db)
     stats = manager.sync_to_engine(
         dry_run=request.dry_run,
-        fresh=request.fresh
+        fresh=request.fresh,
+        include_energy=request.include_energy
     )
 
     return stats

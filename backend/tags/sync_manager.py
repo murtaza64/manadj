@@ -191,13 +191,15 @@ class TagSyncManager:
     def sync_to_engine(
         self,
         dry_run: bool = True,
-        fresh: bool = False
+        fresh: bool = False,
+        include_energy: bool = True
     ) -> TagSyncStats:
         """Sync manadj tags to Engine DJ.
 
         Args:
             dry_run: Preview without writing
             fresh: Delete existing and recreate
+            include_energy: Write track energy as Engine star ratings
 
         Returns:
             Statistics about the sync operation
@@ -207,7 +209,7 @@ class TagSyncManager:
         """
         if not self.engine_writer:
             raise ValueError("Engine DJ not configured")
-        return self.engine_writer.sync_tag_structure(dry_run, fresh)
+        return self.engine_writer.sync_tag_structure(dry_run, fresh, include_energy)
 
     def sync_to_rekordbox(
         self,

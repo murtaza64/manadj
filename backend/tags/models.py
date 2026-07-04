@@ -91,6 +91,7 @@ class TagSyncStats:
     tracks_unmatched: int = 0
     tracks_updated: int = 0
     tracks_colored: int = 0
+    tracks_rated: int = 0  # Engine: star ratings written from energy
 
 
 @dataclass
@@ -99,4 +100,4 @@ class TagSyncRequest:
     target: str                    # 'engine' | 'rekordbox'
     dry_run: bool = True
     fresh: bool = False            # Delete existing and recreate (Engine only)
-    include_energy: bool = True    # Sync energy tags (Rekordbox only)
+    include_energy: bool = True    # Sync energy (Rekordbox: MyTag + color; Engine: star rating)
