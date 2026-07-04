@@ -26,3 +26,7 @@ The overlay's beat-position math must walk the **full** tempo-change list — a 
 
 - 04-hotcue-divergence-and-import
 - 05-beatgrid-maincue-divergence-and-import
+
+## Comments
+
+**2026-07-04 — Done** (jj change `tovrwyym`, workspace perfdata). `PerfDiffViewer` (canvas): one waveform (summed 3-band silhouette), Library overlays from the top in saturated cyan, Engine from the bottom in orange — grids as tick verniers (downbeats full-length), hot cue flags with slot numbers and cue colors, main cue triangles (Library falls back to the waveform's saved cue when not diverged). Wheel zoom about the cursor down to 0.5s windows, drag pan. Pick-a-side buttons reuse `onImportPerf` so the parent's confirmation rule applies; no editing affordances. Beat positions computed from the FULL tempo-change list in `utils/perfDiffOverlay.ts` (pure; 10 vitest tests incl. multi-segment and boundary cases; 200k-marker guard; density cutoff when ticks exceed 2/px). Opens via "Visual diff" in a diverged row's expansion; non-diverged grid/cue layers fetched from the Library for context. Variable-grid ⚠ shown in the toolbar. Pixels eye-verified by the user, per house style; full-stack smoke: status → waveform → viewer data path verified against the sandbox library.

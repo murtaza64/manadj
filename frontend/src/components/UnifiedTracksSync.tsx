@@ -12,6 +12,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, BACKEND_URL } from '../api/client';
 import { formatKeyDisplay } from '../utils/keyUtils';
+import { PerfDiffViewer, type PerfDiffSides } from './PerfDiffViewer';
 import './UnifiedTracksSync.css';
 
 // ------------------------------------------------------------------- types
@@ -704,6 +705,10 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   onExportToDisk: () => void;
 }) {
   const expandable = row.diverged.length > 0;
+  const [showViewer, setShowViewer] = useState(false);
+  const hasPerfDivergence =
+    row.track_id !== null &&
+    row.diverged.some((d) => ['hotcues', 'beatgrid', 'maincue'].includes(d.field));
   return (
     <div className={`uts-card ${row.unprocessed ? 'uts-warn' : ''}`}>
       <div className={`uts-row ${expandable ? 'uts-row-expandable' : ''}`} onClick={expandable ? onToggleExpand : undefined}>
@@ -740,6 +745,11 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
         <div className="uts-expand">
           <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} />
           <div className="uts-expand-actions">
+            {hasPerfDivergence && (
+              <button className="uts-btn" onClick={() => setShowViewer(!showViewer)}>
+                {showViewer ? 'Hide visual diff' : 'Visual diff'}
+              </button>
+            )}
             {row.track_id !== null &&
               row.diverged.some((d) => ['hotcues', 'beatgrid', 'maincue', 'key'].includes(d.field)) && (
               <button className="uts-btn" onClick={onBulkImportPerf} title="Fills blanks automatically; overwrites of saved info will ask first">
@@ -753,9 +763,69 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
               <span className="uts-hint">tag fixes: use the section's "Export tags" buttons (whole-library op)</span>
             )}
           </div>
+          {showViewer && hasPerfDivergence && (
+            <RowPerfDiff row={row} onImportPerf={onImportPerf} />
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+/** Builds the viewer's two sides from the row's divergences, falling back to
+ * Library fetches for non-diverged layers (grid/cues) so the overlay always
+ * has beat context. Read-only + pick-a-side (the parent owns confirmation). */
+function RowPerfDiff({ row, onImportPerf }: {
+  row: StatusRow;
+  onImportPerf: (field: PerfField, mode: PerfImportMode) => void;
+}) {
+  const byField = Object.fromEntries(row.diverged.map((d) => [d.field, d]));
+  const gridDiv = byField['beatgrid'];
+  const cuesDiv = byField['hotcues'];
+  const maincueDiv = byField['maincue'];
+
+  // Library-side context for layers that aren't diverged
+  const { data: libGridResp } = useQuery({
+    queryKey: ['beatgrid', row.track_id],
+    queryFn: () => api.beatgrids.get(row.track_id!),
+    enabled: !gridDiv,
+    retry: false,
+  });
+  const { data: libCuesResp } = useQuery({
+    queryKey: ['hotcues', row.track_id],
+    queryFn: () => api.hotcues.get(row.track_id!),
+    enabled: !cuesDiv,
+    retry: false,
+  });
+
+  const sides: PerfDiffSides = {
+    libraryGrid: gridDiv
+      ? (gridDiv.library_value as BeatgridVal | null)
+      : libGridResp?.data ? { tempo_changes: libGridResp.data.tempo_changes } : null,
+    engineGrid: (gridDiv?.surface_values['engine'] as BeatgridVal | undefined) ?? null,
+    libraryCues: cuesDiv
+      ? (cuesDiv.library_value as HotCueVal[])
+      : ((libCuesResp ?? []) as { slot_number: number; time_seconds: number; label: string | null; color: string | null }[])
+          .map((c) => ({ slot: c.slot_number, time: c.time_seconds, label: c.label, color: c.color })),
+    engineCues: (cuesDiv?.surface_values['engine'] as HotCueVal[] | undefined) ?? [],
+    libraryMaincue: (maincueDiv?.library_value as number | null | undefined) ?? null,
+    engineMaincue: (maincueDiv?.surface_values['engine'] as number | undefined) ?? null,
+  };
+
+  return (
+    <PerfDiffViewer
+      trackId={row.track_id!}
+      sides={sides}
+      onImport={{
+        hotcues: cuesDiv ? (mode) => onImportPerf('hotcues', mode) : undefined,
+        beatgrid: gridDiv
+          ? () => onImportPerf('beatgrid', sides.libraryGrid ? 'replace' : 'fill-empty')
+          : undefined,
+        maincue: maincueDiv
+          ? () => onImportPerf('maincue', sides.libraryMaincue !== null ? 'replace' : 'fill-empty')
+          : undefined,
+      }}
+    />
   );
 }
 
