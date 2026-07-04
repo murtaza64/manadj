@@ -18,6 +18,8 @@ used by the tag editor, PERF `BeatgridBlock`, and editor DeckCard:
 - Keyboard (library Shift+H/L, G) calls the same handlers.
 - The ±10ms constant gets one home (today: `GRID_NUDGE_MS` in DeckPanel +
   literals elsewhere).
+- Icons (PRD icon language): grid nudge uses the grid-ticks-with-arrow
+  SVG pair (not plain ◀/▶); this slice introduces `components/icons/`.
 
 ## Acceptance criteria
 

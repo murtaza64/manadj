@@ -22,6 +22,9 @@ input):
   kept (library keyboard parity).
 - Effective-BPM readout (base × pitch × bend / editor rate) stays a
   per-surface concern beside the control, not inside it.
+- Icons (PRD icon language): BPM step buttons use the grid compress
+  (`→←`, up) / spread (`←→`, down) SVG icons — not ±; halve/double
+  shortcuts read `1/2` / `x2` (plain text).
 
 ## Acceptance criteria
 

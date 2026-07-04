@@ -26,6 +26,10 @@ language plus ONE systematic marker:
   per-card state deleted.
 - Rename `editorStore.nudgeTrack` → `alignmentNudge` (code follows the
   glossary).
+- Icons (PRD icon language): slide-beatjump uses the jump-arrow icons
+  (accent-marked); the Alignment nudge keeps PLAIN ◀/▶ + accent — with
+  every other pair carrying a specific icon, that combination is
+  unambiguous.
 
 ## Acceptance criteria
 

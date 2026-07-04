@@ -54,6 +54,27 @@ Consistency means something different per class:
 - Keyboard: three guard implementations converge on one helper
   (`isGuardedKeyEvent`); per-mode key MAPS stay per-mode (deliberate).
 
+## Icon language (added 2026-07-04, second grill round)
+
+Left/right-coded operations stop sharing glyphs; the accent color says
+which CLASS, the icon says which OPERATION. A small shared SVG icon set
+(`components/icons/`) — unicode only where it survives 11px:
+
+- **Beat jump** (and the editor's slide-beatjump, accent-marked): curved
+  jump arrow (↶/↷ shape, drawn).
+- **Nudge/bend**: ◀◀ / ▶▶ — momentary speed change reads as rewind/FF.
+- **Grid nudge**: grid-ticks-with-arrow (drawn) — clearly a grid op.
+- **BPM step**: grid compress `→←` (BPM up) / spread `←→` (BPM down) —
+  ADR 0016 made visible; replaces generic ± steppers.
+- **Halve/double anything** (beatjump size, PERF BPM shortcuts): text
+  `1/2` / `x2` (plain text, NOT the ½ fraction glyph — unreadable small).
+  Bare +/− disappears from deck controls.
+- **Alignment nudge**: plain ◀ / ▶ + the alignment accent — with every
+  other pair carrying a specific icon, plain-triangle-plus-accent is
+  unambiguous.
+- Transition switcher ◀ name ▶ stays plain (labeled list navigation,
+  different neighborhood).
+
 ## Non-goals
 
 - Variable-tempo grid editing (deferred wholesale).

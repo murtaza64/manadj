@@ -22,6 +22,9 @@ gesture variants are slice 05):
   collapse to one; the library gains the stepper.
 - Merge the duplicated `ScrubTransport` literals (keep PERF's ready-guard
   on seek).
+- Icons (PRD icon language): beatjump buttons use the curved jump-arrow
+  SVGs; bend/nudge hold-buttons use ◀◀/▶▶; beatjump size halve/double
+  reads `1/2` / `x2` (replacing −/+).
 
 ## Acceptance criteria
 
