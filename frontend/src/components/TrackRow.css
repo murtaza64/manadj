@@ -2,7 +2,10 @@
   height: 28px;
   border-bottom: 1px solid var(--surface0);
   background: var(--base);
-  transition: background var(--transition-normal);
+  /* No background transition: sticky cells set their background via their
+     own (untransitioned) rules, so a fade here makes the non-sticky cells
+     visibly lag the sticky ones on selection. Instant is also just right
+     for selection feedback. */
   cursor: pointer;
 }
 
