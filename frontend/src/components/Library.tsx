@@ -14,7 +14,8 @@ import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
-import { useDeck, useDeckReady } from '../hooks/useDeck';
+import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
+import { transitionsFrom, useTransitionIndex } from '../prototype/transitionIndex';
 
 // Related tracks feature - types and constants
 export interface RelatedTracksSettings {
@@ -226,6 +227,14 @@ export default function Library({
   const { engine, loadedTrack, loadTrack } = useDeck();
   const deckReady = useDeckReady();
 
+  // Transition-library discovery (transition-library 02): per-row marks for
+  // tracks with a saved Transition FROM either loaded deck, starred when
+  // the pair is Preferred. Index rebuilds live on editor save events.
+  const decks = useDecks();
+  const transitionIndex = useTransitionIndex();
+  const fromA = transitionsFrom(transitionIndex, decks.A.loadedTrack?.id);
+  const fromB = transitionsFrom(transitionIndex, decks.B.loadedTrack?.id);
+
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
   const nudgeGrid = useNudgeBeatgrid();
@@ -354,8 +363,9 @@ export default function Library({
     const settings = loadSettings();
     const newFilters = deriveRelatedFilters(selectedTrack, settings);
 
-    // REPLACE all filters
-    setFilters(newFilters);
+    // Replace the four heuristic criteria; the transition axis survives
+    // (transition-library composition rule).
+    setFilters((f) => ({ ...newFilters, hasTransitionFromDecks: f.hasTransitionFromDecks }));
   };
 
   const handleApplySettings = (settings: RelatedTracksSettings) => {
@@ -364,7 +374,7 @@ export default function Library({
     // Save settings and apply filters
     saveSettings(settings);
     const newFilters = deriveRelatedFilters(selectedTrack, settings);
-    setFilters(newFilters);
+    setFilters((f) => ({ ...newFilters, hasTransitionFromDecks: f.hasTransitionFromDecks }));
   };
 
   // Beatgrid edits are playhead-dependent, so they act on the loaded Track
@@ -405,6 +415,15 @@ export default function Library({
     const newTracks = [...currentTracks];
     newTracks.splice(selectedTrackPosition, 0, selectedTrack);
     currentTracks = newTracks;
+  }
+
+  // Proven-tier filter (transition-library 02): composes CLIENT-side over
+  // the server-filtered list — transition knowledge lives in localStorage,
+  // not the backend.
+  if (filters.hasTransitionFromDecks) {
+    currentTracks = currentTracks.filter(
+      (t: Track) => fromA.has(t.id) || fromB.has(t.id)
+    );
   }
 
   const totalTracks = selectedView === 'playlist'
@@ -536,6 +555,8 @@ export default function Library({
               onLoadTrack={loadForTable}
               loadedTrackId={loadedTrack?.id ?? null}
               onLoadToDeck={onLoadToDeck}
+              transitionMarksA={fromA}
+              transitionMarksB={fromB}
               sortColumn={filters.sortColumn}
               sortDirection={filters.sortDirection}
               onSort={handleSort}

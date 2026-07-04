@@ -93,8 +93,20 @@ export function loadPairStore(): PairStore {
   return pruned.store;
 }
 
+// ── Change events (same-tab) ───────────────────────────────────────────
+// The library's discovery index rebuilds on every store write (issue 02).
+
+type StoreListener = (store: PairStore) => void;
+const storeListeners = new Set<StoreListener>();
+
+export function subscribePairStore(fn: StoreListener): () => void {
+  storeListeners.add(fn);
+  return () => storeListeners.delete(fn);
+}
+
 export function savePairStore(store: PairStore): void {
   localStorage.setItem(PAIR_STORE_KEY, JSON.stringify(store));
+  for (const fn of storeListeners) fn(store);
 }
 
 // ── Materialization rules (pure — under vitest) ────────────────────────
