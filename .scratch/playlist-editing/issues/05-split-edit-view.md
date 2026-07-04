@@ -35,3 +35,17 @@ The playlist-editing split view:
 ## Blocked by
 
 - `.scratch/playlist-editing/issues/04-play-order-column-remove-track.md`
+
+## Comments
+
+Done (jj mvumnxuu). Edit toggle in a slim playlist header strip (name +
+count + Edit/Done); split stacks playlist pane (Play order, # column,
+remove behaviors) over FilterBar + library pane. Selection machinery
+extracted to selection/useTrackSelection.ts (one instance per pane;
+anchor keep-visible only on the main pane). Focus: mousedown-capture on
+panes, blue outline cue, Tab switches (new hub prop); j/k, Cmd-A, Enter,
+t/e route to the focused pane's selection; Delete only fires with the
+playlist pane focused. Context menu is pane-aware (Remove only on
+playlist-pane rows). All-tracks query enabled while editing; edit mode
+exits on playlist/view switch. Runtime-smoked against the sandbox clone
+on port 8040 (list, get, duplicate-add skip).

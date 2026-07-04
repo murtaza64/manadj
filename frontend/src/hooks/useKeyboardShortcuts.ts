@@ -23,6 +23,9 @@ interface UseKeyboardShortcutsProps {
   /** Delete/Backspace: remove the selection from the viewed playlist
    * (only provided in playlist views — playlist-editing 04). */
   onRemoveSelected?: () => void;
+  /** Tab: switch pane focus (only provided in the split edit view —
+   * playlist-editing 05). */
+  onSwitchPane?: () => void;
   onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid?: (offsetMs: number) => void;
   onSetDownbeat?: () => void;
@@ -39,6 +42,7 @@ export function useKeyboardShortcuts({
   onNavigate,
   onSelectAll,
   onRemoveSelected,
+  onSwitchPane,
   onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
@@ -101,6 +105,12 @@ export function useKeyboardShortcuts({
       if ((event.key === 'Delete' || event.key === 'Backspace') && onRemoveSelected) {
         event.preventDefault();
         onRemoveSelected();
+      }
+
+      // Pane focus: Tab switches between the split view's panes
+      if (event.key === 'Tab' && onSwitchPane) {
+        event.preventDefault();
+        onSwitchPane();
       }
 
       // Load: Enter puts the selection on the Deck (the browse -> Deck bridge).
@@ -280,6 +290,7 @@ export function useKeyboardShortcuts({
     onNavigate,
     onSelectAll,
     onRemoveSelected,
+    onSwitchPane,
     onLoadTrack,
     onNudgeBeatgrid,
     onSetDownbeat,

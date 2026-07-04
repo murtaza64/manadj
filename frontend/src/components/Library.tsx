@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useImperativeHandle, useMemo } from 'react';
 import type { Ref } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -7,7 +7,7 @@ import FilterBar from './FilterBar';
 import TagEditor, { type TagEditorHandle } from './TagEditor';
 import Player from './Player';
 import PlaylistSidebar from './PlaylistSidebar';
-import { useKeyboardShortcuts, scrollTrackIntoView } from '../hooks/useKeyboardShortcuts';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import type { Track } from '../types';
@@ -16,17 +16,8 @@ import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
-import {
-  EMPTY_SELECTION,
-  click,
-  navigate as navigateSelection,
-  prune,
-  rangeClick,
-  selectAll,
-  toggleClick,
-  type Selection,
-} from '../selection/selectionModel';
-import type { SelectMods } from './TrackRow';
+import { click } from '../selection/selectionModel';
+import { useTrackSelection } from '../selection/useTrackSelection';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import { useToast } from './Toast';
 import type { Playlist } from '../types';
@@ -211,6 +202,9 @@ function deriveRelatedFilters(
 
 type ViewType = 'all' | 'unprocessed' | 'playlist';
 
+/** Stable empty list for the dormant edit-pane selection instance. */
+const EMPTY_TRACKS: Track[] = [];
+
 /**
  * The embedded library's browse surface, driven from outside (issue 04):
  * browseOnly mode does NOT mount the library keyboard hub — the Performance
@@ -240,11 +234,6 @@ export default function Library({
   onLoadToDeck,
   browseRef,
 }: LibraryProps) {
-  // Multi-selection (playlist-editing 02): ordered ids + anchor. The
-  // anchor's Track object is cached so it can stay visible (and loadable)
-  // after it stops matching the active filters.
-  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
-  const [anchorTrackCache, setAnchorTrackCache] = useState<Track | null>(null);
   const [selectedView, setSelectedView] = useState<ViewType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
@@ -270,7 +259,25 @@ export default function Library({
   const setDownbeat = useSetBeatgridDownbeat();
   const nudgeGrid = useNudgeBeatgrid();
 
-  // Fetch all tracks (when 'all' or 'unprocessed' view selected)
+  // ── Split edit mode (playlist-editing 05) ──────────────────────────────
+  // Editing a playlist stacks two panes: the playlist (Play order) on top,
+  // the full library with its FilterBar below. Off, the playlist view is
+  // exactly the single-table layout.
+  const [isEditingPlaylist, setIsEditingPlaylist] = useState(false);
+  const editingSplit =
+    !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null && isEditingPlaylist;
+  useEffect(() => {
+    // Leaving the playlist (or the view) exits edit mode.
+    setIsEditingPlaylist(false);
+  }, [selectedView, selectedPlaylistId]);
+
+  // Focus model: click focuses a pane; Tab switches; keyboard routes to it.
+  const [focusedPane, setFocusedPane] = useState<'playlist' | 'library'>('playlist');
+  useEffect(() => {
+    setFocusedPane('playlist');
+  }, [editingSplit]);
+
+  // Fetch all tracks ('all'/'unprocessed' views, and the edit-mode library pane)
   const { data: allTracksData, isLoading: isLoadingAllTracks, error: allTracksError } = useQuery({
     queryKey: ['tracks', filters, selectedView],
     queryFn: () => api.tracks.list(1, 1000, {
@@ -286,7 +293,7 @@ export default function Library({
       sortColumn: filters.sortColumn,
       sortDirection: filters.sortDirection,
     }),
-    enabled: selectedView === 'all' || selectedView === 'unprocessed',
+    enabled: selectedView === 'all' || selectedView === 'unprocessed' || editingSplit,
     placeholderData: (previousData) => previousData,
   });
 
@@ -405,12 +412,8 @@ export default function Library({
     }
   };
 
-  const handleSort = (column: PlaylistSortColumn) => {
-    // Playlist view: local, view-only sort (Play order untouched).
-    if (selectedView === 'playlist') {
-      setPlaylistSort((prev) => nextPlaylistSort(prev, column));
-      return;
-    }
+  /** Sort for library tables (server-side, via FilterContext). */
+  const handleSortLibrary = (column: PlaylistSortColumn) => {
     if (column === 'position') return; // # exists only in playlist tables
     setFilters(prev => {
       // Toggle direction if same column, otherwise default to desc
@@ -424,6 +427,15 @@ export default function Library({
         sortDirection: newDirection
       };
     });
+  };
+
+  const handleSort = (column: PlaylistSortColumn) => {
+    // Playlist table: local, view-only sort (Play order untouched).
+    if (selectedView === 'playlist') {
+      setPlaylistSort((prev) => nextPlaylistSort(prev, column));
+      return;
+    }
+    handleSortLibrary(column);
   };
 
   /** The match reference under the loaded-deck model: the chosen deck's
@@ -468,118 +480,65 @@ export default function Library({
     });
   };
 
-  // Determine current tracks and loading state
+  // ── Track lists per pane ───────────────────────────────────────────────
+  // Library list ('all'/'unprocessed' views and the edit-mode library pane),
+  // with the proven-tier filter composed client-side (transition-library 02).
+  let libraryTracks = allTracksData?.items || [];
+  if (filters.hasTransitionFromDecks) {
+    libraryTracks = libraryTracks.filter((t: Track) => fromA.has(t.id) || fromB.has(t.id));
+  }
+
+  // Playlist list, in the view-only playlist sort. The proven-tier filter
+  // applies only outside edit mode — in the split, the FilterBar belongs
+  // to the library pane.
+  let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
+  if (filters.hasTransitionFromDecks && !editingSplit) {
+    playlistTracks = playlistTracks.filter((t: Track) => fromA.has(t.id) || fromB.has(t.id));
+  }
+
+  // ── Selection machinery: one instance per pane ─────────────────────────
+  // 'main' is the single always-present table (playlist or library,
+  // depending on the view; the top pane in the split). 'editLibrary' only
+  // exists while editing.
+  const mainSel = useTrackSelection(
+    selectedView === 'playlist' ? playlistTracks : libraryTracks,
+    { keepAnchorVisible: true }
+  );
+  const editLibSel = useTrackSelection(editingSplit ? libraryTracks : EMPTY_TRACKS);
+
+  /** The pane keyboard input acts on. */
+  const activeSel = editingSplit && focusedPane === 'library' ? editLibSel : mainSel;
+  const selectedTrack = activeSel.selectedTrack;
+
   const isLoading = selectedView === 'playlist' ? isLoadingPlaylist : isLoadingAllTracks;
   const error = selectedView === 'playlist' ? playlistError : allTracksError;
-  let currentTracks = selectedView === 'playlist'
-    ? sortPlaylistTracks(playlistData?.tracks || [], playlistSort)
-    : allTracksData?.items || [];
+  const currentTracks = mainSel.tracks;
 
-  // The anchor's Track object: from the visible list, falling back to the
-  // cached copy (so it survives leaving the active filter).
-  const selectedTrack =
-    currentTracks.find((t: Track) => t.id === selection.anchorId) ??
-    (anchorTrackCache && anchorTrackCache.id === selection.anchorId ? anchorTrackCache : null);
-
-  // Keep the anchor in the list at its original position even if it no
-  // longer matches the filter (e.g., in Unprocessed view after tagging)
-  const [selectedTrackPosition, setSelectedTrackPosition] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (selectedTrack) {
-      const index = currentTracks.findIndex((t: Track) => t.id === selectedTrack.id);
-      if (index !== -1) {
-        setSelectedTrackPosition(index);
-      }
-    }
-  }, [selectedTrack, currentTracks]);
-
-  if (selectedTrack && !currentTracks.find((t: Track) => t.id === selectedTrack.id) && selectedTrackPosition !== null) {
-    const newTracks = [...currentTracks];
-    newTracks.splice(selectedTrackPosition, 0, selectedTrack);
-    currentTracks = newTracks;
-  }
-
-  // Proven-tier filter (transition-library 02): composes CLIENT-side over
-  // the server-filtered list — transition knowledge lives in localStorage,
-  // not the backend.
-  if (filters.hasTransitionFromDecks) {
-    currentTracks = currentTracks.filter(
-      (t: Track) => fromA.has(t.id) || fromB.has(t.id)
-    );
-  }
-
-  // ── Selection machinery over the displayed list ────────────────────────
-  const displayedIds = currentTracks.map((t: Track) => t.id);
-  const displayedIdsKey = displayedIds.join(',');
-
-  // Cache the anchor's Track object while it is visible.
-  useEffect(() => {
-    if (selection.anchorId === null) {
-      setAnchorTrackCache(null);
-      return;
-    }
-    const anchorTrack = currentTracks.find((t: Track) => t.id === selection.anchorId);
-    if (anchorTrack) setAnchorTrackCache(anchorTrack);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection.anchorId, displayedIdsKey]);
-
-  // Reconcile the selection when the visible list changes (filters, sort,
-  // view switches): selected rows that vanished are dropped.
-  useEffect(() => {
-    setSelection((prev) => prune(prev, displayedIds));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayedIdsKey]);
-
-  const handleRowSelect = (track: Track, mods: SelectMods) => {
-    setSelection((prev) =>
-      mods.shift
-        ? rangeClick(prev, track.id, displayedIds)
-        : mods.toggle
-          ? toggleClick(prev, track.id)
-          : click(prev, track.id)
-    );
-  };
-
-  const handleNavigate = (delta: 1 | -1) => {
-    const next = navigateSelection(selection, delta, displayedIds);
-    if (next.anchorId !== null) scrollTrackIntoView(next.anchorId);
-    setSelection(next);
-  };
-
-  const handleSelectAll = () => {
-    setSelection((prev) => selectAll(prev, displayedIds));
-  };
-
-  // Delete/Backspace and the context-menu Remove item (playlist views only).
+  // Delete/Backspace and the context-menu Remove item (playlist views only;
+  // in the split, only the playlist pane removes).
   const canRemoveFromPlaylist = selectedView === 'playlist' && selectedPlaylistId !== null;
   const removeTracksFromViewedPlaylist = (trackIds: number[]) => {
     if (!canRemoveFromPlaylist || trackIds.length === 0) return;
     removeFromPlaylistMutation.mutate({ playlistId: selectedPlaylistId!, trackIds });
   };
-  const handleRemoveSelected = () => removeTracksFromViewedPlaylist([...selection.ids]);
-
-  // Drag payload: the whole selection when the dragged row is in it, else
-  // just that row. Ref-backed so the callback identity is stable and row
-  // memoization survives selection churn.
-  const selectionRef = useRef(selection);
-  selectionRef.current = selection;
-  const getDragIds = useCallback((trackId: number) => {
-    const sel = selectionRef.current;
-    return sel.ids.includes(trackId) ? [...sel.ids] : [trackId];
-  }, []);
-
-  const selectedIds = useMemo(() => new Set(selection.ids), [selection.ids]);
+  const handleRemoveSelected = () => removeTracksFromViewedPlaylist([...mainSel.selection.ids]);
+  const removeEnabled = canRemoveFromPlaylist && (!editingSplit || focusedPane === 'playlist');
 
   // ── Track-row context menu (playlist-editing 03) ───────────────────────
-  const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } = useContextMenuState<Track>();
+  type MenuPane = 'main' | 'editLibrary';
+  const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } =
+    useContextMenuState<{ track: Track; pane: MenuPane }>();
 
-  const handleRowContextMenu = (track: Track, pos: { x: number; y: number }) => {
+  const selForPane = (pane: MenuPane) => (pane === 'editLibrary' ? editLibSel : mainSel);
+
+  const handleRowContextMenuFor = (pane: MenuPane) => (track: Track, pos: { x: number; y: number }) => {
     // Standard behavior: right-clicking outside the selection selects the row.
-    if (!selection.ids.includes(track.id)) {
-      setSelection(click(selection, track.id));
+    const sel = selForPane(pane);
+    if (!sel.selection.ids.includes(track.id)) {
+      sel.setSelection(click(sel.selection, track.id));
     }
-    openRowMenu(pos.x, pos.y, track);
+    if (editingSplit) setFocusedPane(pane === 'editLibrary' ? 'library' : 'playlist');
+    openRowMenu(pos.x, pos.y, { track, pane });
   };
 
   /** Load target for menu items: route through the embedding view's load
@@ -591,7 +550,9 @@ export default function Library({
 
   const rowMenuItems: MenuItem[] = useMemo(() => {
     if (!rowMenu) return [];
-    const targetIds = selection.ids.includes(rowMenu.context.id) ? [...selection.ids] : [rowMenu.context.id];
+    const { track: menuTrack, pane } = rowMenu.context;
+    const paneSelection = selForPane(pane).selection;
+    const targetIds = paneSelection.ids.includes(menuTrack.id) ? [...paneSelection.ids] : [menuTrack.id];
     const multi = targetIds.length > 1;
     const loadDisabledTitle = multi ? 'Load acts on a single track' : undefined;
     return [
@@ -599,13 +560,13 @@ export default function Library({
         label: 'Load to Deck A',
         disabled: multi,
         title: loadDisabledTitle,
-        onSelect: () => loadToDeckFromMenu('A', rowMenu.context),
+        onSelect: () => loadToDeckFromMenu('A', menuTrack),
       },
       {
         label: 'Load to Deck B',
         disabled: multi,
         title: loadDisabledTitle,
-        onSelect: () => loadToDeckFromMenu('B', rowMenu.context),
+        onSelect: () => loadToDeckFromMenu('B', menuTrack),
       },
       {
         label: multi ? `Add ${targetIds.length} to playlist` : 'Add to playlist',
@@ -617,7 +578,7 @@ export default function Library({
           onSelect: () => addToPlaylistMutation.mutate({ playlistId: p.id, trackIds: targetIds }),
         })),
       },
-      ...(canRemoveFromPlaylist
+      ...(canRemoveFromPlaylist && pane === 'main'
         ? [
             {
               label: multi ? `Remove ${targetIds.length} from playlist` : 'Remove from playlist',
@@ -628,7 +589,7 @@ export default function Library({
         : []),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowMenu, selection.ids, playlists, canRemoveFromPlaylist, selectedPlaylistId]);
+  }, [rowMenu, mainSel.selection.ids, editLibSel.selection.ids, playlists, canRemoveFromPlaylist, selectedPlaylistId]);
 
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0
@@ -648,11 +609,11 @@ export default function Library({
   useImperativeHandle(
     browseRef,
     () => ({
-      navigate: handleNavigate,
-      getSelectedTrack: () => selectedTrack,
+      navigate: mainSel.handleNavigate,
+      getSelectedTrack: () => mainSel.selectedTrack,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [displayedIdsKey, selection, selectedTrack]
+    [mainSel]
   );
 
   return (
@@ -662,9 +623,14 @@ export default function Library({
     {!browseOnly && (
       <LibraryHub
         selectedTrack={selectedTrack}
-        onNavigate={handleNavigate}
-        onSelectAll={handleSelectAll}
-        onRemoveSelected={canRemoveFromPlaylist ? handleRemoveSelected : undefined}
+        onNavigate={activeSel.handleNavigate}
+        onSelectAll={activeSel.handleSelectAll}
+        onRemoveSelected={removeEnabled ? handleRemoveSelected : undefined}
+        onSwitchPane={
+          editingSplit
+            ? () => setFocusedPane((p) => (p === 'playlist' ? 'library' : 'playlist'))
+            : undefined
+        }
         onLoadTrack={loadTrack}
         onNudgeBeatgrid={handleNudgeBeatgrid}
         onSetDownbeat={handleSetDownbeat}
@@ -722,46 +688,154 @@ export default function Library({
           onTrackDrop={handleTrackDrop}
         />
 
-        {/* Main library area (filter + table) */}
+        {/* Main library area (filter + table; split panes when editing) */}
         <div style={{
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden'
         }}>
-          <FilterBar
-            totalTracks={totalTracks}
-            filteredCount={currentTracks.length}
-            loadedA={decks.A.loadedTrack}
-            loadedB={decks.B.loadedTrack}
-            onFindRelated={handleFindRelated}
-            onApplySettings={handleApplySettings}
-          />
+          {/* Playlist header strip: name + edit toggle (playlist view only) */}
+          {selectedView === 'playlist' && !browseOnly && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '4px 12px',
+              borderBottom: '1px solid var(--surface0)',
+              background: 'var(--crust)',
+            }}>
+              <span style={{ fontSize: '13px', color: 'var(--text)' }}>
+                {playlistData?.name ?? 'Playlist'}
+                <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>
+                  {playlistData?.tracks?.length ?? 0} tracks
+                </span>
+              </span>
+              <button
+                onClick={() => setIsEditingPlaylist((v) => !v)}
+                style={{
+                  padding: '2px 10px',
+                  background: editingSplit ? 'var(--blue)' : 'var(--surface0)',
+                  color: editingSplit ? 'var(--base)' : 'var(--text)',
+                  border: '1px solid var(--surface1)',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                {editingSplit ? 'Done' : 'Edit'}
+              </button>
+            </div>
+          )}
 
-          {/* Track table */}
-          <div style={{
-            flex: 1,
-            overflow: 'auto'
-          }}>
-            <TrackList
-              tracks={currentTracks}
-              isLoading={isLoading}
-              error={error}
-              selectedIds={selectedIds}
-              onSelectTrack={handleRowSelect}
-              getDragIds={getDragIds}
-              onRowContextMenu={handleRowContextMenu}
-              playOrder={playOrder}
-              onLoadTrack={loadForTable}
-              loadedTrackId={loadedTrack?.id ?? null}
-              onLoadToDeck={onLoadToDeck}
-              transitionMarksA={fromA}
-              transitionMarksB={fromB}
-              sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
-              sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
-              onSort={handleSort}
-            />
-          </div>
+          {editingSplit ? (
+            <>
+              {/* Playlist pane (Play order) */}
+              <div
+                onMouseDownCapture={() => setFocusedPane('playlist')}
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: 'auto',
+                  outline: focusedPane === 'playlist' ? '1px solid var(--blue)' : '1px solid transparent',
+                  outlineOffset: '-1px',
+                }}
+              >
+                <TrackList
+                  tracks={mainSel.tracks}
+                  isLoading={isLoadingPlaylist}
+                  error={playlistError}
+                  selectedIds={mainSel.selectedIds}
+                  onSelectTrack={mainSel.handleRowSelect}
+                  getDragIds={mainSel.getDragIds}
+                  onRowContextMenu={handleRowContextMenuFor('main')}
+                  playOrder={playOrder}
+                  onLoadTrack={loadForTable}
+                  loadedTrackId={loadedTrack?.id ?? null}
+                  onLoadToDeck={onLoadToDeck}
+                  transitionMarksA={fromA}
+                  transitionMarksB={fromB}
+                  sortColumn={playlistSort.column}
+                  sortDirection={playlistSort.direction}
+                  onSort={handleSort}
+                />
+              </div>
+
+              {/* Library pane (full FilterBar + table) */}
+              <FilterBar
+                totalTracks={allTracksData?.library_total || 0}
+                filteredCount={libraryTracks.length}
+                loadedA={decks.A.loadedTrack}
+                loadedB={decks.B.loadedTrack}
+                onFindRelated={handleFindRelated}
+                onApplySettings={handleApplySettings}
+              />
+              <div
+                onMouseDownCapture={() => setFocusedPane('library')}
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: 'auto',
+                  outline: focusedPane === 'library' ? '1px solid var(--blue)' : '1px solid transparent',
+                  outlineOffset: '-1px',
+                }}
+              >
+                <TrackList
+                  tracks={editLibSel.tracks}
+                  isLoading={isLoadingAllTracks}
+                  error={allTracksError}
+                  selectedIds={editLibSel.selectedIds}
+                  onSelectTrack={editLibSel.handleRowSelect}
+                  getDragIds={editLibSel.getDragIds}
+                  onRowContextMenu={handleRowContextMenuFor('editLibrary')}
+                  onLoadTrack={loadForTable}
+                  loadedTrackId={loadedTrack?.id ?? null}
+                  onLoadToDeck={onLoadToDeck}
+                  transitionMarksA={fromA}
+                  transitionMarksB={fromB}
+                  sortColumn={filters.sortColumn}
+                  sortDirection={filters.sortDirection}
+                  onSort={handleSortLibrary}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <FilterBar
+                totalTracks={totalTracks}
+                filteredCount={currentTracks.length}
+                loadedA={decks.A.loadedTrack}
+                loadedB={decks.B.loadedTrack}
+                onFindRelated={handleFindRelated}
+                onApplySettings={handleApplySettings}
+              />
+
+              {/* Track table */}
+              <div style={{
+                flex: 1,
+                overflow: 'auto'
+              }}>
+                <TrackList
+                  tracks={currentTracks}
+                  isLoading={isLoading}
+                  error={error}
+                  selectedIds={mainSel.selectedIds}
+                  onSelectTrack={mainSel.handleRowSelect}
+                  getDragIds={mainSel.getDragIds}
+                  onRowContextMenu={handleRowContextMenuFor('main')}
+                  playOrder={playOrder}
+                  onLoadTrack={loadForTable}
+                  loadedTrackId={loadedTrack?.id ?? null}
+                  onLoadToDeck={onLoadToDeck}
+                  transitionMarksA={fromA}
+                  transitionMarksB={fromB}
+                  sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
+                  sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
+                  onSort={handleSort}
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -784,6 +858,7 @@ function LibraryHub({
   onNavigate,
   onSelectAll,
   onRemoveSelected,
+  onSwitchPane,
   onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
@@ -795,6 +870,7 @@ function LibraryHub({
   onNavigate: (delta: 1 | -1) => void;
   onSelectAll: () => void;
   onRemoveSelected?: () => void;
+  onSwitchPane?: () => void;
   onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid: (offsetMs: number) => void;
   onSetDownbeat: () => void;
@@ -810,6 +886,7 @@ function LibraryHub({
     onNavigate,
     onSelectAll,
     onRemoveSelected,
+    onSwitchPane,
     onLoadTrack,
     onNudgeBeatgrid,
     onSetDownbeat,
