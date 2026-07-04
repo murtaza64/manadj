@@ -67,9 +67,15 @@
 }
 
 .deck-gridrow .player-button:hover:not(:disabled),
-.deck-bpm .player-button:hover:not(:disabled) {
+.deck-bpm .player-button:hover:not(:disabled),
+.deck-bpm-steps .player-button:hover:not(:disabled) {
   background: var(--surface0, #313244);
   color: var(--text);
+  /* Pin the divider: the standalone player-button hover recolors
+     border-color, which otherwise brightens ONLY this segment's left
+     divider edge (the one border it has). Hover reads as fill + the
+     cluster border, never a single edge. */
+  border-color: var(--surface2, #585b70);
 }
 
 .deck-gridrow.mini .player-button {
