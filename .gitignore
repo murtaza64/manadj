@@ -9,5 +9,3 @@ waveform_tests/
 node_modules/
 .lanes/
 
-# PROTOTYPE — wipe me (waveform-overhaul prototype audio copies)
-frontend/public/proto-waveforms/audio_*

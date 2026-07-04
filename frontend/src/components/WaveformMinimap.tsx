@@ -38,6 +38,7 @@ export default function WaveformMinimap({
     cuePoint,
     hotCues,
     beatgrid,
+    slot: 'minimap',
   });
 
   const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {

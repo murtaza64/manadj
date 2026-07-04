@@ -1,8 +1,9 @@
 import { lazy, Suspense, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-// PROTOTYPE — wipe me (waveform-overhaul). Dev-only page at ?view=wfproto.
-const WaveformStylePrototype = lazy(() => import('./prototype/WaveformStylePrototype'));
+// Dev-only Waveform style tuning page at ?view=wfproto (edits the persisted
+// style slots live; also the design prototype for a future settings panel).
+const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
@@ -27,12 +28,15 @@ const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
 function App() {
   const [view, setView] = useState<AppMode>(initialView);
 
-  // PROTOTYPE — wipe me: standalone waveform style prototype, dev builds only.
+  // Dev-only style tuning page (needs the query client: it renders the real
+  // waveform components, which fetch blobs/beatgrids/hot cues).
   if (import.meta.env.DEV && requestedView === 'wfproto') {
     return (
-      <Suspense fallback={null}>
-        <WaveformStylePrototype />
-      </Suspense>
+      <QueryClientProvider client={queryClient}>
+        <Suspense fallback={null}>
+          <StyleTuningPage />
+        </Suspense>
+      </QueryClientProvider>
     );
   }
 

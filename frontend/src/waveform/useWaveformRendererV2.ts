@@ -9,6 +9,8 @@ import type { BeatgridData, HotCue } from '../types';
 import type { DecodedWaveform } from './blob';
 import { WaveformRendererV2 } from './WaveformRendererV2';
 import type { WaveformRendererConfig } from './WaveformRendererV2';
+import { useStyleSlot } from './styleSlots';
+import type { SlotName } from './styleSlots';
 
 interface Options {
   clock: PlaybackClock;
@@ -20,6 +22,9 @@ interface Options {
   /** Driven mode: no self-running render loop — the caller's own motion
    * clock calls the returned `draw()` once per frame. */
   driven?: boolean;
+  /** Which persisted Waveform style slot this surface renders with.
+   * Defaults to 'full'; minimaps pass 'minimap'. */
+  slot?: SlotName;
 }
 
 export function useWaveformRendererV2({
@@ -30,10 +35,12 @@ export function useWaveformRendererV2({
   hotCues,
   beatgrid,
   driven = false,
+  slot = 'full',
 }: Options) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WaveformRendererV2 | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
+  const slotState = useStyleSlot(slot);
 
   useEffect(() => {
     if (!canvasRef.current || !waveformData) return;
@@ -57,6 +64,11 @@ export function useWaveformRendererV2({
   const draw = useCallback(() => {
     rendererRef.current?.renderFrame(clock);
   }, [clock]);
+
+  // Persisted Waveform style: applied live (also after re-init).
+  useEffect(() => {
+    rendererRef.current?.setStyle(slotState.styleId, slotState.params);
+  }, [slotState, waveformData]);
 
   useEffect(() => {
     rendererRef.current?.setCuePoint(cuePoint);

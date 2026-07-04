@@ -543,12 +543,9 @@ export class WaveformRendererV2 {
     gl.uniform1f(u('u_visibleSeconds'), view.visibleSeconds);
     gl.uniform1f(u('u_canvasWidth'), view.w);
     gl.uniform1f(u('u_displayGamma'), this.params.displayGamma);
-    // Minimap: headroom matters less (its markers are full-height bars, not
-    // edge-dwelling badges), and the strip is short — undo most of the
-    // master down-scale. Becomes the minimap style slot's own master when
-    // issue 05 wires per-slot params.
-    const master = this.isMinimap ? Math.min(1, this.params.master * 1.25) : this.params.master;
-    gl.uniform1f(u('u_master'), master);
+    // Per-surface scaling differences (e.g. minimap headroom) live in the
+    // style slots (styleSlots.ts), not here.
+    gl.uniform1f(u('u_master'), this.params.master);
     gl.uniform3f(u('u_groupGains'), ...this.params.gains);
     gl.uniform2i(u('u_groupBounds'), this.params.b1, this.params.b2);
     gl.uniform1f(u('u_smooth'), this.params.smooth ? 1 : 0);

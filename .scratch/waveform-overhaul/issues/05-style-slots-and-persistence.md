@@ -1,6 +1,6 @@
 # 05 — style slots, persistence, and the tuning surface
 
-Status: ready-for-agent
+Status: resolved (wfproto lane, 2026-07-04 — pending user eye-verify of tuning page)
 
 ## Parent
 
@@ -21,3 +21,19 @@ Two persisted Waveform style slots — `full` and `minimap` — stored in localS
 ## Blocked by
 
 - `04-full-parity-all-surfaces.md`
+
+## Comments
+
+**2026-07-04 (wfproto lane, change `zmqtonkw`)** — Implemented `styleSlots.ts`: versioned
+localStorage key (`manadj.waveformStyles`, v1) with `full` + `minimap` slots, sanitizing
+loader (unknown versions/styles/params fall back per-field to defaults), `useStyleSlot`
+via useSyncExternalStore — `setSlot` repaints every mounted surface live.
+`useWaveformRendererV2` takes a `slot` option ('full' default; WaveformMinimap passes
+'minimap'); the issue-04 minimap x1.25 master hack is replaced by the minimap slot's own
+default (master 1.0 vs full's 0.78). The prototype directory is deleted wholesale
+(`ProtoWaveformGL`, `decodeWfb`, `PrototypeSwitcher`, page, committed .wfb blobs,
+`scripts/proto_waveform_blob.py` — absorbed into `backend/waveform_data.py` in issue 01);
+its replacement `waveform/StyleTuningPage.tsx` (still dev-only `?view=wfproto`) renders
+the REAL `WebGLWaveform` + `WaveformMinimap` components against live library tracks with
+audio playback via the tracks audio endpoint, and its sliders edit the persisted slots.
+NOTES.md open items absorbed into the PRD's Further Notes. tsc, 197 vitest, build green.
