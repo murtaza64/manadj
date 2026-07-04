@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Track } from '../types';
+import { GRID_NUDGE_MS } from './useBeatgridData';
 import { useDeck, useDeckReady, useDeckSnapshot } from './useDeck';
 import { useScrubLoop } from './useScrubLoop';
 
@@ -148,9 +149,9 @@ export function useKeyboardShortcuts({
         event.preventDefault();
 
         if (key === 'h' && onNudgeBeatgrid) {
-          onNudgeBeatgrid(-10);  // Nudge left 10ms
+          onNudgeBeatgrid(-GRID_NUDGE_MS);
         } else if (key === 'l' && onNudgeBeatgrid) {
-          onNudgeBeatgrid(10);   // Nudge right 10ms
+          onNudgeBeatgrid(GRID_NUDGE_MS);
         }
       }
 

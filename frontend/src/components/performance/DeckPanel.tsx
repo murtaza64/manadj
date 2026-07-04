@@ -10,13 +10,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
-import { useNudgeBeatgrid, useSetBeatgridDownbeat } from '../../hooks/useBeatgridData';
 import { useScrubTransport } from '../../hooks/useScrubTransport';
 import WebGLWaveform from '../WebGLWaveform';
 import WaveformMinimap from '../WaveformMinimap';
 import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
 import { BeatjumpRow } from '../deckControls/BeatjumpRow';
+import { GridEditControls } from '../deckControls/GridEditControls';
 import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { DECK_KEYS } from './performanceKeys';
@@ -24,7 +24,6 @@ import type { Track } from '../../types';
 
 /** How long the MATCH out-of-reach hint stays up. */
 const MATCH_HINT_MS = 2000;
-const GRID_NUDGE_MS = 10;
 
 /**
  * The deck's Track, kept fresh: the scope's loadedTrack is a snapshot from
@@ -132,9 +131,6 @@ function BeatgridBlock({ track }: { track: Track | null }) {
   const edit = useTrackEdit(track);
   const enabled = ready && edit.enabled;
 
-  const nudgeGrid = useNudgeBeatgrid();
-  const setDownbeat = useSetBeatgridDownbeat();
-
   // Effective BPM — live with pitch AND bend (what your ears get right now).
   const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, s.bendPercent));
   const effective = track?.bpm ? track.bpm * rate : null;
@@ -182,37 +178,12 @@ function BeatgridBlock({ track }: { track: Track | null }) {
       </div>
       <div className="perf-beatgrid-row">
         <span className="perf-beatgrid-label">GRID</span>
-        <button
-          className="player-button perf-mini"
+        <GridEditControls
+          trackId={track?.id ?? null}
+          getPlayhead={() => engine.getPlayhead()}
           disabled={!enabled}
-          onClick={() =>
-            track && nudgeGrid.mutate({ trackId: track.id, offsetMs: -GRID_NUDGE_MS })
-          }
-          title={`Nudge grid ${GRID_NUDGE_MS}ms earlier`}
-        >
-          ◄
-        </button>
-        <button
-          className="player-button perf-mini perf-downbeat"
-          disabled={!enabled}
-          onClick={() =>
-            track &&
-            setDownbeat.mutate({ trackId: track.id, downbeatTime: engine.getPlayhead() })
-          }
-          title="Set downbeat at playhead"
-        >
-          D
-        </button>
-        <button
-          className="player-button perf-mini"
-          disabled={!enabled}
-          onClick={() =>
-            track && nudgeGrid.mutate({ trackId: track.id, offsetMs: GRID_NUDGE_MS })
-          }
-          title={`Nudge grid ${GRID_NUDGE_MS}ms later`}
-        >
-          ►
-        </button>
+          density="mini"
+        />
       </div>
     </div>
   );

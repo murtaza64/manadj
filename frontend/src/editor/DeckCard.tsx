@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useNudgeBeatgrid, useSetBeatgridDownbeat } from '../hooks/useBeatgridData';
+import { GridEditControls } from '../components/deckControls/GridEditControls';
 import { useDeleteHotCue, useHotCues, useSetHotCue } from '../hooks/useHotCues';
 import {
   PERFORMANCE_BEATJUMP_DEFAULT,
@@ -58,8 +58,6 @@ export function DeckCard({
   lock?: { on: boolean; toggle: () => void };
 }) {
   const queryClient = useQueryClient();
-  const nudge = useNudgeBeatgrid();
-  const setDownbeat = useSetBeatgridDownbeat();
   const { data: hotCues = [] } = useHotCues(track?.id ?? null);
   const setHotCue = useSetHotCue();
   const deleteHotCue = useDeleteHotCue();
@@ -155,30 +153,13 @@ export function DeckCard({
             ▶
           </button>
         </span>
-        <span className="editor-pair" title="Nudge beatgrid ±10ms (persists to the track)">
-          <span className="editor-pair-label">grid</span>
-          <button
-            title="Nudge beatgrid 10ms earlier"
-            onClick={() => nudge.mutate({ trackId: track.id, offsetMs: -10 })}
-          >
-            ◀
-          </button>
-          <button
-            title="Nudge beatgrid 10ms later"
-            onClick={() => nudge.mutate({ trackId: track.id, offsetMs: 10 })}
-          >
-            ▶
-          </button>
-        </span>
-        <button
-          className="editor-action"
-          title="Set downbeat at this deck's playhead"
-          onClick={() =>
-            setDownbeat.mutate({ trackId: track.id, downbeatTime: player.getTrackTime(deck) })
-          }
-        >
-          downbeat @ playhead
-        </button>
+        {/* Grid edit is shared curation (deck-controls 03): nudge / anchor /
+            nudge, playhead read from this deck's MixPlayer track time. */}
+        <GridEditControls
+          trackId={track.id}
+          getPlayhead={() => player.getTrackTime(deck)}
+          density="mini"
+        />
       </div>
       {gestures && (
         <div className="editor-deckcard-row editor-slides">

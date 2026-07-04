@@ -3,6 +3,12 @@ import { api } from '../api/client';
 import type { BeatgridResponse } from '../types';
 
 /**
+ * Grid-nudge step in milliseconds — the ONE home for the ±10ms every grid
+ * nudge surface uses (buttons via GridEditControls, library Shift+H/L).
+ */
+export const GRID_NUDGE_MS = 10;
+
+/**
  * Hook for fetching beatgrid data.
  *
  * Fetches beatgrid from API and caches indefinitely.

@@ -30,3 +30,32 @@
   font-weight: 700;
   font-size: 13px;
 }
+
+/* Grid-edit cluster (curation class): nudge / anchor / nudge */
+.deck-gridrow {
+  display: inline-flex;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.deck-gridrow .player-button {
+  min-width: 32px;
+  height: 24px;
+  padding: 4px 8px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deck-gridrow.mini .player-button {
+  min-width: 26px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+/* Set-downbeat sets the grid's ANCHOR (ADR 0016) — accent it. */
+.deck-gridrow .deck-downbeat {
+  color: var(--blue);
+  border-color: var(--blue);
+}

@@ -10,7 +10,7 @@ import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
 import BpmInput from './BpmInput';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, BeatgridIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
-import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
+import { GridEditControls } from './deckControls/GridEditControls';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import './TagEditor.css';
 
@@ -64,10 +64,6 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
   useEffect(() => {
     onEnergyEditModeChange?.(isEnergyEditMode);
   }, [isEnergyEditMode, onEnergyEditModeChange]);
-
-  // Beatgrid editing mutations
-  const setDownbeat = useSetBeatgridDownbeat();
-  const nudgeGrid = useNudgeBeatgrid();
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -151,24 +147,6 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
     onSave({
       energy: newEnergy,
       tag_ids: Array.from(selectedTagIds),
-    });
-  };
-
-  // Handler for set downbeat button
-  const handleSetDownbeat = () => {
-    if (!track || !isBeatgridEditable) return;
-    setDownbeat.mutate({
-      trackId: track.id,
-      downbeatTime: engine.getPlayhead()
-    });
-  };
-
-  // Handler for nudge buttons
-  const handleNudge = (offsetMs: number) => {
-    if (!track || !isBeatgridEditable) return;
-    nudgeGrid.mutate({
-      trackId: track.id,
-      offsetMs
     });
   };
 
@@ -395,50 +373,12 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
           {/* Row 1: Beatgrid controls, Key, BPM, Hot Cues, and Minimap side by side */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <BeatgridIcon />
-            <button
-              onClick={() => handleNudge(-10)}
-              disabled={!isBeatgridEditable || nudgeGrid.isPending}
-              className="player-button"
-              title={isBeatgridEditable ? 'Nudge grid 10ms earlier' : 'Load this track to edit its beatgrid'}
-              style={{
-                padding: '4px 8px',
-                minWidth: '32px',
-                fontSize: '12px',
-                height: '24px',
-              }}
-            >
-              ◄
-            </button>
-            <button
-              onClick={handleSetDownbeat}
-              disabled={!isBeatgridEditable || setDownbeat.isPending}
-              className="player-button"
-              style={{
-                color: 'var(--blue)',
-                borderColor: 'var(--blue)',
-                padding: '4px 8px',
-                minWidth: '32px',
-                fontSize: '12px',
-                height: '24px',
-              }}
-              title={isBeatgridEditable ? 'Set downbeat at current position (G)' : 'Load this track to edit its beatgrid'}
-            >
-              D
-            </button>
-            <button
-              onClick={() => handleNudge(10)}
-              disabled={!isBeatgridEditable || nudgeGrid.isPending}
-              className="player-button"
-              title={isBeatgridEditable ? 'Nudge grid 10ms later' : 'Load this track to edit its beatgrid'}
-              style={{
-                padding: '4px 8px',
-                minWidth: '32px',
-                fontSize: '12px',
-                height: '24px',
-              }}
-            >
-              ►
-            </button>
+            <GridEditControls
+              trackId={track?.id ?? null}
+              getPlayhead={() => engine.getPlayhead()}
+              disabled={!isBeatgridEditable}
+              disabledTitle="Load this track to edit its beatgrid"
+            />
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
               <SpeedIcon />
               <BpmInput
