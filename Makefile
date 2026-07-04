@@ -17,6 +17,6 @@ typecheck:
 waveforms:
 	uv run scripts/populate_waveforms.py
 
-# PROTOTYPE (mix-editor) — backend + vite + browser in one command.
+# Transition editor — backend + vite + browser in one command.
 proto:
 	bash scripts/proto_dev.sh

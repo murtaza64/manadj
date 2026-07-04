@@ -443,3 +443,14 @@ Detail still to fill:
 - Playback conviction (incl. two-context drift, fader/EQ ramp quality):
 - Ruler/region drag ergonomics:
 - Keep/change model decisions:
+
+## Graduation (2026-07-04) — this log is now an archive
+
+The editor graduated to production in the post-consolidation change: code
+moved to `frontend/src/editor/` under production names (TransitionEditor,
+MixPlayer, mixModel, EditorMix/Transition, editor-* CSS; ADR 0010
+Amendment 3 records the full rename map + kept affordances). This NOTES
+file moved from `frontend/src/prototype/NOTES.md` to the tracker and stops
+accumulating; future work is ordinary issue-tracked development. The
+"real-module fixes" list above was honored by the 2026-07-04 merge (all
+rode in with the stack).

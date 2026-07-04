@@ -1,11 +1,11 @@
 /**
- * PROTOTYPE (mix-editor) — throwaway. Delete or absorb after the verdict.
- * Open with ?proto=mix. Two-track arranger: pick tracks, drag the transition
- * region on the ruler, draw lanes, press play.
+ * Transition editor — the top-bar mode for sketching the Transition between
+ * two loaded Tracks: a two-track arranger with drawn automation lanes over
+ * the overlap window, deterministic playback via MixPlayer, and the saved-
+ * Transition switcher (transition library).
  *
- * Assumption (stated per prototype skill): single variant, not multiple UI
- * variations — the research questions are lane-drawing feel and playback
- * conviction, not layout exploration.
+ * Graduated from prototype 2026-07-04 (ADR 0010; iteration history in
+ * .scratch/mix-editor/NOTES.md).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
@@ -16,7 +16,7 @@ import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
-import { MixProtoPlayer } from './MixProtoPlayer';
+import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
 import { TransitionSwitcher } from './TransitionSwitcher';
@@ -38,14 +38,14 @@ import {
   slideB,
   slideBToCue,
   tempoMatchPitch,
-} from './mixProtoModel';
-import type { LaneId, LanePoint, ProtoMix } from './mixProtoModel';
+} from './mixModel';
+import type { LaneId, LanePoint, EditorMix } from './mixModel';
 import type { Track } from '../types';
-import './mixEditorProto.css';
+import './transitionEditor.css';
 
-export default function MixEditorProto() {
-  const [mix, setMix] = useState<ProtoMix>(defaultMix);
-  const [player] = useState(() => new MixProtoPlayer(defaultMix()));
+export default function TransitionEditor() {
+  const [mix, setMix] = useState<EditorMix>(defaultMix);
+  const [player] = useState(() => new MixPlayer(defaultMix()));
   useEffect(() => () => player.dispose(), [player]);
 
   // Re-render on player/engine state changes.
@@ -97,7 +97,7 @@ export default function MixEditorProto() {
   }));
   /** Session items with the live mix folded into the active one. */
   const liveItems = useCallback(
-    (s: { items: SavedTransition[]; active: number }, m: ProtoMix) =>
+    (s: { items: SavedTransition[]; active: number }, m: EditorMix) =>
       s.items.map((it, i) => (i === s.active ? { ...it, transition: m.transition } : it)),
     []
   );
@@ -408,10 +408,10 @@ export default function MixEditorProto() {
   const tr = mix.transition;
 
   return (
-    <div className="mixproto">
+    <div className="editor-root">
       {/* Top panel: the transition editor (sibling of Library / Performance) */}
-      <div className="mixproto-top">
-        <div className="mixproto-arranger">
+      <div className="editor-top">
+        <div className="editor-arranger">
           <DawTimeline
             mix={mix}
             player={player}
@@ -431,7 +431,7 @@ export default function MixEditorProto() {
           />
 
           {/* Info bar: deck A (left) · transition (center) · deck B (right) */}
-          <div className="mixproto-infobar">
+          <div className="editor-infobar">
             <DeckCard
               deck="A"
               track={trackA}
@@ -452,8 +452,8 @@ export default function MixEditorProto() {
               }}
             />
 
-            <div className="mixproto-center">
-              <div className="mixproto-center-row">
+            <div className="editor-center">
+              <div className="editor-center-row">
                 <button
                   className={`player-button ${
                     player.isPlaying() ? 'player-button-playing' : 'player-button-paused'
@@ -472,7 +472,7 @@ export default function MixEditorProto() {
                   onDelete={deleteTransition}
                 />
               </div>
-              <div className="mixproto-center-row">
+              <div className="editor-center-row">
                 <label>
                   start
                   <input
@@ -518,7 +518,7 @@ export default function MixEditorProto() {
                   />
                 </label>
               </div>
-              <div className="mixproto-center-row">
+              <div className="editor-center-row">
                 <label>
                   <input
                     type="checkbox"
@@ -585,7 +585,7 @@ export default function MixEditorProto() {
           deck A — the editor's own audio runs on its private Mixer). Load
           affordances match the Performance view: hover row buttons,
           double-click → A, arrow keys. */}
-      <div className="mixproto-library">{browsePanel}</div>
+      <div className="editor-library">{browsePanel}</div>
     </div>
   );
 }

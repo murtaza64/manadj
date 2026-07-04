@@ -1,12 +1,10 @@
 /**
- * PROTOTYPE (mix-editor) — throwaway. Delete or absorb after the verdict.
+ * Transition-editor domain model (pure — under vitest).
  *
- * Question under test: does drawing transitions (breakpoint lanes over an
- * overlap region) feel right, and does deterministic playback of the drawn
- * mix sound convincing? (.scratch/mix-editor/PRD.md, ADR 0010)
- *
- * Model: seconds-based, two tracks, one Transition. Lanes are piecewise-linear
- * breakpoints on a normalized 0..1 x-axis over the transition's duration.
+ * Seconds-based, two tracks, one Transition (ADR 0010). Lanes are
+ * piecewise-linear breakpoints on a normalized 0..1 x-axis over the
+ * transition's duration. Includes the chop stamp, crop remaps, and the
+ * deck-slide math (PRD quadrant table).
  */
 
 export interface LanePoint {
@@ -41,7 +39,7 @@ export const DEFAULT_LANE_IDS: LaneId[] = [
 
 export type Lanes = Partial<Record<LaneId, LanePoint[]>>;
 
-export interface ProtoTransition {
+export interface Transition {
   /** Mix-time (s) when the transition window begins. The only clamp in the
    * model: startSec ≥ 0 (a transition can't begin before A exists). */
   startSec: number;
@@ -61,13 +59,13 @@ export interface ProtoTransition {
   hiddenLanes?: LaneId[];
 }
 
-export interface ProtoMix {
+export interface EditorMix {
   trackAId: number | null;
   trackBId: number | null;
-  transition: ProtoTransition;
+  transition: Transition;
 }
 
-export function defaultMix(): ProtoMix {
+export function defaultMix(): EditorMix {
   return {
     trackAId: null,
     trackBId: null,
@@ -127,7 +125,7 @@ export function evalLane(points: LanePoint[], x: number): number {
 /** All lane values at mix-time t, given the transition. x is clamped, so
  * before the transition every lane reads its first value and after it its
  * last — "keep last drawn value" semantics. */
-export function laneValuesAt(transition: ProtoTransition, mixTime: number): Record<LaneId, number> {
+export function laneValuesAt(transition: Transition, mixTime: number): Record<LaneId, number> {
   const x =
     transition.durationSec <= 0
       ? mixTime < transition.startSec
@@ -150,7 +148,7 @@ export function laneValuesAt(transition: ProtoTransition, mixTime: number): Reco
  * second, so its mix-time footprint is durationInB / rateB.
  */
 export function arrangementAt(
-  mix: ProtoMix,
+  mix: EditorMix,
   mixTime: number,
   durations: { a: number; b: number },
   rateB: number = 1
@@ -183,7 +181,7 @@ export function arrangementAt(
 
 /** B's track-time under the playhead at mix-time t. */
 export function bTrackTimeAt(
-  tr: Pick<ProtoTransition, 'startSec' | 'bInSec'>,
+  tr: Pick<Transition, 'startSec' | 'bInSec'>,
   mixTime: number,
   rateB: number
 ): number {
@@ -198,7 +196,7 @@ export function bTrackTimeAt(
  * audio stays under the window. `startSec ≥ 0` is the only clamp.
  */
 export function slideB(
-  tr: ProtoTransition,
+  tr: Transition,
   deltaB: number,
   locked: boolean,
   rateB: number
@@ -211,7 +209,7 @@ export function slideB(
 
 /** Slide deck B so `cueSec` (B track time) lands under the playhead. */
 export function slideBToCue(
-  tr: ProtoTransition,
+  tr: Transition,
   cueSec: number,
   playheadMix: number,
   locked: boolean,

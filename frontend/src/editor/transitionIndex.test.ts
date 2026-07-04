@@ -3,7 +3,7 @@
  * Preferred-pair derivation).
  */
 import { describe, expect, it } from 'vitest';
-import { defaultMix } from './mixProtoModel';
+import { defaultMix } from './mixModel';
 import { buildTransitionIndex, transitionsFrom, transitionsInto } from './transitionIndex';
 import type { PairStore } from './pairStore';
 

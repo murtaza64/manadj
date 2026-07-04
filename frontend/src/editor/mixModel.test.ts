@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE (mix-editor) — chop-stamp math (issue 04), slide math (issue 11).
+ * Transition-editor model — chop-stamp math (issue 04), slide math (issue 11).
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -11,9 +11,9 @@ import {
   slideB,
   slideBToCue,
   type LanePoint,
-  type ProtoMix,
-  type ProtoTransition,
-} from './mixProtoModel';
+  type EditorMix,
+  type Transition,
+} from './mixModel';
 
 /** faderA default: full → silent ramp. */
 const ramp: LanePoint[] = [
@@ -80,7 +80,7 @@ describe('insertChop', () => {
   });
 });
 
-const tr = (over: Partial<ProtoTransition> = {}): ProtoTransition => ({
+const tr = (over: Partial<Transition> = {}): Transition => ({
   startSec: 30,
   durationSec: 20,
   bInSec: 10,
@@ -156,7 +156,7 @@ describe('laneValuesAt with hidden lanes', () => {
 });
 
 describe('arrangementAt with negative entry anchor', () => {
-  const mix: ProtoMix = {
+  const mix: EditorMix = {
     trackAId: 1,
     trackBId: 2,
     transition: tr({ startSec: 30, durationSec: 20, bInSec: -10 }),

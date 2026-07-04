@@ -3,7 +3,7 @@ import TrackRow, { type TransitionMark } from './TrackRow';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon } from './icons';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
-import type { PairInfo } from '../prototype/transitionIndex';
+import type { PairInfo } from '../editor/transitionIndex';
 import { COLUMN_CONFIG } from './columnConfig';
 import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { useColumnWidths } from '../hooks/useColumnWidths';

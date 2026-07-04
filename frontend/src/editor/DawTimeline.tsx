@@ -10,7 +10,7 @@ import { flushSync } from 'react-dom';
 import { useWaveformData } from '../hooks/useWaveformData';
 import { useWaveformRenderer } from '../hooks/useWaveformRenderer';
 import { useHotCues } from '../hooks/useHotCues';
-import { MixProtoPlayer } from './MixProtoPlayer';
+import { MixPlayer } from './MixPlayer';
 import { GlobalMinimap } from './GlobalMinimap';
 import { LaneCanvas } from './LaneCanvas';
 import { LANE_COLORS } from './laneColors';
@@ -23,8 +23,8 @@ import {
   evalLane,
   lanePoints,
   nearestTime,
-} from './mixProtoModel';
-import type { LaneId, LanePoint, Lanes, ProtoMix } from './mixProtoModel';
+} from './mixModel';
+import type { LaneId, LanePoint, Lanes, EditorMix } from './mixModel';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData } from '../types';
 
@@ -69,8 +69,8 @@ export function DawTimeline({
   onLaneHide,
   onChange,
 }: {
-  mix: ProtoMix;
-  player: MixProtoPlayer;
+  mix: EditorMix;
+  player: MixPlayer;
   trackAId: number | null;
   trackBId: number | null;
   clockA: PlaybackClock;
@@ -86,7 +86,7 @@ export function DawTimeline({
   onLaneChange: (id: LaneId, points: LanePoint[] | null) => void;
   /** Remove the lane from the editor (envelope kept; re-add restores). */
   onLaneHide: (id: LaneId) => void;
-  onChange: React.Dispatch<React.SetStateAction<ProtoMix>>;
+  onChange: React.Dispatch<React.SetStateAction<EditorMix>>;
 }) {
   const [pxPerSec, setPxPerSec] = useState(4);
   /** Horizontal offset in px — the single owner of all horizontal motion.
@@ -664,9 +664,9 @@ export function DawTimeline({
   }, [beatgridB, hotCuesB, tr.startSec, tr.durationSec, tr.bInSec, rateB, pxPerSec]);
 
   const laneStrip = (id: LaneId) => (
-    <div key={id} className={`mixproto-lanestrip ${id.endsWith('A') ? 'a' : 'b'}`}>
+    <div key={id} className={`editor-lanestrip ${id.endsWith('A') ? 'a' : 'b'}`}>
       <span
-        className="mixproto-lanelabel"
+        className="editor-lanelabel"
         style={{ color: LANE_COLORS[id] }}
         ref={(el) => {
           if (el) laneLabelRefs.current.set(id, el);
@@ -675,7 +675,7 @@ export function DawTimeline({
       >
         {id}
         <button
-          className="mixproto-laneclear"
+          className="editor-laneclear"
           title="Remove lane (envelope kept — re-add restores it)"
           onClick={() => onLaneHide(id)}
         >
@@ -683,7 +683,7 @@ export function DawTimeline({
         </button>
       </span>
       <div
-        className="mixproto-lanewindow"
+        className="editor-lanewindow"
         style={{ left: tr.startSec * pxPerSec, width: Math.max(tr.durationSec * pxPerSec, 4) }}
       >
         <LaneCanvas
@@ -713,11 +713,11 @@ export function DawTimeline({
   }, [tr.durationSec]);
 
   return (
-    <div className="mixproto-timeline-wrap">
-      <div ref={viewportRef} className="mixproto-timeline">
+    <div className="editor-timeline-wrap">
+      <div ref={viewportRef} className="editor-timeline">
         <div
           ref={contentRef}
-          className="mixproto-timeline-content"
+          className="editor-timeline-content"
           style={{ width: contentEnd * pxPerSec }}
         >
           {/* Stacked halves (issue 13): A lanes / A wave (peaks down) /
@@ -727,22 +727,22 @@ export function DawTimeline({
 
           {/* Row A */}
           <div
-            className="mixproto-timeline-row a"
+            className="editor-timeline-row a"
             onPointerDown={onRowPointerDown('A')}
             onPointerMove={onRowPointerMove('A')}
             onPointerUp={onRowPointerUp}
             onPointerCancel={endDrag}
           >
-            <div ref={waveWrapARef} className="mixproto-wavecanvas" style={{ width: viewW }}>
+            <div ref={waveWrapARef} className="editor-wavecanvas" style={{ width: viewW }}>
               <canvas ref={rendA.canvasRef} />
             </div>
             {trackAId !== null && durA > 0 && (
-              <div className="mixproto-blockframe a" style={{ left: 0, width: aEnd * pxPerSec }} />
+              <div className="editor-blockframe a" style={{ left: 0, width: aEnd * pxPerSec }} />
             )}
             {/* A goes silent at the transition end: grey the tail. */}
             {trackAId !== null && durA > aEnd && (
               <div
-                className="mixproto-inaudible"
+                className="editor-inaudible"
                 style={{ left: aEnd * pxPerSec, width: (durA - aEnd) * pxPerSec }}
               />
             )}
@@ -750,18 +750,18 @@ export function DawTimeline({
 
           {/* Row B — flush under A, forming the seam. */}
           <div
-            className="mixproto-timeline-row b"
+            className="editor-timeline-row b"
             onPointerDown={onRowPointerDown('B')}
             onPointerMove={onRowPointerMove('B')}
             onPointerUp={onRowPointerUp}
             onPointerCancel={endDrag}
           >
-            <div ref={waveWrapBRef} className="mixproto-wavecanvas" style={{ width: viewW }}>
+            <div ref={waveWrapBRef} className="editor-wavecanvas" style={{ width: viewW }}>
               <canvas ref={rendB.canvasRef} />
             </div>
             {trackBId !== null && durB > 0 && (
               <div
-                className="mixproto-blockframe b"
+                className="editor-blockframe b"
                 style={{ left: bAudioStartMix * pxPerSec, width: bBlockLenMix * pxPerSec }}
               />
             )}
@@ -769,7 +769,7 @@ export function DawTimeline({
                 but never plays: grey the head. */}
             {trackBId !== null && durB > 0 && bAudioStartMix > bHeadStartMix && (
               <div
-                className="mixproto-inaudible"
+                className="editor-inaudible"
                 style={{
                   left: bHeadStartMix * pxPerSec,
                   width: (bAudioStartMix - bHeadStartMix) * pxPerSec,
@@ -782,13 +782,13 @@ export function DawTimeline({
           {/* Transition overlap highlight */}
           {tr.durationSec > 0 && (
             <div
-              className="mixproto-overlap"
+              className="editor-overlap"
               style={{ left: tr.startSec * pxPerSec, width: tr.durationSec * pxPerSec }}
             />
           )}
 
           {/* Mix playhead */}
-          <div ref={playheadRef} className="mixproto-playhead" />
+          <div ref={playheadRef} className="editor-playhead" />
         </div>
       </div>
 
@@ -810,7 +810,7 @@ export function DawTimeline({
         getViewPx={() => viewportRef.current?.clientWidth ?? 800}
       />
 
-      <button className="mixproto-fit" onClick={fit} title="Zoom to fit">
+      <button className="editor-fit" onClick={fit} title="Zoom to fit">
         fit
       </button>
     </div>

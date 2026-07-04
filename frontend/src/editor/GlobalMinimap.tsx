@@ -7,9 +7,9 @@
  * triangles, viewport rectangle (drag to pan), playhead. Click = seek.
  */
 import { useEffect, useRef } from 'react';
-import { laneValuesAt } from './mixProtoModel';
-import { MixProtoPlayer } from './MixProtoPlayer';
-import type { ProtoMix } from './mixProtoModel';
+import { laneValuesAt } from './mixModel';
+import { MixPlayer } from './MixPlayer';
+import type { EditorMix } from './mixModel';
 import type { WaveformDataWebGL } from '../utils/WebGLWaveformRenderer';
 import type { HotCue } from '../types';
 
@@ -36,8 +36,8 @@ export function GlobalMinimap({
   setScrollPx,
   getViewPx,
 }: {
-  player: MixProtoPlayer;
-  mix: ProtoMix;
+  player: MixPlayer;
+  mix: EditorMix;
   waveA: WaveformDataWebGL | null;
   waveB: WaveformDataWebGL | null;
   rateB: number;
@@ -200,7 +200,7 @@ export function GlobalMinimap({
   return (
     <canvas
       ref={canvasRef}
-      className="mixproto-globalminimap"
+      className="editor-globalminimap"
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         const sec = secAt(e);

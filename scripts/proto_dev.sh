@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# PROTOTYPE (mix-editor) — one-command dev loop for the two-track arranger.
-# Starts the backend from the MAIN workspace (real library DB lives there),
-# reuses it if already running, starts vite on 5174 (CORS-allowed), and opens
-# the prototype in the browser.
+# Transition editor — one-command dev loop (`make proto`, name kept for
+# muscle memory). Starts the backend from the MAIN workspace (real library
+# DB lives there), reuses it if already running, starts vite on 5174
+# (CORS-allowed), and opens the editor in the browser.
 set -euo pipefail
 
 MAIN_WORKSPACE="/Users/murtaza/manadj"
 BACKEND_URL="http://localhost:8000"
-PROTO_URL="http://localhost:5174/?proto=mix"
+PROTO_URL="http://localhost:5174/?view=transition"
 
 if ! curl -s -o /dev/null --max-time 1 "$BACKEND_URL/docs"; then
   echo "[proto] backend not running — starting it from $MAIN_WORKSPACE"

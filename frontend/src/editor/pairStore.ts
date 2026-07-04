@@ -9,14 +9,15 @@
  * legacy pristine-shaped saves, so merely-opened pairs leave no trace and
  * the discovery index (issue 02) stays honest by construction.
  */
-import { defaultMix } from './mixProtoModel';
-import type { ProtoMix, ProtoTransition } from './mixProtoModel';
+import { defaultMix } from './mixModel';
+import type { EditorMix, Transition } from './mixModel';
 
-const PAIR_STORE_KEY = 'PROTOTYPE-transition-editor-pairs';
-export const LAST_PAIR_KEY = 'PROTOTYPE-transition-editor-last';
-/** Storage key of the pre-rework single-mix draft (migrated on load). */
-const LEGACY_MIX_KEY = 'PROTOTYPE-mix-editor-mix';
-/** Default working pair while prototyping: Weeble Wobble VIP → Last Time. */
+const PAIR_STORE_KEY = 'manadj-transition-pairs';
+export const LAST_PAIR_KEY = 'manadj-last-pair';
+/** Pre-graduation storage keys (renamed 2026-07-04, migrated on load). */
+const OLD_PAIR_STORE_KEY = 'PROTOTYPE-transition-editor-pairs';
+const OLD_LAST_PAIR_KEY = 'PROTOTYPE-transition-editor-last';
+/** Default working pair when nothing else is loaded or saved. */
 export const DEFAULT_PAIR = { a: 549, b: 171 };
 
 /** A saved Transition (first-class, per ordered track pair). `bInSec` lives
@@ -24,7 +25,7 @@ export const DEFAULT_PAIR = { a: 549, b: 171 };
  * artifact); older saves carried it as a sibling field (migrated on load). */
 export interface SavedTransition {
   name: string;
-  transition: ProtoMix['transition'];
+  transition: EditorMix['transition'];
   /** Proven move (glossary: Favorite). A pair with ≥1 favorited Transition
    * is a Preferred pair — always derived, never stored. */
   favorite?: boolean;
@@ -38,6 +39,20 @@ export interface PairEntry {
 export type PairStore = Record<string, PairEntry>;
 
 export function loadPairStore(): PairStore {
+  // Graduation key rename (2026-07-04): one-time move from the PROTOTYPE-
+  // prefixed keys. (The even older single-mix-draft migration was dropped
+  // here — that data was migrated into the pair store long ago.)
+  const old = localStorage.getItem(OLD_PAIR_STORE_KEY);
+  if (old !== null && localStorage.getItem(PAIR_STORE_KEY) === null) {
+    localStorage.setItem(PAIR_STORE_KEY, old);
+  }
+  localStorage.removeItem(OLD_PAIR_STORE_KEY);
+  const oldLast = localStorage.getItem(OLD_LAST_PAIR_KEY);
+  if (oldLast !== null && localStorage.getItem(LAST_PAIR_KEY) === null) {
+    localStorage.setItem(LAST_PAIR_KEY, oldLast);
+  }
+  localStorage.removeItem(OLD_LAST_PAIR_KEY);
+
   let store: PairStore;
   try {
     store = JSON.parse(localStorage.getItem(PAIR_STORE_KEY) ?? '{}');
@@ -56,38 +71,9 @@ export function loadPairStore(): PairStore {
     }
   }
   if (migrated) savePairStore(store);
-  // Migrate the pre-rework single-mix draft into the pair store, so work
-  // saved before the transition-per-pair model isn't lost.
-  try {
-    const raw = localStorage.getItem(LEGACY_MIX_KEY);
-    if (raw) {
-      const legacy = JSON.parse(raw) as ProtoMix;
-      if (legacy.trackAId !== null && legacy.trackBId !== null && legacy.transition) {
-        const key = `${legacy.trackAId}:${legacy.trackBId}`;
-        if (!store[key]) {
-          const legacyBIn = (legacy as ProtoMix & { bInSec?: number }).bInSec ?? 0;
-          store[key] = {
-            items: [
-              {
-                name: 'Transition 1',
-                transition: { ...legacy.transition, bInSec: legacy.transition.bInSec ?? legacyBIn },
-              },
-            ],
-            active: 0,
-          };
-          savePairStore(store);
-        }
-        if (!localStorage.getItem(LAST_PAIR_KEY)) {
-          localStorage.setItem(LAST_PAIR_KEY, key);
-        }
-      }
-      localStorage.removeItem(LEGACY_MIX_KEY);
-    }
-    } catch {
-    /* legacy blob unreadable — nothing to migrate */
-  }
-  // Lazy-persistence honesty: pristine-shaped saves (pre-01 autosave wrote
-  // merely-opened pairs) are pruned so they never feed discovery.
+  // Lazy-persistence honesty: pristine-shaped saves (pre-transition-library
+  // autosave wrote merely-opened pairs) are pruned so they never feed
+  // discovery.
   const pruned = pruneStore(store);
   if (pruned.changed) savePairStore(pruned.store);
   return pruned.store;
@@ -134,7 +120,7 @@ export function freshTransition(items: SavedTransition[]): SavedTransition {
 }
 
 /** Does this transition still have the untouched default shape? */
-function isDefaultShape(tr: ProtoTransition): boolean {
+function isDefaultShape(tr: Transition): boolean {
   const d = defaultMix().transition;
   return (
     tr.startSec === d.startSec &&

@@ -15,7 +15,7 @@ import {
   halveBeatjump,
 } from '../playback/beatjump';
 import { formatKeyDisplay } from '../utils/keyUtils';
-import { MixProtoPlayer } from './MixProtoPlayer';
+import { MixPlayer } from './MixPlayer';
 import type { Track } from '../types';
 
 /**
@@ -37,7 +37,7 @@ export function DeckCard({
 }: {
   deck: 'A' | 'B';
   track: Track | null;
-  player: MixProtoPlayer;
+  player: MixPlayer;
   loadState: string;
   /** BPM after tempo match (differs from base only on the matched deck). */
   effectiveBpm: number | null;
@@ -76,10 +76,10 @@ export function DeckCard({
 
   if (!track) {
     return (
-      <div className={`mixproto-deckcard ${deck.toLowerCase()}`}>
-        <div className="mixproto-deckcard-head">
-          <span className={`mixproto-decklabel ${deck.toLowerCase()}`}>{deck}</span>
-          <span className="mixproto-tweaktitle">no track — select below and load</span>
+      <div className={`editor-deckcard ${deck.toLowerCase()}`}>
+        <div className="editor-deckcard-head">
+          <span className={`editor-decklabel ${deck.toLowerCase()}`}>{deck}</span>
+          <span className="editor-tweaktitle">no track — select below and load</span>
         </div>
       </div>
     );
@@ -97,19 +97,19 @@ export function DeckCard({
   };
 
   return (
-    <div className={`mixproto-deckcard ${deck.toLowerCase()}`}>
-      <div className="mixproto-deckcard-head">
-        <span className={`mixproto-decklabel ${deck.toLowerCase()}`}>{deck}</span>
-        <span className="mixproto-tweaktitle" title={track.title || track.filename}>
+    <div className={`editor-deckcard ${deck.toLowerCase()}`}>
+      <div className="editor-deckcard-head">
+        <span className={`editor-decklabel ${deck.toLowerCase()}`}>{deck}</span>
+        <span className="editor-tweaktitle" title={track.title || track.filename}>
           {track.title || track.filename}
         </span>
-        <span className="mixproto-deckcard-artist">{track.artist || '—'}</span>
+        <span className="editor-deckcard-artist">{track.artist || '—'}</span>
       </div>
-      <div className="mixproto-deckcard-row">
+      <div className="editor-deckcard-row">
         <label title="Base BPM (the track's real tempo — edits persist)">
           BPM
           <input
-            className="mixproto-bpm-base"
+            className="editor-bpm-base"
             type="number"
             step={0.01}
             min={1}
@@ -121,7 +121,7 @@ export function DeckCard({
             }}
           />
         </label>
-        <span className="mixproto-bpm-eff" title="Effective BPM during the mix (after tempo match)">
+        <span className="editor-bpm-eff" title="Effective BPM during the mix (after tempo match)">
           » {effectiveBpm !== null ? effectiveBpm.toFixed(1) : '—'}
           {Math.abs(pitchPercent) > 0.05 && (
             <em>
@@ -131,22 +131,22 @@ export function DeckCard({
             </em>
           )}
         </span>
-        <span className="mixproto-deckcard-key">{formatKeyDisplay(track.key)}</span>
+        <span className="editor-deckcard-key">{formatKeyDisplay(track.key)}</span>
         <button
-          className={`mixproto-mutebtn${player.isMuted(deck) ? ' on' : ''}`}
+          className={`editor-mutebtn${player.isMuted(deck) ? ' on' : ''}`}
           aria-pressed={player.isMuted(deck)}
           title={`Mute deck ${deck} (overrides the fader lane)`}
           onClick={() => player.setMuted(deck, !player.isMuted(deck))}
         >
           mute
         </button>
-        <span className="mixproto-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
+        <span className="editor-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
       </div>
-      <div className="mixproto-deckcard-row">
+      <div className="editor-deckcard-row">
         {/* Segmented pairs (issue 19): label + ◀ + ▶ share one border and
             read as a single control; the step lives in the tooltip. */}
-        <span className="mixproto-pair" title={`Nudge ${deck} ±10ms relative to the other track`}>
-          <span className="mixproto-pair-label">track</span>
+        <span className="editor-pair" title={`Nudge ${deck} ±10ms relative to the other track`}>
+          <span className="editor-pair-label">track</span>
           <button title={`Nudge ${deck} 10ms earlier`} onClick={() => onNudgeTrack(-0.01)}>
             ◀
           </button>
@@ -154,8 +154,8 @@ export function DeckCard({
             ▶
           </button>
         </span>
-        <span className="mixproto-pair" title="Nudge beatgrid ±10ms (persists to the track)">
-          <span className="mixproto-pair-label">grid</span>
+        <span className="editor-pair" title="Nudge beatgrid ±10ms (persists to the track)">
+          <span className="editor-pair-label">grid</span>
           <button
             title="Nudge beatgrid 10ms earlier"
             onClick={() => nudge.mutate({ trackId: track.id, offsetMs: -10 })}
@@ -170,7 +170,7 @@ export function DeckCard({
           </button>
         </span>
         <button
-          className="mixproto-action"
+          className="editor-action"
           title="Set downbeat at this deck's playhead"
           onClick={() =>
             setDownbeat.mutate({ trackId: track.id, downbeatTime: player.getTrackTime(deck) })
@@ -180,16 +180,16 @@ export function DeckCard({
         </button>
       </div>
       {gestures && (
-        <div className="mixproto-deckcard-row mixproto-slides">
+        <div className="editor-deckcard-row editor-slides">
           <span
-            className="mixproto-pair"
+            className="editor-pair"
             title={
               gestures.kind === 'slide'
                 ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put'
                 : 'Transport: moves the playhead — both decks follow, alignment untouched'
             }
           >
-            <span className="mixproto-pair-label">{gestures.kind}</span>
+            <span className="editor-pair-label">{gestures.kind}</span>
             <button
               disabled={!gestures.enabled}
               title={
@@ -204,7 +204,7 @@ export function DeckCard({
             <button title="Halve size" onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}>
               −
             </button>
-            <span className="mixproto-slidesize" title={`Size (${deck}'s beats)`}>
+            <span className="editor-slidesize" title={`Size (${deck}'s beats)`}>
               {gestureBeats}
             </span>
             <button title="Double size" onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}>
@@ -224,7 +224,7 @@ export function DeckCard({
           </span>
           {lock && (
             <button
-              className={`mixproto-lockbtn${lock.on ? ' on' : ''}`}
+              className={`editor-lockbtn${lock.on ? ' on' : ''}`}
               aria-pressed={lock.on}
               title="Locked window: slides carry the window WITH this track (same audio stays under it); unlocked, the window stays with the other track"
               onClick={lock.toggle}
@@ -241,7 +241,7 @@ export function DeckCard({
               return (
                 <button
                   key={slot}
-                  className="mixproto-cueslide unset"
+                  className="editor-cueslide unset"
                   title={`Set cue ${slot} at ${deck}'s playhead`}
                   onClick={() =>
                     setHotCue.mutate({
@@ -259,7 +259,7 @@ export function DeckCard({
             return (
               <button
                 key={slot}
-                className="mixproto-cueslide"
+                className="editor-cueslide"
                 style={{ borderColor: color, color }}
                 title={
                   (gestures.kind === 'slide'

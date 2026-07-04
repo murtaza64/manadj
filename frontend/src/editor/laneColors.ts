@@ -2,7 +2,7 @@
  * Lane color assignments — bright, fully saturated per the project's
  * design language; shared by the lane canvases and the strip labels.
  */
-import type { LaneId } from './mixProtoModel';
+import type { LaneId } from './mixModel';
 
 export const LANE_COLORS: Record<LaneId, string> = {
   faderA: '#00e5ff',

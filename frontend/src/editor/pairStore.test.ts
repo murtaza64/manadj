@@ -2,7 +2,7 @@
  * Transition-library 01 — materialization rules (lazy persistence).
  */
 import { describe, expect, it } from 'vitest';
-import { defaultMix } from './mixProtoModel';
+import { defaultMix } from './mixModel';
 import {
   freshTransition,
   isPristine,

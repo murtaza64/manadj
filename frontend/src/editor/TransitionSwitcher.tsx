@@ -50,7 +50,7 @@ export function TransitionSwitcher({
   const canNew = atEnd && !isPristine(item);
 
   return (
-    <span className="mixproto-switcher">
+    <span className="editor-switcher">
       <button
         title="Previous Transition"
         disabled={active === 0}
@@ -60,7 +60,7 @@ export function TransitionSwitcher({
       </button>
       {draft === null ? (
         <button
-          className="mixproto-switcher-name"
+          className="editor-switcher-name"
           title="Rename (click)"
           onClick={() => setDraft(item.name)}
         >
@@ -69,7 +69,7 @@ export function TransitionSwitcher({
       ) : (
         <input
           ref={inputRef}
-          className="mixproto-switcher-input"
+          className="editor-switcher-input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => setDraft(null)}
@@ -84,14 +84,14 @@ export function TransitionSwitcher({
         />
       )}
       <button
-        className={`mixproto-switcher-star${item.favorite ? ' on' : ''}`}
+        className={`editor-switcher-star${item.favorite ? ' on' : ''}`}
         aria-pressed={!!item.favorite}
         title={item.favorite ? 'Unfavorite (proven move)' : 'Favorite: mark as a proven move'}
         onClick={onToggleFavorite}
       >
         {item.favorite ? '★' : '☆'}
       </button>
-      <span className="mixproto-switcher-pos" title="Position (creation order)">
+      <span className="editor-switcher-pos" title="Position (creation order)">
         {active + 1}/{items.length}
       </span>
       <button
@@ -102,7 +102,7 @@ export function TransitionSwitcher({
         {atEnd ? '+' : '▶'}
       </button>
       <button
-        className={`mixproto-switcher-del${confirming ? ' confirming' : ''}`}
+        className={`editor-switcher-del${confirming ? ' confirming' : ''}`}
         title={
           confirming
             ? 'Click again to delete this Transition'

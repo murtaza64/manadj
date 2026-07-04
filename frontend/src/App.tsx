@@ -8,16 +8,20 @@ import type { AppMode } from './components/TopBar';
 import { FilterProvider } from './contexts/FilterContext';
 import { DeckProvider, DeckScope } from './contexts/DeckContext';
 import { MidiControllerBridge } from './components/MidiControllerBridge';
-import MixEditorProto from './prototype/MixEditorProto';
+import TransitionEditor from './editor/TransitionEditor';
 
 const queryClient = new QueryClient();
 
 type View = AppMode | 'sync';
 
-// PROTOTYPE (mix-editor): ?proto=mix opens straight into the Transition
-// editor (make proto). It is otherwise a normal top-bar mode.
+// Deep link: ?view=transition opens straight into the Transition editor
+// (`make proto` dev loop). It is otherwise a normal top-bar mode.
+// (?proto=mix kept as a legacy alias for muscle memory.)
+const requestedView = new URLSearchParams(window.location.search);
 const initialView: View =
-  new URLSearchParams(window.location.search).get('proto') === 'mix' ? 'transition' : 'library';
+  requestedView.get('view') === 'transition' || requestedView.get('proto') === 'mix'
+    ? 'transition'
+    : 'library';
 
 function App() {
   const [view, setView] = useState<View>(initialView);
@@ -37,7 +41,7 @@ function App() {
                 {view === 'performance' ? (
                   <PerformanceView />
                 ) : view === 'transition' ? (
-                  <MixEditorProto />
+                  <TransitionEditor />
                 ) : (
                   /* The library view is Deck A (performance-mode issue 02). */
                   <DeckScope deck="A">

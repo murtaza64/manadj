@@ -1,7 +1,7 @@
 /**
- * PROTOTYPE (mix-editor) — throwaway. Delete or absorb after the verdict.
+ * MixPlayer — deterministic playback for the Transition editor.
  *
- * Deterministic playback of a two-track ProtoMix on two DeckEngines fed into
+ * Plays a two-track EditorMix on two DeckEngines fed into
  * the editor's own private Mixer (ADR 0009 one-graph architecture — a single
  * AudioContext, real channel strips, master bus + limiter; audio-isolated
  * from the shared decks by being a separate Mixer instance).
@@ -17,23 +17,23 @@
 import { DeckEngine } from '../playback/DeckEngine';
 import { Mixer } from '../playback/mixer';
 import { api } from '../api/client';
-import type { ProtoMix } from './mixProtoModel';
-import { arrangementAt, laneValuesAt, tempoMatchPitch } from './mixProtoModel';
+import type { EditorMix } from './mixModel';
+import { arrangementAt, laneValuesAt, tempoMatchPitch } from './mixModel';
 
 const DRIFT_TOLERANCE_S = 0.12;
 
-export interface MixProtoTrackInfo {
+export interface MixTrackInfo {
   id: number;
   bpm: number | null;
 }
 
-export class MixProtoPlayer {
+export class MixPlayer {
   /** Editor-private mixer: own context/master/limiter (audio isolation). */
   readonly mixer = new Mixer();
   readonly engineA = new DeckEngine(this.mixer.portFor('A'));
   readonly engineB = new DeckEngine(this.mixer.portFor('B'));
 
-  private mix: ProtoMix;
+  private mix: EditorMix;
   private durations = { a: 0, b: 0 };
   private bpm: { a: number | null; b: number | null } = { a: null, b: null };
 
@@ -48,13 +48,13 @@ export class MixProtoPlayer {
   private raf = 0;
   private listeners = new Set<() => void>();
 
-  constructor(mix: ProtoMix) {
+  constructor(mix: EditorMix) {
     this.mix = mix;
   }
 
   // ── Loading ──────────────────────────────────────────────────────────
 
-  async loadTrack(deck: 'A' | 'B', info: MixProtoTrackInfo): Promise<void> {
+  async loadTrack(deck: 'A' | 'B', info: MixTrackInfo): Promise<void> {
     const engine = deck === 'A' ? this.engineA : this.engineB;
     this.bpm[deck === 'A' ? 'a' : 'b'] = info.bpm;
     await engine.load({
@@ -80,7 +80,7 @@ export class MixProtoPlayer {
    * tick, and structural moves are caught by the tick's drift tolerance —
    * a hard sync would restart both sources on every drag event.
    */
-  setMix(mix: ProtoMix): void {
+  setMix(mix: EditorMix): void {
     this.mix = mix;
     this.applyPitch();
     if (this.playing) this.syncDecks(this.getMixTime(), false);

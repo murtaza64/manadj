@@ -6,9 +6,9 @@
  * (full-window canvases were giant compositor surfaces).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { insertChop, nearestTime } from './mixProtoModel';
+import { insertChop, nearestTime } from './mixModel';
 import { LANE_COLORS } from './laneColors';
-import type { LaneId, LanePoint } from './mixProtoModel';
+import type { LaneId, LanePoint } from './mixModel';
 /** One automation lane: breakpoint polyline editor (canvas only; the label
  * and clear button live in the lane strip). */
 /** A vertical guide line inside a lane strip (normalized x within the transition). */
@@ -36,7 +36,7 @@ const LANE_MAX_BITMAP_PX = 8192;
 const LANE_SNAP_PX = 6;
 /** Canvas overhang past the editable lane rect on every side, so breakpoint
  * circles at the extremes render complete, floating over the window borders.
- * Must match the canvas inset/size in mixEditorProto.css. */
+ * Must match the canvas inset/size in transitionEditor.css. */
 const LANE_PAD = 7;
 
 export function LaneCanvas({
@@ -336,7 +336,7 @@ export function LaneCanvas({
   // over the window borders without stealing clicks from neighboring strips.
   return (
     <div
-      className="mixproto-lanehit"
+      className="editor-lanehit"
       onPointerDown={(e) => {
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);

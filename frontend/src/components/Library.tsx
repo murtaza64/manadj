@@ -15,7 +15,7 @@ import type { ChannelId } from '../playback/mixer';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
-import { transitionsFrom, useTransitionIndex } from '../prototype/transitionIndex';
+import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
 
 // Find Compatible feature (né Find Related; internal keys unchanged) —
 // types and constants
