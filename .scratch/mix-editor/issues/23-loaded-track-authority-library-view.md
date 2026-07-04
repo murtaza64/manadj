@@ -1,6 +1,12 @@
 # 23 — Library view: loaded track is the single authority
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change owmpypkz on the fixes lane — verify by eye)
+
+Finding during implementation: the minimap already followed the loaded deck
+(explicit comment in TagEditor); the chimera was the surrounding panel. The
+whole TagEditor (tags, energy, title/artist, BPM, key, Analyze) now targets
+the loaded track via a fresh `['track', id]` query; selection only
+browses/loads.
 
 ## Parent
 

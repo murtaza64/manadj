@@ -488,7 +488,7 @@ export default function Library({
             <TagEditor
               ref={tagEditorRef}
               track={editorTrack}
-              onSave={mutation.mutate}
+              onSave={(data) => mutation.mutateAsync(data)}
               onUpdate={handleFieldUpdate}
               onEnergyEditModeChange={setIsEnergyEditMode}
             />

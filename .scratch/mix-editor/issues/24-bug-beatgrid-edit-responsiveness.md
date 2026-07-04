@@ -1,6 +1,18 @@
 # 24 — BUG: beatgrid editing lost responsiveness in library view
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change ptqonxkz on the fixes lane — verify by eye)
+
+Root cause (recorded per acceptance criteria): NOT the renderer — hypothesis
+1-adjacent plus an ordering race. `handleBpmChange` fired the BPM PATCH
+without awaiting (`mutation.mutate`), then immediately delete+regenerated
+the beatgrid — the backend rebuilt it from the OLD `track.bpm`, and the
+beatgrid query's `staleTime: Infinity` kept the stale grid until the next
+edit. Rapid ±0.03 nudges interleaved whole sequences, compounding it. The
+selected≠loaded mismatch (issue 23) additionally made edits invisible when
+the selected row wasn't the loaded track. Fix: `onSave` is awaited
+(`mutateAsync`), BPM commits serialize through a promise chain, and issue
+23 retargets the editor to the loaded track. Renderer beatgrid cache was
+verified correct (`setBeatgrid` nulls it).
 
 ## Parent
 
