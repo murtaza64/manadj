@@ -6,11 +6,7 @@ import { PlaylistSyncTable } from './PlaylistSyncTable';
 import { PlaylistDetailView } from './PlaylistDetailView';
 import './PlaylistSync.css';
 
-interface PlaylistSyncProps {
-  onClose: () => void;
-}
-
-export function PlaylistSync({ onClose }: PlaylistSyncProps) {
+export function PlaylistSync() {
   const [selectedPlaylistName, setSelectedPlaylistName] = useState<string | null>(null);
   const { data: playlists, isLoading, error } = useQuery({
     queryKey: ['playlistSync'],
@@ -66,7 +62,6 @@ export function PlaylistSync({ onClose }: PlaylistSyncProps) {
       <PlaylistDetailView
         playlist={selectedPlaylist}
         onBack={() => setSelectedPlaylistName(null)}
-        onClose={onClose}
       />
     );
   }

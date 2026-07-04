@@ -1,26 +1,25 @@
 /**
  * Persistent top bar: brand, icon mode switch (Library / Performance /
- * Transition editor), the active section's title, playlist sync. Visible in
- * all three modes; Sync opens its own full-screen flow.
+ * Transition editor / Sync), and the active section's title. Visible in
+ * every mode.
  */
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition';
+export type AppMode = 'library' | 'performance' | 'transition' | 'sync';
 
 const MODES: { id: AppMode; icon: string; title: string }[] = [
   { id: 'library', icon: '≡', title: 'Library' },
   { id: 'performance', icon: '▸', title: 'Performance' },
   { id: 'transition', icon: '⋈', title: 'Transition editor' },
+  { id: 'sync', icon: '⇄', title: 'Sync' },
 ];
 
 export function TopBar({
   mode,
   onModeChange,
-  onOpenSync,
 }: {
   mode: AppMode;
   onModeChange: (mode: AppMode) => void;
-  onOpenSync: () => void;
 }) {
   return (
     <header className="topbar">
@@ -38,9 +37,6 @@ export function TopBar({
         ))}
       </nav>
       <h1 className="topbar-title">{MODES.find((m) => m.id === mode)?.title}</h1>
-      <button className="topbar-sync" onClick={onOpenSync} title="Playlist sync">
-        <span className="topbar-sync-icon">⟳</span> Sync
-      </button>
     </header>
   );
 }

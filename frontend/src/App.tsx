@@ -12,17 +12,16 @@ import TransitionEditor from './editor/TransitionEditor';
 
 const queryClient = new QueryClient();
 
-type View = AppMode | 'sync';
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'sync'];
 
-// Deep link: ?view=transition opens straight into the Transition editor.
-// It is otherwise a normal top-bar mode.
-const initialView: View =
-  new URLSearchParams(window.location.search).get('view') === 'transition'
-    ? 'transition'
-    : 'library';
+// Deep link: ?view=<mode> opens straight into that mode.
+const requestedView = new URLSearchParams(window.location.search).get('view');
+const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
+  ? (requestedView as AppMode)
+  : 'library';
 
 function App() {
-  const [view, setView] = useState<View>(initialView);
+  const [view, setView] = useState<AppMode>(initialView);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -30,25 +29,23 @@ function App() {
         {/* Controller layer: above the view switch, like the Decks it drives. */}
         <MidiControllerBridge />
         <FilterProvider>
-          {view === 'sync' ? (
-            <SyncView onClose={() => setView('library')} />
-          ) : (
-            <div className="app-shell">
-              <TopBar mode={view} onModeChange={setView} onOpenSync={() => setView('sync')} />
-              <main className="app-main">
-                {view === 'performance' ? (
-                  <PerformanceView />
-                ) : view === 'transition' ? (
-                  <TransitionEditor />
-                ) : (
-                  /* The library view is Deck A (performance-mode issue 02). */
-                  <DeckScope deck="A">
-                    <Library />
-                  </DeckScope>
-                )}
-              </main>
-            </div>
-          )}
+          <div className="app-shell">
+            <TopBar mode={view} onModeChange={setView} />
+            <main className="app-main">
+              {view === 'performance' ? (
+                <PerformanceView />
+              ) : view === 'transition' ? (
+                <TransitionEditor />
+              ) : view === 'sync' ? (
+                <SyncView />
+              ) : (
+                /* The library view is Deck A (performance-mode issue 02). */
+                <DeckScope deck="A">
+                  <Library />
+                </DeckScope>
+              )}
+            </main>
+          </div>
         </FilterProvider>
       </DeckProvider>
     </QueryClientProvider>

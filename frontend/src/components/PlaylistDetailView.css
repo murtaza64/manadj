@@ -91,8 +91,7 @@
   border-color: var(--teal);
 }
 
-.detail-back-button,
-.detail-close-button {
+.detail-back-button {
   padding: 6px 12px;
   background: var(--surface0);
   border: 1px solid var(--surface1);
@@ -102,8 +101,7 @@
   font-size: var(--font-sm);
 }
 
-.detail-back-button:hover,
-.detail-close-button:hover {
+.detail-back-button:hover {
   background: var(--surface1);
 }
 

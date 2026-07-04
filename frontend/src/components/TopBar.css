@@ -69,27 +69,3 @@
   text-transform: uppercase;
   color: var(--text);
 }
-
-.topbar-sync {
-  margin-left: auto;
-  padding: 4px 12px;
-  background: transparent;
-  border: 1px solid var(--blue);
-  color: var(--blue);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: background 0.15s, color 0.15s;
-}
-
-.topbar-sync:hover {
-  background: var(--blue);
-  color: var(--base);
-}
-
-.topbar-sync-icon {
-  font-size: 14px;
-}

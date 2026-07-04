@@ -8,10 +8,9 @@ import './PlaylistDetailView.css';
 interface PlaylistDetailViewProps {
   playlist: UnifiedPlaylist;
   onBack: () => void;
-  onClose: () => void;
 }
 
-export function PlaylistDetailView({ playlist, onBack, onClose }: PlaylistDetailViewProps) {
+export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps) {
   const [syncResult, setSyncResult] = useState<SyncResult | SyncResult[] | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -141,9 +140,6 @@ export function PlaylistDetailView({ playlist, onBack, onClose }: PlaylistDetail
               </button>
             )}
           </div>
-          <button onClick={onClose} className="detail-close-button">
-            Close
-          </button>
         </div>
       </div>
 
