@@ -1,22 +1,24 @@
-// Lifecycle hook for the v2 texture renderer (ADR 0015) — the v2 counterpart
-// of useWaveformRenderer, same return shape, so components can choose the
-// engine at the seam. Collapses into useWaveformRenderer when the legacy
-// renderer is deleted (issue 04).
+// Lifecycle hook for the texture renderer (ADR 0015): construction on the
+// returned canvas, data feeding (waveform, beatgrid, hot cues, cue point),
+// the clock-driven render loop, and disposal. The full waveform and the
+// minimap are thin configurations of this one hook (ADR 0008).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData, HotCue } from '../types';
-import type { WebGLRendererConfig } from '../utils/WebGLWaveformRenderer';
 import type { DecodedWaveform } from './blob';
 import { WaveformRendererV2 } from './WaveformRendererV2';
+import type { WaveformRendererConfig } from './WaveformRendererV2';
 
 interface Options {
   clock: PlaybackClock;
   waveformData: DecodedWaveform | null | undefined;
-  config: WebGLRendererConfig;
+  config: WaveformRendererConfig;
   cuePoint?: number | null;
   hotCues?: HotCue[];
   beatgrid?: BeatgridData | null;
+  /** Driven mode: no self-running render loop — the caller's own motion
+   * clock calls the returned `draw()` once per frame. */
   driven?: boolean;
 }
 

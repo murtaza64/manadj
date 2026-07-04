@@ -17,6 +17,11 @@ The old waveform system is removed and the library regenerated:
 
 Reminder (parallel-work rules): migrations run against the real DB only after landing, via the default workspace; pre-trunk they execute only on the lane's sandbox clone.
 
+Note from issue 04: `PerfDiffViewer` is the last JSON-endpoint consumer (PRD listed it
+untouched, but dropping the JSON columns breaks it). Resolve here: convert it to
+`toThreeBands()` over the blob endpoint (small — it only needs low/mid/high arrays +
+duration + cue time), or retire the diagnostic view.
+
 ## Acceptance criteria
 
 - [ ] Migrations drop JSON/PNG columns and move `cue_point_time`; existing Main cues survive; single alembic head

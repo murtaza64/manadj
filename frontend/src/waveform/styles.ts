@@ -21,10 +21,13 @@ export interface StyleParams {
   smooth: boolean;
 }
 
-/** User-approved additive-RGB tuning (2026-07-04 prototype session). */
+/** User-approved additive-RGB tuning (2026-07-04 prototype session).
+ * master < 1 leaves headroom at the container edges: drops otherwise pin
+ * heights to full height and bury cue/beatgrid markers (user feedback after
+ * the issue-04 swap). */
 export const DEFAULT_PARAMS: StyleParams = {
   displayGamma: 1.0,
-  master: 1.0,
+  master: 0.78,
   gains: [0.7, 1.05, 1.5],
   b1: 3,
   b2: 5,

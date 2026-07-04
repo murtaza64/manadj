@@ -10,7 +10,7 @@ import { useEffect, useRef } from 'react';
 import { laneValuesAt } from './mixModel';
 import { MixPlayer } from './MixPlayer';
 import type { EditorMix } from './mixModel';
-import type { WaveformDataWebGL } from '../utils/WebGLWaveformRenderer';
+import type { ThreeBandWaveform } from '../waveform/blob';
 import type { HotCue } from '../types';
 
 /**
@@ -38,8 +38,8 @@ export function GlobalMinimap({
 }: {
   player: MixPlayer;
   mix: EditorMix;
-  waveA: WaveformDataWebGL | null;
-  waveB: WaveformDataWebGL | null;
+  waveA: ThreeBandWaveform | null;
+  waveB: ThreeBandWaveform | null;
   rateB: number;
   contentEnd: number;
   pxPerSec: number;
@@ -90,7 +90,7 @@ export function GlobalMinimap({
         const bOn = durB > 0 && t >= tr.startSec && bTrack >= 0 && bTrack < durB;
 
         const drawCol = (
-          wave: WaveformDataWebGL,
+          wave: ThreeBandWaveform,
           trackT: number,
           fader: number,
           eq: { low: number; mid: number; high: number },

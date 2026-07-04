@@ -1,6 +1,6 @@
 # 04 — full parity: all surfaces on the new renderer, old renderer deleted
 
-Status: ready-for-agent
+Status: resolved (wfproto lane, 2026-07-04 — pending user eye-verify of performance view + editor)
 
 ## Parent
 
@@ -24,3 +24,35 @@ Carried-over known limitation (per PRD): only the first tempo change of variable
 ## Blocked by
 
 - `03-library-player-renders-v2.md`
+
+## Comments
+
+**2026-07-04 (wfproto lane, change `zuyusmko`)** — Implemented. `WaveformRendererV2` grew
+full parity: overlay pass ported from the legacy renderer (beatgrid with density culling +
+time-anchored vertex cache translated by a uniform, Main cue triangle+line, Hot Cue lines +
+edge-anchored triangles + badge/time 2D overlay canvas, playhead incl. minimap-moving and
+external-window modes); amplitude anchors (center/top/bottom, minimap forced bottom);
+waveformBrightness (markers full-strength); modulation via a per-frame-sampled 1024-texel
+RGBA texture (editor EQ/fader lanes, values encoded /2 for boosts up to 2x); external
+display windows; unified click-to-seek across modes. Surfaces swapped: `WebGLWaveform`
+(legacy path + renderEngine prop removed), `WaveformMinimap`, `DawTimeline` (driven mode,
+both rows), `GlobalMinimap` (now consumes `toThreeBands()` derived from the 8-band blob).
+Deleted: `utils/WebGLWaveformRenderer.ts` (1503 lines), `hooks/useWaveformRenderer.ts`,
+`hooks/useWaveformData.ts`; `waveformZoom.ts` lost `MAX_ZOOM_FACTOR` +
+`zoomFactorForVisibleSeconds` + `visibleSecondsForZoom` (tests updated).
+
+**Deviation from acceptance criteria**: the JSON waveform endpoint keeps exactly one
+consumer — `PerfDiffViewer` (PRD lists it out of scope / untouched). Issue 06 must
+resolve the conflict before dropping the JSON columns: convert it to `toThreeBands()`
+over the blob endpoint (~small) or retire the diagnostic view. Noted there.
+
+tsc clean, 197 vitest, build green. Eye-verify: performance view (both decks + minimaps,
+linked zoom), transition editor (stacked half-waveforms, EQ/fader modulation preview,
+scroll/zoom), library player beatgrid/cues/readout now visible.
+
+**2026-07-04 post-verify tuning (same change)**: master default 0.78 (headroom — drops
+buried markers), soft-knee limiter on group heights (knee 0.6, linear below, asymptotic
+to 1; tames hat/snare spikes without dimming the body), minimap master compensation
+x1.25 (interim until 05's per-slot params), and a texture-unit clobber fix: modulation
+upload bound on the implicitly-active unit 2, replacing the bands 4-7 texture — the
+editor rendered automation lanes as high-band energy (user-reported tinted blocks).

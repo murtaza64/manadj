@@ -2,32 +2,88 @@
 //
 // The waveform body is drawn entirely in a fragment shader over tiled LOD
 // data textures (peaks + 8-band matrix, see blob.ts). Zoom, pan, scrub and
-// the playhead are uniforms — no geometry is ever built, so cost is
-// independent of zoom x duration.
+// windowing are uniforms — no geometry is ever built for the body, so cost
+// is independent of zoom x duration.
 //
 // Invariants (ADR 0015 — deliberate, do not "fix"):
 // - View origin is pixel-snapped before sampling: column<->bin assignment is
 //   frame-stable while scrolling, which is what keeps peak heights steady.
-//   Smooth motion belongs to overlays (the playhead stays unsnapped).
+//   Smooth motion belongs to the overlay pass (playhead, markers).
 // - Per-column aggregation is channel-true: hard max for peaks (envelope),
 //   box-filter mean for bands (energy; point-sampling aliases beat patterns
 //   into zoom-out spikes; weighted max makes spike heights pulse).
 //
-// Issue 03 scope: waveform body + playhead + zoom/scrub/click. Beatgrid,
-// cue, hot-cue and badge overlays are ported in issue 04.
+// Overlays (beatgrid, Main cue, Hot Cues, playhead, badge/time canvas) are a
+// separate vertex-geometry pass ported from the legacy geometry renderer.
 
 import type { PlaybackClock } from '../playback/clock';
-import type { WebGLRendererConfig } from '../utils/WebGLWaveformRenderer';
 import { MAX_LEVELS, TEX_WIDTH } from './blob';
 import type { DecodedWaveform, LodPack } from './blob';
 import { DEFAULT_PARAMS, DEFAULT_STYLE_ID, getStyle } from './styles';
 import type { StyleParams } from './styles';
 
+export interface WaveformRendererConfig {
+  isMinimapMode?: boolean;
+  /** Position of the fixed playhead in follow mode (0.0-1.0, default 0.25). */
+  playMarkerPosition?: number;
+  /** Draw a time/bar readout on the overlay canvas (main waveform only). */
+  showTimeReadout?: boolean;
+  /** Scale waveform band colors only (0-1, default 1) — markers stay
+   * full-strength (transition-editor rows use ~0.6). */
+  waveformBrightness?: number;
+  /** Where the amplitude baseline sits (default 'center'). 'top'/'bottom'
+   * draw half-waveforms growing from that edge at double amplitude (the
+   * editor's stacked rows). Minimap mode is always bottom-anchored. */
+  amplitudeAnchor?: 'center' | 'top' | 'bottom';
+}
+
+/** Per-column visual modulation from drawn automation (transition-editor
+ * rows): as a function of TRACK time, `gain` scales bar height (fader) and
+ * `low`/`mid`/`high` scale each group's color (EQ). */
+export type WaveformModulation = (trackTimeSec: number) => {
+  gain: number;
+  low: number;
+  mid: number;
+  high: number;
+};
+
 const MIN_VISIBLE_SECONDS = 1;
 const WHEEL_STEP = 1.2;
-const DEFAULT_VISIBLE_FRACTION = 1 / 8; // initial zoom: an eighth of the track
+const DEFAULT_VISIBLE_SECONDS = 20;
+const MOD_TEX_WIDTH = 1024;
+/** Modulation values are encoded /2 into uint8 so EQ boosts up to 2x survive. */
+const MOD_RANGE = 2;
 
-const VERTEX_SHADER = `#version 300 es
+function formatReadoutTime(seconds: number): string {
+  const s = Math.max(0, seconds);
+  const m = Math.floor(s / 60);
+  const rest = s - m * 60;
+  return `${m}:${rest.toFixed(1).padStart(4, '0')}`;
+}
+
+const HOT_CUE_COLORS: Record<number, [number, number, number]> = {
+  1: [0.54, 0.71, 0.98], // blue
+  2: [0.98, 0.89, 0.69], // yellow
+  3: [0.98, 0.70, 0.53], // peach (orange)
+  4: [0.95, 0.54, 0.66], // red
+  5: [0.65, 0.89, 0.63], // green
+  6: [0.96, 0.76, 0.91], // pink
+  7: [0.80, 0.65, 0.97], // mauve
+  8: [0.58, 0.89, 0.84], // teal
+};
+
+const HOT_CUE_CSS_COLORS: Record<number, string> = {
+  1: 'rgb(137, 180, 250)',
+  2: 'rgb(249, 226, 175)',
+  3: 'rgb(250, 179, 135)',
+  4: 'rgb(243, 139, 168)',
+  5: 'rgb(166, 227, 161)',
+  6: 'rgb(245, 194, 231)',
+  7: 'rgb(203, 166, 247)',
+  8: 'rgb(148, 226, 213)',
+};
+
+const BODY_VERTEX_SHADER = `#version 300 es
 const vec2 pos[4] = vec2[4](vec2(-1,-1), vec2(1,-1), vec2(-1,1), vec2(1,1));
 out vec2 v_uv;
 void main() {
@@ -35,14 +91,13 @@ void main() {
   gl_Position = vec4(pos[gl_VertexID], 0.0, 1.0);
 }`;
 
-// Shared fragment prelude: data access, LOD selection, channel-true column
-// aggregation, group math. Style variants append a styleColor() and MAIN.
-const PRELUDE = `#version 300 es
+const BODY_PRELUDE = `#version 300 es
 precision highp float;
 precision highp int;
 uniform sampler2D u_peakTex;
 uniform sampler2D u_bandLoTex;
 uniform sampler2D u_bandHiTex;
+uniform sampler2D u_modTex;
 uniform int u_peakOffsets[${MAX_LEVELS}];
 uniform int u_peakCounts[${MAX_LEVELS}];
 uniform int u_peakLevels;
@@ -63,7 +118,11 @@ uniform float u_master;
 uniform vec3 u_groupGains;
 uniform ivec2 u_groupBounds;
 uniform float u_smooth;
-uniform float u_playhead; // seconds; < 0 = hidden
+uniform int u_anchor;      // 0 center, 1 top, 2 bottom
+uniform float u_brightness; // body colors only; markers are a separate pass
+uniform float u_modEnabled;
+uniform float u_modStart;  // track-seconds range covered by u_modTex
+uniform float u_modSpan;
 in vec2 v_uv;
 out vec4 fragColor;
 
@@ -90,7 +149,7 @@ int lodLevel(float elemsPerPx, int numLevels, out float scale) {
 
 float amp(float v) { return pow(pow(v, u_invGamma), u_displayGamma); }
 
-// Hard max over the column's elements (see pixel-snap invariant above).
+// Hard max over the column's elements (pixel-snap invariant, ADR 0015).
 float peakColumn(float t0, float t1) {
   float pps = u_sampleRate / u_peakHop;
   float scale;
@@ -121,7 +180,7 @@ void bands8At(float t, out float b[8]) {
   b[4] = amp(hi.r); b[5] = amp(hi.g); b[6] = amp(hi.b); b[7] = amp(hi.a);
 }
 
-// Column-integrated band sample: box-filter mean over the column's frames.
+// Column-integrated band sample: box-filter mean (ADR 0015).
 void bands8Column(float t0, float t1, out float b[8]) {
   float fps = u_sampleRate / u_bandHop;
   float scale;
@@ -170,6 +229,14 @@ float transientFlux(float t) {
   return f;
 }
 
+// Soft-knee limiter: exactly linear below the knee, asymptotic to 1 above.
+// Tames spiky post-gain group heights (hats/snares at gain 1.5 otherwise pin
+// to full height and bury markers) without dimming the body.
+float softLimit(float x) {
+  const float knee = 0.6;
+  return x <= knee ? x : knee + (1.0 - knee) * (1.0 - exp(-(x - knee) / (1.0 - knee)));
+}
+
 vec3 groupAmps(float b[8]) {
   vec3 g = vec3(0.0);
   for (int i = 0; i < 8; i++) {
@@ -178,7 +245,8 @@ vec3 groupAmps(float b[8]) {
     else if (i < u_groupBounds.y) g.y += e;
     else g.z += e;
   }
-  return sqrt(g) * u_groupGains * u_master;
+  vec3 gained = sqrt(g) * u_groupGains;
+  return vec3(softLimit(gained.x), softLimit(gained.y), softLimit(gained.z)) * u_master;
 }
 
 vec3 hsv2rgb(vec3 c) {
@@ -187,37 +255,72 @@ vec3 hsv2rgb(vec3 c) {
 }
 `;
 
-const MAIN = `
+const BODY_MAIN = `
 void main() {
   float px = u_visibleSeconds / u_canvasWidth;
   float t0 = u_startTime + v_uv.x * u_visibleSeconds;
   if (t0 < 0.0 || t0 > u_duration) { fragColor = vec4(BG * 0.6, 1.0); return; }
-  float yA = abs(v_uv.y - 0.5) * 2.0;
+  // Amplitude coordinate: mirrored (center) or edge-anchored half-waveforms.
+  float yA = u_anchor == 0 ? abs(v_uv.y - 0.5) * 2.0
+           : u_anchor == 1 ? 1.0 - v_uv.y
+           : v_uv.y;
   float p = clamp(peakColumn(t0, t0 + px) * u_master, 0.0, 1.0);
   float b[8];
   bands8Column(t0, t0 + px, b);
-  vec3 g = clamp(groupAmps(b), 0.0, 1.0);
-  vec3 c = styleColor(yA, p, g, b);
-  if (u_playhead >= 0.0 && abs(t0 - u_playhead) < px * 1.25) {
-    c = vec3(1.0, 1.0, 1.0); // playhead line (overlay layer: unsnapped)
+  vec3 g = groupAmps(b);
+  if (u_modEnabled > 0.5) {
+    vec4 m = texture(u_modTex, vec2((t0 - u_modStart) / u_modSpan, 0.5)) * float(${MOD_RANGE});
+    g *= m.rgb * m.a;
+    p *= m.a;
   }
-  fragColor = vec4(c, 1.0);
+  g = clamp(g, 0.0, 1.0);
+  vec3 c = styleColor(yA, p, g, b);
+  fragColor = vec4(BG + (c - BG) * u_brightness, 1.0);
 }`;
+
+// Overlay pass: plain position+color triangles in pixel space (ported from
+// the legacy renderer). u_offsetPx translates beatgrid vertices, which are
+// built in time-anchored pixel space so scrolling never rebuilds them.
+const OVERLAY_VS = `#version 300 es
+in vec2 a_position;
+in vec3 a_color;
+uniform mat4 u_matrix;
+uniform float u_offsetPx;
+out vec3 v_color;
+void main() {
+  gl_Position = u_matrix * vec4(a_position.x + u_offsetPx, a_position.y, 0.0, 1.0);
+  v_color = a_color;
+}`;
+
+const OVERLAY_FS = `#version 300 es
+precision mediump float;
+in vec3 v_color;
+out vec4 outColor;
+void main() { outColor = vec4(v_color, 1.0); }`;
 
 interface TexBinding {
   tex: WebGLTexture;
   pack: LodPack;
 }
 
-/**
- * Implements the same interaction surface as the legacy geometry renderer
- * (the useWaveformRenderer hook + WebGLWaveform component contract), so the
- * seam swap is a construction-time choice.
- */
+/** The view actually rendered this frame (one source of truth for overlays). */
+interface FrameView {
+  startTime: number;
+  visibleSeconds: number;
+  playhead: number;
+  w: number;
+  h: number;
+  dpr: number;
+}
+
 export class WaveformRendererV2 {
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext;
-  private config: WebGLRendererConfig;
+  private config: WaveformRendererConfig;
+  private isMinimap: boolean;
+  private anchor: 'center' | 'top' | 'bottom';
+  private brightness: number;
+
   private programs = new Map<string, WebGLProgram>();
   private data: DecodedWaveform | null = null;
   private peakTex: TexBinding | null = null;
@@ -227,24 +330,50 @@ export class WaveformRendererV2 {
   private styleId = DEFAULT_STYLE_ID;
   private params: StyleParams = { ...DEFAULT_PARAMS };
 
-  private visibleSeconds = 20;
+  private visibleSeconds = DEFAULT_VISIBLE_SECONDS;
   private lastPlayhead = 0;
   private dragOffsetPx = 0;
   private animationFrame: number | null = null;
 
-  // Stored for issue 04 (overlay port); not yet drawn.
-  private cuePoint: number | null = null;
-  private hotCues: Array<{ slot_number: number; time_seconds: number; color?: string }> = [];
-  private beatTimes: number[] = [];
-  private downbeatTimes: number[] = [];
+  // Externally-set window (DAW timeline), as normalized track positions.
+  private externalWindow = false;
+  private windowStart = 0;
+  private windowEnd = 1;
 
-  constructor(canvas: HTMLCanvasElement, config: WebGLRendererConfig = {}) {
+  // Modulation (transition-editor rows).
+  private modulation: WaveformModulation | null = null;
+  private modTex: WebGLTexture | null = null;
+  private modScratch = new Uint8Array(MOD_TEX_WIDTH * 4);
+
+  // Overlay pass state.
+  private overlayProgram: WebGLProgram | null = null;
+  private overlayVao: WebGLVertexArrayObject | null = null;
+  private overlayBuffer: WebGLBuffer | null = null;
+  private beatgridVao: WebGLVertexArrayObject | null = null;
+  private beatgridBuffer: WebGLBuffer | null = null;
+  private beatgridCache: { key: string; vertexCount: number } | null = null;
+  private overlayCanvas: HTMLCanvasElement | null = null;
+  private overlayCtx: CanvasRenderingContext2D | null = null;
+
+  private cuePoint: number | null = null;
+  private hotCues = new Map<number, { time: number; color?: string }>();
+  private beatTimes: Float32Array | null = null;
+  private downbeatTimes: Float32Array | null = null;
+  private downbeatIndices = new Set<number>();
+
+  constructor(canvas: HTMLCanvasElement, config: WaveformRendererConfig = {}) {
     this.canvas = canvas;
     this.config = config;
+    this.isMinimap = config.isMinimapMode ?? false;
+    this.anchor = this.isMinimap ? 'bottom' : (config.amplitudeAnchor ?? 'center');
+    // Minimap dims the body (legacy parity) so markers pop; markers stay full.
+    this.brightness =
+      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) * (this.isMinimap ? 0.55 : 1);
     const gl = canvas.getContext('webgl2');
     if (!gl) throw new Error('WebGL 2 not supported');
     this.gl = gl;
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    this.initOverlayPass();
   }
 
   // ------------------------------------------------------------------ data
@@ -254,10 +383,11 @@ export class WaveformRendererV2 {
     this.peakTex = this.uploadPack(this.peakTex, data.peaks, 1);
     this.bandLoTex = this.uploadPack(this.bandLoTex, data.bandsLo, 4);
     this.bandHiTex = this.uploadPack(this.bandHiTex, data.bandsHi, 4);
-    this.visibleSeconds = Math.max(
-      MIN_VISIBLE_SECONDS,
-      data.duration * DEFAULT_VISIBLE_FRACTION,
+    this.visibleSeconds = Math.min(
+      Math.max(DEFAULT_VISIBLE_SECONDS, MIN_VISIBLE_SECONDS),
+      data.duration,
     );
+    this.beatgridCache = null; // beat x-positions depend on track duration
   }
 
   public setStyle(styleId: string, params?: Partial<StyleParams>): void {
@@ -272,22 +402,39 @@ export class WaveformRendererV2 {
   public setHotCues(
     hotCues: Array<{ slot_number: number; time_seconds: number; color?: string }>,
   ): void {
-    this.hotCues = hotCues;
+    this.hotCues.clear();
+    for (const hc of hotCues) {
+      this.hotCues.set(hc.slot_number, { time: hc.time_seconds, color: hc.color });
+    }
   }
 
   public setBeatgrid(beatTimes: number[], downbeatTimes: number[]): void {
-    this.beatTimes = beatTimes;
-    this.downbeatTimes = downbeatTimes;
+    this.beatTimes = new Float32Array(beatTimes);
+    this.downbeatTimes = new Float32Array(downbeatTimes);
+    // New data must invalidate the vertex cache explicitly (a nudged grid
+    // otherwise keeps drawing stale lines — off-by-a-nudge).
+    this.beatgridCache = null;
+    this.downbeatIndices = new Set();
+    const downbeatSet = new Set(downbeatTimes);
+    for (let i = 0; i < beatTimes.length; i++) {
+      if (downbeatSet.has(beatTimes[i])) this.downbeatIndices.add(i);
+    }
   }
 
-  /** Overlay data staged for the issue-04 overlay port (not yet drawn). */
-  public get overlayState() {
-    return {
-      cuePoint: this.cuePoint,
-      hotCues: this.hotCues,
-      beatTimes: this.beatTimes,
-      downbeatTimes: this.downbeatTimes,
-    };
+  /** Per-column automation modulation (editor rows); null clears. */
+  public setModulation(fn: WaveformModulation | null): void {
+    this.modulation = fn;
+  }
+
+  /**
+   * Externally control the visible window as normalized track positions
+   * (may extend past [0,1]). Disables playhead-following; the clock is then
+   * only read to draw the playhead marker inside the window.
+   */
+  public setDisplayWindow(first: number, last: number): void {
+    this.externalWindow = true;
+    this.windowStart = first;
+    this.windowEnd = last;
   }
 
   // ------------------------------------------------------------- rendering
@@ -303,52 +450,15 @@ export class WaveformRendererV2 {
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
       canvas.height = h;
+      this.beatgridCache = null;
     }
     gl.viewport(0, 0, w, h);
 
     this.lastPlayhead = clock.getPlayhead();
-    const marker = this.config.playMarkerPosition ?? 0.25;
-    const dragSeconds = (this.dragOffsetPx / (canvas.clientWidth || 1)) * this.visibleSeconds;
-    const startTime = this.lastPlayhead - marker * this.visibleSeconds - dragSeconds;
+    const view = this.computeView(w, h, dpr);
 
-    const prog = this.programFor(this.styleId);
-    gl.useProgram(prog);
-    const u = (name: string) => gl.getUniformLocation(prog, name);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.peakTex.tex);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.bandLoTex.tex);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.bandHiTex.tex);
-    gl.uniform1i(u('u_peakTex'), 0);
-    gl.uniform1i(u('u_bandLoTex'), 1);
-    gl.uniform1i(u('u_bandHiTex'), 2);
-    this.uploadLod(prog, 'u_peak', this.peakTex.pack);
-    this.uploadLod(prog, 'u_band', this.bandLoTex.pack);
-
-    // Pixel-snapped view origin (ADR 0015); playhead uniform stays smooth.
-    const spp = this.visibleSeconds / w;
-    const snappedStart = Math.floor(startTime / spp) * spp;
-
-    const hd = data.header;
-    gl.uniform1f(u('u_sampleRate'), hd.sampleRate);
-    gl.uniform1f(u('u_peakHop'), hd.peakHop);
-    gl.uniform1f(u('u_bandHop'), hd.bandHop);
-    gl.uniform1f(u('u_stftWindow'), hd.stftWindow);
-    gl.uniform1f(u('u_duration'), hd.duration);
-    gl.uniform1f(u('u_invGamma'), 1 / hd.gamma);
-    gl.uniform1f(u('u_startTime'), snappedStart);
-    gl.uniform1f(u('u_visibleSeconds'), this.visibleSeconds);
-    gl.uniform1f(u('u_canvasWidth'), w);
-    gl.uniform1f(u('u_displayGamma'), this.params.displayGamma);
-    gl.uniform1f(u('u_master'), this.params.master);
-    gl.uniform3f(u('u_groupGains'), ...this.params.gains);
-    gl.uniform2i(u('u_groupBounds'), this.params.b1, this.params.b2);
-    gl.uniform1f(u('u_smooth'), this.params.smooth ? 1 : 0);
-    gl.uniform1f(u('u_playhead'), this.lastPlayhead);
-
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    this.drawBody(view);
+    this.drawOverlays(view);
   }
 
   /** Self-driving convenience: renderFrame on an own rAF loop. */
@@ -365,6 +475,386 @@ export class WaveformRendererV2 {
       cancelAnimationFrame(this.animationFrame);
       this.animationFrame = null;
     }
+  }
+
+  private computeView(w: number, h: number, dpr: number): FrameView {
+    const duration = this.data!.duration;
+    let startTime: number;
+    let visibleSeconds: number;
+    if (this.isMinimap) {
+      startTime = 0;
+      visibleSeconds = duration;
+    } else if (this.externalWindow) {
+      startTime = this.windowStart * duration;
+      visibleSeconds = Math.max((this.windowEnd - this.windowStart) * duration, 1e-6);
+    } else {
+      visibleSeconds = this.visibleSeconds;
+      const marker = this.config.playMarkerPosition ?? 0.25;
+      const dragSeconds =
+        (this.dragOffsetPx / (this.canvas.clientWidth || 1)) * visibleSeconds;
+      startTime = this.lastPlayhead - marker * visibleSeconds - dragSeconds;
+    }
+    return { startTime, visibleSeconds, playhead: this.lastPlayhead, w, h, dpr };
+  }
+
+  private drawBody(view: FrameView): void {
+    const { gl, data } = this;
+    const prog = this.programFor(this.styleId);
+    gl.useProgram(prog);
+    gl.disable(gl.BLEND);
+    const u = (name: string) => gl.getUniformLocation(prog, name);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.peakTex!.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.bandLoTex!.tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.bandHiTex!.tex);
+    gl.uniform1i(u('u_peakTex'), 0);
+    gl.uniform1i(u('u_bandLoTex'), 1);
+    gl.uniform1i(u('u_bandHiTex'), 2);
+    this.uploadLod(prog, 'u_peak', this.peakTex!.pack);
+    this.uploadLod(prog, 'u_band', this.bandLoTex!.pack);
+
+    // Modulation texture (sampled fresh each frame: window and automation
+    // both move; 1024 callback samples is well within frame budget).
+    gl.uniform1f(u('u_modEnabled'), this.modulation ? 1 : 0);
+    if (this.modulation) {
+      this.uploadModulation(view);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, this.modTex);
+      gl.uniform1i(u('u_modTex'), 3);
+      gl.uniform1f(u('u_modStart'), view.startTime);
+      gl.uniform1f(u('u_modSpan'), view.visibleSeconds);
+    }
+
+    // Pixel-snapped view origin (ADR 0015); overlays stay smooth.
+    const spp = view.visibleSeconds / view.w;
+    const snappedStart = Math.floor(view.startTime / spp) * spp;
+
+    const hd = data!.header;
+    gl.uniform1f(u('u_sampleRate'), hd.sampleRate);
+    gl.uniform1f(u('u_peakHop'), hd.peakHop);
+    gl.uniform1f(u('u_bandHop'), hd.bandHop);
+    gl.uniform1f(u('u_stftWindow'), hd.stftWindow);
+    gl.uniform1f(u('u_duration'), hd.duration);
+    gl.uniform1f(u('u_invGamma'), 1 / hd.gamma);
+    gl.uniform1f(u('u_startTime'), snappedStart);
+    gl.uniform1f(u('u_visibleSeconds'), view.visibleSeconds);
+    gl.uniform1f(u('u_canvasWidth'), view.w);
+    gl.uniform1f(u('u_displayGamma'), this.params.displayGamma);
+    // Minimap: headroom matters less (its markers are full-height bars, not
+    // edge-dwelling badges), and the strip is short — undo most of the
+    // master down-scale. Becomes the minimap style slot's own master when
+    // issue 05 wires per-slot params.
+    const master = this.isMinimap ? Math.min(1, this.params.master * 1.25) : this.params.master;
+    gl.uniform1f(u('u_master'), master);
+    gl.uniform3f(u('u_groupGains'), ...this.params.gains);
+    gl.uniform2i(u('u_groupBounds'), this.params.b1, this.params.b2);
+    gl.uniform1f(u('u_smooth'), this.params.smooth ? 1 : 0);
+    gl.uniform1i(u('u_anchor'), this.anchor === 'center' ? 0 : this.anchor === 'top' ? 1 : 2);
+    gl.uniform1f(u('u_brightness'), this.brightness);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  private uploadModulation(view: FrameView): void {
+    const { gl } = this;
+    // Select unit 3 BEFORE any bind: binding on the implicitly-active unit
+    // clobbers the band texture on unit 2 (the shader then renders the
+    // automation lanes as high-band energy — tinted blocks on the rows).
+    gl.activeTexture(gl.TEXTURE3);
+    if (!this.modTex) {
+      this.modTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.modTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, MOD_TEX_WIDTH, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    }
+    const fn = this.modulation!;
+    const s = this.modScratch;
+    for (let i = 0; i < MOD_TEX_WIDTH; i++) {
+      const t = view.startTime + ((i + 0.5) / MOD_TEX_WIDTH) * view.visibleSeconds;
+      const m = fn(t);
+      s[i * 4] = Math.max(0, Math.min(255, (m.low / MOD_RANGE) * 255));
+      s[i * 4 + 1] = Math.max(0, Math.min(255, (m.mid / MOD_RANGE) * 255));
+      s[i * 4 + 2] = Math.max(0, Math.min(255, (m.high / MOD_RANGE) * 255));
+      s[i * 4 + 3] = Math.max(0, Math.min(255, (m.gain / MOD_RANGE) * 255));
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.modTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MOD_TEX_WIDTH, 1, gl.RGBA, gl.UNSIGNED_BYTE, s);
+  }
+
+  // -------------------------------------------------------------- overlays
+
+  private initOverlayPass(): void {
+    const { gl } = this;
+    this.overlayProgram = this.buildProgram(OVERLAY_VS, OVERLAY_FS);
+    const makeVao = (buffer: WebGLBuffer) => {
+      const vao = gl.createVertexArray()!;
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      const aPos = gl.getAttribLocation(this.overlayProgram!, 'a_position');
+      const aCol = gl.getAttribLocation(this.overlayProgram!, 'a_color');
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 20, 0);
+      gl.enableVertexAttribArray(aCol);
+      gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 20, 8);
+      gl.bindVertexArray(null);
+      return vao;
+    };
+    this.overlayBuffer = gl.createBuffer()!;
+    this.overlayVao = makeVao(this.overlayBuffer);
+    this.beatgridBuffer = gl.createBuffer()!;
+    this.beatgridVao = makeVao(this.beatgridBuffer);
+  }
+
+  private drawOverlays(view: FrameView): void {
+    const { gl } = this;
+    const prog = this.overlayProgram!;
+    gl.useProgram(prog);
+    gl.uniformMatrix4fv(
+      gl.getUniformLocation(prog, 'u_matrix'),
+      false,
+      orthoMatrix(0, view.w, view.h, 0),
+    );
+    const uOffset = gl.getUniformLocation(prog, 'u_offsetPx');
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE); // additive (legacy parity: rgb premultiplied)
+
+    this.drawBeatgrid(view, uOffset);
+    gl.uniform1f(uOffset, 0);
+
+    const scratch: number[] = [];
+    if (this.cuePoint !== null) this.pushCuePoint(view, scratch);
+    this.drawTriangles(scratch, this.overlayVao!, this.overlayBuffer!);
+
+    // Hot cues draw with standard alpha blending (accurate colors).
+    const hotCueVerts: number[] = [];
+    this.pushHotCues(view, hotCueVerts);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    this.drawTriangles(hotCueVerts, this.overlayVao!, this.overlayBuffer!);
+    gl.blendFunc(gl.ONE, gl.ONE);
+
+    const playheadVerts: number[] = [];
+    this.pushPlayhead(view, playheadVerts);
+    this.drawTriangles(playheadVerts, this.overlayVao!, this.overlayBuffer!);
+
+    // 2D text overlay: hot-cue badges + time/bar readout (main only).
+    const ctx = this.ensureOverlayContext();
+    if (ctx) {
+      ctx.clearRect(0, 0, view.w, view.h);
+      this.renderHotCueNumbers(ctx, view);
+      if ((this.config.showTimeReadout ?? false) && !this.isMinimap) {
+        this.renderTimeReadout(ctx, view);
+      }
+    }
+  }
+
+  private drawTriangles(verts: number[], vao: WebGLVertexArrayObject, buffer: WebGLBuffer): void {
+    if (verts.length === 0) return;
+    const { gl } = this;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLES, 0, verts.length / 5);
+    gl.bindVertexArray(null);
+  }
+
+  /** Beat lines are built in time-anchored pixel space (x = t * pxPerSec) so
+   * scrolling is a uniform translation; rebuilt only on zoom/resize/data. */
+  private drawBeatgrid(view: FrameView, uOffset: WebGLUniformLocation | null): void {
+    const { gl } = this;
+    if (!this.beatTimes || !this.data || this.beatTimes.length === 0) return;
+
+    const pxPerSec = view.w / view.visibleSeconds;
+    const key = `${view.w}x${view.h}:${pxPerSec}`;
+    if (!this.beatgridCache || this.beatgridCache.key !== key) {
+      const verts = this.buildBeatgridVertices(view, pxPerSec);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.beatgridBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+      this.beatgridCache = { key, vertexCount: verts.length / 5 };
+    }
+    if (this.beatgridCache.vertexCount === 0) return;
+    gl.uniform1f(uOffset, -view.startTime * pxPerSec);
+    gl.bindVertexArray(this.beatgridVao);
+    gl.drawArrays(gl.TRIANGLES, 0, this.beatgridCache.vertexCount);
+    gl.bindVertexArray(null);
+  }
+
+  private buildBeatgridVertices(view: FrameView, pxPerSec: number): Float32Array {
+    const beatTimes = this.beatTimes!;
+    const lineWidth = 1 * view.dpr;
+    const downbeatWidth = 2 * view.dpr;
+
+    // Density culling (legacy parity): hide weak beats below ~12px/beat,
+    // everything below ~2.5px/bar.
+    const secPerBeat = beatTimes.length > 1 ? beatTimes[1] - beatTimes[0] : this.data!.duration;
+    const pxPerBeat = secPerBeat * pxPerSec;
+    const showWeakBeats = pxPerBeat >= 12 * view.dpr;
+    if (pxPerBeat * 4 < 2.5 * view.dpr) return new Float32Array(0);
+
+    const verts: number[] = [];
+    for (let i = 0; i < beatTimes.length; i++) {
+      const isDownbeat = this.downbeatIndices.has(i);
+      if (!showWeakBeats && !isDownbeat) continue;
+      const x = beatTimes[i] * pxPerSec;
+      const width = isDownbeat && showWeakBeats ? downbeatWidth : lineWidth;
+      const alpha = isDownbeat ? (showWeakBeats ? 0.3 : 0.15) : 0.15;
+      pushRect(verts, x, 0, width, view.h, alpha, alpha, alpha);
+    }
+    return new Float32Array(verts);
+  }
+
+  private timeToX(t: number, view: FrameView): number {
+    return ((t - view.startTime) / view.visibleSeconds) * view.w;
+  }
+
+  private pushCuePoint(view: FrameView, verts: number[]): void {
+    const cueX = this.timeToX(this.cuePoint!, view);
+    if (cueX < 0 || cueX >= view.w) return;
+    const [r, g, b] = [0.79, 0.86, 0.26]; // var(--yellow)
+    pushRect(verts, cueX, 0, 2, view.h, r, g, b);
+    const triH = this.isMinimap ? 12 * view.dpr : view.h * 0.05;
+    const cx = cueX + 1;
+    if (this.isMinimap) {
+      verts.push(cx - triH / 2, 0, r, g, b, cx + triH / 2, 0, r, g, b, cx, triH, r, g, b);
+    } else {
+      verts.push(
+        cx - triH / 2, view.h, r, g, b,
+        cx + triH / 2, view.h, r, g, b,
+        cx, view.h - triH, r, g, b,
+      );
+    }
+  }
+
+  private pushHotCues(view: FrameView, verts: number[]): void {
+    for (const [slot, hc] of this.hotCues.entries()) {
+      const x = this.timeToX(hc.time, view);
+      if (x < 0 || x >= view.w) continue;
+      const [r, g, b] = HOT_CUE_COLORS[slot] ?? [1, 1, 1];
+      const width = (this.isMinimap ? 2 : 3) * view.dpr;
+      pushRect(verts, x, 0, width, view.h, r, g, b);
+      // Edge-anchored rows: fixed-size triangle at the baseline edge.
+      if (!this.isMinimap && this.anchor !== 'center') {
+        const tri = 10 * view.dpr;
+        const cx = x + width / 2;
+        if (this.anchor === 'top') {
+          verts.push(cx - tri / 2, 0, r, g, b, cx + tri / 2, 0, r, g, b, cx, tri, r, g, b);
+        } else {
+          verts.push(
+            cx - tri / 2, view.h, r, g, b,
+            cx + tri / 2, view.h, r, g, b,
+            cx, view.h - tri, r, g, b,
+          );
+        }
+      }
+    }
+  }
+
+  private pushPlayhead(view: FrameView, verts: number[]): void {
+    let x: number;
+    if (this.isMinimap) {
+      x = (view.playhead / this.data!.duration) * view.w;
+    } else if (this.externalWindow) {
+      x = this.timeToX(view.playhead, view);
+      if (x < 0 || x >= view.w) return;
+    } else {
+      x = view.w * (this.config.playMarkerPosition ?? 0.25);
+    }
+    pushRect(verts, x, 0, 3, view.h, 0.96, 0.76, 0.91); // var(--pink)
+  }
+
+  private ensureOverlayContext(): CanvasRenderingContext2D | null {
+    if (this.isMinimap || !this.data) return null;
+    this.gl.flush();
+    let overlayCanvas = this.overlayCanvas;
+    if (!overlayCanvas || !overlayCanvas.isConnected) {
+      const parent = this.canvas.parentElement;
+      overlayCanvas =
+        parent?.querySelector<HTMLCanvasElement>(':scope > canvas.waveform-text-overlay') ?? null;
+      if (!overlayCanvas) {
+        overlayCanvas = document.createElement('canvas');
+        overlayCanvas.className = 'waveform-text-overlay';
+        overlayCanvas.style.position = 'absolute';
+        overlayCanvas.style.top = '0';
+        overlayCanvas.style.left = '0';
+        overlayCanvas.style.pointerEvents = 'none';
+        overlayCanvas.style.zIndex = '1';
+        parent?.appendChild(overlayCanvas);
+      }
+      this.overlayCanvas = overlayCanvas;
+      this.overlayCtx = overlayCanvas.getContext('2d');
+    }
+    if (overlayCanvas.width !== this.canvas.width || overlayCanvas.height !== this.canvas.height) {
+      overlayCanvas.width = this.canvas.width;
+      overlayCanvas.height = this.canvas.height;
+      overlayCanvas.style.width = `${this.canvas.clientWidth}px`;
+      overlayCanvas.style.height = `${this.canvas.clientHeight}px`;
+    }
+    return this.overlayCtx;
+  }
+
+  private renderHotCueNumbers(ctx: CanvasRenderingContext2D, view: FrameView): void {
+    if (this.hotCues.size === 0) return;
+    const squareSize = 16 * view.dpr;
+    const squareY =
+      this.anchor === 'top' ? 4 * view.dpr : view.h - squareSize - 4 * view.dpr;
+    ctx.font = `bold ${12 * view.dpr}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const [slot, hc] of this.hotCues.entries()) {
+      const x = this.timeToX(hc.time, view);
+      if (x < 0 || x >= view.w) continue;
+      const squareX = x + 3 * view.dpr + 2 * view.dpr;
+      const color = HOT_CUE_CSS_COLORS[slot] ?? 'rgb(255, 255, 255)';
+      ctx.fillStyle = 'rgb(17, 17, 17)';
+      ctx.fillRect(squareX, squareY, squareSize, squareSize);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(squareX + 0.5, squareY + 0.5, squareSize - 1, squareSize - 1);
+      ctx.fillStyle = color;
+      ctx.fillText(String(slot), squareX + squareSize / 2, squareY + squareSize / 2);
+    }
+  }
+
+  private renderTimeReadout(ctx: CanvasRenderingContext2D, view: FrameView): void {
+    const duration = this.data!.duration;
+    const bar = this.barNumberAt(view.playhead);
+    const text =
+      `${formatReadoutTime(view.playhead)} / ${formatReadoutTime(duration)}` +
+      (bar !== null ? `  bar ${bar}` : '');
+    const pad = 6 * view.dpr;
+    ctx.font = `bold ${12 * view.dpr}px monospace`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    const metrics = ctx.measureText(text);
+    const textHeight = 14 * view.dpr;
+    ctx.fillStyle = 'rgba(17, 17, 17, 0.7)';
+    ctx.fillRect(
+      view.w - pad * 2 - metrics.width,
+      view.h - pad * 1.5 - textHeight,
+      metrics.width + pad * 2,
+      textHeight + pad,
+    );
+    ctx.fillStyle = 'rgb(205, 214, 244)'; // var(--text)
+    ctx.fillText(text, view.w - pad, view.h - pad);
+  }
+
+  /** 1-based bar number at `time`, or null before the first downbeat. */
+  private barNumberAt(time: number): number | null {
+    const downbeats = this.downbeatTimes;
+    if (!downbeats || downbeats.length === 0 || time < downbeats[0]) return null;
+    let lo = 0;
+    let hi = downbeats.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (downbeats[mid] <= time) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
   }
 
   // ----------------------------------------------------------- interaction
@@ -397,9 +887,8 @@ export class WaveformRendererV2 {
   }
 
   /**
-   * End a drag: return the seek time the drag corresponds to (undefined if
-   * no data). Drag right = move backward in time. The renderer never seeks;
-   * the component hands this to the transport.
+   * End a drag: return the seek time it corresponds to (undefined if no
+   * data). Drag right = backward in time. The renderer never seeks itself.
    */
   public commitDrag(): number | undefined {
     if (!this.data) return undefined;
@@ -410,14 +899,18 @@ export class WaveformRendererV2 {
     return Math.max(0, Math.min(this.data.duration, seekTime));
   }
 
-  /** Click-to-seek: the track time under the pointer. */
+  /** Click-to-seek: the track time under the pointer (all modes). */
   public handleClick(event: MouseEvent): number | undefined {
     if (!this.data) return undefined;
     const rect = this.canvas.getBoundingClientRect();
     const frac = (event.clientX - rect.left) / rect.width;
-    const marker = this.config.playMarkerPosition ?? 0.25;
-    const startTime = this.lastPlayhead - marker * this.visibleSeconds;
-    const t = startTime + frac * this.visibleSeconds;
+    const dpr = window.devicePixelRatio || 1;
+    const view = this.computeView(
+      Math.round(this.canvas.clientWidth * dpr) || 1,
+      Math.round(this.canvas.clientHeight * dpr) || 1,
+      dpr,
+    );
+    const t = view.startTime + frac * view.visibleSeconds;
     return Math.max(0, Math.min(this.data.duration, t));
   }
 
@@ -432,6 +925,16 @@ export class WaveformRendererV2 {
       if (b) gl.deleteTexture(b.tex);
     }
     this.peakTex = this.bandLoTex = this.bandHiTex = null;
+    if (this.modTex) gl.deleteTexture(this.modTex);
+    if (this.overlayProgram) gl.deleteProgram(this.overlayProgram);
+    if (this.overlayBuffer) gl.deleteBuffer(this.overlayBuffer);
+    if (this.overlayVao) gl.deleteVertexArray(this.overlayVao);
+    if (this.beatgridBuffer) gl.deleteBuffer(this.beatgridBuffer);
+    if (this.beatgridVao) gl.deleteVertexArray(this.beatgridVao);
+    // Remove OUR overlay canvas only.
+    this.overlayCanvas?.remove();
+    this.overlayCanvas = null;
+    this.overlayCtx = null;
   }
 
   // -------------------------------------------------------------- internals
@@ -439,7 +942,7 @@ export class WaveformRendererV2 {
   private programFor(styleId: string): WebGLProgram {
     let prog = this.programs.get(styleId);
     if (!prog) {
-      prog = this.buildProgram(PRELUDE + getStyle(styleId).source + MAIN);
+      prog = this.buildProgram(BODY_VERTEX_SHADER, BODY_PRELUDE + getStyle(styleId).source + BODY_MAIN);
       this.programs.set(styleId, prog);
     }
     return prog;
@@ -474,7 +977,7 @@ export class WaveformRendererV2 {
     return { tex, pack };
   }
 
-  private buildProgram(fsSource: string): WebGLProgram {
+  private buildProgram(vsSource: string, fsSource: string): WebGLProgram {
     const { gl } = this;
     const compile = (type: number, src: string) => {
       const sh = gl.createShader(type);
@@ -488,7 +991,7 @@ export class WaveformRendererV2 {
     };
     const prog = gl.createProgram();
     if (!prog) throw new Error('waveform: failed to create program');
-    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERTEX_SHADER));
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsSource));
     gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSource));
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
@@ -496,4 +999,32 @@ export class WaveformRendererV2 {
     }
     return prog;
   }
+}
+
+/** Two triangles forming an axis-aligned rectangle, colored (r,g,b). */
+function pushRect(
+  verts: number[],
+  x: number, y: number, w: number, h: number,
+  r: number, g: number, b: number,
+): void {
+  verts.push(
+    x, y, r, g, b,
+    x + w, y, r, g, b,
+    x, y + h, r, g, b,
+    x + w, y, r, g, b,
+    x + w, y + h, r, g, b,
+    x, y + h, r, g, b,
+  );
+}
+
+/** Orthographic projection: pixel space (top-left origin) to clip space. */
+function orthoMatrix(left: number, right: number, bottom: number, top: number): Float32Array {
+  const lr = 1 / (left - right);
+  const bt = 1 / (bottom - top);
+  return new Float32Array([
+    -2 * lr, 0, 0, 0,
+    0, -2 * bt, 0, 0,
+    0, 0, -1, 0,
+    (left + right) * lr, (top + bottom) * bt, 0, 1,
+  ]);
 }

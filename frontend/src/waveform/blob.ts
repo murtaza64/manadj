@@ -47,6 +47,52 @@ export interface DecodedWaveform {
   duration: number;
 }
 
+/** Classic 3-band arrays derived from the 8-band matrix — for consumers
+ * that draw their own 2D visuals (e.g. the editor's global minimap). */
+export interface ThreeBandWaveform {
+  low: Float32Array;
+  mid: Float32Array;
+  high: Float32Array;
+  duration: number;
+}
+
+/**
+ * Collapse the stored 8 bands into low/mid/high group amplitudes at band-frame
+ * resolution, using the same grouping/RMS math as the shader's groupAmps.
+ */
+export function toThreeBands(
+  d: DecodedWaveform,
+  b1 = 3,
+  b2 = 5,
+  gains: [number, number, number] = [1, 1, 1],
+): ThreeBandWaveform {
+  const frames = d.header.bandCount;
+  const invGamma = 1 / d.header.gamma;
+  const lo = d.bandsLo.data;
+  const hi = d.bandsHi.data;
+  const low = new Float32Array(frames);
+  const mid = new Float32Array(frames);
+  const high = new Float32Array(frames);
+  const dequant = (q: number) => (q / 255) ** invGamma;
+  for (let f = 0; f < frames; f++) {
+    let e0 = 0;
+    let e1 = 0;
+    let e2 = 0;
+    for (let band = 0; band < 8; band++) {
+      const q = band < 4 ? lo[f * 4 + band] : hi[f * 4 + band - 4];
+      const a = dequant(q);
+      const e = a * a;
+      if (band < b1) e0 += e;
+      else if (band < b2) e1 += e;
+      else e2 += e;
+    }
+    low[f] = Math.min(1, Math.sqrt(e0) * gains[0]);
+    mid[f] = Math.min(1, Math.sqrt(e1) * gains[1]);
+    high[f] = Math.min(1, Math.sqrt(e2) * gains[2]);
+  }
+  return { low, mid, high, duration: d.duration };
+}
+
 const MAGIC = 'MWF1';
 const SUPPORTED_VERSIONS = [1, 2]; // identical layout; v2 = multi-resolution windows
 

@@ -7,8 +7,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { useWaveformData } from '../hooks/useWaveformData';
-import { useWaveformRenderer } from '../hooks/useWaveformRenderer';
+import { useWaveformBlob } from '../waveform/useWaveformBlob';
+import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
+import { toThreeBands } from '../waveform/blob';
 import { useHotCues } from '../hooks/useHotCues';
 import { MixPlayer } from './MixPlayer';
 import { GlobalMinimap } from './GlobalMinimap';
@@ -184,6 +185,14 @@ export function DawTimeline({
     snapRef.current = { snap, beatsA, beatsB, rateB, lockedWindow };
   });
 
+  // Waveform renderers: one viewport-sized canvas per row, windowed to the
+  // visible time range (crisp at any zoom).
+  const { data: waveA } = useWaveformBlob(trackAId);
+  const { data: waveB } = useWaveformBlob(trackBId);
+  // 3-band arrays for the global minimap's own 2D drawing (memoized: new
+  // identities would re-fire its redraw effect every render).
+  const waveA3 = useMemo(() => (waveA ? toThreeBands(waveA) : null), [waveA]);
+  const waveB3 = useMemo(() => (waveB ? toThreeBands(waveB) : null), [waveB]);
   const { data: hotCuesA = [] } = useHotCues(trackAId);
   const { data: hotCuesB = [] } = useHotCues(trackBId);
   // Dimmed bands so hot cues / beatgrid pop in the editor rows (issue 05).
@@ -206,7 +215,7 @@ export function DawTimeline({
   // writing transforms + display windows — one motion clock, layer order
   // guaranteed (self-running renderer loops only aligned by rAF
   // registration luck, and tore when they ran before the tick).
-  const rendA = useWaveformRenderer({
+  const rendA = useWaveformRendererV2({
     clock: clockA,
     waveformData: waveA,
     config: rowConfigA,
@@ -214,7 +223,7 @@ export function DawTimeline({
     beatgrid: beatgridA,
     driven: true,
   });
-  const rendB = useWaveformRenderer({
+  const rendB = useWaveformRendererV2({
     clock: clockB,
     waveformData: waveB,
     config: rowConfigB,
@@ -854,8 +863,8 @@ export function DawTimeline({
       <GlobalMinimap
         player={player}
         mix={mix}
-        waveA={waveA ?? null}
-        waveB={waveB ?? null}
+        waveA={waveA3}
+        waveB={waveB3}
         rateB={rateB}
         contentEnd={contentEnd}
         pxPerSec={pxPerSec}

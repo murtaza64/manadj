@@ -1,5 +1,5 @@
-import { useWaveformRenderer } from '../hooks/useWaveformRenderer';
-import { useWaveformData } from '../hooks/useWaveformData';
+import { useWaveformBlob } from '../waveform/useWaveformBlob';
+import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { useHotCues } from '../hooks/useHotCues';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData } from '../types';
@@ -26,16 +26,14 @@ export default function WaveformMinimap({
   beatgrid = null,
   className,
 }: WaveformMinimapProps) {
-  const { data: waveformData, isLoading, error: fetchError } = useWaveformData(trackId);
+  const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: hotCues = [] } = useHotCues(trackId);
 
-  const { canvasRef, rendererRef, initError } = useWaveformRenderer({
+  const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
     clock,
     waveformData,
     config: {
       isMinimapMode: true,
-      maxZoom: 1.0,
-      minZoom: 1.0,
     },
     cuePoint,
     hotCues,

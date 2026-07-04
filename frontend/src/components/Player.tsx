@@ -52,7 +52,6 @@ export default function Player() {
           cuePoint={snapshot.cuePoint}
           transport={scrubTransport}
           dimmed={trackId !== null && !ready}
-          renderEngine="v2"
         />
 
         {/* Controls overlay - top left */}
