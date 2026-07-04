@@ -404,6 +404,19 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   (direction, Preferred derivation, counts). Note: favorite→star updates
   ride the 300ms debounced save — near-live.
 
+- v29 (transition-library 03): discovery unified. "Find Related" is now
+  "Find Compatible" (user-facing strings only; internal keys/filenames
+  unchanged). Loaded-deck reference model: the modal gets A/B buttons
+  (track titles, empty deck disabled), the selection-based reference is
+  retired, the whole feature disables with nothing loaded, and
+  `refDeck` persists with the settings so the quick-apply arrow reuses
+  the last deck. The modal's "has transition" switch binds to the SAME
+  `hasTransitionFromDecks` filter state as the filter-bar toggle (one
+  source of truth, two controls — the switch applies live, not on
+  Apply). Composition rules from 02 hold: applying writes only the four
+  heuristic criteria, Clear All clears both axes. Settings loads merge
+  over defaults (pre-refDeck saves).
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

@@ -16,12 +16,15 @@ import './FilterBar.css';
 interface FilterBarProps {
   totalTracks: number;
   filteredCount: number;
-  selectedTrack: Track | null;
+  /** Loaded decks — Find Compatible's reference model (transition-library
+   * 03): the match runs from a loaded deck, not the selection. */
+  loadedA: Track | null;
+  loadedB: Track | null;
   onFindRelated: () => void;
   onApplySettings: (settings: RelatedTracksSettings) => void;
 }
 
-export default function FilterBar({ totalTracks, filteredCount, selectedTrack, onFindRelated, onApplySettings }: FilterBarProps) {
+export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB, onFindRelated, onApplySettings }: FilterBarProps) {
   const { filters, setFilters } = useFilters();
   const [searchInput, setSearchInput] = useState(filters.search);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
@@ -68,13 +71,15 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
     setFilters({ ...filters, search: '' });
   };
 
+  const anyDeckLoaded = loadedA !== null || loadedB !== null;
+
   const handleQuickApply = () => {
-    if (!selectedTrack) return;
+    if (!anyDeckLoaded) return;
     onFindRelated();
   };
 
   const handleOpenSettings = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!selectedTrack) return;
+    if (!anyDeckLoaded) return;
     setRelatedModalPosition({ x: e.clientX, y: e.clientY });
     setShowRelatedModal(true);
   };
@@ -102,7 +107,7 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
       flexDirection: 'column',
       gap: '12px'
     }}>
-      {/* Filter bar - new order: Tag, Search, Energy, Key, BPM, Find Related, Clear All, Result Count */}
+      {/* Filter bar - order: Tag, Search, Energy, Key, BPM, Find Compatible, transitions toggle, Clear All, Result Count */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         {/* Tag Toggle Icon with Red Dot Indicator */}
         <div
@@ -292,18 +297,19 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
           }
         </button>
 
-        {/* Find Related Button Group */}
+        {/* Find Compatible Button Group (runs from a loaded deck) */}
         <div style={{ display: 'flex', gap: 0 }}>
           <button
             onClick={handleOpenSettings}
-            disabled={selectedTrack === null}
+            disabled={!anyDeckLoaded}
             className="find-related-settings"
+            title={anyDeckLoaded ? 'Find tracks compatible with a loaded deck' : 'Load a deck first'}
             style={{
               padding: '4px 10px',
               background: 'var(--surface0)',
-              color: selectedTrack ? 'var(--text)' : 'var(--overlay0)',
+              color: anyDeckLoaded ? 'var(--text)' : 'var(--overlay0)',
               border: '1px solid var(--surface0)',
-              cursor: selectedTrack ? 'pointer' : 'not-allowed',
+              cursor: anyDeckLoaded ? 'pointer' : 'not-allowed',
               fontSize: '12px',
               fontWeight: 'bold',
               display: 'flex',
@@ -311,20 +317,21 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
               gap: '4px',
             }}
           >
-            <span>Find Related</span>
+            <span>Find Compatible</span>
           </button>
 
           <button
             onClick={handleQuickApply}
-            disabled={selectedTrack === null}
+            disabled={!anyDeckLoaded}
             className="find-related-quick"
+            title="Quick apply: last settings + last chosen deck"
             style={{
               background: 'var(--surface0)',
-              color: selectedTrack ? 'var(--text)' : 'var(--overlay0)',
+              color: anyDeckLoaded ? 'var(--text)' : 'var(--overlay0)',
               border: '1px solid var(--surface0)',
               padding: '4px 8px',
               minWidth: '28px',
-              cursor: selectedTrack ? 'pointer' : 'not-allowed',
+              cursor: anyDeckLoaded ? 'pointer' : 'not-allowed',
               fontSize: '12px',
               display: 'flex',
               alignItems: 'center',
@@ -487,7 +494,10 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
       <FindRelatedTracksModal
         isOpen={showRelatedModal}
         onClose={() => setShowRelatedModal(false)}
-        selectedTrack={selectedTrack}
+        loadedA={loadedA}
+        loadedB={loadedB}
+        hasTransition={filters.hasTransitionFromDecks}
+        onToggleTransition={(on) => setFilters({ ...filters, hasTransitionFromDecks: on })}
         onApply={handleApplySettings}
         openPosition={relatedModalPosition}
       />

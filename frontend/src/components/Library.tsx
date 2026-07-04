@@ -17,7 +17,8 @@ import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../prototype/transitionIndex';
 
-// Related tracks feature - types and constants
+// Find Compatible feature (né Find Related; internal keys unchanged) —
+// types and constants
 export interface RelatedTracksSettings {
   harmonicKeys: boolean;
   bpm: boolean;
@@ -26,6 +27,9 @@ export interface RelatedTracksSettings {
   tagMatchMode: 'ANY' | 'ALL';
   energy: boolean;
   energyPreset: 'up' | 'down' | 'near' | 'equal';
+  /** Which loaded deck's track the match runs from (transition-library
+   * 03: loaded-deck reference model — the quick-apply arrow reuses it). */
+  refDeck: 'A' | 'B';
 }
 
 const STORAGE_KEY = 'findRelatedTracksSettings';
@@ -37,6 +41,7 @@ export const DEFAULT_SETTINGS: RelatedTracksSettings = {
   tagMatchMode: 'ANY',
   energy: false,
   energyPreset: 'near',
+  refDeck: 'A',
 };
 
 // Related tracks feature - utility functions
@@ -357,11 +362,18 @@ export default function Library({
     });
   };
 
-  const handleFindRelated = () => {
-    if (!selectedTrack) return;
+  /** The match reference under the loaded-deck model: the chosen deck's
+   * track, falling back to the other loaded deck (selection is retired). */
+  const referenceFor = (refDeck: 'A' | 'B'): Track | null =>
+    decks[refDeck].loadedTrack ?? decks[refDeck === 'A' ? 'B' : 'A'].loadedTrack;
 
+  const handleFindRelated = () => {
+    // Quick apply: last settings + last chosen deck.
     const settings = loadSettings();
-    const newFilters = deriveRelatedFilters(selectedTrack, settings);
+    const reference = referenceFor(settings.refDeck);
+    if (!reference) return;
+
+    const newFilters = deriveRelatedFilters(reference, settings);
 
     // Replace the four heuristic criteria; the transition axis survives
     // (transition-library composition rule).
@@ -369,11 +381,12 @@ export default function Library({
   };
 
   const handleApplySettings = (settings: RelatedTracksSettings) => {
-    if (!selectedTrack) return;
+    const reference = referenceFor(settings.refDeck);
+    if (!reference) return;
 
     // Save settings and apply filters
     saveSettings(settings);
-    const newFilters = deriveRelatedFilters(selectedTrack, settings);
+    const newFilters = deriveRelatedFilters(reference, settings);
     setFilters((f) => ({ ...newFilters, hasTransitionFromDecks: f.hasTransitionFromDecks }));
   };
 
@@ -536,7 +549,8 @@ export default function Library({
           <FilterBar
             totalTracks={totalTracks}
             filteredCount={currentTracks.length}
-            selectedTrack={selectedTrack}
+            loadedA={decks.A.loadedTrack}
+            loadedB={decks.B.loadedTrack}
             onFindRelated={handleFindRelated}
             onApplySettings={handleApplySettings}
           />
