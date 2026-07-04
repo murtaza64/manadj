@@ -9,7 +9,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { DEFAULT_PARAMS, DEFAULT_STYLE_ID, STYLE_REGISTRY } from './styles';
-import type { StyleParams } from './styles';
+import type { RGB, StyleParams } from './styles';
 
 export type SlotName = 'full' | 'minimap';
 
@@ -50,8 +50,23 @@ function sanitizeSlot(raw: unknown, fallback: SlotState): SlotState {
     b1: Math.min(7, Math.max(1, Math.round(num(p.b1, fallback.params.b1)))),
     b2: Math.min(8, Math.max(2, Math.round(num(p.b2, fallback.params.b2)))),
     smooth: typeof p.smooth === 'boolean' ? p.smooth : fallback.params.smooth,
+    colors: null, // validated below
   };
   if (params.b2 <= params.b1) params.b2 = params.b1 + 1;
+  const rgb = (v: unknown): RGB | null =>
+    Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && isFinite(x))
+      ? [Math.min(1, Math.max(0, v[0])), Math.min(1, Math.max(0, v[1])), Math.min(1, Math.max(0, v[2]))]
+      : null;
+  const c = p.colors;
+  params.colors =
+    Array.isArray(c) && c.length === 3
+      ? (() => {
+          const parsed = c.map(rgb);
+          return parsed.every((x) => x !== null)
+            ? (parsed as [RGB, RGB, RGB])
+            : fallback.params.colors;
+        })()
+      : fallback.params.colors ?? null;
   return { styleId, params };
 }
 

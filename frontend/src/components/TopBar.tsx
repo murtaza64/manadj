@@ -5,13 +5,14 @@
  */
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition' | 'sync';
+export type AppMode = 'library' | 'performance' | 'transition' | 'sync' | 'styles';
 
 const MODES: { id: AppMode; icon: string; title: string }[] = [
   { id: 'library', icon: '≡', title: 'Library' },
   { id: 'performance', icon: '▸', title: 'Performance' },
   { id: 'transition', icon: '⋈', title: 'Transition editor' },
   { id: 'sync', icon: '⇄', title: 'Sync' },
+  { id: 'styles', icon: '◔', title: 'Waveform styles' },
 ];
 
 export function TopBar({

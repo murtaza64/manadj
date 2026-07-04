@@ -1,8 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-// Dev-only Waveform style tuning page at ?view=wfproto (edits the persisted
-// style slots live; also the design prototype for a future settings panel).
+// Waveform style panel (edits the persisted style slots live).
 const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
@@ -17,7 +16,7 @@ import { ToastProvider } from './components/Toast';
 
 const queryClient = new QueryClient();
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'sync'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'sync', 'styles'];
 
 // Deep link: ?view=<mode> opens straight into that mode.
 const requestedView = new URLSearchParams(window.location.search).get('view');
@@ -27,18 +26,6 @@ const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
 
 function App() {
   const [view, setView] = useState<AppMode>(initialView);
-
-  // Dev-only style tuning page (needs the query client: it renders the real
-  // waveform components, which fetch blobs/beatgrids/hot cues).
-  if (import.meta.env.DEV && requestedView === 'wfproto') {
-    return (
-      <QueryClientProvider client={queryClient}>
-        <Suspense fallback={null}>
-          <StyleTuningPage />
-        </Suspense>
-      </QueryClientProvider>
-    );
-  }
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -56,6 +43,10 @@ function App() {
                 <TransitionEditor />
               ) : view === 'sync' ? (
                 <SyncView />
+              ) : view === 'styles' ? (
+                <Suspense fallback={null}>
+                  <StyleTuningPage />
+                </Suspense>
               ) : (
                 /* The library view is Deck A (performance-mode issue 02). */
                 <DeckScope deck="A">

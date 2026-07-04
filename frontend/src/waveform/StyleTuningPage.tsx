@@ -10,8 +10,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import WebGLWaveform from '../components/WebGLWaveform';
 import WaveformMinimap from '../components/WaveformMinimap';
-import { STYLE_REGISTRY } from './styles';
-import type { StyleParams } from './styles';
+import { STYLE_REGISTRY, getStyle } from './styles';
+import type { RGB, StyleParams } from './styles';
+
+const rgbToHex = ([r, g, b]: RGB) =>
+  '#' + [r, g, b].map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+const hexToRgb = (hex: string): RGB => [
+  parseInt(hex.slice(1, 3), 16) / 255,
+  parseInt(hex.slice(3, 5), 16) / 255,
+  parseInt(hex.slice(5, 7), 16) / 255,
+];
 import { resetSlots, setSlot, useStyleSlot } from './styleSlots';
 import type { SlotName } from './styleSlots';
 import './styleTuning.css';
@@ -100,8 +108,8 @@ export default function StyleTuningPage() {
   useEffect(() => {
     api.tracks
       .list(1, 300)
-      .then((res: { tracks?: TrackRow[] } | TrackRow[]) => {
-        const rows = Array.isArray(res) ? res : (res.tracks ?? []);
+      .then((res: { items?: TrackRow[] } | TrackRow[]) => {
+        const rows = Array.isArray(res) ? res : (res.items ?? []);
         setTracks(rows);
         if (rows.length > 0) setTrackId((cur) => cur ?? rows[0].id);
       })
@@ -263,6 +271,33 @@ export default function StyleTuningPage() {
           {slider('high gain', p.gains[2], 0, 3, 0.05, (v) => patch({ gains: [p.gains[0], p.gains[1], v] }))}
           {slider('low/mid boundary (band)', p.b1, 1, 7, 1, (v) => patch({ b1: v, b2: Math.max(p.b2, v + 1) }))}
           {slider('mid/high boundary (band)', p.b2, 2, 8, 1, (v) => patch({ b2: v, b1: Math.min(p.b1, v - 1) }))}
+          {(['low', 'mid', 'high'] as const).map((band, i) => {
+            const current = p.colors ?? getStyle(slot.styleId).defaultColors;
+            return (
+              <label className="tune-slider" key={band}>
+                <span>{band} color</span>
+                <input
+                  type="color"
+                  value={rgbToHex(current[i])}
+                  onChange={(e) => {
+                    const next = [...current] as [RGB, RGB, RGB];
+                    next[i] = hexToRgb(e.target.value);
+                    patch({ colors: next });
+                  }}
+                />
+              </label>
+            );
+          })}
+          <label className="tune-slider">
+            <span>&nbsp;</span>
+            <button
+              className="tune-reset"
+              disabled={p.colors === null}
+              onClick={() => patch({ colors: null })}
+            >
+              style default colors
+            </button>
+          </label>
         </div>
       </div>
       <p className="tune-hint">

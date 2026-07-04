@@ -2,8 +2,10 @@
 //
 // A style = a GLSL styleColor() variant + the shared tunable parameter set.
 // All aesthetics live here as data; the renderer core has no look constants.
-// Persistence of the selected style/params is issue 05 (localStorage slots);
-// until then consumers use the defaults.
+// Group colors are uniforms: params.colors overrides a style's defaults
+// (spectral-hue derives its own colors and ignores them).
+
+export type RGB = [number, number, number];
 
 /** Shared tunable parameters — every style consumes this one set. */
 export interface StyleParams {
@@ -19,6 +21,8 @@ export interface StyleParams {
   b2: number;
   /** Interpolate band frames (and smooth flux lobes); off = raw 12ms steps. */
   smooth: boolean;
+  /** Low/mid/high group colors (0-1 RGB); null = the style's own defaults. */
+  colors: [RGB, RGB, RGB] | null;
 }
 
 /** User-approved additive-RGB tuning (2026-07-04 prototype session).
@@ -32,60 +36,78 @@ export const DEFAULT_PARAMS: StyleParams = {
   b1: 3,
   b2: 5,
   smooth: true,
+  colors: null,
 };
 
 export interface WaveformStyle {
   id: string;
   name: string;
+  /** Group colors when params.colors is null. */
+  defaultColors: [RGB, RGB, RGB];
   /** GLSL: vec3 styleColor(float yA, float p, vec3 g, float b[8]) */
   source: string;
 }
 
 export const DEFAULT_STYLE_ID = 'additive-rgb';
 
+const ADDITIVE_COLORS: [RGB, RGB, RGB] = [
+  [1.0, 0.1, 0.1],
+  [0.0, 1.0, 0.25],
+  [0.2, 0.45, 1.0],
+];
+
 /**
  * Built-in styles, all proven in the waveform-overhaul prototype. Each is a
  * ~20-line shader variant over the same data; keeping the losers costs
  * nothing until selected (programs compile lazily) and preserves the
- * exploration surface for the future style-settings product feature.
+ * exploration surface for the style panel.
  */
 export const STYLE_REGISTRY: WaveformStyle[] = [
   {
     id: 'additive-rgb',
     name: 'Additive RGB',
+    defaultColors: ADDITIVE_COLORS,
     source: `
 vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   vec3 c = BG;
-  if (yA < g.x) c += vec3(1.00, 0.10, 0.10);
-  if (yA < g.y) c += vec3(0.00, 1.00, 0.25);
-  if (yA < g.z) c += vec3(0.20, 0.45, 1.00);
+  if (yA < g.x) c += u_colorLow;
+  if (yA < g.y) c += u_colorMid;
+  if (yA < g.z) c += u_colorHigh;
   return min(c, vec3(1.0));
 }`,
   },
   {
     id: 'layered-opaque',
     name: 'Layered opaque (3Band)',
+    defaultColors: [
+      [0.08, 0.22, 1.0],
+      [1.0, 0.56, 0.0],
+      [1.0, 1.0, 1.0],
+    ],
     source: `
 vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   vec3 c = BG;
   if (yA < p) c = vec3(0.15, 0.15, 0.20);
-  if (yA < g.x) c = vec3(0.08, 0.22, 1.00);
-  if (yA < g.y) c = vec3(1.00, 0.56, 0.00);
-  if (yA < g.z) c = vec3(1.00, 1.00, 1.00);
+  if (yA < g.x) c = u_colorLow;
+  if (yA < g.y) c = u_colorMid;
+  if (yA < g.z) c = u_colorHigh;
   return c;
 }`,
   },
   {
     id: 'dominant-band',
     name: 'Dominant band',
+    defaultColors: [
+      [1.0, 0.15, 0.1],
+      [0.1, 1.0, 0.25],
+      [0.25, 0.55, 1.0],
+    ],
     source: `
 vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   if (yA >= p) return BG;
   vec3 w = g * g * g;
   float sum = w.x + w.y + w.z + 1e-6;
-  vec3 c = (w.x * vec3(1.00, 0.15, 0.10)
-          + w.y * vec3(0.10, 1.00, 0.25)
-          + w.z * vec3(0.25, 0.55, 1.00)) / sum;
+  vec3 c = (w.x * u_colorLow + w.y * u_colorMid + w.z * u_colorHigh) / sum;
   float energy = clamp(max(g.x, max(g.y, g.z)), 0.0, 1.0);
   return c * (0.45 + 0.55 * energy);
 }`,
@@ -93,6 +115,7 @@ vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   {
     id: 'spectral-hue',
     name: 'Spectral hue',
+    defaultColors: ADDITIVE_COLORS, // unused: hue derives from spectral content
     source: `
 vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   if (yA >= p) return BG;
@@ -108,6 +131,11 @@ vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   {
     id: 'transient-flux',
     name: 'Engine-ish transient (flux)',
+    defaultColors: [
+      [0.02, 0.3, 1.0],
+      [0.0, 0.85, 0.3],
+      [0.93, 1.0, 0.97], // the onset wedge
+    ],
     source: `
 vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   float t = u_startTime + v_uv.x * u_visibleSeconds;
@@ -115,22 +143,23 @@ vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   bands8Smooth(t, 0.03, bs);
   vec3 gs = groupAmps(bs);
   vec3 c = BG;
-  if (yA < clamp(gs.x, 0.0, 1.0)) c = vec3(0.02, 0.30, 1.00);
-  if (yA < clamp(gs.y, 0.0, 1.0)) c = vec3(0.00, 0.85, 0.30);
+  if (yA < clamp(gs.x, 0.0, 1.0)) c = u_colorLow;
+  if (yA < clamp(gs.y, 0.0, 1.0)) c = u_colorMid;
   float flux = transientFlux(t) * u_groupGains.z * u_master * 1.6;
-  if (yA < clamp(flux, 0.0, 1.0)) c = vec3(0.93, 1.00, 0.97);
+  if (yA < clamp(flux, 0.0, 1.0)) c = u_colorHigh;
   return c;
 }`,
   },
   {
     id: 'additive-ticks',
     name: 'Additive RGB + attack ticks',
+    defaultColors: ADDITIVE_COLORS,
     source: `
 vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   vec3 c = BG;
-  if (yA < g.x) c += vec3(1.00, 0.10, 0.10);
-  if (yA < g.y) c += vec3(0.00, 1.00, 0.25);
-  if (yA < g.z) c += vec3(0.20, 0.45, 1.00);
+  if (yA < g.x) c += u_colorLow;
+  if (yA < g.y) c += u_colorMid;
+  if (yA < g.z) c += u_colorHigh;
   c = min(c, vec3(1.0));
   float t = u_startTime + v_uv.x * u_visibleSeconds;
   float px = u_visibleSeconds / u_canvasWidth;

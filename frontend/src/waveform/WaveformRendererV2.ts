@@ -118,6 +118,9 @@ uniform float u_master;
 uniform vec3 u_groupGains;
 uniform ivec2 u_groupBounds;
 uniform float u_smooth;
+uniform vec3 u_colorLow;
+uniform vec3 u_colorMid;
+uniform vec3 u_colorHigh;
 uniform int u_anchor;      // 0 center, 1 top, 2 bottom
 uniform float u_brightness; // body colors only; markers are a separate pass
 uniform float u_modEnabled;
@@ -549,6 +552,10 @@ export class WaveformRendererV2 {
     gl.uniform3f(u('u_groupGains'), ...this.params.gains);
     gl.uniform2i(u('u_groupBounds'), this.params.b1, this.params.b2);
     gl.uniform1f(u('u_smooth'), this.params.smooth ? 1 : 0);
+    const colors = this.params.colors ?? getStyle(this.styleId).defaultColors;
+    gl.uniform3f(u('u_colorLow'), ...colors[0]);
+    gl.uniform3f(u('u_colorMid'), ...colors[1]);
+    gl.uniform3f(u('u_colorHigh'), ...colors[2]);
     gl.uniform1i(u('u_anchor'), this.anchor === 'center' ? 0 : this.anchor === 'top' ? 1 : 2);
     gl.uniform1f(u('u_brightness'), this.brightness);
 
