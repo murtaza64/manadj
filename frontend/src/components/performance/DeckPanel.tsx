@@ -53,11 +53,9 @@ function useTrackEdit(track: Track | null) {
     void (async () => {
       await api.tracks.update(track.id, data);
       if (data.bpm !== undefined) {
-        // The backend only *generates* a grid when none exists — a BPM
-        // change must delete and re-get to force regeneration (the same
-        // dance the library's TagEditor does).
-        await api.beatgrids.delete(track.id);
-        await api.beatgrids.get(track.id);
+        // The backend's BPM write path updates the beatgrid itself (regen
+        // for placeholders, anchor-preserving re-tempo for edited grids —
+        // ADR 0016); the client only refetches.
         void queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
       }
       void queryClient.invalidateQueries({ queryKey: ['track', track.id] });

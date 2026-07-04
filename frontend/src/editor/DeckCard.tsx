@@ -88,9 +88,10 @@ export function DeckCard({
   const commitBpm = async () => {
     const bpm = Number(bpmDraft);
     if (!bpm || bpm <= 0 || bpm === track.bpm) return;
+    // The PATCH updates the beatgrid server-side (ADR 0016 — regen for
+    // placeholders, anchor-preserving re-tempo for edited grids); the
+    // client only refetches.
     await api.tracks.update(track.id, { bpm });
-    await api.beatgrids.delete(track.id);
-    await api.beatgrids.get(track.id);
     queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
     player.setBpm(deck, bpm);
     onBpmSaved(bpm);
