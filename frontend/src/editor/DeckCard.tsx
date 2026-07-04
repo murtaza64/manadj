@@ -12,7 +12,7 @@
  */
 import HotCue from '../components/HotCue';
 import { BpmControl } from '../components/deckControls/BpmControl';
-import { GridEditControls } from '../components/deckControls/GridEditControls';
+import { SpeedIcon } from '../components/icons';
 import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
 import { LockIcon } from '../components/icons/LockIcon';
 import { MuteIcon } from '../components/icons/MuteIcon';
@@ -97,9 +97,9 @@ export function DeckCard({
       <div className="editor-deckcard-row">
         <span
           className="editor-bpm-base"
-          title="Base BPM (the track's real tempo — edits persist)"
+          title="Tempo / beatgrid (base BPM — edits persist; ADR 0016)"
         >
-          BPM
+          <SpeedIcon width={14} height={14} />
         </span>
         <BpmControl
           track={track}
@@ -108,6 +108,7 @@ export function DeckCard({
             player.setBpm(deck, bpm);
             onBpmSaved(bpm);
           }}
+          grid={{ getPlayhead: () => player.getTrackTime(deck) }}
         />
         <span className="editor-bpm-eff" title="Effective BPM during the mix (after tempo match)">
           » {effectiveBpm !== null ? effectiveBpm.toFixed(1) : '—'}
@@ -133,7 +134,8 @@ export function DeckCard({
       <div className="editor-deckcard-row">
         {/* Alignment nudge (accented — realigns the pair): plain ◀/▶ +
             accent, per the PRD icon language (every other pair carries a
-            specific icon, so this combination is unambiguous). */}
+            specific icon, so this combination is unambiguous). The grid
+            cluster lives with BPM above (one domain — ADR 0016). */}
         <span
           className="editor-pair editor-alignment"
           title={`Alignment nudge: move ${deck} ±10ms relative to the other track (edits the sketch, not the grid)`}
@@ -146,13 +148,6 @@ export function DeckCard({
             ▶
           </button>
         </span>
-        {/* Grid edit is shared curation (deck-controls 03): nudge / anchor /
-            nudge, playhead read from this deck's MixPlayer track time. */}
-        <GridEditControls
-          trackId={track.id}
-          getPlayhead={() => player.getTrackTime(deck)}
-          density="mini"
-        />
       </div>
       {gestures && (
         <div

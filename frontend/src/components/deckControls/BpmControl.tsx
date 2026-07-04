@@ -9,17 +9,20 @@
  * track query invalidation. A 409 (grid went variable under us) reverts
  * the draft.
  *
- * Density-parameterized feature union: the full variant carries the
- * library's suggestion/octave dropdown; `dense` (PERF/editor) drops the
- * dropdown. Both keep the ±0.03 micro-nudges (grid compress/spread icons)
- * and the `1/2` / `x2` shortcuts. The effective-BPM readout stays a
- * per-surface concern beside the control.
+ * Every mode gets the focus dropdown (octave scales ×2/×3/2/×2/3/×1/2 +
+ * analysis suggestions where supplied) — the one halve/double affordance —
+ * plus the ±0.03 micro-nudges (grid compress/spread icons). With `grid`,
+ * the grid-edit buttons embed in the same segmented cluster: BPM and
+ * beatgrid are one domain (ADR 0016). The effective-BPM readout stays a
+ * per-surface concern beside the control; `dense` is a sizing hint only.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useBeatgridData } from '../../hooks/useBeatgridData';
 import { BpmCompressIcon, BpmSpreadIcon } from '../icons/BpmIcons';
+import { GridEditButtons } from './GridEditControls';
+import type { GridEditConfig } from './GridEditControls';
 import {
   createBpmCommitter,
   formatBpm,
@@ -41,6 +44,9 @@ export interface BpmControlProps {
   onSave?: (bpm: number) => void | Promise<unknown>;
   /** After each successful commit (e.g. player.setBpm + onBpmSaved). */
   onCommitted?: (bpm: number) => void;
+  /** Embed the grid-edit buttons (nudge/anchor/nudge) in this cluster —
+   * BPM and beatgrid are one domain (ADR 0016), one semantic unit. */
+  grid?: GridEditConfig;
 }
 
 export function BpmControl({
@@ -50,6 +56,7 @@ export function BpmControl({
   recommendedBpms,
   onSave,
   onCommitted,
+  grid: gridConfig,
 }: BpmControlProps) {
   const queryClient = useQueryClient();
   const { data: grid, error: gridError } = useBeatgridData(track?.id ?? null);
@@ -135,12 +142,7 @@ export function BpmControl({
     commit(nudgeBpm(base, direction));
   };
 
-  const scale = (factor: number) => {
-    if (base === null) return;
-    commit(base * factor);
-  };
-
-  // ── Variable grid: readout only, in all modes ──────────────────────────
+  // ── Variable grid: BPM readout only (grid ops still apply) ─────────────
   if (projection.kind === 'variable') {
     return (
       <span className={`deck-bpm${dense ? ' dense' : ''}`}>
@@ -150,6 +152,7 @@ export function BpmControl({
         >
           ~{Math.round(projection.bpm)} (var)
         </span>
+        {gridConfig && <GridEditButtons trackId={track?.id ?? null} {...gridConfig} />}
       </span>
     );
   }
@@ -179,10 +182,13 @@ export function BpmControl({
       isRecommended: recommendedBpms?.includes(bpm) ?? false,
     };
   });
-  const showDropdown = !dense && isFocused && displayItems.length > 0;
+  // The dropdown (octave scales + analysis suggestions) is the ONE
+  // halve/double affordance in every mode (user decision — dedicated
+  // 1/2 x2 buttons dropped).
+  const showDropdown = isFocused && displayItems.length > 0;
 
   const openDropdown = () => {
-    if (dense || !inputRef.current) return;
+    if (!inputRef.current) return;
     const rect = inputRef.current.getBoundingClientRect();
     setDropdownPosition({ top: rect.bottom + 2, left: rect.left });
     setSelectedIndex(-1);
@@ -273,22 +279,7 @@ export function BpmControl({
           <BpmSpreadIcon />
         </button>
       </span>
-      <button
-        className="player-button deck-bpm-scale"
-        disabled={buttonsDisabled}
-        onClick={() => scale(0.5)}
-        title="Halve BPM"
-      >
-        1/2
-      </button>
-      <button
-        className="player-button deck-bpm-scale"
-        disabled={buttonsDisabled}
-        onClick={() => scale(2)}
-        title="Double BPM"
-      >
-        x2
-      </button>
+      {gridConfig && <GridEditButtons trackId={track?.id ?? null} {...gridConfig} />}
       {showDropdown && (
         <div
           className="deck-bpm-dropdown"

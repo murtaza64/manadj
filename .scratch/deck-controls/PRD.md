@@ -66,9 +66,11 @@ which CLASS, the icon says which OPERATION. A small shared SVG icon set
 - **Grid nudge**: grid-ticks-with-arrow (drawn) — clearly a grid op.
 - **BPM step**: grid compress `→←` (BPM up) / spread `←→` (BPM down) —
   ADR 0016 made visible; replaces generic ± steppers.
-- **Halve/double anything** (beatjump size, PERF BPM shortcuts): text
-  `1/2` / `x2` (plain text, NOT the ½ fraction glyph — unreadable small).
-  Bare +/− disappears from deck controls.
+- **Halve/double beatjump size**: text `1/2` / `x2` (plain text, NOT the
+  ½ fraction glyph — unreadable small). Bare +/− disappears from deck
+  controls. BPM halve/double has NO dedicated buttons: the input's focus
+  dropdown (octave scales + analysis suggestions) is the one affordance,
+  in every mode (decision 2026-07-04, second polish round).
 - **Alignment nudge**: plain ◀ / ▶ + the alignment accent — with every
   other pair carrying a specific icon, plain-triangle-plus-accent is
   unambiguous.
@@ -77,6 +79,11 @@ which CLASS, the icon says which OPERATION. A small shared SVG icon set
 - **Set downbeat**: an anchor icon (drawn ⚓) replacing the "D" button —
   the button literally sets the grid's anchor (ADR 0016), so the icon IS
   the concept.
+- **One tempo/grid cluster** (decision 2026-07-04): the BPM control and
+  the grid-edit buttons merge into ONE segmented unit — same domain (BPM
+  is a projection of the grid, ADR 0016) — labeled by the tempo icon
+  (SpeedIcon) in every mode; the BPM/GRID text labels and the separate
+  grid cluster are gone.
 - **Mute** (editor deck cards): speaker-with-slash SVG, muted/unmuted
   states, replacing the text button.
 - **Locked window** (editor): padlock SVG, open/closed communicating the

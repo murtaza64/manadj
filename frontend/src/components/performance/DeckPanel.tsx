@@ -16,7 +16,7 @@ import WaveformMinimap from '../WaveformMinimap';
 import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
 import { BeatjumpRow } from '../deckControls/BeatjumpRow';
-import { GridEditControls } from '../deckControls/GridEditControls';
+import { SpeedIcon } from '../icons';
 import { BpmControl } from '../deckControls/BpmControl';
 import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
 import { formatKeyDisplay } from '../../utils/keyUtils';
@@ -142,20 +142,21 @@ function BeatgridBlock({ track }: { track: Track | null }) {
   return (
     <div className="perf-beatgrid-block">
       <div className="perf-beatgrid-row">
-        <span className="perf-beatgrid-label">BPM</span>
-        <BpmControl track={track} dense disabled={!enabled} onSave={saveBpm} />
+        {/* One tempo/grid cluster (ADR 0016 — one domain), labeled by the
+            tempo icon (icon language: no BPM/GRID text labels). */}
+        <span className="perf-beatgrid-label" title="Tempo / beatgrid">
+          <SpeedIcon width={14} height={14} />
+        </span>
+        <BpmControl
+          track={track}
+          dense
+          disabled={!enabled}
+          onSave={saveBpm}
+          grid={{ getPlayhead: () => engine.getPlayhead(), disabled: !enabled }}
+        />
         <span className="perf-effbpm" title="Effective BPM (base × pitch × bend)">
           {effective !== null ? `» ${effective.toFixed(1)}` : ''}
         </span>
-      </div>
-      <div className="perf-beatgrid-row">
-        <span className="perf-beatgrid-label">GRID</span>
-        <GridEditControls
-          trackId={track?.id ?? null}
-          getPlayhead={() => engine.getPlayhead()}
-          disabled={!enabled}
-          density="mini"
-        />
       </div>
     </div>
   );

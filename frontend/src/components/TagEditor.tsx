@@ -8,9 +8,8 @@ import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
 import { BpmControl } from './deckControls/BpmControl';
-import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, BeatgridIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
+import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
-import { GridEditControls } from './deckControls/GridEditControls';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import './TagEditor.css';
 
@@ -322,24 +321,21 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
         {/* Right side: Beatgrid controls with Key/BPM, Hot Cues with Minimap, and Tags in separate rows */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-          {/* Row 1: Beatgrid controls, Key, BPM, Hot Cues, and Minimap side by side */}
+          {/* Row 1: the tempo/grid cluster (one domain — ADR 0016), Key,
+              Hot Cues, and Minimap side by side */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <BeatgridIcon />
-            <GridEditControls
-              trackId={track?.id ?? null}
-              getPlayhead={() => engine.getPlayhead()}
-              disabled={!isBeatgridEditable}
-              disabledTitle="Load this track to edit its beatgrid"
+            <SpeedIcon />
+            <BpmControl
+              track={track}
+              recommendedBpms={analysisResults?.bpm?.recommended_bpms}
+              disabled={isDisabled}
+              onSave={(bpm) => onSave({ bpm })}
+              grid={{
+                getPlayhead: () => engine.getPlayhead(),
+                disabled: !isBeatgridEditable,
+                disabledTitle: 'Load this track to edit its beatgrid',
+              }}
             />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
-              <SpeedIcon />
-              <BpmControl
-                track={track}
-                recommendedBpms={analysisResults?.bpm?.recommended_bpms}
-                disabled={isDisabled}
-                onSave={(bpm) => onSave({ bpm })}
-              />
-            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px' }}>
               <KeyIcon />
               <span style={{

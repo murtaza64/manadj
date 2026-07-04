@@ -8,26 +8,26 @@ import { AnchorIcon } from '../icons/AnchorIcon';
 import './deckControls.css';
 
 /**
- * Grid-edit cluster (deck-controls PRD, curation class): nudge earlier /
- * set downbeat / nudge later — ONE component for the tag editor, the
- * Performance BeatgridBlock, and the Transition-editor DeckCard. Curation
- * semantics are bit-identical everywhere (the shared mutations already
- * were); what varies per mode is injected:
+ * Grid-edit buttons (deck-controls PRD, curation class): nudge earlier /
+ * set downbeat / nudge later — ONE implementation for every mode. They
+ * render as a fragment INSIDE the BpmControl's segmented cluster: BPM and
+ * beatgrid are one domain (ADR 0016 — BPM is a projection of the grid),
+ * so they share one semantic unit under the tempo icon.
  *
- * - `getPlayhead`: where "downbeat at playhead" reads time from (DeckEngine
- *   playhead vs MixPlayer track time).
+ * Injected per mode:
+ * - `getPlayhead`: where "downbeat at playhead" reads time from
+ *   (DeckEngine playhead vs MixPlayer track time).
  * - `disabled`: each mode's own gate (library's isBeatgridEditable rule,
  *   PERF's ready check, the editor's track-loaded rule).
  *
  * Set-downbeat records the grid's anchor (ADR 0016) — hence the anchor
  * icon; nudges shift the anchor along with everything.
  */
-export function GridEditControls({
+export function GridEditButtons({
   trackId,
   getPlayhead,
   disabled = false,
   disabledTitle,
-  density = 'normal',
 }: {
   trackId: number | null;
   /** Playhead source for "set downbeat at playhead". */
@@ -36,7 +36,6 @@ export function GridEditControls({
   disabled?: boolean;
   /** Mode-specific tooltip while gated (e.g. "Load this track…"). */
   disabledTitle?: string;
-  density?: 'normal' | 'mini';
 }) {
   const nudgeGrid = useNudgeBeatgrid();
   const setDownbeat = useSetBeatgridDownbeat();
@@ -50,7 +49,7 @@ export function GridEditControls({
   };
 
   return (
-    <div className={`deck-gridrow${density === 'mini' ? ' mini' : ''}`}>
+    <>
       <button
         className="player-button"
         disabled={gated || nudgeGrid.isPending}
@@ -78,6 +77,13 @@ export function GridEditControls({
       >
         <GridNudgeRightIcon />
       </button>
-    </div>
+    </>
   );
+}
+
+/** Grid config the BpmControl threads through to its embedded buttons. */
+export interface GridEditConfig {
+  getPlayhead: () => number;
+  disabled?: boolean;
+  disabledTitle?: string;
 }
