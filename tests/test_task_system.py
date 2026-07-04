@@ -65,12 +65,20 @@ def test_one_failure_does_not_stop_the_queue(db_session: Session) -> None:
     assert calls == ["ok"]
 
 
-def test_unknown_task_type_fails_cleanly(db_session: Session) -> None:
+def test_unhandled_task_type_is_left_pending(db_session: Session) -> None:
+    # A worker without a handler must not claim the task: a stale in-memory
+    # backend once drained ~1000 waveform tasks it couldn't run (failed all).
     task = create_task(db_session, "mystery", {})
-    run_pending(db_session, {})
+    ran = run_pending(db_session, {"other": lambda db, payload: None})
     db_session.refresh(task)
-    assert task.state == "failed"
-    assert task.error is not None and "mystery" in task.error
+    assert ran == 0
+    assert task.state == "pending"
+
+    # A capable worker arriving later picks it up.
+    ran = run_pending(db_session, {"mystery": lambda db, payload: None})
+    db_session.refresh(task)
+    assert ran == 1
+    assert task.state == "done"
 
 
 def test_tasks_run_oldest_first(db_session: Session) -> None:

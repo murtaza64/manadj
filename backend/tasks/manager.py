@@ -29,15 +29,24 @@ def create_task(
 
 
 def run_pending(db: Session, handlers: dict[str, Handler]) -> int:
-    """Run all pending tasks, oldest first. Returns the number processed.
+    """Run all pending tasks THIS worker has handlers for, oldest first.
+    Returns the number processed.
+
+    Tasks of other types are left pending — a worker without a handler
+    (a stale pre-restart process, or one with a handler disabled by env)
+    must not claim work it cannot do: during the waveform-overhaul landing,
+    an old in-memory backend drained and failed ~1000 freshly-enqueued
+    waveform tasks it had no handler for.
 
     A failing task records its error and never stops the queue.
     """
+    if not handlers:
+        return 0
     processed = 0
     while True:
         task = (
             db.query(Task)
-            .filter(Task.state == "pending")
+            .filter(Task.state == "pending", Task.type.in_(handlers.keys()))
             .order_by(Task.id)
             .first()
         )
@@ -47,9 +56,7 @@ def run_pending(db: Session, handlers: dict[str, Handler]) -> int:
         task.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
         try:
-            handler = handlers.get(task.type)
-            if handler is None:
-                raise LookupError(f"no handler registered for task type {task.type!r}")
+            handler = handlers[task.type]
             handler(db, task.payload)
         except Exception as e:
             db.rollback()
