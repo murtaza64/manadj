@@ -76,3 +76,13 @@ Performance data becomes part of the unified sync view. Hot Cues, Beatgrid, and 
 - Design session recorded in glossary edits on jj change `performance-data-sync: grill (docs)`: Beatgrid placeholder distinction, Diverged widening.
 - Deferred items carried from the script era: the 2 constant grids with >0.05 BPM drift vs Engine's analyzed BPM (investigate individually); renderer multi-tempo support (32 known variable-grid tracks).
 - The Engine surface reader will decode performance blobs during sync-status computation (~1k tracks, zlib + light parsing); if status latency suffers, decode lazily or cache by track — implementation detail, not a contract change.
+
+## Comments
+
+**2026-07-04 — Implemented** (workspace perfdata, jj changes `svxqoxor`→`qszpkwpq`, issues 02–07 all done — see each issue's Done comment). Two-axis code review run post-implementation: no hard standards violations; spec gaps fixed on `qszpkwpq` (viewer cue labels, shared frontend value types, single frontend tolerance constant mirroring `CUE_TIME_TOLERANCE`, bulk reports `maincue_no_waveform` instead of silently dropping, exact-boundary tolerance tests; `HOTCUE_TIME_TOLERANCE` renamed `CUE_TIME_TOLERANCE`). One spec-review finding rejected: per-cell fill-empty applies without confirmation — the PRD's automatic tier explicitly makes fill-empty unconfirmed; issue 04's wording was over-strict.
+
+Review follow-ups deferred (judgement calls, not blockers):
+- Viewer opening directly from bulk-confirm-list entries (today: open the row's Visual diff)
+- Consolidate duplicated test fixtures (`make_client`, fakes, helpers) into conftest
+- Collapse `bulk.py`'s four per-field fill/compare/pend blocks into a per-field strategy
+- Type beatgrid `origin` as a `Literal` instead of bare `str`

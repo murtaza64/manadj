@@ -136,6 +136,13 @@ class TestAutomaticTier:
         assert result["applied"] == {"hotcues": 0, "beatgrid": 0, "maincue": 0, "key": 0}
         assert result["pending"] == []
 
+    def test_maincue_without_waveform_row_reported_not_dropped(self, db, make_track, make_client):
+        t = make_track(filename="/m/a.mp3")  # no waveform row
+        client = make_client(FakeEnginePerformanceSource({"/m/a.mp3": ENGINE_FULL}))
+        result = bulk(client, track_ids=[t.id])
+        assert result["applied"]["maincue"] == 0
+        assert result["maincue_no_waveform"] == 1
+
     def test_unmatched_tracks_are_skipped(self, db, make_track, make_client):
         t = make_track(filename="/m/nowhere.mp3")
         client = make_client(FakeEnginePerformanceSource({}))

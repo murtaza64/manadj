@@ -12,7 +12,13 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, BACKEND_URL } from '../api/client';
 import { formatKeyDisplay } from '../utils/keyUtils';
-import { PerfDiffViewer, type PerfDiffSides } from './PerfDiffViewer';
+import {
+  PerfDiffViewer,
+  type BeatgridVal,
+  type HotCueVal,
+  type PerfDiffSides,
+} from './PerfDiffViewer';
+import { CUE_TIME_TOLERANCE_S } from '../utils/perfDiffOverlay';
 import './UnifiedTracksSync.css';
 
 // ------------------------------------------------------------------- types
@@ -27,23 +33,6 @@ interface FieldDivergence {
   surface_values: Record<string, unknown>;
   importable_from: string[];
   no_overwrite: boolean;
-}
-
-interface HotCueVal {
-  slot: number;
-  time: number;
-  label: string | null;
-  color: string | null;
-}
-
-interface TempoChangeVal {
-  start_time: number;
-  bpm: number;
-  bar_position: number;
-}
-
-interface BeatgridVal {
-  tempo_changes: TempoChangeVal[];
 }
 
 type PerfField = 'hotcues' | 'beatgrid' | 'maincue';
@@ -959,7 +948,7 @@ function cuesRoughlyEqual(a: HotCueVal, b: HotCueVal): boolean {
   // mirrors the backend's whole-set semantics (tolerance is authoritative
   // there; this only drives chip coloring)
   return (
-    Math.abs(a.time - b.time) <= 0.0015 &&
+    Math.abs(a.time - b.time) <= CUE_TIME_TOLERANCE_S &&
     (a.label || null) === (b.label || null) &&
     (a.color || '').toUpperCase() === (b.color || '').toUpperCase()
   );

@@ -82,6 +82,23 @@ class TestHotCueDivergence:
         s = engine_surface("/m/a.mp3", [cue(1, 30.0005)])
         assert only_row(compute_sync_status(db, s)).status == "in-sync"
 
+    def test_time_just_inside_the_tolerance_is_equal(self, db, make_track):
+        # the exact boundary isn't representable in binary floats; probe 99%
+        from backend.sync_status.compare import CUE_TIME_TOLERANCE
+
+        t = make_track(filename="/m/a.mp3")
+        add_cue(db, t.id, 1, 30.0)
+        s = engine_surface("/m/a.mp3", [cue(1, 30.0 + CUE_TIME_TOLERANCE * 0.99)])
+        assert only_row(compute_sync_status(db, s)).status == "in-sync"
+
+    def test_time_just_past_the_tolerance_diverges(self, db, make_track):
+        from backend.sync_status.compare import CUE_TIME_TOLERANCE
+
+        t = make_track(filename="/m/a.mp3")
+        add_cue(db, t.id, 1, 30.0)
+        s = engine_surface("/m/a.mp3", [cue(1, 30.0 + CUE_TIME_TOLERANCE * 1.5)])
+        assert only_row(compute_sync_status(db, s)).status == "diverged"
+
     def test_time_beyond_tolerance_diverges(self, db, make_track):
         t = make_track(filename="/m/a.mp3")
         add_cue(db, t.id, 1, 30.0)

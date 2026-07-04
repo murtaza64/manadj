@@ -25,9 +25,9 @@ const LIBRARY_COLOR = '#00E5FF';
 const ENGINE_COLOR = '#FF6D00';
 const WAVEFORM_COLOR = '#4A4A55';
 
-interface HotCueVal { slot: number; time: number; label: string | null; color: string | null }
-interface TempoChangeVal { start_time: number; bpm: number; bar_position: number }
-interface BeatgridVal { tempo_changes: TempoChangeVal[] }
+export interface HotCueVal { slot: number; time: number; label: string | null; color: string | null }
+export interface TempoChangeVal { start_time: number; bpm: number; bar_position: number }
+export interface BeatgridVal { tempo_changes: TempoChangeVal[] }
 
 export interface PerfDiffSides {
   libraryGrid: BeatgridVal | null;
@@ -166,6 +166,11 @@ function Viewer({ waveform, sides, onImport }: {
       ctx.fillStyle = '#000';
       ctx.font = 'bold 9px monospace';
       ctx.fillText(String(cue.slot), x + 4, above ? y - 7 : y + 9);
+      if (cue.label) {
+        ctx.fillStyle = color;
+        ctx.font = '9px monospace';
+        ctx.fillText(cue.label.slice(0, 24), x + 17, above ? y - 7 : y + 9);
+      }
     };
     sides.libraryCues.forEach((c) => drawCue(c, true, LIBRARY_COLOR));
     sides.engineCues.forEach((c) => drawCue(c, false, ENGINE_COLOR));

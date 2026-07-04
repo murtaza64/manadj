@@ -19,6 +19,10 @@ export interface BeatMarker {
 
 const MAX_MARKERS = 200_000; // pathological-grid guard
 
+/** Mirrors the backend's CUE_TIME_TOLERANCE (compare.py) — the backend is
+ * authoritative for divergence; this only drives display decisions. */
+export const CUE_TIME_TOLERANCE_S = 0.001;
+
 /**
  * Expand tempo changes into beat markers across [0, duration).
  * Each segment runs from its start_time to the next change's start_time

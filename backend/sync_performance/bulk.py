@@ -59,6 +59,9 @@ class BulkResult:
     matched: int
     applied: dict[str, int]
     pending: list[PendingItem]
+    # Engine main cues that couldn't land because the track has no waveform
+    # row yet (the cue's persistence home) — reported, never silently dropped
+    maincue_no_waveform: int = 0
 
 
 def _fmt_time(seconds: float) -> str:
@@ -88,6 +91,7 @@ def bulk_import(
     applied = {"hotcues": 0, "beatgrid": 0, "maincue": 0, "key": 0}
     pending: list[PendingItem] = []
     scanned = matched = 0
+    maincue_no_waveform = 0
 
     for track in tracks:
         scanned += 1
@@ -145,7 +149,9 @@ def bulk_import(
                     pend("beatgrid", f"saved grid vs Engine's {grid_detail}", variable)
 
         # ---- main cue (Engine overridden-only, enforced at the source)
-        if engine.maincue is not None and track.id in has_waveform:
+        if engine.maincue is not None and track.id not in has_waveform:
+            maincue_no_waveform += 1
+        elif engine.maincue is not None:
             lib_cue = maincue_by_track[track.id]
             if lib_cue is None:
                 import_maincue(db, track.id, engine.maincue, "fill-empty")
@@ -173,4 +179,10 @@ def bulk_import(
                     pend("key", f"saved key {track.key} vs Engine {engine.key}")
 
     db.commit()
-    return BulkResult(scanned=scanned, matched=matched, applied=applied, pending=pending)
+    return BulkResult(
+        scanned=scanned,
+        matched=matched,
+        applied=applied,
+        pending=pending,
+        maincue_no_waveform=maincue_no_waveform,
+    )

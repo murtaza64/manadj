@@ -12,7 +12,7 @@ from backend import models
 
 from .models import BeatgridValue, HotCueValue, TempoChangeValue
 
-HOTCUE_TIME_TOLERANCE = 0.001
+CUE_TIME_TOLERANCE = 0.001
 BEATGRID_BPM_TOLERANCE = 0.01
 
 
@@ -25,7 +25,7 @@ def hotcue_sets_equal(a: list[HotCueValue], b: list[HotCueValue]) -> bool:
         return False
     for slot, cue_a in by_slot_a.items():
         cue_b = by_slot_b[slot]
-        if abs(cue_a.time - cue_b.time) > HOTCUE_TIME_TOLERANCE:
+        if abs(cue_a.time - cue_b.time) > CUE_TIME_TOLERANCE:
             return False
         if (cue_a.label or None) != (cue_b.label or None):
             return False
@@ -42,7 +42,7 @@ def beatgrids_equal(a: BeatgridValue | None, b: BeatgridValue) -> bool:
     if len(a.tempo_changes) != len(b.tempo_changes):
         return False
     for tc_a, tc_b in zip(a.tempo_changes, b.tempo_changes):
-        if abs(tc_a.start_time - tc_b.start_time) > HOTCUE_TIME_TOLERANCE:
+        if abs(tc_a.start_time - tc_b.start_time) > CUE_TIME_TOLERANCE:
             return False
         if abs(tc_a.bpm - tc_b.bpm) > BEATGRID_BPM_TOLERANCE:
             return False
@@ -52,7 +52,7 @@ def beatgrids_equal(a: BeatgridValue | None, b: BeatgridValue) -> bool:
 
 
 def maincues_equal(a: float, b: float) -> bool:
-    return abs(a - b) <= HOTCUE_TIME_TOLERANCE
+    return abs(a - b) <= CUE_TIME_TOLERANCE
 
 
 def hotcue_values_from_rows(rows: list[models.HotCue]) -> list[HotCueValue]:

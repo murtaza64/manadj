@@ -17,7 +17,7 @@ from backend.sync_common.matching import TrackIndex
 from backend.track_metadata.units import centibpm_to_bpm
 
 from .compare import (
-    HOTCUE_TIME_TOLERANCE,
+    CUE_TIME_TOLERANCE,
     beatgrid_value_from_row,
     beatgrids_equal,
     hotcue_sets_equal,
@@ -205,7 +205,7 @@ def _collect_divergences(
     # maincue: surface None means no user-set cue there (Engine: overridden
     # flag unset) — nothing to compare.
     if "maincue" in reader.fields and surface.maincue is not None:
-        if lib.maincue is None or abs(lib.maincue - surface.maincue) > HOTCUE_TIME_TOLERANCE:
+        if lib.maincue is None or abs(lib.maincue - surface.maincue) > CUE_TIME_TOLERANCE:
             _record_divergence(
                 sid, reader, "maincue", lib.maincue, surface.maincue, diverged, warnings
             )
