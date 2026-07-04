@@ -19,7 +19,9 @@ used by the tag editor, PERF `BeatgridBlock`, and editor DeckCard:
 - The ±10ms constant gets one home (today: `GRID_NUDGE_MS` in DeckPanel +
   literals elsewhere).
 - Icons (PRD icon language): grid nudge uses the grid-ticks-with-arrow
-  SVG pair (not plain ◀/▶); this slice introduces `components/icons/`.
+  SVG pair (not plain ◀/▶); set-downbeat uses the ANCHOR icon (⚓ drawn —
+  the button sets `anchor_time`, ADR 0016: icon = concept), replacing
+  "D". `components/icons/` already exists (slice 04 landed it).
 
 ## Acceptance criteria
 

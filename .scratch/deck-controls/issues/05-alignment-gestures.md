@@ -29,7 +29,9 @@ language plus ONE systematic marker:
 - Icons (PRD icon language): slide-beatjump uses the jump-arrow icons
   (accent-marked); the Alignment nudge keeps PLAIN ◀/▶ + accent — with
   every other pair carrying a specific icon, that combination is
-  unambiguous.
+  unambiguous. Deck-card MUTE becomes a speaker-with-slash SVG
+  (muted/unmuted states) and the Locked-window toggle a padlock SVG
+  (open/closed), both in `components/icons/`.
 
 ## Acceptance criteria
 

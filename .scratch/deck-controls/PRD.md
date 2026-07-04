@@ -74,6 +74,13 @@ which CLASS, the icon says which OPERATION. A small shared SVG icon set
   unambiguous.
 - Transition switcher ◀ name ▶ stays plain (labeled list navigation,
   different neighborhood).
+- **Set downbeat**: an anchor icon (drawn ⚓) replacing the "D" button —
+  the button literally sets the grid's anchor (ADR 0016), so the icon IS
+  the concept.
+- **Mute** (editor deck cards): speaker-with-slash SVG, muted/unmuted
+  states, replacing the text button.
+- **Locked window** (editor): padlock SVG, open/closed communicating the
+  toggle state, replacing the text button.
 
 ## Non-goals
 
