@@ -95,6 +95,9 @@ An independent playback unit: one loaded Track plus its transport state (playhea
 **Mixer**:
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on safety limiter. Mirrors a hardware DJ mixer.
 
+**Audible surface**:
+A group of playback machinery that can produce sound as a unit — the shared Decks+Mixer, or the Transition editor's private player. Exactly one is audible at a time (one running audio clock); an arbiter owns which, and displaced surfaces go silent rather than coexist. Transport gestures from app-wide inputs (a Controller) route to whichever surface is audible; a gesture the surface has no meaning for is dropped, mirroring what the keyboard does there.
+
 **Performance view**:
 The two-deck view for practicing and performing mixes: stacked full-width waveforms with linked zoom, symmetric Deck A/B panels, a central Mixer panel, and the Library's browse surface embedded below. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
 

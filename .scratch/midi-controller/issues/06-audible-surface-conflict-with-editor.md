@@ -1,7 +1,8 @@
 # 06 — MIDI dispatch conflicts with the editor's one-audible-surface invariant
 
-Status: needs-triage (filed 2026-07-04 during the consolidation merge — found
-by cross-stream review, neither stream knew about the other)
+Status: ready-for-agent (fix vehicle: issue 07 — audible-surface arbiter,
+grilled 2026-07-04, ADR 0013. Decision: ROUTE hardware transport to the
+editor's MixPlayer, drop CUE there. Close this when 07 lands.)
 
 ## Problem
 
