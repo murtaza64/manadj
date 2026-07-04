@@ -38,7 +38,10 @@ A Tag Category. A Track's genre means its Tags in this category; the ID3 genre f
 A first-class Track attribute (1–5) expressing intensity. Not a Tag. External libraries encode it differently (e.g. Rekordbox track color, star ratings); those encodings are Sync-boundary details.
 
 **Playlist**:
-A hand-curated, ordered list of Tracks. Curated in manadj and Exported to external libraries. Distinct from the generated playlists that encode Tags in Engine DJ, and from a Mix (which adds performance data).
+A hand-curated, ordered list of Tracks; a Track appears at most once. Curated in manadj and Exported to external libraries. Distinct from the generated playlists that encode Tags in Engine DJ, and from a Mix (which adds performance data).
+
+**Play order**:
+The hand-curated ordering of Tracks within a Playlist — part of the Playlist's identity, what Export preserves. Distinct from a view's *sort*: sorting a playlist's track table (by BPM, key, …) changes only what is displayed and never rewrites Play order. Reordering is only possible when viewing in Play order.
 
 **Transition**:
 A first-class persisted artifact: the handover between an ordered pair of Tracks — entry/exit anchors (in seconds), a duration, an optional tempo-match, and drawn automation lanes for mixer controls. Directional (A→B is not B→A); a pair usually has one Transition, occasionally several. The incoming entry anchor may be negative: the incoming Track's audio then begins partway into the Transition (a silent lead gap). Beat-snapping and tempo-matching are editing affordances, not the model. The accumulating set of saved Transitions is the library of "what mixes well into what" — the seed of track-association features.
