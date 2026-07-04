@@ -27,7 +27,7 @@ def find_missing_tracks_in_rekordbox(
     Archived Tracks are never Export candidates (CONTEXT.md: Archived).
     """
     manadj_tracks = (
-        manadj_session.query(ManAdjTrack).filter(ManAdjTrack.archived_at.is_(None)).all()
+        manadj_session.query(ManAdjTrack).filter(ManAdjTrack.is_active).all()
     )
     rb_contents = list(rb_db.get_content())
     rb_index: TrackIndex[Any] = TrackIndex.build(rb_contents, rb_path)

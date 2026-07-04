@@ -28,7 +28,7 @@ def find_missing_tracks_in_enginedj(
     Archived Tracks are never Export candidates (CONTEXT.md: Archived).
     """
     manadj_tracks = (
-        manadj_session.query(ManAdjTrack).filter(ManAdjTrack.archived_at.is_(None)).all()
+        manadj_session.query(ManAdjTrack).filter(ManAdjTrack.is_active).all()
     )
     edj_tracks = edj_session.query(EDJTrack).all()
     edj_index: TrackIndex[EDJTrack] = TrackIndex.build(edj_tracks, edj_path)

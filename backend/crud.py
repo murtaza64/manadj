@@ -35,9 +35,9 @@ def get_tracks(
     # Archived (CONTEXT.md): out of the active Library. Default listings
     # exclude archived Tracks; archived=True lists ONLY them (the Archived view).
     if archived:
-        query = query.filter(models.Track.archived_at.isnot(None))
+        query = query.filter(~models.Track.is_active)
     else:
-        query = query.filter(models.Track.archived_at.is_(None))
+        query = query.filter(models.Track.is_active)
 
     # Text search on filename, title, or artist
     if search:
@@ -152,7 +152,7 @@ def get_tracks(
 
     # Total ACTIVE library size (archived Tracks are out of the Library)
     total_library_size = (
-        db.query(models.Track).filter(models.Track.archived_at.is_(None)).count()
+        db.query(models.Track).filter(models.Track.is_active).count()
     )
 
     return items, total, total_library_size
@@ -180,14 +180,18 @@ def archive_track(db: Session, track_id: int):
     if not track:
         return None
 
+    # Already archived: full no-op. (Playlist entries added while archived —
+    # auditioning from the Archived view — must survive a re-archive.)
+    if track.archived_at is not None:
+        return track, 0
+
     playlists = get_playlists_containing_track(db, track_id)
     for playlist in playlists:
         remove_track_from_playlist(db, playlist.id, track_id)
 
-    if track.archived_at is None:
-        track.archived_at = func.now()
-        db.commit()
-        db.refresh(track)
+    track.archived_at = func.now()
+    db.commit()
+    db.refresh(track)
     return track, len(playlists)
 
 

@@ -1,6 +1,7 @@
 """SQLAlchemy models for music library database."""
 
 from sqlalchemy import Boolean, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref, deferred, relationship, DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -32,6 +33,16 @@ class Track(Base):
     # Archived (CONTEXT.md): curation verdict — out of the active Library.
     # NULL = active. Record/file/provenance persist; nothing is deleted.
     archived_at = Column(DateTime, nullable=True)
+
+    @hybrid_property
+    def is_active(self) -> bool:
+        """Not Archived. THE predicate for every listing/Export/discovery
+        query — one place to change if the verdict ever grows states."""
+        return self.archived_at is None
+
+    @is_active.expression
+    def is_active(cls):
+        return cls.archived_at.is_(None)
 
     # Relationships
     track_tags = relationship("TrackTag", back_populates="track", cascade="all, delete-orphan")

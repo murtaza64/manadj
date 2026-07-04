@@ -6,7 +6,7 @@ import TrackList from './TrackList';
 import FilterBar from './FilterBar';
 import TagEditor, { type TagEditorHandle } from './TagEditor';
 import Player from './Player';
-import PlaylistSidebar from './PlaylistSidebar';
+import PlaylistSidebar, { type ViewType } from './PlaylistSidebar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
@@ -208,8 +208,6 @@ function deriveRelatedFilters(
 
   return filters;
 }
-
-type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist';
 
 /** Which selection instance a row menu acts on. */
 type MenuPane = 'main' | 'editLibrary';

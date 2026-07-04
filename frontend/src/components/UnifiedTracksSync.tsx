@@ -789,7 +789,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
               <span className="uts-unprocessed">unprocessed — exports with no tags</span>
             )}
             {row.archived && (
-              <span className="uts-unprocessed">archived — out of the active library, not exported</span>
+              <span className="uts-archived">archived — out of the active library, not exported</span>
             )}
           </div>
         </div>

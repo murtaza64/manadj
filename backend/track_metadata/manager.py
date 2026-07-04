@@ -63,7 +63,7 @@ def apply_update(
 
     # Archived Tracks leave Export, including ID3 writes to Disk
     # (CONTEXT.md: Archived) — DB edits still apply.
-    if write_files and file_updates and track.archived_at is None:
+    if write_files and file_updates and track.is_active:
         try:
             write_file_metadata(
                 str(track.filename),
@@ -118,7 +118,7 @@ def compare_with_files(db: Session) -> MetadataComparisonResult:
     """Compare DB metadata with file tags for all ACTIVE tracks; report
     differences. Archived Tracks are excluded — this feeds the write-to-files
     Export flow (CONTEXT.md: Archived)."""
-    tracks = db.query(models.Track).filter(models.Track.archived_at.is_(None)).all()
+    tracks = db.query(models.Track).filter(models.Track.is_active).all()
     stats = MetadataComparisonStats(
         total_tracks=len(tracks),
         tracks_with_changes=0,

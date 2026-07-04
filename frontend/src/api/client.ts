@@ -1,5 +1,6 @@
 import type {
   Playlist,
+  Track,
   PlaylistTrackAdd,
   PlaylistTrackAddResult,
   UnifiedPlaylist,
@@ -144,7 +145,7 @@ export const api = {
     },
 
     /** Reverse the verdict (playlist membership is not restored). */
-    unarchive: async (id: number): Promise<{ archived_at: string | null }> => {
+    unarchive: async (id: number): Promise<Track> => {
       const response = await fetch(`${API_BASE}/tracks/${id}/unarchive`, { method: 'POST' });
       return response.json();
     },

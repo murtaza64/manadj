@@ -21,7 +21,7 @@ def get_tracks_by_tag(manadj_session, tag_id: int) -> list[ManAdjTrack]:
         TrackTag, TrackTag.track_id == ManAdjTrack.id
     ).filter(
         TrackTag.tag_id == tag_id,
-        ManAdjTrack.archived_at.is_(None),
+        ManAdjTrack.is_active,
     ).all()
 
     return tracks

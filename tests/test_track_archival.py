@@ -146,3 +146,66 @@ def test_scan_does_not_repropose_archived_file(db_session, make_track, audio_fil
     names = [c.filename for c in result.candidates]
     assert any("new.mp3" in n for n in names)
     assert not any("known.mp3" in n for n in names)
+
+
+def test_rearchive_preserves_audition_added_playlist_entries(client, make_track) -> None:
+    """Add-to-playlist stays available in the Archived view (auditioning);
+    a re-archive must be a full no-op, not strip those entries."""
+    t = make_track()
+    pl = client.post("/api/playlists/", json={"name": "Set"}).json()["id"]
+    client.post(f"/api/tracks/{t.id}/archive")
+    client.post(f"/api/playlists/{pl}/tracks", json={"track_id": t.id})
+
+    resp = client.post(f"/api/tracks/{t.id}/archive")
+    assert resp.status_code == 200
+    assert resp.json()["removed_from_playlists"] == 0
+    assert _playlist_track_ids(client, pl) == [t.id]
+
+
+def test_archived_excluded_from_tag_playlist_export(db_session, make_track) -> None:
+    """Tag assignments survive archiving, but the tag-playlist Export
+    (Engine 'ManaDJ Tags' tree) must not include archived Tracks."""
+    from backend import models
+    from enginedj.playlist import get_tracks_by_tag
+
+    category = models.TagCategory(name="Genre")
+    db_session.add(category)
+    db_session.commit()
+    tag = models.Tag(name="dnb", category_id=category.id)
+    db_session.add(tag)
+    db_session.commit()
+
+    active, archived = make_track(), make_track(archived_at=datetime.now())
+    db_session.add_all(
+        [
+            models.TrackTag(track_id=active.id, tag_id=tag.id),
+            models.TrackTag(track_id=archived.id, tag_id=tag.id),
+        ]
+    )
+    db_session.commit()
+
+    assert [t.id for t in get_tracks_by_tag(db_session, tag.id)] == [active.id]
+
+
+def test_archived_excluded_from_metadata_compare(db_session, make_track, audio_file) -> None:
+    """compare_with_files feeds write-to-files Export — archived stays out."""
+    from backend.track_metadata.manager import compare_with_files
+
+    path = audio_file(name="a.mp3")
+    make_track(filename=str(path), title="DB Title", archived_at=datetime.now())
+
+    result = compare_with_files(db_session)
+    assert result.stats.total_tracks == 0
+    assert result.comparisons == []
+
+
+def test_patch_on_archived_track_skips_id3_write(db_session, make_track, audio_file) -> None:
+    """DB edits still apply to archived Tracks, but nothing touches the file."""
+    from backend.track_metadata.manager import TrackChanges, apply_update, read_file_metadata
+
+    path = audio_file(name="b.mp3")
+    track = make_track(filename=str(path), title="Old", archived_at=datetime.now())
+
+    updated = apply_update(db_session, track, TrackChanges(title="New"))
+    assert updated.title == "New"  # DB updated
+    assert read_file_metadata(path).title is None  # file untouched

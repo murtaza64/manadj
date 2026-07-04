@@ -163,3 +163,4 @@
   font-size: 11px; padding: 0 2px;
 }
 .uts-chip-diverged-low b { color: #8e8e93; }
+.uts-archived { color: var(--overlay1, #888); font-size: 11px; border: 1px solid #88888855; padding: 0 6px; }

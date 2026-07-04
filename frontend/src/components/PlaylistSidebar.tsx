@@ -11,7 +11,7 @@ import { applyReorder, indicatorY, insertionIndexFromPointer, type RowRect } fro
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import type { Playlist } from '../types';
 
-type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist';
+export type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist';
 
 /** Palette for "Change color ▸" — bright, fully saturated (repo preference). */
 const PLAYLIST_COLORS: Array<{ label: string; value: string }> = [

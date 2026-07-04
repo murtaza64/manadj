@@ -115,13 +115,13 @@ def archive_track(track_id: int, db: Session = Depends(get_db)):
     return {"archived_at": track.archived_at, "removed_from_playlists": removed}
 
 
-@router.post("/{track_id}/unarchive", response_model=schemas.TrackArchiveResult)
+@router.post("/{track_id}/unarchive", response_model=schemas.Track)
 def unarchive_track(track_id: int, db: Session = Depends(get_db)):
     """Reverse the Archived verdict. Playlist membership is not restored."""
     track = crud.unarchive_track(db, track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
-    return {"archived_at": track.archived_at, "removed_from_playlists": 0}
+    return crud.get_track(db, track_id)
 
 
 @router.patch("/{track_id}", response_model=schemas.Track)
