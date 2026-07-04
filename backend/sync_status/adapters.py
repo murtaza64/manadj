@@ -50,11 +50,12 @@ class DiskSurfaceReader:
 
 class EngineSurfaceReader:
     """Engine DJ: Track rows plus Tag assignments encoded as the
-    "manaDJ Tags" playlist tree, plus performance data (Hot Cues, Beatgrid,
-    Main cue) decoded from the PerformanceData blobs."""
+    "manaDJ Tags" playlist tree, energy encoded as the star rating, plus
+    performance data (Hot Cues, Beatgrid, Main cue) decoded from the
+    PerformanceData blobs."""
 
     fields = frozenset(
-        {"title", "artist", "key", "bpm", "tags", "hotcues", "beatgrid", "maincue"}
+        {"title", "artist", "key", "bpm", "energy", "tags", "hotcues", "beatgrid", "maincue"}
     )
 
     def __init__(self, engine_db) -> None:  # EngineDJDatabase
@@ -67,6 +68,7 @@ class EngineSurfaceReader:
         from enginedj.models.playlist import Playlist
         from enginedj.models.playlist_entity import PlaylistEntity
         from enginedj.models.track import Track as EDJTrack
+        from enginedj.ratings import rating_to_energy
 
         with self._db.session_m() as session:
             tags_by_track: dict[int, list[str]] = {}
@@ -103,6 +105,7 @@ class EngineSurfaceReader:
                             artist=t.artist,
                             key=t.key,  # already the canonical 0-23 ID
                             bpm=bpm,
+                            energy=rating_to_energy(t.rating),
                             tags=sorted(tags_by_track.get(t.id, [])),
                             hotcues=perf_fields.hotcues if perf_fields else None,
                             beatgrid=perf_fields.beatgrid if perf_fields else None,

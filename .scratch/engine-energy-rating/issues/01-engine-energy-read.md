@@ -1,6 +1,6 @@
 # Energy read from Engine — divergence and per-cell import
 
-Status: ready-for-agent
+Status: closed (implemented change rlntlqus)
 
 ## What to build
 
@@ -23,3 +23,7 @@ A rating that is not an exact multiple of 20 (hand-edited DB, other tools) decod
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+**2026-07-04 — Done** (jj change `rlntlqus`). `enginedj/ratings.py`: `rating_to_energy` / `energy_to_rating` (star = rating/20, 0/NULL = absent, half rounds up, clamp 1-5; 13 unit tests). `EngineSurfaceReader` carries `energy` decoded from `Track.rating`. 3 aggregator-seam tests (diverged/unrated-not-importable/empty-library-importable); per-cell import needed no frontend work (energy already in `IMPORTABLE_UI_FIELDS`, surface-agnostic). Real-DB dry-run: 994 tracks decode to {None: 871, 3: 43, 4: 58, 5: 22}, matching the raw rating distribution exactly.

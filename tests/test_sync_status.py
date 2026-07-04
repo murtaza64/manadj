@@ -24,7 +24,7 @@ class FakeSurfaceReader:
         return self._refs
 
 
-ENGINE_FIELDS = frozenset({"title", "artist", "key", "bpm", "tags"})
+ENGINE_FIELDS = frozenset({"title", "artist", "key", "bpm", "energy", "tags"})
 REKORDBOX_FIELDS = frozenset({"title", "artist", "key", "energy", "tags"})
 DISK_FIELDS = frozenset({"title", "artist", "key", "bpm"})
 
@@ -182,6 +182,51 @@ class TestDivergence:
         row = row_for(result, title="I")
         d = next(x for x in row.diverged if x.field == "key")
         assert "engine" in d.importable_from
+
+    def test_engine_energy_equal_is_in_sync(self, db, make_track):
+        make_track(filename="/m/eq.mp3", title="Eq", energy=3)
+        result = compute_sync_status(
+            db, surfaces(engine=[ref("/m/eq.mp3", title="Eq", energy=3)])
+        )
+        row = row_for(result, title="Eq")
+        assert all(d.field != "energy" for d in row.diverged)
+
+    def test_engine_energy_diverges(self, db, make_track):
+        """Engine carries energy (decoded from its star rating): a different
+        value there is an ordinary scalar divergence, importable per-cell."""
+        make_track(filename="/m/en.mp3", title="En", energy=3)
+        result = compute_sync_status(
+            db, surfaces(engine=[ref("/m/en.mp3", title="En", energy=5)])
+        )
+        row = row_for(result, title="En")
+        d = next(x for x in row.diverged if x.field == "energy")
+        assert d.library_value == 3
+        assert d.surface_values == {"engine": 5}
+        assert "engine" in d.importable_from
+
+    def test_engine_unrated_track_diverges_but_is_not_importable(self, db, make_track):
+        """Engine rating 0/NULL decodes as absent: with Library energy set it
+        diverges (Export's to-do), but Engine can't supply the field."""
+        make_track(filename="/m/un.mp3", title="Un", energy=4)
+        result = compute_sync_status(
+            db, surfaces(engine=[ref("/m/un.mp3", title="Un", energy=None)])
+        )
+        row = row_for(result, title="Un")
+        d = next(x for x in row.diverged if x.field == "energy")
+        assert d.surface_values == {"engine": None}
+        assert d.importable_from == []
+
+    def test_empty_library_energy_importable_from_engine(self, db, make_track):
+        """No Library energy + a rated Engine track: no_overwrite divergence,
+        Engine offered as the import source."""
+        make_track(filename="/m/ne.mp3", title="Ne", energy=None)
+        result = compute_sync_status(
+            db, surfaces(engine=[ref("/m/ne.mp3", title="Ne", energy=2)])
+        )
+        row = row_for(result, title="Ne")
+        d = next(x for x in row.diverged if x.field == "energy")
+        assert d.no_overwrite is True
+        assert d.importable_from == ["engine"]
 
     def test_surface_with_no_value_is_not_importable(self, db, make_track):
         """A surface that carries the field but holds nothing can't supply it:
