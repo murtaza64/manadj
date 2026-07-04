@@ -3,32 +3,49 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
+import { TopBar } from './components/TopBar';
+import type { AppMode } from './components/TopBar';
 import { FilterProvider } from './contexts/FilterContext';
 import { DeckProvider, DeckScope } from './contexts/DeckContext';
+import { MidiControllerBridge } from './components/MidiControllerBridge';
+import MixEditorProto from './prototype/MixEditorProto';
 
 const queryClient = new QueryClient();
 
-type View = 'library' | 'sync' | 'performance';
+type View = AppMode | 'sync';
+
+// PROTOTYPE (mix-editor): ?proto=mix opens straight into the Transition
+// editor (make proto). It is otherwise a normal top-bar mode.
+const initialView: View =
+  new URLSearchParams(window.location.search).get('proto') === 'mix' ? 'transition' : 'library';
 
 function App() {
-  const [view, setView] = useState<View>('library');
+  const [view, setView] = useState<View>(initialView);
 
   return (
     <QueryClientProvider client={queryClient}>
       <DeckProvider>
+        {/* Controller layer: above the view switch, like the Decks it drives. */}
+        <MidiControllerBridge />
         <FilterProvider>
           {view === 'sync' ? (
             <SyncView onClose={() => setView('library')} />
-          ) : view === 'performance' ? (
-            <PerformanceView onClose={() => setView('library')} />
           ) : (
-            /* The library view is Deck A (performance-mode issue 02). */
-            <DeckScope deck="A">
-              <Library
-                onOpenPlaylistSync={() => setView('sync')}
-                onOpenPerformance={() => setView('performance')}
-              />
-            </DeckScope>
+            <div className="app-shell">
+              <TopBar mode={view} onModeChange={setView} onOpenSync={() => setView('sync')} />
+              <main className="app-main">
+                {view === 'performance' ? (
+                  <PerformanceView />
+                ) : view === 'transition' ? (
+                  <MixEditorProto />
+                ) : (
+                  /* The library view is Deck A (performance-mode issue 02). */
+                  <DeckScope deck="A">
+                    <Library />
+                  </DeckScope>
+                )}
+              </main>
+            </div>
           )}
         </FilterProvider>
       </DeckProvider>

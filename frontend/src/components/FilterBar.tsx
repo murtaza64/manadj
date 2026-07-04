@@ -9,19 +9,22 @@ import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon, ArrowDownIcon } fr
 import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
 import FindRelatedTracksModal from './FindRelatedTracksModal';
-import { useFilters } from '../contexts/FilterContext';
+import { DEFAULT_FILTERS, useFilters } from '../contexts/FilterContext';
 import type { RelatedTracksSettings } from './Library';
 import './FilterBar.css';
 
 interface FilterBarProps {
   totalTracks: number;
   filteredCount: number;
-  selectedTrack: Track | null;
+  /** Loaded decks — Find Compatible's reference model (transition-library
+   * 03): the match runs from a loaded deck, not the selection. */
+  loadedA: Track | null;
+  loadedB: Track | null;
   onFindRelated: () => void;
   onApplySettings: (settings: RelatedTracksSettings) => void;
 }
 
-export default function FilterBar({ totalTracks, filteredCount, selectedTrack, onFindRelated, onApplySettings }: FilterBarProps) {
+export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB, onFindRelated, onApplySettings }: FilterBarProps) {
   const { filters, setFilters } = useFilters();
   const [searchInput, setSearchInput] = useState(filters.search);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
@@ -68,13 +71,15 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
     setFilters({ ...filters, search: '' });
   };
 
+  const anyDeckLoaded = loadedA !== null || loadedB !== null;
+
   const handleQuickApply = () => {
-    if (!selectedTrack) return;
+    if (!anyDeckLoaded) return;
     onFindRelated();
   };
 
   const handleOpenSettings = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!selectedTrack) return;
+    if (!anyDeckLoaded) return;
     setRelatedModalPosition({ x: e.clientX, y: e.clientY });
     setShowRelatedModal(true);
   };
@@ -82,6 +87,16 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
   const handleApplySettings = (settings: RelatedTracksSettings) => {
     onApplySettings(settings);
   };
+
+  /** Anything non-default that Clear All would clear (sort is exempt). */
+  const hasActiveFilters =
+    filters.search !== '' ||
+    filters.selectedTagIds.length > 0 ||
+    filters.energyMin !== 1 ||
+    filters.energyMax !== 5 ||
+    filters.bpmCenter !== null ||
+    filters.selectedKeyCamelotIds.length > 0 ||
+    filters.hasTransitionFromDecks;
 
   return (
     <div style={{
@@ -92,7 +107,7 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
       flexDirection: 'column',
       gap: '12px'
     }}>
-      {/* Filter bar - new order: Tag, Search, Energy, Key, BPM, Find Related, Clear All, Result Count */}
+      {/* Filter bar - order: Tag, Search, Energy, Key, BPM, Find Compatible, transitions toggle, Clear All, Result Count */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         {/* Tag Toggle Icon with Red Dot Indicator */}
         <div
@@ -282,18 +297,19 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
           }
         </button>
 
-        {/* Find Related Button Group */}
+        {/* Find Compatible Button Group (runs from a loaded deck) */}
         <div style={{ display: 'flex', gap: 0 }}>
           <button
             onClick={handleOpenSettings}
-            disabled={selectedTrack === null}
+            disabled={!anyDeckLoaded}
             className="find-related-settings"
+            title={anyDeckLoaded ? 'Find tracks compatible with a loaded deck' : 'Load a deck first'}
             style={{
               padding: '4px 10px',
               background: 'var(--surface0)',
-              color: selectedTrack ? 'var(--text)' : 'var(--overlay0)',
+              color: anyDeckLoaded ? 'var(--text)' : 'var(--overlay0)',
               border: '1px solid var(--surface0)',
-              cursor: selectedTrack ? 'pointer' : 'not-allowed',
+              cursor: anyDeckLoaded ? 'pointer' : 'not-allowed',
               fontSize: '12px',
               fontWeight: 'bold',
               display: 'flex',
@@ -301,20 +317,21 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
               gap: '4px',
             }}
           >
-            <span>Find Related</span>
+            <span>Find Compatible</span>
           </button>
 
           <button
             onClick={handleQuickApply}
-            disabled={selectedTrack === null}
+            disabled={!anyDeckLoaded}
             className="find-related-quick"
+            title="Quick apply: last settings + last chosen deck"
             style={{
               background: 'var(--surface0)',
-              color: selectedTrack ? 'var(--text)' : 'var(--overlay0)',
+              color: anyDeckLoaded ? 'var(--text)' : 'var(--overlay0)',
               border: '1px solid var(--surface0)',
               padding: '4px 8px',
               minWidth: '28px',
-              cursor: selectedTrack ? 'pointer' : 'not-allowed',
+              cursor: anyDeckLoaded ? 'pointer' : 'not-allowed',
               fontSize: '12px',
               display: 'flex',
               alignItems: 'center',
@@ -325,48 +342,43 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
           </button>
         </div>
 
+        {/* Proven tier (transition-library 02): only tracks with a saved
+            Transition FROM either loaded deck. One filter axis, two
+            controls — the Find Compatible modal binds to the same state. */}
+        <button
+          onClick={() =>
+            setFilters({ ...filters, hasTransitionFromDecks: !filters.hasTransitionFromDecks })
+          }
+          className="filter-bar-transition-btn"
+          aria-pressed={filters.hasTransitionFromDecks}
+          title="Only tracks with a saved transition from a loaded deck"
+          style={{
+            padding: '4px 8px',
+            background: 'transparent',
+            color: filters.hasTransitionFromDecks ? 'var(--sapphire)' : 'var(--text)',
+            border: `1px solid ${filters.hasTransitionFromDecks ? 'var(--sapphire)' : 'var(--surface0)'}`,
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: 'bold',
+          }}
+        >
+          ◆ transitions
+        </button>
+
         {/* Clear All Filters Button */}
         <button
           onClick={() => {
             setSearchInput('');
-            setFilters({
-              search: '',
-              selectedTagIds: [],
-              energyMin: 1,
-              energyMax: 5,
-              tagMatchMode: 'ANY',
-              bpmCenter: null,
-              bpmThresholdPercent: 5,
-              selectedKeyCamelotIds: [],
-              sortColumn: 'created_at',
-              sortDirection: 'desc',
-            });
+            setFilters({ ...DEFAULT_FILTERS });
           }}
-          disabled={
-            filters.search === '' &&
-            filters.selectedTagIds.length === 0 &&
-            filters.energyMin === 1 &&
-            filters.energyMax === 5 &&
-            filters.bpmCenter === null &&
-            filters.selectedKeyCamelotIds.length === 0
-          }
+          disabled={!hasActiveFilters}
           className="filter-bar-clear-all-btn"
           style={{
             padding: '4px 8px',
             background: 'var(--surface0)',
-            color: (filters.search === '' &&
-              filters.selectedTagIds.length === 0 &&
-              filters.energyMin === 1 &&
-              filters.energyMax === 5 &&
-              filters.bpmCenter === null &&
-              filters.selectedKeyCamelotIds.length === 0) ? 'var(--overlay0)' : 'var(--text)',
+            color: hasActiveFilters ? 'var(--text)' : 'var(--overlay0)',
             border: '1px solid var(--surface0)',
-            cursor: (filters.search === '' &&
-              filters.selectedTagIds.length === 0 &&
-              filters.energyMin === 1 &&
-              filters.energyMax === 5 &&
-              filters.bpmCenter === null &&
-              filters.selectedKeyCamelotIds.length === 0) ? 'not-allowed' : 'pointer',
+            cursor: hasActiveFilters ? 'pointer' : 'not-allowed',
             fontSize: '12px',
             fontWeight: 'bold',
           }}
@@ -482,7 +494,10 @@ export default function FilterBar({ totalTracks, filteredCount, selectedTrack, o
       <FindRelatedTracksModal
         isOpen={showRelatedModal}
         onClose={() => setShowRelatedModal(false)}
-        selectedTrack={selectedTrack}
+        loadedA={loadedA}
+        loadedB={loadedB}
+        hasTransition={filters.hasTransitionFromDecks}
+        onToggleTransition={(on) => setFilters({ ...filters, hasTransitionFromDecks: on })}
         onApply={handleApplySettings}
         openPosition={relatedModalPosition}
       />

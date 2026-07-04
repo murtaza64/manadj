@@ -1,0 +1,648 @@
+/* PROTOTYPE (mix-editor) — throwaway. */
+
+.mixproto {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--base, #1e1e2e);
+  color: var(--text, #cdd6f4);
+}
+
+/* Top panel: the transition-editor surface (sibling of Library/Performance
+   top panels); bottom half is the shared library browse surface. */
+.mixproto-top {
+  height: 50%;
+  display: flex;
+  flex-direction: column;
+  background: var(--crust, #11111b);
+  border-bottom: 2px solid var(--surface1, #45475a);
+  overflow: hidden;
+  /* Drag-heavy surface: stray lane/region drags must not text-select
+     labels or controls (issue 15). Readable text opts back in below. */
+  user-select: none;
+}
+
+.mixproto-top input,
+.mixproto-tweaktitle,
+.mixproto-deckcard-artist {
+  user-select: text;
+}
+
+.mixproto-library {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mixproto-library > div {
+  height: 100%;
+}
+
+.mixproto-bpm-base {
+  color: var(--yellow, #f9e2af);
+  font-weight: 700;
+}
+
+.mixproto-bpm-eff {
+  color: var(--sapphire, #74c7ec);
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mixproto-bpm-eff em {
+  font-style: normal;
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.mixproto-tweaktitle {
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixproto-arranger {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.mixproto-decklabel {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mixproto-decklabel.a {
+  color: #00e5ff;
+}
+
+.mixproto-decklabel.b {
+  color: #ff2d95;
+}
+
+.mixproto-decklabels {
+  display: flex;
+  gap: 24px;
+}
+
+.mixproto-timeline-wrap {
+  position: relative;
+}
+
+/* No native scrolling and no scrollbar: horizontal motion is applied as a
+   transform from a single rAF (wheel + minimap viewport are the pan inputs),
+   keeping the JS-painted waveforms and the DOM layers in the same frame. */
+.mixproto-timeline {
+  overflow: hidden;
+  border: 1px solid var(--surface0, #313244);
+  background: #0b0b12;
+  /* Fixed stack height: adding/removing lanes redistributes THIS space
+     (strips flex below) instead of growing the timeline vertically. */
+  height: max(280px, 34vh);
+}
+
+.mixproto-timeline-content {
+  position: relative;
+  min-width: 100%;
+  will-change: transform;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Transition switcher: segmented one-border group, same idiom as the deck
+   cards' .mixproto-pair. */
+.mixproto-switcher {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--surface1, #45475a);
+  height: 22px;
+  box-sizing: border-box;
+}
+
+.mixproto-switcher > * + * {
+  border-left: 1px solid var(--surface1, #45475a);
+}
+
+.mixproto-switcher button {
+  background: transparent;
+  border: none;
+  color: var(--text, #cdd6f4);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 0 6px;
+}
+
+.mixproto-switcher button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mixproto-switcher button:hover:not(:disabled) {
+  color: var(--sapphire, #74c7ec);
+}
+
+.mixproto-switcher-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixproto-switcher-input {
+  width: 120px;
+  background: transparent;
+  border: none;
+  color: var(--text, #cdd6f4);
+  font-size: 11px;
+  font-weight: bold;
+  padding: 0 6px;
+  outline: none;
+}
+
+.mixproto-switcher-star.on {
+  color: var(--yellow, #f9e2af);
+}
+
+.mixproto-switcher-pos {
+  display: flex;
+  align-items: center;
+  padding: 0 5px;
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--subtext0, #a6adc8);
+}
+
+.mixproto-switcher-del.confirming {
+  color: var(--red, #f38ba8);
+}
+
+.mixproto-fit {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  padding: 2px 10px;
+  background: var(--crust);
+  border: 1px solid var(--sapphire);
+  color: var(--sapphire);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.mixproto-fit:hover {
+  color: var(--subtext1);
+  border-color: var(--subtext1);
+}
+
+.mixproto-timeline-row {
+  position: relative;
+  /* Half the pre-stack height: polarized half-waveforms carry the same
+     information in half the space (issue 13 proportions pass). Fixed —
+     lane strips flex around them. */
+  flex: 0 0 max(28px, 4vh);
+  touch-action: none;
+}
+
+/* The seam (issue 13): rows sit flush — no border/gap between A and B, so
+   peak-vs-peak beat alignment reads exactly at the meeting line. */
+.mixproto-timeline-row.b {
+  border-bottom: 1px solid var(--surface0, #313244);
+}
+
+.mixproto-wavecanvas {
+  /* Counter-transformed each frame to stay viewport-fixed while the content
+     translates (was position: sticky, which lives outside the rAF clock). */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  height: 100%;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.mixproto-wavecanvas canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.mixproto-blockframe {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border: 1px solid;
+
+  pointer-events: none;
+}
+
+.mixproto-blockframe.a {
+  border-color: #00e5ff;
+}
+
+.mixproto-blockframe.b {
+  border-color: #ff2d95;
+}
+
+.mixproto-lanestrip {
+  position: relative;
+  /* Strips SHARE the timeline's fixed height equally: removing a lane
+     makes the rest taller, adding one shrinks them — the stack never
+     grows. min-height keeps a strip editable in crowded stacks. */
+  flex: 1 1 0;
+  min-height: 22px;
+  border-bottom: 2px solid #1b1b28;
+  touch-action: none;
+}
+
+/* Deck-tinted strip backgrounds + accent edge: A lanes read as A's, B as B's. */
+/* Deck accent via inset shadow, NOT border-left: a border would shift the
+   absolutely-positioned lane windows off the shared time axis. */
+.mixproto-lanestrip.a {
+  background: linear-gradient(rgba(0, 229, 255, 0.06), rgba(0, 229, 255, 0.02)), #0e0e16;
+  box-shadow: inset 3px 0 0 rgba(0, 229, 255, 0.6);
+}
+
+.mixproto-lanestrip.b {
+  background: linear-gradient(rgba(255, 45, 149, 0.06), rgba(255, 45, 149, 0.02)), #0e0e16;
+  box-shadow: inset 3px 0 0 rgba(255, 45, 149, 0.6);
+}
+
+.mixproto-lanestrip .mixproto-lanelabel {
+  /* Pinned to the viewport's left edge by a per-frame counter-transform in
+     the rAF tick (sticky can't track the content's translateX scroll). */
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  width: auto;
+  z-index: 2;
+  will-change: transform;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-family: monospace;
+  background: rgba(11, 11, 18, 0.8);
+  padding: 1px 4px;
+
+}
+
+.mixproto-lanewindow {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  /* The editable region stands out from the rest of the strip. */
+  background: rgba(49, 50, 68, 0.35);
+  /* Outline instead of border: borders inset the drawing surface, skewing
+     guide/curve x-coordinates off the shared time axis. */
+  outline: 1px solid #45475a;
+}
+
+/* Pointer target: overhangs the lane rect by LANE_PAD on the SIDES ONLY
+   (x=0/x=1 breakpoints grabbable across their whole circle) — vertically it
+   matches the lane rect exactly so it never steals pointer events from the
+   strips stacked above/below. */
+.mixproto-lanehit {
+  position: absolute;
+  inset: 0 -7px;
+  touch-action: none;
+}
+
+.mixproto-lanehit canvas {
+  /* Viewport-windowed: the draw code positions/sizes the canvas (inline
+     left/width) to cover only the visible slice of the window + margin —
+     full-window canvases were giant compositor surfaces (scroll jitter).
+     Vertically it overhangs LANE_PAD px so breakpoint circles at the
+     extremes draw complete. Visual only: pointer events land on the hit
+     div, never on the canvas. */
+  position: absolute;
+  left: 0;
+  top: -7px;
+  width: 0;
+  height: calc(100% + 14px);
+  display: block;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Drawn-but-silent waveform spans (A past the transition end, B's content
+   before the window start): dimmed by a plain translucent overlay. NOT
+   backdrop-filter — the canvases beneath repaint every rAF tick, so a
+   filter here ran a GPU filter pass over big regions every frame and made
+   the WHOLE app sluggish (v24 regression hunt). */
+.mixproto-inaudible {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: rgba(11, 11, 18, 0.6);
+}
+
+.mixproto-overlap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* No fill: the lane strips make the transition region obvious; the two
+     edge lines remain as trim-handle markers. */
+  border-left: 2px solid rgba(255, 45, 149, 0.55);
+  border-right: 2px solid rgba(255, 45, 149, 0.55);
+  pointer-events: none;
+}
+
+.mixproto-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0; /* driven per frame via transform: translateX (issue 10) */
+  /* Matches the APPARENT width of the renderer playhead (3 buffer px =
+     1.5 CSS px at DPR 2) — a raw 3 CSS px read double-weight (issue 14).
+     z-index above the lane canvases (1) and labels (2). */
+  width: 1.5px;
+  background: var(--pink);
+  pointer-events: none;
+  z-index: 100;
+  will-change: transform;
+}
+
+/* ── Info bar: deck A | transition center | deck B ── */
+
+.mixproto-infobar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.mixproto-deckcard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 8px;
+
+  border: 1px solid var(--surface0, #313244);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.mixproto-deckcard.a {
+  border-left: 3px solid #00e5ff;
+}
+
+.mixproto-deckcard.b {
+  border-right: 3px solid #ff2d95;
+  text-align: right;
+}
+
+.mixproto-deckcard.b .mixproto-deckcard-head,
+.mixproto-deckcard.b .mixproto-deckcard-row {
+  flex-direction: row-reverse;
+}
+
+.mixproto-deckcard-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mixproto-deckcard-artist {
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mixproto-deckcard-key {
+  color: var(--mauve, #cba6f7);
+  font-family: monospace;
+  font-weight: 700;
+}
+
+.mixproto-deckcard-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mixproto-deckcard-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mixproto-deckcard-row input {
+  width: 72px; /* look comes from the shared control idiom below */
+}
+
+.mixproto-deckcard-row button {
+  background: none;
+  border: 1px solid var(--surface0, #313244);
+  color: var(--text, #cdd6f4);
+
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.mixproto-deckcard-row button:hover {
+  border-color: #ffe600;
+  color: #ffe600;
+}
+
+.mixproto-deckcard-row button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Segmented pair (issue 19): label + segments share ONE border and read as
+   a single control; internal separators only. Reused by the nudge pairs
+   and the slide/jump gesture cluster. */
+.mixproto-pair {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--surface1, #45475a);
+  height: 22px;
+  box-sizing: border-box;
+}
+
+.mixproto-pair > * + * {
+  border-left: 1px solid var(--surface1, #45475a);
+}
+
+.mixproto-pair-label {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  font-size: 10px;
+  font-family: monospace;
+  font-weight: bold;
+  color: var(--subtext0, #a6adc8);
+}
+
+.mixproto-deckcard-row .mixproto-pair button {
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  height: 100%;
+}
+
+.mixproto-pair .mixproto-slidesize {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+}
+
+/* Uniform control height across the card rows (one baseline grid). */
+.mixproto-deckcard-row button,
+.mixproto-deckcard-row input,
+.mixproto-cueslide {
+  height: 22px;
+  box-sizing: border-box;
+}
+
+/* Standalone action (downbeat): same metrics, weighted distinct from the
+   nudge pairs via the beatgrid functional color. */
+.mixproto-deckcard-row .mixproto-action {
+  color: var(--yellow, #f9e2af);
+  border-color: var(--yellow, #f9e2af);
+}
+
+.mixproto-slidesize {
+  min-width: 24px;
+  text-align: center;
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: bold;
+}
+
+.mixproto-cueslide {
+  font-family: monospace;
+  font-weight: bold;
+  min-width: 22px;
+}
+
+/* Empty slot: press to set a cue at this deck's playhead. */
+.mixproto-cueslide.unset {
+  border-style: dashed;
+  color: var(--surface2, #585b70);
+}
+
+/* Cue slots always read 1-8 left-to-right: the card's mirrored layout
+   (row-reverse on deck B) does not apply to the gesture row. */
+.mixproto-deckcard.b .mixproto-deckcard-row.mixproto-slides {
+  flex-direction: row;
+}
+
+.mixproto-center {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--surface0, #313244);
+
+  font-size: 12px;
+}
+
+.mixproto-center-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mixproto-center-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Site control idiom (player-button): transparent background, 1px border,
+   bold, square corners. Selects lose native chrome and gain a drawn caret;
+   number inputs lose their spinners (keyboard/wheel entry unchanged). */
+.mixproto-center-row input[type='number'],
+.mixproto-deckcard-row input[type='number'],
+.mixproto-center-row select {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--surface1, #45475a);
+  border-radius: 0;
+  color: var(--text, #cdd6f4);
+  font-weight: bold;
+  font-size: 11px;
+  padding: 2px 5px;
+}
+
+.mixproto-center-row input[type='number']::-webkit-outer-spin-button,
+.mixproto-center-row input[type='number']::-webkit-inner-spin-button,
+.mixproto-deckcard-row input[type='number']::-webkit-outer-spin-button,
+.mixproto-deckcard-row input[type='number']::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.mixproto-center-row select {
+  cursor: pointer;
+  padding-right: 18px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path d='M0 0l4 5 4-5z' fill='%23a6adc8'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+}
+
+.mixproto-center-row input:focus-visible,
+.mixproto-deckcard-row input:focus-visible,
+.mixproto-center-row select:focus-visible {
+  outline: none;
+  border-color: var(--sapphire, #74c7ec);
+}
+
+.mixproto-center-row input[type='number'] {
+  width: 56px;
+}
+
+.mixproto-center-row input[type='checkbox'] {
+  accent-color: var(--sapphire, #74c7ec);
+}
+
+.mixproto-globalminimap {
+  width: 100%;
+  height: 26px;
+  display: block;
+  border: 1px solid var(--surface0, #313244);
+
+  margin-top: 4px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* Toggle buttons (locked window on B, deck mutes): pressed = functional
+   color, matching the site's square-button idiom. */
+.mixproto-lockbtn.on {
+  color: var(--sapphire, #74c7ec);
+  border-color: var(--sapphire, #74c7ec);
+}
+
+.mixproto-mutebtn.on {
+  color: var(--red, #f38ba8);
+  border-color: var(--red, #f38ba8);
+}
+
+.mixproto-laneclear {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}

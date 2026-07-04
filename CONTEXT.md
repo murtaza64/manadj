@@ -38,7 +38,41 @@ A Tag Category. A Track's genre means its Tags in this category; the ID3 genre f
 A first-class Track attribute (1–5) expressing intensity. Not a Tag. External libraries encode it differently (e.g. Rekordbox track color, star ratings); those encodings are Sync-boundary details.
 
 **Playlist**:
-A hand-curated, ordered list of Tracks. Curated in manadj and Exported to external libraries. Distinct from the generated playlists that encode Tags in Engine DJ.
+A hand-curated, ordered list of Tracks. Curated in manadj and Exported to external libraries. Distinct from the generated playlists that encode Tags in Engine DJ, and from a Mix (which adds performance data).
+
+**Transition**:
+A first-class persisted artifact: the handover between an ordered pair of Tracks — entry/exit anchors (in seconds), a duration, an optional tempo-match, and drawn automation lanes for mixer controls. Directional (A→B is not B→A); a pair usually has one Transition, occasionally several. The incoming entry anchor may be negative: the incoming Track's audio then begins partway into the Transition (a silent lead gap). Beat-snapping and tempo-matching are editing affordances, not the model. The accumulating set of saved Transitions is the library of "what mixes well into what" — the seed of track-association features.
+
+**Sketch origin**:
+The Transition editor's timeline starts at the outgoing Track's start — an invariant, not a setting. The outgoing Track never moves on the timeline; every alignment gesture is expressible as a Slide of the incoming Track, the window, or both.
+
+**Transition editor**:
+The top-panel mode (a sibling of the library and Performance views) for editing the saved Transition between two loaded Tracks on a DAW-style timeline. Entering it pauses other playback surfaces: one audible surface at a time.
+
+**Mix**:
+Future concept: an ordered sequence of Tracks whose adjacencies reference saved Transitions. Deferred until the Transition library exists. Distinct from a Playlist, and from the Classification value "mix" (an externally recorded DJ mix on a Source).
+
+**Favorite**:
+A boolean on a Transition marking a proven move — asserting both "these Tracks go well together" and "this specific Transition is good." The unit discovery ranks by. Distinct from a Track's Rating.
+_Avoid_: like (social-app connotation).
+
+**Preferred pair**:
+A derived, never-stored property: an ordered Track pair with at least one favorited Transition. Surfaces as the starred variant of Transition-library marks. Bookmarking a pairing with no sketched Transition is deliberately NOT this — that would be a worklist concept, not a Favorite variant.
+
+**Transition library**:
+The queryable index over saved Transitions — "what mixes out of / into this Track" — surfaced as library-row marks and discovery filters. Directional, like the Transitions it indexes.
+
+**Transition template**:
+A named beat-domain recipe for producing a Transition: per-side anchor rules (cue slot + beat delta on each track's own grid), a length in beats (fixed or scalable at apply time), and normalized automation lanes (e.g. "bass swap"). Applying one translates beats to seconds via the tempo-matched beatgrids and yields an ordinary seconds-based Transition — the recipe is an editing affordance, not a runtime concept. Designed; built behind DB persistence.
+
+**Slide**:
+Realigning the Track pair in the Transition editor by moving the incoming Track's content relative to the rest. A Slide changes the pair alignment and re-cues only the incoming deck: the playhead's mix position never moves and stays pinned to the outgoing Track, which never hiccups. The incoming deck's controls re-purpose transport gestures as Slides: beat jump = slide by ±N of its own beats; hot cue = slide so that cue and the playhead coincide. The outgoing deck's controls stay plain transport (its track time ≡ mix time — jumping it IS jumping the mix; re-decided 2026-07-03, replacing the earlier mirrored A-slides which duplicated B's under the lock toggle). Distinct from the transport meaning of those gestures on other surfaces.
+
+**Locked window**:
+A Transition-editor toggle choosing which Track the Transition window sticks to during a Slide (incoming-deck gestures and block drags only): locked, the window rides the slid Track (the same audio stays under it); unlocked, it stays with the outgoing Track. Double-drop line-up: jump the playhead to the outgoing Track's drop cue, then hot-cue the incoming Track's drop unlocked — the drops align.
+
+**Cue-slot convention**:
+A library convention (not a code concept) giving hot cue slots stable musical meaning so Transition templates can anchor to them: 1 = first buildup, 4 = drop. Missing slots fall back to hard-coded heuristic beat positions at template-apply time.
 
 **Key**:
 One of 24 key centers (12 tonics × major/minor) assigned to a Track. OpenKey is the preferred notation for display and discussion; Camelot, musical, and external libraries' notations are conversions from the same canonical value.
@@ -46,6 +80,9 @@ One of 24 key centers (12 tonics × major/minor) assigned to a Track. OpenKey is
 **Harmonically compatible**:
 The relation between two Keys that mix well together. The basis of harmonic-mixing features (Circle of Fifths, finding tracks to mix into).
 _Avoid_: related (too vague — could mean same artist, genre, etc.)
+
+**Compatible**:
+A heuristic relation between Tracks: key, tempo, energy, and tag agreement suggest they would mix well. One of discovery's two evidence tiers — heuristics propose, the Transition library confirms (proven, Favorite-ranked). "Find Compatible" is the feature surfacing this tier (renamed from "Find Related", which the glossary forbids).
 
 ### Performance data
 

@@ -273,8 +273,8 @@ export class DeckEngine {
   }
 
   // ── Sound controls ─────────────────────────────────────────────────────
-  // (EQ/filter live on the Mixer's channel strip — ADR 0009. The deck keeps
-  // only varispeed.)
+  // (EQ/filter/fader live on the Mixer's channel strip — ADR 0009. The deck
+  // keeps only varispeed.)
 
   setPitch(percent: number): void {
     const clamped = Math.max(-PITCH_RANGE_PERCENT, Math.min(PITCH_RANGE_PERCENT, percent));
@@ -299,6 +299,10 @@ export class DeckEngine {
    * clock exact — a smoothed rate would drift against the anchor math.
    */
   private setRateComponents(pitchPercent: number, bendPercent: number): void {
+    // No-op (and crucially: no emit) when nothing changes — repeat callers
+    // (e.g. the transition editor re-applying tempo match on every model
+    // change) must not trigger re-renders (issue 10).
+    if (pitchPercent === this.pitchPercent && bendPercent === this.bendPercent) return;
     if (this.source && !this.source.stopped && this.audio) {
       const now = this.audio.ctx.currentTime;
       this.anchorPosition = this.getPlayhead(); // still at the old rate

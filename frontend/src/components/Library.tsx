@@ -14,9 +14,11 @@ import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
-import { useDeck, useDeckReady } from '../hooks/useDeck';
+import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
+import { transitionsFrom, useTransitionIndex } from '../prototype/transitionIndex';
 
-// Related tracks feature - types and constants
+// Find Compatible feature (né Find Related; internal keys unchanged) —
+// types and constants
 export interface RelatedTracksSettings {
   harmonicKeys: boolean;
   bpm: boolean;
@@ -25,6 +27,9 @@ export interface RelatedTracksSettings {
   tagMatchMode: 'ANY' | 'ALL';
   energy: boolean;
   energyPreset: 'up' | 'down' | 'near' | 'equal';
+  /** Which loaded deck's track the match runs from (transition-library
+   * 03: loaded-deck reference model — the quick-apply arrow reuses it). */
+  refDeck: 'A' | 'B';
 }
 
 const STORAGE_KEY = 'findRelatedTracksSettings';
@@ -36,6 +41,7 @@ export const DEFAULT_SETTINGS: RelatedTracksSettings = {
   tagMatchMode: 'ANY',
   energy: false,
   energyPreset: 'near',
+  refDeck: 'A',
 };
 
 // Related tracks feature - utility functions
@@ -196,8 +202,6 @@ export interface LibraryBrowseHandle {
 }
 
 interface LibraryProps {
-  onOpenPlaylistSync?: () => void;
-  onOpenPerformance?: () => void;
   /** Render only the browse surface (sidebar/filter/table) without the
    * Player/TagEditor block — used when a deck surface is shown elsewhere
    * (the Performance view embeds the library this way). Implies: the
@@ -211,8 +215,6 @@ interface LibraryProps {
 }
 
 export default function Library({
-  onOpenPlaylistSync,
-  onOpenPerformance,
   browseOnly = false,
   onLoadToDeck,
   browseRef,
@@ -229,6 +231,14 @@ export default function Library({
   // the (large) library tree.
   const { engine, loadedTrack, loadTrack } = useDeck();
   const deckReady = useDeckReady();
+
+  // Transition-library discovery (transition-library 02): per-row marks for
+  // tracks with a saved Transition FROM either loaded deck, starred when
+  // the pair is Preferred. Index rebuilds live on editor save events.
+  const decks = useDecks();
+  const transitionIndex = useTransitionIndex();
+  const fromA = transitionsFrom(transitionIndex, decks.A.loadedTrack?.id);
+  const fromB = transitionsFrom(transitionIndex, decks.B.loadedTrack?.id);
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
@@ -271,10 +281,22 @@ export default function Library({
     },
   });
 
+  // Loaded-track authority (issue 23): the editor panel (tags, energy,
+  // title/artist, BPM, key) edits the LOADED track — selection is for
+  // browsing and Load only. Fresh copy via query so edits reflect in the
+  // panel without mutating the deck's own loaded-track snapshot.
+  const { data: freshLoadedTrack } = useQuery({
+    queryKey: ['track', loadedTrack?.id],
+    queryFn: () => api.tracks.get(loadedTrack!.id),
+    enabled: loadedTrack !== null,
+  });
+  const editorTrack =
+    loadedTrack && freshLoadedTrack?.id === loadedTrack.id ? freshLoadedTrack : loadedTrack;
+
   const mutation = useMutation({
-    mutationFn: (data: { energy?: number; tag_ids?: number[] }) => {
-      if (!selectedTrack) return Promise.reject();
-      return api.tracks.update(selectedTrack.id, data);
+    mutationFn: (data: { energy?: number; tag_ids?: number[]; bpm?: number; key?: number }) => {
+      if (!loadedTrack) return Promise.reject(new Error('no loaded track'));
+      return api.tracks.update(loadedTrack.id, data);
     },
     onSuccess: async () => {
       // Refetch queries and wait for them to complete
@@ -282,29 +304,8 @@ export default function Library({
       await queryClient.refetchQueries({ queryKey: ['playlist'] });
       // Invalidate tags to update track counts
       await queryClient.invalidateQueries({ queryKey: ['tags'] });
-
-      // Fetch the specific track to get its fresh state
-      if (selectedTrack) {
-        try {
-          const freshTrack = await api.tracks.get(selectedTrack.id);
-          setSelectedTrack(freshTrack);
-        } catch (error) {
-          console.error('Failed to refetch selected track:', error);
-          // Fallback to finding it in the list
-          const currentData = selectedView === 'playlist'
-            ? queryClient.getQueryData(['playlist', selectedPlaylistId])
-            : queryClient.getQueryData(['tracks', filters, selectedView]);
-
-          const items = selectedView === 'playlist'
-            ? (currentData as any)?.tracks
-            : (currentData as any)?.items;
-
-          const updatedTrack = items?.find((t: Track) => t.id === selectedTrack.id);
-          if (updatedTrack) {
-            setSelectedTrack(updatedTrack);
-          }
-        }
-      }
+      // Refresh the editor panel's copy of the loaded track
+      await queryClient.invalidateQueries({ queryKey: ['track'] });
     },
   });
 
@@ -314,24 +315,19 @@ export default function Library({
 
   const handleFieldUpdate = async (trackId: number, field: 'title' | 'artist', value: string) => {
     try {
-      // Optimistically update selectedTrack immediately
-      if (selectedTrack && selectedTrack.id === trackId) {
-        setSelectedTrack({
-          ...selectedTrack,
-          [field]: value
-        });
-      }
+      // Optimistic update of the editor panel's loaded-track copy
+      queryClient.setQueryData(['track', trackId], (prev: Track | undefined) =>
+        prev ? { ...prev, [field]: value } : prev
+      );
 
       await api.tracks.update(trackId, { [field]: value });
-      if (selectedTrack?.id === trackId) {
-        const freshTrack = await api.tracks.get(trackId);
-        setSelectedTrack(freshTrack);
-      }
+      await queryClient.invalidateQueries({ queryKey: ['track', trackId] });
       await queryClient.invalidateQueries({ queryKey: ['tracks'] });
       await queryClient.invalidateQueries({ queryKey: ['playlist'] });
     } catch (error) {
       console.error('Failed to update track:', error);
       // Revert optimistic update on error by refetching
+      queryClient.invalidateQueries({ queryKey: ['track', trackId] });
       queryClient.invalidateQueries({ queryKey: ['tracks'] });
       queryClient.invalidateQueries({ queryKey: ['playlist'] });
     }
@@ -352,23 +348,32 @@ export default function Library({
     });
   };
 
+  /** The match reference under the loaded-deck model: the chosen deck's
+   * track, falling back to the other loaded deck (selection is retired). */
+  const referenceFor = (refDeck: 'A' | 'B'): Track | null =>
+    decks[refDeck].loadedTrack ?? decks[refDeck === 'A' ? 'B' : 'A'].loadedTrack;
+
   const handleFindRelated = () => {
-    if (!selectedTrack) return;
-
+    // Quick apply: last settings + last chosen deck.
     const settings = loadSettings();
-    const newFilters = deriveRelatedFilters(selectedTrack, settings);
+    const reference = referenceFor(settings.refDeck);
+    if (!reference) return;
 
-    // REPLACE all filters
-    setFilters(newFilters);
+    const newFilters = deriveRelatedFilters(reference, settings);
+
+    // Replace the four heuristic criteria; the transition axis survives
+    // (transition-library composition rule).
+    setFilters((f) => ({ ...newFilters, hasTransitionFromDecks: f.hasTransitionFromDecks }));
   };
 
   const handleApplySettings = (settings: RelatedTracksSettings) => {
-    if (!selectedTrack) return;
+    const reference = referenceFor(settings.refDeck);
+    if (!reference) return;
 
     // Save settings and apply filters
     saveSettings(settings);
-    const newFilters = deriveRelatedFilters(selectedTrack, settings);
-    setFilters(newFilters);
+    const newFilters = deriveRelatedFilters(reference, settings);
+    setFilters((f) => ({ ...newFilters, hasTransitionFromDecks: f.hasTransitionFromDecks }));
   };
 
   // Beatgrid edits are playhead-dependent, so they act on the loaded Track
@@ -409,6 +414,15 @@ export default function Library({
     const newTracks = [...currentTracks];
     newTracks.splice(selectedTrackPosition, 0, selectedTrack);
     currentTracks = newTracks;
+  }
+
+  // Proven-tier filter (transition-library 02): composes CLIENT-side over
+  // the server-filtered list — transition knowledge lives in localStorage,
+  // not the backend.
+  if (filters.hasTransitionFromDecks) {
+    currentTracks = currentTracks.filter(
+      (t: Track) => fromA.has(t.id) || fromB.has(t.id)
+    );
   }
 
   const totalTracks = selectedView === 'playlist'
@@ -470,7 +484,8 @@ export default function Library({
       flexDirection: 'column',
       background: 'var(--mantle)'
     }}>
-      {/* Waveform at top (full width), controls and editor below */}
+      {/* Waveform at top (full width), controls and editor below.
+          Hidden in browseOnly mode (deck surface rendered by the host). */}
       {!browseOnly && (
         <div style={{
           display: 'flex',
@@ -481,10 +496,12 @@ export default function Library({
           <div style={{
             display: 'flex'
           }}>
+            {/* Loaded-track authority (issue 23): the panel edits the
+                loaded track; row selection only browses/loads. */}
             <TagEditor
               ref={tagEditorRef}
-              track={selectedTrack}
-              onSave={mutation.mutate}
+              track={editorTrack}
+              onSave={(data) => mutation.mutateAsync(data)}
               onUpdate={handleFieldUpdate}
               onEnergyEditModeChange={setIsEnergyEditMode}
             />
@@ -508,8 +525,6 @@ export default function Library({
             setSelectedPlaylistId(id);
           }}
           onTrackDrop={handleTrackDrop}
-          onOpenPlaylistSync={onOpenPlaylistSync}
-          onOpenPerformance={onOpenPerformance}
         />
 
         {/* Main library area (filter + table) */}
@@ -522,7 +537,8 @@ export default function Library({
           <FilterBar
             totalTracks={totalTracks}
             filteredCount={currentTracks.length}
-            selectedTrack={selectedTrack}
+            loadedA={decks.A.loadedTrack}
+            loadedB={decks.B.loadedTrack}
             onFindRelated={handleFindRelated}
             onApplySettings={handleApplySettings}
           />
@@ -541,6 +557,8 @@ export default function Library({
               onLoadTrack={loadForTable}
               loadedTrackId={loadedTrack?.id ?? null}
               onLoadToDeck={onLoadToDeck}
+              transitionMarksA={fromA}
+              transitionMarksB={fromB}
               sortColumn={filters.sortColumn}
               sortDirection={filters.sortDirection}
               onSort={handleSort}

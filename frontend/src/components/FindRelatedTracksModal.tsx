@@ -7,7 +7,14 @@ import { formatKeyDisplay } from '../utils/keyUtils';
 interface FindRelatedTracksModalProps {
   isOpen: boolean;
   onClose: () => void;
-  selectedTrack: Track | null;
+  /** Loaded decks (transition-library 03): the match runs FROM one of
+   * these — chosen via the A/B buttons, persisted with the settings. */
+  loadedA: Track | null;
+  loadedB: Track | null;
+  /** Proven-tier switch: bound to the SAME filter state as the filter
+   * bar's toggle (one source of truth, two controls). */
+  hasTransition: boolean;
+  onToggleTransition: (on: boolean) => void;
   onApply: (settings: RelatedTracksSettings) => void;
   openPosition?: { x: number; y: number };
 }
@@ -15,7 +22,10 @@ interface FindRelatedTracksModalProps {
 export default function FindRelatedTracksModal({
   isOpen,
   onClose,
-  selectedTrack,
+  loadedA,
+  loadedB,
+  hasTransition,
+  onToggleTransition,
   onApply,
   openPosition,
 }: FindRelatedTracksModalProps) {
@@ -48,7 +58,9 @@ export default function FindRelatedTracksModal({
       const saved = localStorage.getItem('findRelatedTracksSettings');
       if (saved) {
         try {
-          setSettings(JSON.parse(saved));
+          // Merge over defaults: saves predating a field (e.g. refDeck)
+          // must not leave it undefined.
+          setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(saved) });
         } catch (error) {
           console.error('Failed to load settings:', error);
         }
@@ -69,11 +81,27 @@ export default function FindRelatedTracksModal({
 
   if (!isOpen) return null;
 
-  // Data availability checks
-  const hasKey = selectedTrack?.key !== null && selectedTrack?.key !== undefined;
-  const hasBpm = selectedTrack?.bpm !== null && selectedTrack?.bpm !== undefined;
-  const hasTags = selectedTrack?.tags && selectedTrack.tags.length > 0;
-  const hasEnergy = selectedTrack?.energy !== null && selectedTrack?.energy !== undefined;
+  // Reference = the chosen loaded deck's track; fall back to whichever
+  // deck IS loaded (the button for an empty deck is disabled).
+  const effectiveDeck: 'A' | 'B' | null =
+    settings.refDeck === 'A'
+      ? loadedA
+        ? 'A'
+        : loadedB
+          ? 'B'
+          : null
+      : loadedB
+        ? 'B'
+        : loadedA
+          ? 'A'
+          : null;
+  const reference = effectiveDeck === 'A' ? loadedA : effectiveDeck === 'B' ? loadedB : null;
+
+  // Data availability checks (against the reference track)
+  const hasKey = reference?.key !== null && reference?.key !== undefined;
+  const hasBpm = reference?.bpm !== null && reference?.bpm !== undefined;
+  const hasTags = reference?.tags && reference.tags.length > 0;
+  const hasEnergy = reference?.energy !== null && reference?.energy !== undefined;
 
   // Clear settings
   const handleClear = () => {
@@ -89,16 +117,16 @@ export default function FindRelatedTracksModal({
 
   // Calculate BPM range for preview
   const calculateBpmRange = () => {
-    if (!hasBpm || !selectedTrack?.bpm) return '—';
-    const min = Math.round(selectedTrack.bpm - (selectedTrack.bpm * settings.bpmThresholdPercent / 100));
-    const max = Math.round(selectedTrack.bpm + (selectedTrack.bpm * settings.bpmThresholdPercent / 100));
+    if (!hasBpm || !reference?.bpm) return '—';
+    const min = Math.round(reference.bpm - (reference.bpm * settings.bpmThresholdPercent / 100));
+    const max = Math.round(reference.bpm + (reference.bpm * settings.bpmThresholdPercent / 100));
     return `${min}-${max} BPM`;
   };
 
   // Calculate energy range for preview
   const calculateEnergyRange = () => {
-    if (!hasEnergy || selectedTrack?.energy === undefined) return '—';
-    const { min, max } = getEnergyRange(selectedTrack.energy, settings.energyPreset);
+    if (!hasEnergy || reference?.energy === undefined || reference.energy === null) return '—';
+    const { min, max } = getEnergyRange(reference.energy, settings.energyPreset);
     return `Energy ${min}-${max}`;
   };
 
@@ -122,26 +150,52 @@ export default function FindRelatedTracksModal({
         }}
       >
         <h2 style={{ margin: '0 0 16px 0', color: 'var(--text)', fontSize: '16px' }}>
-          Find Related Tracks
+          Find Compatible Tracks
         </h2>
 
-        {/* Reference Track Section */}
-        {selectedTrack && (
-          <div className="related-reference-section">
-            <div style={{ fontWeight: 'bold', marginBottom: '4px', color: 'var(--text)' }}>
-              Reference Track:
-            </div>
-            <div style={{ fontSize: '14px', color: 'var(--subtext1)', marginBottom: '8px' }}>
-              {selectedTrack.title || selectedTrack.filename} {selectedTrack.artist && `- ${selectedTrack.artist}`}
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--subtext0)', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              <span>Key: {formatKeyDisplay(selectedTrack.key)}</span>
-              <span>BPM: {selectedTrack.bpm ?? '—'}</span>
-              <span>Energy: {selectedTrack.energy ?? '—'}</span>
-              <span>Tags: {selectedTrack.tags.length}</span>
-            </div>
+        {/* Reference deck: match FROM a loaded deck's track. */}
+        <div className="related-reference-section">
+          <div style={{ fontWeight: 'bold', marginBottom: '6px', color: 'var(--text)' }}>
+            Match from deck:
           </div>
-        )}
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+            {(['A', 'B'] as const).map((deck) => {
+              const track = deck === 'A' ? loadedA : loadedB;
+              const isChosen = effectiveDeck === deck;
+              return (
+                <button
+                  key={deck}
+                  disabled={track === null}
+                  onClick={() => setSettings({ ...settings, refDeck: deck })}
+                  title={track ? `Match from ${track.title || track.filename}` : `Deck ${deck} is empty`}
+                  style={{
+                    flex: 1,
+                    padding: '4px 8px',
+                    background: isChosen ? 'var(--blue)' : 'var(--surface0)',
+                    color: track === null ? 'var(--overlay0)' : isChosen ? 'var(--base)' : 'var(--text)',
+                    border: '1px solid var(--surface1)',
+                    cursor: track === null ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {deck} · {track ? track.title || track.filename : 'empty'}
+                </button>
+              );
+            })}
+          </div>
+          {reference && (
+            <div style={{ fontSize: '12px', color: 'var(--subtext0)', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              <span>Key: {formatKeyDisplay(reference.key)}</span>
+              <span>BPM: {reference.bpm ?? '—'}</span>
+              <span>Energy: {reference.energy ?? '—'}</span>
+              <span>Tags: {reference.tags.length}</span>
+            </div>
+          )}
+        </div>
 
         <div style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '12px' }}>
           Match Criteria:
@@ -289,6 +343,28 @@ export default function FindRelatedTracksModal({
                   Will match: {calculateEnergyRange()}
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Proven tier (transition-library 03): NOT one of the four
+              heuristic criteria — this switch IS the library filter-bar
+              toggle (same filter state), applied live and preserved by
+              Apply/quick-apply. */}
+          <div className="related-criteria-item">
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={hasTransition}
+                onChange={(e) => onToggleTransition(e.target.checked)}
+              />
+              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                Has transition from loaded decks
+              </span>
+            </label>
+            <div style={{ fontSize: '12px', color: 'var(--subtext0)', paddingLeft: '24px' }}>
+              Proven tier: only tracks you already built a transition into
+              (synced with the ◆ toggle in the filter bar; takes effect
+              immediately)
             </div>
           </div>
         </div>

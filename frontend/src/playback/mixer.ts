@@ -72,10 +72,20 @@ function chain(nodes: AudioNode[]): void {
   for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
 }
 
+/**
+ * Ramp a gain param to a target, safely re-startable at animation-frame rate
+ * (streamed automation — the Transition editor calls the channel setters per
+ * frame). The current value is read BEFORE cancelling: cancelScheduledValues
+ * reverts the param to its previous anchor, so the cancel-then-read order
+ * freezes the gain at its old value and re-anchors with a 60Hz discontinuity
+ * (audible as fuzz). Linear ramp so targets are actually reached (kill =
+ * true zero, not a setTargetAtTime asymptote).
+ */
 function rampGain(ctx: AudioContext, param: AudioParam, target: number): void {
+  const current = param.value; // computed value, including in-flight ramp progress
   const now = ctx.currentTime;
   param.cancelScheduledValues(now);
-  param.setValueAtTime(param.value, now);
+  param.setValueAtTime(current, now);
   param.linearRampToValueAtTime(target, now + GAIN_RAMP_S);
 }
 
@@ -192,6 +202,29 @@ export class Mixer {
       this.applyFilter('B');
     }
     return { ctx: this.ctx, strips: this.strips };
+  }
+
+  /**
+   * The audio clock, seconds (creates/revives the graph if needed). The one
+   * valid time base for anything that must stay in sync with deck playback —
+   * wall clocks (performance.now) drift against context time, especially
+   * with more than one context alive (see mix-editor issue 08).
+   */
+  now(): number {
+    return this.ensure().ctx.currentTime;
+  }
+
+  /**
+   * Suspend/resume the context ("one audible surface at a time" — a mounted
+   * editor suspends the shared Mixer). Loads/decodes still work while
+   * suspended; DeckEngine.startAudio resumes on demand.
+   */
+  suspend(): void {
+    if (this.ctx && this.ctx.state === 'running') void this.ctx.suspend();
+  }
+
+  resume(): void {
+    if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
   /** The audio access a deck is constructed against. */

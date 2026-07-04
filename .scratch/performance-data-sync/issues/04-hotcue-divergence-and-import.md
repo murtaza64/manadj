@@ -1,6 +1,6 @@
 # Hot cue divergence + per-cell import
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change ksxmytzl; landed in merge vspmwkvl — verify import UI by eye)
 
 ## Parent
 

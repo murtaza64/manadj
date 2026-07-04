@@ -1,6 +1,6 @@
 # Bulk import performance data from Engine
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change xxsvrstl; landed in merge vspmwkvl — verify bulk flow by eye)
 
 ## Parent
 

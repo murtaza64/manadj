@@ -1,6 +1,6 @@
 # Beatgrid origin
 
-Status: ready-for-agent
+Status: done (implemented, change otwxtmsn; landed in merge vspmwkvl 2026-07-04)
 
 ## Parent
 

@@ -1,6 +1,6 @@
 # Decoders into the enginedj package
 
-Status: ready-for-agent
+Status: done (implemented, change svxqoxor; landed in merge vspmwkvl 2026-07-04)
 
 ## Parent
 

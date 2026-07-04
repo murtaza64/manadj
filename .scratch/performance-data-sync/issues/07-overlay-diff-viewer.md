@@ -1,6 +1,6 @@
 # Overlay diff viewer
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change tovrwyym; landed in merge vspmwkvl — verify viewer by eye)
 
 ## Parent
 

@@ -1,6 +1,6 @@
 # PRD: Practice view — buffer-based playback spike
 
-Status: ready-for-agent
+Status: done (spike passed — the buffer engine it proved was absorbed via deck-consolidation; the view itself was deleted in performance-mode 01, change vmyttqqw)
 
 ## Problem Statement
 

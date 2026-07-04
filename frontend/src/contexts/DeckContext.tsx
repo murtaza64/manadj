@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
@@ -12,6 +12,23 @@ import { api } from '../api/client';
 import type { BeatgridResponse, Track, WaveformResponse } from '../types';
 
 const DECK_IDS = ['A', 'B'] as const;
+
+/** Loaded-pair persistence: `{"A": trackId|null, "B": trackId|null}`. */
+const LOADED_TRACKS_KEY = 'manadj-loaded-tracks';
+
+function readStoredLoadedIds(): Record<ChannelId, number | null> {
+  try {
+    const raw = localStorage.getItem(LOADED_TRACKS_KEY);
+    if (!raw) return { A: null, B: null };
+    const parsed = JSON.parse(raw) as Partial<Record<ChannelId, unknown>>;
+    return {
+      A: typeof parsed.A === 'number' ? parsed.A : null,
+      B: typeof parsed.B === 'number' ? parsed.B : null,
+    };
+  } catch {
+    return { A: null, B: null };
+  }
+}
 
 /**
  * Both Decks and the Mixer (ADRs 0008/0009). Sits above the view switch, so
@@ -103,6 +120,45 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     },
     [engines, queryClient]
   );
+
+  // ── Loaded-pair persistence ────────────────────────────────────────────
+  // The shared decks are the canonical "what's loaded on A/B" across every
+  // mode (the Transition editor mirrors its loads onto them). Persist track
+  // ids on every Load; restore once on boot (a Load allocates audio memory
+  // but nothing plays until the user does).
+  const loadedTracksRef = useRef(loadedTracks);
+  useEffect(() => {
+    loadedTracksRef.current = loadedTracks;
+  });
+
+  const restoreStarted = useRef(false);
+  useEffect(() => {
+    if (restoreStarted.current) return; // StrictMode re-run guard
+    restoreStarted.current = true;
+    const stored = readStoredLoadedIds();
+    for (const deck of DECK_IDS) {
+      const id = stored[deck];
+      if (id === null) continue;
+      api.tracks
+        .getById(id)
+        .then((track: Track) => {
+          // A user/editor Load may have landed while we fetched — it wins.
+          if (loadedTracksRef.current[deck] === null) loadTrackOnto(deck, track);
+        })
+        .catch(() => undefined); // stale id (deleted track) — drop silently
+    }
+  }, [loadTrackOnto]);
+
+  // Never write the initial all-null state: on boot it would clobber the
+  // stored pair before the async restore lands. There is no unload gesture,
+  // so an all-null write is only ever that boot state.
+  useEffect(() => {
+    if (loadedTracks.A === null && loadedTracks.B === null) return;
+    localStorage.setItem(
+      LOADED_TRACKS_KEY,
+      JSON.stringify({ A: loadedTracks.A?.id ?? null, B: loadedTracks.B?.id ?? null })
+    );
+  }, [loadedTracks]);
 
   // Persist user-set cues (an engine fires this only for deliberate cue
   // sets, never for load defaults, and reports its own loaded trackId) and

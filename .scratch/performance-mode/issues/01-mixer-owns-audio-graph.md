@@ -1,6 +1,6 @@
 # 01 — Mixer owns the audio graph; Practice view deleted
 
-Status: ready-for-agent
+Status: done (implemented, change vmyttqqw)
 
 ## Parent
 

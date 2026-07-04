@@ -1,8 +1,9 @@
 import { type JSX } from 'react';
-import TrackRow from './TrackRow';
+import TrackRow, { type TransitionMark } from './TrackRow';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon } from './icons';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
+import type { PairInfo } from '../prototype/transitionIndex';
 import { COLUMN_CONFIG } from './columnConfig';
 import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { useColumnWidths } from '../hooks/useColumnWidths';
@@ -22,6 +23,10 @@ interface TrackListProps {
   loadedTrackId: number | null;
   /** When set (Performance view), rows get hover load-to-A/B buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
+  /** Saved-Transition marks (transition-library 02): targets with a
+   * Transition FROM deck A's / deck B's loaded track. */
+  transitionMarksA?: ReadonlyMap<number, PairInfo>;
+  transitionMarksB?: ReadonlyMap<number, PairInfo>;
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
@@ -36,10 +41,17 @@ export default function TrackList({
   onLoadTrack,
   loadedTrackId,
   onLoadToDeck,
+  transitionMarksA,
+  transitionMarksB,
   sortColumn,
   sortDirection,
   onSort
 }: TrackListProps) {
+  /** Memo-friendly per-row mark state (strings, not objects). */
+  const markFor = (marks: ReadonlyMap<number, PairInfo> | undefined, id: number): TransitionMark => {
+    const info = marks?.get(id);
+    return info ? (info.preferred ? 'preferred' : 'saved') : 'none';
+  };
   const { widths, setWidth, resetWidth, cssVars } = useColumnWidths();
 
   const SortableHeader = ({
@@ -137,6 +149,8 @@ export default function TrackList({
                 onSelect={onSelectTrack}
                 onLoad={onLoadTrack}
                 onLoadToDeck={onLoadToDeck}
+                markA={markFor(transitionMarksA, track.id)}
+                markB={markFor(transitionMarksB, track.id)}
               />
             ))
           )}

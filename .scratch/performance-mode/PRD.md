@@ -1,7 +1,6 @@
 # PRD: Performance view — two Decks and a Mixer
 
-Status: ready-for-agent
-Blocked by: deck-consolidation issues 03 (shared provider, explicit Load, library port) and 04 (main cue persistence)
+Status: done (all 5 issues landed 2026-07-03; mix-editor prototype built on the mixer stack)
 
 ## Problem Statement
 
