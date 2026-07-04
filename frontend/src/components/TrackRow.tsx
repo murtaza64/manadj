@@ -7,6 +7,7 @@ import { formatRelativeTime } from '../utils/dateUtils';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { COLUMN_CONFIG } from './columnConfig';
+import { setTrackDragPayload } from '../selection/trackDrag';
 import './TrackRow.css';
 
 /** Saved-Transition mark state for one source deck (transition-library
@@ -15,16 +16,30 @@ import './TrackRow.css';
  * effective. */
 export type TransitionMark = 'none' | 'saved' | 'preferred';
 
+/** Click modifiers, interpreted by the selection model (playlist-editing 02). */
+export interface SelectMods {
+  /** Shift: range from the anchor. */
+  shift: boolean;
+  /** Cmd/Ctrl: toggle membership. */
+  toggle: boolean;
+}
+
 interface Props {
   track: Track;
   isSelected: boolean;
   /** True when this track is on the Deck. */
   isLoaded: boolean;
-  onSelect: (track: Track) => void;
+  onSelect: (track: Track, mods: SelectMods) => void;
   /** Load this track onto the Deck (double-click). */
   onLoad: (track: Track) => void;
   /** When set (Performance view), show hover load-to-A/B buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
+  /**
+   * The ids a drag from this row carries: the whole selection when the row
+   * is part of it, else just this row. Identity-stable (reads via ref) so
+   * row memoization survives selection churn.
+   */
+  getDragIds: (trackId: number) => number[];
   markA?: TransitionMark;
   markB?: TransitionMark;
 }
@@ -58,6 +73,7 @@ const TrackRow = memo(function TrackRow({
   onSelect,
   onLoad,
   onLoadToDeck,
+  getDragIds,
   markA = 'none',
   markB = 'none',
 }: Props) {
@@ -89,14 +105,13 @@ const TrackRow = memo(function TrackRow({
   return (
     <tr
       className={`track-row ${isSelected ? 'track-row-selected' : ''} ${isLoaded ? 'track-row-loaded' : ''}`}
-      onClick={() => onSelect(track)}
+      onClick={(e) => onSelect(track, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDoubleClick={() => onLoad(track)}
       data-track-id={track.id}
       style={{ cursor: 'pointer' }}
       draggable={true}
       onDragStart={(e) => {
-        e.dataTransfer.setData('trackId', track.id.toString());
-        e.dataTransfer.effectAllowed = 'copy';
+        setTrackDragPayload(e.dataTransfer, getDragIds(track.id));
       }}
     >
         <td className={getCellClasses(0)} style={getCellStyle(0)}>

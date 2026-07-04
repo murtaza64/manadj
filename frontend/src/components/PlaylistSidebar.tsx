@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { readTrackDragPayload } from '../selection/trackDrag';
 import type { Playlist } from '../types';
 
 type ViewType = 'all' | 'unprocessed' | 'playlist';
@@ -10,7 +11,8 @@ interface PlaylistSidebarProps {
   selectedPlaylistId: number | null;
   onSelectView: (view: ViewType) => void;
   onSelectPlaylist: (playlistId: number) => void;
-  onTrackDrop: (playlistId: number, trackId: number) => void;
+  /** Tracks dropped onto a playlist row (whole selection, selection order). */
+  onTrackDrop: (playlistId: number, trackIds: number[]) => void;
 }
 
 export default function PlaylistSidebar({
@@ -68,9 +70,9 @@ export default function PlaylistSidebar({
 
   const handleDrop = (e: React.DragEvent, playlistId: number) => {
     e.preventDefault();
-    const trackId = parseInt(e.dataTransfer.getData('trackId'), 10);
-    if (trackId) {
-      onTrackDrop(playlistId, trackId);
+    const trackIds = readTrackDragPayload(e.dataTransfer);
+    if (trackIds.length > 0) {
+      onTrackDrop(playlistId, trackIds);
     }
   };
 

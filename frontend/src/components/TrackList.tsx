@@ -1,5 +1,5 @@
 import { type JSX } from 'react';
-import TrackRow, { type TransitionMark } from './TrackRow';
+import TrackRow, { type SelectMods, type TransitionMark } from './TrackRow';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon } from './icons';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
@@ -15,8 +15,11 @@ interface TrackListProps {
   tracks: Track[];
   isLoading: boolean;
   error: Error | null;
-  selectedTrack: Track | null;
-  onSelectTrack: (track: Track) => void;
+  /** Multi-selection (playlist-editing 02): membership + click routing. */
+  selectedIds: ReadonlySet<number>;
+  onSelectTrack: (track: Track, mods: SelectMods) => void;
+  /** Drag payload for a row (whole selection when the row is in it). */
+  getDragIds: (trackId: number) => number[];
   /** Load a track onto the Deck (double-click; Enter goes via the keyboard hub). */
   onLoadTrack: (track: Track) => void;
   /** The Deck's loaded track, for row highlighting. */
@@ -36,8 +39,9 @@ export default function TrackList({
   tracks,
   isLoading,
   error,
-  selectedTrack,
+  selectedIds,
   onSelectTrack,
+  getDragIds,
   onLoadTrack,
   loadedTrackId,
   onLoadToDeck,
@@ -144,11 +148,12 @@ export default function TrackList({
               <TrackRow
                 key={track.id}
                 track={track}
-                isSelected={selectedTrack?.id === track.id}
+                isSelected={selectedIds.has(track.id)}
                 isLoaded={loadedTrackId === track.id}
                 onSelect={onSelectTrack}
                 onLoad={onLoadTrack}
                 onLoadToDeck={onLoadToDeck}
+                getDragIds={getDragIds}
                 markA={markFor(transitionMarksA, track.id)}
                 markB={markFor(transitionMarksB, track.id)}
               />

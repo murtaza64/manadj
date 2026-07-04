@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useImperativeHandle, useMemo } from 'react';
+import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
 import type { Ref } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -16,6 +16,17 @@ import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
+import {
+  EMPTY_SELECTION,
+  click,
+  navigate as navigateSelection,
+  prune,
+  rangeClick,
+  selectAll,
+  toggleClick,
+  type Selection,
+} from '../selection/selectionModel';
+import type { SelectMods } from './TrackRow';
 
 // Find Compatible feature (né Find Related; internal keys unchanged) —
 // types and constants
@@ -219,7 +230,11 @@ export default function Library({
   onLoadToDeck,
   browseRef,
 }: LibraryProps) {
-  const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
+  // Multi-selection (playlist-editing 02): ordered ids + anchor. The
+  // anchor's Track object is cached so it can stay visible (and loadable)
+  // after it stops matching the active filters.
+  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+  const [anchorTrackCache, setAnchorTrackCache] = useState<Track | null>(null);
   const [selectedView, setSelectedView] = useState<ViewType>('all');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
@@ -272,10 +287,17 @@ export default function Library({
     placeholderData: (previousData) => previousData,
   });
 
-  // Add track to playlist mutation
+  // Add tracks to playlist mutation (sequential appends, selection order).
+  // Duplicates are idempotent no-ops server-side (entry identity).
   const addToPlaylistMutation = useMutation({
-    mutationFn: ({ playlistId, trackId }: { playlistId: number; trackId: number }) =>
-      api.playlists.addTrack(playlistId, { track_id: trackId }),
+    mutationFn: async ({ playlistId, trackIds }: { playlistId: number; trackIds: number[] }) => {
+      let skipped = 0;
+      for (const trackId of trackIds) {
+        const result = await api.playlists.addTrack(playlistId, { track_id: trackId });
+        if (result.skipped) skipped += 1;
+      }
+      return { skipped, total: trackIds.length };
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['playlist'] });
     },
@@ -309,8 +331,8 @@ export default function Library({
     },
   });
 
-  const handleTrackDrop = (playlistId: number, trackId: number) => {
-    addToPlaylistMutation.mutate({ playlistId, trackId });
+  const handleTrackDrop = (playlistId: number, trackIds: number[]) => {
+    addToPlaylistMutation.mutate({ playlistId, trackIds });
   };
 
   const handleFieldUpdate = async (trackId: number, field: 'title' | 'artist', value: string) => {
@@ -397,8 +419,14 @@ export default function Library({
     ? playlistData?.tracks || []
     : allTracksData?.items || [];
 
-  // Keep selected track in list at its original position even if it no longer matches filter
-  // (e.g., in Unprocessed view after tagging)
+  // The anchor's Track object: from the visible list, falling back to the
+  // cached copy (so it survives leaving the active filter).
+  const selectedTrack =
+    currentTracks.find((t: Track) => t.id === selection.anchorId) ??
+    (anchorTrackCache && anchorTrackCache.id === selection.anchorId ? anchorTrackCache : null);
+
+  // Keep the anchor in the list at its original position even if it no
+  // longer matches the filter (e.g., in Unprocessed view after tagging)
   const [selectedTrackPosition, setSelectedTrackPosition] = useState<number | null>(null);
 
   useEffect(() => {
@@ -425,6 +453,60 @@ export default function Library({
     );
   }
 
+  // ── Selection machinery over the displayed list ────────────────────────
+  const displayedIds = currentTracks.map((t: Track) => t.id);
+  const displayedIdsKey = displayedIds.join(',');
+
+  // Cache the anchor's Track object while it is visible.
+  useEffect(() => {
+    if (selection.anchorId === null) {
+      setAnchorTrackCache(null);
+      return;
+    }
+    const anchorTrack = currentTracks.find((t: Track) => t.id === selection.anchorId);
+    if (anchorTrack) setAnchorTrackCache(anchorTrack);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection.anchorId, displayedIdsKey]);
+
+  // Reconcile the selection when the visible list changes (filters, sort,
+  // view switches): selected rows that vanished are dropped.
+  useEffect(() => {
+    setSelection((prev) => prune(prev, displayedIds));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayedIdsKey]);
+
+  const handleRowSelect = (track: Track, mods: SelectMods) => {
+    setSelection((prev) =>
+      mods.shift
+        ? rangeClick(prev, track.id, displayedIds)
+        : mods.toggle
+          ? toggleClick(prev, track.id)
+          : click(prev, track.id)
+    );
+  };
+
+  const handleNavigate = (delta: 1 | -1) => {
+    const next = navigateSelection(selection, delta, displayedIds);
+    if (next.anchorId !== null) scrollTrackIntoView(next.anchorId);
+    setSelection(next);
+  };
+
+  const handleSelectAll = () => {
+    setSelection((prev) => selectAll(prev, displayedIds));
+  };
+
+  // Drag payload: the whole selection when the dragged row is in it, else
+  // just that row. Ref-backed so the callback identity is stable and row
+  // memoization survives selection churn.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const getDragIds = useCallback((trackId: number) => {
+    const sel = selectionRef.current;
+    return sel.ids.includes(trackId) ? [...sel.ids] : [trackId];
+  }, []);
+
+  const selectedIds = useMemo(() => new Set(selection.ids), [selection.ids]);
+
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0
     : allTracksData?.library_total || 0;
@@ -443,22 +525,11 @@ export default function Library({
   useImperativeHandle(
     browseRef,
     () => ({
-      navigate: (delta: 1 | -1) => {
-        if (currentTracks.length === 0) return;
-        const currentIndex = selectedTrack
-          ? currentTracks.findIndex((t: Track) => t.id === selectedTrack.id)
-          : -1;
-        const nextIndex =
-          currentIndex === -1
-            ? 0
-            : Math.max(0, Math.min(currentTracks.length - 1, currentIndex + delta));
-        const next = currentTracks[nextIndex];
-        setSelectedTrack(next);
-        scrollTrackIntoView(next.id);
-      },
+      navigate: handleNavigate,
       getSelectedTrack: () => selectedTrack,
     }),
-    [currentTracks, selectedTrack]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [displayedIdsKey, selection, selectedTrack]
   );
 
   return (
@@ -467,9 +538,9 @@ export default function Library({
         Embedded (browseOnly), the Performance hub drives everything. */}
     {!browseOnly && (
       <LibraryHub
-        tracks={currentTracks}
         selectedTrack={selectedTrack}
-        onSelectTrack={setSelectedTrack}
+        onNavigate={handleNavigate}
+        onSelectAll={handleSelectAll}
         onLoadTrack={loadTrack}
         onNudgeBeatgrid={handleNudgeBeatgrid}
         onSetDownbeat={handleSetDownbeat}
@@ -552,8 +623,9 @@ export default function Library({
               tracks={currentTracks}
               isLoading={isLoading}
               error={error}
-              selectedTrack={selectedTrack}
-              onSelectTrack={setSelectedTrack}
+              selectedIds={selectedIds}
+              onSelectTrack={handleRowSelect}
+              getDragIds={getDragIds}
               onLoadTrack={loadForTable}
               loadedTrackId={loadedTrack?.id ?? null}
               onLoadToDeck={onLoadToDeck}
@@ -578,9 +650,9 @@ export default function Library({
  * implementation the Player's pads use).
  */
 function LibraryHub({
-  tracks,
   selectedTrack,
-  onSelectTrack,
+  onNavigate,
+  onSelectAll,
   onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
@@ -588,9 +660,9 @@ function LibraryHub({
   onEnterEnergyEditMode,
   isEnergyEditMode,
 }: {
-  tracks: Track[];
   selectedTrack: Track | null;
-  onSelectTrack: (track: Track | null) => void;
+  onNavigate: (delta: 1 | -1) => void;
+  onSelectAll: () => void;
   onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid: (offsetMs: number) => void;
   onSetDownbeat: () => void;
@@ -602,9 +674,9 @@ function LibraryHub({
   const hotCueActions = useHotCueActions(loadedTrack?.id ?? null);
 
   useKeyboardShortcuts({
-    tracks,
     selectedTrack,
-    onSelectTrack,
+    onNavigate,
+    onSelectAll,
     onLoadTrack,
     onNudgeBeatgrid,
     onSetDownbeat,

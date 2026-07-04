@@ -34,3 +34,17 @@ Multi-selection in all track tables, everywhere a `TrackList` renders:
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+Done (jj tlzqkmmo). Pure model at frontend/src/selection/selectionModel.ts
+(click/toggle/range/navigate/selectAll/prune; 20 vitest cases) + shared
+drag payload helper (selection/trackDrag.ts, 'application/x-manadj-tracks'
+MIME with legacy 'trackId' fallback). TrackRow clicks carry modifiers;
+drags carry the whole selection when the dragged row is in it (ref-backed
+stable getter keeps row memoization). Keyboard hub: j/k → onNavigate
+(collapse-to-anchor), Cmd/Ctrl-A → select-all (handled ahead of the
+modifier guard). LibraryBrowseHandle unchanged for Performance/Transition
+embedders. Sidebar drop appends multi-selections sequentially (duplicate
+no-ops server-side; toast lands with 03). Anchor keep-in-list behavior
+preserved via cached anchor Track.

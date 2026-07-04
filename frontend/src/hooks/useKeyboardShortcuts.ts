@@ -14,9 +14,12 @@ import { BEATJUMP_BEATS } from '../playback/constants';
  */
 
 interface UseKeyboardShortcutsProps {
-  tracks: Track[];
+  /** The anchor of the multi-selection: Enter/t/e target (playlist-editing 02). */
   selectedTrack: Track | null;
-  onSelectTrack: (track: Track | null) => void;
+  /** j/k: move the anchor, collapsing any multi-selection to a single row. */
+  onNavigate: (delta: 1 | -1) => void;
+  /** Cmd/Ctrl-A: select all visible rows. */
+  onSelectAll?: () => void;
   onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid?: (offsetMs: number) => void;
   onSetDownbeat?: () => void;
@@ -29,9 +32,9 @@ interface UseKeyboardShortcutsProps {
 }
 
 export function useKeyboardShortcuts({
-  tracks,
   selectedTrack,
-  onSelectTrack,
+  onNavigate,
+  onSelectAll,
   onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
@@ -59,6 +62,19 @@ export function useKeyboardShortcuts({
         target.tagName === 'TEXTAREA' ||
         target.contentEditable === 'true';
 
+      // Select all: Cmd/Ctrl-A (before the modifier guard below drops it)
+      if (
+        !isInputFocused &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'a' &&
+        onSelectAll
+      ) {
+        event.preventDefault();
+        onSelectAll();
+        return;
+      }
+
       if (isInputFocused || event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
@@ -71,32 +87,10 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // Navigation: j/k (selection-scoped)
+      // Navigation: j/k (selection-scoped; collapses a multi-selection)
       if (key === 'j' || key === 'k') {
         event.preventDefault();
-
-        if (tracks.length === 0) return;
-
-        const currentIndex = selectedTrack
-          ? tracks.findIndex(t => t.id === selectedTrack.id)
-          : -1;
-
-        let nextIndex: number;
-        if (key === 'j') {
-          // Next track (down)
-          nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
-          if (nextIndex >= tracks.length) nextIndex = tracks.length - 1;
-        } else {
-          // Previous track (up)
-          nextIndex = currentIndex === -1 ? 0 : currentIndex - 1;
-          if (nextIndex < 0) nextIndex = 0;
-        }
-
-        const nextTrack = tracks[nextIndex];
-        onSelectTrack(nextTrack);
-
-        // Scroll into view
-        scrollTrackIntoView(nextTrack.id);
+        onNavigate(key === 'j' ? 1 : -1);
       }
 
       // Load: Enter puts the selection on the Deck (the browse -> Deck bridge).
@@ -272,9 +266,9 @@ export function useKeyboardShortcuts({
       document.removeEventListener('keyup', handleKeyUp);
     };
   }, [
-    tracks,
     selectedTrack,
-    onSelectTrack,
+    onNavigate,
+    onSelectAll,
     onLoadTrack,
     onNudgeBeatgrid,
     onSetDownbeat,
