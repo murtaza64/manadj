@@ -276,10 +276,22 @@ export default function Library({
     },
   });
 
+  // Loaded-track authority (issue 23): the editor panel (tags, energy,
+  // title/artist, BPM, key) edits the LOADED track — selection is for
+  // browsing and Load only. Fresh copy via query so edits reflect in the
+  // panel without mutating the deck's own loaded-track snapshot.
+  const { data: freshLoadedTrack } = useQuery({
+    queryKey: ['track', loadedTrack?.id],
+    queryFn: () => api.tracks.get(loadedTrack!.id),
+    enabled: loadedTrack !== null,
+  });
+  const editorTrack =
+    loadedTrack && freshLoadedTrack?.id === loadedTrack.id ? freshLoadedTrack : loadedTrack;
+
   const mutation = useMutation({
-    mutationFn: (data: { energy?: number; tag_ids?: number[] }) => {
-      if (!selectedTrack) return Promise.reject();
-      return api.tracks.update(selectedTrack.id, data);
+    mutationFn: (data: { energy?: number; tag_ids?: number[]; bpm?: number; key?: number }) => {
+      if (!loadedTrack) return Promise.reject(new Error('no loaded track'));
+      return api.tracks.update(loadedTrack.id, data);
     },
     onSuccess: async () => {
       // Refetch queries and wait for them to complete
@@ -287,29 +299,8 @@ export default function Library({
       await queryClient.refetchQueries({ queryKey: ['playlist'] });
       // Invalidate tags to update track counts
       await queryClient.invalidateQueries({ queryKey: ['tags'] });
-
-      // Fetch the specific track to get its fresh state
-      if (selectedTrack) {
-        try {
-          const freshTrack = await api.tracks.get(selectedTrack.id);
-          setSelectedTrack(freshTrack);
-        } catch (error) {
-          console.error('Failed to refetch selected track:', error);
-          // Fallback to finding it in the list
-          const currentData = selectedView === 'playlist'
-            ? queryClient.getQueryData(['playlist', selectedPlaylistId])
-            : queryClient.getQueryData(['tracks', filters, selectedView]);
-
-          const items = selectedView === 'playlist'
-            ? (currentData as any)?.tracks
-            : (currentData as any)?.items;
-
-          const updatedTrack = items?.find((t: Track) => t.id === selectedTrack.id);
-          if (updatedTrack) {
-            setSelectedTrack(updatedTrack);
-          }
-        }
-      }
+      // Refresh the editor panel's copy of the loaded track
+      await queryClient.invalidateQueries({ queryKey: ['track'] });
     },
   });
 
@@ -319,24 +310,19 @@ export default function Library({
 
   const handleFieldUpdate = async (trackId: number, field: 'title' | 'artist', value: string) => {
     try {
-      // Optimistically update selectedTrack immediately
-      if (selectedTrack && selectedTrack.id === trackId) {
-        setSelectedTrack({
-          ...selectedTrack,
-          [field]: value
-        });
-      }
+      // Optimistic update of the editor panel's loaded-track copy
+      queryClient.setQueryData(['track', trackId], (prev: Track | undefined) =>
+        prev ? { ...prev, [field]: value } : prev
+      );
 
       await api.tracks.update(trackId, { [field]: value });
-      if (selectedTrack?.id === trackId) {
-        const freshTrack = await api.tracks.get(trackId);
-        setSelectedTrack(freshTrack);
-      }
+      await queryClient.invalidateQueries({ queryKey: ['track', trackId] });
       await queryClient.invalidateQueries({ queryKey: ['tracks'] });
       await queryClient.invalidateQueries({ queryKey: ['playlist'] });
     } catch (error) {
       console.error('Failed to update track:', error);
       // Revert optimistic update on error by refetching
+      queryClient.invalidateQueries({ queryKey: ['track', trackId] });
       queryClient.invalidateQueries({ queryKey: ['tracks'] });
       queryClient.invalidateQueries({ queryKey: ['playlist'] });
     }
@@ -497,9 +483,11 @@ export default function Library({
           <div style={{
             display: 'flex'
           }}>
+            {/* Loaded-track authority (issue 23): the panel edits the
+                loaded track; row selection only browses/loads. */}
             <TagEditor
               ref={tagEditorRef}
-              track={selectedTrack}
+              track={editorTrack}
               onSave={mutation.mutate}
               onUpdate={handleFieldUpdate}
               onEnergyEditModeChange={setIsEnergyEditMode}
