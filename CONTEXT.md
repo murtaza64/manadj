@@ -16,6 +16,10 @@ _Avoid_: song, file
 **Unprocessed track**:
 A Track that has been added to the library but not yet curated: no Tags assigned, artist/title not yet cleaned up. The to-do state between Import and full library membership.
 
+**Archived**:
+A curation verdict on a Track: out of the active Library (bad rip, duplicate, didn't survive curation). An Archived Track leaves default views, discovery, and Export, but its record, file, provenance, and Source Correspondence persist — nothing is deleted, and nothing resurfaces (a Scan or Refresh never re-proposes it). Reversible.
+_Avoid_: hidden (sounds like a view filter), deleted (nothing is)
+
 ### Curation
 
 **Tag**:
