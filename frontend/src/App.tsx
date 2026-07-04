@@ -5,6 +5,7 @@ import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
 import { FilterProvider } from './contexts/FilterContext';
 import { DeckProvider, DeckScope } from './contexts/DeckContext';
+import { MidiControllerBridge } from './components/MidiControllerBridge';
 
 const queryClient = new QueryClient();
 
@@ -16,6 +17,8 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <DeckProvider>
+        {/* Controller layer: above the view switch, like the Decks it drives. */}
+        <MidiControllerBridge />
         <FilterProvider>
           {view === 'sync' ? (
             <SyncView onClose={() => setView('library')} />
