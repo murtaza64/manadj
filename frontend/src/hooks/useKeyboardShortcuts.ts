@@ -20,6 +20,9 @@ interface UseKeyboardShortcutsProps {
   onNavigate: (delta: 1 | -1) => void;
   /** Cmd/Ctrl-A: select all visible rows. */
   onSelectAll?: () => void;
+  /** Delete/Backspace: remove the selection from the viewed playlist
+   * (only provided in playlist views — playlist-editing 04). */
+  onRemoveSelected?: () => void;
   onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid?: (offsetMs: number) => void;
   onSetDownbeat?: () => void;
@@ -35,6 +38,7 @@ export function useKeyboardShortcuts({
   selectedTrack,
   onNavigate,
   onSelectAll,
+  onRemoveSelected,
   onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
@@ -91,6 +95,12 @@ export function useKeyboardShortcuts({
       if (key === 'j' || key === 'k') {
         event.preventDefault();
         onNavigate(key === 'j' ? 1 : -1);
+      }
+
+      // Remove from playlist: Delete/Backspace (selection-scoped, no confirm)
+      if ((event.key === 'Delete' || event.key === 'Backspace') && onRemoveSelected) {
+        event.preventDefault();
+        onRemoveSelected();
       }
 
       // Load: Enter puts the selection on the Deck (the browse -> Deck bridge).
@@ -269,6 +279,7 @@ export function useKeyboardShortcuts({
     selectedTrack,
     onNavigate,
     onSelectAll,
+    onRemoveSelected,
     onLoadTrack,
     onNudgeBeatgrid,
     onSetDownbeat,

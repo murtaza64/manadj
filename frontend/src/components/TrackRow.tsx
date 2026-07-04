@@ -6,7 +6,7 @@ import KeyDisplay from './KeyDisplay';
 import { formatRelativeTime } from '../utils/dateUtils';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
-import { COLUMN_CONFIG } from './columnConfig';
+import { getColumnConfig } from './columnConfig';
 import { setTrackDragPayload } from '../selection/trackDrag';
 import './TrackRow.css';
 
@@ -42,6 +42,9 @@ interface Props {
   getDragIds: (trackId: number) => number[];
   /** Right-click: open the track context menu (playlist-editing 03). */
   onContextMenu?: (track: Track, pos: { x: number; y: number }) => void;
+  /** Play order index (0-based) — renders the # cell (playlist tables).
+   * undefined = no # column; null = track has no position (shouldn't happen). */
+  orderIndex?: number | null;
   markA?: TransitionMark;
   markB?: TransitionMark;
 }
@@ -77,6 +80,7 @@ const TrackRow = memo(function TrackRow({
   onLoadToDeck,
   getDragIds,
   onContextMenu,
+  orderIndex,
   markA = 'none',
   markB = 'none',
 }: Props) {
@@ -84,8 +88,8 @@ const TrackRow = memo(function TrackRow({
   const filename = track.filename.split('/').pop() || track.filename;
 
   // Helper to get cell style from column config
-  const getCellStyle = (columnIndex: number) => {
-    const config = COLUMN_CONFIG[columnIndex];
+  const getCellStyle = (columnId: string) => {
+    const config = getColumnConfig(columnId)!;
     return {
       width: `var(--colw-${config.id})`,
       minWidth: `var(--colw-${config.id})`,
@@ -96,8 +100,8 @@ const TrackRow = memo(function TrackRow({
   };
 
   // Helper to get cell classes
-  const getCellClasses = (columnIndex: number, baseClass: string = 'track-cell') => {
-    const config = COLUMN_CONFIG[columnIndex];
+  const getCellClasses = (columnId: string, baseClass: string = 'track-cell') => {
+    const config = getColumnConfig(columnId)!;
     return [
       baseClass,
       config.sticky ? 'sticky-col-cell' : '',
@@ -125,17 +129,24 @@ const TrackRow = memo(function TrackRow({
           : undefined
       }
     >
-        <td className={getCellClasses(0)} style={getCellStyle(0)}>
+        {orderIndex !== undefined && (
+          <td className={getCellClasses('order')} style={getCellStyle('order')}>
+            <div className="track-cell-single track-order-cell">
+              {orderIndex === null ? '-' : orderIndex + 1}
+            </div>
+          </td>
+        )}
+        <td className={getCellClasses('key')} style={getCellStyle('key')}>
           <div className="track-cell-single">
             <KeyDisplay keyValue={track.key} />
           </div>
         </td>
-        <td className={getCellClasses(1)} style={getCellStyle(1)}>
+        <td className={getCellClasses('bpm')} style={getCellStyle('bpm')}>
           <div className="track-cell-single">
             <BPMDisplay bpm={track.bpm} round={true} />
           </div>
         </td>
-        <td className={getCellClasses(2, 'track-energy-cell')} style={getCellStyle(2)}>
+        <td className={getCellClasses('energy', 'track-energy-cell')} style={getCellStyle('energy')}>
           {track.energy ? (
             <EnergySquare
               level={track.energy}
@@ -148,7 +159,7 @@ const TrackRow = memo(function TrackRow({
             </div>
           )}
         </td>
-        <td className={getCellClasses(3)} style={getCellStyle(3)}>
+        <td className={getCellClasses('title')} style={getCellStyle('title')}>
           {/* Saved-Transition marks: one glyph per source deck, in the
               deck's accent color; ★ when the pair is Preferred. */}
           {(markA !== 'none' || markB !== 'none') && (
@@ -206,22 +217,22 @@ const TrackRow = memo(function TrackRow({
         }}>
           {formatRelativeTime(track.created_at)}
         </td>
-        <td className="track-tags-cell" style={getCellStyle(6)}>
+        <td className="track-tags-cell" style={getCellStyle('tags')}>
           <div className="track-tags-container">
             {track.tags.map(tag => (
               <TagPill key={tag.id} tag={tag} />
             ))}
           </div>
         </td>
-        <td className="track-cell" style={getCellStyle(7)}>
+        <td className="track-cell" style={getCellStyle('quality')}>
           <span className={`quality-display ${isLowQuality(track) ? 'quality-low' : ''}`}>
             {formatQuality(track.codec, track.bitrate_kbps)}
           </span>
         </td>
-        <td className="track-cell" style={getCellStyle(8)}>
+        <td className="track-cell" style={getCellStyle('size')}>
           <span className="size-display">{formatSize(track.filesize_bytes)}</span>
         </td>
-        <td className="track-cell" style={getCellStyle(9)}>
+        <td className="track-cell" style={getCellStyle('provenance')}>
           {track.provenance ? (
             track.provenance.url ? (
               <a

@@ -34,7 +34,7 @@ function persist(widths: Widths) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
 }
 
-export function useColumnWidths() {
+export function useColumnWidths(showOrder = false) {
   const [widths, setWidths] = useState<Widths>(load);
 
   const setWidth = useCallback((id: string, width: number) => {
@@ -53,12 +53,15 @@ export function useColumnWidths() {
     });
   }, []);
 
-  /** CSS variables for the table container. */
+  /** CSS variables for the table container. The 'order' (#) column only
+   * participates when the table shows it (playlist tables), so sticky
+   * offsets stay correct in both layouts. */
   const cssVars = useMemo(() => {
     const vars: Record<string, string> = {};
     let stickyLeft = 0;
     let total = 0;
     for (const col of COLUMN_CONFIG) {
+      if (col.id === 'order' && !showOrder) continue;
       const w = widths[col.id] ?? col.width;
       vars[`--colw-${col.id}`] = `${w}px`;
       total += w;
@@ -71,7 +74,7 @@ export function useColumnWidths() {
     // degrades to auto layout and columns stop honoring configured widths
     vars['--table-width'] = `${total}px`;
     return vars as React.CSSProperties;
-  }, [widths]);
+  }, [widths, showOrder]);
 
   return { widths, setWidth, resetWidth, cssVars };
 }

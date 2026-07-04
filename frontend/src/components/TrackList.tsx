@@ -4,12 +4,13 @@ import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, Calenda
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import type { PairInfo } from '../editor/transitionIndex';
-import { COLUMN_CONFIG } from './columnConfig';
+import { getColumnConfig } from './columnConfig';
 import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { useColumnWidths } from '../hooks/useColumnWidths';
 import './TrackList.css';
 
-type SortColumn = 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance';
+/** 'position' = Play order (#), playlist tables only. */
+type SortColumn = 'position' | 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance';
 
 interface TrackListProps {
   tracks: Track[];
@@ -22,6 +23,8 @@ interface TrackListProps {
   getDragIds: (trackId: number) => number[];
   /** Right-click on a row: open the track context menu. */
   onRowContextMenu?: (track: Track, pos: { x: number; y: number }) => void;
+  /** Play order by track id (playlist tables): shows the # column. */
+  playOrder?: ReadonlyMap<number, number>;
   /** Load a track onto the Deck (double-click; Enter goes via the keyboard hub). */
   onLoadTrack: (track: Track) => void;
   /** The Deck's loaded track, for row highlighting. */
@@ -45,6 +48,7 @@ export default function TrackList({
   onSelectTrack,
   getDragIds,
   onRowContextMenu,
+  playOrder,
   onLoadTrack,
   loadedTrackId,
   onLoadToDeck,
@@ -59,20 +63,20 @@ export default function TrackList({
     const info = marks?.get(id);
     return info ? (info.preferred ? 'preferred' : 'saved') : 'none';
   };
-  const { widths, setWidth, resetWidth, cssVars } = useColumnWidths();
+  const { widths, setWidth, resetWidth, cssVars } = useColumnWidths(playOrder !== undefined);
 
   const SortableHeader = ({
     column,
     icon,
-    columnIndex,
+    columnId,
     label
   }: {
     column: SortColumn;
     icon?: JSX.Element;
-    columnIndex: number;
+    columnId: string;
     label?: string;
   }) => {
-    const config = COLUMN_CONFIG[columnIndex];
+    const config = getColumnConfig(columnId)!;
     const className = [
       'sortable-header',
       config.sticky ? 'sticky-col-header' : '',
@@ -113,12 +117,13 @@ export default function TrackList({
       <table className="track-table">
         <thead>
           <tr>
-            <SortableHeader column="key" icon={<KeyIcon />} columnIndex={0} />
-            <SortableHeader column="bpm" icon={<SpeedIcon />} columnIndex={1} />
-            <SortableHeader column="energy" icon={<EnergyIcon />} columnIndex={2} />
-            <SortableHeader column="title" icon={<MusicIcon />} columnIndex={3} />
-            <SortableHeader column="artist" icon={<PersonIcon />} columnIndex={4} />
-            <SortableHeader column="created_at" icon={<CalendarIcon />} columnIndex={5} />
+            {playOrder !== undefined && <SortableHeader column="position" label="#" columnId="order" />}
+            <SortableHeader column="key" icon={<KeyIcon />} columnId="key" />
+            <SortableHeader column="bpm" icon={<SpeedIcon />} columnId="bpm" />
+            <SortableHeader column="energy" icon={<EnergyIcon />} columnId="energy" />
+            <SortableHeader column="title" icon={<MusicIcon />} columnId="title" />
+            <SortableHeader column="artist" icon={<PersonIcon />} columnId="artist" />
+            <SortableHeader column="created_at" icon={<CalendarIcon />} columnId="created_at" />
             <th className="tags-header" style={{ textAlign: 'left', padding: '6px 12px', width: 'var(--colw-tags)', minWidth: 'var(--colw-tags)', maxWidth: 'var(--colw-tags)' }}>
               <TagIcon />
               <ColumnResizeHandle
@@ -128,21 +133,21 @@ export default function TrackList({
                 onReset={resetWidth}
               />
             </th>
-            <SortableHeader column="bitrate_kbps" label="quality" columnIndex={7} />
-            <SortableHeader column="filesize_bytes" label="size" columnIndex={8} />
-            <SortableHeader column="provenance" label="from" columnIndex={9} />
+            <SortableHeader column="bitrate_kbps" label="quality" columnId="quality" />
+            <SortableHeader column="filesize_bytes" label="size" columnId="size" />
+            <SortableHeader column="provenance" label="from" columnId="provenance" />
           </tr>
         </thead>
         <tbody>
           {isLoading && tracks.length === 0 ? (
             <tr>
-              <td colSpan={10} className="track-table-message track-table-loading">
+              <td colSpan={playOrder !== undefined ? 11 : 10} className="track-table-message track-table-loading">
                 Loading tracks...
               </td>
             </tr>
           ) : error ? (
             <tr>
-              <td colSpan={10} className="track-table-message track-table-error">
+              <td colSpan={playOrder !== undefined ? 11 : 10} className="track-table-message track-table-error">
                 Error loading tracks
               </td>
             </tr>
@@ -158,6 +163,7 @@ export default function TrackList({
                 onLoadToDeck={onLoadToDeck}
                 getDragIds={getDragIds}
                 onContextMenu={onRowContextMenu}
+                orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
                 markA={markFor(transitionMarksA, track.id)}
                 markB={markFor(transitionMarksB, track.id)}
               />

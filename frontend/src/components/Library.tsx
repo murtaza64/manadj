@@ -30,6 +30,13 @@ import type { SelectMods } from './TrackRow';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import { useToast } from './Toast';
 import type { Playlist } from '../types';
+import {
+  PLAY_ORDER_SORT,
+  nextPlaylistSort,
+  sortPlaylistTracks,
+  type PlaylistSort,
+  type PlaylistSortColumn,
+} from '../utils/trackSort';
 
 // Find Compatible feature (né Find Related; internal keys unchanged) —
 // types and constants
@@ -291,6 +298,22 @@ export default function Library({
     placeholderData: (previousData) => previousData,
   });
 
+  // Playlist-view sort (playlist-editing 04): client-side and view-only —
+  // it never rewrites Play order. Default (and reset on playlist switch)
+  // is the # column ascending, i.e. Play order itself.
+  const [playlistSort, setPlaylistSort] = useState<PlaylistSort>(PLAY_ORDER_SORT);
+  useEffect(() => {
+    setPlaylistSort(PLAY_ORDER_SORT);
+  }, [selectedPlaylistId]);
+
+  /** Play order by track id (from the API's position-ordered response). */
+  const playOrder = useMemo(() => {
+    if (selectedView !== 'playlist') return undefined;
+    return new Map<number, number>(
+      (playlistData?.tracks ?? []).map((t: Track, i: number) => [t.id, i])
+    );
+  }, [selectedView, playlistData]);
+
   // Playlists for the "Add to playlist ▸" submenu (shares the sidebar's cache).
   const { data: playlists = [] } = useQuery({
     queryKey: ['playlists'],
@@ -345,6 +368,19 @@ export default function Library({
     },
   });
 
+  // Remove tracks from the viewed playlist (keyed by track id — entry
+  // identity). No confirmation: re-adding is cheap.
+  const removeFromPlaylistMutation = useMutation({
+    mutationFn: async ({ playlistId, trackIds }: { playlistId: number; trackIds: number[] }) => {
+      for (const trackId of trackIds) {
+        await api.playlists.removeTrack(playlistId, trackId);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playlist'] });
+    },
+  });
+
   const handleTrackDrop = (playlistId: number, trackIds: number[]) => {
     addToPlaylistMutation.mutate({ playlistId, trackIds });
   };
@@ -369,7 +405,13 @@ export default function Library({
     }
   };
 
-  const handleSort = (column: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance') => {
+  const handleSort = (column: PlaylistSortColumn) => {
+    // Playlist view: local, view-only sort (Play order untouched).
+    if (selectedView === 'playlist') {
+      setPlaylistSort((prev) => nextPlaylistSort(prev, column));
+      return;
+    }
+    if (column === 'position') return; // # exists only in playlist tables
     setFilters(prev => {
       // Toggle direction if same column, otherwise default to desc
       const newDirection = prev.sortColumn === column && prev.sortDirection === 'desc'
@@ -430,7 +472,7 @@ export default function Library({
   const isLoading = selectedView === 'playlist' ? isLoadingPlaylist : isLoadingAllTracks;
   const error = selectedView === 'playlist' ? playlistError : allTracksError;
   let currentTracks = selectedView === 'playlist'
-    ? playlistData?.tracks || []
+    ? sortPlaylistTracks(playlistData?.tracks || [], playlistSort)
     : allTracksData?.items || [];
 
   // The anchor's Track object: from the visible list, falling back to the
@@ -509,6 +551,14 @@ export default function Library({
     setSelection((prev) => selectAll(prev, displayedIds));
   };
 
+  // Delete/Backspace and the context-menu Remove item (playlist views only).
+  const canRemoveFromPlaylist = selectedView === 'playlist' && selectedPlaylistId !== null;
+  const removeTracksFromViewedPlaylist = (trackIds: number[]) => {
+    if (!canRemoveFromPlaylist || trackIds.length === 0) return;
+    removeFromPlaylistMutation.mutate({ playlistId: selectedPlaylistId!, trackIds });
+  };
+  const handleRemoveSelected = () => removeTracksFromViewedPlaylist([...selection.ids]);
+
   // Drag payload: the whole selection when the dragged row is in it, else
   // just that row. Ref-backed so the callback identity is stable and row
   // memoization survives selection churn.
@@ -567,9 +617,18 @@ export default function Library({
           onSelect: () => addToPlaylistMutation.mutate({ playlistId: p.id, trackIds: targetIds }),
         })),
       },
+      ...(canRemoveFromPlaylist
+        ? [
+            {
+              label: multi ? `Remove ${targetIds.length} from playlist` : 'Remove from playlist',
+              danger: true,
+              onSelect: () => removeTracksFromViewedPlaylist(targetIds),
+            } satisfies MenuItem,
+          ]
+        : []),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowMenu, selection.ids, playlists]);
+  }, [rowMenu, selection.ids, playlists, canRemoveFromPlaylist, selectedPlaylistId]);
 
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0
@@ -605,6 +664,7 @@ export default function Library({
         selectedTrack={selectedTrack}
         onNavigate={handleNavigate}
         onSelectAll={handleSelectAll}
+        onRemoveSelected={canRemoveFromPlaylist ? handleRemoveSelected : undefined}
         onLoadTrack={loadTrack}
         onNudgeBeatgrid={handleNudgeBeatgrid}
         onSetDownbeat={handleSetDownbeat}
@@ -691,13 +751,14 @@ export default function Library({
               onSelectTrack={handleRowSelect}
               getDragIds={getDragIds}
               onRowContextMenu={handleRowContextMenu}
+              playOrder={playOrder}
               onLoadTrack={loadForTable}
               loadedTrackId={loadedTrack?.id ?? null}
               onLoadToDeck={onLoadToDeck}
               transitionMarksA={fromA}
               transitionMarksB={fromB}
-              sortColumn={filters.sortColumn}
-              sortDirection={filters.sortDirection}
+              sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
+              sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
               onSort={handleSort}
             />
           </div>
@@ -722,6 +783,7 @@ function LibraryHub({
   selectedTrack,
   onNavigate,
   onSelectAll,
+  onRemoveSelected,
   onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
@@ -732,6 +794,7 @@ function LibraryHub({
   selectedTrack: Track | null;
   onNavigate: (delta: 1 | -1) => void;
   onSelectAll: () => void;
+  onRemoveSelected?: () => void;
   onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid: (offsetMs: number) => void;
   onSetDownbeat: () => void;
@@ -746,6 +809,7 @@ function LibraryHub({
     selectedTrack,
     onNavigate,
     onSelectAll,
+    onRemoveSelected,
     onLoadTrack,
     onNudgeBeatgrid,
     onSetDownbeat,

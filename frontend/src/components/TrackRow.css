@@ -267,3 +267,11 @@ a.provenance-chip:hover {
   background: var(--surface1);
   border-color: var(--text);
 }
+
+/* Play order (#) cell — playlist tables only (playlist-editing 04) */
+.track-order-cell {
+  color: var(--subtext0);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  justify-content: flex-end;
+}

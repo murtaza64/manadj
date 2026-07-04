@@ -36,3 +36,15 @@ playlist view:
 - `.scratch/playlist-editing/issues/01-playlist-entry-identity.md`
 - `.scratch/playlist-editing/issues/02-multi-select-track-tables.md`
 - `.scratch/playlist-editing/issues/03-context-menu-infra-track-row.md`
+
+## Comments
+
+Done (jj uyuqmlvp). '#' column (sticky, resizable via columnConfig 'order'
+entry; participates in sticky offsets only in playlist tables). Playlist
+sort is client-side view-only state (utils/trackSort.ts, 7 vitest cases):
+default/reset = # ascending (Play order); header clicks toggle; Play order
+is never rewritten (the API list order is the source, displayed # comes
+from a track-id→position map). Remove from playlist: context-menu item
+(danger, selection-scoped) + Delete/Backspace in the keyboard hub, both
+keyed by track_id, no confirm; server compaction reflected on refetch.
+Column lookups in TrackList/TrackRow switched from numeric indexes to ids.
