@@ -54,7 +54,22 @@
 }
 
 .deck-gridrow .player-button + .player-button {
-  border-left: 1px solid var(--surface1);
+  border-left: 1px solid var(--surface2, #585b70);
+}
+
+/* Segment feedback: the buttons have no own border inside a cluster, so
+   hover reads as a fill (the border-color hover of standalone
+   player-buttons can't show); the cluster's shared border brightens on
+   hover so the unit highlights as one control. */
+.deck-gridrow:hover,
+.deck-bpm:hover {
+  border-color: var(--subtext1, #bac2de);
+}
+
+.deck-gridrow .player-button:hover:not(:disabled),
+.deck-bpm .player-button:hover:not(:disabled) {
+  background: var(--surface0, #313244);
+  color: var(--text);
 }
 
 .deck-gridrow.mini .player-button {
@@ -82,8 +97,10 @@
   box-sizing: border-box;
 }
 
-.deck-bpm > * + *:not(.deck-bpm-dropdown) {
-  border-left: 1px solid var(--surface1);
+/* Dividers between every adjacent segment (the fixed-position dropdown is
+   out of the visual flow and gets none). */
+.deck-bpm > :not(.deck-bpm-dropdown) + :not(.deck-bpm-dropdown) {
+  border-left: 1px solid var(--surface2, #585b70);
 }
 
 .deck-bpm-input {
@@ -124,7 +141,7 @@
 }
 
 .deck-bpm-steps .player-button + .player-button {
-  border-left: 1px solid var(--surface1);
+  border-left: 1px solid var(--surface2, #585b70);
 }
 
 .deck-bpm-steps .player-button svg { display: block; }

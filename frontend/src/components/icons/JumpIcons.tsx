@@ -5,32 +5,34 @@
  * ◀◀/▶▶ text glyph; halve/double is plain text (`1/2` / `x2`).
  */
 
-/** Curved jump arrow, pointing back (↶ shape) — beatjump back. */
+/** Jump-back arrow: a leap trajectory landing down-left — the arrowhead
+ * angles along the terminal tangent (~50° below horizontal), so it reads
+ * as a JUMP, not a rotate/redo glyph. */
 export function JumpBackIcon() {
   return (
     <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
       <path
-        d="M13 11 C 13 4.5, 3.5 4.5, 3.5 9.5"
+        d="M13.5 12 C 12 4.5, 6.5 3, 4.3 7.3"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.6"
       />
-      <path d="M1.2 8.2 L5.8 8.2 L3.5 12.6 Z" fill="currentColor" stroke="none" />
+      <path d="M2.4 10.2 L6.0 8.4 L2.6 6.2 Z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
 
-/** Curved jump arrow, pointing forward (↷ shape) — beatjump forward. */
+/** Jump-forward arrow: leap trajectory landing down-right. */
 export function JumpForwardIcon() {
   return (
     <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
       <path
-        d="M3 11 C 3 4.5, 12.5 4.5, 12.5 9.5"
+        d="M2.5 12 C 4 4.5, 9.5 3, 11.7 7.3"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.6"
       />
-      <path d="M10.2 8.2 L14.8 8.2 L12.5 12.6 Z" fill="currentColor" stroke="none" />
+      <path d="M13.6 10.2 L10.0 8.4 L13.4 6.2 Z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
