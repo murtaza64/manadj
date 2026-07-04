@@ -550,16 +550,27 @@ export function DawTimeline({
       if (d.kind === 'bMove') {
         if (!s.lockedWindow) {
           // Unlocked: the window stays with A — the drag slides B's content
-          // origin, mutating bInSec only. Snap puts a B beat on the window
-          // start; in the negative-anchor regime (silent lead gap) that
-          // would jam at B's first beat, so snap B's audio start to A's
-          // grid instead.
+          // origin, mutating bInSec only. Snap aligns B's GRID to A's GRID
+          // (issue 25): take B's beat nearest the window anchor (its first
+          // beat when the anchor sits in a lead gap), land its mix-time
+          // position on A's nearest gridline, solve back for bInSec. The
+          // window edge itself is NOT a snap target — startSec may sit
+          // off A's grid (typed values), and B's beats must still land
+          // on A's beats.
           const newOrigin = sec - d.grabOffsetSec;
           let bIn = (m.transition.startSec - newOrigin) * s.rateB;
           if (snapOn) {
-            if (bIn >= 0 && s.beatsB) {
+            if (s.beatsA?.length && s.beatsB?.length) {
+              const refB = nearestTime(s.beatsB, bIn) ?? bIn;
+              const refMix =
+                m.transition.startSec + (refB - bIn) / s.rateB;
+              const snapped = nearestTime(s.beatsA, refMix) ?? refMix;
+              bIn = refB - (snapped - m.transition.startSec) * s.rateB;
+            } else if (s.beatsB?.length && bIn >= 0) {
+              // No A grid: fall back to a B beat on the window start.
               bIn = nearestTime(s.beatsB, bIn) ?? bIn;
-            } else if (bIn < 0 && s.beatsA) {
+            } else if (s.beatsA?.length && bIn < 0) {
+              // No B grid: fall back to B's audio start on A's grid.
               const audioStart = m.transition.startSec - bIn / s.rateB;
               const snapped = nearestTime(s.beatsA, audioStart) ?? audioStart;
               bIn = (m.transition.startSec - snapped) * s.rateB;
