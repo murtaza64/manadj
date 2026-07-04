@@ -1,5 +1,8 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+// PROTOTYPE — wipe me (waveform-overhaul). Dev-only page at ?view=wfproto.
+const WaveformStylePrototype = lazy(() => import('./prototype/WaveformStylePrototype'));
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
@@ -23,6 +26,15 @@ const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
 
 function App() {
   const [view, setView] = useState<AppMode>(initialView);
+
+  // PROTOTYPE — wipe me: standalone waveform style prototype, dev builds only.
+  if (import.meta.env.DEV && requestedView === 'wfproto') {
+    return (
+      <Suspense fallback={null}>
+        <WaveformStylePrototype />
+      </Suspense>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
