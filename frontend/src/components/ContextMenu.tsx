@@ -115,7 +115,12 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
     setSubmenuSide(x + rect.width * 2 > window.innerWidth ? 'left' : 'right');
   }, [x, y]);
 
-  // Dismiss on click-away, another context menu, or Escape.
+  // Dismiss on click-away or Escape. Deliberately NO document 'contextmenu'
+  // listener: the right-click that OPENS the menu is still bubbling to
+  // document when this effect attaches (React flushes discrete-event
+  // effects synchronously), so such a listener dismisses the menu in the
+  // same instant it opens. 'mousedown' covers right-clicks anyway — it
+  // fires before 'contextmenu', i.e. before the menu mounts.
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
@@ -124,11 +129,9 @@ export default function ContextMenu({ x, y, items, onClose }: ContextMenuProps) 
       if (e.key === 'Escape') onClose();
     };
     document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('contextmenu', onMouseDown);
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('contextmenu', onMouseDown);
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [onClose]);
