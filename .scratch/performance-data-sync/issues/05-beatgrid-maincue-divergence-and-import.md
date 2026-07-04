@@ -1,6 +1,6 @@
 # Beatgrid + main cue divergence + import
 
-Status: ready-for-human (implemented, change mrsvnwst; landed in merge vspmwkvl — verify by eye)
+Status: closed (implemented change mrsvnwst; landed in merge vspmwkvl; user-verified 2026-07-04)
 
 ## Parent
 

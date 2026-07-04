@@ -1,6 +1,6 @@
 # Hot cue divergence + per-cell import
 
-Status: ready-for-human (implemented, change ksxmytzl; landed in merge vspmwkvl — verify import UI by eye)
+Status: closed (implemented change ksxmytzl; landed in merge vspmwkvl; user-verified 2026-07-04. Library→Engine direction gap filed as issue 08.)
 
 ## Parent
 

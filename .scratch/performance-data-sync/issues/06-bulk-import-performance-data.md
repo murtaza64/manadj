@@ -1,6 +1,6 @@
 # Bulk import performance data from Engine
 
-Status: ready-for-human (implemented, change xxsvrstl; landed in merge vspmwkvl — verify bulk flow by eye)
+Status: closed (implemented change xxsvrstl; landed in merge vspmwkvl; user-verified 2026-07-04)
 
 ## Parent
 

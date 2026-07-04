@@ -1,6 +1,6 @@
 # Overlay diff viewer
 
-Status: ready-for-human (implemented, change tovrwyym; landed in merge vspmwkvl — verify viewer by eye)
+Status: closed (implemented change tovrwyym; landed in merge vspmwkvl; user-verified 2026-07-04, incl. post-merge viewer fixes from change nqzsvywt)
 
 ## Parent
 
