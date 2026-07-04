@@ -507,8 +507,7 @@
 
 /* Uniform control height across the card rows (one baseline grid). */
 .editor-deckcard-row button,
-.editor-deckcard-row input,
-.editor-cueslide {
+.editor-deckcard-row input {
   height: 22px;
   box-sizing: border-box;
 }
@@ -528,16 +527,39 @@
   font-weight: bold;
 }
 
-.editor-cueslide {
-  font-family: monospace;
-  font-weight: bold;
-  min-width: 22px;
+/* ── Alignment accent (deck-controls PRD, class 3) ──────────────────────
+   ONE systematic marker for every control that realigns the pair
+   (Alignment nudge, B's slides + lock). Bright saturated orange: distinct
+   from both deck colors and the beatgrid yellow. */
+.editor-alignment,
+.editor-alignment.editor-pair,
+.editor-alignment .editor-pair {
+  border-color: #ff9500;
 }
 
-/* Empty slot: press to set a cue at this deck's playhead. */
-.editor-cueslide.unset {
-  border-style: dashed;
-  color: var(--surface2, #585b70);
+.editor-alignment .editor-pair-label,
+.editor-alignment.editor-pair .editor-pair-label {
+  color: #ff9500;
+}
+
+.editor-alignment.editor-pair > * + *,
+.editor-alignment .editor-pair > * + * {
+  border-left-color: #ff9500;
+}
+
+/* The slide row is a row, not a bordered control — accent its members. */
+.editor-slides.editor-alignment .editor-lockbtn {
+  border-color: #ff9500;
+  color: #ff9500;
+}
+
+/* Shared HotCue pads sized for the card rows; set pads keep their cue
+   colors (identity), the ROW carries the accent. */
+.editor-slides .hot-cue {
+  height: 22px;
+  width: 24px;
+  padding: 0;
+  font-size: 11px;
 }
 
 /* Cue slots always read 1-8 left-to-right: the card's mirrored layout
@@ -653,11 +675,19 @@
   touch-action: none;
 }
 
-/* Toggle buttons (locked window on B, deck mutes): pressed = functional
-   color, matching the site's square-button idiom. */
+/* Toggle buttons (locked window on B, deck mutes): icon buttons
+   (deck-controls PRD icon language); pressed = functional color. */
+.editor-lockbtn,
+.editor-mutebtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+}
+
 .editor-lockbtn.on {
-  color: var(--sapphire, #74c7ec);
-  border-color: var(--sapphire, #74c7ec);
+  color: #ff9500; /* engaged lock = alignment accent (it scopes slides) */
+  border-color: #ff9500;
 }
 
 .editor-mutebtn.on {

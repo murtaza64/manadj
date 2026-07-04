@@ -3,25 +3,28 @@
  * persisted) with tempo-matched effective BPM and pitch %, key, mute,
  * beatgrid tweaking, and the hot cue / beat jump gesture row (slide on
  * deck B, transport jump on deck A).
+ *
+ * Control classes (deck-controls PRD): BPM + grid rows are shared
+ * CURATION components; the gesture row keeps the shared visual language
+ * and carries the ALIGNMENT ACCENT wherever a control realigns the pair
+ * (Alignment nudge on both cards; slides + lock on B). Deck A's gesture
+ * row is plain — its gestures are transport (playback class).
  */
-import { useState } from 'react';
+import HotCue from '../components/HotCue';
 import { BpmControl } from '../components/deckControls/BpmControl';
 import { GridEditControls } from '../components/deckControls/GridEditControls';
-import { useDeleteHotCue, useHotCues, useSetHotCue } from '../hooks/useHotCues';
-import {
-  PERFORMANCE_BEATJUMP_DEFAULT,
-  doubleBeatjump,
-  halveBeatjump,
-} from '../playback/beatjump';
+import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
+import { LockIcon } from '../components/icons/LockIcon';
+import { MuteIcon } from '../components/icons/MuteIcon';
+import { useDecks } from '../hooks/useDeck';
+import { useHotCueSlots } from '../hooks/useHotCueActions';
+import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { MixPlayer } from './MixPlayer';
 import type { Track } from '../types';
 
-/**
- * Per-deck card (left/right of the transition center): track identity, base
- * BPM (editable, persisted) with tempo-matched effective BPM and pitch %,
- * key, and beatgrid tweaking.
- */
+const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
+
 export function DeckCard({
   deck,
   track,
@@ -30,7 +33,7 @@ export function DeckCard({
   effectiveBpm,
   pitchPercent,
   onBpmSaved,
-  onNudgeTrack,
+  onAlignmentNudge,
   gestures,
   lock,
 }: {
@@ -42,8 +45,8 @@ export function DeckCard({
   effectiveBpm: number | null;
   pitchPercent: number;
   onBpmSaved: (bpm: number) => void;
-  /** Fine alignment: move this track ±deltaSec relative to the other. */
-  onNudgeTrack: (deltaSec: number) => void;
+  /** Alignment nudge (glossary): realign the pair ±deltaSec. */
+  onAlignmentNudge: (deltaSec: number) => void;
   /** Hot cue / beat jump row (issues 11–12). Two semantics, one idiom:
    * B = 'slide' (realign the pair; playhead stays put), A = 'jump' (plain
    * transport — A's track time ≡ mix time, so jumping A jumps the mix). */
@@ -56,11 +59,20 @@ export function DeckCard({
   /** Locked-window toggle (B card only — the lock scopes to B gestures). */
   lock?: { on: boolean; toggle: () => void };
 }) {
-  const { data: hotCues = [] } = useHotCues(track?.id ?? null);
-  const setHotCue = useSetHotCue();
-  const deleteHotCue = useDeleteHotCue();
-  /** Gesture size in this deck's own beats (Performance beatjump idiom). */
-  const [gestureBeats, setGestureBeats] = useState(PERFORMANCE_BEATJUMP_DEFAULT);
+  // Gesture size = the deck's beatjump size (ONE per-deck number across
+  // modes — deck-controls 04/05; adjust it here or in the Performance
+  // view, it's the same N).
+  const deckScope = useDecks()[deck];
+  const gestureBeats = deckScope.beatjumpBeats;
+  const setGestureBeats = deckScope.setBeatjumpBeats;
+
+  // Hot-cue curation (set-empty / delete) is the shared implementation;
+  // the TRIGGER is this card's gesture (slide B / jump A) — tap, no hold.
+  const cueActions = useHotCueSlots(track?.id ?? null, {
+    enabled: track !== null,
+    getPlayhead: () => player.getTrackTime(deck),
+    trigger: (_slot, timeSeconds) => gestures?.toCue(timeSeconds),
+  });
 
   if (!track) {
     return (
@@ -114,19 +126,23 @@ export function DeckCard({
           title={`Mute deck ${deck} (overrides the fader lane)`}
           onClick={() => player.setMuted(deck, !player.isMuted(deck))}
         >
-          mute
+          <MuteIcon muted={player.isMuted(deck)} />
         </button>
         <span className="editor-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
       </div>
       <div className="editor-deckcard-row">
-        {/* Segmented pairs (issue 19): label + ◀ + ▶ share one border and
-            read as a single control; the step lives in the tooltip. */}
-        <span className="editor-pair" title={`Nudge ${deck} ±10ms relative to the other track`}>
-          <span className="editor-pair-label">track</span>
-          <button title={`Nudge ${deck} 10ms earlier`} onClick={() => onNudgeTrack(-0.01)}>
+        {/* Alignment nudge (accented — realigns the pair): plain ◀/▶ +
+            accent, per the PRD icon language (every other pair carries a
+            specific icon, so this combination is unambiguous). */}
+        <span
+          className="editor-pair editor-alignment"
+          title={`Alignment nudge: move ${deck} ±10ms relative to the other track (edits the sketch, not the grid)`}
+        >
+          <span className="editor-pair-label">align</span>
+          <button title={`Nudge ${deck} 10ms earlier`} onClick={() => onAlignmentNudge(-0.01)}>
             ◀
           </button>
-          <button title={`Nudge ${deck} 10ms later`} onClick={() => onNudgeTrack(0.01)}>
+          <button title={`Nudge ${deck} 10ms later`} onClick={() => onAlignmentNudge(0.01)}>
             ▶
           </button>
         </span>
@@ -139,7 +155,11 @@ export function DeckCard({
         />
       </div>
       {gestures && (
-        <div className="editor-deckcard-row editor-slides">
+        <div
+          className={`editor-deckcard-row editor-slides${
+            gestures.kind === 'slide' ? ' editor-alignment' : ''
+          }`}
+        >
           <span
             className="editor-pair"
             title={
@@ -158,16 +178,16 @@ export function DeckCard({
               }
               onClick={() => gestures.beats(-gestureBeats)}
             >
-              ◄◄
+              <JumpBackIcon />
             </button>
             <button title="Halve size" onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}>
-              −
+              1/2
             </button>
-            <span className="editor-slidesize" title={`Size (${deck}'s beats)`}>
+            <span className="editor-slidesize" title={`Size (${deck}'s beats — shared with the deck's beatjump)`}>
               {gestureBeats}
             </span>
             <button title="Double size" onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}>
-              +
+              x2
             </button>
             <button
               disabled={!gestures.enabled}
@@ -178,7 +198,7 @@ export function DeckCard({
               }
               onClick={() => gestures.beats(gestureBeats)}
             >
-              ►►
+              <JumpForwardIcon />
             </button>
           </span>
           {lock && (
@@ -188,53 +208,24 @@ export function DeckCard({
               title="Locked window: slides carry the window WITH this track (same audio stays under it); unlocked, the window stays with the other track"
               onClick={lock.toggle}
             >
-              lock
+              <LockIcon locked={lock.on} />
             </button>
           )}
-          {/* All 8 slots, Performance pad semantics: set cues act (slide/
-              jump), empty ones SET at this deck's playhead; right-click
-              deletes. Always reads 1-8 left-to-right (B un-mirrored). */}
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((slot) => {
-            const cue = hotCues.find((c) => c.slot_number === slot);
-            if (!cue) {
-              return (
-                <button
-                  key={slot}
-                  className="editor-cueslide unset"
-                  title={`Set cue ${slot} at ${deck}'s playhead`}
-                  onClick={() =>
-                    setHotCue.mutate({
-                      trackId: track.id,
-                      slotNumber: slot,
-                      data: { time_seconds: player.getTrackTime(deck) },
-                    })
-                  }
-                >
-                  {slot}
-                </button>
-              );
-            }
-            const color = cue.color || '#39ff14';
-            return (
-              <button
-                key={slot}
-                className="editor-cueslide"
-                style={{ borderColor: color, color }}
-                title={
-                  (gestures.kind === 'slide'
-                    ? `Slide so cue ${slot} lands under the playhead`
-                    : `Jump the playhead to cue ${slot}`) + ' — right-click to delete'
-                }
-                onClick={() => gestures.toCue(cue.time_seconds)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  deleteHotCue.mutate({ trackId: track.id, slotNumber: slot });
-                }}
-              >
-                {slot}
-              </button>
-            );
-          })}
+          {/* All 8 slots, shared pad surface + curation (set-empty at this
+              deck's playhead, right-click deletes); pressing a SET pad is
+              this card's gesture (slide/jump). Always 1-8 left-to-right. */}
+          {SLOTS.map((slot) => (
+            <HotCue
+              key={slot}
+              slotNumber={slot}
+              hotCue={cueActions.bySlot.get(slot)}
+              disabled={!cueActions.enabled}
+              isPreviewing={false}
+              onDown={cueActions.down}
+              onUp={cueActions.up}
+              onDelete={cueActions.remove}
+            />
+          ))}
         </div>
       )}
     </div>

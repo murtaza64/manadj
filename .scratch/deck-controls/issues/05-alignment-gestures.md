@@ -1,6 +1,10 @@
 # 05 — Alignment gestures: one marker, shared plumbing, glossary rename
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change in mixeditor lane — verify by
+eye: orange alignment accent on align-pair/slide-row/lock (B) vs plain
+jump row (A) vs yellow-anchored grid cluster; shared HotCue pads in the
+gesture row; gesture size now shared with PERF's beatjump size; mute/lock
+icons legible)
 
 ## Parent
 

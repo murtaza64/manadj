@@ -223,9 +223,10 @@ export class EditorStore {
     this.updateMix((m) => ({ ...m, transition: { ...m.transition, ...mut } }));
   }
 
-  /** Fine alignment nudge (issue 09): B moves with the frame; A anchors
-   * the mix axis, so nudging A shifts frame+B the opposite way. */
-  nudgeTrack(deck: 'A' | 'B', deltaSec: number): void {
+  /** Alignment nudge (glossary; issue 09): realign the pair by a fixed
+   * time step. B moves with the frame; A anchors the mix axis, so nudging
+   * A shifts frame+B the opposite way. */
+  alignmentNudge(deck: 'A' | 'B', deltaSec: number): void {
     const shift = deck === 'B' ? deltaSec : -deltaSec;
     this.updateMix((m) => ({
       ...m,

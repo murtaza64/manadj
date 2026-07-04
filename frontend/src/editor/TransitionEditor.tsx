@@ -367,7 +367,7 @@ function TransitionEditorInner() {
               effectiveBpm={bpmA}
               pitchPercent={0}
               onBpmSaved={(bpm) => setTrackA((t) => (t ? { ...t, bpm } : t))}
-              onNudgeTrack={(d) => store.nudgeTrack('A', d)}
+              onAlignmentNudge={(d) => store.alignmentNudge('A', d)}
               gestures={{
                 // A ≡ mix axis (sketch origin): its controls are plain
                 // transport, not slides (re-decided 2026-07-03 — mirror-A
@@ -402,7 +402,7 @@ function TransitionEditorInner() {
               effectiveBpm={bpmB !== null ? bpmB * rateB : null}
               pitchPercent={(rateB - 1) * 100}
               onBpmSaved={(bpm) => setTrackB((t) => (t ? { ...t, bpm } : t))}
-              onNudgeTrack={(d) => store.nudgeTrack('B', d)}
+              onAlignmentNudge={(d) => store.alignmentNudge('B', d)}
               gestures={{
                 kind: 'slide',
                 toCue: (cueSec) => slideDeckB('cue', cueSec),
