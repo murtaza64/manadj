@@ -596,18 +596,16 @@ export default function Library({
   // 'main' is the single always-present table (playlist or library,
   // depending on the view; the top pane in the split). 'editLibrary' only
   // exists while editing.
-  const mainSel = useTrackSelection(
-    selectedView === 'playlist' ? playlistTracks : libraryTracks,
-    { keepAnchorVisible: true }
-  );
+  const currentTracks = selectedView === 'playlist' ? playlistTracks : libraryTracks;
+  const mainSel = useTrackSelection(currentTracks);
   const editLibSel = useTrackSelection(splitView ? libraryTracks : EMPTY_TRACKS);
 
   /** The pane keyboard input acts on. */
   const activeSel = splitView && focusedPane === 'library' ? editLibSel : mainSel;
   const selectedTrack = activeSel.selectedTrack;
 
-  // Switching views/playlists clears the main selection (also prevents the
-  // keep-anchor splice from carrying a foreign track across list sources).
+  // Switching views/playlists clears the main selection outright (prune
+  // would do most of it; this also covers same-id coincidences).
   const resetMainSelection = mainSel.setSelection;
   useEffect(() => {
     resetMainSelection(EMPTY_SELECTION);
@@ -615,7 +613,6 @@ export default function Library({
 
   const isLoading = selectedView === 'playlist' ? isLoadingPlaylist : isLoadingAllTracks;
   const error = selectedView === 'playlist' ? playlistError : allTracksError;
-  const currentTracks = mainSel.tracks;
 
   // Delete/Backspace and the context-menu Remove item (playlist views only;
   // in the split, only the playlist pane removes).
@@ -984,7 +981,7 @@ export default function Library({
                   />
                 )}
                 <TrackList
-                  tracks={mainSel.tracks}
+                  tracks={playlistTracks}
                   isLoading={isLoadingPlaylist}
                   error={playlistError}
                   selectedIds={mainSel.selectedIds}
@@ -1024,7 +1021,7 @@ export default function Library({
                 }}
               >
                 <TrackList
-                  tracks={editLibSel.tracks}
+                  tracks={libraryTracks}
                   isLoading={isLoadingAllTracks}
                   error={allTracksError}
                   selectedIds={editLibSel.selectedIds}
