@@ -409,7 +409,12 @@ export function DawTimeline({
     const px = Math.min(MAX_PX_PER_SEC, Math.max(0.05, (w - 2) / span));
     pxRef.current = px;
     scrollPxRef.current = Math.max(0, (tr.startSec - dur * 0.1) * px);
-    setPxPerSec(px);
+    // flushSync, like the wheel-zoom path above: the refs and the React
+    // commit must land in the same frame. Mutating pxRef ahead of an async
+    // commit let a rAF tick consume the dirty key with stale lane geometry
+    // (geomRef/lastViewRef from the old zoom) — envelopes then didn't
+    // redraw on Transition switch until a zoom/scroll changed the key.
+    flushSync(() => setPxPerSec(px));
   }, []);
 
   // Re-frame whenever a Transition is loaded/switched (parent bumps the
