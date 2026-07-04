@@ -78,19 +78,28 @@ vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   },
   {
     id: 'additive-soft',
-    name: 'Additive RGB, hued core',
+    name: 'Additive RGB, dominant core',
     defaultColors: ADDITIVE_COLORS,
     source: `
-// Additive, but overlap compresses hue-preservingly instead of clipping to
-// white: where all groups stack (drops), the core keeps the mixed hue —
-// bass-heavy reads warm, hat-heavy reads cool — instead of a flat white slab.
+// Additive at the fringes; where groups overlap (drops), the core is
+// recolored by the groups' ENERGY BALANCE at full brightness, not the raw
+// channel sum — sum hues are palette artifacts (red+green = yellow no
+// matter the music), while the dominant hue says what the drop is made of.
+// Extreme stacking blooms gently toward white so "loud" still reads.
 vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   vec3 c = vec3(0.0);
   if (yA < g.x) c += u_colorLow;
   if (yA < g.y) c += u_colorMid;
   if (yA < g.z) c += u_colorHigh;
   float m = max(c.r, max(c.g, c.b));
-  if (m > 1.0) c *= (1.0 + 0.25 * (m - 1.0)) / m; // mostly hue, a hint of bloom
+  if (m > 1.0) {
+    vec3 w = g * g;
+    vec3 d = (w.x * u_colorLow + w.y * u_colorMid + w.z * u_colorHigh)
+           / (w.x + w.y + w.z + 1e-6);
+    d /= max(d.r, max(d.g, d.b)) + 1e-6;
+    float bloom = clamp(0.35 * (m - 1.0), 0.0, 0.6);
+    c = mix(d, vec3(1.0), bloom);
+  }
   return BG + min(c, vec3(1.0));
 }`,
   },
