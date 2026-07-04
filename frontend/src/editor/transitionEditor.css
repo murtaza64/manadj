@@ -563,6 +563,32 @@
   gap: 10px;
 }
 
+/* Beat-domain readouts (issue 18): display-only values, monospace so they
+   don't jitter during drags; time-fallback fields (no beatgrid) dim. */
+.editor-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.editor-readout-label {
+  color: var(--subtext0, #a6adc8);
+  font-size: 11px;
+}
+
+.editor-readout-value {
+  color: var(--sapphire, #74c7ec);
+  font-family: monospace;
+  font-weight: bold;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-readout-time .editor-readout-value {
+  color: var(--subtext0, #a6adc8);
+  font-weight: normal;
+}
+
 .editor-center-row label {
   display: flex;
   align-items: center;

@@ -1,9 +1,9 @@
 # 18 — Beat-domain transition readouts (inputs removed)
 
-Status: ready-for-agent (re-specced 2026-07-04 with the user: the original
-beats⇄time INPUT toggle is obsolete — graphical manipulation is the main
-interaction mode, typed entry explicitly not wanted; readouts should be
-beat-domain and useful)
+Status: ready-for-human (implemented, change lmnqxqkq — verify by eye:
+readouts read musically during drags; note the format decision: off-grid
+positions show as ~nearest bar.beat rather than fractional beats — the
+timeline shows exact, readouts orient)
 
 ## Parent
 
@@ -32,16 +32,17 @@ with display-only beat-domain readouts:
 
 ## Acceptance criteria
 
-- [ ] The three inputs are gone; readouts show bar.beat / beats / B-entry
-      beats live during drags (they're in the drag-rate subscriber panel
-      already — mix-editor 27)
-- [ ] Whole-beat positions read clean (no `.0` noise); off-grid values
-      show one decimal
-- [ ] B entry uses B's grid; negative entry reads as lead gap in B beats
-- [ ] Gridless per-value time fallback with indicator
-- [ ] Conversion helpers pure + under vitest (both grids, bar.beat math
-      incl. grids that don't start at t=0, fractional, negative entry)
-- [ ] tsc, eslint on touched files, vitest green
+- [x] The three inputs are gone (`setTransitionField` survives only for
+      the tempo-match checkbox); readouts live in the drag-rate panel
+- [ ] Readouts read usefully during drags — BY EYE
+- [x] Whole-beat positions read clean; off-grid = `~nearest` bar.beat
+      (format refinement over the spec's one-decimal: `1.1.5` was
+      unreadable — lengths still show one decimal, e.g. `3.5 beats`)
+- [x] B entry uses B's grid; negative entry reads `gap N beats`
+- [x] Gridless per-value fallback: dimmed seconds + tooltip marker
+- [x] Conversion helpers pure + vitested (12: offset grids, variable
+      grids, extrapolation, bar inference, fractional, negative entry)
+- [x] tsc, eslint, vitest 279, build green
 
 ## Blocked by
 

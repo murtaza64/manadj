@@ -29,6 +29,7 @@ import { TransitionSwitcher } from './TransitionSwitcher';
 import { TemplatesDropdown } from './TemplatesDropdown';
 import { SaveTemplateModal } from './SaveTemplateModal';
 import type { SaveTemplateResult } from './SaveTemplateModal';
+import { barBeatLabel, bEntryLabel, lengthBeatsLabel } from './beatReadout';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
@@ -423,6 +424,29 @@ function TransitionEditorInner() {
   );
 }
 
+/** Beat-domain readout (issue 18): beat label when the grid supports it,
+ * dimmed seconds fallback otherwise; exact seconds always in the tooltip. */
+function Readout({
+  label,
+  beatValue,
+  seconds,
+}: {
+  label: string;
+  beatValue: string | null;
+  seconds: number;
+}) {
+  const secondsText = `${seconds.toFixed(2)}s`;
+  return (
+    <span
+      className={`editor-readout ${beatValue === null ? 'editor-readout-time' : ''}`}
+      title={beatValue === null ? `${secondsText} — no beatgrid` : secondsText}
+    >
+      <span className="editor-readout-label">{label}</span>
+      <span className="editor-readout-value">{beatValue ?? secondsText}</span>
+    </span>
+  );
+}
+
 /**
  * Transition controls + switcher: the drag-rate subscriber (reads `mix`),
  * isolated so a lane drag re-renders this small panel and DawTimeline —
@@ -587,36 +611,27 @@ function EditorCenterPanel({
           ))}
         </div>
       )}
-      <div className="editor-center-row">
-        <label>
-          start
-          <input
-            type="number"
-            min={0}
-            step={0.5}
-            value={tr.startSec.toFixed(1)}
-            onChange={(e) => setTransitionField({ startSec: Number(e.target.value) })}
-          />
-        </label>
-        <label>
-          length
-          <input
-            type="number"
-            min={0}
-            step={0.5}
-            value={tr.durationSec.toFixed(1)}
-            onChange={(e) => setTransitionField({ durationSec: Number(e.target.value) })}
-          />
-        </label>
-        <label>
-          B entry
-          <input
-            type="number"
-            step={0.5}
-            value={tr.bInSec.toFixed(1)}
-            onChange={(e) => setTransitionField({ bInSec: Number(e.target.value) })}
-          />
-        </label>
+      {/* Beat-domain readouts (issue 18): display-only — the timeline
+          gestures are the manipulation surface. Seconds live in the
+          tooltip; a gridless track's fields fall back to time (dimmed). */}
+      <div className="editor-center-row editor-readouts">
+        <Readout
+          label="start"
+          beatValue={sideA.beatgrid ? barBeatLabel(sideA.beatgrid, tr.startSec) : null}
+          seconds={tr.startSec}
+        />
+        <Readout
+          label="length"
+          beatValue={
+            sideA.beatgrid ? lengthBeatsLabel(sideA.beatgrid, tr.startSec, tr.durationSec) : null
+          }
+          seconds={tr.durationSec}
+        />
+        <Readout
+          label="B entry"
+          beatValue={sideB.beatgrid ? bEntryLabel(sideB.beatgrid, tr.bInSec) : null}
+          seconds={tr.bInSec}
+        />
       </div>
       <div className="editor-center-row">
         <label>
