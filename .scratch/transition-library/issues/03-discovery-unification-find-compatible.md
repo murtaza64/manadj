@@ -1,7 +1,6 @@
 # 03 — Discovery unification: Find Compatible from loaded decks + proven-tier switch
 
-Status: ready-for-human (implemented 2026-07-03, change `qwvtkuwo`; run the
-full discovery loop — compatible from A with the toggle on — in the browser)
+Status: closed (implemented change `qwvtkuwo`; user-verified 2026-07-04)
 
 ## Parent
 

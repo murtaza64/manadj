@@ -1,8 +1,7 @@
 # 19 — Deck card grid/nudge controls: layout and design
 
-Status: ready-for-human (implemented 2026-07-03, change `rmmoxzso`;
-screenshot round with the user pending — segmented pairs also wrap the
-slide/jump gesture cluster)
+Status: closed (implemented change `rmmoxzso`; user-verified 2026-07-04.
+Segmented pairs also wrap the slide/jump gesture cluster.)
 
 ## Parent
 

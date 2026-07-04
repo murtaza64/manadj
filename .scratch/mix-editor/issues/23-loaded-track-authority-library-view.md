@@ -1,6 +1,6 @@
 # 23 — Library view: loaded track is the single authority
 
-Status: ready-for-human (implemented, change owmpypkz on the fixes lane — verify by eye)
+Status: closed (implemented change owmpypkz; user-verified 2026-07-04)
 
 Finding during implementation: the minimap already followed the loaded deck
 (explicit comment in TagEditor); the chimera was the surrounding panel. The

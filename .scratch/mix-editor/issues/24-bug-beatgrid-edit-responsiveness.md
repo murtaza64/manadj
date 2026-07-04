@@ -1,6 +1,6 @@
 # 24 — BUG: beatgrid editing lost responsiveness in library view
 
-Status: ready-for-human (implemented, change ptqonxkz on the fixes lane — verify by eye)
+Status: closed (implemented change ptqonxkz; user-verified 2026-07-04)
 
 Root cause (recorded per acceptance criteria): NOT the renderer — hypothesis
 1-adjacent plus an ordering race. `handleBpmChange` fired the BPM PATCH

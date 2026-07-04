@@ -1,8 +1,8 @@
 # 17 — Site design language: selects and numeric inputs
 
-Status: ready-for-human (implemented 2026-07-03, change `knyunyzv`; visual
-check wanted. Also swept dead CSS: .mixproto-play, -picker*, -body,
--deckrow, -controls*, -lanes/-lane old-layout blocks.)
+Status: closed (implemented change `knyunyzv`; user-verified 2026-07-04.
+Also swept dead CSS: .mixproto-play, -picker*, -body, -deckrow,
+-controls*, -lanes/-lane old-layout blocks.)
 
 ## Parent
 

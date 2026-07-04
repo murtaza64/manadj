@@ -1,8 +1,8 @@
 # 02 — Transition library: discovery marks and filter in the library view
 
-Status: ready-for-human (implemented 2026-07-03, change `mwqvwots`; verify
-marks/stars/filter in the browser. Note: favorite→star updates ride the
-300ms debounced save — near-live)
+Status: closed (implemented change `mwqvwots`; user-verified 2026-07-04.
+Note: favorite→star updates ride the 300ms debounced save — near-live,
+accepted)
 
 ## Parent
 

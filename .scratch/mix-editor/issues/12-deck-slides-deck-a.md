@@ -1,8 +1,6 @@
 # 12 — Deck A controls: transport (jump), not slides
 
-Status: ready-for-human (implemented 2026-07-03, change `vryroqtw`, after a
-re-grill replaced mirror-A slides with transport semantics; verify the A
-jump row and the two-gesture double-drop line-up)
+Status: closed (implemented change `vryroqtw`; user-verified 2026-07-04)
 
 ## Parent
 

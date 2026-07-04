@@ -1,10 +1,8 @@
 # 11 — Deck slides: groundwork + deck B controls
 
-Status: ready-for-human (implemented 2026-07-03, change `roxuvwyx`; awaiting
-user verification — cue-slide feel unlocked/locked, negative-anchor gap
-playback on a real pair, slides during playback. Known soft spot: waveform
-row B's display window goes negative during a lead gap; verify the renderer
-draws blank there rather than garbage.)
+Status: closed (implemented change `roxuvwyx`; user-verified 2026-07-04.
+Follow-up filed separately: B-start snap during slide appears to snap to
+A's beatgrid rather than aligning B's first gridline — see mix-editor/25.)
 
 ## Parent
 

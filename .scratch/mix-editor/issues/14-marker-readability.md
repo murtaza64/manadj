@@ -1,8 +1,6 @@
 # 14 — Marker readability: hotcue triangles, downbeat thinning, playhead, minimap markers
 
-Status: ready-for-human (implemented 2026-07-03, change `yuzzqomk`; eyeball
-pass wanted — triangle size at fit zoom, downbeat lightness, playhead width
-on retina, minimap tint strength)
+Status: closed (implemented change `yuzzqomk`; user-verified 2026-07-04)
 
 ## Parent
 
