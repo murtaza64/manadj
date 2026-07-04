@@ -21,6 +21,10 @@ export interface StyleParams {
   b2: number;
   /** Interpolate band frames (and smooth flux lobes); off = raw 12ms steps. */
   smooth: boolean;
+  /** Overlap-core baseline whiteness (dominant-core style), 0 = pure hue. */
+  coreWhite: number;
+  /** Extra whiteness as stacking deepens (dominant-core style). */
+  coreBloom: number;
   /** Low/mid/high group colors (0-1 RGB); null = the style's own defaults. */
   colors: [RGB, RGB, RGB] | null;
 }
@@ -36,6 +40,8 @@ export const DEFAULT_PARAMS: StyleParams = {
   b1: 3,
   b2: 5,
   smooth: true,
+  coreWhite: 0.45,
+  coreBloom: 0.3,
   colors: null,
 };
 
@@ -98,10 +104,10 @@ vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
     vec3 d = (w.x * u_colorLow + w.y * u_colorMid + w.z * u_colorHigh)
            / (w.x + w.y + w.z + 1e-6);
     d /= max(d.r, max(d.g, d.b)) + 1e-6;
-    // Mostly white, tinted by the dominant hue; whiter still as stacking
-    // deepens. The smoothstep crossfade (not a hard m>1 flip) is what keeps
-    // adjacent columns from banding when dominance flickers.
-    vec3 core = mix(d, vec3(1.0), 0.6 + 0.3 * over);
+    // Tinted by the dominant hue, whitened by u_coreWhite (+bloom with
+    // stacking depth). The smoothstep crossfade (not a hard m>1 flip) is
+    // what keeps adjacent columns from banding when dominance flickers.
+    vec3 core = mix(d, vec3(1.0), clamp(u_coreWhite + u_coreBloom * over, 0.0, 1.0));
     c = mix(min(c, vec3(1.0)), core, smoothstep(0.0, 0.5, over));
   }
   return BG + min(c, vec3(1.0));

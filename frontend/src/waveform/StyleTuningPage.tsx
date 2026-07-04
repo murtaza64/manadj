@@ -271,6 +271,8 @@ export default function StyleTuningPage() {
           {slider('high gain', p.gains[2], 0, 3, 0.05, (v) => patch({ gains: [p.gains[0], p.gains[1], v] }))}
           {slider('low/mid boundary (band)', p.b1, 1, 7, 1, (v) => patch({ b1: v, b2: Math.max(p.b2, v + 1) }))}
           {slider('mid/high boundary (band)', p.b2, 2, 8, 1, (v) => patch({ b2: v, b1: Math.min(p.b1, v - 1) }))}
+          {slider('core whiteness', p.coreWhite, 0, 1, 0.02, (v) => patch({ coreWhite: v }))}
+          {slider('core bloom', p.coreBloom, 0, 1, 0.02, (v) => patch({ coreBloom: v }))}
           {(['low', 'mid', 'high'] as const).map((band, i) => {
             const current = p.colors ?? getStyle(slot.styleId).defaultColors;
             return (

@@ -50,6 +50,8 @@ function sanitizeSlot(raw: unknown, fallback: SlotState): SlotState {
     b1: Math.min(7, Math.max(1, Math.round(num(p.b1, fallback.params.b1)))),
     b2: Math.min(8, Math.max(2, Math.round(num(p.b2, fallback.params.b2)))),
     smooth: typeof p.smooth === 'boolean' ? p.smooth : fallback.params.smooth,
+    coreWhite: Math.min(1, Math.max(0, num(p.coreWhite, fallback.params.coreWhite))),
+    coreBloom: Math.min(1, Math.max(0, num(p.coreBloom, fallback.params.coreBloom))),
     colors: null, // validated below
   };
   if (params.b2 <= params.b1) params.b2 = params.b1 + 1;

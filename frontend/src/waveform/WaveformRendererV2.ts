@@ -118,6 +118,8 @@ uniform float u_master;
 uniform vec3 u_groupGains;
 uniform ivec2 u_groupBounds;
 uniform float u_smooth;
+uniform float u_coreWhite;
+uniform float u_coreBloom;
 uniform vec3 u_colorLow;
 uniform vec3 u_colorMid;
 uniform vec3 u_colorHigh;
@@ -552,6 +554,8 @@ export class WaveformRendererV2 {
     gl.uniform3f(u('u_groupGains'), ...this.params.gains);
     gl.uniform2i(u('u_groupBounds'), this.params.b1, this.params.b2);
     gl.uniform1f(u('u_smooth'), this.params.smooth ? 1 : 0);
+    gl.uniform1f(u('u_coreWhite'), this.params.coreWhite);
+    gl.uniform1f(u('u_coreBloom'), this.params.coreBloom);
     const colors = this.params.colors ?? getStyle(this.styleId).defaultColors;
     gl.uniform3f(u('u_colorLow'), ...colors[0]);
     gl.uniform3f(u('u_colorMid'), ...colors[1]);
