@@ -7,7 +7,7 @@ import { formatRelativeTime } from '../utils/dateUtils';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { getColumnConfig } from './columnConfig';
-import { setTrackDragPayload } from '../selection/trackDrag';
+import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDrag';
 import './TrackRow.css';
 
 /** Saved-Transition mark state for one source deck (transition-library
@@ -40,6 +40,8 @@ interface Props {
    * row memoization survives selection churn.
    */
   getDragIds: (trackId: number) => number[];
+  /** Which pane drags from this row originate in (drop targets branch on it). */
+  dragSource?: TrackDragSource;
   /** Right-click: open the track context menu (playlist-editing 03). */
   onContextMenu?: (track: Track, pos: { x: number; y: number }) => void;
   /** Play order index (0-based) — renders the # cell (playlist tables).
@@ -79,6 +81,7 @@ const TrackRow = memo(function TrackRow({
   onLoad,
   onLoadToDeck,
   getDragIds,
+  dragSource,
   onContextMenu,
   orderIndex,
   markA = 'none',
@@ -118,7 +121,7 @@ const TrackRow = memo(function TrackRow({
       style={{ cursor: 'pointer' }}
       draggable={true}
       onDragStart={(e) => {
-        setTrackDragPayload(e.dataTransfer, getDragIds(track.id));
+        setTrackDragPayload(e.dataTransfer, getDragIds(track.id), dragSource);
       }}
       onContextMenu={
         onContextMenu

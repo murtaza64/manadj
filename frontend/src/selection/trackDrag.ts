@@ -2,32 +2,44 @@
  * Track drag payload (playlist-editing 02): rows drag the whole selection.
  *
  * Payload carries the ordered track-id list under 'application/x-manadj-tracks'
- * plus a legacy single 'trackId' entry (first id) for older drop targets.
+ * and the source pane under 'application/x-manadj-track-source' — drop
+ * targets branch on source (e.g. a playlist pane reorders only drags that
+ * started in it).
  */
 
 export const TRACKS_MIME = 'application/x-manadj-tracks';
+const SOURCE_MIME = 'application/x-manadj-track-source';
 
-export function setTrackDragPayload(dt: DataTransfer, ids: readonly number[]): void {
+/** Where a track drag started (drop targets branch on this). */
+export type TrackDragSource = 'playlist-pane' | 'library';
+
+export function setTrackDragPayload(
+  dt: DataTransfer,
+  ids: readonly number[],
+  source: TrackDragSource = 'library'
+): void {
   dt.setData(TRACKS_MIME, JSON.stringify(ids));
-  if (ids.length > 0) dt.setData('trackId', String(ids[0]));
+  dt.setData(SOURCE_MIME, source);
   dt.effectAllowed = 'copy';
 }
 
 /** True when a drag carries tracks (usable from dragover, where data is unreadable). */
 export function isTrackDrag(dt: DataTransfer): boolean {
-  return dt.types.includes(TRACKS_MIME) || dt.types.includes('trackId');
+  return dt.types.includes(TRACKS_MIME);
 }
 
 export function readTrackDragPayload(dt: DataTransfer): number[] {
-  const multi = dt.getData(TRACKS_MIME);
-  if (multi) {
-    try {
-      const parsed = JSON.parse(multi);
-      if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'number')) return parsed;
-    } catch {
-      // fall through to the legacy payload
-    }
+  const raw = dt.getData(TRACKS_MIME);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'number')) return parsed;
+  } catch {
+    // malformed payload
   }
-  const single = parseInt(dt.getData('trackId'), 10);
-  return Number.isFinite(single) && single > 0 ? [single] : [];
+  return [];
+}
+
+export function readTrackDragSource(dt: DataTransfer): TrackDragSource {
+  return dt.getData(SOURCE_MIME) === 'playlist-pane' ? 'playlist-pane' : 'library';
 }

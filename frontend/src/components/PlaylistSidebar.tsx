@@ -75,9 +75,10 @@ export default function PlaylistSidebar({
 
   const deleteMutation = useMutation({
     mutationFn: api.playlists.delete,
-    onSuccess: () => {
+    onSuccess: (_data, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
-      if (selectedView === 'playlist') {
+      // Only eject to All tracks when the DELETED playlist was being viewed.
+      if (selectedView === 'playlist' && selectedPlaylistId === deletedId) {
         onSelectView('all');
       }
     },

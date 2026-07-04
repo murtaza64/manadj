@@ -147,3 +147,22 @@ Make Playlists editable end-to-end:
   reorder, playlist display-order reorder) and frontend API client
   methods already exist; most backend work is the identity/keying change,
   most frontend work is net-new UI.
+
+## Comments
+
+Code review 2026-07-04 (two-axis, vs 7dc6d2f4). Fixed in
+`playlist-editing: review fixes`: ArrowUp/Down navigate alongside j/k
+(story 11 / issue 05 AC); drop branching is now SOURCE-based (a track
+drag carries its origin pane — fully-present drops from the library pane
+are no-op + toast instead of silently reordering); playlist deletion only
+ejects to All tracks when the deleted playlist was the one being viewed;
+legacy 'trackId' drag payload removed (AGENTS.md: no backward compat).
+
+Accepted deviations: rename also commits on blur (standard UX, spec said
+Enter/Escape); playlist header strip exists in non-edit view (hosts the
+Edit toggle — "pixel-equivalent" read as intent, not literal); '#'
+"toggleable" is vacuous (no column-visibility UI exists for any column);
+non-# sort drags still show an append indicator, refusal happens at drop.
+Noted for future refactors (not blocking): rect/indicator DnD duplication
+between Library and PlaylistSidebar; Library.tsx size (divergent change);
+clampToViewport tested in trackDrag.test.ts.

@@ -21,6 +21,8 @@ interface TrackListProps {
   onSelectTrack: (track: Track, mods: SelectMods) => void;
   /** Drag payload for a row (whole selection when the row is in it). */
   getDragIds: (trackId: number) => number[];
+  /** Which pane drags from this table originate in. */
+  dragSource?: import('../selection/trackDrag').TrackDragSource;
   /** Right-click on a row: open the track context menu. */
   onRowContextMenu?: (track: Track, pos: { x: number; y: number }) => void;
   /** Play order by track id (playlist tables): shows the # column. */
@@ -47,6 +49,7 @@ export default function TrackList({
   selectedIds,
   onSelectTrack,
   getDragIds,
+  dragSource,
   onRowContextMenu,
   playOrder,
   onLoadTrack,
@@ -162,6 +165,7 @@ export default function TrackList({
                 onLoad={onLoadTrack}
                 onLoadToDeck={onLoadToDeck}
                 getDragIds={getDragIds}
+                dragSource={dragSource}
                 onContextMenu={onRowContextMenu}
                 orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
                 markA={markFor(transitionMarksA, track.id)}

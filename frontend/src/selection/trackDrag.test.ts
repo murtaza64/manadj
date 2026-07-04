@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { clampToViewport } from '../components/ContextMenu';
-import { TRACKS_MIME, isTrackDrag, readTrackDragPayload, setTrackDragPayload } from './trackDrag';
+import {
+  TRACKS_MIME,
+  isTrackDrag,
+  readTrackDragPayload,
+  readTrackDragSource,
+  setTrackDragPayload,
+} from './trackDrag';
 
 /** Minimal DataTransfer stand-in (node has no DataTransfer). */
 function fakeDataTransfer(): DataTransfer {
@@ -24,16 +30,13 @@ describe('track drag payload', () => {
     expect(isTrackDrag(dt)).toBe(true);
   });
 
-  it('keeps the legacy single-id entry for older drop targets', () => {
+  it('carries the source pane (library by default)', () => {
     const dt = fakeDataTransfer();
-    setTrackDragPayload(dt, [30, 10]);
-    expect(dt.getData('trackId')).toBe('30');
-  });
-
-  it('falls back to the legacy payload', () => {
-    const dt = fakeDataTransfer();
-    dt.setData('trackId', '42');
-    expect(readTrackDragPayload(dt)).toEqual([42]);
+    setTrackDragPayload(dt, [30], 'playlist-pane');
+    expect(readTrackDragSource(dt)).toBe('playlist-pane');
+    const dt2 = fakeDataTransfer();
+    setTrackDragPayload(dt2, [30]);
+    expect(readTrackDragSource(dt2)).toBe('library');
   });
 
   it('rejects malformed payloads', () => {

@@ -95,10 +95,10 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // Navigation: j/k (selection-scoped; collapses a multi-selection)
-      if (key === 'j' || key === 'k') {
+      // Navigation: j/k or arrows (selection-scoped; collapses a multi-selection)
+      if (key === 'j' || key === 'k' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        onNavigate(key === 'j' ? 1 : -1);
+        onNavigate(key === 'j' || event.key === 'ArrowDown' ? 1 : -1);
       }
 
       // Remove from playlist: Delete/Backspace (selection-scoped, no confirm)

@@ -25,7 +25,7 @@ import {
   splitByMembership,
   type RowRect,
 } from '../selection/dropIndex';
-import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
+import { isTrackDrag, readTrackDragPayload, readTrackDragSource } from '../selection/trackDrag';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import { useToast } from './Toast';
 import type { Playlist } from '../types';
@@ -629,8 +629,10 @@ export default function Library({
 
     const { newIds, presentIds } = splitByMembership(droppedIds, playlistMemberIds);
 
-    if (newIds.length === 0) {
-      // Every dropped track is already in the playlist: an in-pane reorder.
+    // Reorders are source-based: only drags that STARTED in the playlist
+    // pane move tracks. A fully-present drop from the library pane is a
+    // no-op with a toast (PRD: adding a present track never moves it).
+    if (readTrackDragSource(e.dataTransfer) === 'playlist-pane') {
       if (!canPositionDrops) {
         showToast('Sort by # to reorder');
         return;
@@ -639,6 +641,17 @@ export default function Library({
       const newOrder = applyReorder(orderIds, presentIds, indicator?.index ?? orderIds.length);
       if (newOrder.join(',') !== orderIds.join(',')) {
         reorderPlaylistMutation.mutate({ playlistId: selectedPlaylistId, order: newOrder });
+      }
+      return;
+    }
+
+    if (newIds.length === 0) {
+      if (presentIds.length > 0) {
+        showToast(
+          presentIds.length === 1
+            ? '1 track already in playlist'
+            : `${presentIds.length} tracks already in playlist`
+        );
       }
       return;
     }
@@ -904,6 +917,7 @@ export default function Library({
                   getDragIds={mainSel.getDragIds}
                   onRowContextMenu={handleRowContextMenuFor('main')}
                   playOrder={playOrder}
+                  dragSource="playlist-pane"
                   onLoadTrack={loadForTable}
                   loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
@@ -978,6 +992,7 @@ export default function Library({
                   getDragIds={mainSel.getDragIds}
                   onRowContextMenu={handleRowContextMenuFor('main')}
                   playOrder={playOrder}
+                  dragSource={selectedView === 'playlist' ? 'playlist-pane' : 'library'}
                   onLoadTrack={loadForTable}
                   loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
