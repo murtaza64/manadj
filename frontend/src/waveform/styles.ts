@@ -92,13 +92,17 @@ vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
   if (yA < g.y) c += u_colorMid;
   if (yA < g.z) c += u_colorHigh;
   float m = max(c.r, max(c.g, c.b));
-  if (m > 1.0) {
+  float over = clamp(m - 1.0, 0.0, 1.0);
+  if (over > 0.0) {
     vec3 w = g * g;
     vec3 d = (w.x * u_colorLow + w.y * u_colorMid + w.z * u_colorHigh)
            / (w.x + w.y + w.z + 1e-6);
     d /= max(d.r, max(d.g, d.b)) + 1e-6;
-    float bloom = clamp(0.35 * (m - 1.0), 0.0, 0.6);
-    c = mix(d, vec3(1.0), bloom);
+    // Mostly white, tinted by the dominant hue; whiter still as stacking
+    // deepens. The smoothstep crossfade (not a hard m>1 flip) is what keeps
+    // adjacent columns from banding when dominance flickers.
+    vec3 core = mix(d, vec3(1.0), 0.6 + 0.3 * over);
+    c = mix(min(c, vec3(1.0)), core, smoothstep(0.0, 0.5, over));
   }
   return BG + min(c, vec3(1.0));
 }`,
