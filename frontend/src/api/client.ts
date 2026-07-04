@@ -429,6 +429,9 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ track_positions: trackPositions }),
       });
+      if (!response.ok) {
+        throw new Error(`Reorder failed (${response.status})`);
+      }
       return response.json();
     },
 

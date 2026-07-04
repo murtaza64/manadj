@@ -16,13 +16,22 @@ import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
-import { click } from '../selection/selectionModel';
+import { EMPTY_SELECTION, click } from '../selection/selectionModel';
 import { useTrackSelection } from '../selection/useTrackSelection';
+import {
+  applyReorder,
+  indicatorY,
+  insertionIndexFromPointer,
+  splitByMembership,
+  type RowRect,
+} from '../selection/dropIndex';
+import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import { useToast } from './Toast';
 import type { Playlist } from '../types';
 import {
   PLAY_ORDER_SORT,
+  isPlayOrderSort,
   nextPlaylistSort,
   sortPlaylistTracks,
   type PlaylistSort,
@@ -375,6 +384,47 @@ export default function Library({
     },
   });
 
+  // Positioned inserts (drop with insertion line): sequential adds keep
+  // the payload's selection order; duplicates were split out client-side.
+  const insertToPlaylistMutation = useMutation({
+    mutationFn: async ({
+      playlistId,
+      trackIds,
+      position,
+    }: {
+      playlistId: number;
+      trackIds: number[];
+      position: number | null;
+    }) => {
+      for (let i = 0; i < trackIds.length; i++) {
+        await api.playlists.addTrack(playlistId, {
+          track_id: trackIds[i],
+          ...(position !== null ? { position: position + i } : {}),
+        });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playlist'] });
+    },
+  });
+
+  // Reorder (drag within the playlist pane): sends the full permutation.
+  const reorderPlaylistMutation = useMutation({
+    mutationFn: ({ playlistId, order }: { playlistId: number; order: number[] }) =>
+      api.playlists.reorderTracks(
+        playlistId,
+        order.map((track_id, position) => ({ track_id, position }))
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playlist'] });
+    },
+    onError: () => {
+      // e.g. the playlist changed under us (stale permutation → 400)
+      showToast('Reorder failed — playlist refreshed');
+      queryClient.invalidateQueries({ queryKey: ['playlist'] });
+    },
+  });
+
   // Remove tracks from the viewed playlist (keyed by track id — entry
   // identity). No confirmation: re-adding is cheap.
   const removeFromPlaylistMutation = useMutation({
@@ -510,6 +560,13 @@ export default function Library({
   const activeSel = editingSplit && focusedPane === 'library' ? editLibSel : mainSel;
   const selectedTrack = activeSel.selectedTrack;
 
+  // Switching views/playlists clears the main selection (also prevents the
+  // keep-anchor splice from carrying a foreign track across list sources).
+  const resetMainSelection = mainSel.setSelection;
+  useEffect(() => {
+    resetMainSelection(EMPTY_SELECTION);
+  }, [selectedView, selectedPlaylistId, resetMainSelection]);
+
   const isLoading = selectedView === 'playlist' ? isLoadingPlaylist : isLoadingAllTracks;
   const error = selectedView === 'playlist' ? playlistError : allTracksError;
   const currentTracks = mainSel.tracks;
@@ -523,6 +580,84 @@ export default function Library({
   };
   const handleRemoveSelected = () => removeTracksFromViewedPlaylist([...mainSel.selection.ids]);
   const removeEnabled = canRemoveFromPlaylist && (!editingSplit || focusedPane === 'playlist');
+
+  // ── Playlist-pane drag & drop (playlist-editing 06) ────────────────────
+  // Positional drops only when the pane shows actual Play order; under any
+  // other sort the drop appends (and in-pane reorders are refused).
+  const playlistPaneRef = useRef<HTMLDivElement>(null);
+  const [dropIndicator, setDropIndicator] = useState<{ index: number; y: number } | null>(null);
+  const canPositionDrops = isPlayOrderSort(playlistSort);
+  const playlistMemberIds = useMemo(
+    () => new Set<number>((playlistData?.tracks ?? []).map((t: Track) => t.id)),
+    [playlistData]
+  );
+
+  /** Row rectangles in the pane's content coordinates (scroll included). */
+  const paneRowRects = (pane: HTMLDivElement): RowRect[] => {
+    const paneRect = pane.getBoundingClientRect();
+    return Array.from(pane.querySelectorAll('tbody tr[data-track-id]')).map((row) => {
+      const r = (row as HTMLElement).getBoundingClientRect();
+      return { top: r.top - paneRect.top + pane.scrollTop, height: r.height };
+    });
+  };
+
+  const handlePlaylistPaneDragOver = (e: React.DragEvent) => {
+    if (!isTrackDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const pane = playlistPaneRef.current;
+    if (!pane) return;
+    const rects = paneRowRects(pane);
+    const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
+    const index = canPositionDrops ? insertionIndexFromPointer(pointerY, rects) : rects.length;
+    setDropIndicator({ index, y: indicatorY(index, rects) });
+  };
+
+  const handlePlaylistPaneDragLeave = (e: React.DragEvent) => {
+    if (!playlistPaneRef.current?.contains(e.relatedTarget as Node)) {
+      setDropIndicator(null);
+    }
+  };
+
+  const handlePlaylistPaneDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const indicator = dropIndicator;
+    setDropIndicator(null);
+    if (selectedPlaylistId === null) return;
+    const droppedIds = readTrackDragPayload(e.dataTransfer);
+    if (droppedIds.length === 0) return;
+
+    const { newIds, presentIds } = splitByMembership(droppedIds, playlistMemberIds);
+
+    if (newIds.length === 0) {
+      // Every dropped track is already in the playlist: an in-pane reorder.
+      if (!canPositionDrops) {
+        showToast('Sort by # to reorder');
+        return;
+      }
+      const orderIds = (playlistData?.tracks ?? []).map((t: Track) => t.id);
+      const newOrder = applyReorder(orderIds, presentIds, indicator?.index ?? orderIds.length);
+      if (newOrder.join(',') !== orderIds.join(',')) {
+        reorderPlaylistMutation.mutate({ playlistId: selectedPlaylistId, order: newOrder });
+      }
+      return;
+    }
+
+    // Cross-pane add: insert the new tracks at the indicated position
+    // (append under a non-# sort); skip and report the already-present.
+    insertToPlaylistMutation.mutate({
+      playlistId: selectedPlaylistId,
+      trackIds: newIds,
+      position: canPositionDrops ? (indicator?.index ?? null) : null,
+    });
+    if (presentIds.length > 0) {
+      showToast(
+        presentIds.length === 1
+          ? '1 track already in playlist'
+          : `${presentIds.length} tracks already in playlist`
+      );
+    }
+  };
 
   // ── Track-row context menu (playlist-editing 03) ───────────────────────
   type MenuPane = 'main' | 'editLibrary';
@@ -732,8 +867,13 @@ export default function Library({
             <>
               {/* Playlist pane (Play order) */}
               <div
+                ref={playlistPaneRef}
                 onMouseDownCapture={() => setFocusedPane('playlist')}
+                onDragOver={handlePlaylistPaneDragOver}
+                onDragLeave={handlePlaylistPaneDragLeave}
+                onDrop={handlePlaylistPaneDrop}
                 style={{
+                  position: 'relative',
                   flex: 1,
                   minHeight: 0,
                   overflow: 'auto',
@@ -741,6 +881,20 @@ export default function Library({
                   outlineOffset: '-1px',
                 }}
               >
+                {dropIndicator && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      top: Math.max(0, dropIndicator.y - 1),
+                      height: '2px',
+                      background: 'var(--blue)',
+                      pointerEvents: 'none',
+                      zIndex: 10,
+                    }}
+                  />
+                )}
                 <TrackList
                   tracks={mainSel.tracks}
                   isLoading={isLoadingPlaylist}

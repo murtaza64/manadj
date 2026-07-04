@@ -36,3 +36,18 @@ Positional drag-and-drop for Playlist curation, in the split edit view:
 
 - `.scratch/playlist-editing/issues/02-multi-select-track-tables.md`
 - `.scratch/playlist-editing/issues/05-split-edit-view.md`
+
+## Comments
+
+Done (jj xszrmnzx). Pure drop-index math in selection/dropIndex.ts
+(insertionIndexFromPointer midline rule, indicatorY, applyReorder with
+pre-removal index adjustment, splitByMembership; 12 vitest cases). The
+playlist pane hosts the insertion line (content-coordinate math, scrolls
+with rows). Drop branching is membership-based: all-present payload =
+in-pane reorder (full permutation POST; refused with a toast under
+non-# sorts); payload with new tracks = positioned sequential inserts in
+selection order (append under non-# sorts), present ones skipped with a
+count toast. reorderTracks client now throws on non-ok so stale
+permutations surface (toast + refetch). Also: view/playlist switches now
+clear the main selection, preventing the keep-anchor splice from leaking
+a foreign track into the playlist pane's reorder math.
