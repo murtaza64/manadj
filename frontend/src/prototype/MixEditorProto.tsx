@@ -19,7 +19,16 @@ import { useMixer } from '../hooks/useMixer';
 import { MixProtoPlayer } from './MixProtoPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
-import { DEFAULT_PAIR, LAST_PAIR_KEY, loadPairStore, savePairStore } from './pairStore';
+import { TransitionSwitcher } from './TransitionSwitcher';
+import {
+  DEFAULT_PAIR,
+  LAST_PAIR_KEY,
+  freshTransition,
+  isPristine,
+  loadPairStore,
+  savePairStore,
+  toStoredEntry,
+} from './pairStore';
 import type { PairStore, SavedTransition } from './pairStore';
 import {
   DEFAULT_LANE_IDS,
@@ -76,50 +85,58 @@ export default function MixEditorProto() {
     player.setBpm('B', bpmB);
   }, [player, bpmA, bpmB]);
 
-  // Saved Transitions per ordered pair (zero-ceremony: "Transition 1" always
-  // exists; edits autosave to the active one).
+  // Saved Transitions per ordered pair. LAZY PERSISTENCE (transition-
+  // library 01): the SESSION list below is the working set — it may hold
+  // pristine (never-edited) Transitions that exist only in memory; the
+  // store only ever receives materialized ones (toStoredEntry filters).
   const [pairStore, setPairStore] = useState<PairStore>(loadPairStore);
   const pairKey = trackA && trackB ? `${trackA.id}:${trackB.id}` : null;
-  const pairEntry = pairKey ? pairStore[pairKey] : undefined;
+  const [session, setSession] = useState<{ items: SavedTransition[]; active: number }>(() => ({
+    items: [freshTransition([])],
+    active: 0,
+  }));
+  /** Session items with the live mix folded into the active one. */
+  const liveItems = useCallback(
+    (s: { items: SavedTransition[]; active: number }, m: ProtoMix) =>
+      s.items.map((it, i) => (i === s.active ? { ...it, transition: m.transition } : it)),
+    []
+  );
 
   // Keep the player's model current (immediately — audio correctness).
   useEffect(() => {
     player.setMix(mix);
   }, [mix, player]);
 
-  // Autosave to the active saved Transition, DEBOUNCED: the store write
-  // stringifies the whole pair store into localStorage, and doing that at
-  // drag rate (~60Hz) was the biggest main-thread cost during any drag.
-  // The pending edit is flushed before anything reads or repoints the
-  // store (transition switch/create, unmount).
-  const pendingSaveRef = useRef<{ pairKey: string; mix: ProtoMix } | null>(null);
-  const flushAutosave = useCallback(() => {
+  // Persist DEBOUNCED (store writes stringify everything into localStorage;
+  // doing that at drag rate was the biggest main-thread cost during drags),
+  // flushed before pair switches and on unmount. Pristine items never reach
+  // the store; a pair whose session is entirely pristine is deleted.
+  const pendingSaveRef = useRef<{
+    pairKey: string;
+    items: SavedTransition[];
+    active: number;
+  } | null>(null);
+  const flushPersist = useCallback(() => {
     const p = pendingSaveRef.current;
     if (!p) return;
     pendingSaveRef.current = null;
     setPairStore((store) => {
-      const entry = store[p.pairKey] ?? {
-        items: [{ name: 'Transition 1', transition: p.mix.transition }],
-        active: 0,
-      };
-      const items = [...entry.items];
-      items[entry.active] = {
-        ...items[entry.active],
-        transition: p.mix.transition,
-      };
-      const next = { ...store, [p.pairKey]: { ...entry, items } };
+      const stored = toStoredEntry(p.items, p.active);
+      const next = { ...store };
+      if (stored) next[p.pairKey] = stored;
+      else delete next[p.pairKey];
       savePairStore(next);
       return next;
     });
   }, []);
   useEffect(() => {
     if (!pairKey) return;
-    pendingSaveRef.current = { pairKey, mix };
-    const t = setTimeout(flushAutosave, 300);
+    pendingSaveRef.current = { pairKey, items: liveItems(session, mix), active: session.active };
+    const t = setTimeout(flushPersist, 300);
     return () => clearTimeout(t);
-  }, [mix, pairKey, flushAutosave]);
+  }, [mix, session, pairKey, flushPersist, liveItems]);
   // Unmount: don't lose the last ≤300ms of edits.
-  useEffect(() => () => flushAutosave(), [flushAutosave]);
+  useEffect(() => () => flushPersist(), [flushPersist]);
 
   // Shared decks: the canonical loaded pair across modes. Editor loads
   // mirror onto them (issue 07) so Performance/Library show the same tracks;
@@ -177,54 +194,73 @@ export default function MixEditorProto() {
     }));
   }, []);
 
-  // When a (new) pair is assembled, load its active saved Transition —
-  // creating "Transition 1" from the defaults if the pair is fresh.
+  // When a (new) pair is assembled, seed the session from the store —
+  // or with a pristine "Transition 1" that exists only in memory until a
+  // real edit materializes it (merely-opened pairs leave no trace).
   const loadedPairKey = useRef<string | null>(null);
   useEffect(() => {
     if (!pairKey || pairKey === loadedPairKey.current) return;
-    flushAutosave(); // pending edits belong to the previous pair
+    flushPersist(); // pending edits belong to the previous pair
     loadedPairKey.current = pairKey;
     localStorage.setItem(LAST_PAIR_KEY, pairKey);
     const entry = pairStore[pairKey];
-    if (entry) {
-      const item = entry.items[entry.active];
-      setMix((m) => ({ ...m, transition: structuredClone(item.transition) }));
-    } else {
-      setMix((m) => ({ ...m, transition: defaultMix().transition }));
-    }
+    const items = entry ? structuredClone(entry.items) : [freshTransition([])];
+    const active = entry ? Math.min(entry.active, items.length - 1) : 0;
+    setSession({ items, active });
+    setMix((m) => ({ ...m, transition: structuredClone(items[active].transition) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pairKey]);
 
-  const switchTransition = (index: number) => {
-    if (!pairKey || !pairEntry) return;
-    const item = pairEntry.items[index];
-    if (!item) return;
-    flushAutosave(); // a pending edit targets the OLD active slot
-    setPairStore((store) => {
-      const next = { ...store, [pairKey]: { ...store[pairKey], active: index } };
-      savePairStore(next);
-      return next;
-    });
-    setMix((m) => ({ ...m, transition: structuredClone(item.transition) }));
+  /** Navigate the session (◀/▶). Leaving a pristine Transition discards it
+   * silently; ▶ past the last creates a fresh pristine one. */
+  const navigateTransition = (dir: -1 | 1) => {
+    const items = liveItems(session, mix);
+    const cur = items[session.active];
+    let target = session.active + dir;
+    if (target >= items.length) {
+      // Past the end = new take (no-op when the current one IS fresh).
+      if (isPristine(cur)) return;
+      const fresh = freshTransition(items);
+      setSession({ items: [...items, fresh], active: items.length });
+      setMix((m) => ({ ...m, transition: structuredClone(fresh.transition) }));
+      return;
+    }
+    if (target < 0) return;
+    let nextItems = items;
+    if (isPristine(cur) && items.length > 1) {
+      // Evaporate the untouched take on the way out.
+      nextItems = items.filter((_, i) => i !== session.active);
+      if (session.active < target) target -= 1;
+      target = Math.max(0, Math.min(target, nextItems.length - 1));
+    }
+    setSession({ items: nextItems, active: target });
+    setMix((m) => ({ ...m, transition: structuredClone(nextItems[target].transition) }));
   };
 
-  const createTransition = () => {
-    if (!pairKey || !pairEntry) return;
-    flushAutosave(); // a pending edit targets the OLD active slot
-    const item: SavedTransition = {
-      name: `Transition ${pairEntry.items.length + 1}`,
-      transition: defaultMix().transition,
-    };
-    setPairStore((store) => {
-      const entry = store[pairKey];
-      const next = {
-        ...store,
-        [pairKey]: { items: [...entry.items, item], active: entry.items.length },
-      };
-      savePairStore(next);
-      return next;
-    });
-    setMix((m) => ({ ...m, transition: structuredClone(item.transition) }));
+  const renameTransition = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSession((s) => ({
+      ...s,
+      items: s.items.map((it, i) => (i === s.active ? { ...it, name: trimmed } : it)),
+    }));
+  };
+
+  const toggleFavorite = () => {
+    setSession((s) => ({
+      ...s,
+      items: s.items.map((it, i) => (i === s.active ? { ...it, favorite: !it.favorite } : it)),
+    }));
+  };
+
+  /** Delete the active Transition (the switcher does the two-step confirm).
+   * Last one → re-init blank (the old reset's feel); else land on next. */
+  const deleteTransition = () => {
+    const items = liveItems(session, mix).filter((_, i) => i !== session.active);
+    const nextItems = items.length > 0 ? items : [freshTransition([])];
+    const active = Math.min(session.active, nextItems.length - 1);
+    setSession({ items: nextItems, active });
+    setMix((m) => ({ ...m, transition: structuredClone(nextItems[active].transition) }));
   };
 
   // One audible surface AND one running audio clock at a time (issue 08):
@@ -427,23 +463,14 @@ export default function MixEditorProto() {
                 >
                   ⏯
                 </button>
-                {pairEntry && (
-                  <select
-                    className="mixproto-transition-select"
-                    value={pairEntry.active}
-                    onChange={(e) => {
-                      if (e.target.value === 'new') createTransition();
-                      else switchTransition(Number(e.target.value));
-                    }}
-                  >
-                    {pairEntry.items.map((item, i) => (
-                      <option key={i} value={i}>
-                        {item.name}
-                      </option>
-                    ))}
-                    <option value="new">+ create new</option>
-                  </select>
-                )}
+                <TransitionSwitcher
+                  items={liveItems(session, mix)}
+                  active={session.active}
+                  onNavigate={navigateTransition}
+                  onRename={renameTransition}
+                  onToggleFavorite={toggleFavorite}
+                  onDelete={deleteTransition}
+                />
               </div>
               <div className="mixproto-center-row">
                 <label>
@@ -513,14 +540,6 @@ export default function MixEditorProto() {
                   />
                   snap
                 </label>
-                <button
-                  className="mixproto-resetbtn"
-                  title="Reset this Transition to the defaults (envelopes, window, entry)"
-                  onClick={() => setMix((m) => ({ ...m, transition: defaultMix().transition }))}
-                >
-                  reset
-                </button>
-
                 {addableLanes.length > 0 && (
                   <select
                     value=""

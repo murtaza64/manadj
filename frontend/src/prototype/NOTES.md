@@ -373,6 +373,21 @@ and opens the browser. Backend log: /tmp/manadj-proto-backend.log.)
   planned player `parkDecks` extraction turned out moot (its duplicate
   died with the mirror-slide revert).
 
+- v27 (transition-library 01): Transition switcher + lazy persistence.
+  pairStore gained the materialization rules as pure fns under vitest —
+  `isPristine` is VALUE-based (default shape + default name + never
+  favorited), so exactly-reverted edits evaporate too and the same
+  predicate prunes legacy pristine saves on load. The editor now works on
+  a SESSION list (may contain in-memory pristine items); the debounced
+  persist writes `toStoredEntry` (pristine filtered, active remapped,
+  all-pristine pairs deleted) — merely-opened pairs leave zero trace.
+  Dropdown replaced by `TransitionSwitcher` (◀ name ★ 2/3 ▶/+): inline
+  rename, favorite star (`favorite` on SavedTransition — Preferred pair
+  stays derived), two-step inline delete (replaces the reset button;
+  last-one deletion re-inits blank, else lands on next); leaving a
+  pristine take discards it silently; ▶ past the end is a no-op when the
+  current take is already fresh.
+
 ## Real-module fixes made here that MUST ride back to the main line
 
 _(all landed on the unified line via the v11 merge — issue 02 closed;

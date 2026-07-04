@@ -1,6 +1,8 @@
 # 01 — Transition switcher: navigation, rename, favorite, delete, lazy persistence
 
-Status: ready-for-agent
+Status: ready-for-human (implemented 2026-07-03, change `yltoqvnr`; verify
+switcher feel, rename/star, delete flow, and that abandoned pairs leave no
+localStorage trace)
 
 ## Parent
 
