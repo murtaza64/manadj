@@ -7,7 +7,7 @@ import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
-import BpmInput from './BpmInput';
+import { BpmControl } from './deckControls/BpmControl';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, BeatgridIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
 import { GridEditControls } from './deckControls/GridEditControls';
@@ -71,14 +71,11 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
     bpm?: BPMAnalysisResponse;
     key?: KeyAnalysisResponse;
   } | null>(null);
-  const [selectedBpm, setSelectedBpm] = useState<number | null>(null);
-
   // Sync internal state when track prop changes
   useEffect(() => {
     setSelectedTagIds(new Set(track?.tags.map(t => t.id) || []));
     setEnergy(track?.energy);
     setAnalysisResults(null);
-    setSelectedBpm(track?.bpm ?? null);
 
     // Try to load existing BPM analysis for the track
     if (track?.id) {
@@ -163,7 +160,6 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
       ]);
 
       setAnalysisResults({ bpm: bpmResult, key: keyResult });
-      setSelectedBpm(bpmResult.recommended_bpm);
 
       // Update track with analysis results. The backend's BPM write path
       // updates the beatgrid itself (regen for placeholders, anchor-
@@ -181,50 +177,6 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
     } finally {
       setIsAnalyzing(false);
     }
-  };
-
-  // BPM commits are serialized through this chain: rapid nudge clicks used
-  // to interleave writes, landing grids built from stale BPMs (issue 24).
-  // The grid work itself now happens INSIDE the PATCH (server-side, atomic
-  // per write — ADR 0016); the chain still orders the PATCHes + refetches.
-  const bpmCommitChain = useRef<Promise<void>>(Promise.resolve());
-
-  // Handler for BPM change
-  const handleBpmChange = (newBpm: number) => {
-    if (!track) return;
-    const trackId = track.id;
-
-    setSelectedBpm(newBpm);
-
-    bpmCommitChain.current = bpmCommitChain.current
-      .then(async () => {
-        await onSave({ bpm: newBpm });
-        queryClient.invalidateQueries({ queryKey: ['beatgrid', trackId] });
-      })
-      .catch((error) => {
-        console.error('BPM commit failed:', error);
-      });
-  };
-
-  // Handler for fine BPM adjustments
-  const handleBpmNudge = (direction: 1 | -1) => {
-    if (!track) return;
-
-    const currentBpm = selectedBpm ?? track.bpm;
-    if (!currentBpm) return;
-
-    let newBpm = currentBpm + (direction * 0.03);
-
-    // Snap to integer at x.99 or x.01
-    const decimal = Math.abs(newBpm % 1);
-    if (decimal >= 0.99 || decimal <= 0.01) {
-      newBpm = Math.round(newBpm);
-    }
-
-    // Round to 2 decimal places
-    newBpm = Math.round(newBpm * 100) / 100;
-
-    handleBpmChange(newBpm);
   };
 
   // Keyboard handler for tag edit mode
@@ -381,44 +333,12 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '8px' }}>
               <SpeedIcon />
-              <BpmInput
-                value={selectedBpm ?? track?.bpm ?? null}
+              <BpmControl
+                track={track}
                 recommendedBpms={analysisResults?.bpm?.recommended_bpms}
-                onChange={handleBpmChange}
                 disabled={isDisabled}
+                onSave={(bpm) => onSave({ bpm })}
               />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                <button
-                  onClick={() => handleBpmNudge(1)}
-                  disabled={isDisabled}
-                  className="player-button"
-                  title="Increase BPM by 0.03"
-                  style={{
-                    padding: '0px 4px',
-                    minWidth: '20px',
-                    fontSize: '10px',
-                    height: '11px',
-                    lineHeight: '11px',
-                  }}
-                >
-                  +
-                </button>
-                <button
-                  onClick={() => handleBpmNudge(-1)}
-                  disabled={isDisabled}
-                  className="player-button"
-                  title="Decrease BPM by 0.03"
-                  style={{
-                    padding: '0px 4px',
-                    minWidth: '20px',
-                    fontSize: '10px',
-                    height: '11px',
-                    lineHeight: '11px',
-                  }}
-                >
-                  −
-                </button>
-              </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px' }}>
               <KeyIcon />

@@ -59,3 +59,82 @@
   color: var(--blue);
   border-color: var(--blue);
 }
+
+/* BPM control: input / compress-spread micro-steps / 1/2 x2 (curation
+   class — one implementation, `dense` only trims the dropdown). */
+.deck-bpm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.deck-bpm-input {
+  width: 56px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--yellow);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  padding: 2px 5px;
+  text-align: right;
+  outline: none;
+}
+
+.deck-bpm-input:focus {
+  border-color: var(--lavender);
+  background: var(--surface0);
+}
+
+.deck-bpm-input:disabled { opacity: 0.4; }
+
+.deck-bpm-steps {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.deck-bpm-steps .player-button {
+  padding: 0 3px;
+  min-width: 20px;
+  height: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deck-bpm-steps .player-button svg { display: block; }
+
+.deck-bpm .deck-bpm-scale {
+  padding: 2px 4px;
+  min-width: 24px;
+  height: 23px;
+  font-size: 10px;
+}
+
+.deck-bpm-var {
+  color: var(--yellow);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: help;
+}
+
+.deck-bpm-dropdown {
+  position: fixed;
+  background: var(--mantle);
+  border: 1px solid var(--lavender);
+  z-index: 1000;
+  min-width: 140px;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.deck-bpm-option {
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.deck-bpm-option.active { background: var(--surface0); }
+.deck-bpm-option.recommended { color: var(--blue); }
+.deck-bpm-option.current { color: var(--green); font-weight: 700; }

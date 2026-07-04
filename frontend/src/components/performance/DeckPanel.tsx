@@ -17,6 +17,7 @@ import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
 import { BeatjumpRow } from '../deckControls/BeatjumpRow';
 import { GridEditControls } from '../deckControls/GridEditControls';
+import { BpmControl } from '../deckControls/BpmControl';
 import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { DECK_KEYS } from './performanceKeys';
@@ -51,12 +52,6 @@ function useTrackEdit(track: Track | null) {
     if (!track) return;
     void (async () => {
       await api.tracks.update(track.id, data);
-      if (data.bpm !== undefined) {
-        // The backend's BPM write path updates the beatgrid itself (regen
-        // for placeholders, anchor-preserving re-tempo for edited grids —
-        // ADR 0016); the client only refetches.
-        void queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
-      }
       void queryClient.invalidateQueries({ queryKey: ['track', track.id] });
       // Both track-table sources in the embedded library.
       void queryClient.invalidateQueries({ queryKey: ['tracks'] });
@@ -128,50 +123,27 @@ function DeckColumn() {
 function BeatgridBlock({ track }: { track: Track | null }) {
   const { engine } = useDeck();
   const ready = useDeckReady();
-  const edit = useTrackEdit(track);
-  const enabled = ready && edit.enabled;
+  const queryClient = useQueryClient();
+  const enabled = ready && track !== null;
 
   // Effective BPM — live with pitch AND bend (what your ears get right now).
   const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, s.bendPercent));
   const effective = track?.bpm ? track.bpm * rate : null;
 
-  const commitBpm = (bpm: number) => {
-    if (!enabled || !isFinite(bpm) || bpm <= 0) return;
-    edit.commit({ bpm });
+  // The shared control invalidates beatgrid+track itself; the PERF panel
+  // additionally refreshes both track-table sources in the embedded library.
+  const saveBpm = async (bpm: number) => {
+    if (!track) return;
+    await api.tracks.update(track.id, { bpm });
+    void queryClient.invalidateQueries({ queryKey: ['tracks'] });
+    void queryClient.invalidateQueries({ queryKey: ['playlist'] });
   };
 
   return (
     <div className="perf-beatgrid-block">
       <div className="perf-beatgrid-row">
         <span className="perf-beatgrid-label">BPM</span>
-        <input
-          // Uncontrolled, remounted when the track/BPM changes
-          key={`${track?.id ?? 'none'}-${track?.bpm ?? 0}`}
-          className="perf-bpm-input"
-          defaultValue={track?.bpm ? track.bpm.toFixed(1) : ''}
-          disabled={!enabled}
-          onBlur={(e) => commitBpm(parseFloat(e.target.value))}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-            e.stopPropagation(); // keep typed digits away from keyboard hubs
-          }}
-        />
-        <button
-          className="player-button perf-mini"
-          disabled={!enabled || !track?.bpm}
-          onClick={() => track?.bpm && commitBpm(track.bpm / 2)}
-          title="Halve BPM"
-        >
-          ½
-        </button>
-        <button
-          className="player-button perf-mini"
-          disabled={!enabled || !track?.bpm}
-          onClick={() => track?.bpm && commitBpm(track.bpm * 2)}
-          title="Double BPM"
-        >
-          ×2
-        </button>
+        <BpmControl track={track} dense disabled={!enabled} onSave={saveBpm} />
         <span className="perf-effbpm" title="Effective BPM (base × pitch × bend)">
           {effective !== null ? `» ${effective.toFixed(1)}` : ''}
         </span>

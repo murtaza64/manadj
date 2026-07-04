@@ -1,6 +1,6 @@
 # 02 — One BPM control over the projection model
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -39,3 +39,29 @@ input):
 ## Blocked by
 
 - 01 (server op).
+
+## Comments
+
+Done (change `msmksuqx`, lane bpmctl): shared `BpmControl` in
+`components/deckControls/` (BpmControl.tsx + bpmCommit.ts seam +
+bpmCommit.test.ts, 10 tests); grid compress/spread icons in
+`components/icons/BpmIcons.tsx`; call sites replaced in TagEditor
+(dropdown variant), PERF BeatgridBlock (`dense`, keeps » readout), editor
+DeckCard (`dense`, keeps effective/pitch readout, `onCommitted` →
+player.setBpm + onBpmSaved); `components/BpmInput.tsx` deleted (only
+TagEditor imported it). Projection: grid-dominant tempo (duration-weighted
+port of backend `dominant_bpm`), variable grids render `~N (var)` readout
+with edit-the-grid tooltip. 409 → console.warn + draft revert.
+
+By-eye checklist for a human:
+
+- [ ] Library: type a BPM (blur/Enter commits), pick a suggestion/octave
+      from the dropdown, rapid-click the ±0.03 nudges — value never skips
+      backwards (server-serialized; issue mix-editor/24)
+- [ ] PERF deck: BPM edits with 1/2, x2, nudges; effective `»` readout
+      follows pitch/bend; waveform grid re-tempos after edits
+- [ ] Editor deck cards: BPM edit updates tempo-match (player.setBpm) and
+      the effective/pitch readout
+- [ ] Variable-grid track shows `~N (var)` readout (no input) in all three
+      surfaces; tooltip explains
+- [ ] Nudge icons read as grid compress (up) / spread (down) at 11px

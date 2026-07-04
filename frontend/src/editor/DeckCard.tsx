@@ -5,8 +5,7 @@
  * deck B, transport jump on deck A).
  */
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { BpmControl } from '../components/deckControls/BpmControl';
 import { GridEditControls } from '../components/deckControls/GridEditControls';
 import { useDeleteHotCue, useHotCues, useSetHotCue } from '../hooks/useHotCues';
 import {
@@ -57,20 +56,11 @@ export function DeckCard({
   /** Locked-window toggle (B card only — the lock scopes to B gestures). */
   lock?: { on: boolean; toggle: () => void };
 }) {
-  const queryClient = useQueryClient();
   const { data: hotCues = [] } = useHotCues(track?.id ?? null);
   const setHotCue = useSetHotCue();
   const deleteHotCue = useDeleteHotCue();
   /** Gesture size in this deck's own beats (Performance beatjump idiom). */
   const [gestureBeats, setGestureBeats] = useState(PERFORMANCE_BEATJUMP_DEFAULT);
-  const [bpmDraft, setBpmDraft] = useState('');
-  // Reset the draft when the track (or its saved BPM) changes.
-  const [draftKey, setDraftKey] = useState('');
-  const key = `${track?.id ?? 'none'}-${track?.bpm ?? 0}`;
-  if (key !== draftKey) {
-    setDraftKey(key);
-    setBpmDraft(track?.bpm ? track.bpm.toFixed(2) : '');
-  }
 
   if (!track) {
     return (
@@ -83,18 +73,6 @@ export function DeckCard({
     );
   }
 
-  const commitBpm = async () => {
-    const bpm = Number(bpmDraft);
-    if (!bpm || bpm <= 0 || bpm === track.bpm) return;
-    // The PATCH updates the beatgrid server-side (ADR 0016 — regen for
-    // placeholders, anchor-preserving re-tempo for edited grids); the
-    // client only refetches.
-    await api.tracks.update(track.id, { bpm });
-    queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
-    player.setBpm(deck, bpm);
-    onBpmSaved(bpm);
-  };
-
   return (
     <div className={`editor-deckcard ${deck.toLowerCase()}`}>
       <div className="editor-deckcard-head">
@@ -105,21 +83,20 @@ export function DeckCard({
         <span className="editor-deckcard-artist">{track.artist || '—'}</span>
       </div>
       <div className="editor-deckcard-row">
-        <label title="Base BPM (the track's real tempo — edits persist)">
+        <span
+          className="editor-bpm-base"
+          title="Base BPM (the track's real tempo — edits persist)"
+        >
           BPM
-          <input
-            className="editor-bpm-base"
-            type="number"
-            step={0.01}
-            min={1}
-            value={bpmDraft}
-            onChange={(e) => setBpmDraft(e.target.value)}
-            onBlur={() => void commitBpm()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-            }}
-          />
-        </label>
+        </span>
+        <BpmControl
+          track={track}
+          dense
+          onCommitted={(bpm) => {
+            player.setBpm(deck, bpm);
+            onBpmSaved(bpm);
+          }}
+        />
         <span className="editor-bpm-eff" title="Effective BPM during the mix (after tempo match)">
           » {effectiveBpm !== null ? effectiveBpm.toFixed(1) : '—'}
           {Math.abs(pitchPercent) > 0.05 && (
