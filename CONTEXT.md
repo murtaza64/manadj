@@ -119,8 +119,11 @@ The device-specific translation from a Controller's physical controls to manadj 
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid.
 
+**Waveform data**:
+The stored Analysis artifact for a Track's audio: broadband peaks plus per-band energies over time, style-agnostic — no aesthetic choices baked in. Internal to manadj — never transferred by Sync; each external library computes its own.
+
 **Waveform**:
-The 3-band (low/mid/high) rendering of a Track's audio, used by manadj's own player UI. Internal to manadj — never transferred by Sync; each external library renders its own.
+A rendering of a Track's Waveform data in manadj's player UI. Many render styles can be drawn from the same Waveform data; style is a display concern, not an Analysis one.
 
 ### Acquisition
 
@@ -193,3 +196,9 @@ _Avoid_: discrepancy (implementation term)
 
 **Match**:
 The association between a Track and its counterpart in an external library, established during a Sync operation by file path, falling back to filename. Recomputed each run; not persisted.
+
+**Sync inbox**:
+The default unified-sync presentation: every attention-worthy track appears exactly once, in the highest-priority section that applies. Answers "what should I deal with, in what order" — a triage view, not a query.
+
+**Divergence filter**:
+An active chip in the unified sync view — a predicate listing every track carrying that divergence, regardless of which Sync inbox section claimed it. Chip counts always reflect the predicate, so a chip's number and its section's size may legitimately differ.
