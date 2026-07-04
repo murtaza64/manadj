@@ -1,25 +1,30 @@
 /**
- * Save-as-template modal (mix-editor issue 03) — authoring is the one
- * deliberate act in the templates feature, so it earns the modal budget.
- * One question per side: which anchor base (the track's SET cue slots
- * plus "first downbeat"), defaulting to the cue nearest the actual anchor
- * point. Deltas are auto-derived from the window's real placement and
- * rounded to whole beats — shown for confirmation, not editable (a
- * template is saved FROM a Transition; move the window to change them).
+ * Save-as-template modal (mix-editor issue 03; reworked for the
+ * align-and-window model, issue 28) — authoring is the one deliberate act
+ * in the templates feature, so it earns the modal budget. One question
+ * per side: which anchor base (the track's SET cue slots plus "first
+ * downbeat"). Everything else derives from the drawn Transition and is
+ * shown as the recipe sentence — "B's cue 2 lines up with A's cue 4 + 8
+ * beats; window 32 before / 64 after" — not editable here (a template is
+ * saved FROM a Transition; move the window to change it).
  */
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
+  alignmentInstantSec,
   defaultAnchorBase,
-  deriveAnchorDeltaBeats,
-  deriveLengthBeats,
+  defaultAnchorBaseB,
+  deriveAlignment,
 } from './templateModel';
-import type { AnchorBase, AnchorRule, TrackSideInfo } from './templateModel';
+import type { AnchorBase, DerivedAlignment, TrackSideInfo } from './templateModel';
+import type { Transition } from './mixModel';
 
 export interface SaveTemplateResult {
   name: string;
-  alignA: AnchorRule;
-  alignB: AnchorRule;
-  lengthBeats: number;
+  alignABase: AnchorBase;
+  deltaBeats: number;
+  alignBBase: AnchorBase;
+  beforeBeats: number;
+  afterBeats: number;
   scalable: boolean;
 }
 
@@ -34,42 +39,8 @@ function baseOptions(side: TrackSideInfo): AnchorBase[] {
   return [...cues, 'grid_origin'];
 }
 
-function SidePicker({
-  label,
-  trackTitle,
-  side,
-  anchorSec,
-  base,
-  onBase,
-}: {
-  label: 'A' | 'B';
-  trackTitle: string;
-  side: TrackSideInfo;
-  anchorSec: number;
-  base: AnchorBase;
-  onBase: (b: AnchorBase) => void;
-}) {
-  const delta = deriveAnchorDeltaBeats(anchorSec, base, side);
-  return (
-    <div className="editor-savetpl-side">
-      <div className="editor-savetpl-sidehead">
-        {label} · {trackTitle}
-      </div>
-      <label>
-        anchor
-        <select value={base} onChange={(e) => onBase(e.target.value as AnchorBase)}>
-          {baseOptions(side).map((b) => (
-            <option key={b} value={b}>
-              {baseLabel(b)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <span className="editor-savetpl-delta" title="Whole-beat offset from the anchor base (auto-derived)">
-        Δ {delta ?? '—'} beats
-      </span>
-    </div>
-  );
+function signedBeats(n: number): string {
+  return `${n < 0 ? '−' : '+'} ${Math.abs(n)}`;
 }
 
 export function SaveTemplateModal({
@@ -78,9 +49,8 @@ export function SaveTemplateModal({
   sideB,
   trackATitle,
   trackBTitle,
-  anchorASec,
-  anchorBSec,
-  durationSec,
+  transition,
+  rateB,
   onSave,
   onCancel,
 }: {
@@ -91,24 +61,33 @@ export function SaveTemplateModal({
   sideB: TrackSideInfo;
   trackATitle: string;
   trackBTitle: string;
-  anchorASec: number;
-  anchorBSec: number;
-  durationSec: number;
+  transition: Pick<Transition, 'startSec' | 'durationSec' | 'bInSec'>;
+  rateB: number;
   onSave: (result: SaveTemplateResult) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(defaultName);
-  const [baseA, setBaseA] = useState<AnchorBase>(() => defaultAnchorBase(anchorASec, sideA));
-  const [baseB, setBaseB] = useState<AnchorBase>(() => defaultAnchorBase(anchorBSec, sideB));
+  // Defaults (2026-07-04 #2 grill): B first — the earliest set cue inside
+  // B's window span (the mix-in landmark) — then A nearest the resulting
+  // alignment instant. Computed once, together.
+  const [initialBases] = useState(() => {
+    const b = defaultAnchorBaseB(transition, rateB, sideB);
+    const instant = alignmentInstantSec(transition, rateB, b, sideB);
+    return { a: defaultAnchorBase(instant ?? transition.startSec, sideA), b };
+  });
+  const [baseA, setBaseA] = useState<AnchorBase>(initialBases.a);
+  const [baseB, setBaseB] = useState<AnchorBase>(initialBases.b);
   const [scalable, setScalable] = useState(true);
 
-  const lengthBeats = useMemo(
-    () => (sideA.beatgrid ? deriveLengthBeats(durationSec, sideA.beatgrid) : 0),
-    [durationSec, sideA.beatgrid]
+  const derived: DerivedAlignment | null = deriveAlignment(
+    transition,
+    rateB,
+    baseA,
+    baseB,
+    sideA,
+    sideB
   );
-  const deltaA = deriveAnchorDeltaBeats(anchorASec, baseA, sideA);
-  const deltaB = deriveAnchorDeltaBeats(anchorBSec, baseB, sideB);
-  const valid = name.trim().length > 0 && deltaA !== null && deltaB !== null;
+  const valid = name.trim().length > 0 && derived !== null;
 
   return (
     <div className="editor-savetpl-overlay" onMouseDown={onCancel}>
@@ -126,33 +105,51 @@ export function SaveTemplateModal({
             placeholder="bass swap"
           />
         </label>
-        <SidePicker
-          label="A"
-          trackTitle={trackATitle}
-          side={sideA}
-          anchorSec={anchorASec}
-          base={baseA}
-          onBase={setBaseA}
-        />
-        <SidePicker
-          label="B"
-          trackTitle={trackBTitle}
-          side={sideB}
-          anchorSec={anchorBSec}
-          base={baseB}
-          onBase={setBaseB}
-        />
+        <div className="editor-savetpl-side">
+          <div className="editor-savetpl-sidehead">B · {trackBTitle}</div>
+          <label>
+            anchor (mix-in reference)
+            <select value={baseB} onChange={(e) => setBaseB(e.target.value as AnchorBase)}>
+              {baseOptions(sideB).map((b) => (
+                <option key={b} value={b}>
+                  {baseLabel(b)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="editor-savetpl-side">
+          <div className="editor-savetpl-sidehead">A · {trackATitle}</div>
+          <label>
+            lines up with
+            <select value={baseA} onChange={(e) => setBaseA(e.target.value as AnchorBase)}>
+              {baseOptions(sideA).map((b) => (
+                <option key={b} value={b}>
+                  {baseLabel(b)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="editor-savetpl-recipe">
+          {derived ? (
+            <>
+              B&rsquo;s {baseLabel(baseB)} lines up with A&rsquo;s {baseLabel(baseA)}{' '}
+              {signedBeats(derived.deltaBeats)} beats; window {derived.beforeBeats} before /{' '}
+              {derived.afterBeats} after
+            </>
+          ) : (
+            'anchors could not be derived — pick set cues or the first downbeat'
+          )}
+        </div>
         <div className="editor-savetpl-length">
-          <span title="Derived from the window on A's grid, rounded to whole beats">
-            length: {lengthBeats} beats
-          </span>
           <label>
             <input
               type="checkbox"
               checked={scalable}
               onChange={(e) => setScalable(e.target.checked)}
             />
-            scalable at apply time
+            scalable at apply time (proportional)
           </label>
         </div>
         <div className="editor-savetpl-actions">
@@ -164,9 +161,11 @@ export function SaveTemplateModal({
             onClick={() =>
               onSave({
                 name: name.trim(),
-                alignA: { base: baseA, deltaBeats: deltaA! },
-                alignB: { base: baseB, deltaBeats: deltaB! },
-                lengthBeats,
+                alignABase: baseA,
+                deltaBeats: derived!.deltaBeats,
+                alignBBase: baseB,
+                beforeBeats: derived!.beforeBeats,
+                afterBeats: derived!.afterBeats,
                 scalable,
               })
             }

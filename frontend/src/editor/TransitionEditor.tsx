@@ -386,6 +386,7 @@ function TransitionEditorInner() {
               sideB={sideB}
               bpmA={bpmA}
               bpmB={bpmB}
+              rateB={rateB}
               trackATitle={trackA?.title ?? 'A'}
               trackBTitle={trackB?.title ?? 'B'}
               pairLoaded={pairKey !== null}
@@ -460,6 +461,7 @@ function EditorCenterPanel({
   sideB,
   bpmA,
   bpmB,
+  rateB,
   trackATitle,
   trackBTitle,
   pairLoaded,
@@ -472,6 +474,7 @@ function EditorCenterPanel({
   sideB: TrackSideInfo;
   bpmA: number | null;
   bpmB: number | null;
+  rateB: number;
   trackATitle: string;
   trackBTitle: string;
   pairLoaded: boolean;
@@ -546,9 +549,11 @@ function EditorCenterPanel({
       saveTemplate({
         uuid: crypto.randomUUID(),
         name: result.name,
-        alignA: result.alignA,
-        alignB: result.alignB,
-        lengthBeats: result.lengthBeats,
+        alignABase: result.alignABase,
+        deltaBeats: result.deltaBeats,
+        alignBBase: result.alignBBase,
+        beforeBeats: result.beforeBeats,
+        afterBeats: result.afterBeats,
         scalable: result.scalable,
         lanes: structuredClone(stripTemplateLanes(tr)),
       });
@@ -675,9 +680,8 @@ function EditorCenterPanel({
           sideB={sideB}
           trackATitle={trackATitle}
           trackBTitle={trackBTitle}
-          anchorASec={tr.startSec}
-          anchorBSec={tr.bInSec}
-          durationSec={tr.durationSec}
+          transition={tr}
+          rateB={rateB}
           onSave={saveCurrentAsTemplate}
           onCancel={() => setSaveModalOpen(false)}
         />

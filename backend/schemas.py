@@ -1,6 +1,6 @@
 """Pydantic schemas for API validation."""
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from datetime import datetime
 
 from backend.track_metadata.units import centibpm_to_bpm
@@ -295,20 +295,29 @@ ANCHOR_BASE_PATTERN = r"^(cue_[1-8]|grid_origin)$"
 class TransitionTemplateItem(BaseModel):
     """A Transition template as the client authors it (POST/PUT payload).
 
-    `uuid` is the client-generated identity. Anchor bases are a cue slot
-    (`cue_1`..`cue_8`) or `grid_origin`; deltas and length are whole beats.
+    `uuid` is the client-generated identity. The alignment rule: B's
+    anchor (`align_b_base`) lands on A's anchor (`align_a_base`) plus
+    `align_delta_beats` (whole beats, A's grid). The window sits around
+    the alignment instant: `before_beats`/`after_beats` are free-signed
+    whole beats whose total must be ≥ 0 (zero = hard cut at the anchor).
     `lanes` is the sparse normalized lane payload (opaque, same LanePoint
     shape as Transitions).
     """
     uuid: str
     name: str
     align_a_base: str = Field(pattern=ANCHOR_BASE_PATTERN)
-    align_a_delta_beats: int
+    align_delta_beats: int
     align_b_base: str = Field(pattern=ANCHOR_BASE_PATTERN)
-    align_b_delta_beats: int
-    length_beats: int
+    before_beats: int
+    after_beats: int
     scalable: bool = False
     lanes: dict
+
+    @model_validator(mode="after")
+    def _window_total_non_negative(self) -> "TransitionTemplateItem":
+        if self.before_beats + self.after_beats < 0:
+            raise ValueError("window total (before_beats + after_beats) must be >= 0")
+        return self
 
 
 class TransitionTemplateRow(TransitionTemplateItem):

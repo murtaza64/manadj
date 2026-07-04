@@ -24,10 +24,10 @@ def _row(t: models.TransitionTemplate) -> schemas.TransitionTemplateRow:
         uuid=t.uuid,
         name=t.name,
         align_a_base=t.align_a_base,
-        align_a_delta_beats=t.align_a_delta_beats,
+        align_delta_beats=t.align_delta_beats,
         align_b_base=t.align_b_base,
-        align_b_delta_beats=t.align_b_delta_beats,
-        length_beats=t.length_beats,
+        before_beats=t.before_beats,
+        after_beats=t.after_beats,
         scalable=t.scalable,
         lanes=json.loads(t.lanes_json),
     )
@@ -64,10 +64,10 @@ def create_template(payload: schemas.TransitionTemplateItem, db: Session = Depen
         uuid=payload.uuid,
         name=payload.name,
         align_a_base=payload.align_a_base,
-        align_a_delta_beats=payload.align_a_delta_beats,
+        align_delta_beats=payload.align_delta_beats,
         align_b_base=payload.align_b_base,
-        align_b_delta_beats=payload.align_b_delta_beats,
-        length_beats=payload.length_beats,
+        before_beats=payload.before_beats,
+        after_beats=payload.after_beats,
         scalable=payload.scalable,
         lanes_json=json.dumps(payload.lanes),
     )
@@ -87,10 +87,10 @@ def update_template(
     row = _get(db, uuid)
     row.name = payload.name
     row.align_a_base = payload.align_a_base
-    row.align_a_delta_beats = payload.align_a_delta_beats
+    row.align_delta_beats = payload.align_delta_beats
     row.align_b_base = payload.align_b_base
-    row.align_b_delta_beats = payload.align_b_delta_beats
-    row.length_beats = payload.length_beats
+    row.before_beats = payload.before_beats
+    row.after_beats = payload.after_beats
     row.scalable = payload.scalable
     row.lanes_json = json.dumps(payload.lanes)
     db.commit()

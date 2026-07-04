@@ -19,9 +19,11 @@ function fromWire(w: TransitionTemplateWire): TransitionTemplate {
   return {
     uuid: w.uuid,
     name: w.name,
-    alignA: { base: w.align_a_base as AnchorBase, deltaBeats: w.align_a_delta_beats },
-    alignB: { base: w.align_b_base as AnchorBase, deltaBeats: w.align_b_delta_beats },
-    lengthBeats: w.length_beats,
+    alignABase: w.align_a_base as AnchorBase,
+    deltaBeats: w.align_delta_beats,
+    alignBBase: w.align_b_base as AnchorBase,
+    beforeBeats: w.before_beats,
+    afterBeats: w.after_beats,
     scalable: w.scalable,
     lanes: w.lanes as Lanes,
   };
@@ -31,11 +33,11 @@ function toWire(t: TransitionTemplate): TransitionTemplateWire {
   return {
     uuid: t.uuid,
     name: t.name,
-    align_a_base: t.alignA.base,
-    align_a_delta_beats: t.alignA.deltaBeats,
-    align_b_base: t.alignB.base,
-    align_b_delta_beats: t.alignB.deltaBeats,
-    length_beats: t.lengthBeats,
+    align_a_base: t.alignABase,
+    align_delta_beats: t.deltaBeats,
+    align_b_base: t.alignBBase,
+    before_beats: t.beforeBeats,
+    after_beats: t.afterBeats,
     scalable: t.scalable,
     lanes: t.lanes as Record<string, unknown>,
   };

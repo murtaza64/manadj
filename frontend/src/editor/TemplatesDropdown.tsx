@@ -97,15 +97,20 @@ function TemplateRow({
 }: {
   template: TransitionTemplate;
   canApply: boolean;
-  onApply: (lengthBeats: number) => void;
+  onApply: (totalBeats: number) => void;
   onRename: (name: string) => void;
   onDelete: () => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
-  /** Apply-time beat count (scalable templates only), beat-jump idiom. */
-  const [beats, setBeats] = useState(template.lengthBeats);
+  const total = template.beforeBeats + template.afterBeats;
+  /** Apply-time TOTAL beat count (scalable templates only), beat-jump
+   * idiom; splits proportionally around the anchor (scaleWindow). A
+   * zero-length template has no shape to scale — treated as fixed. */
+  const [beats, setBeats] = useState(total);
   const inputRef = useRef<HTMLInputElement>(null);
+  const windowTitle = `window: ${template.beforeBeats} before / ${template.afterBeats} after`;
+  const scalableActive = template.scalable && total > 0;
 
   const editing = draft !== null;
   useEffect(() => {
@@ -139,8 +144,8 @@ function TemplateRow({
           }}
         />
       )}
-      {template.scalable ? (
-        <span className="editor-templates-stepper" title="Apply length (beats)">
+      {scalableActive ? (
+        <span className="editor-templates-stepper" title={`Apply total (beats) — ${windowTitle}`}>
           <button
             disabled={beats <= MIN_BEATS}
             onClick={() => setBeats((b) => Math.max(MIN_BEATS, Math.round(b / 2)))}
@@ -156,15 +161,15 @@ function TemplateRow({
           </button>
         </span>
       ) : (
-        <span className="editor-templates-beats" title="Fixed length (beats)">
-          {template.lengthBeats}b
+        <span className="editor-templates-beats" title={`Fixed — ${windowTitle}`}>
+          {total === 0 ? 'cut' : `${total}b`}
         </span>
       )}
       <button
         className="editor-templates-apply"
         disabled={!canApply}
         title={canApply ? 'Apply to the loaded pair' : 'Load two tracks first'}
-        onClick={() => onApply(template.scalable ? beats : template.lengthBeats)}
+        onClick={() => onApply(scalableActive ? beats : total)}
       >
         apply
       </button>

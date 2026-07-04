@@ -30,10 +30,10 @@ def template(uuid: str = "t1", name: str = "bass swap", **overrides) -> dict:
         "uuid": uuid,
         "name": name,
         "align_a_base": "cue_4",
-        "align_a_delta_beats": 32,
+        "align_delta_beats": 0,
         "align_b_base": "cue_4",
-        "align_b_delta_beats": -32,
-        "length_beats": 64,
+        "before_beats": 32,
+        "after_beats": 32,
         "scalable": True,
         "lanes": {"eqLowA": [{"x": 0, "y": 0.5}, {"x": 0.5, "y": 0}]},
     }
@@ -46,7 +46,8 @@ def test_create_and_list(client):
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["uuid"] == "t1"
-    assert body["align_b_delta_beats"] == -32
+    assert body["before_beats"] == 32
+    assert body["after_beats"] == 32
     assert body["lanes"]["eqLowA"][1]["y"] == 0
 
     listed = client.get("/api/transition-templates").json()
@@ -77,11 +78,12 @@ def test_update(client, db_session):
 
     resp = client.put(
         "/api/transition-templates/t1",
-        json=template("t1", name="renamed", length_beats=32, scalable=False),
+        json=template("t1", name="renamed", before_beats=8, after_beats=24, scalable=False),
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["name"] == "renamed"
-    assert resp.json()["length_beats"] == 32
+    assert resp.json()["before_beats"] == 8
+    assert resp.json()["after_beats"] == 24
     assert resp.json()["scalable"] is False
     # Same row updated in place.
     assert db_session.query(TransitionTemplate).one().id == row_id
@@ -121,3 +123,24 @@ def test_valid_anchor_bases_accepted(client, base):
         "/api/transition-templates", json=template(align_a_base=base, align_b_base=base)
     )
     assert resp.status_code == 201
+
+
+def test_free_signed_window_accepted(client):
+    """The anchor may sit outside the window (issue 28)."""
+    resp = client.post(
+        "/api/transition-templates", json=template(before_beats=32, after_beats=-8)
+    )
+    assert resp.status_code == 201
+    # Zero total = hard cut at the anchor.
+    resp = client.post(
+        "/api/transition-templates",
+        json=template("t2", before_beats=0, after_beats=0),
+    )
+    assert resp.status_code == 201
+
+
+def test_negative_window_total_rejected(client):
+    resp = client.post(
+        "/api/transition-templates", json=template(before_beats=8, after_beats=-16)
+    )
+    assert resp.status_code == 422

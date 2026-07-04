@@ -896,3 +896,12 @@
   opacity: 0.4;
   cursor: default;
 }
+
+/* The derived recipe sentence (issue 28) — the sentence IS the template. */
+.editor-savetpl-recipe {
+  border: 1px solid var(--surface0, #313244);
+  padding: 8px;
+  font-size: 12px;
+  color: var(--sapphire, #74c7ec);
+  line-height: 1.4;
+}

@@ -1,9 +1,12 @@
 /**
- * Transition-template model tests (mix-editor issue 03).
+ * Transition-template model tests (mix-editor issue 03; anchor model
+ * reworked in issue 28 — align-and-window).
  *
  * Pure seams: grid-origin backward extrapolation, anchor resolution
- * (cue → relative ladder → absolute convention → untouched), beats →
- * seconds translation, lane stripping, and apply/derive round-trips.
+ * (cue → relative ladder → absolute convention → untouched), alignment +
+ * window apply math (incl. negative/zero windows and the lead-in-
+ * shrinking clamp), proportional scaling, save-time derivation order,
+ * lane stripping, apply-target session logic.
  */
 import { describe, expect, it } from 'vitest';
 import type { BeatgridData } from '../types';
@@ -14,10 +17,11 @@ import {
   applyTemplate,
   beatPeriodSec,
   defaultAnchorBase,
-  deriveAnchorDeltaBeats,
-  deriveLengthBeats,
+  defaultAnchorBaseB,
+  deriveAlignment,
   gridOriginSec,
   resolveAnchorBase,
+  scaleWindow,
   stampIntoSession,
   stripTemplateLanes,
 } from './templateModel';
@@ -61,14 +65,22 @@ function makeTemplate(overrides: Partial<TransitionTemplate> = {}): TransitionTe
   return {
     uuid: 'tpl-1',
     name: 'bass swap',
-    alignA: { base: 'cue_4', deltaBeats: 32 },
-    alignB: { base: 'cue_4', deltaBeats: -32 },
-    lengthBeats: 64,
+    alignABase: 'cue_4',
+    deltaBeats: 0,
+    alignBBase: 'cue_4',
+    beforeBeats: 32,
+    afterBeats: 32,
     scalable: true,
     lanes: { eqLowA: [{ x: 0, y: 0.5 }, { x: 0.5, y: 0 }] },
     ...overrides,
   };
 }
+
+// Standard pair: A 120 BPM (period 0.5), B 126 BPM (period 60/126).
+const PERIOD_A = 0.5;
+const PERIOD_B = 60 / 126;
+/** B's rate under tempo-match: plays at A's tempo. */
+const RATE_B = 120 / 126;
 
 // ── Grid origin ─────────────────────────────────────────────────────────
 
@@ -107,8 +119,6 @@ describe('gridOriginSec', () => {
 // ── Anchor base resolution ──────────────────────────────────────────────
 
 describe('resolveAnchorBase', () => {
-  const period = 0.5; // 120 BPM
-
   it('uses the set cue directly', () => {
     const r = resolveAnchorBase('cue_4', side(makeGrid(), { 4: 64 }), 'B');
     expect(r).toEqual({ sec: 64 });
@@ -123,27 +133,26 @@ describe('resolveAnchorBase', () => {
   it('derives a missing ladder slot from the nearest set one (relative)', () => {
     // cue 3 = cue 4 − 8 bars.
     const r = resolveAnchorBase('cue_3', side(makeGrid(), { 4: 64 }), 'B');
-    expect(r?.sec).toBeCloseTo(64 - 32 * period);
+    expect(r?.sec).toBeCloseTo(64 - 32 * PERIOD_A);
     expect(r?.notice).toMatch(/cue 3 missing on B/);
   });
 
   it('derives upward too (missing 4 from set 2)', () => {
     const r = resolveAnchorBase('cue_4', side(makeGrid(), { 2: 10 }), 'A');
-    expect(r?.sec).toBeCloseTo(10 + 64 * period);
+    expect(r?.sec).toBeCloseTo(10 + 64 * PERIOD_A);
     expect(r?.notice).toMatch(/derived from cue 2/);
   });
 
   it('breaks nearest-slot ties toward the firmer (higher) rung', () => {
     // cue 3 is 32 beats from both 2 and 4 → prefer 4 (drop is firmest).
     const r = resolveAnchorBase('cue_3', side(makeGrid(), { 2: 10, 4: 60 }), 'B');
-    expect(r?.sec).toBeCloseTo(60 - 32 * period);
+    expect(r?.sec).toBeCloseTo(60 - 32 * PERIOD_A);
     expect(r?.notice).toMatch(/derived from cue 4/);
   });
 
   it('falls back to the absolute convention position when no ladder cue is set', () => {
-    const grid = makeGrid(120, 0, 1);
-    const r = resolveAnchorBase('cue_4', side(grid), 'B');
-    expect(r?.sec).toBeCloseTo(128 * period);
+    const r = resolveAnchorBase('cue_4', side(makeGrid(120, 0, 1)), 'B');
+    expect(r?.sec).toBeCloseTo(128 * PERIOD_A);
     expect(r?.notice).toMatch(/convention position \(beat 128\)/);
   });
 
@@ -161,22 +170,44 @@ describe('resolveAnchorBase', () => {
   });
 });
 
+// ── Window scaling ──────────────────────────────────────────────────────
+
+describe('scaleWindow', () => {
+  it('splits the chosen total proportionally, remainder to after', () => {
+    expect(scaleWindow(32, 64, 48)).toEqual({ before: 16, after: 32 });
+    expect(scaleWindow(32, 64, 192)).toEqual({ before: 64, after: 128 });
+  });
+
+  it('guarantees before + after ≡ chosen total under rounding', () => {
+    const { before, after } = scaleWindow(3, 5, 4);
+    expect(before + after).toBe(4);
+  });
+
+  it('scales free-signed windows', () => {
+    // Anchor outside the window: shape preserved under halving.
+    expect(scaleWindow(-8, 40, 16)).toEqual({ before: -4, after: 20 });
+  });
+
+  it('ignores the override on zero-length templates (no shape to keep)', () => {
+    expect(scaleWindow(0, 0, 64)).toEqual({ before: 0, after: 0 });
+  });
+});
+
 // ── Apply ───────────────────────────────────────────────────────────────
 
 describe('applyTemplate', () => {
-  const gridA = makeGrid(120); // period 0.5
-  const gridB = makeGrid(126); // period 60/126
+  const gridA = makeGrid(120);
+  const gridB = makeGrid(126);
 
-  it('lands the PRD worked example: drop alignment with 32-beat lead-in', () => {
+  it('lands the canonical move: drops aligned, blend 32 before, ride 32 after', () => {
     const a = side(gridA, { 4: 64 });
     const b = side(gridB, { 4: 30 });
     const { patch, notices } = applyTemplate(makeTemplate(), { a, b });
-    // startSec = A-local time of alignA = cueA4 + 32 A-beats.
-    expect(patch.startSec).toBeCloseTo(64 + 32 * 0.5);
-    // bInSec = B-local time of alignB = cueB4 − 32 B-beats.
-    expect(patch.bInSec).toBeCloseTo(30 - 32 * (60 / 126));
-    // duration = lengthBeats in A-beats (mix time ≡ A time).
-    expect(patch.durationSec).toBeCloseTo(64 * 0.5);
+    // Alignment instant = A's cue 4 (+ delta 0) = 64.
+    expect(patch.startSec).toBeCloseTo(64 - 32 * PERIOD_A);
+    expect(patch.durationSec).toBeCloseTo(64 * PERIOD_A);
+    // B's anchor lands on the instant: bInSec = anchor − before B-beats.
+    expect(patch.bInSec).toBeCloseTo(30 - 32 * PERIOD_B);
     expect(patch.tempoMatch).toBe(true);
     expect(patch.lanes).toEqual(makeTemplate().lanes);
     expect(patch.lanes).not.toBe(makeTemplate().lanes); // cloned
@@ -184,13 +215,59 @@ describe('applyTemplate', () => {
     expect(notices).toEqual([]);
   });
 
-  it('scales at an apply-time beat count', () => {
+  it('applies the delta on A\'s grid (phrase-offset alignment)', () => {
+    const { patch } = applyTemplate(
+      makeTemplate({ deltaBeats: 16 }),
+      { a: side(gridA, { 4: 64 }), b: side(gridB, { 4: 30 }) }
+    );
+    // Instant = 64 + 16·0.5 = 72.
+    expect(patch.startSec).toBeCloseTo(72 - 32 * PERIOD_A);
+    expect(patch.bInSec).toBeCloseTo(30 - 32 * PERIOD_B);
+  });
+
+  it('scales proportionally at an apply-time total', () => {
     const { patch } = applyTemplate(
       makeTemplate(),
       { a: side(gridA, { 4: 64 }), b: side(gridB, { 4: 30 }) },
       32
     );
-    expect(patch.durationSec).toBeCloseTo(32 * 0.5);
+    // 32/32 at total 32 → 16/16: window hugs the anchor tighter.
+    expect(patch.startSec).toBeCloseTo(64 - 16 * PERIOD_A);
+    expect(patch.durationSec).toBeCloseTo(32 * PERIOD_A);
+    expect(patch.bInSec).toBeCloseTo(30 - 16 * PERIOD_B);
+  });
+
+  it('supports a negative after (window ends before the anchor)', () => {
+    const { patch } = applyTemplate(
+      makeTemplate({ beforeBeats: 32, afterBeats: -8, scalable: false }),
+      { a: side(gridA, { 4: 64 }), b: side(gridB, { 4: 30 }) }
+    );
+    expect(patch.startSec).toBeCloseTo(64 - 32 * PERIOD_A);
+    expect(patch.durationSec).toBeCloseTo(24 * PERIOD_A);
+  });
+
+  it('zero-length template = hard cut AT the anchor', () => {
+    const { patch } = applyTemplate(
+      makeTemplate({ beforeBeats: 0, afterBeats: 0, scalable: false }),
+      { a: side(gridA, { 4: 64 }), b: side(gridB, { 4: 30 }) }
+    );
+    expect(patch.startSec).toBeCloseTo(64);
+    expect(patch.durationSec).toBe(0);
+    expect(patch.bInSec).toBeCloseTo(30);
+  });
+
+  it('clamp shrinks the lead-in, preserving alignment and tail', () => {
+    // A's cue 1 at 0.5s, before 32 → raw start −15.5s. The lead-in
+    // shrinks to 1 beat; the alignment instant and after-length hold.
+    const { patch, notices } = applyTemplate(
+      makeTemplate({ alignABase: 'cue_1', beforeBeats: 32 }),
+      { a: side(gridA, { 1: 0.5 }), b: side(gridB, { 4: 30 }) }
+    );
+    expect(patch.startSec).toBe(0);
+    expect(patch.durationSec).toBeCloseTo((1 + 32) * PERIOD_A);
+    // B's anchor still lands on the instant: bIn + (instant − start)·rateB = anchor.
+    expect(patch.bInSec! + 0.5 * RATE_B).toBeCloseTo(30);
+    expect(notices.some((n) => /lead-in shortened/.test(n))).toBe(true);
   });
 
   it('stamps anchors via fallbacks with notices', () => {
@@ -198,18 +275,18 @@ describe('applyTemplate', () => {
       a: side(gridA, { 4: 64 }),
       b: side(gridB, { 2: 30 }), // cue 4 missing; derive from cue 2 (+64 beats)
     });
-    expect(patch.bInSec).toBeCloseTo(30 + 64 * (60 / 126) - 32 * (60 / 126));
+    expect(patch.bInSec).toBeCloseTo(30 + 64 * PERIOD_B - 32 * PERIOD_B);
     expect(notices.some((n) => /cue 4 missing on B/.test(n))).toBe(true);
   });
 
   it('leaves BOTH anchors untouched when one side fails (all-or-nothing)', () => {
     const { patch, notices } = applyTemplate(
-      makeTemplate({ alignB: { base: 'cue_5', deltaBeats: 0 } }),
+      makeTemplate({ alignBBase: 'cue_5' }),
       { a: side(gridA, { 4: 64 }), b: side(gridB) }
     );
     expect(patch.startSec).toBeUndefined();
     expect(patch.bInSec).toBeUndefined();
-    expect(patch.durationSec).toBeCloseTo(32); // length still stamps (A grid exists)
+    expect(patch.durationSec).toBeCloseTo(64 * PERIOD_A); // length still stamps
     expect(patch.lanes).toBeDefined();
     expect(notices.some((n) => /anchors unchanged/.test(n))).toBe(true);
   });
@@ -221,7 +298,7 @@ describe('applyTemplate', () => {
     });
     expect(patch.startSec).toBeUndefined();
     expect(patch.bInSec).toBeUndefined();
-    expect(patch.durationSec).toBeCloseTo(32);
+    expect(patch.durationSec).toBeCloseTo(64 * PERIOD_A);
     expect(notices.length).toBeGreaterThan(0);
   });
 
@@ -237,58 +314,62 @@ describe('applyTemplate', () => {
     expect(notices.some((n) => /beatgrid/.test(n))).toBe(true);
   });
 
-  it('clamps startSec at 0 with a notice (the model clamp)', () => {
-    // cue 1 at 0.5s, delta −32 beats → −15.5s → clamp.
-    const { patch, notices } = applyTemplate(
-      makeTemplate({ alignA: { base: 'cue_1', deltaBeats: -32 } }),
-      { a: side(gridA, { 1: 0.5 }), b: side(gridB, { 4: 30 }) }
-    );
-    expect(patch.startSec).toBe(0);
-    expect(notices.some((n) => /clamped/.test(n))).toBe(true);
-  });
-
   it('negative bInSec is first-class (silent lead gap), no clamp, no notice', () => {
-    // B's drop 10 beats in, delta −32 → negative entry anchor.
+    // B's drop 10 B-beats in, before 32 → negative entry anchor.
     const { patch, notices } = applyTemplate(makeTemplate(), {
       a: side(gridA, { 4: 64 }),
-      b: side(gridB, { 4: 10 * (60 / 126) }),
+      b: side(gridB, { 4: 10 * PERIOD_B }),
     });
-    expect(patch.bInSec).toBeCloseTo((10 - 32) * (60 / 126));
+    expect(patch.bInSec).toBeCloseTo((10 - 32) * PERIOD_B);
     expect(notices).toEqual([]);
   });
 });
 
 // ── Derivation (save-time) ──────────────────────────────────────────────
 
-describe('deriveAnchorDeltaBeats', () => {
-  it('rounds the delta to whole beats of the side\'s own grid', () => {
-    // anchor 40.1, cue at 32.0, period 0.5 → 16.2 → 16.
-    const r = deriveAnchorDeltaBeats(40.1, 'cue_4', side(makeGrid(), { 4: 32 }));
-    expect(r).toBe(16);
+describe('deriveAlignment', () => {
+  const gridA = makeGrid(120);
+  const gridB = makeGrid(126);
+
+  it('round-trips the canonical apply', () => {
+    const a = side(gridA, { 4: 64 });
+    const b = side(gridB, { 4: 30 });
+    const { patch } = applyTemplate(makeTemplate(), { a, b });
+    const tr = { startSec: patch.startSec!, durationSec: patch.durationSec!, bInSec: patch.bInSec! };
+    const d = deriveAlignment(tr, RATE_B, 'cue_4', 'cue_4', a, b);
+    expect(d).toEqual({ deltaBeats: 0, beforeBeats: 32, afterBeats: 32 });
   });
 
-  it('derives against grid origin', () => {
-    const r = deriveAnchorDeltaBeats(4.0, 'grid_origin', side(makeGrid(120, 0.5, 2)));
-    expect(r).toBe(8); // origin 0, period 0.5
+  it('derives in the honest order: total first, after as remainder', () => {
+    // Slightly off-grid drawing: duration 32.2s (64.4 beats → 64),
+    // instant 0.6 beats from window start... everything whole-beat rounds
+    // but before + after must equal the rounded total exactly.
+    const a = side(gridA, { 4: 64 });
+    const b = side(gridB, { 4: 30 });
+    const tr = { startSec: 48.2, durationSec: 32.2, bInSec: 30 - ((64 - 48.2) / PERIOD_A) * PERIOD_B };
+    const d = deriveAlignment(tr, RATE_B, 'cue_4', 'cue_4', a, b)!;
+    expect(d.beforeBeats + d.afterBeats).toBe(Math.round(32.2 / PERIOD_A));
   });
 
-  it('is null when the base cannot resolve for saving (no fallbacks at save time)', () => {
-    // A save-time fallback would bake a weaker anchor into the recipe
-    // permanently — only set cues and the grid origin qualify.
-    expect(deriveAnchorDeltaBeats(4.0, 'cue_4', side(makeGrid()))).toBeNull();
-    expect(deriveAnchorDeltaBeats(4.0, 'cue_5', side(makeGrid()))).toBeNull();
-    expect(deriveAnchorDeltaBeats(4.0, 'cue_4', side(null))).toBeNull();
-  });
-});
-
-describe('deriveLengthBeats', () => {
-  it('measures the window in whole A-beats', () => {
-    expect(deriveLengthBeats(20, makeGrid(120))).toBe(40);
-    expect(deriveLengthBeats(20.2, makeGrid(120))).toBe(40);
+  it('the delta absorbs the alignment offset from A\'s base', () => {
+    const a = side(gridA, { 1: 10, 4: 64 });
+    const b = side(gridB, { 4: 30 });
+    const { patch } = applyTemplate(makeTemplate({ deltaBeats: 16 }), { a, b });
+    const tr = { startSec: patch.startSec!, durationSec: patch.durationSec!, bInSec: patch.bInSec! };
+    expect(deriveAlignment(tr, RATE_B, 'cue_4', 'cue_4', a, b)?.deltaBeats).toBe(16);
+    // Same drawing, anchored to A's cue 1 instead: delta re-derives.
+    expect(deriveAlignment(tr, RATE_B, 'cue_1', 'cue_4', a, b)?.deltaBeats).toBe(
+      16 + Math.round((64 - 10) / PERIOD_A)
+    );
   });
 
-  it('never returns less than 0', () => {
-    expect(deriveLengthBeats(0, makeGrid(120))).toBe(0);
+  it('is null when a base cannot resolve for saving (no fallbacks at save time)', () => {
+    const a = side(gridA, { 4: 64 });
+    const b = side(gridB, { 4: 30 });
+    const tr = { startSec: 48, durationSec: 32, bInSec: 15 };
+    expect(deriveAlignment(tr, RATE_B, 'cue_5', 'cue_4', a, b)).toBeNull(); // unset A cue
+    expect(deriveAlignment(tr, RATE_B, 'cue_4', 'cue_2', a, b)).toBeNull(); // unset B cue
+    expect(deriveAlignment(tr, RATE_B, 'cue_4', 'cue_4', side(null, { 4: 64 }), b)).toBeNull();
   });
 });
 
@@ -331,7 +412,7 @@ describe('stripTemplateLanes', () => {
   });
 });
 
-describe('defaultAnchorBase', () => {
+describe('defaultAnchorBase (A side)', () => {
   it('picks the set cue nearest the anchor point', () => {
     const s = side(makeGrid(), { 1: 10, 4: 64 });
     expect(defaultAnchorBase(60, s)).toBe('cue_4');
@@ -340,6 +421,25 @@ describe('defaultAnchorBase', () => {
 
   it('falls back to grid_origin when no cues are set', () => {
     expect(defaultAnchorBase(60, side(makeGrid()))).toBe('grid_origin');
+  });
+});
+
+describe('defaultAnchorBaseB (mix-in default)', () => {
+  const tr = { durationSec: 20, bInSec: 10 };
+  // B's window span: [10, 10 + 20·RATE_B].
+
+  it('picks the EARLIEST set cue inside B\'s window span', () => {
+    const s = side(makeGrid(126), { 2: 12, 4: 20, 1: 5 });
+    expect(defaultAnchorBaseB(tr, RATE_B, s)).toBe('cue_2');
+  });
+
+  it('falls back to the nearest cue to the span midpoint when none is inside', () => {
+    const s = side(makeGrid(126), { 1: 5, 4: 200 });
+    expect(defaultAnchorBaseB(tr, RATE_B, s)).toBe('cue_1');
+  });
+
+  it('falls back to grid_origin with no cues', () => {
+    expect(defaultAnchorBaseB(tr, RATE_B, side(makeGrid(126)))).toBe('grid_origin');
   });
 });
 

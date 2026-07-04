@@ -1,12 +1,20 @@
 /**
  * Transition-template domain model (pure — under vitest).
  *
- * A template is a beat-domain RECIPE (ADR 0010 Amendment 2): per-side
- * anchor rules (base = a cue slot or the grid origin, plus a whole-beat
- * delta on that track's own grid), a length in beats, and sparse
- * normalized lanes. Applying translates beats → seconds via the
- * tempo-matched beatgrids and yields ordinary seconds-based Transition
- * fields — the recipe never survives into the model (no provenance).
+ * A template is a beat-domain RECIPE (ADR 0010 Amendment 2; anchor model
+ * reworked 2026-07-04 #2, issue 28) in two parts:
+ *
+ * - The ALIGNMENT RULE: B's anchor (a cue slot or the grid origin) lands
+ *   on A's anchor plus a single whole-beat delta on A's grid — "B's cue 2
+ *   lines up with A's cue 4 + 8 beats". B's anchor is the musical
+ *   reference of the move, typically B's mix-in landmark.
+ * - The WINDOW: whole beats before/after the alignment instant. Free-
+ *   signed (the anchor may sit outside the window); total ≥ 0, zero being
+ *   a hard cut at the anchor.
+ *
+ * Applying translates beats → seconds via the tempo-matched beatgrids and
+ * yields ordinary seconds-based Transition fields — the recipe never
+ * survives into the model (no provenance).
  *
  * Resolution never guesses silently: every fallback and clamp produces a
  * one-line notice; anchoring is all-or-nothing across the pair (a partial
@@ -29,22 +37,23 @@ export type AnchorBase =
   | 'cue_8'
   | 'grid_origin';
 
-export interface AnchorRule {
-  base: AnchorBase;
-  /** Whole beats on the anchored track's own grid. */
-  deltaBeats: number;
-}
-
 export interface TransitionTemplate {
   uuid: string;
   name: string;
-  /** Anchor rule on the outgoing track. */
-  alignA: AnchorRule;
-  /** Anchor rule on the incoming track. */
-  alignB: AnchorRule;
-  lengthBeats: number;
-  /** Scalable templates take an apply-time beat count (default
-   * lengthBeats); fixed ones apply at exactly lengthBeats. */
+  /** Alignment rule: B's `alignBBase` lands on A's `alignABase` +
+   * `deltaBeats` (whole beats, A's grid — under tempo-match beats are the
+   * shared currency, so one delta carries the whole relative shift). */
+  alignABase: AnchorBase;
+  deltaBeats: number;
+  alignBBase: AnchorBase;
+  /** Window around the alignment instant, whole beats on the mix axis.
+   * Free-signed; `beforeBeats + afterBeats ≥ 0` (zero = hard cut at the
+   * anchor). */
+  beforeBeats: number;
+  afterBeats: number;
+  /** Scalable templates take an apply-time TOTAL beat count (default
+   * before+after) and split it proportionally — the anchor keeps its
+   * relative position in the window. */
   scalable: boolean;
   /** Sparse normalized lanes: only lanes the author gave meaningful
    * content (hidden and untouched-default lanes are stripped at save). */
@@ -166,23 +175,6 @@ export function resolveAnchorBase(
   };
 }
 
-/** Resolve a full anchor rule (base + whole-beat delta on the side's own
- * grid). The delta needs the grid even when the base cue is set. */
-function resolveAnchorRule(
-  rule: AnchorRule,
-  side: TrackSideInfo,
-  label: 'A' | 'B'
-): ResolvedAnchor | null {
-  const base = resolveAnchorBase(rule.base, side, label);
-  if (!base) return null;
-  if (rule.deltaBeats === 0) return base;
-  if (!side.beatgrid) return null;
-  return {
-    sec: base.sec + rule.deltaBeats * beatPeriodSec(side.beatgrid),
-    notice: base.notice,
-  };
-}
-
 // ── Apply ───────────────────────────────────────────────────────────────
 
 /** The seconds-based fields a template application stamps. Anchor and
@@ -203,19 +195,42 @@ export interface ApplyResult {
   notices: string[];
 }
 
+/** Proportional window rescale: the chosen TOTAL splits so the anchor
+ * keeps its relative position; `after` takes the rounding remainder so
+ * `before' + after' ≡ chosenTotal` by construction. A zero-length
+ * template cannot scale (no shape to keep) — the override is ignored. */
+export function scaleWindow(
+  beforeBeats: number,
+  afterBeats: number,
+  chosenTotal: number
+): { before: number; after: number } {
+  const total = beforeBeats + afterBeats;
+  if (total <= 0 || chosenTotal === total) {
+    return { before: beforeBeats, after: afterBeats };
+  }
+  const before = Math.round((beforeBeats * chosenTotal) / total);
+  return { before, after: chosenTotal - before };
+}
+
 /**
- * Apply a template to a pair: the two resolved align points coincide and
- * that instant is the transition start — startSec = A-local time of
- * alignA, bInSec = B-local time of alignB, durationSec = lengthBeats in
- * A-beats (mix time ≡ A time under the sketch origin; tempo-match makes
- * B's beats equivalent). Anchoring is all-or-nothing: if either side
- * fails, neither anchor is touched. The only clamp is the model's own
- * startSec ≥ 0. Negative bInSec is first-class (silent lead gap).
+ * Apply a template to a pair.
+ *
+ * The ALIGNMENT INSTANT (mix time) = A-local time of `alignABase + delta`
+ * on A's grid (A ≡ the mix axis under the sketch origin); B's resolved
+ * anchor lands on it. The window sits around that instant: `startSec` =
+ * instant − before·periodA, `durationSec` = total·periodA, `bInSec` =
+ * B-anchor − before·periodB (B's native seconds — N mix-beats ≡ N B-beats
+ * under tempo-match, which the template implies).
+ *
+ * The model's only clamp, `startSec ≥ 0`, SHRINKS the lead-in instead of
+ * sliding the window: the alignment (the recipe's whole point) is
+ * preserved and the tail keeps its length. Anchoring is all-or-nothing:
+ * if either side fails, neither anchor is touched.
  */
 export function applyTemplate(
   template: TransitionTemplate,
   sides: { a: TrackSideInfo; b: TrackSideInfo },
-  lengthBeats: number = template.lengthBeats
+  totalBeats: number = template.beforeBeats + template.afterBeats
 ): ApplyResult {
   const notices: string[] = [];
   const patch: ApplyPatch = {
@@ -224,38 +239,48 @@ export function applyTemplate(
     hiddenLanes: [],
   };
 
-  // Duration: beats → seconds on A's grid (mix time ≡ A time).
-  if (sides.a.beatgrid) {
-    patch.durationSec = lengthBeats * beatPeriodSec(sides.a.beatgrid);
-  } else {
+  if (!sides.a.beatgrid) {
     notices.push('A has no beatgrid — length and anchors unchanged');
+    if (!sides.b.beatgrid) notices.push('B has no beatgrid — anchors unchanged');
+    return { patch, notices };
   }
+  const periodA = beatPeriodSec(sides.a.beatgrid);
+  const { before, after } = scaleWindow(
+    template.beforeBeats,
+    template.afterBeats,
+    totalBeats
+  );
+
+  // Duration stamps whenever A's grid exists (mix time ≡ A time).
+  patch.durationSec = Math.max(0, (before + after) * periodA);
 
   // Anchors: all-or-nothing across the pair.
-  const anchorA = sides.a.beatgrid
-    ? resolveAnchorRule(template.alignA, sides.a, 'A')
-    : null;
-  const anchorB = sides.b.beatgrid
-    ? resolveAnchorRule(template.alignB, sides.b, 'B')
-    : null;
   if (!sides.b.beatgrid) {
     notices.push('B has no beatgrid — anchors unchanged');
+    return { patch, notices };
   }
-
-  if (anchorA && anchorB) {
-    if (anchorA.notice) notices.push(anchorA.notice);
-    if (anchorB.notice) notices.push(anchorB.notice);
-    if (anchorA.sec < 0) {
-      notices.push('transition start clamped to 0 (resolved before A begins)');
-      patch.startSec = 0;
-    } else {
-      patch.startSec = anchorA.sec;
-    }
-    patch.bInSec = anchorB.sec;
-  } else if (sides.a.beatgrid && sides.b.beatgrid) {
+  const periodB = beatPeriodSec(sides.b.beatgrid);
+  const anchorA = resolveAnchorBase(template.alignABase, sides.a, 'A');
+  const anchorB = resolveAnchorBase(template.alignBBase, sides.b, 'B');
+  if (!anchorA || !anchorB) {
     const failed = [!anchorA && 'A', !anchorB && 'B'].filter(Boolean).join(' and ');
     notices.push(`could not resolve the anchor on ${failed} — anchors unchanged`);
+    return { patch, notices };
   }
+  if (anchorA.notice) notices.push(anchorA.notice);
+  if (anchorB.notice) notices.push(anchorB.notice);
+
+  const instant = anchorA.sec + template.deltaBeats * periodA;
+
+  // startSec ≥ 0: shrink the lead-in, keep the alignment and the tail.
+  let beforeEff = before;
+  if (instant - before * periodA < 0) {
+    beforeEff = instant / periodA;
+    notices.push('window start clamped to 0 — lead-in shortened (alignment preserved)');
+  }
+  patch.startSec = Math.max(0, instant - beforeEff * periodA);
+  patch.durationSec = Math.max(0, (beforeEff + after) * periodA);
+  patch.bInSec = anchorB.sec - beforeEff * periodB;
 
   return { patch, notices };
 }
@@ -290,35 +315,66 @@ export function stampIntoSession(
 
 // ── Derivation (save-from-Transition) ───────────────────────────────────
 
-/**
- * The whole-beat delta from a chosen base to the actual anchor position
- * (save-time). Null when the base cannot resolve on this side — the save
- * modal only offers resolvable bases, so this guards programmer error.
- * Fallback resolutions are NOT acceptable here: a save-time fallback
- * would bake a weaker anchor into the recipe permanently, so only set
- * cues and the grid origin qualify.
- */
-export function deriveAnchorDeltaBeats(
-  anchorSec: number,
-  base: AnchorBase,
-  side: TrackSideInfo
-): number | null {
-  if (!side.beatgrid) return null;
+/** A base position for SAVING: set cues and the grid origin only — a
+ * save-time fallback would bake a weaker anchor into the recipe
+ * permanently. Null when unresolvable. */
+function saveBaseSec(base: AnchorBase, side: TrackSideInfo): number | null {
   const slot = cueSlot(base);
-  let baseSec: number;
-  if (slot === null) {
-    baseSec = gridOriginSec(side.beatgrid);
-  } else {
-    const cue = side.hotCues.find((c) => c.slot === slot);
-    if (!cue) return null;
-    baseSec = cue.timeSec;
-  }
-  return Math.round((anchorSec - baseSec) / beatPeriodSec(side.beatgrid));
+  if (slot === null) return side.beatgrid ? gridOriginSec(side.beatgrid) : null;
+  return side.hotCues.find((c) => c.slot === slot)?.timeSec ?? null;
 }
 
-/** The window's duration in whole A-beats (mix time ≡ A time). */
-export function deriveLengthBeats(durationSec: number, gridA: BeatgridData): number {
-  return Math.max(0, Math.round(durationSec / beatPeriodSec(gridA)));
+export interface DerivedAlignment {
+  deltaBeats: number;
+  beforeBeats: number;
+  afterBeats: number;
+}
+
+/** Where B's chosen base sits in MIX time under the drawn alignment —
+ * the alignment instant the recipe will reproduce. Null when the base
+ * cannot resolve for saving. */
+export function alignmentInstantSec(
+  tr: Pick<Transition, 'startSec' | 'bInSec'>,
+  rateB: number,
+  baseB: AnchorBase,
+  b: TrackSideInfo
+): number | null {
+  if (rateB <= 0) return null;
+  const baseBSec = saveBaseSec(baseB, b);
+  if (baseBSec === null) return null;
+  return tr.startSec + (baseBSec - tr.bInSec) / rateB;
+}
+
+/**
+ * Derive the recipe from the drawn Transition and two chosen bases, in
+ * an order that keeps the identities honest (2026-07-04 #2 grill):
+ *
+ * 1. alignment instant (mix) = where B's base sits under the current
+ *    alignment: startSec + (baseB − bInSec)/rateB;
+ * 2. delta = instant − baseA, in A-beats, rounded;
+ * 3. length = round(duration/periodA) — total FIRST, so the window length
+ *    survives rounding intact;
+ * 4. before = round((instant − startSec)/periodA);
+ *    after = length − before — the remainder, never rounded on its own,
+ *    so before + after ≡ length by construction.
+ */
+export function deriveAlignment(
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'bInSec'>,
+  rateB: number,
+  baseA: AnchorBase,
+  baseB: AnchorBase,
+  a: TrackSideInfo,
+  b: TrackSideInfo
+): DerivedAlignment | null {
+  if (!a.beatgrid) return null;
+  const baseASec = saveBaseSec(baseA, a);
+  const instant = alignmentInstantSec(tr, rateB, baseB, b);
+  if (baseASec === null || instant === null) return null;
+  const periodA = beatPeriodSec(a.beatgrid);
+  const deltaBeats = Math.round((instant - baseASec) / periodA);
+  const lengthBeats = Math.round(tr.durationSec / periodA);
+  const beforeBeats = Math.round((instant - tr.startSec) / periodA);
+  return { deltaBeats, beforeBeats, afterBeats: lengthBeats - beforeBeats };
 }
 
 const LANE_EPS = 1e-9;
@@ -350,9 +406,8 @@ export function stripTemplateLanes(tr: Transition): Lanes {
   return out;
 }
 
-/** The save modal's default base per side: the set cue nearest the
- * actual anchor point (smallest |delta| — the cue the author built the
- * move around), else the grid origin. */
+/** The save modal's default A base: the set cue nearest the alignment
+ * instant (the cue the author built the move around), else grid origin. */
 export function defaultAnchorBase(anchorSec: number, side: TrackSideInfo): AnchorBase {
   let best: { slot: number; dist: number } | null = null;
   for (const cue of side.hotCues) {
@@ -360,4 +415,22 @@ export function defaultAnchorBase(anchorSec: number, side: TrackSideInfo): Ancho
     if (!best || dist < best.dist) best = { slot: cue.slot, dist };
   }
   return best ? (`cue_${best.slot}` as AnchorBase) : 'grid_origin';
+}
+
+/** The save modal's default B base (2026-07-04 #2 grill): the EARLIEST
+ * set cue inside B's window span — the first cue inside the window is
+ * usually the mix-in landmark. Fallbacks: nearest set cue to the span's
+ * midpoint, else grid origin. */
+export function defaultAnchorBaseB(
+  tr: Pick<Transition, 'durationSec' | 'bInSec'>,
+  rateB: number,
+  side: TrackSideInfo
+): AnchorBase {
+  const spanStart = tr.bInSec;
+  const spanEnd = tr.bInSec + tr.durationSec * rateB;
+  const inside = side.hotCues
+    .filter((c) => c.timeSec >= spanStart && c.timeSec <= spanEnd)
+    .sort((p, q) => p.timeSec - q.timeSec);
+  if (inside[0]) return `cue_${inside[0].slot}` as AnchorBase;
+  return defaultAnchorBase((spanStart + spanEnd) / 2, side);
 }

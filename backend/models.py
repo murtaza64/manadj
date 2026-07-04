@@ -234,16 +234,18 @@ class Transition(Base):
 
 
 class TransitionTemplate(Base):
-    """A saved Transition template (mix-editor issue 03; ADR 0010 Amendment 2).
+    """A saved Transition template (mix-editor issues 03 + 28).
 
-    A beat-domain recipe for producing a Transition: per-side anchor rules
-    (base = a cue slot or the grid origin, plus a whole-beat delta on that
-    track's own grid), a length in beats, scalable flag, and sparse
-    normalized lanes. Global — no track FKs; applying to a pair happens
-    entirely client-side. Identity is the client-generated `uuid`; names
-    are cosmetic and may duplicate. Anchor rule columns are queryable by
-    design (unlike Transitions' opaque payload, the recipe's shape is
-    settled); only the lanes stay opaque JSON.
+    A beat-domain recipe for producing a Transition, in two parts: the
+    ALIGNMENT RULE — B's anchor (a cue slot or the grid origin) lands on
+    A's anchor plus a single whole-beat delta on A's grid — and the WINDOW,
+    whole beats before/after the alignment instant (free-signed; total
+    ≥ 0, zero being a hard cut at the anchor). Plus scalable flag and
+    sparse normalized lanes. Global — no track FKs; applying to a pair
+    happens entirely client-side. Identity is the client-generated `uuid`;
+    names are cosmetic and may duplicate. Recipe columns are queryable by
+    design (unlike Transitions' opaque payload); only the lanes stay
+    opaque JSON.
     """
 
     __tablename__ = "transition_templates"
@@ -252,10 +254,10 @@ class TransitionTemplate(Base):
     uuid = Column(String, nullable=False)
     name = Column(String, nullable=False)
     align_a_base = Column(String, nullable=False)  # "cue_1".."cue_8" | "grid_origin"
-    align_a_delta_beats = Column(Integer, nullable=False)
+    align_delta_beats = Column(Integer, nullable=False)
     align_b_base = Column(String, nullable=False)
-    align_b_delta_beats = Column(Integer, nullable=False)
-    length_beats = Column(Integer, nullable=False)
+    before_beats = Column(Integer, nullable=False)
+    after_beats = Column(Integer, nullable=False)
     scalable = Column(Boolean, nullable=False, default=False, server_default="0")
     lanes_json = Column(Text, nullable=False)  # sparse normalized lanes (opaque)
     created_at = Column(DateTime, default=func.now())

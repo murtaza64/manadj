@@ -21,16 +21,17 @@ import type {
   Classification,
 } from '../types';
 
-/** Wire shape of a Transition template (mix-editor issue 03) — snake_case
- * anchor-rule columns; `lanes` stays the client's opaque payload. */
+/** Wire shape of a Transition template (mix-editor issues 03 + 28) —
+ * snake_case recipe columns (alignment rule + window); `lanes` stays the
+ * client's opaque payload. */
 export interface TransitionTemplateWire {
   uuid: string;
   name: string;
   align_a_base: string;
-  align_a_delta_beats: number;
+  align_delta_beats: number;
   align_b_base: string;
-  align_b_delta_beats: number;
-  length_beats: number;
+  before_beats: number;
+  after_beats: number;
   scalable: boolean;
   lanes: Record<string, unknown>;
 }
