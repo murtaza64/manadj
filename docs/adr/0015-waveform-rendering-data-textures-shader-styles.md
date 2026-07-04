@@ -1,0 +1,10 @@
+# Waveform rendering: data textures + shader styles, with channel-true aggregation
+
+The production waveform renderer (replacing the geometry-based one, 2026-07) draws the waveform body entirely in a fragment shader over GPU data textures built from Waveform data (ADR 0014). Zoom, pan, scrub, and windowing are uniforms — no geometry is ever built for the body, so cost is independent of zoom × duration (the old renderer's `MAX_ZOOM_FACTOR` tab-killer guard disappears). A Waveform style is a shader variant plus a shared set of tunable display parameters, all uniforms; the built-in styles live in a registry, and two persisted slots (full, minimap) select style + params from localStorage. Overlays (beatgrid, cues, playhead, badges) remain separate passes, ported from the old renderer.
+
+Invariants that look like bugs but are decisions (validated in the 2026-07 prototype, see `frontend/src/prototype/NOTES.md` while it exists):
+
+- **Peaks aggregate max-max-max; bands aggregate mean-mean-mean** — at every stage: client-built LOD pyramid, and per-column loops in the shader (hard max for peaks, box-filter mean for bands). Peaks are an envelope (transient truth); bands are energy (structure/color truth). Point-sampling bands when zoomed out was tried and rejected: beat-rate aliasing renders as 1-px spikes. Weighted/"antialiased" max was tried and rejected: spike heights pulse as the view scrolls.
+- **The view origin is pixel-snapped** (quantized to whole device pixels) before sampling. Column↔bin assignment is then frame-stable, which is what makes peak heights steady while scrolling. Do not "fix" this into smooth sub-pixel scrolling — that reintroduces shimmer; smooth motion belongs to overlays (e.g. the playhead), which stay unsnapped.
+- **LOD pyramids are client-built** (×4 per level) from the canonical blob — never stored (ADR 0014), so aggregation stays a render-time choice.
+- **No aesthetic constants in the renderer core**: every look knob (band→group boundaries, per-group gains, gamma, smoothing) is a style parameter. Changing a style or its params must never require re-Analysis or geometry work.

@@ -128,6 +128,9 @@ The stored Analysis artifact for a Track's audio: broadband peaks plus per-band 
 **Waveform**:
 A rendering of a Track's Waveform data in manadj's player UI. Many render styles can be drawn from the same Waveform data; style is a display concern, not an Analysis one.
 
+**Waveform style**:
+A named render recipe over Waveform data: a shader variant plus its tunable display parameters (band grouping, per-group gain, gamma, smoothing). A display concern — never baked into Waveform data; switching or tweaking a style never requires re-Analysis.
+
 ### Acquisition
 
 **Source**:
