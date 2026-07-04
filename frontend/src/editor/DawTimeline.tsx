@@ -146,8 +146,24 @@ export function DawTimeline({
     mixRef.current = mix;
   });
 
-  const durA = player.engineA.getSnapshot().duration;
-  const durB = player.engineB.getSnapshot().duration;
+  // Waveform renderers: one viewport-sized canvas per row, windowed to the
+  // visible time range (crisp at any zoom). Fetched before the audio
+  // decodes — see the duration fallback below.
+  const { data: waveA } = useWaveformData(trackAId);
+  const { data: waveB } = useWaveformData(trackBId);
+
+  // Draw before decode (mix-editor 28): engine durations are 0 until
+  // decodeAudioData finishes (seconds for two full tracks), but the
+  // waveform response's duration arrives in milliseconds — geometry and
+  // drawing use it as a fallback so waveforms + envelopes render
+  // immediately. Audio readiness still gates transport (play button,
+  // park-after-ready), never drawing.
+  const durA = player.engineA.getSnapshot().duration || (waveA?.duration ?? 0);
+  const durB = player.engineB.getSnapshot().duration || (waveB?.duration ?? 0);
+  const waveDursRef = useRef({ a: 0, b: 0 });
+  useEffect(() => {
+    waveDursRef.current = { a: waveA?.duration ?? 0, b: waveB?.duration ?? 0 };
+  });
   const tr = mix.transition;
   const aEnd = durA > 0 ? Math.min(tr.startSec + tr.durationSec, durA) : tr.startSec + tr.durationSec;
   // B is time-stretched on the mix axis by its playback rate. The block
@@ -168,10 +184,6 @@ export function DawTimeline({
     snapRef.current = { snap, beatsA, beatsB, rateB, lockedWindow };
   });
 
-  // Waveform renderers: one viewport-sized canvas per row, windowed to the
-  // visible time range (crisp at any zoom).
-  const { data: waveA } = useWaveformData(trackAId);
-  const { data: waveB } = useWaveformData(trackBId);
   const { data: hotCuesA = [] } = useHotCues(trackAId);
   const { data: hotCuesB = [] } = useHotCues(trackBId);
   // Dimmed bands so hot cues / beatgrid pop in the editor rows (issue 05).
@@ -339,8 +351,9 @@ export function DawTimeline({
       const scrollPx = scrollPxRef.current;
       // Dirty check: skip every write/draw below when nothing that feeds
       // them changed since the last frame (idle editor = idle GPU).
-      const dA = player.engineA.getSnapshot().duration;
-      const dB = player.engineB.getSnapshot().duration;
+      // Same pre-decode duration fallback as the render path (issue 28).
+      const dA = player.engineA.getSnapshot().duration || waveDursRef.current.a;
+      const dB = player.engineB.getSnapshot().duration || waveDursRef.current.b;
       const drawKey =
         `${scrollPx}:${px}:${player.getMixTime()}:${viewport.clientWidth}:` +
         `${dA}:${dB}:${modelVersionRef.current}`;

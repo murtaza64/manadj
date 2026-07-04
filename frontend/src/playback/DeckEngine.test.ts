@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeckEngine } from './DeckEngine';
+import { _clearBufferCacheForTests, putCachedBuffer } from './bufferCache';
 import type { DeckAudioPort } from './mixer';
 
 /**
@@ -80,6 +81,33 @@ describe('arbiter tripwire (ADR 0013)', () => {
     engine.play();
     // The failing load clears the latch; the point is play() was not blocked.
     await load;
+    expect(engine.getSnapshot().loadState).toBe('error');
+  });
+});
+
+describe('decoded-buffer cache (mix-editor 28)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  // Duck-typed AudioBuffer: load() only reads channels for the cue scan.
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100), // silence
+  } as unknown as AudioBuffer;
+
+  it('a cached track loads to ready with no fetch and no audio touch', async () => {
+    putCachedBuffer(7, fakeBuffer);
+    const engine = new DeckEngine(unusedPort); // throws if audio is touched
+    // Unroutable URL: any fetch attempt would fail the load.
+    await engine.load({ trackId: 7, audioUrl: 'http://127.0.0.1:1/none', bpm: 128 });
+    expect(engine.getSnapshot().loadState).toBe('ready');
+    expect(engine.getSnapshot().duration).toBe(180);
+  });
+
+  it('an uncached track still takes the fetch path', async () => {
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({ trackId: 8, audioUrl: 'http://127.0.0.1:1/none', bpm: 128 });
     expect(engine.getSnapshot().loadState).toBe('error');
   });
 });

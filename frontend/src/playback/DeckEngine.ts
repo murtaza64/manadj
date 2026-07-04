@@ -18,6 +18,7 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportEvent, TransportState } from './transport';
 import { DECLICK_S } from './graph';
 import type { DeckAudioPort } from './mixer';
+import { getCachedBuffer, putCachedBuffer } from './bufferCache';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
 import { PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
@@ -149,15 +150,22 @@ export class DeckEngine {
     this.emit();
 
     try {
-      const res = await fetch(info.audioUrl, { signal: abort.signal });
-      if (!res.ok) throw new Error(`audio fetch failed: ${res.status}`);
-      const bytes = await res.arrayBuffer();
-      if (abort.signal.aborted) return;
+      // Decoded-buffer cache (mix-editor 28): another surface (or a
+      // previous Load) may already hold this track's decode — reuse it and
+      // skip fetch+decode entirely (mode-switch into the editor path).
+      let buffer = getCachedBuffer(info.trackId);
+      if (!buffer) {
+        const res = await fetch(info.audioUrl, { signal: abort.signal });
+        if (!res.ok) throw new Error(`audio fetch failed: ${res.status}`);
+        const bytes = await res.arrayBuffer();
+        if (abort.signal.aborted) return;
 
-      this.loadState = 'decoding';
-      this.emit();
-      const buffer = await this.ensureAudio().ctx.decodeAudioData(bytes);
-      if (abort.signal.aborted) return;
+        this.loadState = 'decoding';
+        this.emit();
+        buffer = await this.ensureAudio().ctx.decodeAudioData(bytes);
+        if (abort.signal.aborted) return;
+        putCachedBuffer(info.trackId, buffer);
+      }
 
       // Cue metadata was fetched concurrently with the audio; absence (or a
       // failed lookup) falls through the default precedence.
