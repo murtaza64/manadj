@@ -43,6 +43,21 @@ def calculate_beats_from_tempo_changes(tempo_changes: list[dict], duration: floa
     return beat_times, downbeat_times
 
 
+def constant_tempo_changes(
+    bpm: float,
+    time_signature_num: int = 4,
+    time_signature_den: int = 4,
+) -> list[dict]:
+    """Single-tempo grid starting at t=0 with a downbeat on the first beat."""
+    return [{
+        "start_time": 0.0,
+        "bpm": bpm,
+        "time_signature_num": time_signature_num,
+        "time_signature_den": time_signature_den,
+        "bar_position": 1
+    }]
+
+
 def generate_beatgrid_from_bpm(bpm: float, duration: float) -> dict:
     """
     Generate beatgrid data from a single BPM value.
@@ -54,13 +69,7 @@ def generate_beatgrid_from_bpm(bpm: float, duration: float) -> dict:
     Returns:
         Dict with tempo_changes, beat_times, downbeat_times
     """
-    tempo_changes = [{
-        "start_time": 0.0,
-        "bpm": bpm,
-        "time_signature_num": 4,
-        "time_signature_den": 4,
-        "bar_position": 1
-    }]
+    tempo_changes = constant_tempo_changes(bpm)
 
     beat_times, downbeat_times = calculate_beats_from_tempo_changes(tempo_changes, duration)
 
@@ -119,12 +128,13 @@ def nudge_beatgrid(
     tempo_changes: list[dict],
     offset_ms: float,
     track_duration: float
-) -> list[dict]:
+) -> tuple[list[dict], float]:
     """
-    Shift entire beatgrid by offset_ms milliseconds.
-
-    Only adjusts start_time of first tempo change (for single-tempo grids).
-    Clamps to valid range to prevent invalid start times.
+    Shift the entire beatgrid by offset_ms milliseconds (rigid shift: every
+    tempo change moves by the same amount, so variable grids keep their
+    internal structure). Clamps so the first tempo change stays in a valid
+    range; the applied offset (post-clamp, in seconds) is returned so callers
+    can shift the anchor by exactly the same amount.
 
     Args:
         tempo_changes: Current tempo changes array
@@ -132,22 +142,103 @@ def nudge_beatgrid(
         track_duration: Track duration in seconds
 
     Returns:
-        Updated tempo_changes array
+        Tuple of (updated tempo_changes array, applied offset in seconds)
     """
     if not tempo_changes:
         raise ValueError("No beatgrid to nudge")
 
     offset_s = offset_ms / 1000.0
 
-    new_tempo_changes = []
-    for i, tc in enumerate(tempo_changes):
-        new_tc = tc.copy()
-        if i == 0:
-            # Adjust start time with bounds checking
-            new_start = tc["start_time"] + offset_s
-            # Clamp to valid range (allow slight negative for alignment)
-            new_start = max(-0.1, min(track_duration, new_start))
-            new_tc["start_time"] = new_start
-        new_tempo_changes.append(new_tc)
+    # Clamp against the first tempo change (allow slight negative for alignment)
+    first_start = tempo_changes[0]["start_time"]
+    new_first_start = max(-0.1, min(track_duration, first_start + offset_s))
+    applied_offset_s = new_first_start - first_start
 
-    return new_tempo_changes
+    new_tempo_changes = [
+        {**tc, "start_time": tc["start_time"] + applied_offset_s}
+        for tc in tempo_changes
+    ]
+    return new_tempo_changes, applied_offset_s
+
+
+def _downbeat_times(tempo_changes: list[dict], until: float) -> list[float]:
+    """Downbeat times up to `until`, walked segment-by-segment.
+
+    Unlike calculate_beats_from_tempo_changes (display path, first tempo
+    change only), this honors every tempo change: each segment's beats run
+    at its own BPM from its own start_time/bar_position until the next
+    segment begins.
+    """
+    downbeats: list[float] = []
+    for i, tc in enumerate(tempo_changes):
+        if tc["start_time"] > until:
+            break
+        seg_end = tempo_changes[i + 1]["start_time"] if i + 1 < len(tempo_changes) else until
+        seg_end = min(seg_end, until)
+        interval = 60.0 / tc["bpm"]
+        t = tc["start_time"]
+        pos = tc["bar_position"]
+        # Half-interval epsilon: don't double-count the next segment's start beat
+        while t < seg_end + interval / 2:
+            if pos == 1:
+                downbeats.append(t)
+            t += interval
+            pos = (pos % tc["time_signature_num"]) + 1
+    return downbeats
+
+
+def first_downbeat_time(tempo_changes: list[dict]) -> float:
+    """First downbeat of the grid (fallback re-tempo anchor per ADR 0016)."""
+    tc = tempo_changes[0]
+    interval = 60.0 / tc["bpm"]
+    t = tc["start_time"]
+    pos = tc["bar_position"]
+    while pos != 1:
+        t += interval
+        pos = (pos % tc["time_signature_num"]) + 1
+    return t
+
+
+def re_anchor_tempo_changes(tempo_changes: list[dict], mark_time: float) -> list[dict]:
+    """Re-anchor a grid on a marked downbeat by rigid shift (ADR 0016).
+
+    Shifts every tempo change by the same delta so the downbeat nearest the
+    mark lands exactly on it. Tempo changes are preserved — this replaces the
+    old silent flatten-to-constant on variable grids.
+    """
+    if not tempo_changes:
+        raise ValueError("No beatgrid to re-anchor")
+
+    # Search far enough past the mark to see the next downbeat in any segment
+    max_bar_seconds = max(
+        tc["time_signature_num"] * 60.0 / tc["bpm"] for tc in tempo_changes
+    )
+    downbeats = _downbeat_times(tempo_changes, until=mark_time + max_bar_seconds)
+    if not downbeats:
+        raise ValueError("Grid has no downbeats to re-anchor")
+
+    nearest = min(downbeats, key=lambda t: abs(t - mark_time))
+    shift = mark_time - nearest
+    return [{**tc, "start_time": tc["start_time"] + shift} for tc in tempo_changes]
+
+
+def dominant_bpm(tempo_changes: list[dict], duration: float | None = None) -> float:
+    """The grid's dominant tempo: the BPM occupying the most track time.
+
+    BPM is a projection of the Beatgrid (ADR 0016) — this is the projection.
+    For a constant grid it's simply the tempo. For a variable grid, segments
+    are weighted by length; without a duration the last segment's length is
+    unknown, so we fall back to the first tempo change's BPM.
+    """
+    if not tempo_changes:
+        raise ValueError("No tempo changes")
+    if len(tempo_changes) == 1:
+        return tempo_changes[0]["bpm"]
+    if duration is None:
+        return tempo_changes[0]["bpm"]
+
+    weights: dict[float, float] = {}
+    for i, tc in enumerate(tempo_changes):
+        seg_end = tempo_changes[i + 1]["start_time"] if i + 1 < len(tempo_changes) else duration
+        weights[tc["bpm"]] = weights.get(tc["bpm"], 0.0) + max(0.0, seg_end - tc["start_time"])
+    return max(weights, key=lambda bpm: weights[bpm])

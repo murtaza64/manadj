@@ -188,6 +188,8 @@ class BeatgridResponse(BaseModel):
     track_id: int
     data: BeatgridData
     origin: str  # "generated" (placeholder), "edited", or "imported"
+    # User-marked downbeat (seconds, ADR 0016); None = no mark
+    anchor_time: float | None = None
     created_at: datetime
     updated_at: datetime
 

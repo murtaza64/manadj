@@ -55,7 +55,13 @@ def apply_update(
     if changes.key is not None:
         track.key = changes.key
     if changes.bpm is not None:
-        track.bpm = bpm_to_centibpm(changes.bpm)
+        # BPM is a projection of the Beatgrid (ADR 0016): when a grid exists,
+        # editing BPM is a grid operation (regenerate/re-tempo/409), and
+        # tracks.bpm is written through as a cache. Lazy import: beatgrid_ops
+        # imports this package for units.
+        from backend.beatgrid_ops import write_bpm
+
+        write_bpm(db, track, changes.bpm)
     if changes.tag_ids is not None:
         db.query(models.TrackTag).filter(models.TrackTag.track_id == track.id).delete()
         for tag_id in set(changes.tag_ids):

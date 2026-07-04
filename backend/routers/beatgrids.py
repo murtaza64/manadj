@@ -6,7 +6,13 @@ from pydantic import BaseModel
 import json
 from .. import crud, schemas
 from ..database import get_db
-from ..beatgrid_utils import calculate_beats_from_tempo_changes
+from ..beatgrid_utils import (
+    calculate_beats_from_tempo_changes,
+    constant_tempo_changes,
+    re_anchor_tempo_changes,
+    set_downbeat_at_time,
+)
+from ..track_metadata.units import centibpm_to_bpm
 
 router = APIRouter()
 
@@ -66,6 +72,7 @@ def _format_beatgrid_response(beatgrid, db: Session):
             "downbeat_times": downbeat_times
         },
         "origin": beatgrid.origin,
+        "anchor_time": beatgrid.anchor_time,
         "created_at": beatgrid.created_at,
         "updated_at": beatgrid.updated_at
     }
@@ -78,42 +85,45 @@ def set_beatgrid_downbeat(
     db: Session = Depends(get_db)
 ):
     """
-    Set downbeat at specified time, recalculating grid backward to t=0.
+    Mark a downbeat at the specified time (ADR 0016).
 
-    Uses track's BPM and existing time signature (or 4/4 default).
-    Creates new tempo_changes with first beat as early as possible.
+    Records the mark as the grid's anchor (last mark wins) and rebuilds the
+    grid through it. Constant grids rebuild backward to t=0 as before;
+    variable grids re-anchor by rigid shift of the tempo-change map —
+    every tempo change is preserved (never flattened).
     """
-    # Get track BPM
-    track = crud.get_track(db, track_id)
-    if not track or not track.bpm:
-        raise HTTPException(status_code=400, detail="Track has no BPM")
-
     # Get waveform for duration validation
     waveform = crud.get_waveform(db, track_id)
     if not waveform:
         raise HTTPException(status_code=400, detail="Waveform not found")
 
-    # Get current time signature from existing beatgrid, or default to 4/4
+    # The existing grid is the tempo authority; track BPM only seeds a new grid
     beatgrid = crud.get_beatgrid(db, track_id)
     if beatgrid:
         tempo_changes = json.loads(beatgrid.tempo_changes_json)
-        time_sig_num = tempo_changes[0]["time_signature_num"]
-        time_sig_den = tempo_changes[0]["time_signature_den"]
     else:
-        time_sig_num = 4
-        time_sig_den = 4
+        track = crud.get_track(db, track_id)
+        if not track or not track.bpm:
+            raise HTTPException(status_code=400, detail="Track has no BPM")
+        tempo_changes = constant_tempo_changes(centibpm_to_bpm(track.bpm))
 
-    # Calculate new tempo changes
-    from ..beatgrid_utils import set_downbeat_at_time
-    new_tempo_changes = set_downbeat_at_time(
-        user_downbeat_time=request.downbeat_time,
-        bpm=track.bpm / 100.0,  # Convert from centiBPM
-        time_signature_num=time_sig_num,
-        time_signature_den=time_sig_den
+    if len(tempo_changes) > 1:
+        # Variable grid: shift the whole tempo-change map so the nearest
+        # downbeat lands on the mark
+        new_tempo_changes = re_anchor_tempo_changes(tempo_changes, request.downbeat_time)
+    else:
+        tc = tempo_changes[0]
+        new_tempo_changes = set_downbeat_at_time(
+            user_downbeat_time=request.downbeat_time,
+            bpm=tc["bpm"],
+            time_signature_num=tc["time_signature_num"],
+            time_signature_den=tc["time_signature_den"]
+        )
+
+    # Update beatgrid, recording the mark as the anchor (last mark wins)
+    beatgrid = crud.update_beatgrid_tempo_changes(
+        db, track_id, new_tempo_changes, anchor_time=request.downbeat_time
     )
-
-    # Update beatgrid
-    beatgrid = crud.update_beatgrid_tempo_changes(db, track_id, new_tempo_changes)
 
     return _format_beatgrid_response(beatgrid, db)
 
@@ -148,14 +158,23 @@ def nudge_beatgrid_endpoint(
 
     # Nudge
     from ..beatgrid_utils import nudge_beatgrid as nudge_func
-    new_tempo_changes = nudge_func(
+    new_tempo_changes, applied_offset_s = nudge_func(
         tempo_changes=tempo_changes,
         offset_ms=request.offset_ms,
         track_duration=waveform.duration
     )
 
+    # The anchor is part of the grid: shift it by exactly the applied offset
+    new_anchor = (
+        beatgrid.anchor_time + applied_offset_s
+        if beatgrid.anchor_time is not None
+        else None
+    )
+
     # Update beatgrid
-    beatgrid = crud.update_beatgrid_tempo_changes(db, track_id, new_tempo_changes)
+    beatgrid = crud.update_beatgrid_tempo_changes(
+        db, track_id, new_tempo_changes, anchor_time=new_anchor
+    )
 
     return _format_beatgrid_response(beatgrid, db)
 

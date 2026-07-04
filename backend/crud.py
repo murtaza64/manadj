@@ -645,11 +645,16 @@ def create_beatgrid_from_track_bpm(db: Session, track_id: int):
     return db_beatgrid
 
 
+# Sentinel: "leave anchor_time as it is" (None is meaningful — it clears the mark)
+_ANCHOR_UNCHANGED = object()
+
+
 def update_beatgrid_tempo_changes(
     db: Session,
     track_id: int,
     tempo_changes: list[dict],
     origin: str = "edited",
+    anchor_time: float | None | object = _ANCHOR_UNCHANGED,
 ) -> models.Beatgrid:
     """
     Update or create beatgrid with new tempo_changes.
@@ -660,6 +665,9 @@ def update_beatgrid_tempo_changes(
         tempo_changes: New tempo changes array
         origin: Where the new grid came from — "edited" (default: user edits
             like set-downbeat/nudge) or "imported" (External Import)
+        anchor_time: The user-marked downbeat (ADR 0016). Omit to leave the
+            stored mark untouched; pass a float to record a mark (or its
+            nudged position); pass None to clear it.
 
     Returns:
         Updated or created Beatgrid model
@@ -679,6 +687,9 @@ def update_beatgrid_tempo_changes(
             origin=origin,
         )
         db.add(beatgrid)
+
+    if anchor_time is not _ANCHOR_UNCHANGED:
+        beatgrid.anchor_time = anchor_time
 
     db.commit()
     db.refresh(beatgrid)

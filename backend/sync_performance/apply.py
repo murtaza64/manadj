@@ -10,7 +10,9 @@ from typing import Literal
 from sqlalchemy.orm import Session
 
 from backend import crud, models
+from backend.beatgrid_utils import dominant_bpm
 from backend.sync_status.models import BeatgridValue, HotCueValue
+from backend.track_metadata.units import bpm_to_centibpm
 
 HotCueImportMode = Literal["fill-empty", "replace-all"]
 SingleValueImportMode = Literal["fill-empty", "replace"]
@@ -85,7 +87,21 @@ def import_beatgrid(
         }
         for tc in beatgrid.tempo_changes
     ]
-    crud.update_beatgrid_tempo_changes(db, track_id, tempo_changes, origin="imported")
+    # Imported grid replaces the local one wholesale: any prior mark refers
+    # to a grid that no longer exists — clear the anchor (ADR 0016)
+    crud.update_beatgrid_tempo_changes(
+        db, track_id, tempo_changes, origin="imported", anchor_time=None
+    )
+
+    # BPM is a projection of the Beatgrid (ADR 0016): write the imported
+    # grid's dominant tempo through to the tracks.bpm cache
+    track = crud.get_track(db, track_id)
+    if track is not None and tempo_changes:
+        waveform = crud.get_waveform(db, track_id)
+        duration = waveform.duration if waveform else None
+        track.bpm = bpm_to_centibpm(dominant_bpm(tempo_changes, duration))
+        db.commit()
+
     return {"imported": True, "reason": None}
 
 

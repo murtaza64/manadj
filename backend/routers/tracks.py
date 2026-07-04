@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas, track_metadata
+from ..beatgrid_ops import VariableGridBPMError
 from ..database import get_db
 from ..track_metadata import MetadataComparisonResult, MetadataSyncRequest, MetadataSyncResult, TrackChanges
 
@@ -134,7 +135,11 @@ def update_track(
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    track_metadata.apply_update(db, track, changes)
+    try:
+        track_metadata.apply_update(db, track, changes)
+    except VariableGridBPMError as e:
+        # ADR 0016: a single-BPM edit on a variable grid is not meaningful
+        raise HTTPException(status_code=409, detail=str(e))
 
     # Reload to get tags with categories
     return crud.get_track(db, track_id)

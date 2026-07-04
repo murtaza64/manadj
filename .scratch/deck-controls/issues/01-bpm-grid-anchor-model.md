@@ -1,6 +1,10 @@
 # 01 — BPM⇄Beatgrid anchor model (backend)
 
-Status: ready-for-agent (ADR 0016 is the spec)
+Status: ready-for-human (implemented in jj change lvulxzsq — verify by eye:
+mark a downbeat on a deck, edit the track's BPM in the tag editor, and check
+the marked downbeat hasn't moved; note the frontend still runs its own
+delete-grid ritual after BPM edits — see Comments — so eye-verification of
+re-tempo needs the API or waits for slice 02/03)
 
 ## Parent
 
@@ -41,3 +45,53 @@ Status: ready-for-agent (ADR 0016 is the spec)
 ## Blocked by
 
 None. Slices 02–03 consume this.
+
+## Comments
+
+**2026-07-04 (lane gridmodel, jj change lvulxzsq) — done + writer audit.**
+
+Built: migration `0016_lvulxzsq` (`beatgrids.anchor_time`, nullable float;
+renumbered from 0015 and re-parented onto `0015_xupryqxp` after the
+archival lane landed first);
+set-downbeat records the mark as anchor (last mark wins) and re-anchors
+variable grids by rigid shift (`re_anchor_tempo_changes` — the old
+flatten-to-constant in `set_downbeat_at_time` usage is gone); nudge shifts
+every tempo change and the anchor by the applied (post-clamp) offset; new
+`backend/beatgrid_ops.write_bpm` is the one BPM write path (no grid → plain
+write; generated → regen; edited/imported → re-tempo around
+`anchor_time`/first-downbeat fallback, fallback persisted so repeat
+re-tempos don't drift; variable → `VariableGridBPMError` → 409 at the
+tracks PATCH). `anchor_time` exposed on `BeatgridResponse`. Router-seam
+tests in `tests/test_beatgrids_router.py` (10 cases incl. the 46.7s
+174→175 exactness check).
+
+Audit of `tracks.bpm` writers:
+
+- `track_metadata/manager.py apply_update` (tag editor, deck panels,
+  analysis accept — all PATCH /tracks): **routed** through
+  `beatgrid_ops.write_bpm`.
+- `sync_performance/apply.py import_beatgrid`: grid writer that previously
+  left the cache stale — **now writes through** the imported grid's
+  dominant tempo (`beatgrid_utils.dominant_bpm`) and clears `anchor_time`
+  (mark referred to the replaced grid).
+- `crud.py create_track`, `library/import_manager.py import_tracks`,
+  `tracks/executor.py import_tracks_from_rekordbox`: **justified** — all
+  create brand-new Track rows; no grid can exist yet, so BPM is a plain
+  seed (ADR 0016's gridless case).
+- `track_metadata/manager.py refresh_from_files` and `sync_to_db`:
+  **justified** — explicit "file wins" restore/sync tools operating on
+  integer file-tag BPM. Routing them through re-tempo would let rounded
+  tags silently respace saved grids. Left as direct cache/seed writes; on
+  gridded tracks the grid stays the read authority. Known divergence
+  surface — revisit if the sync view grows grid awareness (ADR 0016
+  consequences note).
+- Everything else matching `bpm=` (sync_status aggregator/adapters/compare,
+  sync_manager discrepancies, analysis.py, analyze router) is read-only or
+  writes `BPMAnalysis`, not `tracks.bpm`.
+
+Frontend follow-up for slices 02–03: three client copies of the
+PATCH→delete-grid→regenerate ritual survive (`editor/DeckCard.tsx:92`,
+`components/performance/DeckPanel.tsx:59`, `components/TagEditor.tsx:199,234`).
+The server now re-tempos on PATCH, so the client's follow-up DELETE
+destroys the re-tempoed grid (same net loss as before this change, but now
+strictly the client's fault) — remove the ritual client-side.
