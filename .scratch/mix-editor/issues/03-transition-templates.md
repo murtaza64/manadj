@@ -1,9 +1,9 @@
 # 03 — Transition templates: beat-domain recipes
 
 Status: ready-for-agent
-Blocked by: 01 (verification of the render layer), and the DB-persistence
-graduation slice (not yet filed — templates are library-level artifacts and
-should be born in the DB schema, not migrated out of localStorage twice).
+Blocked by: 01 (verification of the render layer), and 26 (DB-persistence
+graduation — templates are library-level artifacts and should be born in
+the DB schema, not migrated out of localStorage twice; design in ADR 0011).
 
 ## Parent
 
