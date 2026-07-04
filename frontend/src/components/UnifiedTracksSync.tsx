@@ -321,8 +321,16 @@ export function UnifiedTracksSync() {
 
   const groupActions = (key: GroupKey, list: StatusRow[], selectedHere: StatusRow[]) => {
     if (key === 'div-tags') {
+      // energy rides with tags: the Rekordbox tag export also writes energy
+      // colors, so energy-only divergences must still surface that button
       const forTarget = (t: 'engine' | 'rekordbox') =>
-        list.filter((r) => r.diverged.some((d) => d.field === 'tags' && t in d.surface_values)).length;
+        list.filter((r) =>
+          r.diverged.some(
+            (d) =>
+              (d.field === 'tags' || (t === 'rekordbox' && d.field === 'energy')) &&
+              t in d.surface_values,
+          ),
+        ).length;
       return (
         <span className="uts-group-actions">
           {(['engine', 'rekordbox'] as const).map((t) => {
