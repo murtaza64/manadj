@@ -102,8 +102,13 @@ export interface PlaylistTrackAdd {
   position?: number;
 }
 
+export interface PlaylistTrackAddResult {
+  skipped: boolean;
+  playlist: PlaylistWithTracks;
+}
+
 export interface PlaylistTrackReorder {
-  track_positions: Array<{ id: number; position: number }>;
+  track_positions: Array<{ track_id: number; position: number }>;
 }
 
 export interface TempoChange {

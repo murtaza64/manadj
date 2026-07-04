@@ -52,29 +52,34 @@ def delete_playlist(playlist_id: int, db: Session = Depends(get_db)):
     return None
 
 
-@router.post("/{playlist_id}/tracks", response_model=schemas.PlaylistWithTracks)
+@router.post("/{playlist_id}/tracks", response_model=schemas.PlaylistTrackAddResult)
 def add_track_to_playlist(
     playlist_id: int,
     track_add: schemas.PlaylistTrackAdd,
     db: Session = Depends(get_db)
 ):
-    """Add a track to a playlist at specified position (or end if position is None)."""
-    playlist = crud.add_track_to_playlist(
+    """Add a track at the given position (append if None).
+
+    Adding a track already in the playlist is an idempotent no-op
+    (skipped=True in the response).
+    """
+    result = crud.add_track_to_playlist(
         db, playlist_id, track_add.track_id, track_add.position
     )
-    if not playlist:
+    if not result:
         raise HTTPException(status_code=404, detail="Playlist not found")
-    return playlist
+    playlist, skipped = result
+    return {"skipped": skipped, "playlist": playlist}
 
 
-@router.delete("/{playlist_id}/tracks/{playlist_track_id}", response_model=schemas.PlaylistWithTracks)
+@router.delete("/{playlist_id}/tracks/{track_id}", response_model=schemas.PlaylistWithTracks)
 def remove_track_from_playlist(
     playlist_id: int,
-    playlist_track_id: int,
+    track_id: int,
     db: Session = Depends(get_db)
 ):
-    """Remove a track from a playlist."""
-    playlist = crud.remove_track_from_playlist(db, playlist_id, playlist_track_id)
+    """Remove a track from a playlist (keyed by track_id) and compact positions."""
+    playlist = crud.remove_track_from_playlist(db, playlist_id, track_id)
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist or track not found")
     return playlist
@@ -86,8 +91,11 @@ def reorder_playlist_tracks(
     reorder: schemas.PlaylistTrackReorder,
     db: Session = Depends(get_db)
 ):
-    """Reorder tracks within a playlist."""
-    playlist = crud.reorder_playlist_tracks(db, playlist_id, reorder.track_positions)
+    """Set the playlist's Play order. The payload must be a full permutation."""
+    try:
+        playlist = crud.reorder_playlist_tracks(db, playlist_id, reorder.track_positions)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
     return playlist
@@ -95,7 +103,7 @@ def reorder_playlist_tracks(
 
 @router.post("/reorder", status_code=200)
 def reorder_playlists(
-    playlist_order: List[dict],
+    playlist_order: List[schemas.PlaylistOrderItem],
     db: Session = Depends(get_db)
 ):
     """Reorder playlists in the sidebar."""

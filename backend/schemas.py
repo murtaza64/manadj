@@ -160,9 +160,27 @@ class PlaylistTrackAdd(BaseModel):
     position: int | None = None  # If None, append to end
 
 
+class PlaylistTrackAddResult(BaseModel):
+    """Result of an add: skipped=True means the track was already present (no-op)."""
+    skipped: bool
+    playlist: PlaylistWithTracks
+
+
+class PlaylistTrackPosition(BaseModel):
+    """One entry of a reorder payload, keyed by track (entry identity)."""
+    track_id: int
+    position: int
+
+
 class PlaylistTrackReorder(BaseModel):
-    """Request to reorder tracks in playlist."""
-    track_positions: list[dict]  # [{"id": playlist_track_id, "position": new_position}, ...]
+    """Request to reorder tracks in playlist. Must be a full permutation of the playlist."""
+    track_positions: list[PlaylistTrackPosition]
+
+
+class PlaylistOrderItem(BaseModel):
+    """One entry of a sidebar-order payload."""
+    id: int
+    display_order: int
 
 
 # Beatgrid Schemas

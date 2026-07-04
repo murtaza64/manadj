@@ -131,6 +131,8 @@ class PlaylistTrack(Base):
         Index("idx_playlist_tracks_playlist", "playlist_id"),
         Index("idx_playlist_tracks_track", "track_id"),
         Index("idx_playlist_tracks_position", "playlist_id", "position"),
+        # A Track appears at most once per Playlist (entry identity).
+        Index("uq_playlist_tracks_playlist_track", "playlist_id", "track_id", unique=True),
     )
 
 

@@ -473,17 +473,29 @@ def delete_playlist(db: Session, playlist_id: int):
 
 
 def add_track_to_playlist(db: Session, playlist_id: int, track_id: int, position: int | None = None):
-    """Add a track to a playlist at specified position (or end if None)."""
+    """Add a track to a playlist at specified position (or end if None).
+
+    Returns (playlist_with_tracks, skipped). Adding a track already in the
+    playlist is an idempotent no-op with skipped=True (entry identity is
+    (playlist, track); a Track appears at most once per Playlist).
+    """
     playlist = get_playlist(db, playlist_id)
     if not playlist:
         return None
+
+    already_present = db.query(models.PlaylistTrack).filter(
+        models.PlaylistTrack.playlist_id == playlist_id,
+        models.PlaylistTrack.track_id == track_id,
+    ).first()
+    if already_present:
+        return get_playlist_with_tracks(db, playlist_id), True
 
     # If position is None, append to end
     if position is None:
         max_position = db.query(func.max(models.PlaylistTrack.position)).filter(
             models.PlaylistTrack.playlist_id == playlist_id
         ).scalar()
-        position = (max_position or -1) + 1
+        position = 0 if max_position is None else max_position + 1
     else:
         # Shift existing tracks at or after this position
         db.query(models.PlaylistTrack).filter(
@@ -500,13 +512,13 @@ def add_track_to_playlist(db: Session, playlist_id: int, track_id: int, position
     db.add(playlist_track)
     db.commit()
 
-    return get_playlist_with_tracks(db, playlist_id)
+    return get_playlist_with_tracks(db, playlist_id), False
 
 
-def remove_track_from_playlist(db: Session, playlist_id: int, playlist_track_id: int):
-    """Remove a track from a playlist and reorder remaining tracks."""
+def remove_track_from_playlist(db: Session, playlist_id: int, track_id: int):
+    """Remove a track from a playlist (keyed by track_id) and compact positions."""
     playlist_track = db.query(models.PlaylistTrack).filter(
-        models.PlaylistTrack.id == playlist_track_id,
+        models.PlaylistTrack.track_id == track_id,
         models.PlaylistTrack.playlist_id == playlist_id
     ).first()
 
@@ -528,34 +540,43 @@ def remove_track_from_playlist(db: Session, playlist_id: int, playlist_track_id:
     return get_playlist_with_tracks(db, playlist_id)
 
 
-def reorder_playlist_tracks(db: Session, playlist_id: int, track_positions: list[dict]):
+def reorder_playlist_tracks(db: Session, playlist_id: int, track_positions: list[schemas.PlaylistTrackPosition]):
+    """Set the Play order of a playlist from (track_id, position) pairs.
+
+    The payload must be a full permutation: every track in the playlist
+    exactly once, with positions exactly 0..n-1. Raises ValueError otherwise.
     """
-    Update positions for multiple tracks in a playlist.
-    track_positions format: [{"id": playlist_track_id, "position": new_position}, ...]
-    """
-    for item in track_positions:
-        playlist_track = db.query(models.PlaylistTrack).filter(
-            models.PlaylistTrack.id == item['id'],
-            models.PlaylistTrack.playlist_id == playlist_id
-        ).first()
-        if playlist_track:
-            playlist_track.position = item['position']
+    playlist = get_playlist(db, playlist_id)
+    if not playlist:
+        return None
+
+    entries = db.query(models.PlaylistTrack).filter(
+        models.PlaylistTrack.playlist_id == playlist_id
+    ).all()
+
+    current_track_ids = {e.track_id for e in entries}
+    payload_track_ids = [tp.track_id for tp in track_positions]
+    if sorted(payload_track_ids) != sorted(current_track_ids):
+        raise ValueError("reorder payload must include every playlist track exactly once")
+    if sorted(tp.position for tp in track_positions) != list(range(len(entries))):
+        raise ValueError("reorder positions must be exactly 0..n-1")
+
+    new_position = {tp.track_id: tp.position for tp in track_positions}
+    for entry in entries:
+        entry.position = new_position[entry.track_id]
 
     db.commit()
     return get_playlist_with_tracks(db, playlist_id)
 
 
-def reorder_playlists(db: Session, playlist_order: list[dict]):
-    """
-    Update display_order for multiple playlists.
-    playlist_order format: [{"id": playlist_id, "display_order": new_order}, ...]
-    """
+def reorder_playlists(db: Session, playlist_order: list[schemas.PlaylistOrderItem]):
+    """Update display_order for multiple playlists."""
     for item in playlist_order:
         playlist = db.query(models.Playlist).filter(
-            models.Playlist.id == item['id']
+            models.Playlist.id == item.id
         ).first()
         if playlist:
-            playlist.display_order = item['display_order']
+            playlist.display_order = item.display_order
 
     db.commit()
     return True

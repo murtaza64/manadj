@@ -34,3 +34,14 @@ of a Playlist entry:
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+Done (jj rmwnmxnk). Migration 0010_rmwnmxnk dedupes + compacts + unique
+index; add is idempotent (`{skipped, playlist}` response); remove/reorder
+key on track_id; reorder validates full permutation (400 otherwise);
+sidebar reorder payload typed. Also fixed a pre-existing append bug
+(`(max_position or -1) + 1` collapsed position 0 to -1, so second appends
+collided at 0 — masked by id-ordered ties). Router tests:
+tests/test_playlists_router.py (9). Migration verified against the
+sandbox clone (790 rows, 0 dupes, contiguity holds).

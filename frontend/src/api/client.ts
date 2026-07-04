@@ -1,5 +1,6 @@
 import type {
   PlaylistTrackAdd,
+  PlaylistTrackAddResult,
   UnifiedPlaylist,
   PlaylistSyncStats,
   UnifiedTagView,
@@ -406,7 +407,7 @@ export const api = {
       }
     },
 
-    addTrack: async (playlistId: number, data: PlaylistTrackAdd) => {
+    addTrack: async (playlistId: number, data: PlaylistTrackAdd): Promise<PlaylistTrackAddResult> => {
       const response = await fetch(`${API_BASE}/playlists/${playlistId}/tracks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -415,14 +416,14 @@ export const api = {
       return response.json();
     },
 
-    removeTrack: async (playlistId: number, playlistTrackId: number) => {
-      const response = await fetch(`${API_BASE}/playlists/${playlistId}/tracks/${playlistTrackId}`, {
+    removeTrack: async (playlistId: number, trackId: number) => {
+      const response = await fetch(`${API_BASE}/playlists/${playlistId}/tracks/${trackId}`, {
         method: 'DELETE',
       });
       return response.json();
     },
 
-    reorderTracks: async (playlistId: number, trackPositions: Array<{ id: number; position: number }>) => {
+    reorderTracks: async (playlistId: number, trackPositions: Array<{ track_id: number; position: number }>) => {
       const response = await fetch(`${API_BASE}/playlists/${playlistId}/reorder-tracks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
