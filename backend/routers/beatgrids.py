@@ -65,6 +65,7 @@ def _format_beatgrid_response(beatgrid, db: Session):
             "beat_times": beat_times,
             "downbeat_times": downbeat_times
         },
+        "origin": beatgrid.origin,
         "created_at": beatgrid.created_at,
         "updated_at": beatgrid.updated_at
     }

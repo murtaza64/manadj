@@ -589,7 +589,8 @@ def create_beatgrid_from_track_bpm(db: Session, track_id: int):
 
     db_beatgrid = models.Beatgrid(
         track_id=track_id,
-        tempo_changes_json=json.dumps(beatgrid_data["tempo_changes"])
+        tempo_changes_json=json.dumps(beatgrid_data["tempo_changes"]),
+        origin="generated",  # placeholder grid, not saved info
     )
 
     db.add(db_beatgrid)
@@ -601,7 +602,8 @@ def create_beatgrid_from_track_bpm(db: Session, track_id: int):
 def update_beatgrid_tempo_changes(
     db: Session,
     track_id: int,
-    tempo_changes: list[dict]
+    tempo_changes: list[dict],
+    origin: str = "edited",
 ) -> models.Beatgrid:
     """
     Update or create beatgrid with new tempo_changes.
@@ -610,6 +612,8 @@ def update_beatgrid_tempo_changes(
         db: Database session
         track_id: Track ID
         tempo_changes: New tempo changes array
+        origin: Where the new grid came from — "edited" (default: user edits
+            like set-downbeat/nudge) or "imported" (External Import)
 
     Returns:
         Updated or created Beatgrid model
@@ -619,12 +623,14 @@ def update_beatgrid_tempo_changes(
     if beatgrid:
         # Update existing
         beatgrid.tempo_changes_json = json.dumps(tempo_changes)
+        beatgrid.origin = origin
         beatgrid.updated_at = func.now()
     else:
         # Create new
         beatgrid = models.Beatgrid(
             track_id=track_id,
-            tempo_changes_json=json.dumps(tempo_changes)
+            tempo_changes_json=json.dumps(tempo_changes),
+            origin=origin,
         )
         db.add(beatgrid)
 

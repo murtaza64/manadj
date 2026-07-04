@@ -28,3 +28,7 @@ Alembic migration; existing rows backfilled once at migration time using the old
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+**2026-07-04 — Done** (jj change `otwxtmsn`, workspace perfdata). `beatgrids.origin` added (`generated`/`edited`/`imported`), migration `0008_otwxtmsn` with one-time heuristic backfill; lazy GET creates `generated`, set-downbeat/nudge flip to `edited` (via `update_beatgrid_tempo_changes(origin=...)`, default "edited"), DELETE+GET regenerates as `generated`. Origin exposed in BeatgridResponse. Router tests + a 0007→head migration-backfill test in `tests/test_beatgrid_origin.py` (minimal-app fixture — backend.main pulls the analysis stack). Migration rehearsed on a copy of the real library: 920 edited / 40 generated.

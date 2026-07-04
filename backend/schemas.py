@@ -187,6 +187,7 @@ class BeatgridResponse(BaseModel):
     id: int
     track_id: int
     data: BeatgridData
+    origin: str  # "generated" (placeholder), "edited", or "imported"
     created_at: datetime
     updated_at: datetime
 

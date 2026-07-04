@@ -140,6 +140,9 @@ class Beatgrid(Base):
     id = Column(Integer, primary_key=True, index=True)
     track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
     tempo_changes_json = Column(Text, nullable=False)  # JSON array of tempo changes
+    # Where the grid came from: "generated" (placeholder from track BPM, not
+    # saved info), "edited" (user-touched), or "imported" (External Import).
+    origin = Column(String, nullable=False, default="edited", server_default="edited")
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
