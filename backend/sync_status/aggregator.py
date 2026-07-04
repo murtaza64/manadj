@@ -21,6 +21,7 @@ from .models import (
     SCALAR_FIELDS,
     SURFACE_IDS,
     FieldDivergence,
+    HotCueValue,
     RowStatus,
     SurfaceTrackRef,
     SyncStatusResult,
@@ -29,6 +30,10 @@ from .models import (
 )
 
 BPM_TOLERANCE = 0.01
+# Cue positions compared across Surfaces come from different encodings
+# (Engine: samples at the blob's rate; manadj: seconds) — call them equal
+# within a millisecond. Tunable.
+HOTCUE_TIME_TOLERANCE = 0.001
 
 
 class SurfaceReader(Protocol):
@@ -57,7 +62,10 @@ def compute_sync_status(
 
     library_tracks = (
         db.query(models.Track)
-        .options(joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag))
+        .options(
+            joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag),
+            joinedload(models.Track.hotcues),
+        )
         .all()
     )
 
@@ -88,6 +96,15 @@ def _library_fields(track: models.Track) -> TrackFields:
         bpm=centibpm_to_bpm(track.bpm),
         energy=track.energy,
         tags=sorted(tt.tag.name for tt in track.track_tags),
+        hotcues=[
+            HotCueValue(
+                slot=hc.slot_number,
+                time=hc.time_seconds,
+                label=hc.label or None,
+                color=hc.color.upper() if hc.color else None,
+            )
+            for hc in sorted(track.hotcues, key=lambda hc: hc.slot_number)
+        ],
     )
 
 
@@ -166,6 +183,14 @@ def _collect_divergences(
         if sorted(surface.tags) != (lib.tags or []):
             _record_divergence(sid, reader, "tags", lib.tags or [], surface.tags, diverged, warnings)
 
+    # hotcues: whole-set comparison (glossary "Diverged"). None means the
+    # surface doesn't carry cues for this track — not a divergence.
+    if "hotcues" in reader.fields and surface.hotcues is not None:
+        if not _hotcue_sets_equal(lib.hotcues or [], surface.hotcues):
+            _record_divergence(
+                sid, reader, "hotcues", lib.hotcues or [], surface.hotcues, diverged, warnings
+            )
+
 
 def _record_divergence(
     sid: str,
@@ -205,6 +230,24 @@ def _values_equal(fname: str, a: object, b: object) -> bool:
     # a surface with no value where the library also has none is agreement;
     # asymmetric emptiness is a divergence (handled by caller via _record)
     return a == b
+
+
+def _hotcue_sets_equal(a: list[HotCueValue], b: list[HotCueValue]) -> bool:
+    """Whole-set equality: same slots, and per slot the time agrees within
+    tolerance, label agrees (None-normalized), color agrees (case folded)."""
+    by_slot_a = {c.slot: c for c in a}
+    by_slot_b = {c.slot: c for c in b}
+    if by_slot_a.keys() != by_slot_b.keys():
+        return False
+    for slot, cue_a in by_slot_a.items():
+        cue_b = by_slot_b[slot]
+        if abs(cue_a.time - cue_b.time) > HOTCUE_TIME_TOLERANCE:
+            return False
+        if (cue_a.label or None) != (cue_b.label or None):
+            return False
+        if (cue_a.color or "").upper() != (cue_b.color or "").upper():
+            return False
+    return True
 
 
 # ---------------------------------------------------------------- orphan rows

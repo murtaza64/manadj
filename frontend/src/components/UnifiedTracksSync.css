@@ -108,6 +108,14 @@
   background: transparent; color: #ff2d55; border: 1px dashed #ff2d55aa; text-decoration: line-through;
 }
 .uts-tagchip-extra-here { background: #ff950018; color: #ff9500; border: 1px solid #ff950066; }
+.uts-cuedot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 1px;
+  vertical-align: baseline;
+}
 
 /* footer */
 .uts-showall {

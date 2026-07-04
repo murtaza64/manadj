@@ -529,6 +529,23 @@ export const api = {
     },
   },
 
+  syncPerformance: {
+    /** Import Engine's hot cues onto one Library track. "fill-empty" never
+     * touches existing slots; "replace-all" is the confirmed overwrite verb. */
+    importHotcues: async (request: {
+      track_id: number;
+      mode: 'fill-empty' | 'replace-all';
+    }): Promise<{ imported: number; skipped: number; deleted: number }> => {
+      const res = await fetch(`${API_BASE}/sync/performance/hotcues/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) throw new Error('Failed to import hot cues from Engine DJ');
+      return res.json();
+    },
+  },
+
   libraryImport: {
     getCandidates: async (recursive: boolean = false): Promise<LibraryImportResult> => {
       const response = await fetch(`${API_BASE}/sync/library/candidates?recursive=${recursive}`);

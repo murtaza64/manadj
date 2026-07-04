@@ -28,6 +28,15 @@ interface FieldDivergence {
   no_overwrite: boolean;
 }
 
+interface HotCueVal {
+  slot: number;
+  time: number;
+  label: string | null;
+  color: string | null;
+}
+
+type HotCueImportMode = 'fill-empty' | 'replace-all';
+
 interface StatusRow {
   path: string;
   title: string | null;
@@ -59,15 +68,17 @@ const IMPORTABLE_UI_FIELDS = new Set(['title', 'artist', 'bpm', 'key', 'energy']
 
 type GroupKey =
   | 'missing-downstream' | 'div-tags' | 'unimported'
-  | 'div-title-artist' | 'not-in-library' | 'div-bpm-key';
+  | 'div-title-artist' | 'div-perf' | 'not-in-library' | 'div-bpm-key';
 
 // priority order agreed 2026-07-02: tags > unimported > title/artist >
-// not-in-library > bpm/key (lowest, collapsed by default)
+// not-in-library > bpm/key (lowest, collapsed by default);
+// performance data slots between title/artist and not-in-library
 const GROUPS: { key: GroupKey; label: string; chip: string; collapsedByDefault?: boolean }[] = [
   { key: 'missing-downstream', label: 'Missing downstream', chip: 'missing' },
   { key: 'div-tags', label: 'Tags diverged', chip: 'diverged' },
   { key: 'unimported', label: 'Unimported files', chip: 'unimported' },
   { key: 'div-title-artist', label: 'Title / artist diverged', chip: 'diverged' },
+  { key: 'div-perf', label: 'Performance data diverged', chip: 'diverged' },
   { key: 'not-in-library', label: 'Not in Library', chip: 'import' },
   { key: 'div-bpm-key', label: 'BPM / key diverged', chip: 'diverged-low', collapsedByDefault: true },
 ];
@@ -81,6 +92,7 @@ function groupKeyFor(row: StatusRow): GroupKey | null {
   // energy rides with tags: the Rekordbox tag-export op writes energy colors
   if (fields.has('tags') || fields.has('energy')) return 'div-tags';
   if (fields.has('title') || fields.has('artist')) return 'div-title-artist';
+  if (fields.has('hotcues')) return 'div-perf';
   return 'div-bpm-key';
 }
 
@@ -173,6 +185,17 @@ export function UnifiedTracksSync() {
     onSuccess: () => done('Field imported'),
     onError: failed,
   });
+  const importHotcues = useMutation({
+    mutationFn: ({ trackId, mode }: { trackId: number; mode: HotCueImportMode }) =>
+      api.syncPerformance.importHotcues({ track_id: trackId, mode }),
+    onSuccess: (r) =>
+      done(
+        `Hot cues imported: ${r.imported} added` +
+        (r.deleted ? `, ${r.deleted} replaced` : '') +
+        (r.skipped ? `, ${r.skipped} slots kept` : ''),
+      ),
+    onError: failed,
+  });
   const exportRowToDisk = useMutation({
     mutationFn: (row: StatusRow) => {
       // mirrors the Export rule (CONTEXT.md): empty Library values are
@@ -208,8 +231,8 @@ export function UnifiedTracksSync() {
 
   const busy =
     generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
-    importField.isPending || exportRowToDisk.isPending || exportTags.isPending ||
-    rebuildTagTree.isPending;
+    importField.isPending || importHotcues.isPending || exportRowToDisk.isPending ||
+    exportTags.isPending || rebuildTagTree.isPending;
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const attention = useMemo(() => rows.filter((r) => r.status !== 'in-sync'), [rows]);
@@ -408,6 +431,22 @@ export function UnifiedTracksSync() {
                 expanded={expanded.has(row.path)}
                 onToggleExpand={() => setExpanded(toggle(expanded, row.path))}
                 onImportField={(field, value) => importField.mutate({ row, field, value })}
+                onImportHotcues={(mode) => {
+                  const lib = row.diverged.find((d) => d.field === 'hotcues')
+                    ?.library_value as HotCueVal[] | undefined;
+                  const libCount = lib?.length ?? 0;
+                  // no silent overwrites: replacing saved cues goes through
+                  // the pending-confirm flow; fill-empty never overwrites
+                  if (mode === 'replace-all' && libCount > 0) {
+                    setPending({
+                      scope: `Replace ${libCount} Library hot cue${libCount === 1 ? '' : 's'} on "${row.title || row.path}" with Engine's set`,
+                      sideEffects: 'deletes the Library\'s saved hot cues for this track and writes Engine\'s',
+                      run: () => importHotcues.mutate({ trackId: row.track_id!, mode }),
+                    });
+                  } else {
+                    importHotcues.mutate({ trackId: row.track_id!, mode });
+                  }
+                }}
                 onExportToDisk={() => exportRowToDisk.mutate(row)}
                 surfacesAvailable={data.surfaces_available}
               />
@@ -471,7 +510,7 @@ function PresenceBadges({ row, available }: { row: StatusRow; available: Surface
   );
 }
 
-function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onExportToDisk, surfacesAvailable }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportHotcues, onExportToDisk, surfacesAvailable }: {
   row: StatusRow;
   surfacesAvailable: SurfaceId[];
   selectable: boolean;
@@ -480,6 +519,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   expanded: boolean;
   onToggleExpand: () => void;
   onImportField: (field: string, value: unknown) => void;
+  onImportHotcues: (mode: HotCueImportMode) => void;
   onExportToDisk: () => void;
 }) {
   const expandable = row.diverged.length > 0;
@@ -517,7 +557,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
       </div>
       {expanded && expandable && (
         <div className="uts-expand">
-          <DivergenceMatrix row={row} onImportField={onImportField} />
+          <DivergenceMatrix row={row} onImportField={onImportField} onImportHotcues={onImportHotcues} />
           <div className="uts-expand-actions">
             {row.diverged.some((d) => !d.no_overwrite && 'disk' in d.surface_values) && (
               <button className="uts-btn" onClick={onExportToDisk}>Export fields → Disk</button>
@@ -532,9 +572,10 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   );
 }
 
-function DivergenceMatrix({ row, onImportField }: {
+function DivergenceMatrix({ row, onImportField, onImportHotcues }: {
   row: StatusRow;
   onImportField: (field: string, value: unknown) => void;
+  onImportHotcues: (mode: HotCueImportMode) => void;
 }) {
   return (
     <table className="uts-matrix">
@@ -552,6 +593,8 @@ function DivergenceMatrix({ row, onImportField }: {
             <td className="uts-matrix-lib">
               {d.field === 'tags'
                 ? (d.library_value as string[]).map((t) => <span key={t} className="uts-tagchip uts-tagchip-both">{t}</span>)
+                : d.field === 'hotcues'
+                ? <HotCueChips cues={d.library_value as HotCueVal[]} />
                 : fmtValue(d.field, d.library_value) || <span className="uts-novalue">no value</span>}
             </td>
             {EXTERNAL_SURFACES.map((s) => {
@@ -571,6 +614,24 @@ function DivergenceMatrix({ row, onImportField }: {
               if (d.field === 'tags') {
                 return <td key={s.id}><TagDiff library={d.library_value as string[]} here={v as string[]} /></td>;
               }
+              if (d.field === 'hotcues') {
+                const lib = d.library_value as HotCueVal[];
+                const here = v as HotCueVal[];
+                const importable = row.track_id !== null && d.importable_from.includes(s.id);
+                return (
+                  <td key={s.id} className="uts-conflict">
+                    <HotCueDiff library={lib} here={here} />
+                    {importable && (lib.length === 0 ? (
+                      <button className="uts-microbtn" onClick={() => onImportHotcues('fill-empty')}>← import</button>
+                    ) : (
+                      <>
+                        <button className="uts-microbtn" onClick={() => onImportHotcues('fill-empty')}>← fill empty slots</button>
+                        <button className="uts-microbtn" onClick={() => onImportHotcues('replace-all')}>← replace all</button>
+                      </>
+                    ))}
+                  </td>
+                );
+              }
               return (
                 <td key={s.id} className="uts-conflict">
                   {fmtValue(d.field, v) || <span className="uts-novalue">no value</span>}
@@ -584,6 +645,54 @@ function DivergenceMatrix({ row, onImportField }: {
         ))}
       </tbody>
     </table>
+  );
+}
+
+// ------------------------------------------------------------- hot cue diff
+
+function fmtCueTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  return `${m}:${(seconds - m * 60).toFixed(1).padStart(4, '0')}`;
+}
+
+function cuesRoughlyEqual(a: HotCueVal, b: HotCueVal): boolean {
+  // mirrors the backend's whole-set semantics (tolerance is authoritative
+  // there; this only drives chip coloring)
+  return (
+    Math.abs(a.time - b.time) <= 0.0015 &&
+    (a.label || null) === (b.label || null) &&
+    (a.color || '').toUpperCase() === (b.color || '').toUpperCase()
+  );
+}
+
+function CueChip({ cue, cls }: { cue: HotCueVal; cls: string }) {
+  return (
+    <span className={`uts-tagchip uts-tagchip-${cls}`}>
+      {cue.color && <span className="uts-cuedot" style={{ background: cue.color }} />}
+      {cue.slot}·{fmtCueTime(cue.time)}{cue.label ? ` ${cue.label}` : ''}
+    </span>
+  );
+}
+
+function HotCueChips({ cues }: { cues: HotCueVal[] }) {
+  if (cues.length === 0) return <span className="uts-novalue">no cues</span>;
+  return <span className="uts-tagdiff">{cues.map((c) => <CueChip key={c.slot} cue={c} cls="both" />)}</span>;
+}
+
+/** Engine-side cell: chips colored like TagDiff — agreeing cues neutral,
+ * Engine-only or Engine-different cues "extra", Library-only cues "missing". */
+function HotCueDiff({ library, here }: { library: HotCueVal[]; here: HotCueVal[] }) {
+  const slots = [...new Set([...library, ...here].map((c) => c.slot))].sort((a, b) => a - b);
+  return (
+    <span className="uts-tagdiff">
+      {slots.map((slot) => {
+        const lib = library.find((c) => c.slot === slot);
+        const h = here.find((c) => c.slot === slot);
+        if (h && lib && cuesRoughlyEqual(h, lib)) return <CueChip key={slot} cue={h} cls="both" />;
+        if (h) return <CueChip key={slot} cue={h} cls="extra-here" />;
+        return <CueChip key={slot} cue={lib!} cls="missing-here" />;
+      })}
+    </span>
   );
 }
 

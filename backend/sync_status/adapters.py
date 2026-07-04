@@ -50,14 +50,18 @@ class DiskSurfaceReader:
 
 class EngineSurfaceReader:
     """Engine DJ: Track rows plus Tag assignments encoded as the
-    "manaDJ Tags" playlist tree."""
+    "manaDJ Tags" playlist tree, plus Hot Cues decoded from the
+    PerformanceData blobs."""
 
-    fields = frozenset({"title", "artist", "key", "bpm", "tags"})
+    fields = frozenset({"title", "artist", "key", "bpm", "tags", "hotcues"})
 
     def __init__(self, engine_db) -> None:  # EngineDJDatabase
         self._db = engine_db
 
     def list_tracks(self) -> list[SurfaceTrackRef]:
+        from sqlalchemy.orm import joinedload
+
+        from backend.sync_performance import hotcues_from_performance_blobs
         from enginedj.models.playlist import Playlist
         from enginedj.models.playlist_entity import PlaylistEntity
         from enginedj.models.track import Track as EDJTrack
@@ -75,10 +79,16 @@ class EngineSurfaceReader:
                         tags_by_track.setdefault(entity.trackId, []).append(tag_pl.title or "")
 
             refs = []
-            for t in session.query(EDJTrack).all():
+            tracks = (
+                session.query(EDJTrack)
+                .options(joinedload(EDJTrack.performance_data))
+                .all()
+            )
+            for t in tracks:
                 bpm = t.bpmAnalyzed if t.bpmAnalyzed is not None else (
                     float(t.bpm) if t.bpm is not None else None
                 )
+                perf = t.performance_data
                 refs.append(
                     SurfaceTrackRef(
                         path=t.path,
@@ -88,6 +98,10 @@ class EngineSurfaceReader:
                             key=t.key,  # already the canonical 0-23 ID
                             bpm=bpm,
                             tags=sorted(tags_by_track.get(t.id, [])),
+                            hotcues=hotcues_from_performance_blobs(
+                                perf.beatData if perf else None,
+                                perf.quickCues if perf else None,
+                            ),
                         ),
                     )
                 )

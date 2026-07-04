@@ -26,3 +26,7 @@ Import semantics per the PRD: when manadj has no cues, import applies without co
 ## Blocked by
 
 - 02-decoders-into-enginedj-package
+
+## Comments
+
+**2026-07-04 — Done** (jj change `ksxmytzl`, workspace perfdata). Hot Cues are a Diverged field end-to-end: `HotCueValue` + `TrackFields.hotcues` in the sync-status vocabulary; whole-set comparison in the aggregator (`HOTCUE_TIME_TOLERANCE = 1ms`, labels None-normalized, colors case-folded); `EngineSurfaceReader` decodes blobs via the new `backend/sync_performance` package (`hotcues_from_performance_blobs`, samples→seconds, slots 0-7→1-8, decode failure → None). Import: `POST /api/sync/performance/hotcues/import` with `fill-empty`/`replace-all` (`EnginePerformanceSource` dependency, overridable in tests); direct row writes bypass quantization. UI: `div-perf` inbox group, HotCueDiff chips (colored dots, TagDiff semantics), fill/replace verbs — replace-all through the pending-confirm flow. 18 tests (aggregator + router seams). Real-library check: 996 rows in 0.17s, 7 genuine hotcue divergences.

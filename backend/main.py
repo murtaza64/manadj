@@ -8,7 +8,7 @@ from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import tracks, tags, waveforms, playlists, beatgrids, hotcues, sync_playlists, sync_status, sync_tags, sync_tracks, sync_library, analyze
+from .routers import tracks, tags, waveforms, playlists, beatgrids, hotcues, sync_playlists, sync_status, sync_performance, sync_tags, sync_tracks, sync_library, analyze
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -50,6 +50,7 @@ app.include_router(sync_playlists.router, prefix="/api")
 app.include_router(sync_tags.router, prefix="/api")
 app.include_router(sync_tracks.router, prefix="/api")
 app.include_router(sync_status.router, prefix="/api")
+app.include_router(sync_performance.router, prefix="/api")
 app.include_router(sync_library.router, prefix="/api")
 app.include_router(acquisition_router, prefix="/api/acquisition", tags=["acquisition"])
 
