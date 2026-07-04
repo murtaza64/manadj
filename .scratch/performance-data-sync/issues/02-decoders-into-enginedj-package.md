@@ -23,3 +23,7 @@ This creates the agreed new test seam: bytes in → decoded structures out. Per 
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+**2026-07-04 — Done** (jj change `svxqoxor`, workspace perfdata). Decoders moved to `enginedj/performance_blobs.py` (BlobParseError, q_uncompress, parse_beat_data, parse_quick_cues + dataclasses); script now imports them. 14 synthesized-blob tests in `tests/test_engine_performance_blobs.py` (no binary fixtures, ADR 0004). Dry-run parity vs pre-refactor script verified against the real library: identical stats, 992 tracks, 0 parse errors. mypy strict clean.
