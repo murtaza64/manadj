@@ -245,6 +245,15 @@ export const api = {
       return response.json();
     },
 
+    /** Waveform data v2 blob (ADR 0014): binary, immutable once generated. */
+    getData: async (trackId: number): Promise<ArrayBuffer> => {
+      const response = await fetch(`${API_BASE}/waveforms/${trackId}/data`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch waveform data: ${response.statusText}`);
+      }
+      return response.arrayBuffer();
+    },
+
     updateCuePoint: async (trackId: number, cuePointTime: number | null) => {
       const response = await fetch(`${API_BASE}/waveforms/${trackId}/cue-point`, {
         method: 'PATCH',

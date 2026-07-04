@@ -39,3 +39,12 @@ ffmpeg's sine source outputs at 1/8 amplitude, fixtures use `volume=4` → −6 
 Golden blob at `frontend/src/waveform/fixtures/golden.wfb`. Full suite 445 passed;
 ruff clean; single alembic head. One drive-by: the legacy router's `waveform_utils`
 import went lazy — it was about to drag librosa into the test import chain (hygiene guards).
+
+**Post-verify fix (2026-07-04, found by user)**: `analyze()` deadlocked on a real
+library m4a that decodes successfully while emitting ~360 KB of AAC warnings — nobody
+drained ffmpeg's stderr pipe, ffmpeg blocked at 64 KB, and the serial task queue wedged
+behind it. stderr is now consumed on a daemon thread (capped at 64 KB for error
+reporting). Verified against the offending file (0.37 s) and by the sandbox queue
+draining to 987/992 (remaining failures = files missing on disk). Known wart: the
+startup sweep re-enqueues permanently-failed tracks each restart (files might return;
+revisit if the failed-task rows annoy).

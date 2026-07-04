@@ -28,10 +28,9 @@ app = FastAPI(title="Music Library Manager", version="1.0.0")
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost:5174",  # Vite dev server
-    ],
+    # Any localhost port: lanes run vite on per-lane port offsets
+    # (docs/agents/parallel-work.md), so a fixed port list fights the setup.
+    allow_origin_regex=r"http://localhost:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
