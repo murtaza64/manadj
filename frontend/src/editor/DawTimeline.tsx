@@ -23,8 +23,10 @@ import {
   evalLane,
   lanePoints,
   nearestTime,
+  visibleLaneIds,
 } from './mixModel';
 import type { LaneId, LanePoint, Lanes, EditorMix } from './mixModel';
+import { EditorStore, useEditorSelector } from './editorStore';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData } from '../types';
 
@@ -53,7 +55,7 @@ function lowerBound(arr: number[], v: number): number {
  * row, aligned to the transition region. Overlap = the Transition.
  */
 export function DawTimeline({
-  mix,
+  store,
   player,
   trackAId,
   trackBId,
@@ -62,15 +64,11 @@ export function DawTimeline({
   beatgridA,
   beatgridB,
   rateB,
-  snap,
-  lockedWindow,
   frameSignal,
-  visibleLanes,
-  onLaneChange,
-  onLaneHide,
-  onChange,
 }: {
-  mix: EditorMix;
+  /** Editor session state (mix-editor 27): mix/snap/lock come from narrow
+   * subscriptions, mutations go back through named store methods. */
+  store: EditorStore;
   player: MixPlayer;
   trackAId: number | null;
   trackBId: number | null;
@@ -79,19 +77,26 @@ export function DawTimeline({
   beatgridA: BeatgridData | null;
   beatgridB: BeatgridData | null;
   rateB: number;
-  snap: boolean;
-  /** Slide-lock (glossary): dragging B moves the window with it only when
-   * locked; unlocked, B's content slides under a fixed window. */
-  lockedWindow: boolean;
   /** Bumped by the parent when a Transition loads/switches — re-frames the
    * viewport around the window. */
   frameSignal: number;
-  visibleLanes: LaneId[];
-  onLaneChange: (id: LaneId, points: LanePoint[] | null) => void;
-  /** Remove the lane from the editor (envelope kept; re-add restores). */
-  onLaneHide: (id: LaneId) => void;
-  onChange: React.Dispatch<React.SetStateAction<EditorMix>>;
 }) {
+  const mix = useEditorSelector(store, (s) => s.mix);
+  const snap = useEditorSelector(store, (s) => s.snap);
+  /** Slide-lock (glossary): dragging B moves the window with it only when
+   * locked; unlocked, B's content slides under a fixed window. */
+  const lockedWindow = useEditorSelector(store, (s) => s.lockedWindow);
+  const visibleLanes = useMemo(() => visibleLaneIds(mix.transition), [mix.transition]);
+  const onChange = useCallback(
+    (fn: (m: EditorMix) => EditorMix) => store.updateMix(fn),
+    [store]
+  );
+  const onLaneChange = useCallback(
+    (id: LaneId, points: LanePoint[] | null) => store.setLane(id, points),
+    [store]
+  );
+  /** Remove the lane from the editor (envelope kept; re-add restores). */
+  const onLaneHide = useCallback((id: LaneId) => store.hideLane(id), [store]);
   const [pxPerSec, setPxPerSec] = useState(4);
   /** Horizontal offset in px — the single owner of all horizontal motion.
    * No native scrollbar: wheel and the minimap viewport drive it, and the

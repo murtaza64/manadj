@@ -25,26 +25,10 @@ import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
 import { TransitionSwitcher } from './TransitionSwitcher';
-import {
-  LAST_PAIR_KEY,
-  freshTransition,
-  initTransitionStore,
-  isPristine,
-  savePairEntry,
-  snapshotPairStore,
-  toStoredEntry,
-} from './pairStore';
-import type { SavedTransition } from './pairStore';
-import {
-  DEFAULT_LANE_IDS,
-  LANE_IDS,
-  defaultMix,
-  lanePoints,
-  slideB,
-  slideBToCue,
-  tempoMatchPitch,
-} from './mixModel';
-import type { LaneId, LanePoint, EditorMix, Transition } from './mixModel';
+import { EditorStore, useEditorSelector } from './editorStore';
+import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
+import { LANE_IDS, defaultMix, tempoMatchPitch, visibleLaneIds } from './mixModel';
+import type { LaneId, Transition } from './mixModel';
 import type { Track } from '../types';
 import './transitionEditor.css';
 
@@ -68,9 +52,22 @@ export default function TransitionEditor() {
 }
 
 function TransitionEditorInner() {
-  const [mix, setMix] = useState<EditorMix>(defaultMix);
+  // Session state lives in the EditorStore (mix-editor 27); this shell is
+  // layout + glue: tracks/decks/player wiring and view choreography. It
+  // deliberately does NOT subscribe to `mix` — drag-rate changes re-render
+  // only the narrow subscribers (DawTimeline, the center panel).
+  const [store] = useState(() => new EditorStore());
+  useEffect(() => () => store.dispose(), [store]);
   const [player] = useState(() => new MixPlayer(defaultMix()));
   useEffect(() => () => player.dispose(), [player]);
+
+  // The player follows the store SYNCHRONOUSLY (notifications are sync) —
+  // audio sees a mutation before the mutating caller's next line, which
+  // retires the old "push to player NOW" special case in the slide path.
+  useEffect(() => {
+    player.setMix(store.getSnapshot().mix);
+    return store.subscribe(() => player.setMix(store.getSnapshot().mix));
+  }, [store, player]);
 
   // Re-render on player/engine state changes.
   const [, bump] = useState(0);
@@ -86,10 +83,8 @@ function TransitionEditorInner() {
 
   const [trackA, setTrackA] = useState<Track | null>(null);
   const [trackB, setTrackB] = useState<Track | null>(null);
-  const [snap, setSnap] = useState(true);
-  /** Locked window (glossary): during a Slide the window rides the slid
-   * track; unlocked it stays with the other track. */
-  const [lockedWindow, setLockedWindow] = useState(false);
+  /** Locked window (glossary): rare changes — a cheap shell subscription. */
+  const lockedWindow = useEditorSelector(store, (s) => s.lockedWindow);
 
   const { data: beatgridA } = useBeatgridData(trackA?.id ?? null);
   const { data: beatgridB } = useBeatgridData(trackB?.id ?? null);
@@ -100,7 +95,8 @@ function TransitionEditorInner() {
   const bpmB = beatgridB?.data.tempo_changes[0]?.bpm ?? trackB?.bpm ?? null;
 
   // B's playback rate under tempo match (same math as the player's).
-  const rateB = mix.transition.tempoMatch ? 1 + tempoMatchPitch(bpmA, bpmB) / 100 : 1;
+  const tempoMatch = useEditorSelector(store, (s) => s.mix.transition.tempoMatch);
+  const rateB = tempoMatch ? 1 + tempoMatchPitch(bpmA, bpmB) / 100 : 1;
 
   // Keep the player's tempo-match inputs on the grid-derived values (it gets
   // track BPM at load time, before the beatgrid query resolves).
@@ -109,23 +105,7 @@ function TransitionEditorInner() {
     player.setBpm('B', bpmB);
   }, [player, bpmA, bpmB]);
 
-  // Saved Transitions per ordered pair live in the transition store
-  // (snapshot reads — the mount gate guarantees init has resolved). LAZY
-  // PERSISTENCE (transition-library 01): the SESSION list below is the
-  // working set — it may hold pristine (never-edited) Transitions that
-  // exist only in memory; the store only ever receives materialized ones
-  // (toStoredEntry filters).
   const pairKey = trackA && trackB ? `${trackA.id}:${trackB.id}` : null;
-  const [session, setSession] = useState<{ items: SavedTransition[]; active: number }>(() => ({
-    items: [freshTransition([])],
-    active: 0,
-  }));
-  /** Session items with the live mix folded into the active one. */
-  const liveItems = useCallback(
-    (s: { items: SavedTransition[]; active: number }, m: EditorMix) =>
-      s.items.map((it, i) => (i === s.active ? { ...it, transition: m.transition } : it)),
-    []
-  );
 
   /** Bumped whenever a Transition loads/switches: the timeline re-frames
    * around the window and the playhead parks at the window start. The park
@@ -148,48 +128,15 @@ function TransitionEditorInner() {
     }
   });
 
-  // Keep the player's model current (immediately — audio correctness).
+  // Transition loads/switches are store events; the shell decides what they
+  // mean visually (re-frame + park). Persistence — debounce, flush-before-
+  // repoint, unmount flush — lives in the EditorStore, armed inside
+  // mutations only (the 2026-07-04 incident's race is unrepresentable
+  // there; see issue 26 comments and editorStore tests).
   useEffect(() => {
-    player.setMix(mix);
-  }, [mix, player]);
-
-  // Persist DEBOUNCED (a store write is a snapshot swap + index rebuild +
-  // background PUT; doing that at drag rate was the biggest main-thread
-  // cost during drags), flushed before pair switches and on unmount.
-  // Pristine items never reach the store; a pair whose session is entirely
-  // pristine is deleted.
-  //
-  // GUARD (post-incident 2026-07-04): only arm the save once the session
-  // has been SEEDED for this pair (pairKey === loadedPairKey). On the
-  // commit where pairKey changes, this effect runs before the seed effect
-  // below with the OLD session still in state — unguarded, it stamped the
-  // new pair with a pristine/foreign session and the seed's flush
-  // materialized that to a DELETE, wiping the pair's saved Transitions.
-  // (Pre-DB, a stale-closure read of the store accidentally self-healed
-  // this within 300ms; the store snapshot is a live read, so the guard is
-  // now load-bearing.)
-  const loadedPairKey = useRef<string | null>(null);
-  const pendingSaveRef = useRef<{
-    pairKey: string;
-    items: SavedTransition[];
-    active: number;
-  } | null>(null);
-  const flushPersist = useCallback(() => {
-    const p = pendingSaveRef.current;
-    if (!p) return;
-    pendingSaveRef.current = null;
-    // Synchronous snapshot update (the PUT rides behind) — the pair-switch
-    // effect below reads the snapshot right after flushing.
-    savePairEntry(p.pairKey, toStoredEntry(p.items, p.active));
-  }, []);
-  useEffect(() => {
-    if (!pairKey || pairKey !== loadedPairKey.current) return;
-    pendingSaveRef.current = { pairKey, items: liveItems(session, mix), active: session.active };
-    const t = setTimeout(flushPersist, 300);
-    return () => clearTimeout(t);
-  }, [mix, session, pairKey, flushPersist, liveItems]);
-  // Unmount: don't lose the last ≤300ms of edits.
-  useEffect(() => () => flushPersist(), [flushPersist]);
+    store.setTransitionLoadedHandler(onTransitionLoaded);
+    return () => store.setTransitionLoadedHandler(null);
+  }, [store, onTransitionLoaded]);
 
   // Shared decks: the canonical loaded pair across modes. Editor loads
   // mirror onto them (issue 07) so Performance/Library show the same tracks;
@@ -205,121 +152,35 @@ function TransitionEditorInner() {
     (deck: 'A' | 'B', track: Track) => {
       if (deck === 'A') setTrackA(track);
       else setTrackB(track);
-      setMix((m) => ({ ...m, [deck === 'A' ? 'trackAId' : 'trackBId']: track.id }));
+      store.setTrackId(deck, track.id);
       void player.loadTrack(deck, { id: track.id, bpm: track.bpm ?? null });
       const shared = sharedDecksRef.current[deck];
       if (shared.loadedTrack?.id !== track.id) shared.loadTrack(track);
     },
-    [player]
+    [store, player]
   );
 
   // Deck B slides (issue 11): hot cue / beat jump gestures realign the
-  // pair — exactly one deck re-cues, the playhead's mix position never
-  // moves. The lock decides which side the window sticks to (PRD table).
-  // Slides are exact: the snap toggle does not quantize them.
+  // pair. The store mutates (player follows synchronously); the audio-side
+  // re-park stays here — playhead's mix position never moves.
   const slideDeckB = useCallback(
     (kind: 'cue' | 'beats', value: number) => {
       const playhead = player.getMixTime();
-      const mut =
-        kind === 'cue'
-          ? slideBToCue(mix.transition, value, playhead, lockedWindow, rateB)
-          : slideB(mix.transition, value, lockedWindow, rateB);
-      const next = { ...mix, transition: { ...mix.transition, ...mut } };
-      setMix(next);
-      // Push to the player NOW (not on the next render) so the re-park
-      // below sees the new alignment. Playing decks re-cue via soft sync.
-      player.setMix(next);
+      store.slideDeckB(kind, value, playhead, rateB);
       if (!player.isPlaying()) player.seek(playhead);
     },
-    [player, mix, lockedWindow, rateB]
+    [store, player, rateB]
   );
-
-  // Fine alignment nudge (issue 09): move a track ±deltaSec relative to the
-  // other. B moves together with the transition frame (bMove-drag
-  // semantics: startSec shifts, bInSec stays). A anchors the mix axis and
-  // cannot move, so nudging A shifts frame+B the opposite way — the same
-  // relative alignment change, seen from A.
-  const nudgeTrack = useCallback((deck: 'A' | 'B', deltaSec: number) => {
-    const shift = deck === 'B' ? deltaSec : -deltaSec;
-    setMix((m) => ({
-      ...m,
-      transition: { ...m.transition, startSec: Math.max(0, m.transition.startSec + shift) },
-    }));
-  }, []);
 
   // When a (new) pair is assembled, seed the session from the store —
   // or with a pristine "Transition 1" that exists only in memory until a
   // real edit materializes it (merely-opened pairs leave no trace).
-  // (loadedPairKey is declared with the persist machinery above — the
-  // persist effect keys off it.)
+  // loadPair flushes the previous pair's pending edits internally.
   useEffect(() => {
-    if (!pairKey || pairKey === loadedPairKey.current) return;
-    flushPersist(); // pending edits belong to the previous pair
-    loadedPairKey.current = pairKey;
+    if (!pairKey) return;
     localStorage.setItem(LAST_PAIR_KEY, pairKey);
-    const entry = snapshotPairStore()[pairKey];
-    const items = entry ? structuredClone(entry.items) : [freshTransition([])];
-    const active = entry ? Math.min(entry.active, items.length - 1) : 0;
-    setSession({ items, active });
-    setMix((m) => ({ ...m, transition: structuredClone(items[active].transition) }));
-    onTransitionLoaded(items[active].transition);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairKey]);
-
-  /** Navigate the session (◀/▶). Leaving a pristine Transition discards it
-   * silently; ▶ past the last creates a fresh pristine one. */
-  const navigateTransition = (dir: -1 | 1) => {
-    const items = liveItems(session, mix);
-    const cur = items[session.active];
-    let target = session.active + dir;
-    if (target >= items.length) {
-      // Past the end = new take (no-op when the current one IS fresh).
-      if (isPristine(cur)) return;
-      const fresh = freshTransition(items);
-      setSession({ items: [...items, fresh], active: items.length });
-      setMix((m) => ({ ...m, transition: structuredClone(fresh.transition) }));
-      onTransitionLoaded(fresh.transition);
-      return;
-    }
-    if (target < 0) return;
-    let nextItems = items;
-    if (isPristine(cur) && items.length > 1) {
-      // Evaporate the untouched take on the way out.
-      nextItems = items.filter((_, i) => i !== session.active);
-      if (session.active < target) target -= 1;
-      target = Math.max(0, Math.min(target, nextItems.length - 1));
-    }
-    setSession({ items: nextItems, active: target });
-    setMix((m) => ({ ...m, transition: structuredClone(nextItems[target].transition) }));
-    onTransitionLoaded(nextItems[target].transition);
-  };
-
-  const renameTransition = (name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setSession((s) => ({
-      ...s,
-      items: s.items.map((it, i) => (i === s.active ? { ...it, name: trimmed } : it)),
-    }));
-  };
-
-  const toggleFavorite = () => {
-    setSession((s) => ({
-      ...s,
-      items: s.items.map((it, i) => (i === s.active ? { ...it, favorite: !it.favorite } : it)),
-    }));
-  };
-
-  /** Delete the active Transition (the switcher does the two-step confirm).
-   * Last one → re-init blank (the old reset's feel); else land on next. */
-  const deleteTransition = () => {
-    const items = liveItems(session, mix).filter((_, i) => i !== session.active);
-    const nextItems = items.length > 0 ? items : [freshTransition([])];
-    const active = Math.min(session.active, nextItems.length - 1);
-    setSession({ items: nextItems, active });
-    setMix((m) => ({ ...m, transition: structuredClone(nextItems[active].transition) }));
-    onTransitionLoaded(nextItems[active].transition);
-  };
+    store.loadPair(pairKey);
+  }, [pairKey, store]);
 
   // One audible surface AND one running audio clock at a time (issue 08):
   // claim audibility while mounted (ADR 0013). The arbiter silences the
@@ -423,54 +284,8 @@ function TransitionEditorInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player]);
 
-  const setLane = useCallback((id: LaneId, points: LanePoint[] | null) => {
-    setMix((m) => {
-      const lanes = { ...m.transition.lanes };
-      if (points === null) delete lanes[id];
-      else lanes[id] = points;
-      return { ...m, transition: { ...m.transition, lanes } };
-    });
-  }, []);
-
-  /** Remove a lane from the editor: the envelope stays in `lanes` (re-add
-   * restores it) but reads as default during playback (model semantics). */
-  const hideLane = useCallback((id: LaneId) => {
-    setMix((m) => ({
-      ...m,
-      transition: {
-        ...m.transition,
-        hiddenLanes: [...new Set([...(m.transition.hiddenLanes ?? []), id])],
-      },
-    }));
-  }, []);
-
-  /** (Re-)add a lane: unhide, and materialize its points so it's drawn-on
-   * (existing envelope wins over the default shape). */
-  const addLane = useCallback((id: LaneId) => {
-    setMix((m) => ({
-      ...m,
-      transition: {
-        ...m.transition,
-        hiddenLanes: (m.transition.hiddenLanes ?? []).filter((h) => h !== id),
-        lanes: {
-          ...m.transition.lanes,
-          [id]: lanePoints(m.transition.lanes, id, m.transition.durationSec),
-        },
-      },
-    }));
-  }, []);
-
-  const visibleLanes = useMemo(() => {
-    const drawn = Object.keys(mix.transition.lanes) as LaneId[];
-    const hidden = new Set(mix.transition.hiddenLanes ?? []);
-    return [...new Set([...DEFAULT_LANE_IDS, ...drawn])].filter((id) => !hidden.has(id));
-  }, [mix.transition.lanes, mix.transition.hiddenLanes]);
-
-  const addableLanes = LANE_IDS.filter((id) => !visibleLanes.includes(id));
-
   const snapA = player.engineA.getSnapshot();
   const snapB = player.engineB.getSnapshot();
-  const tr = mix.transition;
 
   return (
     <div className="editor-root">
@@ -478,7 +293,7 @@ function TransitionEditorInner() {
       <div className="editor-top">
         <div className="editor-arranger">
           <DawTimeline
-            mix={mix}
+            store={store}
             player={player}
             trackAId={trackA?.id ?? null}
             trackBId={trackB?.id ?? null}
@@ -487,13 +302,7 @@ function TransitionEditorInner() {
             beatgridA={beatgridA?.data ?? null}
             beatgridB={beatgridB?.data ?? null}
             rateB={rateB}
-            snap={snap}
-            lockedWindow={lockedWindow}
             frameSignal={frameSignal}
-            visibleLanes={visibleLanes}
-            onLaneChange={setLane}
-            onLaneHide={hideLane}
-            onChange={setMix}
           />
 
           {/* Info bar: deck A (left) · transition (center) · deck B (right) */}
@@ -506,7 +315,7 @@ function TransitionEditorInner() {
               effectiveBpm={bpmA}
               pitchPercent={0}
               onBpmSaved={(bpm) => setTrackA((t) => (t ? { ...t, bpm } : t))}
-              onNudgeTrack={(d) => nudgeTrack('A', d)}
+              onNudgeTrack={(d) => store.nudgeTrack('A', d)}
               gestures={{
                 // A ≡ mix axis (sketch origin): its controls are plain
                 // transport, not slides (re-decided 2026-07-03 — mirror-A
@@ -518,112 +327,7 @@ function TransitionEditorInner() {
               }}
             />
 
-            <div className="editor-center">
-              <div className="editor-center-row">
-                <button
-                  className={`player-button ${
-                    player.isPlaying() ? 'player-button-playing' : 'player-button-paused'
-                  }`}
-                  disabled={!player.ready()}
-                  onClick={() => player.togglePlay()}
-                >
-                  ⏯
-                </button>
-                <TransitionSwitcher
-                  items={liveItems(session, mix)}
-                  active={session.active}
-                  onNavigate={navigateTransition}
-                  onRename={renameTransition}
-                  onToggleFavorite={toggleFavorite}
-                  onDelete={deleteTransition}
-                />
-              </div>
-              <div className="editor-center-row">
-                <label>
-                  start
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    value={tr.startSec.toFixed(1)}
-                    onChange={(e) =>
-                      setMix((m) => ({
-                        ...m,
-                        transition: { ...m.transition, startSec: Number(e.target.value) },
-                      }))
-                    }
-                  />
-                </label>
-                <label>
-                  length
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    value={tr.durationSec.toFixed(1)}
-                    onChange={(e) =>
-                      setMix((m) => ({
-                        ...m,
-                        transition: { ...m.transition, durationSec: Number(e.target.value) },
-                      }))
-                    }
-                  />
-                </label>
-                <label>
-                  B entry
-                  <input
-                    type="number"
-                    step={0.5}
-                    value={tr.bInSec.toFixed(1)}
-                    onChange={(e) =>
-                      setMix((m) => ({
-                        ...m,
-                        transition: { ...m.transition, bInSec: Number(e.target.value) },
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-              <div className="editor-center-row">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={tr.tempoMatch}
-                    onChange={(e) =>
-                      setMix((m) => ({
-                        ...m,
-                        transition: { ...m.transition, tempoMatch: e.target.checked },
-                      }))
-                    }
-                  />
-                  tempo match
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={snap}
-                    onChange={(e) => setSnap(e.target.checked)}
-                  />
-                  snap
-                </label>
-                {addableLanes.length > 0 && (
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      const id = e.target.value as LaneId;
-                      if (id) addLane(id);
-                    }}
-                  >
-                    <option value="">add lane…</option>
-                    {addableLanes.map((id) => (
-                      <option key={id} value={id}>
-                        {id}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            </div>
+            <EditorCenterPanel store={store} player={player} />
 
             <DeckCard
               deck="B"
@@ -633,7 +337,7 @@ function TransitionEditorInner() {
               effectiveBpm={bpmB !== null ? bpmB * rateB : null}
               pitchPercent={(rateB - 1) * 100}
               onBpmSaved={(bpm) => setTrackB((t) => (t ? { ...t, bpm } : t))}
-              onNudgeTrack={(d) => nudgeTrack('B', d)}
+              onNudgeTrack={(d) => store.nudgeTrack('B', d)}
               gestures={{
                 kind: 'slide',
                 toCue: (cueSec) => slideDeckB('cue', cueSec),
@@ -641,7 +345,7 @@ function TransitionEditorInner() {
                 beats: (n) => bpmB && slideDeckB('beats', (n * 60) / bpmB),
                 enabled: bpmB !== null && bpmB > 0,
               }}
-              lock={{ on: lockedWindow, toggle: () => setLockedWindow((v) => !v) }}
+              lock={{ on: lockedWindow, toggle: () => store.toggleLockedWindow() }}
             />
           </div>
         </div>
@@ -652,6 +356,124 @@ function TransitionEditorInner() {
           affordances match the Performance view: hover row buttons,
           double-click → A, arrow keys. */}
       <div className="editor-library">{browsePanel}</div>
+    </div>
+  );
+}
+
+/**
+ * Transition controls + switcher: the drag-rate subscriber (reads `mix`),
+ * isolated so a lane drag re-renders this small panel and DawTimeline —
+ * never the shell (mix-editor 27).
+ */
+function EditorCenterPanel({ store, player }: { store: EditorStore; player: MixPlayer }) {
+  // Play-button state rides player/engine emits (transport, loads).
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const rerender = () => bump((n) => n + 1);
+    const subs = [
+      player.subscribe(rerender),
+      player.engineA.subscribe(rerender),
+      player.engineB.subscribe(rerender),
+    ];
+    return () => subs.forEach((u) => u());
+  }, [player]);
+
+  const mix = useEditorSelector(store, (s) => s.mix);
+  const session = useEditorSelector(store, (s) => s.session);
+  const snap = useEditorSelector(store, (s) => s.snap);
+  const tr = mix.transition;
+  const visibleLanes = useMemo(() => visibleLaneIds(tr), [tr]);
+  const addableLanes = LANE_IDS.filter((id) => !visibleLanes.includes(id));
+
+  const setTransitionField = (patch: Partial<Transition>) =>
+    store.updateMix((m) => ({ ...m, transition: { ...m.transition, ...patch } }));
+
+  return (
+    <div className="editor-center">
+      <div className="editor-center-row">
+        <button
+          className={`player-button ${
+            player.isPlaying() ? 'player-button-playing' : 'player-button-paused'
+          }`}
+          disabled={!player.ready()}
+          onClick={() => player.togglePlay()}
+        >
+          ⏯
+        </button>
+        <TransitionSwitcher
+          items={store.liveItems()}
+          active={session.active}
+          onNavigate={(dir) => store.navigateTransition(dir)}
+          onRename={(name) => store.renameActive(name)}
+          onToggleFavorite={() => store.toggleFavorite()}
+          onDelete={() => store.deleteActive()}
+        />
+      </div>
+      <div className="editor-center-row">
+        <label>
+          start
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            value={tr.startSec.toFixed(1)}
+            onChange={(e) => setTransitionField({ startSec: Number(e.target.value) })}
+          />
+        </label>
+        <label>
+          length
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            value={tr.durationSec.toFixed(1)}
+            onChange={(e) => setTransitionField({ durationSec: Number(e.target.value) })}
+          />
+        </label>
+        <label>
+          B entry
+          <input
+            type="number"
+            step={0.5}
+            value={tr.bInSec.toFixed(1)}
+            onChange={(e) => setTransitionField({ bInSec: Number(e.target.value) })}
+          />
+        </label>
+      </div>
+      <div className="editor-center-row">
+        <label>
+          <input
+            type="checkbox"
+            checked={tr.tempoMatch}
+            onChange={(e) => setTransitionField({ tempoMatch: e.target.checked })}
+          />
+          tempo match
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={snap}
+            onChange={(e) => store.setSnap(e.target.checked)}
+          />
+          snap
+        </label>
+        {addableLanes.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => {
+              const id = e.target.value as LaneId;
+              if (id) store.addLane(id);
+            }}
+          >
+            <option value="">add lane…</option>
+            {addableLanes.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
     </div>
   );
 }

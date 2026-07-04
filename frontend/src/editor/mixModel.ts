@@ -104,6 +104,13 @@ export function lanePoints(lanes: Lanes, id: LaneId, durationSec: number): LaneP
   return pts && pts.length > 0 ? pts : defaultLanePoints(id, durationSec);
 }
 
+/** Lanes shown in the editor: defaults + drawn-on, minus hidden (issue 05). */
+export function visibleLaneIds(tr: Transition): LaneId[] {
+  const drawn = Object.keys(tr.lanes) as LaneId[];
+  const hidden = new Set(tr.hiddenLanes ?? []);
+  return [...new Set([...DEFAULT_LANE_IDS, ...drawn])].filter((id) => !hidden.has(id));
+}
+
 /** Piecewise-linear evaluation at normalized x. Points must be x-sorted. */
 export function evalLane(points: LanePoint[], x: number): number {
   if (points.length === 0) return 0.5;

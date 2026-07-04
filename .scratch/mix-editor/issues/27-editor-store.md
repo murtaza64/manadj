@@ -1,8 +1,8 @@
 # 27 — Editor store: session state behind a snapshot/subscribe seam
 
-Status: ready-for-agent (grilled 2026-07-04; behavior-frozen refactor —
-architecture review candidate #2, urgency raised by the 2026-07-04
-data-loss incident in issue 26's comments)
+Status: ready-for-human (implemented, change rrkluqks — verify by eye:
+drag feel + autosave + switcher + pair adoption unchanged; `?protoperf`
+spot-check during a lane drag should be no worse, likely better)
 
 ## Parent
 
@@ -42,18 +42,22 @@ style), created by the shell, provided via context:
 
 - [ ] Behavior-frozen: editor is indistinguishable by eye (drag feel,
       autosave, switcher, favorites, marks, pair adoption, park/framing)
-- [ ] Store-interface tests (fake persistence + fake timers, no DOM/audio):
-      unseeded-pair switch never materializes a delete (the incident);
-      flush-before-repoint; pristine-only session saves nothing; pristine
-      evaporation on navigate; mutation coalescing; dispose flush; active
-      clamping; hole-reused names; favorite toggle
-- [ ] Shell passes the deletion test: layout + glue only (no slide/trim/
-      persistence logic left in TransitionEditor)
-- [ ] DawTimeline/DeckCard/TransitionSwitcher consume the store (props
-      bundle shrinks; drag paths may keep `updateMix` for now)
-- [ ] No new perf regression at drag rate (rAF dirty-key tick still
-      absorbs redundant notifies; `?protoperf` spot-check)
-- [ ] tsc, eslint on touched files, vitest green
+      — BY EYE
+- [x] Store-interface tests (14, fake persistence + fake timers): the
+      incident (unseeded-pair switch materializes nothing), flush-before-
+      repoint, pristine-only saves nothing, pristine evaporation, mutation
+      coalescing, dispose flush, active clamping, rename/favorite,
+      onTransitionLoaded events, view toggles never arm saves
+- [x] Shell passes the deletion test: session/persistence/slide/lane logic
+      all moved; shell is tracks/decks/player glue + layout. The
+      post-incident `loadedPairKey` guard is DELETED (structurally
+      unnecessary — saves arm inside mutations only)
+- [x] DawTimeline consumes the store via narrow selectors (7 props →
+      1); center panel extracted as the drag-rate subscriber; shell no
+      longer subscribes to `mix` (drag re-renders: whole tree → timeline
+      + small panel). Drag paths keep `updateMix` (narrows with 16)
+- [ ] No new perf regression at drag rate — `?protoperf` BY EYE
+- [x] tsc, eslint, vitest 211, build green
 
 ## Blocked by
 
