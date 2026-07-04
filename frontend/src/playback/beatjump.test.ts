@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BEATJUMP_DEFAULT,
   BEATJUMP_MAX,
   BEATJUMP_MIN,
   PERFORMANCE_BEATJUMP_DEFAULT,
@@ -10,9 +11,13 @@ import {
 
 describe('beatjump size', () => {
   it('defaults to 32 within the 1-128 bounds', () => {
-    expect(PERFORMANCE_BEATJUMP_DEFAULT).toBe(32);
+    expect(BEATJUMP_DEFAULT).toBe(32);
     expect(BEATJUMP_MIN).toBe(1);
     expect(BEATJUMP_MAX).toBe(128);
+  });
+
+  it('keeps the editor alias on the one shared default (until slice 05)', () => {
+    expect(PERFORMANCE_BEATJUMP_DEFAULT).toBe(BEATJUMP_DEFAULT);
   });
 
   it('halves down to the floor and stops', () => {

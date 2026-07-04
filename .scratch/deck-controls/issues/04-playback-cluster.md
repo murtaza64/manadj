@@ -1,6 +1,15 @@
 # 04 — Playback cluster: transport/cue, pads, beatjump + size unification
 
-Status: ready-for-agent
+Status: ready-for-human — implemented in `oxqlwkpv` (deck-controls: 04-playback-cluster)
+
+By-eye checklist for the human:
+- [ ] Library: beatjump row shows curved jump arrows + `1/2`/[size]/`x2`; size sticks and A/S jump by it
+- [ ] PERF: set beatjump size on a deck, flip to library — same N on the buttons and A/S keys
+- [ ] PERF PLAY pressable mid-load (latches, starts when decoded); CUE still disabled until ready
+- [ ] PERF CUE now flashes when paused away from the cue point (at-cue poll came along) — intended
+- [ ] PERF nudge buttons read ◀◀/▶▶; grid/BPM controls untouched
+- [ ] Library controls overlay widened 140→170px to fit the size stepper — check it doesn't crowd the waveform
+- [ ] Kbd hints still render on PERF pads 1-4, jump, cue, play
 
 ## Parent
 
@@ -28,14 +37,15 @@ gesture variants are slice 05):
 
 ## Acceptance criteria
 
-- [ ] Library Player and PERF DeckPanel render the shared components;
+- [x] Library Player and PERF DeckPanel render the shared components;
       duplicated JSX/pointer logic deleted
-- [ ] One beatjump size per deck across modes (set in PERF, jump in
-      library — same N; editor reads it in slice 05)
-- [ ] PERF PLAY latches during load (button no longer disabled)
-- [ ] Keyboard behavior unchanged in both modes (A/S, F, Space rules,
-      per-deck PERF keys)
-- [ ] tsc, eslint, vitest green
+- [x] One beatjump size per deck across modes (set in PERF, jump in
+      library — same N; editor reads it in slice 05, via the
+      `PERFORMANCE_BEATJUMP_DEFAULT` alias until then)
+- [x] PERF PLAY latches during load (button no longer disabled)
+- [x] Keyboard behavior unchanged in both modes (A/S, F, Space rules,
+      per-deck PERF keys; library A/S now use the per-deck size)
+- [x] tsc, eslint, vitest green
 
 ## Blocked by
 

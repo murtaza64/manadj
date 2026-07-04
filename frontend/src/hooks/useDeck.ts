@@ -25,9 +25,9 @@ export interface DeckContextValue {
   /** Load a Track onto the Deck: fetch + decode, replacing the current one. */
   loadTrack: (track: Track) => void;
   /**
-   * Beatjump size (beats) for this Deck in the Performance view — halve/
-   * double between 1 and 128 (playback/beatjump.ts). The library view keeps
-   * its fixed constant and ignores this.
+   * Beatjump size (beats) for this Deck — halve/double between 1 and 128
+   * (playback/beatjump.ts). ONE per-deck value shared by every mode
+   * (deck-controls PRD): buttons and jump keys in any view use the same N.
    */
   beatjumpBeats: number;
   /** Set the beatjump size (clamped into bounds by the provider). */

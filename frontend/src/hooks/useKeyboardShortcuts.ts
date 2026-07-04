@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { Track } from '../types';
 import { useDeck, useDeckReady, useDeckSnapshot } from './useDeck';
 import { useScrubLoop } from './useScrubLoop';
-import { BEATJUMP_BEATS } from '../playback/constants';
 
 /**
  * Library keyboard hub. Keys split by scope (ADR 0008):
@@ -53,7 +52,9 @@ export function useKeyboardShortcuts({
   onHotCueDelete,
   isEnergyEditMode
 }: UseKeyboardShortcutsProps) {
-  const { engine } = useDeck();
+  // a/s jump by the deck's shared beatjump size (deck-controls PRD: one
+  // per-deck N across modes — set it in any view, these keys use it).
+  const { engine, beatjumpBeats } = useDeck();
   const deckReady = useDeckReady();
   // Space is allowed while loading — the engine latches play intent.
   const deckCanPlay = useDeckSnapshot(
@@ -132,9 +133,9 @@ export function useKeyboardShortcuts({
         if (key === ' ') {
           engine.togglePlay();
         } else if (key === 'a') {
-          engine.jumpBeats(-BEATJUMP_BEATS);
+          engine.jumpBeats(-beatjumpBeats);
         } else if (key === 's') {
-          engine.jumpBeats(BEATJUMP_BEATS);
+          engine.jumpBeats(beatjumpBeats);
         } else if (key === 'f') {
           engine.cueDown();
         }
@@ -301,6 +302,7 @@ export function useKeyboardShortcuts({
     onHotCueDelete,
     isEnergyEditMode,
     engine,
+    beatjumpBeats,
     deckReady,
     deckCanPlay,
   ]);

@@ -10,13 +10,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
-import { useHotCueActions } from '../../hooks/useHotCueActions';
 import { useNudgeBeatgrid, useSetBeatgridDownbeat } from '../../hooks/useBeatgridData';
+import { useScrubTransport } from '../../hooks/useScrubTransport';
 import WebGLWaveform from '../WebGLWaveform';
-import type { ScrubTransport } from '../WebGLWaveform';
 import WaveformMinimap from '../WaveformMinimap';
-import HotCue from '../HotCue';
-import { doubleBeatjump, halveBeatjump } from '../../playback/beatjump';
+import { TransportPair } from '../deckControls/TransportPair';
+import { HotCuePads } from '../deckControls/HotCuePads';
+import { BeatjumpRow } from '../deckControls/BeatjumpRow';
 import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { DECK_KEYS } from './performanceKeys';
@@ -83,14 +83,7 @@ export function DeckWaveform({
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
 
-  const transport: ScrubTransport = {
-    isPlaying: () => engine.isAudioRunning(),
-    pause: () => engine.pause(),
-    play: () => engine.play(),
-    seek: (t) => {
-      if (ready) engine.seek(t);
-    },
-  };
+  const transport = useScrubTransport();
 
   return (
     <WebGLWaveform
@@ -112,109 +105,23 @@ function Kbd({ k }: { k: string }) {
   return <kbd className="perf-kbd">{k.toUpperCase()}</kbd>;
 }
 
-function DeckPads({ trackId }: { trackId: number | null }) {
+/** The deck column: shared playback cluster + this view's key-hint slots. */
+function DeckColumn() {
   const { deck } = useDeck();
   const keys = DECK_KEYS[deck];
-  const actions = useHotCueActions(trackId);
-  const previewingSlot = useDeckSnapshot((s) => s.hotCuePreviewSlot);
 
   return (
-    <div className="perf-pads">
-      {[1, 2, 3, 4, 5, 6, 7, 8].map((slot) => (
-        <span key={slot} className="perf-pad-wrap">
-          <HotCue
-            slotNumber={slot}
-            hotCue={actions.bySlot.get(slot)}
-            disabled={!actions.enabled}
-            isPreviewing={previewingSlot === slot}
-            onDown={actions.down}
-            onUp={actions.up}
-            onDelete={actions.remove}
-          />
-          {slot <= 4 && <Kbd k={keys.pads[slot - 1]} />}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-/** Beatjump row: jump back, halve size, [size], double size, jump forward. */
-function BeatjumpRow() {
-  const { deck, engine, beatjumpBeats, setBeatjumpBeats } = useDeck();
-  const keys = DECK_KEYS[deck];
-  const ready = useDeckReady();
-
-  return (
-    <div className="perf-jumprow">
-      <button
-        className="player-button"
-        disabled={!ready}
-        onClick={() => engine.jumpBeats(-beatjumpBeats)}
-        title={`Jump back ${beatjumpBeats} beats`}
-      >
-        ◄◄
-        <Kbd k={keys.jumpBack} />
-      </button>
-      <button
-        className="player-button"
-        onClick={() => setBeatjumpBeats(halveBeatjump(beatjumpBeats))}
-        title="Halve beatjump size"
-      >
-        −
-      </button>
-      <span className="perf-jumpsize" title="Beatjump size (beats)">
-        {beatjumpBeats}
-      </span>
-      <button
-        className="player-button"
-        onClick={() => setBeatjumpBeats(doubleBeatjump(beatjumpBeats))}
-        title="Double beatjump size"
-      >
-        +
-      </button>
-      <button
-        className="player-button"
-        disabled={!ready}
-        onClick={() => engine.jumpBeats(beatjumpBeats)}
-        title={`Jump forward ${beatjumpBeats} beats`}
-      >
-        ►►
-        <Kbd k={keys.jumpForward} />
-      </button>
-    </div>
-  );
-}
-
-function TransportBlock() {
-  const { deck, engine } = useDeck();
-  const keys = DECK_KEYS[deck];
-  const ready = useDeckReady();
-  const previewing = useDeckSnapshot((s) => s.previewing);
-  const playing = useDeckSnapshot((s) => s.playing || s.pendingPlay);
-
-  return (
-    <div className="perf-transport-block">
-      <button
-        className={`player-button player-button-cue${previewing ? ' player-button-cue-held' : ''}`}
-        disabled={!ready}
-        onPointerDown={(e) => {
-          if (!ready) return;
-          e.currentTarget.setPointerCapture(e.pointerId);
-          engine.cueDown();
-        }}
-        onPointerUp={() => ready && engine.cueUp()}
-      >
-        CUE
-        <Kbd k={keys.cue} />
-      </button>
-      <button
-        className={`player-button ${playing ? 'player-button-playing' : 'player-button-paused'}`}
-        disabled={!ready}
-        onClick={() => engine.togglePlay()}
-      >
-        ⏯
-        <Kbd k={keys.play} />
-      </button>
+    <div className="perf-deck-column">
+      <div className="perf-pads">
+        <HotCuePads padKbd={(slot) => (slot <= 4 ? <Kbd k={keys.pads[slot - 1]} /> : null)} />
+      </div>
+      <BeatjumpRow
+        backKbd={<Kbd k={keys.jumpBack} />}
+        forwardKbd={<Kbd k={keys.jumpForward} />}
+      />
+      <div className="perf-transport-block">
+        <TransportPair cueKbd={<Kbd k={keys.cue} />} playKbd={<Kbd k={keys.play} />} />
+      </div>
     </div>
   );
 }
@@ -393,7 +300,7 @@ function TempoCluster({ track }: { track: Track | null }) {
           onPointerUp={bendEnd}
           onPointerCancel={bendEnd}
         >
-          ◄
+          ◀◀
           <Kbd k={keys.nudgeBack} />
         </button>
         <button
@@ -404,7 +311,7 @@ function TempoCluster({ track }: { track: Track | null }) {
           onPointerUp={bendEnd}
           onPointerCancel={bendEnd}
         >
-          ►
+          ▶▶
           <Kbd k={keys.nudgeForward} />
         </button>
       </div>
@@ -517,11 +424,7 @@ export function DeckPanel({
         />
       </div>
       <div className="perf-deck-controls">
-        <div className="perf-deck-column">
-          <DeckPads trackId={track?.id ?? null} />
-          <BeatjumpRow />
-          <TransportBlock />
-        </div>
+        <DeckColumn />
         <BeatgridBlock track={track} />
         <TempoCluster track={track} />
       </div>

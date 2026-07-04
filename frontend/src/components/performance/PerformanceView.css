@@ -102,29 +102,7 @@
   border: 1px solid var(--surface1);
 }
 
-/* Beatjump row: jump / halve / [size] / double / jump */
-.perf-jumprow {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto 1fr;
-  gap: 4px;
-  align-items: stretch;
-}
-
-.perf-jumprow .player-button {
-  min-width: 24px;
-  font-size: 12px;
-}
-
-.perf-jumpsize {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 34px;
-  border: 1px solid var(--surface1);
-  color: var(--yellow);
-  font-weight: 700;
-  font-size: 13px;
-}
+/* Beatjump row styles are shared: components/deckControls/deckControls.css */
 
 /* Square transport block (library-player style): CUE / PLAY rows */
 .perf-transport-block {
@@ -417,7 +395,6 @@
   border: 1px solid var(--overlay0);
 }
 
-.perf-jumprow .player-button,
 .perf-transport-block .player-button,
 .perf-nudge .player-button {
   position: relative;

@@ -1,0 +1,32 @@
+/* Shared deck-control cluster styles (deck-controls PRD, playback class).
+   Density stays the player-button idiom; views add their own container
+   grids around the fragments. */
+
+/* Beatjump row: jump / 1/2 / [size] / x2 / jump */
+.deck-jumprow {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto 1fr;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.deck-jumprow .player-button {
+  min-width: 24px;
+  font-size: 12px;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative; /* anchors on-control key hints (perf-kbd) */
+}
+
+.deck-jumpsize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  border: 1px solid var(--surface1);
+  color: var(--yellow);
+  font-weight: 700;
+  font-size: 13px;
+}

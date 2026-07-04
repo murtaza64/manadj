@@ -5,7 +5,7 @@ import { DeckEngine } from '../playback/DeckEngine';
 import { Mixer } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 import { isAudible, registerSurface, unregisterSurface } from '../playback/audibleSurface';
-import { PERFORMANCE_BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
+import { BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
 import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
 import { MixerContext } from '../hooks/useMixer';
@@ -79,8 +79,8 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     B: null,
   });
   const [beatjumps, setBeatjumps] = useState<Record<ChannelId, number>>({
-    A: PERFORMANCE_BEATJUMP_DEFAULT,
-    B: PERFORMANCE_BEATJUMP_DEFAULT,
+    A: BEATJUMP_DEFAULT,
+    B: BEATJUMP_DEFAULT,
   });
 
   const loadTrackOnto = useCallback(
