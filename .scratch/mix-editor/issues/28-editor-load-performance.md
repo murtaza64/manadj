@@ -1,7 +1,8 @@
 # 28 — Editor load performance: buffer cache + draw before decode
 
-Status: ready-for-agent (diagnosed 2026-07-04 with the user; spec agreed —
-cache + draw-before-decode, behavior otherwise identical)
+Status: ready-for-human (implemented, change slnsqunq — verify by eye:
+mode-switch into the editor should render waveforms/envelopes instantly;
+refresh-into-editor should draw the timeline before audio decode lands)
 
 ## Parent
 
@@ -41,16 +42,18 @@ envelopes render.
 
 - [ ] Mode-switch into the editor with both tracks loaded on shared
       decks: waveforms + envelopes render with no perceptible decode wait
+      — BY EYE
 - [ ] Refresh straight into the editor: each track fetch+decodes ONCE
-      (network tab / instrumentation), timeline draws before decode
-      completes
-- [ ] Transport still gated on decoded audio (no play against a missing
-      buffer); park-after-ready behavior unchanged
-- [ ] Cache is bounded (LRU 4) and per-track replaced on audio change
-      (track-identity/02 replace-audio should invalidate — note the hook)
-- [ ] No behavior change in library/performance views (they load the
-      same engines through the same path)
-- [ ] tsc, eslint on touched files, vitest green
+      (network tab), timeline draws before decode completes — BY EYE
+- [x] Transport still gated on decoded audio (engine `ready` semantics
+      untouched; cached path lands at loadState 'ready' with a real
+      buffer); park-after-ready unchanged
+- [x] Cache bounded (LRU 4, tested: eviction/refresh/replace/invalidate);
+      `invalidateCachedBuffer(trackId)` exported as the replace-audio
+      hook (track-identity/02)
+- [x] Library/performance unchanged — same engines, same path, they just
+      hit the cache too (cached-load + uncached-fallback engine tests)
+- [x] tsc, eslint, vitest 217 green
 
 ## Blocked by
 

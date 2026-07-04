@@ -1,6 +1,8 @@
 # 29 — Swap track load order (A ⇄ B)
 
-Status: ready-for-agent (filed 2026-07-04 at the user's request)
+Status: ready-for-human (implemented, change zkloymkv — verify by eye: ⇄
+button next to the play button; swap, check the reversed pair seeds its
+own Transitions, swap back, original set intact)
 
 ## Parent
 
@@ -28,16 +30,16 @@ Semantics (Transitions are directional — glossary):
 ## Acceptance criteria
 
 - [ ] One click swaps both decks (editor + shared mirror), loads settle,
-      playhead parks per the normal transition-load choreography
-- [ ] Saved Transitions for the ORIGINAL direction are untouched (flushed,
-      not lost — verify by swapping back)
-- [ ] The reversed pair's own saved Transitions (if any) load; otherwise a
-      fresh pristine session (no trace unless edited)
-- [ ] Buffer reuse: with issue 28's cache, a swap costs zero re-decodes
-      (works without 28, just slower)
-- [ ] Disabled when fewer than two tracks are loaded
-- [ ] tsc, eslint on touched files, vitest green (store-level test for
-      the flush-then-reseed sequence if a store seam is touched)
+      playhead parks per the normal transition-load choreography — BY EYE
+- [x] Saved Transitions for the ORIGINAL direction are untouched: swap is
+      two assignTracks → pairKey reverses → store.loadPair (flush-before-
+      reseed already pinned by editorStore tests)
+- [ ] The reversed pair's own saved Transitions (if any) load; otherwise
+      a fresh pristine session — BY EYE (store behavior tested)
+- [x] Buffer reuse: swap costs zero re-decodes via issue 28's cache
+- [x] Disabled when fewer than two tracks are loaded
+- [x] tsc, eslint, vitest 217, build green (no store seam touched — swap
+      is shell glue over assignTrack + loadPair)
 
 ## Blocked by
 

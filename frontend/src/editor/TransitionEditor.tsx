@@ -198,6 +198,19 @@ function TransitionEditorInner() {
     [store, player]
   );
 
+  // Swap the loaded pair (issue 29): A's track to deck B and vice versa —
+  // one gesture instead of two re-loads when the pair is backwards. The
+  // pair key reverses, so the session re-seeds from the REVERSED pair's
+  // saved Transitions via the normal loadPair rules (old direction flushes
+  // first; nothing is mirrored — direction is meaning).
+  const swapDecks = useCallback(() => {
+    const a = trackA;
+    const b = trackB;
+    if (!a || !b) return;
+    assignTrack('A', b);
+    assignTrack('B', a);
+  }, [trackA, trackB, assignTrack]);
+
   // Deck B slides (issue 11): hot cue / beat jump gestures realign the
   // pair. The store mutates (player follows synchronously); the audio-side
   // re-park stays here — playhead's mix position never moves.
@@ -375,6 +388,8 @@ function TransitionEditorInner() {
               trackATitle={trackA?.title ?? 'A'}
               trackBTitle={trackB?.title ?? 'B'}
               pairLoaded={pairKey !== null}
+              onSwapDecks={swapDecks}
+              canSwapDecks={trackA !== null && trackB !== null}
             />
 
             <DeckCard
@@ -424,6 +439,8 @@ function EditorCenterPanel({
   trackATitle,
   trackBTitle,
   pairLoaded,
+  onSwapDecks,
+  canSwapDecks,
 }: {
   store: EditorStore;
   player: MixPlayer;
@@ -434,6 +451,9 @@ function EditorCenterPanel({
   trackATitle: string;
   trackBTitle: string;
   pairLoaded: boolean;
+  /** Swap the loaded pair A ⇄ B (issue 29 — shell owns track assignment). */
+  onSwapDecks: () => void;
+  canSwapDecks: boolean;
 }) {
   // Play-button state rides player/engine emits (transport, loads).
   const [, bump] = useState(0);
@@ -510,7 +530,7 @@ function EditorCenterPanel({
       });
       setSaveModalOpen(false);
     },
-    [tr]
+    [tr, setSaveModalOpen]
   );
 
   // Preconditions: applying needs a loaded pair; authoring additionally
@@ -532,6 +552,14 @@ function EditorCenterPanel({
           onClick={() => player.togglePlay()}
         >
           ⏯
+        </button>
+        <button
+          className="player-button"
+          title="Swap decks (A ⇄ B) — the reversed pair's own Transitions load"
+          disabled={!canSwapDecks}
+          onClick={onSwapDecks}
+        >
+          ⇄
         </button>
         <TransitionSwitcher
           items={store.liveItems()}
