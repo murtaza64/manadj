@@ -77,6 +77,39 @@ vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
 }`,
   },
   {
+    id: 'additive-soft',
+    name: 'Additive RGB, hued core',
+    defaultColors: ADDITIVE_COLORS,
+    source: `
+// Additive, but overlap compresses hue-preservingly instead of clipping to
+// white: where all groups stack (drops), the core keeps the mixed hue —
+// bass-heavy reads warm, hat-heavy reads cool — instead of a flat white slab.
+vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
+  vec3 c = vec3(0.0);
+  if (yA < g.x) c += u_colorLow;
+  if (yA < g.y) c += u_colorMid;
+  if (yA < g.z) c += u_colorHigh;
+  float m = max(c.r, max(c.g, c.b));
+  if (m > 1.0) c *= (1.0 + 0.25 * (m - 1.0)) / m; // mostly hue, a hint of bloom
+  return BG + min(c, vec3(1.0));
+}`,
+  },
+  {
+    id: 'additive-screen',
+    name: 'Additive RGB, screen blend',
+    defaultColors: ADDITIVE_COLORS,
+    source: `
+// Screen-blended stacking: overlap brightens asymptotically, never slams
+// into the clip ceiling — softer core than plain addition.
+vec3 styleColor(float yA, float p, vec3 g, float b[8]) {
+  vec3 c = vec3(0.0);
+  if (yA < g.x) c = 1.0 - (1.0 - c) * (1.0 - 0.82 * u_colorLow);
+  if (yA < g.y) c = 1.0 - (1.0 - c) * (1.0 - 0.82 * u_colorMid);
+  if (yA < g.z) c = 1.0 - (1.0 - c) * (1.0 - 0.82 * u_colorHigh);
+  return BG + c;
+}`,
+  },
+  {
     id: 'layered-opaque',
     name: 'Layered opaque (3Band)',
     defaultColors: [
