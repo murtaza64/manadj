@@ -8,7 +8,7 @@
  * pick-a-side import actions; grid editing stays on the Deck panels.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { WaveformResponse } from '../types';
@@ -23,7 +23,10 @@ import './PerfDiffViewer.css';
 // bright, fully saturated (repo preference) — Library cyan, Engine orange
 const LIBRARY_COLOR = '#00E5FF';
 const ENGINE_COLOR = '#FF6D00';
-const WAVEFORM_COLOR = '#4A4A55';
+// band colors matching WebGLWaveformRenderer's bandColors (low/mid/high)
+const BAND_LOW_COLOR = 'rgb(242, 97, 97)';
+const BAND_MID_COLOR = 'rgb(0, 255, 0)';
+const BAND_HIGH_COLOR = 'rgb(135, 222, 237)';
 
 export interface HotCueVal { slot: number; time: number; label: string | null; color: string | null }
 export interface TempoChangeVal { start_time: number; bpm: number; bar_position: number }
@@ -69,7 +72,10 @@ function Viewer({ waveform, sides, onImport }: {
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const duration = waveform.data.duration;
-  const [win, setWin] = useState({ windowStart: 0, windowSeconds: duration });
+  // The window lives in a ref and drawing goes straight to the canvas on
+  // rAF — zoom/pan never re-renders React, which is what keeps it smooth.
+  const winRef = useRef({ windowStart: 0, windowSeconds: duration });
+  const rafRef = useRef<number | null>(null);
   const dragState = useRef<{ startX: number; startWindow: number } | null>(null);
 
   const libraryMarkers = useMemo(
@@ -97,7 +103,7 @@ function Viewer({ waveform, sides, onImport }: {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
-    const { windowStart, windowSeconds } = win;
+    const { windowStart, windowSeconds } = winRef.current;
     const xOf = (t: number) => ((t - windowStart) / windowSeconds) * width;
 
     // lanes: cue flags above and below the waveform band
@@ -106,22 +112,32 @@ function Viewer({ waveform, sides, onImport }: {
     const waveMid = (waveTop + waveBottom) / 2;
     const waveHalf = (waveBottom - waveTop) / 2;
 
-    // ---- waveform (summed bands, mono silhouette)
+    // ---- waveform: per-pixel-column band maxima, three bands overlaid
+    // back to front, mirrored around the centerline — same technique and
+    // colors as the deck renderer (WebGLWaveformRenderer bandColors)
     const { low, mid, high } = waveform.data.bands;
     const n = low.length;
-    const peakDuration = duration / n;
-    ctx.fillStyle = WAVEFORM_COLOR;
-    ctx.beginPath();
-    const firstPeak = Math.max(0, Math.floor(windowStart / peakDuration));
-    const lastPeak = Math.min(n - 1, Math.ceil((windowStart + windowSeconds) / peakDuration));
-    for (let i = firstPeak; i <= lastPeak; i++) {
-      const amp = Math.min(1, (low[i] + mid[i] + high[i]));
-      const x = xOf(i * peakDuration);
-      const w = Math.max(peakDuration / windowSeconds * width, 1);
-      const h = amp * waveHalf;
-      ctx.rect(x, waveMid - h, w, h * 2);
+    const peaksPerSecond = n / duration;
+    const bands: [number[], string][] = [
+      [low, BAND_LOW_COLOR],
+      [mid, BAND_MID_COLOR],
+      [high, BAND_HIGH_COLOR],
+    ];
+    for (const [peaks, color] of bands) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      for (let px = 0; px < width; px++) {
+        const t0 = windowStart + (px / width) * windowSeconds;
+        const t1 = windowStart + ((px + 1) / width) * windowSeconds;
+        const i0 = Math.max(0, Math.floor(t0 * peaksPerSecond));
+        const i1 = Math.min(n, Math.max(i0 + 1, Math.ceil(t1 * peaksPerSecond)));
+        let amp = 0;
+        for (let i = i0; i < i1; i++) amp = Math.max(amp, peaks[i]);
+        const h = Math.min(1, amp) * waveHalf;
+        if (h > 0.5) ctx.rect(px, waveMid - h, 1, h * 2);
+      }
+      ctx.fill();
     }
-    ctx.fill();
 
     // ---- beatgrid overlays (Library from top, Engine from bottom — the
     // misalignment reads as a vernier at beat-level zoom)
@@ -201,34 +217,59 @@ function Viewer({ waveform, sides, onImport }: {
     // useful context — the waveform response carries it
     drawMain(sides.libraryMaincue ?? waveform.data.cue_point_time, true, LIBRARY_COLOR);
     drawMain(sides.engineMaincue, false, ENGINE_COLOR);
-  }, [win, waveform, sides, libraryMarkers, engineMarkers, duration]);
+  }, [waveform, sides, libraryMarkers, engineMarkers, duration]);
+
+  const scheduleDraw = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      draw();
+    });
+  }, [draw]);
 
   useEffect(() => {
     draw();
-    const onResize = () => draw();
+    const onResize = () => scheduleDraw();
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [draw]);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [draw, scheduleDraw]);
 
-  const timeAtClientX = (clientX: number) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    return win.windowStart + ((clientX - rect.left) / rect.width) * win.windowSeconds;
-  };
+  // Wheel zoom needs preventDefault (the sync view must not scroll under
+  // the viewer) — React's synthetic wheel handlers are passive, so attach
+  // a native non-passive listener.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const { windowStart, windowSeconds } = winRef.current;
+      const anchor = windowStart + ((e.clientX - rect.left) / rect.width) * windowSeconds;
+      const factor = e.deltaY > 0 ? 1.25 : 0.8;
+      winRef.current = zoomWindow(windowStart, windowSeconds, anchor, factor, duration);
+      scheduleDraw();
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, [duration, scheduleDraw]);
 
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const factor = e.deltaY > 0 ? 1.25 : 0.8;
-    setWin(zoomWindow(win.windowStart, win.windowSeconds, timeAtClientX(e.clientX), factor, duration));
-  };
   const onPointerDown = (e: React.PointerEvent) => {
-    dragState.current = { startX: e.clientX, startWindow: win.windowStart };
+    dragState.current = { startX: e.clientX, startWindow: winRef.current.windowStart };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragState.current) return;
     const rect = canvasRef.current!.getBoundingClientRect();
-    const dt = ((dragState.current.startX - e.clientX) / rect.width) * win.windowSeconds;
-    setWin({ ...win, windowStart: panWindow(dragState.current.startWindow, win.windowSeconds, dt, duration) });
+    const { windowSeconds } = winRef.current;
+    const dt = ((dragState.current.startX - e.clientX) / rect.width) * windowSeconds;
+    winRef.current = {
+      windowSeconds,
+      windowStart: panWindow(dragState.current.startWindow, windowSeconds, dt, duration),
+    };
+    scheduleDraw();
   };
   const onPointerUp = () => { dragState.current = null; };
 
@@ -272,7 +313,6 @@ function Viewer({ waveform, sides, onImport }: {
       <canvas
         ref={canvasRef}
         className="pdv-canvas"
-        onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

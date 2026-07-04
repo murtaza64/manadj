@@ -86,3 +86,10 @@ Review follow-ups deferred (judgement calls, not blockers):
 - Consolidate duplicated test fixtures (`make_client`, fakes, helpers) into conftest
 - Collapse `bulk.py`'s four per-field fill/compare/pend blocks into a per-field strategy
 - Type beatgrid `origin` as a `Literal` instead of bare `str`
+
+**2026-07-04 — Post-merge fixes** (jj change `nqzsvywt`, rebased onto the main line — it is now the tip above `zuopmqvq`; base future work on it). User-reported issues fixed:
+1. Diff viewer rendering: 3-band coloring matching the deck renderer (low maroon / mid green / high sky), per-pixel-column peak aggregation (was one rect per peak — jank at full zoom), zoom/pan now ref-based + rAF-throttled with no React re-renders, and wheel zoom uses a native non-passive listener + `overscroll-behavior` so the page no longer scrolls under the viewer.
+2. Textual divergence resolution: grid summaries show BPM at stored resolution (4 decimals, trimmed) and start times at milliseconds (`fmtBpm`/`fmtCueTimeMs`); maincue cells at milliseconds; cue chips get ms tooltips. Previously "175.00 BPM from 0:00.3" could render identically on both sides of a real divergence (display rounding was 10× coarser than the comparison tolerances).
+3. Tiering: maincue-only rows demoted to a new lowest-priority collapsed "Main cue diverged" group; "Beatgrid / hot cues diverged" keeps the high slot; BPM/key ranks above maincue-only. Bulk-import group action available on both perf groups.
+
+Still open for eye-verification by the user: viewer smoothness/colors at deep zoom against a variable-grid track.

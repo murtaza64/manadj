@@ -78,19 +78,20 @@ const IMPORTABLE_UI_FIELDS = new Set(['title', 'artist', 'bpm', 'key', 'energy']
 
 type GroupKey =
   | 'missing-downstream' | 'div-tags' | 'unimported'
-  | 'div-title-artist' | 'div-perf' | 'not-in-library' | 'div-bpm-key';
+  | 'div-title-artist' | 'div-perf' | 'not-in-library' | 'div-bpm-key' | 'div-maincue';
 
-// priority order agreed 2026-07-02: tags > unimported > title/artist >
-// not-in-library > bpm/key (lowest, collapsed by default);
-// performance data slots between title/artist and not-in-library
+// priority order agreed 2026-07-02, perf tiering revised 2026-07-04:
+// beatgrid/hot-cue and key divergences matter more than maincue-only rows —
+// gig main cues diverge in bulk and would otherwise bury everything else
 const GROUPS: { key: GroupKey; label: string; chip: string; collapsedByDefault?: boolean }[] = [
   { key: 'missing-downstream', label: 'Missing downstream', chip: 'missing' },
   { key: 'div-tags', label: 'Tags diverged', chip: 'diverged' },
   { key: 'unimported', label: 'Unimported files', chip: 'unimported' },
   { key: 'div-title-artist', label: 'Title / artist diverged', chip: 'diverged' },
-  { key: 'div-perf', label: 'Performance data diverged', chip: 'diverged' },
+  { key: 'div-perf', label: 'Beatgrid / hot cues diverged', chip: 'diverged' },
   { key: 'not-in-library', label: 'Not in Library', chip: 'import' },
   { key: 'div-bpm-key', label: 'BPM / key diverged', chip: 'diverged-low', collapsedByDefault: true },
+  { key: 'div-maincue', label: 'Main cue diverged', chip: 'diverged-low', collapsedByDefault: true },
 ];
 
 /** Which section a row belongs to. Diverged rows go to their highest-priority
@@ -102,8 +103,9 @@ function groupKeyFor(row: StatusRow): GroupKey | null {
   // energy rides with tags: the Rekordbox tag-export op writes energy colors
   if (fields.has('tags') || fields.has('energy')) return 'div-tags';
   if (fields.has('title') || fields.has('artist')) return 'div-title-artist';
-  if (fields.has('hotcues') || fields.has('beatgrid') || fields.has('maincue')) return 'div-perf';
-  return 'div-bpm-key';
+  if (fields.has('hotcues') || fields.has('beatgrid')) return 'div-perf';
+  if (fields.has('bpm') || fields.has('key')) return 'div-bpm-key';
+  return 'div-maincue'; // maincue-only: lowest tier
 }
 
 interface PendingAction {
@@ -376,7 +378,7 @@ export function UnifiedTracksSync() {
         </span>
       );
     }
-    if (key === 'div-perf') {
+    if (key === 'div-perf' || key === 'div-maincue') {
       // fill-empty tier needs no confirmation (PRD); overwrites come back
       // as the confirm panel
       return (
@@ -847,7 +849,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf }: {
                     : <span className="uts-novalue">no saved grid</span>)
                 : d.field === 'maincue'
                 ? (d.library_value !== null && d.library_value !== undefined
-                    ? fmtCueTime(d.library_value as number)
+                    ? fmtCueTimeMs(d.library_value as number)
                     : <span className="uts-novalue">unset</span>)
                 : fmtValue(d.field, d.library_value) || <span className="uts-novalue">no value</span>}
             </td>
@@ -909,7 +911,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf }: {
                 const hasSaved = d.library_value !== null && d.library_value !== undefined;
                 return (
                   <td key={s.id} className="uts-conflict">
-                    {fmtCueTime(v as number)}
+                    {fmtCueTimeMs(v as number)}
                     {importable && (
                       <button
                         className="uts-microbtn"
@@ -944,6 +946,20 @@ function fmtCueTime(seconds: number): string {
   return `${m}:${(seconds - m * 60).toFixed(1).padStart(4, '0')}`;
 }
 
+/** Millisecond-resolution time for divergence display — comparison
+ * tolerances are 1 ms, so anything coarser can render two genuinely
+ * diverged values as identical text. */
+function fmtCueTimeMs(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  return `${m}:${(seconds - m * 60).toFixed(3).padStart(6, '0')}`;
+}
+
+/** BPM at full stored resolution (4 decimals, trailing zeros trimmed) —
+ * BEATGRID_BPM_TOLERANCE is 0.01, so 2 decimals can mask a divergence. */
+function fmtBpm(bpm: number): string {
+  return bpm.toFixed(4).replace(/\.?0+$/, '');
+}
+
 function cuesRoughlyEqual(a: HotCueVal, b: HotCueVal): boolean {
   // mirrors the backend's whole-set semantics (tolerance is authoritative
   // there; this only drives chip coloring)
@@ -956,7 +972,10 @@ function cuesRoughlyEqual(a: HotCueVal, b: HotCueVal): boolean {
 
 function CueChip({ cue, cls }: { cue: HotCueVal; cls: string }) {
   return (
-    <span className={`uts-tagchip uts-tagchip-${cls}`}>
+    <span
+      className={`uts-tagchip uts-tagchip-${cls}`}
+      title={`${fmtCueTimeMs(cue.time)}${cue.label ? ` — ${cue.label}` : ''}`}
+    >
       {cue.color && <span className="uts-cuedot" style={{ background: cue.color }} />}
       {cue.slot}·{fmtCueTime(cue.time)}{cue.label ? ` ${cue.label}` : ''}
     </span>
@@ -969,14 +988,14 @@ function CueChip({ cue, cls }: { cue: HotCueVal; cls: string }) {
 function GridSummary({ grid }: { grid: BeatgridVal }) {
   const changes = grid.tempo_changes;
   if (changes.length === 1) {
-    return <span>{changes[0].bpm.toFixed(2)} BPM from {fmtCueTime(changes[0].start_time)}</span>;
+    return <span>{fmtBpm(changes[0].bpm)} BPM from {fmtCueTimeMs(changes[0].start_time)}</span>;
   }
   return (
     <span>
       <span className="uts-tagchip uts-tagchip-extra-here" title="manadj rendering honors only the first tempo change for now">
         ⚠ variable grid — {changes.length} tempo changes
       </span>{' '}
-      {changes.map((c) => c.bpm.toFixed(1)).join(' → ')} BPM
+      {changes.map((c) => fmtBpm(c.bpm)).join(' → ')} BPM
     </span>
   );
 }

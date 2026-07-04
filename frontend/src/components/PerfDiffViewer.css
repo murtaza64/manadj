@@ -52,6 +52,7 @@
   height: 220px;
   cursor: grab;
   touch-action: none;
+  overscroll-behavior: none;
 }
 
 .pdv-canvas:active {
