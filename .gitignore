@@ -7,3 +7,4 @@ waveform_tests/
 .venv/
 .claude/
 node_modules/
+.lanes/
