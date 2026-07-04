@@ -13,7 +13,6 @@ from .acquisition import models as acquisition_models  # noqa: F401  (registers 
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
 from .tasks.worker import TaskWorker
-from .waveform_worker import start_waveform_worker, stop_waveform_worker
 from .logging_config import setup_logging
 
 # Configure logging with colors and override uvicorn handlers
@@ -62,26 +61,43 @@ Path("waveforms").mkdir(exist_ok=True)
 app.mount("/waveforms", StaticFiles(directory="waveforms"), name="waveforms")
 
 
+def _waveform_generation_enabled() -> bool:
+    return os.getenv("DISABLE_WAVEFORM_WORKER", "").lower() not in ("true", "1", "yes")
+
+
 def _build_task_worker() -> "TaskWorker | None":
-    """The task worker (ADR-0003) with the download handler, if configured."""
-    from .acquisition.download import download_handler
-    from .acquisition.source import SoundCloudSource
+    """The task worker (ADR-0003): waveform generation always, downloads if configured."""
+    import logging
+
     from .config import get_config
     from .database import SessionLocal
 
-    config = get_config()
-    if not config.soundcloud.oauth_token or not config.library.tracks_directory:
-        import logging
-        logging.getLogger("backend.main").warning(
-            "task worker not started: soundcloud oauth_token or tracks_directory missing"
+    handlers = {}
+
+    if _waveform_generation_enabled():
+        from .waveform_tasks import WAVEFORM_TASK_TYPE, make_waveform_handler
+        handlers[WAVEFORM_TASK_TYPE] = make_waveform_handler()
+    else:
+        logging.getLogger("backend.main").info(
+            "waveform generation disabled via DISABLE_WAVEFORM_WORKER"
         )
-        return None
-    source = SoundCloudSource(config.soundcloud.oauth_token)
-    handlers = {
-        "download": download_handler(
+
+    config = get_config()
+    if config.soundcloud.oauth_token and config.library.tracks_directory:
+        from .acquisition.download import download_handler
+        from .acquisition.source import SoundCloudSource
+
+        source = SoundCloudSource(config.soundcloud.oauth_token)
+        handlers["download"] = download_handler(
             source, Path(config.library.tracks_directory), config.acquisition.cleanup
         )
-    }
+    else:
+        logging.getLogger("backend.main").warning(
+            "download handler not registered: soundcloud oauth_token or tracks_directory missing"
+        )
+
+    if not handlers:
+        return None
     return TaskWorker(SessionLocal, handlers)
 
 
@@ -101,13 +117,16 @@ async def startup_event():
         if _task_worker is not None:
             _task_worker.start()
 
-    # Check if waveform worker is disabled via environment variable
-    if os.getenv("DISABLE_WAVEFORM_WORKER", "").lower() in ("true", "1", "yes"):
-        import logging
-        logging.getLogger("backend.main").info("Waveform worker disabled via DISABLE_WAVEFORM_WORKER environment variable")
-        return
+        # Sweep: any Track still lacking Waveform data gets a task.
+        if _waveform_generation_enabled():
+            from .database import SessionLocal
+            from .waveform_tasks import enqueue_missing_waveforms
 
-    start_waveform_worker()
+            db = SessionLocal()
+            try:
+                enqueue_missing_waveforms(db)
+            finally:
+                db.close()
 
 
 @app.on_event("shutdown")
@@ -115,8 +134,6 @@ async def shutdown_event():
     """Stop background workers on server shutdown."""
     if _task_worker is not None:
         _task_worker.stop()
-    if os.getenv("DISABLE_WAVEFORM_WORKER", "").lower() not in ("true", "1", "yes"):
-        stop_waveform_worker()
 
 
 @app.get("/")

@@ -190,6 +190,9 @@ class LibraryImportManager:
                 # fill file-derived fields (codec/bitrate/filesize/duration)
                 from ..track_metadata.file_facts import refresh_file_facts
                 refresh_file_facts(self.manadj_session)
+                # Imported Tracks get Waveform data via the task system.
+                from ..waveform_tasks import enqueue_missing_waveforms
+                enqueue_missing_waveforms(self.manadj_session)
                 if derive_provenance:
                     from ..acquisition.provenance import derive_and_write_provenance
                     imported_paths = [c.filepath for c in candidates]

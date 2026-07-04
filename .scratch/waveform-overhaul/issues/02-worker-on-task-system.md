@@ -1,6 +1,6 @@
 # 02 — waveform generation on the task system
 
-Status: ready-for-agent
+Status: resolved (wfproto lane, 2026-07-04)
 
 ## Parent
 
@@ -21,3 +21,25 @@ Automatic Waveform data generation moves from the hand-rolled daemon thread (`ba
 ## Blocked by
 
 - `01-v2-blob-generation-and-endpoint.md`
+
+## Comments
+
+**2026-07-04 (wfproto lane, change `knpnytwv`)** — Implemented:
+`backend/waveform_tasks.py` (handler + `enqueue_waveform_task` dedup + `enqueue_missing_waveforms`
+sweep); enqueue chokepoints: `crud.create_track` and Disk Import's post-commit; startup sweep in
+`main.py`; `_build_task_worker` restructured (waveform handler always unless `DISABLE_WAVEFORM_WORKER`,
+download handler config-gated as before — the worker no longer refuses to start without soundcloud
+config); `backend/waveform_worker.py` deleted. Handler has two paths: missing row → full legacy
+generation (behind an injectable seam — audio analysis is ADR-0002-fakeable, keeps librosa out of
+the suite); NULL `data_blob` → fast v2 backfill (tested real).
+
+**Deviations from the issue text**: (a) *serial, not concurrency 2* — the task system is
+single-threaded by design and generation measures ~0.3 s/track; retrofitting concurrent task
+claiming into shared infra wasn't worth it (992-track backfill ≈ 5 min, verified live on the
+sandbox DB). (b) *No per-track progress* — the Task model has no progress field ("if the task
+system supports it" — it doesn't); the generation module's `on_progress` hook exists whenever
+the task system grows one. (c) `populate_waveforms.py` kept as-is — it calls `create_waveform`,
+which now writes blobs too; it retires in issue 06.
+
+Ripple: `test_acquisition_download.py::test_full_chain` now expects 2 processed tasks (download
++ the waveform task its Track creation enqueues). Full suite 452 passed; ruff clean.

@@ -76,7 +76,10 @@ class TestDownloadChain:
 
         processed = run_pending(db_session, make_handlers(source, tracks_dir))
 
-        assert processed == 1
+        # Two tasks: the download, plus the waveform task its Track creation
+        # enqueues (waveform-overhaul issue 02) — unhandled here (no waveform
+        # handler registered), which is fine: it fails without stopping the queue.
+        assert processed == 2
         task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
         assert task.state == "done", task.error
 
