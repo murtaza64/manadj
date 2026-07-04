@@ -208,7 +208,17 @@ export class DeckEngine {
     return this.loadState === 'fetching' || this.loadState === 'decoding';
   }
 
+  /** Arbiter tripwire (ADR 0013): start gestures on a non-audible surface
+   * are warned no-ops — latching play against a suspended clock is the
+   * two-clock drift bug (issue 08) waiting to resume. */
+  private startBlocked(): boolean {
+    if (this.port.mayStart?.() ?? true) return false;
+    console.warn('[DeckEngine] start blocked: surface is not audible (ADR 0013)');
+    return true;
+  }
+
   play(): void {
+    if (this.startBlocked()) return;
     if (this.isLoading()) {
       // Latch the intent; load() fires it when decode completes.
       if (!this.pendingPlay) {
@@ -230,6 +240,8 @@ export class DeckEngine {
   }
 
   togglePlay(): void {
+    const wouldStart = this.isLoading() ? !this.pendingPlay : !this.snapshot.playing;
+    if (wouldStart && this.startBlocked()) return;
     if (this.isLoading()) {
       this.pendingPlay = !this.pendingPlay;
       this.emit();
@@ -253,6 +265,8 @@ export class DeckEngine {
   }
 
   cueDown(): void {
+    // Cue-down starts audio (hold-to-preview) — same tripwire as play.
+    if (this.startBlocked()) return;
     this.dispatch({ type: 'cue-down' });
   }
 

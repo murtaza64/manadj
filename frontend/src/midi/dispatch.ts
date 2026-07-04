@@ -1,52 +1,39 @@
-import type { DeckContextValue } from '../hooks/useDeck';
-import type { ChannelId } from '../playback/mixer';
+import { audibleTransport } from '../playback/audibleSurface';
 import type { MidiAction } from './actions';
 
 /**
- * Thin glue: dispatch translator actions to the same engine methods the
- * keyboard calls (useKeyboardShortcuts) — never synthetic key events. The
- * readiness guards mirror the keyboard's exactly:
- * - transport allows a loading deck (the engine latches play intent, like
- *   Space during a load);
- * - cue requires decoded audio belonging to the loaded Track (the
- *   useDeckReady predicate), like F.
+ * Thin glue: route translator actions to the AUDIBLE SURFACE's transport
+ * (ADR 0013) — never to decks directly, never synthetic key events. The
+ * arbiter answers "who is audible"; dispatch stays view-blind forever.
+ * Hardware mirrors the keyboard of the audible surface: the shared surface
+ * carries the library/performance guards (loading decks latch play, cue
+ * needs decoded audio), the Transition editor maps both PLAYs to its one
+ * mix transport and registers no cue handlers — CUE drops there, like F.
  *
  * This slice handles transport toggle + cue down/up; every other target in
  * the vocabulary is a silent no-op until its slice lands.
  */
-export function dispatchMidiAction(
-  action: MidiAction,
-  decks: Record<ChannelId, DeckContextValue>
-): void {
+export function dispatchMidiAction(action: MidiAction): void {
   // Absolute/relative handlers land in later slices.
   if (action.kind !== 'button') return;
+
+  const transport = audibleTransport();
+  if (!transport) return; // boot-order edge: holder not registered yet
 
   const target = action.target;
   switch (target.control) {
     case 'transport': {
       if (action.edge !== 'down') return;
-      const deck = decks[target.deck];
-      const { loadState } = deck.engine.getSnapshot();
-      if (loadState !== 'ready' && loadState !== 'fetching' && loadState !== 'decoding') return;
-      deck.engine.togglePlay();
+      transport.togglePlay(target.deck);
       return;
     }
     case 'cue': {
-      const deck = decks[target.deck];
-      if (!deckReady(deck)) return;
-      if (action.edge === 'down') deck.engine.cueDown();
-      else deck.engine.cueUp();
+      if (action.edge === 'down') transport.cueDown?.(target.deck);
+      else transport.cueUp?.(target.deck);
       return;
     }
     // Hot cues, beatjump, match, load: later slices.
     default:
       return;
   }
-}
-
-/** Same predicate as useDeckSnapshot's useDeckReady, sans subscription. */
-function deckReady(deck: DeckContextValue): boolean {
-  const id = deck.loadedTrack?.id ?? null;
-  const snapshot = deck.engine.getSnapshot();
-  return id !== null && snapshot.loadState === 'ready' && snapshot.trackId === id;
 }

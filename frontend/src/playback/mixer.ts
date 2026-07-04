@@ -29,6 +29,10 @@ export type ChannelId = 'A' | 'B';
 /** What a deck needs from the audio layer: a live context and its channel input. */
 export interface DeckAudioPort {
   ensureAudio(): { ctx: AudioContext; input: AudioNode };
+  /** Arbiter tripwire (ADR 0013): may this surface start audible playback
+   * right now? Absent = yes. Engines refuse start gestures (warned no-op)
+   * when false, so no gesture path can resume a silenced surface's clock. */
+  mayStart?(): boolean;
 }
 
 /** Per-channel control state, [0,1] except filter [-1,1]. */
@@ -154,6 +158,15 @@ class ChannelStrip {
 }
 
 export class Mixer {
+  /** Answers the ports' arbiter tripwire (ADR 0013). The owner wires it at
+   * construction (`new Mixer(() => isAudible('shared'))`) — the Mixer never
+   * learns which surface it is. Absent = always allowed. */
+  private readonly mayStart?: () => boolean;
+
+  constructor(mayStart?: () => boolean) {
+    this.mayStart = mayStart;
+  }
+
   private ctx: AudioContext | null = null;
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
@@ -234,6 +247,7 @@ export class Mixer {
         const { ctx, strips } = this.ensure();
         return { ctx, input: strips[channel].input };
       },
+      mayStart: this.mayStart,
     };
   }
 

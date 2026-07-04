@@ -1,7 +1,9 @@
 # 07 — Audible-surface arbiter: one owner for the one-clock invariant
 
-Status: ready-for-agent (grilled 2026-07-04 — ADR 0013 is the spec; route
-decision made: hardware transport follows the audible surface)
+Status: ready-for-human (implemented, changes mwwqynuz + nvkwunvl — verify
+by eye: enter the editor mid-playback → shared decks go silent; leave →
+deck play resumes on gesture only. Hardware PLAY-in-editor routing waits
+on the MIDI cable, but the dispatch path is under test.)
 
 ## Parent
 
@@ -39,19 +41,21 @@ state machine (readable outside React):
 
 ## Acceptance criteria
 
-- [ ] Arbiter state machine under vitest (claim/release/displace/idempotent/
-      non-holder release/subscribe), no Web Audio in tests
-- [ ] Hardware/simulated PLAY while the editor is open toggles the
-      editor's MixPlayer and cannot resume the shared context (midi/06's
-      repro); CUE in the editor is dropped
-- [ ] PLAY/CUE in library and performance views behave exactly as today
-- [ ] Editor mount/unmount still silences/restores the shared surface
-      (by eye: enter editor mid-playback → silence; leave → deck play
-      resumes on gesture, not automatically)
-- [ ] `DeckEngine.play()` with a false `mayStart()` is a warned no-op
-      (unit test at the port seam)
-- [ ] midi/06 closed by this issue; dispatch tests updated
-- [ ] tsc, eslint on touched files, vitest green
+- [x] Arbiter state machine under vitest (10 tests: claim/release/displace/
+      idempotent/non-holder release/unregister-holder/subscribe), no Web
+      Audio in tests
+- [x] Simulated PLAY while the editor is claimed routes to the editor
+      transport (both decks → one mix toggle) and never reaches the shared
+      decks; CUE in the editor is dropped (dispatch tests). Hardware rerun
+      pending the cable (midi/01's session).
+- [x] PLAY/CUE in library/performance route to the shared transport with
+      the exact old guards (moved verbatim into the 'shared' handle)
+- [ ] Editor mount/unmount silences/restores the shared surface — BY EYE
+- [x] `DeckEngine.play()`/`togglePlay()`/`cueDown()` with a false
+      `mayStart()` are warned no-ops (port-seam tests); portless behavior
+      unchanged
+- [x] midi/06 closes with this issue (status updated); dispatch tests added
+- [x] tsc, eslint on touched files, vitest 197 green
 
 ## Blocked by
 

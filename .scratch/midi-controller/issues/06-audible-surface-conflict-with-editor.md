@@ -1,8 +1,9 @@
 # 06 — MIDI dispatch conflicts with the editor's one-audible-surface invariant
 
-Status: ready-for-agent (fix vehicle: issue 07 — audible-surface arbiter,
-grilled 2026-07-04, ADR 0013. Decision: ROUTE hardware transport to the
-editor's MixPlayer, drop CUE there. Close this when 07 lands.)
+Status: closed (fixed by issue 07 — audible-surface arbiter, ADR 0013,
+change nvkwunvl. Hardware transport routes to the editor's MixPlayer, CUE
+drops there; the DeckEngine tripwire makes the two-clock resume
+mechanically impossible. Behavior decided: ROUTE.)
 
 ## Problem
 

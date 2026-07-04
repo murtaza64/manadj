@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
 import { Mixer } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
+import { isAudible, registerSurface, unregisterSurface } from '../playback/audibleSurface';
 import { PERFORMANCE_BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
 import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
@@ -50,7 +51,10 @@ function readStoredLoadedIds(): Record<ChannelId, number | null> {
  */
 export function DeckProvider({ children }: { children: ReactNode }) {
   const [{ mixer, engines }] = useState(() => {
-    const m = new Mixer();
+    // The shared surface's ports answer the arbiter tripwire (ADR 0013):
+    // start gestures are refused while another surface (the editor) holds
+    // audibility, so nothing can resume the suspended shared clock.
+    const m = new Mixer(() => isAudible('shared'));
     return {
       mixer: m,
       engines: {
@@ -214,6 +218,44 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     [scopeA, scopeB]
   );
 
+  // Register the 'shared' audible surface (ADR 0013) — the permanent
+  // default the arbiter falls back to. Transport carries the same readiness
+  // guards MIDI dispatch used to apply inline (loading decks may latch
+  // play, like Space; cue needs decoded audio of the loaded Track, like F).
+  // The registry's identity changes on every Load, so transport reads it
+  // through a ref and registration runs once.
+  const registryRef = useRef(registry);
+  useEffect(() => {
+    registryRef.current = registry;
+  });
+  useEffect(() => {
+    registerSurface('shared', {
+      transport: {
+        togglePlay: (deck) => {
+          const d = registryRef.current[deck];
+          const { loadState } = d.engine.getSnapshot();
+          if (loadState !== 'ready' && loadState !== 'fetching' && loadState !== 'decoding') return;
+          d.engine.togglePlay();
+        },
+        cueDown: (deck) => {
+          const d = registryRef.current[deck];
+          if (deckReadyNow(d)) d.engine.cueDown();
+        },
+        cueUp: (deck) => {
+          const d = registryRef.current[deck];
+          if (deckReadyNow(d)) d.engine.cueUp();
+        },
+      },
+      silence: () => {
+        engines.A.pause();
+        engines.B.pause();
+        mixer.suspend();
+      },
+      wake: () => mixer.resume(),
+    });
+    return () => unregisterSurface('shared');
+  }, [engines, mixer]);
+
   // Throwaway dev handle (performance-mode issue 02): deck B has no UI until
   // issue 03, so it is verified from the console, e.g.
   //   __manadj.loadTrackById('B', 42).then(() => __manadj.engines.B.play())
@@ -240,6 +282,13 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       </DeckRegistryContext.Provider>
     </MixerContext.Provider>
   );
+}
+
+/** Same predicate as useDeckSnapshot's useDeckReady, sans subscription. */
+function deckReadyNow(deck: DeckContextValue): boolean {
+  const id = deck.loadedTrack?.id ?? null;
+  const snapshot = deck.engine.getSnapshot();
+  return id !== null && snapshot.loadState === 'ready' && snapshot.trackId === id;
 }
 
 /**

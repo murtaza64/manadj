@@ -15,7 +15,12 @@ import type { LibraryBrowseHandle } from '../components/Library';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
-import { useMixer } from '../hooks/useMixer';
+import {
+  claimAudible,
+  registerSurface,
+  releaseAudible,
+  unregisterSurface,
+} from '../playback/audibleSurface';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
@@ -317,24 +322,33 @@ function TransitionEditorInner() {
   };
 
   // One audible surface AND one running audio clock at a time (issue 08):
-  // a second live AudioContext makes both contexts' clocks stutter, which
-  // the drift corrector converts into audible re-seeks. Suspend the shared
-  // Mixer's context while the editor is mounted; deck play resumes it on
-  // demand after we leave.
-  const sharedMixer = useMixer();
+  // claim audibility while mounted (ADR 0013). The arbiter silences the
+  // shared surface (pauses both decks, suspends its context) and restores
+  // it on release; hardware transport routes to the MixPlayer meanwhile
+  // (both PLAYs = the one mix transport, keyboard-parity with Space; CUE
+  // has no editor meaning and drops, like F).
   useEffect(() => {
-    sharedMixer.suspend();
-    return () => sharedMixer.resume();
-  }, [sharedMixer]);
+    registerSurface('editor', {
+      transport: { togglePlay: () => player.togglePlay() },
+      silence: () => {
+        player.pause();
+        player.mixer.suspend();
+      },
+      wake: () => player.mixer.resume(),
+    });
+    claimAudible('editor');
+    return () => {
+      releaseAudible('editor');
+      unregisterSurface('editor');
+    };
+  }, [player]);
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh
   // straight into the editor — provider restore may still be in flight);
-  // otherwise the deck stays empty. Pause both shared decks — one audible
-  // surface at a time.
+  // otherwise the deck stays empty. (Silencing the shared surface is the
+  // arbiter's job now — the claim above pauses both shared decks.)
   useEffect(() => {
-    sharedDecks.A.engine.pause();
-    sharedDecks.B.engine.pause();
     const last = localStorage.getItem(LAST_PAIR_KEY);
     const lastIds = last ? last.split(':').map(Number) : null;
     for (const [deck, i] of [['A', 0], ['B', 1]] as const) {
