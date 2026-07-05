@@ -80,7 +80,7 @@ async function recompute(): Promise<void> {
     await mixer.setMasterSinkId(null).catch(() => undefined);
   }
   try {
-    await mixer.setCueSinkId(resolved.cueSinkId);
+    await mixer.setCueSinkId(resolved.cueSinkId, resolved.cuePair);
   } catch (err) {
     // setCueSinkId already disabled itself; just surface it.
     console.warn('[routing] cue sink failed; cue bus disabled', err);

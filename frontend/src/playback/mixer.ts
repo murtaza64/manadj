@@ -36,6 +36,7 @@ import {
 } from './graph';
 import type { EqBand } from './graph';
 import { CueBridge } from './cueBridge';
+import type { OutputPair } from './routing';
 import {
   channelFaderToGain,
   crossfaderGains,
@@ -241,6 +242,8 @@ export class Mixer {
   /** Cue bus output device (headphone-cue 02); null = Cue bus disabled —
    * PFL state still toggles, it just reaches no ears (PRD). */
   private cueSinkId: string | null = null;
+  /** Output pair on the cue sink; null = device default / bridge auto. */
+  private cuePair: OutputPair | null = null;
   private cueLevel = CUE_LEVEL_DEFAULT; // 0..1, session-scoped like the rest
   private cueMix = CUE_MIX_DEFAULT; // 0 (cue only) .. 1 (master only)
 
@@ -314,7 +317,7 @@ export class Mixer {
         });
       }
       if (this.cueSinkId !== null) {
-        void cueBridge.setSink(this.cueSinkId).catch((err: unknown) => {
+        void cueBridge.setSink(this.cueSinkId, this.cuePair).catch((err: unknown) => {
           // Cue device gone at revival: Cue bus disabled, master unaffected.
           console.warn('[Mixer] cue sink reapply failed; cue disabled', err);
           this.cueSinkId = null;
@@ -503,24 +506,28 @@ export class Mixer {
   }
 
   /**
-   * Route the Cue bus to an output device over the bridge; null tears the
-   * delivery down (Cue bus disabled — PFL state keeps toggling, silently).
-   * Rejects (and stays disabled) if the device is gone; master is never
-   * affected by cue routing.
+   * Route the Cue bus to an output device over the bridge, optionally on
+   * an explicit output pair (picker "(outs 3/4)" entries; null = device
+   * default / auto). null sink tears the delivery down (Cue bus disabled —
+   * PFL state keeps toggling, silently). Rejects (and stays disabled) if
+   * the device is gone; master is never affected by cue routing.
    */
-  async setCueSinkId(sinkId: string | null): Promise<void> {
+  async setCueSinkId(sinkId: string | null, pair: OutputPair | null = null): Promise<void> {
     if (sinkId === null) {
       this.cueSinkId = null;
+      this.cuePair = null;
       this.cueBridge?.stop();
       this.notify();
       return;
     }
     this.ensure(); // the bridge exists after this
     try {
-      await this.cueBridge!.setSink(sinkId);
+      await this.cueBridge!.setSink(sinkId, pair);
       this.cueSinkId = sinkId;
+      this.cuePair = pair;
     } catch (err) {
       this.cueSinkId = null;
+      this.cuePair = null;
       throw err;
     } finally {
       this.notify();

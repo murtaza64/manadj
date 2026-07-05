@@ -6,6 +6,11 @@
  * the select red, so the choice survives replugging — resolution handles
  * the fallback live (routingStore).
  *
+ * The CUE list splits multichannel interfaces into explicit stereo pairs
+ * (cueOutputOptions — the Inpulse: "(outs 1/2)" rear RCA, "(outs 3/4)"
+ * front headphone jack); MASTER keeps whole-device entries (non-default
+ * master pairs are the single-context optimization ADR 0017 defers).
+ *
  * Devices are (re-)enumerated when a select is pressed — the moment labels
  * may get unlocked — never at boot for unrouted setups (permission prompt
  * hygiene, see routingStore). A freshly plugged device can need two clicks:
@@ -19,6 +24,7 @@ import {
   setMasterDevice,
   subscribeRouting,
 } from '../playback/routingStore';
+import { cueOutputOptions, sameCueChoice } from '../playback/routing';
 import type { SavedDevice } from '../playback/routing';
 
 function BusSelect({
@@ -26,15 +32,19 @@ function BusSelect({
   noneLabel,
   saved,
   missing,
+  options,
   onPick,
 }: {
   label: string;
   noneLabel: string;
   saved: SavedDevice | null;
   missing: boolean;
+  /** The choosable entries; option values are indexes into this list. */
+  options: readonly SavedDevice[];
   onPick: (device: SavedDevice | null) => void;
 }) {
-  const { devices } = useSyncExternalStore(subscribeRouting, getRoutingSnapshot);
+  const savedIndex =
+    saved === null ? -1 : options.findIndex((option) => sameCueChoice(option, saved));
   return (
     <label
       className={`topbar-routing-bus${missing ? ' missing' : ''}`}
@@ -46,22 +56,24 @@ function BusSelect({
     >
       <span className="topbar-routing-label">{label}</span>
       <select
-        value={saved?.deviceId ?? ''}
+        value={saved === null ? '' : savedIndex >= 0 ? String(savedIndex) : 'saved'}
         onPointerDown={() => void refreshRouting()}
         onChange={(e) => {
-          const id = e.target.value;
-          if (id === '') return onPick(null);
-          const device = devices.find((d) => d.deviceId === id);
-          if (device) onPick({ deviceId: device.deviceId, label: device.label });
+          const value = e.target.value;
+          if (value === '') return onPick(null);
+          const option = options[Number(value)];
+          if (option) onPick(option);
         }}
       >
         <option value="">{noneLabel}</option>
-        {saved && missing && (
-          <option value={saved.deviceId}>{saved.label} (missing)</option>
+        {/* The saved choice when it matches nothing enumerable (unplugged,
+            or a pair the device no longer has) — kept so it survives. */}
+        {saved !== null && savedIndex < 0 && (
+          <option value="saved">{saved.label} (missing)</option>
         )}
-        {devices.map((d) => (
-          <option key={d.deviceId} value={d.deviceId}>
-            {d.label || d.deviceId}
+        {options.map((option, i) => (
+          <option key={`${option.deviceId}:${option.pair?.left ?? 'd'}`} value={String(i)}>
+            {option.label || option.deviceId}
           </option>
         ))}
       </select>
@@ -70,7 +82,10 @@ function BusSelect({
 }
 
 export function AudioRoutingPicker() {
-  const { prefs, resolved } = useSyncExternalStore(subscribeRouting, getRoutingSnapshot);
+  const { prefs, resolved, devices } = useSyncExternalStore(
+    subscribeRouting,
+    getRoutingSnapshot
+  );
   return (
     <div className="topbar-routing">
       <BusSelect
@@ -78,6 +93,7 @@ export function AudioRoutingPicker() {
         noneLabel="System default"
         saved={prefs.master}
         missing={resolved.masterMissing}
+        options={devices.map((d) => ({ deviceId: d.deviceId, label: d.label, pair: null }))}
         onPick={setMasterDevice}
       />
       <BusSelect
@@ -85,6 +101,7 @@ export function AudioRoutingPicker() {
         noneLabel="Off"
         saved={prefs.cue}
         missing={resolved.cueMissing}
+        options={cueOutputOptions(devices)}
         onPick={setCueDevice}
       />
     </div>
