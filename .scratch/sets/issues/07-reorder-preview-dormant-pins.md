@@ -23,3 +23,22 @@ During a drag, the overview ladder recomputes optimistically for the hypothetica
 ## Blocked by
 
 - 03-planner-overview-ladder
+
+## Comments
+
+**2026-07-05 — obligations from issues 08 + 12 (lane setpins).** Dormant
+pins don't exist yet, so three lifecycle behaviors were deferred here:
+
+1. **Drop Dormant pins referencing deleted artifacts** (12's deferred
+   criterion): wire Dormant storage into `degrade_pins`
+   (`backend/routers/sets.py`), which currently nulls only active
+   set_entries pins on Take delete / Transition pair-replace delete.
+2. **Re-point Dormant Take pins at promotion** (08): the rewrite in
+   `set_promoted` (`backend/routers/takes.py`) — and its client mirror
+   `repointTakePinsLocal` in `setStore.ts` — cover only active pins;
+   Dormant storage must join both.
+3. **Reconcile with `insertTrackIntoSet`** (`setStore.ts`, from issue
+   10): insert leaves the predecessor's pin on its entry (rides along,
+   degrades to an unresolved display for the new pair). Under Dormant
+   semantics that pin should presumably become a Dormant pin for the
+   original ordered pair instead of squatting on the new adjacency.
