@@ -8,12 +8,13 @@ import { connectedControllers, subscribeControllers } from '../midi/connectionSt
 import { AudioRoutingPicker } from './AudioRoutingPicker';
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition' | 'sync' | 'styles';
+export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles';
 
 const MODES: { id: AppMode; icon: string; title: string }[] = [
   { id: 'library', icon: '≡', title: 'Library' },
   { id: 'performance', icon: '▸', title: 'Performance' },
   { id: 'transition', icon: '⋈', title: 'Transition editor' },
+  { id: 'history', icon: '↻', title: 'Transition history' },
   { id: 'sync', icon: '⇄', title: 'Sync' },
   { id: 'styles', icon: '◔', title: 'Waveform styles' },
 ];

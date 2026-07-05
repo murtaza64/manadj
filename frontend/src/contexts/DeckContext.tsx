@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
 import { Mixer } from '../playback/mixer';
+import { CaptureRecorder } from '../capture/recorder';
+import { persistTake } from '../capture/takeSink';
 import type { ChannelId } from '../playback/mixer';
 import { isAudible, registerSurface, unregisterSurface } from '../playback/audibleSurface';
 import { deckControlsFor } from '../midi/controlRegistry';
@@ -89,7 +91,15 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // Screen wake lock (screen-wake 01): the display must not dim while a
   // Deck plays.
   useEffect(() => initWakeLockBridge(engines), [engines]);
-
+  // Always-on capture (transition-takes 02, ADR 0020): the recorder taps
+  // this surface's Mixer + decks, the pure detector finds Handovers, and
+  // settled Takes persist to the Transition history. Lives here because
+  // the provider owns the shared surface and outlives every view switch.
+  useEffect(() => {
+    const recorder = new CaptureRecorder(mixer, engines, persistTake);
+    recorder.start();
+    return () => recorder.dispose();
+  }, [engines, mixer]);
   // Dev-only audio routing tracer (headphone-cue 01): console helpers for
   // sink switching + the cue bridge. Lazy import keeps it out of prod.
   useEffect(() => {

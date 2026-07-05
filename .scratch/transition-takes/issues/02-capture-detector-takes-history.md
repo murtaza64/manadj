@@ -37,3 +37,20 @@ None - can start immediately
 ## Further notes
 
 Human checkpoint after landing: the developer practices real mixes and audits the history for false positives/negatives before issue 05's tuning pass. Design detection parameters to be easy to adjust in one place.
+
+## Comments
+
+**Done** (jj change `nxxvnwvm`, lane `takes01`, 2026-07-05). All acceptance criteria met:
+
+- **Event log**: one `CaptureEvent` format (`frontend/src/capture/events.ts`) shared by tap and detector — controls, transport, pitch/bend, loads, ~1 Hz ticks with playhead samples. Monotonic capture clock (audio clock freezes when displaced). In-memory rolling log, pruned (idle 30s / engagement-covering).
+- **Detector**: pure reducer (`detector.ts`, transport.ts house style), 19 scenario tests. Full Handover semantics: overlap + hard-cut (≤2s gap) engagement, cross-cut folding via 8s settle horizon, tease-and-bail dissolution, PFL invisible, mid-blend end (0.5 confidence), lazy handover, chaining, deck-agnostic direction. Audibility = playing × trim × fader × crossfader ≥ threshold, plus EQ-full-kill and filter-ridden-to-end cessations (review finding). Cessation-first edge ordering and cessation-time track snapshot close two attribution races (review findings). Params versioned (`DETECTOR_VERSION 1`), stamped per Take.
+- **Persistence**: `takes` table (migration `0017_nxxvnwvm`), create/list/detail/delete router mirroring transitions; window bounds stored (`window_start_s`/`window_end_s` — review finding: bounds, not bare duration), params + raw slice opaque JSON, `promoted_transition_uuid` column ready for issue 03. 7 TestClient smoke tests.
+- **Tap**: `CaptureRecorder` in DeckProvider (glue, untested by policy) — mixer subscribe diffs (table-driven), deck snapshot diffs, new `DeckEngine.setTransportEventHandler` for playhead discontinuities (seek/jump/hot cue — vectorization evidence for issues 03/04).
+- **History UI**: new top-panel mode (`history`): newest-first table (pair via track titles, when, window length, confidence, promoted mark, delete), live-refreshes on `manadj:take-recorded`.
+
+Known v1 behaviors, deliberate:
+- Entering the editor mid-blend pauses the shared decks and can emit a 0.5-confidence Take — a known false-positive class, kept for issue 05 tuning (recorder.ts doc comment).
+- Settlement lags up to ~1s behind the tick cadence (window bounds stay event-exact); worse in throttled background tabs.
+- A tab crash mid-blend loses that Take (PRD: accepted).
+
+Human checkpoint now open: practice real mixes, audit the history (this is the issue-05 gate).

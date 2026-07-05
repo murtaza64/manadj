@@ -127,6 +127,21 @@ export class DeckEngine {
     this.onCueSet = handler;
   }
 
+  /**
+   * Invoked on playhead DISCONTINUITIES (seek / beat jump / hot cue) —
+   * the transport gestures invisible to snapshot diffs (playing/pitch
+   * flips are; playhead moves aren't). The capture layer's tap
+   * (transition-takes 02): raw-slice evidence for Take vectorization.
+   * Same single-slot, engine-stays-API-ignorant contract as onCueSet.
+   */
+  private onTransportEvent:
+    | ((e: { action: 'seek' | 'jumpBeats' | 'hotCue'; playhead: number; detail?: number }) => void)
+    | null = null;
+
+  setTransportEventHandler(handler: typeof this.onTransportEvent): void {
+    this.onTransportEvent = handler;
+  }
+
   private readonly port: DeckAudioPort;
   /** Varispeed reach, percent. Defaults to the hardware-like fader range;
    * the Transition editor's private decks pass a wider one (templates
@@ -292,7 +307,9 @@ export class DeckEngine {
 
   seek(seconds: number): void {
     if (!this.buffer) return;
-    this.dispatch({ type: 'seek', time: this.clampTime(seconds) });
+    const time = this.clampTime(seconds);
+    this.onTransportEvent?.({ action: 'seek', playhead: time });
+    this.dispatch({ type: 'seek', time });
   }
 
   jumpBeats(beats: number): void {
@@ -300,8 +317,9 @@ export class DeckEngine {
     // BPM-less tracks assume 120 (library-player parity): a usable jump beats
     // a silently dead control.
     const bpm = this.trackInfo?.bpm ?? 120;
-    const target = this.getPlayhead() + beats * (60 / bpm);
-    this.dispatch({ type: 'seek', time: this.clampTime(target) });
+    const target = this.clampTime(this.getPlayhead() + beats * (60 / bpm));
+    this.onTransportEvent?.({ action: 'jumpBeats', playhead: target, detail: beats });
+    this.dispatch({ type: 'seek', time: target });
   }
 
   /** A BPM edit landed for the loaded Track: keep beat-domain math (beat
@@ -324,11 +342,11 @@ export class DeckEngine {
   }
 
   hotCueDown(slot: number, timeSeconds: number | null): void {
-    this.dispatch({
-      type: 'hot-cue-down',
-      slot,
-      time: timeSeconds === null ? null : this.clampTime(timeSeconds),
-    });
+    const time = timeSeconds === null ? null : this.clampTime(timeSeconds);
+    if (time !== null) {
+      this.onTransportEvent?.({ action: 'hotCue', playhead: time, detail: slot });
+    }
+    this.dispatch({ type: 'hot-cue-down', slot, time });
   }
 
   hotCueUp(slot: number, timeSeconds: number | null): void {

@@ -1,0 +1,80 @@
+/* Transition history (transition-takes 02). Bright saturated accents per
+   project style — cyan ties Takes to the jump/capture family. */
+
+.take-history {
+  padding: 16px 20px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.take-history-empty {
+  color: #888;
+  padding: 32px 8px;
+  font-size: 14px;
+}
+
+.take-history-error {
+  color: #ff2d55;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.take-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.take-history-table th {
+  text-align: left;
+  color: #777;
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 10px;
+  border-bottom: 1px solid #26263a;
+}
+
+.take-history-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #1a1a28;
+}
+
+.take-when {
+  color: #999;
+  white-space: nowrap;
+}
+
+.take-pair {
+  max-width: 0;
+  width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.take-arrow {
+  color: #00e5ff;
+  font-weight: 700;
+}
+
+.take-confidence {
+  color: #00e5ff;
+}
+
+.take-promoted {
+  color: #ffe600;
+}
+
+.take-delete {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.take-delete:hover {
+  color: #ff2d55;
+}

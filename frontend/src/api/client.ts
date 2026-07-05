@@ -859,4 +859,71 @@ export const api = {
       return res.json();
     },
   },
+  takes: {
+    /** The Transition history, newest first — metadata only (the raw
+     * event slice stays behind get(); transition-takes 02, ADR 0020). */
+    list: async (): Promise<TakeRowWire[]> => {
+      const res = await fetch(`${API_BASE}/takes`);
+      if (!res.ok) throw new Error('Failed to fetch takes');
+      return res.json();
+    },
+
+    /** One Take with its evidence (raw capture-event slice + detector
+     * parameter snapshot) — vectorization input (issue 03). */
+    get: async (uuid: string): Promise<TakeDetailWire> => {
+      const res = await fetch(`${API_BASE}/takes/${uuid}`);
+      if (!res.ok) throw new Error(`Failed to fetch take (${res.status})`);
+      return res.json();
+    },
+
+    /** Persist a settled Handover (posted by the capture recorder). */
+    create: async (take: TakeCreateWire): Promise<TakeRowWire> => {
+      const res = await fetch(`${API_BASE}/takes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(take),
+      });
+      if (!res.ok) throw new Error(`Failed to create take (${res.status})`);
+      return res.json();
+    },
+
+    delete: async (uuid: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/takes/${uuid}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete take (${res.status})`);
+    },
+  },
 };
+
+// ── Take wire types (transition-takes 02) ───────────────────────────────
+
+export interface TakeRowWire {
+  uuid: string;
+  a_track_id: number;
+  b_track_id: number;
+  detected_at: string;
+  /** Take window on the capture clock (glossary: the engagement). */
+  window_start_s: number;
+  window_end_s: number;
+  confidence: number;
+  detector_version: number;
+  promoted_transition_uuid: string | null;
+}
+
+export interface TakeDetailWire extends TakeRowWire {
+  /** Opaque evidence: detector-parameter snapshot + raw event slice.
+   * Typed loosely at the wire — the capture module owns the real types. */
+  params: object;
+  events: object[];
+}
+
+export interface TakeCreateWire {
+  uuid: string;
+  a_track_id: number;
+  b_track_id: number;
+  window_start_s: number;
+  window_end_s: number;
+  confidence: number;
+  detector_version: number;
+  params: object;
+  events: object[];
+}

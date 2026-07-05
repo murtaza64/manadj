@@ -348,3 +348,44 @@ class TransitionTemplateItem(BaseModel):
 
 class TransitionTemplateRow(TransitionTemplateItem):
     """A persisted Transition template (GET/POST/PUT response)."""
+
+
+# Take Schemas (transition-takes 02, ADR 0020)
+
+
+class TakeCreate(BaseModel):
+    """A settled Handover, posted by the frontend detector.
+
+    a = outgoing Track, b = incoming. `params` is the detector-parameter
+    snapshot and `events` the raw capture-event slice — both opaque
+    (stored as JSON text, never queried): the evidence, kept re-derivable
+    for detector/vectorizer tuning (issue 05).
+    """
+    uuid: str
+    a_track_id: int
+    b_track_id: int
+    window_start_s: float
+    window_end_s: float
+    confidence: float
+    detector_version: int
+    params: dict
+    events: list[dict]
+
+
+class TakeRow(BaseModel):
+    """History-list metadata (GET response) — no raw slice."""
+    uuid: str
+    a_track_id: int
+    b_track_id: int
+    detected_at: datetime
+    window_start_s: float
+    window_end_s: float
+    confidence: float
+    detector_version: int
+    promoted_transition_uuid: str | None = None
+
+
+class TakeDetail(TakeRow):
+    """One Take with its evidence (GET /{uuid} response)."""
+    params: dict
+    events: list[dict]

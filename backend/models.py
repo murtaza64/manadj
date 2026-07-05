@@ -286,6 +286,56 @@ class TransitionTemplate(Base):
     )
 
 
+class Take(Base):
+    """A detected Handover captured during live playback (ADR 0020,
+    transition-takes 02).
+
+    a = outgoing Track, b = incoming (directional, matching Transitions).
+    Immutable audit data: rows are created by the frontend detector when a
+    Handover settles and only ever deleted or given a promoted-Transition
+    reference (issue 03). The raw event slice and the detector-parameter
+    snapshot are opaque JSON — the evidence, re-derivable as detection and
+    vectorization improve; the queryable columns are the history/tuning
+    metadata. Identity is the client-generated `uuid`.
+    """
+
+    __tablename__ = "takes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    a_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    b_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    detected_at = Column(DateTime, nullable=False, default=func.now())
+    window_start_s = Column(Float, nullable=False)  # capture-clock seconds
+    window_end_s = Column(Float, nullable=False)
+    confidence = Column(Float, nullable=False)
+    detector_version = Column(Integer, nullable=False)
+    params_json = Column(Text, nullable=False)  # detector-parameter snapshot (opaque)
+    events_json = Column(Text, nullable=False)  # raw capture-event slice (opaque)
+    promoted_transition_uuid = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # ORM-level cascade, as on Transition (SQLite FK PRAGMA is off).
+    a_track = relationship(
+        "Track",
+        foreign_keys=[a_track_id],
+        backref=backref("takes_out", cascade="all, delete-orphan"),
+    )
+    b_track = relationship(
+        "Track",
+        foreign_keys=[b_track_id],
+        backref=backref("takes_in", cascade="all, delete-orphan"),
+    )
+
+    __table_args__ = (
+        Index("idx_takes_uuid", "uuid", unique=True),
+        Index("idx_takes_a", "a_track_id"),
+        Index("idx_takes_b", "b_track_id"),
+        Index("idx_takes_detected_at", "detected_at"),
+    )
+
+
 class HotCue(Base):
     __tablename__ = "hotcues"
 

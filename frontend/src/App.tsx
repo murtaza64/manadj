@@ -16,11 +16,12 @@ import { MidiControlRegistrar } from './components/MidiControlRegistrar';
 import { MidiFeedbackBridge } from './components/MidiFeedbackBridge';
 import { AudioRoutingBridge } from './components/AudioRoutingBridge';
 import TransitionEditor from './editor/TransitionEditor';
+import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { ToastProvider } from './components/Toast';
 
 const queryClient = new QueryClient();
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'sync', 'styles'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles'];
 
 // Deep link: ?view=<mode> opens straight into that mode.
 const requestedView = new URLSearchParams(window.location.search).get('view');
@@ -56,6 +57,8 @@ function App() {
                 <PerformanceView />
               ) : view === 'transition' ? (
                 <TransitionEditor />
+              ) : view === 'history' ? (
+                <TakeHistoryView />
               ) : view === 'sync' ? (
                 <SyncView />
               ) : view === 'styles' ? (
