@@ -1,6 +1,9 @@
-/* Performance view (performance-mode issue 03). Design language: library
-   player — square 1px-border buttons, hot-cue squares, muted catppuccin
-   palette from styles/variables.css. Layout per the prototype verdict. */
+/* Performance view — ultra-flat layout (perf-layout 01). Design language:
+   library player — square 1px-border buttons, hot-cue squares, palette from
+   styles/variables.css. Deck = minimap header + one dense band in three
+   zones (TRACK / PLAY / MIX), outer → inner; X-FADER + MASTER strip between
+   the waveforms and the decks; the surface is content-sized and the
+   embedded library takes every remaining pixel. */
 
 .perf-root {
   height: 100%;
@@ -12,40 +15,62 @@
   font-size: 12px;
 }
 
-/* ── Performance surface: top half ────────────────────────────── */
+/* ── Performance surface: content-sized top ───────────────────── */
 
 .perf-surface {
-  height: 50%;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--crust);
   border-bottom: 2px solid var(--surface1);
-  min-height: 0;
 }
 
 .perf-waves { flex-shrink: 0; }
 .perf-waves .waveform-container,
 .perf-waves .waveform-container canvas { height: 76px; }
 
-.perf-middle {
-  flex: 1;
+/* ── Mixer strip: X-FADER centered, MASTER on the right ───────── */
+
+.perf-strip {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  gap: 8px;
-  padding: 8px 12px;
-  min-height: 0;
-  overflow: hidden;
+  align-items: center;
+  padding: 3px 12px;
+  border-top: 1px solid var(--surface0);
+  border-bottom: 1px solid var(--surface0);
+  background: var(--mantle);
 }
 
+.perf-strip-fader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--subtext0);
+  justify-self: center;
+}
+
+.perf-strip > .perf-strip-fader:last-child { justify-self: end; }
+
+.perf-strip-fader input { width: 120px; accent-color: var(--overlay2); }
+.perf-strip-fader.wide input { width: 220px; accent-color: var(--text); }
+
 /* ── Deck panels ──────────────────────────────────────────────── */
+
+.perf-decks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 6px 12px 8px;
+}
 
 .perf-deckpanel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  min-height: 0;
-  padding: 6px 8px;
+  padding: 5px 8px 6px;
   border: 1px solid var(--surface0);
 }
 
@@ -68,170 +93,66 @@
   flex-shrink: 0;
 }
 
-.perf-deck-controls {
-  flex: 1;
+/* ── The band and its zones ───────────────────────────────────── */
+
+.perf-deck-band {
   display: flex;
   align-items: stretch;
-  gap: 14px;
-  min-height: 0;
-}
-
-.perf-deckpanel.mirrored .perf-deck-controls { flex-direction: row-reverse; }
-
-/* Deck column: pads stacked over beatjump row over transport */
-.perf-deck-column {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 170px;
-  flex-shrink: 0;
-  min-height: 0;
-}
-
-/* Hot cue pads: 2 x 4 grid */
-.perf-pads {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: minmax(30px, 1fr);
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.perf-pads .hot-cue {
-  width: auto;
-  border: 1px solid var(--surface1);
-}
-
-/* Beatjump row styles are shared: components/deckControls/deckControls.css */
-
-/* Square transport block (library-player style): CUE / PLAY rows */
-.perf-transport-block {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr;
-  grid-auto-rows: 1fr;
-  gap: 4px;
-  min-height: 64px;
-}
-
-.perf-transport-block .player-button {
-  font-size: 13px;
-  min-width: 0;
-}
-
-/* Beatgrid + BPM block */
-.perf-beatgrid-block {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   gap: 8px;
-  min-width: 0;
-}
-
-.perf-beatgrid-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.perf-beatgrid-label {
-  width: 34px;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--subtext0);
-  flex-shrink: 0;
-}
-
-.perf-bpm-input {
-  width: 56px;
-  background: transparent;
-  border: 1px solid var(--surface1);
-  color: var(--yellow);
-  font-size: 14px;
-  font-weight: 700;
-  padding: 2px 6px;
-  text-align: right;
-}
-
-.perf-bpm-input:disabled { opacity: 0.4; }
-
-.perf-mini {
-  padding: 2px 6px;
-  min-width: 26px;
-  font-size: 11px;
-  height: 24px;
-}
-
-.perf-downbeat { color: var(--blue); border-color: var(--blue); }
-
-.perf-effbpm {
-  color: var(--sapphire);
-  font-size: 12px;
-  font-weight: 700;
-  min-width: 52px;
-}
-
-/* Tempo cluster: MATCH / vertical pitch fader / nudge */
-.perf-tempo-cluster {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
   min-height: 0;
 }
 
-.perf-match { font-size: 9px; min-width: 52px; }
-.perf-match-hint { color: var(--red); border-color: var(--red); }
+.perf-deckpanel.mirrored .perf-deck-band { flex-direction: row-reverse; }
 
-.perf-pitch {
-  flex: 1;
+/* Zones: the visual hierarchy. Persistent (curation — writes to the
+   library) gets the yellow accent; playback zones stay neutral. */
+.perf-zone {
+  position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  font-size: 9px;
-  color: var(--subtext0);
-  min-height: 0;
-}
-
-/* Polarity mirrors hardware: pushing the fader DOWN raises tempo (+). */
-.perf-pitch input {
-  writing-mode: vertical-lr;
-  flex: 1;
-  width: 18px;
-  accent-color: var(--blue);
-}
-
-.perf-nudge { display: flex; gap: 4px; }
-
-.perf-nudge-held {
-  background: var(--surface1);
-  color: var(--yellow);
-  border-color: var(--yellow);
-}
-
-/* Metadata footer */
-.perf-meta-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  border-top: 1px solid var(--surface0);
-  padding-top: 5px;
-}
-
-.perf-deckpanel.mirrored .perf-meta-footer { flex-direction: row-reverse; }
-.perf-deckpanel.mirrored .perf-inline-edit { text-align: right; }
-
-.perf-deckmeta {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
+  gap: 3px;
+  padding: 14px 8px 6px;
+  border: 1px solid var(--surface0);
   min-width: 0;
 }
+
+.perf-zone-label {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--overlay0);
+}
+
+.perf-deckpanel.mirrored .perf-zone-label { left: auto; right: 6px; }
+
+.perf-zone.persistent {
+  border-color: color-mix(in srgb, var(--yellow) 45%, var(--surface0));
+  background: color-mix(in srgb, var(--yellow) 4%, transparent);
+}
+
+.perf-zone.persistent .perf-zone-label { color: var(--yellow); }
+
+/* ── TRACK zone (outer): title / artist / tags / energy / tempo ── */
+
+.perf-zone-track { flex: 1; }
+
+.perf-track-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.perf-track-tempo { margin-top: auto; }
+
+.perf-deckpanel.mirrored .perf-zone-track { align-items: flex-end; }
+.perf-deckpanel.mirrored .perf-track-row,
+.perf-deckpanel.mirrored .perf-tagrow { flex-direction: row-reverse; }
 
 .perf-inline-edit {
+  width: 100%;
   background: transparent;
   border: 1px solid transparent;
   color: var(--subtext1);
@@ -243,17 +164,42 @@
 .perf-inline-edit:hover:not(:disabled) { border-color: var(--surface1); }
 .perf-inline-edit.perf-title { font-weight: 700; font-size: 12px; color: var(--text); }
 
+.perf-deckpanel.mirrored .perf-inline-edit { text-align: right; }
+
+/* Tag pills (read-only — editing is perf-layout issue 02) */
+.perf-tagrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.perf-tag-add {
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--overlay0);
+  font-size: 10px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.perf-tag-add:disabled { opacity: 0.5; cursor: default; }
+
 /* Energy picker: five mini squares, the set one lit */
 .perf-energy-picker { display: flex; gap: 2px; flex-shrink: 0; }
 
 .perf-energy {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 10px;
+  font-size: 9px;
   border: 1px solid var(--surface1);
   background: transparent;
   color: var(--overlay0);
@@ -269,50 +215,91 @@
 .perf-energy.set.energy-4 { color: var(--energy-4); border-color: var(--energy-4); }
 .perf-energy.set.energy-5 { color: var(--energy-5); border-color: var(--energy-5); }
 
-.perf-key { color: var(--sapphire); font-size: 11px; flex-shrink: 0; }
-
-/* ── Mixer: columnar channels, crossfader below ───────────────── */
-
-.perf-mixer {
-  display: flex;
-  flex-direction: column;
+/* Consolidated tempo/grid cluster, shrunk: never drives the zone width */
+.perf-tempo-label {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border: 1px solid var(--surface1);
-  background: var(--mantle);
-  min-height: 0;
+  color: var(--subtext0);
+  flex-shrink: 0;
 }
 
-.perf-mixer-channels {
+.perf-zone-track .deck-bpm { height: 20px; }
+.perf-zone-track .deck-bpm-input { width: 42px; font-size: 11px; padding: 1px 4px; }
+.perf-zone-track .deck-bpm > .player-button { min-width: 20px; padding: 1px 4px; }
+.perf-zone-track .deck-bpm-steps .player-button { min-width: 18px; padding: 0 3px; }
+.perf-zone-track .deck-bpm-steps .player-button svg,
+.perf-zone-track .deck-bpm > .player-button svg { transform: scale(0.85); }
+
+/* ── PLAY zone (middle): transport / pads / beatjump ─────────────
+   Transport order (CUE over PLAY) never mirrors — habit control. */
+
+.perf-zone-play { flex-shrink: 0; }
+
+.perf-play-inner {
   flex: 1;
   display: flex;
-  gap: 18px;
-  min-height: 0;
-}
-
-.perf-channel {
-  display: flex;
-  flex-direction: row;
   align-items: stretch;
-  gap: 8px;
-  min-height: 0;
+  gap: 6px;
 }
 
-.perf-channel.mirrored { flex-direction: row-reverse; }
+.perf-deckpanel.mirrored .perf-play-inner { flex-direction: row-reverse; }
 
-.perf-knob-col {
+.perf-transport {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: 1fr;
+  gap: 4px;
+  width: 56px;
+  min-height: 56px;
+}
+
+.perf-transport .player-button {
+  font-size: 12px;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+}
+
+.perf-padcol {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  min-height: 0;
+  gap: 4px;
 }
 
-.perf-channel-name {
-  font-weight: 800;
-  font-size: 11px;
-  color: var(--subtext0);
+/* Hot cue pads: 2 x 4 grid */
+.perf-pads {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 34px);
+  grid-auto-rows: 1fr;
+  gap: 4px;
+}
+
+.perf-pads .hot-cue {
+  width: auto;
+  padding: 0;
+  border: 1px solid var(--surface1);
+}
+
+.perf-pad-wrap { position: relative; display: flex; }
+.perf-pad-wrap .hot-cue { flex: 1; }
+
+/* Beatjump row styles are shared: components/deckControls/deckControls.css */
+.perf-padcol .deck-jumprow .player-button { padding: 2px 4px; }
+
+/* ── MIX zone (inner): knobs / pitch / vol / readouts + match ──── */
+
+.perf-zone-mix {
+  flex-shrink: 0;
+  width: 240px;
+  justify-content: space-between;
+}
+
+.perf-knobrow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
 }
 
 .perf-knob {
@@ -325,8 +312,8 @@
 }
 
 .perf-knob-dial {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: 1px solid var(--overlay1);
   background: var(--crust);
@@ -346,43 +333,92 @@
   top: 1px;
   left: 50%;
   width: 2px;
-  height: 8px;
+  height: 7px;
   background: var(--text);
   transform: translateX(-50%);
 }
 
-.perf-vfader {
-  flex: 1;
+/* EQ knobs boxed as one unit; TRIM/FLT read as separate utilities */
+.perf-eqbox {
   display: flex;
-  flex-direction: column;
+  gap: 8px;
+  padding: 2px 6px;
+  border: 1px solid var(--surface1);
+}
+
+/* Horizontal sliders. Polarity is universal (right = faster / louder) —
+   sliders never mirror. */
+.perf-hslider {
+  display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   font-size: 8px;
+  font-weight: 700;
   color: var(--subtext0);
-  min-height: 40px;
 }
 
-.perf-vfader input {
-  writing-mode: vertical-lr;
-  direction: rtl;
-  flex: 1;
-  width: 16px;
-  accent-color: var(--overlay2);
-}
+.perf-hslider > span { width: 58px; flex-shrink: 0; }
+.perf-hslider input { flex: 1; min-width: 0; accent-color: var(--overlay2); }
+.perf-hslider.pitch input { accent-color: var(--blue); }
 
-.perf-hfader {
+/* Foot: prominent playback readouts beside MATCH + nudge */
+.perf-mix-foot {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  font-size: 9px;
-  color: var(--subtext0);
+  gap: 4px;
 }
 
-.perf-hfader input { width: 110px; accent-color: var(--overlay2); }
-.perf-hfader.wide input { width: 170px; accent-color: var(--text); }
+.perf-mix-spacer { flex: 1; }
 
-/* On-control key hints (shared map — see performanceKeys.ts) */
+.perf-readout {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.perf-readout-label {
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--overlay0);
+}
+
+.perf-readout-val {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--sapphire);
+  font-variant-numeric: tabular-nums;
+}
+
+.perf-readout-key { color: var(--mauve); }
+
+.perf-mini {
+  padding: 2px 6px;
+  min-width: 26px;
+  font-size: 11px;
+  height: 24px;
+}
+
+.perf-mix-foot .player-button.perf-mini {
+  min-width: 0;
+  padding: 2px 5px;
+  font-size: 9px;
+  height: 22px;
+  position: relative;
+}
+
+.perf-match { flex-shrink: 0; }
+.perf-match-hint { color: var(--red); border-color: var(--red); }
+
+.perf-nudge-held {
+  background: var(--surface1);
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+/* ── On-control key hints (shared map — performanceKeys.ts) ────── */
+
 .perf-kbd {
   position: absolute;
   bottom: -6px;
@@ -394,14 +430,6 @@
   font-weight: 700;
   border: 1px solid var(--overlay0);
 }
-
-.perf-transport-block .player-button,
-.perf-nudge .player-button {
-  position: relative;
-}
-
-.perf-pad-wrap { position: relative; display: flex; }
-.perf-pad-wrap .hot-cue { flex: 1; }
 
 /* Load-lock refusal hint on the deck panel (view policy, issue 04) */
 .perf-lock-hint {

@@ -1,9 +1,10 @@
 /**
- * The Performance view (performance-mode issues 03/04/05): two-deck surface
- * over an embedded Library. Layout per the prototype verdict (PRD Further
- * Notes) — top 50vh: stacked full-width waveforms, then Deck A | Mixer |
- * Deck B; bottom 50vh: the real Library browse surface (browseOnly) with
- * per-row load-to-A/B buttons.
+ * The Performance view (performance-mode issues 03/04/05; layout per
+ * perf-layout 01): two-deck surface over an embedded Library. Top surface
+ * is CONTENT-SIZED — stacked full-width waveforms, the MixerStrip
+ * (X-FADER + MASTER), then Deck A | Deck B (each deck carries its own
+ * channel controls in its MIX zone). The real Library browse surface
+ * (browseOnly, per-row load-to-A/B buttons) takes every remaining pixel.
  *
  * This view owns its keyboard outright (issue 04): per-deck DeckKeys hubs
  * inside each scope, table keys here (↑/↓ navigate, ←/→ load to A/B,
@@ -24,7 +25,7 @@ import type { DeckEngine } from '../../playback/DeckEngine';
 import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
-import { MixerPanel } from './MixerPanel';
+import { MixerStrip } from './MixerStrip';
 import { DeckKeys } from './DeckKeys';
 import { isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
@@ -151,7 +152,7 @@ export function PerformanceView() {
 
   return (
     <div className="perf-root">
-      {/* Performance surface — top half of the viewport */}
+      {/* Performance surface — content-sized; the library gets the rest */}
       <div className="perf-surface">
         <div className="perf-waves">
           <DeckScope deck="A">
@@ -167,12 +168,12 @@ export function PerformanceView() {
             />
           </DeckScope>
         </div>
-        <div className="perf-middle">
+        <MixerStrip />
+        <div className="perf-decks">
           <DeckScope deck="A">
             <DeckPanel lockHint={lockHint === 'A'} />
             <DeckKeys />
           </DeckScope>
-          <MixerPanel />
           <DeckScope deck="B">
             <DeckPanel mirrored lockHint={lockHint === 'B'} />
             <DeckKeys />
@@ -180,8 +181,8 @@ export function PerformanceView() {
         </div>
       </div>
 
-      {/* Browse surface — the real Library, bottom half. All loads (hover
-          buttons, double-click, arrow keys) go through the load lock. */}
+      {/* Browse surface — the real Library, all remaining height. All loads
+          (hover buttons, double-click, arrow keys) go through the load lock. */}
       <LockDimmedLibrary engineA={engineA} engineB={engineB}>
         <DeckScope deck="A">
           <Library browseOnly onLoadToDeck={tryLoad} browseRef={libraryRef} />
