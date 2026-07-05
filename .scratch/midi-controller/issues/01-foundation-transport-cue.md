@@ -1,6 +1,6 @@
 # 01 — Foundation: adapter + translator seam + transport/cue end-to-end
 
-Status: ready-for-human (implemented, change zprmmplk; checks green — HARDWARE verification pending, bindings carry TODO(hardware-verify))
+Status: done (implemented, change zprmmplk; hardware-verified against the physical MK2, change xrunwzzz — PLAY/CUE on both decks confirmed, full learned mapping applied, MIDI inspector added at /midi-inspect)
 
 ## Parent
 

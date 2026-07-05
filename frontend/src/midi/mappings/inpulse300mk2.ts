@@ -3,49 +3,300 @@ import type { Mapping } from '../mapping';
 /**
  * Hercules DJControl Inpulse 300 MK2 (glossary: Controller, Mapping).
  *
- * The device's exact MIDI implementation is established empirically against
- * the hardware; this file is the single place that knowledge lives (PRD
- * further notes). Every number below is a placeholder taken from the Mixxx
- * mapping for the (MK1) DJControl Inpulse 300
- * (mixxxdj/mixxx res/controllers/Hercules_DJControl_Inpulse_300.midi.xml:
- * deck A play/cue = status 0x91 notes 0x07/0x06, deck B = status 0x92 same
- * notes — i.e. MIDI channels 1 and 2, not 0 and 1) and must be confirmed
- * against the physical MK2.
+ * Learned against the physical device via the Web MIDI inspector. Channels
+ * are the app's 0-based status-byte low nibble, not human MIDI channel names.
  *
- * Port name: Mixxx identifies the MK1 as "DJControl Inpulse 300"; the MK2
- * is expected to enumerate as "DJControl Inpulse 300 MK2" (possibly with an
- * OS-specific prefix/suffix), so we match the common substring. Casing is
- * assumed to match Hercules' branding — verify against
- * navigator.requestMIDIAccess() port names on the real device.
+ * The MK2 enumerated as "DJControl Inpulse 300 Mk2" on macOS. Keep the
+ * common substring so OS-specific suffixes and MK1/MK2 casing differences do
+ * not break matching.
+ *
+ * Shifted controls are hardware-layered: SHIFT emits its own note and shifted
+ * controls emit distinct messages. Only verified unshifted bindings live here
+ * until each shifted function has a manadj target.
  */
 export const INPULSE_300_MK2: Mapping = {
   portNameMatch: 'DJControl Inpulse 300',
   bindings: [
-    // Deck A: notes on channel 1 (status 0x91/0x81, per Mixxx).
+    // Transport.
     {
-      // TODO(hardware-verify): deck A PLAY, note 0x07 on ch 1.
       match: { message: 'note', channel: 1, number: 0x07 },
       controlType: 'button',
       target: { control: 'transport', deck: 'A' },
     },
     {
-      // TODO(hardware-verify): deck A CUE, note 0x06 on ch 1.
       match: { message: 'note', channel: 1, number: 0x06 },
       controlType: 'button',
       target: { control: 'cue', deck: 'A' },
     },
-    // Deck B: same note numbers on channel 2 (status 0x92/0x82, per Mixxx).
     {
-      // TODO(hardware-verify): deck B PLAY, note 0x07 on ch 2.
       match: { message: 'note', channel: 2, number: 0x07 },
       controlType: 'button',
       target: { control: 'transport', deck: 'B' },
     },
     {
-      // TODO(hardware-verify): deck B CUE, note 0x06 on ch 2.
       match: { message: 'note', channel: 2, number: 0x06 },
       controlType: 'button',
       target: { control: 'cue', deck: 'B' },
+    },
+
+    // Browser/load.
+    {
+      match: { message: 'note', channel: 1, number: 0x0d },
+      controlType: 'button',
+      target: { control: 'load', deck: 'A' },
+    },
+    {
+      match: { message: 'note', channel: 2, number: 0x0d },
+      controlType: 'button',
+      target: { control: 'load', deck: 'B' },
+    },
+    {
+      match: { message: 'cc', channel: 0, number: 0x01 },
+      controlType: 'relative',
+      target: { control: 'selection-move' },
+    },
+
+    // Jogs. Touch emits note #8 and CC #10 per deck; leave unmapped until a
+    // touch-sensitive jog behavior exists.
+    {
+      match: { message: 'cc', channel: 1, number: 0x09 },
+      controlType: 'relative',
+      target: { control: 'jog', deck: 'A' },
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x09 },
+      controlType: 'relative',
+      target: { control: 'jog', deck: 'B' },
+    },
+
+    // Pitch faders.
+    {
+      match: { message: 'cc', channel: 1, number: 0x08 },
+      controlType: 'absolute',
+      target: { control: 'pitch', deck: 'A' },
+      bits: 14,
+      lsbNumber: 0x28,
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x08 },
+      controlType: 'absolute',
+      target: { control: 'pitch', deck: 'B' },
+      bits: 14,
+      lsbNumber: 0x28,
+    },
+
+    // Mixer absolute controls.
+    {
+      match: { message: 'cc', channel: 1, number: 0x05 },
+      controlType: 'absolute',
+      target: { control: 'trim', channel: 'A' },
+      bits: 14,
+      lsbNumber: 0x25,
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x05 },
+      controlType: 'absolute',
+      target: { control: 'trim', channel: 'B' },
+      bits: 14,
+      lsbNumber: 0x25,
+    },
+    {
+      match: { message: 'cc', channel: 1, number: 0x04 },
+      controlType: 'absolute',
+      target: { control: 'eq', channel: 'A', band: 'high' },
+      bits: 14,
+      lsbNumber: 0x24,
+    },
+    {
+      match: { message: 'cc', channel: 1, number: 0x03 },
+      controlType: 'absolute',
+      target: { control: 'eq', channel: 'A', band: 'mid' },
+      bits: 14,
+      lsbNumber: 0x23,
+    },
+    {
+      match: { message: 'cc', channel: 1, number: 0x02 },
+      controlType: 'absolute',
+      target: { control: 'eq', channel: 'A', band: 'low' },
+      bits: 14,
+      lsbNumber: 0x22,
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x04 },
+      controlType: 'absolute',
+      target: { control: 'eq', channel: 'B', band: 'high' },
+      bits: 14,
+      lsbNumber: 0x24,
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x03 },
+      controlType: 'absolute',
+      target: { control: 'eq', channel: 'B', band: 'mid' },
+      bits: 14,
+      lsbNumber: 0x23,
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x02 },
+      controlType: 'absolute',
+      target: { control: 'eq', channel: 'B', band: 'low' },
+      bits: 14,
+      lsbNumber: 0x22,
+    },
+    {
+      match: { message: 'cc', channel: 1, number: 0x01 },
+      controlType: 'absolute',
+      target: { control: 'filter', channel: 'A' },
+      bits: 14,
+      lsbNumber: 0x21,
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x01 },
+      controlType: 'absolute',
+      target: { control: 'filter', channel: 'B' },
+      bits: 14,
+      lsbNumber: 0x21,
+    },
+    {
+      match: { message: 'cc', channel: 1, number: 0x00 },
+      controlType: 'absolute',
+      target: { control: 'channel-fader', channel: 'A' },
+      bits: 14,
+      lsbNumber: 0x20,
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x00 },
+      controlType: 'absolute',
+      target: { control: 'channel-fader', channel: 'B' },
+      bits: 14,
+      lsbNumber: 0x20,
+    },
+    {
+      match: { message: 'cc', channel: 0, number: 0x00 },
+      controlType: 'absolute',
+      target: { control: 'crossfader' },
+      bits: 14,
+      lsbNumber: 0x20,
+    },
+    {
+      match: { message: 'cc', channel: 0, number: 0x03 },
+      controlType: 'absolute',
+      target: { control: 'master' },
+      bits: 14,
+      lsbNumber: 0x23,
+    },
+
+    // Deck buttons.
+    {
+      match: { message: 'note', channel: 1, number: 0x05 },
+      controlType: 'button',
+      target: { control: 'match', deck: 'A' },
+    },
+    {
+      match: { message: 'note', channel: 2, number: 0x05 },
+      controlType: 'button',
+      target: { control: 'match', deck: 'B' },
+    },
+    {
+      match: { message: 'note', channel: 1, number: 0x09 },
+      controlType: 'button',
+      target: { control: 'beatjump', deck: 'A', direction: 'back' },
+    },
+    {
+      match: { message: 'note', channel: 1, number: 0x0a },
+      controlType: 'button',
+      target: { control: 'beatjump', deck: 'A', direction: 'forward' },
+    },
+    {
+      match: { message: 'note', channel: 2, number: 0x09 },
+      controlType: 'button',
+      target: { control: 'beatjump', deck: 'B', direction: 'back' },
+    },
+    {
+      match: { message: 'note', channel: 2, number: 0x0a },
+      controlType: 'button',
+      target: { control: 'beatjump', deck: 'B', direction: 'forward' },
+    },
+
+    // Hot cues.
+    {
+      match: { message: 'note', channel: 6, number: 0x00 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'A', pad: 1 },
+    },
+    {
+      match: { message: 'note', channel: 6, number: 0x01 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'A', pad: 2 },
+    },
+    {
+      match: { message: 'note', channel: 6, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'A', pad: 3 },
+    },
+    {
+      match: { message: 'note', channel: 6, number: 0x03 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'A', pad: 4 },
+    },
+    {
+      match: { message: 'note', channel: 6, number: 0x04 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'A', pad: 5 },
+    },
+    {
+      match: { message: 'note', channel: 6, number: 0x05 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'A', pad: 6 },
+    },
+    {
+      match: { message: 'note', channel: 6, number: 0x06 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'A', pad: 7 },
+    },
+    {
+      match: { message: 'note', channel: 6, number: 0x07 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'A', pad: 8 },
+    },
+    {
+      match: { message: 'note', channel: 7, number: 0x00 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'B', pad: 1 },
+    },
+    {
+      match: { message: 'note', channel: 7, number: 0x01 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'B', pad: 2 },
+    },
+    {
+      match: { message: 'note', channel: 7, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'B', pad: 3 },
+    },
+    {
+      match: { message: 'note', channel: 7, number: 0x03 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'B', pad: 4 },
+    },
+    {
+      match: { message: 'note', channel: 7, number: 0x04 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'B', pad: 5 },
+    },
+    {
+      match: { message: 'note', channel: 7, number: 0x05 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'B', pad: 6 },
+    },
+    {
+      match: { message: 'note', channel: 7, number: 0x06 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'B', pad: 7 },
+    },
+    {
+      match: { message: 'note', channel: 7, number: 0x07 },
+      controlType: 'button',
+      target: { control: 'hot-cue', deck: 'B', pad: 8 },
     },
   ],
 };

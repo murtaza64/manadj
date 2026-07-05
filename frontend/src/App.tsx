@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Waveform style panel (edits the persisted style slots live).
 const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
+const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
@@ -26,6 +27,14 @@ const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
 
 function App() {
   const [view, setView] = useState<AppMode>(initialView);
+
+  if (window.location.pathname === '/midi-inspect') {
+    return (
+      <Suspense fallback={null}>
+        <MidiInspectorPage />
+      </Suspense>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
