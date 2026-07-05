@@ -12,6 +12,7 @@ import type { AppMode } from './components/TopBar';
 import { FilterProvider } from './contexts/FilterContext';
 import { DeckProvider, DeckScope } from './contexts/DeckContext';
 import { MidiControllerBridge } from './components/MidiControllerBridge';
+import { MidiControlRegistrar } from './components/MidiControlRegistrar';
 import TransitionEditor from './editor/TransitionEditor';
 import { ToastProvider } from './components/Toast';
 
@@ -42,6 +43,7 @@ function App() {
       <DeckProvider>
         {/* Controller layer: above the view switch, like the Decks it drives. */}
         <MidiControllerBridge />
+        <MidiControlRegistrar />
         <FilterProvider>
           <div className="app-shell">
             <TopBar mode={view} onModeChange={setView} />

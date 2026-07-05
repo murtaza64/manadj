@@ -216,6 +216,32 @@ export const INPULSE_300_MK2: Mapping = {
       controlType: 'button',
       target: { control: 'beatjump', deck: 'B', direction: 'forward' },
     },
+    // Beatjump size on the SHIFT layer of the jump buttons. SHIFT is
+    // hardware-layered: shifted controls emit on channel+3 (learned:
+    // SHIFT+jump-back deck A = note ch 4 #9, vs ch 1 #9 unshifted).
+    {
+      match: { message: 'note', channel: 4, number: 0x09 },
+      controlType: 'button',
+      target: { control: 'beatjump-size', deck: 'A', change: 'halve' },
+    },
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'note', channel: 4, number: 0x0a },
+      controlType: 'button',
+      target: { control: 'beatjump-size', deck: 'A', change: 'double' },
+    },
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'note', channel: 5, number: 0x09 },
+      controlType: 'button',
+      target: { control: 'beatjump-size', deck: 'B', change: 'halve' },
+    },
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'note', channel: 5, number: 0x0a },
+      controlType: 'button',
+      target: { control: 'beatjump-size', deck: 'B', change: 'double' },
+    },
 
     // Hot cues.
     {

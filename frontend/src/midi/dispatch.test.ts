@@ -1,7 +1,8 @@
 /**
- * MIDI dispatch routes through the audible surface (midi-controller 07 /
- * ADR 0013) — never to decks directly, and gestures without a handler on
- * the audible surface are dropped (the editor registers no cue handlers).
+ * MIDI dispatch routing (ADR 0013): transport-class gestures go through the
+ * audible surface (gestures without a handler there are dropped — the editor
+ * registers no cue handlers); pad-class gestures go to the registered deck
+ * controls and drop silently when nothing is registered.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../playback/audibleSurface';
 import type { ChannelId } from '../playback/mixer';
 import type { MidiAction } from './actions';
+import { _resetMidiControlsForTests, registerDeckControls } from './controlRegistry';
 import { dispatchMidiAction } from './dispatch';
 
 const button = (
@@ -20,6 +22,15 @@ const button = (
 ): MidiAction => ({ kind: 'button', edge, target: { control, deck } });
 
 let calls: string[];
+
+function registerFakeDeckControls(deck: ChannelId): void {
+  registerDeckControls(deck, {
+    hotCueDown: (pad) => calls.push(`${deck}:hotCueDown:${pad}`),
+    hotCueUp: (pad) => calls.push(`${deck}:hotCueUp:${pad}`),
+    beatjump: (direction) => calls.push(`${deck}:beatjump:${direction}`),
+    beatjumpSize: (change) => calls.push(`${deck}:beatjumpSize:${change}`),
+  });
+}
 
 beforeEach(() => {
   calls = [];
@@ -40,7 +51,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => _resetAudibleSurfacesForTests());
+afterEach(() => {
+  _resetAudibleSurfacesForTests();
+  _resetMidiControlsForTests();
+});
 
 describe('routing', () => {
   it('shared surface: transport and cue reach the shared handlers per deck', () => {
@@ -72,6 +86,74 @@ describe('routing', () => {
   it('no registered holder: actions drop silently (boot-order edge)', () => {
     _resetAudibleSurfacesForTests();
     dispatchMidiAction(button('transport', 'A', 'down'));
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('pads (midi-controller 02)', () => {
+  const hotCue = (deck: ChannelId, pad: number, edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'hot-cue', deck, pad },
+  });
+
+  it('hot cue down/up route to the deck controls with the pad number', () => {
+    registerFakeDeckControls('A');
+    registerFakeDeckControls('B');
+    dispatchMidiAction(hotCue('A', 1, 'down'));
+    dispatchMidiAction(hotCue('A', 1, 'up'));
+    dispatchMidiAction(hotCue('B', 8, 'down'));
+    expect(calls).toEqual(['A:hotCueDown:1', 'A:hotCueUp:1', 'B:hotCueDown:8']);
+  });
+
+  it('beatjump fires on the down edge only', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'beatjump', deck: 'A', direction: 'back' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'beatjump', deck: 'A', direction: 'back' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'beatjump', deck: 'A', direction: 'forward' },
+    });
+    expect(calls).toEqual(['A:beatjump:back', 'A:beatjump:forward']);
+  });
+
+  it('beatjump size halve/double fire on the down edge only', () => {
+    registerFakeDeckControls('B');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'beatjump-size', deck: 'B', change: 'halve' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'beatjump-size', deck: 'B', change: 'double' },
+    });
+    expect(calls).toEqual(['B:beatjumpSize:halve']);
+  });
+
+  it('no registered deck controls: pad actions drop silently', () => {
+    dispatchMidiAction(hotCue('A', 1, 'down'));
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'beatjump', deck: 'A', direction: 'back' },
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('deck controls only affect their own deck', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction(hotCue('B', 1, 'down'));
     expect(calls).toEqual([]);
   });
 });
