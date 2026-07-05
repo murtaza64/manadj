@@ -5,6 +5,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { connectedControllers, subscribeControllers } from '../midi/connectionStore';
+import { AudioRoutingPicker } from './AudioRoutingPicker';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'sync' | 'styles';
@@ -55,6 +56,7 @@ export function TopBar({
       </nav>
       <h1 className="topbar-title">{MODES.find((m) => m.id === mode)?.title}</h1>
       <MidiBadge />
+      <AudioRoutingPicker />
     </header>
   );
 }

@@ -4,7 +4,7 @@
  * silent; the Cue bus degrades to disabled.
  */
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ROUTING_PREFS, resolveRouting } from './routing';
+import { DEFAULT_ROUTING_PREFS, parseRoutingPrefs, resolveRouting } from './routing';
 import type { RoutingPrefs } from './routing';
 
 const MAC = { deviceId: 'mac-speakers', label: 'MacBook Pro Speakers' };
@@ -72,5 +72,37 @@ describe('resolveRouting', () => {
       cueSinkId: null,
       cueMissing: true,
     });
+  });
+});
+
+describe('parseRoutingPrefs (headphone-cue 04)', () => {
+  it('revives a well-formed blob', () => {
+    expect(parseRoutingPrefs({ master: MAC, cue: INPULSE })).toEqual({
+      master: MAC,
+      cue: INPULSE,
+    });
+  });
+
+  it('degrades garbage to the defaults', () => {
+    expect(parseRoutingPrefs(null)).toEqual(DEFAULT_ROUTING_PREFS);
+    expect(parseRoutingPrefs('nope')).toEqual(DEFAULT_ROUTING_PREFS);
+    expect(parseRoutingPrefs(42)).toEqual(DEFAULT_ROUTING_PREFS);
+  });
+
+  it('degrades each malformed bus independently', () => {
+    expect(parseRoutingPrefs({ master: MAC, cue: { deviceId: 7 } })).toEqual({
+      master: MAC,
+      cue: null,
+    });
+    expect(parseRoutingPrefs({ master: { label: 'no id' }, cue: INPULSE })).toEqual({
+      master: null,
+      cue: INPULSE,
+    });
+  });
+
+  it('rejects empty device ids (Chrome uses "" for masked entries)', () => {
+    expect(parseRoutingPrefs({ master: { deviceId: '', label: 'x' }, cue: null })).toEqual(
+      DEFAULT_ROUTING_PREFS
+    );
   });
 });

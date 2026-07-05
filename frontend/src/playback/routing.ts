@@ -52,3 +52,21 @@ export function resolveRouting(
     cueMissing: prefs.cue !== null && !cuePresent,
   };
 }
+
+/**
+ * Revive persisted prefs (headphone-cue 04). Anything malformed degrades to
+ * the safe default for that bus — a corrupt blob must never kill audio or
+ * throw at boot.
+ */
+export function parseRoutingPrefs(raw: unknown): RoutingPrefs {
+  if (typeof raw !== 'object' || raw === null) return DEFAULT_ROUTING_PREFS;
+  const device = (v: unknown): SavedDevice | null => {
+    if (typeof v !== 'object' || v === null) return null;
+    const d = v as Record<string, unknown>;
+    return typeof d.deviceId === 'string' && d.deviceId !== '' && typeof d.label === 'string'
+      ? { deviceId: d.deviceId, label: d.label }
+      : null;
+  };
+  const o = raw as Record<string, unknown>;
+  return { master: device(o.master), cue: device(o.cue) };
+}
