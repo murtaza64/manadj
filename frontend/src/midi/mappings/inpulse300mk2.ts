@@ -377,6 +377,7 @@ export const INPULSE_300_MK2: Mapping = {
     decks: {
       A: {
         play: { channel: 1, number: 0x07, onVelocity: 0x7f },
+        cue: { channel: 1, number: 0x06, onVelocity: 0x7f },
         hotCuePads: Array.from({ length: 8 }, (_, i) => ({
           channel: 6,
           number: i,
@@ -385,6 +386,7 @@ export const INPULSE_300_MK2: Mapping = {
       },
       B: {
         play: { channel: 2, number: 0x07, onVelocity: 0x7f },
+        cue: { channel: 2, number: 0x06, onVelocity: 0x7f },
         hotCuePads: Array.from({ length: 8 }, (_, i) => ({
           channel: 7,
           number: i,

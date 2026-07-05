@@ -5,12 +5,18 @@
  * mapping (the LED ground truth cited in mappings/inpulse300mk2.ts).
  */
 import { describe, expect, it } from 'vitest';
-import { allOffMessages, encodeDeckLeds, ledStates } from './feedback';
+import { BLINK_INTERVAL_MS, allOffMessages, blinkPhase, encodeDeckLeds, ledStates } from './feedback';
 import { INPULSE_300_MK2 } from './mappings/inpulse300mk2';
 
 const feedback = INPULSE_300_MK2.feedback!;
 
-const idle = { playing: false, assignedPads: new Set<number>() };
+const idle = {
+  playing: false,
+  pendingPlay: false,
+  previewing: false,
+  atCuePoint: false,
+  assignedPads: new Set<number>(),
+};
 
 describe('ledStates', () => {
   it('PLAY is solid while playing', () => {
@@ -19,6 +25,32 @@ describe('ledStates', () => {
 
   it('PLAY is off while paused', () => {
     expect(ledStates({ ...idle, playing: false }).play).toBe(false);
+  });
+
+  it('PLAY follows the blink phase while play is latched during a load', () => {
+    expect(ledStates({ ...idle, pendingPlay: true }, true).play).toBe(true);
+    expect(ledStates({ ...idle, pendingPlay: true }, false).play).toBe(false);
+  });
+
+  it('PLAY ignores the blink phase while actually playing', () => {
+    expect(ledStates({ ...idle, playing: true }, false).play).toBe(true);
+  });
+
+  it('CUE is solid when paused at the cue point (stab armed)', () => {
+    expect(ledStates({ ...idle, atCuePoint: true }).cue).toBe(true);
+  });
+
+  it('CUE is lit during hold-to-preview', () => {
+    expect(ledStates({ ...idle, previewing: true }).cue).toBe(true);
+  });
+
+  it('CUE is off while playing elsewhere and while paused away from the cue', () => {
+    expect(ledStates({ ...idle, playing: true }).cue).toBe(false);
+    expect(ledStates(idle).cue).toBe(false);
+  });
+
+  it('CUE is off while playing even over the cue point', () => {
+    expect(ledStates({ ...idle, playing: true, atCuePoint: true }).cue).toBe(false);
   });
 
   it('lights exactly the assigned pad slots', () => {
@@ -49,6 +81,15 @@ describe('encodeDeckLeds', () => {
     expect(messages).toContainEqual([0x92, 0x07, 0x00]);
   });
 
+  it('encodes CUE at its mapped address per deck', () => {
+    expect(encodeDeckLeds(feedback, 'A', { ...dark, cue: true })).toContainEqual([
+      0x91, 0x06, 0x7f,
+    ]);
+    expect(encodeDeckLeds(feedback, 'B', { ...dark, cue: false })).toContainEqual([
+      0x92, 0x06, 0x00,
+    ]);
+  });
+
   it('encodes pads on the HOTCUE base-layer addresses (Mixxx ground truth)', () => {
     const states = ledStates({ ...idle, assignedPads: new Set([1, 8]) });
     const messagesA = encodeDeckLeds(feedback, 'A', states);
@@ -63,7 +104,23 @@ describe('encodeDeckLeds', () => {
     const messages = encodeDeckLeds(feedback, 'A', dark);
     const addresses = messages.map(([status, number]) => `${status}:${number}`);
     expect(new Set(addresses).size).toBe(addresses.length);
-    expect(addresses.length).toBeGreaterThanOrEqual(9); // PLAY + 8 pads
+    expect(addresses.length).toBeGreaterThanOrEqual(10); // PLAY + CUE + 8 pads
+  });
+});
+
+describe('blinkPhase', () => {
+  it('alternates every interval under a fed clock (~2 Hz)', () => {
+    expect(blinkPhase(0)).toBe(true);
+    expect(blinkPhase(BLINK_INTERVAL_MS - 1)).toBe(true);
+    expect(blinkPhase(BLINK_INTERVAL_MS)).toBe(false);
+    expect(blinkPhase(2 * BLINK_INTERVAL_MS)).toBe(true);
+    expect(blinkPhase(3 * BLINK_INTERVAL_MS)).toBe(false);
+  });
+
+  it('completes a full on/off cycle in 2×interval (2 Hz at 250ms)', () => {
+    const t = 1234567; // arbitrary epoch offset — phase is clock-derived
+    expect(blinkPhase(t + 2 * BLINK_INTERVAL_MS)).toBe(blinkPhase(t));
+    expect(blinkPhase(t + BLINK_INTERVAL_MS)).toBe(!blinkPhase(t));
   });
 });
 
@@ -75,9 +132,11 @@ describe('allOffMessages', () => {
       expect(status >> 4).toBe(0x9);
       expect(velocity).toBe(0x00);
     }
-    // Both decks' PLAY LEDs and pad grids are covered.
+    // Both decks' PLAY + CUE LEDs and pad grids are covered.
     expect(messages).toContainEqual([0x91, 0x07, 0x00]);
     expect(messages).toContainEqual([0x92, 0x07, 0x00]);
+    expect(messages).toContainEqual([0x91, 0x06, 0x00]);
+    expect(messages).toContainEqual([0x92, 0x06, 0x00]);
     expect(messages).toContainEqual([0x96, 0x05, 0x00]);
     expect(messages).toContainEqual([0x97, 0x02, 0x00]);
   });

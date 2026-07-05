@@ -18,6 +18,16 @@ export const PAD_COUNT = 8;
 /** The slice of deck state Feedback reads. */
 export interface DeckLedInput {
   playing: boolean;
+  /** Play latched during a load (deck snapshot vocabulary). */
+  pendingPlay: boolean;
+  /** Hold-to-preview in progress (CUE held while paused). */
+  previewing: boolean;
+  /**
+   * Paused with the playhead at the cue point — stab armed. Callers derive
+   * it the same way the on-screen CUE button does (coarse playhead poll
+   * against the snapshot's cuePoint).
+   */
+  atCuePoint: boolean;
   /**
    * Assigned hot cue slot numbers (1-based) of the loaded Track — from the
    * same query cache the on-screen pads render, so screen and hardware
@@ -29,6 +39,7 @@ export interface DeckLedInput {
 /** Desired on/off per light of one deck. */
 export interface DeckLedStates {
   play: boolean;
+  cue: boolean;
   /** Pads 1..8 by index (index 0 = pad 1), HOTCUE base layer only. */
   pads: readonly boolean[];
 }
@@ -36,10 +47,27 @@ export interface DeckLedStates {
 /** [status, data1, data2] — ready for MIDIOutput.send. */
 export type MidiMessage = readonly [number, number, number];
 
-/** Deck state → desired light states. */
-export function ledStates(input: DeckLedInput): DeckLedStates {
+/**
+ * The app-driven blink clock (the device has no native blink): ~2 Hz,
+ * phase derived from the clock so both decks always agree. `true` = lit.
+ */
+export const BLINK_INTERVAL_MS = 250;
+
+export function blinkPhase(nowMs: number): boolean {
+  return Math.floor(nowMs / BLINK_INTERVAL_MS) % 2 === 0;
+}
+
+/**
+ * Deck state → desired light states. `phase` only matters while play is
+ * latched during a load (pendingPlay blinks); solid/off states ignore it.
+ */
+export function ledStates(input: DeckLedInput, phase: boolean = true): DeckLedStates {
   return {
-    play: input.playing,
+    play: input.playing || (input.pendingPlay && phase),
+    // Solid when a stab is armed (paused at the cue), lit through a
+    // hold-to-preview (the playhead runs away from the cue; previewing
+    // keeps the light on), off while playing elsewhere.
+    cue: input.previewing || (!input.playing && input.atCuePoint),
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
   };
 }
@@ -51,7 +79,7 @@ function encodeLed(address: LedAddress, lit: boolean): MidiMessage {
 }
 
 function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
-  return [deck.play, ...deck.hotCuePads];
+  return [deck.play, deck.cue, ...deck.hotCuePads];
 }
 
 /** Desired light states for one deck → the full message set to send. */
@@ -63,6 +91,7 @@ export function encodeDeckLeds(
   const addresses = feedback.decks[deck];
   return [
     encodeLed(addresses.play, states.play),
+    encodeLed(addresses.cue, states.cue),
     ...addresses.hotCuePads.map((address, i) => encodeLed(address, states.pads[i] ?? false)),
   ];
 }

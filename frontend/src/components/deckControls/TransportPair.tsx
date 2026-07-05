@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useAtCuePoint } from '../../hooks/useAtCuePoint';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../../hooks/useDeck';
 
 /**
@@ -37,18 +37,8 @@ export function TransportPair({
       s.loadState === 'ready' || s.loadState === 'fetching' || s.loadState === 'decoding'
   );
 
-  // At-cue styling: polled coarsely, but setState only on boolean flips so
-  // steady playback causes zero re-renders.
-  const [atCuePoint, setAtCuePoint] = useState(false);
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const s = engine.getSnapshot();
-      const next =
-        s.cuePoint !== null && Math.abs(engine.getPlayhead() - s.cuePoint) < 0.1;
-      setAtCuePoint((prev) => (prev === next ? prev : next));
-    }, 100);
-    return () => clearInterval(interval);
-  }, [engine]);
+  // At-cue styling: the shared coarse poll (hooks/useAtCuePoint).
+  const atCuePoint = useAtCuePoint();
 
   const flashing =
     !previewing && !playing && cuePoint !== null && !atCuePoint;
