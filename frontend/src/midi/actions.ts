@@ -27,7 +27,9 @@ export type ButtonTarget =
   | { control: 'beatjump'; deck: ChannelId; direction: 'back' | 'forward' }
   | { control: 'beatjump-size'; deck: ChannelId; change: 'halve' | 'double' }
   | { control: 'match'; deck: ChannelId }
-  | { control: 'load'; deck: ChannelId };
+  | { control: 'load'; deck: ChannelId }
+  /** PFL toggle (headphone-cue 02) — mixer-facing, hence `channel`. */
+  | { control: 'pfl'; channel: ChannelId };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }

@@ -6,6 +6,11 @@
  *   sweep filter -> channel fader -> crossfader gain -> master gain ->
  *   safety limiter (always on) -> destination
  *
+ * Cue bus (headphone-cue, ADR 0017), all in the same graph/clock:
+ *   per-channel PFL tap (post-EQ/filter, pre-fader) -> cue sum ->
+ *   cue gain (cue level) -> cue limiter -> MediaStream bridge ->
+ *   second context sunk to the cue device (cueBridge.ts)
+ *
  * The context is created lazily and revived if closed (StrictMode dev
  * double-mount disposes once before the real mount) — this responsibility
  * moved up from DeckEngine. On revival the whole graph is rebuilt and all
@@ -22,7 +27,8 @@ import {
   sweepPositionToFilter,
 } from './graph';
 import type { EqBand } from './graph';
-import { channelFaderToGain, crossfaderGains, trimToGain } from './mixerMath';
+import { CueBridge } from './cueBridge';
+import { channelFaderToGain, crossfaderGains, cueLevelToGain, trimToGain } from './mixerMath';
 
 export type ChannelId = 'A' | 'B';
 
@@ -35,12 +41,14 @@ export interface DeckAudioPort {
   mayStart?(): boolean;
 }
 
-/** Per-channel control state, [0,1] except filter [-1,1]. */
+/** Per-channel control state, [0,1] except filter [-1,1] and pfl (bool). */
 export interface ChannelState {
   trim: number;
   eq: Record<EqBand, number>;
   filter: number;
   fader: number;
+  /** PFL (glossary): this channel feeds the Cue bus, pre-fader. */
+  pfl: boolean;
 }
 
 const FLAT_CHANNEL: ChannelState = {
@@ -48,6 +56,7 @@ const FLAT_CHANNEL: ChannelState = {
   eq: { low: 0.5, mid: 0.5, high: 0.5 },
   filter: 0,
   fader: 1,
+  pfl: false, // session default: off (PRD)
 };
 
 /** Crossover frequencies — tweak by ear. */
@@ -59,6 +68,10 @@ const PARAM_SMOOTHING_S = 0.015;
 
 /** Linear ramp length for gain moves (reaches the target exactly). */
 const GAIN_RAMP_S = 0.05;
+
+/** Session-default cue level: moderate, not unity — it feeds headphones
+ * directly and the hardware knob jumps on first touch anyway. */
+const CUE_LEVEL_DEFAULT = 0.7;
 
 function makeFilter(
   ctx: AudioContext,
@@ -93,7 +106,10 @@ function rampGain(ctx: AudioContext, param: AudioParam, target: number): void {
   param.linearRampToValueAtTime(target, now + GAIN_RAMP_S);
 }
 
-/** One channel strip: input -> trim -> isolator EQ -> sweep -> fader -> crossfader gain. */
+/** One channel strip: input -> trim -> isolator EQ -> sweep -> fader -> crossfader gain.
+ * The PFL tap (headphone-cue 02) hangs off the sweep output — post-EQ/filter,
+ * pre-fader/crossfader, so a cued channel is heard fully shaped with its
+ * fader down. */
 class ChannelStrip {
   readonly input: GainNode;
   readonly trimGain: GainNode;
@@ -101,6 +117,7 @@ class ChannelStrip {
   readonly sweep: BiquadFilterNode;
   readonly faderGain: GainNode;
   readonly crossfadeGain: GainNode;
+  readonly pflGain: GainNode;
 
   constructor(ctx: AudioContext, state: ChannelState) {
     this.input = ctx.createGain();
@@ -150,9 +167,12 @@ class ChannelStrip {
     this.faderGain = ctx.createGain();
     this.faderGain.gain.value = channelFaderToGain(state.fader);
     this.crossfadeGain = ctx.createGain();
+    this.pflGain = ctx.createGain();
+    this.pflGain.gain.value = state.pfl ? 1 : 0;
 
     sum.connect(this.sweep);
     this.sweep.connect(this.faderGain);
+    this.sweep.connect(this.pflGain);
     this.faderGain.connect(this.crossfadeGain);
   }
 }
@@ -170,6 +190,8 @@ export class Mixer {
   private ctx: AudioContext | null = null;
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
+  private cueGain: GainNode | null = null;
+  private cueBridge: CueBridge | null = null;
   private listeners = new Set<() => void>();
 
   // Control state survives graph rebuilds (StrictMode revival).
@@ -184,6 +206,10 @@ export class Mixer {
   private master = 1; // 0..1
   /** Master bus output device (headphone-cue 01); null = system default. */
   private masterSinkId: string | null = null;
+  /** Cue bus output device (headphone-cue 02); null = Cue bus disabled —
+   * PFL state still toggles, it just reaches no ears (PRD). */
+  private cueSinkId: string | null = null;
+  private cueLevel = CUE_LEVEL_DEFAULT; // 0..1, session-scoped like the rest
 
   /** Get (lazily creating / reviving) the live context and graph. */
   private ensure(): { ctx: AudioContext; strips: Record<ChannelId, ChannelStrip> } {
@@ -211,9 +237,30 @@ export class Mixer {
       masterGain.connect(limiter);
       limiter.connect(ctx.destination);
 
+      // Cue bus (headphone-cue 02, ADR 0017): PFL taps sum in the MAIN
+      // graph and leave over the MediaStream bridge. Its own safety limiter
+      // — two full-scale cued tracks clip like the master case above.
+      const cueSum = ctx.createGain();
+      strips.A.pflGain.connect(cueSum);
+      strips.B.pflGain.connect(cueSum);
+      const cueGain = ctx.createGain();
+      cueGain.gain.value = cueLevelToGain(this.cueLevel);
+      const cueLimiter = ctx.createDynamicsCompressor();
+      cueLimiter.threshold.value = -3;
+      cueLimiter.knee.value = 0;
+      cueLimiter.ratio.value = 20;
+      cueLimiter.attack.value = 0.003;
+      cueLimiter.release.value = 0.25;
+      const cueBridge = new CueBridge(ctx);
+      cueSum.connect(cueGain);
+      cueGain.connect(cueLimiter);
+      cueLimiter.connect(cueBridge.input);
+
       this.ctx = ctx;
       this.strips = strips;
       this.masterGain = masterGain;
+      this.cueGain = cueGain;
+      this.cueBridge = cueBridge;
 
       // Reapply position-dependent settings on the fresh graph.
       this.applyCrossfader(false);
@@ -225,6 +272,14 @@ export class Mixer {
           // audio must never die over routing (headphone-cue PRD).
           console.warn('[Mixer] master sink reapply failed; using default', err);
           this.masterSinkId = null;
+        });
+      }
+      if (this.cueSinkId !== null) {
+        void cueBridge.setSink(this.cueSinkId).catch((err: unknown) => {
+          // Cue device gone at revival: Cue bus disabled, master unaffected.
+          console.warn('[Mixer] cue sink reapply failed; cue disabled', err);
+          this.cueSinkId = null;
+          this.notify();
         });
       }
     }
@@ -362,12 +417,71 @@ export class Mixer {
     this.masterSinkId = sinkId;
   }
 
+  // ── Cue bus (headphone-cue 02, ADR 0017) ─────────────────────────────
+
+  /** PFL this channel into the headphones — post-EQ/filter, pre-fader.
+   * Both channels may be cued at once (they sum). */
+  setPfl(channel: ChannelId, on: boolean): void {
+    this.channels[channel] = { ...this.channels[channel], pfl: on };
+    this.notify();
+    const { ctx, strips } = this.ensure();
+    rampGain(ctx, strips[channel].pflGain.gain, on ? 1 : 0);
+  }
+
+  togglePfl(channel: ChannelId): void {
+    this.setPfl(channel, !this.channels[channel].pfl);
+  }
+
+  getCueLevel(): number {
+    return this.cueLevel;
+  }
+
+  /** Cue bus volume (the headphone-level knob), 0..1. */
+  setCueLevel(value: number): void {
+    this.cueLevel = value;
+    this.notify();
+    const { ctx } = this.ensure();
+    if (this.cueGain) rampGain(ctx, this.cueGain.gain, cueLevelToGain(value));
+  }
+
+  getCueSinkId(): string | null {
+    return this.cueSinkId;
+  }
+
+  /**
+   * Route the Cue bus to an output device over the bridge; null tears the
+   * delivery down (Cue bus disabled — PFL state keeps toggling, silently).
+   * Rejects (and stays disabled) if the device is gone; master is never
+   * affected by cue routing.
+   */
+  async setCueSinkId(sinkId: string | null): Promise<void> {
+    if (sinkId === null) {
+      this.cueSinkId = null;
+      this.cueBridge?.stop();
+      this.notify();
+      return;
+    }
+    this.ensure(); // the bridge exists after this
+    try {
+      await this.cueBridge!.setSink(sinkId);
+      this.cueSinkId = sinkId;
+    } catch (err) {
+      this.cueSinkId = null;
+      throw err;
+    } finally {
+      this.notify();
+    }
+  }
+
   /** Tear down. Safe to keep using — the graph revives on demand. */
   dispose(): void {
+    this.cueBridge?.stop();
     if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
     this.ctx = null;
     this.strips = null;
     this.masterGain = null;
+    this.cueGain = null;
+    this.cueBridge = null;
   }
 
   private applyCrossfader(ramp: boolean): void {

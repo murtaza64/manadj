@@ -26,6 +26,15 @@ export function trimToGain(value: number): number {
 }
 
 /**
+ * Cue level (headphone volume) [0,1] → linear gain. Same audio taper as the
+ * channel fader — it is a volume control, not a trim (headphone-cue 02).
+ */
+export function cueLevelToGain(value: number): number {
+  const v = clamp01(value);
+  return v * v;
+}
+
+/**
  * Crossfader position [-1 (full A), 1 (full B)] → per-channel gains.
  * Dipless curve: a channel is at unity anywhere in its own half INCLUDING
  * center, and fades linearly to a full kill at the opposite end. Center is

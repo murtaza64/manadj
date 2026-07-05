@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { channelFaderToGain, crossfaderGains, trimToGain } from './mixerMath';
+import { channelFaderToGain, crossfaderGains, cueLevelToGain, trimToGain } from './mixerMath';
 
 describe('channelFaderToGain', () => {
   it('is silent at the bottom', () => {
@@ -42,6 +42,23 @@ describe('trimToGain', () => {
   it('clamps out-of-range values', () => {
     expect(trimToGain(-0.5)).toBeCloseTo(Math.pow(10, -12 / 20), 10);
     expect(trimToGain(1.5)).toBeCloseTo(Math.pow(10, 12 / 20), 10);
+  });
+});
+
+describe('cueLevelToGain (headphone-cue 02)', () => {
+  it('is silent at the bottom and unity at the top', () => {
+    expect(cueLevelToGain(0)).toBe(0);
+    expect(cueLevelToGain(1)).toBe(1);
+  });
+
+  it('follows the channel-fader audio taper', () => {
+    expect(cueLevelToGain(0.5)).toBeCloseTo(0.25, 10);
+  });
+
+  it('is monotonic and clamps out-of-range values', () => {
+    expect(cueLevelToGain(0.3)).toBeLessThan(cueLevelToGain(0.6));
+    expect(cueLevelToGain(-1)).toBe(0);
+    expect(cueLevelToGain(2)).toBe(1);
   });
 });
 

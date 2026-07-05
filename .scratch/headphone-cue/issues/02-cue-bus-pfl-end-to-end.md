@@ -1,6 +1,6 @@
 # 02 — Cue bus + PFL end-to-end
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -36,3 +36,37 @@ Press PFL (hardware or screen) and hear that channel in the headphones:
 ## Blocked by
 
 - 01-sink-bridge-tracer
+
+## Comments
+
+- (hpcue lane, change vlrunqwz) Implemented:
+  - Mixer: `ChannelState.pfl` (default off per session), per-strip `pflGain`
+    tapped off the sweep output (post-EQ/filter, pre-fader/crossfader) →
+    `cueSum` → `cueGain` (cue level, `cueLevelToGain` audio taper, default
+    0.7 — headphone-safe, knob jumps anyway) → cue safety limiter (same
+    settings as master: two full-scale cued tracks) → issue 01's CueBridge.
+    All rebuilt on graph revival; cue sink reapplied, failure → cue disabled
+    + notify, master untouched.
+  - API: `setPfl`/`togglePfl` (both channels may sum), `getCueLevel`/
+    `setCueLevel`, `getCueSinkId`/`setCueSinkId(null = torn down)`.
+  - Actions: `ButtonTarget` += `{ control: 'pfl'; channel }` (mixer-facing →
+    `channel:` key); dispatch routes down-edge to
+    `midiMixerControls()?.togglePfl` — outside the arbiter like the other
+    mixer controls (ADR 0013 untouched; tested).
+  - `MidiMixerControls` += `togglePfl` (Mixer still registers itself).
+  - Inpulse mapping: note 0x0C ch 1/2 → PFL A/B (hardware-learned).
+  - Screen: PFL toggle in each deck's MIX-zone foot (`perf-pfl`, green when
+    on), driven by `useMixerValue` channel state so hardware ↔ screen
+    repaint each other. Works with no track loaded and with no cue device
+    (state-only, silent).
+  - Tests: dispatch PFL routing (down edge, per channel, arbiter bypass,
+    unregistered no-op), `cueLevelToGain` in mixerMath.test.ts. 423 vitest
+    green; tsc + eslint clean.
+- No cue device yet (issue 04 builds the picker): use the dev tracer —
+  `__routing.setCue('inpulse')` routes the real Cue bus; `setCue(null)`
+  disables.
+- READY-FOR-HUMAN (change vlrunqwz): with master on Mac speakers and
+  `__routing.setCue('inpulse')`: PFL A with fader down + crossfader hard-B →
+  deck A alone in headphones, EQ/filter moves audible; PFL both → blend;
+  hardware PFL buttons toggle the screen buttons and vice versa; with cue
+  never configured, PFL still toggles and nothing plays anywhere.

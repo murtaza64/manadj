@@ -53,6 +53,7 @@ function registerFakeMixerControls(): void {
     setFader: (channel, value) => calls.push(`mixer:fader:${channel}:${value}`),
     setCrossfader: (position) => calls.push(`mixer:crossfader:${position}`),
     setMaster: (value) => calls.push(`mixer:master:${value}`),
+    togglePfl: (channel) => calls.push(`mixer:pfl:${channel}`),
   });
 }
 
@@ -271,6 +272,34 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
   it('no registered mixer: absolute actions drop silently', () => {
     dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 1 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 1 });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('cue bus (headphone-cue 02)', () => {
+  const pfl = (channel: ChannelId, edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'pfl', channel },
+  });
+
+  it('PFL toggles the mixer surface per channel, on the down edge only', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(pfl('A', 'down'));
+    dispatchMidiAction(pfl('A', 'up'));
+    dispatchMidiAction(pfl('B', 'down'));
+    expect(calls).toEqual(['mixer:pfl:A', 'mixer:pfl:B']);
+  });
+
+  it('PFL bypasses the audible-surface arbiter (works while the editor holds audio)', () => {
+    registerFakeMixerControls();
+    claimAudible('editor');
+    dispatchMidiAction(pfl('A', 'down'));
+    expect(calls).toEqual(['mixer:pfl:A']);
+  });
+
+  it('no registered mixer: PFL drops silently', () => {
+    dispatchMidiAction(pfl('A', 'down'));
     expect(calls).toEqual([]);
   });
 });

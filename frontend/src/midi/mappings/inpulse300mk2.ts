@@ -232,6 +232,19 @@ export const INPULSE_300_MK2: Mapping = {
       lsbNumber: 0x23,
     },
 
+    // PFL buttons (headphone-cue 02): the headphone icon under each VU
+    // strip puts that channel in the Cue bus. Hardware-learned.
+    {
+      match: { message: 'note', channel: 1, number: 0x0c },
+      controlType: 'button',
+      target: { control: 'pfl', channel: 'A' },
+    },
+    {
+      match: { message: 'note', channel: 2, number: 0x0c },
+      controlType: 'button',
+      target: { control: 'pfl', channel: 'B' },
+    },
+
     // Deck buttons.
     {
       match: { message: 'note', channel: 1, number: 0x05 },

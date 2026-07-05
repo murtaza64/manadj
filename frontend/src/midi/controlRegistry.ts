@@ -69,6 +69,8 @@ export interface MidiMixerControls {
   setFader(channel: ChannelId, value: number): void;
   setCrossfader(position: number): void;
   setMaster(value: number): void;
+  /** PFL this channel into the Cue bus (headphone-cue 02). */
+  togglePfl(channel: ChannelId): void;
 }
 
 const deckControls = new Map<ChannelId, MidiDeckControls>();

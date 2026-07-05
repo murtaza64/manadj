@@ -9,6 +9,8 @@
  *   __routing.setMaster(null)      // back to the system default
  *   __routing.startCue('external') // 440 Hz test tone on a second device
  *   __routing.stopCue()
+ *   __routing.setCue('inpulse')    // route the REAL Cue bus (PFL taps,
+ *   __routing.setCue(null)         // headphone-cue 02) / disable it
  *
  * Device queries match by exact id or case-insensitive label substring.
  * Loaded lazily in dev only (DeckContext); never in the production bundle.
@@ -24,6 +26,7 @@ const TONE_GAIN = 0.1;
 interface AudioRoutingTracer {
   devices(): Promise<AudioOutputDevice[]>;
   setMaster(query: string | null): Promise<void>;
+  setCue(query: string | null): Promise<void>;
   startCue(query: string): Promise<void>;
   stopCue(): void;
 }
@@ -71,6 +74,17 @@ export function installAudioRoutingTracer(mixer: Mixer): void {
       const device = await findOutput(query);
       await mixer.setMasterSinkId(device.deviceId);
       console.log(`[routing] master → ${device.label}`);
+    },
+
+    setCue: async (query) => {
+      if (query === null) {
+        await mixer.setCueSinkId(null);
+        console.log('[routing] cue bus disabled');
+        return;
+      }
+      const device = await findOutput(query);
+      await mixer.setCueSinkId(device.deviceId);
+      console.log(`[routing] cue bus → ${device.label}`);
     },
 
     startCue: async (query) => {

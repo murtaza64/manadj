@@ -95,6 +95,15 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       deckControlsFor(target.deck)?.match();
       return;
     }
+    case 'pfl': {
+      // Mixer-class button (headphone-cue 02): straight to the mixer
+      // surface like the absolutes — cueing works from any view and is
+      // outside the audible-surface arbiter (the Cue bus belongs to the
+      // shared Mixer, ADR 0013 untouched).
+      if (edge !== 'down') return;
+      midiMixerControls()?.togglePfl(target.channel);
+      return;
+    }
     case 'load': {
       if (edge !== 'down') return;
       const track = browseSurface()?.getSelectedTrack();

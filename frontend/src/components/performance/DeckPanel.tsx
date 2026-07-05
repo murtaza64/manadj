@@ -475,6 +475,19 @@ function MixZone({ track }: { track: Track | null }) {
           </span>
         </span>
         <span className="perf-mix-spacer" />
+        {/* PFL (headphone-cue 02): mixer state, so it works with no track
+            loaded and repaints from hardware toggles (note 0x0C). */}
+        <button
+          className={`player-button perf-mini perf-pfl${channel.pfl ? ' on' : ''}`}
+          onClick={() => mixer.togglePfl(deck)}
+          title={
+            channel.pfl
+              ? 'Remove this channel from the headphones'
+              : 'Pre-listen this channel in the headphones (PFL)'
+          }
+        >
+          PFL
+        </button>
         <button
           className={`player-button perf-mini perf-match${hint ? ' perf-match-hint' : ''}`}
           disabled={!ready || !track?.bpm || otherBpm === null}
