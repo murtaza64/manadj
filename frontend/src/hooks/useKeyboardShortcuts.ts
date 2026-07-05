@@ -317,15 +317,16 @@ export function useKeyboardShortcuts({
 //
 // Motion-minimizing (midi-controller 10): no center pinning — while the row
 // is comfortably inside the viewport, nothing moves. Only when it nears the
-// top or bottom edge does the list scroll, and then by a half-page burst in
-// the direction of travel, so the screen moves once per half page of
-// navigation instead of once per row. Bursts are jump-scrolled when calls
-// arrive in rapid succession (a spun encoder, held arrow keys): restarting
-// a smooth animation per tick never lets it finish and stutters.
-const SCROLL_BURST_MS = 200;
+// top or bottom edge does the list scroll, and then by a SMOOTH half-page
+// burst in the direction of travel, so the screen glides once per half page
+// of navigation instead of moving per row. While a burst animates, further
+// triggers are suppressed (a restarted smooth scroll never finishes and
+// stutters); if a fast spin outruns the animation, the far-outside branch
+// catches the row up on the next call after the cooldown.
+const SCROLL_COOLDOWN_MS = 250;
 /** "Nears the edge" margin, in row heights. */
 const EDGE_MARGIN_ROWS = 2;
-let lastScrollMs = -Infinity;
+let lastBurstMs = -Infinity;
 
 function scrollableAncestor(el: Element): HTMLElement | null {
   for (let parent = el.parentElement; parent; parent = parent.parentElement) {
@@ -337,40 +338,43 @@ function scrollableAncestor(el: Element): HTMLElement | null {
 }
 
 export function scrollTrackIntoView(trackId: number) {
-  const now = performance.now();
-  const inBurst = now - lastScrollMs < SCROLL_BURST_MS;
-  lastScrollMs = now;
-  const behavior: ScrollBehavior = inBurst ? 'auto' : 'smooth';
-
   const row = document.querySelector(`[data-track-id="${trackId}"]`);
   if (!row) return;
   const container = scrollableAncestor(row);
   if (!container) {
-    row.scrollIntoView({ behavior, block: 'nearest' });
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     return;
   }
+
+  // A burst is still animating: let it glide.
+  const now = performance.now();
+  if (now - lastBurstMs < SCROLL_COOLDOWN_MS) return;
 
   const rowRect = row.getBoundingClientRect();
   const viewRect = container.getBoundingClientRect();
   const margin = rowRect.height * EDGE_MARGIN_ROWS;
   const halfPage = viewRect.height / 2;
 
-  // Far outside the viewport (selection jumped, e.g. filter change): land
-  // the row a comfortable margin inside the edge it enters from.
+  // Far outside the viewport (selection jumped, or a spin outran the last
+  // burst): land the row a comfortable margin inside the edge it enters
+  // from.
   if (rowRect.bottom < viewRect.top || rowRect.top > viewRect.bottom) {
     const fromTop = rowRect.top < viewRect.top;
     container.scrollBy({
       top: fromTop
         ? rowRect.top - viewRect.top - margin
         : rowRect.bottom - viewRect.bottom + margin,
-      behavior,
+      behavior: 'smooth',
     });
+    lastBurstMs = now;
     return;
   }
 
   if (rowRect.top < viewRect.top + margin) {
-    container.scrollBy({ top: -halfPage, behavior });
+    container.scrollBy({ top: -halfPage, behavior: 'smooth' });
+    lastBurstMs = now;
   } else if (rowRect.bottom > viewRect.bottom - margin) {
-    container.scrollBy({ top: halfPage, behavior });
+    container.scrollBy({ top: halfPage, behavior: 'smooth' });
+    lastBurstMs = now;
   }
 }
