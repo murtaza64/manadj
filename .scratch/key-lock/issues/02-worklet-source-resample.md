@@ -34,3 +34,29 @@ works identically through the worklet.
 ## Blocked by
 
 None (parallel with 01 — resample mode needs no stretcher).
+
+## Comments
+
+- Implemented (change `key-lock: 02-worklet-source-resample`). Structure:
+  pure kernel `worklet/deckSourceKernel.ts` (voices, declick splices,
+  linear resample — 19 vitest cases), thin `deckSourceProcessor.ts`
+  (bundled via `?worker&url`; self-contained IIFE in prod, verified),
+  main-thread `deckSourceNode.ts`, engine swap in `DeckEngine.ts`. The
+  composed rate rides an a-rate AudioParam so `setValueAtTime` keeps the
+  anchor-clock math exact; start/stop/load are ordered port messages.
+- **Sample handover decision: copy + transfer.** Channel data is copied
+  out of the AudioBuffer and the copies transferred to the audio thread.
+  One extra decoded-track copy resident per loaded deck (~50-100MB);
+  the AudioBuffer stays intact in the buffer cache for cross-surface
+  reuse (mix-editor 28) and context revival. SharedArrayBuffer rejected
+  (needs cross-origin isolation); transferring the cache's own buffers
+  would poison the cache. Revisit only if residency hurts in practice.
+- Declick moved inside the worklet (voice fade-in/out + splice on
+  restart, multiple tails kept like the old per-source envelopes) — this
+  is the crossfade machinery issue 03's mode switch reuses.
+- Known parity deltas (judged inaudible, for the smoke test to confirm):
+  start onset is message-delivery-timed (~1 render quantum, like the old
+  `node.start(0)`); a fading tail advances at the current rate rather
+  than its retire-time rate (≤5ms); first play on a cache-hit load that
+  never touched audio pays one-time addModule latency (decode-path loads
+  pre-warm the node).

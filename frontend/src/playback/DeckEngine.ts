@@ -2,13 +2,16 @@
  * DeckEngine — framework-free playback engine for one Deck.
  *
  * Buffer-based Web Audio (ADR 0007): the whole track is fetched and decoded
- * into an AudioBuffer; seeks/cues/beatjumps are sample-accurate. Source nodes
- * are one-shot, so every start recreates one and the engine keeps its own
- * playhead clock against AudioContext.currentTime.
+ * into an AudioBuffer; seeks/cues/beatjumps are sample-accurate. The deck's
+ * single audio source is a persistent dual-mode pull worklet (ADR 0018) —
+ * the one-shot AudioBufferSourceNode path is retired. Starts, stops, and
+ * stab restarts are declick splices inside the worklet; the engine keeps its
+ * own playhead clock against AudioContext.currentTime, anchored at every
+ * start and rate step.
  *
  * The deck does not own an AudioContext or any sound-shaping (ADR 0009): it
  * is constructed against a DeckAudioPort (the Mixer's channel input) and
- * keeps only transport, declick envelopes, and varispeed.
+ * keeps only transport and varispeed.
  *
  * Transport/cue semantics live in the pure reducer (transport.ts); this class
  * interprets its AudioEffects against its channel input.
@@ -16,8 +19,8 @@
 
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportEvent, TransportState } from './transport';
-import { DECLICK_S } from './graph';
 import type { DeckAudioPort } from './mixer';
+import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, putCachedBuffer } from './bufferCache';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
 import { PITCH_RANGE_PERCENT, composeRate } from './tempo';
@@ -63,13 +66,6 @@ export interface DeckSnapshot {
   bendPercent: number;
 }
 
-interface ActiveSource {
-  node: AudioBufferSourceNode;
-  envelope: GainNode;
-  /** Set when the engine stops it deliberately, so onended isn't a natural end. */
-  stopped: boolean;
-}
-
 export class DeckEngine {
   /** Last audio access from the port (context may be revived by the Mixer). */
   private audio: { ctx: AudioContext; input: AudioNode } | null = null;
@@ -81,9 +77,22 @@ export class DeckEngine {
   private loadAbort: AbortController | null = null;
 
   private transport: TransportState = initialTransportState();
-  private source: ActiveSource | null = null;
   /** Play pressed while loading — fires as soon as decode completes. */
   private pendingPlay = false;
+
+  // ── Worklet source (ADR 0018) ────────────────────────────────────────
+  /** The deck's single audio source, persistent per AudioContext. */
+  private sourceNode: DeckSourceNode | null = null;
+  /** In-flight DeckSourceNode.create (addModule is the one async step). */
+  private sourceNodeCreating = false;
+  /** Buffer whose samples were last handed to the worklet. */
+  private loadedIntoWorklet: AudioBuffer | null = null;
+  /** startId of the running voice; null while audio is stopped. Ended
+   * messages carrying any other id are stale and ignored. */
+  private runningStartId: number | null = null;
+  private nextStartId = 1;
+  /** Start requested before the node was ready (first play / ctx revival). */
+  private pendingStartAt: number | null = null;
 
   /** Clock anchor: playhead position (s) at ctx time `anchorCtxTime`. */
   private anchorPosition = 0;
@@ -196,6 +205,17 @@ export class DeckEngine {
         cuePoint: this.clampTime(cue),
         playhead: this.clampTime(cue),
       };
+
+      // Hand the samples to the worklet source ahead of the first start, so
+      // a stab doesn't pay the channel-data copy. Cache-hit loads on a deck
+      // with no node yet stay audio-free (the first start builds the node).
+      if (this.sourceNode) {
+        this.handOverIfStale(this.sourceNode);
+      } else if (this.audio) {
+        // The decode path already touched audio: warm the node too, so the
+        // first play skips addModule latency.
+        this.createSourceNode(this.audio.ctx);
+      }
 
       this.loadState = 'ready';
       this.emit();
@@ -342,13 +362,13 @@ export class DeckEngine {
     // (e.g. the transition editor re-applying tempo match on every model
     // change) must not trigger re-renders (issue 10).
     if (pitchPercent === this.pitchPercent && bendPercent === this.bendPercent) return;
-    if (this.source && !this.source.stopped && this.audio) {
+    if (this.runningStartId !== null && this.sourceNode && this.audio) {
       const now = this.audio.ctx.currentTime;
       this.anchorPosition = this.getPlayhead(); // still at the old rate
       this.anchorCtxTime = now;
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
-      this.source.node.playbackRate.setValueAtTime(this.currentRate(), now);
+      this.sourceNode.setRateAt(this.currentRate(), now);
     } else {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
@@ -365,7 +385,7 @@ export class DeckEngine {
 
   /** Current playhead in seconds. Cheap; safe to poll per animation frame. */
   getPlayhead(): number {
-    if (this.source && !this.source.stopped && this.audio) {
+    if (this.runningStartId !== null && this.audio) {
       const elapsed =
         (this.audio.ctx.currentTime - this.anchorCtxTime) * this.currentRate();
       return this.clampTime(this.anchorPosition + elapsed);
@@ -389,6 +409,8 @@ export class DeckEngine {
   dispose(): void {
     this.loadAbort?.abort();
     this.stopAudio(this.getPlayhead());
+    // Keep the node cached for revival; just detach it from the graph.
+    this.sourceNode?.disconnect();
     this.audio = null;
     this.listeners.clear();
   }
@@ -426,69 +448,99 @@ export class DeckEngine {
         console.warn('[DeckEngine] AudioContext.resume() failed:', err);
       });
     }
-    this.killCurrentSource();
-
-    const offset = Math.max(0, Math.min(at, this.buffer.duration - 0.001));
-    const node = ctx.createBufferSource();
-    node.buffer = this.buffer;
-    node.playbackRate.value = this.currentRate();
-
-    // Declick fade-in envelope into this deck's mixer channel.
-    const envelope = ctx.createGain();
-    const now = ctx.currentTime;
-    envelope.gain.setValueAtTime(0, now);
-    envelope.gain.linearRampToValueAtTime(1, now + DECLICK_S);
-    envelope.connect(input);
-    node.connect(envelope);
-
-    const active: ActiveSource = { node, envelope, stopped: false };
-    node.onended = () => {
-      // Natural end of buffer (deliberate stops set `stopped` first).
-      if (!active.stopped && this.source === active) {
-        this.source = null;
-        // The clock can no longer be read from the source; rest the playhead
-        // at the end of the track before reducing.
-        this.transport = {
-          ...this.transport,
-          playhead: this.buffer?.duration ?? this.transport.playhead,
-        };
-        this.dispatch({ type: 'ended' });
-      }
-    };
-
-    node.start(0, offset);
-    this.source = active;
-    this.anchorPosition = offset;
-    this.anchorCtxTime = ctx.currentTime;
+    if (this.sourceNode && this.sourceNode.ctx === ctx) {
+      this.beginStart(this.sourceNode, input, at);
+      return;
+    }
+    // No node yet, or the node belongs to a replaced context: (re)build
+    // asynchronously and latch the start. A later stop clears the latch;
+    // a later start replaces it.
+    this.pendingStartAt = at;
+    this.createSourceNode(ctx);
   }
 
   private stopAudio(at: number): void {
-    this.killCurrentSource();
+    this.pendingStartAt = null;
+    if (this.runningStartId !== null) {
+      // The worklet declick-fades internally (its stop splice).
+      this.sourceNode?.stop();
+      this.runningStartId = null;
+    }
     this.transport = { ...this.transport, playhead: this.clampTime(at) };
   }
 
-  /** Declick-fade and stop the current source, if any. */
-  private killCurrentSource(): void {
-    const active = this.source;
-    if (!active || active.stopped) {
-      this.source = null;
-      return;
-    }
-    active.stopped = true;
-    // An active source implies live audio access.
-    if (this.audio) {
-      const now = this.audio.ctx.currentTime;
-      // Declick fade-out, then stop the source.
-      active.envelope.gain.cancelScheduledValues(now);
-      active.envelope.gain.setValueAtTime(active.envelope.gain.value, now);
-      active.envelope.gain.linearRampToValueAtTime(0, now + DECLICK_S);
-      try {
-        active.node.stop(now + DECLICK_S * 1.5);
-      } catch {
-        // Source may never have started or already ended; nothing to do.
-      }
-    }
-    this.source = null;
+  /** Issue the start against a ready node: hand samples over if this buffer
+   * hasn't been yet, reconnect (the mixer may have rebuilt its strips), set
+   * the rate, and anchor the playhead clock. All synchronous — MessagePort
+   * ordering makes load-before-start safe. */
+  private beginStart(node: DeckSourceNode, input: AudioNode, at: number): void {
+    if (!this.buffer) return;
+    this.handOverIfStale(node);
+    node.disconnect();
+    node.connect(input);
+    const now = node.ctx.currentTime;
+    const offset = Math.max(0, Math.min(at, this.buffer.duration - 0.001));
+    node.setRateAt(this.currentRate(), now);
+    const startId = this.nextStartId++;
+    node.start(Math.round(offset * this.buffer.sampleRate), startId);
+    this.runningStartId = startId;
+    this.anchorPosition = offset;
+    this.anchorCtxTime = now;
+  }
+
+  /** Build the worklet node for `ctx` (addModule + construction — the one
+   * async step; every command afterwards is synchronous). Fires a latched
+   * start when it lands. */
+  private createSourceNode(ctx: AudioContext): void {
+    if (this.sourceNodeCreating) return;
+    this.sourceNodeCreating = true;
+    DeckSourceNode.create(ctx)
+      .then((node) => {
+        this.sourceNodeCreating = false;
+        this.sourceNode?.disconnect();
+        this.sourceNode = node;
+        this.loadedIntoWorklet = null;
+        node.onEnded = (startId) => this.handleEnded(startId);
+        // Warm handover so the first stab doesn't pay the copy.
+        this.handOverIfStale(node);
+        const at = this.pendingStartAt;
+        if (at === null) return;
+        this.pendingStartAt = null;
+        const audio = this.ensureAudio();
+        if (audio.ctx !== ctx) {
+          // The context was replaced while the node was building: rebuild.
+          this.pendingStartAt = at;
+          this.createSourceNode(audio.ctx);
+          return;
+        }
+        this.beginStart(node, audio.input, at);
+      })
+      .catch((err) => {
+        this.sourceNodeCreating = false;
+        this.pendingStartAt = null;
+        console.warn('[DeckEngine] worklet source creation failed:', err);
+      });
+  }
+
+  /** Hand the loaded buffer's samples to the worklet unless it already has
+   * them. Sole writer of `loadedIntoWorklet`. */
+  private handOverIfStale(node: DeckSourceNode): void {
+    if (!this.buffer || this.loadedIntoWorklet === this.buffer) return;
+    node.loadTrack(this.buffer);
+    this.loadedIntoWorklet = this.buffer;
+  }
+
+  /** The live voice ran off the end of the track (worklet message). */
+  private handleEnded(startId: number): void {
+    if (this.runningStartId !== startId) return; // raced a seek/stop
+    this.runningStartId = null;
+    // The clock can no longer be read from the source; rest the playhead
+    // at the end of the track before reducing.
+    this.transport = {
+      ...this.transport,
+      playhead: this.buffer?.duration ?? this.transport.playhead,
+    };
+    this.dispatch({ type: 'ended' });
   }
 
   private currentRate(): number {
