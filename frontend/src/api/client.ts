@@ -282,6 +282,13 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cue_point_time: cuePointTime }),
       });
+      // Cue persistence is fire-and-forget at the call site (DeckContext
+      // voids the promise) — a swallowed non-ok response is how a broken
+      // contract went unnoticed for months. Throw so it at least lands in
+      // the console as an unhandled rejection.
+      if (!response.ok) {
+        throw new Error(`cue-point persist failed (${response.status}) for track ${trackId}`);
+      }
       return response.json();
     },
   },
