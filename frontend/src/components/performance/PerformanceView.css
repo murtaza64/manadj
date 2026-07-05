@@ -101,9 +101,11 @@
   left: 50%;
   top: 11px; /* perf-decks + deckpanel padding: the minimap row */
   transform: translateX(-50%);
-  height: 30px; /* minimap-container height */
+  width: 30px; /* square: minimap-container height both ways */
+  height: 30px;
   display: flex;
   align-items: center;
+  justify-content: center;
   z-index: 2;
   background: var(--mantle, #181825);
   border: 1px solid var(--surface1);
