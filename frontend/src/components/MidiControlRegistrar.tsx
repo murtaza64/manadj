@@ -27,7 +27,7 @@ import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
  */
 
 function DeckControlsRegistrar() {
-  const { deck, engine, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { deck, engine, loadedTrack, loadTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
   const ready = useDeckReady();
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const matchAction = useMatchAction();
@@ -51,13 +51,23 @@ function DeckControlsRegistrar() {
     engine,
     ready,
     hotCues,
+    loadTrack,
     beatjumpBeats,
     setBeatjumpBeats,
     matchAction,
     jog,
   });
   useEffect(() => {
-    latest.current = { engine, ready, hotCues, beatjumpBeats, setBeatjumpBeats, matchAction, jog };
+    latest.current = {
+      engine,
+      ready,
+      hotCues,
+      loadTrack,
+      beatjumpBeats,
+      setBeatjumpBeats,
+      matchAction,
+      jog,
+    };
   });
 
   useEffect(
@@ -87,6 +97,13 @@ function DeckControlsRegistrar() {
           const { jog: j, ready: r } = latest.current;
           if (!r) return; // no track/decoding: nothing to bend or seek
           j.onTicks(ticks);
+        },
+        load: (track) => {
+          const { engine: e, loadTrack: doLoad } = latest.current;
+          // Load lock (PerformanceView policy, PRD decision): refused onto a
+          // playing deck, silently — no hardware feedback channel.
+          if (e.isAudioRunning() || e.getSnapshot().pendingPlay) return;
+          doLoad(track);
         },
       }),
     [deck]

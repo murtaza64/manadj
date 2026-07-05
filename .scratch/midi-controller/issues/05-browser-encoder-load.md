@@ -1,6 +1,6 @@
 # 05 — Browser: encoder selection + LOAD A/B
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change oywnvyrw; checks green — hardware smoke test pending)
 
 ## Parent
 
@@ -29,3 +29,16 @@ Status: ready-for-agent
 
 - 01-foundation-transport-cue (03 for tick decoding if not yet landed —
   coordinate)
+
+## Comments
+
+- Browse surface: Library registers its existing LibraryBrowseHandle shape
+  (navigate/getSelectedTrack) module-level on mount (controlRegistry stack;
+  most recent mount wins, so embedded Library instances in Performance/
+  Transition views work unchanged). Views with no Library mounted: encoder
+  and LOAD are silent no-ops.
+- Encoder reuses issue 03's relative tick decode; dispatch steps navigate()
+  once per tick, capped at 8 steps/message against runaway bursts.
+- LOAD honors the load lock (isAudioRunning || pendingPlay → silent refuse),
+  implemented in the registrar's load handler — one view-blind policy.
+- Encoder press stays unmapped per the issue.

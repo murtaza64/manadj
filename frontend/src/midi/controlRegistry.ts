@@ -1,5 +1,6 @@
 import type { EqBand } from '../playback/graph';
 import type { ChannelId } from '../playback/mixer';
+import type { Track } from '../types';
 
 /**
  * Module-level registry for non-transport Controller targets (midi-controller
@@ -30,6 +31,23 @@ export interface MidiDeckControls {
   match(): void;
   /** Jog rotation ticks (signed): bend when playing, seek when paused. */
   jogTicks(ticks: number): void;
+  /**
+   * Load a Track onto this deck, honoring the load lock (refused onto a
+   * playing deck, silently — no hardware feedback channel).
+   */
+  load(track: Track): void;
+}
+
+/**
+ * The active browse surface — whatever Library instance is currently
+ * mounted (any view). Same shape as Library's LibraryBrowseHandle. Views
+ * without a browse surface simply leave this empty: encoder/LOAD no-op
+ * (PRD scope decision).
+ */
+export interface MidiBrowseSurface {
+  /** Move the selection up (-1) / down (+1), scrolling it into view. */
+  navigate(delta: 1 | -1): void;
+  getSelectedTrack(): Track | null;
 }
 
 /**
@@ -49,6 +67,9 @@ export interface MidiMixerControls {
 
 const deckControls = new Map<ChannelId, MidiDeckControls>();
 let mixerControls: MidiMixerControls | null = null;
+// A stack, not a slot: views mount/unmount overlapping during switches;
+// the most recently mounted surface wins and unregistration is orderless.
+const browseSurfaces: MidiBrowseSurface[] = [];
 
 /** Register a deck's controls; returns an unregister function. */
 export function registerDeckControls(deck: ChannelId, controls: MidiDeckControls): () => void {
@@ -74,7 +95,21 @@ export function midiMixerControls(): MidiMixerControls | null {
   return mixerControls;
 }
 
+/** Register the active browse surface; returns an unregister function. */
+export function registerBrowseSurface(surface: MidiBrowseSurface): () => void {
+  browseSurfaces.push(surface);
+  return () => {
+    const index = browseSurfaces.indexOf(surface);
+    if (index !== -1) browseSurfaces.splice(index, 1);
+  };
+}
+
+export function browseSurface(): MidiBrowseSurface | null {
+  return browseSurfaces[browseSurfaces.length - 1] ?? null;
+}
+
 export function _resetMidiControlsForTests(): void {
   deckControls.clear();
   mixerControls = null;
+  browseSurfaces.length = 0;
 }

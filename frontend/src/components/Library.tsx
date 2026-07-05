@@ -10,6 +10,7 @@ import PlaylistSidebar, { type ViewType } from './PlaylistSidebar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
+import { registerBrowseSurface } from '../midi/controlRegistry';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { formatKeyDisplay } from '../utils/keyUtils';
@@ -834,6 +835,23 @@ export default function Library({
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mainSel]
+  );
+
+  // The same handle, registered module-level as the active browse surface
+  // for the hardware Controller (midi-controller 05): encoder moves this
+  // selection, LOAD A/B reads it. Registration is mount-scoped; handlers
+  // read the live selection through a ref.
+  const mainSelRef = useRef(mainSel);
+  useEffect(() => {
+    mainSelRef.current = mainSel;
+  });
+  useEffect(
+    () =>
+      registerBrowseSurface({
+        navigate: (delta) => mainSelRef.current.handleNavigate(delta),
+        getSelectedTrack: () => mainSelRef.current.selectedTrack,
+      }),
+    []
   );
 
   return (

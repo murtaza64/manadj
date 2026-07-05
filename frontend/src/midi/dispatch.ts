@@ -1,7 +1,11 @@
 import { audibleTransport } from '../playback/audibleSurface';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { MidiAction } from './actions';
-import { deckControlsFor, midiMixerControls } from './controlRegistry';
+import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
+
+/** Encoder detents per action are tiny; cap steps so a burst can't warp the
+ * selection across the whole library in one message. */
+const MAX_SELECTION_STEPS = 8;
 
 /**
  * Thin glue, view-blind forever. Two routing classes (ADR 0013):
@@ -34,9 +38,14 @@ function dispatchRelative(target: RelativeAction['target'], ticks: number): void
     case 'jog':
       deckControlsFor(target.deck)?.jogTicks(ticks);
       return;
-    // selection-move: browser slice.
-    case 'selection-move':
+    case 'selection-move': {
+      const surface = browseSurface();
+      if (!surface) return; // no browse surface in this view: no-op
+      const step = ticks > 0 ? 1 : -1;
+      const count = Math.min(Math.abs(ticks), MAX_SELECTION_STEPS);
+      for (let i = 0; i < count; i++) surface.navigate(step);
       return;
+    }
   }
 }
 
@@ -75,7 +84,13 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       deckControlsFor(target.deck)?.match();
       return;
     }
-    // Load: browser slice.
+    case 'load': {
+      if (edge !== 'down') return;
+      const track = browseSurface()?.getSelectedTrack();
+      if (!track) return; // no browse surface or no selection: no-op
+      deckControlsFor(target.deck)?.load(track);
+      return;
+    }
     default:
       return;
   }

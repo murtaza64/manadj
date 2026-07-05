@@ -12,8 +12,10 @@ import {
 } from '../playback/audibleSurface';
 import type { ChannelId } from '../playback/mixer';
 import type { MidiAction } from './actions';
+import type { Track } from '../types';
 import {
   _resetMidiControlsForTests,
+  registerBrowseSurface,
   registerDeckControls,
   registerMixerControls,
 } from './controlRegistry';
@@ -36,6 +38,7 @@ function registerFakeDeckControls(deck: ChannelId): void {
     setPitch: (percent) => calls.push(`${deck}:setPitch:${percent}`),
     match: () => calls.push(`${deck}:match`),
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
+    load: (track) => calls.push(`${deck}:load:${track.id}`),
   });
 }
 
@@ -266,5 +269,69 @@ describe('jog (midi-controller 03)', () => {
   it('no registered deck controls: jog drops silently', () => {
     dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 1 });
     expect(calls).toEqual([]);
+  });
+});
+
+describe('browser (midi-controller 05)', () => {
+  const track = { id: 42 } as Track;
+
+  it('selection-move steps the browse surface once per tick, signed', () => {
+    const moves: number[] = [];
+    registerBrowseSurface({
+      navigate: (delta) => moves.push(delta),
+      getSelectedTrack: () => null,
+    });
+    dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 2 });
+    dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: -1 });
+    expect(moves).toEqual([1, 1, -1]);
+  });
+
+  it('selection-move caps runaway tick bursts', () => {
+    const moves: number[] = [];
+    registerBrowseSurface({
+      navigate: (delta) => moves.push(delta),
+      getSelectedTrack: () => null,
+    });
+    dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 100 });
+    expect(moves.length).toBeLessThanOrEqual(8);
+  });
+
+  it('no browse surface: selection-move and load are no-ops', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 1 });
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'load', deck: 'A' } });
+    expect(calls).toEqual([]);
+  });
+
+  it('LOAD routes the selected track to the deck on the down edge only', () => {
+    registerFakeDeckControls('A');
+    registerFakeDeckControls('B');
+    registerBrowseSurface({ navigate: () => undefined, getSelectedTrack: () => track });
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'load', deck: 'B' } });
+    dispatchMidiAction({ kind: 'button', edge: 'up', target: { control: 'load', deck: 'B' } });
+    expect(calls).toEqual(['B:load:42']);
+  });
+
+  it('LOAD with no selection is a no-op', () => {
+    registerFakeDeckControls('A');
+    registerBrowseSurface({ navigate: () => undefined, getSelectedTrack: () => null });
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'load', deck: 'A' } });
+    expect(calls).toEqual([]);
+  });
+
+  it('the most recently mounted browse surface wins; unregister restores', () => {
+    const moves: string[] = [];
+    registerBrowseSurface({
+      navigate: () => moves.push('first'),
+      getSelectedTrack: () => null,
+    });
+    const unregister = registerBrowseSurface({
+      navigate: () => moves.push('second'),
+      getSelectedTrack: () => null,
+    });
+    dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 1 });
+    unregister();
+    dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 1 });
+    expect(moves).toEqual(['second', 'first']);
   });
 });
