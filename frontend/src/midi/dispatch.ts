@@ -1,4 +1,4 @@
-import { audibleJumps, audiblePads, audibleTransport } from '../playback/audibleSurface';
+import { audibleJog, audibleJumps, audiblePads, audibleTransport } from '../playback/audibleSurface';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { MidiAction } from './actions';
 import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
@@ -38,13 +38,13 @@ type RelativeAction = Extract<MidiAction, { kind: 'relative' }>;
 function dispatchRelative(target: RelativeAction['target'], ticks: number): void {
   switch (target.control) {
     case 'jog':
-      deckControlsFor(target.deck)?.jogTicks(ticks);
+      audibleJog()?.rimTicks(target.deck, ticks);
       return;
     case 'jog-touch':
-      deckControlsFor(target.deck)?.jogTouchTicks(ticks);
+      audibleJog()?.touchTicks(target.deck, ticks);
       return;
     case 'jog-seek':
-      deckControlsFor(target.deck)?.jogSeekTicks(ticks);
+      audibleJog()?.shiftRimTicks(target.deck, ticks);
       return;
     case 'selection-move': {
       const surface = browseSurface();

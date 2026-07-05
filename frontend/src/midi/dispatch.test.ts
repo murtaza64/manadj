@@ -81,6 +81,11 @@ beforeEach(() => {
     jumps: {
       beatjump: (deck, direction) => deckControlsFor(deck)?.beatjump(direction),
     },
+    jog: {
+      rimTicks: (deck, ticks) => deckControlsFor(deck)?.jogTicks(ticks),
+      touchTicks: (deck, ticks) => deckControlsFor(deck)?.jogTouchTicks(ticks),
+      shiftRimTicks: (deck, ticks) => deckControlsFor(deck)?.jogSeekTicks(ticks),
+    },
     silence: () => undefined,
     wake: () => undefined,
   });
@@ -325,6 +330,55 @@ describe('jumps route per audible surface (editor-midi 02)', () => {
       target: { control: 'beatjump-size', deck: 'A', change: 'double' },
     });
     expect(calls).toEqual(['A:beatjumpSize:double']);
+  });
+});
+
+describe('jog routes per audible surface (editor-midi 04)', () => {
+  const tick = (
+    control: 'jog' | 'jog-touch' | 'jog-seek',
+    deck: ChannelId,
+    ticks: number
+  ): MidiAction => ({ kind: 'relative', target: { control, deck }, ticks });
+
+  function registerEditorWithJog(): void {
+    registerSurface('editor', {
+      transport: { togglePlay: () => calls.push('editor:toggle') },
+      jog: {
+        rimTicks: (deck, ticks) => calls.push(`editor:rim:${deck}:${ticks}`),
+        touchTicks: (deck, ticks) => calls.push(`editor:touch:${deck}:${ticks}`),
+        shiftRimTicks: (deck, ticks) => calls.push(`editor:shiftRim:${deck}:${ticks}`),
+      },
+      silence: () => undefined,
+      wake: () => undefined,
+    });
+  }
+
+  it('editor claimed with jog: all three tiers route with deck and signed ticks', () => {
+    registerFakeDeckControls('A');
+    registerEditorWithJog();
+    claimAudible('editor');
+    dispatchMidiAction(tick('jog', 'A', 2));
+    dispatchMidiAction(tick('jog-touch', 'B', -1));
+    dispatchMidiAction(tick('jog-seek', 'A', 3));
+    expect(calls).toEqual(['editor:rim:A:2', 'editor:touch:B:-1', 'editor:shiftRim:A:3']);
+  });
+
+  it('editor claimed without a jog section: the class drops', () => {
+    registerFakeDeckControls('A');
+    claimAudible('editor');
+    dispatchMidiAction(tick('jog', 'A', 1));
+    dispatchMidiAction(tick('jog-touch', 'A', 1));
+    dispatchMidiAction(tick('jog-seek', 'A', 1));
+    expect(calls).toEqual([]);
+  });
+
+  it('release restores shared jog routing (delegating to the deck controls)', () => {
+    registerFakeDeckControls('B');
+    registerEditorWithJog();
+    claimAudible('editor');
+    releaseAudible('editor');
+    dispatchMidiAction(tick('jog', 'B', -3));
+    expect(calls).toEqual(['B:jog:-3']);
   });
 });
 

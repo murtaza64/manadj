@@ -12,6 +12,7 @@ import { api } from '../api/client';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useHotCueSlots } from '../hooks/useHotCueActions';
 import { useHotCues } from '../hooks/useHotCues';
+import { JogController } from '../midi/jog';
 import Library from '../components/Library';
 import type { LibraryBrowseHandle } from '../components/Library';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
@@ -265,6 +266,45 @@ function TransitionEditorInner() {
     midiGestures.current = { bpmA, bpmB, slideDeckB };
   });
 
+  // Hardware jog (editor-midi 04): the performance jog controller reused
+  // over editor ports, keeping the three-tier feel (rim = gentle, touch =
+  // fine, SHIFT+rim = velocity-accelerated fast) with settled constants.
+  // `isPlaying: false` makes every rim tick a seek — the mix transport has
+  // no bend, so ticks scrub whether the mix plays or not (MixPlayer
+  // hard-syncs the decks on seek).
+  const midiJogA = useMemo(
+    () =>
+      new JogController({
+        isPlaying: () => false,
+        getPlayhead: () => player.getMixTime(),
+        seek: (s) => player.seek(s),
+        setBend: () => undefined, // unreachable while isPlaying is false
+      }),
+    [player]
+  );
+  // Deck B Slides instead of seeking: a delta port (playhead pinned to 0)
+  // turns the controller's absolute seeks into signed slide-by-seconds —
+  // the continuous generalization of the Alignment nudge. Goes through
+  // slideDeckB, so the paused re-park and autosave match the on-screen
+  // Slide gestures.
+  const midiJogB = useMemo(
+    () =>
+      new JogController({
+        isPlaying: () => false,
+        getPlayhead: () => 0,
+        seek: (deltaSec) => midiGestures.current.slideDeckB('beats', deltaSec),
+        setBend: () => undefined,
+      }),
+    []
+  );
+  useEffect(
+    () => () => {
+      midiJogA.dispose();
+      midiJogB.dispose();
+    },
+    [midiJogA, midiJogB]
+  );
+
   // One audible surface AND one running audio clock at a time (issue 08):
   // claim audibility while mounted (ADR 0013). The arbiter silences the
   // shared surface (pauses both decks, suspends its context) and restores
@@ -291,6 +331,11 @@ function TransitionEditorInner() {
           else slide('beats', beatsToSeconds(n, bpm));
         },
       },
+      jog: {
+        rimTicks: (deck, ticks) => (deck === 'A' ? midiJogA : midiJogB).onTicks(ticks),
+        touchTicks: (deck, ticks) => (deck === 'A' ? midiJogA : midiJogB).onTouchTicks(ticks),
+        shiftRimTicks: (deck, ticks) => (deck === 'A' ? midiJogA : midiJogB).onSeekTicks(ticks),
+      },
       silence: () => {
         player.pause();
         player.mixer.suspend();
@@ -302,7 +347,7 @@ function TransitionEditorInner() {
       releaseAudible('editor');
       unregisterSurface('editor');
     };
-  }, [player]);
+  }, [player, midiJogA, midiJogB]);
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh

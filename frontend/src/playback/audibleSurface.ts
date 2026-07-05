@@ -43,6 +43,20 @@ export interface SurfaceJumps {
   beatjump(deck: ChannelId, direction: 'back' | 'forward'): void;
 }
 
+/** Jog gesture class (ADR 0019): the wheel's three tick streams. The
+ * shared surface delegates to the deck jog controller (bend/seek/fine/
+ * fast); the editor scrubs the mix (A) or Slides continuously (B) — the
+ * mix transport has no bend, so rim ticks there always scrub. */
+export interface SurfaceJog {
+  /** Bare rim (CC #9): bend when playing / gentle seek when paused on the
+   * shared decks; always a scrub/Slide in the editor. */
+  rimTicks(deck: ChannelId, ticks: number): void;
+  /** Touch surface (CC #10): the fine tier. */
+  touchTicks(deck: ChannelId, ticks: number): void;
+  /** SHIFT+rim: the deliberate velocity-accelerated fast tier. */
+  shiftRimTicks(deck: ChannelId, ticks: number): void;
+}
+
 export interface AudibleSurface {
   transport: SurfaceTransport;
   /** Optional gesture-class sections (ADR 0019): a class the surface
@@ -50,6 +64,7 @@ export interface AudibleSurface {
    * editor. */
   pads?: SurfacePads;
   jumps?: SurfaceJumps;
+  jog?: SurfaceJog;
   /** Go quiet: pause playback AND suspend the surface's audio clock. */
   silence(): void;
   /** Resume the surface's audio clock only — never starts playback. */
@@ -131,6 +146,11 @@ export function audiblePads(): SurfacePads | null {
 /** The audible surface's jumps section — null when unregistered. */
 export function audibleJumps(): SurfaceJumps | null {
   return surfaces.get(holder)?.jumps ?? null;
+}
+
+/** The audible surface's jog section — null when unregistered. */
+export function audibleJog(): SurfaceJog | null {
+  return surfaces.get(holder)?.jog ?? null;
 }
 
 export function subscribeAudible(fn: Listener): () => void {

@@ -272,6 +272,11 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       jumps: {
         beatjump: (deck, direction) => deckControlsFor(deck)?.beatjump(direction),
       },
+      jog: {
+        rimTicks: (deck, ticks) => deckControlsFor(deck)?.jogTicks(ticks),
+        touchTicks: (deck, ticks) => deckControlsFor(deck)?.jogTouchTicks(ticks),
+        shiftRimTicks: (deck, ticks) => deckControlsFor(deck)?.jogSeekTicks(ticks),
+      },
       silence: () => {
         engines.A.pause();
         engines.B.pause();
