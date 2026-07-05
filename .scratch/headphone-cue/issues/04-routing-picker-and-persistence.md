@@ -63,6 +63,16 @@ Product UI over issue 01's plumbing:
   the MASTER/CUE selects inline in the top bar instead of the OUT popover —
   done in the polish change (`headphone-cue: polish`), popover removed,
   missing device now paints the select red (title carries the detail).
+- Explicit output pairs (2026-07-05, change ykqutvor, user request): the
+  CUE select now splits multichannel interfaces into stereo-pair entries
+  ("Inpulse … (outs 1/2)" rear RCA / "(outs 3/4)" headphone jack) —
+  `cueOutputOptions` pure seam; channel counts probed once per device
+  (audioDevices.ts, cached, 2s timeout → stereo). Saved cue prefs carry
+  `pair`; the bridge honors it, auto (3/4 on ≥4-out) remains the no-pair
+  fallback. MASTER deliberately keeps whole-device entries — master on a
+  non-default pair is the single-context optimization ADR 0017 defers.
+  NOTE: a cue pref saved before this change (no pair) shows as
+  "(missing)" — re-pick once. Selects also use the app font now.
 - READY-FOR-HUMAN (change ytqykolk): route MASTER→Mac speakers, CUE→
   Inpulse; both live without reload. Restart → routing restored. Restart
   with the Inpulse unplugged → master plays on default, OUT red, cue

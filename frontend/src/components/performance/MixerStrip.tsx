@@ -203,7 +203,7 @@ export function MixerStrip({
           value={cueMix}
           defaultValue={CUE_MIX_DEFAULT}
           onChange={(v) => mixer.setCueMix(v)}
-          title="Headphone blend: cue only ← → master only (double-click = cue-heavy default)"
+          title="Headphone blend: cue only ← → master only (double-click = cue only)"
         />
         <HFader
           label="PHONES"

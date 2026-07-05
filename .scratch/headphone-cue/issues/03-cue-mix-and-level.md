@@ -57,6 +57,9 @@ The beatmatching half of the headphone mix:
     subscribed via useMixerValue (hardware knob repaints PHONES live);
     double-click resets to the session defaults.
   - 428 vitest green; tsc + eslint clean.
+- Smoke-test feedback (2026-07-05): user decision — session default for
+  cue/mix is now 0 (cue only), not the PRD's cue-heavy 0.25
+  (`CUE_MIX_DEFAULT = 0`, polish change). Double-click reset follows.
 - READY-FOR-HUMAN (change rwtxtkux): with a matched pair cued/playing,
   sweep CUE MIX end to end — headphones go cue-only → master-only with
   beats staying locked across the sweep; sweep the hardware headphone knob

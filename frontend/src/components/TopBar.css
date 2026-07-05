@@ -141,6 +141,8 @@
   background: var(--crust);
   border: 1px solid var(--surface1);
   color: var(--text);
+  /* base.css inherits the app font into button/input but not select */
+  font-family: inherit;
   font-size: 11px;
   text-overflow: ellipsis;
 }

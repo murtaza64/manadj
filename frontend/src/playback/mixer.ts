@@ -88,9 +88,9 @@ const GAIN_RAMP_S = 0.05;
  * directly and the hardware knob jumps on first touch anyway. */
 export const CUE_LEVEL_DEFAULT = 0.7;
 
-/** Session-default cue/mix: cue-heavy (PRD) — mostly the cued channel with
- * a taste of master, the position you audition the next track from. */
-export const CUE_MIX_DEFAULT = 0.25;
+/** Session-default cue/mix: cue only (user decision at the smoke test —
+ * the PRD's "cue-heavy" default landed as 0.25 and got dialed to 0). */
+export const CUE_MIX_DEFAULT = 0;
 
 function makeFilter(
   ctx: AudioContext,
