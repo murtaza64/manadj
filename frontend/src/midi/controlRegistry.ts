@@ -28,6 +28,8 @@ export interface MidiDeckControls {
   setPitch(percent: number): void;
   /** Stateless one-shot BPM match against the other deck (on-screen MATCH). */
   match(): void;
+  /** Jog rotation ticks (signed): bend when playing, seek when paused. */
+  jogTicks(ticks: number): void;
 }
 
 /**

@@ -35,6 +35,7 @@ function registerFakeDeckControls(deck: ChannelId): void {
     beatjumpSize: (change) => calls.push(`${deck}:beatjumpSize:${change}`),
     setPitch: (percent) => calls.push(`${deck}:setPitch:${percent}`),
     match: () => calls.push(`${deck}:match`),
+    jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
   });
 }
 
@@ -249,6 +250,21 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
   it('no registered mixer: absolute actions drop silently', () => {
     dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 1 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 1 });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('jog (midi-controller 03)', () => {
+  it('jog ticks route to the deck controls signed', () => {
+    registerFakeDeckControls('A');
+    registerFakeDeckControls('B');
+    dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 1 });
+    dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'B' }, ticks: -3 });
+    expect(calls).toEqual(['A:jog:1', 'B:jog:-3']);
+  });
+
+  it('no registered deck controls: jog drops silently', () => {
+    dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 1 });
     expect(calls).toEqual([]);
   });
 });

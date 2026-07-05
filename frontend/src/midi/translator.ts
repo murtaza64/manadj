@@ -8,10 +8,10 @@ import type { Mapping } from './mapping';
  * message arrays.
  *
  * Decoders: buttons (note on/off → down/up edges, binding resolution,
- * unmapped-message silence) and absolutes (7-bit CC, 14-bit MSB/LSB
- * assembly). Relative tick decoding lands in the jog slice. No modifier
- * layer: SHIFT is hardware-layered on this device (shifted controls emit
- * distinct messages), so shifted functions are ordinary bindings.
+ * unmapped-message silence), absolutes (7-bit CC, 14-bit MSB/LSB assembly),
+ * and relatives (two's-complement CC ticks). No modifier layer: SHIFT is
+ * hardware-layered on this device (shifted controls emit distinct
+ * messages), so shifted functions are ordinary bindings.
  */
 
 export interface DecoderState {
@@ -126,9 +126,16 @@ export function translateMidiMessage(
         state,
       };
     }
-    // Relative tick decoding lands in the jog slice; bound-but-undecoded
-    // is silent, same as unmapped.
-    case 'relative':
-      return silence;
+    case 'relative': {
+      if (messageType !== 'cc') return silence;
+      // Two's-complement ticks (hardware-learned): 0x01.. = clockwise,
+      // 0x7f.. = counter-clockwise. Zero is a no-op, not an action.
+      const ticks = value < 0x40 ? value : value - 0x80;
+      if (ticks === 0) return silence;
+      return {
+        actions: [{ kind: 'relative', target: binding.target, ticks }],
+        state,
+      };
+    }
   }
 }

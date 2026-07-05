@@ -56,6 +56,12 @@ const mapping: Mapping = {
       bits: 14,
       lsbNumber: 0x20,
     },
+    {
+      // Relative encoder.
+      match: { message: 'cc', channel: 0, number: 0x18 },
+      controlType: 'relative',
+      target: { control: 'jog', deck: 'A' },
+    },
   ],
 };
 
@@ -214,6 +220,30 @@ describe('absolute decoding (midi-controller 04)', () => {
 
   it('note messages on absolute-bound numbers stay silent', () => {
     expect(translate([[0x90, 0x14, 0x7f]])).toEqual([]);
+  });
+});
+
+describe('relative decoding (midi-controller 03)', () => {
+  it("decodes two's-complement ticks in both directions", () => {
+    expect(translate([[0xb0, 0x18, 0x01], [0xb0, 0x18, 0x7f]])).toEqual([
+      { kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 1 },
+      { kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: -1 },
+    ]);
+  });
+
+  it('carries multi-tick values', () => {
+    expect(translate([[0xb0, 0x18, 0x03], [0xb0, 0x18, 0x7d]])).toEqual([
+      { kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 3 },
+      { kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: -3 },
+    ]);
+  });
+
+  it('a zero value is silence, not a zero-tick action', () => {
+    expect(translate([[0xb0, 0x18, 0x00]])).toEqual([]);
+  });
+
+  it('note messages on relative-bound numbers stay silent', () => {
+    expect(translate([[0x90, 0x18, 0x7f]])).toEqual([]);
   });
 });
 

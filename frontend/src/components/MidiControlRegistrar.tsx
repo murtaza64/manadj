@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDeck, useDeckReady } from '../hooks/useDeck';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { useMatchAction } from '../hooks/useMatchAction';
 import { useMixer } from '../hooks/useMixer';
 import { registerDeckControls, registerMixerControls } from '../midi/controlRegistry';
+import { JogController } from '../midi/jog';
 import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
 
 /**
@@ -31,9 +32,32 @@ function DeckControlsRegistrar() {
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const matchAction = useMatchAction();
 
-  const latest = useRef({ engine, ready, hotCues, beatjumpBeats, setBeatjumpBeats, matchAction });
+  // One jog state machine per deck over the engine's bend/seek primitives
+  // (midi/jog.ts is the tested seam). Disposed on engine change so a held
+  // bend never outlives its deck.
+  const jog = useMemo(
+    () =>
+      new JogController({
+        isPlaying: () => engine.getSnapshot().playing,
+        getPlayhead: () => engine.getPlayhead(),
+        seek: (seconds) => engine.seek(seconds),
+        setBend: (percent) => engine.setBend(percent),
+      }),
+    [engine]
+  );
+  useEffect(() => () => jog.dispose(), [jog]);
+
+  const latest = useRef({
+    engine,
+    ready,
+    hotCues,
+    beatjumpBeats,
+    setBeatjumpBeats,
+    matchAction,
+    jog,
+  });
   useEffect(() => {
-    latest.current = { engine, ready, hotCues, beatjumpBeats, setBeatjumpBeats, matchAction };
+    latest.current = { engine, ready, hotCues, beatjumpBeats, setBeatjumpBeats, matchAction, jog };
   });
 
   useEffect(
@@ -58,6 +82,11 @@ function DeckControlsRegistrar() {
         match: () => {
           // Out-of-reach/unavailable are silent: no hardware feedback channel.
           latest.current.matchAction();
+        },
+        jogTicks: (ticks) => {
+          const { jog: j, ready: r } = latest.current;
+          if (!r) return; // no track/decoding: nothing to bend or seek
+          j.onTicks(ticks);
         },
       }),
     [deck]

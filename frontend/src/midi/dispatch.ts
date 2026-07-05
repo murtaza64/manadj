@@ -22,11 +22,23 @@ import { deckControlsFor, midiMixerControls } from './controlRegistry';
 export function dispatchMidiAction(action: MidiAction): void {
   if (action.kind === 'button') return dispatchButton(action.target, action.edge);
   if (action.kind === 'absolute') return dispatchAbsolute(action.target, action.value);
-  // Relative handlers (jog, selection-move) land in later slices.
+  return dispatchRelative(action.target, action.ticks);
 }
 
 type ButtonAction = Extract<MidiAction, { kind: 'button' }>;
 type AbsoluteAction = Extract<MidiAction, { kind: 'absolute' }>;
+type RelativeAction = Extract<MidiAction, { kind: 'relative' }>;
+
+function dispatchRelative(target: RelativeAction['target'], ticks: number): void {
+  switch (target.control) {
+    case 'jog':
+      deckControlsFor(target.deck)?.jogTicks(ticks);
+      return;
+    // selection-move: browser slice.
+    case 'selection-move':
+      return;
+  }
+}
 
 function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): void {
   switch (target.control) {
