@@ -1,4 +1,5 @@
 import type { MidiAction } from './actions';
+import { controllerAttached, controllerDetached } from './connectionStore';
 import type { Mapping } from './mapping';
 import { initialDecoderState, translateMidiMessage } from './translator';
 import type { DecoderState } from './translator';
@@ -38,7 +39,11 @@ export function attachMidiController({ mappings, onAction }: AttachMidiOptions):
       for (const action of result.actions) onAction(action);
     };
     input.addEventListener('midimessage', onMessage);
-    attached.set(input, () => input.removeEventListener('midimessage', onMessage));
+    attached.set(input, () => {
+      input.removeEventListener('midimessage', onMessage);
+      controllerDetached(input.id);
+    });
+    controllerAttached(input.id, input.name ?? 'MIDI controller');
   };
 
   const detachPort = (input: MIDIInput) => {
