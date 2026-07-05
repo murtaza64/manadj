@@ -76,7 +76,10 @@
 }
 
 .deck-bpm-input {
-  width: 56px;
+  /* 3 digits (decimals scroll while editing; committed values are shown
+     rounded to fit) — 56px wasted space at every call site. */
+  width: 4.5ch;
+  min-width: 34px;
   background: transparent;
   border: none;
   color: var(--yellow);

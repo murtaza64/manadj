@@ -157,7 +157,12 @@ export function BpmControl({
     );
   }
 
-  const displayValue = isFocused ? draft : base !== null ? formatBpm(base) : '';
+  // At rest the input is 3 digits wide (user decision): show the rounded
+  // value; the exact tempo lives in the tooltip and appears (full
+  // precision) the moment the input focuses for editing.
+  const displayValue = isFocused ? draft : base !== null ? String(Math.round(base)) : '';
+  const exactTitle =
+    base !== null ? `${formatBpm(base)} BPM — click to edit` : 'BPM';
   const inputDisabled = disabled || !track;
   const buttonsDisabled = inputDisabled || base === null;
 
@@ -243,6 +248,7 @@ export function BpmControl({
         type="text"
         className="deck-bpm-input"
         value={displayValue}
+        title={exactTitle}
         placeholder="-"
         disabled={inputDisabled}
         onChange={(e) => {

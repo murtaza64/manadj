@@ -568,9 +568,11 @@
 }
 
 /* Cue slots always read 1-8 left-to-right: the card's mirrored layout
-   (row-reverse on deck B) does not apply to the gesture row. */
+   (row-reverse on deck B) does not apply to the gesture/pad rows — but
+   they still hug B's right edge like everything else on the card. */
 .editor-deckcard.b .editor-deckcard-row.editor-slides {
   flex-direction: row;
+  justify-content: flex-end;
 }
 
 .editor-center {
