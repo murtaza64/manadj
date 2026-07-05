@@ -96,7 +96,10 @@ The relation between two Keys that mix well together. The basis of harmonic-mixi
 _Avoid_: related (too vague — could mean same artist, genre, etc.)
 
 **Compatible**:
-A heuristic relation between Tracks: key, tempo, energy, and tag agreement suggest they would mix well. One of discovery's two evidence tiers — heuristics propose, the Transition library confirms (proven, Favorite-ranked). "Find Compatible" is the feature surfacing this tier (renamed from "Find Related", which the glossary forbids).
+A heuristic relation between Tracks: key, tempo, energy, and tag agreement suggest they would mix well. Tag agreement means sharing at least one Tag — never requiring all Tags to match; if any-shared proves too loose, the refinement is scoping to chosen Tag Categories. One of discovery's two evidence tiers — heuristics propose, the Transition library confirms (proven, Favorite-ranked). Follow mode is the feature surfacing this tier; its one-shot ancestors ("Find Compatible", né "Find Related") are retired.
+
+**Follow mode**:
+A per-Deck toggle that keeps the browse list continuously filtered to candidate next Tracks for that Deck's loaded Track, updating hands-off as Tracks change — serving "finding the next track painlessly during a set". A followed Track's candidates carry both evidence tiers: heuristic Compatible Tracks unioned with the proven tier (Tracks with a saved Transition from it) — a proven move surfaces even when heuristics would exclude it, and "proven only" narrows to just that tier. With both Decks following, the two candidate sets union. The followed list is tier-ordered by candidate strength — currently proven, same Key, relative Key, one Key up, one Key down, then everything else that passed the filter (tiering provisional); best tier wins across followed Decks, and the view's sort orders within a tier. Follow rides playback: starting a Deck while any Deck follows spreads follow to it and revokes it from any paused following Deck (a paused Deck may only follow while nothing plays); pausing a Deck ends its follow unless it was the only Deck playing — the list survives mid-set silence. Playback never enables Follow from nothing: when no Deck follows, turning it on is the user's act.
 
 ### Performance data
 
