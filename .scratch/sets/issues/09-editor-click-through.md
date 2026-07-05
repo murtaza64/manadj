@@ -1,6 +1,6 @@
 # 09 — Adjacency click-through to the Transition editor
 
-Status: ready-for-human
+Status: done — approved and landed 2026-07-05
 
 ## Parent
 
@@ -38,3 +38,5 @@ Verification: gate green (pytest 636, vitest 920 across 59 files incl. new openP
 4. Click an unresolved (✕ hard cut) adjacency → blank sketch ("Transition N", default shape) on that pair.
 5. Press ▶ Play set in the Set pane's header (under the editor), then click any adjacency → the Conductor stops (mode-switch semantics), pair loads.
 6. Stale-plan check: from the Set view click a pinned adjacency, drag its window/lanes in the editor, return to library mode → the ladder/row durations reflect the edit.
+
+**2026-07-05 (agent, lane setui) — approved and landed** (`pqmwzoxy` on main, human verbal approval in-session).

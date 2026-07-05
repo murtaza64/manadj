@@ -1,6 +1,6 @@
 # 13 — Rehearsal loop: practice an adjacency live, pin the fresh Take
 
-Status: ready-for-human
+Status: done — approved and landed 2026-07-05
 
 ## Parent
 
@@ -58,3 +58,5 @@ Verification: gate green on the rebased stack (pytest 648, vitest 944/63 files i
 5. Click the chip → the pin chip flips to "● take · <today> (unpromoted)", the offer disappears.
 6. Repeat the mix a couple of times without pinning → the chip stays (offering the latest), the `tk` count grows by one per attempt.
 7. Regression guard: audition inside the Transition editor, and play a Set via ▶ Play set — neither should add `tk` counts or chips.
+
+**2026-07-05 (agent, lane setui) — approved and landed** (`lpyqvuys` on main, human verbal approval in-session).
