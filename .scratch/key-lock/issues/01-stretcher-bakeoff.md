@@ -1,6 +1,6 @@
 # 01 — Stretcher bake-off: Signalsmith vs Rubber Band, by ear
 
-Status: ready-for-agent (harness); verdict is ready-for-human by nature
+Status: done — verdict recorded (Signalsmith), prototype abandoned
 
 Type: prototype
 
@@ -32,11 +32,39 @@ then abandon the prototype change.
 
 ## Acceptance criteria
 
-- [ ] Both stretchers audible through the same harness, level-matched
-- [ ] Resample reference for honesty
-- [ ] CPU numbers for 1 and 2 instances
-- [ ] Verdict comment recorded; prototype abandoned
+- [x] Both stretchers audible through the same harness, level-matched
+- [x] Resample reference for honesty
+- [x] CPU numbers for 1 and 2 instances
+- [x] Verdict comment recorded; prototype abandoned
 
 ## Blocked by
 
 None.
+
+## Comments
+
+- **VERDICT (human listening session, 2026-07-05): Signalsmith Stretch.**
+  Rubber Band R3 (`EngineFiner | PitchHighConsistency`, rubberband-wasm
+  3.3.0) showed audible artifacts at DJ ratios where Signalsmith sounded
+  better — the "clearly wins" bar for accepting GPL was not met; it lost
+  outright. CPU agreed: RB ≈ 3.4% of quantum budget per playing instance,
+  Signalsmith barely registered (<0.2%). Issue 03 uses
+  **signalsmith-stretch (MIT, 1.3.2, first-party WASM)**.
+- Harness (throwaway change `pskvwvon`, abandoned after this verdict):
+  `/stretch-bakeoff` route, two decks on one context, per-deck Key Lock
+  toggle (off = production deck-source resample reference), stretcher
+  radio, ±8% pitch, cue stab, live per-processor CPU meters via a
+  registerProcessor-wrapping timing shim.
+- Integration notes for issue 03, learned building the RB harness (apply
+  to any WASM inside the deck-source worklet):
+  - The realtime audio thread never services ASYNC WebAssembly APIs —
+    `WebAssembly.instantiate(...)` hangs forever. Use the sync
+    `new WebAssembly.Module(bytes)` / `new WebAssembly.Instance(...)`.
+  - A `WebAssembly.Module` does not survive the structured clone into an
+    AudioWorklet (silently dropped as a `messageerror`); transfer the raw
+    bytes instead.
+  - signalsmith-stretch's npm API is a main-thread node factory that
+    registers its own processor from a self-contained Blob module; using
+    it INSIDE our dual-mode worklet means driving its emscripten module
+    directly (`_seek`/`_process` + heap buffers) — its .mjs runs in both
+    scopes by design, so this is feasible but is issue 03 design work.
