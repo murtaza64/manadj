@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
 import type { Ref } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
 import FilterBar from './FilterBar';
@@ -11,12 +11,14 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { registerBrowseSurface } from '../midi/controlRegistry';
-import type { Track } from '../types';
+import type { PaginatedTracks, Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
-import { formatKeyDisplay } from '../utils/keyUtils';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
+import { deriveFollowQuery, getEnergyRange, getHarmonicKeys, unionIds } from '../follow/model';
+import type { FollowParams } from '../follow/model';
+import { useFollowFlags } from '../follow/followStore';
 import { EMPTY_SELECTION, click } from '../selection/selectionModel';
 import { useTrackSelection } from '../selection/useTrackSelection';
 import {
@@ -66,62 +68,9 @@ export const DEFAULT_SETTINGS: RelatedTracksSettings = {
   refDeck: 'A',
 };
 
-// Related tracks feature - utility functions
-
-/**
- * Get harmonically compatible keys in OpenKey notation.
- * Compatible keys: same key, ±1 (same mode), relative minor/major
- */
-function getHarmonicKeys(keyId: number | null | undefined): string[] {
-  if (keyId === null || keyId === undefined) return [];
-
-  // Convert Engine DJ key ID to OpenKey notation
-  const openKey = formatKeyDisplay(keyId);
-  if (openKey === '-') return [];
-
-  const results = new Set<string>();
-  results.add(openKey);  // Same key
-
-  const match = openKey.match(/^(\d+)(m|d)$/);
-  if (!match) return Array.from(results);
-
-  const num = parseInt(match[1]);
-  const mode = match[2];
-
-  // Adjacent keys (±1, same mode)
-  const prev = num === 1 ? 12 : num - 1;
-  const next = num === 12 ? 1 : num + 1;
-  results.add(`${prev}${mode}`);
-  results.add(`${next}${mode}`);
-
-  // Relative minor/major (same number, opposite mode)
-  const oppositeMode = mode === 'm' ? 'd' : 'm';
-  results.add(`${num}${oppositeMode}`);
-
-  return Array.from(results);
-}
-
-/**
- * Calculate energy range based on preset
- */
-export function getEnergyRange(
-  currentEnergy: number,
-  preset: 'up' | 'down' | 'near' | 'equal'
-): { min: number; max: number } {
-  switch (preset) {
-    case 'equal':
-      return { min: currentEnergy, max: currentEnergy };
-    case 'near':
-      return {
-        min: Math.max(1, currentEnergy - 1),
-        max: Math.min(5, currentEnergy + 1),
-      };
-    case 'up':
-      return { min: currentEnergy, max: 5 };
-    case 'down':
-      return { min: 1, max: currentEnergy };
-  }
-}
+// Related-tracks utilities now live in the follow model (follow-mode 01);
+// re-exported here for the modal until the one-shot retires (issue 05).
+export { getEnergyRange };
 
 /**
  * Load settings from localStorage with validation
@@ -265,6 +214,63 @@ export default function Library({
   const transitionIndex = useTransitionIndex();
   const fromA = transitionsFrom(transitionIndex, decks.A.loadedTrack?.id);
   const fromB = transitionsFrom(transitionIndex, decks.B.loadedTrack?.id);
+
+  // ── Follow mode (follow-mode 01) ───────────────────────────────────────
+  // Follow composes BESIDE the manual filters: one candidates query per
+  // followed reference (full conjunction per reference), unioned by id,
+  // intersected with the manually-filtered list below. Never writes
+  // FilterState — toggling Follow off restores the manual view exactly.
+  // A Load onto a followed Deck changes the reference → new query keys →
+  // the list updates hands-off. (Proven tier folds in via issue 03;
+  // playback rules 02; tiered ordering 04; own parameters modal 05.)
+  const followFlags = useFollowFlags();
+  // Explicit projection of the stored one-shot settings onto FollowParams:
+  // Follow's tag agreement is any-shared by definition (CONTEXT.md:
+  // Compatible) — a stored ALL tagMatchMode and the refDeck are
+  // deliberately dropped, not silently reinterpreted via structural typing.
+  const storedSettings = loadSettings();
+  const followParams: FollowParams = {
+    harmonicKeys: storedSettings.harmonicKeys,
+    bpm: storedSettings.bpm,
+    bpmThresholdPercent: storedSettings.bpmThresholdPercent,
+    tags: storedSettings.tags,
+    energy: storedSettings.energy,
+    energyPreset: storedSettings.energyPreset,
+  };
+  const followRefs = (['A', 'B'] as const).flatMap((deck) => {
+    const reference = decks[deck].loadedTrack;
+    return followFlags[deck] && reference ? [{ deck, reference }] : [];
+  });
+  const followQueries = useQueries({
+    queries: followRefs.map(({ deck, reference }) => {
+      const q = deriveFollowQuery(reference, followParams);
+      return {
+        queryKey: ['tracks', 'follow', deck, reference.id, q, selectedView === 'archived'],
+        queryFn: (): Promise<PaginatedTracks> =>
+          api.tracks.list(1, 1000, {
+            tagIds: q.tagIds,
+            energyMin: q.energyMin,
+            energyMax: q.energyMax,
+            tagMatchMode: q.tagMatchMode,
+            bpmCenter: q.bpmCenter,
+            bpmThresholdPercent: q.bpmThresholdPercent,
+            keyCamelotIds: q.keyCamelotIds,
+            archived: selectedView === 'archived' ? true : undefined,
+          }),
+        placeholderData: (previousData: unknown) => previousData,
+      };
+    }),
+  });
+  /** Candidate ids while following. Built from the reference queries that
+   * have data: a still-loading second reference doesn't un-narrow the
+   * already-followed list. Null (= no filtering) only when nothing is
+   * followed or no reference has resolved yet — the manual list shows
+   * unfiltered rather than flashing empty. */
+  const resolvedFollowQueries = followQueries.filter((q) => q.data !== undefined);
+  const followCandidateIds =
+    followRefs.length > 0 && resolvedFollowQueries.length > 0
+      ? unionIds(resolvedFollowQueries.map((q) => q.data!.items ?? []))
+      : null;
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
@@ -584,13 +590,19 @@ export default function Library({
   if (filters.hasTransitionFromDecks) {
     libraryTracks = libraryTracks.filter((t: Track) => fromA.has(t.id) || fromB.has(t.id));
   }
+  if (followCandidateIds) {
+    libraryTracks = libraryTracks.filter((t: Track) => followCandidateIds.has(t.id));
+  }
 
-  // Playlist list, in the view-only playlist sort. The proven-tier filter
-  // applies only outside edit mode — in the split, the FilterBar belongs
-  // to the library pane.
+  // Playlist list, in the view-only playlist sort. The proven-tier and
+  // Follow filters apply only outside edit mode — in the split, the
+  // FilterBar belongs to the library pane.
   let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
   if (filters.hasTransitionFromDecks && !splitView) {
     playlistTracks = playlistTracks.filter((t: Track) => fromA.has(t.id) || fromB.has(t.id));
+  }
+  if (followCandidateIds && !splitView) {
+    playlistTracks = playlistTracks.filter((t: Track) => followCandidateIds.has(t.id));
   }
 
   // ── Selection machinery: one instance per pane ─────────────────────────

@@ -10,6 +10,7 @@ import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
 import FindRelatedTracksModal from './FindRelatedTracksModal';
 import { DEFAULT_FILTERS, useFilters } from '../contexts/FilterContext';
+import { setDeckFollow, useFollowFlags } from '../follow/followStore';
 import type { RelatedTracksSettings } from './Library';
 import './FilterBar.css';
 
@@ -72,6 +73,8 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
   };
 
   const anyDeckLoaded = loadedA !== null || loadedB !== null;
+  const followFlags = useFollowFlags();
+  const loadedByDeck = { A: loadedA, B: loadedB } as const;
 
   const handleQuickApply = () => {
     if (!anyDeckLoaded) return;
@@ -296,6 +299,45 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
             : 'BPM'
           }
         </button>
+
+        {/* Follow mode (follow-mode 01): per-Deck toggles. Follow composes
+            beside the manual filters (never writes them); the list keeps
+            matching the followed Deck's loaded Track hands-off. A toggle is
+            disabled while its Deck is empty. */}
+        <div style={{ display: 'flex', gap: 0 }}>
+          {(['A', 'B'] as const).map((deck) => {
+            const loaded = loadedByDeck[deck] !== null;
+            const on = followFlags[deck];
+            // Only ENABLING requires a loaded Track — an on-flag must
+            // always be turn-off-able, even if the Deck somehow emptied.
+            const actionable = loaded || on;
+            return (
+              <button
+                key={deck}
+                onClick={() => actionable && setDeckFollow(deck, !on)}
+                disabled={!actionable}
+                className="filter-bar-follow-btn"
+                aria-pressed={on}
+                title={
+                  actionable
+                    ? `Follow Deck ${deck}: keep the list matched to its loaded track`
+                    : `Load Deck ${deck} first`
+                }
+                style={{
+                  padding: '4px 8px',
+                  background: 'transparent',
+                  color: on ? 'var(--green)' : actionable ? 'var(--text)' : 'var(--overlay0)',
+                  border: `1px solid ${on ? 'var(--green)' : 'var(--surface0)'}`,
+                  cursor: actionable ? 'pointer' : 'not-allowed',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                }}
+              >
+                ⟲{deck}
+              </button>
+            );
+          })}
+        </div>
 
         {/* Find Compatible Button Group (runs from a loaded deck) */}
         <div style={{ display: 'flex', gap: 0 }}>

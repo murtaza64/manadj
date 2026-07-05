@@ -30,3 +30,7 @@ Parameters are read from the existing stored find-compatible settings for now (m
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+- Done (llpkorpk, lane followmode): pure follow model at `frontend/src/follow/` — derivation face (`deriveFollowQuery`, `getHarmonicKeys`, `getEnergyRange`) + `unionIds`, 12 framework-free tests; module-level `followStore` (routingStore idiom, manual flags only); FilterBar per-Deck ⟲A/⟲B toggles (enable requires a loaded Track; an on-flag is always turn-off-able); Library composes manual ∩ union-of-candidates via one query per followed reference (partial-ready union: a loading second reference never un-narrows the list). Stored one-shot settings are explicitly projected onto FollowParams (ALL tag mode + refDeck deliberately dropped). Known limits accepted for this slice: placeholderData shows the previous reference's candidates during a Load's fetch window; candidate sets cap at the library query's 1000-row parity. Gate: 530 pytest / 481 vitest / build / one alembic head.
