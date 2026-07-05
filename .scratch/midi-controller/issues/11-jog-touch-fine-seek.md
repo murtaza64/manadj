@@ -1,6 +1,6 @@
 # 11 — Jog touch surface: fine seek when paused
 
-Status: ready-for-human (implemented, change zlqqqsnu; checks green — hardware feel-verify pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 

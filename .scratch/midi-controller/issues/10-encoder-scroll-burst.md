@@ -1,6 +1,6 @@
 # 10 — Encoder scrolling stutters: smooth-scroll restarts per tick
 
-Status: ready-for-human (implemented, change lzqoquru; checks green — feel-verify with the encoder pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 

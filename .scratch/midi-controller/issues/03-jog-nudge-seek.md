@@ -1,6 +1,6 @@
 # 03 — Jog wheels: nudge (playing) + velocity seek (paused)
 
-Status: ready-for-human (implemented, change plppovrq; checks green — hardware feel-tuning pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 

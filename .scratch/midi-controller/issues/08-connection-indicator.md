@@ -1,6 +1,6 @@
 # 08 — Connection indicator: MIDI badge in the top bar
 
-Status: ready-for-human (implemented, change orxoukxq; checks green — hardware eye-verify pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 

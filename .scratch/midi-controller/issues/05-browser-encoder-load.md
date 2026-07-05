@@ -1,6 +1,6 @@
 # 05 — Browser: encoder selection + LOAD A/B
 
-Status: ready-for-human (implemented, change oywnvyrw; checks green — hardware smoke test pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 

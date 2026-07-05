@@ -1,6 +1,6 @@
 # 04 — Mixer section: faders, EQ/filter/trim, master, 14-bit pitch, SYNC
 
-Status: ready-for-human (implemented, change ztxrqpxu; checks green — hardware smoke test pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 

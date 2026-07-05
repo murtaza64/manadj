@@ -1,6 +1,6 @@
 # 06 — Waveform zoom follows effective BPM, not base
 
-Status: ready-for-human (implemented, change zwqttooy; checks green — eye-verify while beatmatching pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 

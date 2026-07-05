@@ -1,6 +1,6 @@
 # 12 — Paused rim = gentle nudges; fast seek moves to SHIFT+wheel
 
-Status: ready-for-human (implemented, change uvywnzqo; checks green — hardware verify of shifted wheel channels pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 

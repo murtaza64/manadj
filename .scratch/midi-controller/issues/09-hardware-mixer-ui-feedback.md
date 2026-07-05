@@ -1,6 +1,6 @@
 # 09 — Hardware moves repaint the on-screen mixer controls
 
-Status: ready-for-human (implemented, change znpowyzt; checks green — eye-verify with hardware pending)
+Status: done (hardware-verified by Murtaza 2026-07-05)
 
 ## Parent
 
