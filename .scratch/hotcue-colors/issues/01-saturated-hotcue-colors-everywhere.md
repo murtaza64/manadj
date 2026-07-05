@@ -1,6 +1,6 @@
 # 01 — Saturated hotcue slot colors everywhere
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: task
 
 ## Problem
@@ -59,3 +59,33 @@ them).
 None - can start immediately.
 
 ## Comments
+
+**2026-07-05 — implemented (lane minimap-clarity, change puywxqvs), parked ready-for-human.**
+
+- Palette (bright, hue-preserving): 1 `#1e90ff` blue, 2 `#ffd400` yellow,
+  3 `#ff8800` orange, 4 `#ff4455` red, 5 `#2ed573` green, 6 `#ff5cc8`
+  pink, 7 `#a855f7` purple, 8 `#00cec9` teal. Single hex source
+  (`HOT_CUE_CSS_COLORS`); GL floats derived from it at module init;
+  mirrored as `--hc-1..8` in variables.css for `HotCue.css` (GL can't
+  read CSS vars — sync comment on both sides).
+- Renderer stored-color honoring: `pushHotCues` + `renderHotCueNumbers`
+  use the cue's `#RRGGBB` when valid (`CUE_COLOR_RE` guard), slot palette
+  otherwise — same precedence as pads/OverviewLadder.
+- Verified headless: deck with Engine colors (track 9) — minimap flags ==
+  pad colors per cue; deck with colorless cues (track 942) — identical
+  saturated fallback on pads and flags. No pastel hotcue values remain
+  (grep-verified; `--yellow`/`--peach`/`--pink` untouched for non-hotcue
+  UI).
+- Gate: vitest 919, build + tsc + eslint clean.
+
+**Verification walkthrough (lane app at http://localhost:5273):**
+
+1. Performance view, load 9 on A (Engine-colored cues) and 942 on B
+   (colorless in-app cues).
+2. Deck A: pads 2-6 (cyan/amber/red/amber/red) match the minimap flag
+   colors exactly.
+3. Deck B: pads and flags both show the saturated slot palette (blue,
+   yellow, orange, red) — no pastels anywhere.
+4. Full waveform: cue poles + number badges use the same colors as pads.
+5. Sets view → any set: OverviewLadder cue ticks unchanged for colored
+   cues, saturated fallback for colorless ones.
