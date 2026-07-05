@@ -1,4 +1,6 @@
-# 13 — Visualize Conductor automation on the performance controls
+# 15 — Visualize Conductor automation on the performance controls
+
+(Renumbered from 13, 2026-07-05 — parallel filing collided with 13-rehearsal-loop.)
 
 Status: needs-triage
 

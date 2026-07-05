@@ -55,7 +55,7 @@ All domain vocabulary is defined in `CONTEXT.md` (Set, Set playback, Conductor, 
 39. As a DJ, I want clicking an adjacency to open the Transition editor for that pair (pinned Transition selected, Take pin in review, unresolved as a blank sketch) while the browse surface below stays put, so that I can walk a set and fine-tune its handovers without losing my place.
 40. As a DJ, I want a play button on each Set row that seeks the Conductor to that track's planned entry and plays, so that I can resume Set playback from anywhere.
 41. As a DJ, I want clicking the overview ladder to seek within the mix, with a visible playhead in the ladder and the active row highlighted, so that auditioning any moment of the set is one click.
-42. As a DJ, I want a follow-playback toggle (on when playback starts, disengaged by manual scroll, re-engaged by seeking), so that the ladder and list track the playhead unless I'm deliberately browsing elsewhere.
+42. As a DJ, I want a follow-playback toggle (on when playback starts, disengaged by manual pan/scroll, re-engaged by seeking), so that the ladder and list converge on the playhead unless I'm deliberately browsing elsewhere.
 
 ## Implementation Decisions
 
@@ -76,7 +76,7 @@ All domain vocabulary is defined in `CONTEXT.md` (Set, Set playback, Conductor, 
 - **Persistence**: new Set and Set-entry tables (ordered entries; pin kind + uuid columns on the entry for the adjacency it heads), Alembic migration per repo convention. Persistence follows the client-authoritative pattern established for Transitions (ADR 0011): the client owns Set state and replaces it via the API; the backend router provides CRUD plus the promotion re-pointing hook.
 - **Escape hatch to Export**: "create Playlist from Set" copies the track order into a new ordinary Playlist; Sets themselves never Export (external libraries have no transition concept).
 - **The Conductor is a thin driver over a new pure planner module**: `plan(Set, pins, track facts) → deterministic playback plan` (deck assignments, entry/exit instants, rates, Tempo returns, runway flags, hard cuts). All playback semantics live in the planner; the runtime driver only schedules the plan onto the shared deck engines, in the mold of the existing two-track mix player.
-- **Conductor transport**: play/pause/seek are Conductor controls, not takeover triggers — the takeover rule applies to deck/mixer gestures only. Seek is plan evaluation at a mix-time instant (active tracks, deck positions, lane values mid-window, tempo state per policy), legal mid-Transition and while paused. Per-row play buttons seek to that track's planned entry and play; clicking the overview ladder seeks. A follow-playback mode keeps the (mutually pinned) ladder and list scrolls tracking the playhead: on at playback start, disengaged by manual scroll, re-engaged by seeking.
+- **Conductor transport**: play/pause/seek are Conductor controls, not takeover triggers — the takeover rule applies to deck/mixer gestures only. Seek is plan evaluation at a mix-time instant (active tracks, deck positions, lane values mid-window, tempo state per policy), legal mid-Transition and while paused. Per-row play buttons seek to that track's planned entry and play; clicking the overview ladder seeks. The ladder and list are DECOUPLED surfaces (revised 2026-07-05: the original mutual scroll-pin breaks on one-screen Sets and its invariant is unkeepable): the ladder pans/zooms freely (vertical wheel = zoom, waveform convention; default framing fits the whole set), and the surfaces converge on EVENTS only — a seek centers the playhead in the ladder (if off-viewport) and scrolls the active row into view; under follow-playback the ladder auto-scrolls paged (DAW-style) and the list follows at track-change boundaries. Follow: on at playback start, disengaged by manual pan/scroll (never by zoom), re-engaged by seeking.
 - **Transition lanes address roles, not physical Decks**: `faderA`/`faderB` etc. mean outgoing/incoming. The Conductor maps roles onto Decks per its ping-pong parity (swapping channels on odd adjacencies); the Transition editor always presents outgoing-as-A. Artifacts stay deck-agnostic.
 - **The Set view lives on the shared browse surface** (the pane the Performance view and Transition editor both embed). Clicking an adjacency loads the pair (outgoing→A, incoming→B) and switches the top panel to the Transition editor — pinned Transition selected, Take pin opens review, unresolved opens a blank sketch — while the browse surface below does not remount or move; walking a set's handovers stays inside editor mode. Set-view state (selected Set, scroll progress) lives in a store, not component state, since each mode mounts its own browse instance.
 
@@ -120,9 +120,26 @@ list doesn't scroll); a redesign — free ladder viewport + zoom, viewport
 highlighted in the tracklist — is being grilled as a candidate ticket.
 (3) On-screen deck/mixer controls not moving during conducted playback is
 ADR 0022 by design (automation overlay never touches base state); filed as
-issue 13 (needs-triage). (4) Overlapping windows edge (B→C window opens
+issue 15 (needs-triage; renumbered from 13 after a parallel-filing collision). (4) Overlapping windows edge (B→C window opens
 before A→B closes): the shared deck gets an instantaneous jump, aggravated
 by load delays — needs visual surfacing (ladder) and graceful handling
 (e.g. early fade-out to free the deck ~5s for loading); in the same grill.
 
 **2026-07-05 — grilling round 3 (rehearsal loop).** Assessed the "notice gap → mix live → Take appears → pin" story: capture machinery and evidence model already cover it; two connecting gestures were missing. Decisions: a practice affordance per adjacency (loads outgoing→A/incoming→B in the Performance view, runway/hot-cue/Main-cue positioning, re-press re-cues) distinct from issue 09's editor click-through; fresh Takes invalidate the takes query and surface a transient "new take — pin?" chip on the matching adjacency (latest attempt; never auto-pinned). Filed as issue 13; Conductor practice-mode (pause at unresolved) stays deferred.
+
+**2026-07-05 — grill: free ladder + Grace fade (post-03/04 review).**
+(1) Ladder↔list scroll-pin retired — decoupled surfaces with event-driven
+convergence (seek; track changes under follow); ladder gains free pan/zoom
+(vertical wheel, cursor-anchored — playhead-anchored under follow), default
+framing fits the whole set; folded into the rewritten issue 05. (2) Window
+collisions (B→C opening before A→B closes, or before a hard-cut outgoing
+ends) get a **Grace fade**: planner-level truncation of the earlier
+outgoing (default 5s load headroom + ~2s synthesized fade, both tunable
+settings), never shifting authored windows; degenerate pileups become
+validation flags. Conductor load handling: never stall while music plays
+(late deck joins at plan position), never skip while silent (clock holds);
+next-entry buffer prefetch into the decode cache. Filed as issue 14.
+
+**2026-07-05 — tracker hygiene.** Two sessions filed an issue 13 in
+parallel (rehearsal loop / visualize-conductor-automation); the
+visualization issue is renumbered to 15.
