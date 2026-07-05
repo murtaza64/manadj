@@ -1,6 +1,6 @@
 # 17 — Set view: track-row context menu (+ shared track menu module)
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -91,3 +91,41 @@ seam without component suites.
 ## Blocked by
 
 —
+
+## Verification walkthrough (2026-07-05, lane setsugg, change `xktvupxn`)
+
+Implemented as specced: pure core `components/trackMenu.ts` (vitest suite,
+24 cases), thin hook `components/useTrackMenuItems.ts`, SetDetailPane
+track-row menu (load policy passed down from Library), Library migrated.
+Gate: 651 pytest · 984 vitest · build clean · one alembic head (0021) ·
+eslint clean on touched files.
+
+Open **http://localhost:5283** (or `npm --prefix desktop start -- --port
+5283`). Sandbox DB is seeded with set **review-17** (4 tracks, one
+archived).
+
+1. Sidebar → Sets → **review-17**. Right-click a live track row: Load to
+   Deck A/B · Add to playlist ▸ · Add to set ▸ (review-17 absent —
+   "No other sets" if it's your only set) · Remove from set (red) ·
+   Archive track (red). Same order every time.
+2. Right-click the ⚑ archived row ("Under the Waves"): menu shows
+   **Unarchive** (and Remove from set) instead of Archive.
+3. Pick Unarchive → the header's ⚑ flag clears without a reload
+   (`['sets']` invalidation); re-archive it from the Library if you like —
+   the flag comes back on the Set too.
+4. Load to Deck A from the row menu → routes through the view's load
+   policy (deck A loads the track).
+5. Drag a row to reorder, hover ▶/✕ — all unchanged; Esc/click-away
+   dismisses the menu.
+6. Library parity: All-tracks view right-click (single + a multi
+   selection — "Add N to …", Load disabled on multi); a playlist view
+   right-click (Remove from playlist present, the viewed playlist no
+   longer listed under Add to playlist ▸ — spec: "the current container
+   never lists itself"); Archived view (Unarchive per-track, Load/Add
+   still there).
+
+Notes for review: unarchive now also invalidates `['playlist']` (issue
+spec: full invalidation set); retiring the old memo's eslint-disable
+un-bailed the React compiler lint on Library.tsx, forcing three
+setState-in-effect resets to adjust-during-render + one ref-write into
+an effect (behavior-preserving, incidental maintenance).
