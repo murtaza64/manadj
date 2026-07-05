@@ -1,6 +1,6 @@
 # 05 — Seek, playhead, follow — and the free ladder
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -57,3 +57,43 @@ the list. Transport gestures are Conductor controls, not takeover triggers.
 ## Blocked by
 
 - 04-conductor-v1
+
+## Comments
+
+**2026-07-05 — Implemented (change osyqtrou, parked for review).**
+`Conductor.seek(mixTime)` = plan evaluation at an instant: playing seeks
+land as a forced hard sync on the next tick; paused seeks park decks,
+pitch, and mixer automation via `reconcilePaused` (loads completing while
+paused finish the parking through the engine-ready hook). Row ▶ now routes
+through seek. `conductorStore` grew `seekSetPlayback` (conducting: seek in
+place preserving play/pause; idle: start playing from that instant — one-
+click audition) and follow state (on at start, re-engaged by any seek,
+`setFollowPlayback` for disengage/toggle). OverviewLadder rewritten free:
+pan = native horizontal scroll, zoom = vertical wheel (cursor-anchored;
+playhead-anchored under follow; canvases redraw at settled zoom), default
+framing fits the whole set, viewport persists per Set in setStore; click =
+seek; rAF playhead line; follow auto-scroll is DAW-paged (re-entry at 15%,
+trigger at 78%) with seek discontinuities >2s centering instead; manual
+pan disengages follow (programmatic scrolls excluded via a 700ms window),
+zoom never does; ⌖ toggle on the ladder. List convergence: active row
+scrolls into view at track-change boundaries under follow; manual list
+scroll disengages. 03's scroll-pin, dimming, and zoom-1 band-aid removed.
+
+**2026-07-05 — Review walkthrough (ready-for-human).** Lane app at
+**http://localhost:5253** ("test set", 8 tracks). Script:
+
+1. Open the set — ladder shows the WHOLE set (fit framing). Vertical
+   wheel over it zooms around the cursor; horizontal scroll pans; switch
+   modes and back — framing kept.
+2. Click anywhere in the ladder: playback starts from that instant
+   (mid-window clicks land inside the transition, both decks correct).
+   White playhead line tracks; ⌖ button lit (follow on).
+3. Let it play: the ladder pages when the playhead nears the right edge;
+   the list scrolls the active row into view as tracks change.
+4. Pan the ladder or scroll the list by hand: follow disengages (⌖ dims);
+   playhead keeps moving. Zoom: follow stays on. Click ⌖ or seek: follow
+   re-engages and snaps back.
+5. Pause (toolbar ⏸), then click elsewhere in the ladder: decks/waveforms
+   re-park at the target without playing; ▶ resumes exactly there.
+6. Row ▶ still starts at a track's planned entry; deck/mixer gestures
+   still take over (stop the Conductor, audio keeps playing).
