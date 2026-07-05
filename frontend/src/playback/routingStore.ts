@@ -43,6 +43,14 @@ function savePrefs(prefs: RoutingPrefs): void {
 }
 
 let mixer: Mixer | null = null;
+
+/** Secondary mixers following the MASTER sink (headphone-cue 06): the
+ * Transition editor's private Mixer plays to the system default unless
+ * routed too — "editor comes out of the headphones". Master only: the cue
+ * bridge stays exclusive to the primary mixer. */
+type MasterRoutable = Pick<Mixer, 'setMasterSinkId'>;
+const secondaryMixers = new Set<MasterRoutable>();
+
 let prefs: RoutingPrefs = loadPrefs();
 let devices: AudioOutputDevice[] = [];
 let snapshot: RoutingSnapshot = {
@@ -72,19 +80,39 @@ async function recompute(): Promise<void> {
   const resolved = resolveRouting(prefs, devices.map((d) => d.deviceId));
   snapshot = { prefs, resolved, devices };
   notify();
-  if (!mixer) return;
-  try {
-    await mixer.setMasterSinkId(resolved.masterSinkId);
-  } catch (err) {
-    console.warn('[routing] master sink failed; falling back to default', err);
-    await mixer.setMasterSinkId(null).catch(() => undefined);
+  for (const secondary of secondaryMixers) {
+    void applyMasterSink(secondary, resolved.masterSinkId);
   }
+  if (!mixer) return;
+  await applyMasterSink(mixer, resolved.masterSinkId);
   try {
     await mixer.setCueSinkId(resolved.cueSinkId, resolved.cuePair);
   } catch (err) {
     // setCueSinkId already disabled itself; just surface it.
     console.warn('[routing] cue sink failed; cue bus disabled', err);
   }
+}
+
+async function applyMasterSink(target: MasterRoutable, sinkId: string | null): Promise<void> {
+  try {
+    await target.setMasterSinkId(sinkId);
+  } catch (err) {
+    console.warn('[routing] master sink failed; falling back to default', err);
+    await target.setMasterSinkId(null).catch(() => undefined);
+  }
+}
+
+/**
+ * Follow the routed MASTER device with an additional Mixer (the editor's
+ * private one). Applies the currently-resolved sink immediately and on
+ * every recompute; never the cue sink. Returns an unregister.
+ */
+export function registerRoutedMixer(target: MasterRoutable): () => void {
+  secondaryMixers.add(target);
+  void applyMasterSink(target, snapshot.resolved.masterSinkId);
+  return () => {
+    secondaryMixers.delete(target);
+  };
 }
 
 /** Enumerate (may unlock labels — see audioDevices.ts) and re-apply. */

@@ -17,6 +17,7 @@
 import { DeckEngine } from '../playback/DeckEngine';
 import { Mixer } from '../playback/mixer';
 import { isAudible } from '../playback/audibleSurface';
+import { registerRoutedMixer } from '../playback/routingStore';
 import { api } from '../api/client';
 import type { EditorMix } from './mixModel';
 import {
@@ -58,6 +59,11 @@ export class MixPlayer {
   private anchorAudioTime = 0;
   private raf = 0;
   private listeners = new Set<() => void>();
+
+  /** The private mixer follows the routed MASTER device (headphone-cue
+   * 06): un-routed it plays to the system default — typically the
+   * headphone interface once a cue device is configured. */
+  private unregisterRouting = registerRoutedMixer(this.mixer);
 
   constructor(mix: EditorMix) {
     this.mix = mix;
@@ -194,6 +200,7 @@ export class MixPlayer {
   }
 
   dispose(): void {
+    this.unregisterRouting();
     cancelAnimationFrame(this.raf);
     this.engineA.dispose();
     this.engineB.dispose();
