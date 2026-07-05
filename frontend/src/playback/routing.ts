@@ -54,6 +54,21 @@ export function resolveRouting(
 }
 
 /**
+ * Which output channels the Cue bus occupies on a device with this many
+ * outputs (hardware-learned at the smoke test): the Inpulse enumerates as
+ * ONE 4-channel device — outs 1/2 are the rear RCA, 3/4 the front headphone
+ * jack — and a stereo stream lands on 1/2, i.e. silence for headphones. So
+ * a ≥4-out sink gets the cue on channels 3/4 (0-based 2/3), which also
+ * leaves 1/2 free for master in an all-Inpulse setup. null = the device's
+ * default stereo pair.
+ */
+export function cueChannelPair(
+  maxChannelCount: number
+): { left: number; right: number } | null {
+  return maxChannelCount >= 4 ? { left: 2, right: 3 } : null;
+}
+
+/**
  * Revive persisted prefs (headphone-cue 04). Anything malformed degrades to
  * the safe default for that bus — a corrupt blob must never kill audio or
  * throw at boot.

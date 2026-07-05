@@ -79,3 +79,16 @@ None - can start immediately.
      the Inpulse (which jack?), master unaffected; note logged latencies
      and any glitches/dropouts over a minute.
   4. Unplug the Inpulse mid-tone — tone dies, master keeps playing.
+- HARDWARE FINDINGS (smoke test, 2026-07-05): enumeration, sink switching,
+  the bridge, and headphone cueing via the Mac's speakers/headphone port
+  all verified working. The 4-channel question resolved the bad way: the
+  Inpulse enumerates as ONE device ("DJControl Inpulse 300 Mk2"), so the
+  bridge's stereo stream landed on outputs 1/2 (rear RCA) and the front
+  headphone jack (3/4) stayed silent.
+- Fix (change stmywupw, `cue-to-3-4`): `cueChannelPair(maxChannelCount)`
+  pure seam — ≥4-out sink → cue on 0-based channels 2/3 — and the bridge
+  now rebuilds its context per target and splits the stereo cue onto that
+  pair (`destination.channelCount` raised, 'discrete' interpretation,
+  splitter→merger). Side effect: outs 1/2 stay free, so the all-Inpulse
+  setup (master → RCA, cue → headphones) works with no extra routing.
+  RE-VERIFY: cue → Inpulse must now sound from the headphone jack.

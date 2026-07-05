@@ -4,7 +4,12 @@
  * silent; the Cue bus degrades to disabled.
  */
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ROUTING_PREFS, parseRoutingPrefs, resolveRouting } from './routing';
+import {
+  DEFAULT_ROUTING_PREFS,
+  cueChannelPair,
+  parseRoutingPrefs,
+  resolveRouting,
+} from './routing';
 import type { RoutingPrefs } from './routing';
 
 const MAC = { deviceId: 'mac-speakers', label: 'MacBook Pro Speakers' };
@@ -104,5 +109,23 @@ describe('parseRoutingPrefs (headphone-cue 04)', () => {
     expect(parseRoutingPrefs({ master: { deviceId: '', label: 'x' }, cue: null })).toEqual(
       DEFAULT_ROUTING_PREFS
     );
+  });
+});
+
+describe('cueChannelPair (cue-to-3-4 follow-up)', () => {
+  it('stereo (and smaller) devices use the default pair', () => {
+    expect(cueChannelPair(0)).toBeNull();
+    expect(cueChannelPair(1)).toBeNull();
+    expect(cueChannelPair(2)).toBeNull();
+    expect(cueChannelPair(3)).toBeNull();
+  });
+
+  it('a 4-out interface (the Inpulse) gets the headphone pair, 0-based 2/3', () => {
+    expect(cueChannelPair(4)).toEqual({ left: 2, right: 3 });
+  });
+
+  it('bigger interfaces still cue on 3/4', () => {
+    expect(cueChannelPair(6)).toEqual({ left: 2, right: 3 });
+    expect(cueChannelPair(8)).toEqual({ left: 2, right: 3 });
   });
 });
