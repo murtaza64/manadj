@@ -23,17 +23,23 @@
   z-index: 10;
 }
 
-/* Sortable header base styles */
+/* Sortable header base styles. Unified vocabulary: hover = bg tint
+   (headers are borderless — the tint IS the feedback); sorted = mauve
+   accent text (an inverted fill would overweight a table header). */
 .sortable-header {
   padding: 6px 6px;
   cursor: pointer;
   user-select: none;
   color: var(--text);
-  transition: color 0.2s;
+  transition: background 0.1s ease;
 }
 
 .sortable-header:hover {
-  color: var(--lavender);
+  background: var(--surface0);
+}
+
+.sortable-header:active {
+  background: var(--surface1);
 }
 
 .sortable-header.sorted {
@@ -123,7 +129,7 @@
 .col-resize-handle:hover, body.col-resizing .col-resize-handle {
   background: linear-gradient(
     to right,
-    transparent 3px, #007aff 3px, #007aff 6px, transparent 6px
+    transparent 3px, var(--blue) 3px, var(--blue) 6px, transparent 6px
   );
 }
 body.col-resizing { cursor: col-resize; user-select: none; }

@@ -113,7 +113,7 @@
 
 .bpm-action-btn {
   padding: 6px 16px;
-  background: var(--surface0);
+  background: transparent;
   color: var(--text);
   border: 1px solid var(--surface1);
   cursor: pointer;
@@ -121,7 +121,12 @@
   font-family: 'UbuntuMono Nerd Font', monospace;
 }
 
-.bpm-action-btn:hover {
+.bpm-action-btn:hover:not(:disabled) {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.bpm-action-btn:active:not(:disabled) {
   background: var(--surface1);
 }
 

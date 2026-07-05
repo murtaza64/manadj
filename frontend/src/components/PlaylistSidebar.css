@@ -1,0 +1,64 @@
+/* Sidebar rows + actions. Unified interaction vocabulary (perf-layout
+   08): hover = tint (rows are borderless), selected = surface0 (row
+   selection, not a button engaged state), accent CTAs rest as outlines. */
+
+.pl-sidebar-row {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.pl-sidebar-row:hover {
+  background: var(--surface0);
+}
+
+.pl-sidebar-row.selected {
+  background: var(--surface0);
+}
+
+/* Accent confirm/cancel: outline at rest (solid fill is reserved for
+   engaged states), accent border holds on hover */
+.pl-sidebar-ok,
+.pl-sidebar-cancel {
+  padding: 4px 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pl-sidebar-ok {
+  border: 1px solid var(--green);
+  color: var(--green);
+}
+
+.pl-sidebar-cancel {
+  border: 1px solid var(--red);
+  color: var(--red);
+}
+
+.pl-sidebar-ok:hover,
+.pl-sidebar-cancel:hover {
+  background: var(--surface0);
+}
+
+.pl-sidebar-ok:active,
+.pl-sidebar-cancel:active {
+  background: var(--surface1);
+}
+
+.pl-sidebar-new {
+  width: 100%;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.pl-sidebar-new:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.pl-sidebar-new:active {
+  background: var(--surface1);
+}

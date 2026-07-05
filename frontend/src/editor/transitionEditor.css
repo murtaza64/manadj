@@ -147,8 +147,17 @@
   cursor: default;
 }
 
+/* Segment hover = fill (joined-panel idiom); the group border brightens */
+.editor-switcher:hover {
+  border-color: var(--text, #cdd6f4);
+}
+
 .editor-switcher button:hover:not(:disabled) {
-  color: var(--sapphire, #74c7ec);
+  background: var(--surface0, #313244);
+}
+
+.editor-switcher button:active:not(:disabled) {
+  background: var(--surface1, #45475a);
 }
 
 .editor-switcher-name {
@@ -175,8 +184,12 @@
   font-size: 14px;
 }
 
-.editor-switcher-star.on {
-  color: var(--yellow, #f9e2af);
+/* Engaged = inverted fill (unified vocabulary) */
+.editor-switcher-star.on,
+.editor-switcher-star.on:hover:not(:disabled),
+.editor-switcher-star.on:active:not(:disabled) {
+  background: var(--yellow, #f9e2af);
+  color: var(--base, #1e1e2e);
 }
 
 .editor-switcher-pos {
@@ -188,8 +201,11 @@
   color: var(--subtext0, #a6adc8);
 }
 
-.editor-switcher-del.confirming {
-  color: var(--red, #f38ba8);
+.editor-switcher-del.confirming,
+.editor-switcher-del.confirming:hover:not(:disabled),
+.editor-switcher-del.confirming:active:not(:disabled) {
+  background: var(--red, #f38ba8);
+  color: var(--base, #1e1e2e);
 }
 
 .editor-fit {
@@ -206,9 +222,14 @@
   font-weight: bold;
 }
 
+/* Accent control: border stays sapphire, the tint carries the feedback
+   (bg is crust at rest — it floats over the timeline) */
 .editor-fit:hover {
-  color: var(--subtext1);
-  border-color: var(--subtext1);
+  background: var(--surface0);
+}
+
+.editor-fit:active {
+  background: var(--surface1);
 }
 
 .editor-timeline-row {
@@ -378,23 +399,35 @@
 }
 
 .editor-take-banner button {
-  border-radius: 3px;
   padding: 3px 10px;
   font-size: 12px;
   cursor: pointer;
+  background: transparent;
 }
 
+.editor-take-banner button:hover {
+  background: var(--surface0);
+}
+
+.editor-take-banner button:active {
+  background: var(--surface1);
+}
+
+/* Accent CTA: outline at rest (solid fill is reserved for engaged
+   states), border stays cyan on hover */
 .editor-take-promote {
-  background: #00e5ff;
   border: 1px solid #00e5ff;
-  color: #001114;
+  color: #00e5ff;
   font-weight: 600;
 }
 
 .editor-take-discard {
-  background: transparent;
-  border: 1px solid #444;
-  color: #aaa;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+}
+
+.editor-take-discard:hover {
+  border-color: var(--text);
 }
 
 /* ── Jump events (transition-takes 01): incoming-track discontinuities.
@@ -408,7 +441,6 @@
   /* The splice seam (transition-takes 06), scoped to ROW B — the deck
      that jumps (Jump events are incoming-only) — in that deck's color. */
   border-left: 2px solid var(--deck-b);
-  box-shadow: 0 0 4px rgba(var(--deck-b-rgb), 0.7);
   cursor: grab;
   z-index: 60;
 }
@@ -469,17 +501,21 @@
 }
 
 .editor-jump-popover button {
-  background: #14141f;
-  color: #e8e8f0;
-  border: 1px solid #333;
-  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--surface1);
   padding: 2px 6px;
   font-size: 11px;
   cursor: pointer;
 }
 
 .editor-jump-popover button:hover {
-  border-color: #00e5ff;
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.editor-jump-popover button:active {
+  background: var(--surface1);
 }
 
 .editor-jump-popover .editor-jump-delete {
@@ -580,7 +616,7 @@
 
 .editor-deckcard-row button {
   background: none;
-  border: 1px solid var(--surface0, #313244);
+  border: 1px solid var(--surface1, #45475a);
   color: var(--text, #cdd6f4);
 
   cursor: pointer;
@@ -588,9 +624,15 @@
   padding: 2px 6px;
 }
 
-.editor-deckcard-row button:hover {
-  border-color: #ffe600;
-  color: #ffe600;
+/* Unified vocabulary: hover = tint + white border (accent clusters pin
+   their accent border below), press = fill step */
+.editor-deckcard-row button:hover:not(:disabled) {
+  background: var(--surface0, #313244);
+  border-color: var(--text, #cdd6f4);
+}
+
+.editor-deckcard-row button:active:not(:disabled) {
+  background: var(--surface1, #45475a);
 }
 
 .editor-deckcard-row button:disabled {
@@ -611,6 +653,16 @@
 
 .editor-pair > * + * {
   border-left: 1px solid var(--surface1, #45475a);
+}
+
+/* Panel idiom: group border brightens on hover; segments keep their
+   divider color (pinned below) and read feedback as fill */
+.editor-pair:hover {
+  border-color: var(--text, #cdd6f4);
+}
+
+.editor-deckcard-row .editor-pair button:hover:not(:disabled) {
+  border-color: var(--surface1, #45475a);
 }
 
 .editor-pair-label {
@@ -644,8 +696,10 @@
 }
 
 /* Standalone action (downbeat): same metrics, weighted distinct from the
-   nudge pairs via the beatgrid functional color. */
-.editor-deckcard-row .editor-action {
+   nudge pairs via the beatgrid functional color. Accent control — border
+   stays yellow on hover. */
+.editor-deckcard-row .editor-action,
+.editor-deckcard-row .editor-action:hover:not(:disabled) {
   color: var(--yellow, #f9e2af);
   border-color: var(--yellow, #f9e2af);
 }
@@ -676,6 +730,18 @@
 .editor-alignment.editor-pair > * + *,
 .editor-alignment .editor-pair > * + * {
   border-left-color: #ff9500;
+}
+
+/* Alignment clusters are accent controls: the orange border holds on
+   hover (group and segment dividers both) */
+.editor-alignment.editor-pair:hover,
+.editor-alignment .editor-pair:hover {
+  border-color: #ff9500;
+}
+
+.editor-alignment.editor-pair > button:hover:not(:disabled),
+.editor-alignment .editor-pair > button:hover:not(:disabled) {
+  border-color: #ff9500;
 }
 
 /* The lock is stateful, not passively accented: ENGAGED = alignment
@@ -823,14 +889,22 @@
   min-width: 24px;
 }
 
-.editor-lockbtn.on {
-  color: #ff9500; /* engaged lock = alignment accent (it scopes slides) */
+/* Engaged = inverted fill: lock in the alignment accent (it scopes
+   slides), mute in red */
+.editor-lockbtn.on,
+.editor-lockbtn.on:hover:not(:disabled),
+.editor-lockbtn.on:active:not(:disabled) {
+  background: #ff9500;
   border-color: #ff9500;
+  color: var(--base, #1e1e2e);
 }
 
-.editor-mutebtn.on {
-  color: var(--red, #f38ba8);
+.editor-mutebtn.on,
+.editor-mutebtn.on:hover:not(:disabled),
+.editor-mutebtn.on:active:not(:disabled) {
+  background: var(--red, #f38ba8);
   border-color: var(--red, #f38ba8);
+  color: var(--base, #1e1e2e);
 }
 
 .editor-laneclear {
@@ -839,6 +913,14 @@
   color: inherit;
   cursor: pointer;
   font-size: 12px;
+}
+
+.editor-laneclear:hover {
+  background: var(--surface0, #313244);
+}
+
+.editor-laneclear:active {
+  background: var(--surface1, #45475a);
 }
 
 /* ── Transition templates (issue 03) ─────────────────────────────────── */
@@ -860,10 +942,21 @@
   padding: 0 8px;
 }
 
-.editor-templates-trigger:hover,
-.editor-templates-trigger[aria-expanded='true'] {
-  color: var(--sapphire, #74c7ec);
+.editor-templates-trigger:hover {
+  background: var(--surface0, #313244);
+  border-color: var(--text, #cdd6f4);
+}
+
+.editor-templates-trigger:active {
+  background: var(--surface1, #45475a);
+}
+
+/* Open = engaged: inverted sapphire fill */
+.editor-templates-trigger[aria-expanded='true'],
+.editor-templates-trigger[aria-expanded='true']:hover {
+  background: var(--sapphire, #74c7ec);
   border-color: var(--sapphire, #74c7ec);
+  color: var(--base, #1e1e2e);
 }
 
 .editor-templates-panel {
@@ -907,8 +1000,13 @@
   cursor: default;
 }
 
+/* Borderless menu items: hover reads as fill */
 .editor-templates-row button:hover:not(:disabled) {
-  color: var(--sapphire, #74c7ec);
+  background: var(--surface0, #313244);
+}
+
+.editor-templates-row button:active:not(:disabled) {
+  background: var(--surface1, #45475a);
 }
 
 .editor-templates-name {
@@ -935,8 +1033,9 @@
   text-align: center;
 }
 
+/* Accent CTA text (the row hover is a bg fill, so no !important needed) */
 .editor-templates-apply {
-  color: var(--green, #a6e3a1) !important;
+  color: var(--green, #a6e3a1);
   font-weight: bold;
 }
 
@@ -950,6 +1049,10 @@
   font-size: 11px;
   padding: 5px 8px;
   text-align: left;
+}
+
+.editor-templates-save:hover:not(:disabled) {
+  background: var(--surface0, #313244);
 }
 
 .editor-templates-save:disabled {
@@ -1055,9 +1158,20 @@
   padding: 4px 12px;
 }
 
-.editor-savetpl-confirm {
-  color: var(--green, #a6e3a1) !important;
-  border-color: var(--green, #a6e3a1) !important;
+.editor-savetpl-actions button:hover:not(:disabled) {
+  background: var(--surface0, #313244);
+  border-color: var(--text, #cdd6f4);
+}
+
+.editor-savetpl-actions button:active:not(:disabled) {
+  background: var(--surface1, #45475a);
+}
+
+/* Accent CTA: border stays green on hover */
+.editor-savetpl-confirm,
+.editor-savetpl-confirm:hover:not(:disabled) {
+  color: var(--green, #a6e3a1);
+  border-color: var(--green, #a6e3a1);
 }
 
 .editor-savetpl-confirm:disabled {

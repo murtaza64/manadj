@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { HotCue as HotCueType } from '../types';
 import './HotCue.css';
 
@@ -64,15 +65,12 @@ export default function HotCue({
       }
       style={
         // A stored color (e.g. imported from Engine) renders THROUGH the
-        // site idiom — colored border + 12% tint + colored number — not as
-        // an opaque fill that ignores the theme. Colorless cues keep their
-        // per-slot theme colors from the cue-N classes.
+        // site idiom: it only overrides --cue-color, so every state rule
+        // (rest tint / hover brighten / previewing inverted fill) in
+        // HotCue.css applies unchanged. Colorless cues keep their per-slot
+        // theme colors from the cue-N classes.
         isSet && hotCue.color
-          ? {
-              borderColor: hotCue.color,
-              backgroundColor: `color-mix(in srgb, ${hotCue.color} 12%, transparent)`,
-              color: hotCue.color,
-            }
+          ? ({ '--cue-color': hotCue.color } as CSSProperties)
           : undefined
       }
     >
