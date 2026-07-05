@@ -1,6 +1,6 @@
 # 03 — Pure planner + overview ladder
 
-Status: ready-for-human
+Status: done (landed on main, change vykmvyym)
 
 ## Parent
 
@@ -67,3 +67,9 @@ Set fits one screen the list has no scroll to pin to, leaving the zoomed
 ladder unreachable — zoom now drops to 1 so the whole set is visible
 (band-aid; a free-viewport + zoom redesign is being grilled as its own
 ticket).
+
+**2026-07-05 — Approved and landed.** Human click-through approved ("land 3
+and 4"); stack rebased onto trunk tip (post sets-10/11 landing — two
+SetDetailPane toolbar conflicts resolved: one span wraps transport +
+Auto-fill + Suggest), gate green (817 vitest, 633 pytest, build clean,
+single alembic head). main → rtqkwmot.

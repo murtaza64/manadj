@@ -1,6 +1,6 @@
 # 04 — Conductor v1: play a Set end-to-end
 
-Status: ready-for-human
+Status: done (landed on main, change rtqkwmot)
 
 ## Parent
 
@@ -93,3 +93,9 @@ capture script). Landing on approval: rebase vykmvyym+rtqkwmot onto trunk
 tip, re-run the gate, `jj bookmark move main --to rtqkwmot`, then move the
 default workspace's idle @ to the new trunk (real DB has no migrations to
 run). Lane app :5253 serves the stack.
+
+**2026-07-05 — Approved and landed.** Human click-through approved ("land 3
+and 4"); stack rebased onto trunk tip (post sets-10/11 landing — two
+SetDetailPane toolbar conflicts resolved: one span wraps transport +
+Auto-fill + Suggest), gate green (817 vitest, 633 pytest, build clean,
+single alembic head). main → rtqkwmot.
