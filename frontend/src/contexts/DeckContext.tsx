@@ -12,6 +12,7 @@ import type { DeckContextValue } from '../hooks/useDeck';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
 import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
+import { initWakeLockBridge } from '../playback/wakeLock';
 import { getKeyLockFlags } from '../playback/keyLockStore';
 import type { BeatgridResponse, Track } from '../types';
 
@@ -84,6 +85,10 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // feed the Follow state machine (spread/drop/sticky rules live in the
   // reducer, not here).
   useEffect(() => initFollowPlaybackBridge(engines), [engines]);
+
+  // Screen wake lock (screen-wake 01): the display must not dim while a
+  // Deck plays.
+  useEffect(() => initWakeLockBridge(engines), [engines]);
 
   // Dev-only audio routing tracer (headphone-cue 01): console helpers for
   // sink switching + the cue bridge. Lazy import keeps it out of prod.
