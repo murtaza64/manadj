@@ -61,29 +61,40 @@ function formatReadoutTime(seconds: number): string {
   return `${m}:${rest.toFixed(1).padStart(4, '0')}`;
 }
 
-const HOT_CUE_COLORS: Record<number, [number, number, number]> = {
-  1: [0.54, 0.71, 0.98], // blue
-  2: [0.98, 0.89, 0.69], // yellow
-  3: [0.98, 0.70, 0.53], // peach (orange)
-  4: [0.95, 0.54, 0.66], // red
-  5: [0.65, 0.89, 0.63], // green
-  6: [0.96, 0.76, 0.91], // pink
-  7: [0.80, 0.65, 0.97], // mauve
-  8: [0.58, 0.89, 0.84], // teal
+/** Hot-cue slot FALLBACK palette (hotcue-colors 01): bright, fully
+ * saturated — the pastel Catppuccin set was rejected. A cue's STORED
+ * color (Engine import) takes precedence at every render site; these are
+ * what colorless (in-app-created) cues get. Mirrors --hc-1..--hc-8 in
+ * styles/variables.css (the GL pass can't read CSS vars — keep in sync).
+ * Also reused by the Set overview ladder (sets 04 review). */
+export const HOT_CUE_CSS_COLORS: Record<number, string> = {
+  1: '#1e90ff', // blue
+  2: '#ffd400', // yellow
+  3: '#ff8800', // orange
+  4: '#ff4455', // red
+  5: '#2ed573', // green
+  6: '#ff5cc8', // pink
+  7: '#a855f7', // purple
+  8: '#00cec9', // teal
 };
 
-/** Hot-cue slot palette (CSS side; also reused by the Set overview
- * ladder — sets 04 review). */
-export const HOT_CUE_CSS_COLORS: Record<number, string> = {
-  1: 'rgb(137, 180, 250)',
-  2: 'rgb(249, 226, 175)',
-  3: 'rgb(250, 179, 135)',
-  4: 'rgb(243, 139, 168)',
-  5: 'rgb(166, 227, 161)',
-  6: 'rgb(245, 194, 231)',
-  7: 'rgb(203, 166, 247)',
-  8: 'rgb(148, 226, 213)',
-};
+const CUE_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+/** '#RRGGBB' → 0-1 floats; null for anything else (falls back to the
+ * slot palette — stored colors are Engine-import hex, but don't trust). */
+function parseCueColor(color: string | undefined): [number, number, number] | null {
+  if (!color || !CUE_COLOR_RE.test(color)) return null;
+  return [
+    parseInt(color.slice(1, 3), 16) / 255,
+    parseInt(color.slice(3, 5), 16) / 255,
+    parseInt(color.slice(5, 7), 16) / 255,
+  ];
+}
+
+/** GL-side palette: the CSS palette as 0-1 floats. */
+const HOT_CUE_COLORS: Record<number, [number, number, number]> = Object.fromEntries(
+  Object.entries(HOT_CUE_CSS_COLORS).map(([slot, hex]) => [slot, parseCueColor(hex)!]),
+);
 
 const BODY_VERTEX_SHADER = `#version 300 es
 const vec2 pos[4] = vec2[4](vec2(-1,-1), vec2(1,-1), vec2(-1,1), vec2(1,1));
@@ -957,7 +968,9 @@ export class WaveformRendererV2 {
     for (const [slot, hc] of this.hotCues.entries()) {
       const x = this.timeToX(hc.time, view);
       if (x < 0 || x >= view.w) continue;
-      const [r, g, b] = HOT_CUE_COLORS[slot] ?? [1, 1, 1];
+      // Stored per-cue color first (pad/ladder precedence — hotcue-colors
+      // 01); saturated slot palette for colorless cues.
+      const [r, g, b] = parseCueColor(hc.color) ?? HOT_CUE_COLORS[slot] ?? [1, 1, 1];
       if (this.isMinimap) {
         // Zoned marks: 2px full-height pole flying a 5×5 square flag off
         // its top RIGHT — the hotcues' identity zone is the top edge.
@@ -1039,7 +1052,11 @@ export class WaveformRendererV2 {
       const x = this.timeToX(hc.time, view);
       if (x < 0 || x >= view.w) continue;
       const squareX = x + 3 * view.dpr + 2 * view.dpr;
-      const color = HOT_CUE_CSS_COLORS[slot] ?? 'rgb(255, 255, 255)';
+      // Stored per-cue color first, like the marks (hotcue-colors 01).
+      const color =
+        hc.color && CUE_COLOR_RE.test(hc.color)
+          ? hc.color
+          : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');
       ctx.fillStyle = 'rgb(17, 17, 17)';
       ctx.fillRect(squareX, squareY, squareSize, squareSize);
       ctx.strokeStyle = color;

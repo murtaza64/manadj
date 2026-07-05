@@ -29,6 +29,19 @@
   --mauve: #b366ff;
   --lavender: #7a7aff;
 
+  /* Hotcue slot palette (fallback when a cue has no stored color) —
+     bright, fully saturated (hotcue-colors 01; pastel rejected). Mirrored
+     as HOT_CUE_COLORS / HOT_CUE_CSS_COLORS in WaveformRendererV2.ts, which
+     the GL pass can't read from CSS — keep the two in sync. */
+  --hc-1: #1e90ff; /* blue */
+  --hc-2: #ffd400; /* yellow */
+  --hc-3: #ff8800; /* orange */
+  --hc-4: #ff4455; /* red */
+  --hc-5: #2ed573; /* green */
+  --hc-6: #ff5cc8; /* pink */
+  --hc-7: #a855f7; /* purple */
+  --hc-8: #00cec9; /* teal */
+
   /* Energy gradient */
   --energy-1: #ffffcc;
   --energy-2: #ffcc66;
