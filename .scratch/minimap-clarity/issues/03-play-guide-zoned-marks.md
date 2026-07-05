@@ -1,6 +1,6 @@
 # 03 — Play-guide minimap marks: bar + mid-height play arrow
 
-Status: ready-for-agent
+Status: ready-for-human
 Type: task
 
 ## Parent
@@ -42,3 +42,32 @@ only. Emphasis must update as guides get missed while the deck plays.
 None - can start immediately.
 
 ## Comments
+
+**2026-07-05 — implemented (lane minimap-clarity, change wmmuzpzl, stacked on 02), parked ready-for-human.**
+
+- `PlayGuideOverlay.css`: `.perf-minimap-guide` is now a 1px full-height
+  bar + ▶ CSS-triangle at mid-height (~8px tall) via `::after`, painted
+  with `currentColor` (deck color set once per incoming class). `.next`:
+  2px bar + ~11px arrow, opacity 1; other upcoming 0.7; `.missed` 0.3.
+- `PlayGuideMinimapMarks.tsx`: computes the emphasized guide as the
+  earliest non-missed by aTime (no sort-order assumption); emphasis moves
+  when a guide flips to missed because `usePlayGuides` keys its signature
+  on `missed`. Presentation only — the model is untouched.
+- Verified headless with pair 549→171 (two saved transitions): exactly one
+  `.next` at a time; seeking the outgoing deck past a guide dims it to 0.3
+  and moves the emphasis to the following guide; arrows sit clear of the
+  top flag zone and bottom triangle zone.
+- Gate: vitest 817, build + tsc + eslint clean.
+
+**Verification walkthrough (lane app at http://localhost:5273):**
+
+1. Performance view, load 549 ("Weeble Wobble VIP") on A and 171
+   ("Last Time") on B — the pair has two saved transitions A→B.
+2. Deck A minimap: two pink (deck-B color) guide marks — full-height bar
+   with a ▶ arrow at mid-height. The earlier one is bolder (2px bar,
+   bigger arrow); the later one is thinner at 0.7 opacity.
+3. Seek/play deck A past the first guide (~77s in): it fades to 0.3 and
+   the second guide becomes the emphasized one — exactly one bold guide
+   at any moment.
+4. Note the guides' arrows don't cover deck A's hotcue flags (top) or a
+   main-cue triangle (bottom) — only their 1px bar crosses those zones.
