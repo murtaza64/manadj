@@ -158,10 +158,13 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
   }
 
   // Track metadata for the entry rows (batch-by-Promise.all pattern, as in
-  // TakeHistoryView's labels query).
+  // TakeHistoryView's labels query). Keyed under the ['tracks'] prefix so
+  // every track mutation's invalidation (archive/unarchive/update) reaches
+  // it — as ['set-tracks', …] the rows kept a stale archived_at until
+  // remount (the drift class sets 12 patched).
   const trackIds = (entries ?? []).map((e) => e.trackId);
   const { data: trackMap } = useQuery({
-    queryKey: ['set-tracks', setId, trackIds.join(',')],
+    queryKey: ['tracks', 'set-rows', setId, trackIds.join(',')],
     enabled: trackIds.length > 0,
     queryFn: async () => {
       const tracks = await Promise.all(trackIds.map((id) => api.tracks.getById(id)));
