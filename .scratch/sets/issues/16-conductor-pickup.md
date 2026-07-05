@@ -1,6 +1,6 @@
 # 16 — Pickup: Conductor resumes from manual deck state
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -36,3 +36,56 @@ The inverse of takeover. After manual fiddling, a **Pick up** control adopts the
 ## Blocked by
 
 - 05-seek-playhead-follow (pickup is structurally "seek with an untouchable anchor" — 05's plan-evaluation seek is the engine)
+
+## Verification walkthrough (2026-07-05, lane setlist, change `mylmsyuu`)
+
+Implemented as specced. Pure seam: `sets/pickup.ts` — `evaluatePickup`
+(predicate + reasons), `mixTimeForTrackTime` (the planStateAt inverse:
+window segments / Tempo-return quadratic / solo anchor),
+`flipPlanDecks`, `pickupStartLanes` — 29 vitest cases incl. round-trip
+invariants (a lit instant puts the anchor exactly where its playhead
+is). Runtime: `Conductor.pickup` (no-silence claim via
+`claimAudible(id, {silencePrevious:false})`, mixer/pitch convergence
+ramp, anchors never re-seeked mid-ramp), `pickupSetPlayback` (one
+coherent snapshot per decision), toolbar button in SetDetailPane.
+Capture rule rides the recorder's existing gate; 2 new regression
+tests. Gate: 651 pytest · 999 vitest · build clean · one alembic head
+(0021) · eslint clean on touched files.
+
+Open **http://localhost:5253** (or `npm --prefix desktop start -- --port
+5253`). Sandbox DB has set **test set** (8 tracks; adjacencies: 2
+transition pins, 3 take pins, 2 hard cuts).
+
+1. Sets → **test set**: the toolbar shows a dimmed **⤴ Pick up**; hover
+   → "No audible deck to anchor on — bring a set track into the mix".
+2. **One-deck pickup**: load "Weeble Wobble VIP" (track 1) on a deck by
+   hand, play it mid-track, fader up. The button lights (peach). Click:
+   the set resumes from that instant — the anchor keeps playing without
+   a glitch, the other deck loads/cues "Last Time", mixer/pitch glide
+   to the plan over ~1.5s (no snaps), ladder playhead lands mid-track-1.
+3. **Takeover → pickup loop**: while conducting, nudge any fader —
+   Conductor stops, decks keep sounding (takeover). The button lights
+   again; click — seamless resume. Repeat at will.
+4. **Reasons teach the fix**: seek the deck near its end (past the
+   window) → dimmed "outside its planned span — silent in the set".
+   Load a non-set track → "not in the set". Bring a second wrong deck
+   audible → "…fade Deck X out and the button lights"; fade it → lit.
+5. **Wrong physical deck**: track 1 on Deck B only → still lights;
+   pickup runs the set deck-mirrored (flip) — watch the handover load
+   land on Deck A.
+6. **Paused pickup**: pause the deck mid-span, fader up → still lit;
+   pickup resumes from the parked spot.
+7. **Two-deck blend**: hard to stage by hand — use ⏸ mid-transition,
+   then takeover by touching a fader, then Pick up while both decks
+   sit aligned: lit, adopts the blend mid-window.
+
+Notes for review: (a) deck-flip (`flipPlanDecks`) is my reading of
+"automatic mapping" for a track sitting on the other physical deck —
+mapping, not re-planning (instants/tracks/Transitions unchanged); flag
+if you want it cut. (b) The two-deck instant derives from the audibly
+dominant deck; alignment residue lands on the other. (c)
+`pickupToleranceSec` raised past the drift tolerance (0.12s) means the
+non-dominant deck can be adopted off-plan enough that the first
+post-ramp drift check re-seeks it audibly — documented at the setting.
+(d) Mid-engagement abandonment / post-settle preservation of Takes is
+recorder-gate behavior, regression-tested in recorder.test.ts.
