@@ -16,6 +16,7 @@ import { JogController } from '../midi/jog';
 import Library from '../components/Library';
 import type { LibraryBrowseHandle } from '../components/Library';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
+import { AutoBlurSelect } from '../components/AutoBlurSelect';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import {
@@ -853,7 +854,7 @@ function EditorCenterPanel({
           snap
         </label>
         {addableLanes.length > 0 && (
-          <select
+          <AutoBlurSelect
             value=""
             onChange={(e) => {
               const id = e.target.value as LaneId;
@@ -866,7 +867,7 @@ function EditorCenterPanel({
                 {id}
               </option>
             ))}
-          </select>
+          </AutoBlurSelect>
         )}
       </div>
       {takeDraft && (

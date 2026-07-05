@@ -22,14 +22,22 @@ export interface DeckKeyMap {
   pads: [string, string, string, string];
 }
 
+/** INPUT types that take typed text (keyboard-focus 01: a focused
+ * checkbox/radio/range must NOT silence the hubs — the no-focus rule
+ * keeps them from focusing at all; this guard makes any leak non-fatal). */
+const TEXT_INPUT_TYPES = new Set(['text', 'search', 'number', 'url', 'email', 'password']);
+
 /** True while the user is typing somewhere keys must not be stolen from. */
 export function isTypingTarget(event: KeyboardEvent): boolean {
-  const target = event.target as HTMLElement;
-  return (
-    target.tagName === 'INPUT' ||
-    target.tagName === 'TEXTAREA' ||
-    target.contentEditable === 'true'
-  );
+  return isTextEntryTarget(event.target);
+}
+
+/** The predicate behind isTypingTarget, on the target itself (testable). */
+export function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.tagName === 'TEXTAREA') return true;
+  if ((target as HTMLElement).contentEditable === 'true') return true;
+  return target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has((target as HTMLInputElement).type);
 }
 
 /**

@@ -5,6 +5,7 @@
  * Esc reverts), favorite star, and a two-step inline delete (no modal).
  */
 import { useEffect, useRef, useState } from 'react';
+import { useConfirmFlag } from '../hooks/useConfirmFlag';
 import { isPristine } from './pairStore';
 import type { SavedTransition } from './pairStore';
 
@@ -25,7 +26,9 @@ export function TransitionSwitcher({
 }) {
   const item = items[active];
   const [draft, setDraft] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  // Two-step delete arms then auto-disarms (~3s) — no focus involved
+  // (keyboard-focus 01: the no-focus rule killed the old onBlur reset).
+  const { armed: confirming, fire: fireDelete, disarm } = useConfirmFlag();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Editing/confirm state is per-Transition: navigation resets both
@@ -35,7 +38,7 @@ export function TransitionSwitcher({
   if (navKey !== seenKey) {
     setSeenKey(navKey);
     setDraft(null);
-    setConfirming(false);
+    disarm();
   }
 
   // Select-all exactly ONCE when editing starts — keying this on the draft
@@ -113,14 +116,8 @@ export function TransitionSwitcher({
             : 'Delete this Transition (two-step)'
         }
         onClick={() => {
-          if (confirming) {
-            setConfirming(false);
-            onDelete();
-          } else {
-            setConfirming(true);
-          }
+          if (fireDelete()) onDelete();
         }}
-        onBlur={() => setConfirming(false)}
       >
         {confirming ? 'sure?' : 'del'}
       </button>

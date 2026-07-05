@@ -19,6 +19,7 @@ import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { ToastProvider } from './components/Toast';
+import { installNoFocusRule } from './focus/noFocusRule';
 
 const queryClient = new QueryClient();
 
@@ -47,6 +48,10 @@ function App() {
       // persistence is best-effort
     }
   };
+
+  // Keyboard-focus hygiene: buttons/checkboxes never take click-focus
+  // (keyboard-focus 01) — one enforcement site for the whole app.
+  useEffect(installNoFocusRule, []);
 
   // A Take review request (Transition history row) opens the editor; the
   // mounted editor consumes the pending uuid itself (takeReview.ts).
