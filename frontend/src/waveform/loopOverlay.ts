@@ -26,3 +26,19 @@ export function loopOverlayRegions(loop: LoopRegion | null | undefined): Overlay
     },
   ];
 }
+
+/**
+ * Played-dim boundary under overlay regions (minimap-clarity verdict,
+ * handed to looping 05): while the playhead sits inside a region, the dim
+ * wash stops at the region's LEFT edge — the loop body is about to
+ * replay, never "already heard". Otherwise the boundary is the playhead.
+ */
+export function playedDimBoundary(
+  playhead: number,
+  regions: readonly Pick<OverlayRegion, 'start' | 'end'>[]
+): number {
+  for (const region of regions) {
+    if (playhead >= region.start && playhead < region.end) return region.start;
+  }
+  return playhead;
+}

@@ -17,6 +17,7 @@
 // separate vertex-geometry pass ported from the legacy geometry renderer.
 
 import type { PlaybackClock } from '../playback/clock';
+import { playedDimBoundary } from './loopOverlay';
 import { MAX_LEVELS, TEX_WIDTH } from './blob';
 import type { DecodedWaveform, LodPack } from './blob';
 import { DEFAULT_PARAMS, DEFAULT_STYLE_ID, getStyle } from './styles';
@@ -782,11 +783,14 @@ export class WaveformRendererV2 {
 
     // Played-portion dim (minimap, zoned-marks verdict): 0.35 black wash
     // over the body left of the playhead. Draw order body → dim → marks,
-    // so every mark keeps full brightness in the played region.
+    // so every mark keeps full brightness in the played region. With the
+    // playhead inside an overlay region (active loop), the wash stops at
+    // the region's left edge — about to replay, never "already heard".
     if (this.isMinimap && !opts.skipPlayhead) {
+      const dimTime = playedDimBoundary(view.playhead, this.regions);
       const dimX = Math.max(
         0,
-        Math.min(view.w, (view.playhead / this.data!.duration) * view.w),
+        Math.min(view.w, (dimTime / this.data!.duration) * view.w),
       );
       if (dimX > 0) {
         const dimVerts: number[] = [];
