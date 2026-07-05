@@ -11,7 +11,7 @@
  * parallel-stack decision.
  */
 
-import { snapToNearestBeat } from './quantize';
+import { phasePreservingJumpTarget, snapToNearestBeat } from './quantize';
 
 export interface TransportState {
   /** Deck play state ("the deck is running"), distinct from audio audibly playing. */
@@ -155,8 +155,14 @@ export function reduceTransport(
     case 'hot-cue-down': {
       if (e.time === null) return [s, []];
       if (s.playing) {
-        // Jump and keep playing.
-        return [{ ...s, playhead: e.time }, [{ type: 'start', at: e.time }]];
+        // Jump and keep playing. Quantize governs the trigger: the jump is
+        // immediate but lands at cue + intra-beat phase (a whole-beat
+        // displacement — looping 02). Paused triggers below are seeks and
+        // land exactly, regardless of the toggle.
+        const at = ctx.quantize
+          ? phasePreservingJumpTarget(e.time, s.playhead, ctx.beatTimes)
+          : e.time;
+        return [{ ...s, playhead: at }, [{ type: 'start', at }]];
       }
       // Hold-to-preview from the hot cue.
       return [

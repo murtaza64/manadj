@@ -245,6 +245,47 @@ describe('hot-cue-down', () => {
   });
 });
 
+describe('hot-cue-down under Quantize (phase-preserving triggers)', () => {
+  it('jumps immediately to cue + intra-beat phase while playing', () => {
+    // playhead 1.4 → beat before 1.25, phase 0.15; cue 0.75 → land 0.9.
+    const s = state({ playing: true, playhead: 1.4 });
+    const [next, effects] = reduceTransport(s, { type: 'hot-cue-down', slot: 1, time: 0.75 }, quantized());
+    expect(next.playing).toBe(true);
+    expect(next.playhead).toBeCloseTo(0.9, 10);
+    expect(effects).toHaveLength(1);
+    expect(effects[0].type).toBe('start');
+    expect(effects[0].at).toBeCloseTo(0.9, 10);
+  });
+
+  it('lands exactly on the cue with Quantize off', () => {
+    const ctx: TransportContext = { quantize: false, beatTimes: [0.25, 0.75, 1.25, 1.75] };
+    const s = state({ playing: true, playhead: 1.4 });
+    const [next] = reduceTransport(s, { type: 'hot-cue-down', slot: 1, time: 0.75 }, ctx);
+    expect(next.playhead).toBe(0.75);
+  });
+
+  it('lands exactly on the cue on a gridless Track', () => {
+    const s = state({ playing: true, playhead: 1.4 });
+    const [next] = reduceTransport(s, { type: 'hot-cue-down', slot: 1, time: 0.75 }, quantized(null));
+    expect(next.playhead).toBe(0.75);
+  });
+
+  it('previews exactly from the cue while paused, regardless of the toggle', () => {
+    const s = state({ playhead: 1.4 });
+    const [next, effects] = reduceTransport(s, { type: 'hot-cue-down', slot: 2, time: 0.75 }, quantized());
+    expect(next.hotCuePreviewSlot).toBe(2);
+    expect(next.playhead).toBe(0.75);
+    expect(effects).toEqual([{ type: 'start', at: 0.75 }]);
+  });
+
+  it('leaves seek (beat jump) exact with the toggle on', () => {
+    const s = state({ playing: true, playhead: 1.4 });
+    const [next, effects] = reduceTransport(s, { type: 'seek', time: 0.9 }, quantized());
+    expect(next.playhead).toBe(0.9);
+    expect(effects).toEqual([{ type: 'start', at: 0.9 }]);
+  });
+});
+
 describe('hot-cue-up', () => {
   it('returns to the hot cue and stops when the deck stayed paused', () => {
     const s = state({ hotCuePreviewSlot: 2, playhead: 36 });

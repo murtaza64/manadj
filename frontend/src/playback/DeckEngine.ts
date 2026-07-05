@@ -352,11 +352,19 @@ export class DeckEngine {
   }
 
   hotCueDown(slot: number, timeSeconds: number | null): void {
+    if (!this.buffer) return;
     const time = timeSeconds === null ? null : this.clampTime(timeSeconds);
-    if (time !== null) {
-      this.fireTransportEvent({ action: 'hotCue', playhead: time, detail: slot });
-    }
     this.dispatch({ type: 'hot-cue-down', slot, time });
+    // Capture tap AFTER the reducer: a quantized trigger lands at cue +
+    // intra-beat phase, not the raw cue time — the recorded evidence must
+    // be the actual landing (Take vectorization measures jump deltas).
+    if (time !== null) {
+      this.fireTransportEvent({
+        action: 'hotCue',
+        playhead: this.transport.playhead,
+        detail: slot,
+      });
+    }
   }
 
   hotCueUp(slot: number, timeSeconds: number | null): void {

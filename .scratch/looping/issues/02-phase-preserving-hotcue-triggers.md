@@ -1,6 +1,6 @@
 # Phase-preserving Hot Cue triggers under Quantize
 
-Status: ready-for-agent
+Status: done (implemented, change vrwtykmm)
 
 ## Parent
 
