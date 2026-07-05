@@ -19,11 +19,12 @@ class GridAnalyzer:
     fit produces the grid — or bails (Quantized-track assumption)."""
 
     candidate: GridCandidate
-    params: FitParams = FitParams()
+    params: FitParams | None = None
 
     @property
     def name(self) -> str:
         return self.candidate.name
 
     def analyze(self, audio_path: str) -> GridFit:
-        return fit_constant_grid(self.candidate.ticks(audio_path), self.params)
+        params = self.params if self.params is not None else self.candidate.fit_params
+        return fit_constant_grid(self.candidate.ticks(audio_path), params)

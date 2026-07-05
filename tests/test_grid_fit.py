@@ -119,3 +119,21 @@ class TestEvidence:
         assert 0.9 <= fit.evidence["coverage"] <= 1.0
         assert fit.evidence["raw_bpm"] > 0
         assert fit.evidence["longest_region"] > 48
+
+
+class TestIntroWander:
+    def test_wandering_intro_does_not_bias_period_or_phase(self):
+        # Regression: a start-anchored refinement was poisoned by intro
+        # wander — 0.1% period bias smears phase across a long clean body.
+        # Intro: 100 ticks at a slightly different tempo; body: 400 clean
+        # ticks at 175. The fit must report the body's grid.
+        intro_period = 60.0 / 175.0 * 1.004
+        intro = [i * intro_period for i in range(100)]
+        body_start = intro[-1] + 60.0 / 175.0
+        body = [body_start + i * 60.0 / 175.0 for i in range(400)]
+        fit = fit_constant_grid(intro + body)
+        assert not fit.bailed
+        assert fit.bpm == 175.0
+        period = 60.0 / 175.0
+        offset = (fit.phase - body_start) % period
+        assert min(offset, period - offset) < 0.005

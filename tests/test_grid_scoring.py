@@ -108,8 +108,11 @@ class TestAnalyzerSeam:
     def test_analyzer_composes_candidate_and_fit(self):
         from harness.analyzer import GridAnalyzer
 
+        from harness.fit import FitParams
+
         class StubCandidate:
             name = "stub"
+            fit_params = FitParams()
 
             def ticks(self, audio_path: str) -> list[float]:
                 period = 60.0 / 174.0

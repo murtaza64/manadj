@@ -60,10 +60,12 @@ def scoreable(entries: list[CorpusEntry]) -> list[CorpusEntry]:
 def run(
     candidate_name: str,
     entries: list[CorpusEntry],
-    params: FitParams = FitParams(),
+    params: FitParams | None = None,
     progress=lambda msg: None,
 ) -> list[TrackScore]:
     candidate = GRID_CANDIDATES[candidate_name]
+    if params is None:
+        params = candidate.fit_params
     scores: list[TrackScore] = []
     for i, e in enumerate(entries):
         ticks = cached_ticks(candidate_name, e.filename)

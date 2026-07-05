@@ -2,7 +2,7 @@
 
 import sys
 
-HEAVY_MODULES = ("essentia", "tensorflow", "madmom", "librosa", "beatnet")
+HEAVY_MODULES = ("essentia", "tensorflow", "madmom", "librosa", "beatnet", "torch", "torchaudio", "beat_this")
 
 
 def test_heavy_analysis_deps_not_imported() -> None:

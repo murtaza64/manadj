@@ -7,7 +7,10 @@ fails, some module in the test import chain grew an analysis import.
 
 import sys
 
-HEAVY_MODULES = ["essentia", "tensorflow", "madmom", "beatnet", "librosa", "keras"]
+HEAVY_MODULES = [
+    "essentia", "tensorflow", "madmom", "beatnet", "librosa", "keras",
+    "torch", "torchaudio", "beat_this",
+]
 
 
 def test_no_heavy_audio_deps_in_import_chain():
@@ -19,6 +22,12 @@ def test_no_heavy_audio_deps_in_import_chain():
     import backend.routers.tracks  # noqa: F401
     import backend.schemas  # noqa: F401
     import backend.track_metadata  # noqa: F401
+
+    # Harness pure modules (fit/scoring/corpus) must stay light too.
+    import harness.corpus  # noqa: F401
+    import harness.fit  # noqa: F401
+    import harness.grid_scoring  # noqa: F401
+    import harness.key_scoring  # noqa: F401
 
     loaded = [m for m in HEAVY_MODULES if m in sys.modules]
     assert not loaded, (
