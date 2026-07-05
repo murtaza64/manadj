@@ -142,6 +142,17 @@ export default function TrackList({
             <SortableHeader column="key" icon={<KeyIcon />} columnId="key" />
             <SortableHeader column="bpm" icon={<SpeedIcon />} columnId="bpm" />
             <SortableHeader column="energy" icon={<EnergyIcon />} columnId="energy" />
+            {/* Marks column (follow-mode 09): blank header, no sort, no
+                resize — two fixed evidence slots per row. */}
+            <th
+              className="sticky-col-header"
+              style={{
+                width: 'var(--colw-marks)',
+                minWidth: 'var(--colw-marks)',
+                maxWidth: 'var(--colw-marks)',
+                left: 'var(--colleft-marks)',
+              }}
+            />
             <SortableHeader column="title" icon={<MusicIcon />} columnId="title" />
             <SortableHeader column="artist" icon={<PersonIcon />} columnId="artist" />
             <SortableHeader column="created_at" icon={<CalendarIcon />} columnId="created_at" />
@@ -162,13 +173,13 @@ export default function TrackList({
         <tbody>
           {isLoading && tracks.length === 0 ? (
             <tr>
-              <td colSpan={playOrder !== undefined ? 11 : 10} className="track-table-message track-table-loading">
+              <td colSpan={playOrder !== undefined ? 12 : 11} className="track-table-message track-table-loading">
                 Loading tracks...
               </td>
             </tr>
           ) : error ? (
             <tr>
-              <td colSpan={playOrder !== undefined ? 11 : 10} className="track-table-message track-table-error">
+              <td colSpan={playOrder !== undefined ? 12 : 11} className="track-table-message track-table-error">
                 Error loading tracks
               </td>
             </tr>
@@ -193,7 +204,7 @@ export default function TrackList({
                   <React.Fragment key={track.id}>
                     {opensGroup && (
                       <tr className="track-tier-header">
-                        <td colSpan={playOrder !== undefined ? 11 : 10}>
+                        <td colSpan={playOrder !== undefined ? 12 : 11}>
                           {label}
                           <span className="track-tier-count"> — {counts.get(label!)}</span>
                         </td>
