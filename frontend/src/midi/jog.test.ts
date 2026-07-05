@@ -7,7 +7,6 @@ import {
   JOG_BEND_MAX_PERCENT,
   JOG_FINE_CONTINUATION_MS,
   JOG_IDLE_MS,
-  JOG_TOUCH_AUTHORITATIVE_MS,
   JOG_TOUCH_SEEK_SECONDS_PER_TICK,
   JogController,
   jogBendPercent,
@@ -222,17 +221,12 @@ describe('touch surface (midi-controller 11)', () => {
   });
 
   describe('release continuation (the wheel keeps spinning after letting go)', () => {
-    it('rim ticks inside the touch-authoritative window are dropped (dual streams)', () => {
+    it('rim ticks continue IMMEDIATELY after touch ticks at the fine rate (no release gap)', () => {
       const jog = new JogController(port);
       jog.onTouchTicks(1, 1000);
-      jog.onTicks(1, 1000 + JOG_TOUCH_AUTHORITATIVE_MS - 10);
-      expect(calls).toEqual([`seek:${(60 + JOG_TOUCH_SEEK_SECONDS_PER_TICK).toFixed(4)}`]);
-    });
-
-    it('rim ticks continuing a touch gesture seek at the fine rate, not the accelerated one', () => {
-      const jog = new JogController(port);
-      jog.onTouchTicks(1, 1000);
-      jog.onTicks(1, 1000 + JOG_TOUCH_AUTHORITATIVE_MS + 20);
+      // The streams are mutually exclusive on this hardware: the first rim
+      // tick right after release must seek, not be deduped away.
+      jog.onTicks(1, 1010);
       expect(calls).toEqual([
         `seek:${(60 + JOG_TOUCH_SEEK_SECONDS_PER_TICK).toFixed(4)}`,
         `seek:${(60 + 2 * JOG_TOUCH_SEEK_SECONDS_PER_TICK).toFixed(4)}`,
@@ -242,7 +236,7 @@ describe('touch surface (midi-controller 11)', () => {
     it('continuation rim ticks keep extending the window while the wheel spins down', () => {
       const jog = new JogController(port);
       jog.onTouchTicks(1, 1000);
-      let t = 1000 + JOG_TOUCH_AUTHORITATIVE_MS + 20;
+      let t = 1010;
       for (let i = 0; i < 10; i++) {
         jog.onTicks(1, t);
         t += JOG_FINE_CONTINUATION_MS - 50; // each tick inside the window
@@ -270,7 +264,7 @@ describe('touch surface (midi-controller 11)', () => {
       const jog = new JogController(port);
       jog.onTouchTicks(1, 1000);
       playing = true;
-      jog.onTicks(1, 1000 + JOG_TOUCH_AUTHORITATIVE_MS + 20);
+      jog.onTicks(1, 1010);
       expect(calls[calls.length - 1].startsWith('bend:')).toBe(true);
     });
   });

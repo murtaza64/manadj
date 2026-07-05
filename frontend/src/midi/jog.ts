@@ -47,21 +47,17 @@ export const JOG_TOUCH_SEEK_SECONDS_PER_TICK = 0.01;
 
 /**
  * Release continuation (issue 11 follow-up): letting go of a spinning
- * platter hands the tick stream from the touch CC back to the rim CC — the
- * gesture is still the same spin, so it must keep the same fine
- * seconds-per-tick instead of snapping to the rim's accelerated seek.
+ * platter hands the tick stream from the touch CC to the rim CC — the
+ * gesture is still the same spin, so rim ticks within this window of the
+ * last fine-rate seek keep the same seconds-per-tick (and extend the
+ * window), instead of snapping to the rim's accelerated seek. A gap ends
+ * the gesture; the next rim gesture is classic accelerated seek.
  *
- * - While touch ticks are streaming, rim ticks are dropped entirely (both
- *   CCs can fire for one physical motion; the touch stream is
- *   authoritative).
- * - After the touch stream stops, rim ticks within the continuation window
- *   seek at the touch rate and keep the window alive, so a free-spinning
- *   wheel stays fine until it actually stops.
- * - A gap ends the gesture; the next rim gesture is classic accelerated
- *   seek. (If the two CCs turn out to tick at different densities per
- *   revolution, tune the continuation feel here.)
+ * The streams don't need deduping: the hardware sends #0x0A while touched
+ * and #0x09 while released, never both (hardware-verified — an earlier
+ * drop-window "guard" here only produced a dead gap on release; Mixxx's
+ * mapping relies on the same exclusivity).
  */
-export const JOG_TOUCH_AUTHORITATIVE_MS = 100;
 export const JOG_FINE_CONTINUATION_MS = 250;
 
 /** Rate smoothing: how much of the instantaneous rate each burst carries. */
@@ -96,8 +92,6 @@ export class JogController {
   private lastTickMs: number | null = null;
   private bending = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Last touch-CC tick (dual-stream authority window). */
-  private lastTouchTickMs: number | null = null;
   /** Last fine-rate seek — touch tick or continuation rim tick. */
   private lastFineActivityMs: number | null = null;
 
@@ -112,7 +106,6 @@ export class JogController {
    */
   onTouchTicks(ticks: number, nowMs: number = performance.now()): void {
     if (this.port.isPlaying()) return;
-    this.lastTouchTickMs = nowMs;
     this.lastFineActivityMs = nowMs;
     this.port.seek(this.port.getPlayhead() + ticks * JOG_TOUCH_SEEK_SECONDS_PER_TICK);
   }
@@ -135,9 +128,6 @@ export class JogController {
 
     this.releaseBend(); // mode flip mid-gesture: never leave a stale bend
 
-    // Touch stream still live: it is authoritative for this motion.
-    if (this.lastTouchTickMs !== null && nowMs - this.lastTouchTickMs < JOG_TOUCH_AUTHORITATIVE_MS)
-      return;
     // Released but still spinning: same gesture, same seconds-per-tick.
     if (this.lastFineActivityMs !== null && nowMs - this.lastFineActivityMs < JOG_FINE_CONTINUATION_MS) {
       this.lastFineActivityMs = nowMs;

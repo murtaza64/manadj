@@ -53,3 +53,10 @@ stays unmapped). Learned in the 01 session: deck A/B touch-spin = cc ch 1/2
   (JOG_TOUCH_AUTHORITATIVE_MS) so dual streams can't double-seek. If the
   two CCs tick at different densities per revolution, the handoff may still
   feel like a speed step — tune the constants on hardware.
+- Release-gap fix (change slpvxnxs): the touch-authoritative drop-window
+  created a ~100ms dead zone on release. Hardware-verified (and confirmed
+  by Mixxx's mapping, which shares one handler for both CCs) that #0x09 and
+  #0x0A are mutually exclusive streams — the guard was protecting against a
+  message pattern this device never sends. Removed; rim ticks continue the
+  fine seek immediately on release. Speed parity across the handoff was
+  hardware-confirmed, so the shared seconds-per-tick stands.

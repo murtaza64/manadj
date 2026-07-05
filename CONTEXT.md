@@ -140,6 +140,14 @@ The device-specific translation from a Controller's physical controls to manadj 
 Device-directed output that mirrors existing on-screen state on a Controller's lights (hot cue pads, transport LEDs). Feedback never carries information the screen doesn't already show, and losing it changes nothing about what the app can do.
 _Avoid_: LED sync, output mapping
 
+**Cue bus**:
+The second audio output alongside the Master bus: what the DJ's headphones play. Fed by per-channel PFL taps (post-EQ/filter, pre-fader, pre-crossfader) blended with an adjustable taste of master. Independently routable to any output device.
+_Avoid_: headphone bus, monitor bus
+
+**PFL**:
+Pre-fader listen — a per-channel toggle putting that channel on the Cue bus regardless of its fader or the crossfader. Both channels may be on at once.
+_Avoid_: headphone cue (as the toggle's name), solo
+
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid. When a Beatgrid exists it is the authority on tempo: the Track's BPM is its projection (the grid's dominant tempo), not an independent field, and editing BPM is a grid operation (ADR 0016). A grid may carry an *anchor* — the downbeat the user explicitly marked — which re-tempo operations never move.
 
