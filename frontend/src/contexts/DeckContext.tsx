@@ -269,6 +269,9 @@ export function DeckProvider({ children }: { children: ReactNode }) {
         hotCueUp: (deck, pad) => deckControlsFor(deck)?.hotCueUp(pad),
         hotCueClear: (deck, pad) => deckControlsFor(deck)?.hotCueClear(pad),
       },
+      jumps: {
+        beatjump: (deck, direction) => deckControlsFor(deck)?.beatjump(direction),
+      },
       silence: () => {
         engines.A.pause();
         engines.B.pause();

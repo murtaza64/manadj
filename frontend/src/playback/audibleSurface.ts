@@ -35,12 +35,21 @@ export interface SurfacePads {
   hotCueClear(deck: ChannelId, pad: number): void;
 }
 
+/** Jump gesture class (ADR 0019): beatjump. The shared surface jumps the
+ * deck by its size; the editor jumps the mix by A's beats (A) or Slides B
+ * by its own beats (B). Beatjump-size is deliberately NOT here — it
+ * mutates the shared per-deck size and stays registry-direct. */
+export interface SurfaceJumps {
+  beatjump(deck: ChannelId, direction: 'back' | 'forward'): void;
+}
+
 export interface AudibleSurface {
   transport: SurfaceTransport;
   /** Optional gesture-class sections (ADR 0019): a class the surface
    * doesn't register is dropped by dispatch, exactly like CUE on the
    * editor. */
   pads?: SurfacePads;
+  jumps?: SurfaceJumps;
   /** Go quiet: pause playback AND suspend the surface's audio clock. */
   silence(): void;
   /** Resume the surface's audio clock only — never starts playback. */
@@ -117,6 +126,11 @@ export function audibleTransport(): SurfaceTransport | null {
  * registered one (the class drops, ADR 0019). */
 export function audiblePads(): SurfacePads | null {
   return surfaces.get(holder)?.pads ?? null;
+}
+
+/** The audible surface's jumps section — null when unregistered. */
+export function audibleJumps(): SurfaceJumps | null {
+  return surfaces.get(holder)?.jumps ?? null;
 }
 
 export function subscribeAudible(fn: Listener): () => void {

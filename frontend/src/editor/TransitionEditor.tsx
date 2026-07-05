@@ -31,6 +31,7 @@ import { TemplatesDropdown } from './TemplatesDropdown';
 import { SaveTemplateModal } from './SaveTemplateModal';
 import type { SaveTemplateResult } from './SaveTemplateModal';
 import { barBeatLabel, bEntryLabel, lengthBeatsLabel } from './beatReadout';
+import { beatsToSeconds } from './gestureMath';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
@@ -256,6 +257,14 @@ function TransitionEditorInner() {
     midiCues.current = { A: midiCuesA, B: midiCuesB };
   });
 
+  // Hardware jump gestures (editor-midi 02): mirror the on-screen ◀/▶
+  // cluster — A jumps the mix by the shared size in A's beats; B Slides by
+  // its own beats. Size and BPM read through refs (registration runs once).
+  const midiGestures = useRef({ bpmA, bpmB, slideDeckB });
+  useEffect(() => {
+    midiGestures.current = { bpmA, bpmB, slideDeckB };
+  });
+
   // One audible surface AND one running audio clock at a time (issue 08):
   // claim audibility while mounted (ADR 0013). The arbiter silences the
   // shared surface (pauses both decks, suspends its context) and restores
@@ -270,6 +279,17 @@ function TransitionEditorInner() {
       pads: {
         hotCueDown: (deck, pad) => midiCues.current[deck].down(pad),
         hotCueClear: (deck, pad) => midiCues.current[deck].remove(pad),
+      },
+      jumps: {
+        beatjump: (deck, direction) => {
+          const { bpmA: a, bpmB: b, slideDeckB: slide } = midiGestures.current;
+          const bpm = deck === 'A' ? a : b;
+          if (!bpm || bpm <= 0) return; // same gate as the on-screen cluster
+          const beats = sharedDecksRef.current[deck].beatjumpBeats;
+          const n = direction === 'back' ? -beats : beats;
+          if (deck === 'A') player.seek(player.getMixTime() + beatsToSeconds(n, bpm));
+          else slide('beats', beatsToSeconds(n, bpm));
+        },
       },
       silence: () => {
         player.pause();
@@ -402,7 +422,7 @@ function TransitionEditorInner() {
                 // slides duplicated B's under the lock toggle).
                 kind: 'jump',
                 toCue: (cueSec) => player.seek(cueSec),
-                beats: (n) => bpmA && player.seek(player.getMixTime() + (n * 60) / bpmA),
+                beats: (n) => bpmA && player.seek(player.getMixTime() + beatsToSeconds(n, bpmA)),
                 enabled: bpmA !== null && bpmA > 0,
               }}
             />
@@ -435,7 +455,7 @@ function TransitionEditorInner() {
                 kind: 'slide',
                 toCue: (cueSec) => slideDeckB('cue', cueSec),
                 // n of B's OWN beats → B-track seconds via base BPM.
-                beats: (n) => bpmB && slideDeckB('beats', (n * 60) / bpmB),
+                beats: (n) => bpmB && slideDeckB('beats', beatsToSeconds(n, bpmB)),
                 enabled: bpmB !== null && bpmB > 0,
               }}
               lock={{ on: lockedWindow, toggle: () => store.toggleLockedWindow() }}

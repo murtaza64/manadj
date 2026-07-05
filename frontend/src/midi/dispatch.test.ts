@@ -78,6 +78,9 @@ beforeEach(() => {
       hotCueUp: (deck, pad) => deckControlsFor(deck)?.hotCueUp(pad),
       hotCueClear: (deck, pad) => deckControlsFor(deck)?.hotCueClear(pad),
     },
+    jumps: {
+      beatjump: (deck, direction) => deckControlsFor(deck)?.beatjump(direction),
+    },
     silence: () => undefined,
     wake: () => undefined,
   });
@@ -274,6 +277,54 @@ describe('pads route per audible surface (ADR 0019, editor-midi 01)', () => {
     releaseAudible('editor');
     dispatchMidiAction(hotCue('A', 1, 'down'));
     expect(calls).toEqual(['A:hotCueDown:1', 'editor:padDown:A:1', 'A:hotCueDown:1']);
+  });
+});
+
+describe('jumps route per audible surface (editor-midi 02)', () => {
+  const jump = (deck: ChannelId, direction: 'back' | 'forward', edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'beatjump', deck, direction },
+  });
+
+  function registerEditorWithJumps(): void {
+    registerSurface('editor', {
+      transport: { togglePlay: () => calls.push('editor:toggle') },
+      jumps: {
+        beatjump: (deck, direction) => calls.push(`editor:jump:${deck}:${direction}`),
+      },
+      silence: () => undefined,
+      wake: () => undefined,
+    });
+  }
+
+  it('editor claimed with jumps: beatjump routes with deck and direction, down edge only', () => {
+    registerFakeDeckControls('A');
+    registerEditorWithJumps();
+    claimAudible('editor');
+    dispatchMidiAction(jump('A', 'back', 'down'));
+    dispatchMidiAction(jump('B', 'forward', 'down'));
+    dispatchMidiAction(jump('A', 'back', 'up'));
+    expect(calls).toEqual(['editor:jump:A:back', 'editor:jump:B:forward']);
+  });
+
+  it('editor claimed without a jumps section: the class drops', () => {
+    registerFakeDeckControls('A');
+    claimAudible('editor');
+    dispatchMidiAction(jump('A', 'forward', 'down'));
+    expect(calls).toEqual([]);
+  });
+
+  it('beatjump-size stays registry-direct while the editor is audible (shared per-deck size)', () => {
+    registerFakeDeckControls('A');
+    registerEditorWithJumps();
+    claimAudible('editor');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'beatjump-size', deck: 'A', change: 'double' },
+    });
+    expect(calls).toEqual(['A:beatjumpSize:double']);
   });
 });
 

@@ -1,4 +1,4 @@
-import { audiblePads, audibleTransport } from '../playback/audibleSurface';
+import { audibleJumps, audiblePads, audibleTransport } from '../playback/audibleSurface';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { MidiAction } from './actions';
 import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
@@ -85,7 +85,7 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
     }
     case 'beatjump': {
       if (edge !== 'down') return;
-      deckControlsFor(target.deck)?.beatjump(target.direction);
+      audibleJumps()?.beatjump(target.deck, target.direction);
       return;
     }
     case 'beatjump-size': {
