@@ -231,11 +231,11 @@ a.provenance-chip:hover {
 }
 
 .track-transition-mark.mark-a {
-  color: #00e5ff;
+  color: var(--deck-a);
 }
 
 .track-transition-mark.mark-b {
-  color: #ff2d95;
+  color: var(--deck-b);
 }
 
 /* Linked marks (linked-pairs 03): a chain per loaded deck the row is
@@ -247,11 +247,11 @@ a.provenance-chip:hover {
 }
 
 .track-link-mark.mark-a {
-  box-shadow: 0 2px 0 -0.5px #00e5ff;
+  box-shadow: 0 2px 0 -0.5px var(--deck-a);
 }
 
 .track-link-mark.mark-b {
-  box-shadow: 0 2px 0 -0.5px #ff2d95;
+  box-shadow: 0 2px 0 -0.5px var(--deck-b);
 }
 
 /* Load-to-deck hover buttons (Performance view's embedded library). The

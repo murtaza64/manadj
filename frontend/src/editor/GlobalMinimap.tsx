@@ -7,6 +7,7 @@
  * triangles, viewport rectangle (drag to pan), playhead. Click = seek.
  */
 import { useEffect, useRef } from 'react';
+import { DECK_COLORS, hexToRgbTriplet } from '../theme/deckColors';
 import { laneValuesAt } from './mixModel';
 import { MixPlayer } from './MixPlayer';
 import type { EditorMix } from './mixModel';
@@ -119,7 +120,7 @@ export function GlobalMinimap({
       // border lines read as markers at minimap scale (issue 14).
       const fx = (tr.startSec / contentEnd) * w;
       const fw = Math.max((tr.durationSec / contentEnd) * w, 2);
-      ctx.fillStyle = 'rgba(255,45,149,0.14)';
+      ctx.fillStyle = `rgba(${hexToRgbTriplet(DECK_COLORS.B)}, 0.14)`;
       ctx.fillRect(fx, 0, fw, h);
 
       // Hot cue triangles (issue 14): A's along the top edge, B's along the
@@ -184,7 +185,9 @@ export function GlobalMinimap({
       ctx.fillRect(vx, 0, vw, h);
 
       const px = (player.getMixTime() / contentEnd) * w;
-      ctx.fillStyle = '#00e5ff';
+      // Playhead in Deck A's color: mix time ≡ the outgoing (A) Track's
+      // time (CONTEXT.md: Sketch origin / Slide).
+      ctx.fillStyle = DECK_COLORS.A;
       ctx.fillRect(px - 1, 0, 2, h);
     };
     tick();

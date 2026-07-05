@@ -81,11 +81,11 @@
 }
 
 .editor-decklabel.a {
-  color: #00e5ff;
+  color: var(--deck-a);
 }
 
 .editor-decklabel.b {
-  color: #ff2d95;
+  color: var(--deck-b);
 }
 
 .editor-decklabels {
@@ -248,11 +248,11 @@
 }
 
 .editor-blockframe.a {
-  border-color: #00e5ff;
+  border-color: var(--deck-a);
 }
 
 .editor-blockframe.b {
-  border-color: #ff2d95;
+  border-color: var(--deck-b);
 }
 
 .editor-lanestrip {
@@ -270,13 +270,13 @@
 /* Deck accent via inset shadow, NOT border-left: a border would shift the
    absolutely-positioned lane windows off the shared time axis. */
 .editor-lanestrip.a {
-  background: linear-gradient(rgba(0, 229, 255, 0.06), rgba(0, 229, 255, 0.02)), #0e0e16;
-  box-shadow: inset 3px 0 0 rgba(0, 229, 255, 0.6);
+  background: linear-gradient(rgba(var(--deck-a-rgb), 0.06), rgba(var(--deck-a-rgb), 0.02)), #0e0e16;
+  box-shadow: inset 3px 0 0 rgba(var(--deck-a-rgb), 0.6);
 }
 
 .editor-lanestrip.b {
-  background: linear-gradient(rgba(255, 45, 149, 0.06), rgba(255, 45, 149, 0.02)), #0e0e16;
-  box-shadow: inset 3px 0 0 rgba(255, 45, 149, 0.6);
+  background: linear-gradient(rgba(var(--deck-b-rgb), 0.06), rgba(var(--deck-b-rgb), 0.02)), #0e0e16;
+  box-shadow: inset 3px 0 0 rgba(var(--deck-b-rgb), 0.6);
 }
 
 .editor-lanestrip .editor-lanelabel {
@@ -355,8 +355,8 @@
   bottom: 0;
   /* No fill: the lane strips make the transition region obvious; the two
      edge lines remain as trim-handle markers. */
-  border-left: 2px solid rgba(255, 45, 149, 0.55);
-  border-right: 2px solid rgba(255, 45, 149, 0.55);
+  border-left: 2px solid rgba(var(--deck-b-rgb), 0.55);
+  border-right: 2px solid rgba(var(--deck-b-rgb), 0.55);
   pointer-events: none;
 }
 
@@ -396,11 +396,11 @@
 }
 
 .editor-deckcard.a {
-  border-left: 3px solid #00e5ff;
+  border-left: 3px solid var(--deck-a);
 }
 
 .editor-deckcard.b {
-  border-right: 3px solid #ff2d95;
+  border-right: 3px solid var(--deck-b);
   text-align: right;
 }
 

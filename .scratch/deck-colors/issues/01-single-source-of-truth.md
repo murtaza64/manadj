@@ -1,6 +1,6 @@
 # 01 — Deck colors: single source of truth
 
-Status: ready-for-agent
+Status: done — pending user eye-verify
 
 ## What to build
 
@@ -19,3 +19,7 @@ One canonical home for the Deck colors (CONTEXT.md: Deck color — A cyan `#00e5
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+- Done (wsvtupok, lane followmode): `theme/deckColors.ts` (DECK_COLORS + hexToRgbTriplet + installDeckColorVars, 2 tests); boot injection in main.tsx; migrated laneColors fader pair, all transitionEditor.css sites (incl. rgba washes via --deck-*-rgb), TrackRow.css marks + loaded-row underlines, GlobalMinimap canvas (B wash + playhead, the latter documented as A's color since mix time ≡ the outgoing Track's time). Deliberate exception: PerfDiffViewer's dev-only LIBRARY_COLOR keeps its own cyan — it means "library", not Deck A.
