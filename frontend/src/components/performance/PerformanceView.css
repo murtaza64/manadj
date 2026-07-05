@@ -44,6 +44,25 @@
 .perf-strip-slot { width: 130px; justify-self: end; }
 .perf-strip-slot.wide { width: 240px; justify-self: center; }
 
+.perf-strip-left { justify-self: start; }
+
+.perf-hints-toggle {
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--overlay0);
+  border-color: var(--surface1);
+}
+
+.perf-hints-toggle.on {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+/* The toggle hides every on-control key hint */
+.perf-root.kbd-hints-off .perf-kbd { display: none; }
+
 /* ── Deck panels ──────────────────────────────────────────────── */
 
 .perf-decks {

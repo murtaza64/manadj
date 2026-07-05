@@ -33,6 +33,10 @@ import './PerformanceView.css';
 
 const LOCK_HINT_MS = 1500;
 
+/** Keyboard-hint visibility, persisted; read once (same idiom as ?view=). */
+const HINTS_STORAGE_KEY = 'perf-kbd-hints';
+const initialHintsOn = localStorage.getItem(HINTS_STORAGE_KEY) !== 'off';
+
 /** True while a Load onto this deck must be refused (audible or about to be). */
 function isDeckLocked(engine: DeckEngine): boolean {
   return engine.isAudioRunning() || engine.getSnapshot().pendingPlay;
@@ -150,8 +154,16 @@ export function PerformanceView() {
   // each waveform re-derives its track-relative factor from this value.
   const [visibleSeconds, setVisibleSeconds] = useState(DEFAULT_VISIBLE_SECONDS);
 
+  // On-control keyboard hints — togglable from the mixer strip, persisted.
+  const [hintsOn, setHintsOn] = useState(initialHintsOn);
+  const toggleHints = () => {
+    const next = !hintsOn;
+    localStorage.setItem(HINTS_STORAGE_KEY, next ? 'on' : 'off');
+    setHintsOn(next);
+  };
+
   return (
-    <div className="perf-root">
+    <div className={`perf-root${hintsOn ? '' : ' kbd-hints-off'}`}>
       {/* Performance surface — content-sized; the library gets the rest */}
       <div className="perf-surface">
         <div className="perf-waves">
@@ -168,7 +180,7 @@ export function PerformanceView() {
             />
           </DeckScope>
         </div>
-        <MixerStrip />
+        <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
         <div className="perf-decks">
           <DeckScope deck="A">
             <DeckPanel lockHint={lockHint === 'A'} />

@@ -167,14 +167,31 @@ export function HFader({
   );
 }
 
-export function MixerStrip() {
+export function MixerStrip({
+  hintsOn = true,
+  onToggleHints,
+}: {
+  /** Keyboard-hint visibility (the KBD toggle in the strip's left cell). */
+  hintsOn?: boolean;
+  onToggleHints?: () => void;
+}) {
   const mixer = useMixer();
   const [crossfader, setCrossfader] = useState(() => mixer.getCrossfader());
   const [master, setMaster] = useState(() => mixer.getMaster());
 
   return (
     <div className="perf-strip">
-      <div />
+      <div className="perf-strip-left">
+        {onToggleHints && (
+          <button
+            className={`player-button perf-hints-toggle${hintsOn ? ' on' : ''}`}
+            onClick={onToggleHints}
+            title={hintsOn ? 'Hide keyboard hints' : 'Show keyboard hints'}
+          >
+            KBD
+          </button>
+        )}
+      </div>
       <div className="perf-strip-slot wide">
         <HFader
           label="X-FADER"
