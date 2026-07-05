@@ -10,10 +10,13 @@ import type { Track } from '../types';
  * register handlers here and dispatch looks them up per action. Unregistered
  * targets drop silently, same as unmapped messages.
  *
- * Per ADR 0013 these stay aimed at the shared decks directly — never through
- * the audible-surface arbiter. While the editor holds audibility the shared
- * decks are silenced and the engine's mayStart tripwire keeps stabs from
- * resuming audio, so no arbiter routing is needed here.
+ * Per ADRs 0013/0019 these stay aimed at the shared decks directly — never
+ * through the audible-surface arbiter. Gesture-CLASS routing (transport,
+ * pads, jumps, jog) goes through the arbiter in dispatch; what remains
+ * registry-direct is state (mixer controls, beatjump size) plus the
+ * handlers the audible surface's sections delegate back to. Since ADR
+ * 0022 the editor plays through these same decks, so dispatch gates the
+ * few registry-direct controls the conductor owns (pitch) on audibility.
  */
 
 export interface MidiDeckControls {

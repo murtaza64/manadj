@@ -1,6 +1,6 @@
 # 05 — Key Lock for the Transition editor's player
 
-Status: needs-triage (architectural question, not a build brief)
+Status: done (resolved by ADR 0022 — editor-shared-decks lane)
 
 ## Parent
 
@@ -27,3 +27,11 @@ build issue.
 ## Blocked by
 
 - 03-stretch-mode-keylock (need the machinery to exist first)
+
+## Comments
+
+**Resolved by construction (2026-07-05, editor-shared-decks lane, ADR
+0022).** The private editor player is gone: the Transition editor plays
+through the shared Decks, so its auditions run through each Deck's sticky
+Key Lock (default ON) — including tempo-matched playback, where it
+matters most. No editor-specific Key Lock work remains.

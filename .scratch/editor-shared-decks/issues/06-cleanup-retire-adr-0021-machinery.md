@@ -40,3 +40,16 @@ gone.
 ## Blocked by
 
 - `05-swap-editor-conducts-shared-machinery.md`
+
+## Comments
+
+**Done (lane editorshared, change yolvpmrz).** Deleted: the ADR 0021
+registry (`registerRoutedMixer`, secondary set, recompute loop) + its
+registry tests (one primary-path routing test kept); `Mixer.suspend()/
+resume()` (callerless — no surface suspends the one clock). Trued:
+controlRegistry's ADR 0013 tripwire comment, routingStore header,
+key-lock issue 05 (status → done, resolved by ADR 0022). Wins verified
+in-tree: one Mixer construction site (DeckProvider), no "private mixer"
+references left in source, second engine pair/worklets/limiter chain gone
+with the swap. Repo-wide grep for private/secondary mixer now hits only
+historical docs.

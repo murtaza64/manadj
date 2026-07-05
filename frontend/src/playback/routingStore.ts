@@ -44,12 +44,10 @@ function savePrefs(prefs: RoutingPrefs): void {
 
 let mixer: Mixer | null = null;
 
-/** Secondary mixers following the MASTER sink (headphone-cue 06): the
- * Transition editor's private Mixer plays to the system default unless
- * routed too — "editor comes out of the headphones". Master only: the cue
- * bridge stays exclusive to the primary mixer. */
+/** The routable slice of the Mixer. There is exactly one Mixer since
+ * ADR 0022 — the secondary-mixer registry (ADR 0021, retired) lived here
+ * while the Transition editor had a private one. */
 type MasterRoutable = Pick<Mixer, 'setMasterSinkId'>;
-const secondaryMixers = new Set<MasterRoutable>();
 
 let prefs: RoutingPrefs = loadPrefs();
 let devices: AudioOutputDevice[] = [];
@@ -80,9 +78,6 @@ async function recompute(): Promise<void> {
   const resolved = resolveRouting(prefs, devices.map((d) => d.deviceId));
   snapshot = { prefs, resolved, devices };
   notify();
-  for (const secondary of secondaryMixers) {
-    void applyMasterSink(secondary, resolved.masterSinkId);
-  }
   if (!mixer) return;
   await applyMasterSink(mixer, resolved.masterSinkId);
   try {
@@ -100,19 +95,6 @@ async function applyMasterSink(target: MasterRoutable, sinkId: string | null): P
     console.warn('[routing] master sink failed; falling back to default', err);
     await target.setMasterSinkId(null).catch(() => undefined);
   }
-}
-
-/**
- * Follow the routed MASTER device with an additional Mixer (the editor's
- * private one). Applies the currently-resolved sink immediately and on
- * every recompute; never the cue sink. Returns an unregister.
- */
-export function registerRoutedMixer(target: MasterRoutable): () => void {
-  secondaryMixers.add(target);
-  void applyMasterSink(target, snapshot.resolved.masterSinkId);
-  return () => {
-    secondaryMixers.delete(target);
-  };
 }
 
 /** Enumerate (may unlock labels — see audioDevices.ts) and re-apply. */

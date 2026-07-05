@@ -367,18 +367,8 @@ export class Mixer {
     return this.ensure().ctx.currentTime;
   }
 
-  /**
-   * Suspend/resume the context ("one audible surface at a time" — a mounted
-   * editor suspends the shared Mixer). Loads/decodes still work while
-   * suspended; DeckEngine.startAudio resumes on demand.
-   */
-  suspend(): void {
-    if (this.ctx && this.ctx.state === 'running') void this.ctx.suspend();
-  }
-
-  resume(): void {
-    if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
-  }
+  // (Context suspend/resume left with ADR 0022: no surface ever suspends
+  // the one shared clock — silence means "pause playback" only.)
 
   /** The live graph, or null. Policy paths (automation, engage/disengage)
    * use this instead of ensure(): they must never force-create a context
