@@ -1,6 +1,6 @@
 # 13 — SHIFT+pad clears the hot cue
 
-Status: ready-for-human (implemented, change qstrpums; checks green — hardware smoke test pending)
+Status: done (hardware-verified by Murtaza 2026-07-04: SHIFT+pad clears, pad light follows)
 
 ## Parent
 
