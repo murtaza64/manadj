@@ -238,6 +238,22 @@ a.provenance-chip:hover {
   color: #ff2d95;
 }
 
+/* Linked marks (linked-pairs 03): a chain per loaded deck the row is
+   Linked with — symmetric pair knowledge alongside the directional ◆/★.
+   The emoji ignores `color`, so the deck accent rides an underline. */
+.track-link-mark {
+  font-size: 10px;
+  line-height: inherit;
+}
+
+.track-link-mark.mark-a {
+  box-shadow: 0 2px 0 -0.5px #00e5ff;
+}
+
+.track-link-mark.mark-b {
+  box-shadow: 0 2px 0 -0.5px #ff2d95;
+}
+
 /* Load-to-deck hover buttons (Performance view's embedded library). The
    title cell is position: sticky, so the absolute overlay anchors to it. */
 .track-load-buttons {

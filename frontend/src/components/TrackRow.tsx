@@ -49,6 +49,11 @@ interface Props {
   orderIndex?: number | null;
   markA?: TransitionMark;
   markB?: TransitionMark;
+  /** Linked marks (linked-pairs 03): this row is Linked with the loaded
+   * deck's track. Symmetric, so shown alongside — never instead of — the
+   * directional Transition marks. */
+  linkedA?: boolean;
+  linkedB?: boolean;
 }
 
 const LOSSLESS = new Set(['flac', 'alac', 'pcm']);
@@ -86,6 +91,8 @@ const TrackRow = memo(function TrackRow({
   orderIndex,
   markA = 'none',
   markB = 'none',
+  linkedA = false,
+  linkedB = false,
 }: Props) {
   // Extract just the filename from the full path
   const filename = track.filename.split('/').pop() || track.filename;
@@ -165,7 +172,7 @@ const TrackRow = memo(function TrackRow({
         <td className={getCellClasses('title')} style={getCellStyle('title')}>
           {/* Saved-Transition marks: one glyph per source deck, in the
               deck's accent color; ★ when the pair is Preferred. */}
-          {(markA !== 'none' || markB !== 'none') && (
+          {(markA !== 'none' || markB !== 'none' || linkedA || linkedB) && (
             <span className="track-transition-marks">
               {markA !== 'none' && (
                 <span
@@ -175,12 +182,22 @@ const TrackRow = memo(function TrackRow({
                   {markA === 'preferred' ? '★' : '◆'}
                 </span>
               )}
+              {linkedA && (
+                <span className="track-link-mark mark-a" title="Linked with deck A's track">
+                  🔗
+                </span>
+              )}
               {markB !== 'none' && (
                 <span
                   className="track-transition-mark mark-b"
                   title={`Saved transition from deck B's track${markB === 'preferred' ? ' (favorite)' : ''}`}
                 >
                   {markB === 'preferred' ? '★' : '◆'}
+                </span>
+              )}
+              {linkedB && (
+                <span className="track-link-mark mark-b" title="Linked with deck B's track">
+                  🔗
                 </span>
               )}
             </span>

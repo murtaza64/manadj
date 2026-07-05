@@ -4,6 +4,7 @@ import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, Calenda
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import type { PairInfo } from '../editor/transitionIndex';
+import { isLinked, type LinkKey } from '../links/linkStore';
 import { getColumnConfig } from './columnConfig';
 import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { useColumnWidths } from '../hooks/useColumnWidths';
@@ -37,6 +38,11 @@ interface TrackListProps {
    * Transition FROM deck A's / deck B's loaded track. */
   transitionMarksA?: ReadonlyMap<number, PairInfo>;
   transitionMarksB?: ReadonlyMap<number, PairInfo>;
+  /** Linked marks (linked-pairs 03): the Linked set plus each deck's
+   * loaded track id, resolved per row (symmetric, unordered pairs). */
+  links?: ReadonlySet<LinkKey>;
+  deckAId?: number | null;
+  deckBId?: number | null;
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
@@ -57,6 +63,9 @@ export default function TrackList({
   onLoadToDeck,
   transitionMarksA,
   transitionMarksB,
+  links,
+  deckAId,
+  deckBId,
   sortColumn,
   sortDirection,
   onSort
@@ -66,6 +75,9 @@ export default function TrackList({
     const info = marks?.get(id);
     return info ? (info.preferred ? 'preferred' : 'saved') : 'none';
   };
+  /** Memo-friendly Linked flag: is this row Linked with the deck's track? */
+  const linkedFor = (deckId: number | null | undefined, id: number): boolean =>
+    links !== undefined && deckId != null && isLinked(links, deckId, id);
   const { widths, setWidth, resetWidth, cssVars } = useColumnWidths(playOrder !== undefined);
 
   const SortableHeader = ({
@@ -170,6 +182,8 @@ export default function TrackList({
                 orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
                 markA={markFor(transitionMarksA, track.id)}
                 markB={markFor(transitionMarksB, track.id)}
+                linkedA={linkedFor(deckAId, track.id)}
+                linkedB={linkedFor(deckBId, track.id)}
               />
             ))
           )}
