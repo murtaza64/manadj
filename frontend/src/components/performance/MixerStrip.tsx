@@ -175,13 +175,16 @@ export function MixerStrip({
   const mixer = useMixer();
   const crossfader = useMixerValue((m) => m.getCrossfader());
   const master = useMixerValue((m) => m.getMaster());
+  // Crossfader bypass — audio truth lives in the Mixer; UI repaints
+  // through the same subscription as every other mixer control.
+  const xfOn = useMixerValue((m) => m.getCrossfaderEnabled());
 
   return (
     <div className="perf-strip">
       <div className="perf-strip-left">
         {onToggleHints && (
           <button
-            className={`player-button perf-hints-toggle${hintsOn ? ' on' : ''}`}
+            className={`player-button perf-strip-toggle${hintsOn ? ' on' : ''}`}
             onClick={onToggleHints}
             title={hintsOn ? 'Hide keyboard hints' : 'Show keyboard hints'}
           >
@@ -190,6 +193,17 @@ export function MixerStrip({
         )}
       </div>
       <div className="perf-strip-slot wide">
+        <button
+          className={`player-button perf-strip-toggle${xfOn ? ' on' : ''}`}
+          onClick={() => mixer.setCrossfaderEnabled(!xfOn)}
+          title={
+            xfOn
+              ? 'Disable crossfader (both channels at unity)'
+              : 'Enable crossfader'
+          }
+        >
+          XF
+        </button>
         <HFader
           label="X-FADER"
           min={-1}
@@ -197,6 +211,7 @@ export function MixerStrip({
           value={crossfader}
           defaultValue={0}
           detent
+          disabled={!xfOn}
           onChange={(v) => mixer.setCrossfader(v)}
           title="Crossfader (double-click to center)"
         />

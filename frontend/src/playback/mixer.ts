@@ -178,6 +178,9 @@ export class Mixer {
     B: structuredClone(FLAT_CHANNEL),
   };
   private crossfader = 0; // -1 (A) .. 1 (B)
+  /** Crossfader bypass: while false the fader position is kept but both
+   * channels run at unity (as if centered) — an accidental-kill guard. */
+  private crossfaderEnabled = true;
   private master = 1; // 0..1
 
   /** Get (lazily creating / reviving) the live context and graph. */
@@ -319,6 +322,17 @@ export class Mixer {
     this.applyCrossfader(true);
   }
 
+  getCrossfaderEnabled(): boolean {
+    return this.crossfaderEnabled;
+  }
+
+  setCrossfaderEnabled(enabled: boolean): void {
+    this.crossfaderEnabled = enabled;
+    this.notify();
+    this.ensure();
+    this.applyCrossfader(true);
+  }
+
   setMaster(value: number): void {
     this.master = value;
     this.notify();
@@ -336,7 +350,7 @@ export class Mixer {
 
   private applyCrossfader(ramp: boolean): void {
     if (!this.ctx || !this.strips) return;
-    const { a, b } = crossfaderGains(this.crossfader);
+    const { a, b } = crossfaderGains(this.crossfaderEnabled ? this.crossfader : 0);
     if (ramp) {
       rampGain(this.ctx, this.strips.A.crossfadeGain.gain, a);
       rampGain(this.ctx, this.strips.B.crossfadeGain.gain, b);

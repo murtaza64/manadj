@@ -42,20 +42,30 @@
 }
 
 .perf-strip-slot { width: 130px; justify-self: end; }
-.perf-strip-slot.wide { width: 240px; justify-self: center; }
+
+.perf-strip-slot.wide {
+  width: 270px;
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.perf-strip-slot.wide .perf-fader { flex: 1; min-width: 0; }
 
 .perf-strip-left { justify-self: start; }
 
-.perf-hints-toggle {
+.perf-strip-toggle {
   padding: 1px 6px;
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--overlay0);
   border-color: var(--surface1);
+  flex-shrink: 0;
 }
 
-.perf-hints-toggle.on {
+.perf-strip-toggle.on {
   color: var(--yellow);
   border-color: var(--yellow);
 }
