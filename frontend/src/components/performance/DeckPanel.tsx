@@ -33,6 +33,7 @@ import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm } from '../../playback/tempo';
 import { trackWindowSeconds } from '../../utils/waveformZoom';
 import { formatKeyDisplay } from '../../utils/keyUtils';
+import { setKeyLockFlag } from '../../playback/keyLockStore';
 import { DECK_KEYS } from './performanceKeys';
 import type { EqBand } from '../../playback/graph';
 import type { Track } from '../../types';
@@ -370,6 +371,7 @@ function MixZone({ track }: { track: Track | null }) {
   const channel = useMixerValue((m) => m.getChannelState(deck));
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
+  const keyLock = useDeckSnapshot((s) => s.keyLock);
   // Effective BPM follows the pitch fader only: a nudge's momentary bend is
   // a phase correction, not a tempo change — the readout must not wobble
   // mid-beatmatch (same reasoning as the zoom window, performance-mode 06).
@@ -464,6 +466,24 @@ function MixZone({ track }: { track: Track | null }) {
             {formatKeyDisplay(track?.key)}
           </span>
         </span>
+        {/* Key Lock (key-lock 03): Deck setting — works with no track
+            loaded, sticky per Deck (engine holds live state, store
+            persists). Lit while tempo changes leave the Key unchanged. */}
+        <button
+          className={`player-button perf-mini perf-keylock${keyLock ? ' on' : ''}`}
+          onClick={() => {
+            engine.setKeyLock(!keyLock);
+            setKeyLockFlag(deck, !keyLock);
+          }}
+          aria-pressed={keyLock}
+          title={
+            keyLock
+              ? 'Key Lock on: pitch changes keep the Track\u2019s Key (click for vinyl-style varispeed)'
+              : 'Key Lock off: speed and pitch coupled, like vinyl (click to hold the Key)'
+          }
+        >
+          LOCK
+        </button>
         <span className="perf-readout" title="Effective BPM (base × pitch × bend)">
           <span className="perf-readout-label">BPM</span>
           <span className="perf-readout-val">

@@ -600,6 +600,15 @@
   box-shadow: 0 0 6px var(--green);
 }
 
+/* Key Lock toggle (key-lock 03) — next to the KEY readout, lit while
+   tempo changes leave the Track's Key unchanged */
+.perf-keylock { flex-shrink: 0; }
+.perf-keylock.on {
+  color: var(--green);
+  border-color: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
 .perf-nudge-held {
   background: var(--surface1);
   color: var(--yellow);

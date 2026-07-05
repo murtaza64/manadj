@@ -47,6 +47,40 @@ describe('DeckEngine bend', () => {
   });
 });
 
+describe('DeckEngine key lock (key-lock 03)', () => {
+  it('defaults OFF at the engine level (editor decks keep varispeed)', () => {
+    const engine = new DeckEngine(unusedPort);
+    expect(engine.getSnapshot().keyLock).toBe(false);
+  });
+
+  it('setKeyLock flips the snapshot without touching audio', () => {
+    const engine = new DeckEngine(unusedPort);
+    engine.setKeyLock(true);
+    expect(engine.getSnapshot().keyLock).toBe(true);
+    engine.setKeyLock(false);
+    expect(engine.getSnapshot().keyLock).toBe(false);
+  });
+
+  it('same-value setKeyLock does not emit (no re-render churn)', () => {
+    const engine = new DeckEngine(unusedPort);
+    let emits = 0;
+    engine.subscribe(() => {
+      emits += 1;
+    });
+    engine.setKeyLock(false); // already off
+    expect(emits).toBe(0);
+    engine.setKeyLock(true);
+    expect(emits).toBe(1);
+  });
+
+  it('key lock survives a Load (Deck setting, not Track state)', async () => {
+    const engine = new DeckEngine(unusedPort);
+    engine.setKeyLock(true);
+    await engine.load({ trackId: 1, audioUrl: 'http://127.0.0.1:1/none', bpm: 128 });
+    expect(engine.getSnapshot().keyLock).toBe(true);
+  });
+});
+
 describe('arbiter tripwire (ADR 0013)', () => {
   const blockedPort: DeckAudioPort = {
     ensureAudio: () => {

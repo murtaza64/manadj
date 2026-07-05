@@ -64,6 +64,9 @@ export interface DeckSnapshot {
   pitchPercent: number;
   /** Momentary nudge, percent (± — stacked on pitch, 0 when released). */
   bendPercent: number;
+  /** Key Lock (CONTEXT.md): while on, rate changes leave the Track's Key
+   * unchanged (worklet stretch mode). Deck setting; survives Loads. */
+  keyLock: boolean;
 }
 
 export class DeckEngine {
@@ -101,6 +104,10 @@ export class DeckEngine {
   private pitchPercent = 0;
   /** Momentary nudge multiplier on top of pitch; 0 when released. */
   private bendPercent = 0;
+  /** Key Lock. Engine default is OFF (pure varispeed — the editor's private
+   * decks keep today's behavior); the shared Decks' default-ON comes from
+   * the persisted store at the DeckContext layer. */
+  private keyLock = false;
 
   private listeners = new Set<() => void>();
   private snapshot: DeckSnapshot;
@@ -341,6 +348,18 @@ export class DeckEngine {
   }
 
   /**
+   * Key Lock toggle. Seamless mid-play: the worklet splices modes with an
+   * internal crossfade at the audible position — the composed rate, the
+   * playhead clock, and the anchor math are untouched.
+   */
+  setKeyLock(on: boolean): void {
+    if (on === this.keyLock) return;
+    this.keyLock = on;
+    this.sourceNode?.setMode(on ? 'stretch' : 'resample');
+    this.emit();
+  }
+
+  /**
    * Momentary tempo bend (Nudge): a rate multiplier stacked on pitch —
    * rate = (1 + pitch/100) × (1 + bend/100). setBend(0) releases, restoring
    * the exact pitch-only rate. Auto-cleared on Load. The ±2% UI amount is
@@ -443,11 +462,7 @@ export class DeckEngine {
   private startAudio(at: number): void {
     if (!this.buffer) return;
     const { ctx, input } = this.ensureAudio();
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch((err) => {
-        console.warn('[DeckEngine] AudioContext.resume() failed:', err);
-      });
-    }
+    if (ctx.state === 'suspended') this.resumeWithGestureRetry(ctx);
     if (this.sourceNode && this.sourceNode.ctx === ctx) {
       this.beginStart(this.sourceNode, input, at);
       return;
@@ -469,6 +484,36 @@ export class DeckEngine {
     this.transport = { ...this.transport, playhead: this.clampTime(at) };
   }
 
+  /** One pending gesture-retry at a time. */
+  private gestureRetryInstalled = false;
+
+  /**
+   * Chrome's autoplay policy refuses resume() outside user activation — and
+   * a MIDI message is NOT activation, so a hardware play against a fresh
+   * (boot-restored) context leaves it suspended: the transport runs, the
+   * audio doesn't. Retry on the next real gesture, guarded so it can never
+   * undo a deliberate arbiter suspend (ADR 0013): audio must still be
+   * wanted, the surface still audible, and the context unchanged.
+   */
+  private resumeWithGestureRetry(ctx: AudioContext): void {
+    ctx.resume().catch((err) => {
+      console.warn('[DeckEngine] AudioContext.resume() failed:', err);
+    });
+    if (this.gestureRetryInstalled || typeof window === 'undefined') return;
+    this.gestureRetryInstalled = true;
+    const retry = () => {
+      this.gestureRetryInstalled = false;
+      window.removeEventListener('pointerdown', retry, true);
+      window.removeEventListener('keydown', retry, true);
+      if (!isAudioRunning(this.transport)) return;
+      if (this.audio?.ctx !== ctx || ctx.state !== 'suspended') return;
+      if (!(this.port.mayStart?.() ?? true)) return;
+      void ctx.resume().catch(() => undefined);
+    };
+    window.addEventListener('pointerdown', retry, true);
+    window.addEventListener('keydown', retry, true);
+  }
+
   /** Issue the start against a ready node: hand samples over if this buffer
    * hasn't been yet, reconnect (the mixer may have rebuilt its strips), set
    * the rate, and anchor the playhead clock. All synchronous — MessagePort
@@ -476,6 +521,9 @@ export class DeckEngine {
   private beginStart(node: DeckSourceNode, input: AudioNode, at: number): void {
     if (!this.buffer) return;
     this.handOverIfStale(node);
+    // Re-assert the mode every start: covers a freshly (re)built node and
+    // costs one ordered message.
+    node.setMode(this.keyLock ? 'stretch' : 'resample');
     node.disconnect();
     node.connect(input);
     const now = node.ctx.currentTime;
@@ -566,6 +614,7 @@ export class DeckEngine {
       cuePoint: this.transport.cuePoint,
       pitchPercent: this.pitchPercent,
       bendPercent: this.bendPercent,
+      keyLock: this.keyLock,
     };
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DeckSourceKernel } from './deckSourceKernel';
+import type { StretchEngine } from './deckSourceKernel';
 
 /**
  * Pure position-bookkeeping and declick tests for the worklet kernel —
@@ -235,6 +236,183 @@ describe('DeckSourceKernel end of track', () => {
     kernel.stop();
     const { ended } = render(kernel, 16);
     expect(ended).toEqual([]);
+  });
+});
+
+/**
+ * Deterministic fake stretcher (ADR 0002: fake at the true seam): output is
+ * the NEGATED track sample at the audible position — distinguishable from
+ * the resample path (positive) while keeping position math checkable.
+ */
+class FakeStretchEngine implements StretchEngine {
+  ready = true;
+  resets = 0;
+  calls: Array<{ position: number; rate: number; frames: number }> = [];
+
+  reset(): void {
+    this.resets++;
+  }
+
+  render(
+    out: Float32Array[],
+    frames: number,
+    channels: Float32Array[],
+    positionFrames: number,
+    rate: number
+  ): void {
+    this.calls.push({ position: positionFrames, rate, frames });
+    for (let c = 0; c < out.length; c++) {
+      const data = channels[Math.min(c, channels.length - 1)];
+      for (let i = 0; i < frames; i++) {
+        const idx = Math.round(positionFrames + i * rate);
+        out[c][i] = idx < data.length ? -data[idx] : 0;
+      }
+    }
+  }
+}
+
+describe('DeckSourceKernel stretch mode (Key Lock)', () => {
+  function stretchKernel(data: Float32Array, engine: StretchEngine) {
+    const kernel = new DeckSourceKernel(DECLICK);
+    kernel.setTrack([data], 1);
+    kernel.setStretchEngine(engine);
+    kernel.setMode('stretch');
+    return kernel;
+  }
+
+  it('renders through the stretch engine with the fade-in envelope', () => {
+    const data = ramp(64);
+    const fake = new FakeStretchEngine();
+    const kernel = stretchKernel(data, fake);
+    kernel.start(10, 1);
+    const { out } = render(kernel, 8);
+    for (let i = 0; i < 8; i++) {
+      expect(out[0][i]).toBeCloseTo(-data[10 + i] * Math.min(i / DECLICK, 1), 5);
+    }
+  });
+
+  it('advances position by rate and hands the engine the audible position', () => {
+    const fake = new FakeStretchEngine();
+    const kernel = stretchKernel(ramp(64), fake);
+    kernel.start(10, 1);
+    render(kernel, 8, 0.5);
+    expect(kernel.livePositionFrames).toBeCloseTo(14, 6);
+    render(kernel, 8, 0.5);
+    expect(fake.calls.map((c) => c.position)).toEqual([10, 14]);
+    expect(fake.calls[0].rate).toBe(0.5);
+  });
+
+  it('mode switch mid-play splices at the audible position (no jump)', () => {
+    const data = ramp(64);
+    const fake = new FakeStretchEngine();
+    const kernel = new DeckSourceKernel(DECLICK);
+    kernel.setTrack([data], 1);
+    kernel.setStretchEngine(fake);
+    kernel.start(0, 1); // resample (default mode)
+    render(kernel, 8); // full gain, position 8
+    kernel.setMode('stretch');
+    const { out } = render(kernel, 8);
+    // Old resample tail fades out; stretch voice fades in at the SAME
+    // position: data[8+i]·(1−i/D) − data[8+i]·(i/D).
+    for (let i = 0; i < DECLICK; i++) {
+      expect(out[0][i]).toBeCloseTo(data[8 + i] * (1 - (2 * i) / DECLICK), 5);
+    }
+    for (let i = DECLICK; i < 8; i++) expect(out[0][i]).toBeCloseTo(-data[8 + i], 5);
+    expect(kernel.livePositionFrames).toBeCloseTo(16, 6);
+  });
+
+  it('switching back to resample splices seamlessly (tail is resample)', () => {
+    const data = ramp(64);
+    const fake = new FakeStretchEngine();
+    const kernel = stretchKernel(data, fake);
+    kernel.start(0, 1);
+    render(kernel, 8); // stretch at full gain, position 8
+    kernel.setMode('resample');
+    const { out } = render(kernel, 8);
+    // The retired stretch voice's declick tail renders via the RESAMPLE
+    // path (one stretcher instance, Mixxx-style): tail + fade-in of the new
+    // resample voice sum exactly to the plain samples.
+    for (let i = 0; i < 8; i++) {
+      expect(out[0][i]).toBeCloseTo(data[8 + i], 5);
+    }
+  });
+
+  it('same-mode setMode is a no-op (no splice, no reset)', () => {
+    const fake = new FakeStretchEngine();
+    const kernel = stretchKernel(ramp(64), fake);
+    kernel.start(0, 1);
+    render(kernel, 8);
+    const resets = fake.resets;
+    kernel.setMode('stretch');
+    render(kernel, 8);
+    expect(fake.resets).toBe(resets);
+  });
+
+  it('resets the engine once per stretch voice', () => {
+    const fake = new FakeStretchEngine();
+    const kernel = stretchKernel(ramp(256), fake);
+    kernel.start(0, 1);
+    render(kernel, 8);
+    render(kernel, 8);
+    expect(fake.resets).toBe(1);
+    kernel.start(100, 2); // stab: new voice, new prime
+    render(kernel, 8);
+    expect(fake.resets).toBe(2);
+  });
+
+  it('falls back to resample without an engine, and while not ready', () => {
+    const data = ramp(64);
+    const noEngine = new DeckSourceKernel(DECLICK);
+    noEngine.setTrack([data], 1);
+    noEngine.setMode('stretch');
+    noEngine.start(0, 1);
+    const a = render(noEngine, 8);
+    for (let i = DECLICK; i < 8; i++) expect(a.out[0][i]).toBe(data[i]);
+
+    const fake = new FakeStretchEngine();
+    fake.ready = false;
+    const notReady = stretchKernel(data, fake);
+    notReady.start(0, 1);
+    const b = render(notReady, 8);
+    for (let i = DECLICK; i < 8; i++) expect(b.out[0][i]).toBe(data[i]);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('falls back to resample when track and context rates differ', () => {
+    const data = ramp(64);
+    const fake = new FakeStretchEngine();
+    const kernel = new DeckSourceKernel(DECLICK);
+    kernel.setTrack([data], 2); // srRatio ≠ 1
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    kernel.start(0, 1);
+    render(kernel, 8);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('setMode while stopped applies to the next start', () => {
+    const data = ramp(64);
+    const fake = new FakeStretchEngine();
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([data], 1);
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    kernel.start(0, 1);
+    const { out } = render(kernel, 8);
+    for (let i = 1; i < 8; i++) expect(out[0][i]).toBeCloseTo(-data[i], 5);
+  });
+
+  it('reports ended when a stretch voice runs off the track', () => {
+    const fake = new FakeStretchEngine();
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([ramp(8)], 1);
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    kernel.start(6, 9);
+    const { ended } = render(kernel, 8);
+    expect(ended).toEqual([9]);
+    const after = render(kernel, 8);
+    expect(Array.from(after.out[0])).toEqual(new Array(8).fill(0));
   });
 });
 

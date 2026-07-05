@@ -8,6 +8,11 @@
  * anchor-clock math stays exact (ADR 0018).
  */
 
+/** The worklet's two modes (ADR 0018): resample = varispeed (Key Lock off,
+ * bit-perfect at rate 1); stretch = time-stretch without transpose (Key
+ * Lock on — tempo changes leave the Track's Key unchanged). */
+export type SourceMode = 'resample' | 'stretch';
+
 export type DeckSourceCommand =
   /** Hand over a track's decoded samples (channel data, transferred copies). */
   | { type: 'load'; channels: Float32Array[]; sampleRate: number }
@@ -15,12 +20,18 @@ export type DeckSourceCommand =
    * internal declick splice (old voice fades while the new fades in). */
   | { type: 'start'; positionFrames: number; startId: number }
   /** Declick-fade to silence. Idempotent. */
-  | { type: 'stop' };
+  | { type: 'stop' }
+  /** Key Lock: switch modes. Mid-play this is an internal crossfade at the
+   * audible position — no click, no position jump. */
+  | { type: 'mode'; mode: SourceMode };
 
 export type DeckSourceEvent =
   /** The live voice ran off the end of the track. Echoes the startId so the
    * engine can discard stale notifications that raced a seek/stop. */
-  | { type: 'ended'; startId: number };
+  | { type: 'ended'; startId: number }
+  /** The stretcher failed to initialize (Key Lock falls back to varispeed —
+   * playback keeps working, the Key shifts). Diagnostic. */
+  | { type: 'stretch-error'; message: string };
 
 /** Constructor options for the processor (AudioWorkletNodeOptions.
  * processorOptions). The declick length is passed in rather than imported

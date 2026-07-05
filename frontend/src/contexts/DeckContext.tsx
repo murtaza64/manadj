@@ -12,6 +12,7 @@ import type { DeckContextValue } from '../hooks/useDeck';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
 import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
+import { getKeyLockFlags } from '../playback/keyLockStore';
 import type { BeatgridResponse, Track } from '../types';
 
 const DECK_IDS = ['A', 'B'] as const;
@@ -57,12 +58,16 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     // start gestures are refused while another surface (the editor) holds
     // audibility, so nothing can resume the suspended shared clock.
     const m = new Mixer(() => isAudible('shared'));
+    const engineA = new DeckEngine(m.portFor('A'));
+    const engineB = new DeckEngine(m.portFor('B'));
+    // Key Lock boot restore (key-lock 03): sticky per Deck, default ON.
+    // Only the shared Decks — the editor's private engines stay varispeed.
+    const keyLock = getKeyLockFlags();
+    engineA.setKeyLock(keyLock.A);
+    engineB.setKeyLock(keyLock.B);
     return {
       mixer: m,
-      engines: {
-        A: new DeckEngine(m.portFor('A')),
-        B: new DeckEngine(m.portFor('B')),
-      } as Record<ChannelId, DeckEngine>,
+      engines: { A: engineA, B: engineB } as Record<ChannelId, DeckEngine>,
     };
   });
   useEffect(

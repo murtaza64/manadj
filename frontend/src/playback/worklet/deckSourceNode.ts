@@ -22,6 +22,7 @@ import type {
   DeckSourceCommand,
   DeckSourceEvent,
   DeckSourceProcessorOptions,
+  SourceMode,
 } from './protocol';
 
 /** addModule once per context (both Decks share the Mixer's context). */
@@ -65,6 +66,12 @@ export class DeckSourceNode {
     this.rate = rate;
     this.node.port.onmessage = (event: MessageEvent<DeckSourceEvent>) => {
       if (event.data.type === 'ended') this.onEnded?.(event.data.startId);
+      else if (event.data.type === 'stretch-error') {
+        console.warn(
+          '[DeckSourceNode] stretcher init failed (Key Lock degrades to varispeed):',
+          event.data.message
+        );
+      }
     };
   }
 
@@ -86,6 +93,11 @@ export class DeckSourceNode {
 
   stop(): void {
     this.post({ type: 'stop' });
+  }
+
+  /** Key Lock: mid-play this is a worklet-internal crossfade splice. */
+  setMode(mode: SourceMode): void {
+    this.post({ type: 'mode', mode });
   }
 
   /** Sample-accurate composed-rate step (the anchor-clock contract). */
