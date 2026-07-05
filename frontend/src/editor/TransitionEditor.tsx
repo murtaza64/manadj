@@ -20,14 +20,11 @@ import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import {
   claimAudible,
-  isAudible,
   registerSurface,
   releaseAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
-import { registerRoutedMixer } from '../playback/routingStore';
-import { DeckEngine } from '../playback/DeckEngine';
-import { Mixer } from '../playback/mixer';
+import { useMixer } from '../hooks/useMixer';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
@@ -89,37 +86,22 @@ function TransitionEditorInner() {
   // only the narrow subscribers (DawTimeline, the center panel).
   const [store] = useState(() => new EditorStore());
   useEffect(() => () => store.dispose(), [store]);
-  // The editor owns its playback machinery and injects it into the
-  // conductor (ADR 0022 prefactor, issue 04). Still the private pair —
-  // the swap (issue 05) replaces this construction with the shared
-  // Decks+Mixer. Ports answer the arbiter tripwire for the 'editor'
-  // surface (ADR 0013); the widened pitch range keeps tempo-match honest
-  // on extreme pairs.
-  const [{ player, mixer }] = useState(() => {
-    const privateMixer = new Mixer(() => isAudible('editor'));
-    const engineA = new DeckEngine(privateMixer.portFor('A'), EDITOR_PITCH_RANGE_PERCENT);
-    const engineB = new DeckEngine(privateMixer.portFor('B'), EDITOR_PITCH_RANGE_PERCENT);
-    return {
-      mixer: privateMixer,
-      player: new MixPlayer(defaultMix(), { mixer: privateMixer, engineA, engineB }),
-    };
-  });
-  // Disposal pairs with the mount, not the constructor (StrictMode). The
-  // conductor first (stops its RAF), then the machinery it conducts.
-  useEffect(
-    () => () => {
-      player.dispose();
-      player.engineA.dispose();
-      player.engineB.dispose();
-      mixer.dispose();
-    },
-    [player, mixer]
+  // The conductor drives the SHARED Decks and Mixer (ADR 0022) — no
+  // private machinery, so routing (master AND cue/PFL), Key Lock, and
+  // every future mixer feature cover the editor by construction. The
+  // borrow lifecycle (claim/engage/checkpoint) lives in the surface
+  // effect below.
+  const mixer = useMixer();
+  const sharedDecks = useDecks();
+  const [player] = useState(
+    () =>
+      new MixPlayer(defaultMix(), {
+        mixer,
+        engineA: sharedDecks.A.engine,
+        engineB: sharedDecks.B.engine,
+      })
   );
-  // The private mixer follows the routed MASTER device (headphone-cue 06).
-  // Registered here — an effect, not a constructor — so StrictMode's
-  // double-invoke/spurious-cleanup pairs correctly; the stored sink
-  // survives dispose/revive inside the Mixer itself.
-  useEffect(() => registerRoutedMixer(mixer), [mixer]);
+  useEffect(() => () => player.dispose(), [player]);
 
   // The player follows the store SYNCHRONOUSLY (notifications are sync) —
   // audio sees a mutation before the mutating caller's next line, which
@@ -216,11 +198,10 @@ function TransitionEditorInner() {
     return () => store.setTransitionLoadedHandler(null);
   }, [store, onTransitionLoaded]);
 
-  // Shared decks: the canonical loaded pair across modes. Editor loads
-  // mirror onto them (issue 07) so Performance/Library show the same tracks;
-  // read through a ref so assignTrack stays identity-stable for the
-  // keyboard effect.
-  const sharedDecks = useDecks();
+  // The shared decks are the loaded pair (ADR 0022 — mirroring is gone:
+  // editor loads ARE Deck loads through the provider's one path); read
+  // through a ref so assignTrack stays identity-stable for the keyboard
+  // effect.
   const sharedDecksRef = useRef(sharedDecks);
   useEffect(() => {
     sharedDecksRef.current = sharedDecks;
@@ -231,11 +212,13 @@ function TransitionEditorInner() {
       if (deck === 'A') setTrackA(track);
       else setTrackB(track);
       store.setTrackId(deck, track.id);
-      void player.loadTrack(deck, { id: track.id, bpm: track.bpm ?? null });
+      // The one load path (ADR 0022): assigning to the editor pair IS
+      // Loading the shared Deck (Main-cue defaults, persistence and all).
+      // Same track already loaded → nothing to do, buffer's already hot.
       const shared = sharedDecksRef.current[deck];
       if (shared.loadedTrack?.id !== track.id) shared.loadTrack(track);
     },
-    [store, player]
+    [store]
   );
 
   // Swap the loaded pair (issue 29): A's track to deck B and vice versa —
@@ -341,14 +324,22 @@ function TransitionEditorInner() {
     [midiJogA, midiJogB]
   );
 
-  // One audible surface AND one running audio clock at a time (issue 08):
-  // claim audibility while mounted (ADR 0013). The arbiter silences the
-  // shared surface (pauses both decks, suspends its context) and restores
-  // it on release; hardware gestures route to the MixPlayer meanwhile
+  // One audible surface at a time (ADR 0013, shrunk by ADR 0022): claim
+  // audibility while mounted. The arbiter pauses the shared surface's
+  // playback on claim (the one clock keeps running — the editor plays
+  // through it); hardware gestures route to the MixPlayer meanwhile
   // (both PLAYs = the one mix transport, keyboard-parity with Space; CUE
   // has no editor meaning and drops, like F). Pads carry the editor's
   // gesture semantics (ADR 0019); release is absent — editor gestures are
   // taps, so the up edge drops.
+  //
+  // The claim is also the BORROW BOUNDARY (ADR 0022): while the editor
+  // holds audibility, drawn automation owns the shared Mixer's lane
+  // params (engage/disengage — the Mixer reapplies base state itself),
+  // and deck pitches are checkpointed here and restored on release (the
+  // editor's tempo-match pitch must not leak into the ±8% Performance
+  // fader; transport positions deliberately DO persist — transition
+  // editing is not a mid-set activity).
   useEffect(() => {
     registerSurface('editor', {
       transport: { togglePlay: () => player.togglePlay() },
@@ -378,18 +369,22 @@ function TransitionEditorInner() {
         playing: () => player.isPlaying(),
         subscribe: (fn) => player.subscribe(fn),
       },
-      silence: () => {
-        player.pause();
-        player.mixer.suspend();
-      },
-      wake: () => player.mixer.resume(),
+      silence: () => player.pause(),
     });
-    claimAudible('editor');
-    return () => {
-      releaseAudible('editor');
-      unregisterSurface('editor');
+    claimAudible('editor'); // pauses the shared surface's playback
+    const pitches = {
+      A: player.engineA.getSnapshot().pitchPercent,
+      B: player.engineB.getSnapshot().pitchPercent,
     };
-  }, [player, midiJogA, midiJogB]);
+    mixer.engageAutomation();
+    return () => {
+      releaseAudible('editor'); // pauses the audition (editor.silence)
+      unregisterSurface('editor');
+      mixer.disengageAutomation(); // Mixer reapplies base state
+      player.engineA.setPitch(pitches.A);
+      player.engineB.setPitch(pitches.B);
+    };
+  }, [player, mixer, midiJogA, midiJogB]);
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh
@@ -601,10 +596,9 @@ function TransitionEditorInner() {
         </div>
       </div>
 
-      {/* Bottom panel: the shared library browse surface (scoped to shared
-          deck A — the editor's own audio runs on its private Mixer). Load
-          affordances match the Performance view: hover row buttons,
-          double-click → A, arrow keys. */}
+      {/* Bottom panel: the shared library browse surface (scoped to deck
+          A). Load affordances match the Performance view: hover row
+          buttons, double-click → A, arrow keys. */}
       <div className="editor-library">{browsePanel}</div>
     </div>
   );

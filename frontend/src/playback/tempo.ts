@@ -9,6 +9,15 @@
 /** Varispeed range, percent — the pitch fader's reach. */
 export const PITCH_RANGE_PERCENT = 8;
 
+/**
+ * The engine-level pitch clamp (ADR 0022): range POLICY lives with
+ * callers — the Performance fader/MIDI geometry clamps writes to
+ * ±PITCH_RANGE_PERCENT, the Transition editor's tempo-match to its wider
+ * editor range — and the engine accepts anything up to this hard ceiling
+ * (beat alignment on extreme pairs needs the reach).
+ */
+export const MAX_PITCH_RANGE_PERCENT = 25;
+
 /** Momentary nudge amount, percent (UI constant — tune by ear). */
 export const NUDGE_BEND_PERCENT = 2;
 

@@ -1,12 +1,16 @@
 /**
- * Audible-surface arbiter (ADR 0013): the owner of "one audible surface /
- * one running audio clock" (mix-editor issue 08's invariant, previously
- * enforced by scattered view effects).
+ * Audible-surface arbiter (ADR 0013, shrunk by ADR 0022): the owner of
+ * "one audible surface at a time" — which playback mode's semantics own
+ * the shared Decks+Mixer.
  *
- * A surface registers { transport, silence, wake } and audibility is a
- * single-holder state machine with 'shared' (Decks+Mixer) as the permanent
- * default: claim silences the displaced holder and wakes the claimant;
- * release restores the default. Wake resumes a clock, never playback.
+ * A surface registers { transport, …gesture classes…, silence } and
+ * audibility is a single-holder state machine with 'shared' (plain deck
+ * transport) as the permanent default: claim silences (pauses) the
+ * displaced holder; release silences the releaser and restores the
+ * default. Since ADR 0022 every surface plays through the one shared
+ * AudioContext, so there are no clocks to suspend or wake — the old
+ * silence-suspends/wake-resumes machinery and the engine-level `mayStart`
+ * tripwire are gone (a second clock no longer exists to resurrect).
  *
  * App-wide inputs (MIDI dispatch) route transport-class gestures through
  * `audibleTransport()` and stay view-blind — hardware mirrors the keyboard
@@ -76,10 +80,9 @@ export interface AudibleSurface {
   jumps?: SurfaceJumps;
   jog?: SurfaceJog;
   transportState?: SurfaceTransportState;
-  /** Go quiet: pause playback AND suspend the surface's audio clock. */
+  /** Go quiet: pause this surface's playback (ADR 0022 — nothing else;
+   * the one shared clock keeps running). */
   silence(): void;
-  /** Resume the surface's audio clock only — never starts playback. */
-  wake(): void;
 }
 
 const surfaces = new Map<AudibleSurfaceId, AudibleSurface>();
@@ -105,10 +108,10 @@ export function unregisterSurface(id: AudibleSurfaceId): void {
   surfaces.delete(id);
 }
 
-/** Become the audible surface: silences the current holder, wakes the
- * claimant. Idempotent for the holder. Claim-over-claim (neither party is
- * 'shared') is last-wins — unreachable with two surfaces; a third surface
- * re-grills this (ADR 0013). */
+/** Become the audible surface: silences (pauses) the current holder.
+ * Idempotent for the holder. Claim-over-claim (neither party is 'shared')
+ * is last-wins — unreachable with two surfaces; a third surface re-grills
+ * this (ADR 0013). */
 export function claimAudible(id: AudibleSurfaceId): void {
   if (holder === id) return;
   const claimant = surfaces.get(id);
@@ -121,7 +124,6 @@ export function claimAudible(id: AudibleSurfaceId): void {
   }
   surfaces.get(holder)?.silence();
   holder = id;
-  claimant.wake();
   notify();
 }
 
@@ -134,7 +136,6 @@ export function releaseAudible(id: AudibleSurfaceId): void {
   }
   surfaces.get(id)?.silence();
   holder = 'shared';
-  surfaces.get('shared')?.wake();
   notify();
 }
 

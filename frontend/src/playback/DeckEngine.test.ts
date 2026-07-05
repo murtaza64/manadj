@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { DeckEngine } from './DeckEngine';
 import { _clearBufferCacheForTests, putCachedBuffer } from './bufferCache';
 import type { DeckAudioPort } from './mixer';
@@ -81,39 +81,18 @@ describe('DeckEngine key lock (key-lock 03)', () => {
   });
 });
 
-describe('arbiter tripwire (ADR 0013)', () => {
-  const blockedPort: DeckAudioPort = {
-    ensureAudio: () => {
-      throw new Error('audio must not be touched when blocked');
-    },
-    mayStart: () => false,
-  };
+// The ADR 0013 mayStart tripwire tests lived here until ADR 0022 removed
+// the tripwire: with one shared AudioContext there is no second clock a
+// start gesture could resurrect, and the editor's conductor drives these
+// same engines — a per-surface start veto would block it.
 
-  it('play/togglePlay/cueDown are warned no-ops when the surface is not audible', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const engine = new DeckEngine(blockedPort);
-    engine.play();
-    engine.togglePlay();
-    engine.cueDown();
-    expect(engine.getSnapshot().playing).toBe(false);
-    expect(engine.getSnapshot().pendingPlay).toBe(false);
-    expect(warn).toHaveBeenCalledTimes(3);
-    warn.mockRestore();
-  });
-
-  it('pause and stateless controls stay allowed while blocked', () => {
-    const engine = new DeckEngine(blockedPort);
-    engine.pause(); // never touches audio
-    engine.setPitch(2);
-    expect(engine.getSnapshot().pitchPercent).toBe(2);
-  });
-
-  it('a port without mayStart behaves as always-allowed (latch path)', async () => {
+describe('play latch (load in flight)', () => {
+  it('play during a load latches intent without touching audio', async () => {
     const engine = new DeckEngine(unusedPort);
     // Loading state lets play latch intent without touching audio.
     const load = engine.load({ trackId: 1, audioUrl: 'http://127.0.0.1:1/none', bpm: 128 });
     engine.play();
-    // The failing load clears the latch; the point is play() was not blocked.
+    // The failing load clears the latch; the point is play() latched.
     await load;
     expect(engine.getSnapshot().loadState).toBe('error');
   });

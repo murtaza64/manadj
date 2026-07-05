@@ -86,7 +86,6 @@ beforeEach(() => {
       shiftRimTicks: (deck, ticks) => deckControlsFor(deck)?.jogSeekTicks(ticks),
     },
     silence: () => undefined,
-    wake: () => undefined,
   });
   registerSurface('editor', {
     // No cue handlers: CUE drops in the editor, like keyboard F.
@@ -94,7 +93,6 @@ beforeEach(() => {
     // re-register with a pads section (registerSurface overwrites).
     transport: { togglePlay: () => calls.push('editor:toggle') },
     silence: () => undefined,
-    wake: () => undefined,
   });
 });
 
@@ -243,7 +241,6 @@ describe('pads route per audible surface (ADR 0019, editor-midi 01)', () => {
         hotCueClear: (deck, pad) => calls.push(`editor:padClear:${deck}:${pad}`),
       },
       silence: () => undefined,
-      wake: () => undefined,
     });
   }
 
@@ -298,7 +295,6 @@ describe('jumps route per audible surface (editor-midi 02)', () => {
         beatjump: (deck, direction) => calls.push(`editor:jump:${deck}:${direction}`),
       },
       silence: () => undefined,
-      wake: () => undefined,
     });
   }
 
@@ -348,7 +344,6 @@ describe('jog routes per audible surface (editor-midi 04)', () => {
         shiftRimTicks: (deck, ticks) => calls.push(`editor:shiftRim:${deck}:${ticks}`),
       },
       silence: () => undefined,
-      wake: () => undefined,
     });
   }
 

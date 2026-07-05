@@ -75,3 +75,26 @@ during audition; return-to-Performance sounds untouched.
 - `02-mixer-automation-overlay.md`
 - `03-capture-gates-on-audibility.md`
 - `04-prefactor-invert-mixplayer-ownership.md`
+
+## Comments
+
+**Done (lane editorshared, change lwronprw).** The editor conducts the
+shared Decks+Mixer; the private mixer is gone. Notes beyond the brief:
+
+- Two unplanned audibility gates were needed once auditions hit the real
+  engines: the FOLLOW playback bridge (editor play/pause must not
+  spread/drop Follow) and MIDI PITCH (registry-direct per ADR 0019, but
+  the conductor owns B's rate — a hardware pitch move mid-audition caused
+  perpetual drift-correct re-seeks). Both gate on `audibleHolder()`,
+  same seam as capture.
+- "One AudioContext" is now structural: the app constructs exactly one
+  Mixer (DeckProvider); the editor constructs none. The cue bridge's
+  second context (ADR 0017) is unaffected.
+- `browseOnly` Library exposes no transport, so no direct-start path
+  survives the tripwire's removal (audited: follow bridge listen-only,
+  boot restore never plays, sibling views unmount).
+- MixPlayer no longer loads: `assignTrack` → DeckContext's `loadTrack`
+  (Main-cue defaults now apply to editor loads — accepted behavior merge).
+- Ear-check list still owed: human verification at the end of the lane
+  (per plan), covering release-reapply pops, RAF-rate lane smoothness,
+  ±25% stretch artifacts, PFL-in-editor, return-to-Performance state.

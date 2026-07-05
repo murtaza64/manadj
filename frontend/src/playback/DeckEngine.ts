@@ -23,7 +23,7 @@ import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, putCachedBuffer } from './bufferCache';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
-import { PITCH_RANGE_PERCENT, composeRate } from './tempo';
+import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
 
@@ -143,14 +143,9 @@ export class DeckEngine {
   }
 
   private readonly port: DeckAudioPort;
-  /** Varispeed reach, percent. Defaults to the hardware-like fader range;
-   * the Transition editor's private decks pass a wider one (templates
-   * imply tempo-match and must hold beat alignment on extreme pairs). */
-  private readonly pitchRangePercent: number;
 
-  constructor(port: DeckAudioPort, pitchRangePercent: number = PITCH_RANGE_PERCENT) {
+  constructor(port: DeckAudioPort) {
     this.port = port;
-    this.pitchRangePercent = pitchRangePercent;
     this.snapshot = this.buildSnapshot();
   }
 
@@ -263,17 +258,7 @@ export class DeckEngine {
     return this.loadState === 'fetching' || this.loadState === 'decoding';
   }
 
-  /** Arbiter tripwire (ADR 0013): start gestures on a non-audible surface
-   * are warned no-ops — latching play against a suspended clock is the
-   * two-clock drift bug (issue 08) waiting to resume. */
-  private startBlocked(): boolean {
-    if (this.port.mayStart?.() ?? true) return false;
-    console.warn('[DeckEngine] start blocked: surface is not audible (ADR 0013)');
-    return true;
-  }
-
   play(): void {
-    if (this.startBlocked()) return;
     if (this.isLoading()) {
       // Latch the intent; load() fires it when decode completes.
       if (!this.pendingPlay) {
@@ -295,8 +280,6 @@ export class DeckEngine {
   }
 
   togglePlay(): void {
-    const wouldStart = this.isLoading() ? !this.pendingPlay : !this.snapshot.playing;
-    if (wouldStart && this.startBlocked()) return;
     if (this.isLoading()) {
       this.pendingPlay = !this.pendingPlay;
       this.emit();
@@ -332,8 +315,6 @@ export class DeckEngine {
   }
 
   cueDown(): void {
-    // Cue-down starts audio (hold-to-preview) — same tripwire as play.
-    if (this.startBlocked()) return;
     this.dispatch({ type: 'cue-down' });
   }
 
@@ -357,10 +338,14 @@ export class DeckEngine {
   // (EQ/filter/fader live on the Mixer's channel strip — ADR 0009. The deck
   // keeps only varispeed.)
 
+  /** Varispeed. Range POLICY belongs to callers (ADR 0022): the
+   * Performance fader/MIDI clamp to ±PITCH_RANGE_PERCENT, the editor's
+   * tempo-match to its wider range; the engine only enforces the hard
+   * ceiling. */
   setPitch(percent: number): void {
     const clamped = Math.max(
-      -this.pitchRangePercent,
-      Math.min(this.pitchRangePercent, percent)
+      -MAX_PITCH_RANGE_PERCENT,
+      Math.min(MAX_PITCH_RANGE_PERCENT, percent)
     );
     this.setRateComponents(clamped, this.bendPercent);
   }
@@ -509,9 +494,8 @@ export class DeckEngine {
    * Chrome's autoplay policy refuses resume() outside user activation — and
    * a MIDI message is NOT activation, so a hardware play against a fresh
    * (boot-restored) context leaves it suspended: the transport runs, the
-   * audio doesn't. Retry on the next real gesture, guarded so it can never
-   * undo a deliberate arbiter suspend (ADR 0013): audio must still be
-   * wanted, the surface still audible, and the context unchanged.
+   * audio doesn't. Retry on the next real gesture, guarded: audio must
+   * still be wanted and the context unchanged.
    */
   private resumeWithGestureRetry(ctx: AudioContext): void {
     ctx.resume().catch((err) => {
@@ -525,7 +509,6 @@ export class DeckEngine {
       window.removeEventListener('keydown', retry, true);
       if (!isAudioRunning(this.transport)) return;
       if (this.audio?.ctx !== ctx || ctx.state !== 'suspended') return;
-      if (!(this.port.mayStart?.() ?? true)) return;
       void ctx.resume().catch(() => undefined);
     };
     window.addEventListener('pointerdown', retry, true);

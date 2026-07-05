@@ -107,7 +107,7 @@ class FakeDeckSource implements CaptureDeckSource {
 }
 
 function surface() {
-  return { transport: { togglePlay: () => undefined }, silence: () => undefined, wake: () => undefined };
+  return { transport: { togglePlay: () => undefined }, silence: () => undefined };
 }
 
 /** A rig: recorder over fakes, real detector, fake clock at second `t`. */
