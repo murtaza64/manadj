@@ -57,6 +57,7 @@ import {
 } from './mixModel';
 import type { LaneId, Transition } from './mixModel';
 import { LinkToggle } from '../links/LinkToggle';
+import { repointTakePinsLocal } from '../sets/setStore';
 import type { Track } from '../types';
 import './transitionEditor.css';
 
@@ -690,6 +691,9 @@ function EditorCenterPanel({
     if (!ref) return;
     void api.takes
       .setPromoted(ref.takeUuid, ref.transitionUuid)
+      // The endpoint re-pointed Set pins server-side (sets 08); mirror it
+      // in loaded Sets so client-authoritative entries stay in sync.
+      .then(() => repointTakePinsLocal(ref.takeUuid, ref.transitionUuid))
       .catch((err) => console.error('take review: promoted-reference write failed', err));
   }, [store]);
   const tr = mix.transition;

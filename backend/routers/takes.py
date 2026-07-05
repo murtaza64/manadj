@@ -85,11 +85,28 @@ def set_promoted(
 ) -> schemas.TakeRow:
     """Record (or clear) which Transition this Take was promoted into —
     the only mutable field on an otherwise immutable audit row (issue 03).
+
+    Promotion also re-points Set pins (sets 08, ADR 0023): every
+    set_entries pin referencing this Take is rewritten to the resulting
+    Transition's uuid, right here at promotion time — a one-time
+    migration, never query-time indirection. Clearing (null) rewrites
+    nothing: already-migrated pins stay on the Transition.
     """
     t = db.query(models.Take).filter(models.Take.uuid == uuid).first()
     if t is None:
         raise HTTPException(status_code=404, detail="take not found")
     t.promoted_transition_uuid = payload.promoted_transition_uuid
+    if payload.promoted_transition_uuid is not None:
+        db.query(models.SetEntry).filter(
+            models.SetEntry.pin_kind == "take",
+            models.SetEntry.pin_uuid == uuid,
+        ).update(
+            {
+                models.SetEntry.pin_kind: "transition",
+                models.SetEntry.pin_uuid: payload.promoted_transition_uuid,
+            },
+            synchronize_session=False,
+        )
     db.commit()
     db.refresh(t)
     return _row(t)

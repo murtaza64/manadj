@@ -242,6 +242,29 @@ export function insertTrackIntoSet(setId: number, trackId: number, index: number
   replaceSetEntries(setId, next);
 }
 
+/** Mirror the server's promotion re-pointing (sets 08, ADR 0023) in
+ * every loaded Set: each Take pin with this uuid becomes a Transition
+ * pin with the promoted uuid. Local-only — the promotion PATCH already
+ * rewrote the rows server-side; without this mirror a later wholesale
+ * PUT from a loaded Set would clobber the migration with the stale
+ * Take pin. */
+export function repointTakePinsLocal(takeUuid: string, transitionUuid: string): void {
+  let changed = false;
+  const entriesBySet = { ...snapshot.entriesBySet };
+  for (const [setId, entries] of Object.entries(entriesBySet)) {
+    if (!entries.some((e) => e.pin?.kind === 'take' && e.pin.uuid === takeUuid)) continue;
+    changed = true;
+    entriesBySet[Number(setId)] = entries.map((e) =>
+      e.pin?.kind === 'take' && e.pin.uuid === takeUuid
+        ? { ...e, pin: { kind: 'transition', uuid: transitionUuid } }
+        : e
+    );
+  }
+  if (!changed) return;
+  snapshot = { ...snapshot, entriesBySet };
+  notify();
+}
+
 /** Forget a deleted Set's local state (selection cleared by the caller). */
 export function dropSetLocalState(setId: number): void {
   loadPromises.delete(setId);
