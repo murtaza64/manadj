@@ -10,6 +10,7 @@ import {
 import { applyReorder, indicatorY, insertionIndexFromPointer, type RowRect } from '../selection/dropIndex';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import SetsSidebarSection from '../sets/SetsSidebarSection';
+import { createSetFromPlaylist } from '../sets/playlistFlows';
 import type { Playlist } from '../types';
 
 export type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist' | 'set';
@@ -132,6 +133,18 @@ export default function PlaylistSidebar({
             if (confirm(`Delete playlist "${menu.context.name}"?`)) {
               deleteMutation.mutate(menu.context.id);
             }
+          },
+        },
+        // Sets 11: one-time copy of the Play order into a new Set — no
+        // live link (later edits on either side never propagate).
+        {
+          label: 'New set from playlist',
+          separatorBefore: true,
+          onSelect: () => {
+            void createSetFromPlaylist(menu.context.id).then((created) => {
+              queryClient.invalidateQueries({ queryKey: ['sets'] });
+              onSelectSet(created.id);
+            });
           },
         },
       ]

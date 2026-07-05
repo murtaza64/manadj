@@ -12,6 +12,7 @@ import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
 import ContextMenu, { useContextMenuState, type MenuItem } from '../components/ContextMenu';
 import { useToast } from '../components/Toast';
 import { addTracksToSet, dropSetLocalState } from './setStore';
+import { createPlaylistFromSet } from './playlistFlows';
 
 /** Same bright, fully saturated palette as playlists (repo preference). */
 const SET_COLORS: Array<{ label: string; value: string }> = [
@@ -113,6 +114,18 @@ export default function SetsSidebarSection({
             if (confirm(`Delete set "${menu.context.name}"? Tracks and transitions stay.`)) {
               deleteMutation.mutate(menu.context.id);
             }
+          },
+        },
+        // Sets 11: escape hatch to Export — one-time copy of the track
+        // order into an ordinary Playlist (Sets themselves never Export).
+        {
+          label: 'Create playlist from set',
+          separatorBefore: true,
+          onSelect: () => {
+            void createPlaylistFromSet(menu.context).then((playlist) => {
+              queryClient.invalidateQueries({ queryKey: ['playlists'] });
+              showToast(`Playlist "${playlist.name}" created from set`);
+            });
           },
         },
       ]
