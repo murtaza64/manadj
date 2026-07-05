@@ -1,6 +1,6 @@
 # 14 — Grace fade: overlapping windows and load latency
 
-Status: ready-for-human (parked for review, change pkwxstws)
+Status: done (landed on main, change pkwxstws)
 
 ## Parent
 
@@ -144,3 +144,6 @@ consumer:
    clock holds (silence) until the incoming is ready — its opening is
    never skipped. During normal playback the next track's buffer
    prefetches (handover loads are instant on second pass).
+
+**2026-07-05 — Approved and landed.** Human approval ("land these");
+landed with 06 as the stack head. main → pkwxstws.

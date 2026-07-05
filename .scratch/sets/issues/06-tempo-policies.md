@@ -1,6 +1,6 @@
 # 06 — Tempo policies: Riding and Fixed
 
-Status: ready-for-human (parked for review, change oxwwnsvl)
+Status: done (landed on main, change oxwwnsvl)
 
 ## Parent
 
@@ -82,3 +82,8 @@ planner seam, tested there (12 new planner tests):
    and the ladder marks ⚠ at that window.
 5. Seek around (ladder clicks) — mid-window, mid-ramp, and solo positions
    all land decks/pitch consistently under both policies.
+
+**2026-07-05 — Approved and landed.** Human approval ("land these");
+gate green on the landed tree (651 pytest, 944 vitest, build + tsc
+clean, single alembic head 0021_oxwwnsvl). main → pkwxstws (06+14
+together).
