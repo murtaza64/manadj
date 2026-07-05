@@ -1,11 +1,17 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
 import { useAtCuePoint } from '../hooks/useAtCuePoint';
-import { useDeck, useDecks, useDeckSnapshot } from '../hooks/useDeck';
+import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
 import { useHotCues } from '../hooks/useHotCues';
-import { BLINK_INTERVAL_MS, blinkPhase, encodeDeckLeds, ledStates } from '../midi/feedback';
+import {
+  BLINK_INTERVAL_MS,
+  CUE_FLASH_INTERVAL_MS,
+  blinkPhase,
+  encodeDeckLeds,
+  ledStates,
+} from '../midi/feedback';
+import type { BlinkPhases } from '../midi/feedback';
 import { connectedOutputs, subscribeOutputs } from '../midi/outputStore';
-import type { DeckEngine } from '../playback/DeckEngine';
 
 /**
  * Headless Feedback glue (midi-pad-leds 01/02/03): per deck, subscribes to
@@ -26,11 +32,19 @@ import type { DeckEngine } from '../playback/DeckEngine';
  * verified glue — the tested seam is feedback.ts.
  */
 
-function DeckFeedbackPublisher({ phase }: { phase: boolean }) {
+function DeckFeedbackPublisher({
+  phases,
+  onNeedsClock,
+}: {
+  phases: BlinkPhases;
+  /** Report whether this deck currently has a blinking light. */
+  onNeedsClock: (needs: boolean) => void;
+}) {
   const { deck, loadedTrack } = useDeck();
   const playing = useDeckSnapshot((s) => s.playing);
   const pendingPlay = useDeckSnapshot((s) => s.pendingPlay);
   const previewing = useDeckSnapshot((s) => s.previewing);
+  const hasCuePoint = useDeckSnapshot((s) => s.cuePoint !== null);
   // The on-screen CUE button's own at-cue predicate; ledStates adds the
   // paused gate (tested at the seam).
   const atCuePoint = useAtCuePoint();
@@ -45,61 +59,90 @@ function DeckFeedbackPublisher({ phase }: { phase: boolean }) {
     [loadedTrack, hotCues]
   );
 
+  // Which lights of THIS deck are blinking right now. Drives the shared
+  // clock, and gates the phase values entering the effect below — a deck
+  // with nothing blinking sees constant `true` phases, so the other deck's
+  // blinking never causes resends here.
+  const cueFlashing = !playing && !previewing && hasCuePoint && !atCuePoint;
+  const needsClock = pendingPlay || cueFlashing;
+  useEffect(() => {
+    onNeedsClock(needsClock);
+    return () => onNeedsClock(false);
+  }, [needsClock, onNeedsClock]);
+
+  const pendingPhase = pendingPlay ? phases.pending : true;
+  const cueFlashPhase = cueFlashing ? phases.cueFlash : true;
+
   useEffect(() => {
     if (outputs.length === 0) return;
-    const states = ledStates({ playing, pendingPlay, previewing, atCuePoint, assignedPads }, phase);
+    const states = ledStates(
+      { playing, pendingPlay, previewing, hasCuePoint, atCuePoint, assignedPads },
+      { pending: pendingPhase, cueFlash: cueFlashPhase }
+    );
     for (const output of outputs) {
       if (!output.mapping.feedback) continue;
       for (const message of encodeDeckLeds(output.mapping.feedback, deck, states)) {
         output.send(message);
       }
     }
-  }, [deck, playing, pendingPlay, previewing, atCuePoint, assignedPads, phase, outputs]);
+  }, [
+    deck,
+    playing,
+    pendingPlay,
+    previewing,
+    hasCuePoint,
+    atCuePoint,
+    assignedPads,
+    pendingPhase,
+    cueFlashPhase,
+    outputs,
+  ]);
 
   return null;
 }
 
-/** The one app-driven ~2 Hz blink clock (the device has no native blink),
- * running only while some deck is pending-play. Phase is clock-derived so
- * both decks blink in step regardless of when each latched. */
-function usePendingPlay(engine: DeckEngine): boolean {
-  return useSyncExternalStore(
-    (cb) => engine.subscribe(cb),
-    () => engine.getSnapshot().pendingPlay
-  );
-}
-
-function useBlinkPhase(): boolean {
-  const decks = useDecks();
-  // Both hooks must run unconditionally (no || short-circuit).
-  const pendingA = usePendingPlay(decks.A.engine);
-  const pendingB = usePendingPlay(decks.B.engine);
-  const anyPending = pendingA || pendingB;
-
-  const [phase, setPhase] = useState(true);
+/** The one app-driven blink clock (the device has no native blink),
+ * running only while some deck has a blinking light (pending-play PLAY or
+ * away-from-cue CUE flash). Phases are clock-derived so both decks and the
+ * on-screen CUE flash stay in step regardless of when each started. */
+function useBlinkClock(active: boolean): BlinkPhases {
+  const [phases, setPhases] = useState<BlinkPhases>({ pending: true, cueFlash: true });
   useEffect(() => {
-    if (!anyPending) return; // no timer while nothing is pending
-    const tick = () => setPhase(blinkPhase(performance.now()));
+    if (!active) return; // no timer while nothing is blinking
+    const tick = () => {
+      const now = performance.now();
+      const next: BlinkPhases = {
+        pending: blinkPhase(now, BLINK_INTERVAL_MS),
+        cueFlash: blinkPhase(now, CUE_FLASH_INTERVAL_MS),
+      };
+      setPhases((prev) =>
+        prev.pending === next.pending && prev.cueFlash === next.cueFlash ? prev : next
+      );
+    };
     tick();
     const interval = setInterval(tick, BLINK_INTERVAL_MS);
     return () => {
       clearInterval(interval);
-      setPhase(true);
+      setPhases({ pending: true, cueFlash: true });
     };
-  }, [anyPending]);
-  return phase;
+  }, [active]);
+  return phases;
 }
 
 /** Mounted once inside DeckProvider, alongside MidiControlRegistrar. */
 export function MidiFeedbackBridge() {
-  const phase = useBlinkPhase();
+  const [needsA, setNeedsA] = useState(false);
+  const [needsB, setNeedsB] = useState(false);
+  const onNeedsA = useCallback((needs: boolean) => setNeedsA(needs), []);
+  const onNeedsB = useCallback((needs: boolean) => setNeedsB(needs), []);
+  const phases = useBlinkClock(needsA || needsB);
   return (
     <>
       <DeckScope deck="A">
-        <DeckFeedbackPublisher phase={phase} />
+        <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsA} />
       </DeckScope>
       <DeckScope deck="B">
-        <DeckFeedbackPublisher phase={phase} />
+        <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsB} />
       </DeckScope>
     </>
   );

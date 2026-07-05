@@ -5,7 +5,14 @@
  * mapping (the LED ground truth cited in mappings/inpulse300mk2.ts).
  */
 import { describe, expect, it } from 'vitest';
-import { BLINK_INTERVAL_MS, allOffMessages, blinkPhase, encodeDeckLeds, ledStates } from './feedback';
+import {
+  BLINK_INTERVAL_MS,
+  CUE_FLASH_INTERVAL_MS,
+  allOffMessages,
+  blinkPhase,
+  encodeDeckLeds,
+  ledStates,
+} from './feedback';
 import { INPULSE_300_MK2 } from './mappings/inpulse300mk2';
 
 const feedback = INPULSE_300_MK2.feedback!;
@@ -14,9 +21,13 @@ const idle = {
   playing: false,
   pendingPlay: false,
   previewing: false,
+  hasCuePoint: false,
   atCuePoint: false,
   assignedPads: new Set<number>(),
 };
+
+const lit = { pending: true, cueFlash: true };
+const dim = { pending: false, cueFlash: false };
 
 describe('ledStates', () => {
   it('PLAY is solid while playing', () => {
@@ -27,30 +38,40 @@ describe('ledStates', () => {
     expect(ledStates({ ...idle, playing: false }).play).toBe(false);
   });
 
-  it('PLAY follows the blink phase while play is latched during a load', () => {
-    expect(ledStates({ ...idle, pendingPlay: true }, true).play).toBe(true);
-    expect(ledStates({ ...idle, pendingPlay: true }, false).play).toBe(false);
+  it('PLAY follows the pending phase while play is latched during a load', () => {
+    expect(ledStates({ ...idle, pendingPlay: true }, lit).play).toBe(true);
+    expect(ledStates({ ...idle, pendingPlay: true }, dim).play).toBe(false);
   });
 
-  it('PLAY ignores the blink phase while actually playing', () => {
-    expect(ledStates({ ...idle, playing: true }, false).play).toBe(true);
+  it('PLAY ignores the phases while actually playing', () => {
+    expect(ledStates({ ...idle, playing: true }, dim).play).toBe(true);
   });
 
-  it('CUE is solid when paused at the cue point (stab armed)', () => {
-    expect(ledStates({ ...idle, atCuePoint: true }).cue).toBe(true);
+  it('CUE is solid when paused at the cue point (stab armed), any phase', () => {
+    const armed = { ...idle, hasCuePoint: true, atCuePoint: true };
+    expect(ledStates(armed, lit).cue).toBe(true);
+    expect(ledStates(armed, dim).cue).toBe(true);
   });
 
-  it('CUE is lit during hold-to-preview', () => {
-    expect(ledStates({ ...idle, previewing: true }).cue).toBe(true);
+  it('CUE is lit during hold-to-preview, any phase', () => {
+    expect(ledStates({ ...idle, previewing: true }, dim).cue).toBe(true);
   });
 
-  it('CUE is off while playing elsewhere and while paused away from the cue', () => {
-    expect(ledStates({ ...idle, playing: true }).cue).toBe(false);
-    expect(ledStates(idle).cue).toBe(false);
+  it('CUE flashes while paused away from the cue point (mirrors the screen)', () => {
+    const away = { ...idle, hasCuePoint: true, atCuePoint: false };
+    expect(ledStates(away, lit).cue).toBe(true);
+    expect(ledStates(away, dim).cue).toBe(false);
   });
 
-  it('CUE is off while playing even over the cue point', () => {
-    expect(ledStates({ ...idle, playing: true, atCuePoint: true }).cue).toBe(false);
+  it('CUE is off while paused with no cue point set', () => {
+    expect(ledStates(idle, lit).cue).toBe(false);
+  });
+
+  it('CUE is off while playing, even over the cue point', () => {
+    expect(ledStates({ ...idle, playing: true, hasCuePoint: true, atCuePoint: true }).cue).toBe(
+      false
+    );
+    expect(ledStates({ ...idle, playing: true, hasCuePoint: true }, lit).cue).toBe(false);
   });
 
   it('lights exactly the assigned pad slots', () => {
@@ -109,7 +130,7 @@ describe('encodeDeckLeds', () => {
 });
 
 describe('blinkPhase', () => {
-  it('alternates every interval under a fed clock (~2 Hz)', () => {
+  it('alternates every interval under a fed clock (~2 Hz default)', () => {
     expect(blinkPhase(0)).toBe(true);
     expect(blinkPhase(BLINK_INTERVAL_MS - 1)).toBe(true);
     expect(blinkPhase(BLINK_INTERVAL_MS)).toBe(false);
@@ -121,6 +142,14 @@ describe('blinkPhase', () => {
     const t = 1234567; // arbitrary epoch offset — phase is clock-derived
     expect(blinkPhase(t + 2 * BLINK_INTERVAL_MS)).toBe(blinkPhase(t));
     expect(blinkPhase(t + BLINK_INTERVAL_MS)).toBe(!blinkPhase(t));
+  });
+
+  it('cue flash runs a 1s cycle (the on-screen CUE flash period)', () => {
+    const t = 424242;
+    expect(blinkPhase(t + CUE_FLASH_INTERVAL_MS, CUE_FLASH_INTERVAL_MS)).toBe(
+      !blinkPhase(t, CUE_FLASH_INTERVAL_MS)
+    );
+    expect(blinkPhase(t + 1000, CUE_FLASH_INTERVAL_MS)).toBe(blinkPhase(t, CUE_FLASH_INTERVAL_MS));
   });
 });
 

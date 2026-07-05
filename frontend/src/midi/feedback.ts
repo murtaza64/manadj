@@ -22,6 +22,8 @@ export interface DeckLedInput {
   pendingPlay: boolean;
   /** Hold-to-preview in progress (CUE held while paused). */
   previewing: boolean;
+  /** A cue point is set on the loaded Track (snapshot cuePoint !== null). */
+  hasCuePoint: boolean;
   /**
    * Paused with the playhead at the cue point — stab armed. Callers derive
    * it the same way the on-screen CUE button does (coarse playhead poll
@@ -48,26 +50,46 @@ export interface DeckLedStates {
 export type MidiMessage = readonly [number, number, number];
 
 /**
- * The app-driven blink clock (the device has no native blink): ~2 Hz,
- * phase derived from the clock so both decks always agree. `true` = lit.
+ * The app-driven blink clock (the device has no native blink). Phases are
+ * derived from the clock (floor(now / interval) parity), so every deck and
+ * every light agree regardless of when each started blinking — the same
+ * epoch-anchoring trick as the on-screen CUE flash animation. `true` = lit.
  */
-export const BLINK_INTERVAL_MS = 250;
+export const BLINK_INTERVAL_MS = 250; // pending-play PLAY blink, ~2 Hz
+export const CUE_FLASH_INTERVAL_MS = 500; // CUE away-flash, 1 Hz — the screen's period
 
-export function blinkPhase(nowMs: number): boolean {
-  return Math.floor(nowMs / BLINK_INTERVAL_MS) % 2 === 0;
+export function blinkPhase(nowMs: number, intervalMs: number = BLINK_INTERVAL_MS): boolean {
+  return Math.floor(nowMs / intervalMs) % 2 === 0;
 }
 
+/** The two blink phases in play; both `true` when no clock is running. */
+export interface BlinkPhases {
+  /** ~2 Hz — PLAY while play is latched during a load. */
+  pending: boolean;
+  /** 1 Hz — CUE while paused away from the cue point (screen parity). */
+  cueFlash: boolean;
+}
+
+const STEADY: BlinkPhases = { pending: true, cueFlash: true };
+
 /**
- * Deck state → desired light states. `phase` only matters while play is
- * latched during a load (pendingPlay blinks); solid/off states ignore it.
+ * Deck state → desired light states. Phases only matter for the blinking
+ * states (pendingPlay PLAY, paused-away-from-cue CUE); solid/off states
+ * ignore them.
  */
-export function ledStates(input: DeckLedInput, phase: boolean = true): DeckLedStates {
+export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): DeckLedStates {
+  const paused = !input.playing && !input.previewing;
   return {
-    play: input.playing || (input.pendingPlay && phase),
+    play: input.playing || (input.pendingPlay && phases.pending),
     // Solid when a stab is armed (paused at the cue), lit through a
     // hold-to-preview (the playhead runs away from the cue; previewing
-    // keeps the light on), off while playing elsewhere.
-    cue: input.previewing || (!input.playing && input.atCuePoint),
+    // keeps the light on), flashing when paused away from a set cue
+    // (mirrors the on-screen CUE button), off while playing.
+    cue:
+      input.previewing ||
+      (paused &&
+        input.hasCuePoint &&
+        (input.atCuePoint || phases.cueFlash)),
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
   };
 }

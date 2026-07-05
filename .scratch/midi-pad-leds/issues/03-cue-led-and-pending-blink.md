@@ -43,3 +43,12 @@ The remaining transport light semantics:
   HARDWARE SMOKE TEST — pause at cue (CUE solid), hold CUE (lit through
   preview), play (CUE off), latch play during a load (PLAY blinks ~2 Hz
   then solid; off if load fails), confirm no blink resends while idle.
+- 2026-07-04 (padleds lane, follow-up in jj change `lxxvmsox`): CUE now
+  also FLASHES (1 Hz, the on-screen CUE button's away-flash period) while
+  paused away from a set cue point — hardware mirrors the screen's third
+  CUE state. The blink clock's run condition widened accordingly: it runs
+  while some deck is pending-play OR paused away from its cue (so with a
+  paused loaded track it is usually running); still one timer, still no
+  resends on the deck that isn't blinking. Smoke test addition: pause away
+  from the cue → CUE flashes in step with the on-screen button; seek onto
+  the cue → solid.
