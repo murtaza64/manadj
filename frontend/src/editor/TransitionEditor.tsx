@@ -24,6 +24,7 @@ import {
   releaseAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
+import { registerRoutedMixer } from '../playback/routingStore';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
@@ -87,6 +88,11 @@ function TransitionEditorInner() {
   useEffect(() => () => store.dispose(), [store]);
   const [player] = useState(() => new MixPlayer(defaultMix()));
   useEffect(() => () => player.dispose(), [player]);
+  // The private mixer follows the routed MASTER device (headphone-cue 06).
+  // Registered here — an effect, not the MixPlayer constructor — so
+  // StrictMode's double-invoke/spurious-cleanup pairs correctly; the
+  // stored sink survives dispose/revive inside the Mixer itself.
+  useEffect(() => registerRoutedMixer(player.mixer), [player]);
 
   // The player follows the store SYNCHRONOUSLY (notifications are sync) —
   // audio sees a mutation before the mutating caller's next line, which

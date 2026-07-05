@@ -454,9 +454,16 @@ export class Mixer {
    * routing.ts).
    */
   async setMasterSinkId(sinkId: string | null): Promise<void> {
-    const { ctx } = this.ensure();
-    await ctx.setSinkId(sinkId ?? '');
+    // Store first, apply only to a LIVE context (headphone-cue 06
+    // follow-up): routing a context-less mixer must not force-create an
+    // AudioContext (registration would leak contexts and race dispose —
+    // "AudioContext is going away"); ensure() reapplies the stored sink
+    // on creation/revival, so a disposed-then-revived mixer keeps its
+    // routing (the Mixer's "safe to keep using after dispose" contract).
     this.masterSinkId = sinkId;
+    const ctx = this.ctx;
+    if (!ctx || ctx.state === 'closed') return;
+    await ctx.setSinkId(sinkId ?? '');
   }
 
   // ── Cue bus (headphone-cue 02, ADR 0017) ─────────────────────────────

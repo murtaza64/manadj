@@ -33,8 +33,18 @@ concerns the graph inside one mixer, it may stay per-instance.
 
 ## Consequences
 
-- `registerRoutedMixer` returns an unregister; MixPlayer holds it for its
-  lifetime (dispose unregisters).
+- `registerRoutedMixer` returns an unregister. Registration belongs in
+  the owning component's mount effect, NOT in a constructor paired with
+  dispose (follow-up finding): StrictMode double-invokes state
+  initializers (a zombie mixer would stay registered, holding state) and
+  fires a spurious cleanup on the kept instance (constructor-paired
+  unregistration orphans the mixer that actually plays). Effects pair
+  setup/cleanup correctly.
+- `Mixer.setMasterSinkId` stores the sink and applies it only to a LIVE
+  context; `ensure()` reapplies on creation/revival. Routing a
+  context-less mixer must never force-create an AudioContext — that
+  leaked zombie contexts and raced dispose ("AudioContext is going
+  away", whose error fallback then clobbered the sink to null).
 - Regression tests live at the routingStore seam with fake mixers
   (routingStore.test.ts) — the first tests this store has.
 - The deep fix (single context) is tracked as a deepening opportunity for
