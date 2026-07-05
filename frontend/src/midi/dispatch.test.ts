@@ -45,7 +45,6 @@ function registerFakeDeckControls(deck: ChannelId): void {
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
     jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
     jogSeekTicks: (ticks) => calls.push(`${deck}:jogSeek:${ticks}`),
-    load: (track) => calls.push(`${deck}:load:${track.id}`),
   });
 }
 
@@ -531,6 +530,7 @@ describe('browser (midi-controller 05)', () => {
     registerBrowseSurface({
       navigate: (delta) => moves.push(delta),
       getSelectedTrack: () => null,
+      load: () => undefined,
     });
     dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 2 });
     dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: -1 });
@@ -542,6 +542,7 @@ describe('browser (midi-controller 05)', () => {
     registerBrowseSurface({
       navigate: (delta) => moves.push(delta),
       getSelectedTrack: () => null,
+      load: () => undefined,
     });
     dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 100 });
     expect(moves.length).toBeLessThanOrEqual(8);
@@ -554,18 +555,39 @@ describe('browser (midi-controller 05)', () => {
     expect(calls).toEqual([]);
   });
 
-  it('LOAD routes the selected track to the deck on the down edge only', () => {
-    registerFakeDeckControls('A');
-    registerFakeDeckControls('B');
-    registerBrowseSurface({ navigate: () => undefined, getSelectedTrack: () => track });
+  it('LOAD routes the selected track to the browse surface load policy, down edge only (editor-midi 03)', () => {
+    registerBrowseSurface({
+      navigate: () => undefined,
+      getSelectedTrack: () => track,
+      load: (deck, t) => calls.push(`view:load:${deck}:${t.id}`),
+    });
     dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'load', deck: 'B' } });
     dispatchMidiAction({ kind: 'button', edge: 'up', target: { control: 'load', deck: 'B' } });
-    expect(calls).toEqual(['B:load:42']);
+    expect(calls).toEqual(['view:load:B:42']);
+  });
+
+  it('LOAD policy is the VIEW\u2019s: a lock-refusing policy simply receives the call', () => {
+    // Per-view policies (editor assign-to-pair, Performance lock, library
+    // free replace) live in the registered handler — dispatch stays blind.
+    let refused = 0;
+    registerBrowseSurface({
+      navigate: () => undefined,
+      getSelectedTrack: () => track,
+      load: () => {
+        refused += 1; // e.g. Performance silently refusing a running deck
+      },
+    });
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'load', deck: 'A' } });
+    expect(refused).toBe(1);
+    expect(calls).toEqual([]);
   });
 
   it('LOAD with no selection is a no-op', () => {
-    registerFakeDeckControls('A');
-    registerBrowseSurface({ navigate: () => undefined, getSelectedTrack: () => null });
+    registerBrowseSurface({
+      navigate: () => undefined,
+      getSelectedTrack: () => null,
+      load: (deck, t) => calls.push(`view:load:${deck}:${t.id}`),
+    });
     dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'load', deck: 'A' } });
     expect(calls).toEqual([]);
   });
@@ -575,10 +597,12 @@ describe('browser (midi-controller 05)', () => {
     registerBrowseSurface({
       navigate: () => moves.push('first'),
       getSelectedTrack: () => null,
+      load: () => undefined,
     });
     const unregister = registerBrowseSurface({
       navigate: () => moves.push('second'),
       getSelectedTrack: () => null,
+      load: () => undefined,
     });
     dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 1 });
     unregister();

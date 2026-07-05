@@ -785,12 +785,18 @@ export default function Library({
     [rowContextMenu]
   );
 
-  /** Load target for menu items: route through the embedding view's load
-   * policy when present (Performance view), else the shared Decks. */
-  const loadToDeckFromMenu = (deck: ChannelId, track: Track) => {
+  /** The view's load policy (editor-midi 03): the embedding view's when
+   * present (editor assign-to-pair, Performance lock), else the library's
+   * free replace straight onto the shared Decks. Menu items and hardware
+   * LOAD route through the same policy. */
+  const loadWithViewPolicy = (deck: ChannelId, track: Track) => {
     if (onLoadToDeck) onLoadToDeck(deck, track);
     else decks[deck].loadTrack(track);
   };
+  const loadWithViewPolicyRef = useRef(loadWithViewPolicy);
+  useEffect(() => {
+    loadWithViewPolicyRef.current = loadWithViewPolicy;
+  });
 
   const rowMenuItems: MenuItem[] = useMemo(() => {
     if (!rowMenu) return [];
@@ -804,13 +810,13 @@ export default function Library({
         label: 'Load to Deck A',
         disabled: multi,
         title: loadDisabledTitle,
-        onSelect: () => loadToDeckFromMenu('A', menuTrack),
+        onSelect: () => loadWithViewPolicy('A', menuTrack),
       },
       {
         label: 'Load to Deck B',
         disabled: multi,
         title: loadDisabledTitle,
-        onSelect: () => loadToDeckFromMenu('B', menuTrack),
+        onSelect: () => loadWithViewPolicy('B', menuTrack),
       },
       {
         label: multi ? `Add ${targetIds.length} to playlist` : 'Add to playlist',
@@ -876,8 +882,9 @@ export default function Library({
 
   // The same handle, registered module-level as the active browse surface
   // for the hardware Controller (midi-controller 05): encoder moves this
-  // selection, LOAD A/B reads it. Registration is mount-scoped; handlers
-  // read the live selection through a ref.
+  // selection, LOAD A/B reads it and loads with the view's policy
+  // (editor-midi 03). Registration is mount-scoped; handlers read the live
+  // selection and policy through refs.
   const mainSelRef = useRef(mainSel);
   useEffect(() => {
     mainSelRef.current = mainSel;
@@ -887,6 +894,7 @@ export default function Library({
       registerBrowseSurface({
         navigate: (delta) => mainSelRef.current.handleNavigate(delta),
         getSelectedTrack: () => mainSelRef.current.selectedTrack,
+        load: (deck, track) => loadWithViewPolicyRef.current(deck, track),
       }),
     []
   );

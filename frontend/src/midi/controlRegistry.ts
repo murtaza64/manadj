@@ -37,23 +37,24 @@ export interface MidiDeckControls {
   jogTouchTicks(ticks: number): void;
   /** SHIFT+jog ticks (signed): deliberate fast seek, playing or paused. */
   jogSeekTicks(ticks: number): void;
-  /**
-   * Load a Track onto this deck, honoring the load lock (refused onto a
-   * playing deck, silently — no hardware feedback channel).
-   */
-  load(track: Track): void;
 }
 
 /**
  * The active browse surface — whatever Library instance is currently
- * mounted (any view). Same shape as Library's LibraryBrowseHandle. Views
- * without a browse surface simply leave this empty: encoder/LOAD no-op
- * (PRD scope decision).
+ * mounted (any view). Views without a browse surface simply leave this
+ * empty: encoder/LOAD no-op (PRD scope decision).
  */
 export interface MidiBrowseSurface {
   /** Move the selection up (-1) / down (+1), scrolling it into view. */
   navigate(delta: 1 | -1): void;
   getSelectedTrack(): Track | null;
+  /**
+   * Load a Track — with the EMBEDDING VIEW's policy (editor-midi 03, ADR
+   * 0019): load policy is view-owned, not audibility-owned. The editor
+   * assigns to the pair, the Performance view keeps its load lock (silent
+   * refusal), the library view replaces freely.
+   */
+  load(deck: ChannelId, track: Track): void;
 }
 
 /**

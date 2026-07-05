@@ -27,7 +27,7 @@ import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
  */
 
 function DeckControlsRegistrar() {
-  const { deck, engine, loadedTrack, loadTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
+  const { deck, engine, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
   const ready = useDeckReady();
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const matchAction = useMatchAction();
@@ -51,7 +51,6 @@ function DeckControlsRegistrar() {
     engine,
     ready,
     hotCues,
-    loadTrack,
     beatjumpBeats,
     setBeatjumpBeats,
     matchAction,
@@ -62,7 +61,6 @@ function DeckControlsRegistrar() {
       engine,
       ready,
       hotCues,
-      loadTrack,
       beatjumpBeats,
       setBeatjumpBeats,
       matchAction,
@@ -111,13 +109,8 @@ function DeckControlsRegistrar() {
           if (!r) return;
           j.onSeekTicks(ticks);
         },
-        load: (track) => {
-          const { engine: e, loadTrack: doLoad } = latest.current;
-          // Load lock (PerformanceView policy, PRD decision): refused onto a
-          // playing deck, silently — no hardware feedback channel.
-          if (e.isAudioRunning() || e.getSnapshot().pendingPlay) return;
-          doLoad(track);
-        },
+        // LOAD deliberately absent (editor-midi 03): load policy is
+        // view-owned and rides the browse-surface registration in Library.
       }),
     [deck]
   );

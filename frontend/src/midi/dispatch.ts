@@ -108,10 +108,14 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       return;
     }
     case 'load': {
+      // Load policy is VIEW-owned (editor-midi 03, ADR 0019): the browse
+      // surface registration carries the embedding view's policy. No
+      // browse surface or no selection: no-op.
       if (edge !== 'down') return;
-      const track = browseSurface()?.getSelectedTrack();
-      if (!track) return; // no browse surface or no selection: no-op
-      deckControlsFor(target.deck)?.load(track);
+      const surface = browseSurface();
+      const track = surface?.getSelectedTrack();
+      if (!surface || !track) return;
+      surface.load(target.deck, track);
       return;
     }
     default:
