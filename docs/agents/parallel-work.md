@@ -93,6 +93,11 @@ issue's Testing Decisions will ever catch it.)
    that exercise the slice and what correct looks like. Land the flip via
    the docs fast-path.
 4. Toast the human (same URL + one-line summary) and report it in-session.
+   **Print the full verification walkthrough in the agent's output
+   message itself** — the URL and the click-by-click steps, not just a
+   pointer to the issue file. The human reviews from the session
+   transcript; docs and toasts are the durable/ambient copies, not the
+   primary delivery.
 5. **Keep working**: continue to the next issue on top of the parked stack.
    Approval lands a *prefix* (`jj bookmark move main --to <reviewed change>`
    — landing a non-head is fine). Review fixes are amended into the still
