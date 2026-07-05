@@ -18,8 +18,10 @@ required. Pushing `main` to origin is periodic backup hygiene, not part of the
 gate. After advancing `main` from your own head, immediately `jj new` — your
 old `@` just became immutable.
 
-**Landing**: getting a lane's changes behind trunk — by rebase (short lanes) or
-by a named merge commit (long-lived lanes).
+**Landing**: getting a lane's changes behind trunk — by a named merge commit
+targeting a specific `main` commit (revised 2026-07-05; formerly rebase for
+short lanes). Fast-forward degenerate case: if `main` has not moved and your
+stack sits directly on it, moving the bookmark *is* the land.
 
 **The gate**: the verification suite that must be green before trunk advances.
 
@@ -33,21 +35,40 @@ abandoned.
 1. **Never rewrite a change another workspace's `@` sits on or descends from.**
    No amend, describe, rebase, squash, or split of foreign mutable changes.
    An agent's working-copy change is private until landed or handed off.
-2. **Never touch another lane's workspace** — no `workspace forget`, no edits in
-   its directory. A workspace is created and forgotten by its own agent only.
-3. **Rebase within your own lane; merge across lanes.**
+2. **Never touch a workspace you don't own** — no `workspace forget`, no edits
+   in its directory. Ownership is explicit: the `owner:` line (a session ID, or
+   `human`) in the lane's `.lanes/<lane>.md`. It changes only by explicit
+   handover (the spawn script updates it when handing a workspace to a new
+   session). After resuming a session — or as a forked session — re-read your
+   lane's `owner:` before your first write; if it isn't you, the lane moved
+   on: open your own.
+3. **The default workspace is read-only for agents** (see below).
+4. **Rebase within your own lane; merge across lanes.**
 
 ## Trunk-based flow
 
 - Lanes branch off trunk (`jj workspace add --name <lane> -r main ../manadj-<lane>`).
-- **Short lane (1-3 changes)**: finish → rebase onto trunk tip → run the gate →
-  advance `main` to your head (`jj bookmark move main --to <head>`). If trunk moved
-  while you verified: rebase again, re-gate, retry.
-- **Long-lived lane**: never repeatedly rebase the whole stack (rewrites every
-  commit; races every other workspace). Catch up by merging trunk *into* the lane
-  (`jj new <lane-head> main`), keep building on top. Land with a named merge
-  commit (`merge: <what>`), then move `main` to it.
-- Rebases onto trunk happen at issue boundaries, never mid-issue.
+- **Landing is merge-based** (revised 2026-07-05 after rebase-landing retry
+  storms; head-to-head in the change history of this file):
+  1. Pick the `main` commit you are integrating with (usually the tip; pin it).
+  2. `jj new <lane-head> <main-commit> -m "land: <what>"` — the landing merge.
+  3. Verify that tree (per Verification below).
+  4. `jj bookmark move main --to <merge>`.
+  5. If `main` moved while you verified: do **not** rewrite anything — stack a
+     fresh merge of new-`main` + your verified merge, spot-verify the
+     integration delta, retry the move. Retries are cheap and non-destructive.
+- **Retry invariant**: `main` only ever moves to a commit that has the current
+  `main` as an ancestor — the mechanical definition of "never lose someone's
+  landed work." If your candidate doesn't, re-merge; never `--allow-backwards`.
+- **Fast-forward degenerate case**: `main` unmoved and your stack sits on it →
+  move the bookmark to your head; no merge-commit litter.
+- **Rebase is an intra-lane tool only** (cleanup of your own unlanded stack,
+  pre-review); it is never the landing mechanism. Catch up with trunk by
+  merging it into your lane (`jj new <lane-head> main`), at issue boundaries,
+  never mid-issue.
+- Accepted cost: trunk history is merge-shaped; read it linearly with
+  `jj log -r 'main:: & ~merges()'`. Review-gated prefix landing composes:
+  approval of change X = landing merge of X + main.
 
 ## Landing policy (revised 2026-07-05: human review gates features)
 
@@ -106,15 +127,33 @@ issue's Testing Decisions will ever catch it.)
    relayed) is the gate; the agent then moves `main` and stops the lane app
    (or keeps it running for the next review round).
 
+## Directory layout (target adopted 2026-07-05; migration pending)
+
+Umbrella root `/Users/murtaza/manadj/` will contain **every** workspace:
+`default/` (the repo's default workspace — real DB, real app, the human's
+working copy) plus one directory per lane (`/Users/murtaza/manadj/<lane>`).
+One root means no external-directory permission prompts and a tidy tree; the
+opencode project path stays `/Users/murtaza/manadj` throughout the move. The
+`.lanes/` registry moves to the umbrella root (outside any working copy).
+Lane creation becomes `jj workspace add --name <lane> -r main ../<lane>`.
+
+**Until the migration runs** (runbook:
+`.scratch/parallel-process/issues/01-umbrella-migration.md` — requires all
+lanes idle, human calls the moment), lanes remain siblings at
+`~/manadj-<lane>` and everything below describing paths refers to the
+current layout.
+
 ## Lane registry: `.lanes/`
 
 Advisory claims, not locks — the prime rules prevent damage; the registry makes
 routing visible. Untracked directory at the **main repo root**
 (`/Users/murtaza/manadj/.lanes/`), readable by every agent via absolute path.
 One file per lane (so registry writes never collide): `<lane>.md` with workspace
-path, agent, `.scratch` feature, claimed areas/hotspots, port offset, and a
-status line. Create it when the lane opens; delete it when you forget your
-workspace. `jj workspace list` remains the source of truth for what exists.
+path, **`owner:` (session ID or `human` — the write-access key, see prime rule
+2)**, `.scratch` feature, claimed areas/hotspots, port offset, and a status
+line. Create it when the lane opens; delete it when you forget your workspace.
+`jj workspace list` remains the source of truth for what exists. The registry
+is untracked: writing it is exempt from the default workspace's read-only rule.
 
 ## Hotspot protocol
 
@@ -196,10 +235,18 @@ needs real-time visibility and no history, it lives in `.lanes/`.**
 
 ## The default workspace
 
-Reserved for the human and for integration/verification: probes, gates, the real
-DB, the real app (ports 8000/5173). It is not a lane; agents do not do feature
-work in it. Each lane records a port offset in its `.lanes/` file (e.g. +10:
-backend 8010, vite 5183) and always passes explicit ports.
+Reserved for the human: the real DB, the real app (ports 8000/5173), and the
+human's own edits. **Read-only for agents** (rule added 2026-07-05 after two
+same-day stranding incidents caused by agent docs edits there): agents never
+write tracked files in it — docs, tracker, handoffs, scripts included; all
+work happens in a lane (docs-only lanes are cheap: `jj workspace add`, no DB
+clone needed, docs fast-path lands from there). Writing the untracked
+`.lanes/` registry is exempt. Agent-initiated `@` moves are limited to the
+two sanctioned maneuvers — post-landing hot-reload (below) and probe
+materialization — both gated on `@` being an idle placeholder; since agents
+never edit here, a non-idle `@` is the human's by construction: back off and
+report instead. Each lane records a port offset in its `.lanes/` file (e.g.
++10: backend 8010, vite 5183) and always passes explicit ports.
 
 - **Post-landing hot-reload** (practice added 2026-07-05): the real app runs
   off the default workspace's working copy, so a landed change is invisible
