@@ -39,8 +39,8 @@ export interface SavedTransition {
   uuid: string;
   name: string;
   transition: EditorMix['transition'];
-  /** Proven move (glossary: Favorite). A pair with ≥1 favorited Transition
-   * is a Preferred pair — always derived, never stored. */
+  /** Glossary: Favorite — asserts the pair goes well together AND this
+   * specific Transition is good. Write-independent of Linked. */
   favorite?: boolean;
 }
 

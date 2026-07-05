@@ -35,14 +35,3 @@ export function knownStrengthOf(
   if (info) return KNOWN_SAVED;
   return null;
 }
-
-/** Every Track id Linked with the given Track. */
-export function linkedIdsOf(links: ReadonlySet<LinkKey>, trackId: number): Set<number> {
-  const ids = new Set<number>();
-  for (const key of links) {
-    const [low, high] = key.split(':').map(Number);
-    if (low === trackId) ids.add(high);
-    else if (high === trackId) ids.add(low);
-  }
-  return ids;
-}

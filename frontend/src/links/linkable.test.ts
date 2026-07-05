@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { buildTransitionIndex } from '../editor/transitionIndex';
 import type { PairStore } from '../editor/pairStore';
 import type { SavedTransition } from '../editor/pairStore';
-import { pairHasFavoritedTransition } from './linkable';
+import { isTogglablePair, pairHasFavoritedTransition } from './linkable';
 
 const saved = (favorite = false): SavedTransition => ({
   uuid: `u${Math.random()}`,
@@ -18,6 +18,16 @@ const saved = (favorite = false): SavedTransition => ({
 });
 
 const index = (store: PairStore) => buildTransitionIndex(store);
+
+describe('isTogglablePair (toggle disabled states)', () => {
+  it('needs two distinct loaded Tracks', () => {
+    expect(isTogglablePair(3, 7)).toBe(true);
+    expect(isTogglablePair(null, 7)).toBe(false); // single load
+    expect(isTogglablePair(3, null)).toBe(false);
+    expect(isTogglablePair(null, null)).toBe(false); // nothing loaded
+    expect(isTogglablePair(3, 3)).toBe(false); // self-pair
+  });
+});
 
 describe('pairHasFavoritedTransition', () => {
   it('true when the A→B direction has a favorite', () => {

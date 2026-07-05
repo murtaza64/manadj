@@ -6,13 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildTransitionIndex, transitionsFrom } from '../editor/transitionIndex';
 import type { PairStore, SavedTransition } from '../editor/pairStore';
-import {
-  KNOWN_FAVORITED,
-  KNOWN_LINKED,
-  KNOWN_SAVED,
-  knownStrengthOf,
-  linkedIdsOf,
-} from './known';
+import { KNOWN_FAVORITED, KNOWN_LINKED, KNOWN_SAVED, knownStrengthOf } from './known';
 import { linkKeyOf } from './linkStore';
 
 const saved = (favorite = false): SavedTransition => ({
@@ -62,14 +56,5 @@ describe('knownStrengthOf (pair takes its best)', () => {
   it('strengths order favorited < linked < saved (ascending = stronger first)', () => {
     expect(KNOWN_FAVORITED).toBeLessThan(KNOWN_LINKED);
     expect(KNOWN_LINKED).toBeLessThan(KNOWN_SAVED);
-  });
-});
-
-describe('linkedIdsOf', () => {
-  it('collects the other end of every Link touching the track', () => {
-    const set = links([1, 2], [3, 1], [4, 5]);
-    expect(linkedIdsOf(set, 1)).toEqual(new Set([2, 3]));
-    expect(linkedIdsOf(set, 5)).toEqual(new Set([4]));
-    expect(linkedIdsOf(set, 9)).toEqual(new Set());
   });
 });

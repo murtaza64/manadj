@@ -13,6 +13,7 @@
  */
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
+import { KNOWN_FAVORITED, KNOWN_SAVED } from '../links/known';
 import { engineIdToOpenKey, formatKeyDisplay } from '../utils/keyUtils';
 
 // ── State machine (follow-mode 02) ──────────────────────────────────────
@@ -270,9 +271,10 @@ export interface FollowReference {
 }
 
 /** Tier order is provisional (PRD) — keep changes inside this face. The
- * known tier occupies 0–2 (its strengths ARE tiers, linked-pairs 04). */
-const TIER_KNOWN_BEST = 0;
-const TIER_KNOWN_SPAN = 3;
+ * known tier's strengths ARE its leading tiers (linked-pairs 04), so the
+ * Key tiers start right after the weakest known strength. */
+const TIER_KNOWN_BEST = KNOWN_FAVORITED;
+const TIER_KNOWN_SPAN = KNOWN_SAVED + 1;
 const TIER_SAME_KEY = TIER_KNOWN_SPAN;
 const TIER_RELATIVE_KEY = TIER_SAME_KEY + 1;
 const TIER_KEY_UP = TIER_RELATIVE_KEY + 1;

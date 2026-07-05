@@ -1,7 +1,7 @@
 /* Linked toggle (linked-pairs 01/02): chain lights up when the loaded
    pair is Linked; greyscale when not; near-invisible without a pair.
    The hint state (favorited Transition, no Link) pulses to suggest
-   promoting a proven pair — display-only, never auto-links. */
+   linking a pair with a favorited Transition — display-only, never auto-links. */
 .link-toggle {
   background: transparent;
   border: none;

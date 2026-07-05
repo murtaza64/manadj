@@ -21,6 +21,9 @@ export function linkKeyOf(aTrackId: number, bTrackId: number): LinkKey {
 
 let snapshot: ReadonlySet<LinkKey> = new Set();
 let initPromise: Promise<void> | null = null;
+/** Pre-boot toggles, re-applied over the boot rows so a toggle racing the
+ * boot GET is never silently reverted (the PUT persists it regardless). */
+let pendingPreBoot: Map<LinkKey, boolean> | null = new Map();
 
 /** Boot the store: one GET. Idempotent; never rejects — a dead backend
  * degrades to an empty snapshot with a logged error. */
@@ -37,9 +40,16 @@ async function doInit(): Promise<void> {
   }
 }
 
-/** Replace the snapshot from persisted rows (boot load; tests). */
+/** Replace the snapshot from persisted rows (boot load; tests), keeping
+ * any toggles made before the load resolved. */
 export function applyLinkRows(rows: { low_track_id: number; high_track_id: number }[]): void {
-  snapshot = new Set(rows.map((r) => linkKeyOf(r.low_track_id, r.high_track_id)));
+  const next = new Set(rows.map((r) => linkKeyOf(r.low_track_id, r.high_track_id)));
+  for (const [key, linked] of pendingPreBoot ?? []) {
+    if (linked) next.add(key);
+    else next.delete(key);
+  }
+  pendingPreBoot = null; // booted: writes are authoritative from here on
+  snapshot = next;
   notify();
 }
 
@@ -62,13 +72,28 @@ export function isLinked(links: ReadonlySet<LinkKey>, aTrackId: number, bTrackId
 export function setLinked(aTrackId: number, bTrackId: number, linked: boolean): void {
   if (aTrackId === bTrackId) return;
   const key = linkKeyOf(aTrackId, bTrackId);
-  if (snapshot.has(key) === linked) return;
+  // The no-op guard only applies once booted: pre-boot the snapshot is
+  // empty, but the server may not be — an "unlink" must still record and
+  // push, or the boot rows would resurrect it.
+  if (pendingPreBoot === null && snapshot.has(key) === linked) return;
   const next = new Set(snapshot);
   if (linked) next.add(key);
   else next.delete(key);
   snapshot = next;
+  pendingPreBoot?.set(key, linked);
   notify();
   void push(aTrackId, bTrackId, linked);
+}
+
+/** Every Track id Linked with the given Track. */
+export function linkedIdsOf(links: ReadonlySet<LinkKey>, trackId: number): Set<number> {
+  const ids = new Set<number>();
+  for (const key of links) {
+    const [low, high] = key.split(':').map(Number);
+    if (low === trackId) ids.add(high);
+    else if (high === trackId) ids.add(low);
+  }
+  return ids;
 }
 
 async function push(aTrackId: number, bTrackId: number, linked: boolean): Promise<void> {
@@ -103,5 +128,6 @@ export function useLinks(): ReadonlySet<LinkKey> {
 export function _resetLinkStoreForTests(): void {
   snapshot = new Set();
   initPromise = null;
+  pendingPreBoot = new Map();
   listeners.clear();
 }

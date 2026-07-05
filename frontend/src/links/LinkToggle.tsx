@@ -5,7 +5,7 @@
  * loaded pair (no self-links). Optimistic via linkStore.
  */
 import { useTransitionIndex } from '../editor/transitionIndex';
-import { pairHasFavoritedTransition } from './linkable';
+import { isTogglablePair, pairHasFavoritedTransition } from './linkable';
 import { isLinked, setLinked, useLinks } from './linkStore';
 import './linkToggle.css';
 
@@ -18,8 +18,9 @@ export function LinkToggle({
 }) {
   const links = useLinks();
   const index = useTransitionIndex();
-  const canToggle = aTrackId !== null && bTrackId !== null && aTrackId !== bTrackId;
-  const linked = canToggle && isLinked(links, aTrackId, bTrackId);
+  const canToggle = isTogglablePair(aTrackId, bTrackId);
+  const linked =
+    aTrackId !== null && bTrackId !== null && isLinked(links, aTrackId, bTrackId);
   // Linkable (issue 02): favorited Transition, no Link — suggest promoting.
   // Display-only; never auto-links.
   const hint = canToggle && !linked && pairHasFavoritedTransition(index, aTrackId, bTrackId);
@@ -40,7 +41,9 @@ export function LinkToggle({
       aria-pressed={linked}
       disabled={!canToggle}
       title={title}
-      onClick={() => canToggle && setLinked(aTrackId, bTrackId, !linked)}
+      onClick={() =>
+        aTrackId !== null && bTrackId !== null && setLinked(aTrackId, bTrackId, !linked)
+      }
     >
       🔗
     </button>

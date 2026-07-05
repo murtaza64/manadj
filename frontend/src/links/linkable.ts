@@ -6,6 +6,12 @@
 import { transitionsFrom } from '../editor/transitionIndex';
 import type { TransitionIndex } from '../editor/transitionIndex';
 
+/** Is this a togglable pair — two distinct loaded Tracks? The toggle
+ * disables (never hides) outside this: single load, or self-pair. */
+export function isTogglablePair(aTrackId: number | null, bTrackId: number | null): boolean {
+  return aTrackId !== null && bTrackId !== null && aTrackId !== bTrackId;
+}
+
 /** Does the unordered pair have ≥1 favorited Transition, either direction?
  * Self and null pairs are never linkable. */
 export function pairHasFavoritedTransition(

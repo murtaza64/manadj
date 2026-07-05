@@ -100,7 +100,7 @@ export function TransitionSwitcher({
       <button
         className={`editor-switcher-star${item.favorite ? ' on' : ''}`}
         aria-pressed={!!item.favorite}
-        title={item.favorite ? 'Unfavorite (proven move)' : 'Favorite: mark as a proven move'}
+        title={item.favorite ? 'Unfavorite' : 'Favorite: this Transition is a keeper'}
         onClick={onToggleFavorite}
       >
         {item.favorite ? '★' : '☆'}
