@@ -125,9 +125,10 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       setLoadedTracks((prev) => ({ ...prev, [deck]: track }));
 
       // Saved cue comes with the Track row itself (the Main cue lives on the
-      // Track); the first beat is fetched through the same query cache the
+      // Track); the beat times are fetched through the same query cache the
       // beatgrid components use (usually already warm). The engine awaits
-      // this after decode; failures fall through the cue-default precedence.
+      // this after decode; failures fall through the cue-default precedence
+      // (and leave the deck gridless for Quantize math).
       const cueDefaults = (async () => {
         const bg = await Promise.allSettled([
           queryClient.fetchQuery<BeatgridResponse>({
@@ -139,8 +140,10 @@ export function DeckProvider({ children }: { children: ReactNode }) {
         ]).then(([r]) => r);
         return {
           savedCuePoint: track.cue_point_time ?? null,
-          firstBeatTime:
-            bg.status === 'fulfilled' ? (bg.value.data.beat_times[0] ?? null) : null,
+          beatTimes:
+            bg.status === 'fulfilled' && bg.value.data.beat_times.length > 0
+              ? bg.value.data.beat_times
+              : null,
         };
       })();
 

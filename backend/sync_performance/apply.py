@@ -1,8 +1,10 @@
 """Applying performance-data imports to the Library.
 
-Writes rows directly — Engine positions are ground truth, so the set-cue
-beat-quantization path is deliberately bypassed (PRD). "fill-empty" never
-touches saved info; the replace verbs are the confirmed overwrites.
+Writes rows directly — Engine positions are ground truth, stored exactly
+as-is. (No longer a special case: since looping 01 the whole API stores
+positions verbatim; Quantize snapping happens client-side at gesture time.)
+"fill-empty" never touches saved info; the replace verbs are the confirmed
+overwrites.
 """
 
 from typing import Literal

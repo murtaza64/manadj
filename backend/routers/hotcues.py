@@ -22,7 +22,7 @@ def set_hotcue(
     data: schemas.HotCueSet,
     db: Session = Depends(get_db)
 ):
-    """Set or update a hot cue (auto-quantized to beat)."""
+    """Set or update a hot cue (stored verbatim — snapping is client-side)."""
     if not 1 <= slot_number <= 8:
         raise HTTPException(status_code=400, detail="Slot number must be between 1 and 8")
 

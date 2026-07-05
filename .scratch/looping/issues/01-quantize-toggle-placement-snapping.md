@@ -1,6 +1,6 @@
 # Quantize toggle and gesture-time placement snapping
 
-Status: ready-for-agent
+Status: done (implemented, change rtxmzxzs)
 
 ## Parent
 
@@ -28,3 +28,7 @@ A pure beat-domain snap helper (position → nearest gridline) should fall out o
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+**2026-07-05 — Done** (jj change `rtxmzxzs`, workspace looping). Quantize store `playback/quantizeStore.ts` (`manadj-quantize`, default on) + TopBar `Q` button (lit green, beside MIDI badge). Pure snap helper `playback/quantize.ts` (`snapToNearestBeat`, binary search, gridless passthrough — issue 03 consumes it). Reducer gains `TransportContext` (`{quantize, beatTimes}`, third arg, defaults unquantized); `cue-down` set-branch snaps cue+parked playhead. DeckEngine holds `beatTimes` (CueDefaultsInfo now carries the full grid; first beat derived) and assembles the context per dispatch. Hot-cue placement snaps in `useHotCueSlots.down` via the beatgrid query cache. Backend: `quantize_to_nearest_beat` deleted, `set_hotcue` stores verbatim; sync_performance import unchanged (bypass note retired). Tests: `quantize.test.ts`, `quantizeStore.test.ts`, transport cue-down-under-Quantize block, `tests/test_hotcues_router.py` (verbatim with grid present).

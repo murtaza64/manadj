@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
 import { useDeck, useDeckReady } from './useDeck';
+import { useBeatgridData } from './useBeatgridData';
 import { useHotCues, useSetHotCue, useDeleteHotCue } from './useHotCues';
+import { snapToNearestBeat } from '../playback/quantize';
+import { isQuantizeOn } from '../playback/quantizeStore';
 import type { HotCue } from '../types';
 
 export interface HotCueActions {
@@ -39,6 +42,9 @@ export function useHotCueSlots(
   handlers: HotCueSlotHandlers
 ): HotCueActions {
   const { data: hotCues = [] } = useHotCues(trackId);
+  // Beat times for Quantize placement snapping (client-side, at gesture
+  // time — the backend stores what it's told). Missing grid = no snap.
+  const { data: beatgrid } = useBeatgridData(trackId);
   const setHotCue = useSetHotCue();
   const deleteHotCue = useDeleteHotCue();
 
@@ -53,11 +59,16 @@ export function useHotCueSlots(
     if (!enabled || trackId === null) return;
     const cue = bySlot.get(slot);
     if (!cue) {
-      // Hot cue not set: set it at the current playhead
+      // Hot cue not set: set it at the current playhead — a placement
+      // gesture, so Quantize governs it (nearest beat when on + gridded).
+      const raw = handlers.getPlayhead();
+      const time = isQuantizeOn()
+        ? snapToNearestBeat(raw, beatgrid?.data.beat_times ?? null)
+        : raw;
       setHotCue.mutate({
         trackId,
         slotNumber: slot,
-        data: { time_seconds: handlers.getPlayhead() },
+        data: { time_seconds: time },
       });
     } else {
       handlers.trigger(slot, cue.time_seconds);

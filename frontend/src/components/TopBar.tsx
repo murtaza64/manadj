@@ -1,10 +1,12 @@
 /**
  * Persistent top bar: brand, icon mode switch (Library / Performance /
- * Transition editor / Sync), the active section's title, and the MIDI
- * Controller badge (top right — lit while a mapped controller is attached).
+ * Transition editor / Sync), the active section's title, the MIDI
+ * Controller badge (top right — lit while a mapped controller is attached),
+ * and the app-wide Quantize toggle (looping 01).
  */
 import { useSyncExternalStore } from 'react';
 import { connectedControllers, subscribeControllers } from '../midi/connectionStore';
+import { isQuantizeOn, setQuantize, subscribeQuantize } from '../playback/quantizeStore';
 import { AudioRoutingPicker } from './AudioRoutingPicker';
 import './TopBar.css';
 
@@ -18,6 +20,20 @@ const MODES: { id: AppMode; icon: string; title: string }[] = [
   { id: 'sync', icon: '⇄', title: 'Sync' },
   { id: 'styles', icon: '◔', title: 'Waveform styles' },
 ];
+
+/** App-wide Quantize toggle: lit while beat-relative gestures snap. */
+function QuantizeToggle() {
+  const on = useSyncExternalStore(subscribeQuantize, isQuantizeOn);
+  return (
+    <button
+      className={`topbar-quantize${on ? ' on' : ''}`}
+      title={on ? 'Quantize on: gestures snap to the beat' : 'Quantize off: exact placement'}
+      onClick={() => setQuantize(!on)}
+    >
+      Q
+    </button>
+  );
+}
 
 function MidiBadge() {
   const controllers = useSyncExternalStore(subscribeControllers, connectedControllers);
@@ -57,6 +73,7 @@ export function TopBar({
       </nav>
       <h1 className="topbar-title">{MODES.find((m) => m.id === mode)?.title}</h1>
       <MidiBadge />
+      <QuantizeToggle />
       <AudioRoutingPicker />
     </header>
   );

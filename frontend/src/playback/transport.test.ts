@@ -4,10 +4,15 @@ import {
   isAudioRunning,
   reduceTransport,
 } from './transport';
-import type { TransportState } from './transport';
+import type { TransportContext, TransportState } from './transport';
 
 function state(overrides: Partial<TransportState> = {}): TransportState {
   return { ...initialTransportState(), ...overrides };
+}
+
+/** A 120 BPM grid starting at 0.25s (beats every 0.5s), Quantize on. */
+function quantized(beatTimes: number[] | null = [0.25, 0.75, 1.25, 1.75, 2.25]): TransportContext {
+  return { quantize: true, beatTimes };
 }
 
 describe('play', () => {
@@ -151,6 +156,39 @@ describe('cue-down', () => {
     const [next, effects] = reduceTransport(s, { type: 'cue-down' });
     expect(next).toBe(s);
     expect(effects).toEqual([]);
+  });
+});
+
+describe('cue-down under Quantize (placement snapping)', () => {
+  it('snaps the cue point (and the parked playhead) to the nearest beat', () => {
+    const [next, effects] = reduceTransport(state({ playhead: 0.9 }), { type: 'cue-down' }, quantized());
+    expect(next.cuePoint).toBe(0.75);
+    expect(next.playhead).toBe(0.75);
+    expect(effects).toEqual([]);
+  });
+
+  it('stores the exact position with Quantize off', () => {
+    const ctx: TransportContext = { quantize: false, beatTimes: [0.25, 0.75, 1.25] };
+    const [next] = reduceTransport(state({ playhead: 0.9 }), { type: 'cue-down' }, ctx);
+    expect(next.cuePoint).toBe(0.9);
+    expect(next.playhead).toBe(0.9);
+  });
+
+  it('degrades to the exact position on a gridless Track', () => {
+    const [next] = reduceTransport(state({ playhead: 0.9 }), { type: 'cue-down' }, quantized(null));
+    expect(next.cuePoint).toBe(0.9);
+  });
+
+  it('defaults to unquantized behavior when no context is given', () => {
+    const [next] = reduceTransport(state({ playhead: 0.9 }), { type: 'cue-down' });
+    expect(next.cuePoint).toBe(0.9);
+  });
+
+  it('does not affect return-to-cue while playing', () => {
+    const s = state({ playing: true, cuePoint: 0.9, playhead: 2.0 });
+    const [next, effects] = reduceTransport(s, { type: 'cue-down' }, quantized());
+    expect(next.playhead).toBe(0.9);
+    expect(effects).toEqual([{ type: 'stop', at: 0.9 }]);
   });
 });
 

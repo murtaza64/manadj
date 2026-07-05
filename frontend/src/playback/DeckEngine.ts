@@ -18,7 +18,8 @@
  */
 
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
-import type { TransportEvent, TransportState } from './transport';
+import type { TransportContext, TransportEvent, TransportState } from './transport';
+import { isQuantizeOn } from './quantizeStore';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, putCachedBuffer } from './bufferCache';
@@ -37,8 +38,12 @@ export interface DeckTransportGesture {
 export interface CueDefaultsInfo {
   /** Persisted Main cue, if any (CDJ memory-cue behavior). */
   savedCuePoint: number | null;
-  /** First beat time from the Beatgrid, if any (cue default fallback). */
-  firstBeatTime: number | null;
+  /**
+   * The Beatgrid's beat times in seconds, or null for gridless Tracks.
+   * First beat is the cue-default fallback; the full grid feeds Quantize
+   * math at gesture time (looping 01).
+   */
+  beatTimes: number[] | null;
 }
 
 export interface DeckTrackInfo {
@@ -89,6 +94,8 @@ export class DeckEngine {
   private transport: TransportState = initialTransportState();
   /** Play pressed while loading — fires as soon as decode completes. */
   private pendingPlay = false;
+  /** Loaded Track's Beatgrid beat times (null = gridless) — Quantize math. */
+  private beatTimes: number[] | null = null;
 
   // ── Worklet source (ADR 0018) ────────────────────────────────────────
   /** The deck's single audio source, persistent per AudioContext. */
@@ -186,6 +193,7 @@ export class DeckEngine {
     this.stopAudio(0);
     this.transport = initialTransportState();
     this.buffer = null;
+    this.beatTimes = null;
     this.trackInfo = info;
     this.pendingPlay = false;
     // A nudge is a momentary correction against the *previous* pairing —
@@ -221,6 +229,7 @@ export class DeckEngine {
       if (abort.signal.aborted) return;
 
       this.buffer = buffer;
+      this.beatTimes = cueInfo?.beatTimes ?? null;
 
       // Resolve the initial Main cue (saved → first beat → first
       // non-silence → 0) and park the deck at it, CDJ-style. Non-silence
@@ -234,7 +243,7 @@ export class DeckEngine {
       }
       const cue = resolveInitialCue({
         saved: cueInfo?.savedCuePoint ?? null,
-        firstBeat: cueInfo?.firstBeatTime ?? null,
+        firstBeat: this.beatTimes?.[0] ?? null,
         firstNonSilence,
       });
       this.transport = {
@@ -459,10 +468,15 @@ export class DeckEngine {
 
   // ── Internals ──────────────────────────────────────────────────────────
 
+  /** Ambient Quantize facts, assembled fresh per dispatch (gesture time). */
+  private transportContext(): TransportContext {
+    return { quantize: isQuantizeOn(), beatTimes: this.beatTimes };
+  }
+
   private dispatch(event: TransportEvent): void {
     if (!this.buffer) return;
     const synced = { ...this.transport, playhead: this.getPlayhead() };
-    const [next, effects] = reduceTransport(synced, event);
+    const [next, effects] = reduceTransport(synced, event, this.transportContext());
     const cueChanged = next.cuePoint !== synced.cuePoint;
     this.transport = next;
     for (const effect of effects) {

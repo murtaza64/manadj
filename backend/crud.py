@@ -784,47 +784,6 @@ def create_or_update_key_analysis(
 
 # Hot Cue Functions
 
-def quantize_to_nearest_beat(
-    db: Session,
-    track_id: int,
-    time_seconds: float
-) -> float:
-    """
-    Quantize time to nearest beat from beatgrid.
-    Falls back to unquantized if:
-    - No beatgrid exists
-    - Quantized position exceeds track duration
-    """
-    import json
-    from .beatgrid_utils import calculate_beats_from_tempo_changes
-
-    beatgrid = get_beatgrid(db, track_id)
-    if not beatgrid:
-        return time_seconds
-
-    waveform = get_waveform(db, track_id)
-    if not waveform:
-        return time_seconds
-
-    tempo_changes = json.loads(beatgrid.tempo_changes_json)
-    beat_times, _ = calculate_beats_from_tempo_changes(
-        tempo_changes,
-        waveform.duration
-    )
-
-    if not beat_times:
-        return time_seconds
-
-    # Find nearest beat
-    nearest_beat = min(beat_times, key=lambda bt: abs(bt - time_seconds))
-
-    # Edge case: quantized position beyond track duration
-    if nearest_beat > waveform.duration:
-        return time_seconds
-
-    return nearest_beat
-
-
 def get_hotcues(db: Session, track_id: int):
     """Get all hot cues for a track."""
     return db.query(models.HotCue).filter(
@@ -840,10 +799,11 @@ def set_hotcue(
     label: str | None = None,
     color: str | None = None
 ):
-    """Set or update a hot cue (auto-quantized to beat)."""
-    # Quantize to nearest beat
-    quantized_time = quantize_to_nearest_beat(db, track_id, time_seconds)
+    """Set or update a hot cue.
 
+    Stores the position verbatim: Quantize snapping is a client-side,
+    gesture-time concern (looping 01) — the API stores what it's told.
+    """
     # Get existing hot cue if it exists
     hotcue = db.query(models.HotCue).filter(
         models.HotCue.track_id == track_id,
@@ -852,7 +812,7 @@ def set_hotcue(
 
     if hotcue:
         # Update existing
-        hotcue.time_seconds = quantized_time
+        hotcue.time_seconds = time_seconds
         if label is not None:
             hotcue.label = label
         if color is not None:
@@ -862,7 +822,7 @@ def set_hotcue(
         hotcue = models.HotCue(
             track_id=track_id,
             slot_number=slot_number,
-            time_seconds=quantized_time,
+            time_seconds=time_seconds,
             label=label,
             color=color
         )

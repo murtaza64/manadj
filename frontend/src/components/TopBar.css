@@ -115,6 +115,31 @@
   box-shadow: 0 0 6px var(--green);
 }
 
+/* Quantize toggle (looping 01): app-wide, lit green while gestures snap. */
+.topbar-quantize {
+  width: 24px;
+  padding: 3px 0;
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--overlay0);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.topbar-quantize:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.topbar-quantize.on {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--base);
+}
+
 /* Output routing (headphone-cue 04): MASTER/CUE device selects, inline. */
 .topbar-routing {
   display: flex;

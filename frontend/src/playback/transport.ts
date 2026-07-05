@@ -11,6 +11,8 @@
  * parallel-stack decision.
  */
 
+import { snapToNearestBeat } from './quantize';
+
 export interface TransportState {
   /** Deck play state ("the deck is running"), distinct from audio audibly playing. */
   playing: boolean;
@@ -43,6 +45,26 @@ export type AudioEffect =
   /** Stop audio; playhead rests at `at` seconds. Idempotent if audio already stopped. */
   | { type: 'stop'; at: number };
 
+/**
+ * Ambient facts the reducer needs for Quantize (looping 01): the app-wide
+ * toggle at gesture time and the loaded Track's Beatgrid. Not transport
+ * state — the engine assembles this per dispatch. Omitting it (the default)
+ * degrades to unquantized behavior, exactly like a gridless Track.
+ */
+export interface TransportContext {
+  /** App-wide Quantize toggle, read at gesture time. */
+  quantize: boolean;
+  /** The Beatgrid's beat times in seconds, or null for gridless Tracks. */
+  beatTimes: readonly number[] | null;
+}
+
+const UNQUANTIZED: TransportContext = { quantize: false, beatTimes: null };
+
+/** Nearest-beat snap when Quantize governs the gesture; exact otherwise. */
+function placementTime(time: number, ctx: TransportContext): number {
+  return ctx.quantize ? snapToNearestBeat(time, ctx.beatTimes) : time;
+}
+
 /** Tolerance for "playhead is at the cue point" (matches library player). */
 const AT_CUE_EPSILON = 0.01;
 
@@ -63,7 +85,8 @@ export function isAudioRunning(s: TransportState): boolean {
 
 export function reduceTransport(
   s: TransportState,
-  e: TransportEvent
+  e: TransportEvent,
+  ctx: TransportContext = UNQUANTIZED
 ): [TransportState, AudioEffect[]] {
   switch (e.type) {
     case 'play': {
@@ -83,7 +106,7 @@ export function reduceTransport(
     }
 
     case 'toggle-play':
-      return reduceTransport(s, { type: s.playing ? 'pause' : 'play' });
+      return reduceTransport(s, { type: s.playing ? 'pause' : 'play' }, ctx);
 
     case 'seek': {
       const next = { ...s, playhead: e.time };
@@ -109,8 +132,11 @@ export function reduceTransport(
         // Hold-to-preview from the cue point.
         return [{ ...s, previewing: true }, [{ type: 'start', at: s.cuePoint }]];
       }
-      // Set the cue point at the current position.
-      return [{ ...s, cuePoint: s.playhead }, []];
+      // Set the cue point at the current position — a placement gesture, so
+      // Quantize governs it. The parked playhead moves with the snapped cue,
+      // preserving the at-cue invariant (set, then hold-to-preview).
+      const at = placementTime(s.playhead, ctx);
+      return [{ ...s, cuePoint: at, playhead: at }, []];
     }
 
     case 'cue-up': {
