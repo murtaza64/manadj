@@ -106,9 +106,6 @@ A per-Deck toggle that keeps the browse list continuously filtered to candidate 
 **Analysis**:
 Automatically determining a property of a Track from its audio — key, BPM, beatgrid, waveform. Manual edits to those properties are orthogonal to Analysis.
 
-**Ground truth corpus**:
-The set of Tracks whose key/BPM/Beatgrid values are externally verified, used as the measuring stick for Analysis accuracy: candidate analyzers are scored by agreement with it, not by vibe. Tiered by agreement: *gold* where Engine DJ and Rekordbox concur (headline scoring), *disputed* where they disagree — excluded from scoring until hand verification promotes them. Grid phase is Engine-only (no Rekordbox performance data).
-
 **Deck**:
 An independent playback unit: one loaded Track plus its transport state (playhead, playing/paused, Main cue) and pitch. Two Decks exist — Deck A and Deck B — owned by the application, not by any view: a Deck outlives views and keeps playing across them. The library player shows Deck A; the Performance view shows both. Per-Deck sound shaping (trim, EQ, filter, volume) belongs to the Mixer's channel strips, as on hardware.
 
@@ -160,9 +157,6 @@ _Avoid_: headphone cue (as the toggle's name), solo
 
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid. When a Beatgrid exists it is the authority on tempo: the Track's BPM is its projection (the grid's dominant tempo), not an independent field, and editing BPM is a grid operation (ADR 0016). A grid may carry an *anchor* — the downbeat the user explicitly marked — which re-tempo operations never move.
-
-**Quantized track**:
-A Track produced against a fixed tempo grid, so a constant-tempo Beatgrid (BPM + phase) is its correct description — nearly all of the library. Native grid Analysis assumes quantization: it fits a constant grid to detected beats, and bails (no grid, flagged for attention) rather than emit a wobbly variable grid when the fit is poor. Raw beat-tracker ticks are evidence for the fit, never the grid itself.
 
 **Waveform data**:
 The stored Analysis artifact for a Track's audio: broadband peaks plus per-band energies over time, style-agnostic — no aesthetic choices baked in. Internal to manadj — never transferred by Sync; each external library computes its own.

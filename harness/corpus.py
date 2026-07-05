@@ -1,4 +1,4 @@
-"""Ground truth corpus: tiering logic (ADR 0020).
+"""Ground truth corpus: tiering logic (ADR 0024).
 
 Pure functions and dataclasses — no DB access, no heavy deps. The measuring
 stick for Analysis accuracy: gold tier where Engine DJ and Rekordbox concur,

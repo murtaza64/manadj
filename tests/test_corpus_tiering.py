@@ -1,4 +1,4 @@
-"""Tiering logic for the Ground truth corpus (ADR 0020).
+"""Tiering logic for the Ground truth corpus (ADR 0024).
 
 Pure-function tests with synthesized value pairs — no DBs, no real Engine
 blobs (ADR 0004), no heavy deps.

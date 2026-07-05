@@ -1,4 +1,4 @@
-"""MIREX-weighted key scoring (ADR 0020).
+"""MIREX-weighted key scoring (ADR 0024).
 
 Pure functions over the canonical Key type. Error classes reflect DJ
 reality: a fifth or relative is still mixable; a parallel is a common

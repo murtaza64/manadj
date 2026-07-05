@@ -1,4 +1,4 @@
-"""Constant-tempo fit over beat-tracker ticks (ADR 0020).
+"""Constant-tempo fit over beat-tracker ticks (ADR 0024).
 
 Pure-function tests with synthetic tick sequences: perfect, jittered,
 half/double-time, variable (must bail), fractional BPM (must not snap),

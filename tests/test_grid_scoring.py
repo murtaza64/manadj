@@ -1,4 +1,4 @@
-"""Grid scoring against the Ground truth corpus (ADR 0020).
+"""Grid scoring against the Ground truth corpus (ADR 0024).
 
 Pure-function tests: BPM within tolerance, half/double-time as its own error
 class, phase error mod beat vs Engine's grid.

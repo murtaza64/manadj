@@ -1,4 +1,4 @@
-"""The candidate analyzer seam (ADR 0020): audio in -> GridFit out.
+"""The candidate analyzer seam (ADR 0024): audio in -> GridFit out.
 
 This is the interface the app will consume in Phase B — a grid analyzer is
 a beat tracker (Stage 1, ticks) composed with the shared constant fit

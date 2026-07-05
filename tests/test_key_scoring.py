@@ -1,4 +1,4 @@
-"""MIREX-weighted key scoring (ADR 0020).
+"""MIREX-weighted key scoring (ADR 0024).
 
 Pure-function tests. Error classes: exact, fifth (adjacent on the circle,
 same mode), relative (same Camelot number, other mode), parallel (same

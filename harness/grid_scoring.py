@@ -1,4 +1,4 @@
-"""Scoring grid fits against the Ground truth corpus (ADR 0020).
+"""Scoring grid fits against the Ground truth corpus (ADR 0024).
 
 Pure functions. BPM correct within tolerance; half/double-time is its own
 error class (an octave mistake, not jitter); phase error is circular,

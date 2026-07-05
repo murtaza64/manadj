@@ -1,4 +1,4 @@
-"""Constant-tempo fit: beat-tracker ticks -> (BPM, phase) or bail (ADR 0020).
+"""Constant-tempo fit: beat-tracker ticks -> (BPM, phase) or bail (ADR 0024).
 
 Ticks are evidence, never the grid. The fit assumes a Quantized track and
 refuses to describe anything else: poor fit means bail, not a wobbly
@@ -18,7 +18,7 @@ line fit fails on good tracks. Instead:
    track that lands on that grid, least-squares the keepers for the
    full-track lever arm, and gate again on the conforming fraction.
 4. Integer BPM only when within the snap threshold (conditional snapping,
-   ADR 0020); phase is the fitted anchor mod period; residual is the RMS
+   ADR 0024); phase is the fitted anchor mod period; residual is the RMS
    deviation of conforming ticks from the grid.
 
 Pure: stdlib only.

@@ -1,4 +1,4 @@
-"""Build the Ground truth corpus (issue 01, ADR 0020).
+"""Build the Ground truth corpus (issue 01, ADR 0024).
 
 Offline, read-only: gathers Engine DJ and Rekordbox key/BPM (plus Engine's
 beatgrid as phase truth) for every active manadj Track, tiers them by

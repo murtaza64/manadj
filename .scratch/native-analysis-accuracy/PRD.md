@@ -8,7 +8,7 @@ manadj's native Analysis is measurably worse than Engine DJ, Rekordbox, and Mixx
 
 ## Solution
 
-Rebuild native Analysis around two ideas (ADR 0020):
+Rebuild native Analysis around two ideas (ADR 0024):
 
 1. **Constant-fit-or-bail grid analysis.** Beat trackers emit ticks; ticks are evidence, never the grid. The analyzer fits a constant-tempo Beatgrid (BPM + phase) to the ticks — correct for a library of Quantized tracks — and bails (no grid, no BPM, needs-attention flag) when the fit is poor.
 2. **Measured accuracy.** A benchmark harness scores candidate analyzers against the Ground truth corpus (gold tier = Engine and Rekordbox agree; disputed tier excluded until hand-verified). The shootout runs fully isolated from the UI; only the winner gets wired into the app.
@@ -45,7 +45,7 @@ Delivered in two phases: **Phase A** — harness and shootout, offline scripts o
 
 - **Candidate analyzer interface (the single new seam).** Every contender implements the same contract: grid analysis takes audio and returns a fit result (BPM, phase, fit residual/confidence, bail flag, evidence summary); key analysis takes audio and returns a key result (Key plus confidence). Heavy deps (essentia, madmom, beat_this, keyfinder) live strictly behind implementations of this interface. The harness and the app both consume candidates through it.
 - **Grid pipeline is two stages.** Stage 1: beat tracker → ticks. Stage 2: constant fit → (BPM, phase) with goodness-of-fit; the fit logic is shared across all Stage-1 candidates and is informed by Mixxx's const-region approach (fit constant regions, prefer integer BPM within a threshold, fractional otherwise). Unconditional integer snapping is removed.
-- **Bail semantics (ADR 0020).** Poor fit ⇒ no Beatgrid, no BPM written, diagnostics stored, Track flagged needs-attention. No placeholder grid is generated from a dubious BPM.
+- **Bail semantics (ADR 0024).** Poor fit ⇒ no Beatgrid, no BPM written, diagnostics stored, Track flagged needs-attention. No placeholder grid is generated from a dubious BPM.
 - **Beat tracker candidates:** Essentia RhythmExtractor2013 ticks (baseline), madmom DBN; beat_this optional. TempoCNN as tempo-only cross-check (no phase).
 - **Key candidates:** Essentia KeyExtractor profile sweep (edma, edmm, bgate, braw), libkeyfinder, madmom CNN key recognition.
 - **Ground truth corpus** is assembled from data already in the library DB: imported Engine grids/keys and Rekordbox scalar key/BPM. Gold tier = Engine and Rekordbox agree (after notation conversion); disputed tier excluded from headline scores and emitted as a review list. Grid phase scoring is Engine-only. Hand-verified overrides promote disputed tracks to gold.
@@ -83,7 +83,7 @@ Winners, signed off: **madmom_dbn** for grids (851 gold tracks: 93.3% ok, phase 
 
 ## Further Notes
 
-- ADR 0020 records the constant-fit-or-bail decision and ground-truth scoring rationale; ADR 0016 governs grid/BPM authority; CONTEXT.md defines Ground truth corpus and Quantized track.
+- ADR 0024 records the constant-fit-or-bail decision and ground-truth scoring rationale; ADR 0016 governs grid/BPM authority; CONTEXT.md defines Ground truth corpus and Quantized track.
 - Known reference points from prior work: Engine produced variable grids for ~32 tracks and >0.05 BPM drift on 2 constant-grid tracks (uninvestigated); these belong to the disputed/review flows, not gold scoring.
 - Open issue "protect manual overrides" (analysis-curation 01) is subsumed by the overwrite ladder in Phase B.
 - Existing benchmark/experiment scripts (TempoCNN, keyfinder comparisons, BPM method benchmarks) are superseded by the harness and may be deleted as part of Phase A.
