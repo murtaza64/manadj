@@ -29,8 +29,10 @@ export interface MidiDeckControls {
   setPitch(percent: number): void;
   /** Stateless one-shot BPM match against the other deck (on-screen MATCH). */
   match(): void;
-  /** Jog rotation ticks (signed): bend when playing, seek when paused. */
+  /** Jog rim ticks (signed): bend when playing, seek when paused. */
   jogTicks(ticks: number): void;
+  /** Jog touch-surface ticks (signed): fine seek when paused only. */
+  jogTouchTicks(ticks: number): void;
   /**
    * Load a Track onto this deck, honoring the load lock (refused onto a
    * playing deck, silently — no hardware feedback channel).

@@ -38,6 +38,7 @@ function registerFakeDeckControls(deck: ChannelId): void {
     setPitch: (percent) => calls.push(`${deck}:setPitch:${percent}`),
     match: () => calls.push(`${deck}:match`),
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
+    jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
     load: (track) => calls.push(`${deck}:load:${track.id}`),
   });
 }
@@ -269,6 +270,13 @@ describe('jog (midi-controller 03)', () => {
   it('no registered deck controls: jog drops silently', () => {
     dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 1 });
     expect(calls).toEqual([]);
+  });
+
+  it('touch-surface ticks route separately from rim ticks (midi-controller 11)', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 1 });
+    dispatchMidiAction({ kind: 'relative', target: { control: 'jog-touch', deck: 'A' }, ticks: -2 });
+    expect(calls).toEqual(['A:jog:1', 'A:jogTouch:-2']);
   });
 });
 

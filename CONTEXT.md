@@ -131,10 +131,14 @@ One of 8 persistent saved positions in a Track, used to jump to during performan
 The single repositionable cue position of a Track, moved with the "cue" button while DJing — distinct from Hot Cues by being one slot that moves freely during performance. Persisted with the Track (CDJ memory-cue behavior). When unset, it defaults to the Track's first beat if a Beatgrid exists, else the first non-silent audio.
 
 **Controller**:
-A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Decks, Mixer, and library browsing. An alternative input alongside keyboard and pointer — a Controller adds no new capabilities, only physical access to existing actions. Active app-wide, like the Decks it controls, not tied to any view.
+A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Decks, Mixer, and library browsing. An alternative input alongside keyboard and pointer — a Controller adds no new capabilities, only physical access to existing actions — plus Feedback on its own lights. Active app-wide, like the Decks it controls, not tied to any view.
 
 **Mapping**:
-The device-specific translation from a Controller's physical controls to manadj actions. One Mapping per device model; controls with no manadj counterpart are simply absent from it and do nothing.
+The device-specific translation from a Controller's physical controls to manadj actions, and of manadj state to the Controller's Feedback addresses. One Mapping per device model; controls with no manadj counterpart are simply absent from it and do nothing.
+
+**Feedback**:
+Device-directed output that mirrors existing on-screen state on a Controller's lights (hot cue pads, transport LEDs). Feedback never carries information the screen doesn't already show, and losing it changes nothing about what the app can do.
+_Avoid_: LED sync, output mapping
 
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid. When a Beatgrid exists it is the authority on tempo: the Track's BPM is its projection (the grid's dominant tempo), not an independent field, and editing BPM is a grid operation (ADR 0016). A grid may carry an *anchor* — the downbeat the user explicitly marked — which re-tempo operations never move.

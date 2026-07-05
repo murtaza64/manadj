@@ -56,8 +56,9 @@ export const INPULSE_300_MK2: Mapping = {
       target: { control: 'selection-move' },
     },
 
-    // Jogs. Touch emits note #8 and CC #10 per deck; leave unmapped until a
-    // touch-sensitive jog behavior exists.
+    // Jogs. The rim (CC #9) only ticks past a rotation-speed threshold; the
+    // touch surface (CC #10) streams densely while touched — fine paused
+    // seeks live there (issue 11). The touch on/off note #8 stays unmapped.
     {
       match: { message: 'cc', channel: 1, number: 0x09 },
       controlType: 'relative',
@@ -67,6 +68,16 @@ export const INPULSE_300_MK2: Mapping = {
       match: { message: 'cc', channel: 2, number: 0x09 },
       controlType: 'relative',
       target: { control: 'jog', deck: 'B' },
+    },
+    {
+      match: { message: 'cc', channel: 1, number: 0x0a },
+      controlType: 'relative',
+      target: { control: 'jog-touch', deck: 'A' },
+    },
+    {
+      match: { message: 'cc', channel: 2, number: 0x0a },
+      controlType: 'relative',
+      target: { control: 'jog-touch', deck: 'B' },
     },
 
     // Pitch faders.

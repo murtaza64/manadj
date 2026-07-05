@@ -98,6 +98,11 @@ function DeckControlsRegistrar() {
           if (!r) return; // no track/decoding: nothing to bend or seek
           j.onTicks(ticks);
         },
+        jogTouchTicks: (ticks) => {
+          const { jog: j, ready: r } = latest.current;
+          if (!r) return;
+          j.onTouchTicks(ticks);
+        },
         load: (track) => {
           const { engine: e, loadTrack: doLoad } = latest.current;
           // Load lock (PerformanceView policy, PRD decision): refused onto a

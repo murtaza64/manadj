@@ -31,10 +31,19 @@ export const JOG_IDLE_MS = 150;
 export const JOG_BEND_PERCENT_PER_TPS = 0.02;
 export const JOG_BEND_MAX_PERCENT = 8;
 
-/** Paused seek: seconds per tick at rest, accelerated quadratically. */
+/** Paused seek (rim): seconds per tick at rest, accelerated quadratically. */
 export const JOG_SEEK_SECONDS_PER_TICK = 0.05;
 export const JOG_SEEK_ACCEL_TPS = 50;
 export const JOG_SEEK_ACCEL_MAX = 100;
+
+/**
+ * Paused seek (touch surface, midi-controller 11): strictly linear seconds
+ * per tick. The touch stream is dense (the rim only ticks past a speed
+ * threshold — the hardware finding that motivated this surface), so fine
+ * placement needs predictability, not reach; hard travel stays the rim's
+ * job.
+ */
+export const JOG_TOUCH_SEEK_SECONDS_PER_TICK = 0.01;
 
 /** Rate smoothing: how much of the instantaneous rate each burst carries. */
 const RATE_BLEND = 0.6;
@@ -73,6 +82,17 @@ export class JogController {
     this.port = port;
   }
 
+  /**
+   * Touch-surface rotation (CC #10): fine linear seek on a paused deck;
+   * ignored while playing — there is no scratch model, and the dense touch
+   * stream would swamp the rim's bend velocity math.
+   */
+  onTouchTicks(ticks: number): void {
+    if (this.port.isPlaying()) return;
+    this.port.seek(this.port.getPlayhead() + ticks * JOG_TOUCH_SEEK_SECONDS_PER_TICK);
+  }
+
+  /** Rim rotation (CC #9): bend when playing, accelerated seek when paused. */
   onTicks(ticks: number, nowMs: number = performance.now()): void {
     const dtMs = this.lastTickMs === null ? DT_MAX_MS : nowMs - this.lastTickMs;
     // A gap past the activity window is a fresh gesture, not a continuation.

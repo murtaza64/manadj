@@ -39,6 +39,8 @@ export type AbsoluteTarget =
 
 export type RelativeTarget =
   | { control: 'jog'; deck: ChannelId }
+  /** The jog's touch surface: a denser tick stream for fine paused seeks. */
+  | { control: 'jog-touch'; deck: ChannelId }
   | { control: 'selection-move' };
 
 /** A domain action emitted by the translator, dispatched by thin glue. */

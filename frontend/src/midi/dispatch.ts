@@ -38,6 +38,9 @@ function dispatchRelative(target: RelativeAction['target'], ticks: number): void
     case 'jog':
       deckControlsFor(target.deck)?.jogTicks(ticks);
       return;
+    case 'jog-touch':
+      deckControlsFor(target.deck)?.jogTouchTicks(ticks);
+      return;
     case 'selection-move': {
       const surface = browseSurface();
       if (!surface) return; // no browse surface in this view: no-op

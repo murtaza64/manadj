@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   JOG_BEND_MAX_PERCENT,
   JOG_IDLE_MS,
+  JOG_TOUCH_SEEK_SECONDS_PER_TICK,
   JogController,
   jogBendPercent,
   jogSeekDelta,
@@ -154,5 +155,67 @@ describe('JogController', () => {
     const jog = new JogController(port);
     jog.dispose();
     expect(calls).toEqual([]);
+  });
+});
+
+describe('touch surface (midi-controller 11)', () => {
+  let playing: boolean;
+  let playhead: number;
+  let calls: string[];
+  let port: JogDeckPort;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    playing = false;
+    playhead = 60;
+    calls = [];
+    port = {
+      isPlaying: () => playing,
+      getPlayhead: () => playhead,
+      // Stateful, like the engine: the next seek starts from the last one.
+      seek: (s) => {
+        playhead = s;
+        calls.push(`seek:${s.toFixed(4)}`);
+      },
+      setBend: (p) => calls.push(`bend:${p.toFixed(3)}`),
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('paused: touch ticks seek linearly per tick, both directions', () => {
+    const jog = new JogController(port);
+    jog.onTouchTicks(1);
+    jog.onTouchTicks(-1);
+    // +1 tick then -1 tick returns exactly to the start.
+    expect(calls).toEqual([
+      `seek:${(60 + JOG_TOUCH_SEEK_SECONDS_PER_TICK).toFixed(4)}`,
+      `seek:${(60).toFixed(4)}`,
+    ]);
+  });
+
+  it('paused: no velocity acceleration — dense bursts stay per-tick linear', () => {
+    const jog = new JogController(port);
+    for (let i = 0; i < 20; i++) jog.onTouchTicks(1);
+    const last = parseFloat(calls[calls.length - 1].slice(5));
+    expect(last).toBeCloseTo(60 + 20 * JOG_TOUCH_SEEK_SECONDS_PER_TICK, 10);
+  });
+
+  it('playing: touch ticks are ignored (no bend, no seek)', () => {
+    playing = true;
+    const jog = new JogController(port);
+    jog.onTouchTicks(4);
+    expect(calls).toEqual([]);
+  });
+
+  it('touch ticks do not disturb a rim bend in progress', () => {
+    playing = true;
+    const jog = new JogController(port);
+    jog.onTicks(1, 1000);
+    const bendCalls = calls.length;
+    jog.onTouchTicks(1);
+    expect(calls.length).toBe(bendCalls);
   });
 });
