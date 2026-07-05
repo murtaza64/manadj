@@ -68,6 +68,76 @@ export function Knob({
   );
 }
 
+/**
+ * Horizontal fader with the label ON the handle (no label column — the
+ * label travels with the grab point). Pointer-driven; double-click resets
+ * to `defaultValue`. `detent` draws a center tick (pitch zero).
+ */
+export function HFader({
+  label,
+  min,
+  max,
+  value,
+  defaultValue,
+  onChange,
+  disabled = false,
+  accent = false,
+  detent = false,
+  title,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  value: number;
+  defaultValue: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+  accent?: boolean;
+  detent?: boolean;
+  title?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  const setFromPointer = (clientX: number) => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onChange(min + f * (max - min));
+  };
+
+  const fraction = (value - min) / (max - min);
+
+  return (
+    <div
+      ref={ref}
+      className={`perf-fader${accent ? ' accent' : ''}${disabled ? ' disabled' : ''}`}
+      title={title}
+      onPointerDown={(e) => {
+        if (disabled) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        dragging.current = true;
+        setFromPointer(e.clientX);
+      }}
+      onPointerMove={(e) => {
+        if (dragging.current && !disabled) setFromPointer(e.clientX);
+      }}
+      onPointerUp={() => (dragging.current = false)}
+      onPointerCancel={() => (dragging.current = false)}
+      onDoubleClick={() => !disabled && onChange(defaultValue)}
+    >
+      <div className="perf-fader-track" />
+      {detent && <div className="perf-fader-detent" />}
+      <div
+        className="perf-fader-handle"
+        style={{ left: `${Math.max(0, Math.min(1, fraction)) * 100}%` }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
 export function MixerStrip() {
   const mixer = useMixer();
   const [crossfader, setCrossfader] = useState(() => mixer.getCrossfader());

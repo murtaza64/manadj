@@ -7,9 +7,9 @@
  * the zone order, so both MIX zones meet at the crossfader strip):
  *   TRACK — persistent, curation class (yellow accent: edits write to the
  *           library): title/artist, tag pills, energy, tempo/grid cluster.
- *   PLAY  — CUE over PLAY, hot-cue pads, beatjump row.
- *   MIX   — TRIM | [LOW MID HI] | FLT knobs, horizontal PITCH + VOL
- *           sliders, KEY + effective-BPM readouts beside MATCH/nudge.
+ *   PLAY  — three equal rows: jump|nudge, pads|CUE, pads|PLAY.
+ *   MIX   — TRIM | [LOW MID HI] | FLT knobs, VOL + PITCH label-on-handle
+ *           faders, KEY + effective-BPM(+pitch%) readouts beside MATCH.
  * Habit controls never mirror: transport order, slider polarity (right =
  * faster) and the foot's readout/button order are identical on both decks.
  */
@@ -25,9 +25,9 @@ import TagPill from '../TagPill';
 import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
 import { BeatjumpRow } from '../deckControls/BeatjumpRow';
-import { SpeedIcon } from '../icons';
+import { EnergyIcon, SpeedIcon } from '../icons';
 import { BpmControl } from '../deckControls/BpmControl';
-import { Knob } from './MixerStrip';
+import { HFader, Knob } from './MixerStrip';
 import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { DECK_KEYS } from './performanceKeys';
@@ -186,8 +186,7 @@ function TrackZone({ track }: { track: Track | null }) {
   };
 
   return (
-    <div className="perf-zone persistent perf-zone-track">
-      <span className="perf-zone-label">TRACK</span>
+    <div className="perf-zone perf-zone-track">
       <InlineEdit
         className="perf-inline-edit perf-title"
         value={track?.title ?? ''}
@@ -204,6 +203,9 @@ function TrackZone({ track }: { track: Track | null }) {
       />
       <TagRow track={track} />
       <div className="perf-track-row" title="Energy">
+        <span className="perf-row-icon">
+          <EnergyIcon width={14} height={14} />
+        </span>
         <div className="perf-energy-picker">
           {[1, 2, 3, 4, 5].map((level) => (
             <button
@@ -220,7 +222,7 @@ function TrackZone({ track }: { track: Track | null }) {
       <div className="perf-track-row perf-track-tempo">
         {/* One tempo/grid cluster (ADR 0016 — one domain), labeled by the
             tempo icon (icon language: no BPM/GRID text labels). */}
-        <span className="perf-tempo-label" title="Tempo / beatgrid">
+        <span className="perf-row-icon" title="Tempo / beatgrid">
           <SpeedIcon width={14} height={14} />
         </span>
         <BpmControl
@@ -236,29 +238,64 @@ function TrackZone({ track }: { track: Track | null }) {
   );
 }
 
-// ── PLAY zone: transport / pads / beatjump ───────────────────────────────
+// ── PLAY zone: jump/nudge over pads/transport (three equal rows) ─────────
+//   <jump>     <nudge>
+//   <pads top> <cue>
+//   <pads bot> <play>
 
 function PlayZone() {
-  const { deck } = useDeck();
+  const { deck, engine } = useDeck();
   const keys = DECK_KEYS[deck];
+  const ready = useDeckReady();
+  const bend = useDeckSnapshot((s) => s.bendPercent);
+
+  const bendStart = (sign: 1 | -1) => (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!ready) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    engine.setBend(sign * NUDGE_BEND_PERCENT);
+  };
+  const bendEnd = () => engine.setBend(0);
 
   return (
     <div className="perf-zone perf-zone-play">
-      <span className="perf-zone-label">PLAY</span>
       <div className="perf-play-inner">
-        <div className="perf-transport">
-          <TransportPair cueKbd={<Kbd k={keys.cue} />} playKbd={<Kbd k={keys.play} />} />
-        </div>
         <div className="perf-padcol">
+          <BeatjumpRow
+            backKbd={<Kbd k={keys.jumpBack} />}
+            forwardKbd={<Kbd k={keys.jumpForward} />}
+          />
           <div className="perf-pads">
             <HotCuePads
               padKbd={(slot) => (slot <= 4 ? <Kbd k={keys.pads[slot - 1]} /> : null)}
             />
           </div>
-          <BeatjumpRow
-            backKbd={<Kbd k={keys.jumpBack} />}
-            forwardKbd={<Kbd k={keys.jumpForward} />}
-          />
+        </div>
+        <div className="perf-transport-col">
+          <div className="perf-nudge">
+            <button
+              className={`player-button${bend < 0 ? ' perf-nudge-held' : ''}`}
+              disabled={!ready}
+              title="Nudge slower (hold)"
+              onPointerDown={bendStart(-1)}
+              onPointerUp={bendEnd}
+              onPointerCancel={bendEnd}
+            >
+              ◀◀
+              <Kbd k={keys.nudgeBack} />
+            </button>
+            <button
+              className={`player-button${bend > 0 ? ' perf-nudge-held' : ''}`}
+              disabled={!ready}
+              title="Nudge faster (hold)"
+              onPointerDown={bendStart(1)}
+              onPointerUp={bendEnd}
+              onPointerCancel={bendEnd}
+            >
+              ▶▶
+              <Kbd k={keys.nudgeForward} />
+            </button>
+          </div>
+          <TransportPair cueKbd={<Kbd k={keys.cue} />} playKbd={<Kbd k={keys.play} />} />
         </div>
       </div>
     </div>
@@ -269,7 +306,6 @@ function PlayZone() {
 
 function MixZone({ track }: { track: Track | null }) {
   const { deck, engine } = useDeck();
-  const keys = DECK_KEYS[deck];
   const decks = useDecks();
   const ready = useDeckReady();
 
@@ -280,7 +316,6 @@ function MixZone({ track }: { track: Track | null }) {
   const [fader, setFader] = useState(initial.fader);
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
-  const bend = useDeckSnapshot((s) => s.bendPercent);
   // Effective BPM — live with pitch AND bend (what your ears get right now).
   const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, s.bendPercent));
   const effective = track?.bpm ? track.bpm * rate : null;
@@ -315,13 +350,6 @@ function MixZone({ track }: { track: Track | null }) {
     }
   };
 
-  const bendStart = (sign: 1 | -1) => (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (!ready) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    engine.setBend(sign * NUDGE_BEND_PERCENT);
-  };
-  const bendEnd = () => engine.setBend(0);
-
   const eqKnob = (band: EqBand, label: string) => (
     <Knob
       label={label}
@@ -335,7 +363,6 @@ function MixZone({ track }: { track: Track | null }) {
 
   return (
     <div className="perf-zone perf-zone-mix">
-      <span className="perf-zone-label">MIX</span>
       <div className="perf-knobrow">
         <Knob
           label="TRIM"
@@ -345,8 +372,9 @@ function MixZone({ track }: { track: Track | null }) {
           initial={initial.trim}
           onChange={(v) => mixer.setTrim(deck, v)}
         />
-        {/* EQ bands boxed as one unit; TRIM/FLT read as separate utilities */}
-        <div className="perf-eqbox">
+        {/* EQ bands grouped tight; placement (not a box) separates them
+            from the TRIM/FLT utilities on the flanks */}
+        <div className="perf-eqgroup">
           {eqKnob('low', 'LOW')}
           {eqKnob('mid', 'MID')}
           {eqKnob('high', 'HI')}
@@ -360,42 +388,32 @@ function MixZone({ track }: { track: Track | null }) {
           onChange={(v) => mixer.setFilter(deck, v)}
         />
       </div>
+      <HFader
+        label="VOL"
+        min={0}
+        max={1}
+        value={fader}
+        defaultValue={1}
+        onChange={(v) => {
+          setFader(v);
+          mixer.setFader(deck, v);
+        }}
+        title="Channel volume (double-click = full)"
+      />
       {/* Horizontal pitch: right = faster (grill decision — the vertical
           fader's hardware polarity died with the vertical fader). */}
-      <label className="perf-hslider pitch" title="Pitch (right = faster; double-click resets)">
-        <span>
-          PITCH {pitch >= 0 ? '+' : ''}
-          {pitch.toFixed(1)}%
-        </span>
-        <input
-          type="range"
-          min={-80}
-          max={80}
-          value={Math.round(pitch * 10)}
-          onChange={(e) => engine.setPitch(Number(e.target.value) / 10)}
-          onDoubleClick={() => engine.setPitch(0)}
-          disabled={!ready}
-        />
-      </label>
-      <label className="perf-hslider" title="Channel volume (double-click = full)">
-        <span>VOL</span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={fader}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            setFader(v);
-            mixer.setFader(deck, v);
-          }}
-          onDoubleClick={() => {
-            setFader(1);
-            mixer.setFader(deck, 1);
-          }}
-        />
-      </label>
+      <HFader
+        label="PITCH"
+        accent
+        detent
+        min={-8}
+        max={8}
+        value={pitch}
+        defaultValue={0}
+        onChange={(v) => engine.setPitch(Math.round(v * 10) / 10)}
+        disabled={!ready}
+        title="Pitch (right = faster; double-click resets)"
+      />
       <div className="perf-mix-foot">
         <span className="perf-readout" title="Key">
           <span className="perf-readout-label">KEY</span>
@@ -408,6 +426,10 @@ function MixZone({ track }: { track: Track | null }) {
           <span className="perf-readout-val">
             {effective !== null ? effective.toFixed(1) : '-'}
           </span>
+          <span className="perf-readout-sub">
+            {pitch >= 0 ? '+' : ''}
+            {pitch.toFixed(1)}%
+          </span>
         </span>
         <span className="perf-mix-spacer" />
         <button
@@ -417,28 +439,6 @@ function MixZone({ track }: { track: Track | null }) {
           title="Match the other deck's tempo (half/double-aware)"
         >
           {hint ? 'OUT OF REACH' : 'MATCH'}
-        </button>
-        <button
-          className={`player-button perf-mini${bend < 0 ? ' perf-nudge-held' : ''}`}
-          disabled={!ready}
-          title="Nudge slower (hold)"
-          onPointerDown={bendStart(-1)}
-          onPointerUp={bendEnd}
-          onPointerCancel={bendEnd}
-        >
-          ◀◀
-          <Kbd k={keys.nudgeBack} />
-        </button>
-        <button
-          className={`player-button perf-mini${bend > 0 ? ' perf-nudge-held' : ''}`}
-          disabled={!ready}
-          title="Nudge faster (hold)"
-          onPointerDown={bendStart(1)}
-          onPointerUp={bendEnd}
-          onPointerCancel={bendEnd}
-        >
-          ▶▶
-          <Kbd k={keys.nudgeForward} />
         </button>
       </div>
     </div>

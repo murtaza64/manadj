@@ -61,8 +61,8 @@
 .perf-decks {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  padding: 6px 12px 8px;
+  gap: 0;
+  padding: 6px 0 8px;
 }
 
 .perf-deckpanel {
@@ -70,9 +70,11 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  padding: 5px 8px 6px;
-  border: 1px solid var(--surface0);
+  padding: 5px 12px 6px;
 }
+
+/* The one separator: a single vertical rule between the two decks. */
+.perf-deckpanel.mirrored { border-left: 1px solid var(--surface1); }
 
 .perf-deck-minimap {
   display: flex;
@@ -98,42 +100,20 @@
 .perf-deck-band {
   display: flex;
   align-items: stretch;
-  gap: 8px;
+  gap: 16px;
   min-height: 0;
 }
 
 .perf-deckpanel.mirrored .perf-deck-band { flex-direction: row-reverse; }
 
-/* Zones: the visual hierarchy. Persistent (curation — writes to the
-   library) gets the yellow accent; playback zones stay neutral. */
+/* Zones: unboxed groupings — placement carries the hierarchy, the only
+   drawn separator is the deck divider above. */
 .perf-zone {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 14px 8px 6px;
-  border: 1px solid var(--surface0);
   min-width: 0;
 }
-
-.perf-zone-label {
-  position: absolute;
-  top: 2px;
-  left: 6px;
-  font-size: 7px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  color: var(--overlay0);
-}
-
-.perf-deckpanel.mirrored .perf-zone-label { left: auto; right: 6px; }
-
-.perf-zone.persistent {
-  border-color: color-mix(in srgb, var(--yellow) 45%, var(--surface0));
-  background: color-mix(in srgb, var(--yellow) 4%, transparent);
-}
-
-.perf-zone.persistent .perf-zone-label { color: var(--yellow); }
 
 /* ── TRACK zone (outer): title / artist / tags / energy / tempo ── */
 
@@ -142,7 +122,14 @@
 .perf-track-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+}
+
+.perf-row-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--subtext0);
+  flex-shrink: 0;
 }
 
 .perf-track-tempo { margin-top: auto; }
@@ -216,13 +203,6 @@
 .perf-energy.set.energy-5 { color: var(--energy-5); border-color: var(--energy-5); }
 
 /* Consolidated tempo/grid cluster, shrunk: never drives the zone width */
-.perf-tempo-label {
-  display: inline-flex;
-  align-items: center;
-  color: var(--subtext0);
-  flex-shrink: 0;
-}
-
 .perf-zone-track .deck-bpm { height: 20px; }
 /* Width stays the shared 4.5ch/34px (deckControls.css) — no local width. */
 .perf-zone-track .deck-bpm-input { font-size: 11px; padding: 1px 4px; }
@@ -231,7 +211,10 @@
 .perf-zone-track .deck-bpm-steps .player-button svg,
 .perf-zone-track .deck-bpm > .player-button svg { transform: scale(0.85); }
 
-/* ── PLAY zone (middle): transport / pads / beatjump ─────────────
+/* ── PLAY zone (middle): three equal 26px rows ───────────────────
+     <jump>     <nudge>
+     <pads top> <cue>
+     <pads bot> <play>
    Transport order (CUE over PLAY) never mirrors — habit control. */
 
 .perf-zone-play { flex-shrink: 0; }
@@ -239,27 +222,11 @@
 .perf-play-inner {
   flex: 1;
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   gap: 6px;
 }
 
 .perf-deckpanel.mirrored .perf-play-inner { flex-direction: row-reverse; }
-
-.perf-transport {
-  display: grid;
-  grid-template-columns: 1fr;
-  grid-auto-rows: 1fr;
-  gap: 4px;
-  width: 56px;
-  min-height: 56px;
-}
-
-.perf-transport .player-button {
-  font-size: 12px;
-  min-width: 0;
-  padding: 0;
-  position: relative;
-}
 
 .perf-padcol {
   display: flex;
@@ -267,13 +234,42 @@
   gap: 4px;
 }
 
+.perf-padcol .deck-jumprow { height: 26px; }
+
 /* Hot cue pads: 2 x 4 grid */
 .perf-pads {
-  flex: 1;
   display: grid;
   grid-template-columns: repeat(4, 34px);
-  grid-auto-rows: 1fr;
+  grid-auto-rows: 26px;
   gap: 4px;
+}
+
+.perf-transport-col {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: 26px;
+  gap: 4px;
+  width: 56px;
+}
+
+.perf-transport-col .player-button {
+  font-size: 12px;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+}
+
+.perf-nudge {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.perf-nudge .player-button {
+  font-size: 9px;
+  min-width: 0;
+  padding: 0;
+  position: relative;
 }
 
 .perf-pads .hot-cue {
@@ -339,28 +335,64 @@
   transform: translateX(-50%);
 }
 
-/* EQ knobs boxed as one unit; TRIM/FLT read as separate utilities */
-.perf-eqbox {
+/* EQ bands grouped tight between the TRIM/FLT flanks — no box, placement
+   is the separation */
+.perf-eqgroup {
   display: flex;
-  gap: 8px;
-  padding: 2px 6px;
-  border: 1px solid var(--surface1);
-}
-
-/* Horizontal sliders. Polarity is universal (right = faster / louder) —
-   sliders never mirror. */
-.perf-hslider {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  font-size: 8px;
-  font-weight: 700;
-  color: var(--subtext0);
 }
 
-.perf-hslider > span { width: 58px; flex-shrink: 0; }
-.perf-hslider input { flex: 1; min-width: 0; accent-color: var(--overlay2); }
-.perf-hslider.pitch input { accent-color: var(--blue); }
+/* Custom horizontal faders: the label rides the handle (no label column).
+   Polarity is universal (right = faster / louder) — faders never mirror. */
+.perf-fader {
+  position: relative;
+  height: 17px;
+  min-width: 0;
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.perf-fader.disabled { opacity: 0.4; cursor: default; }
+
+.perf-fader-track {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  transform: translateY(-50%);
+  background: var(--surface1);
+}
+
+.perf-fader-detent {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  background: var(--overlay0);
+}
+
+.perf-fader-handle {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 1px 5px;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--subtext1);
+  background: var(--crust);
+  border: 1px solid var(--overlay1);
+  white-space: nowrap;
+}
+
+.perf-fader.accent .perf-fader-handle {
+  color: var(--blue);
+  border-color: var(--blue);
+}
 
 /* Foot: prominent playback readouts beside MATCH + nudge */
 .perf-mix-foot {
@@ -393,6 +425,14 @@
 }
 
 .perf-readout-key { color: var(--mauve); }
+
+/* Pitch % — secondary readout riding the effective BPM */
+.perf-readout-sub {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--blue);
+  font-variant-numeric: tabular-nums;
+}
 
 .perf-mini {
   padding: 2px 6px;
