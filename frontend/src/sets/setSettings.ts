@@ -6,16 +6,27 @@
  * Edits apply live: the next plan recompute reads the new values.
  */
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_TEMPO_RETURN_SEC_PER_PERCENT } from './planner';
+import {
+  DEFAULT_GRACE_FADE_SEC,
+  DEFAULT_GRACE_HEADROOM_SEC,
+  DEFAULT_TEMPO_RETURN_SEC_PER_PERCENT,
+} from './planner';
 
 export interface SetPlaybackSettings {
   /** Tempo return speed (Riding): seconds of ramp per percent of pitch
    * ridden during the window. */
   tempoReturnSecPerPercent: number;
+  /** Grace fade (sets 14): free a colliding deck this long before the
+   * window that needs it (load headroom)… */
+  graceHeadroomSec: number;
+  /** …fading the dying track out over this long, ending at the cut. */
+  graceFadeSec: number;
 }
 
 export const DEFAULT_SET_SETTINGS: SetPlaybackSettings = {
   tempoReturnSecPerPercent: DEFAULT_TEMPO_RETURN_SEC_PER_PERCENT,
+  graceHeadroomSec: DEFAULT_GRACE_HEADROOM_SEC,
+  graceFadeSec: DEFAULT_GRACE_FADE_SEC,
 };
 
 const STORAGE_KEY = 'manadj-set-settings';
@@ -30,6 +41,11 @@ function load(): SetPlaybackSettings {
         parsed.tempoReturnSecPerPercent,
         DEFAULT_SET_SETTINGS.tempoReturnSecPerPercent
       ),
+      graceHeadroomSec: clampNonNegative(
+        parsed.graceHeadroomSec,
+        DEFAULT_SET_SETTINGS.graceHeadroomSec
+      ),
+      graceFadeSec: clampNonNegative(parsed.graceFadeSec, DEFAULT_SET_SETTINGS.graceFadeSec),
     };
   } catch {
     return DEFAULT_SET_SETTINGS;

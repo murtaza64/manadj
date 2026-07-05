@@ -212,7 +212,7 @@ describe('pinned Transition windows', () => {
     expect(plan.entries[1].mixOffsetSec).toBeCloseTo(42);
   });
 
-  it('warns when consecutive windows overlap and when a window starts past the outgoing end', () => {
+  it('flags overlapping windows (as a grace fade, sets 14) and windows past the outgoing end', () => {
     const overlapping = planSet(
       input({
         entries: [
@@ -227,8 +227,13 @@ describe('pinned Transition windows', () => {
         },
       })
     );
-    const overlap = overlapping.warnings.find((w) => w.kind === 'window-overlap');
-    expect(overlap?.adjacencyIndex).toBe(1);
+    // The collision surfaces as the grace-fade transform's warning (the
+    // raw window-overlap flag is subsumed — one chip per collision).
+    const flagged = overlapping.warnings.find(
+      (w) => w.kind === 'grace-fade' || w.kind === 'grace-floor'
+    );
+    expect(flagged?.adjacencyIndex).toBe(1);
+    expect(overlapping.warnings.some((w) => w.kind === 'window-overlap')).toBe(false);
 
     const pastEnd = planSet(twoTracks(tr({ startSec: 95 })));
     expect(pastEnd.warnings.some((w) => w.kind === 'window-past-end' && w.adjacencyIndex === 0)).toBe(
@@ -670,5 +675,166 @@ describe('Fixed tempo policy (global rate scaling)', () => {
     // 90/60 → +50%, clamped to the decks' ±25%.
     expect(plan.entries[1].rate).toBeCloseTo(1.25);
     expect(plan.warnings.some((w) => w.kind === 'pitch-clamped' && w.entryIndex === 1)).toBe(true);
+  });
+});
+
+// ── Grace fade (sets 14): overlapping windows and load latency ──────────
+
+describe('grace fade (planner transform)', () => {
+  /** Three tracks, rates 1 (Riding, no tempo match). Window 0 at mix
+   * 60..80 (B in at 0 → track 2 anchored at 60). Window 1 authored at
+   * track-2 time `start2`: its mix start is 60 + start2, and it needs
+   * deck A — still occupied by track 1 until mix 80. grace 5s, fade 2s. */
+  const threeTracks = (start2: number, over: Partial<PlanInput> = {}) =>
+    planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 1: facts(100), 2: facts(200), 3: facts(100) },
+        transitionsByUuid: {
+          t1: tr({ startSec: 60, bInSec: 0, tempoMatch: false }),
+          t2: tr({ startSec: start2, bInSec: 0, tempoMatch: false }),
+        },
+        grace: { headroomSec: 5, fadeSec: 2 },
+        ...over,
+      })
+    );
+
+  it('truncates the occupant grace seconds before the colliding window, with a synthesized fade', () => {
+    // Window 1 opens at mix 82; deck A must be free by 77 (grace 5).
+    const plan = threeTracks(22);
+    const [e0] = plan.entries;
+    expect(e0.exitMixSec).toBeCloseTo(77);
+    expect(e0.exitSec).toBeCloseTo(77);
+    expect(e0.graceFade).toBeDefined();
+    expect(e0.graceFade!.fadeStartMixSec).toBeCloseTo(75);
+    expect(e0.graceFade!.authoredExitSec).toBeCloseTo(80);
+    expect(e0.graceFade!.authoredExitMixSec).toBeCloseTo(80);
+    // Authored windows never shift.
+    expect(plan.adjacencies[0].mixStartSec).toBeCloseTo(60);
+    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(80);
+    expect(plan.adjacencies[1].mixStartSec).toBeCloseTo(82);
+    expect(plan.entries[1].entryMixSec).toBeCloseTo(60);
+    expect(
+      plan.warnings.some((w) => w.kind === 'grace-fade' && w.adjacencyIndex === 1)
+    ).toBe(true);
+  });
+
+  it('planStateAt: the fade replaces the authored tail; the deck frees for the next entry', () => {
+    const plan = threeTracks(22);
+    // Mid-fade (75..77): the outgoing role-fader ramps from its authored
+    // value (default faderA = 1) to 0.
+    const midFade = planStateAt(plan, 76);
+    expect(midFade.decks.A.playing).toBe(true);
+    expect(midFade.lanes.A.fader).toBeCloseTo(0.5);
+    // Past the truncated exit but inside the authored window: entry 0 is
+    // done — deck A parks on entry 2 (the Conductor's load target) and
+    // the dropped tail reads silent, not the authored faderA.
+    const afterExit = planStateAt(plan, 78);
+    expect(afterExit.decks.A.playing).toBe(false);
+    expect(afterExit.decks.A.trackId).toBe(3);
+    expect(afterExit.lanes.A.fader).toBe(0);
+  });
+
+  it('applies the same grace to a hard-cut outgoing (the cut instant never moves)', () => {
+    // Track 1 plays out to a hard cut at mix 100; track 2's window opens
+    // at track-2 time 2 → mix 102, needing deck A free by 97.
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null },
+          { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 1: facts(100), 2: facts(200), 3: facts(100) },
+        transitionsByUuid: { t2: tr({ startSec: 2, bInSec: 0, tempoMatch: false }) },
+        grace: { headroomSec: 5, fadeSec: 2 },
+      })
+    );
+    const [e0, e1] = plan.entries;
+    expect(e0.exitMixSec).toBeCloseTo(97);
+    expect(e0.graceFade!.fadeStartMixSec).toBeCloseTo(95);
+    // The cut instant is derived from the AUTHORED end — never shifted.
+    expect(plan.adjacencies[0].mixStartSec).toBeCloseTo(100);
+    expect(e1.entryMixSec).toBeCloseTo(100);
+    // Solo fade: mid-fade the solo fader ramps 1 → 0.
+    const midFade = planStateAt(plan, 96);
+    expect(midFade.lanes.A.fader).toBeCloseTo(0.5);
+    // The grace gap is silent (planned silence, not a stall).
+    const gap = planStateAt(plan, 98.5);
+    expect(gap.decks.A.playing).toBe(false);
+    expect(gap.decks.B.playing).toBe(false);
+  });
+
+  it('floors at the entry window: degenerate pileups plan as-authored with an error flag', () => {
+    // Four tracks; window 2 (needing deck B, entry 1's) opens at mix 83 —
+    // freeing deck B by 78 would cut into entry 1's own entry window
+    // (60..80): no heroics, plan as authored, flag an error.
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+          { trackId: 3, pin: { kind: 'transition', uuid: 't3' } },
+          { trackId: 4, pin: null },
+        ],
+        tracks: { 1: facts(100), 2: facts(200), 3: facts(100), 4: facts(100) },
+        transitionsByUuid: {
+          t1: tr({ startSec: 60, bInSec: 0, tempoMatch: false }),
+          t2: tr({ startSec: 22, bInSec: 0, tempoMatch: false }), // window mix 82..102
+          t3: tr({ startSec: 1, bInSec: 0, tempoMatch: false }), // window mix 83..103
+        },
+        grace: { headroomSec: 5, fadeSec: 2 },
+      })
+    );
+    const e1 = plan.entries[1];
+    expect(e1.graceFade).toBeUndefined();
+    expect(e1.exitMixSec).toBeCloseTo(102); // as authored
+    expect(
+      plan.warnings.some((w) => w.kind === 'grace-floor' && w.severity === 'error' && w.adjacencyIndex === 2)
+    ).toBe(true);
+  });
+
+  it('replaces the window-overlap warning when the fade handles the collision', () => {
+    // Window 2 at mix 92..112 overlaps window 1 (82..102): entry 1 is
+    // truncated at 87 (grace) — the fade chip subsumes the overlap chip.
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+          { trackId: 3, pin: { kind: 'transition', uuid: 't3' } },
+          { trackId: 4, pin: null },
+        ],
+        tracks: { 1: facts(100), 2: facts(200), 3: facts(100), 4: facts(100) },
+        transitionsByUuid: {
+          t1: tr({ startSec: 60, bInSec: 0, tempoMatch: false }),
+          t2: tr({ startSec: 22, bInSec: 0, tempoMatch: false }), // window mix 82..102
+          t3: tr({ startSec: 10, bInSec: 0, tempoMatch: false }), // window mix 92..112
+        },
+        grace: { headroomSec: 5, fadeSec: 2 },
+      })
+    );
+    const e1 = plan.entries[1];
+    expect(e1.exitMixSec).toBeCloseTo(87);
+    expect(e1.exitSec).toBeCloseTo(27); // (87 − 60) at rate 1
+    expect(e1.graceFade!.authoredExitSec).toBeCloseTo(42);
+    expect(plan.warnings.some((w) => w.kind === 'grace-fade' && w.adjacencyIndex === 2)).toBe(true);
+    expect(plan.warnings.some((w) => w.kind === 'window-overlap' && w.adjacencyIndex === 2)).toBe(
+      false
+    );
+  });
+
+  it('leaves non-colliding plans untouched', () => {
+    // Window 1 opens at mix 150 — 70s of runway past track 1's exit.
+    const plan = threeTracks(90);
+    expect(plan.entries[0].graceFade).toBeUndefined();
+    expect(plan.entries[0].exitMixSec).toBeCloseTo(80);
+    expect(plan.warnings.some((w) => w.kind === 'grace-fade' || w.kind === 'grace-floor')).toBe(
+      false
+    );
   });
 });

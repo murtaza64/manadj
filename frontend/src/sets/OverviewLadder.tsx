@@ -290,6 +290,48 @@ export function OverviewLadder({
               redrawKey={settledZoom}
             />
           ))}
+          {/* Grace fades (sets 14): the synthesized fade-out drawn over the
+              clip tail, plus the dropped (unreachable) authored tail hatched
+              past the truncated exit. */}
+          {plan.entries.map((entry, i) => {
+            const g = entry.graceFade;
+            if (!g) return null;
+            const top = entry.deck === 'A' ? 0 : LANE_H + 2;
+            return (
+              <div key={`grace-${i}`} style={{ pointerEvents: 'none' }}>
+                <div
+                  title="Synthesized fade — the planner fades this track early to free its deck"
+                  style={{
+                    position: 'absolute',
+                    left: `${(g.fadeStartMixSec / total) * 100}%`,
+                    width: `${((entry.exitMixSec - g.fadeStartMixSec) / total) * 100}%`,
+                    top,
+                    height: LANE_H,
+                    background: 'rgba(255,0,64,0.30)',
+                    clipPath:
+                      entry.deck === 'A'
+                        ? 'polygon(0 0, 0 100%, 100% 100%)'
+                        : 'polygon(0 0, 100% 0, 0 100%)',
+                    zIndex: 3,
+                  }}
+                />
+                <div
+                  title="Dropped tail — authored material past the truncation is unreachable"
+                  style={{
+                    position: 'absolute',
+                    left: `${(entry.exitMixSec / total) * 100}%`,
+                    width: `${((g.authoredExitMixSec - entry.exitMixSec) / total) * 100}%`,
+                    top,
+                    height: LANE_H,
+                    background:
+                      'repeating-linear-gradient(45deg, rgba(255,0,64,0.28) 0 4px, transparent 4px 9px)',
+                    border: '1px dashed rgba(255,0,64,0.7)',
+                    zIndex: 3,
+                  }}
+                />
+              </div>
+            );
+          })}
           {/* Center line the mirrored lanes meet at */}
           <div
             style={{

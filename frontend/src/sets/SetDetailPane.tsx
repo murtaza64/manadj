@@ -56,6 +56,7 @@ import {
 } from './conductorStore';
 import { OverviewLadder } from './OverviewLadder';
 import { fmtSec, type PlannedEntry, type PlanWarning } from './planner';
+import { prefetchTrackBuffer } from './prefetch';
 import { useSetPlan } from './useSetPlan';
 import {
   addTracksToSet,
@@ -171,15 +172,22 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
     if (known) decks[deck].loadTrack(known);
     else void api.tracks.getById(trackId).then((t) => decks[deck].loadTrack(t));
   };
+  // Prefetch one entry ahead (sets 14): warm the decode cache so the
+  // handover's deck load is a near-instant cache hit.
+  const prefetchTrack = (trackId: number) => {
+    void prefetchTrackBuffer(mixer, trackId).catch((err) =>
+      console.error(`set prefetch failed for track ${trackId}`, err)
+    );
+  };
   const playFromEntry = (index: number) => {
     if (!plan) return;
-    startSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, index);
+    startSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, index, prefetchTrack);
   };
   // Ladder click (sets 05): seek — conducting already seeks in place
   // (preserving play/pause); idle starts playing from that instant.
   const seekToMixTime = (mixTime: number) => {
     if (!plan) return;
-    seekSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, mixTime);
+    seekSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, mixTime, prefetchTrack);
   };
 
   // ── Scroll persistence (set store — survives mode switches) ──────────
@@ -582,6 +590,8 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'incoming-ends-inside-window': 'incoming ends early',
   'no-bpm': 'no BPM',
   'pitch-clamped': 'pitch clamped',
+  'grace-fade': 'overlap: previous track fades early',
+  'grace-floor': 'overlap pileup',
 };
 
 function AdjacencyRow({

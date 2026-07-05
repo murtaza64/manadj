@@ -453,6 +453,12 @@ export class Mixer {
     this.applyFilterPosition(channel, values.filter);
   }
 
+  /** The shared AudioContext (creating the graph if needed) — for
+   * non-deck consumers like the Set prefetcher's decode (sets 14). */
+  audioContext(): AudioContext {
+    return this.ensure().ctx;
+  }
+
   /** The audio access a deck is constructed against. */
   portFor(channel: ChannelId): DeckAudioPort {
     return {

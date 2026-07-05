@@ -31,7 +31,7 @@ export function useSetPlan(
    * planned as Riding at the tuned return speed. */
   tempo?: { policy: 'riding' | 'fixed'; setTempoBpm: number | null }
 ): SetPlan | undefined {
-  const { tempoReturnSecPerPercent } = useSetSettings();
+  const { tempoReturnSecPerPercent, graceHeadroomSec, graceFadeSec } = useSetSettings();
   const pairStore = useSyncExternalStore(subscribePairStore, snapshotPairStore);
 
   // Never plan against an unloaded pair store: pinned Transitions would
@@ -102,7 +102,14 @@ export function useSetPlan(
         ? { policy: 'fixed', setTempoBpm: tempo.setTempoBpm }
         : { policy: 'riding', returnSecPerPercent: tempoReturnSecPerPercent };
 
-    return planSet({ entries, tracks, transitionsByUuid, takesByUuid, tempo: tempoInput });
+    return planSet({
+      entries,
+      tracks,
+      transitionsByUuid,
+      takesByUuid,
+      tempo: tempoInput,
+      grace: { headroomSec: graceHeadroomSec, fadeSec: graceFadeSec },
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     entries,
@@ -114,5 +121,7 @@ export function useSetPlan(
     tempo?.policy,
     tempo?.setTempoBpm,
     tempoReturnSecPerPercent,
+    graceHeadroomSec,
+    graceFadeSec,
   ]);
 }

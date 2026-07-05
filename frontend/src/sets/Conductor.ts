@@ -58,6 +58,10 @@ export interface ConductorAudio {
 export interface ConductorHooks {
   /** The deck provider's one Load path (ADR 0022), by track id. */
   loadTrack(deck: ChannelId, trackId: number): void;
+  /** Warm the decoded-buffer cache for an upcoming entry (sets 14):
+   * fetch + decode + putCachedBuffer, so the deck load at handover is a
+   * near-instant cache hit. Fire-and-forget. */
+  prefetch?(trackId: number): void;
   /** Conducting ended — exactly once, with why. */
   onStopped(reason: ConductorStopReason): void;
 }
@@ -87,6 +91,8 @@ export class Conductor {
   /** Last load requested per deck (one request per target; the engine's
    * snapshot lags the async fetch). */
   private loadRequested: Record<ChannelId, number | null> = { A: null, B: null };
+  /** Last entry index handed to the prefetch hook (sets 14). */
+  private prefetchedIndex = -1;
   /** Last automation values written (the sounding mix) — written into
    * base mixer state at takeover so disengaging is inaudible. */
   private lastLanes: Record<ChannelId, PlanAutomation> | null = null;
@@ -389,15 +395,28 @@ export class Conductor {
     const state = planStateAt(this.plan, t);
     const readyA = this.ensureDeckTrack('A', state);
     const readyB = this.ensureDeckTrack('B', state);
+    this.prefetchAhead(state);
 
-    // A deck that must be audible right now but is still loading holds
-    // the mix clock (freeze the anchor) — the set never skips content.
-    if ((state.decks.A.playing && !readyA) || (state.decks.B.playing && !readyB)) {
+    // Load latency (sets 14): never stall while music plays; never skip
+    // while silent. The clock freezes ONLY when a deck that must be
+    // audible is still loading and NOTHING else is sounding (cold-cache
+    // ▶, a hard-cut instant with the incoming still loading — running
+    // the clock there would skip the incoming's opening). While any deck
+    // is sounding, the clock runs and the late deck joins at its plan
+    // position when ready (syncDeck's seek-to-plan below).
+    const missingA = state.decks.A.playing && !readyA;
+    const missingB = state.decks.B.playing && !readyB;
+    const anySounding =
+      (state.decks.A.playing && readyA) || (state.decks.B.playing && readyB);
+    if ((missingA || missingB) && !anySounding) {
       this.mixTimeAtAnchor = t;
       this.anchorAudioTime = this.mixer.now();
+      // Frozen = silent by definition: park anything still sounding
+      // (e.g. a hard-cut outgoing running past its cut instant).
       this.self(() => {
-        if (state.decks.A.playing && !readyA && readyB) this.engines.B.pause();
-        if (state.decks.B.playing && !readyB && readyA) this.engines.A.pause();
+        for (const deck of ['A', 'B'] as const) {
+          if (this.engines[deck].getSnapshot().playing) this.engines[deck].pause();
+        }
       });
       this.raf = requestAnimationFrame(this.tick);
       return;
@@ -431,6 +450,7 @@ export class Conductor {
     const state = planStateAt(this.plan, t);
     const readyA = this.ensureDeckTrack('A', state);
     const readyB = this.ensureDeckTrack('B', state);
+    this.prefetchAhead(state);
     this.self(() => {
       for (const [deck, ready] of [
         ['A', readyA],
@@ -450,6 +470,20 @@ export class Conductor {
       this.activeEntryIndex = state.activeEntryIndex;
       this.emit();
     }
+  }
+
+  /** Prefetch one entry ahead (sets 14): while the decks hold entries k
+   * and k+1, warm the decoded-buffer cache for k+2 — its deck load at
+   * the handover becomes a near-instant cache hit, inside the grace
+   * fade's headroom. One request per entry index. */
+  private prefetchAhead(state: PlanState): void {
+    if (!this.hooks.prefetch) return;
+    const nextIdx =
+      Math.max(state.decks.A.entryIndex ?? -1, state.decks.B.entryIndex ?? -1) + 1;
+    if (nextIdx <= 0 || nextIdx >= this.plan.entries.length) return;
+    if (this.prefetchedIndex === nextIdx) return;
+    this.prefetchedIndex = nextIdx;
+    this.hooks.prefetch(this.plan.entries[nextIdx].trackId);
   }
 
   /** Reconcile one deck's loaded track against the plan's occupant.

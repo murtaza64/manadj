@@ -1,6 +1,6 @@
 # 14 — Grace fade: overlapping windows and load latency
 
-Status: ready-for-agent
+Status: ready-for-human (parked for review, change pkwxstws)
 
 ## Parent
 
@@ -76,3 +76,71 @@ consumer:
 ## Blocked by
 
 - 04-conductor-v1
+
+## Comments
+
+**2026-07-05 — Implemented (change pkwxstws, stacked on 06/oxwwnsvl).**
+
+- **Grace fade = planner transform** (`applyGraceFades` in
+  `sets/planner.ts`, 6 new tests): for each adjacency j, if entry j−1
+  (the deck's occupant, ping-pong parity) is still audible within
+  `headroom` (default 5s) of W(j).mixStart, its exit truncates to
+  `mixStart − headroom` with a synthesized fade (default 2s, ending at
+  the cut) on its role-fader — `PlannedEntry.graceFade` carries
+  fadeStart/fadeStartValue/authored-exit so ladder, row durations, and
+  `planStateAt` all agree. The fade REPLACES the authored tail (ramp from
+  the authored fader value at fadeStart to 0); past the truncated exit
+  the window's outgoing-role lanes read silent (the dropped tail), and
+  the freed deck parks/loads the next entry. Hard-cut outgoings get the
+  same treatment; the cut instant stays derived from the AUTHORED end
+  (planned silence up to `headroom`, never a timing shift). Degenerate
+  floor (truncation into the victim's own entry window): as-authored +
+  `grace-floor` error flag. The transform subsumes the raw
+  window-overlap warning (one chip per collision). Tunables live in
+  `sets/setSettings.ts` (store-only, matching the 06 precedent — no edit
+  UI yet).
+- **ADR**: docs/adr/0025-grace-fade-rewrites-the-plan-tail.md (truncate
+  vs fade-in-late vs shift-window vs runtime handling).
+- **Load latency (Conductor)**: the unconditional clock-freeze is
+  narrowed to "freeze only when NOTHING is audible" (cold-cache ▶,
+  hard-cut instant with the incoming still loading); while any deck
+  sounds the clock runs and the late deck joins at its plan position via
+  the existing per-tick seek-to-plan. Frozen = silent: anything still
+  sounding is parked.
+- **Prefetch**: `prefetchAhead` warms the decode cache one entry past the
+  current deck occupants (`hooks.prefetch` → `sets/prefetch.ts`: fetch +
+  decodeAudioData on the Mixer's context + putCachedBuffer; new
+  `Mixer.audioContext()` accessor). DeckEngine loads consult the cache,
+  so the handover load is a near-instant hit inside the 5s grace. Known
+  minor: a failed prefetch isn't retried for that entry (degrades to a
+  slow load — the grace fade still covers it).
+- **Surfacing**: ladder draws the synthesized fade (red wedge over the
+  clip tail) and the dropped tail (hatched + dashed outline past the
+  truncated exit); adjacency rows chip "overlap: previous track fades
+  early" (yellow) / "overlap pileup" (red error); toolbar ⚠ count
+  includes both.
+
+**2026-07-05 — Review walkthrough (ready-for-human).** Lane app at
+**http://localhost:5253** ("test set"). The stack under review is 06 →
+14 (review 06's walkthrough first if not yet done). Script:
+
+1. Create a collision: pin transitions on two consecutive adjacencies and
+   drag the second window early (in the Transition editor, move its start
+   near/before the first window's end), or use any pair where the second
+   handover opens within ~5s of the first track's exit.
+2. The ladder shows the first track's clip ending early: a red fade wedge
+   over its last 2s, then a hatched dashed region where the authored tail
+   would have played. The row's "plays m:ss" shrinks to match. The
+   adjacency row shows "⚠ overlap: previous track fades early".
+3. Play through it: the dying track audibly fades out ~5s before the
+   colliding window; the incoming's opening plays as authored (window
+   position/timing unchanged); no jump-cut on the shared deck.
+4. Push the collision deeper (window opening inside the previous track's
+   own entry window): the fade disappears, the plan plays as authored,
+   and the row/ladder show a RED "overlap pileup" error instead.
+5. Load latency: while one track is sounding, seek far ahead (cold
+   buffers) — the music never stalls; the late deck pops in at its plan
+   position once decoded. Pause, seek to a hard-cut instant, play: the
+   clock holds (silence) until the incoming is ready — its opening is
+   never skipped. During normal playback the next track's buffer
+   prefetches (handover loads are instant on second pass).

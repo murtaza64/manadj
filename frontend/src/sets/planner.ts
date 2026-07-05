@@ -58,6 +58,12 @@ export type TempoPolicyInput =
  * ridden (a 4% ride eases back over ~8s). */
 export const DEFAULT_TEMPO_RETURN_SEC_PER_PERCENT = 2;
 
+/** Grace fade defaults (sets 14): free a colliding deck this long before
+ * the window that needs it (load headroom), fading the dying track out
+ * over the last `FADE` seconds. Both tunable settings. */
+export const DEFAULT_GRACE_HEADROOM_SEC = 5;
+export const DEFAULT_GRACE_FADE_SEC = 2;
+
 export interface PlanInput {
   entries: { trackId: number; pin: AdjacencyPin | null }[];
   /** Facts per track id. Every entry's track must be present. */
@@ -68,6 +74,8 @@ export interface PlanInput {
   takesByUuid: Record<string, VectorizeInput>;
   /** Tempo policy; absent = Riding at the default return speed. */
   tempo?: TempoPolicyInput;
+  /** Grace fade tunables (sets 14); absent = the defaults above. */
+  grace?: { headroomSec?: number; fadeSec?: number };
 }
 
 interface PlannedAdjacencyBase {
@@ -99,6 +107,21 @@ export type PlannedAdjacency =
   | (PlannedAdjacencyBase & { kind: 'hardcut'; transition?: undefined })
   | (PlannedAdjacencyBase & { kind: 'transition' | 'take'; transition: Transition });
 
+/** A planner-synthesized early exit (sets 14): the entry's tail was
+ * truncated to free its deck for a colliding window, with a fade-out
+ * ramp replacing the authored tail (which is unreachable and dropped). */
+export interface GraceFade {
+  /** The synthesized fade begins here, reaching silence at exitMixSec. */
+  fadeStartMixSec: number;
+  /** The role-fader's authored value at the fade start — the ramp runs
+   * from here to 0, REPLACING the authored tail. */
+  fadeStartValue: number;
+  /** Where the tail would have played to, as authored (ladder renders
+   * the clipped region distinctly). */
+  authoredExitSec: number;
+  authoredExitMixSec: number;
+}
+
 export interface PlannedEntry {
   trackId: number;
   deck: 'A' | 'B';
@@ -114,6 +137,8 @@ export interface PlannedEntry {
   /** The audible span on the mix axis. */
   entryMixSec: number;
   exitMixSec: number;
+  /** Present when the planner truncated this entry's tail (sets 14). */
+  graceFade?: GraceFade;
 }
 
 /** A plan degeneracy, keyed to the adjacency (or entry) it afflicts —
@@ -126,7 +151,9 @@ export interface PlanWarning {
     | 'incoming-ends-inside-window'
     | 'insufficient-runway'
     | 'no-bpm'
-    | 'pitch-clamped';
+    | 'pitch-clamped'
+    | 'grace-fade'
+    | 'grace-floor';
   message: string;
   adjacencyIndex?: number;
   entryIndex?: number;
@@ -410,8 +437,88 @@ export function planSet(input: PlanInput): SetPlan {
     mixOffset = nextMixOffset;
   }
 
+  applyGraceFades(entries, adjacencies, warnings, input.grace);
+
   const last = entries[entries.length - 1];
   return { entries, adjacencies, totalSec: Math.max(0, last.exitMixSec), warnings };
+}
+
+/**
+ * Grace fade (sets 14) — a planner TRANSFORM, not runtime improvisation.
+ * When adjacency j's window opens, its incoming (entry j+1) needs the
+ * deck entry j−1 occupies (ping-pong parity). If entry j−1 is still
+ * audible within `headroom` of that instant, truncate it early — exit at
+ * mixStart − headroom with a synthesized fade-out replacing the authored
+ * tail — so the deck frees in time to load. Authored windows NEVER shift
+ * (pins play the exact move intended; hard-cut instants stay derived
+ * from the authored end — the price of a truncated hard-cut tail is up
+ * to `headroom` of planned silence). Degenerate floor: truncation that
+ * would cut into entry j−1's own entry window plans as-authored with an
+ * error flag instead. See docs/adr on the grace fade for the rationale.
+ */
+function applyGraceFades(
+  entries: PlannedEntry[],
+  adjacencies: PlannedAdjacency[],
+  warnings: PlanWarning[],
+  grace: PlanInput['grace']
+): void {
+  const headroom = grace?.headroomSec ?? DEFAULT_GRACE_HEADROOM_SEC;
+  const fadeLen = grace?.fadeSec ?? DEFAULT_GRACE_FADE_SEC;
+
+  for (let j = 1; j < adjacencies.length; j++) {
+    const victim = entries[j - 1];
+    const needMix = adjacencies[j].mixStartSec - headroom;
+    if (victim.exitMixSec <= needMix) continue;
+
+    // This transform (or its floor flag) subsumes the raw window-overlap
+    // warning — one chip per collision.
+    const overlapIdx = warnings.findIndex(
+      (w) => w.kind === 'window-overlap' && w.adjacencyIndex === j
+    );
+    if (overlapIdx >= 0) warnings.splice(overlapIdx, 1);
+
+    // Floor: never cut into the victim's own entry window (nor before it
+    // entered at all) — plan as-authored and flag the pileup.
+    const entryAdj = j >= 2 ? adjacencies[j - 2] : undefined;
+    const floorMix =
+      entryAdj && entryAdj.kind !== 'hardcut' ? entryAdj.mixEndSec : victim.entryMixSec;
+    if (needMix <= floorMix) {
+      warnings.push({
+        severity: 'error',
+        kind: 'grace-floor',
+        adjacencyIndex: j,
+        message: `overlap pileup: freeing the deck ${headroom.toFixed(0)}s before this window would cut into the previous track's own entry — plays as authored (expect a jump-cut)`,
+      });
+      continue;
+    }
+
+    // The victim exits through its own adjacency (index j−1). The fade
+    // rides its role-fader: the authored outgoing fader if the fade sits
+    // inside that window, else the solo fader (1).
+    const exitAdj = adjacencies[j - 1];
+    const fadeStartMixSec = Math.max(needMix - fadeLen, floorMix);
+    const fadeStartValue =
+      isWindowed(exitAdj) && fadeStartMixSec >= exitAdj.mixStartSec
+        ? laneValuesAt(exitAdj.transition, authoredLocalAt(exitAdj, fadeStartMixSec)).faderA
+        : 1;
+    entries[j - 1] = {
+      ...victim,
+      exitSec: playingTrackTimeAt(entries, adjacencies, j - 1, needMix).trackTime,
+      exitMixSec: needMix,
+      graceFade: {
+        fadeStartMixSec,
+        fadeStartValue,
+        authoredExitSec: victim.exitSec,
+        authoredExitMixSec: victim.exitMixSec,
+      },
+    };
+    warnings.push({
+      severity: 'warning',
+      kind: 'grace-fade',
+      adjacencyIndex: j,
+      message: `overlap: the previous track fades out ${(victim.exitMixSec - needMix).toFixed(1)}s early to free its deck for this handover`,
+    });
+  }
 }
 
 // ── Plan evaluation (sets 04) ────────────────────────────────────────────
@@ -490,6 +597,49 @@ function authoredLocalAt(adj: WindowedAdjacency, mixTime: number): number {
   return adj.transition.startSec + (mixTime - adj.mixStartSec) * adj.rateOutgoing;
 }
 
+/** Entry `idx`'s track time + deck pitch at a mix instant WHILE PLAYING:
+ * riding its entry window, easing through the Tempo return, else on its
+ * solo anchor. Shared by planStateAt and the grace-fade transform. */
+function playingTrackTimeAt(
+  entries: PlannedEntry[],
+  adjacencies: PlannedAdjacency[],
+  idx: number,
+  mixTime: number
+): { trackTime: number; pitchPercent: number } {
+  const entry = entries[idx];
+  const entryAdj = idx > 0 ? adjacencies[idx - 1] : undefined;
+  const windowed = entryAdj && entryAdj.kind !== 'hardcut' ? entryAdj : null;
+  if (windowed && mixTime < windowed.mixEndSec) {
+    return {
+      trackTime: Math.max(
+        0,
+        bTrackTimeAt(windowed.transition, authoredLocalAt(windowed, mixTime), windowed.rateIncoming)
+      ),
+      pitchPercent: windowed.pitchIncomingPercent,
+    };
+  }
+  if (windowed && mixTime < windowed.tempoReturnEndSec) {
+    // Tempo return (Riding): rate eases linearly from the window rate r
+    // to 1 over the ramp, so track time advances quadratically.
+    const d = windowed.tempoReturnEndSec - windowed.mixEndSec;
+    const tau = mixTime - windowed.mixEndSec;
+    const r = windowed.rateIncoming;
+    const b = bTrackTimeAt(
+      windowed.transition,
+      windowed.transition.startSec + windowed.transition.durationSec,
+      r
+    );
+    return {
+      trackTime: b + r * tau + ((1 - r) * tau * tau) / (2 * d),
+      pitchPercent: windowed.pitchIncomingPercent * (1 - tau / d),
+    };
+  }
+  return {
+    trackTime: (mixTime - entry.mixOffsetSec) * entry.rate,
+    pitchPercent: (entry.rate - 1) * 100,
+  };
+}
+
 export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
   const state: PlanState = {
     decks: { A: { ...IDLE_DECK }, B: { ...IDLE_DECK } },
@@ -520,34 +670,14 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
     // rate and jump deltas (bTrackTimeAt on the authored window axis);
     // through the Tempo return it eases back to native (Riding);
     // everywhere else the solo-rate anchor rules.
-    const entryAdj = idx > 0 ? plan.adjacencies[idx - 1] : undefined;
-    const windowed = entryAdj && entryAdj.kind !== 'hardcut' ? entryAdj : null;
     let trackTime: number;
-    let pitchPercent = (entry.rate - 1) * 100;
-    if (playing && windowed && mixTime < windowed.mixEndSec) {
-      trackTime = Math.max(
-        0,
-        bTrackTimeAt(windowed.transition, authoredLocalAt(windowed, mixTime), windowed.rateIncoming)
-      );
-      pitchPercent = windowed.pitchIncomingPercent;
-    } else if (playing && windowed && mixTime < windowed.tempoReturnEndSec) {
-      // Tempo return (Riding): rate eases linearly from the window rate r
-      // to 1 over the ramp, so track time advances quadratically.
-      const d = windowed.tempoReturnEndSec - windowed.mixEndSec;
-      const tau = mixTime - windowed.mixEndSec;
-      const r = windowed.rateIncoming;
-      const b = bTrackTimeAt(
-        windowed.transition,
-        windowed.transition.startSec + windowed.transition.durationSec,
-        r
-      );
-      trackTime = b + r * tau + ((1 - r) * tau * tau) / (2 * d);
-      pitchPercent = windowed.pitchIncomingPercent * (1 - tau / d);
-    } else if (playing) {
-      trackTime = (mixTime - entry.mixOffsetSec) * entry.rate;
+    let pitchPercent: number;
+    if (playing) {
+      ({ trackTime, pitchPercent } = playingTrackTimeAt(plan.entries, plan.adjacencies, idx, mixTime));
     } else {
       // Parked: at the planned entry before playing, at the exit after.
       trackTime = idx === active || idx === upcoming ? entry.entrySec : entry.exitSec;
+      pitchPercent = (entry.rate - 1) * 100;
     }
     state.decks[deck] = { entryIndex: idx, trackId: entry.trackId, trackTime, playing, pitchPercent };
   }
@@ -565,11 +695,17 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
     const v = laneValuesAt(windowAdj.transition, authoredLocalAt(windowAdj, mixTime));
     const outDeck = plan.entries[windowIdx].deck;
     const inDeck = plan.entries[windowIdx + 1].deck;
-    state.lanes[outDeck] = {
-      fader: v.faderA,
-      eq: { low: v.eqLowA, mid: v.eqMidA, high: v.eqHighA },
-      filter: v.filterA * 2 - 1,
-    };
+    // A grace-truncated outgoing is gone: its authored tail is dropped —
+    // the deck (now parking/loading the NEXT entry) reads silent, not the
+    // authored outgoing-role fader (sets 14).
+    state.lanes[outDeck] =
+      mixTime < plan.entries[windowIdx].exitMixSec
+        ? {
+            fader: v.faderA,
+            eq: { low: v.eqLowA, mid: v.eqMidA, high: v.eqHighA },
+            filter: v.filterA * 2 - 1,
+          }
+        : soloLanes(0);
     state.lanes[inDeck] = {
       fader: v.faderB,
       eq: { low: v.eqLowB, mid: v.eqMidB, high: v.eqHighB },
@@ -579,6 +715,22 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
     for (const deck of ['A', 'B'] as const) {
       if (state.decks[deck].playing) state.lanes[deck] = soloLanes(1);
     }
+  }
+
+  // Grace fade (sets 14): inside the synthesized fade, the dying entry's
+  // fader ramps from its authored value at the fade start to 0 at the
+  // truncated exit — REPLACING the authored tail on that deck.
+  for (const deck of ['A', 'B'] as const) {
+    const d = state.decks[deck];
+    if (!d.playing || d.entryIndex === null) continue;
+    const entry = plan.entries[d.entryIndex];
+    const g = entry.graceFade;
+    if (!g || mixTime < g.fadeStartMixSec) continue;
+    const span = Math.max(entry.exitMixSec - g.fadeStartMixSec, 1e-6);
+    state.lanes[deck] = {
+      ...state.lanes[deck],
+      fader: g.fadeStartValue * Math.max(0, 1 - (mixTime - g.fadeStartMixSec) / span),
+    };
   }
   return state;
 }

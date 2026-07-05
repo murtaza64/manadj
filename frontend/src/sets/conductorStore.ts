@@ -69,13 +69,15 @@ function clearInstance(): void {
 
 /** Start playing a Set from an entry (0 = the top). Replaces any running
  * Conductor. `loadTrack` is the deck provider's Load path, captured by
- * the initiating view. */
+ * the initiating view; `prefetch` (sets 14) warms the decode cache one
+ * entry ahead. */
 export function startSetPlayback(
   setId: number,
   plan: SetPlan,
   audio: ConductorAudio,
   loadTrack: ConductorHooks['loadTrack'],
-  fromEntryIndex = 0
+  fromEntryIndex = 0,
+  prefetch?: ConductorHooks['prefetch']
 ): void {
   // Same Set, same plan, still conducting: just re-seek (row play button)
   // instead of bouncing the claim/overlay through a stop-start.
@@ -89,6 +91,7 @@ export function startSetPlayback(
   clearInstance();
   const instance = new Conductor(plan, audio, {
     loadTrack,
+    prefetch,
     onStopped: () => {
       // Every end (stop, natural end, takeover, displaced) settles idle.
       if (conductor === instance) clearInstance();
@@ -113,7 +116,8 @@ export function seekSetPlayback(
   plan: SetPlan,
   audio: ConductorAudio,
   loadTrack: ConductorHooks['loadTrack'],
-  mixTime: number
+  mixTime: number,
+  prefetch?: ConductorHooks['prefetch']
 ): void {
   if (conductor?.isActive() && conductorSetId === setId && conductor.plan === plan) {
     follow = true;
@@ -125,6 +129,7 @@ export function seekSetPlayback(
   clearInstance();
   const instance = new Conductor(plan, audio, {
     loadTrack,
+    prefetch,
     onStopped: () => {
       if (conductor === instance) clearInstance();
     },
