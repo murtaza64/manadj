@@ -151,3 +151,15 @@ Reserved for the human and for integration/verification: probes, gates, the real
 DB, the real app (ports 8000/5173). It is not a lane; agents do not do feature
 work in it. Each lane records a port offset in its `.lanes/` file (e.g. +10:
 backend 8010, vite 5183) and always passes explicit ports.
+
+- **Post-landing hot-reload** (practice added 2026-07-05): the real app runs
+  off the default workspace's working copy, so a landed change is invisible
+  there until that working copy moves. After advancing `main`, check the
+  default workspace's `@`: if it is an idle placeholder (empty change, no
+  description — or its own stale "post-landing" empty), move it to a fresh
+  change on the new trunk: `jj -R /Users/murtaza/manadj new main`. Vite and
+  the auto-reload backend pick the landed change up immediately. If `@` has
+  file changes or a real description, it's the human's — leave it alone and
+  say the app needs a manual update instead. (Note: moving default@ onto a
+  trunk containing new migrations auto-migrates the real DB on next backend
+  start — that is the sanctioned post-landing migration path.)
