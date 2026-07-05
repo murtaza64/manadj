@@ -1,6 +1,6 @@
 # 11 — Playlist flows
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -40,3 +40,5 @@ What was built:
 - No live link: reorder/remove a track in the source after copying — the copy does not change (and vice versa).
 
 Gate (on the stacked tree): pytest 633 ✓, vitest 792 ✓ (3 new), build ✓, eslint clean on touched files, alembic single head ✓. Stack parked for review: `tlrnwnvp` (10) → `nwxymvpq` (11); approving both lands the head, approving only 10 lands the prefix.
+
+**2026-07-05 — approved and landed.** Human click-through approved; stack rebased onto trunk, re-gated (pytest 633, vitest 792, build, single alembic head), landed as `tlrnwnvp` + `nwxymvpq`.

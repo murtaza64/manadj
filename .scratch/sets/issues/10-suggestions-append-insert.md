@@ -1,6 +1,6 @@
 # 10 — Suggestions: append and insert
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -41,3 +41,5 @@ What was built:
 - Ranking semantics (direction, weaker-edge, tie-break, exclusion) are asserted in `frontend/src/follow/suggest.test.ts`.
 
 Gate: pytest 633 ✓, vitest 789 ✓, build ✓, eslint clean on touched files, alembic single head ✓ (no migration). Feature stack parked on change `tlrnwnvp` pending approval.
+
+**2026-07-05 — approved and landed.** Human click-through approved; stack rebased onto trunk, re-gated (pytest 633, vitest 792, build, single alembic head), landed as `tlrnwnvp` + `nwxymvpq`.
