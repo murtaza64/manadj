@@ -20,6 +20,10 @@ A Track that has been added to the library but not yet curated: no Tags assigned
 A curation verdict on a Track: out of the active Library (bad rip, duplicate, didn't survive curation). An Archived Track leaves default views, discovery, and Export, but its record, file, provenance, and Source Correspondence persist — nothing is deleted, and nothing resurfaces (a Scan or Refresh never re-proposes it). Reversible.
 _Avoid_: hidden (sounds like a view filter), deleted (nothing is)
 
+**Desktop shell**:
+The window manadj runs in when launched as an app rather than a browser tab. Purely presentational — it attaches to a running manadj and owns no processes or state.
+_Avoid_: native app (implies a packaged distributable, which this is not)
+
 ### Curation
 
 **Tag**:
