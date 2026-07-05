@@ -69,6 +69,28 @@ with all marks present. Winner (or top two) recorded here, then a fresh
 implementation change ports it into `WaveformRendererV2` (prototype code is
 never promoted).
 
+## Verdict (2026-07-05, human judged in the lab)
+
+**Winner: "Zoned marks"** — out of 8 variants (the 5 grilled + 3 iterated:
+square-flag cues, flagpole guides, zoned marks). Vocabulary: all mark kinds
+keep full-height bars, but each kind carries its identity glyph in its own
+vertical zone:
+
+- **Hotcues**: 2px full-height pole + 5px square flag at the TOP right,
+  per-slot colors.
+- **Transition guides**: 1px full-height bar + ▶ play arrow at MID-height,
+  deck color (incoming). The next guide is emphasized (2px bar, larger
+  arrow); passed guides dim to 0.3.
+- **Main cue**: 2px full-height yellow bar + triangle at the BOTTOM.
+- **Playhead**: 3px pink bar, the widest — plus the played-dim boundary.
+- **Loop region**: purple wash (`rgba(170,0,255,0.18)`) + 2px bright purple
+  bottom band (changed from the green in `.scratch/looping/` plans).
+- **Played-portion dim**: black wash at 0.35 over body before the playhead
+  (marks stay full brightness).
+
+Iteration continues on the winner in the lab (losers deleted from
+variants.ts); the WebGL port stays a follow-up.
+
 ## Follow-ups (out of scope here)
 
 - Port winner into `WaveformRendererV2` minimap mode (+ `PlayGuideMinimapMarks`).
