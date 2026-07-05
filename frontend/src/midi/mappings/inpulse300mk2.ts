@@ -406,11 +406,12 @@ export const INPULSE_300_MK2: Mapping = {
   // (mixxxdj/mixxx res/controllers/Hercules_DJControl_Inpulse_300.midi.xml,
   // "LED Outputs" section) — PLAY LED is note 0x07 / CUE 0x06 on the deck's
   // transport channel (status 0x91/0x92), velocity 0x7f lit / 0x00 dark;
-  // hot cue pads are notes 0x00-0x07 on the pads' HOTCUE base-layer channel
-  // (status 0x96/0x97), velocity 0x7e lit; the SHIFT-layer pads are the
-  // same channels at notes 0x08-0x0F (Mixxx maps both layers to the same
-  // hotcue_N_status, so shifted lights mirror the base layer). Other pad
-  // modes are note-isolated and never written.
+  // PFL (headphone) LED echoes its button note 0x0C on the same channels
+  // (headphone-cue 05); hot cue pads are notes 0x00-0x07 on the pads'
+  // HOTCUE base-layer channel (status 0x96/0x97), velocity 0x7e lit; the
+  // SHIFT-layer pads are the same channels at notes 0x08-0x0F (Mixxx maps
+  // both layers to the same hotcue_N_status, so shifted lights mirror the
+  // base layer). Other pad modes are note-isolated and never written.
   // The device does not dump LED state on connect (tested); full sync on
   // connect is the app's job. TODO(hardware-verify): smoke-test on the MK2.
   feedback: {
@@ -418,6 +419,7 @@ export const INPULSE_300_MK2: Mapping = {
       A: {
         play: { channel: 1, number: 0x07, onVelocity: 0x7f },
         cue: { channel: 1, number: 0x06, onVelocity: 0x7f },
+        pfl: { channel: 1, number: 0x0c, onVelocity: 0x7f },
         hotCuePads: Array.from({ length: 8 }, (_, i) => ({
           channel: 6,
           number: i,
@@ -432,6 +434,7 @@ export const INPULSE_300_MK2: Mapping = {
       B: {
         play: { channel: 2, number: 0x07, onVelocity: 0x7f },
         cue: { channel: 2, number: 0x06, onVelocity: 0x7f },
+        pfl: { channel: 2, number: 0x0c, onVelocity: 0x7f },
         hotCuePads: Array.from({ length: 8 }, (_, i) => ({
           channel: 7,
           number: i,

@@ -24,6 +24,7 @@ const idle = {
   hasCuePoint: false,
   atCuePoint: false,
   assignedPads: new Set<number>(),
+  pfl: false,
 };
 
 const lit = { pending: true, cueFlash: true };
@@ -87,6 +88,17 @@ describe('ledStates', () => {
     const states = ledStates({ ...idle, assignedPads: new Set([0, 9, 42]) });
     expect(states.pads).toEqual(new Array(8).fill(false));
   });
+
+  it('PFL mirrors the mixer channel state, any phase (headphone-cue 05)', () => {
+    expect(ledStates({ ...idle, pfl: true }, lit).pfl).toBe(true);
+    expect(ledStates({ ...idle, pfl: true }, dim).pfl).toBe(true);
+    expect(ledStates(idle).pfl).toBe(false);
+  });
+
+  it('PFL is independent of transport state', () => {
+    expect(ledStates({ ...idle, playing: true, pfl: true }).pfl).toBe(true);
+    expect(ledStates({ ...idle, playing: true, pfl: false }).pfl).toBe(false);
+  });
 });
 
 const dark = ledStates(idle);
@@ -131,11 +143,20 @@ describe('encodeDeckLeds', () => {
     expect(messagesB).toContainEqual([0x97, 0x08, 0x7e]); // deck B shifted layer
   });
 
+  it('encodes PFL at its button note per deck (headphone-cue 05)', () => {
+    expect(encodeDeckLeds(feedback, 'A', { ...dark, pfl: true })).toContainEqual([
+      0x91, 0x0c, 0x7f,
+    ]);
+    expect(encodeDeckLeds(feedback, 'B', { ...dark, pfl: false })).toContainEqual([
+      0x92, 0x0c, 0x00,
+    ]);
+  });
+
   it('covers every light of the deck exactly once', () => {
     const messages = encodeDeckLeds(feedback, 'A', dark);
     const addresses = messages.map(([status, number]) => `${status}:${number}`);
     expect(new Set(addresses).size).toBe(addresses.length);
-    expect(addresses.length).toBeGreaterThanOrEqual(18); // PLAY + CUE + 2×8 pads
+    expect(addresses.length).toBeGreaterThanOrEqual(19); // PLAY + CUE + PFL + 2×8 pads
   });
 });
 
@@ -171,11 +192,13 @@ describe('allOffMessages', () => {
       expect(status >> 4).toBe(0x9);
       expect(velocity).toBe(0x00);
     }
-    // Both decks' PLAY + CUE LEDs and pad grids (both layers) are covered.
+    // Both decks' PLAY + CUE + PFL LEDs and pad grids (both layers) are covered.
     expect(messages).toContainEqual([0x91, 0x07, 0x00]);
     expect(messages).toContainEqual([0x92, 0x07, 0x00]);
     expect(messages).toContainEqual([0x91, 0x06, 0x00]);
     expect(messages).toContainEqual([0x92, 0x06, 0x00]);
+    expect(messages).toContainEqual([0x91, 0x0c, 0x00]);
+    expect(messages).toContainEqual([0x92, 0x0c, 0x00]);
     expect(messages).toContainEqual([0x96, 0x05, 0x00]);
     expect(messages).toContainEqual([0x97, 0x02, 0x00]);
     expect(messages).toContainEqual([0x96, 0x0d, 0x00]);

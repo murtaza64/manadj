@@ -56,6 +56,8 @@ export interface LedAddress {
 export interface DeckFeedback {
   play: LedAddress;
   cue: LedAddress;
+  /** The channel's PFL button light (headphone-cue 05). */
+  pfl: LedAddress;
   /**
    * Pads 1..8 by index, HOTCUE base-layer addresses ONLY — pad modes are
    * note-isolated on this class of device; other modes' lights are never

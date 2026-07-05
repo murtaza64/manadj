@@ -3,6 +3,7 @@ import { DeckScope } from '../contexts/DeckContext';
 import { useAtCuePoint } from '../hooks/useAtCuePoint';
 import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
 import { useHotCues } from '../hooks/useHotCues';
+import { useMixerValue } from '../hooks/useMixer';
 import {
   BLINK_INTERVAL_MS,
   CUE_FLASH_INTERVAL_MS,
@@ -48,6 +49,10 @@ function DeckFeedbackPublisher({
   // The on-screen CUE button's own at-cue predicate; ledStates adds the
   // paused gate (tested at the seam).
   const atCuePoint = useAtCuePoint();
+  // PFL is Mixer state, not deck state (headphone-cue 05) — read through
+  // the same change subscription as the on-screen PFL button, so hardware
+  // toggles, screen clicks and this light can never disagree.
+  const pfl = useMixerValue((m) => m.getChannelState(deck).pfl);
   // Keyed by the loaded Track: a Load re-keys the query, an empty deck
   // disables it (placeholder []) — both resolve to all pads dark until
   // real assignments arrive.
@@ -76,7 +81,7 @@ function DeckFeedbackPublisher({
   useEffect(() => {
     if (outputs.length === 0) return;
     const states = ledStates(
-      { playing, pendingPlay, previewing, hasCuePoint, atCuePoint, assignedPads },
+      { playing, pendingPlay, previewing, hasCuePoint, atCuePoint, assignedPads, pfl },
       { pending: pendingPhase, cueFlash: cueFlashPhase }
     );
     for (const output of outputs) {
@@ -93,6 +98,7 @@ function DeckFeedbackPublisher({
     hasCuePoint,
     atCuePoint,
     assignedPads,
+    pfl,
     pendingPhase,
     cueFlashPhase,
     outputs,

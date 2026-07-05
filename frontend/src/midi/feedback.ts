@@ -36,12 +36,20 @@ export interface DeckLedInput {
    * cannot drift. Empty deck = empty set = all pads dark.
    */
   assignedPads: ReadonlySet<number>;
+  /**
+   * This channel feeds the Cue bus (Mixer channel state, headphone-cue 05)
+   * — the one non-deck input; the bridge reads it off the Mixer's change
+   * subscription like the on-screen PFL button.
+   */
+  pfl: boolean;
 }
 
 /** Desired on/off per light of one deck. */
 export interface DeckLedStates {
   play: boolean;
   cue: boolean;
+  /** PFL button light — lit while the channel is cued (headphone-cue 05). */
+  pfl: boolean;
   /** Pads 1..8 by index (index 0 = pad 1), HOTCUE base layer only. */
   pads: readonly boolean[];
 }
@@ -90,6 +98,7 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
       (paused &&
         input.hasCuePoint &&
         (input.atCuePoint || phases.cueFlash)),
+    pfl: input.pfl,
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
   };
 }
@@ -101,7 +110,7 @@ function encodeLed(address: LedAddress, lit: boolean): MidiMessage {
 }
 
 function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
-  return [deck.play, deck.cue, ...deck.hotCuePads, ...deck.hotCuePadsShifted];
+  return [deck.play, deck.cue, deck.pfl, ...deck.hotCuePads, ...deck.hotCuePadsShifted];
 }
 
 /** Desired light states for one deck → the full message set to send. */
@@ -114,6 +123,7 @@ export function encodeDeckLeds(
   return [
     encodeLed(addresses.play, states.play),
     encodeLed(addresses.cue, states.cue),
+    encodeLed(addresses.pfl, states.pfl),
     ...addresses.hotCuePads.map((address, i) => encodeLed(address, states.pads[i] ?? false)),
     // The SHIFT layer mirrors the base layer (same hotcue_N_status source
     // in Mixxx), so pads stay lit while SHIFT is held — no shift tracking.
