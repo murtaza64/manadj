@@ -215,6 +215,61 @@ describe('continuous gestures collapse (idealization)', () => {
   });
 });
 
+describe('discrete gestures become Jump events (issue 04)', () => {
+  const transport = (
+    t: number,
+    channel: CaptureChannel,
+    action: 'jumpBeats' | 'hotCue' | 'seek',
+    playhead: number,
+    detail?: number
+  ): CaptureEvent => ({ t, kind: 'transport', channel, action, playhead, detail });
+
+  it('an incoming beat jump back (doubled buildup) extracts a Jump event and leaves alignment honest', () => {
+    // B rolling from 8; at mix 110 (x 0.5) a −8s beat jump: expected 18, landed 10.
+    const input = baseInput([transport(110, 'B', 'jumpBeats', 10, -16)]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toEqual([{ x: 0.5, deltaSec: expect.closeTo(-8) }]);
+    // bInSec back-projection subtracts the jump: B ends at 20 (10 + 10s),
+    // so bInSec = 20 − 20 − (−8) = 8 — the pre-jump alignment.
+    expect(tr.bInSec).toBeCloseTo(8);
+  });
+
+  it('a hot-cue press on the incoming deck extracts a Jump event', () => {
+    // Expected 18 at mix 110; the pad lands B at its drop cue 64.
+    const input = baseInput([transport(110, 'B', 'hotCue', 64, 4)]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toEqual([{ x: 0.5, deltaSec: expect.closeTo(46) }]);
+  });
+
+  it('outgoing-deck jumps are dropped (incoming-only, ADR 0020) but stay in the slice', () => {
+    const input = baseInput([transport(110, 'A', 'jumpBeats', 40, -32)]);
+    const draft = vectorizeTake(input, facts)!;
+    expect(draft.transition.jumps).toBeUndefined();
+    expect(draft.transition.startSec).toBeCloseTo(60); // anchor unaffected
+  });
+
+  it('chained jumps compute each delta against the post-previous-jump path', () => {
+    const input = baseInput([
+      transport(110, 'B', 'jumpBeats', 10, -16), // 18 → 10 (−8)
+      transport(115, 'B', 'jumpBeats', 23, 16), // expected 15 → 23 (+8)
+    ]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toEqual([
+      { x: 0.5, deltaSec: expect.closeTo(-8) },
+      { x: 0.75, deltaSec: expect.closeTo(8) },
+    ]);
+    expect(tr.bInSec).toBeCloseTo(8);
+  });
+
+  it('sub-noise deltas and plain seeks do not become Jump events', () => {
+    const input = baseInput([
+      transport(110, 'B', 'jumpBeats', 18.02, 0), // ≈ where it already was
+      transport(114, 'B', 'seek', 30, undefined), // scrubbing, not a gesture
+    ]);
+    expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
+  });
+});
+
 describe('breakpoint simplification', () => {
   it('a dense drag stream simplifies to a sparse editable polyline', () => {
     const events: CaptureEvent[] = [];

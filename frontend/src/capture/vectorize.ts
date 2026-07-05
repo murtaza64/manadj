@@ -18,13 +18,16 @@
  *   breakpoints; untouched controls stay out of `lanes` entirely — except
  *   the incoming fader lane, always drawn: its model default (a 2s fade-in
  *   ramp) would lie about a deck that was already up.
- * - Discrete gestures (beat jumps / hot cues) are IGNORED here — issue 04
- *   extends this module to extract Jump events.
+ * - DISCRETE GESTURES PRESERVED (issue 04): incoming-deck beat jumps and
+ *   hot-cue presses become Jump events; outgoing-deck ones are dropped
+ *   (incoming-only, ADR 0020). Plain seeks are scrubbing — not gestures:
+ *   a mid-window seek simply shifts the commit-point alignment, i.e. the
+ *   final (post-seek) alignment wins, per the idealization rule.
  *
  * The editor's deck roles are track-based: editor A = the outgoing deck,
  * whichever physical channel it was on.
  */
-import type { LaneId, LanePoint, Lanes, Transition } from '../editor/mixModel';
+import type { JumpEvent, LaneId, LanePoint, Lanes, Transition } from '../editor/mixModel';
 import { channelFaderToGain, crossfaderGains } from '../playback/mixerMath';
 import type { CaptureChannel, CaptureEvent, InitDeckState } from './events';
 
@@ -39,6 +42,8 @@ const VARIES_EPS = 0.005;
 const OFF_DEFAULT_EPS = 0.02;
 /** Performed-vs-required pitch gap (percent) still reading as "matched". */
 const TEMPO_MATCH_TOLERANCE_PERCENT = 1.5;
+/** Discontinuities smaller than this are sample jitter, not gestures. */
+const MIN_JUMP_SEC = 0.1;
 
 export interface VectorizeInput {
   /** The Take's raw slice, starting with its `init` head. */
@@ -108,14 +113,38 @@ export function vectorizeTake(
     required !== null &&
     Math.abs(pitchAt(inc, windowEndS) - required) <= TEMPO_MATCH_TOLERANCE_PERCENT;
 
+  // DISCRETE GESTURES → JUMP EVENTS (issue 04, ADR 0020's line): beat
+  // jumps and hot-cue presses on the INCOMING deck are intentional
+  // structure, preserved; the outgoing deck's are dropped at vectorization
+  // (incoming-only — the raw slice keeps them for a later both-decks
+  // extension). Each delta measures the landing against the pre-jump
+  // path — extrapolated from the latest sample strictly before the
+  // gesture, so chained jumps compose correctly. Plain seeks are
+  // scrubbing, not gestures.
+  const jumps: JumpEvent[] = [];
+  if (windowLen > 0) {
+    for (const e of input.events) {
+      if (e.kind !== 'transport' || e.channel !== inc) continue;
+      if (e.action !== 'jumpBeats' && e.action !== 'hotCue') continue;
+      if (e.t < windowStartS || e.t > windowEndS) continue;
+      const pre = playheadStrictlyBefore(input.events, inc, e.t, rateAt);
+      if (pre === null) continue;
+      const deltaSec = e.playhead - pre;
+      if (Math.abs(deltaSec) < MIN_JUMP_SEC) continue;
+      jumps.push({ x: (e.t - windowStartS) / windowLen, deltaSec });
+    }
+  }
+  const jumpTotal = jumps.reduce((sum, j) => sum + j.deltaSec, 0);
+
   // ALIGNMENT AT THE COMMIT POINT (PRD): the incoming's position is read
   // at the window END — after every Nudge/pitch correction has done its
   // work — and back-projected to the window start at the promoted rate.
   // Corrections thus fold INTO the single static alignment instead of
-  // being frozen out of it. (Beat jumps distort this back-projection;
-  // issue 04 subtracts them when it extracts Jump events.)
+  // being frozen out of it. Jump deltas are subtracted: the model adds
+  // them back at their instants (bTrackTimeAt), so the anchor stays the
+  // PRE-jump alignment.
   const rateUsed = tempoMatch && required !== null ? 1 + required / 100 : rateAt(inc, windowEndS);
-  const bInSec = playheadAt(inc, windowEndS) - windowLen * rateUsed;
+  const bInSec = playheadAt(inc, windowEndS) - windowLen * rateUsed - jumpTotal;
 
   return {
     outgoingChannel: out,
@@ -125,8 +154,26 @@ export function vectorizeTake(
       bInSec,
       tempoMatch,
       lanes: windowLen > 0 ? buildLanes(input, init, out) : {},
+      ...(jumps.length > 0 ? { jumps } : {}),
     },
   };
+}
+
+/** Playhead extrapolated from the latest sample STRICTLY before t (null
+ * when none) — the pre-gesture path a jump's delta is measured against. */
+function playheadStrictlyBefore(
+  events: CaptureEvent[],
+  ch: CaptureChannel,
+  t: number,
+  rateAt: (ch: CaptureChannel, t: number) => number
+): number | null {
+  let ref: { t: number; pos: number } | null = null;
+  for (const e of events) {
+    if (e.t >= t) continue;
+    if (e.kind === 'tick' && e.playheads[ch] !== undefined) ref = { t: e.t, pos: e.playheads[ch]! };
+    else if (e.kind === 'transport' && e.channel === ch) ref = { t: e.t, pos: e.playhead };
+  }
+  return ref === null ? null : ref.pos + (t - ref.t) * rateAt(ch, ref.t);
 }
 
 // ── Lane building ────────────────────────────────────────────────────────

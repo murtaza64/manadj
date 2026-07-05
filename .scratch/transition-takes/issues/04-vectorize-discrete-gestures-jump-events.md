@@ -24,3 +24,13 @@ Outgoing-deck discrete gestures are dropped at vectorization (incoming-only for 
 
 - `01-jump-events-in-model-editor-playback.md`
 - `03-take-review-and-promotion.md`
+
+## Comments
+
+**Done** (jj change on lane `takes01`, 2026-07-05). All acceptance criteria met:
+
+- Incoming-deck beat jumps and hot-cue presses inside the Take window extract as Jump events (`vectorize.ts`): each `deltaSec` measured against the pre-gesture path (extrapolated from the latest sample strictly before the instant — chained jumps compose against the previous landing). Sub-0.1s deltas are jitter, dropped; plain seeks are scrubbing, not gestures (a mid-window seek shifts the commit-point alignment instead — final alignment wins).
+- The issue-03 back-projection subtracts the jump total, so `bInSec` stays the pre-jump alignment and `bTrackTimeAt` re-adds each delta at its instant — auditioning a doubled buildup replays it.
+- Outgoing-deck gestures are dropped at vectorization; the stored raw slice is untouched (pure function) for a later both-decks extension.
+- Derived jumps are ordinary `Transition.jumps` — issue 01's editor markers/playback and issue 03's promotion path apply unchanged.
+- 5 new pure vectorizer tests (single, hot-cue, chained, incoming-only, noise/seek floor), two asserting the alignment interaction.
