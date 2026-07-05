@@ -1,6 +1,6 @@
 # 01: Ultra-flat deck layout
 
-Status: ready-for-agent (claimed — perflayout lane)
+Status: done (landed olumspok; pending user eye-verify — tweaks in-prod)
 
 Implement the PRD layout in the real performance components (replacing the
 current flank/mixer layout outright — no flag, no back-compat):
