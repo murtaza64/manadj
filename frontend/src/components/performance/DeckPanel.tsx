@@ -297,10 +297,11 @@ function TrackZone({ track }: { track: Track | null }) {
   );
 }
 
-// ── PLAY zone: jump/nudge over pads/transport (three equal rows) ─────────
+// ── PLAY zone: jump/loop/pads column beside nudge/transport ──────────────
 //   <jump>     <nudge>
-//   <pads top> <cue>
-//   <pads bot> <play>
+//   <loop>     <cue>
+//   <pads top> <play>
+//   <pads bot>
 
 function PlayZone() {
   const { deck, engine } = useDeck();

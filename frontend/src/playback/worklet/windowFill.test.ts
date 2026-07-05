@@ -45,4 +45,32 @@ describe('fillStretchWindow', () => {
     fillStretchWindow(dest, ramp(3), -2);
     expect(Array.from(dest)).toEqual([0, 0, 1, 2, 3, 0, 0, 0]);
   });
+
+  describe('loop fold (looping 03 — the stretch wrap happens at the read layer)', () => {
+    const loop = { startFrames: 4, endFrames: 8 }; // content 5,6,7,8
+
+    it('reads past the loop end come from the loop start', () => {
+      const dest = new Float32Array(6);
+      fillStretchWindow(dest, ramp(16), 6, loop);
+      expect(Array.from(dest)).toEqual([7, 8, 5, 6, 7, 8]);
+    });
+
+    it('folds across multiple wraps within one window', () => {
+      const dest = new Float32Array(10);
+      fillStretchWindow(dest, ramp(16), 6, loop);
+      expect(Array.from(dest)).toEqual([7, 8, 5, 6, 7, 8, 5, 6, 7, 8]);
+    });
+
+    it('reads before the loop end are untouched (playing into the region)', () => {
+      const dest = new Float32Array(4);
+      fillStretchWindow(dest, ramp(16), 2, loop);
+      expect(Array.from(dest)).toEqual([3, 4, 5, 6]);
+    });
+
+    it('degenerate regions read linearly', () => {
+      const dest = new Float32Array(4);
+      fillStretchWindow(dest, ramp(16), 6, { startFrames: 8, endFrames: 8 });
+      expect(Array.from(dest)).toEqual([7, 8, 9, 10]);
+    });
+  });
 });

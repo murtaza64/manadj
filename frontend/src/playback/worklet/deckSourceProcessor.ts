@@ -18,6 +18,7 @@ import type {
   DeckSourceCommand,
   DeckSourceEvent,
   DeckSourceProcessorOptions,
+  LoopFrames,
 } from './protocol';
 import type { StretchEngine } from './deckSourceKernel';
 import { fillStretchWindow } from './windowFill';
@@ -83,20 +84,23 @@ class SignalsmithEngine implements StretchEngine {
     frames: number,
     channels: Float32Array[],
     positionFrames: number,
-    rate: number
+    rate: number,
+    loop: LoopFrames | null
   ): void {
     const m = this.m;
     if (!m) return;
     const memory = m.exports ? m.exports.memory.buffer : m.HEAP8.buffer;
     // Read-ahead window ends past the audible position by the stretcher's
-    // full latency (input + output×rate, both in track frames here).
+    // full latency (input + output×rate, both in track frames here). With
+    // an active loop the fill folds reads past the region end back to its
+    // start (looping 03) — the stretcher smooths the wrap itself.
     const windowEnd = Math.round(
       positionFrames + rate * m._outputLatency() + m._inputLatency()
     );
     const windowStart = windowEnd - this.bufferLength;
     for (let c = 0; c < this.channels; c++) {
       const heap = new Float32Array(memory, this.inPtrs[c], this.bufferLength);
-      fillStretchWindow(heap, channels[Math.min(c, channels.length - 1)], windowStart);
+      fillStretchWindow(heap, channels[Math.min(c, channels.length - 1)], windowStart, loop);
     }
     m._seek(this.bufferLength, rate);
     m._process(0, frames);

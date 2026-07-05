@@ -27,13 +27,15 @@
  * at the live voice's own (audible) position.
  */
 
-import type { SourceMode } from './protocol';
+import type { LoopFrames, SourceMode } from './protocol';
 
 /** The worklet-internal stretcher seam (ADR 0018): feed samples, set rate,
  * transpose fixed at none. `render` fills `frames` of output whose audible
  * start is `positionFrames`, advancing at `rate`; the engine reads its own
  * read-ahead window from `channels` (track and context sample rates equal —
- * the kernel falls back to resample otherwise). */
+ * the kernel falls back to resample otherwise). With `loop` set, window
+ * reads at/past the region end fold back to its start (looping 03): the
+ * stretcher hears the wrapped signal and smooths the wrap itself. */
 export interface StretchEngine {
   readonly ready: boolean;
   /** Prime for a fresh voice (start/stab/mode-switch). */
@@ -43,7 +45,8 @@ export interface StretchEngine {
     frames: number,
     channels: Float32Array[],
     positionFrames: number,
-    rate: number
+    rate: number,
+    loop: LoopFrames | null
   ): void;
 }
 
@@ -72,7 +75,7 @@ export class DeckSourceKernel {
   private fading: Voice[] = [];
   private readonly declickFrames: number;
   /** Active loop region in track frames (looping 03), or null. */
-  private loop: { startFrames: number; endFrames: number } | null = null;
+  private loop: LoopFrames | null = null;
 
   private mode: SourceMode = 'resample';
   private stretchEngine: StretchEngine | null = null;
@@ -102,7 +105,7 @@ export class DeckSourceKernel {
    * end-of-track inside the region; a voice outside the region never
    * wraps. Degenerate regions clear.
    */
-  setLoop(region: { startFrames: number; endFrames: number } | null): void {
+  setLoop(region: LoopFrames | null): void {
     this.loop = region && region.endFrames > region.startFrames ? region : null;
   }
 
@@ -180,7 +183,8 @@ export class DeckSourceKernel {
           frames,
           liveAtStart.channels,
           liveAtStart.position,
-          rates[0]
+          rates[0],
+          this.renderLoopFor(liveAtStart)
         );
       }
       // Engine absent/not ready, or track at a foreign sample rate: the
@@ -228,22 +232,30 @@ export class DeckSourceKernel {
           voice.position >= effEnd
         ) {
           // Loop wrap: precedence over end-of-track inside the region.
-          // The same declick splice as a stab — retire the edge voice,
-          // fade a fresh one in at the wrapped position (both modes; a
-          // stretch voice re-primes on its next block).
           const wrapped =
             loop.startFrames + ((voice.position - effEnd) % (effEnd - loop.startFrames));
-          const { channels, srRatio, startId, mode } = voice;
-          this.retireLive();
-          this.live = {
-            channels,
-            srRatio,
-            position: wrapped,
-            age: 0,
-            fade: null,
-            startId,
-            mode,
-          };
+          if (liveBlock && voice === liveAtStart) {
+            // Stretcher-rendered voice: the wrap already happened at the
+            // READ layer (the render window folds past the region end), so
+            // the audio is continuous — only the position bookkeeping
+            // folds. No splice, no re-prime: splicing here would swap the
+            // voice onto the resample path mid-block and pop every cycle.
+            voice.position = wrapped;
+          } else {
+            // Resample path: the same declick splice as a stab — retire
+            // the edge voice, fade a fresh one in at the wrapped position.
+            const { channels, srRatio, startId, mode } = voice;
+            this.retireLive();
+            this.live = {
+              channels,
+              srRatio,
+              position: wrapped,
+              age: 0,
+              fade: null,
+              startId,
+              mode,
+            };
+          }
         } else if (voice.position >= length) {
           endedStartId = voice.startId;
           this.live = null;
@@ -251,6 +263,17 @@ export class DeckSourceKernel {
       }
     }
     return endedStartId;
+  }
+
+  /** The loop region the stretcher should fold its read window into for
+   * this voice: end clamped to the track, and only while the voice is
+   * before the end edge (a voice beyond the region never wraps). */
+  private renderLoopFor(voice: Voice): LoopFrames | null {
+    const loop = this.loop;
+    if (!loop) return null;
+    const effEnd = Math.min(loop.endFrames, DeckSourceKernel.lengthOf(voice));
+    if (effEnd <= loop.startFrames || voice.position >= effEnd) return null;
+    return { startFrames: loop.startFrames, endFrames: effEnd };
   }
 
   private retireLive(): void {

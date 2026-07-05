@@ -373,9 +373,10 @@
 
 /* ── PLAY zone (middle): three equal 26px rows ───────────────────
      <jump>     <nudge>
-     <pads top> <cue>
-     <pads bot> <play>
-   Transport order (CUE over PLAY) never mirrors — habit control. */
+      <loop>     <cue>
+      <pads top> <play>
+      <pads bot>
+    Transport order (CUE over PLAY) never mirrors — habit control. */
 
 .perf-zone-play { flex-shrink: 0; }
 
@@ -388,17 +389,18 @@
 
 .perf-deckpanel.mirrored .perf-play-inner { flex-direction: row-reverse; }
 
-/* One 3-row grid fills the band height (rows match the MIX zone's height):
-   jump row spans the top, the 8 pads flow into rows 2-3 (display:contents
-   dissolves the HotCuePads container into this grid). */
+/* One 4-row grid fills the band height: jump row spans the top, the loop
+   row (looping 03) spans below it, the 8 pads flow into rows 3-4
+   (display:contents dissolves the HotCuePads container into this grid). */
 .perf-padcol {
   display: grid;
   grid-template-columns: repeat(4, 36px);
-  grid-template-rows: repeat(3, 1fr);
+  grid-template-rows: repeat(4, 1fr);
   gap: 4px;
 }
 
 .perf-padcol .deck-jumprow { grid-column: 1 / -1; }
+.perf-padcol .deck-looprow { grid-column: 1 / -1; }
 
 .perf-pads { display: contents; }
 
@@ -439,8 +441,9 @@
 .perf-pad-wrap { position: relative; display: flex; }
 .perf-pad-wrap .hot-cue { flex: 1; }
 
-/* Beatjump row styles are shared: components/deckControls/deckControls.css */
+/* Beatjump/loop row styles are shared: components/deckControls/deckControls.css */
 .perf-padcol .deck-jumprow .player-button { padding: 2px 4px; }
+.perf-padcol .deck-looprow .player-button { padding: 2px 4px; }
 
 /* ── MIX zone (inner): knobs / pitch / vol / readouts + match ──── */
 

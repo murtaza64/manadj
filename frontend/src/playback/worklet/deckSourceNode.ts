@@ -22,6 +22,7 @@ import type {
   DeckSourceCommand,
   DeckSourceEvent,
   DeckSourceProcessorOptions,
+  LoopFrames,
   SourceMode,
 } from './protocol';
 
@@ -101,7 +102,7 @@ export class DeckSourceNode {
   }
 
   /** Active loop region in track frames (looping 03); null clears. */
-  setLoop(region: { startFrames: number; endFrames: number } | null): void {
+  setLoop(region: LoopFrames | null): void {
     this.post({ type: 'loop', region });
   }
 

@@ -247,7 +247,12 @@ describe('DeckSourceKernel end of track', () => {
 class FakeStretchEngine implements StretchEngine {
   ready = true;
   resets = 0;
-  calls: Array<{ position: number; rate: number; frames: number }> = [];
+  calls: Array<{
+    position: number;
+    rate: number;
+    frames: number;
+    loop: { startFrames: number; endFrames: number } | null;
+  }> = [];
 
   reset(): void {
     this.resets++;
@@ -258,13 +263,18 @@ class FakeStretchEngine implements StretchEngine {
     frames: number,
     channels: Float32Array[],
     positionFrames: number,
-    rate: number
+    rate: number,
+    loop: { startFrames: number; endFrames: number } | null
   ): void {
-    this.calls.push({ position: positionFrames, rate, frames });
+    this.calls.push({ position: positionFrames, rate, frames, loop });
     for (let c = 0; c < out.length; c++) {
       const data = channels[Math.min(c, channels.length - 1)];
       for (let i = 0; i < frames; i++) {
-        const idx = Math.round(positionFrames + i * rate);
+        // Honor the read-layer loop fold, like the real window fill.
+        let idx = Math.round(positionFrames + i * rate);
+        if (loop && idx >= loop.endFrames) {
+          idx = loop.startFrames + ((idx - loop.endFrames) % (loop.endFrames - loop.startFrames));
+        }
         out[c][i] = idx < data.length ? -data[idx] : 0;
       }
     }
@@ -494,7 +504,7 @@ describe('DeckSourceKernel loop wrap (looping 03)', () => {
     expect(kernel.livePositionFrames).toBeCloseTo(20, 6);
   });
 
-  it('wraps identically in stretch mode (Key Lock), re-priming per wrap', () => {
+  it('wraps in stretch mode at the READ layer: same voice, no splice, no re-prime', () => {
     const fake = new FakeStretchEngine();
     const kernel = new DeckSourceKernel(DECLICK);
     kernel.setTrack([ramp(256)], 1);
@@ -506,22 +516,47 @@ describe('DeckSourceKernel loop wrap (looping 03)', () => {
     expect(kernel.livePositionFrames).toBeCloseTo(8, 6);
     render(kernel, 8);
     expect(kernel.livePositionFrames).toBeCloseTo(8, 6);
-    // The stretcher saw the wrapped position and re-primed for the new voice.
+    // The engine saw folded read windows for the SAME voice — one prime
+    // total: a splice would swap render paths mid-voice and pop per cycle.
     expect(fake.calls.map((c) => c.position)).toEqual([8, 8]);
-    expect(fake.resets).toBe(2);
+    expect(fake.calls.map((c) => c.loop)).toEqual([
+      { startFrames: 8, endFrames: 16 },
+      { startFrames: 8, endFrames: 16 },
+    ]);
+    expect(fake.resets).toBe(1);
   });
 
-  it('a mid-block wrap in stretch mode keeps position bookkeeping exact', () => {
+  it('a mid-block stretch wrap is output-continuous (no fade dip, no splice)', () => {
+    const fake = new FakeStretchEngine();
+    const kernel = new DeckSourceKernel(1);
+    const data = ramp(256);
+    kernel.setTrack([data], 1);
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    kernel.setLoop({ startFrames: 8, endFrames: 16 });
+    kernel.start(10, 1);
+    const { out, ended } = render(kernel, 10); // wraps after 6 frames, 4 more
+    expect(ended).toEqual([]);
+    expect(kernel.livePositionFrames).toBeCloseTo(12, 6);
+    // Full gain throughout: content 10..15, then folded 8..11 — no
+    // crossfade envelope anywhere near the boundary.
+    const expected = [10, 11, 12, 13, 14, 15, 8, 9, 10, 11];
+    for (let i = 1; i < 10; i++) {
+      expect(out[0][i]).toBeCloseTo(-data[expected[i]], 5);
+    }
+  });
+
+  it('does not fold the read window for a voice beyond the region', () => {
     const fake = new FakeStretchEngine();
     const kernel = new DeckSourceKernel(1);
     kernel.setTrack([ramp(256)], 1);
     kernel.setStretchEngine(fake);
     kernel.setMode('stretch');
     kernel.setLoop({ startFrames: 8, endFrames: 16 });
-    kernel.start(10, 1);
-    const { ended } = render(kernel, 10); // wraps after 6 frames, 4 more
-    expect(ended).toEqual([]);
-    expect(kernel.livePositionFrames).toBeCloseTo(12, 6);
+    kernel.start(32, 1); // jumped past the loop: plays on linearly
+    render(kernel, 8);
+    expect(fake.calls[0].loop).toBeNull();
+    expect(kernel.livePositionFrames).toBeCloseTo(40, 6);
   });
 });
 

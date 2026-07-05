@@ -4,7 +4,6 @@ import { useScrubTransport } from '../hooks/useScrubTransport';
 import { TransportPair } from './deckControls/TransportPair';
 import { HotCuePads } from './deckControls/HotCuePads';
 import { BeatjumpRow } from './deckControls/BeatjumpRow';
-import { LoopRow } from './deckControls/LoopRow';
 import './Player.css';
 
 /**
@@ -41,7 +40,8 @@ export default function Player() {
         <div className="player-controls-overlay">
           <TransportPair cueTitle="Cue (F)" />
           <BeatjumpRow backTitleSuffix=" (A)" forwardTitleSuffix=" (S)" />
-          <LoopRow titleSuffix=" (R)" />
+          {/* No on-screen loop controls here (review verdict): `r` toggles
+              the loop, and the waveform's green region shows it. */}
 
           {/* Load state (time/bar readout is drawn on the waveform overlay) */}
           {loadState !== 'ready' && loadState !== 'empty' && (

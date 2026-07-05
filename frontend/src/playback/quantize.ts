@@ -7,12 +7,6 @@
  * Beatgrid's precomputed beat times.
  */
 
-/**
- * Nearest gridline to `time`, in seconds. Gridless degradation: without a
- * grid (null/empty) the exact position comes back unchanged. Distance ties
- * break toward the earlier beat; positions outside the grid clamp to its
- * first/last beat.
- */
 /** Index of the first beat >= time (beat_times are sorted). */
 function lowerBound(time: number, beatTimes: readonly number[]): number {
   let lo = 0;
@@ -25,6 +19,12 @@ function lowerBound(time: number, beatTimes: readonly number[]): number {
   return lo;
 }
 
+/**
+ * Nearest gridline to `time`, in seconds. Gridless degradation: without a
+ * grid (null/empty) the exact position comes back unchanged. Distance ties
+ * break toward the earlier beat; positions outside the grid clamp to its
+ * first/last beat.
+ */
 export function snapToNearestBeat(
   time: number,
   beatTimes: readonly number[] | null | undefined

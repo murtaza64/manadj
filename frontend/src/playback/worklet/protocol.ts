@@ -13,6 +13,13 @@
  * Lock on — tempo changes leave the Track's Key unchanged). */
 export type SourceMode = 'resample' | 'stretch';
 
+/** Active loop region in TRACK FRAMES (looping 03) — the audio-thread
+ * projection of the transport's seconds-domain LoopRegion. */
+export interface LoopFrames {
+  startFrames: number;
+  endFrames: number;
+}
+
 export type DeckSourceCommand =
   /** Hand over a track's decoded samples (channel data, transferred copies). */
   | { type: 'load'; channels: Float32Array[]; sampleRate: number }
@@ -24,9 +31,9 @@ export type DeckSourceCommand =
   /** Key Lock: switch modes. Mid-play this is an internal crossfade at the
    * audible position — no click, no position jump. */
   | { type: 'mode'; mode: SourceMode }
-  /** Active loop region in track frames (looping 03), or null to clear.
-   * A live voice crossing the end from inside wraps with a declick splice. */
-  | { type: 'loop'; region: { startFrames: number; endFrames: number } | null };
+  /** Active loop region (looping 03), or null to clear. A live voice
+   * crossing the end from inside wraps with a declick splice. */
+  | { type: 'loop'; region: LoopFrames | null };
 
 export type DeckSourceEvent =
   /** The live voice ran off the end of the track. Echoes the startId so the
