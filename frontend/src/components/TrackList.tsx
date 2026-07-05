@@ -192,7 +192,7 @@ export default function TrackList({
                 return (
                   <React.Fragment key={track.id}>
                     {opensGroup && (
-                      <tr className="track-tier-header" aria-hidden="false">
+                      <tr className="track-tier-header">
                         <td colSpan={playOrder !== undefined ? 11 : 10}>
                           {label}
                           <span className="track-tier-count"> — {counts.get(label!)}</span>
