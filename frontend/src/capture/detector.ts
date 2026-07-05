@@ -239,6 +239,33 @@ export function reduceCapture(
 
   applyEvent(s, e);
 
+  // A Load re-premises the deck: the track being traded no longer exists
+  // on it, so an open engagement's pair snapshot must not outlive the
+  // decks it described (the sets-13 rehearsal-reload mis-attribution).
+  // - Outgoing already ceased → the Handover was complete; its comeback
+  //   is now impossible, so settle it immediately instead of waiting out
+  //   the horizon (an eager next-track Load must not lose the Take).
+  // - Otherwise → bail: abandoning a blend by loading fresh tracks is
+  //   not a Handover; dissolve with no Take.
+  // A Load onto a LIVE incumbent also resets incumbency — its audible run
+  // ended by replacement, not by mix-out. (A Load onto an already-ceased
+  // incumbent keeps the cut-gap defense: outTrackAtCessation still
+  // attributes the outgoing.)
+  if (e.kind === 'load') {
+    if (s.engagedSince !== null) {
+      if (s.outSilentSince !== null) {
+        const take = emitTake(s);
+        if (take) takes.push(take);
+        const incoming = OTHER[s.incumbent!];
+        s.incumbent = s.decks[incoming].audible ? incoming : null;
+      }
+      dissolve(s);
+    }
+    if (s.incumbent === e.channel && s.outSilentSince === null) {
+      s.incumbent = null;
+    }
+  }
+
   // Audibility edges — CESSATIONS FIRST: an event flipping both decks at
   // once (a crossfader flick) must anchor as a cut at the cessation, on
   // either incumbency, not ride whichever deck the loop visited first.

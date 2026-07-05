@@ -227,6 +227,55 @@ describe('hard-cut track attribution', () => {
   });
 });
 
+describe('a Load re-premises the deck (the rehearsal-reload bug)', () => {
+  it('reloading both decks mid-blend ends the engagement: the next mix attributes the NEW pair', () => {
+    // The sets-13 rehearsal bug (take db99d514): noodle a pair, then the
+    // practice press reloads both decks and re-cues INSIDE the settle
+    // horizon — the old engagement must not fold over the reload and
+    // swallow the real mix under its stale pair snapshot.
+    const s = script().at(0).load('A', 9).load('B', 171).play('A').advance(5);
+    s.at(5).play('B').advance(10); // noodling: engagement 9→171 opens
+    // Practice press (engine order: load, then transport pause).
+    s.at(15).load('A', 609).pause('A').load('B', 780).pause('B');
+    s.at(19).play('A').advance(9); // re-cued A back in UNDER the horizon
+    s.at(29).play('B').advance(6); // the real mix: 780 in...
+    s.at(35).pause('A').advance(HORIZON + 1); // ...609 out
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(609);
+    expect(takes[0].incomingTrackId).toBe(780);
+    expect(takes[0].windowStartS).toBe(29);
+    expect(takes[0].windowEndS).toBe(35);
+  });
+
+  it('reloading the INCOMING deck mid-blend bails that engagement; the replacement starts fresh', () => {
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1); // engagement 1→2
+    s.at(15).load('B', 3).pause('B'); // change of mind: bail via reload
+    s.at(18).play('B'); // the replacement comes in (A still audible)
+    s.at(25).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(3);
+    expect(takes[0].windowStartS).toBe(18);
+    expect(takes[0].windowEndS).toBe(25);
+  });
+
+  it('a Load after the outgoing ceased settles the completed Handover immediately (no lost Take)', () => {
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1).at(20).fader('A', 0); // mix completes at 20
+    s.at(24).load('A', 3); // eager next-track load INSIDE the horizon
+    s.advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(2);
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(20);
+  });
+});
+
 describe('what detection cannot see', () => {
   it('PFL previewing is invisible', () => {
     const s = incumbentA();
