@@ -74,3 +74,22 @@ dispatch rule); plan is snapshotted at start (re-pin → next start); planner
    is invisible); after a takeover, perform a manual handover — that one
    DOES capture. Conductor transport itself (pause/resume, row ▶) never
    stops the Conductor.
+
+**2026-07-05 — Verification note (issues 03+04, awaiting approval).**
+Stack parked on the setlist lane: vykmvyym (03) → rtqkwmot (04), based on
+zlnxtkws. Agent-owned verification, run on the stack: frontend vitest 803
+passed (planner seam: 25 tests in `sets/planner.test.ts` — parity, windows,
+mix offsets, hard cuts, Main-cue starts, Take vectorization delegation,
+tempo-match, lead gaps, jumps, planStateAt role→deck mapping, jumpCrossed);
+`npm run build` clean; eslint clean on touched files (one pre-existing
+warning); backend pytest 566 passed; `alembic heads` = single head
+0020_ooytvuot (no new migrations in this stack). A code-review pass
+(standards + spec sub-agents) ran before parking; fixes applied in
+rtqkwmot: takeover base←automation sync (inaudible disengage), useSetPlan
+gates on pair-store init, ladder resize re-pin, cue-palette dedup,
+PlannedAdjacency discriminated union. Click-throughs: issue 03 comment
+(ladder visuals) + the walkthrough above (audible end-to-end + takeover +
+capture script). Landing on approval: rebase vykmvyym+rtqkwmot onto trunk
+tip, re-run the gate, `jj bookmark move main --to rtqkwmot`, then move the
+default workspace's idle @ to the new trunk (real DB has no migrations to
+run). Lane app :5253 serves the stack.
