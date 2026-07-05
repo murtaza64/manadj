@@ -1,10 +1,13 @@
 /**
- * MixPlayer — deterministic playback for the Transition editor.
+ * MixPlayer — the Transition editor's deterministic CONDUCTOR.
  *
- * Plays a two-track EditorMix on two DeckEngines fed into
- * the editor's own private Mixer (ADR 0009 one-graph architecture — a single
- * AudioContext, real channel strips, master bus + limiter; audio-isolated
- * from the shared decks by being a separate Mixer instance).
+ * Plays a two-track EditorMix over INJECTED playback machinery (ADR 0022
+ * prefactor, editor-shared-decks 04): two DeckEngines and the Mixer they
+ * feed. MixPlayer owns no audio — construction, registration, and
+ * disposal of the machinery belong to the owning component's lifecycle
+ * (TransitionEditor's mount effects). Until the swap (issue 05) the
+ * injected machinery is still the editor's private pair; afterwards it is
+ * the shared Decks+Mixer.
  *
  * The mix timeline runs on the Mixer's AUDIO clock (issue 08): the decks'
  * playheads derive from the same ctx.currentTime, so mix time and deck time
@@ -14,13 +17,11 @@
  * hundred ms.) The corrector remains as a rare safety net.
  */
 
-import { DeckEngine } from '../playback/DeckEngine';
-import { Mixer } from '../playback/mixer';
-import { isAudible } from '../playback/audibleSurface';
+import type { DeckEngine } from '../playback/DeckEngine';
+import type { Mixer } from '../playback/mixer';
 import { api } from '../api/client';
 import type { EditorMix } from './mixModel';
 import {
-  EDITOR_PITCH_RANGE_PERCENT,
   arrangementAt,
   jumpInstantSec,
   laneValuesAt,
@@ -34,13 +35,18 @@ export interface MixTrackInfo {
   bpm: number | null;
 }
 
+export interface MixPlayerAudio {
+  mixer: Mixer;
+  engineA: DeckEngine;
+  engineB: DeckEngine;
+}
+
 export class MixPlayer {
-  /** Editor-private mixer: own context/master/limiter (audio isolation).
-   * Its ports answer the arbiter tripwire for the 'editor' surface
-   * (ADR 0013) — starts are refused unless the editor holds audibility. */
-  readonly mixer = new Mixer(() => isAudible('editor'));
-  readonly engineA = new DeckEngine(this.mixer.portFor('A'), EDITOR_PITCH_RANGE_PERCENT);
-  readonly engineB = new DeckEngine(this.mixer.portFor('B'), EDITOR_PITCH_RANGE_PERCENT);
+  /** Injected machinery (see header). Public: the editor's UI reads deck
+   * snapshots and subscribes through these. */
+  readonly mixer: Mixer;
+  readonly engineA: DeckEngine;
+  readonly engineB: DeckEngine;
 
   private mix: EditorMix;
   private durations = { a: 0, b: 0 };
@@ -59,14 +65,18 @@ export class MixPlayer {
   private raf = 0;
   private listeners = new Set<() => void>();
 
-  // Routing registration lives in TransitionEditor's mount effect, NOT
-  // here (headphone-cue 06 follow-up): StrictMode double-invokes state
-  // initializers (a zombie MixPlayer would stay registered forever) and
-  // fires a spurious dispose on the kept instance (constructor-paired
-  // unregistration would orphan it). Effects pair setup/cleanup correctly.
+  // Routing/surface registration lives in TransitionEditor's mount
+  // effects, NOT here (headphone-cue 06 follow-up): StrictMode
+  // double-invokes state initializers (a zombie MixPlayer would stay
+  // registered forever) and fires a spurious dispose on the kept instance
+  // (constructor-paired unregistration would orphan it). Effects pair
+  // setup/cleanup correctly.
 
-  constructor(mix: EditorMix) {
+  constructor(mix: EditorMix, audio: MixPlayerAudio) {
     this.mix = mix;
+    this.mixer = audio.mixer;
+    this.engineA = audio.engineA;
+    this.engineB = audio.engineB;
   }
 
   // ── Loading ──────────────────────────────────────────────────────────
@@ -199,11 +209,10 @@ export class MixPlayer {
     return () => this.listeners.delete(listener);
   }
 
+  /** Stop conducting. Does NOT dispose the injected machinery — the
+   * owner's lifecycle does (it may outlive this conductor). */
   dispose(): void {
     cancelAnimationFrame(this.raf);
-    this.engineA.dispose();
-    this.engineB.dispose();
-    this.mixer.dispose();
     this.listeners.clear();
   }
 

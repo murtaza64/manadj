@@ -20,11 +20,14 @@ import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import {
   claimAudible,
+  isAudible,
   registerSurface,
   releaseAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
 import { registerRoutedMixer } from '../playback/routingStore';
+import { DeckEngine } from '../playback/DeckEngine';
+import { Mixer } from '../playback/mixer';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
@@ -86,13 +89,37 @@ function TransitionEditorInner() {
   // only the narrow subscribers (DawTimeline, the center panel).
   const [store] = useState(() => new EditorStore());
   useEffect(() => () => store.dispose(), [store]);
-  const [player] = useState(() => new MixPlayer(defaultMix()));
-  useEffect(() => () => player.dispose(), [player]);
+  // The editor owns its playback machinery and injects it into the
+  // conductor (ADR 0022 prefactor, issue 04). Still the private pair —
+  // the swap (issue 05) replaces this construction with the shared
+  // Decks+Mixer. Ports answer the arbiter tripwire for the 'editor'
+  // surface (ADR 0013); the widened pitch range keeps tempo-match honest
+  // on extreme pairs.
+  const [{ player, mixer }] = useState(() => {
+    const privateMixer = new Mixer(() => isAudible('editor'));
+    const engineA = new DeckEngine(privateMixer.portFor('A'), EDITOR_PITCH_RANGE_PERCENT);
+    const engineB = new DeckEngine(privateMixer.portFor('B'), EDITOR_PITCH_RANGE_PERCENT);
+    return {
+      mixer: privateMixer,
+      player: new MixPlayer(defaultMix(), { mixer: privateMixer, engineA, engineB }),
+    };
+  });
+  // Disposal pairs with the mount, not the constructor (StrictMode). The
+  // conductor first (stops its RAF), then the machinery it conducts.
+  useEffect(
+    () => () => {
+      player.dispose();
+      player.engineA.dispose();
+      player.engineB.dispose();
+      mixer.dispose();
+    },
+    [player, mixer]
+  );
   // The private mixer follows the routed MASTER device (headphone-cue 06).
-  // Registered here — an effect, not the MixPlayer constructor — so
-  // StrictMode's double-invoke/spurious-cleanup pairs correctly; the
-  // stored sink survives dispose/revive inside the Mixer itself.
-  useEffect(() => registerRoutedMixer(player.mixer), [player]);
+  // Registered here — an effect, not a constructor — so StrictMode's
+  // double-invoke/spurious-cleanup pairs correctly; the stored sink
+  // survives dispose/revive inside the Mixer itself.
+  useEffect(() => registerRoutedMixer(mixer), [mixer]);
 
   // The player follows the store SYNCHRONOUSLY (notifications are sync) —
   // audio sees a mutation before the mutating caller's next line, which
