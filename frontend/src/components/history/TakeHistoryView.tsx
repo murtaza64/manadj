@@ -5,10 +5,9 @@
  * and delete. Opening a Take in the editor is issue 03; false positives
  * are kept deliberately (delete is manual — ADR 0020).
  */
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { TAKE_RECORDED_EVENT } from '../../capture/takeSink';
 import { requestTakeReview } from '../../capture/takeReview';
 import { degradeDeletedPinsLocal } from '../../sets/setStore';
 import './takeHistory.css';
@@ -35,12 +34,8 @@ export function TakeHistoryView() {
 
   const { data: rows, error } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
 
-  // Live update: the capture layer announces each persisted Take.
-  useEffect(() => {
-    const onRecorded = () => void queryClient.invalidateQueries({ queryKey: ['takes'] });
-    window.addEventListener(TAKE_RECORDED_EVENT, onRecorded);
-    return () => window.removeEventListener(TAKE_RECORDED_EVENT, onRecorded);
-  }, [queryClient]);
+  // Live update needs no listener here: the take sink invalidates
+  // `['takes']` itself on persist (sets 13).
 
   const trackIds = useMemo(
     () => [...new Set((rows ?? []).flatMap((t) => [t.a_track_id, t.b_track_id]))].sort((a, b) => a - b),

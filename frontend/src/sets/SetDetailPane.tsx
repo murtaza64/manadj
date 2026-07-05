@@ -42,6 +42,14 @@ import {
 import { requestPairEdit } from '../editor/openPair';
 import { requestTakeReview } from '../capture/takeReview';
 import {
+  clearFreshTake,
+  freshTakeChip,
+  snapshotFreshTakes,
+  subscribeFreshTakes,
+  type FreshTake,
+} from '../capture/freshTakes';
+import { practiceCuePositions } from './practice';
+import {
   adjacencyView,
   autoFillProposal,
   type AdjacencyPin,
@@ -97,6 +105,9 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
     void initTransitionStore();
   }, []);
   const { data: takes = [] } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+  // Fresh-Take offers (sets 13): the capture sink records the latest Take
+  // per ordered pair; matching adjacencies grow a "new take — pin?" chip.
+  const freshTakes = useSyncExternalStore(subscribeFreshTakes, snapshotFreshTakes);
 
   const pairEvidence = (a: number, b: number) => {
     const transitions: TransitionEvidence[] = (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
@@ -214,6 +225,73 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
   const seekToMixTime = (mixTime: number) => {
     if (!plan) return;
     seekSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, mixTime, prefetchTrack);
+  };
+
+  // ── Practice (sets 13): mix an adjacency live on the shared decks ────
+  // Cue-on-ready plumbing: a deck seek needs decoded audio, so a cue on a
+  // not-yet-loaded track parks via a one-shot engine subscription. One
+  // pending cue per deck; a re-press (or a different practice) cancels it.
+  const pendingCues = useRef<Record<'A' | 'B', (() => void) | null>>({ A: null, B: null });
+  useEffect(
+    () => () => {
+      pendingCues.current.A?.();
+      pendingCues.current.B?.();
+    },
+    []
+  );
+  const cueDeckAt = (deck: 'A' | 'B', trackId: number, seconds: number) => {
+    pendingCues.current[deck]?.(); // cancel a superseded pending cue
+    pendingCues.current[deck] = null;
+    const engine = decks[deck].engine;
+    const snap = engine.getSnapshot();
+    if (snap.trackId === trackId && snap.loadState === 'ready') {
+      // The rehearsal reset: park (pause) and re-cue in place.
+      engine.pause();
+      engine.seek(seconds);
+      return;
+    }
+    // Load unless the right track is already in flight (a re-press during
+    // the fetch must not restart it — just re-park the cue on ready).
+    if (snap.trackId !== trackId || snap.loadState === 'error' || snap.loadState === 'empty') {
+      loadTrackOnDeck(deck, trackId);
+    }
+    const unsub = engine.subscribe(() => {
+      const s = engine.getSnapshot();
+      if (s.trackId === trackId && s.loadState === 'ready') {
+        pendingCues.current[deck] = null;
+        unsub();
+        engine.seek(seconds);
+      }
+    });
+    pendingCues.current[deck] = unsub;
+  };
+
+  // The second adjacency verb (issue 09 sketches it; this mixes it live):
+  // outgoing→A, incoming→B, cued by the plan when the adjacency is pinned,
+  // by the hot-cue/Main-cue fallbacks when unresolved. Stays in this view;
+  // the shared surface keeps audibility, so capture stays armed — mixing
+  // the pair by hand is exactly what produces the Take.
+  const practiceAdjacency = (i: number) => {
+    if (!entries) return;
+    const outgoing = entries[i];
+    const incoming = entries[i + 1];
+    const outTrack = trackMap?.get(outgoing.trackId);
+    const inTrack = incoming ? trackMap?.get(incoming.trackId) : undefined;
+    if (!incoming || !outTrack || !inTrack) return;
+    // Practicing takes the decks by hand — a running Conductor stands down.
+    stopSetPlayback();
+    const positions = practiceCuePositions({
+      adjacency: plan?.adjacencies[i],
+      outgoingEntry: plan?.entries[i],
+      incomingEntry: plan?.entries[i + 1],
+      outgoingDurationSec: outTrack.duration_secs ?? 0,
+      outgoingHotCueSecs: (hotCuesByTrack.get(outgoing.trackId) ?? []).map(
+        (c) => c.time_seconds
+      ),
+      incomingMainCueSec: inTrack.cue_point_time ?? 0,
+    });
+    cueDeckAt('A', outgoing.trackId, positions.outgoingSec);
+    cueDeckAt('B', incoming.trackId, positions.incomingSec);
   };
 
   // ── Scroll persistence (set store — survives mode switches) ──────────
@@ -530,6 +608,21 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
                     onOpenEditor={() =>
                       openAdjacencyEditor(entry.trackId, next.trackId, entry.pin)
                     }
+                    onPractice={
+                      trackMap?.has(entry.trackId) && trackMap?.has(next.trackId)
+                        ? () => practiceAdjacency(i)
+                        : undefined
+                    }
+                    freshTake={freshTakeChip(
+                      freshTakes,
+                      entry.trackId,
+                      next.trackId,
+                      entry.pin?.uuid ?? null
+                    )}
+                    onPinFreshTake={(uuid) => {
+                      setAdjacencyPin(setId, entry.trackId, { kind: 'take', uuid });
+                      clearFreshTake(entry.trackId, next.trackId);
+                    }}
                     onSuggestInsert={(() => {
                       const predecessor = trackMap?.get(entry.trackId);
                       const successor = trackMap?.get(next.trackId);
@@ -629,6 +722,9 @@ function AdjacencyRow({
   warnings,
   onPin,
   onOpenEditor,
+  onPractice,
+  freshTake,
+  onPinFreshTake,
   onSuggestInsert,
 }: {
   pin: AdjacencyPin | null;
@@ -639,6 +735,13 @@ function AdjacencyRow({
   /** Click-through (sets 09): open this adjacency in the Transition
    * editor (pin-kind routing lives with the caller). */
   onOpenEditor: () => void;
+  /** Practice (sets 13): cue the pair on the decks — re-press re-cues.
+   * Absent while the pair's track metadata is still loading. */
+  onPractice?: () => void;
+  /** A just-captured Take for this ordered pair (sets 13) — the transient
+   * "new take — pin?" offer; null when none (or it's already the pin). */
+  freshTake: FreshTake | null;
+  onPinFreshTake: (uuid: string) => void;
   /** Open insert suggestions for this adjacency (sets 10); absent while
    * the pair's track metadata is still loading. */
   onSuggestInsert?: (x: number, y: number) => void;
@@ -731,6 +834,51 @@ function AdjacencyRow({
             }}
           >
             ↳ pin {proposal.favorite ? '★ ' : ''}{proposal.name}
+          </button>
+        )}
+
+        {/* Practice (sets 13): the mix-it-live verb — outgoing cued on A
+            with a runway, incoming on B; press again to re-cue. */}
+        {onPractice && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onPractice();
+            }}
+            title="Practice this handover: cue outgoing on deck A (with a runway), incoming on deck B — press again to re-cue"
+            style={{
+              padding: '1px 8px',
+              background: 'transparent',
+              border: '1px dashed var(--yellow)',
+              color: 'var(--yellow)',
+              cursor: 'pointer',
+              fontSize: '12px',
+            }}
+          >
+            ⏵ practice
+          </button>
+        )}
+
+        {/* Fresh-Take offer (sets 13): the latest just-captured Take for
+            this pair — one click pins it (never auto-pinned). */}
+        {freshTake && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onPinFreshTake(freshTake.uuid);
+            }}
+            title="A Take was just captured for this handover — pin it"
+            style={{
+              padding: '1px 8px',
+              background: 'var(--mauve)',
+              border: '1px solid var(--mauve)',
+              color: 'var(--base)',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+            }}
+          >
+            ● new take — pin?
           </button>
         )}
 

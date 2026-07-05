@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './api/queryClient';
 
 // Waveform style panel (edits the persisted style slots live).
 const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
@@ -21,8 +22,6 @@ import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
 import { installNoFocusRule } from './focus/noFocusRule';
-
-const queryClient = new QueryClient();
 
 const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles'];
 
