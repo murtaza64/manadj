@@ -1,6 +1,6 @@
 # 07 — Reorder live preview + Dormant pins
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -82,3 +82,8 @@ open http://localhost:5313 →
    reload): the Dormant state survived — dragging back still restores.
 6. Open a second Set sharing the same tracks: its adjacencies are
    unaffected (dormancy is strictly per-Set).
+
+**2026-07-05 — approved and landed** (`mwzqllkt`, re-gated after 16
+landed first: pytest 666, vitest 1041, single alembic head). Follow-up
+filed: 20-list-drag-preview (extend the drag preview from the ladder to
+the track list itself).
