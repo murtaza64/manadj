@@ -9,12 +9,16 @@
  * undefined while anything is still loading; a failed Take fetch degrades
  * that pin to a hard cut (dangling-reference rule).
  */
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { VectorizeInput } from '../capture/vectorize';
 import type { Transition } from '../editor/mixModel';
-import { snapshotPairStore, subscribePairStore } from '../editor/pairStore';
+import {
+  initTransitionStore,
+  snapshotPairStore,
+  subscribePairStore,
+} from '../editor/pairStore';
 import type { Track } from '../types';
 import { planSet, type PlanInput, type SetPlan } from './planner';
 import type { SetEntryLocal } from './setStore';
@@ -24,6 +28,20 @@ export function useSetPlan(
   trackMap: Map<number, Track> | undefined
 ): SetPlan | undefined {
   const pairStore = useSyncExternalStore(subscribePairStore, snapshotPairStore);
+
+  // Never plan against an unloaded pair store: pinned Transitions would
+  // transiently degrade to hard cuts — and a "Play set" pressed in that
+  // window would snapshot the wrong plan into the Conductor.
+  const [transitionsReady, setTransitionsReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void initTransitionStore().then(() => {
+      if (alive) setTransitionsReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const takeUuids = (entries ?? [])
     .filter((e) => e.pin?.kind === 'take')
@@ -40,7 +58,7 @@ export function useSetPlan(
 
   return useMemo(() => {
     if (!entries || entries.length === 0) return undefined;
-    if (takesLoading) return undefined;
+    if (!transitionsReady || takesLoading) return undefined;
     if (!trackMap || entries.some((e) => !trackMap.has(e.trackId))) return undefined;
 
     const tracks: PlanInput['tracks'] = {};
@@ -76,5 +94,5 @@ export function useSetPlan(
 
     return planSet({ entries, tracks, transitionsByUuid, takesByUuid });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, trackMap, pairStore, takesLoading, takeUuids.join(',')]);
+  }, [entries, trackMap, pairStore, transitionsReady, takesLoading, takeUuids.join(',')]);
 }

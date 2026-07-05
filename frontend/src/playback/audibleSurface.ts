@@ -19,7 +19,7 @@
  */
 import type { ChannelId } from './mixer';
 
-export type AudibleSurfaceId = 'shared' | 'editor';
+export type AudibleSurfaceId = 'shared' | 'editor' | 'conductor';
 
 /** Transport-class gestures (the ones that can start audio). Absent
  * handlers mean the gesture has no meaning on that surface — dropped. */
@@ -110,8 +110,9 @@ export function unregisterSurface(id: AudibleSurfaceId): void {
 
 /** Become the audible surface: silences (pauses) the current holder.
  * Idempotent for the holder. Claim-over-claim (neither party is 'shared')
- * is last-wins — unreachable with two surfaces; a third surface re-grills
- * this (ADR 0013). */
+ * is last-wins: the Conductor yields to an editor claim by halting and
+ * leaving the claimant in charge (sets 04 ADR — it subscribes and stands
+ * down instead of releasing, since only the holder may release). */
 export function claimAudible(id: AudibleSurfaceId): void {
   if (holder === id) return;
   const claimant = surfaces.get(id);

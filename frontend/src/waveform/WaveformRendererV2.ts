@@ -72,7 +72,9 @@ const HOT_CUE_COLORS: Record<number, [number, number, number]> = {
   8: [0.58, 0.89, 0.84], // teal
 };
 
-const HOT_CUE_CSS_COLORS: Record<number, string> = {
+/** Hot-cue slot palette (CSS side; also reused by the Set overview
+ * ladder — sets 04 review). */
+export const HOT_CUE_CSS_COLORS: Record<number, string> = {
   1: 'rgb(137, 180, 250)',
   2: 'rgb(249, 226, 175)',
   3: 'rgb(250, 179, 135)',

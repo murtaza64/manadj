@@ -21,24 +21,13 @@ import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
 import { toThreeBands, type ThreeBandWaveform } from '../waveform/blob';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
+import { HOT_CUE_CSS_COLORS } from '../waveform/WaveformRendererV2';
 import type { PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
 
 const LANE_H = 46;
 const TITLE_H = 13;
 export const LADDER_H = LANE_H * 2 + 4;
 const ZOOM = 5;
-
-/** Hot-cue slot palette (matches the waveform renderer's slot colors). */
-const CUE_SLOT_COLORS: Record<number, string> = {
-  1: 'rgb(137, 180, 250)',
-  2: 'rgb(249, 226, 175)',
-  3: 'rgb(250, 179, 135)',
-  4: 'rgb(243, 139, 168)',
-  5: 'rgb(166, 227, 161)',
-  6: 'rgb(245, 194, 231)',
-  7: 'rgb(203, 166, 247)',
-  8: 'rgb(148, 226, 213)',
-};
 
 interface OverviewLadderProps {
   plan: SetPlan;
@@ -51,8 +40,12 @@ interface OverviewLadderProps {
 
 export function OverviewLadder({ plan, tracks, hotCuesByTrack, listRef }: OverviewLadderProps) {
   const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   /** Entry index span currently visible in the list (dims the rest). */
   const [view, setView] = useState<[number, number]>([0, plan.entries.length - 1]);
+  /** ZOOM while the list scrolls; 1 when the whole Set fits one screen —
+   * a zoomed ladder would otherwise be unreachable (no scroll to pin to). */
+  const [zoom, setZoom] = useState(ZOOM);
   const total = Math.max(plan.totalSec, 0.001);
 
   // ── Pinned scrolls: one progress value drives both ─────────────────────
@@ -61,10 +54,12 @@ export function OverviewLadder({ plan, tracks, hotCuesByTrack, listRef }: Overvi
     if (!list) return;
     const recompute = () => {
       const outer = outerRef.current;
-      if (!outer) return;
+      const inner = innerRef.current;
+      if (!outer || !inner) return;
       const scrollable = list.scrollHeight - list.clientHeight;
+      setZoom(scrollable > 0 ? ZOOM : 1);
       const progress = scrollable > 0 ? list.scrollTop / scrollable : 0;
-      outer.scrollLeft = progress * (outer.clientWidth * ZOOM - outer.clientWidth);
+      outer.scrollLeft = progress * (inner.clientWidth - outer.clientWidth);
 
       // Visible rows → dim clips outside the span.
       const rows = list.querySelectorAll('[data-set-track-row]');
@@ -84,8 +79,14 @@ export function OverviewLadder({ plan, tracks, hotCuesByTrack, listRef }: Overvi
     };
     recompute();
     list.addEventListener('scroll', recompute);
-    return () => list.removeEventListener('scroll', recompute);
-  }, [listRef, plan]);
+    // Resizes change both scroll fractions and the ladder's pixel widths —
+    // re-pin (row-height changes come through as list scroll/plan updates).
+    window.addEventListener('resize', recompute);
+    return () => {
+      list.removeEventListener('scroll', recompute);
+      window.removeEventListener('resize', recompute);
+    };
+  }, [listRef, plan, zoom]);
 
   // Click: scroll the list to the progress that centers the clicked clip
   // (clamped at the edges — the pinned handler then moves the ladder).
@@ -95,11 +96,12 @@ export function OverviewLadder({ plan, tracks, hotCuesByTrack, listRef }: Overvi
     if (!outer || !list) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const t = ((e.clientX - rect.left) / rect.width) * total;
-    let idx = plan.entries.findIndex((en) => t <= en.exitMixSec);
+    let idx = plan.entries.findIndex((entry) => t <= entry.exitMixSec);
     if (idx === -1) idx = plan.entries.length - 1;
-    const en = plan.entries[idx];
-    const innerW = outer.clientWidth * ZOOM;
-    const clipCenterPx = (((en.entryMixSec + en.exitMixSec) / 2) / total) * innerW;
+    const entry = plan.entries[idx];
+    const innerW = outer.clientWidth * zoom;
+    if (innerW <= outer.clientWidth) return; // whole set visible — nothing to scroll
+    const clipCenterPx = (((entry.entryMixSec + entry.exitMixSec) / 2) / total) * innerW;
     const progress = Math.min(
       Math.max((clipCenterPx - outer.clientWidth / 2) / (innerW - outer.clientWidth), 0),
       1
@@ -120,8 +122,9 @@ export function OverviewLadder({ plan, tracks, hotCuesByTrack, listRef }: Overvi
       }}
     >
       <div
+        ref={innerRef}
         onClick={onClick}
-        style={{ position: 'relative', width: `${ZOOM * 100}%`, height: '100%', cursor: 'pointer' }}
+        style={{ position: 'relative', width: `${zoom * 100}%`, height: '100%', cursor: 'pointer' }}
       >
         {/* Transition/Take window bands + hard-cut blades */}
         {plan.adjacencies.map((adj, i) => (
@@ -229,7 +232,7 @@ function LadderClip({
   const title = track ? (track.title ?? track.filename) : `Track ${entry.trackId}`;
   const cues = hotCues.map((c) => ({
     t: c.time_seconds,
-    color: c.color ?? CUE_SLOT_COLORS[c.slot_number] ?? '#fff',
+    color: c.color ?? HOT_CUE_CSS_COLORS[c.slot_number] ?? '#fff',
   }));
   return (
     <div

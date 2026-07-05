@@ -15,6 +15,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useDecks } from '../hooks/useDeck';
+import { useMixer } from '../hooks/useMixer';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
@@ -44,6 +46,12 @@ import {
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
+import {
+  conductorTogglePlay,
+  startSetPlayback,
+  stopSetPlayback,
+  useConductorState,
+} from './conductorStore';
 import { OverviewLadder } from './OverviewLadder';
 import { fmtSec, type PlannedEntry } from './planner';
 import { useSetPlan } from './useSetPlan';
@@ -136,6 +144,32 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
     const cues = hotCueQueries[i]?.data;
     if (cues) hotCuesByTrack.set(id, cues);
   });
+
+  // ── Conductor (sets 04): play the Set through the shared Decks/Mixer ─
+  const mixer = useMixer();
+  const decks = useDecks();
+  const conductorState = useConductorState();
+  const conductingThis = conductorState.setId === setId && conductorState.status !== 'idle';
+  const trackMapRef = useRef(trackMap);
+  useEffect(() => {
+    trackMapRef.current = trackMap;
+  });
+  const playFromEntry = (index: number) => {
+    if (!plan) return;
+    startSetPlayback(
+      setId,
+      plan,
+      { mixer, engines: { A: decks.A.engine, B: decks.B.engine } },
+      (deck, trackId) => {
+        // The deck provider's one Load path (ADR 0022); the pane's track
+        // map usually already holds the row.
+        const known = trackMapRef.current?.get(trackId);
+        if (known) decks[deck].loadTrack(known);
+        else void api.tracks.getById(trackId).then((t) => decks[deck].loadTrack(t));
+      },
+      index
+    );
+  };
 
   // ── Scroll persistence (set store — survives mode switches) ──────────
   const paneRef = useRef<HTMLDivElement>(null);
@@ -239,7 +273,49 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
             {plan && ` · ${fmtSec(plan.totalSec)}`}
           </span>
         </span>
-        <span style={{ display: 'flex', alignItems: 'center' }}>
+        <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          {/* Conductor transport (sets 04) — play/pause/stop are Conductor
+              controls, never takeover triggers. */}
+          {plan && plan.entries.length > 0 && (
+            <>
+              <button
+                onClick={() => (conductingThis ? conductorTogglePlay() : playFromEntry(0))}
+                title={
+                  conductingThis
+                    ? conductorState.status === 'playing'
+                      ? 'Pause set playback'
+                      : 'Resume set playback'
+                    : 'Play the set through the decks'
+                }
+                style={{
+                  padding: '2px 10px',
+                  background: conductingThis ? 'var(--mauve)' : 'var(--surface0)',
+                  color: conductingThis ? 'var(--base)' : 'var(--text)',
+                  border: '1px solid var(--surface1)',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                {conductingThis && conductorState.status === 'playing' ? '⏸ Playing' : '▶ Play set'}
+              </button>
+              {conductingThis && (
+                <button
+                  onClick={stopSetPlayback}
+                  title="Stop the Conductor (decks pause)"
+                  style={{
+                    padding: '2px 10px',
+                    background: 'var(--surface0)',
+                    color: 'var(--red)',
+                    border: '1px solid var(--surface1)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  ⏹
+                </button>
+              )}
+            </>
+          )}
         <button
           onClick={() => setAdjacencyPins(setId, autoFillable)}
           disabled={autoFillable.size === 0}
@@ -338,6 +414,8 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
                   trackId={entry.trackId}
                   track={track}
                   planned={planned}
+                  conducting={conductingThis && conductorState.activeEntryIndex === i}
+                  onPlayFrom={plan ? () => playFromEntry(i) : undefined}
                   onRemove={() => removeTrackFromSet(setId, entry.trackId)}
                 />
                 {next && (
@@ -559,6 +637,8 @@ function SetTrackRow({
   trackId,
   track,
   planned,
+  conducting,
+  onPlayFrom,
   onRemove,
 }: {
   index: number;
@@ -566,6 +646,10 @@ function SetTrackRow({
   track: Track | undefined;
   /** This entry's slice of the playback plan (sets 03). */
   planned: PlannedEntry | undefined;
+  /** The Conductor's playhead is inside this entry (sets 04). */
+  conducting: boolean;
+  /** Row play button: start Set playback at this track's planned entry. */
+  onPlayFrom: (() => void) | undefined;
   onRemove: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -585,10 +669,31 @@ function SetTrackRow({
         borderLeft: planned
           ? `3px solid ${DECK_COLORS[planned.deck]}`
           : '3px solid transparent',
-        background: hovered ? 'var(--surface0)' : 'transparent',
+        background: conducting
+          ? 'color-mix(in srgb, var(--mauve) 18%, transparent)'
+          : hovered
+            ? 'var(--surface0)'
+            : 'transparent',
         cursor: 'grab',
       }}
     >
+      <button
+        onClick={onPlayFrom}
+        disabled={!onPlayFrom}
+        title="Play the set from this track's planned entry"
+        style={{
+          visibility: hovered && onPlayFrom ? 'visible' : 'hidden',
+          padding: 0,
+          width: '18px',
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--mauve)',
+          cursor: 'pointer',
+          fontSize: '12px',
+        }}
+      >
+        ▶
+      </button>
       <span style={{ width: '24px', textAlign: 'right', color: 'var(--subtext0)', fontSize: '12px' }}>
         {index + 1}
       </span>

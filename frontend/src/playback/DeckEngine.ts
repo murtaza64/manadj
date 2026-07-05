@@ -27,6 +27,13 @@ import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
 
+/** A playhead discontinuity: seek, beat jump, or hot-cue jump. */
+export interface DeckTransportGesture {
+  action: 'seek' | 'jumpBeats' | 'hotCue';
+  playhead: number;
+  detail?: number;
+}
+
 export interface CueDefaultsInfo {
   /** Persisted Main cue, if any (CDJ memory-cue behavior). */
   savedCuePoint: number | null;
@@ -134,12 +141,25 @@ export class DeckEngine {
    * (transition-takes 02): raw-slice evidence for Take vectorization.
    * Same single-slot, engine-stays-API-ignorant contract as onCueSet.
    */
-  private onTransportEvent:
-    | ((e: { action: 'seek' | 'jumpBeats' | 'hotCue'; playhead: number; detail?: number }) => void)
-    | null = null;
+  private onTransportEvent: ((e: DeckTransportGesture) => void) | null = null;
 
   setTransportEventHandler(handler: typeof this.onTransportEvent): void {
     this.onTransportEvent = handler;
+  }
+
+  /** Additional discontinuity listeners (sets 04): the Conductor's
+   * takeover tap rides beside capture's single slot — additive, so the
+   * recorder's ownership of the slot above stays untouched. */
+  private transportEventListeners = new Set<(e: DeckTransportGesture) => void>();
+
+  addTransportEventListener(listener: (e: DeckTransportGesture) => void): () => void {
+    this.transportEventListeners.add(listener);
+    return () => this.transportEventListeners.delete(listener);
+  }
+
+  private fireTransportEvent(e: DeckTransportGesture): void {
+    this.onTransportEvent?.(e);
+    for (const listener of this.transportEventListeners) listener(e);
   }
 
   private readonly port: DeckAudioPort;
@@ -291,7 +311,7 @@ export class DeckEngine {
   seek(seconds: number): void {
     if (!this.buffer) return;
     const time = this.clampTime(seconds);
-    this.onTransportEvent?.({ action: 'seek', playhead: time });
+    this.fireTransportEvent({ action: 'seek', playhead: time });
     this.dispatch({ type: 'seek', time });
   }
 
@@ -301,7 +321,7 @@ export class DeckEngine {
     // a silently dead control.
     const bpm = this.trackInfo?.bpm ?? 120;
     const target = this.clampTime(this.getPlayhead() + beats * (60 / bpm));
-    this.onTransportEvent?.({ action: 'jumpBeats', playhead: target, detail: beats });
+    this.fireTransportEvent({ action: 'jumpBeats', playhead: target, detail: beats });
     this.dispatch({ type: 'seek', time: target });
   }
 
@@ -325,7 +345,7 @@ export class DeckEngine {
   hotCueDown(slot: number, timeSeconds: number | null): void {
     const time = timeSeconds === null ? null : this.clampTime(timeSeconds);
     if (time !== null) {
-      this.onTransportEvent?.({ action: 'hotCue', playhead: time, detail: slot });
+      this.fireTransportEvent({ action: 'hotCue', playhead: time, detail: slot });
     }
     this.dispatch({ type: 'hot-cue-down', slot, time });
   }

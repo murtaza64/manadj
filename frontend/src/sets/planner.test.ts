@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CaptureEvent } from '../capture/events';
 import type { Transition } from '../editor/mixModel';
-import { planSet, type PlanInput } from './planner';
+import { jumpCrossed, planSet, planStateAt, type PlanInput } from './planner';
 
 /** Track facts shorthand: id → { durationSec, bpm, mainCueSec }. */
 function input(over: Partial<PlanInput> = {}): PlanInput {
@@ -298,5 +298,176 @@ describe('Take pins (plan-time vectorization)', () => {
       })
     );
     expect(headless.adjacencies[0].kind).toBe('hardcut');
+  });
+});
+
+// ── planStateAt (sets 04): plan evaluation at a mix instant ─────────────
+
+describe('planStateAt', () => {
+  /** Two tracks, transition window at track-1 time 60..80 (= mix 60..80),
+   * B in at 8 — the same fixture as the window suite, with drawn lanes:
+   * outgoing fader ramps 1→0, incoming eqLow parked at 0.2. */
+  const lanes: Transition['lanes'] = {
+    faderA: [
+      { x: 0, y: 1 },
+      { x: 1, y: 0 },
+    ],
+    eqLowB: [{ x: 0, y: 0.2 }],
+  };
+  const twoTrackPlan = () =>
+    planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100) },
+        transitionsByUuid: { t1: tr({ lanes }) },
+      })
+    );
+
+  it('solo stretch: only the active deck plays, at full fader, native pitch', () => {
+    const s = planStateAt(twoTrackPlan(), 20); // track-1 time 20
+    expect(s.decks.A.playing).toBe(true);
+    expect(s.decks.A.trackTime).toBeCloseTo(20);
+    expect(s.decks.A.pitchPercent).toBe(0);
+    expect(s.decks.B.playing).toBe(false);
+    expect(s.lanes.A.fader).toBe(1);
+    expect(s.lanes.B.fader).toBe(0);
+    expect(s.activeEntryIndex).toBe(0);
+    expect(s.done).toBe(false);
+  });
+
+  it('inside the window: both decks play, role lanes mapped onto physical decks', () => {
+    const s = planStateAt(twoTrackPlan(), 70); // window midpoint (x = 0.5)
+    expect(s.decks.A.playing).toBe(true);
+    expect(s.decks.A.trackTime).toBeCloseTo(70);
+    expect(s.decks.B.playing).toBe(true);
+    expect(s.decks.B.trackTime).toBeCloseTo(18); // 8 + 10s at rate 1
+    // Outgoing-role fader (drawn 1→0) reads 0.5 at the midpoint, on deck A.
+    expect(s.lanes.A.fader).toBeCloseTo(0.5);
+    expect(s.lanes.B.eq.low).toBeCloseTo(0.2);
+    expect(s.activeEntryIndex).toBe(1); // the incoming has entered
+  });
+
+  it('after the window: incoming solo at native pitch, outgoing deck stopped', () => {
+    const s = planStateAt(twoTrackPlan(), 90);
+    expect(s.decks.A.playing).toBe(false);
+    expect(s.decks.B.playing).toBe(true);
+    expect(s.decks.B.trackTime).toBeCloseTo(38); // native anchor: 90 − 52
+    expect(s.decks.B.pitchPercent).toBe(0);
+    expect(s.lanes.B.fader).toBe(1);
+    expect(s.lanes.A.fader).toBe(0);
+  });
+
+  it('swaps role→deck mapping on odd adjacencies (outgoing on deck B)', () => {
+    // Three tracks: adjacency 1's outgoing (entry 1) sits on deck B.
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null }, // hard cut into track 2
+          { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100), 3: facts(100) },
+        transitionsByUuid: { t2: tr({ startSec: 40, lanes }) },
+      })
+    );
+    // Track 1 ends at mix 90 (cut); track 2 time 0 at mix 90; window mix 130..150.
+    const s = planStateAt(plan, 140);
+    expect(s.decks.B.playing).toBe(true); // outgoing (entry 1)
+    expect(s.decks.A.playing).toBe(true); // incoming (entry 2)
+    // Outgoing-role fader lane lands on physical deck B this time.
+    expect(s.lanes.B.fader).toBeCloseTo(0.5);
+    expect(s.lanes.A.eq.low).toBeCloseTo(0.2);
+  });
+
+  it('tempo-matches the incoming inside the window only', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: { ...facts(90, 10), bpm: 100 }, 2: { ...facts(100), bpm: 96 } },
+        transitionsByUuid: { t1: tr({ tempoMatch: true }) },
+      })
+    );
+    const rate = 100 / 96;
+    const inWindow = planStateAt(plan, 70);
+    expect(inWindow.decks.B.pitchPercent).toBeCloseTo((rate - 1) * 100);
+    expect(inWindow.decks.B.trackTime).toBeCloseTo(8 + 10 * rate);
+    const after = planStateAt(plan, 90);
+    expect(after.decks.B.pitchPercent).toBe(0);
+  });
+
+  it('holds the incoming silent through a lead gap (bInSec < 0)', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100) },
+        transitionsByUuid: { t1: tr({ bInSec: -4 }) },
+      })
+    );
+    const early = planStateAt(plan, 62); // gap: B audio starts at mix 64
+    expect(early.decks.B.playing).toBe(false);
+    const later = planStateAt(plan, 66);
+    expect(later.decks.B.playing).toBe(true);
+    expect(later.decks.B.trackTime).toBeCloseTo(2);
+  });
+
+  it('hard-cuts: outgoing solo to the cut, incoming solo from its Main cue after', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100, 25) },
+      })
+    );
+    const before = planStateAt(plan, 89.5);
+    expect(before.decks.A.playing).toBe(true);
+    expect(before.decks.B.playing).toBe(false);
+    const after = planStateAt(plan, 90.5);
+    expect(after.decks.A.playing).toBe(false);
+    expect(after.decks.B.playing).toBe(true);
+    expect(after.decks.B.trackTime).toBeCloseTo(25.5);
+    expect(after.lanes.B.fader).toBe(1);
+  });
+
+  it('parks the upcoming deck at its planned entry before it plays', () => {
+    const s = planStateAt(twoTrackPlan(), 20);
+    expect(s.decks.B.entryIndex).toBe(1);
+    expect(s.decks.B.trackId).toBe(2);
+    expect(s.decks.B.trackTime).toBeCloseTo(8); // parked at planned entry
+    expect(s.decks.B.playing).toBe(false);
+  });
+
+  it('reports jump-instant crossings on the global mix axis', () => {
+    // Jump at window x=0.5 → track-1 time 70 → mix 70.
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100) },
+        transitionsByUuid: { t1: tr({ jumps: [{ x: 0.5, deltaSec: 10 }] }) },
+      })
+    );
+    expect(jumpCrossed(plan, 69.9, 70.1)).toBe(true);
+    expect(jumpCrossed(plan, 70.1, 70.3)).toBe(false);
+  });
+
+  it('is done past the last exit: both decks stopped', () => {
+    const plan = twoTrackPlan();
+    const s = planStateAt(plan, plan.totalSec + 1);
+    expect(s.done).toBe(true);
+    expect(s.decks.A.playing).toBe(false);
+    expect(s.decks.B.playing).toBe(false);
   });
 });
