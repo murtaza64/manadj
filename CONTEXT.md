@@ -149,6 +149,9 @@ Realigning the Track pair in the Transition editor by moving the incoming Track'
 **Locked window**:
 A Transition-editor toggle choosing which Track the Transition window sticks to during a Slide (incoming-deck gestures and block drags only): locked, the window rides the slid Track (the same audio stays under it); unlocked, it stays with the outgoing Track. Double-drop line-up: jump the playhead to the outgoing Track's drop cue, then hot-cue the incoming Track's drop unlocked — the drops align.
 
+**Undo step**:
+The unit of undo in the Transition editor: one gesture (press to release), one discrete action (a beat-jump Slide, a stamp, a delete), or one coalesced run of Alignment nudges (broken by any other action or a pause). Undo covers everything the editor autosaves — sketch edits and session operations — never view toggles or selection, though undoing an edit re-selects the Transition it touched. One chronological history per Track pair, spanning the session's Transitions; it ends when the pair is switched.
+
 **Cue-slot convention**:
 A library convention (not a code concept) giving hot cue slots stable musical meaning so Transition templates can anchor to them — a ladder into the drop: 4 = drop, 3 = 8 bars before 4, 2 = 8 bars before 3, 1 = first buildup, typically 16 bars before 2. **4 = drop is the firmest rung** — the most strongly held convention in actual DJing; the earlier slots are progressively softer ("typically"). Slots 5–8 carry no convention. At template-apply time a missing slot resolves relative to the nearest set ladder slot, falling back to heuristic positions from the Grid origin only when no ladder slot is set.
 
