@@ -4,14 +4,14 @@
  * FLT/VOL) live on their deck's MIX zone — the strip is all that remains of
  * the central mixer column.
  *
- * Wired straight to the Mixer module via useMixer() (ADR 0009): mixer state
- * is not React state — controls keep local UI positions (seeded from the
- * Mixer's getters, which survive view switches) and push changes through
- * the setters. The shared rotary Knob lives here too (used by the deck MIX
- * zones).
+ * Wired straight to the Mixer module (ADR 0009): mixer state is not React
+ * state — controls are CONTROLLED components reading it through
+ * useMixerValue (so hardware Controller moves repaint them too,
+ * midi-controller 09) and pushing changes through the setters. The shared
+ * rotary Knob lives here too (used by the deck MIX zones).
  */
-import { useRef, useState } from 'react';
-import { useMixer } from '../../hooks/useMixer';
+import { useRef } from 'react';
+import { useMixer, useMixerValue } from '../../hooks/useMixer';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
 const KNOB_DRAG_RANGE_PX = 150;
@@ -29,7 +29,7 @@ export function Knob({
   min,
   max,
   defaultValue,
-  initial,
+  value,
   onChange,
 }: {
   label: string;
@@ -37,16 +37,13 @@ export function Knob({
   max: number;
   /** Double-click reset position. */
   defaultValue: number;
-  initial: number;
+  value: number;
   onChange: (value: number) => void;
 }) {
-  const [value, setValue] = useState(initial);
   const drag = useRef<{ startY: number; startValue: number } | null>(null);
 
   const set = (v: number) => {
-    const clamped = Math.max(min, Math.min(max, v));
-    setValue(clamped);
-    onChange(clamped);
+    onChange(Math.max(min, Math.min(max, v)));
   };
 
   const fraction = (value - min) / (max - min);
@@ -176,8 +173,8 @@ export function MixerStrip({
   onToggleHints?: () => void;
 }) {
   const mixer = useMixer();
-  const [crossfader, setCrossfader] = useState(() => mixer.getCrossfader());
-  const [master, setMaster] = useState(() => mixer.getMaster());
+  const crossfader = useMixerValue((m) => m.getCrossfader());
+  const master = useMixerValue((m) => m.getMaster());
 
   return (
     <div className="perf-strip">
@@ -200,10 +197,7 @@ export function MixerStrip({
           value={crossfader}
           defaultValue={0}
           detent
-          onChange={(v) => {
-            setCrossfader(v);
-            mixer.setCrossfader(v);
-          }}
+          onChange={(v) => mixer.setCrossfader(v)}
           title="Crossfader (double-click to center)"
         />
       </div>
@@ -215,10 +209,7 @@ export function MixerStrip({
           value={master}
           defaultValue={1}
           fill
-          onChange={(v) => {
-            setMaster(v);
-            mixer.setMaster(v);
-          }}
+          onChange={(v) => mixer.setMaster(v)}
           title="Master volume"
         />
       </div>

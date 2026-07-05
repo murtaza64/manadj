@@ -170,6 +170,7 @@ export class Mixer {
   private ctx: AudioContext | null = null;
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
+  private listeners = new Set<() => void>();
 
   // Control state survives graph rebuilds (StrictMode revival).
   private channels: Record<ChannelId, ChannelState> = {
@@ -251,6 +252,22 @@ export class Mixer {
     };
   }
 
+  /**
+   * Control-state change subscription (midi-controller 09). Mixer state is
+   * still module state, not React state (ADR 0009) — but on-screen controls
+   * subscribe so hardware moves repaint them. Fires after every setter;
+   * channel states are replaced immutably, so snapshot selectors can rely
+   * on reference/primitive equality.
+   */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
+
   getChannelState(channel: ChannelId): ChannelState {
     return this.channels[channel];
   }
@@ -265,6 +282,7 @@ export class Mixer {
 
   setTrim(channel: ChannelId, value: number): void {
     this.channels[channel] = { ...this.channels[channel], trim: value };
+    this.notify();
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].trimGain.gain, trimToGain(value));
   }
@@ -273,6 +291,7 @@ export class Mixer {
   setEq(channel: ChannelId, band: EqBand, value: number): void {
     const ch = this.channels[channel];
     this.channels[channel] = { ...ch, eq: { ...ch.eq, [band]: value } };
+    this.notify();
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(value));
   }
@@ -280,12 +299,14 @@ export class Mixer {
   /** position in [-1, 1]: negative = LPF, positive = HPF, center = bypass. */
   setFilter(channel: ChannelId, position: number): void {
     this.channels[channel] = { ...this.channels[channel], filter: position };
+    this.notify();
     this.ensure();
     this.applyFilter(channel);
   }
 
   setFader(channel: ChannelId, value: number): void {
     this.channels[channel] = { ...this.channels[channel], fader: value };
+    this.notify();
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(value));
   }
@@ -293,12 +314,14 @@ export class Mixer {
   /** position in [-1 (full A), 1 (full B)]. */
   setCrossfader(position: number): void {
     this.crossfader = position;
+    this.notify();
     this.ensure();
     this.applyCrossfader(true);
   }
 
   setMaster(value: number): void {
     this.master = value;
+    this.notify();
     const { ctx } = this.ensure();
     if (this.masterGain) rampGain(ctx, this.masterGain.gain, value);
   }

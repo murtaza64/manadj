@@ -18,7 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
 import { useMatchAction } from '../../hooks/useMatchAction';
-import { useMixer } from '../../hooks/useMixer';
+import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useScrubTransport } from '../../hooks/useScrubTransport';
 import WebGLWaveform from '../WebGLWaveform';
 import WaveformMinimap from '../WaveformMinimap';
@@ -351,11 +351,11 @@ function MixZone({ track }: { track: Track | null }) {
   const decks = useDecks();
   const ready = useDeckReady();
 
-  // Mixer state is not React state (ADR 0009): local UI positions seeded
-  // from the Mixer's getters (which survive view switches).
+  // Mixer state is not React state (ADR 0009): controls are controlled
+  // components subscribed through useMixerValue, so hardware Controller
+  // moves repaint them too (midi-controller 09).
   const mixer = useMixer();
-  const initial = mixer.getChannelState(deck);
-  const [fader, setFader] = useState(initial.fader);
+  const channel = useMixerValue((m) => m.getChannelState(deck));
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
   // Effective BPM — live with pitch AND bend (what your ears get right now).
@@ -388,7 +388,7 @@ function MixZone({ track }: { track: Track | null }) {
       min={0}
       max={1}
       defaultValue={0.5}
-      initial={initial.eq[band]}
+      value={channel.eq[band]}
       onChange={(v) => mixer.setEq(deck, band, v)}
     />
   );
@@ -401,7 +401,7 @@ function MixZone({ track }: { track: Track | null }) {
           min={0}
           max={1}
           defaultValue={0.5}
-          initial={initial.trim}
+          value={channel.trim}
           onChange={(v) => mixer.setTrim(deck, v)}
         />
         {/* EQ bands grouped tight; placement (not a box) separates them
@@ -416,7 +416,7 @@ function MixZone({ track }: { track: Track | null }) {
           min={-1}
           max={1}
           defaultValue={0}
-          initial={initial.filter}
+          value={channel.filter}
           onChange={(v) => mixer.setFilter(deck, v)}
         />
       </div>
@@ -425,12 +425,9 @@ function MixZone({ track }: { track: Track | null }) {
         fill
         min={0}
         max={1}
-        value={fader}
+        value={channel.fader}
         defaultValue={1}
-        onChange={(v) => {
-          setFader(v);
-          mixer.setFader(deck, v);
-        }}
+        onChange={(v) => mixer.setFader(deck, v)}
         title="Channel volume (double-click = full)"
       />
       {/* Horizontal pitch: right = faster (grill decision — the vertical
