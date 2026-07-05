@@ -363,4 +363,21 @@ export const INPULSE_300_MK2: Mapping = {
       target: { control: 'hot-cue', deck: 'B', pad: 8 },
     },
   ],
+
+  // LED Feedback addresses. Ground truth: Mixxx's Inpulse 300 mapping
+  // (mixxxdj/mixxx res/controllers/Hercules_DJControl_Inpulse_300.midi.xml,
+  // "LED Outputs" section) — PLAY LED is note 0x07 / CUE 0x06 on the deck's
+  // transport channel (status 0x91/0x92), velocity 0x7f lit / 0x00 dark.
+  // The device does not dump LED state on connect (tested); full sync on
+  // connect is the app's job. TODO(hardware-verify): smoke-test on the MK2.
+  feedback: {
+    decks: {
+      A: {
+        play: { channel: 1, number: 0x07, onVelocity: 0x7f },
+      },
+      B: {
+        play: { channel: 2, number: 0x07, onVelocity: 0x7f },
+      },
+    },
+  },
 };
