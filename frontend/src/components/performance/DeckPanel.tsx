@@ -96,7 +96,11 @@ export function DeckWaveform({
   // beat spacing on screen then follows effective BPM, and beatmatched
   // decks line up visually. The wheel callback divides the multiplicative
   // step back out, keeping the shared state rate-free.
-  const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, s.bendPercent));
+  //
+  // Pitch only: a nudge's momentary bend must not breathe the zoom scale —
+  // you nudge for phase while WATCHING the beats, so the ruler has to hold
+  // still (the effective-BPM readout keeps bend; that one is for ears).
+  const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, 0));
 
   return (
     <WebGLWaveform

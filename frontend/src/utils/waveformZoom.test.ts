@@ -55,8 +55,8 @@ describe('trackWindowSeconds (performance-mode 06)', () => {
     expect(beatsB).toBeCloseTo(beatsA, 10);
   });
 
-  it('bend is part of the rate, like the effective-BPM readout', () => {
-    expect(trackWindowSeconds(20, composeRate(0, 2))).toBeCloseTo(20.4, 10);
+  it('the window follows pitch (callers pass a pitch-only rate; bend excluded)', () => {
+    expect(trackWindowSeconds(20, composeRate(5, 0))).toBeCloseTo(21, 10);
   });
 
   it('the wheel round-trip stays rate-free: scaling then unscaling is exact', () => {

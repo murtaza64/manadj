@@ -26,3 +26,10 @@ view's shared zoom state stays rate-free.
 - [ ] Zoom wheel on a pitched deck still steps the shared zoom smoothly
 - [ ] `trackWindowSeconds` under vitest (equal-effective-BPM invariant)
 - [ ] make typecheck, eslint on touched files, vitest green
+
+## Comments
+
+- Follow-up (change klmmztnn): the original rate included bend, so nudging
+  breathed the zoom scale mid-beatmatch — exactly when the ruler must hold
+  still. The window rate is now pitch-only; the effective-BPM readout keeps
+  bend (ears vs eyes).

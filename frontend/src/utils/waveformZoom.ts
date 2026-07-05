@@ -32,9 +32,11 @@ export function stepVisibleSeconds(current: number, direction: 'in' | 'out'): nu
  * wall-clock zoom (performance-mode 06). The renderer consumes seconds of
  * TRACK time; a pitched deck plays them faster, so an unscaled window kept
  * base-BPM beat spacing on screen. Scaling by the rate makes the viewport a
- * fixed wall-clock duration on every deck — equal effective BPM (pitch and
- * bend included) means equal beat spacing, which is what beatmatching eyes
- * need.
+ * fixed wall-clock duration on every deck — equal effective BPM means equal
+ * beat spacing, which is what beatmatching eyes need.
+ *
+ * Callers pass a PITCH-only rate: a nudge's momentary bend must not breathe
+ * the zoom while you're watching beat alignment.
  */
 export function trackWindowSeconds(visibleSeconds: number, rate: number): number {
   return visibleSeconds * rate;
