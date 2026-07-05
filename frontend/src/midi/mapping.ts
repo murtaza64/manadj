@@ -55,6 +55,12 @@ export interface LedAddress {
 /** The LED addresses Feedback drives for one deck. */
 export interface DeckFeedback {
   play: LedAddress;
+  /**
+   * Pads 1..8 by index, HOTCUE base-layer addresses ONLY — pad modes are
+   * note-isolated on this class of device; other modes' lights are never
+   * written.
+   */
+  hotCuePads: readonly LedAddress[];
 }
 
 /** Device knowledge for Feedback: every light the app writes, per deck. */

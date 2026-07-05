@@ -12,14 +12,25 @@ import type { DeckFeedback, LedAddress, MappingFeedback } from './mapping';
  * which is also exactly what a connect/replug resync needs.
  */
 
+/** Number of hot cue pads on the grid (slots 1..PAD_COUNT). */
+export const PAD_COUNT = 8;
+
 /** The slice of deck state Feedback reads. */
 export interface DeckLedInput {
   playing: boolean;
+  /**
+   * Assigned hot cue slot numbers (1-based) of the loaded Track — from the
+   * same query cache the on-screen pads render, so screen and hardware
+   * cannot drift. Empty deck = empty set = all pads dark.
+   */
+  assignedPads: ReadonlySet<number>;
 }
 
 /** Desired on/off per light of one deck. */
 export interface DeckLedStates {
   play: boolean;
+  /** Pads 1..8 by index (index 0 = pad 1), HOTCUE base layer only. */
+  pads: readonly boolean[];
 }
 
 /** [status, data1, data2] — ready for MIDIOutput.send. */
@@ -27,7 +38,10 @@ export type MidiMessage = readonly [number, number, number];
 
 /** Deck state → desired light states. */
 export function ledStates(input: DeckLedInput): DeckLedStates {
-  return { play: input.playing };
+  return {
+    play: input.playing,
+    pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
+  };
 }
 
 const NOTE_ON = 0x9;
@@ -37,7 +51,7 @@ function encodeLed(address: LedAddress, lit: boolean): MidiMessage {
 }
 
 function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
-  return [deck.play];
+  return [deck.play, ...deck.hotCuePads];
 }
 
 /** Desired light states for one deck → the full message set to send. */
@@ -47,7 +61,10 @@ export function encodeDeckLeds(
   states: DeckLedStates
 ): readonly MidiMessage[] {
   const addresses = feedback.decks[deck];
-  return [encodeLed(addresses.play, states.play)];
+  return [
+    encodeLed(addresses.play, states.play),
+    ...addresses.hotCuePads.map((address, i) => encodeLed(address, states.pads[i] ?? false)),
+  ];
 }
 
 /**
