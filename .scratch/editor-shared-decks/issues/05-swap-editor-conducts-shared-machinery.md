@@ -98,3 +98,9 @@ shared Decks+Mixer; the private mixer is gone. Notes beyond the brief:
 - Ear-check list still owed: human verification at the end of the lane
   (per plan), covering release-reapply pops, RAF-rate lane smoothness,
   ±25% stretch artifacts, PFL-in-editor, return-to-Performance state.
+
+**Verified (human ear-check, 2026-07-05).** All six checks passed:
+audition through shared Mixer, pop-free release reapply, RAF-rate lane
+smoothness, Key Lock at tempo-match, master+cue/PFL routing in the
+editor, clean return-to-Performance (pitch restored, no phantom Takes,
+Follow untouched). Feature complete.
