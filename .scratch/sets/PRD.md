@@ -145,3 +145,5 @@ parallel (rehearsal loop / visualize-conductor-automation); the
 visualization issue is renumbered to 15.
 
 **2026-07-05 — grilling round 4 (Pickup).** Designed the Conductor's inverse-of-takeover: explicit gesture + automatic mapping (never auto re-engage), anchored on the audibly dominant Deck; predicate lit for one-audible-deck-in-span or two-deck-aligned-blend, unlit-with-reason otherwise (reasons teach the fix); never audibly destructive; mixer/pitch converge by ramps; mid-engagement pickup abandons the in-flight Take. Glossary term Pickup added; filed as issue 16 (blocked by 05). No re-planning around the user — plan stays fixed (named and rejected).
+
+**2026-07-05 — hard-cut entry heuristic revised (live debugging).** The Main cue proved unstable as a planning anchor (it moves during performance; observed: entry 2:35 after mix-out 1:51 → never-audible track). Unresolved hard-cut entry is now Hot Cue 1 → track start; Main cue no longer participates in Set planning. Plus plan reactivity to cue edits and an entry-after-exit warning class. Filed as issue 19; CONTEXT.md Set playback updated.
