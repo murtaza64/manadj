@@ -551,38 +551,14 @@
    accent (it scopes slides), disengaged = default chrome — the color IS
    the state cue (user feedback: open padlock alone read ambiguously). */
 
-/* Gesture block: the two control rows stack in the outside column; the
-   4×2 cue-pad grid spans BOTH rows on the INSIDE edge (toward the center
-   panel) — total height stays two rows, no editor scroll. */
-.editor-gestureblock {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.editor-gesturecol {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-}
-
-/* Deck B mirrors: pads sit toward the center panel (its left). */
-.editor-deckcard.b .editor-gestureblock {
-  flex-direction: row-reverse;
-}
-
-/* Shared HotCue pads (1-4 over 5-8, left-to-right on both cards); set
-   pads keep their cue colors (identity). Compact sizing beats
-   HotCue.css's pad metrics. */
-.editor-gestureblock .editor-cuegrid {
-  display: grid;
-  grid-template-columns: repeat(4, min-content);
+/* Cue pads: their own bottom row (1-8 left-to-right on both cards); set
+   pads keep their cue colors (identity). Compact sizing beats HotCue.css's
+   pad metrics. */
+.editor-cuerow {
   gap: 2px;
 }
 
-.editor-gestureblock .editor-cuegrid .hot-cue {
+.editor-cuerow .hot-cue {
   height: 20px;
   width: 26px;
   min-width: 26px;

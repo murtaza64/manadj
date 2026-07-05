@@ -136,108 +136,103 @@ export function DeckCard({
         </button>
         <span className="editor-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
       </div>
-      {/* Gesture block: two control rows on the outside column, the 4×2
-          cue-pad grid spanning BOTH rows on the INSIDE edge (toward the
-          center panel) — no vertical growth beyond the two rows. */}
-      <div className="editor-gestureblock">
-        <div className="editor-gesturecol">
-          <div className="editor-deckcard-row">
-            {/* Alignment nudge (accented — realigns the pair): plain ◀/▶ +
-                accent, per the PRD icon language. The grid cluster lives
-                with BPM above (one domain — ADR 0016). */}
+      {/* One gesture row (align + jump/slide + lock), then the cue pads on
+          their own bottom row. */}
+      <div
+        className={`editor-deckcard-row editor-slides${
+          gestures?.kind === 'slide' ? ' editor-alignment' : ''
+        }`}
+      >
+        {/* Alignment nudge (accented — realigns the pair): plain ◀/▶ +
+            accent, per the PRD icon language. The grid cluster lives with
+            BPM above (one domain — ADR 0016). */}
+        <span
+          className="editor-pair editor-alignment"
+          title={`Alignment nudge: move ${deck} ±10ms relative to the other track (edits the sketch, not the grid)`}
+        >
+          <span className="editor-pair-label">align</span>
+          <button title={`Nudge ${deck} 10ms earlier`} onClick={() => onAlignmentNudge(-0.01)}>
+            ◀
+          </button>
+          <button title={`Nudge ${deck} 10ms later`} onClick={() => onAlignmentNudge(0.01)}>
+            ▶
+          </button>
+        </span>
+        {gestures && (
+          <>
             <span
-              className="editor-pair editor-alignment"
-              title={`Alignment nudge: move ${deck} ±10ms relative to the other track (edits the sketch, not the grid)`}
+              className="editor-pair"
+              title={
+                gestures.kind === 'slide'
+                  ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put'
+                  : 'Transport: moves the playhead — both decks follow, alignment untouched'
+              }
             >
-              <span className="editor-pair-label">align</span>
-              <button title={`Nudge ${deck} 10ms earlier`} onClick={() => onAlignmentNudge(-0.01)}>
-                ◀
-              </button>
-              <button title={`Nudge ${deck} 10ms later`} onClick={() => onAlignmentNudge(0.01)}>
-                ▶
-              </button>
-            </span>
-          </div>
-          {gestures && (
-            <div
-              className={`editor-deckcard-row editor-slides${
-                gestures.kind === 'slide' ? ' editor-alignment' : ''
-              }`}
-            >
-              <span
-                className="editor-pair"
+              <span className="editor-pair-label">{gestures.kind}</span>
+              <button
+                disabled={!gestures.enabled}
                 title={
                   gestures.kind === 'slide'
-                    ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put'
-                    : 'Transport: moves the playhead — both decks follow, alignment untouched'
+                    ? `Slide ${deck} ${gestureBeats} of its beats earlier`
+                    : `Jump the playhead ${gestureBeats} of ${deck}'s beats back`
                 }
+                onClick={() => gestures.beats(-gestureBeats)}
               >
-                <span className="editor-pair-label">{gestures.kind}</span>
-                <button
-                  disabled={!gestures.enabled}
-                  title={
-                    gestures.kind === 'slide'
-                      ? `Slide ${deck} ${gestureBeats} of its beats earlier`
-                      : `Jump the playhead ${gestureBeats} of ${deck}'s beats back`
-                  }
-                  onClick={() => gestures.beats(-gestureBeats)}
-                >
-                  <JumpBackIcon />
-                </button>
-                <button title="Halve size" onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}>
-                  1/2
-                </button>
-                <span
-                  className="editor-slidesize"
-                  title={`Size (${deck}'s beats — shared with the deck's beatjump)`}
-                >
-                  {gestureBeats}
-                </span>
-                <button title="Double size" onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}>
-                  x2
-                </button>
-                <button
-                  disabled={!gestures.enabled}
-                  title={
-                    gestures.kind === 'slide'
-                      ? `Slide ${deck} ${gestureBeats} of its beats later`
-                      : `Jump the playhead ${gestureBeats} of ${deck}'s beats forward`
-                  }
-                  onClick={() => gestures.beats(gestureBeats)}
-                >
-                  <JumpForwardIcon />
-                </button>
+                <JumpBackIcon />
+              </button>
+              <button title="Halve size" onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}>
+                1/2
+              </button>
+              <span
+                className="editor-slidesize"
+                title={`Size (${deck}'s beats — shared with the deck's beatjump)`}
+              >
+                {gestureBeats}
               </span>
-              {lock && (
-                <button
-                  className={`editor-lockbtn${lock.on ? ' on' : ''}`}
-                  aria-pressed={lock.on}
-                  title="Locked window: slides carry the window WITH this track (same audio stays under it); unlocked, the window stays with the other track"
-                  onClick={lock.toggle}
-                >
-                  <LockIcon locked={lock.on} />
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-        {gestures && (
-          <span className="editor-cuegrid">
-            {SLOTS.map((slot) => (
-              <HotCue
-                key={slot}
-                slotNumber={slot}
-                hotCue={cueActions.bySlot.get(slot)}
-                disabled={!cueActions.enabled}
-                isPreviewing={false}
-                onDown={cueActions.down}
-                onUp={cueActions.up}
-                onDelete={cueActions.remove}
-              />
-            ))}
-          </span>
+              <button title="Double size" onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}>
+                x2
+              </button>
+              <button
+                disabled={!gestures.enabled}
+                title={
+                  gestures.kind === 'slide'
+                    ? `Slide ${deck} ${gestureBeats} of its beats later`
+                    : `Jump the playhead ${gestureBeats} of ${deck}'s beats forward`
+                }
+                onClick={() => gestures.beats(gestureBeats)}
+              >
+                <JumpForwardIcon />
+              </button>
+            </span>
+            {lock && (
+              <button
+                className={`editor-lockbtn${lock.on ? ' on' : ''}`}
+                aria-pressed={lock.on}
+                title="Locked window: slides carry the window WITH this track (same audio stays under it); unlocked, the window stays with the other track"
+                onClick={lock.toggle}
+              >
+                <LockIcon locked={lock.on} />
+              </button>
+            )}
+          </>
         )}
       </div>
+      {gestures && (
+        <div className="editor-deckcard-row editor-slides editor-cuerow">
+          {SLOTS.map((slot) => (
+            <HotCue
+              key={slot}
+              slotNumber={slot}
+              hotCue={cueActions.bySlot.get(slot)}
+              disabled={!cueActions.enabled}
+              isPreviewing={false}
+              onDown={cueActions.down}
+              onUp={cueActions.up}
+              onDelete={cueActions.remove}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
