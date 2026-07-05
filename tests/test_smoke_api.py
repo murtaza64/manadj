@@ -29,6 +29,19 @@ def test_list_tracks(client, make_track):
     assert body["items"][0]["title"]
 
 
+def test_list_tracks_fractional_bpm_center(client, make_track):
+    """BPM is float BPM at the API (centiBPM never crosses the interface):
+    a fractional bpm_center must filter, not 422 (follow-mode 06 — Follow
+    sends the reference Track's BPM verbatim, e.g. 127.98)."""
+    make_track(title="In", bpm=12798)  # 127.98 BPM
+    make_track(title="Out", bpm=14000)  # 140 BPM
+    resp = client.get(
+        "/api/tracks/", params={"bpm_center": 127.98, "bpm_threshold_percent": 4}
+    )
+    assert resp.status_code == 200
+    assert [t["title"] for t in resp.json()["items"]] == ["In"]
+
+
 def test_patch_track_bpm_round_trip(client, db, make_track):
     track = make_track()
     resp = client.patch(f"/api/tracks/{track.id}", json={"bpm": 128.5})

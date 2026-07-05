@@ -27,7 +27,9 @@ def list_tracks(
     energy_min: int | None = Query(None, ge=1, le=5),
     energy_max: int | None = Query(None, ge=1, le=5),
     tag_match_mode: str = Query("ANY", pattern="^(ANY|ALL)$"),
-    bpm_center: int | None = Query(None, ge=1, le=300),
+    # Float BPM (centiBPM never crosses this interface): Follow sends the
+    # reference Track's BPM verbatim, e.g. 127.98 (follow-mode 06).
+    bpm_center: float | None = Query(None, ge=1, le=300),
     bpm_threshold_percent: int | None = Query(None, ge=0, le=100),
     key_camelot_ids: List[str] | None = Query(None),
     unprocessed: bool | None = Query(None),

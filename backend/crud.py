@@ -20,7 +20,7 @@ def get_tracks(
     energy_min: int | None = None,
     energy_max: int | None = None,
     tag_match_mode: str = "ANY",
-    bpm_center: int | None = None,
+    bpm_center: float | None = None,
     bpm_threshold_percent: int | None = None,
     key_camelot_ids: list[str] | None = None,
     unprocessed: bool | None = None,
