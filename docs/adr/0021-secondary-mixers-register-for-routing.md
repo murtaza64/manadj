@@ -39,3 +39,6 @@ concerns the graph inside one mixer, it may stay per-instance.
   (routingStore.test.ts) — the first tests this store has.
 - The deep fix (single context) is tracked as a deepening opportunity for
   an architecture pass, not scheduled.
+
+
+*Renumbered 0020 → 0021 on 2026-07-05: two lanes landed an "ADR 0020" the same day (takes-raw-capture holds the number — 16 files cite it, this one had 1). The headphone-cue issue-06 landing message still says 0020; this note is the correction.*
