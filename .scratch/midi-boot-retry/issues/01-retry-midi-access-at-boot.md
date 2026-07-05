@@ -77,3 +77,32 @@ Verification walkthrough (lane app running, vite 5303):
   the smoke test.)
 - Optional: unplug/replug the controller after boot — badge drops and
   returns (statechange path untouched).
+
+**2026-07-05 (opencode, lane midi-boot-retry) — root cause captured; design
+revised.** Human smoke test of the first cut: retry ran but every attempt
+failed (`[object DOMException]` — the shell's console pipe flattens
+objects); a later run failed with NO logs at all and cmd+R fixed it. The
+second observation was the tell: the boot `requestMIDIAccess()` doesn't
+(only) reject — it can HANG unsettled, which a rejection-only retry never
+sees. Revised design, all in `adapter.ts`:
+
+- Per-attempt watchdog (4s): an unsettled attempt is treated as failed and
+  the next attempt starts; the dangling promise keeps racing — first
+  success wins, late losers are dropped.
+- Errors logged as `name: message` (survives the console pipe).
+- Success is logged too (attempt number, port counts, port names) — a hung
+  boot was previously indistinguishable from "granted but no match".
+- Sticky-failure backstop: after 3 dead attempts, reload the page once
+  (sessionStorage loop guard; ~3-17s after mount, before anything plays).
+  Post-reload boots run the full schedule then degrade as before.
+
+Live confirmation during agent sanity boot (shell attached to lane app,
+Inpulse connected): attempt 1 hung and was watchdogged, attempt 2 granted
+access and attached the controller — recovery without reload:
+
+    MIDI access request failed (attempt 1 of 6), retrying in 1000ms: request did not settle within 4000ms
+    MIDI access granted (attempt 2): 1 inputs, 1 outputs — DJControl Inpulse 300 Mk2
+
+Agent verification: build + vitest 919/919 green. Smoke test unchanged
+(relaunch shell, badge green, pads work) — expect a `MIDI access granted`
+info line every healthy boot now.
