@@ -8,7 +8,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { DECK_COLORS, hexToRgbTriplet } from '../theme/deckColors';
-import { laneValuesAt } from './mixModel';
+import { bContentSegments, bEndMixTime, bTrackTimeAt, laneValuesAt } from './mixModel';
 import { MixPlayer } from './MixPlayer';
 import type { EditorMix } from './mixModel';
 import type { ThreeBandWaveform } from '../waveform/blob';
@@ -83,12 +83,15 @@ export function GlobalMinimap({
         { key: 'high' as const, color: '135,222,237' },
       ];
 
+      // Piecewise B mapping (transition-takes 06): the per-column loop
+      // renders splice discontinuities for free.
+      const bEnd = bEndMixTime(tr, durB, rateB);
       for (let x = 0; x < w; x++) {
         const t = (x / w) * contentEnd;
         const v = laneValuesAt(tr, t);
-        const bTrack = tr.bInSec + (t - tr.startSec) * rateB;
+        const bTrack = bTrackTimeAt(tr, t, rateB);
         const aOn = durA > 0 && t >= 0 && t < aEnd;
-        const bOn = durB > 0 && t >= tr.startSec && bTrack >= 0 && bTrack < durB;
+        const bOn = durB > 0 && t >= tr.startSec && bTrack >= 0 && bTrack < durB && t < bEnd;
 
         const drawCol = (
           wave: ThreeBandWaveform,
@@ -145,9 +148,13 @@ export function GlobalMinimap({
           cueTri((c.time_seconds / contentEnd) * w, 'top', c.color || '#39ff14');
         }
       }
+      // B cues map through the spliced segments (transition-takes 06) —
+      // a cue in replayed content marks every landing, like the main row.
       for (const c of hotCuesB) {
-        const mixT = tr.startSec + (c.time_seconds - tr.bInSec) / rateB;
-        if (mixT >= 0 && mixT <= contentEnd) {
+        for (const g of bContentSegments(tr, durB, rateB)) {
+          if (c.time_seconds < g.bStartSec) continue;
+          const mixT = g.mixStartSec + (c.time_seconds - g.bStartSec) / rateB;
+          if (mixT >= g.mixEndSec || mixT < 0 || mixT > contentEnd) continue;
           cueTri((mixT / contentEnd) * w, 'bottom', c.color || '#39ff14');
         }
       }

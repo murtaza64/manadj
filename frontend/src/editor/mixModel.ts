@@ -227,36 +227,85 @@ export function bTrackTimeAt(
   return t;
 }
 
+/** One linear stretch of audible B content on the mix axis (transition-
+ * takes 06): between Jump events, B advances at rateB from `bStartSec`.
+ * The DAW-splice rendering, overlays, guides, and hit zones all map
+ * through these. */
+export interface BContentSegment {
+  mixStartSec: number;
+  mixEndSec: number;
+  /** B's track time at mixStartSec. */
+  bStartSec: number;
+}
+
+/**
+ * THE piecewise walk (single source): linear spans between Jump events,
+ * clipped to audible content — entry deferred while b < 0 (lead gaps and
+ * below-zero jumps), exit at B's FIRST durB crossing (first end is the
+ * end; a jump firing exactly at the crossing wins — bTrackTimeAt applies
+ * deltas AT their instants). Returns the active segments and B's end on
+ * the mix axis; `bContentSegments`/`bEndMixTime` are its two views.
+ */
+function walkB(
+  tr: Pick<Transition, 'startSec' | 'bInSec' | 'durationSec' | 'jumps'>,
+  durB: number,
+  rateB: number
+): { segments: BContentSegment[]; endMixSec: number } {
+  const jumps = [...(tr.jumps ?? [])].sort((a, b) => a.x - b.x);
+  const segments: BContentSegment[] = [];
+  let t0 = tr.startSec;
+  let b0 = tr.bInSec;
+
+  /** Emit the active sub-span of the linear span [t0, spanEnd) and report
+   * where it ends ({done} when durB was crossed strictly inside it). */
+  const linear = (spanEnd: number): { end: number; done: boolean } => {
+    if (b0 >= durB) return { end: spanEnd, done: false }; // dead span (bInSec past the end)
+    const entry = b0 < 0 ? t0 + -b0 / rateB : t0;
+    const tHit = t0 + (durB - b0) / rateB;
+    const done = tHit < spanEnd;
+    const end = done ? tHit : spanEnd;
+    if (end > entry) {
+      segments.push({ mixStartSec: entry, mixEndSec: end, bStartSec: Math.max(0, b0) });
+    }
+    return { end, done };
+  };
+
+  for (const j of jumps) {
+    const tj = jumpInstantSec(tr, j);
+    if (tj > t0) {
+      const r = linear(tj);
+      if (r.done) return { segments, endMixSec: r.end };
+      b0 += (tj - t0) * rateB;
+      t0 = tj;
+    }
+    b0 += j.deltaSec;
+    if (b0 >= durB) return { segments, endMixSec: t0 };
+  }
+  if (b0 >= durB) return { segments, endMixSec: t0 + (durB - b0) / rateB };
+  return { segments, endMixSec: linear(Infinity).end };
+}
+
+/** B's audible content as mix-axis segments (transition-takes 06). */
+export function bContentSegments(
+  tr: Pick<Transition, 'startSec' | 'bInSec' | 'durationSec' | 'jumps'>,
+  durB: number,
+  rateB: number
+): BContentSegment[] {
+  return walkB(tr, durB, rateB).segments;
+}
+
 /**
  * Mix-time when B's audio ends: the FIRST instant its track time reaches
- * durB, walking the linear segments between Jump events. A forward jump
- * past the end ends B at that instant; a backward jump can extend B's
- * mix-time footprint (a replayed stretch plays twice). Without jumps this
- * is the plain `startSec + (durB − bInSec)/rateB`.
+ * durB. A forward jump past the end ends B at that instant; a backward
+ * jump can extend B's mix-time footprint (a replayed stretch plays
+ * twice). Without jumps this is the plain `startSec + (durB − bInSec)/rateB`.
  */
 export function bEndMixTime(
   tr: Pick<Transition, 'startSec' | 'bInSec' | 'durationSec' | 'jumps'>,
   durB: number,
   rateB: number
 ): number {
-  const jumps = [...(tr.jumps ?? [])].sort((a, b) => a.x - b.x);
-  let t0 = tr.startSec;
-  let b0 = tr.bInSec;
-  for (const j of jumps) {
-    const tj = jumpInstantSec(tr, j);
-    if (tj > t0) {
-      const tHit = t0 + (durB - b0) / rateB;
-      // STRICT before the instant: bTrackTimeAt applies a delta AT its
-      // instant, so a jump firing exactly as B's tape runs out wins — a
-      // backward jump there rescues B rather than ending it.
-      if (b0 < durB && tHit < tj) return tHit;
-      b0 += (tj - t0) * rateB;
-      t0 = tj;
-    }
-    b0 += j.deltaSec;
-    if (b0 >= durB) return t0;
-  }
-  return t0 + (durB - b0) / rateB;
+  return walkB(tr, durB, rateB).endMixSec;
 }
 
 /**

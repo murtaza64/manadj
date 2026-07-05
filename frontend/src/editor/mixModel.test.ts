@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import {
   EDITOR_PITCH_RANGE_PERCENT,
   arrangementAt,
+  bContentSegments,
+  bEndMixTime,
   bTrackTimeAt,
   cropRemapJumps,
   cropRemapJumpsLeft,
@@ -266,6 +268,71 @@ describe('arrangementAt with jump events', () => {
     expect(arrangementAt(m, 35, durations, 1).bActive).toBe(false);
     expect(arrangementAt(m, 41, durations, 1).bActive).toBe(true);
     expect(arrangementAt(m, 41, durations, 1).bTrackTime).toBeCloseTo(1);
+  });
+});
+
+describe('bContentSegments (transition-takes 06: the one piecewise walk)', () => {
+  const durB = 60;
+
+  it('no jumps: one segment, linear, ending where B runs out', () => {
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: 10 });
+    expect(bContentSegments(t, durB, 1)).toEqual([
+      { mixStartSec: 30, mixEndSec: 80, bStartSec: 10 },
+    ]);
+    // rateB scales the footprint: 50 B-seconds in 25 mix-seconds.
+    expect(bContentSegments(t, durB, 2)).toEqual([
+      { mixStartSec: 30, mixEndSec: 55, bStartSec: 10 },
+    ]);
+  });
+
+  it('a negative entry anchor defers the segment to B\'s audio start', () => {
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: -10 });
+    expect(bContentSegments(t, durB, 1)).toEqual([
+      { mixStartSec: 40, mixEndSec: 100, bStartSec: 0 },
+    ]);
+  });
+
+  it('a backward jump splits into two segments with overlapping B ranges', () => {
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: -8 }] });
+    expect(bContentSegments(t, durB, 1)).toEqual([
+      { mixStartSec: 30, mixEndSec: 40, bStartSec: 10 }, // plays 10..20
+      { mixStartSec: 40, mixEndSec: 88, bStartSec: 12 }, // replays from 12
+    ]);
+  });
+
+  it('a forward jump past B\'s end truncates: first end is the end', () => {
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: 45 }] });
+    expect(bContentSegments(t, durB, 1)).toEqual([
+      { mixStartSec: 30, mixEndSec: 40, bStartSec: 10 },
+    ]);
+  });
+
+  it('a jump below zero opens a gap; the next segment re-enters at B\'s start', () => {
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.1, deltaSec: -20 }] });
+    expect(bContentSegments(t, durB, 1)).toEqual([
+      { mixStartSec: 30, mixEndSec: 32, bStartSec: 10 }, // 10..12
+      { mixStartSec: 40, mixEndSec: 100, bStartSec: 0 }, // silent 32..40, then 0..60
+    ]);
+  });
+
+  it('bEndMixTime is the last segment\'s end (single walk, two views)', () => {
+    for (const jumps of [
+      undefined,
+      [{ x: 0.5, deltaSec: -8 }],
+      [{ x: 0.1, deltaSec: -20 }],
+      [{ x: 0.25, deltaSec: -8 }, { x: 0.75, deltaSec: 4 }],
+    ]) {
+      const t = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps });
+      const segs = bContentSegments(t, durB, 1);
+      expect(bEndMixTime(t, durB, 1)).toBeCloseTo(segs[segs.length - 1].mixEndSec);
+    }
+  });
+
+  it('a zero-duration window puts every jump at the cut instant', () => {
+    const t = tr({ startSec: 30, durationSec: 0, bInSec: 10, jumps: [{ x: 0.5, deltaSec: -8 }] });
+    expect(bContentSegments(t, durB, 1)).toEqual([
+      { mixStartSec: 30, mixEndSec: 88, bStartSec: 2 },
+    ]);
   });
 });
 

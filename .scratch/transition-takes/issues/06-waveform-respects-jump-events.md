@@ -52,3 +52,14 @@ None - can start immediately
 ## Comments
 
 Grilled 2026-07-05 (visual language, renderer mechanism, walk location, scope). No ADR: everything sits inside ADR 0015's existing constraints, applied per segment.
+
+**Done** (jj change on lane `beatjump`, 2026-07-05). All acceptance criteria met:
+
+- `bContentSegments` in mixModel is THE walk (7 new tests; `bEndMixTime` derived from it, behavior frozen — rescue-at-instant, dead spans, pre-start edge all preserved).
+- Renderer: `setDisplaySegments` + `renderSegmentedFrame` — per-strip scissored body passes with per-segment `u_canvasWidth`/pixel-snap (ADR 0015 per strip); overlays full-viewport through a time-shifted view with the beatgrid vertex cache stable across strips (pxPerSec from UNROUNDED widths — review finding); one background clear (`BG × 0.6`); 2D text overlay clipped per strip; sub-pixel strips skipped; empty array = spliced-with-nothing-visible clears rather than falling back to a stale window (review finding).
+- DawTimeline: legacy zero-cost single-window path when no jumps; spliced strips otherwise, with segment-0 head extension, playhead ownership (first segment ahead of mix time — head/gap/past-end all land sensibly; review finding), mix-domain modulation with per-strip affine remap, per-segment blockframes + head-only inaudible div, piecewise guidesB (multi-landing hot cues), piecewise `zoneAt`, `contentEnd` from the walk's footprint edge.
+- GlobalMinimap: per-column `bTrackTimeAt` + `bEndMixTime` guard; B hot-cue triangles land per segment (review finding).
+- Jump marker brightened (solid + glow) — it is now the splice seam.
+- Gate: vitest 683, tsc, build, eslint (touched files), pytest 547.
+
+Eye-verify when convenient: doubled buildup shows twice with the marker as seam; scroll/zoom across a seam (no peak shimmer); beat lines land on spliced audio; `?protoperf` on a jump-heavy Transition.
