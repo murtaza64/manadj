@@ -32,3 +32,16 @@ stays unmapped). Learned in the 01 session: deck A/B touch-spin = cc ch 1/2
 - [ ] Rim nudge/seek behave exactly as before
 - [ ] Touch seek math + routing under vitest
 - [ ] make typecheck, eslint on touched files, vitest green
+
+## Comments
+
+- Landed in change zlqqqsnu — note its description reads "midi-pad-leds +
+  headphone-cue: grill (docs)": a concurrent grill session in the same
+  workspace described the working-copy change and its CONTEXT.md glossary
+  edits (Feedback entry, Controller/Mapping wording) rode along. The change
+  contains BOTH that docs work and this issue's full implementation
+  (jog-touch target, mapping CC #0x0A bindings, JogController.onTouchTicks,
+  registry/dispatch/registrar wiring, tests). Gate was green on the merged
+  content. Immutable now; recorded here instead of rewritten.
+- Touch seek is linear (JOG_TOUCH_SEEK_SECONDS_PER_TICK = 0.01 s/tick) —
+  tune on hardware.
