@@ -229,6 +229,56 @@ export function OverviewLadder({
           {plan.adjacencies.map((adj, i) => (
             <AdjacencyBand key={`adj-${i}`} adj={adj} total={total} />
           ))}
+          {/* Tempo return ramps (sets 06): the incoming eases back to its
+              native tempo after the window — drawn on its lane, fading out
+              where the ramp completes. */}
+          {plan.adjacencies.map((adj, i) => {
+            if (adj.tempoReturnEndSec <= adj.mixEndSec) return null;
+            const inDeck = plan.entries[i + 1]?.deck ?? 'B';
+            return (
+              <div
+                key={`ramp-${i}`}
+                title="Tempo return — easing back to native tempo"
+                style={{
+                  position: 'absolute',
+                  left: `${(adj.mixEndSec / total) * 100}%`,
+                  width: `${((adj.tempoReturnEndSec - adj.mixEndSec) / total) * 100}%`,
+                  top: inDeck === 'A' ? LANE_H - 7 : LANE_H + 3,
+                  height: 6,
+                  background: 'linear-gradient(90deg, #ff00ff 0%, rgba(255,0,255,0) 100%)',
+                  zIndex: 3,
+                  pointerEvents: 'none',
+                }}
+              />
+            );
+          })}
+          {/* Plan warnings (sets 06): ⚠ at the afflicted adjacency —
+              runway clamps, window overlaps… (errors in red). */}
+          {plan.warnings.map((w, k) => {
+            if (w.adjacencyIndex === undefined) return null;
+            const adj = plan.adjacencies[w.adjacencyIndex];
+            if (!adj) return null;
+            return (
+              <span
+                key={`warn-${k}`}
+                title={w.message}
+                style={{
+                  position: 'absolute',
+                  left: `${(adj.mixStartSec / total) * 100}%`,
+                  top: LANE_H - 8,
+                  transform: 'translateX(-50%)',
+                  color: w.severity === 'error' ? '#ff0040' : '#ffe000',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  textShadow: '0 0 4px #000, 0 0 4px #000',
+                  zIndex: 4,
+                  pointerEvents: 'none',
+                }}
+              >
+                ⚠
+              </span>
+            );
+          })}
           {/* Entry clips: mirrored lanes, titles on the outer edge */}
           {plan.entries.map((entry, i) => (
             <LadderClip

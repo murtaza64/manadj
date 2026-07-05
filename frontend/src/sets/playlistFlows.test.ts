@@ -99,6 +99,8 @@ describe('createPlaylistFromSet — track order into an ordinary Playlist', () =
       name: 'My set',
       color: '#00d0ff',
       display_order: 0,
+      tempo_policy: 'riding',
+      set_tempo_bpm: null,
       has_archived_tracks: false,
     });
 

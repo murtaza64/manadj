@@ -405,6 +405,12 @@ class Set(Base):
     name = Column(String, nullable=False)
     color = Column(String)  # Hex color (sidebar accent)
     display_order = Column(Integer, nullable=False, default=0, server_default="0")
+    # Tempo policy (sets 06): "riding" (Tempo returns after each window)
+    # or "fixed" (everything pitched to set_tempo_bpm). One policy per Set.
+    tempo_policy = Column(String, nullable=False, default="riding", server_default="riding")
+    # Explicit Set tempo (Fixed policy); null = default from the first
+    # track's native BPM at plan time.
+    set_tempo_bpm = Column(Float, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

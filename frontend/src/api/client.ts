@@ -935,7 +935,15 @@ export const api = {
 
     update: async (
       id: number,
-      data: { name?: string; color?: string; display_order?: number }
+      data: {
+        name?: string;
+        color?: string;
+        display_order?: number;
+        /** Tempo policy (sets 06); a null set_tempo_bpm defaults from the
+         * first track's BPM at plan time. */
+        tempo_policy?: 'riding' | 'fixed';
+        set_tempo_bpm?: number | null;
+      }
     ): Promise<SetRowWire> => {
       const res = await fetch(`${API_BASE}/sets/${id}`, {
         method: 'PATCH',
@@ -1009,6 +1017,10 @@ export interface SetRowWire {
   name: string;
   color: string | null;
   display_order: number;
+  /** Tempo policy (sets 06): Riding (Tempo returns) or Fixed (Set tempo). */
+  tempo_policy: 'riding' | 'fixed';
+  /** Explicit Set tempo (Fixed); null = first track's BPM at plan time. */
+  set_tempo_bpm: number | null;
   /** Sets 12: the Set contains an Archived Track — flagged, never altered. */
   has_archived_tracks: boolean;
 }

@@ -88,6 +88,45 @@ def test_get_unknown_404(client):
     assert client.get("/api/sets/999").status_code == 404
 
 
+# ── Tempo policy (sets 06) ──────────────────────────────────────────────
+
+
+def test_tempo_policy_defaults_to_riding(client):
+    s = make_set(client)
+    assert s["tempo_policy"] == "riding"
+    assert s["set_tempo_bpm"] is None
+
+
+def test_tempo_policy_persists(client):
+    s = make_set(client)
+    resp = client.patch(
+        f"/api/sets/{s['id']}", json={"tempo_policy": "fixed", "set_tempo_bpm": 128.0}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tempo_policy"] == "fixed"
+    assert resp.json()["set_tempo_bpm"] == 128.0
+
+    # Round-trips through GET; other fields untouched.
+    detail = client.get(f"/api/sets/{s['id']}").json()
+    assert detail["tempo_policy"] == "fixed"
+    assert detail["set_tempo_bpm"] == 128.0
+    assert detail["name"] == s["name"]
+
+    # Back to riding; a null Set tempo is legal (defaults at plan time).
+    resp = client.patch(
+        f"/api/sets/{s['id']}", json={"tempo_policy": "riding", "set_tempo_bpm": None}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tempo_policy"] == "riding"
+    assert resp.json()["set_tempo_bpm"] is None
+
+
+def test_tempo_policy_rejects_unknown_values(client):
+    s = make_set(client)
+    assert client.patch(f"/api/sets/{s['id']}", json={"tempo_policy": "swing"}).status_code == 422
+    assert client.patch(f"/api/sets/{s['id']}", json={"set_tempo_bpm": 0}).status_code == 422
+
+
 # ── Entries: wholesale replace (ADR 0011 pattern) ───────────────────────
 
 

@@ -20,13 +20,18 @@ import {
   subscribePairStore,
 } from '../editor/pairStore';
 import type { Track } from '../types';
-import { planSet, type PlanInput, type SetPlan } from './planner';
+import { planSet, type PlanInput, type SetPlan, type TempoPolicyInput } from './planner';
+import { useSetSettings } from './setSettings';
 import type { SetEntryLocal } from './setStore';
 
 export function useSetPlan(
   entries: SetEntryLocal[] | undefined,
-  trackMap: Map<number, Track> | undefined
+  trackMap: Map<number, Track> | undefined,
+  /** The Set's Tempo policy (sets 06); absent while the row loads —
+   * planned as Riding at the tuned return speed. */
+  tempo?: { policy: 'riding' | 'fixed'; setTempoBpm: number | null }
 ): SetPlan | undefined {
+  const { tempoReturnSecPerPercent } = useSetSettings();
   const pairStore = useSyncExternalStore(subscribePairStore, snapshotPairStore);
 
   // Never plan against an unloaded pair store: pinned Transitions would
@@ -92,7 +97,22 @@ export function useSetPlan(
       };
     });
 
-    return planSet({ entries, tracks, transitionsByUuid, takesByUuid });
+    const tempoInput: TempoPolicyInput =
+      tempo?.policy === 'fixed'
+        ? { policy: 'fixed', setTempoBpm: tempo.setTempoBpm }
+        : { policy: 'riding', returnSecPerPercent: tempoReturnSecPerPercent };
+
+    return planSet({ entries, tracks, transitionsByUuid, takesByUuid, tempo: tempoInput });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, trackMap, pairStore, transitionsReady, takesLoading, takeUuids.join(',')]);
+  }, [
+    entries,
+    trackMap,
+    pairStore,
+    transitionsReady,
+    takesLoading,
+    takeUuids.join(','),
+    tempo?.policy,
+    tempo?.setTempoBpm,
+    tempoReturnSecPerPercent,
+  ]);
 }

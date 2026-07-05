@@ -13,8 +13,8 @@
  * only; the manual pin picker also lists the pair's Takes (ADR 0023).
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, type SetRowWire } from '../api/client';
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
 import { DECK_COLORS } from '../theme/deckColors';
@@ -55,7 +55,7 @@ import {
   useConductorState,
 } from './conductorStore';
 import { OverviewLadder } from './OverviewLadder';
-import { fmtSec, type PlannedEntry } from './planner';
+import { fmtSec, type PlannedEntry, type PlanWarning } from './planner';
 import { useSetPlan } from './useSetPlan';
 import {
   addTracksToSet,
@@ -132,7 +132,13 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
   });
 
   // ── Playback plan (sets 03): drives the ladder + played durations ────
-  const plan = useSetPlan(entries, trackMap);
+  // The Set's Tempo policy (sets 06) shapes the plan: Riding ramps or
+  // Fixed global rate scaling.
+  const plan = useSetPlan(
+    entries,
+    trackMap,
+    set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
+  );
 
   // Real hot cues for the ladder clips (same cache keys as useHotCues).
   const hotCueQueries = useQueries({
@@ -303,6 +309,25 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
           )}
         </span>
         <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          {/* Tempo policy chip (sets 06): Riding / Fixed · Set tempo */}
+          {set && (
+            <TempoPolicyChip
+              set={set}
+              defaultBpm={
+                (entries && entries.length > 0
+                  ? trackMap?.get(entries[0].trackId)?.bpm
+                  : null) ?? null
+              }
+            />
+          )}
+          {/* Plan degeneracies (sets 06): runway clamps, window overlaps… */}
+          {plan && plan.warnings.length > 0 && (
+            <WarningChip
+              severity={plan.warnings.some((w) => w.severity === 'error') ? 'error' : 'warning'}
+              title={plan.warnings.map((w) => w.message).join('\n')}
+              label={`⚠ ${plan.warnings.length}`}
+            />
+          )}
           {/* Conductor transport (sets 04) — play/pause/stop are Conductor
               controls, never takeover triggers. */}
           {plan && plan.entries.length > 0 && (
@@ -466,6 +491,7 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
                   <AdjacencyRow
                     pin={entry.pin}
                     evidence={pairEvidence(entry.trackId, next.trackId)}
+                    warnings={plan?.warnings.filter((w) => w.adjacencyIndex === i)}
                     onPin={(pin) => setAdjacencyPin(setId, entry.trackId, pin)}
                     onSuggestInsert={(() => {
                       const predecessor = trackMap?.get(entry.trackId);
@@ -521,14 +547,54 @@ function pinChip(view: ReturnType<typeof adjacencyView>): { text: string; color:
   return { text: '✕ hard cut', color: 'var(--subtext0)' };
 }
 
+/** Plan-degeneracy chip (sets 06): errors red, warnings yellow; the full
+ * message rides the title. */
+function WarningChip({
+  severity,
+  title,
+  label,
+}: {
+  severity: PlanWarning['severity'];
+  title: string;
+  label: string;
+}) {
+  return (
+    <span
+      title={title}
+      style={{
+        padding: '1px 6px',
+        background: severity === 'error' ? 'var(--red)' : 'var(--yellow)',
+        color: 'var(--base)',
+        fontSize: '11px',
+        fontWeight: 600,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+/** Short chip label per plan-warning kind (full message in the title). */
+const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
+  'insufficient-runway': 'tempo runway',
+  'window-overlap': 'windows overlap',
+  'window-past-end': 'window past end',
+  'incoming-ends-inside-window': 'incoming ends early',
+  'no-bpm': 'no BPM',
+  'pitch-clamped': 'pitch clamped',
+};
+
 function AdjacencyRow({
   pin,
   evidence,
+  warnings,
   onPin,
   onSuggestInsert,
 }: {
   pin: AdjacencyPin | null;
   evidence: { transitions: TransitionEvidence[]; takes: TakeEvidence[] };
+  /** This adjacency's plan degeneracies (sets 06), if any. */
+  warnings?: PlanWarning[];
   onPin: (pin: AdjacencyPin | null) => void;
   /** Open insert suggestions for this adjacency (sets 10); absent while
    * the pair's track metadata is still loading. */
@@ -640,6 +706,17 @@ function AdjacencyRow({
             UNPRACTICED
           </span>
         )}
+
+        {/* Plan degeneracies on this adjacency (sets 06): runway clamps,
+            window overlaps… — errors red, warnings yellow. */}
+        {warnings?.map((w, k) => (
+          <WarningChip
+            key={k}
+            severity={w.severity}
+            title={w.message}
+            label={`⚠ ${WARNING_LABELS[w.kind]}`}
+          />
+        ))}
 
         {/* Evidence counts for the ordered pair */}
         <span style={{ marginLeft: 'auto', color: 'var(--subtext0)' }}>
@@ -775,5 +852,150 @@ function SetTrackRow({
         ✕
       </button>
     </div>
+  );
+}
+
+/**
+ * Tempo policy chip (sets 06): shows the Set's policy (and Set tempo when
+ * Fixed); clicking opens a small popover to switch policy or edit the
+ * tempo. Persists per Set via PATCH; the plan recomputes on the refreshed
+ * row. Switching to Fixed seeds the Set tempo from the first track's
+ * native BPM (the PRD default), kept editable afterwards.
+ */
+function TempoPolicyChip({
+  set,
+  defaultBpm,
+}: {
+  set: SetRowWire;
+  /** The first track's native BPM (Fixed's default Set tempo). */
+  defaultBpm: number | null;
+}) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [bpmDraft, setBpmDraft] = useState<string | null>(null);
+
+  const patch = (data: { tempo_policy?: 'riding' | 'fixed'; set_tempo_bpm?: number | null }) => {
+    void api.sets
+      .update(set.id, data)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['sets'] }))
+      .catch((err) => console.error('set tempo update failed', err));
+  };
+
+  const fixed = set.tempo_policy === 'fixed';
+  const effectiveBpm = set.set_tempo_bpm ?? defaultBpm;
+  const commitBpm = () => {
+    if (bpmDraft === null) return;
+    const parsed = Number(bpmDraft);
+    if (Number.isFinite(parsed) && parsed > 0) patch({ set_tempo_bpm: parsed });
+    setBpmDraft(null);
+  };
+
+  return (
+    <span style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Tempo policy: Riding eases each track back to its native tempo; Fixed pitches the whole set to one BPM"
+        style={{
+          padding: '2px 10px',
+          background: 'var(--surface0)',
+          color: fixed ? 'var(--peach)' : 'var(--sapphire)',
+          border: '1px solid var(--surface1)',
+          cursor: 'pointer',
+          fontSize: '12px',
+        }}
+      >
+        {fixed ? `Fixed · ${effectiveBpm ? `${effectiveBpm.toFixed(1)} BPM` : 'no BPM'}` : 'Riding'}
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            right: 0,
+            zIndex: 30,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            padding: '8px',
+            background: 'var(--mantle)',
+            border: '1px solid var(--surface1)',
+            minWidth: '220px',
+            fontSize: '12px',
+          }}
+        >
+          <button
+            onClick={() => {
+              if (fixed) patch({ tempo_policy: 'riding' });
+              setOpen(false);
+            }}
+            style={{
+              padding: '3px 8px',
+              textAlign: 'left',
+              background: !fixed ? 'var(--sapphire)' : 'var(--surface0)',
+              color: !fixed ? 'var(--base)' : 'var(--text)',
+              border: '1px solid var(--surface1)',
+              cursor: 'pointer',
+            }}
+          >
+            Riding — tracks return to native tempo between handovers
+          </button>
+          <button
+            onClick={() => {
+              if (!fixed) {
+                patch({ tempo_policy: 'fixed', set_tempo_bpm: set.set_tempo_bpm ?? defaultBpm });
+              }
+            }}
+            style={{
+              padding: '3px 8px',
+              textAlign: 'left',
+              background: fixed ? 'var(--peach)' : 'var(--surface0)',
+              color: fixed ? 'var(--base)' : 'var(--text)',
+              border: '1px solid var(--surface1)',
+              cursor: 'pointer',
+            }}
+          >
+            Fixed — the whole set holds one tempo
+          </button>
+          {fixed && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: 'var(--subtext0)' }}>Set tempo</span>
+              <input
+                type="number"
+                min={1}
+                step={0.1}
+                value={bpmDraft ?? (effectiveBpm != null ? String(effectiveBpm) : '')}
+                onChange={(e) => setBpmDraft(e.target.value)}
+                onBlur={commitBpm}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+                style={{
+                  width: '72px',
+                  padding: '2px 4px',
+                  background: 'var(--surface0)',
+                  color: 'var(--text)',
+                  border: '1px solid var(--surface1)',
+                  fontSize: '12px',
+                }}
+              />
+              <span style={{ color: 'var(--subtext0)' }}>BPM</span>
+            </label>
+          )}
+          <button
+            onClick={() => setOpen(false)}
+            style={{
+              padding: '2px 8px',
+              background: 'transparent',
+              color: 'var(--subtext0)',
+              border: 'none',
+              cursor: 'pointer',
+              alignSelf: 'flex-end',
+            }}
+          >
+            close
+          </button>
+        </div>
+      )}
+    </span>
   );
 }

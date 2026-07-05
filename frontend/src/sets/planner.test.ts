@@ -181,6 +181,8 @@ describe('pinned Transition windows', () => {
   });
 
   it('tempo-matches the incoming during the window and snaps to native after', () => {
+    // returnSecPerPercent 0 = instant snap; Tempo return ramps have their
+    // own suite below (sets 06).
     const plan = planSet(
       input({
         entries: [
@@ -189,6 +191,7 @@ describe('pinned Transition windows', () => {
         ],
         tracks: { 1: { ...facts(90, 10), bpm: 100 }, 2: { ...facts(100), bpm: 96 } },
         transitionsByUuid: { t1: tr({ tempoMatch: true }) },
+        tempo: { policy: 'riding', returnSecPerPercent: 0 },
       })
     );
     const [adj] = plan.adjacencies;
@@ -197,7 +200,7 @@ describe('pinned Transition windows', () => {
     expect(adj.rateIncoming).toBeCloseTo(rate);
     // B advances 20s of mix time at the matched rate: 8 + 20·rate.
     const bAtEnd = 8 + 20 * rate;
-    // Post-window anchor is native-rate (Tempo v1 snap): time 0 at 80 − bAtEnd.
+    // Post-window anchor is native-rate (instant snap): time 0 at 80 − bAtEnd.
     expect(plan.entries[1].mixOffsetSec).toBeCloseTo(80 - bAtEnd);
     expect(plan.totalSec).toBeCloseTo(80 - bAtEnd + 100);
   });
@@ -224,10 +227,13 @@ describe('pinned Transition windows', () => {
         },
       })
     );
-    expect(overlapping.warnings.some((w) => w.includes('overlaps'))).toBe(true);
+    const overlap = overlapping.warnings.find((w) => w.kind === 'window-overlap');
+    expect(overlap?.adjacencyIndex).toBe(1);
 
     const pastEnd = planSet(twoTracks(tr({ startSec: 95 })));
-    expect(pastEnd.warnings.some((w) => w.includes('past the outgoing'))).toBe(true);
+    expect(pastEnd.warnings.some((w) => w.kind === 'window-past-end' && w.adjacencyIndex === 0)).toBe(
+      true
+    );
   });
 });
 
@@ -469,5 +475,200 @@ describe('planStateAt', () => {
     expect(s.done).toBe(true);
     expect(s.decks.A.playing).toBe(false);
     expect(s.decks.B.playing).toBe(false);
+  });
+});
+
+// ── Tempo policies (sets 06): Riding ramps + Fixed set tempo ────────────
+
+describe('Riding tempo policy (Tempo return ramps)', () => {
+  /** Tempo-matched window: outgoing 100 BPM, incoming 96 BPM → the
+   * incoming rides ~+4.17% during the window (rate 100/96) and eases back
+   * to native afterwards. Window at outgoing time 60..80, B in at 8. */
+  const pitch = (100 / 96 - 1) * 100;
+  const rate = 100 / 96;
+  const bAtEnd = 8 + 20 * rate;
+  const riding = (over: Partial<PlanInput> = {}) =>
+    planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: { ...facts(300), bpm: 100 }, 2: { ...facts(300), bpm: 96 } },
+        transitionsByUuid: { t1: tr({ tempoMatch: true }) },
+        tempo: { policy: 'riding', returnSecPerPercent: 2 },
+        ...over,
+      })
+    );
+
+  it('appends a Tempo return ramp after the window (duration = pitch · secPerPercent)', () => {
+    const plan = riding();
+    const [adj] = plan.adjacencies;
+    const d = pitch * 2;
+    expect(adj.tempoReturnEndSec).toBeCloseTo(80 + d);
+    // Post-ramp native anchor: the ramp covers d·(r+1)/2 of B's track time.
+    expect(plan.entries[1].mixOffsetSec).toBeCloseTo(80 + d - (bAtEnd + (d * (rate + 1)) / 2));
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it('planStateAt eases pitch and position through the ramp, native after', () => {
+    const plan = riding();
+    const d = pitch * 2;
+    const mid = 80 + d / 2;
+    const s = planStateAt(plan, mid);
+    expect(s.decks.B.pitchPercent).toBeCloseTo(pitch / 2);
+    // trackTime = b + r·τ + (1−r)·τ²/(2d) at τ = d/2.
+    const tau = d / 2;
+    expect(s.decks.B.trackTime).toBeCloseTo(bAtEnd + rate * tau + ((1 - rate) * tau * tau) / (2 * d));
+    const after = planStateAt(plan, 80 + d + 5);
+    expect(after.decks.B.pitchPercent).toBe(0);
+    expect(after.decks.B.trackTime).toBeCloseTo(80 + d + 5 - plan.entries[1].mixOffsetSec);
+  });
+
+  it('clamps the ramp faster when the runway to the next window is short, and flags it', () => {
+    // Next window opens at incoming time 30 — only ~1.17s of B's track
+    // time after the window end (b = 28.83): the return can't complete at
+    // the tuned speed, so it clamps to end exactly at the next window.
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: {
+          1: { ...facts(300), bpm: 100 },
+          2: { ...facts(300), bpm: 96 },
+          3: { ...facts(300), bpm: 96 },
+        },
+        transitionsByUuid: {
+          t1: tr({ tempoMatch: true }),
+          t2: tr({ startSec: 30, tempoMatch: true }),
+        },
+        tempo: { policy: 'riding', returnSecPerPercent: 2 },
+      })
+    );
+    const [adj, next] = plan.adjacencies;
+    expect(adj.tempoReturnEndSec).toBeCloseTo(next.mixStartSec);
+    expect(adj.tempoReturnEndSec - adj.mixEndSec).toBeLessThan(pitch * 2);
+    expect(
+      plan.warnings.some((w) => w.kind === 'insufficient-runway' && w.adjacencyIndex === 0)
+    ).toBe(true);
+  });
+
+  it('rides native windows (no tempo match) without a ramp', () => {
+    const plan = riding({ transitionsByUuid: { t1: tr({ tempoMatch: false }) } });
+    const [adj] = plan.adjacencies;
+    expect(adj.tempoReturnEndSec).toBeCloseTo(adj.mixEndSec);
+    expect(plan.entries[1].mixOffsetSec).toBeCloseTo(80 - 28); // b at rate 1
+  });
+});
+
+describe('Fixed tempo policy (global rate scaling)', () => {
+  /** Set tempo 90: outgoing (100 BPM) plays at rate 0.9, incoming
+   * (80 BPM) at 1.125. Window authored at outgoing time 60..80 stretches
+   * to mix 66.67..88.89. */
+  const fixed = (over: Partial<PlanInput> = {}) =>
+    planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: { ...facts(100), bpm: 100 }, 2: { ...facts(100), bpm: 80 } },
+        transitionsByUuid: { t1: tr({ tempoMatch: false }) },
+        tempo: { policy: 'fixed', setTempoBpm: 90 },
+        ...over,
+      })
+    );
+
+  it('pitches every entry to the Set tempo', () => {
+    const plan = fixed();
+    expect(plan.entries[0].rate).toBeCloseTo(0.9);
+    expect(plan.entries[1].rate).toBeCloseTo(1.125);
+  });
+
+  it('stretches the authored window on the mix axis by the outgoing rate', () => {
+    const plan = fixed();
+    const [adj] = plan.adjacencies;
+    expect(adj.mixStartSec).toBeCloseTo(60 / 0.9);
+    expect(adj.mixEndSec).toBeCloseTo(80 / 0.9);
+    expect(adj.rateOutgoing).toBeCloseTo(0.9);
+    // The tempo-match flag is moot: B advances at bpmOut/bpmIn per
+    // authored window second (both decks locked to the Set tempo).
+    expect(adj.rateIncoming).toBeCloseTo(100 / 80);
+    expect(adj.pitchIncomingPercent).toBeCloseTo(12.5);
+    // No Tempo return under Fixed.
+    expect(adj.tempoReturnEndSec).toBeCloseTo(adj.mixEndSec);
+  });
+
+  it('anchors the incoming at its own fixed rate after the window', () => {
+    const plan = fixed();
+    const b = 8 + 20 * (100 / 80); // 33, in B's track time
+    const mixEnd = 80 / 0.9;
+    expect(plan.entries[1].mixOffsetSec).toBeCloseTo(mixEnd - b / 1.125);
+    expect(plan.totalSec).toBeCloseTo(mixEnd - b / 1.125 + 100 / 1.125);
+  });
+
+  it('planStateAt: constant per-deck pitch, window lanes on the authored axis', () => {
+    const lanes = { faderA: [{ x: 0, y: 1 }, { x: 1, y: 0 }] };
+    const plan = fixed({
+      transitionsByUuid: { t1: tr({ tempoMatch: false, lanes }) },
+    });
+    const solo = planStateAt(plan, 30);
+    expect(solo.decks.A.trackTime).toBeCloseTo(27); // 30 · 0.9
+    expect(solo.decks.A.pitchPercent).toBeCloseTo(-10);
+    // Authored window midpoint (outgoing time 70) at mix 70/0.9.
+    const mid = planStateAt(plan, 70 / 0.9);
+    expect(mid.decks.A.trackTime).toBeCloseTo(70);
+    expect(mid.decks.B.trackTime).toBeCloseTo(8 + 10 * (100 / 80));
+    expect(mid.decks.B.pitchPercent).toBeCloseTo(12.5);
+    expect(mid.lanes.A.fader).toBeCloseTo(0.5); // authored x = 0.5
+    const after = planStateAt(plan, 80 / 0.9 + 10);
+    expect(after.decks.B.pitchPercent).toBeCloseTo(12.5); // holds the Set tempo
+    expect(after.decks.B.trackTime).toBeCloseTo(
+      (80 / 0.9 + 10 - plan.entries[1].mixOffsetSec) * 1.125
+    );
+  });
+
+  it('hard-cuts scale too: cut at the outgoing end ÷ rate, incoming from its Main cue', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: { ...facts(100), bpm: 100 }, 2: { ...facts(100, 20), bpm: 80 } },
+        tempo: { policy: 'fixed', setTempoBpm: 90 },
+      })
+    );
+    const cut = 100 / 0.9;
+    expect(plan.adjacencies[0].mixStartSec).toBeCloseTo(cut);
+    expect(plan.entries[1].entrySec).toBe(20);
+    expect(plan.entries[1].entryMixSec).toBeCloseTo(cut);
+    expect(plan.totalSec).toBeCloseTo(cut + 80 / 1.125);
+  });
+
+  it('defaults the Set tempo to the first track’s native BPM', () => {
+    const plan = fixed({ tempo: { policy: 'fixed', setTempoBpm: null } });
+    expect(plan.entries[0].rate).toBeCloseTo(1); // 100/100
+    expect(plan.entries[1].rate).toBeCloseTo(1.25); // 100/80
+  });
+
+  it('plays BPM-less tracks at native rate and flags them', () => {
+    const plan = fixed({
+      tracks: { 1: { ...facts(100), bpm: 100 }, 2: { ...facts(100), bpm: null } },
+    });
+    expect(plan.entries[1].rate).toBe(1);
+    expect(plan.warnings.some((w) => w.kind === 'no-bpm' && w.entryIndex === 1)).toBe(true);
+  });
+
+  it('clamps rates past the deck varispeed range and flags the entry', () => {
+    const plan = fixed({
+      tracks: { 1: { ...facts(100), bpm: 100 }, 2: { ...facts(100), bpm: 60 } },
+    });
+    // 90/60 → +50%, clamped to the decks' ±25%.
+    expect(plan.entries[1].rate).toBeCloseTo(1.25);
+    expect(plan.warnings.some((w) => w.kind === 'pitch-clamped' && w.entryIndex === 1)).toBe(true);
   });
 });

@@ -410,6 +410,10 @@ class SetUpdate(BaseModel):
     name: str | None = None
     color: str | None = None
     display_order: int | None = None
+    # Tempo policy (sets 06). set_tempo_bpm may be explicitly nulled
+    # (falls back to the first track's BPM at plan time).
+    tempo_policy: str | None = Field(default=None, pattern=r"^(riding|fixed)$")
+    set_tempo_bpm: float | None = Field(default=None, gt=0)
 
 
 class SetRow(BaseModel):
@@ -418,6 +422,8 @@ class SetRow(BaseModel):
     name: str
     color: str | None
     display_order: int
+    tempo_policy: str = "riding"
+    set_tempo_bpm: float | None = None
     created_at: datetime | None
     updated_at: datetime | None
     # Sets 12: an Archived Track in the Set flags it (sidebar + detail)
