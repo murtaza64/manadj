@@ -77,6 +77,10 @@ Delivered in two phases: **Phase A** — harness and shootout, offline scripts o
 - UI beyond surfacing the needs-attention flag as a library filter; no new analysis UI
 - Waveform analysis changes (ADR 0014 blob unchanged)
 
+## Shootout Verdict (2026-07-05, Phase A complete)
+
+Winners, signed off: **madmom_dbn** for grids (851 gold tracks: 93.3% ok, phase median 4.3ms, 5.1% honest bail) and **madmom_keycnn** for keys (783 gold tracks: 93.0% mixable, 81.1% exact) — both from the one madmom dep. beat_this second on grids (85.7%); essentia baseline third everywhere; EDM-tuned essentia profiles (edma/edmm) lost to bgate on this corpus. Corpus reads Engine/RB DBs directly (read-only) rather than library-DB rows — deliberate deviation, covers never-imported tracks. Full numbers: issue 06 and `data/shootout_report.md` (lane `analysis`).
+
 ## Further Notes
 
 - ADR 0020 records the constant-fit-or-bail decision and ground-truth scoring rationale; ADR 0016 governs grid/BPM authority; CONTEXT.md defines Ground truth corpus and Quantized track.
