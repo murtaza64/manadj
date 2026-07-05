@@ -37,11 +37,18 @@ export default function HotCue({
     <button
       className={classNames}
       onPointerDown={(e) => {
-        if (disabled) return;
+        // Primary button only: a right-click is the DELETE gesture
+        // (contextmenu below) — letting it through here started a
+        // hold-to-preview whose release was then swallowed by the delete
+        // (playback ran on forever).
+        if (disabled || e.button !== 0) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         onDown(slotNumber);
       }}
-      onPointerUp={() => onUp(slotNumber)}
+      onPointerUp={(e) => {
+        if (e.button !== 0) return;
+        onUp(slotNumber);
+      }}
       onPointerCancel={() => onUp(slotNumber)}
       onContextMenu={(e) => {
         e.preventDefault();
