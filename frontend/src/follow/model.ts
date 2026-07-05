@@ -91,9 +91,7 @@ export interface FollowParams {
   provenOnly: boolean;
 }
 
-/** Canonical defaults. Production currently projects the stored one-shot
- * settings instead; this becomes the params store's default when the
- * parameters move to their own preference key (issue 05). */
+/** Canonical defaults — the params store boots from these. */
 export const DEFAULT_FOLLOW_PARAMS: FollowParams = {
   harmonicKeys: true,
   bpm: true,
@@ -195,6 +193,35 @@ export function deriveFollowQuery(reference: Track, params: FollowParams): Follo
   return query;
 }
 
+// ── Indicator summary (follow-mode 05) ──────────────────────────────────
+
+/**
+ * Compact "what is Follow deriving" text for one followed reference —
+ * the FilterBar indicator's chip. Enabled axes only; axes the reference
+ * has no data for are skipped (mirroring deriveFollowQuery); '—' when
+ * nothing contributes.
+ */
+export function followSummary(reference: Track, params: FollowParams): string {
+  const parts: string[] = [];
+  if (params.harmonicKeys && reference.key !== null && reference.key !== undefined) {
+    parts.push(formatKeyDisplay(reference.key));
+  }
+  if (params.bpm && reference.bpm) {
+    parts.push(`${Math.round(reference.bpm)}±${params.bpmThresholdPercent}%`);
+  }
+  if (params.energy && reference.energy !== undefined) {
+    const { min, max } = getEnergyRange(reference.energy, params.energyPreset);
+    parts.push(`E${min}–${max}`);
+  }
+  if (params.tags && reference.tags.length > 0) {
+    parts.push('tags');
+  }
+  if (params.provenOnly) {
+    parts.push('◆only');
+  }
+  return parts.length > 0 ? parts.join('·') : '—';
+}
+
 // ── Union (per-track OR) ────────────────────────────────────────────────
 
 /**
@@ -217,6 +244,19 @@ export function unionIds(resultSets: Track[][]): Set<number> {
  * reference are always candidates, even when the heuristic parameters
  * would exclude them. `provenOnly` narrows to just the proven tier.
  */
+/** The followed references: followed Decks that actually hold a Track,
+ * in deck order. One home for the derivation the FilterBar (summary
+ * chips, modal context) and the Library (queries, tiering) share. */
+export function followedReferences(
+  flags: FollowFlags,
+  loaded: Record<ChannelId, Track | null>
+): Array<{ deck: ChannelId; reference: Track }> {
+  return DECKS.flatMap((deck) => {
+    const reference = loaded[deck];
+    return flags[deck] && reference ? [{ deck, reference }] : [];
+  });
+}
+
 // ── Ranking (follow-mode 04) ────────────────────────────────────────────
 
 /** A followed Deck's reference for tiering: its Track plus the proven

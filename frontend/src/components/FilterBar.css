@@ -85,32 +85,8 @@
   opacity: 0.5;
 }
 
-.find-related-quick {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.find-related-quick:hover:not(:disabled) {
-  background: var(--surface1) !important;
-}
-
-.find-related-quick:disabled {
-  opacity: 0.5;
-}
-
-.find-related-settings {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.find-related-settings:hover:not(:disabled) {
-  background: var(--surface1) !important;
-}
-
-.find-related-settings:disabled {
-  opacity: 0.5;
+.follow-summary-chip:hover {
+  background: var(--surface0) !important;
 }
 
 .filter-bar-key-btn:hover {

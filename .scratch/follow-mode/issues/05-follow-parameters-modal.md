@@ -1,6 +1,6 @@
 # 05 — Follow parameters modal + retire the one-shot
 
-Status: ready-for-agent
+Status: done — pending user eye-verify
 
 ## Parent
 
@@ -27,3 +27,7 @@ Retire the one-shot: the Find Compatible button group and quick-apply button go 
 
 - 01-follow-core-manual-toggles
 - 03-proven-tier-folded-in (proven-only control)
+
+## Comments
+
+- Done (lwmnozwo, lane followmode): `FollowParamsModal` (new, replacing the deleted FindRelatedTracksModal) — live edits via the new `paramsStore` (`manadj-follow-params` preference key; legacy `findRelatedTracksSettings` deleted on boot), no Apply, no reference picker, tags as a single any-shared checkbox, ◆ proven-only control, Reset/Close footer. FilterBar: per-followed-Deck summary chips (`A▸10m·128±4%·E2–4`) via `followSummary` (model, tested), any chip opens the modal; a plain ⟲… chip keeps it reachable while nothing follows (deliberate extra). One-shot fully retired: button group, quick-apply, `deriveRelatedFilters`, `RelatedTracksSettings`, dead CSS — no residue greps. `followedReferences` extracted into the model (was duplicated FilterBar/Library). Review fixes: double-`modal` CSS rename bug (modal chrome was dead), stale comments. Gate: 530 pytest / 535 vitest / build / one head.

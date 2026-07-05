@@ -14,6 +14,7 @@ import {
   candidateIdSet,
   DEFAULT_FOLLOW_PARAMS,
   deriveFollowQuery,
+  followSummary,
   followTier,
   orderByTier,
   reduceFollow,
@@ -194,6 +195,35 @@ describe('candidateIdSet — proven tier folded in (follow-mode 03)', () => {
     const ids = candidateIdSet([[t(1)]], [transitionsFrom(index, 7)], false);
     expect([...ids].sort()).toEqual([1, 30]);
     expect([...candidateIdSet([[t(1)]], [transitionsFrom(index, 7)], true)]).toEqual([30]);
+  });
+});
+
+describe('followSummary — the FilterBar indicator text (follow-mode 05)', () => {
+  const tag = (id: number): Tag => ({ id, name: `t${id}` }) as unknown as Tag;
+  const reference = track({ key: 19, bpm: 128, energy: 3, tags: [tag(1), tag(2)] });
+
+  it('renders the enabled axes from the reference', () => {
+    expect(
+      followSummary(reference, {
+        harmonicKeys: true,
+        bpm: true,
+        bpmThresholdPercent: 4,
+        tags: true,
+        energy: true,
+        energyPreset: 'near',
+        provenOnly: false,
+      })
+    ).toBe('10m·128±4%·E2–4·tags');
+  });
+
+  it('marks proven-only and skips disabled axes', () => {
+    expect(
+      followSummary(reference, { ...DEFAULT_FOLLOW_PARAMS, harmonicKeys: false, bpm: false, provenOnly: true })
+    ).toBe('◆only');
+  });
+
+  it('skips axes the reference has no data for; nothing enabled renders a dash', () => {
+    expect(followSummary(track({}), DEFAULT_FOLLOW_PARAMS)).toBe('—');
   });
 });
 

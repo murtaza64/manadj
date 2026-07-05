@@ -5,27 +5,26 @@ import type { Tag, Track } from '../types';
 import { getTagColor } from '../utils/colorUtils';
 import { getBpmColor, getAverageKeyColor } from '../utils/displayColors';
 import EnergySquare from './EnergySquare';
-import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon, ArrowDownIcon } from './icons';
+import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon } from './icons';
 import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
-import FindRelatedTracksModal from './FindRelatedTracksModal';
+import FollowParamsModal from './FollowParamsModal';
 import { DEFAULT_FILTERS, useFilters } from '../contexts/FilterContext';
 import { dispatchFollow, useFollowFlags } from '../follow/followStore';
-import type { RelatedTracksSettings } from './Library';
+import { useFollowParams } from '../follow/paramsStore';
+import { followedReferences, followSummary } from '../follow/model';
 import './FilterBar.css';
 
 interface FilterBarProps {
   totalTracks: number;
   filteredCount: number;
-  /** Loaded decks — Find Compatible's reference model (transition-library
-   * 03): the match runs from a loaded deck, not the selection. */
+  /** Loaded decks — Follow's reference model: the followed Deck's loaded
+   * Track is the match reference, never the selection. */
   loadedA: Track | null;
   loadedB: Track | null;
-  onFindRelated: () => void;
-  onApplySettings: (settings: RelatedTracksSettings) => void;
 }
 
-export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB, onFindRelated, onApplySettings }: FilterBarProps) {
+export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB }: FilterBarProps) {
   const { filters, setFilters } = useFilters();
   const [searchInput, setSearchInput] = useState(filters.search);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
@@ -33,8 +32,8 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
   const [isBpmModalOpen, setIsBpmModalOpen] = useState(false);
   const [bpmModalPosition, setBpmModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
   const [showTagFilters, setShowTagFilters] = useState(false);
-  const [showRelatedModal, setShowRelatedModal] = useState(false);
-  const [relatedModalPosition, setRelatedModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
+  const [showParamsModal, setShowParamsModal] = useState(false);
+  const [paramsModalPosition, setParamsModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
 
   // Fetch all tags
   const { data: allTags } = useQuery({
@@ -72,23 +71,15 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
     setFilters({ ...filters, search: '' });
   };
 
-  const anyDeckLoaded = loadedA !== null || loadedB !== null;
   const followFlags = useFollowFlags();
+  const followParams = useFollowParams();
   const loadedByDeck = { A: loadedA, B: loadedB } as const;
+  /** Followed references, for the summary chips and the modal context. */
+  const followedRefs = followedReferences(followFlags, loadedByDeck);
 
-  const handleQuickApply = () => {
-    if (!anyDeckLoaded) return;
-    onFindRelated();
-  };
-
-  const handleOpenSettings = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!anyDeckLoaded) return;
-    setRelatedModalPosition({ x: e.clientX, y: e.clientY });
-    setShowRelatedModal(true);
-  };
-
-  const handleApplySettings = (settings: RelatedTracksSettings) => {
-    onApplySettings(settings);
+  const openParamsModal = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setParamsModalPosition({ x: e.clientX, y: e.clientY });
+    setShowParamsModal(true);
   };
 
   /** Anything non-default that Clear All would clear (sort is exempt). */
@@ -109,7 +100,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
       flexDirection: 'column',
       gap: '12px'
     }}>
-      {/* Filter bar - order: Tag, Search, Energy, Key, BPM, Find Compatible, transitions toggle, Clear All, Result Count */}
+      {/* Filter bar - order: Tag, Search, Energy, Key, BPM, Follow toggles + summary, Clear All, Result Count */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         {/* Tag Toggle Icon with Red Dot Indicator */}
         <div
@@ -337,56 +328,51 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
               </button>
             );
           })}
+
+          {/* Derived summary per followed Deck (follow-mode 05); any chip
+              opens the parameters modal. With nothing followed, a plain
+              params button keeps the modal reachable for pre-configuring.
+              (The one-shot Find Compatible group and the ◆ transitions
+              chip are retired — Follow is the single surface now.) */}
+          {followedRefs.length > 0 ? (
+            followedRefs.map(({ deck, reference }) => (
+              <button
+                key={`summary-${deck}`}
+                onClick={openParamsModal}
+                className="follow-summary-chip"
+                title={`Follow ${deck} is deriving these criteria — click to edit`}
+                style={{
+                  padding: '4px 8px',
+                  background: 'transparent',
+                  color: 'var(--green)',
+                  border: '1px solid var(--surface0)',
+                  borderLeft: 'none',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                {deck}▸{followSummary(reference, followParams)}
+              </button>
+            ))
+          ) : (
+            <button
+              onClick={openParamsModal}
+              className="follow-summary-chip"
+              title="Follow parameters"
+              style={{
+                padding: '4px 8px',
+                background: 'transparent',
+                color: 'var(--text)',
+                border: '1px solid var(--surface0)',
+                borderLeft: 'none',
+                cursor: 'pointer',
+                fontSize: '12px',
+              }}
+            >
+              ⟲…
+            </button>
+          )}
         </div>
-
-        {/* Find Compatible Button Group (runs from a loaded deck) */}
-        <div style={{ display: 'flex', gap: 0 }}>
-          <button
-            onClick={handleOpenSettings}
-            disabled={!anyDeckLoaded}
-            className="find-related-settings"
-            title={anyDeckLoaded ? 'Find tracks compatible with a loaded deck' : 'Load a deck first'}
-            style={{
-              padding: '4px 10px',
-              background: 'var(--surface0)',
-              color: anyDeckLoaded ? 'var(--text)' : 'var(--overlay0)',
-              border: '1px solid var(--surface0)',
-              cursor: anyDeckLoaded ? 'pointer' : 'not-allowed',
-              fontSize: '12px',
-              fontWeight: 'bold',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-            }}
-          >
-            <span>Find Compatible</span>
-          </button>
-
-          <button
-            onClick={handleQuickApply}
-            disabled={!anyDeckLoaded}
-            className="find-related-quick"
-            title="Quick apply: last settings + last chosen deck"
-            style={{
-              background: 'var(--surface0)',
-              color: anyDeckLoaded ? 'var(--text)' : 'var(--overlay0)',
-              border: '1px solid var(--surface0)',
-              padding: '4px 8px',
-              minWidth: '28px',
-              cursor: anyDeckLoaded ? 'pointer' : 'not-allowed',
-              fontSize: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <ArrowDownIcon width={14} height={14} opacity={1} />
-          </button>
-        </div>
-
-        {/* The standalone ◆ transitions chip is retired (follow-mode 03):
-            the proven tier is part of Follow's candidate set now, with
-            provenOnly as a Follow parameter. */}
 
         {/* Clear All Filters Button */}
         <button
@@ -514,13 +500,11 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
         openPosition={bpmModalPosition}
       />
 
-      <FindRelatedTracksModal
-        isOpen={showRelatedModal}
-        onClose={() => setShowRelatedModal(false)}
-        loadedA={loadedA}
-        loadedB={loadedB}
-        onApply={handleApplySettings}
-        openPosition={relatedModalPosition}
+      <FollowParamsModal
+        isOpen={showParamsModal}
+        onClose={() => setShowParamsModal(false)}
+        references={followedRefs}
+        openPosition={paramsModalPosition}
       />
     </div>
   );

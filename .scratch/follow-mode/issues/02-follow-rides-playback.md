@@ -1,6 +1,6 @@
 # 02 — Follow rides playback
 
-Status: ready-for-agent
+Status: done — pending user eye-verify
 
 ## Parent
 

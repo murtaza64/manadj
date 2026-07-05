@@ -1,6 +1,6 @@
 # 01 — Follow core: manual toggles drive the list live
 
-Status: ready-for-agent
+Status: done — pending user eye-verify
 
 ## Parent
 

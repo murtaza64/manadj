@@ -16,15 +16,10 @@ import type { ChannelId } from '../playback/mixer';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
-import {
-  candidateIdSet,
-  deriveFollowQuery,
-  getEnergyRange,
-  getHarmonicKeys,
-  orderByTier,
-} from '../follow/model';
-import type { FollowParams, FollowReference } from '../follow/model';
+import { candidateIdSet, deriveFollowQuery, followedReferences, orderByTier } from '../follow/model';
+import type { FollowReference } from '../follow/model';
 import { useFollowFlags } from '../follow/followStore';
+import { useFollowParams } from '../follow/paramsStore';
 import { EMPTY_SELECTION, click } from '../selection/selectionModel';
 import { useTrackSelection } from '../selection/useTrackSelection';
 import {
@@ -46,129 +41,6 @@ import {
   type PlaylistSort,
   type PlaylistSortColumn,
 } from '../utils/trackSort';
-
-// Find Compatible feature (né Find Related; internal keys unchanged) —
-// types and constants
-export interface RelatedTracksSettings {
-  harmonicKeys: boolean;
-  bpm: boolean;
-  bpmThresholdPercent: number;
-  tags: boolean;
-  tagMatchMode: 'ANY' | 'ALL';
-  energy: boolean;
-  energyPreset: 'up' | 'down' | 'near' | 'equal';
-  /** Which loaded deck's track the match runs from (transition-library
-   * 03: loaded-deck reference model — the quick-apply arrow reuses it). */
-  refDeck: 'A' | 'B';
-  /** Follow's proven-tier narrowing (follow-mode 03). Stored with these
-   * settings until the parameters get their own key + modal control
-   * (issue 05); the retired one-shot path ignores it. */
-  provenOnly: boolean;
-}
-
-const STORAGE_KEY = 'findRelatedTracksSettings';
-export const DEFAULT_SETTINGS: RelatedTracksSettings = {
-  harmonicKeys: true,
-  bpm: true,
-  bpmThresholdPercent: 5,
-  tags: false,
-  tagMatchMode: 'ANY',
-  energy: false,
-  energyPreset: 'near',
-  refDeck: 'A',
-  provenOnly: false,
-};
-
-// Related-tracks utilities now live in the follow model (follow-mode 01);
-// re-exported here for the modal until the one-shot retires (issue 05).
-export { getEnergyRange };
-
-/**
- * Load settings from localStorage with validation
- */
-function loadSettings(): RelatedTracksSettings {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return DEFAULT_SETTINGS;
-
-    const parsed = JSON.parse(saved);
-
-    // Validate and merge with defaults
-    return {
-      ...DEFAULT_SETTINGS,
-      ...parsed,
-      bpmThresholdPercent: Math.max(0, Math.min(15, parsed.bpmThresholdPercent ?? 5)),
-    };
-  } catch (error) {
-    console.error('Failed to load settings:', error);
-    return DEFAULT_SETTINGS;
-  }
-}
-
-/**
- * Save settings to localStorage
- */
-export function saveSettings(settings: RelatedTracksSettings) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-}
-
-/**
- * Derive filter state from track and settings
- */
-function deriveRelatedFilters(
-  track: Track,
-  settings: RelatedTracksSettings
-): {
-  search: string;
-  selectedTagIds: number[];
-  energyMin: number;
-  energyMax: number;
-  tagMatchMode: 'ANY' | 'ALL';
-  bpmCenter: number | null;
-  bpmThresholdPercent: number;
-  selectedKeyCamelotIds: string[];
-  sortColumn: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance' | null;
-  sortDirection: 'asc' | 'desc';
-} {
-  const filters = {
-    search: '',
-    selectedTagIds: [] as number[],
-    energyMin: 1,
-    energyMax: 5,
-    tagMatchMode: 'ANY' as 'ANY' | 'ALL',
-    bpmCenter: null as number | null,
-    bpmThresholdPercent: 5,
-    selectedKeyCamelotIds: [] as string[],
-    sortColumn: 'created_at' as 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance' | null,
-    sortDirection: 'desc' as 'asc' | 'desc',
-  };
-
-  // 1. Harmonic Keys
-  if (settings.harmonicKeys && track.key) {
-    filters.selectedKeyCamelotIds = getHarmonicKeys(track.key);
-  }
-
-  // 2. BPM
-  if (settings.bpm && track.bpm) {
-    filters.bpmCenter = track.bpm;
-    filters.bpmThresholdPercent = settings.bpmThresholdPercent;
-  }
-
-  // 3. Tags
-  if (settings.tags && track.tags.length > 0) {
-    filters.selectedTagIds = track.tags.map(t => t.id);
-    filters.tagMatchMode = settings.tagMatchMode;
-  }
-
-  // 4. Energy (with presets)
-  if (settings.energy && track.energy !== undefined) {
-    const { min, max } = getEnergyRange(track.energy, settings.energyPreset);
-    filters.energyMin = min;
-    filters.energyMax = max;
-  }
-
-  return filters;
-}
 
 /** Which selection instance a row menu acts on. */
 type MenuPane = 'main' | 'editLibrary';
@@ -235,23 +107,10 @@ export default function Library({
   // the list updates hands-off. (Proven tier folds in via issue 03;
   // playback rules 02; tiered ordering 04; own parameters modal 05.)
   const followFlags = useFollowFlags();
-  // Explicit projection of the stored one-shot settings onto FollowParams:
-  // Follow's tag agreement is any-shared by definition (CONTEXT.md:
-  // Compatible) — a stored ALL tagMatchMode and the refDeck are
-  // deliberately dropped, not silently reinterpreted via structural typing.
-  const storedSettings = loadSettings();
-  const followParams: FollowParams = {
-    harmonicKeys: storedSettings.harmonicKeys,
-    bpm: storedSettings.bpm,
-    bpmThresholdPercent: storedSettings.bpmThresholdPercent,
-    tags: storedSettings.tags,
-    energy: storedSettings.energy,
-    energyPreset: storedSettings.energyPreset,
-    provenOnly: storedSettings.provenOnly,
-  };
-  const followRefs = (['A', 'B'] as const).flatMap((deck) => {
-    const reference = decks[deck].loadedTrack;
-    return followFlags[deck] && reference ? [{ deck, reference }] : [];
+  const followParams = useFollowParams();
+  const followRefs = followedReferences(followFlags, {
+    A: decks.A.loadedTrack,
+    B: decks.B.loadedTrack,
   });
   const followQueries = useQueries({
     queries: followRefs.map(({ deck, reference }) => {
@@ -567,29 +426,6 @@ export default function Library({
       return;
     }
     handleSortLibrary(column);
-  };
-
-  /** The match reference under the loaded-deck model: the chosen deck's
-   * track, falling back to the other loaded deck (selection is retired). */
-  const referenceFor = (refDeck: 'A' | 'B'): Track | null =>
-    decks[refDeck].loadedTrack ?? decks[refDeck === 'A' ? 'B' : 'A'].loadedTrack;
-
-  const handleFindRelated = () => {
-    // Quick apply: last settings + last chosen deck.
-    const settings = loadSettings();
-    const reference = referenceFor(settings.refDeck);
-    if (!reference) return;
-
-    setFilters(deriveRelatedFilters(reference, settings));
-  };
-
-  const handleApplySettings = (settings: RelatedTracksSettings) => {
-    const reference = referenceFor(settings.refDeck);
-    if (!reference) return;
-
-    // Save settings and apply filters
-    saveSettings(settings);
-    setFilters(deriveRelatedFilters(reference, settings));
   };
 
   // Beatgrid edits are playhead-dependent, so they act on the loaded Track
@@ -1070,8 +906,6 @@ export default function Library({
                 filteredCount={libraryTracks.length}
                 loadedA={decks.A.loadedTrack}
                 loadedB={decks.B.loadedTrack}
-                onFindRelated={handleFindRelated}
-                onApplySettings={handleApplySettings}
               />
               <div
                 onMouseDownCapture={() => setFocusedPane('library')}
@@ -1109,8 +943,6 @@ export default function Library({
                 filteredCount={currentTracks.length}
                 loadedA={decks.A.loadedTrack}
                 loadedB={decks.B.loadedTrack}
-                onFindRelated={handleFindRelated}
-                onApplySettings={handleApplySettings}
               />
 
               {/* Track table. In playlist view it is the playlist pane:

@@ -1,6 +1,6 @@
 # 04 — Tier ordering
 
-Status: ready-for-agent
+Status: done — pending user eye-verify
 
 ## Parent
 

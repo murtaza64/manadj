@@ -1,6 +1,6 @@
 # 03 — Proven tier folded in
 
-Status: ready-for-agent
+Status: done — pending user eye-verify
 
 ## Parent
 
