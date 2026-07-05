@@ -72,6 +72,9 @@ function emptySnapshot(): DeckSnapshot {
     pitchPercent: 0,
     bendPercent: 0,
     keyLock: false,
+    loop: null,
+    pendingLoopBeats: 4,
+    hasBeatgrid: false,
   };
 }
 

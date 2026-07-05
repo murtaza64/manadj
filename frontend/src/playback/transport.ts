@@ -11,7 +11,9 @@
  * parallel-stack decision.
  */
 
-import { phasePreservingJumpTarget, snapToNearestBeat } from './quantize';
+import { addBeats, phasePreservingJumpTarget, snapToNearestBeat } from './quantize';
+import { LOOP_DEFAULT_BEATS } from './loop';
+import type { LoopRegion } from './loop';
 
 export interface TransportState {
   /** Deck play state ("the deck is running"), distinct from audio audibly playing. */
@@ -25,6 +27,12 @@ export interface TransportState {
   /** Playhead in seconds. Authoritative while audio is stopped; the engine
    * syncs it from its clock before dispatching events. */
   playhead: number;
+  /** Active loop (looping 03): the region the playhead wraps in, or null.
+   * Deck state — survives pause and view switches; Load clears it. */
+  loop: LoopRegion | null;
+  /** Pending auto-loop size in beats — remembered per Deck across
+   * engagements (and Loads, at the engine layer). */
+  pendingLoopBeats: number;
 }
 
 export type TransportEvent =
@@ -36,6 +44,8 @@ export type TransportEvent =
   | { type: 'cue-up' }
   | { type: 'hot-cue-down'; slot: number; time: number | null }
   | { type: 'hot-cue-up'; slot: number; time: number | null }
+  /** Auto-loop engage/release (looping 03). Inert on gridless Tracks. */
+  | { type: 'loop-toggle' }
   /** Audio reached the end of the buffer on its own. */
   | { type: 'ended' };
 
@@ -75,6 +85,8 @@ export function initialTransportState(): TransportState {
     hotCuePreviewSlot: null,
     cuePoint: null,
     playhead: 0,
+    loop: null,
+    pendingLoopBeats: LOOP_DEFAULT_BEATS,
   };
 }
 
@@ -180,6 +192,23 @@ export function reduceTransport(
       return [
         { ...s, hotCuePreviewSlot: null, playhead: e.time },
         [{ type: 'stop', at: e.time }],
+      ];
+    }
+
+    case 'loop-toggle': {
+      // Release: playback simply flows past the end edge — no relocation.
+      if (s.loop) return [{ ...s, loop: null }, []];
+      // Engage: anchor at the playhead, snapped per Quantize (possibly
+      // slightly ahead — the playhead plays into the region and NEVER
+      // moves on engage). Gridless Tracks: inert — never guess.
+      const grid = ctx.beatTimes;
+      if (!grid || grid.length < 2) return [s, []];
+      const start = ctx.quantize ? snapToNearestBeat(s.playhead, grid) : s.playhead;
+      const end = addBeats(start, s.pendingLoopBeats, grid);
+      if (end <= start) return [s, []];
+      return [
+        { ...s, loop: { start, end, lengthBeats: s.pendingLoopBeats } },
+        [],
       ];
     }
 

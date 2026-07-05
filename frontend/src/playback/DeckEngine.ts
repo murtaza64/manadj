@@ -20,6 +20,8 @@
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
+import { foldLoopPlayhead } from './loop';
+import type { LoopRegion } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, putCachedBuffer } from './bufferCache';
@@ -79,6 +81,12 @@ export interface DeckSnapshot {
   /** Key Lock (CONTEXT.md): while on, rate changes leave the Track's Key
    * unchanged (worklet stretch mode). Deck setting; survives Loads. */
   keyLock: boolean;
+  /** Active loop (looping 03): the region the playhead wraps in, or null. */
+  loop: LoopRegion | null;
+  /** Pending auto-loop size in beats (survives Loads). */
+  pendingLoopBeats: number;
+  /** The loaded Track has a usable Beatgrid (auto-loop is inert without). */
+  hasBeatgrid: boolean;
 }
 
 export class DeckEngine {
@@ -189,9 +197,14 @@ export class DeckEngine {
     const abort = new AbortController();
     this.loadAbort = abort;
 
-    // Reset the deck for the new track.
+    // Reset the deck for the new track. Load clears the loop (a region
+    // from the old Track can't haunt the new one) but the pending size is
+    // a Deck preference and survives.
     this.stopAudio(0);
-    this.transport = initialTransportState();
+    this.transport = {
+      ...initialTransportState(),
+      pendingLoopBeats: this.transport.pendingLoopBeats,
+    };
     this.buffer = null;
     this.beatTimes = null;
     this.trackInfo = info;
@@ -371,6 +384,12 @@ export class DeckEngine {
     this.dispatch({ type: 'hot-cue-up', slot, time: timeSeconds });
   }
 
+  /** Auto-loop engage/release (looping 03). Inert on gridless Tracks (the
+   * reducer refuses to guess); the playhead never moves on engage. */
+  toggleLoop(): void {
+    this.dispatch({ type: 'loop-toggle' });
+  }
+
   // ── Sound controls ─────────────────────────────────────────────────────
   // (EQ/filter/fader live on the Mixer's channel strip — ADR 0009. The deck
   // keeps only varispeed.)
@@ -447,7 +466,19 @@ export class DeckEngine {
     if (this.runningStartId !== null && this.audio) {
       const elapsed =
         (this.audio.ctx.currentTime - this.anchorCtxTime) * this.currentRate();
-      return this.clampTime(this.anchorPosition + elapsed);
+      let position = this.anchorPosition + elapsed;
+      // Active loop: fold the monotone clock into the region — the mirror
+      // of the worklet's sample wrap, exact across many wraps (modulo).
+      const loop = this.transport.loop;
+      if (loop) {
+        position = foldLoopPlayhead(
+          position,
+          loop.start,
+          Math.min(loop.end, this.buffer?.duration ?? loop.end),
+          this.anchorPosition
+        );
+      }
+      return this.clampTime(position);
     }
     return this.transport.playhead;
   }
@@ -486,11 +517,18 @@ export class DeckEngine {
     const synced = { ...this.transport, playhead: this.getPlayhead() };
     const [next, effects] = reduceTransport(synced, event, this.transportContext());
     const cueChanged = next.cuePoint !== synced.cuePoint;
+    const loopChanged = next.loop !== synced.loop;
     this.transport = next;
     for (const effect of effects) {
       if (effect.type === 'start') this.startAudio(effect.at);
       else this.stopAudio(effect.at);
     }
+    // Loop state is a live source property, not an AudioEffect: push
+    // region changes to the worklet whether or not audio (re)started —
+    // engage/release never restart the voice (that inaudibility is the
+    // point). The clock anchor is untouched; getPlayhead's fold handles
+    // the wraps.
+    if (loopChanged) this.syncLoopToSource();
     this.emit();
 
     // A cue-down that moved the cue is the user setting it — persistence hook.
@@ -564,9 +602,10 @@ export class DeckEngine {
   private beginStart(node: DeckSourceNode, input: AudioNode, at: number): void {
     if (!this.buffer) return;
     this.handOverIfStale(node);
-    // Re-assert the mode every start: covers a freshly (re)built node and
-    // costs one ordered message.
+    // Re-assert the mode and loop region every start: covers a freshly
+    // (re)built node and costs two ordered messages.
     node.setMode(this.keyLock ? 'stretch' : 'resample');
+    this.syncLoopToSource(node);
     node.disconnect();
     node.connect(input);
     const now = node.ctx.currentTime;
@@ -611,6 +650,23 @@ export class DeckEngine {
         this.pendingStartAt = null;
         console.warn('[DeckEngine] worklet source creation failed:', err);
       });
+  }
+
+  /** Mirror the transport's loop region into the worklet source, converted
+   * to track frames (end clamped to the track — wrap-vs-end-of-track
+   * precedence stays consistent with getPlayhead's fold). */
+  private syncLoopToSource(node: DeckSourceNode | null = this.sourceNode): void {
+    if (!node || !this.buffer) return;
+    const loop = this.transport.loop;
+    if (!loop) {
+      node.setLoop(null);
+      return;
+    }
+    const sampleRate = this.buffer.sampleRate;
+    node.setLoop({
+      startFrames: Math.round(loop.start * sampleRate),
+      endFrames: Math.round(Math.min(loop.end, this.buffer.duration) * sampleRate),
+    });
   }
 
   /** Hand the loaded buffer's samples to the worklet unless it already has
@@ -658,6 +714,9 @@ export class DeckEngine {
       pitchPercent: this.pitchPercent,
       bendPercent: this.bendPercent,
       keyLock: this.keyLock,
+      loop: this.transport.loop,
+      pendingLoopBeats: this.transport.pendingLoopBeats,
+      hasBeatgrid: (this.beatTimes?.length ?? 0) >= 2,
     };
   }
 

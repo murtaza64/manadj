@@ -319,6 +319,67 @@ describe('hot-cue-up', () => {
   });
 });
 
+describe('loop-toggle', () => {
+  it('engages a pending-size loop snapped to the nearest beat with Quantize on', () => {
+    const s = state({ playing: true, playhead: 0.9 });
+    const [next, effects] = reduceTransport(s, { type: 'loop-toggle' }, quantized());
+    // Start snaps to 0.75; 4 beats at 0.5s/beat → end 2.75.
+    expect(next.loop).not.toBeNull();
+    expect(next.loop!.start).toBeCloseTo(0.75, 10);
+    expect(next.loop!.end).toBeCloseTo(2.75, 10);
+    expect(next.loop!.lengthBeats).toBe(4);
+    // The playhead never moves on engage; no audio effect.
+    expect(next.playhead).toBe(0.9);
+    expect(effects).toEqual([]);
+  });
+
+  it('may snap the start slightly ahead of the playhead (plays into it)', () => {
+    const s = state({ playing: true, playhead: 1.1 });
+    const [next] = reduceTransport(s, { type: 'loop-toggle' }, quantized());
+    expect(next.loop!.start).toBeCloseTo(1.25, 10);
+    expect(next.playhead).toBe(1.1);
+  });
+
+  it('starts exactly at the playhead with Quantize off', () => {
+    const ctx: TransportContext = { quantize: false, beatTimes: [0.25, 0.75, 1.25, 1.75, 2.25] };
+    const s = state({ playing: true, playhead: 0.9 });
+    const [next] = reduceTransport(s, { type: 'loop-toggle' }, ctx);
+    expect(next.loop!.start).toBe(0.9);
+    expect(next.loop!.end).toBeCloseTo(2.9, 10);
+  });
+
+  it('is inert on a gridless Track', () => {
+    const s = state({ playing: true, playhead: 0.9 });
+    const [next, effects] = reduceTransport(s, { type: 'loop-toggle' }, quantized(null));
+    expect(next).toBe(s);
+    expect(effects).toEqual([]);
+  });
+
+  it('releases without relocating the playhead', () => {
+    const s = state({
+      playing: true,
+      playhead: 1.6,
+      loop: { start: 0.75, end: 2.75, lengthBeats: 4 },
+    });
+    const [next, effects] = reduceTransport(s, { type: 'loop-toggle' }, quantized());
+    expect(next.loop).toBeNull();
+    expect(next.playhead).toBe(1.6);
+    expect(effects).toEqual([]);
+  });
+
+  it('uses the per-deck pending size', () => {
+    const s = state({ playhead: 0.75, pendingLoopBeats: 1 });
+    const [next] = reduceTransport(s, { type: 'loop-toggle' }, quantized());
+    expect(next.loop!.end).toBeCloseTo(1.25, 10);
+    expect(next.loop!.lengthBeats).toBe(1);
+  });
+
+  it('a fresh deck defaults the pending size to 4 beats', () => {
+    expect(initialTransportState().pendingLoopBeats).toBe(4);
+    expect(initialTransportState().loop).toBeNull();
+  });
+});
+
 describe('ended', () => {
   it('returns to the cue when the track ends during a main-cue preview', () => {
     const s = state({ previewing: true, cuePoint: 170, playhead: 180 });

@@ -98,6 +98,90 @@ describe('play latch (load in flight)', () => {
   });
 });
 
+describe('DeckEngine active loop (looping 03)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** A 120 BPM grid from 0s: beats every 0.5s across the whole track. */
+  const beatTimes = Array.from({ length: 360 }, (_, i) => i * 0.5);
+
+  async function loadedEngine(trackId: number, grid: number[] | null = beatTimes) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+    });
+    return engine;
+  }
+
+  it('engages at the playhead and exposes the region in the snapshot', async () => {
+    const engine = await loadedEngine(20);
+    engine.seek(10.1);
+    engine.toggleLoop();
+    const s = engine.getSnapshot();
+    expect(s.loop).not.toBeNull();
+    // Quantize defaults ON: start snaps to the nearest beat, 4 beats long.
+    expect(s.loop!.start).toBeCloseTo(10.0, 10);
+    expect(s.loop!.end).toBeCloseTo(12.0, 10);
+    expect(s.loop!.lengthBeats).toBe(4);
+    expect(s.pendingLoopBeats).toBe(4);
+    expect(s.hasBeatgrid).toBe(true);
+    // Engage never moves the playhead.
+    expect(engine.getPlayhead()).toBeCloseTo(10.1, 10);
+  });
+
+  it('release keeps the playhead where it is', async () => {
+    const engine = await loadedEngine(21);
+    engine.seek(10);
+    engine.toggleLoop();
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loop).toBeNull();
+    expect(engine.getPlayhead()).toBeCloseTo(10, 10);
+  });
+
+  it('is inert on a gridless Track', async () => {
+    const engine = await loadedEngine(22, null);
+    engine.seek(10);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loop).toBeNull();
+    expect(engine.getSnapshot().hasBeatgrid).toBe(false);
+  });
+
+  it('Load clears the loop but keeps the pending size', async () => {
+    const engine = await loadedEngine(23);
+    engine.seek(10);
+    engine.toggleLoop();
+    expect(engine.getSnapshot().loop).not.toBeNull();
+    putCachedBuffer(24, fakeBuffer);
+    await engine.load({
+      trackId: 24,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes }),
+    });
+    const s = engine.getSnapshot();
+    expect(s.loop).toBeNull();
+    expect(s.pendingLoopBeats).toBe(4);
+  });
+
+  it('loop state survives a pause (Deck state, not playback state)', async () => {
+    const engine = await loadedEngine(25);
+    engine.seek(10);
+    engine.toggleLoop();
+    engine.pause(); // already paused: still must not clear the loop
+    expect(engine.getSnapshot().loop).not.toBeNull();
+  });
+});
+
 describe('decoded-buffer cache (mix-editor 28)', () => {
   afterEach(() => _clearBufferCacheForTests());
 

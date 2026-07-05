@@ -152,6 +152,9 @@ class DeckSourceProcessor extends AudioWorkletProcessor {
         case 'mode':
           this.kernel.setMode(command.mode);
           break;
+        case 'loop':
+          this.kernel.setLoop(command.region);
+          break;
       }
     };
   }

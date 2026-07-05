@@ -1,6 +1,6 @@
 # Minimal audible loop: engage and release
 
-Status: ready-for-agent
+Status: done (implemented, change korxkwrz)
 
 ## Parent
 
@@ -28,3 +28,7 @@ Triggers: a minimal `LOOP 4` stateful button (lit green while active — state c
 ## Blocked by
 
 - `01-quantize-toggle-placement-snapping.md`
+
+## Comments
+
+**2026-07-05 — Done** (jj change `korxkwrz`, workspace looping). Loop state (`loop: LoopRegion | null` + `pendingLoopBeats`) lives in the transport reducer; `loop-toggle` event engages (start snapped per Quantize via `snapToNearestBeat`, end via new `addBeats` grid projection; playhead never moves; gridless = inert, needs ≥2 beats) and releases (no relocation). New `playback/loop.ts`: LoopRegion, size constants, `formatLoopBeats`, `foldLoopPlayhead` (engine-clock modulo fold). Kernel: `setLoop({startFrames,endFrames}|null)`; a live voice crossing the end from inside wraps via the existing declick splice machinery (retire + fresh voice at the wrapped position), identical in resample and stretch modes (stretch re-primes per wrap); wrap beats end-of-track inside the region (end clamped to track length); render loop reordered tails-before-live so a mid-block wrap can't double-mix. Protocol `loop` command + `DeckSourceNode.setLoop`. Engine: `toggleLoop()`, loop-diff → worklet sync + re-assert per start, `getPlayhead` folds into the region (anchor-guarded), Load clears loop but keeps pending size; snapshot gains `loop`, `pendingLoopBeats`, `hasBeatgrid`. UI: `LoopRow` (`LOOP N`, lit green = state color) in DeckPanel padcol + library Player overlay; keys `r`/`u` (perf, in DECK_KEYS + hints) and `r` (library hub); "loops" gesture class (SurfaceLoops + audibleLoops + shared-surface registration + `loop-toggle` ButtonTarget/dispatch case — editor unregistered, drops). Tests: reducer loop-toggle block, kernel loop-wrap block (8 cases incl. declick splice sum, precedence, stretch), engine loop block (snapshot/Load/gridless/pause), loop.test.ts fold math. Note: engine "clock across wraps" is covered by the pure fold tests — the running-clock path needs live audio the engine tests can't fake. (Process note: the 02 Done comment accidentally rode trunk change `wnoxsnsq` via a wrong-workdir append — content accurate, change attribution wrong; landed, immutable.)

@@ -18,6 +18,8 @@ export interface DeckKeyMap {
   /** Hold-to-nudge (momentary bend). */
   nudgeBack: string;
   nudgeForward: string;
+  /** Auto-loop engage/release toggle (looping 03). */
+  loop: string;
   /** Hot cue pads 1-4, in slot order. */
   pads: [string, string, string, string];
 }
@@ -58,6 +60,7 @@ export const DECK_KEYS: Record<ChannelId, DeckKeyMap> = {
     jumpForward: 's',
     nudgeBack: 'w',
     nudgeForward: 'e',
+    loop: 'r',
     pads: ['z', 'x', 'c', 'v'],
   },
   B: {
@@ -67,6 +70,7 @@ export const DECK_KEYS: Record<ChannelId, DeckKeyMap> = {
     jumpForward: ';',
     nudgeBack: 'i',
     nudgeForward: 'o',
+    loop: 'u',
     pads: ['m', ',', '.', '/'],
   },
 };

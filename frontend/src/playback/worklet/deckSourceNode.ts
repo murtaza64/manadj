@@ -100,6 +100,11 @@ export class DeckSourceNode {
     this.post({ type: 'mode', mode });
   }
 
+  /** Active loop region in track frames (looping 03); null clears. */
+  setLoop(region: { startFrames: number; endFrames: number } | null): void {
+    this.post({ type: 'loop', region });
+  }
+
   /** Sample-accurate composed-rate step (the anchor-clock contract). */
   setRateAt(rate: number, ctxTime: number): void {
     this.rate.setValueAtTime(rate, ctxTime);

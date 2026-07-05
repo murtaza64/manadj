@@ -3,7 +3,7 @@
  * with graceful degradation when there is no grid.
  */
 import { describe, expect, it } from 'vitest';
-import { phasePreservingJumpTarget, snapToNearestBeat } from './quantize';
+import { addBeats, phasePreservingJumpTarget, snapToNearestBeat } from './quantize';
 
 // A 120 BPM grid starting at 0.25s: beats every 0.5s.
 const GRID = [0.25, 0.75, 1.25, 1.75, 2.25];
@@ -37,6 +37,30 @@ describe('snapToNearestBeat', () => {
     expect(snapToNearestBeat(1.1, null)).toBe(1.1);
     expect(snapToNearestBeat(1.1, undefined)).toBe(1.1);
     expect(snapToNearestBeat(1.1, [])).toBe(1.1);
+  });
+});
+
+describe('addBeats', () => {
+  it('advances whole beats along the grid', () => {
+    expect(addBeats(0.75, 2, GRID)).toBeCloseTo(1.75, 10);
+  });
+
+  it('carries an intra-beat offset', () => {
+    expect(addBeats(0.9, 2, GRID)).toBeCloseTo(1.9, 10);
+  });
+
+  it('handles fractional beat counts', () => {
+    expect(addBeats(0.75, 0.5, GRID)).toBeCloseTo(1.0, 10);
+    expect(addBeats(0.75, 0.125, GRID)).toBeCloseTo(0.8125, 10);
+  });
+
+  it('extrapolates past the last beat at the edge beat length', () => {
+    // Last interval is 0.5s; 2 beats past 2.25 = 3.25.
+    expect(addBeats(2.25, 2, GRID)).toBeCloseTo(3.25, 10);
+  });
+
+  it('supports negative beat counts', () => {
+    expect(addBeats(1.75, -2, GRID)).toBeCloseTo(0.75, 10);
   });
 });
 

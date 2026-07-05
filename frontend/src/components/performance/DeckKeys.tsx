@@ -64,6 +64,10 @@ export function DeckKeys() {
         if (!ready) return;
         event.preventDefault();
         engine.setBend(key === keys.nudgeBack ? -NUDGE_BEND_PERCENT : NUDGE_BEND_PERCENT);
+      } else if (key === keys.loop) {
+        if (!ready) return;
+        event.preventDefault();
+        if (!event.repeat) engine.toggleLoop();
       } else {
         const slot = padSlot(key);
         if (slot !== null) {

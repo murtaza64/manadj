@@ -26,6 +26,9 @@ export type ButtonTarget =
   | { control: 'hot-cue-clear'; deck: ChannelId; pad: number }
   | { control: 'beatjump'; deck: ChannelId; direction: 'back' | 'forward' }
   | { control: 'beatjump-size'; deck: ChannelId; change: 'halve' | 'double' }
+  /** Auto-loop engage/release (looping 03) — loops gesture class; no
+   * hardware binding yet (loop-section mapping is follow-up MIDI work). */
+  | { control: 'loop-toggle'; deck: ChannelId }
   | { control: 'match'; deck: ChannelId }
   | { control: 'load'; deck: ChannelId }
   /** PFL toggle (headphone-cue 02) — mixer-facing, hence `channel`. */

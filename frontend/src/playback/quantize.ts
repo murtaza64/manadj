@@ -39,6 +39,33 @@ export function snapToNearestBeat(
 }
 
 /**
+ * Advance a position by a (possibly fractional, possibly negative) number
+ * of beats, projected through the Beatgrid (looping 03). The position maps
+ * to a beat coordinate (interval index + fraction), the count is added in
+ * beat space, and the result maps back to seconds — so beat-domain
+ * semantics hold on any constant or piecewise grid; positions beyond the
+ * grid extrapolate linearly at the edge interval's beat length.
+ *
+ * Callers must ensure the grid has at least two beats (no interval to
+ * measure otherwise).
+ */
+export function addBeats(
+  position: number,
+  beats: number,
+  beatTimes: readonly number[]
+): number {
+  const n = beatTimes.length;
+  const clampInterval = (i: number) => Math.max(0, Math.min(i, n - 2));
+  // Seconds → beat coordinate.
+  const at = clampInterval(lowerBound(position, beatTimes) - 1);
+  const coord =
+    at + (position - beatTimes[at]) / (beatTimes[at + 1] - beatTimes[at]) + beats;
+  // Beat coordinate → seconds.
+  const to = clampInterval(Math.floor(coord));
+  return beatTimes[to] + (coord - to) * (beatTimes[to + 1] - beatTimes[to]);
+}
+
+/**
  * Quantized trigger landing (looping 02): a phase-preserving jump. Executes
  * immediately; the landing is the cue's beat (nearest gridline — placement
  * usually put it there) plus the playhead's intra-beat phase, so the jump is

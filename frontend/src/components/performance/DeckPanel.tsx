@@ -26,6 +26,7 @@ import TagPill from '../TagPill';
 import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
 import { BeatjumpRow } from '../deckControls/BeatjumpRow';
+import { LoopRow } from '../deckControls/LoopRow';
 import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons';
 import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
@@ -320,6 +321,7 @@ function PlayZone() {
             backKbd={<Kbd k={keys.jumpBack} />}
             forwardKbd={<Kbd k={keys.jumpForward} />}
           />
+          <LoopRow kbd={<Kbd k={keys.loop} />} />
           <div className="perf-pads">
             <HotCuePads
               padKbd={(slot) => (slot <= 4 ? <Kbd k={keys.pads[slot - 1]} /> : null)}

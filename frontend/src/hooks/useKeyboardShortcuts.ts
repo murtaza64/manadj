@@ -9,8 +9,8 @@ import { useScrubLoop } from './useScrubLoop';
  * Library keyboard hub. Keys split by scope (ADR 0008):
  * - Selection-scoped (the highlighted row): j/k navigate, t tags, e energy
  * - Deck-scoped (the loaded Track): space play/pause, f cue (hold),
- *   a/s beatjump, h/l scrub (hold), 1-8 hot cues, Shift+1-8 delete hot cue,
- *   g set downbeat, Shift+H/L nudge beatgrid
+ *   a/s beatjump, r loop toggle, h/l scrub (hold), 1-8 hot cues,
+ *   Shift+1-8 delete hot cue, g set downbeat, Shift+H/L nudge beatgrid
  * - The bridge: Enter loads the selection onto the Deck
  */
 
@@ -142,6 +142,14 @@ export function useKeyboardShortcuts({
         } else if (key === 'f') {
           engine.cueDown();
         }
+      }
+
+      // Loop toggle: R (deck-scoped, looping 03 — same key as Deck A in
+      // the Performance view; inert on gridless Tracks)
+      if (key === 'r') {
+        if (!deckReady) return;
+        event.preventDefault();
+        if (!event.repeat) engine.toggleLoop();
       }
 
       // Beatgrid controls (deck-scoped): Shift+H/L nudge, G set downbeat

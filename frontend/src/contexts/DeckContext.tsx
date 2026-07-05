@@ -295,6 +295,12 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       jumps: {
         beatjump: (deck, direction) => deckControlsFor(deck)?.beatjump(direction),
       },
+      loops: {
+        toggleLoop: (deck) => {
+          const d = registryRef.current[deck];
+          if (deckReadyNow(d)) d.engine.toggleLoop();
+        },
+      },
       jog: {
         rimTicks: (deck, ticks) => deckControlsFor(deck)?.jogTicks(ticks),
         touchTicks: (deck, ticks) => deckControlsFor(deck)?.jogTouchTicks(ticks),

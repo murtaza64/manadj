@@ -23,7 +23,10 @@ export type DeckSourceCommand =
   | { type: 'stop' }
   /** Key Lock: switch modes. Mid-play this is an internal crossfade at the
    * audible position — no click, no position jump. */
-  | { type: 'mode'; mode: SourceMode };
+  | { type: 'mode'; mode: SourceMode }
+  /** Active loop region in track frames (looping 03), or null to clear.
+   * A live voice crossing the end from inside wraps with a declick splice. */
+  | { type: 'loop'; region: { startFrames: number; endFrames: number } | null };
 
 export type DeckSourceEvent =
   /** The live voice ran off the end of the track. Echoes the startId so the

@@ -2,6 +2,7 @@ import {
   audibleHolder,
   audibleJog,
   audibleJumps,
+  audibleLoops,
   audiblePads,
   audibleTransport,
 } from '../playback/audibleSurface';
@@ -92,6 +93,11 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
     case 'beatjump': {
       if (edge !== 'down') return;
       audibleJumps()?.beatjump(target.deck, target.direction);
+      return;
+    }
+    case 'loop-toggle': {
+      if (edge !== 'down') return;
+      audibleLoops()?.toggleLoop(target.deck);
       return;
     }
     case 'beatjump-size': {

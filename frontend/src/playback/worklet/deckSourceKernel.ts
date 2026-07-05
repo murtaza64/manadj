@@ -71,6 +71,8 @@ export class DeckSourceKernel {
   private live: Voice | null = null;
   private fading: Voice[] = [];
   private readonly declickFrames: number;
+  /** Active loop region in track frames (looping 03), or null. */
+  private loop: { startFrames: number; endFrames: number } | null = null;
 
   private mode: SourceMode = 'resample';
   private stretchEngine: StretchEngine | null = null;
@@ -91,6 +93,17 @@ export class DeckSourceKernel {
 
   setStretchEngine(engine: StretchEngine | null): void {
     this.stretchEngine = engine;
+  }
+
+  /**
+   * Active loop (looping 03): while set, a live voice crossing `endFrames`
+   * from inside the region wraps back by the region length — a declick
+   * splice, identical in both modes. Wrap takes precedence over
+   * end-of-track inside the region; a voice outside the region never
+   * wraps. Degenerate regions clear.
+   */
+  setLoop(region: { startFrames: number; endFrames: number } | null): void {
+    this.loop = region && region.endFrames > region.startFrames ? region : null;
   }
 
   /** Key Lock. Mid-play, splice into the new mode at the live voice's own
@@ -178,23 +191,8 @@ export class DeckSourceKernel {
     let endedStartId: number | null = null;
     for (let i = 0; i < frames; i++) {
       const rate = rates.length > 1 ? rates[i] : rates[0];
-      if (this.live) {
-        const voice = this.live;
-        const gain = this.gainOf(voice);
-        if (liveBlock) {
-          if (gain > 0) {
-            for (let c = 0; c < out.length; c++) out[c][i] += liveBlock[c][i] * gain;
-          }
-        } else {
-          this.mix(voice, out, i, gain);
-        }
-        voice.position += rate * voice.srRatio;
-        voice.age++;
-        if (voice.position >= DeckSourceKernel.lengthOf(voice)) {
-          endedStartId = voice.startId;
-          this.live = null;
-        }
-      }
+      // Tails first: a voice retired by a mid-block loop wrap below must
+      // not also render as a tail in its retirement frame (double-mix).
       for (let f = this.fading.length - 1; f >= 0; f--) {
         const voice = this.fading[f];
         const gain = this.gainOf(voice);
@@ -205,6 +203,50 @@ export class DeckSourceKernel {
         const faded = voice.fade !== null && voice.fade.age >= this.declickFrames;
         if (faded || gain <= 0 || voice.position >= DeckSourceKernel.lengthOf(voice)) {
           this.fading.splice(f, 1);
+        }
+      }
+      if (this.live) {
+        const voice = this.live;
+        const gain = this.gainOf(voice);
+        if (liveBlock && voice === liveAtStart) {
+          if (gain > 0) {
+            for (let c = 0; c < out.length; c++) out[c][i] += liveBlock[c][i] * gain;
+          }
+        } else {
+          this.mix(voice, out, i, gain);
+        }
+        const before = voice.position;
+        voice.position += rate * voice.srRatio;
+        voice.age++;
+        const length = DeckSourceKernel.lengthOf(voice);
+        const loop = this.loop;
+        const effEnd = loop ? Math.min(loop.endFrames, length) : 0;
+        if (
+          loop &&
+          before >= loop.startFrames &&
+          before < effEnd &&
+          voice.position >= effEnd
+        ) {
+          // Loop wrap: precedence over end-of-track inside the region.
+          // The same declick splice as a stab — retire the edge voice,
+          // fade a fresh one in at the wrapped position (both modes; a
+          // stretch voice re-primes on its next block).
+          const wrapped =
+            loop.startFrames + ((voice.position - effEnd) % (effEnd - loop.startFrames));
+          const { channels, srRatio, startId, mode } = voice;
+          this.retireLive();
+          this.live = {
+            channels,
+            srRatio,
+            position: wrapped,
+            age: 0,
+            fade: null,
+            startId,
+            mode,
+          };
+        } else if (voice.position >= length) {
+          endedStartId = voice.startId;
+          this.live = null;
         }
       }
     }

@@ -416,6 +416,115 @@ describe('DeckSourceKernel stretch mode (Key Lock)', () => {
   });
 });
 
+describe('DeckSourceKernel loop wrap (looping 03)', () => {
+  it('wraps the voice position across the loop end (sample-accurate)', () => {
+    const kernel = new DeckSourceKernel(DECLICK);
+    kernel.setTrack([ramp(64)], 1);
+    kernel.setLoop({ startFrames: 8, endFrames: 16 });
+    kernel.start(8, 1);
+    render(kernel, 12); // 8 frames to the edge, wrap, 4 more
+    expect(kernel.livePositionFrames).toBeCloseTo(12, 6);
+  });
+
+  it('keeps wrapping over many cycles without drift', () => {
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([ramp(64)], 1);
+    kernel.setLoop({ startFrames: 8, endFrames: 16 });
+    kernel.start(8, 1);
+    render(kernel, 8 * 10 + 3); // ten full cycles + 3
+    expect(kernel.livePositionFrames).toBeCloseTo(11, 6);
+  });
+
+  it('declick-splices the wrap: old edge fades out under the new fade-in', () => {
+    const data = ramp(64);
+    const kernel = new DeckSourceKernel(DECLICK);
+    kernel.setTrack([data], 1);
+    kernel.setLoop({ startFrames: 8, endFrames: 16 });
+    kernel.start(8, 1);
+    render(kernel, 8); // reaches the edge exactly at the block boundary
+    const { out, ended } = render(kernel, 8);
+    // Tail keeps reading past the edge while the wrapped voice fades in.
+    for (let i = 0; i < DECLICK; i++) {
+      const tail = data[16 + i] * (1 - i / DECLICK);
+      const wrapped = data[8 + i] * (i / DECLICK);
+      expect(out[0][i]).toBeCloseTo(tail + wrapped, 5);
+    }
+    for (let i = DECLICK; i < 8; i++) expect(out[0][i]).toBe(data[8 + i]);
+    expect(ended).toEqual([]);
+  });
+
+  it('loop wrap takes precedence over end-of-track inside the region', () => {
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([ramp(16)], 1);
+    kernel.setLoop({ startFrames: 8, endFrames: 16 }); // end == track end
+    kernel.start(8, 1);
+    const { ended } = render(kernel, 24);
+    expect(ended).toEqual([]);
+    expect(kernel.livePositionFrames).not.toBeNull();
+  });
+
+  it('clamps a region end beyond the track to the track end', () => {
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([ramp(16)], 1);
+    kernel.setLoop({ startFrames: 8, endFrames: 999 });
+    kernel.start(8, 1);
+    const { ended } = render(kernel, 24);
+    expect(ended).toEqual([]);
+  });
+
+  it('does not wrap a voice that was never inside the region', () => {
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([ramp(16)], 1);
+    kernel.setLoop({ startFrames: 0, endFrames: 8 });
+    kernel.start(12, 5); // beyond the region: plays to the end of track
+    const { ended } = render(kernel, 8);
+    expect(ended).toEqual([5]);
+  });
+
+  it('clearing the loop lets playback flow past the end edge', () => {
+    const data = ramp(64);
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([data], 1);
+    kernel.setLoop({ startFrames: 8, endFrames: 16 });
+    kernel.start(8, 1);
+    render(kernel, 4);
+    kernel.setLoop(null);
+    const { out } = render(kernel, 8);
+    for (let i = 1; i < 8; i++) expect(out[0][i]).toBe(data[12 + i]);
+    expect(kernel.livePositionFrames).toBeCloseTo(20, 6);
+  });
+
+  it('wraps identically in stretch mode (Key Lock), re-priming per wrap', () => {
+    const fake = new FakeStretchEngine();
+    const kernel = new DeckSourceKernel(DECLICK);
+    kernel.setTrack([ramp(256)], 1);
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    kernel.setLoop({ startFrames: 8, endFrames: 16 });
+    kernel.start(8, 1);
+    render(kernel, 8); // exactly to the edge: wrap at the block boundary
+    expect(kernel.livePositionFrames).toBeCloseTo(8, 6);
+    render(kernel, 8);
+    expect(kernel.livePositionFrames).toBeCloseTo(8, 6);
+    // The stretcher saw the wrapped position and re-primed for the new voice.
+    expect(fake.calls.map((c) => c.position)).toEqual([8, 8]);
+    expect(fake.resets).toBe(2);
+  });
+
+  it('a mid-block wrap in stretch mode keeps position bookkeeping exact', () => {
+    const fake = new FakeStretchEngine();
+    const kernel = new DeckSourceKernel(1);
+    kernel.setTrack([ramp(256)], 1);
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    kernel.setLoop({ startFrames: 8, endFrames: 16 });
+    kernel.start(10, 1);
+    const { ended } = render(kernel, 10); // wraps after 6 frames, 4 more
+    expect(ended).toEqual([]);
+    expect(kernel.livePositionFrames).toBeCloseTo(12, 6);
+  });
+});
+
 describe('DeckSourceKernel track swap', () => {
   it('a fading voice keeps sounding the old track after setTrack', () => {
     const oldData = ramp(64);

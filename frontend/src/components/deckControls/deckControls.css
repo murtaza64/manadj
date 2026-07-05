@@ -31,6 +31,42 @@
   font-size: 13px;
 }
 
+/* Loop row (looping 03): one stateful LOOP button, lit green while a loop
+   is active — bright saturated green is the active-STATE color (never a
+   Deck identity color). */
+.deck-looprow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.deck-looprow .player-button {
+  min-width: 24px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative; /* anchors on-control key hints (perf-kbd) */
+}
+
+.deck-looprow .deck-loop-toggle:hover:not(:disabled) {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.deck-looprow .deck-loop-toggle.active {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--base);
+}
+
+.deck-looprow .deck-loop-toggle.active:hover:not(:disabled) {
+  color: var(--base);
+}
+
 /* Grid-edit cluster (curation class): nudge / anchor / nudge */
 /* Segment feedback: the buttons have no own border inside a cluster, so
    hover reads as a fill (the border-color hover of standalone

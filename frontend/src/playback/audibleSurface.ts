@@ -47,6 +47,15 @@ export interface SurfaceJumps {
   beatjump(deck: ChannelId, direction: 'back' | 'forward'): void;
 }
 
+/** Loop gesture class (ADR 0019, looping 03): auto-loop engage/release.
+ * Registered by the shared surface (Performance and library views); the
+ * editor does not register it — loop gestures there are dropped like any
+ * unregistered class. Hardware mapping is follow-up MIDI work; the class
+ * exists so routing is ready. */
+export interface SurfaceLoops {
+  toggleLoop(deck: ChannelId): void;
+}
+
 /** Jog gesture class (ADR 0019): the wheel's three tick streams. The
  * shared surface delegates to the deck jog controller (bend/seek/fine/
  * fast); the editor scrubs the mix (A) or Slides continuously (B) — the
@@ -78,6 +87,7 @@ export interface AudibleSurface {
    * editor. */
   pads?: SurfacePads;
   jumps?: SurfaceJumps;
+  loops?: SurfaceLoops;
   jog?: SurfaceJog;
   transportState?: SurfaceTransportState;
   /** Go quiet: pause this surface's playback (ADR 0022 — nothing else;
@@ -164,6 +174,11 @@ export function audiblePads(): SurfacePads | null {
 /** The audible surface's jumps section — null when unregistered. */
 export function audibleJumps(): SurfaceJumps | null {
   return surfaces.get(holder)?.jumps ?? null;
+}
+
+/** The audible surface's loops section — null when unregistered. */
+export function audibleLoops(): SurfaceLoops | null {
+  return surfaces.get(holder)?.loops ?? null;
 }
 
 /** The audible surface's jog section — null when unregistered. */
