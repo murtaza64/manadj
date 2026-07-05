@@ -394,3 +394,64 @@ class TakeDetail(TakeRow):
 class TakePromotedPatch(BaseModel):
     """Set/clear a Take's promoted-Transition reference (issue 03)."""
     promoted_transition_uuid: str | None
+
+
+# Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)
+
+
+class SetCreate(BaseModel):
+    """Create a Set (sidebar sibling of Playlist)."""
+    name: str
+    color: str | None = None
+    display_order: int = 0
+
+
+class SetUpdate(BaseModel):
+    name: str | None = None
+    color: str | None = None
+    display_order: int | None = None
+
+
+class SetRow(BaseModel):
+    """Set metadata (list/create/patch response)."""
+    id: int
+    name: str
+    color: str | None
+    display_order: int
+    created_at: datetime | None
+    updated_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SetEntryItem(BaseModel):
+    """One entry of a wholesale entries replace (PUT payload).
+
+    Position is NOT in the payload: it is the item's index in the list.
+    track_id is the entry identity (a Track at most once per Set).
+    """
+    track_id: int
+
+
+class SetEntriesReplace(BaseModel):
+    """Full replacement of a Set's ordered entry list (ADR 0011 pattern)."""
+    items: list[SetEntryItem]
+
+
+class SetEntryRow(BaseModel):
+    """A persisted Set entry (GET response)."""
+    track_id: int
+    position: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SetWithEntries(SetRow):
+    """A Set with its ordered entries."""
+    entries: list[SetEntryRow] = []
+
+
+class SetOrderItem(BaseModel):
+    """One entry of a sidebar-order payload."""
+    id: int
+    display_order: int

@@ -389,3 +389,55 @@ class TrackLink(Base):
         Index("idx_track_links_pair", "low_track_id", "high_track_id", unique=True),
         Index("idx_track_links_high", "high_track_id"),
     )
+
+
+class Set(Base):
+    """A Set (sets PRD): an ordered sequence of Tracks whose adjacencies
+    pin evidence (issue 02). Sidebar sibling of Playlist — but where a
+    Playlist's identity is hand-curated order for Export, a Set's identity
+    is its adjacencies and what they pin. A Set is a plan over the library,
+    never an owner: deleting one touches no Track/Transition/Take.
+    """
+
+    __tablename__ = "sets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    color = Column(String)  # Hex color (sidebar accent)
+    display_order = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    entries = relationship(
+        "SetEntry",
+        back_populates="set",
+        cascade="all, delete-orphan",
+        order_by="SetEntry.position",
+    )
+
+
+class SetEntry(Base):
+    """One ordered Set entry. A Track appears at most once per Set (same
+    invariant as Playlist), which makes track_id the entry identity — the
+    client-authoritative wholesale replace (ADR 0011 pattern) reconciles
+    by it. Position is the payload index.
+    """
+
+    __tablename__ = "set_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    set_id = Column(Integer, ForeignKey("sets.id", ondelete="CASCADE"), nullable=False)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False)
+    position = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    set = relationship("Set", back_populates="entries")
+    track = relationship("Track")
+
+    __table_args__ = (
+        Index("idx_set_entries_set", "set_id"),
+        Index("idx_set_entries_position", "set_id", "position"),
+        # A Track appears at most once per Set (entry identity).
+        Index("uq_set_entries_set_track", "set_id", "track_id", unique=True),
+    )

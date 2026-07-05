@@ -907,6 +907,65 @@ export const api = {
       return res.json();
     },
   },
+
+  sets: {
+    /** All Sets, in sidebar order (sets 01). */
+    list: async (): Promise<SetRowWire[]> => {
+      const res = await fetch(`${API_BASE}/sets`);
+      if (!res.ok) throw new Error('Failed to fetch sets');
+      return res.json();
+    },
+
+    /** One Set with its ordered entries. */
+    get: async (id: number): Promise<SetWithEntriesWire> => {
+      const res = await fetch(`${API_BASE}/sets/${id}`);
+      if (!res.ok) throw new Error(`Failed to fetch set (${res.status})`);
+      return res.json();
+    },
+
+    create: async (data: { name: string; color?: string }): Promise<SetRowWire> => {
+      const res = await fetch(`${API_BASE}/sets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`Failed to create set (${res.status})`);
+      return res.json();
+    },
+
+    update: async (
+      id: number,
+      data: { name?: string; color?: string; display_order?: number }
+    ): Promise<SetRowWire> => {
+      const res = await fetch(`${API_BASE}/sets/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`Failed to update set (${res.status})`);
+      return res.json();
+    },
+
+    delete: async (id: number): Promise<void> => {
+      const res = await fetch(`${API_BASE}/sets/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete set (${res.status})`);
+    },
+
+    /** Client-authoritative wholesale replace of the ordered entry list
+     * (ADR 0011 pattern): the server reconciles by track_id. */
+    replaceEntries: async (
+      id: number,
+      items: SetEntryItemWire[]
+    ): Promise<SetWithEntriesWire> => {
+      const res = await fetch(`${API_BASE}/sets/${id}/entries`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error(`Failed to save set entries (${res.status})`);
+      return res.json();
+    },
+  },
 };
 
 // ── Take wire types (transition-takes 02) ───────────────────────────────
@@ -941,4 +1000,26 @@ export interface TakeCreateWire {
   detector_version: number;
   params: CaptureDetectorParams;
   events: CaptureEventWire[];
+}
+
+// ── Set wire types (sets 01) ────────────────────────────────────────────
+
+export interface SetRowWire {
+  id: number;
+  name: string;
+  color: string | null;
+  display_order: number;
+}
+
+export interface SetEntryItemWire {
+  track_id: number;
+}
+
+export interface SetEntryRowWire {
+  track_id: number;
+  position: number;
+}
+
+export interface SetWithEntriesWire extends SetRowWire {
+  entries: SetEntryRowWire[];
 }

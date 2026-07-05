@@ -11,7 +11,7 @@ export const TRACKS_MIME = 'application/x-manadj-tracks';
 const SOURCE_MIME = 'application/x-manadj-track-source';
 
 /** Where a track drag started (drop targets branch on this). */
-export type TrackDragSource = 'playlist-pane' | 'library';
+export type TrackDragSource = 'playlist-pane' | 'library' | 'set-pane';
 
 export function setTrackDragPayload(
   dt: DataTransfer,
@@ -41,5 +41,6 @@ export function readTrackDragPayload(dt: DataTransfer): number[] {
 }
 
 export function readTrackDragSource(dt: DataTransfer): TrackDragSource {
-  return dt.getData(SOURCE_MIME) === 'playlist-pane' ? 'playlist-pane' : 'library';
+  const source = dt.getData(SOURCE_MIME);
+  return source === 'playlist-pane' || source === 'set-pane' ? source : 'library';
 }

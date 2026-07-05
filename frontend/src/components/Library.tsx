@@ -41,6 +41,8 @@ import {
 import { isTrackDrag, readTrackDragPayload, readTrackDragSource } from '../selection/trackDrag';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import { useToast } from './Toast';
+import SetDetailPane from '../sets/SetDetailPane';
+import { addTracksToSet, getSelectedSetId, selectSet } from '../sets/setStore';
 import type { Playlist } from '../types';
 import {
   PLAY_ORDER_SORT,
@@ -86,8 +88,15 @@ export default function Library({
   onLoadToDeck,
   browseRef,
 }: LibraryProps) {
-  const [selectedView, setSelectedView] = useState<ViewType>('all');
+  // Set-view state lives in the set store (sets 01): every mode mounts its
+  // own browse instance, and the Set pane must survive mode switches. A
+  // fresh mount restores the store's selection; local view changes write
+  // back through the handlers below.
+  const [selectedView, setSelectedView] = useState<ViewType>(() =>
+    getSelectedSetId() !== null ? 'set' : 'all'
+  );
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
+  const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
   const queryClient = useQueryClient();
   const tagEditorRef = useRef<TagEditorHandle | null>(null);
@@ -246,6 +255,20 @@ export default function Library({
     queryKey: ['playlists'],
     queryFn: api.playlists.list,
   });
+
+  // Sets for the "Add to set ▸" submenu (shares the sidebar's cache; sets 01).
+  const { data: setsList = [] } = useQuery({
+    queryKey: ['sets'],
+    queryFn: api.sets.list,
+  });
+
+  const addTracksToSetWithToast = (setId: number, trackIds: number[]) => {
+    void addTracksToSet(setId, trackIds).then((skipped) => {
+      if (skipped > 0) {
+        showToast(skipped === 1 ? '1 track already in set' : `${skipped} tracks already in set`);
+      }
+    });
+  };
 
   // Add tracks to playlist mutation (sequential appends, selection order).
   // Duplicates are idempotent no-ops server-side (entry identity); skips
@@ -686,6 +709,15 @@ export default function Library({
           onSelect: () => addToPlaylistMutation.mutate({ playlistId: p.id, trackIds: targetIds }),
         })),
       },
+      {
+        label: multi ? `Add ${targetIds.length} to set` : 'Add to set',
+        disabled: setsList.length === 0,
+        title: setsList.length === 0 ? 'No sets yet' : undefined,
+        submenu: setsList.map((s) => ({
+          label: s.name,
+          onSelect: () => addTracksToSetWithToast(s.id, targetIds),
+        })),
+      },
       ...(canRemoveFromPlaylist && pane === 'main'
         ? [
             {
@@ -711,7 +743,7 @@ export default function Library({
           } satisfies MenuItem),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowMenu, mainSel.selection.ids, editLibSel.selection.ids, playlists, canRemoveFromPlaylist, selectedPlaylistId, selectedView]);
+  }, [rowMenu, mainSel.selection.ids, editLibSel.selection.ids, playlists, setsList, canRemoveFromPlaylist, selectedPlaylistId, selectedView]);
 
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0
@@ -821,12 +853,22 @@ export default function Library({
         <PlaylistSidebar
           selectedView={selectedView}
           selectedPlaylistId={selectedPlaylistId}
-          onSelectView={setSelectedView}
+          onSelectView={(view) => {
+            setSelectedView(view);
+            selectSet(null);
+          }}
           onSelectPlaylist={(id) => {
             setSelectedView('playlist');
             setSelectedPlaylistId(id);
+            selectSet(null);
           }}
           onTrackDrop={handleTrackDrop}
+          selectedSetId={selectedSetId}
+          onSelectSet={(id) => {
+            setSelectedView('set');
+            setSelectedSetId(id);
+            selectSet(id);
+          }}
         />
 
         {/* Main library area (filter + table; split panes when editing) */}
@@ -869,7 +911,10 @@ export default function Library({
             </div>
           )}
 
-          {splitView ? (
+          {selectedView === 'set' && selectedSetId !== null ? (
+            /* Set detail view (sets 01): replaces the track table. */
+            <SetDetailPane setId={selectedSetId} />
+          ) : splitView ? (
             <>
               {/* Playlist pane (Play order) */}
               <div
