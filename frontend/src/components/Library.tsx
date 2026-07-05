@@ -39,11 +39,11 @@ import {
   type RowRect,
 } from '../selection/dropIndex';
 import { isTrackDrag, readTrackDragPayload, readTrackDragSource } from '../selection/trackDrag';
-import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
+import ContextMenu, { useContextMenuState } from './ContextMenu';
 import { useToast } from './Toast';
+import { useAddTracksToPlaylist, useTrackMenuItems } from './useTrackMenuItems';
 import SetDetailPane from '../sets/SetDetailPane';
-import { addTracksToSet, getSelectedSetId, selectSet } from '../sets/setStore';
-import type { Playlist } from '../types';
+import { getSelectedSetId, selectSet } from '../sets/setStore';
 import {
   PLAY_ORDER_SORT,
   isPlayOrderSort,
@@ -194,16 +194,25 @@ export default function Library({
   const [isSplitViewOpen, setIsSplitViewOpen] = useState(false);
   const splitView =
     !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null && isSplitViewOpen;
-  useEffect(() => {
-    // Leaving the playlist (or the view) closes the split.
+  // Leaving the playlist (or the view) closes the split — adjust-during-
+  // render (not an effect: react.dev "you might not need an effect").
+  const [prevSplitCtx, setPrevSplitCtx] = useState<[ViewType, number | null]>([
+    selectedView,
+    selectedPlaylistId,
+  ]);
+  if (prevSplitCtx[0] !== selectedView || prevSplitCtx[1] !== selectedPlaylistId) {
+    setPrevSplitCtx([selectedView, selectedPlaylistId]);
     setIsSplitViewOpen(false);
-  }, [selectedView, selectedPlaylistId]);
+  }
 
   // Focus model: click focuses a pane; Tab switches; keyboard routes to it.
+  // Opening/closing the split resets focus to the playlist pane.
   const [focusedPane, setFocusedPane] = useState<'playlist' | 'library'>('playlist');
-  useEffect(() => {
+  const [prevSplitView, setPrevSplitView] = useState(splitView);
+  if (prevSplitView !== splitView) {
+    setPrevSplitView(splitView);
     setFocusedPane('playlist');
-  }, [splitView]);
+  }
 
   // Fetch all tracks ('all'/'unprocessed' views, and the edit-mode library pane)
   const { data: allTracksData, isLoading: isLoadingAllTracks, error: allTracksError } = useQuery({
@@ -238,9 +247,11 @@ export default function Library({
   // it never rewrites Play order. Default (and reset on playlist switch)
   // is the # column ascending, i.e. Play order itself.
   const [playlistSort, setPlaylistSort] = useState<PlaylistSort>(PLAY_ORDER_SORT);
-  useEffect(() => {
+  const [prevSortPlaylistId, setPrevSortPlaylistId] = useState(selectedPlaylistId);
+  if (prevSortPlaylistId !== selectedPlaylistId) {
+    setPrevSortPlaylistId(selectedPlaylistId);
     setPlaylistSort(PLAY_ORDER_SORT);
-  }, [selectedPlaylistId]);
+  }
 
   /** Play order by track id (from the API's position-ordered response). */
   const playOrder = useMemo(() => {
@@ -250,45 +261,9 @@ export default function Library({
     );
   }, [selectedView, playlistData]);
 
-  // Playlists for the "Add to playlist ▸" submenu (shares the sidebar's cache).
-  const { data: playlists = [] } = useQuery({
-    queryKey: ['playlists'],
-    queryFn: api.playlists.list,
-  });
-
-  // Sets for the "Add to set ▸" submenu (shares the sidebar's cache; sets 01).
-  const { data: setsList = [] } = useQuery({
-    queryKey: ['sets'],
-    queryFn: api.sets.list,
-  });
-
-  const addTracksToSetWithToast = (setId: number, trackIds: number[]) => {
-    void addTracksToSet(setId, trackIds).then((skipped) => {
-      if (skipped > 0) {
-        showToast(skipped === 1 ? '1 track already in set' : `${skipped} tracks already in set`);
-      }
-    });
-  };
-
-  // Add tracks to playlist mutation (sequential appends, selection order).
-  // Duplicates are idempotent no-ops server-side (entry identity); skips
-  // are reported with a toast.
-  const addToPlaylistMutation = useMutation({
-    mutationFn: async ({ playlistId, trackIds }: { playlistId: number; trackIds: number[] }) => {
-      let skipped = 0;
-      for (const trackId of trackIds) {
-        const result = await api.playlists.addTrack(playlistId, { track_id: trackId });
-        if (result.skipped) skipped += 1;
-      }
-      return { skipped, total: trackIds.length };
-    },
-    onSuccess: ({ skipped }) => {
-      queryClient.invalidateQueries({ queryKey: ['playlist'] });
-      if (skipped > 0) {
-        showToast(skipped === 1 ? '1 track already in playlist' : `${skipped} tracks already in playlist`);
-      }
-    },
-  });
+  // Add tracks to playlist (sidebar drops) — the same sequential-append
+  // mutation the track menu uses (sets 17: one home, no drift).
+  const addToPlaylistMutation = useAddTracksToPlaylist();
 
   // Loaded-track authority (issue 23): the editor panel (tags, energy,
   // title/artist, BPM, key) edits the LOADED track — selection is for
@@ -374,53 +349,6 @@ export default function Library({
 
   const handleTrackDrop = (playlistId: number, trackIds: number[]) => {
     addToPlaylistMutation.mutate({ playlistId, trackIds });
-  };
-
-  // ── Archive / Unarchive (track-archival 01) ────────────────────────────
-  // Archived (CONTEXT.md): curation verdict — removes from all playlists;
-  // record/file persist. Confirm only when playlist entries are affected.
-  const archiveMutation = useMutation({
-    mutationFn: async (trackIds: number[]) => {
-      for (const id of trackIds) {
-        await api.tracks.archive(id);
-      }
-      return trackIds.length;
-    },
-    onSuccess: (count) => {
-      queryClient.invalidateQueries({ queryKey: ['tracks'] });
-      queryClient.invalidateQueries({ queryKey: ['playlist'] });
-      // Sets 12: a Set containing an archived Track is flagged, not altered.
-      queryClient.invalidateQueries({ queryKey: ['sets'] });
-      showToast(count === 1 ? 'Track archived' : `${count} tracks archived`);
-    },
-  });
-
-  const unarchiveMutation = useMutation({
-    mutationFn: async (trackIds: number[]) => {
-      for (const id of trackIds) {
-        await api.tracks.unarchive(id);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tracks'] });
-      queryClient.invalidateQueries({ queryKey: ['sets'] });
-    },
-  });
-
-  const archiveTracks = async (trackIds: number[]) => {
-    const memberships = (
-      await Promise.all(trackIds.map((id) => api.tracks.getPlaylists(id)))
-    ).reduce((n, playlists) => n + playlists.length, 0);
-    const what = trackIds.length === 1 ? 'this track' : `${trackIds.length} tracks`;
-    if (
-      memberships > 0 &&
-      !confirm(
-        `Archive ${what}? Also removes ${memberships} playlist ${memberships === 1 ? 'entry' : 'entries'} (not restored on unarchive).`
-      )
-    ) {
-      return;
-    }
-    archiveMutation.mutate(trackIds);
   };
 
   const handleFieldUpdate = async (trackId: number, field: 'title' | 'artist', value: string) => {
@@ -645,7 +573,9 @@ export default function Library({
 
   // Ref-backed + stable per pane: these land on every memoized row.
   const menuDepsRef = useRef({ mainSel, editLibSel, splitView });
-  menuDepsRef.current = { mainSel, editLibSel, splitView };
+  useEffect(() => {
+    menuDepsRef.current = { mainSel, editLibSel, splitView };
+  });
 
   const rowContextMenu = useCallback(
     (pane: MenuPane, track: Track, pos: { x: number; y: number }) => {
@@ -658,7 +588,8 @@ export default function Library({
       if (deps.splitView) setFocusedPane(pane === 'editLibrary' ? 'library' : 'playlist');
       openRowMenu(pos.x, pos.y, { track, pane });
     },
-    [openRowMenu]
+    // setFocusedPane is a stable setState — listed for the compiler lint.
+    [openRowMenu, setFocusedPane]
   );
   const handleRowContextMenuMain = useCallback(
     (track: Track, pos: { x: number; y: number }) => rowContextMenu('main', track, pos),
@@ -682,71 +613,43 @@ export default function Library({
     loadWithViewPolicyRef.current = loadWithViewPolicy;
   });
 
-  const rowMenuItems: MenuItem[] = useMemo(() => {
-    if (!rowMenu) return [];
+  // The universal track menu (sets 17): shared core + hook own the
+  // items (per-track Archive↔Unarchive replaced the old view-level
+  // switch — the Archived view still gets Load/Add for auditioning);
+  // this surface contributes only its targets and Remove from playlist.
+  // Targets = the selection if the clicked row is in it, else the
+  // clicked row, resolved to Track rows in selection order.
+  const rowMenuTargets: Track[] = (() => {
+    if (!rowMenu) return EMPTY_TRACKS;
     const { track: menuTrack, pane } = rowMenu.context;
     const paneSelection = selForPane(pane).selection;
-    const targetIds = paneSelection.ids.includes(menuTrack.id) ? [...paneSelection.ids] : [menuTrack.id];
-    const multi = targetIds.length > 1;
-    const loadDisabledTitle = multi ? 'Load acts on a single track' : undefined;
-    return [
-      {
-        label: 'Load to Deck A',
-        disabled: multi,
-        title: loadDisabledTitle,
-        onSelect: () => loadWithViewPolicy('A', menuTrack),
-      },
-      {
-        label: 'Load to Deck B',
-        disabled: multi,
-        title: loadDisabledTitle,
-        onSelect: () => loadWithViewPolicy('B', menuTrack),
-      },
-      {
-        label: multi ? `Add ${targetIds.length} to playlist` : 'Add to playlist',
-        separatorBefore: true,
-        disabled: playlists.length === 0,
-        title: playlists.length === 0 ? 'No playlists yet' : undefined,
-        submenu: playlists.map((p: Playlist) => ({
-          label: p.name,
-          onSelect: () => addToPlaylistMutation.mutate({ playlistId: p.id, trackIds: targetIds }),
-        })),
-      },
-      {
-        label: multi ? `Add ${targetIds.length} to set` : 'Add to set',
-        disabled: setsList.length === 0,
-        title: setsList.length === 0 ? 'No sets yet' : undefined,
-        submenu: setsList.map((s) => ({
-          label: s.name,
-          onSelect: () => addTracksToSetWithToast(s.id, targetIds),
-        })),
-      },
-      ...(canRemoveFromPlaylist && pane === 'main'
-        ? [
-            {
-              label: multi ? `Remove ${targetIds.length} from playlist` : 'Remove from playlist',
-              danger: true,
-              onSelect: () => removeTracksFromViewedPlaylist(targetIds),
-            } satisfies MenuItem,
-          ]
-        : []),
-      // Archived (CONTEXT.md): verdict in normal views; reversal in the
-      // Archived view (which also keeps Load/Add for auditioning).
-      selectedView === 'archived'
-        ? ({
-            label: multi ? `Unarchive ${targetIds.length} tracks` : 'Unarchive',
-            separatorBefore: true,
-            onSelect: () => unarchiveMutation.mutate(targetIds),
-          } satisfies MenuItem)
-        : ({
-            label: multi ? `Archive ${targetIds.length} tracks` : 'Archive track',
+    if (!paneSelection.ids.includes(menuTrack.id)) return [menuTrack];
+    const paneTracks = pane === 'editLibrary' ? libraryTracks : currentTracks;
+    const byId = new Map<number, Track>(paneTracks.map((t: Track) => [t.id, t]));
+    return paneSelection.ids.flatMap((id): Track[] => {
+      const t = id === menuTrack.id ? menuTrack : byId.get(id);
+      return t ? [t] : [];
+    });
+  })();
+  const menuInViewedPlaylist = canRemoveFromPlaylist && rowMenu?.context.pane === 'main';
+  const rowMenuItems = useTrackMenuItems({
+    tracks: rowMenuTargets,
+    // The viewed playlist never lists itself under Add to playlist ▸.
+    excludePlaylistId: menuInViewedPlaylist ? selectedPlaylistId ?? undefined : undefined,
+    loadToDeck: loadWithViewPolicy,
+    surfaceItems: menuInViewedPlaylist
+      ? [
+          {
+            label:
+              rowMenuTargets.length > 1
+                ? `Remove ${rowMenuTargets.length} from playlist`
+                : 'Remove from playlist',
             danger: true,
-            separatorBefore: true,
-            onSelect: () => void archiveTracks(targetIds),
-          } satisfies MenuItem),
-    ];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowMenu, mainSel.selection.ids, editLibSel.selection.ids, playlists, setsList, canRemoveFromPlaylist, selectedPlaylistId, selectedView]);
+            onSelect: () => removeTracksFromViewedPlaylist(rowMenuTargets.map((t) => t.id)),
+          },
+        ]
+      : [],
+  });
 
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0
@@ -769,7 +672,6 @@ export default function Library({
       navigate: mainSel.handleNavigate,
       getSelectedTrack: () => mainSel.selectedTrack,
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [mainSel]
   );
 
@@ -916,7 +818,7 @@ export default function Library({
 
           {selectedView === 'set' && selectedSetId !== null ? (
             /* Set detail view (sets 01): replaces the track table. */
-            <SetDetailPane setId={selectedSetId} />
+            <SetDetailPane setId={selectedSetId} onLoadToDeck={loadWithViewPolicy} />
           ) : splitView ? (
             <>
               {/* Playlist pane (Play order) */}

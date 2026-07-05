@@ -33,7 +33,9 @@ import {
   setTrackDragPayload,
 } from '../selection/trackDrag';
 import { useToast } from '../components/Toast';
-import ContextMenu, { type MenuItem } from '../components/ContextMenu';
+import ContextMenu, { useContextMenuState, type MenuItem } from '../components/ContextMenu';
+import { useTrackMenuItems } from '../components/useTrackMenuItems';
+import type { ChannelId } from '../playback/mixer';
 import {
   initTransitionStore,
   snapshotPairStore,
@@ -85,9 +87,13 @@ import { ArchivedTrackFlag, ArchivedTrackRowMark } from './archivedFlag';
 
 interface SetDetailPaneProps {
   setId: number;
+  /** The embedding view's load policy (editor-midi 03): Library passes
+   * its `loadWithViewPolicy` down, so embedded views (editor assign-to-
+   * pair, Performance lock) keep their semantics for menu Loads too. */
+  onLoadToDeck: (deck: ChannelId, track: Track) => void;
 }
 
-export default function SetDetailPane({ setId }: SetDetailPaneProps) {
+export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProps) {
   const showToast = useToast();
   const entries = useSetEntries(setId);
   useEffect(() => {
@@ -328,6 +334,28 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
   const inSetIds = new Set(trackIds);
   const lastTrack =
     entries && entries.length > 0 ? trackMap?.get(entries[entries.length - 1].trackId) : undefined;
+
+  // ── Track-row context menu (sets 17): the universal track menu plus
+  // the surface's Remove from set. Targeting bakes in Library's rule —
+  // targets = the selection if the clicked row is in it, else the
+  // clicked row; with no selection model yet (issue 18) that is de
+  // facto the clicked row, and 18 upgrades to multi for free.
+  const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } =
+    useContextMenuState<Track>();
+  const rowMenuItems = useTrackMenuItems({
+    tracks: rowMenu ? [rowMenu.context] : [],
+    excludeSetId: setId,
+    loadToDeck: onLoadToDeck,
+    surfaceItems: rowMenu
+      ? [
+          {
+            label: 'Remove from set',
+            danger: true,
+            onSelect: () => removeTrackFromSet(setId, rowMenu.context.id),
+          },
+        ]
+      : [],
+  });
 
   // ── Drag-reorder (dropIndex helpers, playlist-pane mechanics) ────────
   const [dropIndicator, setDropIndicator] = useState<{ index: number; y: number } | null>(null);
@@ -601,6 +629,14 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
                   conducting={conductingThis && conductorState.activeEntryIndex === i}
                   onPlayFrom={plan ? () => playFromEntry(i) : undefined}
                   onRemove={() => removeTrackFromSet(setId, entry.trackId)}
+                  onContextMenu={
+                    track
+                      ? (e) => {
+                          e.preventDefault();
+                          openRowMenu(e.clientX, e.clientY, track);
+                        }
+                      : undefined
+                  }
                 />
                 {next && (
                   <AdjacencyRow
@@ -662,6 +698,11 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
           }}
           onClose={() => setSuggest(null)}
         />
+      )}
+
+      {/* Track-row context menu (sets 17) */}
+      {rowMenu && (
+        <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
     </div>
   );
@@ -970,6 +1011,7 @@ function SetTrackRow({
   conducting,
   onPlayFrom,
   onRemove,
+  onContextMenu,
 }: {
   index: number;
   trackId: number;
@@ -981,6 +1023,9 @@ function SetTrackRow({
   /** Row play button: start Set playback at this track's planned entry. */
   onPlayFrom: (() => void) | undefined;
   onRemove: () => void;
+  /** Right-click: the universal track menu (sets 17); absent while the
+   * row's track metadata is still loading. */
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -988,6 +1033,7 @@ function SetTrackRow({
       data-set-track-row
       draggable
       onDragStart={(e) => setTrackDragPayload(e.dataTransfer, [trackId], 'set-pane')}
+      onContextMenu={onContextMenu}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
