@@ -6,10 +6,10 @@ import type { AbsoluteTarget, ButtonTarget, RelativeTarget } from './actions';
  * device model declares a port-name match and a list of bindings; controls
  * with no manadj counterpart are simply absent and do nothing.
  *
- * The schema already names every control type from the PRD (button /
- * absolute incl. 14-bit / relative, plus named modifiers) so later slices
- * add decoders without reshaping mapping files. This slice's translator
- * implements buttons only.
+ * The schema names every control type from the PRD (button / absolute incl.
+ * 14-bit / relative). No modifier layer: the Inpulse's SHIFT turned out to
+ * be hardware-layered (shifted controls emit distinct messages), so shifted
+ * functions are just more bindings.
  */
 
 export interface MessageMatcher {
@@ -23,13 +23,6 @@ export interface MessageMatcher {
 
 interface BindingBase {
   match: MessageMatcher;
-  /**
-   * Active only while this named modifier (e.g. 'shift') is held. Whether
-   * the Inpulse's SHIFT changes emitted messages in hardware or must be
-   * tracked in software is decided in a later slice — until modifiers are
-   * implemented, modifier-gated bindings never fire.
-   */
-  modifier?: string;
 }
 
 export type Binding = BindingBase &

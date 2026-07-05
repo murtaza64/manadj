@@ -34,11 +34,27 @@ const mapping: Mapping = {
       target: { control: 'cue', deck: 'B' },
     },
     {
-      // Modifier layers are a later slice: gated bindings must stay inert.
-      match: { message: 'note', channel: 0, number: 0x10 },
-      modifier: 'shift',
-      controlType: 'button',
-      target: { control: 'load', deck: 'A' },
+      // 7-bit absolute.
+      match: { message: 'cc', channel: 0, number: 0x14 },
+      controlType: 'absolute',
+      target: { control: 'master' },
+      bits: 7,
+    },
+    {
+      // 14-bit absolute: MSB #0, LSB #32.
+      match: { message: 'cc', channel: 0, number: 0x00 },
+      controlType: 'absolute',
+      target: { control: 'crossfader' },
+      bits: 14,
+      lsbNumber: 0x20,
+    },
+    {
+      // 14-bit absolute on another channel: same numbers, different target.
+      match: { message: 'cc', channel: 1, number: 0x00 },
+      controlType: 'absolute',
+      target: { control: 'channel-fader', channel: 'A' },
+      bits: 14,
+      lsbNumber: 0x20,
     },
   ],
 };
@@ -131,9 +147,73 @@ describe('unmapped-message silence', () => {
   it('ignores truncated messages', () => {
     expect(translate([[0xf8], [0x90, 0x07]])).toEqual([]);
   });
+});
 
-  it('keeps modifier-gated bindings inert until modifiers land', () => {
-    expect(translate([[0x90, 0x10, 0x7f], [0x80, 0x10, 0x00]])).toEqual([]);
+describe('absolute decoding (midi-controller 04)', () => {
+  it('7-bit CC emits a normalized 0..1 value', () => {
+    expect(translate([[0xb0, 0x14, 0x00], [0xb0, 0x14, 0x7f]])).toEqual([
+      { kind: 'absolute', target: { control: 'master' }, value: 0 },
+      { kind: 'absolute', target: { control: 'master' }, value: 1 },
+    ]);
+  });
+
+  it('14-bit: MSB alone is silent, the LSB completes the pair', () => {
+    expect(translate([[0xb0, 0x00, 0x40], [0xb0, 0x20, 0x00]])).toEqual([
+      { kind: 'absolute', target: { control: 'crossfader' }, value: (0x40 << 7) / 16383 },
+    ]);
+  });
+
+  it('14-bit endpoints reach exactly 0 and 1', () => {
+    expect(
+      translate([
+        [0xb0, 0x00, 0x00],
+        [0xb0, 0x20, 0x00],
+        [0xb0, 0x00, 0x7f],
+        [0xb0, 0x20, 0x7f],
+      ])
+    ).toEqual([
+      { kind: 'absolute', target: { control: 'crossfader' }, value: 0 },
+      { kind: 'absolute', target: { control: 'crossfader' }, value: 1 },
+    ]);
+  });
+
+  it('14-bit: an LSB with no stored MSB is silent', () => {
+    expect(translate([[0xb0, 0x20, 0x7f]])).toEqual([]);
+  });
+
+  it('14-bit: the stored MSB persists across LSB-only refinements', () => {
+    expect(
+      translate([
+        [0xb0, 0x00, 0x40],
+        [0xb0, 0x20, 0x00],
+        [0xb0, 0x20, 0x01],
+      ])
+    ).toEqual([
+      { kind: 'absolute', target: { control: 'crossfader' }, value: (0x40 << 7) / 16383 },
+      { kind: 'absolute', target: { control: 'crossfader' }, value: ((0x40 << 7) | 1) / 16383 },
+    ]);
+  });
+
+  it('14-bit MSBs are tracked per channel', () => {
+    expect(
+      translate([
+        [0xb0, 0x00, 0x10], // crossfader MSB (ch 0)
+        [0xb1, 0x00, 0x40], // channel-fader A MSB (ch 1)
+        [0xb1, 0x20, 0x00],
+        [0xb0, 0x20, 0x00],
+      ])
+    ).toEqual([
+      {
+        kind: 'absolute',
+        target: { control: 'channel-fader', channel: 'A' },
+        value: (0x40 << 7) / 16383,
+      },
+      { kind: 'absolute', target: { control: 'crossfader' }, value: (0x10 << 7) / 16383 },
+    ]);
+  });
+
+  it('note messages on absolute-bound numbers stay silent', () => {
+    expect(translate([[0x90, 0x14, 0x7f]])).toEqual([]);
   });
 });
 

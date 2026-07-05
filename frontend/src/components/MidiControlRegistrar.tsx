@@ -2,16 +2,22 @@ import { useEffect, useRef } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDeck, useDeckReady } from '../hooks/useDeck';
 import { useHotCueActions } from '../hooks/useHotCueActions';
-import { registerDeckControls } from '../midi/controlRegistry';
+import { useMatchAction } from '../hooks/useMatchAction';
+import { useMixer } from '../hooks/useMixer';
+import { registerDeckControls, registerMixerControls } from '../midi/controlRegistry';
 import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
 
 /**
- * Headless glue (midi-controller 02): registers each shared Deck's
- * React-owned pad capabilities into the module-level control registry so
- * MIDI dispatch (which lives outside React) can drive them. Reuses the exact
- * hooks the on-screen pads use — hot cues via useHotCueActions (set-empty /
- * jump / hold-preview, React Query curation included), beatjump via the same
- * engine call + shared per-deck size as BeatjumpRow.
+ * Headless glue (midi-controller 02/04): registers each shared Deck's
+ * React-owned capabilities into the module-level control registry so MIDI
+ * dispatch (which lives outside React) can drive them. Reuses the exact
+ * hooks the on-screen controls use — hot cues via useHotCueActions
+ * (set-empty / jump / hold-preview, React Query curation included),
+ * beatjump via the same engine call + shared per-deck size as BeatjumpRow,
+ * MATCH via the same useMatchAction as the on-screen button (out-of-reach
+ * is silent: no hardware feedback channel), pitch via engine.setPitch with
+ * the same ready gate as the on-screen fader. The Mixer registers itself —
+ * MidiMixerControls is structurally a subset of Mixer.
  *
  * Registration runs once per deck; handlers read the latest hook values
  * through a ref so a Load or size change never re-registers. Like
@@ -23,10 +29,11 @@ function DeckControlsRegistrar() {
   const { deck, engine, loadedTrack, beatjumpBeats, setBeatjumpBeats } = useDeck();
   const ready = useDeckReady();
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
+  const matchAction = useMatchAction();
 
-  const latest = useRef({ engine, ready, hotCues, beatjumpBeats, setBeatjumpBeats });
+  const latest = useRef({ engine, ready, hotCues, beatjumpBeats, setBeatjumpBeats, matchAction });
   useEffect(() => {
-    latest.current = { engine, ready, hotCues, beatjumpBeats, setBeatjumpBeats };
+    latest.current = { engine, ready, hotCues, beatjumpBeats, setBeatjumpBeats, matchAction };
   });
 
   useEffect(
@@ -43,10 +50,27 @@ function DeckControlsRegistrar() {
           const { beatjumpBeats: beats, setBeatjumpBeats: set } = latest.current;
           set(change === 'halve' ? halveBeatjump(beats) : doubleBeatjump(beats));
         },
+        setPitch: (percent) => {
+          const { engine: e, ready: r } = latest.current;
+          if (!r) return; // same gate as the on-screen pitch fader
+          e.setPitch(percent);
+        },
+        match: () => {
+          // Out-of-reach/unavailable are silent: no hardware feedback channel.
+          latest.current.matchAction();
+        },
       }),
     [deck]
   );
 
+  return null;
+}
+
+function MixerRegistrar() {
+  const mixer = useMixer();
+  // The Mixer instance satisfies MidiMixerControls structurally; it owns
+  // clamping and audio-math (mixerMath.ts), so no wrapping is needed.
+  useEffect(() => registerMixerControls(mixer), [mixer]);
   return null;
 }
 
@@ -60,6 +84,7 @@ export function MidiControlRegistrar() {
       <DeckScope deck="B">
         <DeckControlsRegistrar />
       </DeckScope>
+      <MixerRegistrar />
     </>
   );
 }

@@ -1,12 +1,13 @@
+import type { EqBand } from '../playback/graph';
 import type { ChannelId } from '../playback/mixer';
 
 /**
  * Module-level registry for non-transport Controller targets (midi-controller
  * 02+). Mirrors playback/audibleSurface.ts: the MIDI layer lives outside
  * React, so React-owned capabilities (hot-cue curation is React Query,
- * beatjump size is DeckProvider state) register handlers here and dispatch
- * looks them up per action. Unregistered targets drop silently, same as
- * unmapped messages.
+ * beatjump size is DeckProvider state, the Mixer lives in DeckProvider)
+ * register handlers here and dispatch looks them up per action. Unregistered
+ * targets drop silently, same as unmapped messages.
  *
  * Per ADR 0013 these stay aimed at the shared decks directly — never through
  * the audible-surface arbiter. While the editor holds audibility the shared
@@ -14,7 +15,7 @@ import type { ChannelId } from '../playback/mixer';
  * resuming audio, so no arbiter routing is needed here.
  */
 
-export interface DeckPadControls {
+export interface MidiDeckControls {
   /** Press a hot cue pad: set-at-playhead when unset, jump/preview when set. */
   hotCueDown(pad: number): void;
   /** Release a hot cue pad: ends a hold-to-preview. */
@@ -23,22 +24,55 @@ export interface DeckPadControls {
   beatjump(direction: 'back' | 'forward'): void;
   /** Halve/double the deck's beatjump size (shared with on-screen controls). */
   beatjumpSize(change: 'halve' | 'double'): void;
+  /** Absolute pitch in percent (±PITCH_RANGE_PERCENT; the engine clamps). */
+  setPitch(percent: number): void;
+  /** Stateless one-shot BPM match against the other deck (on-screen MATCH). */
+  match(): void;
 }
 
-const deckControls = new Map<ChannelId, DeckPadControls>();
+/**
+ * The mixer surface — structurally a subset of playback/mixer.ts's Mixer,
+ * so the registrar can register the Mixer instance itself. Values use the
+ * Mixer's own conventions: 0..1 for trim/EQ/fader/master, -1..1 for
+ * filter/crossfader (dispatch rescales the translator's 0..1).
+ */
+export interface MidiMixerControls {
+  setTrim(channel: ChannelId, value: number): void;
+  setEq(channel: ChannelId, band: EqBand, value: number): void;
+  setFilter(channel: ChannelId, position: number): void;
+  setFader(channel: ChannelId, value: number): void;
+  setCrossfader(position: number): void;
+  setMaster(value: number): void;
+}
 
-/** Register a deck's pad controls; returns an unregister function. */
-export function registerDeckControls(deck: ChannelId, controls: DeckPadControls): () => void {
+const deckControls = new Map<ChannelId, MidiDeckControls>();
+let mixerControls: MidiMixerControls | null = null;
+
+/** Register a deck's controls; returns an unregister function. */
+export function registerDeckControls(deck: ChannelId, controls: MidiDeckControls): () => void {
   deckControls.set(deck, controls);
   return () => {
     if (deckControls.get(deck) === controls) deckControls.delete(deck);
   };
 }
 
-export function deckControlsFor(deck: ChannelId): DeckPadControls | null {
+export function deckControlsFor(deck: ChannelId): MidiDeckControls | null {
   return deckControls.get(deck) ?? null;
+}
+
+/** Register the mixer surface; returns an unregister function. */
+export function registerMixerControls(controls: MidiMixerControls): () => void {
+  mixerControls = controls;
+  return () => {
+    if (mixerControls === controls) mixerControls = null;
+  };
+}
+
+export function midiMixerControls(): MidiMixerControls | null {
+  return mixerControls;
 }
 
 export function _resetMidiControlsForTests(): void {
   deckControls.clear();
+  mixerControls = null;
 }

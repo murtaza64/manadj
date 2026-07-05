@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
+import { useMatchAction } from '../../hooks/useMatchAction';
 import { useMixer } from '../../hooks/useMixer';
 import { useScrubTransport } from '../../hooks/useScrubTransport';
 import WebGLWaveform from '../WebGLWaveform';
@@ -29,7 +30,7 @@ import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons'
 import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { TagPopover } from './TagPopover';
-import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
+import { NUDGE_BEND_PERCENT, composeRate } from '../../playback/tempo';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { DECK_KEYS } from './performanceKeys';
 import type { EqBand } from '../../playback/graph';
@@ -367,24 +368,14 @@ function MixZone({ track }: { track: Track | null }) {
     if (hintTimer.current) clearTimeout(hintTimer.current);
   }, []);
 
-  const queryClient = useQueryClient();
   const other = decks[deck === 'A' ? 'B' : 'A'];
   const otherBpm = other.loadedTrack?.bpm ?? null;
 
+  // Shared with the hardware SYNC button (useMatchAction applies the pitch);
+  // only the out-of-reach hint is on-screen-specific.
+  const matchAction = useMatchAction();
   const onMatch = () => {
-    // The other deck's BPM may have been edited since its load — prefer the
-    // fresh track from the query cache (kept warm by its own panel).
-    const otherFresh = other.loadedTrack
-      ? (queryClient.getQueryData<Track>(['track', other.loadedTrack.id])?.bpm ??
-        otherBpm)
-      : null;
-    if (!track?.bpm || otherFresh === null) return;
-    const otherEffective =
-      otherFresh * (1 + other.engine.getSnapshot().pitchPercent / 100);
-    const result = bpmMatch(track.bpm, otherEffective);
-    if (result.kind === 'match') {
-      engine.setPitch(result.pitchPercent);
-    } else {
+    if (matchAction()?.kind === 'out-of-reach') {
       setHint(true);
       if (hintTimer.current) clearTimeout(hintTimer.current);
       hintTimer.current = setTimeout(() => setHint(false), MATCH_HINT_MS);

@@ -12,7 +12,11 @@ import {
 } from '../playback/audibleSurface';
 import type { ChannelId } from '../playback/mixer';
 import type { MidiAction } from './actions';
-import { _resetMidiControlsForTests, registerDeckControls } from './controlRegistry';
+import {
+  _resetMidiControlsForTests,
+  registerDeckControls,
+  registerMixerControls,
+} from './controlRegistry';
 import { dispatchMidiAction } from './dispatch';
 
 const button = (
@@ -29,6 +33,19 @@ function registerFakeDeckControls(deck: ChannelId): void {
     hotCueUp: (pad) => calls.push(`${deck}:hotCueUp:${pad}`),
     beatjump: (direction) => calls.push(`${deck}:beatjump:${direction}`),
     beatjumpSize: (change) => calls.push(`${deck}:beatjumpSize:${change}`),
+    setPitch: (percent) => calls.push(`${deck}:setPitch:${percent}`),
+    match: () => calls.push(`${deck}:match`),
+  });
+}
+
+function registerFakeMixerControls(): void {
+  registerMixerControls({
+    setTrim: (channel, value) => calls.push(`mixer:trim:${channel}:${value}`),
+    setEq: (channel, band, value) => calls.push(`mixer:eq:${channel}:${band}:${value}`),
+    setFilter: (channel, position) => calls.push(`mixer:filter:${channel}:${position}`),
+    setFader: (channel, value) => calls.push(`mixer:fader:${channel}:${value}`),
+    setCrossfader: (position) => calls.push(`mixer:crossfader:${position}`),
+    setMaster: (value) => calls.push(`mixer:master:${value}`),
   });
 }
 
@@ -154,6 +171,84 @@ describe('pads (midi-controller 02)', () => {
   it('deck controls only affect their own deck', () => {
     registerFakeDeckControls('A');
     dispatchMidiAction(hotCue('B', 1, 'down'));
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('mixer/pitch/match (midi-controller 04)', () => {
+  it('MATCH fires on the down edge only', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'match', deck: 'A' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'match', deck: 'A' },
+    });
+    expect(calls).toEqual(['A:match']);
+  });
+
+  it('pitch rescales 0..1 to ±PITCH_RANGE_PERCENT', () => {
+    registerFakeDeckControls('B');
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'B' }, value: 0 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'B' }, value: 0.5 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'B' }, value: 1 });
+    expect(calls).toEqual(['B:setPitch:-8', 'B:setPitch:0', 'B:setPitch:8']);
+  });
+
+  it('unipolar mixer targets pass the normalized value through', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.25 });
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'eq', channel: 'B', band: 'mid' },
+      value: 0.5,
+    });
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'channel-fader', channel: 'A' },
+      value: 1,
+    });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 0.75 });
+    expect(calls).toEqual([
+      'mixer:trim:A:0.25',
+      'mixer:eq:B:mid:0.5',
+      'mixer:fader:A:1',
+      'mixer:master:0.75',
+    ]);
+  });
+
+  it('bipolar mixer targets rescale to -1..1', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'filter', channel: 'A' }, value: 0 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'crossfader' }, value: 0.5 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'crossfader' }, value: 1 });
+    expect(calls).toEqual(['mixer:filter:A:-1', 'mixer:crossfader:0', 'mixer:crossfader:1']);
+  });
+
+  it('hardware center detents land on exactly zero (they sit a hair above 0.5)', () => {
+    registerFakeDeckControls('A');
+    registerFakeMixerControls();
+    // 14-bit center: MSB 0x40, LSB 0x00 → 8192/16383; 7-bit center: 64/127.
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'pitch', deck: 'A' },
+      value: 8192 / 16383,
+    });
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'filter', channel: 'A' },
+      value: 64 / 127,
+    });
+    expect(calls).toEqual(['A:setPitch:0', 'mixer:filter:A:0']);
+  });
+
+  it('no registered mixer: absolute actions drop silently', () => {
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 1 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 1 });
     expect(calls).toEqual([]);
   });
 });

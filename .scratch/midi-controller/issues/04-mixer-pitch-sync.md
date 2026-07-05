@@ -1,6 +1,6 @@
 # 04 — Mixer section: faders, EQ/filter/trim, master, 14-bit pitch, SYNC
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change ztxrqpxu; checks green — hardware smoke test pending)
 
 ## Parent
 
@@ -32,3 +32,19 @@ Status: ready-for-agent
 ## Blocked by
 
 - 01-foundation-transport-cue
+
+## Comments
+
+- Translator: 14-bit MSB/LSB assembly emits on the LSB (the MK2 sends
+  MSB,LSB pairs per move — hardware-learned, change xrunwzzz); the stored
+  MSB persists for LSB-only refinements; an LSB before any MSB drops. 7-bit
+  bindings normalize value/127. All under vitest (translator.test.ts).
+- Dispatch rescales bipolar targets (pitch ±8%, filter/crossfader -1..1)
+  and passes unipolar targets through; jump semantics, no soft takeover.
+- MATCH extracted to hooks/useMatchAction.ts — single implementation for
+  the on-screen button (keeps its out-of-reach hint) and hardware SYNC
+  (silent on out-of-reach: no feedback channel).
+- Mixer registers itself into the control registry (MidiMixerControls is
+  structurally a subset of Mixer); pitch keeps the on-screen ready gate.
+- Pitch fader hardware polarity unverified: mapping assumes MIDI 0 = -8%.
+  If the hardware fader is inverted, flip the scaling during the smoke test.
