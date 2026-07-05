@@ -1,4 +1,6 @@
-# 20 — List drag preview (rows + adjacency rows)
+# 23 — List drag preview (rows + adjacency rows)
+
+(Renumbered from 20, 2026-07-05 — parallel filing collided with 20-set-row-polish.)
 
 Status: ready-for-agent
 
