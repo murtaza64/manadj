@@ -25,3 +25,17 @@ This is the waveform renderer's first filled-region overlay primitive: build it 
 ## Blocked by
 
 - `03-minimal-audible-loop.md`
+
+## Comments
+
+**2026-07-05 (lane minimap-clarity)** — minimap loop visuals were prototyped
+in the minimap-clarity lab; human-approved verdict to converge on
+(.scratch/minimap-clarity/PRD.md):
+
+- Loop color `#00f900`, region wash at ~0.18 alpha (full height on the
+  minimap, not just a thin band).
+- The 2px solid guide line sits at the TOP edge of the minimap strip — the
+  bottom edge is the waveform body's zero line, keep it clean.
+- Interaction with played-portion dim (minimap-clarity issue 03): while the
+  playhead is inside an active loop, the dim wash stops at the loop's left
+  edge — the loop body is about to replay, never "already heard".

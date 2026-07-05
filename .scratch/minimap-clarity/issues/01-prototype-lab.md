@@ -1,6 +1,6 @@
 # 01 — Prototype lab: minimap mark-clarity variants
 
-Status: ready-for-human
+Status: done
 Type: prototype
 
 Build `?view=minimap-lab`, a dev-only page rendering the five variants from
@@ -54,3 +54,9 @@ synthetic fallbacks kick in per-track when the real data is empty.
 
 Verified by agent: `npm run build` green; lane app serves the page; real
 data confirmed via API (track 9: hotcues + transitions present).
+
+**2026-07-05 — done.** Human judged in the lab across 8 variants (5 grilled
++ 3 iterated). Winner: **Zoned marks** — full verdict in `../PRD.md`
+(vocabulary, loop color `#00f900`, 30px height, played-dim on, per-slot
+hotcue colors). Port tracked as issues 02-04. The lab stays on the lane's
+throwaway change (oyrprrqt) until the port lands, then is abandoned.

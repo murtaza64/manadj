@@ -77,19 +77,26 @@ keep full-height bars, but each kind carries its identity glyph in its own
 vertical zone:
 
 - **Hotcues**: 2px full-height pole + 5px square flag at the TOP right,
-  per-slot colors.
+  per-slot colors (unified-color option rejected).
 - **Transition guides**: 1px full-height bar + ▶ play arrow at MID-height,
   deck color (incoming). The next guide is emphasized (2px bar, larger
   arrow); passed guides dim to 0.3.
 - **Main cue**: 2px full-height yellow bar + triangle at the BOTTOM.
 - **Playhead**: 3px pink bar, the widest — plus the played-dim boundary.
-- **Loop region**: purple wash (`rgba(170,0,255,0.18)`) + 2px bright purple
-  bottom band (changed from the green in `.scratch/looping/` plans).
+- **Loop region**: `#00f900` wash at 0.18 + 2px guide line at the TOP edge
+  (the bottom edge is the waveform's zero line). Mid-loop, the played-dim
+  wash stops at the loop's left edge — the loop body is about to replay,
+  never "already heard".
 - **Played-portion dim**: black wash at 0.35 over body before the playhead
-  (marks stay full brightness).
+  (marks stay full brightness). Ships ON by default.
+- **Height**: stays 30px (44px explored, rejected).
 
-Iteration continues on the winner in the lab (losers deleted from
-variants.ts); the WebGL port stays a follow-up.
+Loop rendering itself belongs to `.scratch/looping/` (their issue 05) —
+this feature hands over the visual verdict only.
+
+Port issues: 02 (marks vocabulary), 03 (played-dim), 04 (play-guide
+marks). Prototype lab (`?view=minimap-lab`, change oyrprrqt) is retired —
+abandoned, never landed — once the port issues are done.
 
 ## Follow-ups (out of scope here)
 
