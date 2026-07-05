@@ -1,6 +1,6 @@
 # 21 — Conductor playback survives entering the Transition editor
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -32,3 +32,16 @@ The editor claims audibility **lazily — on its first audition gesture (play), 
 ## Notes
 
 - Touches editor surface lifecycle (`TransitionEditor` register/claim) and possibly the arbiter — coordinate with lane setlist if 16 (pickup) is still in flight (Conductor-adjacent, different files; likely fine).
+
+## Comments
+
+**Implemented (2026-07-05, jj change `xlmtsrpk`, lane setlist — parked for review):**
+
+- Claim moved from mount to the first audition gesture: `ensureEditorAudible()` (claim → pitch checkpoint → `engageAutomation`) rides `auditionTogglePlay`, which all three play paths use (center ⏯ button, Space, hardware PLAY via the surface transport handle). Pausing never claims; a play press on unloaded decks claims nothing.
+- Unmount unwinds the borrow only if the editor still holds it. A displaced editor (Conductor claimed over an audition) neither releases nor disengages nor restores pitches — mirror of the Conductor's own stand-down.
+- Arbiter untouched. Capture untouched (recorder still gates on `audibleHolder() !== 'shared'`).
+- `MixPlayer` gained an injected `audible()` gate: while the editor is not the audible surface it is a pure model — no engine seeks/pitch, no automation-overlay writes (those would corrupt a sounding Conductor's overlay). First play after a claim re-applies pitch + lanes fresh. `MixPlayer.togglePlay` removed (all gestures route through `auditionTogglePlay`). Tests: `frontend/src/editor/MixPlayer.test.ts`.
+- `openPair`/`openTake` claim eagerly (via `ensureEditorAudible`) before loading: opening an artifact loads the shared Decks (ADR 0022), so whatever sounds stands down first. openPair's claim is sets 09 behavior kept; openTake's is new but same rationale. Plain mode entry claims nothing.
+- Code review found a pre-existing app-wide gap: plain library loads / swap-decks onto a conducted deck start a reload war (no takeover, no claim) — filed as issue 26 (renumbered from 24 after a filing collision), out of scope here.
+
+**Verification (agent, 2026-07-05):** gate green — `uv run -m pytest` 666 passed; `npx vitest run` 1048 passed (incl. 7 new MixPlayer gate tests); frontend build clean; `alembic heads` → one (0022); eslint clean on touched files. Audible matrix walk-through is the human review below.
