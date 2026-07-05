@@ -48,6 +48,12 @@ abandoned.
   (`jj new <lane-head> main`), keep building on top. Land with a named merge
   commit (`merge: <what>`), then move `main` to it.
 - Rebases onto trunk happen at issue boundaries, never mid-issue.
+- **When to land** (practice added 2026-07-05): agents land automatically only
+  at boundaries where human testing is useful (something demoable/verifiable
+  just got finished) OR where the implementation is at a natural stopping
+  point (an issue closed, a coherent slice green). Never land mid-thought
+  just because the gate happens to be green — half-wired work on trunk costs
+  every other lane a rebase for nothing a human can act on.
 
 ## The gate (before `main` moves)
 
