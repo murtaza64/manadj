@@ -546,9 +546,25 @@ export class DeckEngine {
     // Loop state is a live source property, not an AudioEffect: push
     // region changes to the worklet whether or not audio (re)started —
     // engage/release never restart the voice (that inaudibility is the
-    // point). The clock anchor is untouched; getPlayhead's fold handles
-    // the wraps.
-    if (loopChanged) this.syncLoopToSource();
+    // point).
+    if (loopChanged) {
+      // Re-anchor the clock at the audible position when loop state
+      // changes WITHOUT an audio restart. getPlayhead's fold is defined by
+      // the loop being folded into: releasing after k wraps would
+      // otherwise expose the raw monotone clock — k loop lengths ahead of
+      // the audio (a phantom "slip"); a live resize would fold a stale
+      // anchor into the wrong region. `synced.playhead` is the audible
+      // position under the OLD loop state, read this dispatch.
+      if (
+        this.runningStartId !== null &&
+        this.audio &&
+        !effects.some((e) => e.type === 'start' || e.type === 'stop')
+      ) {
+        this.anchorPosition = synced.playhead;
+        this.anchorCtxTime = this.audio.ctx.currentTime;
+      }
+      this.syncLoopToSource();
+    }
     this.emit();
 
     // A cue-down that moved the cue is the user setting it — persistence hook.
