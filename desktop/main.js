@@ -54,7 +54,8 @@ function retryPageDataUrl(target) {
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>manadj</title><style>
   body { background: #111; color: #ddd; font: 16px/1.5 -apple-system, sans-serif;
-         display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+         display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;
+         -webkit-app-region: drag; /* no titlebar — whole retry page drags the window */ }
   code { color: #4fc3f7; }
   .box { text-align: center; }
 </style></head><body><div class="box">
@@ -95,6 +96,11 @@ function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
     title: "manadj",
+    // No native title bar: the app's TopBar is the titlebar (drag region +
+    // double-click-to-zoom via CSS in frontend TopBar.css). Traffic lights
+    // stay, vertically centered in the 40px bar.
+    titleBarStyle: "hidden",
+    trafficLightPosition: { x: 16, y: 13 },
     webPreferences: {
       // A DJ app must never have rAF/timers throttled while occluded:
       // audio would keep playing while UI clocks and waveforms stall.

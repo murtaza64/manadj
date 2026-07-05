@@ -26,6 +26,21 @@
   flex-shrink: 0;
 }
 
+/* Desktop shell (Electron, macOS): the native title bar is hidden and the
+   topbar doubles as the window titlebar — drag to move, double-click to zoom
+   (system behavior on drag regions). Traffic lights overlay the bar's left
+   edge; inset past them. Gated on the .desktop-shell class set in main.tsx. */
+.desktop-shell .topbar {
+  -webkit-app-region: drag;
+  padding-left: 84px;
+}
+
+/* Anything interactive in the bar must opt out of the drag region, including
+   controls other features add later. */
+.desktop-shell .topbar :is(button, a, input, select, [role='button']) {
+  -webkit-app-region: no-drag;
+}
+
 .topbar-logo {
   width: 26px;
   height: 26px;

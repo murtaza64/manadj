@@ -20,6 +20,12 @@ auto-loads once the server comes up.
 - Web MIDI (incl. sysex) auto-granted — the Controller never prompts
 - Closing the window quits the app (single window, no hidden-but-playing state)
 - Window bounds persist in `window-state.json` (gitignored)
+- No native title bar (`titleBarStyle: hidden`): the app's TopBar is the
+  titlebar — drag to move, double-click to zoom (system behavior), traffic
+  lights overlaid. The frontend detects the shell via user agent
+  (`desktop-shell` class, `frontend/src/main.tsx`) and gates the drag-region
+  CSS in `TopBar.css`; interactive TopBar elements must be `no-drag` (a
+  blanket rule covers `button/a/input/select/[role=button]`)
 
 ## Why Electron (and why not "lighter" options)
 
