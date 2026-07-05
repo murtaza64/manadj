@@ -179,7 +179,12 @@ export class EditorStore {
     // Re-opening a Take on the already-loaded pair: the previous draft is
     // REPLACED, never orphaned (an orphan named "Take" is non-pristine and
     // would ride the next armed save — the bug this filter closes).
-    const items = this.liveItems().filter((it) => it.uuid !== this.state.takeDraft?.itemUuid);
+    // Pristine items evaporate too — on a fresh pair the draft replaces
+    // "Transition 1" instead of siblinging it (same evaporation rule as
+    // navigating away from an untouched take).
+    const items = this.liveItems().filter(
+      (it) => it.uuid !== this.state.takeDraft?.itemUuid && !isPristine(it)
+    );
     const item: SavedTransition = {
       uuid: crypto.randomUUID(),
       name: 'Take',

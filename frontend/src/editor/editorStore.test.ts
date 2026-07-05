@@ -174,6 +174,25 @@ describe('take drafts (transition-takes 03)', () => {
     expect(store.getSnapshot().takeDraft).toBeNull();
   });
 
+  it('stamping on a fresh pair replaces the pristine "Transition 1" instead of siblinging it', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2'); // seeds a pristine Transition 1
+    store.stampTakeDraft('take-1', draftTransition);
+    const { session } = store.getSnapshot();
+    expect(session.items).toHaveLength(1);
+    expect(session.items[0].name).toBe('Take');
+    expect(session.active).toBe(0);
+  });
+
+  it('stamping keeps real saved Transitions as siblings', () => {
+    const p = fakePersistence({ '1:2': { items: [edited('u1')], active: 0 } });
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    expect(store.getSnapshot().session.items.map((i) => i.name)).toEqual(['drop swap', 'Take']);
+  });
+
   it('re-stamping on the same pair replaces the draft — no orphan can ride a later save', () => {
     const p = fakePersistence();
     const store = new EditorStore(p);
