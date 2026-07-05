@@ -1,6 +1,6 @@
 # 09 — Adjacency click-through to the Transition editor
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -21,3 +21,20 @@ Clicking an adjacency in the Set view loads the pair onto the Decks (outgoing→
 ## Blocked by
 
 - 02-adjacency-pins-evidence
+
+## Comments
+
+**2026-07-05 (agent, lane setui) — implemented, parked for review** (jj change `pqmwzoxy`)
+
+Mechanism: adjacency rows are now clickable (whole row; the pin chip / auto-fill / + insert buttons stop propagation). Routing uses the RESOLVED pin (`adjacencyView`, so dangling pins go the unresolved path): Transition pin → `requestPairEdit` with the uuid; Take pin → the existing `requestTakeReview` flow; unresolved → `requestPairEdit` with null → blank sketch. `editor/openPair.ts` is a one-shot pending + CustomEvent handoff (the takeReview.ts pattern); App flips the mode; the mounted editor consumes the request, assigns outgoing→A / incoming→B (`assignTrack` — shared-deck loads, ADR 0022), `loadPair`s, then `selectTransition(uuid)` or `startBlankSketch()` (new emit-only EditorStore method — opening an adjacency is not an edit; the pristine sketch never persists). `openPair` re-claims the editor's audible surface, so a Conductor started from the Set pane under a mounted editor stands down on the next adjacency click.
+
+Verification: gate green (pytest 636, vitest 920 across 59 files incl. new openPair + startBlankSketch tests, tsc+vite build, alembic single head; no backend/python files touched).
+
+**Verification walkthrough** — lane app running at http://localhost:5313 (desktop shell: `npm --prefix /Users/murtaza/manadj/desktop start -- --port 5313`):
+
+1. Library mode → select a Set in the sidebar. Scroll the Set pane somewhere non-trivial; note the scroll position.
+2. Click an adjacency row with a green ◆ Transition pin → Transition editor opens, outgoing on A / incoming on B, that Transition selected in the switcher.
+3. In the editor's bottom browse panel the Set pane is still there, at the same scroll. Click a different adjacency (mauve ● Take pin) → Take review opens for that Take (still in editor mode).
+4. Click an unresolved (✕ hard cut) adjacency → blank sketch ("Transition N", default shape) on that pair.
+5. Press ▶ Play set in the Set pane's header (under the editor), then click any adjacency → the Conductor stops (mode-switch semantics), pair loads.
+6. Stale-plan check: from the Set view click a pinned adjacency, drag its window/lanes in the editor, return to library mode → the ladder/row durations reflect the edit.
