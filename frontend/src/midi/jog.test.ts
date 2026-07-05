@@ -5,7 +5,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   JOG_BEND_MAX_PERCENT,
+  JOG_FINE_CONTINUATION_MS,
   JOG_IDLE_MS,
+  JOG_TOUCH_AUTHORITATIVE_MS,
   JOG_TOUCH_SEEK_SECONDS_PER_TICK,
   JogController,
   jogBendPercent,
@@ -215,7 +217,61 @@ describe('touch surface (midi-controller 11)', () => {
     const jog = new JogController(port);
     jog.onTicks(1, 1000);
     const bendCalls = calls.length;
-    jog.onTouchTicks(1);
+    jog.onTouchTicks(1, 1010);
     expect(calls.length).toBe(bendCalls);
+  });
+
+  describe('release continuation (the wheel keeps spinning after letting go)', () => {
+    it('rim ticks inside the touch-authoritative window are dropped (dual streams)', () => {
+      const jog = new JogController(port);
+      jog.onTouchTicks(1, 1000);
+      jog.onTicks(1, 1000 + JOG_TOUCH_AUTHORITATIVE_MS - 10);
+      expect(calls).toEqual([`seek:${(60 + JOG_TOUCH_SEEK_SECONDS_PER_TICK).toFixed(4)}`]);
+    });
+
+    it('rim ticks continuing a touch gesture seek at the fine rate, not the accelerated one', () => {
+      const jog = new JogController(port);
+      jog.onTouchTicks(1, 1000);
+      jog.onTicks(1, 1000 + JOG_TOUCH_AUTHORITATIVE_MS + 20);
+      expect(calls).toEqual([
+        `seek:${(60 + JOG_TOUCH_SEEK_SECONDS_PER_TICK).toFixed(4)}`,
+        `seek:${(60 + 2 * JOG_TOUCH_SEEK_SECONDS_PER_TICK).toFixed(4)}`,
+      ]);
+    });
+
+    it('continuation rim ticks keep extending the window while the wheel spins down', () => {
+      const jog = new JogController(port);
+      jog.onTouchTicks(1, 1000);
+      let t = 1000 + JOG_TOUCH_AUTHORITATIVE_MS + 20;
+      for (let i = 0; i < 10; i++) {
+        jog.onTicks(1, t);
+        t += JOG_FINE_CONTINUATION_MS - 50; // each tick inside the window
+      }
+      const last = parseFloat(calls[calls.length - 1].slice(5));
+      expect(last).toBeCloseTo(60 + 11 * JOG_TOUCH_SEEK_SECONDS_PER_TICK, 10);
+    });
+
+    it('after the gesture gap, rim ticks return to the classic accelerated seek', () => {
+      const jog = new JogController(port);
+      jog.onTouchTicks(1, 1000);
+      jog.onTicks(1, 1000 + JOG_FINE_CONTINUATION_MS + 100);
+      const travel = parseFloat(calls[1].slice(5)) - parseFloat(calls[0].slice(5));
+      expect(travel).toBeGreaterThan(JOG_TOUCH_SEEK_SECONDS_PER_TICK * 2);
+    });
+
+    it('a fresh rim gesture with no touch history seeks classically', () => {
+      const jog = new JogController(port);
+      jog.onTicks(1, 5000);
+      const travel = parseFloat(calls[0].slice(5)) - 60;
+      expect(travel).toBeGreaterThan(JOG_TOUCH_SEEK_SECONDS_PER_TICK * 2);
+    });
+
+    it('playing is untouched by continuation: rim ticks still bend', () => {
+      const jog = new JogController(port);
+      jog.onTouchTicks(1, 1000);
+      playing = true;
+      jog.onTicks(1, 1000 + JOG_TOUCH_AUTHORITATIVE_MS + 20);
+      expect(calls[calls.length - 1].startsWith('bend:')).toBe(true);
+    });
   });
 });

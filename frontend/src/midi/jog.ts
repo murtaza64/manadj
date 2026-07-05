@@ -45,6 +45,25 @@ export const JOG_SEEK_ACCEL_MAX = 100;
  */
 export const JOG_TOUCH_SEEK_SECONDS_PER_TICK = 0.01;
 
+/**
+ * Release continuation (issue 11 follow-up): letting go of a spinning
+ * platter hands the tick stream from the touch CC back to the rim CC — the
+ * gesture is still the same spin, so it must keep the same fine
+ * seconds-per-tick instead of snapping to the rim's accelerated seek.
+ *
+ * - While touch ticks are streaming, rim ticks are dropped entirely (both
+ *   CCs can fire for one physical motion; the touch stream is
+ *   authoritative).
+ * - After the touch stream stops, rim ticks within the continuation window
+ *   seek at the touch rate and keep the window alive, so a free-spinning
+ *   wheel stays fine until it actually stops.
+ * - A gap ends the gesture; the next rim gesture is classic accelerated
+ *   seek. (If the two CCs turn out to tick at different densities per
+ *   revolution, tune the continuation feel here.)
+ */
+export const JOG_TOUCH_AUTHORITATIVE_MS = 100;
+export const JOG_FINE_CONTINUATION_MS = 250;
+
 /** Rate smoothing: how much of the instantaneous rate each burst carries. */
 const RATE_BLEND = 0.6;
 /** dt clamp bounds (ms): messages closer than MIN share a burst; a gap
@@ -77,6 +96,10 @@ export class JogController {
   private lastTickMs: number | null = null;
   private bending = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Last touch-CC tick (dual-stream authority window). */
+  private lastTouchTickMs: number | null = null;
+  /** Last fine-rate seek — touch tick or continuation rim tick. */
+  private lastFineActivityMs: number | null = null;
 
   constructor(port: JogDeckPort) {
     this.port = port;
@@ -87,12 +110,16 @@ export class JogController {
    * ignored while playing — there is no scratch model, and the dense touch
    * stream would swamp the rim's bend velocity math.
    */
-  onTouchTicks(ticks: number): void {
+  onTouchTicks(ticks: number, nowMs: number = performance.now()): void {
     if (this.port.isPlaying()) return;
+    this.lastTouchTickMs = nowMs;
+    this.lastFineActivityMs = nowMs;
     this.port.seek(this.port.getPlayhead() + ticks * JOG_TOUCH_SEEK_SECONDS_PER_TICK);
   }
 
-  /** Rim rotation (CC #9): bend when playing, accelerated seek when paused. */
+  /** Rim rotation (CC #9): bend when playing, accelerated seek when paused
+   * — unless the ticks continue a touch gesture (a released, still-spinning
+   * platter), which keeps the fine rate. */
   onTicks(ticks: number, nowMs: number = performance.now()): void {
     const dtMs = this.lastTickMs === null ? DT_MAX_MS : nowMs - this.lastTickMs;
     // A gap past the activity window is a fresh gesture, not a continuation.
@@ -103,10 +130,22 @@ export class JogController {
       this.bending = true;
       this.port.setBend(jogBendPercent(this.rate));
       this.armIdleRelease();
-    } else {
-      this.releaseBend(); // mode flip mid-gesture: never leave a stale bend
-      this.port.seek(this.port.getPlayhead() + jogSeekDelta(ticks, this.rate));
+      return;
     }
+
+    this.releaseBend(); // mode flip mid-gesture: never leave a stale bend
+
+    // Touch stream still live: it is authoritative for this motion.
+    if (this.lastTouchTickMs !== null && nowMs - this.lastTouchTickMs < JOG_TOUCH_AUTHORITATIVE_MS)
+      return;
+    // Released but still spinning: same gesture, same seconds-per-tick.
+    if (this.lastFineActivityMs !== null && nowMs - this.lastFineActivityMs < JOG_FINE_CONTINUATION_MS) {
+      this.lastFineActivityMs = nowMs;
+      this.port.seek(this.port.getPlayhead() + ticks * JOG_TOUCH_SEEK_SECONDS_PER_TICK);
+      return;
+    }
+
+    this.port.seek(this.port.getPlayhead() + jogSeekDelta(ticks, this.rate));
   }
 
   /** Detach hook for the registrar: release any held bend immediately. */

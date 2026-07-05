@@ -45,3 +45,11 @@ stays unmapped). Learned in the 01 session: deck A/B touch-spin = cc ch 1/2
   content. Immutable now; recorded here instead of rewritten.
 - Touch seek is linear (JOG_TOUCH_SEEK_SECONDS_PER_TICK = 0.01 s/tick) —
   tune on hardware.
+- Release continuation (change xskqnktl): letting go of a spinning platter
+  hands ticks from CC #10 back to CC #9; rim ticks continuing a touch
+  gesture now keep the fine seconds-per-tick until the wheel stops
+  (JOG_FINE_CONTINUATION_MS window, extended by each continuation tick).
+  While the touch stream is live, rim ticks are dropped
+  (JOG_TOUCH_AUTHORITATIVE_MS) so dual streams can't double-seek. If the
+  two CCs tick at different densities per revolution, the handoff may still
+  feel like a speed step — tune the constants on hardware.
