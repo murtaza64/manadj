@@ -1,5 +1,12 @@
-import { createContext, useCallback, useContext, useSyncExternalStore } from 'react';
-import type { Mixer } from '../playback/mixer';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import type { AutomationChannelValues, ChannelId, Mixer } from '../playback/mixer';
 
 /**
  * The one Mixer (ADR 0009), provided app-wide by DeckProvider. The instance
@@ -28,4 +35,51 @@ export function useMixerValue<T>(selector: (mixer: Mixer) => T): T {
     useCallback((cb) => mixer.subscribe(cb), [mixer]),
     () => selector(mixer)
   );
+}
+
+function sameAutomation(
+  a: AutomationChannelValues | null,
+  b: AutomationChannelValues | null
+): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.fader === b.fader &&
+    a.filter === b.filter &&
+    a.eq.low === b.eq.low &&
+    a.eq.mid === b.eq.mid &&
+    a.eq.high === b.eq.high
+  );
+}
+
+/**
+ * The channel's live automation values for ghost indicators (sets 15), or
+ * null while no overlay is engaged / nothing is written. rAF-polled like
+ * the waveform playheads — the Mixer's automation write path never
+ * notifies subscribers (ADR 0022), so this is the ONE sanctioned way for
+ * the view to see automation. Value-gated: re-renders only while the
+ * automation is actually moving. Read-only — gestures keep going through
+ * the base-state setters.
+ */
+export function useAutomationGhost(channel: ChannelId): AutomationChannelValues | null {
+  const mixer = useMixer();
+  const [ghost, setGhost] = useState<AutomationChannelValues | null>(null);
+  useEffect(() => {
+    let raf = 0;
+    let last: AutomationChannelValues | null = null;
+    const tick = () => {
+      const next = mixer.getAutomation(channel);
+      if (!sameAutomation(last, next)) {
+        // Snapshot: the conductor replaces the stored object per tick, but
+        // a copy keeps us honest if a writer ever mutates in place.
+        last = next && { fader: next.fader, filter: next.filter, eq: { ...next.eq } };
+        setGhost(last);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+    };
+  }, [mixer, channel]);
+  return ghost;
 }

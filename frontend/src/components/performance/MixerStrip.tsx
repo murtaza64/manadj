@@ -32,6 +32,7 @@ export function Knob({
   defaultValue,
   value,
   onChange,
+  ghost = null,
 }: {
   label: string;
   min: number;
@@ -40,6 +41,10 @@ export function Knob({
   defaultValue: number;
   value: number;
   onChange: (value: number) => void;
+  /** Automation ghost (sets 15): a second, translucent pointer at the live
+   * automation value while an overlay is engaged. Display only — never
+   * affects the real pointer (base state) or gesture handling. */
+  ghost?: number | null;
 }) {
   const drag = useRef<{ startY: number; startValue: number } | null>(null);
 
@@ -47,8 +52,11 @@ export function Knob({
     onChange(Math.max(min, Math.min(max, v)));
   };
 
-  const fraction = (value - min) / (max - min);
-  const angle = -135 + fraction * 270;
+  /** Dial angle for a value, clamped to the knob's physical stops. */
+  const toAngle = (v: number) =>
+    -135 + Math.max(0, Math.min(1, (v - min) / (max - min))) * 270;
+  const angle = toAngle(value);
+  const ghostAngle = ghost === null ? null : toAngle(ghost);
 
   return (
     <div className="perf-knob">
@@ -68,7 +76,18 @@ export function Knob({
         onDoubleClick={() => set(defaultValue)}
         onWheel={(e) => set(value + wheelDelta(e, min, max))}
       >
-        <div className="perf-knob-pointer" style={{ transform: `rotate(${angle}deg)` }} />
+        {ghostAngle !== null && (
+          <div
+            className="perf-knob-pointer perf-knob-ghost"
+            style={{ transform: `rotate(${ghostAngle}deg)` }}
+          />
+        )}
+        {/* While a ghost shows, automation is what's audible — dim the
+            base pointer so the ghost reads as winning. */}
+        <div
+          className={`perf-knob-pointer${ghostAngle !== null ? ' perf-base-dim' : ''}`}
+          style={{ transform: `rotate(${angle}deg)` }}
+        />
       </div>
       <span>{label}</span>
     </div>
@@ -101,6 +120,7 @@ export function HFader({
   fillColor,
   crossfade = false,
   title,
+  ghost = null,
 }: {
   label: string;
   min: number;
@@ -115,6 +135,10 @@ export function HFader({
   fillColor?: string;
   crossfade?: boolean;
   title?: string;
+  /** Automation ghost (sets 15): a translucent DAW-style marker on the
+   * track at the live automation value while an overlay is engaged. The
+   * real handle (base state) and gesture handling are untouched. */
+  ghost?: number | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -127,6 +151,11 @@ export function HFader({
   };
 
   const fraction = (value - min) / (max - min);
+  const ghostFraction =
+    ghost === null ? null : Math.max(0, Math.min(1, (ghost - min) / (max - min)));
+  // The fill shows the AUDIBLE level: the ghost's value while automation
+  // is winning, the handle's (base state) otherwise.
+  const fillFraction = ghostFraction ?? Math.max(0, Math.min(1, fraction));
 
   return (
     <div
@@ -155,7 +184,7 @@ export function HFader({
         <div
           className="perf-fader-fill"
           style={{
-            width: `${Math.max(0, Math.min(1, fraction)) * 100}%`,
+            width: `${fillFraction * 100}%`,
             ...(fillColor ? { background: fillColor } : {}),
           }}
         />
@@ -181,11 +210,17 @@ export function HFader({
         </>
       )}
       {detent && <div className="perf-fader-detent" />}
+      {ghostFraction !== null && (
+        <div className="perf-fader-ghost" style={{ left: `${ghostFraction * 100}%` }} />
+      )}
       {/* left: X% + translateX(-X%) keeps the handle fully inside the box
           at both extremes (slider-thumb idiom) instead of overflowing by
           half its label width. */}
+      {/* While a ghost shows, automation is what's audible — dim the base
+          handle so the ghost reads as winning (it stays the takeover
+          target, so it never disappears). */}
       <div
-        className="perf-fader-handle"
+        className={`perf-fader-handle${ghostFraction !== null ? ' perf-base-dim' : ''}`}
         style={{
           left: `${Math.max(0, Math.min(1, fraction)) * 100}%`,
           transform: `translate(-${Math.max(0, Math.min(1, fraction)) * 100}%, -50%)`,

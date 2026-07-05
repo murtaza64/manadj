@@ -496,6 +496,32 @@
   transform: translateX(-50%);
 }
 
+/* Automation ghost (sets 15): second, translucent DAW-style pointer at the
+   live automation value while an overlay is engaged (Conductor / editor
+   audition). The real pointer stays at base state — the takeover target.
+   Shared ghost color: saturated orange, distinct from every deck/level
+   color in the strip. */
+.perf-knob-ghost::after,
+.perf-fader-ghost {
+  background: var(--orange, #ff8000);
+  opacity: 0.65;
+}
+
+.perf-knob-ghost::after {
+  height: 9px;
+}
+
+/* While a ghost is showing, automation is winning — dim the base-state
+   indicators (pointer/handle) so the ghost reads as the live value. They
+   stay visible: base state is the takeover target. */
+.perf-knob-pointer.perf-base-dim::after {
+  opacity: 0.35;
+}
+
+.perf-fader-handle.perf-base-dim {
+  opacity: 0.45;
+}
+
 /* EQ bands grouped tight between the TRIM/FLT flanks — no box, placement
    is the separation */
 .perf-eqgroup {
@@ -555,6 +581,18 @@
   height: 11px;
   transform: translate(-50%, -50%);
   background: var(--overlay0);
+}
+
+/* Automation ghost (sets 15): translucent DAW-style tick on the track at
+   the live automation value; the labeled handle stays at base state.
+   Color/opacity shared with .perf-knob-ghost above. */
+.perf-fader-ghost {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 13px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
 .perf-fader-handle {

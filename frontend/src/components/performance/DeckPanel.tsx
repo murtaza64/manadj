@@ -18,7 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
 import { useMatchAction } from '../../hooks/useMatchAction';
-import { useMixer, useMixerValue } from '../../hooks/useMixer';
+import { useAutomationGhost, useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useScrubTransport } from '../../hooks/useScrubTransport';
 import WebGLWaveform from '../WebGLWaveform';
 import WaveformMinimap from '../WaveformMinimap';
@@ -375,6 +375,10 @@ function MixZone({ track }: { track: Track | null }) {
   // moves repaint them too (midi-controller 09).
   const mixer = useMixer();
   const channel = useMixerValue((m) => m.getChannelState(deck));
+  // Automation ghosts (sets 15): the overlay's live values, rAF-polled
+  // (the automation write path never notifies — ADR 0022). Null while no
+  // overlay is engaged; display only.
+  const auto = useAutomationGhost(deck);
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
   const keyLock = useDeckSnapshot((s) => s.keyLock);
@@ -412,6 +416,7 @@ function MixZone({ track }: { track: Track | null }) {
       defaultValue={0.5}
       value={channel.eq[band]}
       onChange={(v) => mixer.setEq(deck, band, v)}
+      ghost={auto ? auto.eq[band] : null}
     />
   );
 
@@ -440,6 +445,7 @@ function MixZone({ track }: { track: Track | null }) {
           defaultValue={0}
           value={channel.filter}
           onChange={(v) => mixer.setFilter(deck, v)}
+          ghost={auto ? auto.filter : null}
         />
       </div>
       <HFader
@@ -452,6 +458,7 @@ function MixZone({ track }: { track: Track | null }) {
         defaultValue={1}
         onChange={(v) => mixer.setFader(deck, v)}
         title="Channel volume (double-click = full)"
+        ghost={auto ? auto.fader : null}
       />
       {/* Horizontal pitch: right = faster (grill decision — the vertical
           fader's hardware polarity died with the vertical fader). */}

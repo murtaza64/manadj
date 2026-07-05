@@ -421,6 +421,17 @@ export class Mixer {
   }
 
   /**
+   * Read-only view of the overlay's current values for a channel (sets 15
+   * ghost indicators): null while disengaged, and per-channel null before
+   * the first write. Polled per-frame by the view (rAF, like the waveform
+   * playheads) — deliberately NOT part of subscribe()/notify(), which
+   * carries base state only (ADR 0022).
+   */
+  getAutomation(channel: ChannelId): AutomationChannelValues | null {
+    return this.automation?.[channel] ?? null;
+  }
+
+  /**
    * Automation write (the conductor's per-tick lane application). Stores
    * first, applies to a live graph only. Never touches base state, never
    * notifies subscribers — on-screen knobs and the capture recorder see

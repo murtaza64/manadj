@@ -188,6 +188,52 @@ describe('automation overlay — no side-effectful context creation', () => {
   });
 });
 
+// ── Read accessor for ghost indicators (sets 15) ────────────────────────
+
+describe('automation overlay — getAutomation read accessor', () => {
+  it('is null while disengaged and per-channel null before the first write', () => {
+    forbidAudio();
+    const mixer = new Mixer();
+    expect(mixer.getAutomation('A')).toBeNull();
+    expect(mixer.getAutomation('B')).toBeNull();
+    mixer.engageAutomation();
+    // Engaged but nothing written yet: nothing to ghost.
+    expect(mixer.getAutomation('A')).toBeNull();
+    expect(mixer.getAutomation('B')).toBeNull();
+  });
+
+  it('returns the written values per channel and null again after disengage', () => {
+    forbidAudio();
+    const mixer = new Mixer();
+    mixer.engageAutomation();
+    const a = values(0.2, 0.8, -0.5);
+    mixer.setAutomation('A', a);
+    expect(mixer.getAutomation('A')).toEqual(a);
+    expect(mixer.getAutomation('B')).toBeNull(); // B never written
+    mixer.disengageAutomation();
+    expect(mixer.getAutomation('A')).toBeNull();
+  });
+
+  it('reads never notify and are insulated from base-state moves', () => {
+    forbidAudio();
+    const mixer = new Mixer();
+    mixer.engageAutomation();
+    const a = values(0.3, 0.6, 0.1);
+    mixer.setAutomation('A', a);
+    let notifications = 0;
+    mixer.subscribe(() => {
+      notifications += 1;
+    });
+    mixer.getAutomation('A');
+    expect(notifications).toBe(0);
+    // A user gesture mid-automation (takeover write) changes base state
+    // only — the overlay's values are untouched.
+    mixer.setFader('A', 0.99);
+    expect(mixer.getAutomation('A')).toEqual(a);
+    expect(mixer.getChannelState('A').fader).toBe(0.99);
+  });
+});
+
 // ── Graph-level invariants (recording fake context) ────────────────────
 
 describe('automation overlay — node ownership round trip', () => {
