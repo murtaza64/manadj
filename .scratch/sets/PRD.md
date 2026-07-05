@@ -28,7 +28,7 @@ All domain vocabulary is defined in `CONTEXT.md` (Set, Set playback, Conductor, 
 12. As a DJ, I want to play a Set end-to-end with saved Transitions executed automatically, so that I can audition the whole plan hands-free.
 13. As a DJ, I want Set playback to run on the two shared Decks and Mixer, so that the Performance view visualizes the set as it plays.
 14. As a DJ, I want unresolved adjacencies to hard-cut (outgoing Track to its end, incoming from its Main cue), so that playback never stalls at a gap.
-15. As a DJ, I want the first Track to start at its Main cue and playback to stop after the last Track ends, so that a Set has sensible boundaries.
+15. As a DJ, I want the first Track to start at its beginning and playback to stop after the last Track ends, so that a Set has sensible boundaries. *(Revised 2026-07-05 during the 03 review: was "at its Main cue" — the Main cue is a performance marker, not a set boundary.)*
 16. As a DJ, I want to start Set playback from any position in the ladder, so that I can audition one section without replaying the whole set.
 17. As a DJ, I want any manual deck or mixer gesture to stop the Conductor entirely while the Decks keep playing as they are, so that I can grab the controls and continue the set live.
 18. As a DJ, I want Conductor-driven playback to be invisible to Take capture, so that machine performances never pollute my Transition history.
@@ -64,7 +64,7 @@ All domain vocabulary is defined in `CONTEXT.md` (Set, Set playback, Conductor, 
 - **Auto-fill** proposes Transitions only (favorite first, else the sole Transition); Takes are pinned manually only. Take promotion rewrites all Set pins referencing that Take to the new Transition uuid, at promotion time (the Take model already records its promoted Transition).
 - **Take pins play their idealized vectorization computed at play time** using the existing vectorizer (the same result promotion would produce) — no snapshot into the Set, no auto-promotion. Vectorizer improvements flow through automatically.
 - **Set playback structure is fully derived from pins**: a pinned Transition's start position is in the outgoing Track's own time (Sketch origin invariant), so each Track's solo stretch and every handover instant follow from the pins alone. No new anchors.
-- **Unresolved adjacency = hard cut**: outgoing plays to its end, incoming starts at its Main cue. First Track starts at its Main cue; playback stops after the last Track.
+- **Unresolved adjacency = hard cut**: outgoing plays to its end, incoming starts at its Main cue. The first Track starts at its BEGINNING (revised 2026-07-05, 03 review — a set opens with the whole opening track; hard-cut incomings still enter at their Main cue); playback stops after the last Track.
 - **Conductor, not a new Audible surface**: Set playback is an automation driver on the existing performance surface, loading Decks, starting transports, and moving Mixer controls per the pins. Tracks ping-pong across Deck A and Deck B. Any manual deck/mixer gesture stops the Conductor entirely (per-control takeover deferred); the Decks keep playing and the user is live. Conductor-driven playback is invisible to Handover detection; capture resumes at takeover.
 - **Tempo policy is per-Set**, two values. *Riding*: each incoming Track eases back to native tempo after the window — the Tempo return, a tunable-heuristic ramp that must complete before the next window (insufficient runway is a validation flag; the ramp clamps faster rather than staying incomplete). *Fixed*: one explicit Set tempo (BPM, defaulted from the first Track's native BPM); every Track pitched to it, pinned Transitions play rate-scaled as a whole; a Transition's tempo-match flag is moot. Tempo-matched Transitions scale cleanly under a global rate: both decks stay matched and automation stretches uniformly.
 - **Key Lock**: the Conductor inherits each Deck's sticky Key Lock setting; no Set-level override.
@@ -110,3 +110,17 @@ All domain vocabulary is defined in `CONTEXT.md` (Set, Set playback, Conductor, 
 ## Comments
 
 **2026-07-05 — grilling round 2 (post-prototype).** Decisions folded into the body above: (1) reorder previews live in the overview ladder during drag; (2) pin discard-on-reorder overturned — pins go Dormant per ordered pair per Set, auto-restoring (new glossary term); (3) adjacency click-through to the Transition editor over the stationary shared browse surface; (4) Transition lanes are role-addressed, not deck-addressed — Conductor swaps channels per ping-pong parity; (5) Conductor transport (play/pause/seek + follow mode) is not a takeover trigger; ladder click = seek, per-row play buttons. Set view is a planning/practice surface, not a performance tool — no seek guard needed. UI prototype (variant D, "list + follow minimap") lives on the sets lane, change qpzwslkl; verdict notes pending in the prototype dir.
+
+**2026-07-05 — 03/04 review feedback (human click-through).** (1) First
+track starts from its beginning, not its Main cue — decision revised above,
+planner fixed in the parked stack (amended into vykmvyym). (2) The ladder's
+hard scroll-pinning breaks when a Set fits one screen (no list scroll ⇒
+zoomed ladder unreachable); band-aid in the stack (zoom drops to 1 when the
+list doesn't scroll); a redesign — free ladder viewport + zoom, viewport
+highlighted in the tracklist — is being grilled as a candidate ticket.
+(3) On-screen deck/mixer controls not moving during conducted playback is
+ADR 0022 by design (automation overlay never touches base state); filed as
+issue 13 (needs-triage). (4) Overlapping windows edge (B→C window opens
+before A→B closes): the shared deck gets an instantaneous jump, aggravated
+by load delays — needs visual surfacing (ladder) and graceful handling
+(e.g. early fade-out to free the deck ~5s for loading); in the same grill.

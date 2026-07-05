@@ -59,3 +59,11 @@ unresolved tails. Clicks:
    cue; hard-cut outgoings play to their end), deck-colored left borders,
    toolbar shows "8 tracks · <set length>".
 4. Re-pin an adjacency (pin chip) → ladder + durations recompute live.
+
+**2026-07-05 — Review fixes (amended into the parked stack).** First track
+now starts from its BEGINNING, not its Main cue (human verdict; PRD revised
+— Main cue stays the entry point for hard-cut incomings). Ladder: when the
+Set fits one screen the list has no scroll to pin to, leaving the zoomed
+ladder unreachable — zoom now drops to 1 so the whole set is visible
+(band-aid; a free-viewport + zoom redesign is being grilled as its own
+ticket).
