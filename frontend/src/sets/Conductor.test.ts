@@ -31,8 +31,12 @@ import { planSet, planStateAt, type SetPlan } from './planner';
 class FakeEngine {
   trackId: number | null = null;
   seeks = 0;
+  /** Decoded-buffer duration the snapshot reports (may differ from the
+   * plan's metadata duration — the mp3-estimate mismatch). */
+  durationSec = 120;
   private playingFlag = false;
   private parkedAt = 0;
+  private subs = new Set<() => void>();
   /** Estimate anchor (post time — mirrors DeckEngine.beginStart). */
   private anchorPos = 0;
   private anchorCtx = 0;
@@ -52,6 +56,7 @@ class FakeEngine {
       trackId: this.trackId,
       loadState: this.trackId === null ? 'empty' : 'ready',
       playing: this.playingFlag,
+      duration: this.durationSec,
       pitchPercent: 0,
       bendPercent: 0,
       previewing: false,
@@ -83,27 +88,45 @@ class FakeEngine {
     this.seeks++;
     if (this.playingFlag) this.splice(t);
     else this.parkedAt = t;
+    this.emit();
   }
 
   play(): void {
     if (this.playingFlag) return;
     this.playingFlag = true;
     this.splice(this.parkedAt);
+    this.emit();
   }
 
   pause(): void {
     if (!this.playingFlag) return;
     this.parkedAt = this.getPlayhead();
     this.playingFlag = false;
+    this.emit();
+  }
+
+  /** The worklet ran off the end of the buffer (DeckEngine.handleEnded):
+   * the engine parks itself at the decoded duration and emits — OUTSIDE
+   * any conductor call. */
+  finishTrack(): void {
+    if (!this.playingFlag) return;
+    this.parkedAt = this.durationSec;
+    this.playingFlag = false;
+    this.emit();
   }
 
   setPitch(): void {}
   setBend(): void {}
-  subscribe(): () => void {
-    return () => {};
+  subscribe(fn: () => void): () => void {
+    this.subs.add(fn);
+    return () => this.subs.delete(fn);
   }
   addTransportEventListener(): () => void {
     return () => {};
+  }
+
+  private emit(): void {
+    for (const fn of this.subs) fn();
   }
 }
 
@@ -150,6 +173,23 @@ function overlapPlan(): SetPlan {
   });
 }
 
+/** Two tracks, unresolved adjacency: hard cut at track 1's end (metadata
+ * duration `dur1`), track 2 entering at 20s. */
+function hardCutPlan(dur1 = 120): SetPlan {
+  return planSet({
+    entries: [
+      { trackId: 1, pin: null },
+      { trackId: 2, pin: null },
+    ],
+    tracks: {
+      1: { durationSec: dur1, bpm: null, mainCueSec: 0 },
+      2: { durationSec: 120, bpm: null, mainCueSec: 20 },
+    },
+    transitionsByUuid: {},
+    takesByUuid: {},
+  });
+}
+
 // ── Harness ────────────────────────────────────────────────────────────
 
 let now = 0;
@@ -163,10 +203,10 @@ function tickAt(t: number): void {
   frame?.();
 }
 
-function makeConductor(latencyOf: (postTime: number) => number) {
+function makeConductor(latencyOf: (postTime: number) => number, plan: SetPlan = overlapPlan()) {
   const clock = () => now;
   const engines = { A: new FakeEngine(clock, latencyOf), B: new FakeEngine(clock, latencyOf) };
-  const plan = overlapPlan();
+  const stopped: string[] = [];
   const conductor = new Conductor(
     plan,
     { mixer: fakeMixer(clock), engines: engines as unknown as Record<ChannelId, DeckEngine> },
@@ -174,10 +214,10 @@ function makeConductor(latencyOf: (postTime: number) => number) {
       loadTrack: (deck, trackId) => {
         engines[deck].trackId = trackId;
       },
-      onStopped: () => {},
+      onStopped: (reason) => stopped.push(reason),
     }
   );
-  return { conductor, engines, plan };
+  return { conductor, engines, plan, stopped };
 }
 
 /** Per-deck actual-audio offset from its plan position at mix time t. */
@@ -208,6 +248,64 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('natural end-of-track at a hard cut (the "conductor stops instead of cutting" bug)', () => {
+  // A hard-cut outgoing plays to its literal buffer end, so the worklet's
+  // 'ended' always fires there: the engine parks itself (playing→false)
+  // and emits OUTSIDE any conductor call. That self-park is the deck's
+  // own doing — it must not read as a manual-gesture takeover.
+  const latency = () => 0.002;
+
+  it('does not stop when the outgoing ends exactly at the cut; the incoming still enters', () => {
+    const { conductor, engines, stopped } = makeConductor(latency, hardCutPlan());
+    conductor.playFromEntry(0);
+    tickAt(0); // load-freeze tick
+    tickAt(0.01); // A starts
+    tickAt(60); // mid-track
+    // The buffer runs out at the cut instant, between ticks.
+    now = 120;
+    engines.A.finishTrack();
+    expect(stopped).toEqual([]);
+    tickAt(120.02); // the tick after the cut: B joins at its entry
+    tickAt(120.05);
+    expect(conductor.isPlaying()).toBe(true);
+    expect(engines.B.getSnapshot().playing).toBe(true);
+    conductor.stop();
+  });
+
+  it('rides out a metadata tail (decoded audio shorter than the plan) without restarting the dead deck', () => {
+    // Plan exit at 122 (metadata), decoded buffer 120: the deck ends 2s
+    // "early" while the plan still has it audible.
+    const { conductor, engines, stopped } = makeConductor(latency, hardCutPlan(122));
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    now = 120;
+    engines.A.finishTrack();
+    expect(stopped).toEqual([]);
+    const seeksAfterEnd = engines.A.seeks;
+    tickAt(120.5); // inside the metadata tail
+    tickAt(121.5);
+    // The exhausted deck stays parked — no per-tick restart churn.
+    expect(engines.A.seeks).toBe(seeksAfterEnd);
+    expect(engines.A.getSnapshot().playing).toBe(false);
+    tickAt(122.1); // past the cut: the incoming enters
+    tickAt(122.2);
+    expect(conductor.isPlaying()).toBe(true);
+    expect(engines.B.getSnapshot().playing).toBe(true);
+    conductor.stop();
+  });
+
+  it('a manual pause mid-track is still a takeover', () => {
+    const { conductor, engines, stopped } = makeConductor(latency, hardCutPlan());
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    now = 60;
+    engines.A.pause(); // user hits pause far from the track end
+    expect(stopped).toEqual(['takeover']);
+  });
 });
 
 describe('deck-join alignment (the set-playback clash bug)', () => {
