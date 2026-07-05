@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Waveform style panel (edits the persisted style slots live).
@@ -17,6 +17,7 @@ import { MidiFeedbackBridge } from './components/MidiFeedbackBridge';
 import { AudioRoutingBridge } from './components/AudioRoutingBridge';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
+import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { ToastProvider } from './components/Toast';
 
 const queryClient = new QueryClient();
@@ -31,6 +32,14 @@ const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
 
 function App() {
   const [view, setView] = useState<AppMode>(initialView);
+
+  // A Take review request (Transition history row) opens the editor; the
+  // mounted editor consumes the pending uuid itself (takeReview.ts).
+  useEffect(() => {
+    const onOpenTake = () => setView('transition');
+    window.addEventListener(OPEN_TAKE_EVENT, onOpenTake);
+    return () => window.removeEventListener(OPEN_TAKE_EVENT, onOpenTake);
+  }, []);
 
   if (window.location.pathname === '/midi-inspect') {
     return (

@@ -280,6 +280,21 @@ describe('direction and chaining', () => {
   });
 });
 
+describe('the slice init head (vectorization input, issue 03)', () => {
+  it('every Take slice starts with engagement-open state and deck roles', () => {
+    const s = script().at(0).load('A', 1).load('B', 2).fader('A', 0).play('B').advance(10);
+    s.at(10).play('A').fader('A', 1).at(20).fader('B', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    const head = takes[0].events[0];
+    if (head.kind !== 'init') throw new Error('slice must start with init');
+    expect(head.t).toBe(takes[0].windowStartS);
+    expect(head.outgoingChannel).toBe('B'); // deck-agnostic roles
+    expect(head.decks.B.trackId).toBe(2);
+    expect(head.decks.A.fader).toBe(1); // reflects the fade-in at open
+    expect(head.crossfader).toBe(0);
+  });
+});
+
 describe('the rolling log', () => {
   it('is pruned while idle (bounded memory), kept through an engagement', () => {
     const s = incumbentA();

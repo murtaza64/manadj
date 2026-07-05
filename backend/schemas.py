@@ -389,3 +389,8 @@ class TakeDetail(TakeRow):
     """One Take with its evidence (GET /{uuid} response)."""
     params: dict
     events: list[dict]
+
+
+class TakePromotedPatch(BaseModel):
+    """Set/clear a Take's promoted-Transition reference (issue 03)."""
+    promoted_transition_uuid: str | None

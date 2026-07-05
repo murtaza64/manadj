@@ -1,4 +1,8 @@
 import type {
+  CaptureEvent as CaptureEventWire,
+  DetectorParams as CaptureDetectorParams,
+} from '../capture/events';
+import type {
   Playlist,
   Track,
   PlaylistTrackAdd,
@@ -891,6 +895,17 @@ export const api = {
       const res = await fetch(`${API_BASE}/takes/${uuid}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Failed to delete take (${res.status})`);
     },
+
+    /** Record (or clear) the Transition a Take was promoted into. */
+    setPromoted: async (uuid: string, transitionUuid: string | null): Promise<TakeRowWire> => {
+      const res = await fetch(`${API_BASE}/takes/${uuid}/promoted`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promoted_transition_uuid: transitionUuid }),
+      });
+      if (!res.ok) throw new Error(`Failed to set take promotion (${res.status})`);
+      return res.json();
+    },
   },
 };
 
@@ -910,10 +925,10 @@ export interface TakeRowWire {
 }
 
 export interface TakeDetailWire extends TakeRowWire {
-  /** Opaque evidence: detector-parameter snapshot + raw event slice.
-   * Typed loosely at the wire — the capture module owns the real types. */
-  params: object;
-  events: object[];
+  /** The evidence — opaque to the BACKEND, but this client both writes and
+   * reads it, so the wire keeps the capture module's real types. */
+  params: CaptureDetectorParams;
+  events: CaptureEventWire[];
 }
 
 export interface TakeCreateWire {
@@ -924,6 +939,6 @@ export interface TakeCreateWire {
   window_end_s: number;
   confidence: number;
   detector_version: number;
-  params: object;
-  events: object[];
+  params: CaptureDetectorParams;
+  events: CaptureEventWire[];
 }

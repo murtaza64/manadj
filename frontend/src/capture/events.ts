@@ -52,7 +52,30 @@ export type CaptureEvent =
   | { t: number; kind: 'load'; channel: CaptureChannel; trackId: number | null; bpm: number | null }
   /** Coarse periodic sample (~1 Hz): keeps alignment reconstructible and
    * drives time-based settlement in the detector. */
-  | { t: number; kind: 'tick'; playheads: Partial<Record<CaptureChannel, number>> };
+  | { t: number; kind: 'tick'; playheads: Partial<Record<CaptureChannel, number>> }
+  /** Synthetic slice head (never in the live stream): the detector stamps
+   * the engagement-open state into every Take slice, so vectorization
+   * (issue 03) starts from known controls instead of assumed defaults —
+   * and knows which physical deck was the outgoing one. */
+  | {
+      t: number;
+      kind: 'init';
+      outgoingChannel: CaptureChannel;
+      decks: Record<CaptureChannel, InitDeckState>;
+      crossfader: number;
+      crossfaderEnabled: boolean;
+    };
+
+/** One deck's state at engagement open (init event). */
+export interface InitDeckState {
+  trackId: number | null;
+  playing: boolean;
+  fader: number;
+  trim: number;
+  eq: { low: number; mid: number; high: number };
+  filter: number;
+  pitch: number;
+}
 
 // ── Detection parameters (versioned — stamped on every Take) ────────────
 

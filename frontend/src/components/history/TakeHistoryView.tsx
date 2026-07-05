@@ -9,6 +9,7 @@ import { useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { TAKE_RECORDED_EVENT } from '../../capture/takeSink';
+import { requestTakeReview } from '../../capture/takeReview';
 import './takeHistory.css';
 
 function fmtWhen(iso: string): string {
@@ -92,7 +93,16 @@ export function TakeHistoryView() {
           </thead>
           <tbody>
             {rows.map((t) => (
-              <tr key={t.uuid}>
+              <tr
+                key={t.uuid}
+                className="take-row"
+                title={
+                  t.promoted_transition_uuid
+                    ? 'Open its promoted Transition in the editor'
+                    : 'Review this Take in the Transition editor'
+                }
+                onClick={() => requestTakeReview(t.uuid)}
+              >
                 <td className="take-when">{fmtWhen(t.detected_at)}</td>
                 <td className="take-pair">
                   <span title={`outgoing: ${label(t.a_track_id)}`}>{label(t.a_track_id)}</span>
@@ -118,7 +128,10 @@ export function TakeHistoryView() {
                   <button
                     className="take-delete"
                     title="Delete this Take"
-                    onClick={() => void remove(t.uuid)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void remove(t.uuid);
+                    }}
                   >
                     ✕
                   </button>

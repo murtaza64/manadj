@@ -132,6 +132,95 @@ describe('jump events (transition-takes 01)', () => {
   });
 });
 
+describe('take drafts (transition-takes 03)', () => {
+  const draftTransition = { ...defaultMix().transition, startSec: 60, durationSec: 15 };
+
+  it('stamping a take draft arms no save (browsing costs nothing)', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    vi.runAllTimers();
+    store.dispose();
+    expect(p.saves).toEqual([]);
+    expect(store.getSnapshot().mix.transition.startSec).toBe(60);
+  });
+
+  it('edits persist the session but never the unpromoted draft', () => {
+    const p = fakePersistence({ '1:2': { items: [edited('u1')], active: 0 } });
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    store.updateMix((m) => ({ ...m, transition: { ...m.transition, durationSec: 30 } }));
+    vi.runAllTimers();
+    expect(p.saves).toHaveLength(1);
+    const items = p.saves[0].entry!.items;
+    expect(items.map((i) => i.uuid)).toEqual(['u1']); // draft filtered out
+  });
+
+  it('promotion persists the draft (with edits) and reports the reference pair', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    store.updateMix((m) => ({ ...m, transition: { ...m.transition, durationSec: 30 } }));
+    const ref = store.promoteTakeDraft()!;
+    expect(ref.takeUuid).toBe('take-1');
+    expect(p.saves.length).toBeGreaterThan(0);
+    const items = p.saves[p.saves.length - 1].entry!.items;
+    expect(items).toHaveLength(1);
+    expect(items[0].uuid).toBe(ref.transitionUuid);
+    expect(items[0].transition.durationSec).toBe(30); // tweak-then-promote kept
+    expect(store.getSnapshot().takeDraft).toBeNull();
+  });
+
+  it('re-stamping on the same pair replaces the draft — no orphan can ride a later save', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    store.stampTakeDraft('take-1', { ...draftTransition, startSec: 90 }); // re-open
+    store.updateMix((m) => ({ ...m, transition: { ...m.transition, durationSec: 30 } }));
+    vi.runAllTimers();
+    // The armed save carries NOTHING (only the single live draft existed).
+    expect(p.saves.map((s) => s.entry)).toEqual([null]);
+    expect(store.getSnapshot().session.items.filter((i) => i.name === 'Take')).toHaveLength(1);
+  });
+
+  it('deleting the draft item drops the review reference (no dangling promotion)', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    store.deleteActive(); // the draft is the active item
+    expect(store.getSnapshot().takeDraft).toBeNull();
+    expect(store.promoteTakeDraft()).toBeNull();
+  });
+
+  it('leaving the pair evaporates an unpromoted draft', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.stampTakeDraft('take-1', draftTransition);
+    store.loadPair('3:4');
+    vi.runAllTimers();
+    expect(p.saves).toEqual([]);
+    expect(store.getSnapshot().takeDraft).toBeNull();
+  });
+
+  it('selectTransition switches the active item without arming a save', () => {
+    const p = fakePersistence({
+      '1:2': { items: [edited('u1'), edited('u2', 'other')], active: 0 },
+    });
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.selectTransition('u2');
+    expect(store.getSnapshot().session.active).toBe(1);
+    vi.runAllTimers();
+    expect(p.saves).toEqual([]);
+  });
+});
+
 describe('debounce and dispose', () => {
   it('rapid mutations coalesce into one save', () => {
     const p = fakePersistence();

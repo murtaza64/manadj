@@ -36,6 +36,8 @@ import { beatsToSeconds } from './gestureMath';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
+import { vectorizeTake } from '../capture/vectorize';
+import { OPEN_TAKE_EVENT, consumeTakeReview } from '../capture/takeReview';
 import type { TrackSideInfo, TransitionTemplate } from './templateModel';
 import {
   deleteTemplate,
@@ -376,6 +378,63 @@ function TransitionEditorInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Take review (transition-takes 03): a Transition-history row opens its
+  // Take here. Tracks are assigned by ROLE — outgoing → editor A, whatever
+  // physical deck it played on. An unpromoted Take vectorizes into an
+  // unsaved draft (store.stampTakeDraft); an already-promoted one just
+  // selects its Transition.
+  const openTake = useCallback(
+    async (uuid: string) => {
+      try {
+        const detail = await api.takes.get(uuid);
+        const [a, b] = await Promise.all([
+          api.tracks.getById(detail.a_track_id),
+          api.tracks.getById(detail.b_track_id),
+        ]);
+        assignTrack('A', a);
+        assignTrack('B', b);
+        const pk = `${a.id}:${b.id}`;
+        localStorage.setItem(LAST_PAIR_KEY, pk);
+        store.loadPair(pk);
+        if (detail.promoted_transition_uuid) {
+          store.selectTransition(detail.promoted_transition_uuid);
+          return;
+        }
+        const draft = vectorizeTake(
+          {
+            events: detail.events,
+            windowStartS: detail.window_start_s,
+            windowEndS: detail.window_end_s,
+          },
+          { bpmA: a.bpm ?? null, bpmB: b.bpm ?? null }
+        );
+        if (draft) store.stampTakeDraft(uuid, draft.transition);
+        else console.error('take review: slice has no init head — cannot vectorize', uuid);
+      } catch (err) {
+        console.error('take review: open failed', err);
+      }
+    },
+    [assignTrack, store]
+  );
+  useEffect(() => {
+    const consume = () => {
+      const uuid = consumeTakeReview();
+      if (uuid) void openTake(uuid);
+    };
+    consume(); // a request may be pending from before the view switch
+    window.addEventListener(OPEN_TAKE_EVENT, consume);
+    return () => window.removeEventListener(OPEN_TAKE_EVENT, consume);
+  }, [openTake]);
+
+  const takeDraft = useEditorSelector(store, (s) => s.takeDraft);
+  const promoteTake = useCallback(() => {
+    const ref = store.promoteTakeDraft();
+    if (!ref) return;
+    void api.takes
+      .setPromoted(ref.takeUuid, ref.transitionUuid)
+      .catch((err) => console.error('take review: promoted-reference write failed', err));
+  }, [store]);
+
   // Selection/navigation handle into the embedded library panel.
   const libraryRef = useRef<LibraryBrowseHandle>(null);
 
@@ -443,6 +502,19 @@ function TransitionEditorInner() {
     <div className="editor-root">
       {/* Top panel: the transition editor (sibling of Library / Performance) */}
       <div className="editor-top">
+        {takeDraft && (
+          <div className="editor-take-banner">
+            <span>
+              Reviewing a Take — audition and tweak freely; nothing persists until promoted.
+            </span>
+            <button className="editor-take-promote" onClick={promoteTake}>
+              Promote to library
+            </button>
+            <button className="editor-take-discard" onClick={() => store.discardTakeDraft()}>
+              Discard
+            </button>
+          </div>
+        )}
         <div className="editor-arranger">
           <DawTimeline
             store={store}

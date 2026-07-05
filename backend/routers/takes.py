@@ -79,6 +79,22 @@ def create_take(payload: schemas.TakeCreate, db: Session = Depends(get_db)) -> s
     return _row(t)
 
 
+@router.patch("/{uuid}/promoted", response_model=schemas.TakeRow)
+def set_promoted(
+    uuid: str, payload: schemas.TakePromotedPatch, db: Session = Depends(get_db)
+) -> schemas.TakeRow:
+    """Record (or clear) which Transition this Take was promoted into —
+    the only mutable field on an otherwise immutable audit row (issue 03).
+    """
+    t = db.query(models.Take).filter(models.Take.uuid == uuid).first()
+    if t is None:
+        raise HTTPException(status_code=404, detail="take not found")
+    t.promoted_transition_uuid = payload.promoted_transition_uuid
+    db.commit()
+    db.refresh(t)
+    return _row(t)
+
+
 @router.delete("/{uuid}")
 def delete_take(uuid: str, db: Session = Depends(get_db)) -> dict:
     t = db.query(models.Take).filter(models.Take.uuid == uuid).first()

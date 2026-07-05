@@ -38,6 +38,8 @@ interface DeckCapture {
   trim: number;
   eq: { low: number; mid: number; high: number };
   filter: number;
+  /** Varispeed percent (bends excluded — momentary by definition). */
+  pitch: number;
   audible: boolean;
   /** Time of the last audibility flip. */
   since: number;
@@ -65,6 +67,9 @@ export interface CaptureState {
    * snapshots this, so a Load onto the stopped deck within the cut gap
    * can't mis-attribute the outgoing Track. */
   outTrackAtCessation: number | null;
+  /** Engagement-open snapshot, stamped into the Take slice as its `init`
+   * event (vectorization starts from known state, not defaults). */
+  openSnapshot: Extract<CaptureEvent, { kind: 'init' }> | null;
 }
 
 const OTHER: Record<CaptureChannel, CaptureChannel> = { A: 'B', B: 'A' };
@@ -78,6 +83,7 @@ function freshDeck(): DeckCapture {
     trim: 0.5,
     eq: { low: 0.5, mid: 0.5, high: 0.5 },
     filter: 0,
+    pitch: 0,
     audible: false,
     since: 0,
   };
@@ -97,6 +103,7 @@ export function initialCaptureState(params: DetectorParams = DEFAULT_DETECTOR_PA
     incomingSilentSince: null,
     outSilentSince: null,
     outTrackAtCessation: null,
+    openSnapshot: null,
   };
 }
 
@@ -137,6 +144,9 @@ function applyEvent(s: CaptureState, e: CaptureEvent): void {
     case 'load':
       s.decks[e.channel].trackId = e.trackId;
       break;
+    case 'pitch':
+      s.decks[e.channel].pitch = e.value;
+      break;
     default:
       break;
   }
@@ -149,6 +159,7 @@ function dissolve(s: CaptureState): void {
   s.incomingSilentSince = null;
   s.outSilentSince = null;
   s.outTrackAtCessation = null;
+  s.openSnapshot = null;
 }
 
 function openEngagement(s: CaptureState, at: number): void {
@@ -159,6 +170,23 @@ function openEngagement(s: CaptureState, at: number): void {
   s.outgoingTrackId = s.outTrackAtCessation ?? s.decks[inc].trackId;
   s.incomingTrackId = s.decks[OTHER[inc]].trackId;
   s.incomingSilentSince = null;
+  const snapDeck = (d: DeckCapture) => ({
+    trackId: d.trackId,
+    playing: d.playing,
+    fader: d.fader,
+    trim: d.trim,
+    eq: { ...d.eq },
+    filter: d.filter,
+    pitch: d.pitch,
+  });
+  s.openSnapshot = {
+    t: at,
+    kind: 'init',
+    outgoingChannel: inc,
+    decks: { A: snapDeck(s.decks.A), B: snapDeck(s.decks.B) },
+    crossfader: s.crossfader,
+    crossfaderEnabled: s.crossfaderEnabled,
+  };
 }
 
 function emitTake(s: CaptureState): DetectedTake | null {
@@ -180,7 +208,14 @@ function emitTake(s: CaptureState): DetectedTake | null {
     params: s.params,
     // now may exceed hi (settlement lags the window by the horizon);
     // slice by window+pad regardless — the horizon tail is not evidence.
-    events: s.log.filter((ev) => ev.t >= lo && ev.t <= hi),
+    // The synthetic init head carries engagement-open state + deck roles.
+    // Pre-window pad events ARE included (context); the init state already
+    // reflects them, and that's safe: control events carry absolute values
+    // (set, not delta), so replaying them over init is idempotent.
+    events: [
+      ...(s.openSnapshot ? [s.openSnapshot] : []),
+      ...s.log.filter((ev) => ev.t >= lo && ev.t <= hi),
+    ],
   };
 }
 

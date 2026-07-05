@@ -366,6 +366,38 @@
   pointer-events: none;
 }
 
+/* ── Take review banner (transition-takes 03) ── */
+.editor-take-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(0, 229, 255, 0.08);
+  border-bottom: 1px solid #00e5ff;
+  font-size: 12px;
+  color: #bff7ff;
+}
+
+.editor-take-banner button {
+  border-radius: 3px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.editor-take-promote {
+  background: #00e5ff;
+  border: 1px solid #00e5ff;
+  color: #001114;
+  font-weight: 600;
+}
+
+.editor-take-discard {
+  background: transparent;
+  border: 1px solid #444;
+  color: #aaa;
+}
+
 /* ── Jump events (transition-takes 01): incoming-track discontinuities.
    Bright saturated cyan — distinct from the pink playhead/window edges
    and the green cue guides. */

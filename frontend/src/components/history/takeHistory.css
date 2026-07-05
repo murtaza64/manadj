@@ -41,6 +41,14 @@
   border-bottom: 1px solid #1a1a28;
 }
 
+.take-row {
+  cursor: pointer;
+}
+
+.take-row:hover td {
+  background: rgba(0, 229, 255, 0.06);
+}
+
 .take-when {
   color: #999;
   white-space: nowrap;

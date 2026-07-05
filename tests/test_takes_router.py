@@ -103,3 +103,16 @@ def test_delete(client, make_track):
     assert client.delete("/api/takes/t1").status_code == 200
     assert client.get("/api/takes").json() == []
     assert client.delete("/api/takes/t1").status_code == 404
+
+
+def test_promote_reference(client, make_track):
+    a, b = make_track(), make_track()
+    client.post("/api/takes", json=take_payload("t1", a.id, b.id))
+    resp = client.patch("/api/takes/t1/promoted", json={"promoted_transition_uuid": "tr-9"})
+    assert resp.status_code == 200
+    assert client.get("/api/takes").json()[0]["promoted_transition_uuid"] == "tr-9"
+    # Clearing is allowed (the promoted Transition may be deleted later).
+    resp = client.patch("/api/takes/t1/promoted", json={"promoted_transition_uuid": None})
+    assert resp.status_code == 200
+    assert client.get("/api/takes").json()[0]["promoted_transition_uuid"] is None
+    assert client.patch("/api/takes/nope/promoted", json={"promoted_transition_uuid": "x"}).status_code == 404
