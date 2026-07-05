@@ -1,5 +1,11 @@
 # Gesture classes route per audible surface
 
+Status: accepted (unchanged by ADR 0022, but one rationale aged: "the
+editor's private mixer is not hardware-addressable" no longer motivates
+keeping mixer-class controls registry-direct — the editor now plays through
+the shared Mixer, so those controls audibly affect editor playback, which
+is the intended pass-through.)
+
 ADR 0013 routed transport-class gestures (transport, cue) through the
 audible-surface arbiter and aimed every other Controller target at the shared
 decks unconditionally. That made pads, jumps, and jog inert-or-wrong in the

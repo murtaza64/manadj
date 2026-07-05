@@ -1,6 +1,8 @@
 # Secondary mixers register for device routing
 
-Status: accepted (headphone-cue 06 post-mortem)
+Status: retired by ADR 0022 (2026-07-05) — the deep fix this ADR named
+("fold the editor onto the shared Mixer/context") was decided; no secondary
+mixers exist, and the `registerRoutedMixer` registry is deleted.
 
 The Transition editor's private Mixer (its audio isolation, tolerated
 against ADR 0009's one-context intent and policed by ADR 0013's arbiter)
