@@ -1,160 +1,299 @@
 /**
- * Overview ladder (sets 03): the zoomed staircase minimap above the Set
- * list — prototype variant D's verdict, reimplemented fresh against the
- * pure planner (never promoted prototype code).
+ * Overview ladder (sets 03, freed in sets 05): the staircase minimap
+ * above the Set list — prototype variant D's geometry (mirrored deck
+ * lanes around a center line, titles on the outer edge, real hot cues on
+ * the title side, transition/take bands, dashed-red-✕ hard cuts) on a
+ * freely navigable mix-time axis.
  *
- * Geometry: mirrored deck lanes around a center line (A grows up, B hangs
- * down), each entry a clip spanning its audible mix span; title strips
- * OUTSIDE the waveform on the outer edge; real hot cues as faint line +
- * triangle on the title side; transition/take bands across the window;
- * hard cuts as an unmissable dashed red blade + ✕ at the center line.
- *
- * Scroll: the ladder is ZOOM× the viewport wide and PINNED to the Set
- * list through one progress value — the list's scroll fraction maps to
- * the ladder's scroll fraction (pure centering fails at the edges: list
- * top ⇒ set start flush left, bottom ⇒ set end flush right). Clicking the
- * ladder scrolls the list to the progress that centers the clicked clip
- * (click-to-SEEK is issue 05 and replaces this).
+ * Free ladder (sets 05, replacing 03's list scroll-pin — see CONTEXT.md
+ * "Overview ladder"): pan = native horizontal scroll; zoom = vertical
+ * wheel (waveform convention), anchored at the cursor's mix-time — at
+ * the playhead while follow is engaged. Default framing fits the whole
+ * set; the viewport persists per Set in the set store. The ladder and
+ * the track list are independent surfaces converging on EVENTS only:
+ * clicking the ladder SEEKS (Conductor), and under follow-playback the
+ * ladder auto-scrolls DAW-style (paged — pan when the playhead crosses
+ * ~78% of the viewport; a seek discontinuity centers instead). Manual
+ * pan disengages follow; zoom never does.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
 import { toThreeBands, type ThreeBandWaveform } from '../waveform/blob';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { HOT_CUE_CSS_COLORS } from '../waveform/WaveformRendererV2';
+import { getConductor, setFollowPlayback } from './conductorStore';
 import type { PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
+import { getLadderView, setLadderView } from './setStore';
 
 const LANE_H = 46;
 const TITLE_H = 13;
 export const LADDER_H = LANE_H * 2 + 4;
-const ZOOM = 5;
+/** Max zoom: ~8s of mix per 100px. */
+const MAX_PX_PER_SEC = 12.5;
+/** Follow paging: pan when the playhead passes this viewport fraction,
+ * landing it at the re-entry fraction. */
+const PAGE_TRIGGER = 0.78;
+const PAGE_REENTRY = 0.15;
+/** A mix-time discontinuity this large is a seek — center, don't page. */
+const SEEK_JUMP_S = 2;
+/** Scroll events within this window of a programmatic scrollTo are ours,
+ * not the user's (smooth scrolling animates through many events). */
+const AUTO_SCROLL_WINDOW_MS = 700;
 
 interface OverviewLadderProps {
+  setId: number;
   plan: SetPlan;
   tracks: Map<number, Track>;
   hotCuesByTrack: Map<number, HotCue[]>;
-  /** The Set list's scroll container — the other end of the pinned-scroll
-   * pair. Rows are located via [data-set-track-row]. */
-  listRef: React.RefObject<HTMLDivElement | null>;
+  /** The Conductor is active on THIS set (playhead + follow live). */
+  conducting: boolean;
+  /** Follow-playback engaged (conductor store state). */
+  follow: boolean;
+  /** Ladder click: seek Set playback to a mix-time instant. */
+  onSeek: (mixTimeSec: number) => void;
 }
 
-export function OverviewLadder({ plan, tracks, hotCuesByTrack, listRef }: OverviewLadderProps) {
+export function OverviewLadder({
+  setId,
+  plan,
+  tracks,
+  hotCuesByTrack,
+  conducting,
+  follow,
+  onSeek,
+}: OverviewLadderProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
-  /** Entry index span currently visible in the list (dims the rest). */
-  const [view, setView] = useState<[number, number]>([0, plan.entries.length - 1]);
-  /** ZOOM while the list scrolls; 1 when the whole Set fits one screen —
-   * a zoomed ladder would otherwise be unreachable (no scroll to pin to). */
-  const [zoom, setZoom] = useState(ZOOM);
+  const playheadRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(() => getLadderView(setId).zoom);
+  /** Cursor anchor for the pending zoom render: keep this mix-time under
+   * this viewport x through the width change. */
+  const zoomAnchor = useRef<{ mixTime: number; viewportX: number } | null>(null);
+  const lastAutoScrollAt = useRef(0);
+  const lastMixTime = useRef<number | null>(null);
   const total = Math.max(plan.totalSec, 0.001);
 
-  // ── Pinned scrolls: one progress value drives both ─────────────────────
+  // Canvases redraw at the SETTLED zoom (crisp after the gesture, cheap
+  // during it — CSS scaling covers the in-between frames).
+  const [settledZoom, setSettledZoom] = useState(zoom);
   useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const recompute = () => {
+    const id = window.setTimeout(() => setSettledZoom(zoom), 150);
+    return () => window.clearTimeout(id);
+  }, [zoom]);
+
+  // ── Viewport restore (session state, per Set) ─────────────────────────
+  // Zoom restores in the state initializer — the call site keys this
+  // component by setId, so a Set switch remounts with its own viewport.
+  useLayoutEffect(() => {
+    const outer = outerRef.current;
+    if (outer) outer.scrollLeft = getLadderView(setId).scrollLeft;
+    lastMixTime.current = null;
+  }, [setId]);
+
+  // ── Zoom: vertical wheel, cursor-anchored (playhead-anchored under
+  // follow). Native horizontal scroll pans. ─────────────────────────────
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // horizontal = pan
+      e.preventDefault();
+      const inner = innerRef.current;
+      if (!inner) return;
+      const outerW = outer.clientWidth;
+      const maxZoom = Math.max(1, (total * MAX_PX_PER_SEC) / outerW);
+      setZoom((z) => {
+        const next = Math.min(maxZoom, Math.max(1, z * Math.exp(-e.deltaY * 0.002)));
+        if (next === z) return z;
+        const rect = outer.getBoundingClientRect();
+        const conductor = getConductor();
+        if (conducting && follow && conductor) {
+          // Follow keeps the playhead put — zoom around it.
+          const px = (conductor.getMixTime() / total) * inner.clientWidth;
+          zoomAnchor.current = {
+            mixTime: conductor.getMixTime(),
+            viewportX: px - outer.scrollLeft,
+          };
+        } else {
+          const viewportX = e.clientX - rect.left;
+          const mixTime = ((outer.scrollLeft + viewportX) / inner.clientWidth) * total;
+          zoomAnchor.current = { mixTime, viewportX };
+        }
+        return next;
+      });
+    };
+    outer.addEventListener('wheel', onWheel, { passive: false });
+    return () => outer.removeEventListener('wheel', onWheel);
+  }, [total, conducting, follow]);
+
+  // Apply the zoom anchor after the width change lands.
+  useLayoutEffect(() => {
+    const outer = outerRef.current;
+    const inner = innerRef.current;
+    const anchor = zoomAnchor.current;
+    if (!outer || !inner || !anchor) return;
+    zoomAnchor.current = null;
+    lastAutoScrollAt.current = performance.now(); // not a user pan
+    outer.scrollLeft = (anchor.mixTime / total) * inner.clientWidth - anchor.viewportX;
+    setLadderView(setId, { zoom, scrollLeft: outer.scrollLeft });
+  }, [zoom, setId, total]);
+
+  // ── Pan bookkeeping: persist viewport; manual pan disengages follow ───
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+    const onScroll = () => {
+      setLadderView(setId, { zoom, scrollLeft: outer.scrollLeft });
+      if (performance.now() - lastAutoScrollAt.current > AUTO_SCROLL_WINDOW_MS) {
+        if (conducting && follow) setFollowPlayback(false);
+      }
+    };
+    outer.addEventListener('scroll', onScroll);
+    return () => outer.removeEventListener('scroll', onScroll);
+  }, [setId, zoom, conducting, follow]);
+
+  // ── Playhead + follow auto-scroll (rAF, no React state per frame) ─────
+  useEffect(() => {
+    const playheadEl = playheadRef.current;
+    if (!conducting) {
+      if (playheadEl) playheadEl.style.display = 'none';
+      lastMixTime.current = null;
+      return;
+    }
+    let raf = 0;
+    const frame = () => {
+      const conductor = getConductor();
       const outer = outerRef.current;
       const inner = innerRef.current;
-      if (!outer || !inner) return;
-      const scrollable = list.scrollHeight - list.clientHeight;
-      setZoom(scrollable > 0 ? ZOOM : 1);
-      const progress = scrollable > 0 ? list.scrollTop / scrollable : 0;
-      outer.scrollLeft = progress * (inner.clientWidth - outer.clientWidth);
-
-      // Visible rows → dim clips outside the span.
-      const rows = list.querySelectorAll('[data-set-track-row]');
-      const top = list.scrollTop;
-      const bottom = top + list.clientHeight;
-      let first = -1;
-      let last = -1;
-      rows.forEach((el, i) => {
-        const y0 = (el as HTMLElement).offsetTop - list.offsetTop;
-        const y1 = y0 + (el as HTMLElement).offsetHeight;
-        if (y1 > top && y0 < bottom) {
-          if (first === -1) first = i;
-          last = i;
+      const el = playheadRef.current;
+      if (conductor && outer && inner && el) {
+        const t = conductor.getMixTime();
+        const px = (t / total) * inner.clientWidth;
+        el.style.display = 'block';
+        el.style.left = `${(t / total) * 100}%`;
+        if (follow) {
+          const viewX = px - outer.scrollLeft;
+          const outerW = outer.clientWidth;
+          const seeked =
+            lastMixTime.current !== null && Math.abs(t - lastMixTime.current) > SEEK_JUMP_S;
+          if (seeked && (viewX < 0 || viewX > outerW)) {
+            // Seek landed off-viewport: animated pan to CENTER it.
+            lastAutoScrollAt.current = performance.now();
+            outer.scrollTo({ left: px - outerW / 2, behavior: 'smooth' });
+          } else if (viewX > outerW * PAGE_TRIGGER || viewX < 0) {
+            // DAW-style page: re-enter at the leading edge.
+            lastAutoScrollAt.current = performance.now();
+            outer.scrollTo({ left: px - outerW * PAGE_REENTRY, behavior: 'smooth' });
+          }
         }
-      });
-      if (first !== -1) setView([first, last]);
+        lastMixTime.current = t;
+      }
+      raf = requestAnimationFrame(frame);
     };
-    recompute();
-    list.addEventListener('scroll', recompute);
-    // Resizes change both scroll fractions and the ladder's pixel widths —
-    // re-pin (row-height changes come through as list scroll/plan updates).
-    window.addEventListener('resize', recompute);
-    return () => {
-      list.removeEventListener('scroll', recompute);
-      window.removeEventListener('resize', recompute);
-    };
-  }, [listRef, plan, zoom]);
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [conducting, follow, total]);
 
-  // Click: scroll the list to the progress that centers the clicked clip
-  // (clamped at the edges — the pinned handler then moves the ladder).
   const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const outer = outerRef.current;
-    const list = listRef.current;
-    if (!outer || !list) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const t = ((e.clientX - rect.left) / rect.width) * total;
-    let idx = plan.entries.findIndex((entry) => t <= entry.exitMixSec);
-    if (idx === -1) idx = plan.entries.length - 1;
-    const entry = plan.entries[idx];
-    const innerW = outer.clientWidth * zoom;
-    if (innerW <= outer.clientWidth) return; // whole set visible — nothing to scroll
-    const clipCenterPx = (((entry.entryMixSec + entry.exitMixSec) / 2) / total) * innerW;
-    const progress = Math.min(
-      Math.max((clipCenterPx - outer.clientWidth / 2) / (innerW - outer.clientWidth), 0),
-      1
-    );
-    list.scrollTo({ top: progress * (list.scrollHeight - list.clientHeight), behavior: 'smooth' });
+    onSeek(((e.clientX - rect.left) / rect.width) * total);
   };
 
   return (
-    <div
-      ref={outerRef}
-      style={{
-        overflow: 'hidden',
-        position: 'relative',
-        flex: 'none',
-        height: LADDER_H,
-        borderBottom: '1px solid var(--surface0)',
-        background: 'var(--crust)',
-      }}
-    >
+    <div style={{ position: 'relative', flex: 'none' }}>
       <div
-        ref={innerRef}
-        onClick={onClick}
-        style={{ position: 'relative', width: `${zoom * 100}%`, height: '100%', cursor: 'pointer' }}
+        ref={outerRef}
+        style={{
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          scrollbarWidth: 'thin',
+          position: 'relative',
+          height: LADDER_H,
+          borderBottom: '1px solid var(--surface0)',
+          background: 'var(--crust)',
+        }}
       >
-        {/* Transition/Take window bands + hard-cut blades */}
-        {plan.adjacencies.map((adj, i) => (
-          <AdjacencyBand key={`adj-${i}`} adj={adj} total={total} />
-        ))}
-        {/* Entry clips: mirrored lanes, titles on the outer edge */}
-        {plan.entries.map((entry, i) => (
-          <LadderClip
-            key={`${entry.trackId}-${i}`}
-            entry={entry}
-            track={tracks.get(entry.trackId)}
-            hotCues={hotCuesByTrack.get(entry.trackId) ?? []}
-            total={total}
-            dim={i < view[0] || i > view[1]}
-          />
-        ))}
-        {/* Center line the mirrored lanes meet at */}
         <div
+          ref={innerRef}
+          onClick={onClick}
+          style={{
+            position: 'relative',
+            width: `${zoom * 100}%`,
+            height: '100%',
+            cursor: 'pointer',
+          }}
+        >
+          {/* Transition/Take window bands + hard-cut blades */}
+          {plan.adjacencies.map((adj, i) => (
+            <AdjacencyBand key={`adj-${i}`} adj={adj} total={total} />
+          ))}
+          {/* Entry clips: mirrored lanes, titles on the outer edge */}
+          {plan.entries.map((entry, i) => (
+            <LadderClip
+              key={`${entry.trackId}-${i}`}
+              entry={entry}
+              track={tracks.get(entry.trackId)}
+              hotCues={hotCuesByTrack.get(entry.trackId) ?? []}
+              total={total}
+              redrawKey={settledZoom}
+            />
+          ))}
+          {/* Center line the mirrored lanes meet at */}
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: LANE_H,
+              height: 2,
+              background: 'rgba(255,255,255,0.35)',
+              zIndex: 3,
+              pointerEvents: 'none',
+            }}
+          />
+          {/* Conductor playhead (sets 05) — rAF-driven, hidden when idle */}
+          <div
+            ref={playheadRef}
+            style={{
+              display: 'none',
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              width: 2,
+              marginLeft: -1,
+              background: '#ffffff',
+              boxShadow: '0 0 4px #000',
+              zIndex: 5,
+              pointerEvents: 'none',
+            }}
+          />
+        </div>
+      </div>
+      {/* Follow-playback toggle (sets 05): on at playback start, off on
+          manual pan/scroll, re-engaged by seeking or this button. */}
+      {conducting && (
+        <button
+          onClick={() => setFollowPlayback(!follow)}
+          title={follow ? 'Following playback — click to stop' : 'Follow playback'}
           style={{
             position: 'absolute',
-            left: 0,
-            right: 0,
-            top: LANE_H,
-            height: 2,
-            background: 'rgba(255,255,255,0.35)',
-            zIndex: 3,
-            pointerEvents: 'none',
+            top: 4,
+            right: 8,
+            zIndex: 6,
+            padding: '0 6px',
+            fontSize: '13px',
+            lineHeight: '18px',
+            background: follow ? 'var(--mauve)' : 'rgba(0,0,0,0.55)',
+            color: follow ? 'var(--base)' : 'var(--text)',
+            border: '1px solid var(--surface1)',
+            cursor: 'pointer',
           }}
-        />
-      </div>
+        >
+          ⌖
+        </button>
+      )}
     </div>
   );
 }
@@ -218,13 +357,14 @@ function LadderClip({
   track,
   hotCues,
   total,
-  dim,
+  redrawKey,
 }: {
   entry: PlannedEntry;
   track: Track | undefined;
   hotCues: HotCue[];
   total: number;
-  dim: boolean;
+  /** Bumps when the canvas backing store should re-render (zoom settle). */
+  redrawKey: number;
 }) {
   const { data } = useWaveformBlob(entry.trackId);
   const wave = useMemo(() => (data ? toThreeBands(data) : null), [data]);
@@ -247,7 +387,6 @@ function LadderClip({
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        opacity: dim ? 0.3 : 1,
         zIndex: 2,
       }}
     >
@@ -258,6 +397,7 @@ function LadderClip({
         range={[entry.entrySec, entry.exitSec]}
         cues={cues}
         dir={isA ? 'up' : 'down'}
+        redrawKey={redrawKey}
       />
       {!isA && <ClipTitle title={title} color={DECK_COLORS.B} />}
     </div>
@@ -296,6 +436,7 @@ function LadderWave({
   range,
   cues,
   dir,
+  redrawKey,
 }: {
   wave: ThreeBandWaveform | null;
   height: number;
@@ -303,6 +444,7 @@ function LadderWave({
   range: [number, number];
   cues: { t: number; color: string }[];
   dir: 'up' | 'down';
+  redrawKey: number;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const cueKey = cues.map((c) => `${c.t}:${c.color}`).join('|');
@@ -371,7 +513,7 @@ function LadderWave({
       ctx.fill();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wave, height, dir, range[0], range[1], cueKey]);
+  }, [wave, height, dir, range[0], range[1], cueKey, redrawKey]);
 
   return <canvas ref={ref} style={{ width: '100%', height, display: 'block', flex: 'none' }} />;
 }

@@ -37,6 +37,14 @@ let snapshot: SetStoreSnapshot = { selectedSetId: null, entriesBySet: {} };
  * imperatively on mount, written on scroll; not reactive). */
 const scrollTopBySet = new Map<number, number>();
 
+/** Ladder viewport per Set (sets 05): zoom (1 = whole set fits) and pan.
+ * Same session-state contract as the scroll position. */
+export interface LadderView {
+  zoom: number;
+  scrollLeft: number;
+}
+const ladderViewBySet = new Map<number, LadderView>();
+
 /** In-flight/completed entry loads, per Set (idempotence, pairStore-style). */
 const loadPromises = new Map<number, Promise<void>>();
 
@@ -75,6 +83,14 @@ export function getSetScroll(setId: number): number {
 
 export function setSetScroll(setId: number, top: number): void {
   scrollTopBySet.set(setId, top);
+}
+
+export function getLadderView(setId: number): LadderView {
+  return ladderViewBySet.get(setId) ?? { zoom: 1, scrollLeft: 0 };
+}
+
+export function setLadderView(setId: number, view: LadderView): void {
+  ladderViewBySet.set(setId, view);
 }
 
 // ── Entries (client-authoritative) ─────────────────────────────────────
@@ -230,6 +246,7 @@ export function insertTrackIntoSet(setId: number, trackId: number, index: number
 export function dropSetLocalState(setId: number): void {
   loadPromises.delete(setId);
   scrollTopBySet.delete(setId);
+  ladderViewBySet.delete(setId);
   if (snapshot.selectedSetId === setId) {
     snapshot = { ...snapshot, selectedSetId: null };
   }
@@ -245,6 +262,7 @@ export function dropSetLocalState(setId: number): void {
 export function _resetSetStoreForTests(): void {
   snapshot = { selectedSetId: null, entriesBySet: {} };
   scrollTopBySet.clear();
+  ladderViewBySet.clear();
   loadPromises.clear();
   listeners.clear();
 }

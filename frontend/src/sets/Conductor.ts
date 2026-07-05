@@ -90,6 +90,9 @@ export class Conductor {
   /** Last automation values written (the sounding mix) — written into
    * base mixer state at takeover so disengaging is inaudible. */
   private lastLanes: Record<ChannelId, PlanAutomation> | null = null;
+  /** A seek landed: the next tick re-positions decks unconditionally
+   * (sub-tolerance seeks must not be swallowed by the drift check). */
+  private pendingHardSync = false;
 
   private unsubs: (() => void)[] = [];
   private listeners = new Set<() => void>();
@@ -154,16 +157,29 @@ export class Conductor {
     else this.play();
   }
 
-  /** Row play button: start at that track's planned entry (full seek is
-   * issue 05). */
+  /** Row play button: start at that track's planned entry. */
   playFromEntry(index: number): void {
     const entry = this.plan.entries[index];
     if (!entry) return;
-    this.mixTimeAtAnchor = entry.entryMixSec;
-    this.anchorAudioTime = this.mixer.now();
-    this.lastTickT = entry.entryMixSec;
-    this.activeEntryIndex = index;
+    this.seek(entry.entryMixSec);
     if (!this.playing) this.play();
+  }
+
+  /**
+   * Seek (sets 05): plan evaluation at a mix-time instant — legal into
+   * the middle of a Transition and while paused (positions the decks and
+   * the mixer without playing; the next play resumes from here). A
+   * Conductor control, never a takeover trigger. Never stops playback.
+   */
+  seek(mixTime: number): void {
+    const t = Math.max(0, Math.min(mixTime, Math.max(this.plan.totalSec - 0.001, 0)));
+    this.mixTimeAtAnchor = t;
+    this.anchorAudioTime = this.mixer.now();
+    this.lastTickT = t;
+    this.activeEntryIndex = planStateAt(this.plan, t).activeEntryIndex;
+    // Playing: the next tick reconciles everything (drift check forced).
+    this.pendingHardSync = true;
+    if (this.active && !this.playing) this.reconcilePaused();
     this.emit();
   }
 
@@ -303,8 +319,13 @@ export class Conductor {
       prev = snap;
       if (this.selfOps > 0 || !this.active) return;
       // Load-flow emits (conductor-initiated, async — outside the guard):
-      // anything moving trackId/loadState is a Load, not a gesture.
-      if (snap.trackId !== before.trackId || snap.loadState !== before.loadState) return;
+      // anything moving trackId/loadState is a Load, not a gesture. A load
+      // completing while PAUSED finishes the parked seek (sets 05) — the
+      // tick loop isn't running to do it.
+      if (snap.trackId !== before.trackId || snap.loadState !== before.loadState) {
+        if (!this.playing && snap.loadState === 'ready') this.reconcilePaused();
+        return;
+      }
       if (
         snap.playing !== before.playing ||
         snap.pitchPercent !== before.pitchPercent ||
@@ -382,7 +403,8 @@ export class Conductor {
       return;
     }
 
-    const hard = jumpCrossed(this.plan, this.lastTickT, t);
+    const hard = this.pendingHardSync || jumpCrossed(this.plan, this.lastTickT, t);
+    this.pendingHardSync = false;
     this.lastTickT = t;
     this.self(() => {
       if (readyA) this.syncDeck('A', state, hard);
@@ -398,6 +420,37 @@ export class Conductor {
     }
     this.raf = requestAnimationFrame(this.tick);
   };
+
+  /** A paused seek (sets 05): position decks, pitch, and automation at
+   * the seeked instant WITHOUT playing — waveforms show the target, and
+   * play resumes exactly here. Loads still in flight finish the parking
+   * via the watchEngine ready hook. */
+  private reconcilePaused(): void {
+    if (!this.active || this.playing) return;
+    const t = this.getMixTime();
+    const state = planStateAt(this.plan, t);
+    const readyA = this.ensureDeckTrack('A', state);
+    const readyB = this.ensureDeckTrack('B', state);
+    this.self(() => {
+      for (const [deck, ready] of [
+        ['A', readyA],
+        ['B', readyB],
+      ] as const) {
+        if (!ready) continue;
+        const engine = this.engines[deck];
+        if (engine.getSnapshot().playing) engine.pause();
+        engine.seek(state.decks[deck].trackTime);
+        engine.setPitch(state.decks[deck].pitchPercent);
+      }
+      this.mixer.setAutomation('A', state.lanes.A);
+      this.mixer.setAutomation('B', state.lanes.B);
+    });
+    this.lastLanes = state.lanes;
+    if (state.activeEntryIndex !== this.activeEntryIndex) {
+      this.activeEntryIndex = state.activeEntryIndex;
+      this.emit();
+    }
+  }
 
   /** Reconcile one deck's loaded track against the plan's occupant.
    * Returns readiness (loaded + decoded, right track). */

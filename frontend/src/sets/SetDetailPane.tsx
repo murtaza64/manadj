@@ -48,6 +48,8 @@ import {
 } from './adjacency';
 import {
   conductorTogglePlay,
+  seekSetPlayback,
+  setFollowPlayback,
   startSetPlayback,
   stopSetPlayback,
   useConductorState,
@@ -154,21 +156,23 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
   useEffect(() => {
     trackMapRef.current = trackMap;
   });
+  const conductorAudio = () => ({ mixer, engines: { A: decks.A.engine, B: decks.B.engine } });
+  const loadTrackOnDeck = (deck: 'A' | 'B', trackId: number) => {
+    // The deck provider's one Load path (ADR 0022); the pane's track
+    // map usually already holds the row.
+    const known = trackMapRef.current?.get(trackId);
+    if (known) decks[deck].loadTrack(known);
+    else void api.tracks.getById(trackId).then((t) => decks[deck].loadTrack(t));
+  };
   const playFromEntry = (index: number) => {
     if (!plan) return;
-    startSetPlayback(
-      setId,
-      plan,
-      { mixer, engines: { A: decks.A.engine, B: decks.B.engine } },
-      (deck, trackId) => {
-        // The deck provider's one Load path (ADR 0022); the pane's track
-        // map usually already holds the row.
-        const known = trackMapRef.current?.get(trackId);
-        if (known) decks[deck].loadTrack(known);
-        else void api.tracks.getById(trackId).then((t) => decks[deck].loadTrack(t));
-      },
-      index
-    );
+    startSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, index);
+  };
+  // Ladder click (sets 05): seek — conducting already seeks in place
+  // (preserving play/pause); idle starts playing from that instant.
+  const seekToMixTime = (mixTime: number) => {
+    if (!plan) return;
+    seekSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, mixTime);
   };
 
   // ── Scroll persistence (set store — survives mode switches) ──────────
@@ -178,6 +182,22 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
     if (pane) pane.scrollTop = getSetScroll(setId);
     // Restore once the rows exist (first data arrival changes scrollHeight).
   }, [setId, entries !== undefined && trackMap !== undefined]);
+
+  // ── List convergence (sets 05): under follow, the active row scrolls
+  // into view at track-change boundaries; a manual scroll disengages
+  // follow (programmatic scrolls are excluded via a timestamp window).
+  const lastAutoListScrollAt = useRef(0);
+  useEffect(() => {
+    if (!conductingThis || !conductorState.follow) return;
+    const index = conductorState.activeEntryIndex;
+    const pane = paneRef.current;
+    if (pane === null || index === null) return;
+    const row = pane.querySelectorAll('[data-set-track-row]')[index];
+    if (row) {
+      lastAutoListScrollAt.current = performance.now();
+      (row as HTMLElement).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [conductingThis, conductorState.follow, conductorState.activeEntryIndex]);
 
   // ── Suggestions (sets 10): toolbar append + per-adjacency insert ─────
   const [suggest, setSuggest] = useState<{ x: number; y: number; target: SuggestTarget } | null>(
@@ -362,20 +382,35 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
         </span>
       </div>
 
-      {/* Overview ladder (sets 03): zoomed staircase minimap, scroll-pinned
-          to the list below through one progress value. */}
+      {/* Overview ladder (sets 03; freed in 05): pan/zoom minimap with
+          click-to-seek, playhead, and follow-playback paging. */}
       {plan && trackMap && plan.entries.length > 0 && (
         <OverviewLadder
+          key={setId}
+          setId={setId}
           plan={plan}
           tracks={trackMap}
           hotCuesByTrack={hotCuesByTrack}
-          listRef={paneRef}
+          conducting={conductingThis}
+          follow={conductorState.follow}
+          onSeek={seekToMixTime}
         />
       )}
 
       <div
         ref={paneRef}
-        onScroll={(e) => setSetScroll(setId, e.currentTarget.scrollTop)}
+        onScroll={(e) => {
+          setSetScroll(setId, e.currentTarget.scrollTop);
+          // Manual list scroll disengages follow (sets 05); programmatic
+          // convergence scrolls are excluded by the timestamp window.
+          if (
+            conductingThis &&
+            conductorState.follow &&
+            performance.now() - lastAutoListScrollAt.current > 700
+          ) {
+            setFollowPlayback(false);
+          }
+        }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}

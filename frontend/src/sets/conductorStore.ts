@@ -18,13 +18,17 @@ export interface ConductorState {
   status: 'idle' | 'playing' | 'paused';
   /** Entry index the playhead is inside (row highlight). */
   activeEntryIndex: number | null;
+  /** Follow-playback (sets 05): on at playback start, disengaged by
+   * manual pan/scroll, re-engaged by seeking or the follow button. */
+  follow: boolean;
 }
 
-const IDLE: ConductorState = { setId: null, status: 'idle', activeEntryIndex: null };
+const IDLE: ConductorState = { setId: null, status: 'idle', activeEntryIndex: null, follow: false };
 
 let conductor: Conductor | null = null;
 let conductorSetId: number | null = null;
 let conductorUnsub: (() => void) | null = null;
+let follow = false;
 let snapshot: ConductorState = IDLE;
 
 const listeners = new Set<() => void>();
@@ -40,12 +44,14 @@ function refreshSnapshot(): void {
           setId: conductorSetId,
           status: conductor.isPlaying() ? 'playing' : 'paused',
           activeEntryIndex: conductor.getActiveEntryIndex(),
+          follow,
         }
       : IDLE;
   if (
     next.setId !== snapshot.setId ||
     next.status !== snapshot.status ||
-    next.activeEntryIndex !== snapshot.activeEntryIndex
+    next.activeEntryIndex !== snapshot.activeEntryIndex ||
+    next.follow !== snapshot.follow
   ) {
     snapshot = next;
     notify();
@@ -57,6 +63,7 @@ function clearInstance(): void {
   conductorUnsub = null;
   conductor = null;
   conductorSetId = null;
+  follow = false;
   refreshSnapshot();
 }
 
@@ -73,6 +80,7 @@ export function startSetPlayback(
   // Same Set, same plan, still conducting: just re-seek (row play button)
   // instead of bouncing the claim/overlay through a stop-start.
   if (conductor?.isActive() && conductorSetId === setId && conductor.plan === plan) {
+    follow = true; // seeking re-engages follow (sets 05)
     conductor.playFromEntry(fromEntryIndex);
     refreshSnapshot();
     return;
@@ -89,7 +97,51 @@ export function startSetPlayback(
   conductor = instance;
   conductorSetId = setId;
   conductorUnsub = instance.subscribe(refreshSnapshot);
+  follow = true; // on at playback start (sets 05)
   instance.playFromEntry(fromEntryIndex);
+  refreshSnapshot();
+}
+
+/**
+ * Seek within a Set's playback (sets 05: ladder click). Conducting this
+ * plan already: seek in place, preserving play/pause. Otherwise: start
+ * playing from that instant — auditioning any moment is one click.
+ * Seeking re-engages follow.
+ */
+export function seekSetPlayback(
+  setId: number,
+  plan: SetPlan,
+  audio: ConductorAudio,
+  loadTrack: ConductorHooks['loadTrack'],
+  mixTime: number
+): void {
+  if (conductor?.isActive() && conductorSetId === setId && conductor.plan === plan) {
+    follow = true;
+    conductor.seek(mixTime);
+    refreshSnapshot();
+    return;
+  }
+  conductor?.stop();
+  clearInstance();
+  const instance = new Conductor(plan, audio, {
+    loadTrack,
+    onStopped: () => {
+      if (conductor === instance) clearInstance();
+    },
+  });
+  conductor = instance;
+  conductorSetId = setId;
+  conductorUnsub = instance.subscribe(refreshSnapshot);
+  follow = true;
+  instance.seek(mixTime);
+  instance.play();
+  refreshSnapshot();
+}
+
+/** Follow-playback toggle/disengage (sets 05). */
+export function setFollowPlayback(on: boolean): void {
+  if (follow === on) return;
+  follow = on;
   refreshSnapshot();
 }
 
