@@ -12,13 +12,13 @@ export function JumpForwardIcon({ size = 13 }: { size?: number }) {
   return (
     <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false">
       <path
-        d="M1.5 8 H6.2 M9.2 8 H12"
+        d="M1.5 8 H6.2 M9.2 8 H11.5"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
       />
-      <path d="M14.6 8 L11.4 6 L11.4 10 Z" fill="currentColor" stroke="none" />
+      <path d="M15.2 8 L10.8 5.2 L10.8 10.8 Z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -28,13 +28,13 @@ export function JumpBackIcon({ size = 13 }: { size?: number }) {
   return (
     <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false">
       <path
-        d="M14.5 8 H9.8 M6.8 8 H4"
+        d="M14.5 8 H9.8 M6.8 8 H4.5"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
       />
-      <path d="M1.4 8 L4.6 6 L4.6 10 Z" fill="currentColor" stroke="none" />
+      <path d="M0.8 8 L5.2 5.2 L5.2 10.8 Z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
