@@ -12,12 +12,12 @@ An offline script that assembles the Ground truth corpus from the library DB: fo
 
 ## Acceptance criteria
 
-- [ ] Script outputs corpus with per-track ground-truth values and tier labels
-- [ ] Key agreement computed after notation conversion (Engine key ID vs RB ScaleName), BPM agreement within 0.05
-- [ ] Disputed review queue emitted (track, Engine value, RB value)
-- [ ] Override file promotes disputed tracks to gold with the verified value
-- [ ] Tiering logic covered by pure-function tests with synthesized value pairs (no real Engine blobs, ADR 0004)
-- [ ] Read-only DB access; no schema, API, or UI changes
+- [x] Script outputs corpus with per-track ground-truth values and tier labels
+- [x] Key agreement computed after notation conversion (Engine key ID vs RB ScaleName), BPM agreement within 0.05
+- [x] Disputed review queue emitted (track, Engine value, RB value)
+- [x] Override file promotes disputed tracks to gold with the verified value
+- [x] Tiering logic covered by pure-function tests with synthesized value pairs (no real Engine blobs, ADR 0004)
+- [x] Read-only DB access; no schema, API, or UI changes
 
 ## Blocked by
 

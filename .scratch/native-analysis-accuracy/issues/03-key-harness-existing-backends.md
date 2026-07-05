@@ -12,11 +12,11 @@ The key arm of the harness. Key candidates implement the candidate interface's k
 
 ## Acceptance criteria
 
-- [ ] Key candidate contract defined; Essentia profile sweep and libkeyfinder run through it
-- [ ] MIREX-weighted scoring pure-function tested (all five error classes, notation conversions)
-- [ ] One command scores all key candidates and prints per-candidate breakdown + mixable rate
-- [ ] Per-track failure list per candidate
-- [ ] No app import chain changes
+- [x] Key candidate contract defined; Essentia profile sweep and libkeyfinder run through it
+- [x] MIREX-weighted scoring pure-function tested (all five error classes, notation conversions)
+- [x] One command scores all key candidates and prints per-candidate breakdown + mixable rate
+- [x] Per-track failure list per candidate
+- [x] No app import chain changes
 
 ## Blocked by
 

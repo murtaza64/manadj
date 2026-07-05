@@ -14,11 +14,11 @@ Heavy deps stay behind candidate implementations (import-hygiene guard applies).
 
 ## Acceptance criteria
 
-- [ ] Candidate interface defined; Essentia baseline implements it
-- [ ] Constant fit is candidate-agnostic and pure-function tested with synthetic ticks: perfect, jittered, half/double-time, variable (must bail), fractional BPM (must not snap)
-- [ ] Scoring pure-function tested; half/double-time reported separately from jitter errors
-- [ ] One command scores the baseline against the corpus from issue 01 and prints the table + failure list
-- [ ] No app import chain changes (heavy-dep guard passes)
+- [x] Candidate interface defined; Essentia baseline implements it
+- [x] Constant fit is candidate-agnostic and pure-function tested with synthetic ticks: perfect, jittered, half/double-time, variable (must bail), fractional BPM (must not snap)
+- [x] Scoring pure-function tested; half/double-time reported separately from jitter errors
+- [x] One command scores the baseline against the corpus from issue 01 and prints the table + failure list
+- [x] No app import chain changes (heavy-dep guard passes)
 
 ## Blocked by
 

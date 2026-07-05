@@ -68,16 +68,37 @@ class KeyfinderCli(KeyCandidate):
         raise RuntimeError("keyfinder-cli not found")
 
 
-def _all_candidates() -> dict[str, KeyCandidate]:
-    candidates: list[KeyCandidate] = [
+
+
+
+class MadmomKeyCNN(KeyCandidate):
+    """madmom CNNKeyRecognition (Korzeniowski & Widmer) — CNN trained
+    partly on EDM; the deep-learning contender."""
+
+    name = "madmom_keycnn"
+
+    def key(self, audio_path: str) -> tuple[Key | None, float | None]:
+        from madmom.features.key import (  # heavy: candidates only
+            CNNKeyRecognitionProcessor,
+            key_prediction_to_label,
+        )
+
+        prediction = CNNKeyRecognitionProcessor()(audio_path)
+        label = key_prediction_to_label(prediction)  # e.g. "F# minor"
+        tonic, _, mode = label.partition(" ")
+        musical = f"{tonic}m" if mode == "minor" else tonic
+        return Key.from_musical(musical), float(prediction.max())
+
+
+KEY_CANDIDATES: dict[str, KeyCandidate] = {
+    c.name: c
+    for c in (
         EssentiaKey(None),
         EssentiaKey("edma"),
         EssentiaKey("edmm"),
         EssentiaKey("bgate"),
         EssentiaKey("braw"),
         KeyfinderCli(),
-    ]
-    return {c.name: c for c in candidates}
-
-
-KEY_CANDIDATES: dict[str, KeyCandidate] = _all_candidates()
+        MadmomKeyCNN(),
+    )
+}
