@@ -100,9 +100,12 @@ export function translateMidiMessage(
     }
     case 'absolute': {
       if (messageType !== 'cc') return silence;
+      const orient = (v: number) => (binding.invert ? 1 - v : v);
       if (binding.bits === 7) {
         return {
-          actions: [{ kind: 'absolute', target: binding.target, value: value / 127 }],
+          actions: [
+            { kind: 'absolute', target: binding.target, value: orient(value / 127) },
+          ],
           state,
         };
       }
@@ -120,7 +123,7 @@ export function translateMidiMessage(
           {
             kind: 'absolute',
             target: binding.target,
-            value: ((msb << 7) | value) / FULL_14_BIT,
+            value: orient(((msb << 7) | value) / FULL_14_BIT),
           },
         ],
         state,

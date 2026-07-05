@@ -57,12 +57,13 @@ None.
   registerProcessor-wrapping timing shim.
 - Integration notes for issue 03, learned building the RB harness (apply
   to any WASM inside the deck-source worklet):
-  - The realtime audio thread never services ASYNC WebAssembly APIs —
-    `WebAssembly.instantiate(...)` hangs forever. Use the sync
-    `new WebAssembly.Module(bytes)` / `new WebAssembly.Instance(...)`.
   - A `WebAssembly.Module` does not survive the structured clone into an
     AudioWorklet (silently dropped as a `messageerror`); transfer the raw
-    bytes instead.
+    bytes instead. (CORRECTION while building issue 03: this clone drop
+    was the real bug behind the "async WASM hangs on the audio thread"
+    claim first recorded here — Signalsmith's own factory async-
+    instantiates on the worklet thread and works. Sync instantiation
+    remains the safe default, but it is not mandatory.)
   - signalsmith-stretch's npm API is a main-thread node factory that
     registers its own processor from a self-contained Blob module; using
     it INSIDE our dual-mode worklet means driving its emscripten module

@@ -1,6 +1,6 @@
 # 03 — Stretch mode + Key Lock toggle
 
-Status: ready-for-agent
+Status: done — landed; human smoke test passed 2026-07-05
 
 ## Parent
 
@@ -39,3 +39,33 @@ issue 01.
 
 - 01-stretcher-bakeoff (library choice)
 - 02-worklet-source-resample
+
+## Comments
+
+- Done (change `key-lock: 03-stretch-mode-keylock`). Signalsmith Stretch
+  runs INSIDE the deck-source worklet: the npm package's emscripten factory
+  is vendored (`worklet/vendor/signalsmithStretchModule.js`, MIT, tail
+  patched to export the factory) and driven per block with the package's
+  own buffer-mode window model (`_seek` + `_process`; window ends at
+  position + rate × outputLatency + inputLatency — read-ahead per ADR
+  0018). Kernel: voices carry a mode; StretchEngine seam is pure-fakeable
+  (13 new kernel tests); mode switch = the stab splice at the live voice's
+  position; tails always render varispeed (single stretcher instance,
+  Mixxx-style). Persistence: `playback/keyLockStore.ts` (default ON, only
+  explicit false is off), applied to the shared Decks at DeckContext boot;
+  engine default is OFF so the editor's private decks stay varispeed (v1
+  scope). MixZone LOCK button next to the KEY readout, PFL lit idiom.
+- Machine-verified through the real worklet: 440Hz sine → 475.1Hz at
+  rate 1.08 resample; 440.1Hz at 1.08 AND 0.92 in stretch mode.
+- Human smoke test passed (pitch sweeps, mid-play toggles, stabs, nudges,
+  both decks locked). Known/accepted edges recorded in review: LOCK-on at
+  0% is not bit-perfect (windowed resynthesis; PRD guarantees bit-perfect
+  for OFF only); splice tails are ≤5ms varispeed; stretch rate is
+  per-block (~2.9ms); stretcher-init failure and foreign-sample-rate
+  tracks silently degrade to varispeed with the button still lit (near
+  unreachable; candidate follow-up if it ever bites).
+- Smoke-test fallout fixed in the same landing: Chrome autoplay policy —
+  MIDI input is not user activation, so a hardware play on a fresh
+  (boot-restored) context left it suspended (UI ran, no audio).
+  `DeckEngine.resumeWithGestureRetry` re-tries on the next real gesture,
+  guarded so it never undoes an arbiter suspend (ADR 0013).
