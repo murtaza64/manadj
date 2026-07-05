@@ -225,20 +225,20 @@ export default function FollowParamsModal({
             </div>
           </div>
 
-          {/* Proven only */}
+          {/* Known only (linked-pairs 04, formerly "proven only") */}
           <div className="follow-modal-criteria-item">
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
               <input
                 type="checkbox"
-                checked={params.provenOnly}
-                onChange={(e) => setFollowParams({ provenOnly: e.target.checked })}
+                checked={params.knownOnly}
+                onChange={(e) => setFollowParams({ knownOnly: e.target.checked })}
               />
-              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>◆ Proven only</span>
+              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>◆🔗 Known only</span>
             </label>
             <div style={{ fontSize: '12px', color: 'var(--subtext0)', paddingLeft: '24px' }}>
-              Only tracks with a saved transition from a followed track
-              (otherwise proven moves are always included on top of the
-              criteria above)
+              Only known tracks: a saved transition from a followed track (◆)
+              or Linked with it (🔗). Otherwise known tracks are always
+              included on top of the criteria above.
             </div>
           </div>
         </div>

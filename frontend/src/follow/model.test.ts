@@ -160,27 +160,28 @@ describe('unionIds — per-track OR of candidate sets', () => {
   });
 });
 
-describe('candidateIdSet — proven tier folded in (follow-mode 03)', () => {
+describe('candidateIdSet — known tier folded in (follow-mode 03 / linked-pairs 04)', () => {
   const t = (id: number) => track({ id });
 
-  it('proven candidates OR in beyond the heuristic sets', () => {
-    // Track 30 has a saved Transition from a followed reference but fails
-    // the heuristics (e.g. a favorited tempo-jump outside the BPM window).
+  it('known candidates OR in beyond the heuristic sets', () => {
+    // Track 30 is Known from a followed reference (saved Transition or
+    // Link) but fails the heuristics (e.g. a tempo-jump outside the BPM
+    // window).
     const ids = candidateIdSet([[t(1), t(2)]], [new Set([2, 30])], false);
     expect([...ids].sort()).toEqual([1, 2, 30]);
   });
 
-  it('proven only narrows to just the proven tier', () => {
+  it('known only narrows to just the known tier', () => {
     const ids = candidateIdSet([[t(1), t(2)]], [new Set([2, 30])], true);
     expect([...ids].sort()).toEqual([2, 30]);
   });
 
-  it('dual follow unions the proven tiers of both references', () => {
+  it('dual follow unions the known tiers of both references', () => {
     const ids = candidateIdSet([], [new Set([5]), new Set([6, 5])], true);
     expect([...ids].sort()).toEqual([5, 6]);
   });
 
-  it('no proven Transitions leaves the heuristic union untouched', () => {
+  it('nothing known leaves the heuristic union untouched', () => {
     expect([...candidateIdSet([[t(1)]], [new Set()], false)]).toEqual([1]);
   });
 
@@ -211,15 +212,15 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
         tags: true,
         energy: true,
         energyPreset: 'near',
-        provenOnly: false,
+        knownOnly: false,
       })
     ).toBe('10m·128±4%·E2–4·tags');
   });
 
-  it('marks proven-only and skips disabled axes', () => {
+  it('marks known-only and skips disabled axes', () => {
     expect(
-      followSummary(reference, { ...DEFAULT_FOLLOW_PARAMS, harmonicKeys: false, bpm: false, provenOnly: true })
-    ).toBe('◆only');
+      followSummary(reference, { ...DEFAULT_FOLLOW_PARAMS, harmonicKeys: false, bpm: false, knownOnly: true })
+    ).toBe('◆🔗only');
   });
 
   it('skips axes the reference has no data for; nothing enabled renders a dash', () => {
@@ -227,55 +228,71 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
   });
 });
 
-describe('followTier / orderByTier — candidate strength (follow-mode 04)', () => {
+describe('followTier / orderByTier — candidate strength (follow-mode 04 / linked-pairs 04)', () => {
   // Engine key ids (keyUtils): 19=10m(Cm) 18=10d(Eb) 21=11m(Gm) 17=9m(Fm)
   // 9=5m(C#m) 23=12m(Dm) 1=1m(Am).
-  const ref = (key: number | undefined, provenIds: number[] = []): FollowReference => ({
+  // Known strengths (links/known.ts): favorited=0, linked=1, saved=2.
+  const ref = (
+    key: number | undefined,
+    known: Record<number, 0 | 1 | 2> = {}
+  ): FollowReference => ({
     track: track({ id: 999, key }),
-    proven: new Set(provenIds),
+    knownStrength: (id) => known[id] ?? null,
   });
 
-  it('tiers: proven < same Key < relative < one up < one down < rest', () => {
-    const r = ref(19, [50]); // 10m reference; track 50 proven
-    expect(followTier(track({ id: 50, key: 9 }), [r])).toBe(0); // proven trumps key
-    expect(followTier(track({ id: 1, key: 19 }), [r])).toBe(1); // 10m same
-    expect(followTier(track({ id: 2, key: 18 }), [r])).toBe(2); // 10d relative
-    expect(followTier(track({ id: 3, key: 21 }), [r])).toBe(3); // 11m up
-    expect(followTier(track({ id: 4, key: 17 }), [r])).toBe(4); // 9m down
-    expect(followTier(track({ id: 5, key: 9 }), [r])).toBe(5); // 5m unrelated
-    expect(followTier(track({ id: 6, key: undefined }), [r])).toBe(5); // keyless
+  it('tiers: known (by strength) < same Key < relative < one up < one down < rest', () => {
+    const r = ref(19, { 50: 0, 51: 1, 52: 2 }); // 10m reference
+    expect(followTier(track({ id: 50, key: 9 }), [r])).toBe(0); // favorited trumps key
+    expect(followTier(track({ id: 51, key: 9 }), [r])).toBe(1); // linked
+    expect(followTier(track({ id: 52, key: 9 }), [r])).toBe(2); // unfavorited saved
+    expect(followTier(track({ id: 1, key: 19 }), [r])).toBe(3); // 10m same
+    expect(followTier(track({ id: 2, key: 18 }), [r])).toBe(4); // 10d relative
+    expect(followTier(track({ id: 3, key: 21 }), [r])).toBe(5); // 11m up
+    expect(followTier(track({ id: 4, key: 17 }), [r])).toBe(6); // 9m down
+    expect(followTier(track({ id: 5, key: 9 }), [r])).toBe(7); // 5m unrelated
+    expect(followTier(track({ id: 6, key: undefined }), [r])).toBe(7); // keyless
+  });
+
+  it('any known strength outranks every Key tier', () => {
+    const r = ref(19, { 52: 2 });
+    // Weakest known (unfavorited saved) still beats same-Key.
+    expect(followTier(track({ id: 52, key: 19 }), [r])).toBe(2);
   });
 
   it('wraps the wheel: 12m→1m is one up, 1m→12m is one down', () => {
-    expect(followTier(track({ id: 1, key: 1 }), [ref(23)])).toBe(3); // 12m ref, 1m up
-    expect(followTier(track({ id: 2, key: 23 }), [ref(1)])).toBe(4); // 1m ref, 12m down
+    expect(followTier(track({ id: 1, key: 1 }), [ref(23)])).toBe(5); // 12m ref, 1m up
+    expect(followTier(track({ id: 2, key: 23 }), [ref(1)])).toBe(6); // 1m ref, 12m down
   });
 
-  it('a keyless reference contributes only its proven tier', () => {
-    const r = ref(undefined, [7]);
+  it('a keyless reference contributes only its known tier', () => {
+    const r = ref(undefined, { 7: 0 });
     expect(followTier(track({ id: 7, key: 19 }), [r])).toBe(0);
-    expect(followTier(track({ id: 8, key: 19 }), [r])).toBe(5);
+    expect(followTier(track({ id: 8, key: 19 }), [r])).toBe(7);
   });
 
-  it('best tier wins across followed references', () => {
-    // Same key as ref B (tier 1) but merely one-up from ref A (tier 3).
+  it('best tier wins across followed references (a pair takes its best)', () => {
+    // Same key as ref B (tier 3) but merely one-up from ref A (tier 5).
     const refs = [ref(19), ref(21)];
-    expect(followTier(track({ id: 1, key: 21 }), refs)).toBe(1);
+    expect(followTier(track({ id: 1, key: 21 }), refs)).toBe(3);
+    // Linked to A (1) but favorited from B (0): best wins.
+    const known = [ref(19, { 9: 1 }), ref(21, { 9: 0 })];
+    expect(followTier(track({ id: 9, key: 9 }), known)).toBe(0);
   });
 
   it('orderByTier groups by tier and keeps the incoming order within a tier', () => {
-    const r = ref(19, [40]); // 10m; 40 proven
+    const r = ref(19, { 40: 0, 41: 1 }); // 10m; 40 favorited, 41 linked
     const input = [
       track({ id: 10, key: 9 }), // rest
       track({ id: 11, key: 19 }), // same
+      track({ id: 41, key: 9 }), // linked
       track({ id: 12, key: 19 }), // same (after 11 in input)
-      track({ id: 40, key: 9 }), // proven
+      track({ id: 40, key: 9 }), // favorited
       track({ id: 13, key: 18 }), // relative
     ];
-    expect(orderByTier(input, [r]).map((t) => t.id)).toEqual([40, 11, 12, 13, 10]);
+    expect(orderByTier(input, [r]).map((t) => t.id)).toEqual([40, 41, 11, 12, 13, 10]);
     // Input untouched; no references = no reordering.
-    expect(input.map((t) => t.id)).toEqual([10, 11, 12, 40, 13]);
-    expect(orderByTier(input, []).map((t) => t.id)).toEqual([10, 11, 12, 40, 13]);
+    expect(input.map((t) => t.id)).toEqual([10, 11, 41, 12, 40, 13]);
+    expect(orderByTier(input, []).map((t) => t.id)).toEqual([10, 11, 41, 12, 40, 13]);
   });
 });
 

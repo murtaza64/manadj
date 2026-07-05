@@ -85,10 +85,10 @@ export interface FollowParams {
   tags: boolean;
   energy: boolean;
   energyPreset: EnergyPreset;
-  /** Narrow the candidates to the proven tier only (the retired
-   * transitions chip's job). Consumed by candidateIdSet, not by the
-   * per-reference query derivation. */
-  provenOnly: boolean;
+  /** Narrow the candidates to the known tier only — Linked ∪ saved
+   * Transition (glossary: Known; formerly "proven only"). Consumed by
+   * candidateIdSet, not by the per-reference query derivation. */
+  knownOnly: boolean;
 }
 
 /** Canonical defaults — the params store boots from these. */
@@ -99,7 +99,7 @@ export const DEFAULT_FOLLOW_PARAMS: FollowParams = {
   tags: false,
   energy: false,
   energyPreset: 'near',
-  provenOnly: false,
+  knownOnly: false,
 };
 
 // ── Derivation ──────────────────────────────────────────────────────────
@@ -216,8 +216,8 @@ export function followSummary(reference: Track, params: FollowParams): string {
   if (params.tags && reference.tags.length > 0) {
     parts.push('tags');
   }
-  if (params.provenOnly) {
-    parts.push('◆only');
+  if (params.knownOnly) {
+    parts.push('◆🔗only');
   }
   return parts.length > 0 ? parts.join('·') : '—';
 }
@@ -238,11 +238,12 @@ export function unionIds(resultSets: Track[][]): Set<number> {
 }
 
 /**
- * The full candidate id set (follow-mode 03): both evidence tiers.
- * Heuristics propose (per-reference query results), the Transition
- * library confirms — Tracks with a saved Transition from a followed
- * reference are always candidates, even when the heuristic parameters
- * would exclude them. `provenOnly` narrows to just the proven tier.
+ * The full candidate id set (follow-mode 03 / linked-pairs 04): both
+ * evidence tiers. Heuristics propose (per-reference query results), the
+ * known tier confirms — Tracks with a saved Transition from a followed
+ * reference, and Linked Tracks, are always candidates, even when the
+ * heuristic parameters would exclude them. `knownOnly` narrows to just
+ * the known tier.
  */
 /** The followed references: followed Decks that actually hold a Track,
  * in deck order. One home for the derivation the FilterBar (summary
@@ -259,20 +260,24 @@ export function followedReferences(
 
 // ── Ranking (follow-mode 04) ────────────────────────────────────────────
 
-/** A followed Deck's reference for tiering: its Track plus the proven
- * tier (ids with a saved Transition from it). */
+/** A followed Deck's reference for tiering: its Track plus its known-tier
+ * lookup — the candidate's Known strength (links/known.ts: favorited
+ * Transition 0, Linked 1, unfavorited Transition 2; a pair takes its
+ * best), or null when the candidate is not Known relative to it. */
 export interface FollowReference {
   track: Track;
-  proven: { has(id: number): boolean };
+  knownStrength: (id: number) => number | null;
 }
 
-/** Tier order is provisional (PRD) — keep changes inside this face. */
-const TIER_PROVEN = 0;
-const TIER_SAME_KEY = 1;
-const TIER_RELATIVE_KEY = 2;
-const TIER_KEY_UP = 3;
-const TIER_KEY_DOWN = 4;
-const TIER_REST = 5;
+/** Tier order is provisional (PRD) — keep changes inside this face. The
+ * known tier occupies 0–2 (its strengths ARE tiers, linked-pairs 04). */
+const TIER_KNOWN_BEST = 0;
+const TIER_KNOWN_SPAN = 3;
+const TIER_SAME_KEY = TIER_KNOWN_SPAN;
+const TIER_RELATIVE_KEY = TIER_SAME_KEY + 1;
+const TIER_KEY_UP = TIER_RELATIVE_KEY + 1;
+const TIER_KEY_DOWN = TIER_KEY_UP + 1;
+const TIER_REST = TIER_KEY_DOWN + 1;
 
 function parseOpenKey(keyId: number | null | undefined): { num: number; mode: string } | null {
   const openKey = engineIdToOpenKey(keyId);
@@ -281,7 +286,8 @@ function parseOpenKey(keyId: number | null | undefined): { num: number; mode: st
 }
 
 function tierAgainst(candidate: Track, reference: FollowReference): number {
-  if (reference.proven.has(candidate.id)) return TIER_PROVEN;
+  const known = reference.knownStrength(candidate.id);
+  if (known !== null) return known;
   const ref = parseOpenKey(reference.track.key);
   const cand = parseOpenKey(candidate.key);
   if (!ref || !cand) return TIER_REST;
@@ -297,15 +303,16 @@ function tierAgainst(candidate: Track, reference: FollowReference): number {
 }
 
 /**
- * Candidate strength: proven, same Key, relative Key, one Key up, one Key
- * down, then everything else that passed the filter. Best tier wins
- * across followed references.
+ * Candidate strength: known (favorited Transition, Linked, unfavorited
+ * Transition), same Key, relative Key, one Key up, one Key down, then
+ * everything else that passed the filter. Best tier wins across followed
+ * references.
  */
 export function followTier(candidate: Track, references: FollowReference[]): number {
   let best = TIER_REST;
   for (const reference of references) {
     best = Math.min(best, tierAgainst(candidate, reference));
-    if (best === TIER_PROVEN) break;
+    if (best === TIER_KNOWN_BEST) break;
   }
   return best;
 }
@@ -325,12 +332,12 @@ export function candidateIdSet(
   heuristicSets: Track[][],
   // Anything keyed by track id — a Set of ids or the transition index's
   // per-reference Map (trackId → PairInfo).
-  provenSets: ReadonlyArray<{ keys(): IterableIterator<number> }>,
-  provenOnly: boolean
+  knownSets: ReadonlyArray<{ keys(): IterableIterator<number> }>,
+  knownOnly: boolean
 ): Set<number> {
-  const ids = provenOnly ? new Set<number>() : unionIds(heuristicSets);
-  for (const proven of provenSets) {
-    for (const id of proven.keys()) ids.add(id);
+  const ids = knownOnly ? new Set<number>() : unionIds(heuristicSets);
+  for (const known of knownSets) {
+    for (const id of known.keys()) ids.add(id);
   }
   return ids;
 }
