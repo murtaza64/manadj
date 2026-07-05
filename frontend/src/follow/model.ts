@@ -13,7 +13,7 @@
  */
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
-import { formatKeyDisplay } from '../utils/keyUtils';
+import { engineIdToOpenKey, formatKeyDisplay } from '../utils/keyUtils';
 
 // ── State machine (follow-mode 02) ──────────────────────────────────────
 
@@ -217,6 +217,70 @@ export function unionIds(resultSets: Track[][]): Set<number> {
  * reference are always candidates, even when the heuristic parameters
  * would exclude them. `provenOnly` narrows to just the proven tier.
  */
+// ── Ranking (follow-mode 04) ────────────────────────────────────────────
+
+/** A followed Deck's reference for tiering: its Track plus the proven
+ * tier (ids with a saved Transition from it). */
+export interface FollowReference {
+  track: Track;
+  proven: { has(id: number): boolean };
+}
+
+/** Tier order is provisional (PRD) — keep changes inside this face. */
+const TIER_PROVEN = 0;
+const TIER_SAME_KEY = 1;
+const TIER_RELATIVE_KEY = 2;
+const TIER_KEY_UP = 3;
+const TIER_KEY_DOWN = 4;
+const TIER_REST = 5;
+
+function parseOpenKey(keyId: number | null | undefined): { num: number; mode: string } | null {
+  const openKey = engineIdToOpenKey(keyId);
+  const match = openKey?.match(/^(\d+)(m|d)$/);
+  return match ? { num: parseInt(match[1]), mode: match[2] } : null;
+}
+
+function tierAgainst(candidate: Track, reference: FollowReference): number {
+  if (reference.proven.has(candidate.id)) return TIER_PROVEN;
+  const ref = parseOpenKey(reference.track.key);
+  const cand = parseOpenKey(candidate.key);
+  if (!ref || !cand) return TIER_REST;
+  if (cand.num === ref.num) {
+    return cand.mode === ref.mode ? TIER_SAME_KEY : TIER_RELATIVE_KEY;
+  }
+  if (cand.mode !== ref.mode) return TIER_REST;
+  const up = ref.num === 12 ? 1 : ref.num + 1;
+  const down = ref.num === 1 ? 12 : ref.num - 1;
+  if (cand.num === up) return TIER_KEY_UP;
+  if (cand.num === down) return TIER_KEY_DOWN;
+  return TIER_REST;
+}
+
+/**
+ * Candidate strength: proven, same Key, relative Key, one Key up, one Key
+ * down, then everything else that passed the filter. Best tier wins
+ * across followed references.
+ */
+export function followTier(candidate: Track, references: FollowReference[]): number {
+  let best = TIER_REST;
+  for (const reference of references) {
+    best = Math.min(best, tierAgainst(candidate, reference));
+    if (best === TIER_PROVEN) break;
+  }
+  return best;
+}
+
+/**
+ * Tier-order the followed list. The sort is stable, so the incoming order
+ * (the view's own sort) holds within each tier — tiering groups, never
+ * overrides. No references = no reordering.
+ */
+export function orderByTier(tracks: Track[], references: FollowReference[]): Track[] {
+  if (references.length === 0) return tracks;
+  const tiers = new Map(tracks.map((t) => [t.id, followTier(t, references)]));
+  return [...tracks].sort((x, y) => tiers.get(x.id)! - tiers.get(y.id)!);
+}
+
 export function candidateIdSet(
   heuristicSets: Track[][],
   // Anything keyed by track id — a Set of ids or the transition index's

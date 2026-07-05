@@ -24,3 +24,7 @@ A Track qualifying under both followed references ranks by its best tier. The us
 ## Blocked by
 
 - 03-proven-tier-folded-in
+
+## Comments
+
+- Done (pypooqvy, lane followmode): ranking face in the follow model — `followTier` (proven 0 → same 1 → relative 2 → up 3 → down 4 → rest 5, wheel wrap at 12↔1, best tier via min across references) and `orderByTier` (stable sort: the view's own order holds within tiers; no references = no-op). Library filter+order applies only while following, to both the library list and the non-split playlist list. 6 new tests; engine-id literals audited against keyUtils. Tier numbering stays inside the model face (provisional per PRD). Gate: 530 pytest / 525 vitest / build / one head.

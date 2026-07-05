@@ -14,10 +14,13 @@ import {
   candidateIdSet,
   DEFAULT_FOLLOW_PARAMS,
   deriveFollowQuery,
+  followTier,
+  orderByTier,
   reduceFollow,
   unionIds,
   type FollowEvent,
   type FollowFlags,
+  type FollowReference,
 } from './model';
 
 /** Minimal Track for derivation: only key/bpm/energy/tags are read. */
@@ -191,6 +194,58 @@ describe('candidateIdSet — proven tier folded in (follow-mode 03)', () => {
     const ids = candidateIdSet([[t(1)]], [transitionsFrom(index, 7)], false);
     expect([...ids].sort()).toEqual([1, 30]);
     expect([...candidateIdSet([[t(1)]], [transitionsFrom(index, 7)], true)]).toEqual([30]);
+  });
+});
+
+describe('followTier / orderByTier — candidate strength (follow-mode 04)', () => {
+  // Engine key ids (keyUtils): 19=10m(Cm) 18=10d(Eb) 21=11m(Gm) 17=9m(Fm)
+  // 9=5m(C#m) 23=12m(Dm) 1=1m(Am).
+  const ref = (key: number | undefined, provenIds: number[] = []): FollowReference => ({
+    track: track({ id: 999, key }),
+    proven: new Set(provenIds),
+  });
+
+  it('tiers: proven < same Key < relative < one up < one down < rest', () => {
+    const r = ref(19, [50]); // 10m reference; track 50 proven
+    expect(followTier(track({ id: 50, key: 9 }), [r])).toBe(0); // proven trumps key
+    expect(followTier(track({ id: 1, key: 19 }), [r])).toBe(1); // 10m same
+    expect(followTier(track({ id: 2, key: 18 }), [r])).toBe(2); // 10d relative
+    expect(followTier(track({ id: 3, key: 21 }), [r])).toBe(3); // 11m up
+    expect(followTier(track({ id: 4, key: 17 }), [r])).toBe(4); // 9m down
+    expect(followTier(track({ id: 5, key: 9 }), [r])).toBe(5); // 5m unrelated
+    expect(followTier(track({ id: 6, key: undefined }), [r])).toBe(5); // keyless
+  });
+
+  it('wraps the wheel: 12m→1m is one up, 1m→12m is one down', () => {
+    expect(followTier(track({ id: 1, key: 1 }), [ref(23)])).toBe(3); // 12m ref, 1m up
+    expect(followTier(track({ id: 2, key: 23 }), [ref(1)])).toBe(4); // 1m ref, 12m down
+  });
+
+  it('a keyless reference contributes only its proven tier', () => {
+    const r = ref(undefined, [7]);
+    expect(followTier(track({ id: 7, key: 19 }), [r])).toBe(0);
+    expect(followTier(track({ id: 8, key: 19 }), [r])).toBe(5);
+  });
+
+  it('best tier wins across followed references', () => {
+    // Same key as ref B (tier 1) but merely one-up from ref A (tier 3).
+    const refs = [ref(19), ref(21)];
+    expect(followTier(track({ id: 1, key: 21 }), refs)).toBe(1);
+  });
+
+  it('orderByTier groups by tier and keeps the incoming order within a tier', () => {
+    const r = ref(19, [40]); // 10m; 40 proven
+    const input = [
+      track({ id: 10, key: 9 }), // rest
+      track({ id: 11, key: 19 }), // same
+      track({ id: 12, key: 19 }), // same (after 11 in input)
+      track({ id: 40, key: 9 }), // proven
+      track({ id: 13, key: 18 }), // relative
+    ];
+    expect(orderByTier(input, [r]).map((t) => t.id)).toEqual([40, 11, 12, 13, 10]);
+    // Input untouched; no references = no reordering.
+    expect(input.map((t) => t.id)).toEqual([10, 11, 12, 40, 13]);
+    expect(orderByTier(input, []).map((t) => t.id)).toEqual([10, 11, 12, 40, 13]);
   });
 });
 

@@ -16,8 +16,14 @@ import type { ChannelId } from '../playback/mixer';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
-import { candidateIdSet, deriveFollowQuery, getEnergyRange, getHarmonicKeys } from '../follow/model';
-import type { FollowParams } from '../follow/model';
+import {
+  candidateIdSet,
+  deriveFollowQuery,
+  getEnergyRange,
+  getHarmonicKeys,
+  orderByTier,
+} from '../follow/model';
+import type { FollowParams, FollowReference } from '../follow/model';
 import { useFollowFlags } from '../follow/followStore';
 import { EMPTY_SELECTION, click } from '../selection/selectionModel';
 import { useTrackSelection } from '../selection/useTrackSelection';
@@ -288,6 +294,11 @@ export default function Library({
       followParams.provenOnly
     );
   })();
+  /** References for tier ordering (follow-mode 04), proven maps included. */
+  const followReferences: FollowReference[] = followRefs.map(({ reference }, i) => ({
+    track: reference,
+    proven: followProvenSets[i],
+  }));
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
@@ -600,7 +611,12 @@ export default function Library({
   // with the Follow candidate set composed client-side (follow-mode 01/03).
   let libraryTracks = allTracksData?.items || [];
   if (followCandidateIds) {
-    libraryTracks = libraryTracks.filter((t: Track) => followCandidateIds.has(t.id));
+    // Filter to candidates, then tier-order them (follow-mode 04): the
+    // stable sort keeps the server sort within each tier.
+    libraryTracks = orderByTier(
+      libraryTracks.filter((t: Track) => followCandidateIds.has(t.id)),
+      followReferences
+    );
   }
 
   // Playlist list, in the view-only playlist sort. The Follow filter
@@ -608,7 +624,10 @@ export default function Library({
   // to the library pane.
   let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
   if (followCandidateIds && !splitView) {
-    playlistTracks = playlistTracks.filter((t: Track) => followCandidateIds.has(t.id));
+    playlistTracks = orderByTier(
+      playlistTracks.filter((t: Track) => followCandidateIds.has(t.id)),
+      followReferences
+    );
   }
 
   // ── Selection machinery: one instance per pane ─────────────────────────
