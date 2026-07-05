@@ -245,5 +245,17 @@ export class CaptureRecorder {
     if (cur.bendPercent !== prev.bendPercent) {
       this.feed({ t, kind: 'bend', channel: ch, value: cur.bendPercent });
     }
+    if (cur.loop !== prev.loop) {
+      // Loop engage/resize/translate/release (looping 06): the wraps
+      // themselves are inaudible to snapshot diffs — vectorization derives
+      // them from the region + rate.
+      this.feed({
+        t,
+        kind: 'loop',
+        channel: ch,
+        playhead: this.engines[ch].getPlayhead(),
+        region: cur.loop ? { start: cur.loop.start, end: cur.loop.end } : null,
+      });
+    }
   }
 }

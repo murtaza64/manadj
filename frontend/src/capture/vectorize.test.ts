@@ -270,6 +270,112 @@ describe('discrete gestures become Jump events (issue 04)', () => {
   });
 });
 
+describe('loop engagements collapse to repeated Jump events (looping 06)', () => {
+  const loop = (
+    t: number,
+    channel: CaptureChannel,
+    playhead: number,
+    region: { start: number; end: number } | null
+  ): CaptureEvent => ({ t, kind: 'loop', channel, playhead, region });
+
+  const transport = (
+    t: number,
+    channel: CaptureChannel,
+    action: 'jumpBeats' | 'hotCue',
+    playhead: number
+  ): CaptureEvent => ({ t, kind: 'transport', channel, action, playhead });
+
+  it('a held loop vectorizes to ONE repeated Jump, not k jumps', () => {
+    // B rolling from 8; loop [13, 15) engaged at 105 (playhead 13),
+    // released at 112 — unwrapped 20, so 3 wraps of 2s.
+    const input = baseInput([
+      loop(105, 'B', 13, { start: 13, end: 15 }),
+      loop(112, 'B', 14, null),
+      tick(112, { A: 72, B: 14 }),
+    ]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toHaveLength(1);
+    const j = tr.jumps![0];
+    // First wrap at t 107 → x 0.35; displacement = the loop length, back.
+    expect(j.x).toBeCloseTo(0.35);
+    expect(j.deltaSec).toBeCloseTo(-2);
+    expect(j.count).toBe(3);
+    // Alignment stays honest: repeats fold into the back-projection.
+    expect(tr.bInSec).toBeCloseTo(8);
+  });
+
+  it('a loop still held at the window end counts wraps up to the end', () => {
+    const input = baseInput([loop(110, 'B', 18, { start: 18, end: 20 })]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    // Unwrapped at 120 = 28 → wraps at 20, 22, 24, 26, 28 → count 5.
+    expect(tr.jumps).toHaveLength(1);
+    expect(tr.jumps![0].deltaSec).toBeCloseTo(-2);
+    expect(tr.jumps![0].count).toBe(5);
+    expect(tr.jumps![0].x).toBeCloseTo(0.6);
+  });
+
+  it('a single wrap derives a plain backward Jump (no count field)', () => {
+    const input = baseInput([
+      loop(105, 'B', 13, { start: 13, end: 15 }),
+      loop(108, 'B', 14, null), // unwrapped 16: one wrap
+      tick(108, { A: 68, B: 14 }),
+    ]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toEqual([{ x: expect.closeTo(0.35), deltaSec: expect.closeTo(-2) }]);
+  });
+
+  it('a loop released before its first wrap derives nothing', () => {
+    const input = baseInput([
+      loop(105, 'B', 13, { start: 13, end: 15 }),
+      loop(106, 'B', 14, null),
+    ]);
+    expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
+  });
+
+  it('outgoing-deck loops are dropped (incoming-only, ADR 0020)', () => {
+    const input = baseInput([
+      loop(105, 'A', 65, { start: 65, end: 67 }),
+      loop(115, 'A', 66, null),
+    ]);
+    expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
+  });
+
+  it('loop wraps and ordinary jumps coexist in the same Take', () => {
+    const input = baseInput([
+      loop(105, 'B', 13, { start: 13, end: 15 }),
+      loop(112, 'B', 14, null),
+      tick(112, { A: 72, B: 14 }),
+      transport(115, 'B', 'hotCue', 64), // expected 17 → 64
+    ]);
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toHaveLength(2);
+    const [hotCue, looped] = [...tr.jumps!].sort((a, b) => a.deltaSec - b.deltaSec).reverse();
+    expect(hotCue.deltaSec).toBeCloseTo(47);
+    expect(looped.deltaSec).toBeCloseTo(-2);
+    expect(looped.count).toBe(3);
+  });
+
+  it('scales wrap counting by the incoming deck\'s rate', () => {
+    // B at +100% pitch (rate 2): loop [13, 15) engaged at 105; by 109.5
+    // the unwrapped position is 13 + 4.5×2 = 22 → 4 crossings of the end.
+    const input = {
+      events: [
+        init('A', 100, { decks: { A: deck(), B: deck({ trackId: 2, pitch: 100 }) } }),
+        tick(100, { A: 60, B: 8 }),
+        loop(105, 'B', 13, { start: 13, end: 15 }),
+        loop(109.5, 'B', 14, null),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, { bpmA: 174, bpmB: 87 })!.transition;
+    expect(tr.jumps).toHaveLength(1);
+    expect(tr.jumps![0].count).toBe(4);
+    // First wrap after (15-13)/2 = 1s → t 106 → x 0.3.
+    expect(tr.jumps![0].x).toBeCloseTo(0.3);
+  });
+});
+
 describe('breakpoint simplification', () => {
   it('a dense drag stream simplifies to a sparse editable polyline', () => {
     const events: CaptureEvent[] = [];

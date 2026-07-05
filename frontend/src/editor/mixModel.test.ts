@@ -12,6 +12,7 @@ import {
   cropRemapJumpsLeft,
   evalLane,
   insertChop,
+  jumpRepeatCount,
   laneValuesAt,
   slideB,
   slideBToCue,
@@ -333,6 +334,65 @@ describe('bContentSegments (transition-takes 06: the one piecewise walk)', () =>
     expect(bContentSegments(t, durB, 1)).toEqual([
       { mixStartSec: 30, mixEndSec: 88, bStartSec: 2 },
     ]);
+  });
+});
+
+describe('repeatable jump events (looping 06)', () => {
+  const durB = 60;
+
+  it('jumpRepeatCount: backward jumps repeat, forward jumps never do', () => {
+    expect(jumpRepeatCount({ x: 0.5, deltaSec: -2, count: 4 })).toBe(4);
+    expect(jumpRepeatCount({ x: 0.5, deltaSec: -2 })).toBe(1);
+    expect(jumpRepeatCount({ x: 0.5, deltaSec: 2, count: 4 })).toBe(1);
+    expect(jumpRepeatCount({ x: 0.5, deltaSec: 0, count: 4 })).toBe(1);
+    expect(jumpRepeatCount({ x: 0.5, deltaSec: -2, count: 0 })).toBe(1);
+  });
+
+  it('bTrackTimeAt replays the jumped-back stretch count times', () => {
+    // Window 30..50, b 10 at start; at mix 40 a 4-beat loop: back 2s, ×3.
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: -2, count: 3 }] });
+    // Repeats fire at mix 40, 42, 44 (period = |delta| / rateB).
+    expect(bTrackTimeAt(t, 39.9, 1)).toBeCloseTo(19.9);
+    expect(bTrackTimeAt(t, 41, 1)).toBeCloseTo(19); // after 1st wrap
+    expect(bTrackTimeAt(t, 43, 1)).toBeCloseTo(19); // after 2nd
+    expect(bTrackTimeAt(t, 45, 1)).toBeCloseTo(19); // after 3rd
+    expect(bTrackTimeAt(t, 47, 1)).toBeCloseTo(21); // released — flows past
+  });
+
+  it('the repetition period scales with rateB (B-seconds, not mix-seconds)', () => {
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: -2, count: 2 }] });
+    // rateB 2: period 1 mix-second — wraps at 40 and 41.
+    expect(bTrackTimeAt(t, 40.5, 2)).toBeCloseTo(10 + 10.5 * 2 - 2);
+    expect(bTrackTimeAt(t, 41.5, 2)).toBeCloseTo(10 + 11.5 * 2 - 4);
+  });
+
+  it('bContentSegments splices one segment per repeat', () => {
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: -2, count: 3 }] });
+    expect(bContentSegments(t, durB, 1)).toEqual([
+      { mixStartSec: 30, mixEndSec: 40, bStartSec: 10 }, // 10..20
+      { mixStartSec: 40, mixEndSec: 42, bStartSec: 18 }, // replay 18..20
+      { mixStartSec: 42, mixEndSec: 44, bStartSec: 18 }, // replay 18..20
+      { mixStartSec: 44, mixEndSec: 86, bStartSec: 18 }, // released: 18..60
+    ]);
+  });
+
+  it('bEndMixTime extends by count × |delta| (each replay plays again)', () => {
+    const plain = tr({ startSec: 30, durationSec: 20, bInSec: 10 });
+    const looped = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: -2, count: 3 }] });
+    expect(bEndMixTime(looped, durB, 1)).toBeCloseTo(bEndMixTime(plain, durB, 1) + 6);
+  });
+
+  it('a forward jump with a count applies its delta exactly once', () => {
+    const t = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: 5, count: 3 }] });
+    expect(bTrackTimeAt(t, 49, 1)).toBeCloseTo(29 + 5);
+    expect(bContentSegments(t, durB, 1)).toHaveLength(2);
+  });
+
+  it('count-1 jumps behave exactly like plain jumps', () => {
+    const plain = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: -8 }] });
+    const counted = tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps: [{ x: 0.5, deltaSec: -8, count: 1 }] });
+    expect(bContentSegments(counted, durB, 1)).toEqual(bContentSegments(plain, durB, 1));
+    expect(bTrackTimeAt(counted, 45, 1)).toBe(bTrackTimeAt(plain, 45, 1));
   });
 });
 

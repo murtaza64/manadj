@@ -51,6 +51,21 @@ export interface JumpEvent {
   x: number;
   /** Jump distance in B's OWN seconds (+ = forward, − = back/replay). */
   deltaSec: number;
+  /**
+   * Repeat count k ≥ 1 (looping 06); absent = 1. Only coherent on a
+   * BACKWARD jump, whose repetition period is definitionally its
+   * displacement magnitude — jump back N, replay N, jump again. There is
+   * no period field, and forward jumps never repeat (jumpRepeatCount is
+   * the boundary that enforces it).
+   */
+  count?: number;
+}
+
+/** Effective repeat count — the model boundary's backward-only validation:
+ * a count on a forward (or zero) jump reads as 1. */
+export function jumpRepeatCount(j: JumpEvent): number {
+  if (!j.count || j.count <= 1) return 1;
+  return j.deltaSec < 0 ? Math.floor(j.count) : 1;
 }
 
 export interface Transition {
@@ -212,17 +227,39 @@ export function jumpInstantSec(
   return tr.startSec + j.x * tr.durationSec;
 }
 
+/**
+ * A repeated Jump expanded to its point jumps on the mix axis (looping
+ * 06): repeat i fires at instant + i × period, period = |deltaSec| of B's
+ * own time = |deltaSec|/rateB mix-seconds — the replayed stretch plays out
+ * before the next wrap. Sorted by instant; every model computation that
+ * walks jumps walks THIS, so audition/segments/end-time replay repeats
+ * faithfully.
+ */
+function expandedJumps(
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumps'>,
+  rateB: number
+): { tj: number; deltaSec: number }[] {
+  const out: { tj: number; deltaSec: number }[] = [];
+  for (const j of tr.jumps ?? []) {
+    const count = jumpRepeatCount(j);
+    const tj = jumpInstantSec(tr, j);
+    const period = rateB > 0 ? -j.deltaSec / rateB : 0;
+    for (let i = 0; i < count; i++) out.push({ tj: tj + i * period, deltaSec: j.deltaSec });
+  }
+  return out.sort((a, b) => a.tj - b.tj);
+}
+
 /** B's track-time under the playhead at mix-time t: linear in rateB, plus
- * the deltas of every Jump event whose instant has passed (piecewise —
- * transition-takes 01). */
+ * the deltas of every (expanded) Jump whose instant has passed (piecewise
+ * — transition-takes 01, repeats per looping 06). */
 export function bTrackTimeAt(
   tr: Pick<Transition, 'startSec' | 'bInSec' | 'durationSec' | 'jumps'>,
   mixTime: number,
   rateB: number
 ): number {
   let t = tr.bInSec + (mixTime - tr.startSec) * rateB;
-  for (const j of tr.jumps ?? []) {
-    if (mixTime >= jumpInstantSec(tr, j)) t += j.deltaSec;
+  for (const j of expandedJumps(tr, rateB)) {
+    if (mixTime >= j.tj) t += j.deltaSec;
   }
   return t;
 }
@@ -251,7 +288,7 @@ function walkB(
   durB: number,
   rateB: number
 ): { segments: BContentSegment[]; endMixSec: number } {
-  const jumps = [...(tr.jumps ?? [])].sort((a, b) => a.x - b.x);
+  const jumps = expandedJumps(tr, rateB);
   const segments: BContentSegment[] = [];
   let t0 = tr.startSec;
   let b0 = tr.bInSec;
@@ -271,7 +308,7 @@ function walkB(
   };
 
   for (const j of jumps) {
-    const tj = jumpInstantSec(tr, j);
+    const tj = j.tj;
     if (tj > t0) {
       const r = linear(tj);
       if (r.done) return { segments, endMixSec: r.end };

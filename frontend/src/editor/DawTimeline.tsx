@@ -25,6 +25,7 @@ import {
   cropRemapLanesLeft,
   defaultLanePoints,
   evalLane,
+  jumpRepeatCount,
   lanePoints,
   nearestTime,
   visibleLaneIds,
@@ -1037,6 +1038,7 @@ export function DawTimeline({
                 <span className="editor-jump-chip">
                   {j.deltaSec < 0 ? <JumpBackIcon size={11} /> : <JumpForwardIcon size={11} />}{' '}
                   {jumpDeltaLabel(j.deltaSec, beatSecB)}
+                  {jumpRepeatCount(j) > 1 ? ` ×${jumpRepeatCount(j)}` : ''}
                 </span>
               </div>
             ))}

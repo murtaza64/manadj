@@ -27,6 +27,7 @@
  * The editor's deck roles are track-based: editor A = the outgoing deck,
  * whichever physical channel it was on.
  */
+import { jumpRepeatCount } from '../editor/mixModel';
 import type { JumpEvent, LaneId, LanePoint, Lanes, Transition } from '../editor/mixModel';
 import { channelFaderToGain, crossfaderGains } from '../playback/mixerMath';
 import type { CaptureChannel, CaptureEvent, InitDeckState } from './events';
@@ -133,8 +134,10 @@ export function vectorizeTake(
       if (Math.abs(deltaSec) < MIN_JUMP_SEC) continue;
       jumps.push({ x: (e.t - windowStartS) / windowLen, deltaSec });
     }
+    jumps.push(...loopJumps(input, inc, rateAt));
   }
-  const jumpTotal = jumps.reduce((sum, j) => sum + j.deltaSec, 0);
+  // Repeats each apply their delta (the model expands them back).
+  const jumpTotal = jumps.reduce((sum, j) => sum + j.deltaSec * jumpRepeatCount(j), 0);
 
   // ALIGNMENT AT THE COMMIT POINT (PRD): the incoming's position is read
   // at the window END — after every Nudge/pitch correction has done its
@@ -157,6 +160,55 @@ export function vectorizeTake(
       ...(jumps.length > 0 ? { jumps } : {}),
     },
   };
+}
+
+/**
+ * LOOP ENGAGEMENTS → REPEATED JUMP EVENTS (looping 06, extending ADR
+ * 0020's discrete-gesture rule): a held loop on the incoming deck
+ * collapses to ONE backward Jump — displacement = the loop length, count
+ * = the number of wraps — rather than k separate jumps. Wraps are pure
+ * derivation (region + engage playhead + rate), never guessed from the
+ * coarse ticks: the deck crosses the end edge every `len` track-seconds
+ * once it reaches it. Each loop event (engage/resize/translate/release)
+ * closes the previous segment; a loop still open at the window end counts
+ * wraps up to the end. Outgoing-deck loops are dropped (incoming-only).
+ */
+function loopJumps(
+  input: VectorizeInput,
+  inc: CaptureChannel,
+  rateAt: (ch: CaptureChannel, t: number) => number
+): JumpEvent[] {
+  const { windowStartS, windowEndS } = input;
+  const windowLen = windowEndS - windowStartS;
+  const out: JumpEvent[] = [];
+  let open: { t: number; playhead: number; start: number; end: number } | null = null;
+
+  const close = (tEnd: number): void => {
+    if (!open) return;
+    const { t: t0, playhead: p0, start, end } = open;
+    open = null;
+    const len = end - start;
+    if (len <= 0 || tEnd <= t0) return;
+    const rate = rateAt(inc, t0);
+    const clampedEnd = Math.min(tEnd, windowEndS);
+    const unwrapped = p0 + (clampedEnd - t0) * rate;
+    const count = Math.floor((unwrapped - end) / len) + 1;
+    if (count < 1) return;
+    // First wrap: when the playhead reaches the end edge.
+    const tw = t0 + (end - p0) / rate;
+    const x = Math.min(1, Math.max(0, (tw - windowStartS) / windowLen));
+    out.push({ x, deltaSec: -len, ...(count > 1 ? { count } : {}) });
+  };
+
+  for (const e of input.events) {
+    if (e.kind !== 'loop' || e.channel !== inc || e.t > windowEndS) continue;
+    close(e.t);
+    if (e.region) {
+      open = { t: e.t, playhead: e.playhead, start: e.region.start, end: e.region.end };
+    }
+  }
+  close(windowEndS);
+  return out;
 }
 
 /** Playhead extrapolated from the latest sample STRICTLY before t (null

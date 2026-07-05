@@ -49,6 +49,18 @@ export type CaptureEvent =
       detail?: number;
     }
   | { t: number; kind: 'pitch' | 'bend'; channel: CaptureChannel; value: number }
+  /** Active-loop state change (looping 06): engage/resize carry the new
+   * region, release/cancel/Load-clear carry null. Evidence for collapsing
+   * a held loop into one repeated Jump event at vectorization. */
+  | {
+      t: number;
+      kind: 'loop';
+      channel: CaptureChannel;
+      /** Deck playhead at the change (s). */
+      playhead: number;
+      /** The region after the change (track seconds), or null. */
+      region: { start: number; end: number } | null;
+    }
   | { t: number; kind: 'load'; channel: CaptureChannel; trackId: number | null; bpm: number | null }
   /** Coarse periodic sample (~1 Hz): keeps alignment reconstructible and
    * drives time-based settlement in the detector. */
