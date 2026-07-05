@@ -12,6 +12,30 @@ import './deckControls.css';
  * size when idle and resize the active region live when looping. Inert on
  * gridless Tracks (auto-loop never guesses).
  */
+/** Repeat-cycle glyph (two arcs + arrowheads) standing in for "LOOP". */
+function LoopIcon() {
+  return (
+    <svg className="deck-loop-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M2 7.3 v-0.6 a2.7 2.7 0 0 1 2.7 -2.7 h9.3 M11.3 1.3 l2.7 2.7 -2.7 2.7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 8.7 v0.6 a2.7 2.7 0 0 1 -2.7 2.7 H2 M4.7 14.7 l-2.7 -2.7 2.7 -2.7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function LoopRow({
   kbd,
   titleSuffix = '',
@@ -48,8 +72,10 @@ export function LoopRow({
         disabled={!ready || !hasBeatgrid}
         onClick={() => engine.toggleLoop()}
         title={title}
+        aria-label={`Loop ${formatLoopBeats(beats)}`}
       >
-        LOOP {formatLoopBeats(beats)}
+        <LoopIcon />
+        {formatLoopBeats(beats)}
         {kbd}
       </button>
       <button

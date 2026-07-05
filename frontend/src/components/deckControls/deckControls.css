@@ -2,15 +2,19 @@
    Density stays the player-button idiom; views add their own container
    grids around the fragments. */
 
-/* Beatjump row: jump / 1/2 / [size] / x2 / jump */
+/* Beatjump row: jump / 1/2 / [size] / x2 / jump — one segmented unit
+   like .deck-bpm: shared border, internal dividers, no gaps. */
 .deck-jumprow {
   display: grid;
   grid-template-columns: 1fr auto auto auto 1fr;
-  gap: 4px;
+  gap: 0;
   align-items: stretch;
+  border: 1px solid var(--surface1);
+  box-sizing: border-box;
 }
 
 .deck-jumprow .player-button {
+  border: none;
   min-width: 24px;
   font-size: 12px;
   padding: 4px 6px;
@@ -18,6 +22,23 @@
   align-items: center;
   justify-content: center;
   position: relative; /* anchors on-control key hints (perf-kbd) */
+}
+
+.deck-jumprow > .player-button + .player-button,
+.deck-jumprow > .player-button + .deck-jumpsize,
+.deck-jumprow > .deck-jumpsize + .player-button {
+  border-left: 1px solid var(--surface2, #585b70);
+}
+
+.deck-jumprow:hover {
+  border-color: var(--subtext1, #bac2de);
+}
+
+.deck-jumprow .player-button:hover:not(:disabled) {
+  background: var(--surface0, #313244);
+  color: var(--text);
+  /* Pin the divider (see .deck-bpm hover note) */
+  border-color: var(--surface2, #585b70);
 }
 
 .deck-jumpsize {
@@ -25,23 +46,26 @@
   align-items: center;
   justify-content: center;
   min-width: 34px;
-  border: 1px solid var(--surface1);
   color: var(--yellow);
   font-weight: 700;
   font-size: 13px;
 }
 
-/* Loop row (looping 03/04): 1/2 / LOOP N / x2 — the stateful LOOP button
-   lights green while a loop is active (bright saturated green is the
-   active-STATE color, never a Deck identity color). */
+/* Loop row (looping 03/04): 1/2 / LOOP N / x2 — one segmented unit like
+   .deck-bpm. The stateful LOOP button lights green while a loop is active
+   (bright saturated green is the active-STATE color, never a Deck
+   identity color). */
 .deck-looprow {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 4px;
+  gap: 0;
   align-items: stretch;
+  border: 1px solid var(--surface1);
+  box-sizing: border-box;
 }
 
 .deck-looprow .player-button {
+  border: none;
   min-width: 24px;
   font-size: 12px;
   font-weight: 700;
@@ -52,18 +76,43 @@
   position: relative; /* anchors on-control key hints (perf-kbd) */
 }
 
+.deck-looprow > .player-button + .player-button {
+  border-left: 1px solid var(--surface2, #585b70);
+}
+
+.deck-looprow:hover {
+  border-color: var(--subtext1, #bac2de);
+}
+
+.deck-looprow .player-button:hover:not(:disabled) {
+  background: var(--surface0, #313244);
+  color: var(--text);
+  /* Pin the divider (see .deck-bpm hover note) */
+  border-color: var(--surface2, #585b70);
+}
+
+.deck-looprow .deck-loop-toggle {
+  gap: 5px;
+}
+
+.deck-loop-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+  flex-shrink: 0;
+}
+
 .deck-looprow .deck-loop-toggle:hover:not(:disabled) {
-  border-color: var(--green);
   color: var(--green);
 }
 
 .deck-looprow .deck-loop-toggle.active {
   background: var(--green);
-  border-color: var(--green);
   color: var(--base);
 }
 
 .deck-looprow .deck-loop-toggle.active:hover:not(:disabled) {
+  background: var(--green);
   color: var(--base);
 }
 

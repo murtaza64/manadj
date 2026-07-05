@@ -423,6 +423,8 @@ function MixZone({ track }: { track: Track | null }) {
   return (
     <div className="perf-zone perf-zone-mix">
       <div className="perf-knobrow">
+        {/* TRIM/EQ/FLT and PFL spread evenly across the row; PFL at the
+            right end on both decks */}
         <Knob
           label="TRIM"
           min={0}
@@ -431,13 +433,9 @@ function MixZone({ track }: { track: Track | null }) {
           value={channel.trim}
           onChange={(v) => mixer.setTrim(deck, v)}
         />
-        {/* EQ bands grouped tight; placement (not a box) separates them
-            from the TRIM/FLT utilities on the flanks */}
-        <div className="perf-eqgroup">
-          {eqKnob('low', 'LOW')}
-          {eqKnob('mid', 'MID')}
-          {eqKnob('high', 'HI')}
-        </div>
+        {eqKnob('low', 'LOW')}
+        {eqKnob('mid', 'MID')}
+        {eqKnob('high', 'HI')}
         <Knob
           label="FLT"
           min={-1}
@@ -447,6 +445,31 @@ function MixZone({ track }: { track: Track | null }) {
           onChange={(v) => mixer.setFilter(deck, v)}
           ghost={auto ? auto.filter : null}
         />
+        {/* PFL (headphone-cue 02): mixer state, so it works with no track
+            loaded and repaints from hardware toggles (note 0x0C). Headphone
+            glyph like the hardware button; "PFL" stays in the tooltip. */}
+        <button
+          className={`player-button perf-mini perf-pfl${channel.pfl ? ' on' : ''}`}
+          onClick={() => mixer.togglePfl(deck)}
+          aria-label="PFL"
+          title={
+            channel.pfl
+              ? 'Remove this channel from the headphones (PFL)'
+              : 'Pre-listen this channel in the headphones (PFL)'
+          }
+        >
+          <svg className="perf-pfl-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M2.5 12 V8 a5.5 5.5 0 0 1 11 0 V12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+            />
+            <rect x="1.2" y="9.4" width="3.1" height="4.8" rx="1" fill="currentColor" />
+            <rect x="11.7" y="9.4" width="3.1" height="4.8" rx="1" fill="currentColor" />
+          </svg>
+        </button>
       </div>
       <HFader
         label="VOL"
@@ -475,6 +498,34 @@ function MixZone({ track }: { track: Track | null }) {
         title="Pitch (right = faster; double-click resets)"
       />
       <div className="perf-mix-foot">
+        {/* Key Lock (key-lock 03): Deck setting — works with no track
+            loaded, sticky per Deck (engine holds live state, store
+            persists). Lit while tempo changes leave the Key unchanged. */}
+        <button
+          className={`player-button perf-mini perf-keylock${keyLock ? ' on' : ''}`}
+          onClick={() => {
+            engine.setKeyLock(!keyLock);
+            setKeyLockFlag(deck, !keyLock);
+          }}
+          aria-pressed={keyLock}
+          aria-label="Key Lock"
+          title={
+            keyLock
+              ? 'Key Lock on: pitch changes keep the Track\u2019s Key (click for vinyl-style varispeed)'
+              : 'Key Lock off: speed and pitch coupled, like vinyl (click to hold the Key)'
+          }
+        >
+          <svg className="perf-keylock-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M5 7 V5 a3 3 0 0 1 6 0 v2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+            />
+            <rect x="3.4" y="7" width="9.2" height="6.6" rx="1.2" fill="currentColor" />
+          </svg>
+        </button>
         {/* Drift marker (key-lock 04): unlocked + |pitch| ≥ ~half a
             semitone means the sounding key is no longer the Track's Key —
             dim it and mark with ~ (no computed "actual key"; PRD). */}
@@ -499,24 +550,7 @@ function MixZone({ track }: { track: Track | null }) {
             {formatKeyDisplay(track?.key)}
           </span>
         </span>
-        {/* Key Lock (key-lock 03): Deck setting — works with no track
-            loaded, sticky per Deck (engine holds live state, store
-            persists). Lit while tempo changes leave the Key unchanged. */}
-        <button
-          className={`player-button perf-mini perf-keylock${keyLock ? ' on' : ''}`}
-          onClick={() => {
-            engine.setKeyLock(!keyLock);
-            setKeyLockFlag(deck, !keyLock);
-          }}
-          aria-pressed={keyLock}
-          title={
-            keyLock
-              ? 'Key Lock on: pitch changes keep the Track\u2019s Key (click for vinyl-style varispeed)'
-              : 'Key Lock off: speed and pitch coupled, like vinyl (click to hold the Key)'
-          }
-        >
-          LOCK
-        </button>
+        <span className="perf-mix-spacer" />
         <span className="perf-readout" title="Effective BPM (base × pitch × bend)">
           <span className="perf-readout-val">
             {effective !== null ? effective.toFixed(1) : '-'}
@@ -526,39 +560,16 @@ function MixZone({ track }: { track: Track | null }) {
             {pitch.toFixed(1)}%
           </span>
         </span>
-        <span className="perf-mix-spacer" />
-        {/* PFL (headphone-cue 02): mixer state, so it works with no track
-            loaded and repaints from hardware toggles (note 0x0C). Headphone
-            glyph like the hardware button; "PFL" stays in the tooltip. */}
-        <button
-          className={`player-button perf-mini perf-pfl${channel.pfl ? ' on' : ''}`}
-          onClick={() => mixer.togglePfl(deck)}
-          aria-label="PFL"
-          title={
-            channel.pfl
-              ? 'Remove this channel from the headphones (PFL)'
-              : 'Pre-listen this channel in the headphones (PFL)'
-          }
-        >
-          <svg className="perf-pfl-icon" viewBox="0 0 16 16" aria-hidden="true">
-            <path
-              d="M2.5 12 V8 a5.5 5.5 0 0 1 11 0 V12"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-            />
-            <rect x="1.2" y="9.4" width="3.1" height="4.8" rx="1" fill="currentColor" />
-            <rect x="11.7" y="9.4" width="3.1" height="4.8" rx="1" fill="currentColor" />
-          </svg>
-        </button>
+        {/* MATCH as an equals glyph: = matches the other deck's tempo;
+            ≠ flashes red while the target is out of pitch-fader reach. */}
         <button
           className={`player-button perf-mini perf-match${hint ? ' perf-match-hint' : ''}`}
           disabled={!ready || !track?.bpm || otherBpm === null}
           onClick={onMatch}
+          aria-label="Match tempo"
           title="Match the other deck's tempo (half/double-aware)"
         >
-          {hint ? 'OUT OF REACH' : 'MATCH'}
+          {hint ? '\u2260' : '='}
         </button>
       </div>
     </div>

@@ -419,17 +419,36 @@
   position: relative;
 }
 
+/* Nudge pair as one segmented unit (same idiom as .deck-bpm/.deck-jumprow) */
 .perf-nudge {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
+  gap: 0;
+  border: 1px solid var(--surface1);
+  box-sizing: border-box;
 }
 
 .perf-nudge .player-button {
+  border: none;
   font-size: 9px;
   min-width: 0;
   padding: 0;
   position: relative;
+}
+
+.perf-nudge > .player-button + .player-button {
+  border-left: 1px solid var(--surface2, #585b70);
+}
+
+.perf-nudge:hover {
+  border-color: var(--subtext1, #bac2de);
+}
+
+.perf-nudge .player-button:hover:not(:disabled) {
+  background: var(--surface0, #313244);
+  color: var(--text);
+  /* Pin the divider (see .deck-bpm hover note) */
+  border-color: var(--surface2, #585b70);
 }
 
 .perf-pads .hot-cue {
@@ -522,12 +541,9 @@
   opacity: 0.45;
 }
 
-/* EQ bands grouped tight between the TRIM/FLT flanks — no box, placement
-   is the separation */
-.perf-eqgroup {
-  display: flex;
-  gap: 6px;
-}
+/* TRIM/EQ/FLT and PFL spread evenly across the knob row (PFL rightmost,
+   same side on both decks) */
+.perf-knobrow .perf-pfl { align-self: flex-start; }
 
 /* Custom horizontal faders: the label rides the handle (no label column).
    Polarity is universal (right = faster / louder) — faders never mirror. */
@@ -662,7 +678,13 @@
   position: relative;
 }
 
-.perf-match { flex-shrink: 0; }
+/* MATCH glyph: = (match) / ≠ (out of pitch-fader reach) */
+.perf-mix-foot .player-button.perf-mini.perf-match {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 7px;
+}
 .perf-match-hint { color: var(--red); border-color: var(--red); }
 
 /* PFL toggle (headphone glyph) — lit green while the channel feeds the Cue bus */
@@ -683,9 +705,19 @@
   box-shadow: 0 0 6px var(--green);
 }
 
-/* Key Lock toggle (key-lock 03) — next to the KEY readout, lit while
-   tempo changes leave the Track's Key unchanged */
-.perf-keylock { flex-shrink: 0; }
+/* Key Lock toggle (key-lock 03) — padlock glyph leading the foot row,
+   lit while tempo changes leave the Track's Key unchanged */
+.perf-keylock {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.perf-keylock-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
 
 /* Drift marker (key-lock 04): the readout dims while the sounding key has
    drifted from the Track's Key (Key Lock off, |pitch| ≥ threshold). The ~
@@ -699,10 +731,16 @@
   box-shadow: 0 0 6px var(--green);
 }
 
+/* Held nudge reads as fill + yellow text (segments own no border; a
+   border-color accent would tint only this segment's divider edge). */
 .perf-nudge-held {
   background: var(--surface1);
   color: var(--yellow);
-  border-color: var(--yellow);
+}
+
+.perf-nudge .player-button.perf-nudge-held:hover:not(:disabled) {
+  background: var(--surface1);
+  color: var(--yellow);
 }
 
 /* ── On-control key hints (shared map — performanceKeys.ts) ────── */
