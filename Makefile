@@ -8,6 +8,7 @@ dev: frontend/node_modules/.package-lock.json
 # Everything in one command: backend + frontend + desktop shell.
 # Quitting the window (Cmd+Q) shuts the servers down too.
 dev-app: frontend/node_modules/.package-lock.json desktop/node_modules/.package-lock.json
+	desktop/ensure-electron.sh
 	uv run scripts/dev.py --app
 
 # npm creates node_modules/.package-lock.json on install; rebuild when the
@@ -18,6 +19,7 @@ frontend/node_modules/.package-lock.json: frontend/package.json frontend/package
 # Desktop shell (attach-only Electron window; see desktop/README.md).
 # Attaches to a running `make dev` at PORT (default 5173).
 app: desktop/node_modules/.package-lock.json
+	desktop/ensure-electron.sh
 	cd desktop && npx electron . --port $(PORT)
 
 desktop/node_modules/.package-lock.json: desktop/package.json desktop/package-lock.json

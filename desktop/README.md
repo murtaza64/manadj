@@ -47,12 +47,13 @@ issue file.
 
 ## Troubleshooting
 
-"Electron failed to install correctly": the postinstall that downloads the
-Electron binary was blocked (npm allow-scripts) or silently no-opped
-(observed on Node 26: `install.js` cache-hits then exits without extracting).
-Fix manually:
+"Electron failed to install correctly" / "electron is not installed": the
+postinstall that downloads the Electron binary was blocked (npm allow-scripts)
+or silently no-opped (observed on Node 26: `install.js` cache-hits then exits
+without extracting). `make app` / `make dev-app` self-heal this via
+`ensure-electron.sh` (extracts from the electron cache, writes `path.txt`).
+If even that fails, the manual steps are the same ones it automates:
 
-    npm approve-scripts electron
-    cd node_modules/electron
+    cd node_modules/electron && node install.js
     ditto -x -k ~/Library/Caches/electron/*/electron-v*-darwin-arm64.zip dist/
     printf 'Electron.app/Contents/MacOS/Electron' > path.txt
