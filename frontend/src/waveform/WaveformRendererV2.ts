@@ -360,7 +360,6 @@ export class WaveformRendererV2 {
 
   private visibleSeconds = DEFAULT_VISIBLE_SECONDS;
   private lastPlayhead = 0;
-  private dragOffsetPx = 0;
   private animationFrame: number | null = null;
 
   // Externally-set window (DAW timeline), as normalized track positions.
@@ -595,9 +594,7 @@ export class WaveformRendererV2 {
     } else {
       visibleSeconds = this.visibleSeconds;
       const marker = this.config.playMarkerPosition ?? 0.25;
-      const dragSeconds =
-        (this.dragOffsetPx / (this.canvas.clientWidth || 1)) * visibleSeconds;
-      startTime = this.lastPlayhead - marker * visibleSeconds - dragSeconds;
+      startTime = this.lastPlayhead - marker * visibleSeconds;
     }
     return { startTime, visibleSeconds, playhead: this.lastPlayhead, w, h, dpr };
   }
@@ -1010,22 +1007,10 @@ export class WaveformRendererV2 {
     else this.zoomOut();
   }
 
-  /** Shift the visible content by a pixel delta (CSS pixels) during a drag. */
-  public setDragOffset(pixels: number): void {
-    this.dragOffsetPx = pixels;
-  }
-
-  /**
-   * End a drag: return the seek time it corresponds to (undefined if no
-   * data). Drag right = backward in time. The renderer never seeks itself.
-   */
-  public commitDrag(): number | undefined {
-    if (!this.data) return undefined;
-    const dragSeconds =
-      (this.dragOffsetPx / (this.canvas.clientWidth || 1)) * this.visibleSeconds;
-    this.dragOffsetPx = 0;
-    const seekTime = this.lastPlayhead - dragSeconds;
-    return Math.max(0, Math.min(this.data.duration, seekTime));
+  /** The current visible window, in track seconds (drag-to-scrub converts
+   * pixels to time with it when the caller doesn't own the zoom). */
+  public getVisibleSeconds(): number {
+    return this.visibleSeconds;
   }
 
   /** Click-to-seek: the track time under the pointer (all modes). */

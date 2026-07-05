@@ -68,9 +68,15 @@ export default function WebGLWaveform({
     }
   }, [visibleSeconds, waveformData, rendererRef]);
 
-  // Drag-to-scrub state
+  // Drag-to-scrub: REAL seeks per pointer move (silent — the deck pauses
+  // for the drag's duration). The playhead is then always where the view
+  // says, so every playhead consumer (guides, minimap, readouts) tracks the
+  // drag for free — no visual-offset side channel to keep in sync. Cheap by
+  // construction: a seek on a paused buffer deck is an anchor update
+  // (ADR 0018), and the engine clamps to the track.
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
+  const dragStartPlayhead = useRef(0);
   const wasPlaying = useRef(false);
 
   const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -78,10 +84,9 @@ export default function WebGLWaveform({
 
     isDragging.current = true;
     dragStartX.current = event.clientX;
+    dragStartPlayhead.current = clock.getPlayhead();
     event.currentTarget.style.cursor = 'grabbing';
 
-    // Pause playback during the drag; the clock then holds still while the
-    // drag offset shifts the visible content.
     wasPlaying.current = transport.isPlaying();
     if (wasPlaying.current) {
       transport.pause();
@@ -90,18 +95,17 @@ export default function WebGLWaveform({
 
   const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDragging.current || !rendererRef.current) return;
-    rendererRef.current.setDragOffset(event.clientX - dragStartX.current);
+    // Drag right = backward in time (content follows the pointer).
+    const dx = event.clientX - dragStartX.current;
+    const width = event.currentTarget.clientWidth || 1;
+    const seconds = visibleSeconds ?? rendererRef.current.getVisibleSeconds();
+    transport.seek(dragStartPlayhead.current - (dx / width) * seconds);
   };
 
   const endDrag = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDragging.current) return;
     isDragging.current = false;
     event.currentTarget.style.cursor = 'grab';
-
-    const seekTime = rendererRef.current?.commitDrag();
-    if (seekTime !== undefined) {
-      transport.seek(seekTime);
-    }
     if (wasPlaying.current) {
       transport.play();
     }
