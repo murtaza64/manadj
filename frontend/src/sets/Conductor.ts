@@ -422,7 +422,20 @@ export class Conductor {
       return;
     }
 
-    const hard = this.pendingHardSync || jumpCrossed(this.plan, this.lastTickT, t);
+    // A deck JOINING this tick (plan says play, engine not yet playing)
+    // hard-syncs BOTH decks in this same task: worklet starts posted
+    // together share their render-quantum boundary, so the decks' start
+    // latencies cancel. Started apart, the latency difference is a
+    // constant audible flam that the drift check can never see — the
+    // playhead estimate is anchored at post time, so estimate-vs-plan
+    // reads ~0 while the actual audio runs behind by each deck's own
+    // start latency (the set-playback clash bug; pausing and resuming
+    // "fixed" it by doing exactly this restart-together).
+    const joining =
+      (readyA && state.decks.A.playing && !this.engines.A.getSnapshot().playing) ||
+      (readyB && state.decks.B.playing && !this.engines.B.getSnapshot().playing);
+    const hard =
+      this.pendingHardSync || joining || jumpCrossed(this.plan, this.lastTickT, t);
     this.pendingHardSync = false;
     this.lastTickT = t;
     this.self(() => {

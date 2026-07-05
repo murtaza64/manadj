@@ -1,0 +1,259 @@
+/**
+ * Conductor drive-loop tests (sets 04) — the deck-join alignment bug.
+ *
+ * The platform fact these fakes model (ADR 0018 anchor math): a start
+ * command posted to the worklet begins rendering at a later render-quantum
+ * boundary. Starts posted in the SAME task drain together and share that
+ * boundary (equal latency); starts in different tasks do not. The engine's
+ * playhead ESTIMATE anchors at post time, so the Conductor's drift check —
+ * estimate vs plan, both on the audio clock — reads ~0 regardless of what
+ * the audio actually does: actual-vs-estimate offsets are invisible to it.
+ *
+ * The reported bug: deck B joins mid-set (its window entry) in its own
+ * task, so its start latency differs from A's — the decks sound a constant
+ * few-to-tens-of-ms flam ("clashing") that no drift correction can see.
+ * Pausing and resuming fixed it because resume restarts BOTH decks in one
+ * task. The fix automates exactly that: a join hard-syncs every playing
+ * deck in the same task.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { _resetAudibleSurfacesForTests } from '../playback/audibleSurface';
+import type { DeckEngine } from '../playback/DeckEngine';
+import type { ChannelId, Mixer } from '../playback/mixer';
+import type { Transition } from '../editor/mixModel';
+import { Conductor } from './Conductor';
+import { planSet, planStateAt, type SetPlan } from './planner';
+
+// ── Fakes ──────────────────────────────────────────────────────────────
+
+/** Deterministic "audio thread": a start posted at clock time `t` becomes
+ * audible at `t + latencyByPostTime(t)` — same post instant, same boundary. */
+class FakeEngine {
+  trackId: number | null = null;
+  seeks = 0;
+  private playingFlag = false;
+  private parkedAt = 0;
+  /** Estimate anchor (post time — mirrors DeckEngine.beginStart). */
+  private anchorPos = 0;
+  private anchorCtx = 0;
+  /** When the audio ACTUALLY begins advancing from anchorPos. */
+  private actualStartCtx = 0;
+
+  private readonly clock: () => number;
+  private readonly latencyOf: (postTime: number) => number;
+
+  constructor(clock: () => number, latencyOf: (postTime: number) => number) {
+    this.clock = clock;
+    this.latencyOf = latencyOf;
+  }
+
+  getSnapshot() {
+    return {
+      trackId: this.trackId,
+      loadState: this.trackId === null ? 'empty' : 'ready',
+      playing: this.playingFlag,
+      pitchPercent: 0,
+      bendPercent: 0,
+      previewing: false,
+      hotCuePreviewSlot: null,
+      keyLock: true,
+    } as ReturnType<DeckEngine['getSnapshot']>;
+  }
+
+  /** The engine's estimate: anchored at post time (the real anchor math). */
+  getPlayhead(): number {
+    if (!this.playingFlag) return this.parkedAt;
+    return this.anchorPos + (this.clock() - this.anchorCtx);
+  }
+
+  /** What the ears hear: audio begins at the start's quantum boundary. */
+  actualPosition(): number {
+    if (!this.playingFlag) return this.parkedAt;
+    return this.anchorPos + Math.max(0, this.clock() - this.actualStartCtx);
+  }
+
+  private splice(at: number): void {
+    const now = this.clock();
+    this.anchorPos = at;
+    this.anchorCtx = now;
+    this.actualStartCtx = now + this.latencyOf(now);
+  }
+
+  seek(t: number): void {
+    this.seeks++;
+    if (this.playingFlag) this.splice(t);
+    else this.parkedAt = t;
+  }
+
+  play(): void {
+    if (this.playingFlag) return;
+    this.playingFlag = true;
+    this.splice(this.parkedAt);
+  }
+
+  pause(): void {
+    if (!this.playingFlag) return;
+    this.parkedAt = this.getPlayhead();
+    this.playingFlag = false;
+  }
+
+  setPitch(): void {}
+  setBend(): void {}
+  subscribe(): () => void {
+    return () => {};
+  }
+  addTransportEventListener(): () => void {
+    return () => {};
+  }
+}
+
+function fakeMixer(clock: () => number): Mixer {
+  const channel = { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pfl: false };
+  return {
+    now: clock,
+    engageAutomation: () => {},
+    disengageAutomation: () => {},
+    setAutomation: () => {},
+    subscribe: () => () => {},
+    getChannelState: () => channel,
+    getCrossfader: () => 0,
+    getCrossfaderEnabled: () => true,
+    getMaster: () => 1,
+    setFader: () => {},
+    setEq: () => {},
+    setFilter: () => {},
+    setCrossfader: () => {},
+  } as unknown as Mixer;
+}
+
+/** Two 120s tracks, one 10s transition window at A's t=60 (B enters at its
+ * own t=0): decks overlap for mix 60..70. */
+function overlapPlan(): SetPlan {
+  const transition: Transition = {
+    startSec: 60,
+    durationSec: 10,
+    bInSec: 0,
+    tempoMatch: false,
+    lanes: {},
+  };
+  return planSet({
+    entries: [
+      { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+      { trackId: 2, pin: null },
+    ],
+    tracks: {
+      1: { durationSec: 120, bpm: null, mainCueSec: 0 },
+      2: { durationSec: 120, bpm: null, mainCueSec: 0 },
+    },
+    transitionsByUuid: { t1: transition },
+    takesByUuid: {},
+  });
+}
+
+// ── Harness ────────────────────────────────────────────────────────────
+
+let now = 0;
+let pendingFrame: (() => void) | null = null;
+
+/** Advance the clock and run the Conductor's scheduled tick. */
+function tickAt(t: number): void {
+  now = t;
+  const frame = pendingFrame;
+  pendingFrame = null;
+  frame?.();
+}
+
+function makeConductor(latencyOf: (postTime: number) => number) {
+  const clock = () => now;
+  const engines = { A: new FakeEngine(clock, latencyOf), B: new FakeEngine(clock, latencyOf) };
+  const plan = overlapPlan();
+  const conductor = new Conductor(
+    plan,
+    { mixer: fakeMixer(clock), engines: engines as unknown as Record<ChannelId, DeckEngine> },
+    {
+      loadTrack: (deck, trackId) => {
+        engines[deck].trackId = trackId;
+      },
+      onStopped: () => {},
+    }
+  );
+  return { conductor, engines, plan };
+}
+
+/** Per-deck actual-audio offset from its plan position at mix time t. */
+function actualOffsets(
+  engines: { A: FakeEngine; B: FakeEngine },
+  plan: SetPlan,
+  t: number
+): { A: number; B: number } {
+  const state = planStateAt(plan, t);
+  return {
+    A: engines.A.actualPosition() - state.decks.A.trackTime,
+    B: engines.B.actualPosition() - state.decks.B.trackTime,
+  };
+}
+
+beforeEach(() => {
+  now = 0;
+  pendingFrame = null;
+  _resetAudibleSurfacesForTests();
+  vi.stubGlobal('requestAnimationFrame', (cb: () => void) => {
+    pendingFrame = cb;
+    return 1;
+  });
+  vi.stubGlobal('cancelAnimationFrame', () => {
+    pendingFrame = null;
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('deck-join alignment (the set-playback clash bug)', () => {
+  // Start latency: 2ms for everything posted at mix start, 20ms for the
+  // task where B joins — different tasks, different quantum boundaries.
+  const latency = (postTime: number) => (postTime < 1 ? 0.002 : 0.02);
+
+  it('a deck joining mid-set does not leave the decks audibly misaligned', () => {
+    const { conductor, engines, plan } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0); // loads requested; the load-latency freeze holds this tick
+    tickAt(0.01); // A starts (latency 2ms)
+    tickAt(60.2); // B joins inside the window (latency 20ms)
+    tickAt(65); // mid-overlap
+    const off = actualOffsets(engines, plan, 65);
+    // Relative misalignment is the audible clash; each deck's absolute
+    // offset (its own start latency) is inaudible.
+    expect(Math.abs(off.A - off.B)).toBeLessThan(0.003);
+    conductor.stop();
+  });
+
+  it('the join realigns by restarting in ONE task, not by per-tick reseeking', () => {
+    const { conductor, engines } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0); // load-freeze tick
+    tickAt(0.01); // A starts
+    tickAt(60.2); // the join
+    const seeksAfterJoin = engines.A.seeks;
+    tickAt(61);
+    tickAt(62);
+    tickAt(65);
+    // Steady overlap: no further corrective churn on the running deck.
+    expect(engines.A.seeks).toBe(seeksAfterJoin);
+    conductor.stop();
+  });
+
+  it('the running deck is restarted at its own plan position (audio continuity)', () => {
+    const { conductor, engines, plan } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0); // load-freeze tick
+    tickAt(0.01); // A starts
+    tickAt(60.2);
+    // Immediately after the join tick, A's estimate sits at its plan
+    // position for that instant — the restart is a re-anchor, not a jump.
+    const state = planStateAt(plan, 60.2);
+    expect(engines.A.getPlayhead()).toBeCloseTo(state.decks.A.trackTime, 6);
+    conductor.stop();
+  });
+});
