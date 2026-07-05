@@ -302,8 +302,9 @@ void main() {
 const OVERLAY_FS = `#version 300 es
 precision mediump float;
 in vec3 v_color;
+uniform float u_alpha;
 out vec4 outColor;
-void main() { outColor = vec4(v_color, 1.0); }`;
+void main() { outColor = vec4(v_color, u_alpha); }`;
 
 interface TexBinding {
   tex: WebGLTexture;
@@ -763,8 +764,32 @@ export class WaveformRendererV2 {
       orthoMatrix(0, view.w, view.h, 0),
     );
     const uOffset = gl.getUniformLocation(prog, 'u_offsetPx');
+    const uAlpha = gl.getUniformLocation(prog, 'u_alpha');
+    gl.uniform1f(uAlpha, 1);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE); // additive (legacy parity: rgb premultiplied)
+
+    // Played-portion dim (minimap, zoned-marks verdict): 0.35 black wash
+    // over the body left of the playhead. Draw order body → dim → marks,
+    // so every mark keeps full brightness in the played region.
+    if (this.isMinimap && !opts.skipPlayhead) {
+      const dimX = Math.max(
+        0,
+        Math.min(view.w, (view.playhead / this.data!.duration) * view.w),
+      );
+      if (dimX > 0) {
+        const dimVerts: number[] = [];
+        pushRect(dimVerts, 0, 0, dimX, view.h, 0, 0, 0);
+        // Blend rgb only — writing src alpha into the canvas would make it
+        // semi-transparent and let the page background composite through
+        // (a gray wash instead of a darkening).
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+        gl.uniform1f(uAlpha, 0.35);
+        this.drawTriangles(dimVerts, this.overlayVao!, this.overlayBuffer!);
+        gl.uniform1f(uAlpha, 1);
+        gl.blendFunc(gl.ONE, gl.ONE);
+      }
+    }
 
     this.drawBeatgrid(view, uOffset);
     gl.uniform1f(uOffset, 0);
@@ -777,8 +802,10 @@ export class WaveformRendererV2 {
     // Hot cues draw with standard alpha blending (accurate colors).
     const hotCueVerts: number[] = [];
     this.pushHotCues(view, hotCueVerts);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+    if (this.isMinimap) gl.uniform1f(uAlpha, 0.95);
     this.drawTriangles(hotCueVerts, this.overlayVao!, this.overlayBuffer!);
+    gl.uniform1f(uAlpha, 1);
     gl.blendFunc(gl.ONE, gl.ONE);
 
     if (!opts.skipPlayhead) {
@@ -905,11 +932,19 @@ export class WaveformRendererV2 {
     if (cueX < 0 || cueX >= view.w) return;
     const [r, g, b] = [0.79, 0.86, 0.26]; // var(--yellow)
     pushRect(verts, cueX, 0, 2, view.h, r, g, b);
-    const triH = this.isMinimap ? 12 * view.dpr : view.h * 0.05;
     const cx = cueX + 1;
     if (this.isMinimap) {
-      verts.push(cx - triH / 2, 0, r, g, b, cx + triH / 2, 0, r, g, b, cx, triH, r, g, b);
+      // Zoned marks: the main cue's identity glyph is a BOTTOM triangle
+      // (the top zone belongs to hotcue flags, mid to guide arrows).
+      const halfW = 5 * view.dpr;
+      const depth = 8 * view.dpr;
+      verts.push(
+        cx - halfW, view.h, r, g, b,
+        cx + halfW, view.h, r, g, b,
+        cx, view.h - depth, r, g, b,
+      );
     } else {
+      const triH = view.h * 0.05;
       verts.push(
         cx - triH / 2, view.h, r, g, b,
         cx + triH / 2, view.h, r, g, b,
@@ -923,10 +958,17 @@ export class WaveformRendererV2 {
       const x = this.timeToX(hc.time, view);
       if (x < 0 || x >= view.w) continue;
       const [r, g, b] = HOT_CUE_COLORS[slot] ?? [1, 1, 1];
-      const width = (this.isMinimap ? 2 : 3) * view.dpr;
+      if (this.isMinimap) {
+        // Zoned marks: 2px full-height pole flying a 5×5 square flag off
+        // its top RIGHT — the hotcues' identity zone is the top edge.
+        pushRect(verts, x - 1 * view.dpr, 0, 2 * view.dpr, view.h, r, g, b);
+        pushRect(verts, x + 1 * view.dpr, 0, 5 * view.dpr, 5 * view.dpr, r, g, b);
+        continue;
+      }
+      const width = 3 * view.dpr;
       pushRect(verts, x, 0, width, view.h, r, g, b);
       // Edge-anchored rows: fixed-size triangle at the baseline edge.
-      if (!this.isMinimap && this.anchor !== 'center') {
+      if (this.anchor !== 'center') {
         const tri = 10 * view.dpr;
         const cx = x + width / 2;
         if (this.anchor === 'top') {
