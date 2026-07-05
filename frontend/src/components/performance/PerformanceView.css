@@ -224,7 +224,8 @@
 }
 
 .perf-zone-track .deck-bpm { height: 20px; }
-.perf-zone-track .deck-bpm-input { width: 42px; font-size: 11px; padding: 1px 4px; }
+/* Width stays the shared 4.5ch/34px (deckControls.css) — no local width. */
+.perf-zone-track .deck-bpm-input { font-size: 11px; padding: 1px 4px; }
 .perf-zone-track .deck-bpm > .player-button { min-width: 20px; padding: 1px 4px; }
 .perf-zone-track .deck-bpm-steps .player-button { min-width: 18px; padding: 0 3px; }
 .perf-zone-track .deck-bpm-steps .player-button svg,
