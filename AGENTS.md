@@ -18,7 +18,11 @@ This repo uses jj. One jj change per issue; change description = `<feature-slug>
 
 ### Parallel work (multiple agents)
 
-Trunk-based: `main` is trunk and advances after a green gate; landed history is immutable. One lane = one workspace = one agent. Never rewrite a change another workspace's `@` sits on or descends from; never touch another lane's workspace. Real DB lives only in the default workspace — lanes APFS-clone it (`cp -c`), never symlink; migrations touch the real DB only after landing. Full rules, lane registry (`.lanes/`), hotspot protocol, probes: `docs/agents/parallel-work.md` (ADR 0012).
+Trunk-based: `main` is trunk; landed history is immutable. Landing policy: bugfixes and incidental maintenance auto-land after agent-owned verification (the test suite is a suggestion; single alembic head is the one hard invariant); feature work and tracked refactors require human review first — run the lane app (`uv run scripts/agent/lane_app.py start`) and request review per `docs/agents/parallel-work.md`. One lane = one workspace = one agent. Never rewrite a change another workspace's `@` sits on or descends from; never touch another lane's workspace. Real DB lives only in the default workspace — lanes APFS-clone it (`cp -c`), never symlink; migrations touch the real DB only after landing. Full rules, lane registry (`.lanes/`), hotspot protocol, probes: `docs/agents/parallel-work.md` (ADR 0012).
+
+### Spawning sessions
+
+Hand work to a fresh opencode session via the server API instead of a pasted handoff: write the handoff to `.scratch/<feature>/handoffs/`, then run `uv run scripts/agent/spawn_session.py`. See `docs/agents/spawn-session.md`.
 
 ### Database migrations
 

@@ -28,3 +28,7 @@ Deliberate consequences to preserve, not fix:
 ## Blocked by
 
 - `01-quantize-toggle-placement-snapping.md`
+
+## Comments
+
+**2026-07-05 — Done** (jj change `vrwtykmm`, workspace looping). `phasePreservingJumpTarget(cue, playhead, beatTimes)` in `playback/quantize.ts`: landing = nearest gridline to the cue + the playhead's intra-beat phase (whole-beat displacement; degrades to exact without a grid or with the playhead before the first beat). Reducer applies it only on the `hot-cue-down` playing branch — paused triggers, seek/beat-jump, and cue return untouched. Also moved DeckEngine's `hotCue` capture tap after the reducer so recorded evidence is the actual landing, not the raw cue time (Take vectorization measures jump deltas from it). Tests: quantize.test.ts phase-target block; transport.test.ts phase-preserving describe (on/off/gridless/paused/seek-exact).
