@@ -2,7 +2,7 @@
 
 (Renumbered from 13, 2026-07-05 — parallel filing collided with 13-rehearsal-loop.)
 
-Status: ready-for-human
+Status: done (approved + landed 2026-07-05, change `uqntzoto`)
 
 ## Parent
 
@@ -68,6 +68,12 @@ already implemented; no prior rejection on record.
 > mutually exclusive views, and leaving the editor ends its audition —
 > so editor-audition ghosts have no on-screen venue today. Styling is a
 > first DAW-style cut; iterate freely.
+
+> **Done (2026-07-05, change `uqntzoto`).** Approved after one iteration
+> round: base indicators dim while a ghost shows (ghost reads as
+> winning), and the VOL fill tracks the audible (ghost) level while
+> automation is engaged. Landed with the full gate green (pytest 648,
+> vitest 926, build, single alembic head).
 
 ## Agent Brief
 
