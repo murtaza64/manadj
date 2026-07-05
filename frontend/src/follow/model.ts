@@ -319,6 +319,23 @@ export function followTier(candidate: Track, references: FollowReference[]): num
   return best;
 }
 
+/** Section-header names reifying the tiers (follow-mode 08). Indexed by
+ * followTier's result; keep in lockstep with the tier constants above. */
+const TIER_LABELS: readonly string[] = [
+  '★ Favorited transition',
+  '🔗 Linked',
+  '◆ Saved transition',
+  'Same key',
+  'Relative key',
+  'Key up',
+  'Key down',
+  'Other matches',
+];
+
+export function tierLabel(tier: number): string {
+  return TIER_LABELS[tier] ?? TIER_LABELS[TIER_LABELS.length - 1];
+}
+
 /**
  * Tier-order the followed list. The sort is stable, so the incoming order
  * (the view's own sort) holds within each tier — tiering groups, never

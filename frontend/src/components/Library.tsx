@@ -18,7 +18,14 @@ import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
 import { linkedIdsOf, useLinks } from '../links/linkStore';
 import { knownStrengthOf } from '../links/known';
-import { candidateIdSet, deriveFollowQuery, followedReferences, orderByTier } from '../follow/model';
+import {
+  candidateIdSet,
+  deriveFollowQuery,
+  followedReferences,
+  followTier,
+  orderByTier,
+  tierLabel,
+} from '../follow/model';
 import type { FollowReference } from '../follow/model';
 import { useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
@@ -473,6 +480,13 @@ export default function Library({
       followReferences
     );
   }
+
+  /** Tier section headers (follow-mode 08): only while Follow filters —
+   * manual browsing stays a flat table. Applies wherever the candidate
+   * filter applied (never the split's playlist pane). */
+  const followGroupLabel = followCandidateIds
+    ? (t: Track) => tierLabel(followTier(t, followReferences))
+    : undefined;
 
   // ── Selection machinery: one instance per pane ─────────────────────────
   // 'main' is the single always-present table (playlist or library,
@@ -944,6 +958,7 @@ export default function Library({
                   links={links}
                   deckAId={decks.A.loadedTrack?.id ?? null}
                   deckBId={decks.B.loadedTrack?.id ?? null}
+                  groupLabelFor={followGroupLabel}
                   sortColumn={filters.sortColumn}
                   sortDirection={filters.sortDirection}
                   onSort={handleSortLibrary}
@@ -1004,6 +1019,7 @@ export default function Library({
                   links={links}
                   deckAId={decks.A.loadedTrack?.id ?? null}
                   deckBId={decks.B.loadedTrack?.id ?? null}
+                  groupLabelFor={followGroupLabel}
                   sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
                   sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
                   onSort={handleSort}

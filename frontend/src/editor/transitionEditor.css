@@ -169,6 +169,12 @@
   outline: none;
 }
 
+/* ★ renders smaller than other glyphs at the switcher's 11px — bump the
+   favorite control ~30% (follow-mode 08 rider). */
+.editor-switcher-star {
+  font-size: 14px;
+}
+
 .editor-switcher-star.on {
   color: var(--yellow, #f9e2af);
 }

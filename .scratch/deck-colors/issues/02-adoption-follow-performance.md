@@ -1,6 +1,6 @@
 # 02 — Deck colors: adoption in Follow and the Performance view
 
-Status: ready-for-agent
+Status: done — pending user eye-verify
 
 ## What to build
 
@@ -27,3 +27,7 @@ Untouched: PFL, play buttons, pitch accent, waveforms, the library Player.
 ## Blocked by
 
 - 01-single-source-of-truth
+
+## Comments
+
+- Done (rrsmrnkp, lane followmode): Follow toggles + params-modal badges in Deck colors; perf deck tags (`.perf-decktag.deck-a/b`); channel VOL fill via new HFader `fillColor` (MASTER untouched); crossfader `crossfade` mode — opposite-side fills (right-of-handle cyan/A, left magenta/B, position-based) + colored end labels in physical orientation; per-deck load-button colors. All via the issue-01 vars; no new hex literals. NOTE: this change was untangled (jj split) out of a working copy shared with the follow-mode 08 agent; TrackRow.css hunks were separated manually.

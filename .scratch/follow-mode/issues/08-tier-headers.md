@@ -1,6 +1,6 @@
 # 08 — Tier headers: reify candidate strength in the results list
 
-Status: ready-for-agent
+Status: done — pending user eye-verify
 
 ## Parent
 
@@ -43,3 +43,7 @@ Tier order (provisional, still model-internal), reflecting the linked-pairs PRD'
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+- Done (lqxrtuxx, `follow-mode: 08-tier-headers (implementation)`): tier group headers in TrackList while Follow filters (labels + counts from the model's tierLabel/followTier; empty tiers absent; flat table otherwise); ★/🔗/◆ split per the new numbering; ★ scaled ~1.3 in row marks + editor favorite switcher. Untangle note: implemented by a second agent in the followmode workspace concurrently with deck-colors 02 — changes were split apart before landing (deck-colors hunks in rrsmrnkp). The issue file itself landed earlier under change wsvtupok (misdescribed as "follow-mode: 08-tier-headers" — it actually contains deck-colors 01; this change is the real 08).

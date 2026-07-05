@@ -176,7 +176,7 @@ const TrackRow = memo(function TrackRow({
             <span className="track-transition-marks">
               {markA !== 'none' && (
                 <span
-                  className="track-transition-mark mark-a"
+                  className={`track-transition-mark mark-a${markA === 'preferred' ? ' mark-star' : ''}`}
                   title={`Saved transition from deck A's track${markA === 'preferred' ? ' (favorite)' : ''}`}
                 >
                   {markA === 'preferred' ? '★' : '◆'}
@@ -189,7 +189,7 @@ const TrackRow = memo(function TrackRow({
               )}
               {markB !== 'none' && (
                 <span
-                  className="track-transition-mark mark-b"
+                  className={`track-transition-mark mark-b${markB === 'preferred' ? ' mark-star' : ''}`}
                   title={`Saved transition from deck B's track${markB === 'preferred' ? ' (favorite)' : ''}`}
                 >
                   {markB === 'preferred' ? '★' : '◆'}

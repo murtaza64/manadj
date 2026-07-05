@@ -18,6 +18,7 @@ import {
   followTier,
   orderByTier,
   reduceFollow,
+  tierLabel,
   unionIds,
   type FollowEvent,
   type FollowFlags,
@@ -293,6 +294,21 @@ describe('followTier / orderByTier — candidate strength (follow-mode 04 / link
     // Input untouched; no references = no reordering.
     expect(input.map((t) => t.id)).toEqual([10, 11, 41, 12, 40, 13]);
     expect(orderByTier(input, []).map((t) => t.id)).toEqual([10, 11, 41, 12, 40, 13]);
+  });
+});
+
+describe('tierLabel — section headers (follow-mode 08)', () => {
+  it('names all eight tiers', () => {
+    expect([0, 1, 2, 3, 4, 5, 6, 7].map(tierLabel)).toEqual([
+      '★ Favorited transition',
+      '🔗 Linked',
+      '◆ Saved transition',
+      'Same key',
+      'Relative key',
+      'Key up',
+      'Key down',
+      'Other matches',
+    ]);
   });
 });
 

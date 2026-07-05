@@ -1,4 +1,4 @@
-import { type JSX } from 'react';
+import React, { type JSX } from 'react';
 import TrackRow, { type SelectMods, type TransitionMark } from './TrackRow';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon } from './icons';
 import type { Track } from '../types';
@@ -43,6 +43,11 @@ interface TrackListProps {
   links?: ReadonlySet<LinkKey>;
   deckAId?: number | null;
   deckBId?: number | null;
+  /** Section headers (follow-mode 08): when set, a full-width header row
+   * (label — count) opens each run of equal labels. The caller supplies
+   * pre-grouped tracks (Follow's tier ordering); this only renders the
+   * boundaries. Absent = flat table. */
+  groupLabelFor?: (track: Track) => string;
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
@@ -66,6 +71,7 @@ export default function TrackList({
   links,
   deckAId,
   deckBId,
+  groupLabelFor,
   sortColumn,
   sortDirection,
   onSort
@@ -167,25 +173,52 @@ export default function TrackList({
               </td>
             </tr>
           ) : (
-            tracks.map((track: Track) => (
-              <TrackRow
-                key={track.id}
-                track={track}
-                isSelected={selectedIds.has(track.id)}
-                isLoaded={loadedTrackId === track.id}
-                onSelect={onSelectTrack}
-                onLoad={onLoadTrack}
-                onLoadToDeck={onLoadToDeck}
-                getDragIds={getDragIds}
-                dragSource={dragSource}
-                onContextMenu={onRowContextMenu}
-                orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
-                markA={markFor(transitionMarksA, track.id)}
-                markB={markFor(transitionMarksB, track.id)}
-                linkedA={linkedFor(deckAId, track.id)}
-                linkedB={linkedFor(deckBId, track.id)}
-              />
-            ))
+            (() => {
+              // Group counts for the header rows (one pass; labels arrive
+              // pre-grouped, so counting runs of equals suffices — but a
+              // full tally is robust to a caller that didn't sort).
+              const counts = new Map<string, number>();
+              if (groupLabelFor) {
+                for (const t of tracks) {
+                  const label = groupLabelFor(t);
+                  counts.set(label, (counts.get(label) ?? 0) + 1);
+                }
+              }
+              let previousLabel: string | null = null;
+              return tracks.map((track: Track) => {
+                const label = groupLabelFor?.(track) ?? null;
+                const opensGroup = label !== null && label !== previousLabel;
+                previousLabel = label;
+                return (
+                  <React.Fragment key={track.id}>
+                    {opensGroup && (
+                      <tr className="track-tier-header" aria-hidden="false">
+                        <td colSpan={playOrder !== undefined ? 11 : 10}>
+                          {label}
+                          <span className="track-tier-count"> — {counts.get(label!)}</span>
+                        </td>
+                      </tr>
+                    )}
+                    <TrackRow
+                      track={track}
+                      isSelected={selectedIds.has(track.id)}
+                      isLoaded={loadedTrackId === track.id}
+                      onSelect={onSelectTrack}
+                      onLoad={onLoadTrack}
+                      onLoadToDeck={onLoadToDeck}
+                      getDragIds={getDragIds}
+                      dragSource={dragSource}
+                      onContextMenu={onRowContextMenu}
+                      orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
+                      markA={markFor(transitionMarksA, track.id)}
+                      markB={markFor(transitionMarksB, track.id)}
+                      linkedA={linkedFor(deckAId, track.id)}
+                      linkedB={linkedFor(deckBId, track.id)}
+                    />
+                  </React.Fragment>
+                );
+              });
+            })()
           )}
         </tbody>
       </table>
