@@ -182,6 +182,8 @@ export class Mixer {
    * channels run at unity (as if centered) — an accidental-kill guard. */
   private crossfaderEnabled = true;
   private master = 1; // 0..1
+  /** Master bus output device (headphone-cue 01); null = system default. */
+  private masterSinkId: string | null = null;
 
   /** Get (lazily creating / reviving) the live context and graph. */
   private ensure(): { ctx: AudioContext; strips: Record<ChannelId, ChannelStrip> } {
@@ -217,6 +219,14 @@ export class Mixer {
       this.applyCrossfader(false);
       this.applyFilter('A');
       this.applyFilter('B');
+      if (this.masterSinkId !== null) {
+        void ctx.setSinkId(this.masterSinkId).catch((err: unknown) => {
+          // Saved device gone at revival: stay on the default — master
+          // audio must never die over routing (headphone-cue PRD).
+          console.warn('[Mixer] master sink reapply failed; using default', err);
+          this.masterSinkId = null;
+        });
+      }
     }
     return { ctx: this.ctx, strips: this.strips };
   }
@@ -338,6 +348,18 @@ export class Mixer {
     this.notify();
     const { ctx } = this.ensure();
     if (this.masterGain) rampGain(ctx, this.masterGain.gain, value);
+  }
+
+  /**
+   * Route the Master bus — the whole main context — to an output device
+   * (headphone-cue 01, ADR 0017). null = system default. Remembered across
+   * graph revivals; rejects if the device is gone (callers fall back per
+   * routing.ts).
+   */
+  async setMasterSinkId(sinkId: string | null): Promise<void> {
+    const { ctx } = this.ensure();
+    await ctx.setSinkId(sinkId ?? '');
+    this.masterSinkId = sinkId;
   }
 
   /** Tear down. Safe to keep using — the graph revives on demand. */

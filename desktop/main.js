@@ -140,13 +140,17 @@ function forwardConsole(webContents) {
 }
 
 app.whenReady().then(() => {
-  // Auto-grant Web MIDI (incl. sysex) so the Controller never prompts.
-  const MIDI = new Set(["midi", "midiSysex"]);
+  // Auto-grant device capabilities so nothing prompts on the dev machine:
+  // Web MIDI (incl. sysex) for the Controller, plus media + speaker
+  // selection so enumerateDevices() exposes output ids/labels and
+  // AudioContext.setSinkId can target non-default devices (headphone-cue
+  // 01: the routing picker and the ADR 0017 cue bridge need both).
+  const GRANTED = new Set(["midi", "midiSysex", "media", "speaker-selection"]);
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) =>
-    cb(MIDI.has(permission)),
+    cb(GRANTED.has(permission)),
   );
   session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
-    MIDI.has(permission),
+    GRANTED.has(permission),
   );
   createWindow();
 });

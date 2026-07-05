@@ -73,6 +73,16 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     [engines, mixer]
   );
 
+  // Dev-only audio routing tracer (headphone-cue 01): console helpers for
+  // sink switching + the cue bridge. Lazy import keeps it out of prod.
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      void import('../dev/audioRoutingTracer').then((m) =>
+        m.installAudioRoutingTracer(mixer)
+      );
+    }
+  }, [mixer]);
+
   const queryClient = useQueryClient();
   const [loadedTracks, setLoadedTracks] = useState<Record<ChannelId, Track | null>>({
     A: null,
