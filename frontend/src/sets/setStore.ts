@@ -265,6 +265,26 @@ export function repointTakePinsLocal(takeUuid: string, transitionUuid: string): 
   notify();
 }
 
+/** Mirror the server's dangling-pin degradation (sets 12) in every
+ * loaded Set: pins of the given kind referencing a deleted artifact go
+ * Unresolved (null). Local-only — the deletion endpoint already nulled
+ * the rows server-side; without this mirror a later wholesale PUT from
+ * a loaded Set would write the dangling reference back. */
+export function degradeDeletedPinsLocal(kind: 'transition' | 'take', uuid: string): void {
+  let changed = false;
+  const entriesBySet = { ...snapshot.entriesBySet };
+  for (const [setId, entries] of Object.entries(entriesBySet)) {
+    if (!entries.some((e) => e.pin?.kind === kind && e.pin.uuid === uuid)) continue;
+    changed = true;
+    entriesBySet[Number(setId)] = entries.map((e) =>
+      e.pin?.kind === kind && e.pin.uuid === uuid ? { ...e, pin: null } : e
+    );
+  }
+  if (!changed) return;
+  snapshot = { ...snapshot, entriesBySet };
+  notify();
+}
+
 /** Forget a deleted Set's local state (selection cleared by the caller). */
 export function dropSetLocalState(setId: number): void {
   loadPromises.delete(setId);

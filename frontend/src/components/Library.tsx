@@ -389,6 +389,8 @@ export default function Library({
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['tracks'] });
       queryClient.invalidateQueries({ queryKey: ['playlist'] });
+      // Sets 12: a Set containing an archived Track is flagged, not altered.
+      queryClient.invalidateQueries({ queryKey: ['sets'] });
       showToast(count === 1 ? 'Track archived' : `${count} tracks archived`);
     },
   });
@@ -401,6 +403,7 @@ export default function Library({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tracks'] });
+      queryClient.invalidateQueries({ queryKey: ['sets'] });
     },
   });
 

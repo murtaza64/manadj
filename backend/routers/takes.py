@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.database import get_db
+from backend.routers.sets import degrade_pins
 
 router = APIRouter()
 
@@ -114,9 +115,12 @@ def set_promoted(
 
 @router.delete("/{uuid}")
 def delete_take(uuid: str, db: Session = Depends(get_db)) -> dict:
+    """Delete a Take. Set pins referencing it degrade to Unresolved
+    (sets 12) — library cleanup never corrupts a Set."""
     t = db.query(models.Take).filter(models.Take.uuid == uuid).first()
     if t is None:
         raise HTTPException(status_code=404, detail="take not found")
     db.delete(t)
+    degrade_pins(db, "take", {uuid})
     db.commit()
     return {"ok": True}

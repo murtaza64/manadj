@@ -13,6 +13,7 @@ import ContextMenu, { useContextMenuState, type MenuItem } from '../components/C
 import { useToast } from '../components/Toast';
 import { addTracksToSet, dropSetLocalState } from './setStore';
 import { createPlaylistFromSet } from './playlistFlows';
+import { ArchivedTrackFlag } from './archivedFlag';
 
 /** Same bright, fully saturated palette as playlists (repo preference). */
 const SET_COLORS: Array<{ label: string; value: string }> = [
@@ -210,7 +211,10 @@ export default function SetsSidebarSection({
                 }}
               />
             ) : (
-              <span>{set.name}</span>
+              <span>
+                {set.name}
+                {set.has_archived_tracks && <ArchivedTrackFlag compact />}
+              </span>
             )}
           </div>
         ))}

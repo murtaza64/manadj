@@ -420,6 +420,9 @@ class SetRow(BaseModel):
     display_order: int
     created_at: datetime | None
     updated_at: datetime | None
+    # Sets 12: an Archived Track in the Set flags it (sidebar + detail)
+    # rather than silently altering it — computed per response, never stored.
+    has_archived_tracks: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

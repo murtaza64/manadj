@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { TAKE_RECORDED_EVENT } from '../../capture/takeSink';
 import { requestTakeReview } from '../../capture/takeReview';
+import { degradeDeletedPinsLocal } from '../../sets/setStore';
 import './takeHistory.css';
 
 function fmtWhen(iso: string): string {
@@ -64,7 +65,12 @@ export function TakeHistoryView() {
   });
 
   const remove = async (uuid: string) => {
-    await api.takes.delete(uuid).catch((err) => console.error('take delete failed', err));
+    await api.takes
+      .delete(uuid)
+      // The endpoint degraded Set pins referencing this Take (sets 12);
+      // mirror it in loaded Sets so client-authoritative entries agree.
+      .then(() => degradeDeletedPinsLocal('take', uuid))
+      .catch((err) => console.error('take delete failed', err));
     invalidate();
   };
 

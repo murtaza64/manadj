@@ -99,6 +99,7 @@ describe('createPlaylistFromSet — track order into an ordinary Playlist', () =
       name: 'My set',
       color: '#00d0ff',
       display_order: 0,
+      has_archived_tracks: false,
     });
 
     expect(playlist.id).toBe(11);

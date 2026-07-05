@@ -18,6 +18,7 @@ vi.mock('../api/client', () => ({
 import { api } from '../api/client';
 import {
   _resetSetStoreForTests,
+  degradeDeletedPinsLocal,
   getSetEntries,
   replaceSetEntries,
   repointTakePinsLocal,
@@ -74,5 +75,28 @@ describe('repointTakePinsLocal', () => {
     repointTakePinsLocal('tk-1', 'tr-9');
 
     expect(getSetEntries(1)).toEqual([{ trackId: 10, pin: { kind: 'transition', uuid: 'tr-1' } }]);
+  });
+});
+
+describe('degradeDeletedPinsLocal (sets 12)', () => {
+  it('nulls matching pins in every loaded Set, kind-aware, without pushing', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: { kind: 'take', uuid: 'tk-1' } },
+      { trackId: 11, pin: { kind: 'transition', uuid: 'tk-1' } }, // same uuid, other kind
+      { trackId: 12, pin: null },
+    ]);
+    replaceSetEntries(2, [{ trackId: 10, pin: { kind: 'take', uuid: 'tk-1' } }]);
+    mocked.sets.replaceEntries.mockClear();
+
+    degradeDeletedPinsLocal('take', 'tk-1');
+
+    expect(getSetEntries(1)).toEqual([
+      { trackId: 10, pin: null },
+      { trackId: 11, pin: { kind: 'transition', uuid: 'tk-1' } },
+      { trackId: 12, pin: null },
+    ]);
+    expect(getSetEntries(2)).toEqual([{ trackId: 10, pin: null }]);
+    // Local-only: the deletion endpoint already nulled the rows.
+    expect(mocked.sets.replaceEntries).not.toHaveBeenCalled();
   });
 });

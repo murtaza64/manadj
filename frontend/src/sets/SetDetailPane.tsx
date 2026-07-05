@@ -70,6 +70,7 @@ import {
   useSetEntries,
 } from './setStore';
 import SetSuggestions, { type SuggestTarget } from './SetSuggestions';
+import { ArchivedTrackFlag, ArchivedTrackRowMark } from './archivedFlag';
 
 interface SetDetailPaneProps {
   setId: number;
@@ -292,6 +293,14 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
             {entries?.length ?? 0} tracks
             {plan && ` · ${fmtSec(plan.totalSec)}`}
           </span>
+          {set?.has_archived_tracks && (
+            <ArchivedTrackFlag
+              archivedTitles={(entries ?? []).flatMap((e) => {
+                const t = trackMap?.get(e.trackId);
+                return t?.archived_at ? [t.title || `Track ${t.id}`] : [];
+              })}
+            />
+          )}
         </span>
         <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           {/* Conductor transport (sets 04) — play/pause/stop are Conductor
@@ -737,6 +746,7 @@ function SetTrackRow({
         {track?.artist && (
           <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>{track.artist}</span>
         )}
+        {track?.archived_at != null && <ArchivedTrackRowMark />}
       </span>
       {/* "plays m:ss of m:ss" — the plan's audible footprint (sets 03) */}
       <span style={{ width: '110px', color: 'var(--subtext0)', fontSize: '12px', textAlign: 'right' }}>

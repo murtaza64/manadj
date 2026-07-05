@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
+from .sets import degrade_pins
 
 router = APIRouter()
 
@@ -96,9 +97,14 @@ def replace_pair(
             row.favorite = item.favorite
             row.data_json = data_json
 
+    deleted_uuids = set()
     for uuid, row in existing.items():
         if uuid not in seen_uuids:
             db.delete(row)
+            deleted_uuids.add(uuid)
+    # Set pins referencing a deleted Transition degrade to Unresolved
+    # (sets 12) — library cleanup never corrupts a Set.
+    degrade_pins(db, "transition", deleted_uuids)
 
     db.commit()
 

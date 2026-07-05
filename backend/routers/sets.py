@@ -20,6 +20,41 @@ from ..database import get_db
 router = APIRouter()
 
 
+def degrade_pins(db: Session, kind: str, uuids: set[str]) -> None:
+    """Degrade dangling pins to Unresolved (sets 12): null every Set pin
+    of the given kind referencing a deleted artifact — the DB never keeps
+    a broken reference. Called from the deletion paths (takes router,
+    transitions pair replace); the caller commits.
+    """
+    if not uuids:
+        return
+    db.query(models.SetEntry).filter(
+        models.SetEntry.pin_kind == kind,
+        models.SetEntry.pin_uuid.in_(uuids),
+    ).update(
+        {models.SetEntry.pin_kind: None, models.SetEntry.pin_uuid: None},
+        synchronize_session=False,
+    )
+
+
+def _archived_set_ids(db: Session, set_ids: list[int]) -> set[int]:
+    """The subset of the given Sets containing at least one Archived Track
+    (sets 12: the Set is flagged, never altered)."""
+    if not set_ids:
+        return set()
+    rows = (
+        db.query(models.SetEntry.set_id)
+        .join(models.Track, models.Track.id == models.SetEntry.track_id)
+        .filter(
+            models.SetEntry.set_id.in_(set_ids),
+            models.Track.archived_at.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    return {set_id for (set_id,) in rows}
+
+
 def _get_set(db: Session, set_id: int) -> models.Set:
     row = db.query(models.Set).filter(models.Set.id == set_id).first()
     if row is None:
@@ -36,17 +71,22 @@ def _with_entries(db: Session, set_id: int) -> models.Set:
     )
     if row is None:
         raise HTTPException(status_code=404, detail=f"Set {set_id} not found")
+    row.has_archived_tracks = bool(_archived_set_ids(db, [set_id]))
     return row
 
 
 @router.get("", response_model=list[schemas.SetRow])
 def list_sets(db: Session = Depends(get_db)):
     """All Sets, in sidebar order."""
-    return (
+    rows = (
         db.query(models.Set)
         .order_by(models.Set.display_order, models.Set.id)
         .all()
     )
+    flagged = _archived_set_ids(db, [r.id for r in rows])
+    for r in rows:
+        r.has_archived_tracks = r.id in flagged
+    return rows
 
 
 @router.post("", response_model=schemas.SetRow, status_code=201)
@@ -76,6 +116,7 @@ def update_set(set_id: int, payload: schemas.SetUpdate, db: Session = Depends(ge
         setattr(row, field, value)
     db.commit()
     db.refresh(row)
+    row.has_archived_tracks = bool(_archived_set_ids(db, [set_id]))
     return row
 
 

@@ -1009,6 +1009,8 @@ export interface SetRowWire {
   name: string;
   color: string | null;
   display_order: number;
+  /** Sets 12: the Set contains an Archived Track — flagged, never altered. */
+  has_archived_tracks: boolean;
 }
 
 export interface SetEntryItemWire {
