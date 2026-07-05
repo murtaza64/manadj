@@ -306,6 +306,9 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
             // always be turn-off-able, even if the Deck somehow emptied.
             // (The reducer enforces the same rule; disabled is just UI.)
             const actionable = reference !== null || on;
+            // Deck color when on (identity, CONTEXT.md: Deck color) —
+            // green would say "active" without saying which deck.
+            const deckColor = `var(--deck-${deck.toLowerCase()})`;
             return (
               <button
                 key={deck}
@@ -324,8 +327,8 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
                   padding: '4px 0',
                   width: '28px',
                   background: 'transparent',
-                  color: on ? 'var(--green)' : actionable ? 'var(--text)' : 'var(--overlay0)',
-                  border: `1px solid ${on ? 'var(--green)' : 'var(--surface0)'}`,
+                  color: on ? deckColor : actionable ? 'var(--text)' : 'var(--overlay0)',
+                  border: `1px solid ${on ? deckColor : 'var(--surface0)'}`,
                   cursor: actionable ? 'pointer' : 'not-allowed',
                   fontSize: '12px',
                   fontWeight: 'bold',

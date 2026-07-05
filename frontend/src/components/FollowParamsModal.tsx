@@ -117,7 +117,11 @@ export default function FollowParamsModal({
                   flexWrap: 'wrap',
                 }}
               >
-                <span style={{ color: 'var(--green)', fontWeight: 'bold' }}>⟲{deck}</span>
+                <span
+                  style={{ color: `var(--deck-${deck.toLowerCase()})`, fontWeight: 'bold' }}
+                >
+                  {deck}
+                </span>
                 <span style={{ color: 'var(--text)' }}>
                   {reference.title || reference.filename}
                 </span>

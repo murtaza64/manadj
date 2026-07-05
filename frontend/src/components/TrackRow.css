@@ -287,6 +287,24 @@ a.provenance-chip:hover {
   border-color: var(--text);
 }
 
+/* Deck colors (CONTEXT.md: Deck color): the per-deck load buttons carry
+   their target's identity (deck-colors 02). */
+.track-load-button-A {
+  color: var(--deck-a);
+}
+
+.track-load-button-B {
+  color: var(--deck-b);
+}
+
+.track-load-button-A:hover {
+  border-color: var(--deck-a);
+}
+
+.track-load-button-B:hover {
+  border-color: var(--deck-b);
+}
+
 /* Play order (#) cell — playlist tables only (playlist-editing 04) */
 .track-order-cell {
   color: var(--subtext0);
@@ -299,3 +317,4 @@ a.provenance-chip:hover {
 .track-row-archived > td {
   opacity: 0.5;
 }
+

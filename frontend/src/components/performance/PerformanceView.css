@@ -140,6 +140,17 @@
   flex-shrink: 0;
 }
 
+/* Deck colors (CONTEXT.md: Deck color) — identity, never state. */
+.perf-decktag.deck-a {
+  color: var(--deck-a);
+  border-color: var(--deck-a);
+}
+
+.perf-decktag.deck-b {
+  color: var(--deck-b);
+  border-color: var(--deck-b);
+}
+
 /* ── The band and its zones ───────────────────────────────────── */
 
 .perf-deck-band {
@@ -503,7 +514,9 @@
   background: var(--surface1);
 }
 
-/* Level fill (VOL/MASTER): the track lights up to the handle */
+/* Level fill (VOL/MASTER): the track lights up to the handle.
+   Channel VOL overrides the color per Deck (deck-colors 02); the
+   crossfader paints two of these (opposite-side Deck colors). */
 .perf-fader-fill {
   position: absolute;
   top: 50%;
@@ -511,6 +524,27 @@
   height: 2px;
   transform: translateY(-50%);
   background: var(--green);
+}
+
+/* Crossfader end labels: physical orientation (A left, B right) — only
+   the fills are reversed. */
+.perf-xfade-end {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.perf-xfade-end.a {
+  left: 3px;
+  color: var(--deck-a);
+}
+
+.perf-xfade-end.b {
+  right: 3px;
+  color: var(--deck-b);
 }
 
 .perf-fader-detent {

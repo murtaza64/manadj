@@ -439,6 +439,7 @@ function MixZone({ track }: { track: Track | null }) {
       <HFader
         label="VOL"
         fill
+        fillColor={`var(--deck-${deck.toLowerCase()})`}
         min={0}
         max={1}
         value={channel.fader}
@@ -569,7 +570,7 @@ export function DeckPanel({
   return (
     <section className={`perf-deckpanel${mirrored ? ' mirrored' : ''}`}>
       <div className="perf-deck-minimap">
-        <span className="perf-decktag">{deck}</span>
+        <span className={`perf-decktag deck-${deck.toLowerCase()}`}>{deck}</span>
         {lockHint && <span className="perf-lock-hint">PLAYING — LOAD BLOCKED</span>}
         <WaveformMinimap
           trackId={track?.id ?? null}
