@@ -24,7 +24,7 @@ import { toThreeBands, type ThreeBandWaveform } from '../waveform/blob';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { HOT_CUE_CSS_COLORS } from '../waveform/WaveformRendererV2';
 import { getConductor, setFollowPlayback } from './conductorStore';
-import type { AdjacencyFuture } from './dormancy';
+import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
 import type { PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
 import { getLadderView, setLadderView } from './setStore';
 
@@ -468,7 +468,7 @@ function AdjacencyBand({
         background: bg,
         borderLeft: `1px solid ${color}`,
         borderRight: `1px solid ${color}`,
-        outline: willRestore ? '2px dashed #b400ff' : undefined,
+        outline: willRestore ? `2px dashed ${WILL_RESTORE_COLOR}` : undefined,
         outlineOffset: willRestore ? -1 : undefined,
         zIndex: 1,
         pointerEvents: 'none',
@@ -481,7 +481,7 @@ function AdjacencyBand({
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
-            color: '#b400ff',
+            color: WILL_RESTORE_COLOR,
             fontSize: 13,
             fontWeight: 700,
             textShadow: '0 0 4px #000, 0 0 4px #000',

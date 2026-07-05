@@ -69,6 +69,20 @@ describe('applyReorder', () => {
   it('ignores ids not in the order', () => {
     expect(applyReorder(ORDER, [99, 3], 0)).toEqual([3, 1, 2, 4, 5]);
   });
+
+  // The sortable-list preview (sets 23) recomputes the hypothetical order
+  // AGAINST THE DISPLAYED (already-hypothetical) order on every dragover.
+  // Steady state must be a fixed point: with the pointer inside the moved
+  // block's own slot, re-applying reproduces the displayed order exactly
+  // — otherwise the rows would jitter under a stationary pointer.
+  it('is a fixed point when the moved block is dropped onto its own slot', () => {
+    const displayed = [1, 3, 4, 2, 5]; // mid-drag: 2 previewed before 5
+    const blockStart = displayed.indexOf(2);
+    // The pointer over the moved row maps to its own index or the next
+    // (midline flip) — both reproduce the displayed order.
+    expect(applyReorder(displayed, [2], blockStart)).toEqual(displayed);
+    expect(applyReorder(displayed, [2], blockStart + 1)).toEqual(displayed);
+  });
 });
 
 describe('splitByMembership', () => {

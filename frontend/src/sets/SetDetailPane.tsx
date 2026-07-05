@@ -58,7 +58,12 @@ import {
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
-import { previewAdjacencyFutures, reconcileOrderChange } from './dormancy';
+import {
+  previewAdjacencyFutures,
+  reconcileOrderChange,
+  WILL_RESTORE_COLOR,
+  type AdjacencyFuture,
+} from './dormancy';
 import {
   conductorTogglePlay,
   pickupSetPlayback,
@@ -193,14 +198,19 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
   );
 
-  // ── Live drag preview (sets 07): during an in-pane row drag the ladder
-  // recomputes optimistically for the hypothetical order. The planner is
-  // a read-only dependency — the hypothetical entries come from the same
-  // pure reconcile rule the drop will commit through, so what the
-  // preview shows is exactly what a drop produces. Drop commits; cancel
+  // ── Live drag preview (sets 07, extended to the list in sets 23):
+  // during an in-pane row drag the ladder AND the track list render the
+  // hypothetical order. The planner is a read-only dependency — the
+  // hypothetical entries come from the same pure reconcile rule the drop
+  // will commit through, so what the preview shows is exactly what a
+  // drop produces (drop commits `previewOrder` directly). Cancel
   // (dragend/leave without a drop) simply discards the hypothesis.
   const dormant = useSetDormantPins(setId);
   const dragIdsRef = useRef<number[] | null>(null);
+  // The same ids as state, for rendering only (the dragged rows dim,
+  // sets 23) — dragover handlers keep reading the ref (set synchronously
+  // at dragstart, before any re-render).
+  const [dragIds, setDragIds] = useState<number[] | null>(null);
   const [previewOrder, setPreviewOrder] = useState<number[] | null>(null);
   const previewState = useMemo(
     () =>
@@ -227,6 +237,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     [previewOrder, entries, dormant, pairStore]
   );
 
+  // What the row stack renders (sets 23): the hypothetical state while a
+  // preview is live, the committed state otherwise. Everything the rows
+  // read (entries, plan, futures) switches together, so the list is
+  // internally consistent mid-drag. Row affordances stay mounted (layout
+  // stability for the dragover math) but are inert mid-drag — no click
+  // can happen during an HTML5 drag.
+  const displayEntries = previewState?.entries ?? entries;
+  const displayPlan = previewState ? previewPlan : plan;
+
   // Real hot cues for the ladder clips (same cache keys as useHotCues).
   const hotCueQueries = useQueries({
     queries: trackIds.map((id) => ({
@@ -246,6 +265,13 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const decks = useDecks();
   const conductorState = useConductorState();
   const conductingThis = conductorState.setId === setId && conductorState.status !== 'idle';
+  // The conducting highlight follows the TRACK, not the index — mid-drag
+  // the rows display the hypothetical order (sets 23), where the
+  // committed plan's entry index points at the wrong row.
+  const conductingTrackId =
+    conductingThis && conductorState.activeEntryIndex !== null
+      ? (entries?.[conductorState.activeEntryIndex]?.trackId ?? null)
+      : null;
   const trackMapRef = useRef(trackMap);
   useEffect(() => {
     trackMapRef.current = trackMap;
@@ -465,20 +491,28 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     const rects = rowRects(pane);
     const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
     const index = insertionIndexFromPointer(pointerY, rects);
-    setDropIndicator({ index, y: indicatorY(index, rects) });
 
-    // In-pane reorder drags feed the ladder preview (sets 07). The drag
-    // payload is unreadable during dragover, so the dragged ids ride a
-    // ref set at the row's dragstart — foreign drags leave it null.
+    // In-pane reorder drags feed the live preview (sets 07/23): the rows
+    // already display the hypothetical order, so the insertion index is
+    // interpreted against THAT order (standard sortable pattern — steady
+    // state is stable: the pointer over the dragged row's own slot
+    // reproduces the same order). The moved row is its own indicator, so
+    // the line is suppressed; foreign drags (library/playlist — payload
+    // unreadable during dragover, ids ride a ref set at the row's
+    // dragstart) keep the indicator line and never preview.
     if (dragIdsRef.current && entries) {
-      const orderIds = entries.map((en) => en.trackId);
-      const hypothetical = applyReorder(orderIds, dragIdsRef.current, index);
+      setDropIndicator(null);
+      const committedIds = entries.map((en) => en.trackId);
+      const displayedIds = previewOrder ?? committedIds;
+      const hypothetical = applyReorder(displayedIds, dragIdsRef.current, index);
       setPreviewOrder((prev) => {
-        const next = hypothetical.join(',') === orderIds.join(',') ? null : hypothetical;
+        const next = hypothetical.join(',') === committedIds.join(',') ? null : hypothetical;
         if (prev !== null && next !== null && prev.join(',') === next.join(',')) return prev;
         return next;
       });
+      return;
     }
+    setDropIndicator({ index, y: indicatorY(index, rects) });
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -491,6 +525,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const indicator = dropIndicator;
+    const previewed = previewOrder;
     setDropIndicator(null);
     setPreviewOrder(null);
     if (!entries) return;
@@ -500,10 +535,19 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     // In-pane drags reorder; drags from anywhere else append (a Track
     // appears at most once — present drops are skipped with a toast).
     if (readTrackDragSource(e.dataTransfer) === 'set-pane') {
-      const orderIds = entries.map((en) => en.trackId);
-      const newOrder = applyReorder(orderIds, droppedIds, indicator?.index ?? orderIds.length);
-      if (newOrder.join(',') !== orderIds.join(',')) {
-        reorderSetEntries(setId, newOrder);
+      // The rows previewed the hypothetical order — commit exactly it
+      // (sets 23: preview ≡ commit by construction). No live preview
+      // means the drag never left the committed order: nothing to do.
+      // (Indicator fallback: a set-pane drag whose ids never rode this
+      // pane's dragstart ref cannot preview — treat it like before.)
+      if (previewed) {
+        reorderSetEntries(setId, previewed);
+      } else if (indicator) {
+        const orderIds = entries.map((en) => en.trackId);
+        const newOrder = applyReorder(orderIds, droppedIds, indicator.index);
+        if (newOrder.join(',') !== orderIds.join(',')) {
+          reorderSetEntries(setId, newOrder);
+        }
       }
       return;
     }
@@ -734,17 +778,17 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           />
         )}
 
-        {entries === undefined ? (
+        {displayEntries === undefined ? (
           <div style={{ padding: '16px', color: 'var(--subtext1)' }}>Loading…</div>
-        ) : entries.length === 0 ? (
+        ) : displayEntries.length === 0 ? (
           <div style={{ padding: '16px', color: 'var(--subtext1)' }}>
             Empty set — drag tracks onto the set&apos;s sidebar row to add them.
           </div>
         ) : (
-          entries.map((entry, i) => {
+          displayEntries.map((entry, i) => {
             const track = trackMap?.get(entry.trackId);
-            const next = entries[i + 1];
-            const planned = plan?.entries[i];
+            const next = displayEntries[i + 1];
+            const planned = displayPlan?.entries[i];
             return (
               <div key={entry.trackId}>
                 <SetTrackRow
@@ -752,15 +796,18 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   trackId={entry.trackId}
                   track={track}
                   planned={planned}
-                  conducting={conductingThis && conductorState.activeEntryIndex === i}
+                  conducting={conductingThis && conductingTrackId === entry.trackId}
+                  dragging={dragIds?.includes(entry.trackId) ?? false}
                   onDragStart={(e) => {
                     setTrackDragPayload(e.dataTransfer, [entry.trackId], 'set-pane');
                     dragIdsRef.current = [entry.trackId];
+                    setDragIds([entry.trackId]);
                   }}
                   onDragEnd={() => {
                     // Fires after drop AND on cancel (Esc / drop outside):
                     // either way the hypothesis is over.
                     dragIdsRef.current = null;
+                    setDragIds(null);
                     setPreviewOrder(null);
                   }}
                   onPlayFrom={plan ? () => playFromEntry(i) : undefined}
@@ -777,8 +824,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 {next && (
                   <AdjacencyRow
                     pin={entry.pin}
+                    future={previewOrder ? (previewFutures?.[i] ?? null) : null}
                     evidence={pairEvidence(entry.trackId, next.trackId)}
-                    warnings={plan?.warnings.filter((w) => w.adjacencyIndex === i)}
+                    warnings={displayPlan?.warnings.filter((w) => w.adjacencyIndex === i)}
                     onPin={(pin) => setAdjacencyPin(setId, entry.trackId, pin)}
                     onOpenEditor={() =>
                       openAdjacencyEditor(entry.trackId, next.trackId, entry.pin)
@@ -899,6 +947,7 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
 
 function AdjacencyRow({
   pin,
+  future,
   evidence,
   warnings,
   onPin,
@@ -909,6 +958,12 @@ function AdjacencyRow({
   onSuggestInsert,
 }: {
   pin: AdjacencyPin | null;
+  /** This adjacency's future under a live drag preview (sets 23):
+   * 'will-restore' grows the violet ↺ marker beside the (already
+   * restored) pin chip; auto-fillable/unresolved render through the
+   * ordinary machinery (proposal button, hard-cut badge); null when
+   * unaffected or not previewing. */
+  future?: AdjacencyFuture | null;
   evidence: { transitions: TransitionEvidence[]; takes: TakeEvidence[] };
   /** This adjacency's plan degeneracies (sets 06), if any. */
   warnings?: PlanWarning[];
@@ -996,6 +1051,24 @@ function AdjacencyRow({
         >
           {chip.text}
         </button>
+
+        {/* WILL-RESTORE marker (sets 23, the 07 vocabulary): this pair's
+            Dormant pin wakes if the drop commits — the chip above already
+            shows the restored pin; the violet ↺ says it's a restoration. */}
+        {future === 'will-restore' && (
+          <span
+            title="Dropping here restores this pair's Dormant pin"
+            style={{
+              padding: '1px 6px',
+              border: `1px dashed ${WILL_RESTORE_COLOR}`,
+              color: WILL_RESTORE_COLOR,
+              fontSize: '11px',
+              fontWeight: 700,
+            }}
+          >
+            ↺ will restore
+          </span>
+        )}
 
         {/* One-click auto-fill accept (Transitions only, favorite first) */}
         {proposal && view.status === 'unresolved' && (
@@ -1146,6 +1219,7 @@ function SetTrackRow({
   track,
   planned,
   conducting,
+  dragging,
   onDragStart,
   onDragEnd,
   onPlayFrom,
@@ -1159,6 +1233,10 @@ function SetTrackRow({
   planned: PlannedEntry | undefined;
   /** The Conductor's playhead is inside this entry (sets 04). */
   conducting: boolean;
+  /** This row is the drag source (sets 23) — dimmed, sortable-style,
+   * wherever it currently displays (its hypothetical slot mid-preview,
+   * its committed one when the pointer is back over it). */
+  dragging: boolean;
   /** Row drag lifecycle (sets 07): the pane sets the drag payload and
    * tracks the dragged ids for the ladder's live preview. */
   onDragStart: (e: React.DragEvent) => void;
@@ -1194,6 +1272,7 @@ function SetTrackRow({
           : hovered
             ? 'var(--surface0)'
             : 'transparent',
+        opacity: dragging ? 0.45 : 1,
         cursor: 'grab',
       }}
     >

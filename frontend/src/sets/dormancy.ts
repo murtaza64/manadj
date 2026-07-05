@@ -94,6 +94,11 @@ export function reconcileOrderChange(
  * unaffected (the ordered pair is adjacent in the committed order too). */
 export type AdjacencyFuture = 'will-restore' | 'auto-fillable' | 'unresolved';
 
+/** The will-restore preview color (ladder frames and list markers share
+ * it). Violet is unclaimed on purpose: cyan/magenta are Deck identity,
+ * never state — CONTEXT.md "Deck color". */
+export const WILL_RESTORE_COLOR = '#b400ff';
+
 /**
  * Classify each adjacency of a hypothetical order for the live drag
  * preview, index-aligned with the hypothetical plan's adjacencies.

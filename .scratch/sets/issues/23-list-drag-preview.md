@@ -2,7 +2,7 @@
 
 (Renumbered from 20, 2026-07-05 — parallel filing collided with 20-set-row-polish.)
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -68,3 +68,48 @@ blocks and is ready-for-agent. Whichever lands first, the other adapts —
 sortable preview generalizes to blocks for free; 18's `dragIdsRef`
 becomes the selection instead of a single id. Coordinate via the lane
 registry if picked up concurrently.
+
+**2026-07-06 — implemented (lane setui, change `pykptyny`); parked
+ready-for-human.** All acceptance criteria except the real-mouse feel
+check (criterion 5 — a human act by definition; walkthrough below).
+
+- The row stack renders `displayEntries`/`displayPlan` — the same
+  `reconcileOrderChange` output the ladder consumes — so mid-drag the
+  list IS the hypothetical state: rows in hypothetical order (dragged
+  row dimmed, sortable-style), restored pins showing their normal chip
+  plus a violet "↺ will restore" marker, newly-formed pairs flowing
+  through the existing `adjacencyView` machinery (proposal button /
+  UNRESOLVED badge). `WILL_RESTORE_COLOR` extracted to dormancy.ts —
+  ladder frames and list markers share the one constant.
+- `handleDragOver` interprets the insertion index against the DISPLAYED
+  order (standard sortable pattern); steady state is a fixed point
+  (unit-tested in dropIndex.test.ts). In-pane drags suppress the blue
+  indicator line (the moved row is the indicator); library/playlist
+  drags keep it and never preview.
+- Drop commits `previewOrder` directly (preview ≡ commit); a null
+  preview means the order never left committed — no-op. Esc/leave/
+  dragend snap back (existing 07 paths, unchanged).
+- The conducting highlight now follows the trackId, not the entry index
+  — mid-preview the committed plan's index points at the wrong row.
+- Verification: frontend build clean; vitest 1042 passed; pytest 666;
+  `alembic heads` = `0022_mwzqllkt` only; eslint clean on touched files
+  (one pre-existing warning).
+
+**Verification walkthrough** (lane app on ports 8140/5313):
+open http://localhost:5313 →
+1. Select the demo Set ("07 review — dormant pins", 3+ tracks, pins).
+2. Drag a row slowly up/down the list: rows re-slot live under the
+   pointer (the dragged row rides along, dimmed); the blue indicator
+   line never appears for this drag.
+3. Watch the adjacency rows mid-drag: broken pairs' replacements show
+   the auto-fill proposal button or the red UNRESOLVED badge; a pair
+   whose Dormant pin would wake shows its restored pin chip plus the
+   violet "↺ will restore" marker. The ladder above shows the same
+   futures (◆ / ✕ / ↺) — list and ladder never disagree.
+4. FEEL CHECK (the open criterion): hover the midlines near the tall
+   adjacency rows and hold the pointer still over the dragged row's own
+   slot — no jitter/flicker of the row order.
+5. Drop — the committed list is exactly what was previewed. Esc mid-drag
+   (or drag out of the pane) — the list and ladder snap back untouched.
+6. Drag a track in from the Library/a playlist: today's blue indicator
+   line behavior, no row motion.
