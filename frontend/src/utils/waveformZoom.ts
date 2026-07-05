@@ -13,6 +13,11 @@ export const MIN_VISIBLE_SECONDS = 4;
 export const MAX_VISIBLE_SECONDS = 240;
 export const DEFAULT_VISIBLE_SECONDS = 20;
 
+/** Where scrolling waveforms pin the playhead, as a fraction of the canvas
+ * width (the renderer's playMarkerPosition). One constant — the play-guide
+ * overlay projects against the same fraction the waveforms render with. */
+export const PLAY_MARKER_FRACTION = 0.25;
+
 /** Wheel step ratio (matches the renderer's own zoomIn/zoomOut step). */
 const STEP_RATIO = 1.2;
 

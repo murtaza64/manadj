@@ -318,6 +318,29 @@ interface FrameView {
   dpr: number;
 }
 
+/** One spliced strip of the canvas (transition-takes 06): the DAW-splice
+ * rendering for Jump events. Body draws with viewport+scissor into the
+ * strip (per-segment pixel-snap — ADR 0015 applies per strip); overlays
+ * draw full-viewport through a time-shifted view under the same scissor,
+ * keeping the beatgrid vertex cache stable across segments. */
+export interface DisplaySegment {
+  /** Canvas x-range, as fractions of the canvas width. */
+  x0Frac: number;
+  x1Frac: number;
+  /** Track window (normalized track positions, like setDisplayWindow). */
+  first: number;
+  last: number;
+  /** Whether the playhead marker belongs to this segment. Replayed
+   * content contains the same track time twice — the CALLER knows which
+   * instance is under the mix playhead. */
+  drawPlayhead: boolean;
+  /** Optional modulation-domain remap: the modulation callback is invoked
+   * with `offset + trackTime × scale` instead of raw track time (the
+   * editor feeds mix-domain envelopes in segmented mode — track time is
+   * ambiguous across replayed segments). */
+  modAffine?: { offset: number; scale: number };
+}
+
 export class WaveformRendererV2 {
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext;
@@ -337,13 +360,14 @@ export class WaveformRendererV2 {
 
   private visibleSeconds = DEFAULT_VISIBLE_SECONDS;
   private lastPlayhead = 0;
-  private dragOffsetPx = 0;
   private animationFrame: number | null = null;
 
   // Externally-set window (DAW timeline), as normalized track positions.
   private externalWindow = false;
   private windowStart = 0;
   private windowEnd = 1;
+  // Spliced strips (transition-takes 06); non-null overrides the window.
+  private displaySegments: DisplaySegment[] | null = null;
 
   // Modulation (transition-editor rows).
   private modulation: WaveformModulation | null = null;
@@ -442,6 +466,14 @@ export class WaveformRendererV2 {
     this.windowEnd = last;
   }
 
+  /** Splice the canvas into per-segment windows (transition-takes 06);
+   * null restores the single-window path. An EMPTY array is meaningful:
+   * spliced mode with nothing visible — the frame clears to background
+   * instead of falling back to a stale single window. */
+  public setDisplaySegments(segments: DisplaySegment[] | null): void {
+    this.displaySegments = segments;
+  }
+
   // ------------------------------------------------------------- rendering
 
   public renderFrame(clock: PlaybackClock): void {
@@ -460,10 +492,77 @@ export class WaveformRendererV2 {
     gl.viewport(0, 0, w, h);
 
     this.lastPlayhead = clock.getPlayhead();
-    const view = this.computeView(w, h, dpr);
 
+    if (this.displaySegments) {
+      this.renderSegmentedFrame(w, h, dpr);
+      return;
+    }
+
+    const view = this.computeView(w, h, dpr);
     this.drawBody(view);
     this.drawOverlays(view);
+  }
+
+  /** DAW-splice frame (transition-takes 06): one body pass per segment
+   * strip. Sub-pixel strips are skipped; canvas areas outside every strip
+   * clear to the out-of-range dimmed background (BG × 0.6 — "no content
+   * here", same as the shader's off-track look). */
+  private renderSegmentedFrame(w: number, h: number, dpr: number): void {
+    const { gl } = this;
+    const duration = this.data!.duration;
+
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(0.03 * 0.6, 0.03 * 0.6, 0.05 * 0.6, 1); // BG * 0.6 (shader constant)
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const ctx = this.ensureOverlayContext();
+    ctx?.clearRect(0, 0, w, h);
+
+    gl.enable(gl.SCISSOR_TEST);
+    for (const seg of this.displaySegments!) {
+      const x0 = Math.round(seg.x0Frac * w);
+      const x1 = Math.round(seg.x1Frac * w);
+      const segW = x1 - x0;
+      if (segW < 1) continue; // sub-pixel segment: nothing to draw
+      gl.scissor(x0, 0, segW, h);
+
+      // BODY: viewport = the strip; u_canvasWidth = strip width, so
+      // spp/LOD selection and the pixel-snapped origin are per-segment
+      // exact (no peak shimmer at seams — ADR 0015 per strip).
+      gl.viewport(x0, 0, segW, h);
+      const bodyView: FrameView = {
+        startTime: seg.first * duration,
+        visibleSeconds: Math.max((seg.last - seg.first) * duration, 1e-6),
+        playhead: this.lastPlayhead,
+        w: segW,
+        h,
+        dpr,
+      };
+      this.drawBody(bodyView, seg.modAffine);
+
+      // OVERLAYS: full viewport, time-shifted view — beat/cue x-positions
+      // land inside the strip and the scissor clips the rest. pxPerSec
+      // derives from the UNROUNDED strip width: all strips share one time
+      // scale, so the value (hence the beatgrid vertex cache key) is
+      // bit-identical across strips — rounded widths would rebuild the
+      // vertex buffer per strip per frame. Rounded x0 against unrounded
+      // pxPerSec costs the overlay lines ≤1px, invisible at line widths.
+      gl.viewport(0, 0, w, h);
+      const pxPerSec = ((seg.x1Frac - seg.x0Frac) * w) / bodyView.visibleSeconds;
+      const overlayView: FrameView = {
+        startTime: bodyView.startTime - x0 / pxPerSec,
+        visibleSeconds: w / pxPerSec,
+        playhead: this.lastPlayhead,
+        w,
+        h,
+        dpr,
+      };
+      this.drawOverlays(overlayView, {
+        skipPlayhead: !seg.drawPlayhead,
+        textClip: { x0, w: segW },
+      });
+    }
+    gl.disable(gl.SCISSOR_TEST);
+    gl.viewport(0, 0, w, h);
   }
 
   /** Self-driving convenience: renderFrame on an own rAF loop. */
@@ -495,14 +594,12 @@ export class WaveformRendererV2 {
     } else {
       visibleSeconds = this.visibleSeconds;
       const marker = this.config.playMarkerPosition ?? 0.25;
-      const dragSeconds =
-        (this.dragOffsetPx / (this.canvas.clientWidth || 1)) * visibleSeconds;
-      startTime = this.lastPlayhead - marker * visibleSeconds - dragSeconds;
+      startTime = this.lastPlayhead - marker * visibleSeconds;
     }
     return { startTime, visibleSeconds, playhead: this.lastPlayhead, w, h, dpr };
   }
 
-  private drawBody(view: FrameView): void {
+  private drawBody(view: FrameView, modAffine?: { offset: number; scale: number }): void {
     const { gl, data } = this;
     const prog = this.programFor(this.styleId);
     gl.useProgram(prog);
@@ -525,7 +622,7 @@ export class WaveformRendererV2 {
     // both move; 1024 callback samples is well within frame budget).
     gl.uniform1f(u('u_modEnabled'), this.modulation ? 1 : 0);
     if (this.modulation) {
-      this.uploadModulation(view);
+      this.uploadModulation(view, modAffine);
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, this.modTex);
       gl.uniform1i(u('u_modTex'), 3);
@@ -566,7 +663,10 @@ export class WaveformRendererV2 {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
-  private uploadModulation(view: FrameView): void {
+  private uploadModulation(
+    view: FrameView,
+    modAffine?: { offset: number; scale: number }
+  ): void {
     const { gl } = this;
     // Select unit 3 BEFORE any bind: binding on the implicitly-active unit
     // clobbers the band texture on unit 2 (the shader then renders the
@@ -584,7 +684,10 @@ export class WaveformRendererV2 {
     const fn = this.modulation!;
     const s = this.modScratch;
     for (let i = 0; i < MOD_TEX_WIDTH; i++) {
-      const t = view.startTime + ((i + 0.5) / MOD_TEX_WIDTH) * view.visibleSeconds;
+      const raw = view.startTime + ((i + 0.5) / MOD_TEX_WIDTH) * view.visibleSeconds;
+      // Segmented mode remaps track → mix time (track time is ambiguous
+      // across replayed segments; the envelope lives on the mix axis).
+      const t = modAffine ? modAffine.offset + raw * modAffine.scale : raw;
       const m = fn(t);
       s[i * 4] = Math.max(0, Math.min(255, (m.low / MOD_RANGE) * 255));
       s[i * 4 + 1] = Math.max(0, Math.min(255, (m.mid / MOD_RANGE) * 255));
@@ -619,7 +722,10 @@ export class WaveformRendererV2 {
     this.beatgridVao = makeVao(this.beatgridBuffer);
   }
 
-  private drawOverlays(view: FrameView): void {
+  private drawOverlays(
+    view: FrameView,
+    opts: { skipPlayhead?: boolean; textClip?: { x0: number; w: number } } = {}
+  ): void {
     const { gl } = this;
     const prog = this.overlayProgram!;
     gl.useProgram(prog);
@@ -646,18 +752,30 @@ export class WaveformRendererV2 {
     this.drawTriangles(hotCueVerts, this.overlayVao!, this.overlayBuffer!);
     gl.blendFunc(gl.ONE, gl.ONE);
 
-    const playheadVerts: number[] = [];
-    this.pushPlayhead(view, playheadVerts);
-    this.drawTriangles(playheadVerts, this.overlayVao!, this.overlayBuffer!);
+    if (!opts.skipPlayhead) {
+      const playheadVerts: number[] = [];
+      this.pushPlayhead(view, playheadVerts);
+      this.drawTriangles(playheadVerts, this.overlayVao!, this.overlayBuffer!);
+    }
 
     // 2D text overlay: hot-cue badges + time/bar readout (main only).
+    // GL scissor doesn't clip 2D canvases — segmented mode passes an
+    // explicit clip (and clears once per frame, not per segment).
     const ctx = this.ensureOverlayContext();
     if (ctx) {
-      ctx.clearRect(0, 0, view.w, view.h);
+      if (opts.textClip) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(opts.textClip.x0, 0, opts.textClip.w, view.h);
+        ctx.clip();
+      } else {
+        ctx.clearRect(0, 0, view.w, view.h);
+      }
       this.renderHotCueNumbers(ctx, view);
       if ((this.config.showTimeReadout ?? false) && !this.isMinimap) {
         this.renderTimeReadout(ctx, view);
       }
+      if (opts.textClip) ctx.restore();
     }
   }
 
@@ -889,22 +1007,10 @@ export class WaveformRendererV2 {
     else this.zoomOut();
   }
 
-  /** Shift the visible content by a pixel delta (CSS pixels) during a drag. */
-  public setDragOffset(pixels: number): void {
-    this.dragOffsetPx = pixels;
-  }
-
-  /**
-   * End a drag: return the seek time it corresponds to (undefined if no
-   * data). Drag right = backward in time. The renderer never seeks itself.
-   */
-  public commitDrag(): number | undefined {
-    if (!this.data) return undefined;
-    const dragSeconds =
-      (this.dragOffsetPx / (this.canvas.clientWidth || 1)) * this.visibleSeconds;
-    this.dragOffsetPx = 0;
-    const seekTime = this.lastPlayhead - dragSeconds;
-    return Math.max(0, Math.min(this.data.duration, seekTime));
+  /** The current visible window, in track seconds (drag-to-scrub converts
+   * pixels to time with it when the caller doesn't own the zoom). */
+  public getVisibleSeconds(): number {
+    return this.visibleSeconds;
   }
 
   /** Click-to-seek: the track time under the pointer (all modes). */

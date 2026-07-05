@@ -39,7 +39,7 @@ describe('paramsStore', () => {
       harmonicKeys: true,
       bpm: true,
       bpmThresholdPercent: 5,
-      provenOnly: false,
+      knownOnly: false,
     });
   });
 
@@ -55,10 +55,10 @@ describe('paramsStore', () => {
     store.subscribeFollowParams(() => {
       calls += 1;
     });
-    store.setFollowParams({ provenOnly: true });
-    expect(store.getFollowParams().provenOnly).toBe(true);
+    store.setFollowParams({ knownOnly: true });
+    expect(store.getFollowParams().knownOnly).toBe(true);
     expect(store.getFollowParams().harmonicKeys).toBe(true); // merged, not replaced
     expect(calls).toBe(1);
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ provenOnly: true });
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ knownOnly: true });
   });
 });

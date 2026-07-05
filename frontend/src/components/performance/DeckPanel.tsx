@@ -29,10 +29,12 @@ import { BeatjumpRow } from '../deckControls/BeatjumpRow';
 import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons';
 import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
+import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
-import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm } from '../../playback/tempo';
+import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { trackWindowSeconds } from '../../utils/waveformZoom';
 import { formatKeyDisplay } from '../../utils/keyUtils';
+import { setKeyLockFlag } from '../../playback/keyLockStore';
 import { DECK_KEYS } from './performanceKeys';
 import type { EqBand } from '../../playback/graph';
 import type { Track } from '../../types';
@@ -370,6 +372,8 @@ function MixZone({ track }: { track: Track | null }) {
   const channel = useMixerValue((m) => m.getChannelState(deck));
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
+  const keyLock = useDeckSnapshot((s) => s.keyLock);
+  const drifted = keyDrifted(keyLock, pitch);
   // Effective BPM follows the pitch fader only: a nudge's momentary bend is
   // a phase correction, not a tempo change — the readout must not wobble
   // mid-beatmatch (same reasoning as the zoom window, performance-mode 06).
@@ -436,6 +440,7 @@ function MixZone({ track }: { track: Track | null }) {
       <HFader
         label="VOL"
         fill
+        fillColor={`var(--deck-${deck.toLowerCase()})`}
         min={0}
         max={1}
         value={channel.fader}
@@ -458,14 +463,49 @@ function MixZone({ track }: { track: Track | null }) {
         title="Pitch (right = faster; double-click resets)"
       />
       <div className="perf-mix-foot">
-        <span className="perf-readout" title="Key">
-          <span className="perf-readout-label">KEY</span>
-          <span className="perf-readout-val perf-readout-key">
+        {/* Drift marker (key-lock 04): unlocked + |pitch| ≥ ~half a
+            semitone means the sounding key is no longer the Track's Key —
+            dim it and mark with ~ (no computed "actual key"; PRD). */}
+        <span
+          className="perf-readout"
+          title={
+            drifted
+              ? 'Key drifted: Key Lock is off and pitch has shifted the sounding key'
+              : 'Key'
+          }
+        >
+          <span
+            className={`perf-readout-val perf-readout-key${
+              drifted ? ' perf-key-drift' : ''
+            }`}
+          >
+            {/* Always rendered so the readout width never jumps; invisible
+                until the key has drifted. */}
+            <span className="perf-key-tilde" aria-hidden={!drifted}>
+              ~
+            </span>
             {formatKeyDisplay(track?.key)}
           </span>
         </span>
+        {/* Key Lock (key-lock 03): Deck setting — works with no track
+            loaded, sticky per Deck (engine holds live state, store
+            persists). Lit while tempo changes leave the Key unchanged. */}
+        <button
+          className={`player-button perf-mini perf-keylock${keyLock ? ' on' : ''}`}
+          onClick={() => {
+            engine.setKeyLock(!keyLock);
+            setKeyLockFlag(deck, !keyLock);
+          }}
+          aria-pressed={keyLock}
+          title={
+            keyLock
+              ? 'Key Lock on: pitch changes keep the Track\u2019s Key (click for vinyl-style varispeed)'
+              : 'Key Lock off: speed and pitch coupled, like vinyl (click to hold the Key)'
+          }
+        >
+          LOCK
+        </button>
         <span className="perf-readout" title="Effective BPM (base × pitch × bend)">
-          <span className="perf-readout-label">BPM</span>
           <span className="perf-readout-val">
             {effective !== null ? effective.toFixed(1) : '-'}
           </span>
@@ -531,15 +571,20 @@ export function DeckPanel({
   return (
     <section className={`perf-deckpanel${mirrored ? ' mirrored' : ''}`}>
       <div className="perf-deck-minimap">
-        <span className="perf-decktag">{deck}</span>
+        <span className={`perf-decktag deck-${deck.toLowerCase()}`}>{deck}</span>
         {lockHint && <span className="perf-lock-hint">PLAYING — LOAD BLOCKED</span>}
-        <WaveformMinimap
-          trackId={track?.id ?? null}
-          clock={engine}
-          cuePoint={cuePoint}
-          onSeek={(t) => ready && engine.seek(t)}
-          dimmed={track !== null && !ready}
-        />
+        <div className="perf-minimap-wrap">
+          <WaveformMinimap
+            trackId={track?.id ?? null}
+            clock={engine}
+            cuePoint={cuePoint}
+            onSeek={(t) => ready && engine.seek(t)}
+            dimmed={track !== null && !ready}
+          />
+          {/* Play guides at track scale (play-guides PRD): how far out is
+              the press moment. Shows only while this Deck is outgoing. */}
+          <PlayGuideMinimapMarks />
+        </div>
       </div>
       <div className="perf-deck-band">
         <TrackZone track={track} />

@@ -493,6 +493,18 @@ describe('stampIntoSession (apply target)', () => {
     expect(next.items[1].transition.bInSec).toBeCloseTo(14.7);
   });
 
+  it('Jump events never ride templates: a jump-carrying active gets a jump-free new take', () => {
+    // Templates have no jumps field (transition-takes 01); and a Transition
+    // with jumps is non-pristine, so stamping targets a FRESH take — the
+    // jump-carrying work is untouched and the stamped result carries none.
+    const items = [pristineItem()];
+    items[0].transition = { ...items[0].transition, jumps: [{ x: 0.5, deltaSec: -8 }] };
+    const next = stampIntoSession(items, 0, 'bass swap', patch);
+    expect(next.items).toHaveLength(2);
+    expect(next.items[0].transition.jumps).toEqual([{ x: 0.5, deltaSec: -8 }]);
+    expect(next.items[1].transition.jumps ?? []).toEqual([]);
+  });
+
   it('a partial patch (unresolved anchors) leaves the receiver defaults', () => {
     const partial = { tempoMatch: true as const, lanes: {}, hiddenLanes: [] };
     const next = stampIntoSession([pristineItem()], 0, 'bass swap', partial);

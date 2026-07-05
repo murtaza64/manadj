@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import TagPill from './TagPill';
 import EnergySquare from './EnergySquare';
 import BPMDisplay from './BPMDisplay';
@@ -8,6 +8,7 @@ import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { getColumnConfig } from './columnConfig';
 import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDrag';
+import { LinkIcon } from '../links/LinkIcon';
 import './TrackRow.css';
 
 /** Saved-Transition mark state for one source deck (transition-library
@@ -49,6 +50,11 @@ interface Props {
   orderIndex?: number | null;
   markA?: TransitionMark;
   markB?: TransitionMark;
+  /** Linked marks (linked-pairs 03): this row is Linked with the loaded
+   * deck's track. Symmetric, so shown alongside — never instead of — the
+   * directional Transition marks. */
+  linkedA?: boolean;
+  linkedB?: boolean;
 }
 
 const LOSSLESS = new Set(['flac', 'alac', 'pcm']);
@@ -71,6 +77,34 @@ function formatSize(bytes?: number | null): string {
   return `${(bytes / 1_000_000).toFixed(1)}M`;
 }
 
+/** A Deck's slot in the marks column: strongest evidence, or nothing. */
+function markSlot(mark: TransitionMark, linked: boolean): ReactNode {
+  if (mark === 'preferred') return <span className="mark-star">★</span>;
+  if (linked) return <LinkIcon size={10} />;
+  if (mark === 'saved') return '◆';
+  return null;
+}
+
+/** Tooltip: the FULL evidence behind both slots (slots show only the
+ * strongest per Deck). Undefined when the row carries none. */
+function markEvidence(
+  markA: TransitionMark,
+  markB: TransitionMark,
+  linkedA: boolean,
+  linkedB: boolean
+): string | undefined {
+  const evidence: string[] = [];
+  if (markA !== 'none') {
+    evidence.push(`Saved transition from deck A's track${markA === 'preferred' ? ' (favorite)' : ''}`);
+  }
+  if (linkedA) evidence.push("Linked with deck A's track");
+  if (markB !== 'none') {
+    evidence.push(`Saved transition from deck B's track${markB === 'preferred' ? ' (favorite)' : ''}`);
+  }
+  if (linkedB) evidence.push("Linked with deck B's track");
+  return evidence.length > 0 ? evidence.join(' · ') : undefined;
+}
+
 /** Memoized: the table is large, and rows must not re-render on deck/selection
  * churn unless their own props changed. */
 const TrackRow = memo(function TrackRow({
@@ -86,6 +120,8 @@ const TrackRow = memo(function TrackRow({
   orderIndex,
   markA = 'none',
   markB = 'none',
+  linkedA = false,
+  linkedB = false,
 }: Props) {
   // Extract just the filename from the full path
   const filename = track.filename.split('/').pop() || track.filename;
@@ -162,29 +198,21 @@ const TrackRow = memo(function TrackRow({
             </div>
           )}
         </td>
+        {/* Marks column (follow-mode 09): one slot per Deck, strongest
+            evidence wins (★ favorited Transition > 🔗 Linked > ◆ saved
+            Transition — the Known ranking); slots keep their width when
+            empty, so titles never shift. Tooltip carries ALL evidence. */}
+        <td
+          className={getCellClasses('marks', 'track-marks-cell')}
+          style={getCellStyle('marks')}
+          title={markEvidence(markA, markB, linkedA, linkedB)}
+        >
+          <div className="track-marks">
+            <span className="track-mark-slot mark-a">{markSlot(markA, linkedA)}</span>
+            <span className="track-mark-slot mark-b">{markSlot(markB, linkedB)}</span>
+          </div>
+        </td>
         <td className={getCellClasses('title')} style={getCellStyle('title')}>
-          {/* Saved-Transition marks: one glyph per source deck, in the
-              deck's accent color; ★ when the pair is Preferred. */}
-          {(markA !== 'none' || markB !== 'none') && (
-            <span className="track-transition-marks">
-              {markA !== 'none' && (
-                <span
-                  className="track-transition-mark mark-a"
-                  title={`Saved transition from deck A's track${markA === 'preferred' ? ' (favorite)' : ''}`}
-                >
-                  {markA === 'preferred' ? '★' : '◆'}
-                </span>
-              )}
-              {markB !== 'none' && (
-                <span
-                  className="track-transition-mark mark-b"
-                  title={`Saved transition from deck B's track${markB === 'preferred' ? ' (favorite)' : ''}`}
-                >
-                  {markB === 'preferred' ? '★' : '◆'}
-                </span>
-              )}
-            </span>
-          )}
           <div className="track-cell-text">
             {track.title || filename}
           </div>

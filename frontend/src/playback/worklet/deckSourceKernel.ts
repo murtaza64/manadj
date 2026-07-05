@@ -17,7 +17,35 @@
  * AudioBufferSourceNode. At rate 1.0 and integer positions the interpolation
  * degenerates to a direct sample read and the fade-in gain to exactly 1, so
  * unity playback is bit-perfect (Key Lock off costs nothing).
+ *
+ * Stretch mode (Key Lock, issue 03): the live voice renders through a
+ * StretchEngine behind a pure seam; position bookkeeping stays the kernel's
+ * (advance rate × srRatio per frame), so the engine anchor math holds in
+ * both modes. There is ONE stretcher instance, so fading tails always
+ * render via the resample path (Mixxx-style) — during the ≤5ms declick the
+ * pitch difference is masked. A mode switch is the same splice as a stab,
+ * at the live voice's own (audible) position.
  */
+
+import type { SourceMode } from './protocol';
+
+/** The worklet-internal stretcher seam (ADR 0018): feed samples, set rate,
+ * transpose fixed at none. `render` fills `frames` of output whose audible
+ * start is `positionFrames`, advancing at `rate`; the engine reads its own
+ * read-ahead window from `channels` (track and context sample rates equal —
+ * the kernel falls back to resample otherwise). */
+export interface StretchEngine {
+  readonly ready: boolean;
+  /** Prime for a fresh voice (start/stab/mode-switch). */
+  reset(): void;
+  render(
+    out: Float32Array[],
+    frames: number,
+    channels: Float32Array[],
+    positionFrames: number,
+    rate: number
+  ): void;
+}
 
 interface Voice {
   channels: Float32Array[];
@@ -31,6 +59,7 @@ interface Voice {
    * declickFrames of fade age. */
   fade: { g0: number; age: number } | null;
   startId: number;
+  mode: SourceMode;
 }
 
 /** Tails are ≤ declick (5ms) long; more simultaneous ones than this means
@@ -43,6 +72,13 @@ export class DeckSourceKernel {
   private fading: Voice[] = [];
   private readonly declickFrames: number;
 
+  private mode: SourceMode = 'resample';
+  private stretchEngine: StretchEngine | null = null;
+  /** Voice the stretcher was last reset for — one prime per voice. */
+  private primedVoice: Voice | null = null;
+  /** Block scratch for stretch output (gain applied per frame by the kernel). */
+  private scratch: Float32Array[] = [];
+
   constructor(declickFrames: number) {
     this.declickFrames = Math.max(1, declickFrames);
   }
@@ -51,6 +87,23 @@ export class DeckSourceKernel {
    * an in-flight declick tail keeps its captured old data. */
   setTrack(channels: Float32Array[], srRatio: number): void {
     this.track = { channels, srRatio };
+  }
+
+  setStretchEngine(engine: StretchEngine | null): void {
+    this.stretchEngine = engine;
+  }
+
+  /** Key Lock. Mid-play, splice into the new mode at the live voice's own
+   * position: the retired tail fades under the new voice's fade-in — same
+   * machinery as a stab, so no click and no position jump. */
+  setMode(mode: SourceMode): void {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    const live = this.live;
+    if (!live) return;
+    const { channels, srRatio, position, startId } = live;
+    this.retireLive();
+    this.live = { channels, srRatio, position, age: 0, fade: null, startId, mode };
   }
 
   /** (Re)start at a track frame. A running voice is retired into the
@@ -66,6 +119,7 @@ export class DeckSourceKernel {
       age: 0,
       fade: null,
       startId,
+      mode: this.mode,
     };
   }
 
@@ -95,12 +149,45 @@ export class DeckSourceKernel {
     for (const channel of out) channel.fill(0);
     if (!this.live && this.fading.length === 0) return null;
 
+    // Stretch voices render block-wise through the engine (it takes one
+    // rate per block — tempo moves at 128-frame granularity are inaudible);
+    // the per-frame loop below applies the envelope and the bookkeeping.
+    let liveBlock: Float32Array[] | null = null;
+    const liveAtStart = this.live;
+    if (liveAtStart && liveAtStart.mode === 'stretch') {
+      const engine = this.stretchEngine;
+      if (engine?.ready && liveAtStart.srRatio === 1) {
+        if (this.primedVoice !== liveAtStart) {
+          engine.reset();
+          this.primedVoice = liveAtStart;
+        }
+        liveBlock = this.scratchFor(out.length, frames);
+        engine.render(
+          liveBlock,
+          frames,
+          liveAtStart.channels,
+          liveAtStart.position,
+          rates[0]
+        );
+      }
+      // Engine absent/not ready, or track at a foreign sample rate: the
+      // voice falls through to the resample path below (graceful, audible
+      // pitch coupling until the stretcher is available).
+    }
+
     let endedStartId: number | null = null;
     for (let i = 0; i < frames; i++) {
       const rate = rates.length > 1 ? rates[i] : rates[0];
       if (this.live) {
         const voice = this.live;
-        this.mix(voice, out, i, this.gainOf(voice));
+        const gain = this.gainOf(voice);
+        if (liveBlock) {
+          if (gain > 0) {
+            for (let c = 0; c < out.length; c++) out[c][i] += liveBlock[c][i] * gain;
+          }
+        } else {
+          this.mix(voice, out, i, gain);
+        }
         voice.position += rate * voice.srRatio;
         voice.age++;
         if (voice.position >= DeckSourceKernel.lengthOf(voice)) {
@@ -127,9 +214,22 @@ export class DeckSourceKernel {
   private retireLive(): void {
     if (!this.live) return;
     this.live.fade = { g0: this.gainOf(this.live), age: 0 };
+    // Tails always render via the resample path: the single stretcher
+    // instance is freed for the next voice, and ≤5ms of varispeed in a
+    // fade-out is masked by the incoming voice.
+    this.live.mode = 'resample';
     this.fading.push(this.live);
     this.live = null;
     while (this.fading.length > MAX_FADING_VOICES) this.fading.shift();
+  }
+
+  /** Reusable stretch-output scratch (per channel-count/frame-length). */
+  private scratchFor(channelCount: number, frames: number): Float32Array[] {
+    if (this.scratch.length !== channelCount || (this.scratch[0]?.length ?? 0) < frames) {
+      this.scratch = [];
+      for (let c = 0; c < channelCount; c++) this.scratch.push(new Float32Array(frames));
+    }
+    return this.scratch;
   }
 
   /** Envelope: fade-in age/declick capped at 1; fade-out slopes g0 → 0. */

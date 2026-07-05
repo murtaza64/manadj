@@ -23,7 +23,7 @@ import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, putCachedBuffer } from './bufferCache';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
-import { PITCH_RANGE_PERCENT, composeRate } from './tempo';
+import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
 
@@ -64,6 +64,9 @@ export interface DeckSnapshot {
   pitchPercent: number;
   /** Momentary nudge, percent (± — stacked on pitch, 0 when released). */
   bendPercent: number;
+  /** Key Lock (CONTEXT.md): while on, rate changes leave the Track's Key
+   * unchanged (worklet stretch mode). Deck setting; survives Loads. */
+  keyLock: boolean;
 }
 
 export class DeckEngine {
@@ -101,6 +104,10 @@ export class DeckEngine {
   private pitchPercent = 0;
   /** Momentary nudge multiplier on top of pitch; 0 when released. */
   private bendPercent = 0;
+  /** Key Lock. Engine default is OFF (pure varispeed — the editor's private
+   * decks keep today's behavior); the shared Decks' default-ON comes from
+   * the persisted store at the DeckContext layer. */
+  private keyLock = false;
 
   private listeners = new Set<() => void>();
   private snapshot: DeckSnapshot;
@@ -120,15 +127,25 @@ export class DeckEngine {
     this.onCueSet = handler;
   }
 
-  private readonly port: DeckAudioPort;
-  /** Varispeed reach, percent. Defaults to the hardware-like fader range;
-   * the Transition editor's private decks pass a wider one (templates
-   * imply tempo-match and must hold beat alignment on extreme pairs). */
-  private readonly pitchRangePercent: number;
+  /**
+   * Invoked on playhead DISCONTINUITIES (seek / beat jump / hot cue) —
+   * the transport gestures invisible to snapshot diffs (playing/pitch
+   * flips are; playhead moves aren't). The capture layer's tap
+   * (transition-takes 02): raw-slice evidence for Take vectorization.
+   * Same single-slot, engine-stays-API-ignorant contract as onCueSet.
+   */
+  private onTransportEvent:
+    | ((e: { action: 'seek' | 'jumpBeats' | 'hotCue'; playhead: number; detail?: number }) => void)
+    | null = null;
 
-  constructor(port: DeckAudioPort, pitchRangePercent: number = PITCH_RANGE_PERCENT) {
+  setTransportEventHandler(handler: typeof this.onTransportEvent): void {
+    this.onTransportEvent = handler;
+  }
+
+  private readonly port: DeckAudioPort;
+
+  constructor(port: DeckAudioPort) {
     this.port = port;
-    this.pitchRangePercent = pitchRangePercent;
     this.snapshot = this.buildSnapshot();
   }
 
@@ -241,17 +258,7 @@ export class DeckEngine {
     return this.loadState === 'fetching' || this.loadState === 'decoding';
   }
 
-  /** Arbiter tripwire (ADR 0013): start gestures on a non-audible surface
-   * are warned no-ops — latching play against a suspended clock is the
-   * two-clock drift bug (issue 08) waiting to resume. */
-  private startBlocked(): boolean {
-    if (this.port.mayStart?.() ?? true) return false;
-    console.warn('[DeckEngine] start blocked: surface is not audible (ADR 0013)');
-    return true;
-  }
-
   play(): void {
-    if (this.startBlocked()) return;
     if (this.isLoading()) {
       // Latch the intent; load() fires it when decode completes.
       if (!this.pendingPlay) {
@@ -273,8 +280,6 @@ export class DeckEngine {
   }
 
   togglePlay(): void {
-    const wouldStart = this.isLoading() ? !this.pendingPlay : !this.snapshot.playing;
-    if (wouldStart && this.startBlocked()) return;
     if (this.isLoading()) {
       this.pendingPlay = !this.pendingPlay;
       this.emit();
@@ -285,7 +290,9 @@ export class DeckEngine {
 
   seek(seconds: number): void {
     if (!this.buffer) return;
-    this.dispatch({ type: 'seek', time: this.clampTime(seconds) });
+    const time = this.clampTime(seconds);
+    this.onTransportEvent?.({ action: 'seek', playhead: time });
+    this.dispatch({ type: 'seek', time });
   }
 
   jumpBeats(beats: number): void {
@@ -293,8 +300,9 @@ export class DeckEngine {
     // BPM-less tracks assume 120 (library-player parity): a usable jump beats
     // a silently dead control.
     const bpm = this.trackInfo?.bpm ?? 120;
-    const target = this.getPlayhead() + beats * (60 / bpm);
-    this.dispatch({ type: 'seek', time: this.clampTime(target) });
+    const target = this.clampTime(this.getPlayhead() + beats * (60 / bpm));
+    this.onTransportEvent?.({ action: 'jumpBeats', playhead: target, detail: beats });
+    this.dispatch({ type: 'seek', time: target });
   }
 
   /** A BPM edit landed for the loaded Track: keep beat-domain math (beat
@@ -307,8 +315,6 @@ export class DeckEngine {
   }
 
   cueDown(): void {
-    // Cue-down starts audio (hold-to-preview) — same tripwire as play.
-    if (this.startBlocked()) return;
     this.dispatch({ type: 'cue-down' });
   }
 
@@ -317,11 +323,11 @@ export class DeckEngine {
   }
 
   hotCueDown(slot: number, timeSeconds: number | null): void {
-    this.dispatch({
-      type: 'hot-cue-down',
-      slot,
-      time: timeSeconds === null ? null : this.clampTime(timeSeconds),
-    });
+    const time = timeSeconds === null ? null : this.clampTime(timeSeconds);
+    if (time !== null) {
+      this.onTransportEvent?.({ action: 'hotCue', playhead: time, detail: slot });
+    }
+    this.dispatch({ type: 'hot-cue-down', slot, time });
   }
 
   hotCueUp(slot: number, timeSeconds: number | null): void {
@@ -332,12 +338,28 @@ export class DeckEngine {
   // (EQ/filter/fader live on the Mixer's channel strip — ADR 0009. The deck
   // keeps only varispeed.)
 
+  /** Varispeed. Range POLICY belongs to callers (ADR 0022): the
+   * Performance fader/MIDI clamp to ±PITCH_RANGE_PERCENT, the editor's
+   * tempo-match to its wider range; the engine only enforces the hard
+   * ceiling. */
   setPitch(percent: number): void {
     const clamped = Math.max(
-      -this.pitchRangePercent,
-      Math.min(this.pitchRangePercent, percent)
+      -MAX_PITCH_RANGE_PERCENT,
+      Math.min(MAX_PITCH_RANGE_PERCENT, percent)
     );
     this.setRateComponents(clamped, this.bendPercent);
+  }
+
+  /**
+   * Key Lock toggle. Seamless mid-play: the worklet splices modes with an
+   * internal crossfade at the audible position — the composed rate, the
+   * playhead clock, and the anchor math are untouched.
+   */
+  setKeyLock(on: boolean): void {
+    if (on === this.keyLock) return;
+    this.keyLock = on;
+    this.sourceNode?.setMode(on ? 'stretch' : 'resample');
+    this.emit();
   }
 
   /**
@@ -443,11 +465,7 @@ export class DeckEngine {
   private startAudio(at: number): void {
     if (!this.buffer) return;
     const { ctx, input } = this.ensureAudio();
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch((err) => {
-        console.warn('[DeckEngine] AudioContext.resume() failed:', err);
-      });
-    }
+    if (ctx.state === 'suspended') this.resumeWithGestureRetry(ctx);
     if (this.sourceNode && this.sourceNode.ctx === ctx) {
       this.beginStart(this.sourceNode, input, at);
       return;
@@ -469,6 +487,34 @@ export class DeckEngine {
     this.transport = { ...this.transport, playhead: this.clampTime(at) };
   }
 
+  /** One pending gesture-retry at a time. */
+  private gestureRetryInstalled = false;
+
+  /**
+   * Chrome's autoplay policy refuses resume() outside user activation — and
+   * a MIDI message is NOT activation, so a hardware play against a fresh
+   * (boot-restored) context leaves it suspended: the transport runs, the
+   * audio doesn't. Retry on the next real gesture, guarded: audio must
+   * still be wanted and the context unchanged.
+   */
+  private resumeWithGestureRetry(ctx: AudioContext): void {
+    ctx.resume().catch((err) => {
+      console.warn('[DeckEngine] AudioContext.resume() failed:', err);
+    });
+    if (this.gestureRetryInstalled || typeof window === 'undefined') return;
+    this.gestureRetryInstalled = true;
+    const retry = () => {
+      this.gestureRetryInstalled = false;
+      window.removeEventListener('pointerdown', retry, true);
+      window.removeEventListener('keydown', retry, true);
+      if (!isAudioRunning(this.transport)) return;
+      if (this.audio?.ctx !== ctx || ctx.state !== 'suspended') return;
+      void ctx.resume().catch(() => undefined);
+    };
+    window.addEventListener('pointerdown', retry, true);
+    window.addEventListener('keydown', retry, true);
+  }
+
   /** Issue the start against a ready node: hand samples over if this buffer
    * hasn't been yet, reconnect (the mixer may have rebuilt its strips), set
    * the rate, and anchor the playhead clock. All synchronous — MessagePort
@@ -476,6 +522,9 @@ export class DeckEngine {
   private beginStart(node: DeckSourceNode, input: AudioNode, at: number): void {
     if (!this.buffer) return;
     this.handOverIfStale(node);
+    // Re-assert the mode every start: covers a freshly (re)built node and
+    // costs one ordered message.
+    node.setMode(this.keyLock ? 'stretch' : 'resample');
     node.disconnect();
     node.connect(input);
     const now = node.ctx.currentTime;
@@ -566,6 +615,7 @@ export class DeckEngine {
       cuePoint: this.transport.cuePoint,
       pitchPercent: this.pitchPercent,
       bendPercent: this.bendPercent,
+      keyLock: this.keyLock,
     };
   }
 

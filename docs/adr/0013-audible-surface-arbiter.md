@@ -1,6 +1,9 @@
 # An arbiter owns the audible surface
 
-Status: accepted (grill 2026-07-04)
+Status: superseded in part by ADR 0022 (2026-07-05) — with one AudioContext
+the clock invariant is vacuous: `silence()` becomes "pause playback" only,
+`wake()`-as-resume and the `mayStart` tripwire are deleted. The single-holder
+state machine, gesture routing seam, and claim/release lifecycle survive.
 
 "One audible surface / one running audio clock" (the invariant from
 mix-editor issue 08 — two live AudioContexts make both clocks stutter) gets

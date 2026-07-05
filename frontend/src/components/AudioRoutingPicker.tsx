@@ -26,6 +26,7 @@ import {
 } from '../playback/routingStore';
 import { cueOutputOptions, sameCueChoice } from '../playback/routing';
 import type { SavedDevice } from '../playback/routing';
+import { AutoBlurSelect } from './AutoBlurSelect';
 
 function BusSelect({
   label,
@@ -55,7 +56,7 @@ function BusSelect({
       }
     >
       <span className="topbar-routing-label">{label}</span>
-      <select
+      <AutoBlurSelect
         value={saved === null ? '' : savedIndex >= 0 ? String(savedIndex) : 'saved'}
         onPointerDown={() => void refreshRouting()}
         onChange={(e) => {
@@ -76,7 +77,7 @@ function BusSelect({
             {option.label || option.deviceId}
           </option>
         ))}
-      </select>
+      </AutoBlurSelect>
     </label>
   );
 }

@@ -141,11 +141,13 @@ function forwardConsole(webContents) {
 
 app.whenReady().then(() => {
   // Auto-grant device capabilities so nothing prompts on the dev machine:
-  // Web MIDI (incl. sysex) for the Controller, plus media + speaker
-  // selection so enumerateDevices() exposes output ids/labels and
-  // AudioContext.setSinkId can target non-default devices (headphone-cue
-  // 01: the routing picker and the ADR 0017 cue bridge need both).
-  const GRANTED = new Set(["midi", "midiSysex", "media", "speaker-selection"]);
+  // Web MIDI (incl. sysex) for the Controller, media + speaker selection so
+  // enumerateDevices() exposes output ids/labels and AudioContext.setSinkId
+  // can target non-default devices (headphone-cue 01: the routing picker and
+  // the ADR 0017 cue bridge need both), and screen-wake-lock so the display
+  // never dims mid-set (screen-wake 01; denied permissions here surface as
+  // NotAllowedError from navigator.wakeLock.request).
+  const GRANTED = new Set(["midi", "midiSysex", "media", "speaker-selection", "screen-wake-lock"]);
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) =>
     cb(GRANTED.has(permission)),
   );

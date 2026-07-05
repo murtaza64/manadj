@@ -39,8 +39,8 @@ export interface SavedTransition {
   uuid: string;
   name: string;
   transition: EditorMix['transition'];
-  /** Proven move (glossary: Favorite). A pair with ≥1 favorited Transition
-   * is a Preferred pair — always derived, never stored. */
+  /** Glossary: Favorite — asserts the pair goes well together AND this
+   * specific Transition is good. Write-independent of Linked. */
   favorite?: boolean;
 }
 
@@ -284,7 +284,8 @@ function isDefaultShape(tr: Transition): boolean {
     tr.bInSec === d.bInSec &&
     tr.tempoMatch === d.tempoMatch &&
     Object.values(tr.lanes).every((pts) => !pts || pts.length === 0) &&
-    (tr.hiddenLanes?.length ?? 0) === 0
+    (tr.hiddenLanes?.length ?? 0) === 0 &&
+    (tr.jumps?.length ?? 0) === 0
   );
 }
 

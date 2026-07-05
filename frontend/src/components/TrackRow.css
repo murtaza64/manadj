@@ -219,23 +219,31 @@ a.provenance-chip:hover {
   text-decoration: underline;
 }
 
-/* Saved-Transition marks (transition-library 02): per-source-deck glyphs
-   in the deck accent colors; ★ = Preferred pair (has a favorite). */
-.track-transition-marks {
-  float: left;
+/* Marks column (follow-mode 09): two fixed slots (A, B) in Deck colors,
+   strongest evidence per Deck (★ > 🔗 > ◆). Slots hold their width when
+   empty — the title edge never moves. */
+.track-marks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.track-mark-slot {
   display: inline-flex;
-  gap: 3px;
-  margin-right: 6px;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
   font-size: 13px;
-  line-height: inherit;
+  line-height: 1;
 }
 
-.track-transition-mark.mark-a {
-  color: #00e5ff;
+.track-mark-slot.mark-a {
+  color: var(--deck-a);
 }
 
-.track-transition-mark.mark-b {
-  color: #ff2d95;
+.track-mark-slot.mark-b {
+  color: var(--deck-b);
 }
 
 /* Load-to-deck hover buttons (Performance view's embedded library). The
@@ -271,6 +279,24 @@ a.provenance-chip:hover {
   border-color: var(--text);
 }
 
+/* Deck colors (CONTEXT.md: Deck color): the per-deck load buttons carry
+   their target's identity (deck-colors 02). */
+.track-load-button-A {
+  color: var(--deck-a);
+}
+
+.track-load-button-B {
+  color: var(--deck-b);
+}
+
+.track-load-button-A:hover {
+  border-color: var(--deck-a);
+}
+
+.track-load-button-B:hover {
+  border-color: var(--deck-b);
+}
+
 /* Play order (#) cell — playlist tables only (playlist-editing 04) */
 .track-order-cell {
   color: var(--subtext0);
@@ -283,3 +309,12 @@ a.provenance-chip:hover {
 .track-row-archived > td {
   opacity: 0.5;
 }
+
+/* The ★ glyph renders visually smaller than ◆ at equal font-size —
+   scale it up ~30% without moving the slot layout (follow-mode 08/09). */
+.track-mark-slot .mark-star {
+  display: inline-block;
+  transform: scale(1.3);
+  transform-origin: center;
+}
+

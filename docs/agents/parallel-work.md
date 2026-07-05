@@ -49,13 +49,57 @@ abandoned.
   commit (`merge: <what>`), then move `main` to it.
 - Rebases onto trunk happen at issue boundaries, never mid-issue.
 
-## The gate (before `main` moves)
+## Landing policy (revised 2026-07-05: human review gates features)
 
-On the rebased/merged tree:
+Who may advance `main`, by category of work:
+
+- **Auto-land (agent's own judgment)**: bugfixes (restoring intended
+  behavior), incidental refactors and maintenance done in passing (renames,
+  tooling, dev-process changes), and the docs fast-path below.
+- **Review-gated (never advance `main` without human approval)**: feature
+  work — anything driven by a PRD or `.scratch/<feature>/issues/` — and
+  refactors that are their own tracked effort (arch-review outputs, module
+  reshapes).
+- **Tiebreaker**: unsure → request review.
+
+A bugfix discovered inside a feature lane may be split to its own change and
+auto-landed while the feature stack stays parked for review.
+
+## Verification (the landing agent owns it)
+
+The issue's Testing Decisions are the verification spec — the agent decides
+what checks prove the change, and runs those. The standard suite is a
+**suggestion** for when in doubt, not a mandate:
+
 - `uv run -m pytest`
 - `npm --prefix frontend run build` and `npx vitest run` in `frontend/`
-- `uv run alembic heads` → exactly one head
 - `uv run --extra dev ruff check` on touched files (known baseline excepted)
+
+One hard invariant remains, always, on the rebased/merged tree:
+`uv run alembic heads` → exactly one head. (Repo integrity, not testing — a
+multi-head trunk breaks every lane's startup auto-migrate at once, and no
+issue's Testing Decisions will ever catch it.)
+
+## Requesting review (review-gated work)
+
+1. Verify per the issue's Testing Decisions; rebase/prepare the stack.
+2. Start the lane app: `uv run scripts/agent/lane_app.py start` (reads the
+   lane's port offset from `.lanes/`, clones the sandbox DB if absent, runs
+   backend+vite in the background; refuses to run in the default workspace).
+3. Flip the issue to `Status: ready-for-human` with a **verification
+   walkthrough** comment: the URL to open (or desktop-shell command:
+   `npm --prefix desktop start -- --port <vite port>` — attach-only, works
+   from anywhere), and a brief guide of what to look at — the 3-5 clicks
+   that exercise the slice and what correct looks like. Land the flip via
+   the docs fast-path.
+4. Toast the human (same URL + one-line summary) and report it in-session.
+5. **Keep working**: continue to the next issue on top of the parked stack.
+   Approval lands a *prefix* (`jj bookmark move main --to <reviewed change>`
+   — landing a non-head is fine). Review fixes are amended into the still
+   unlanded changes (your lane, your right).
+6. The human's verbal approval ("approved, land it" — in your session or
+   relayed) is the gate; the agent then moves `main` and stops the lane app
+   (or keeps it running for the next review round).
 
 ## Lane registry: `.lanes/`
 
@@ -151,3 +195,15 @@ Reserved for the human and for integration/verification: probes, gates, the real
 DB, the real app (ports 8000/5173). It is not a lane; agents do not do feature
 work in it. Each lane records a port offset in its `.lanes/` file (e.g. +10:
 backend 8010, vite 5183) and always passes explicit ports.
+
+- **Post-landing hot-reload** (practice added 2026-07-05): the real app runs
+  off the default workspace's working copy, so a landed change is invisible
+  there until that working copy moves. After advancing `main`, check the
+  default workspace's `@`: if it is an idle placeholder (empty change, no
+  description — or its own stale "post-landing" empty), move it to a fresh
+  change on the new trunk: `jj -R /Users/murtaza/manadj new main`. Vite and
+  the auto-reload backend pick the landed change up immediately. If `@` has
+  file changes or a real description, it's the human's — leave it alone and
+  say the app needs a manual update instead. (Note: moving default@ onto a
+  trunk containing new migrations auto-migrates the real DB on next backend
+  start — that is the sanctioned post-landing migration path.)

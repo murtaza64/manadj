@@ -16,7 +16,16 @@ import type { ChannelId } from '../playback/mixer';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
-import { candidateIdSet, deriveFollowQuery, followedReferences, orderByTier } from '../follow/model';
+import { linkedIdsOf, useLinks } from '../links/linkStore';
+import { knownStrengthOf } from '../links/known';
+import {
+  candidateIdSet,
+  deriveFollowQuery,
+  followedReferences,
+  followTier,
+  orderByTier,
+  tierLabel,
+} from '../follow/model';
 import type { FollowReference } from '../follow/model';
 import { useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
@@ -32,6 +41,8 @@ import {
 import { isTrackDrag, readTrackDragPayload, readTrackDragSource } from '../selection/trackDrag';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import { useToast } from './Toast';
+import SetDetailPane from '../sets/SetDetailPane';
+import { addTracksToSet, getSelectedSetId, selectSet } from '../sets/setStore';
 import type { Playlist } from '../types';
 import {
   PLAY_ORDER_SORT,
@@ -77,8 +88,15 @@ export default function Library({
   onLoadToDeck,
   browseRef,
 }: LibraryProps) {
-  const [selectedView, setSelectedView] = useState<ViewType>('all');
+  // Set-view state lives in the set store (sets 01): every mode mounts its
+  // own browse instance, and the Set pane must survive mode switches. A
+  // fresh mount restores the store's selection; local view changes write
+  // back through the handlers below.
+  const [selectedView, setSelectedView] = useState<ViewType>(() =>
+    getSelectedSetId() !== null ? 'set' : 'all'
+  );
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
+  const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
   const queryClient = useQueryClient();
   const tagEditorRef = useRef<TagEditorHandle | null>(null);
@@ -95,6 +113,7 @@ export default function Library({
   // the pair is Preferred. Index rebuilds live on editor save events.
   const decks = useDecks();
   const transitionIndex = useTransitionIndex();
+  const links = useLinks();
   const fromA = transitionsFrom(transitionIndex, decks.A.loadedTrack?.id);
   const fromB = transitionsFrom(transitionIndex, decks.B.loadedTrack?.id);
 
@@ -132,31 +151,36 @@ export default function Library({
       };
     }),
   });
-  /** Candidate ids while following: both evidence tiers (follow-mode 03) —
-   * heuristic query results unioned with the proven tier (saved
-   * Transitions from each followed reference), or the proven tier alone
-   * under provenOnly. Heuristic sets come from the reference queries that
-   * have data: a still-loading second reference doesn't un-narrow the
-   * already-followed list. Null (= no filtering) only when nothing is
-   * followed, or when heuristics are wanted but none have resolved yet —
-   * the manual list shows unfiltered rather than flashing empty. */
-  const followProvenSets = followRefs.map(({ reference }) =>
-    transitionsFrom(transitionIndex, reference.id)
-  );
+  /** Candidate ids while following: both evidence tiers (follow-mode 03 /
+   * linked-pairs 04) — heuristic query results unioned with the known
+   * tier (saved Transitions from each followed reference, plus its Linked
+   * Tracks), or the known tier alone under knownOnly. Heuristic sets come
+   * from the reference queries that have data: a still-loading second
+   * reference doesn't un-narrow the already-followed list. Null (= no
+   * filtering) only when nothing is followed, or when heuristics are
+   * wanted but none have resolved yet — the manual list shows unfiltered
+   * rather than flashing empty. */
+  const followKnownSets = followRefs.map(({ reference }) => {
+    const ids = new Set(transitionsFrom(transitionIndex, reference.id).keys());
+    for (const id of linkedIdsOf(links, reference.id)) ids.add(id);
+    return ids;
+  });
   const resolvedFollowQueries = followQueries.filter((q) => q.data !== undefined);
   const followCandidateIds = (() => {
     if (followRefs.length === 0) return null;
-    if (!followParams.provenOnly && resolvedFollowQueries.length === 0) return null;
+    if (!followParams.knownOnly && resolvedFollowQueries.length === 0) return null;
     return candidateIdSet(
       resolvedFollowQueries.map((q) => q.data!.items ?? []),
-      followProvenSets,
-      followParams.provenOnly
+      followKnownSets,
+      followParams.knownOnly
     );
   })();
-  /** References for tier ordering (follow-mode 04), proven maps included. */
-  const followReferences: FollowReference[] = followRefs.map(({ reference }, i) => ({
+  /** References for tier ordering (follow-mode 04), known lookups
+   * included (favorited Transition > Linked > unfavorited Transition). */
+  const followReferences: FollowReference[] = followRefs.map(({ reference }) => ({
     track: reference,
-    proven: followProvenSets[i],
+    knownStrength: (id: number) =>
+      knownStrengthOf(transitionsFrom(transitionIndex, reference.id), links, reference.id, id),
   }));
 
   // Beatgrid mutation hooks
@@ -231,6 +255,20 @@ export default function Library({
     queryKey: ['playlists'],
     queryFn: api.playlists.list,
   });
+
+  // Sets for the "Add to set ▸" submenu (shares the sidebar's cache; sets 01).
+  const { data: setsList = [] } = useQuery({
+    queryKey: ['sets'],
+    queryFn: api.sets.list,
+  });
+
+  const addTracksToSetWithToast = (setId: number, trackIds: number[]) => {
+    void addTracksToSet(setId, trackIds).then((skipped) => {
+      if (skipped > 0) {
+        showToast(skipped === 1 ? '1 track already in set' : `${skipped} tracks already in set`);
+      }
+    });
+  };
 
   // Add tracks to playlist mutation (sequential appends, selection order).
   // Duplicates are idempotent no-ops server-side (entry identity); skips
@@ -466,6 +504,13 @@ export default function Library({
     );
   }
 
+  /** Tier section headers (follow-mode 08): only while Follow filters —
+   * manual browsing stays a flat table. Applies wherever the candidate
+   * filter applied (never the split's playlist pane). */
+  const followGroupLabel = followCandidateIds
+    ? (t: Track) => tierLabel(followTier(t, followReferences))
+    : undefined;
+
   // ── Selection machinery: one instance per pane ─────────────────────────
   // 'main' is the single always-present table (playlist or library,
   // depending on the view; the top pane in the split). 'editLibrary' only
@@ -664,6 +709,15 @@ export default function Library({
           onSelect: () => addToPlaylistMutation.mutate({ playlistId: p.id, trackIds: targetIds }),
         })),
       },
+      {
+        label: multi ? `Add ${targetIds.length} to set` : 'Add to set',
+        disabled: setsList.length === 0,
+        title: setsList.length === 0 ? 'No sets yet' : undefined,
+        submenu: setsList.map((s) => ({
+          label: s.name,
+          onSelect: () => addTracksToSetWithToast(s.id, targetIds),
+        })),
+      },
       ...(canRemoveFromPlaylist && pane === 'main'
         ? [
             {
@@ -689,7 +743,7 @@ export default function Library({
           } satisfies MenuItem),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowMenu, mainSel.selection.ids, editLibSel.selection.ids, playlists, canRemoveFromPlaylist, selectedPlaylistId, selectedView]);
+  }, [rowMenu, mainSel.selection.ids, editLibSel.selection.ids, playlists, setsList, canRemoveFromPlaylist, selectedPlaylistId, selectedView]);
 
   const totalTracks = selectedView === 'playlist'
     ? playlistData?.tracks?.length || 0
@@ -799,12 +853,22 @@ export default function Library({
         <PlaylistSidebar
           selectedView={selectedView}
           selectedPlaylistId={selectedPlaylistId}
-          onSelectView={setSelectedView}
+          onSelectView={(view) => {
+            setSelectedView(view);
+            selectSet(null);
+          }}
           onSelectPlaylist={(id) => {
             setSelectedView('playlist');
             setSelectedPlaylistId(id);
+            selectSet(null);
           }}
           onTrackDrop={handleTrackDrop}
+          selectedSetId={selectedSetId}
+          onSelectSet={(id) => {
+            setSelectedView('set');
+            setSelectedSetId(id);
+            selectSet(id);
+          }}
         />
 
         {/* Main library area (filter + table; split panes when editing) */}
@@ -847,7 +911,10 @@ export default function Library({
             </div>
           )}
 
-          {splitView ? (
+          {selectedView === 'set' && selectedSetId !== null ? (
+            /* Set detail view (sets 01): replaces the track table. */
+            <SetDetailPane setId={selectedSetId} />
+          ) : splitView ? (
             <>
               {/* Playlist pane (Play order) */}
               <div
@@ -894,6 +961,9 @@ export default function Library({
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}
+                  links={links}
+                  deckAId={decks.A.loadedTrack?.id ?? null}
+                  deckBId={decks.B.loadedTrack?.id ?? null}
                   sortColumn={playlistSort.column}
                   sortDirection={playlistSort.direction}
                   onSort={handleSort}
@@ -930,6 +1000,10 @@ export default function Library({
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}
+                  links={links}
+                  deckAId={decks.A.loadedTrack?.id ?? null}
+                  deckBId={decks.B.loadedTrack?.id ?? null}
+                  groupLabelFor={followGroupLabel}
                   sortColumn={filters.sortColumn}
                   sortDirection={filters.sortDirection}
                   onSort={handleSortLibrary}
@@ -987,6 +1061,10 @@ export default function Library({
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}
+                  links={links}
+                  deckAId={decks.A.loadedTrack?.id ?? null}
+                  deckBId={decks.B.loadedTrack?.id ?? null}
+                  groupLabelFor={followGroupLabel}
                   sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
                   sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
                   onSort={handleSort}

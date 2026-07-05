@@ -1,9 +1,10 @@
-import { type JSX } from 'react';
+import React, { type JSX } from 'react';
 import TrackRow, { type SelectMods, type TransitionMark } from './TrackRow';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon } from './icons';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import type { PairInfo } from '../editor/transitionIndex';
+import { isLinked, type LinkKey } from '../links/linkStore';
 import { getColumnConfig } from './columnConfig';
 import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { useColumnWidths } from '../hooks/useColumnWidths';
@@ -37,6 +38,16 @@ interface TrackListProps {
    * Transition FROM deck A's / deck B's loaded track. */
   transitionMarksA?: ReadonlyMap<number, PairInfo>;
   transitionMarksB?: ReadonlyMap<number, PairInfo>;
+  /** Linked marks (linked-pairs 03): the Linked set plus each deck's
+   * loaded track id, resolved per row (symmetric, unordered pairs). */
+  links?: ReadonlySet<LinkKey>;
+  deckAId?: number | null;
+  deckBId?: number | null;
+  /** Section headers (follow-mode 08): when set, a full-width header row
+   * (label — count) opens each run of equal labels. The caller supplies
+   * pre-grouped tracks (Follow's tier ordering); this only renders the
+   * boundaries. Absent = flat table. */
+  groupLabelFor?: (track: Track) => string;
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
@@ -57,6 +68,10 @@ export default function TrackList({
   onLoadToDeck,
   transitionMarksA,
   transitionMarksB,
+  links,
+  deckAId,
+  deckBId,
+  groupLabelFor,
   sortColumn,
   sortDirection,
   onSort
@@ -66,6 +81,9 @@ export default function TrackList({
     const info = marks?.get(id);
     return info ? (info.preferred ? 'preferred' : 'saved') : 'none';
   };
+  /** Memo-friendly Linked flag: is this row Linked with the deck's track? */
+  const linkedFor = (deckId: number | null | undefined, id: number): boolean =>
+    links !== undefined && deckId != null && isLinked(links, deckId, id);
   const { widths, setWidth, resetWidth, cssVars } = useColumnWidths(playOrder !== undefined);
 
   const SortableHeader = ({
@@ -124,6 +142,17 @@ export default function TrackList({
             <SortableHeader column="key" icon={<KeyIcon />} columnId="key" />
             <SortableHeader column="bpm" icon={<SpeedIcon />} columnId="bpm" />
             <SortableHeader column="energy" icon={<EnergyIcon />} columnId="energy" />
+            {/* Marks column (follow-mode 09): blank header, no sort, no
+                resize — two fixed evidence slots per row. */}
+            <th
+              className="sticky-col-header"
+              style={{
+                width: 'var(--colw-marks)',
+                minWidth: 'var(--colw-marks)',
+                maxWidth: 'var(--colw-marks)',
+                left: 'var(--colleft-marks)',
+              }}
+            />
             <SortableHeader column="title" icon={<MusicIcon />} columnId="title" />
             <SortableHeader column="artist" icon={<PersonIcon />} columnId="artist" />
             <SortableHeader column="created_at" icon={<CalendarIcon />} columnId="created_at" />
@@ -144,34 +173,63 @@ export default function TrackList({
         <tbody>
           {isLoading && tracks.length === 0 ? (
             <tr>
-              <td colSpan={playOrder !== undefined ? 11 : 10} className="track-table-message track-table-loading">
+              <td colSpan={playOrder !== undefined ? 12 : 11} className="track-table-message track-table-loading">
                 Loading tracks...
               </td>
             </tr>
           ) : error ? (
             <tr>
-              <td colSpan={playOrder !== undefined ? 11 : 10} className="track-table-message track-table-error">
+              <td colSpan={playOrder !== undefined ? 12 : 11} className="track-table-message track-table-error">
                 Error loading tracks
               </td>
             </tr>
           ) : (
-            tracks.map((track: Track) => (
-              <TrackRow
-                key={track.id}
-                track={track}
-                isSelected={selectedIds.has(track.id)}
-                isLoaded={loadedTrackId === track.id}
-                onSelect={onSelectTrack}
-                onLoad={onLoadTrack}
-                onLoadToDeck={onLoadToDeck}
-                getDragIds={getDragIds}
-                dragSource={dragSource}
-                onContextMenu={onRowContextMenu}
-                orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
-                markA={markFor(transitionMarksA, track.id)}
-                markB={markFor(transitionMarksB, track.id)}
-              />
-            ))
+            (() => {
+              // Group counts for the header rows (one pass; labels arrive
+              // pre-grouped, so counting runs of equals suffices — but a
+              // full tally is robust to a caller that didn't sort).
+              const counts = new Map<string, number>();
+              if (groupLabelFor) {
+                for (const t of tracks) {
+                  const label = groupLabelFor(t);
+                  counts.set(label, (counts.get(label) ?? 0) + 1);
+                }
+              }
+              let previousLabel: string | null = null;
+              return tracks.map((track: Track) => {
+                const label = groupLabelFor?.(track) ?? null;
+                const opensGroup = label !== null && label !== previousLabel;
+                previousLabel = label;
+                return (
+                  <React.Fragment key={track.id}>
+                    {opensGroup && (
+                      <tr className="track-tier-header">
+                        <td colSpan={playOrder !== undefined ? 12 : 11}>
+                          {label}
+                          <span className="track-tier-count"> — {counts.get(label!)}</span>
+                        </td>
+                      </tr>
+                    )}
+                    <TrackRow
+                      track={track}
+                      isSelected={selectedIds.has(track.id)}
+                      isLoaded={loadedTrackId === track.id}
+                      onSelect={onSelectTrack}
+                      onLoad={onLoadTrack}
+                      onLoadToDeck={onLoadToDeck}
+                      getDragIds={getDragIds}
+                      dragSource={dragSource}
+                      onContextMenu={onRowContextMenu}
+                      orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
+                      markA={markFor(transitionMarksA, track.id)}
+                      markB={markFor(transitionMarksB, track.id)}
+                      linkedA={linkedFor(deckAId, track.id)}
+                      linkedB={linkedFor(deckBId, track.id)}
+                    />
+                  </React.Fragment>
+                );
+              });
+            })()
           )}
         </tbody>
       </table>

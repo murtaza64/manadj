@@ -52,26 +52,75 @@ A hand-curated, ordered list of Tracks; a Track appears at most once. Curated in
 The hand-curated ordering of Tracks within a Playlist — part of the Playlist's identity, what Export preserves. Distinct from a view's *sort*: sorting a playlist's track table (by BPM, key, …) changes only what is displayed and never rewrites Play order. Reordering is only possible when viewing in Play order.
 
 **Transition**:
-A first-class persisted artifact: the handover between an ordered pair of Tracks — entry/exit anchors (in seconds), a duration, an optional tempo-match, and drawn automation lanes for mixer controls. Directional (A→B is not B→A); a pair usually has one Transition, occasionally several. The incoming entry anchor may be negative: the incoming Track's audio then begins partway into the Transition (a silent lead gap). Beat-snapping and tempo-matching are editing affordances, not the model. The accumulating set of saved Transitions is the library of "what mixes well into what" — the seed of track-association features.
+A first-class persisted artifact: the handover between an ordered pair of Tracks — entry/exit anchors (in seconds), a duration, an optional tempo-match, drawn automation lanes for mixer controls, and Jump events on the incoming Track. Directional (A→B is not B→A); a pair usually has one Transition, occasionally several. The incoming entry anchor may be negative: the incoming Track's audio then begins partway into the Transition (a silent lead gap). Beat-snapping and tempo-matching are editing affordances, not the model. The accumulating set of saved Transitions is the library of "what mixes well into what" — the seed of track-association features.
 
 **Sketch origin**:
 The Transition editor's timeline starts at the outgoing Track's start — an invariant, not a setting. The outgoing Track never moves on the timeline; every alignment gesture is expressible as a Slide of the incoming Track, the window, or both.
 
 **Transition editor**:
-The top-panel mode (a sibling of the library and Performance views) for editing the saved Transition between two loaded Tracks on a DAW-style timeline. Entering it pauses other playback surfaces: one audible surface at a time.
+The top-panel mode (a sibling of the library and Performance views) for editing the saved Transition between two loaded Tracks on a DAW-style timeline. Its auditions play through the shared Decks and Mixer; entering it pauses shared playback — one audible surface at a time.
 
-**Mix**:
-Future concept: an ordered sequence of Tracks whose adjacencies reference saved Transitions. Deferred until the Transition library exists. Distinct from a Playlist, and from the Classification value "mix" (an externally recorded DJ mix on a Source).
+**Set**:
+An ordered sequence of Tracks whose adjacencies each pin, by explicit reference, a saved Transition, a Take, or nothing (unresolved) — the planned form of a DJ set. Pins are stable: saving new Transitions for a pair never changes an existing pin. Auto-fill may propose Transitions (favorite first) but never a Take — Takes are by definition unreviewed, so pinning one is always a manual act; promoting a Take re-points every Set pin to the resulting Transition. Reordering never destroys a pin: a broken adjacency's pin goes Dormant and restores if the pair becomes adjacent again. Renames the former "Mix" concept (2026-07-05), which collided with the Classification value "mix" (an externally recorded DJ mix on a Source). Distinct from a Playlist: a Playlist's identity is hand-curated order for curation and Export; a Set's identity is its adjacencies and what they pin.
+_Avoid_: mix (retired), setlist, auto playlist
+
+**Dormant pin**:
+A Set's memory of a pin whose adjacency was broken by reordering or removal — kept per ordered pair, per Set, and restored automatically when that pair becomes adjacent in that Set again (restoring a manually-pinned Take honors the original manual act). Strictly per-Set: another Set with the same pair gets auto-fill, not this Set's memory. Makes reordering non-destructive — the discard warning it replaced (decided then overturned 2026-07-05) is gone.
+
+**Set playback**:
+Playing a Set end-to-end via the Conductor: Tracks ping-pong across the two shared Decks, each playing solo from its entry until the next pinned Transition's window, whose position on the outgoing Track's timeline is given by the Transition itself. A Take pin plays its idealized vectorization. An unresolved adjacency hard-cuts: the outgoing Track plays to its end, the incoming starts at its Main cue — playback never stalls. (A future practice mode may instead hand unresolved boundaries to the user, capturing a Take.)
+
+**Conductor**:
+The automation driver that performs Set playback on the existing performance surface — loading Decks, starting transports, and moving Mixer controls per the pinned Transitions. Not a new Audible surface: the Decks and Mixer behave plainly, and any view showing them visualizes the Set as it plays. It has its own transport — play, pause, seek — which are Conductor controls, not takeover triggers; a seek is an evaluation of the playback plan at a mix-time instant (deck positions, lane values mid-window, tempo state), legal into the middle of a Transition and while paused. Any manual deck or mixer gesture stops the Conductor entirely — the Decks keep playing as they are and the user is mixing live (per-control takeover deferred). Conductor-driven playback is invisible to Take capture, like editor auditions; capture resumes at takeover. A Transition's lanes address the outgoing/incoming roles, not physical Decks: the Conductor maps roles onto Decks per its ping-pong parity, and the Transition editor always presents outgoing-as-A.
+
+**Unresolved**:
+A Set adjacency with nothing pinned — no Transition, no Take. Says only "playback will hard-cut here"; the pair may still be well-practiced (evidence exists, not yet pinned — an auto-fill candidate). Orthogonal to Unpracticed.
+
+**Unpracticed**:
+A Set adjacency whose ordered pair has no saved Transition and no Take — these two Tracks have never been mixed, in either artifact's sense. The Set's rehearsal to-do list. Orthogonal to Unresolved: an adjacency can be unresolved yet practiced, and (via a pinned Take) resolved yet never promoted.
+
+**Tempo policy**:
+A per-Set choice governing tempo during Set playback. **Riding**: each incoming Track eases back to its native tempo between Transitions (see Tempo return). **Fixed**: the entire Set plays at the Set tempo — every Track pitched to it, Transitions rate-scaled as a whole; a pinned Transition's tempo-match flag is moot. One policy per Set; per-section tempo progression is deferred.
+
+**Set tempo**:
+The single BPM a Fixed-policy Set plays at. Explicit and editable on the Set, defaulted from the first Track's native BPM. Has no meaning under Riding.
+
+**Tempo return**:
+Under the Riding policy, the eased ramp of an incoming Track from its tempo-matched rate back to native after a Transition's window closes — the pitch-fader ride-back a DJ performs by hand. Ramp speed is a tunable heuristic, not part of the model; a ramp that cannot complete before the next window is a Set validation flag (insufficient runway), clamped faster rather than left incomplete.
 
 **Favorite**:
 A boolean on a Transition marking a proven move — asserting both "these Tracks go well together" and "this specific Transition is good." The unit discovery ranks by. Distinct from a Track's Rating.
 _Avoid_: like (social-app connotation).
 
 **Preferred pair**:
-A derived, never-stored property: an ordered Track pair with at least one favorited Transition. Surfaces as the starred variant of Transition-library marks. Bookmarking a pairing with no sketched Transition is deliberately NOT this — that would be a worklist concept, not a Favorite variant.
+Retired term (2026-07-05). "An ordered Track pair with at least one favorited Transition" is now an unnamed derived property — say it longhand. Its starred Transition-library marks remain; the stored, toggleable pair association it deliberately excluded now exists as Linked.
+
+**Linked**:
+A stored, symmetric, user-toggled assertion that two Tracks go well together — one fact per unordered pair of distinct Tracks (never self-Linked), toggleable whenever the pair is loaded together (Performance view, Transition editor). Independent of Favorite at write time: favoriting a Transition never links, unfavoriting never unlinks; discovery's effective "goes well together" set is the query-time union of Linked and pairs with a favorited Transition. Surfaces as a symmetric library-row mark relative to each loaded Track, alongside the directional Transition-library marks. Feeds discovery (Follow mode) and future set-building.
+_Avoid_: pairing, preferred pair. Note: "Link" as a Track↔external-library association is now External Correspondence.
+
+**Known**:
+The relation between two Tracks when they are Linked or a saved Transition connects them — discovery's confirmed evidence tier, as opposed to the heuristic Compatible tier. Within the tier, strength orders favorited Transition, then Linked, then unfavorited Transition; a pair takes its best. "Known only" is the Follow-mode filter narrowing to this tier (formerly "proven only").
+_Avoid_: proven (connotes a rehearsed Transition, which a bare Link isn't)
+
+**External Correspondence**:
+Planned concept (formerly "Link", renamed 2026-07-05 to free Linked for the Track-pair assertion): a stored association between a Track and its counterpart row in a specific External library, keyed by that library's stable internal ID. The sibling of Source Correspondence — one Correspondence family: stable-ID-keyed associations between a Track and its representation in another system.
 
 **Transition library**:
-The queryable index over saved Transitions — "what mixes out of / into this Track" — surfaced as library-row marks and discovery filters. Directional, like the Transitions it indexes.
+The queryable index over saved Transitions — "what mixes out of / into this Track" — surfaced as library-row marks and discovery filters. Directional, like the Transitions it indexes. Takes are not in it: only promotion adds to the library.
+
+**Take**:
+A Handover detected and captured automatically during live performance playback — playback while the shared Decks+Mixer surface is audible; Transition-editor auditions are invisible to capture, even though they play through the same Decks — a track pair plus the recorded performance, weaker than a Transition. Takes live in the Transition history, never in the Transition library. Reviewed in the Transition editor; **promoting** a Take converts it into an ordinary saved Transition (recording is a capture method, not a new artifact kind downstream). Promotion idealizes: continuous gestures (Nudge, pitch riding) collapse into the Transition's single alignment and tempo-match; crossfader and channel-fader work compose into the per-deck fader lanes; discrete gestures (beat jumps, hot-cue jumps) are preserved as Jump events, and a loop engagement collapses to one repeated Jump event rather than k wraps. Unpromoted Takes are audit data with one non-audit use: a Set adjacency may pin one (manually, never by auto-fill), playing its idealized vectorization without creating a Transition. Takes from one capture session share a clock, so the pairwise Takes of a multi-deck engagement (a double or triple) remain time-correlated — the full move is reconstructable from its pairs.
+_Avoid_: recorded Transition (a Take is not a Transition until promoted)
+
+**Handover**:
+The detection target for Takes: audibility on the Master bus passes *finally* from the outgoing Track to the incoming — the incoming becomes audible while (or shortly after) the outgoing is, and the outgoing then stays silent. The definition applies per ordered pair: when more than two Decks are audible, one engagement emits a Take for every ordered pair that meets it (deliberately liberal — Takes are audit data; curation happens at review). A Track may hand over to itself (the same Track on two Decks — a dnb double against itself). Brief returns of the outgoing (cross-cuts — dnb teases, double drops) fold into the same Handover rather than ending or splitting it; a tease where the outgoing survives is no Handover at all. Zero-overlap hard cuts are Handovers. Cue-bus (PFL) audibility is invisible to detection. A Take's window is the whole engagement — the contiguous period the two Tracks trade or share audibility, ending at the outgoing's final cessation. Thresholds and settle horizons are tunable heuristics, not part of the definition.
+
+**Jump event**:
+A playback discontinuity inside a Transition — the incoming Track's playhead jumps to a new position at a mix instant (a beat jump or hot-cue press mid-mix, e.g. doubling a buildup). May carry a repeat count: a backward Jump repeated k times recurs at its own displacement's period — which is exactly a loop, so loops need no separate Transition vocabulary. A repeat count is only coherent on a backward Jump (a forward one has no natural period). Intentional structure, unlike a Nudge. Incoming-Track-only for now (the Sketch origin invariant keeps the outgoing Track's time ≡ mix time); outgoing-side jumps may be admitted later, which would restate that invariant.
+
+**Transition history**:
+The chronological log of Takes — "what did I actually mix, when." Audit and review surface, and the tuning ground for Handover detection (false positives included, deliberately). Distinct from the Transition library, which is curated and directional.
 
 **Transition template**:
 A named beat-domain recipe for producing a Transition, in two parts. The **alignment rule**: B's anchor (a cue slot or the Grid origin) lands on A's anchor plus a whole-beat delta — "B's cue 2 lines up with A's cue 4 + 8 beats". B's anchor is the musical reference of the move, typically B's mix-in landmark. The **window**: whole beats before and after the alignment instant (either may be negative; their total, the length, is ≥ 0 — zero is a hard cut at the anchor); scalable templates rescale the total proportionally, keeping the anchor's relative position. Plus normalized automation lanes — only lanes the author gave meaningful content; hidden and untouched lanes are not part of the recipe. Applying translates beats to seconds via the tempo-matched beatgrids and yields an ordinary seconds-based Transition — the recipe is an editing affordance, not a runtime concept. Application never guesses alignment: an anchor that cannot be resolved leaves anchors untouched, while the rest of the recipe still stamps. (Reworked 2026-07-04 from per-side window-start anchors: aligning at the window start forced lead-ins through double-delta arithmetic; anchoring the alignment and windowing around it matches how the move is actually thought.)
@@ -96,24 +145,30 @@ The relation between two Keys that mix well together. The basis of harmonic-mixi
 _Avoid_: related (too vague — could mean same artist, genre, etc.)
 
 **Compatible**:
-A heuristic relation between Tracks: key, tempo, energy, and tag agreement suggest they would mix well. Tag agreement means sharing at least one Tag — never requiring all Tags to match; if any-shared proves too loose, the refinement is scoping to chosen Tag Categories. One of discovery's two evidence tiers — heuristics propose, the Transition library confirms (proven, Favorite-ranked). Follow mode is the feature surfacing this tier; its one-shot ancestors ("Find Compatible", né "Find Related") are retired.
+A heuristic relation between Tracks: key, tempo, energy, and tag agreement suggest they would mix well. Tag agreement means sharing at least one Tag — never requiring all Tags to match; if any-shared proves too loose, the refinement is scoping to chosen Tag Categories. One of discovery's two evidence tiers — heuristics propose, the known tier confirms (Linked pairs and the Transition library). Follow mode is the feature surfacing this tier; its one-shot ancestors ("Find Compatible", né "Find Related") are retired.
 
 **Follow mode**:
-A per-Deck toggle that keeps the browse list continuously filtered to candidate next Tracks for that Deck's loaded Track, updating hands-off as Tracks change — serving "finding the next track painlessly during a set". A followed Track's candidates carry both evidence tiers: heuristic Compatible Tracks unioned with the proven tier (Tracks with a saved Transition from it) — a proven move surfaces even when heuristics would exclude it, and "proven only" narrows to just that tier. With both Decks following, the two candidate sets union. The followed list is tier-ordered by candidate strength — currently proven, same Key, relative Key, one Key up, one Key down, then everything else that passed the filter (tiering provisional); best tier wins across followed Decks, and the view's sort orders within a tier. Follow rides playback: starting a Deck while any Deck follows spreads follow to it and revokes it from any paused following Deck (a paused Deck may only follow while nothing plays); pausing a Deck ends its follow unless it was the only Deck playing — the list survives mid-set silence. Playback never enables Follow from nothing: when no Deck follows, turning it on is the user's act.
+A per-Deck toggle that keeps the browse list continuously filtered to candidate next Tracks for that Deck's loaded Track, updating hands-off as Tracks change — serving "finding the next track painlessly during a set". A followed Track's candidates carry both evidence tiers: heuristic Compatible Tracks unioned with the known tier (Tracks with a saved Transition from it, and Linked Tracks) — a known Track surfaces even when heuristics would exclude it, and "known only" narrows to just that tier. With both Decks following, the two candidate sets union. The followed list is tier-ordered by candidate strength — currently known (internally: favorited Transition, then Linked, then unfavorited Transition; a pair takes its best), same Key, relative Key, one Key up, one Key down, then everything else that passed the filter (tiering provisional); best tier wins across followed Decks, and the view's sort orders within a tier. Follow rides playback: starting a Deck while any Deck follows spreads follow to it and revokes it from any paused following Deck (a paused Deck may only follow while nothing plays); pausing a Deck ends its follow unless it was the only Deck playing — the list survives mid-set silence. Playback never enables Follow from nothing: when no Deck follows, turning it on is the user's act.
 
 ### Performance data
 
 **Analysis**:
 Automatically determining a property of a Track from its audio — key, BPM, beatgrid, waveform. Manual edits to those properties are orthogonal to Analysis.
 
+**Ground truth corpus**:
+The set of Tracks whose key/BPM/Beatgrid values are externally verified, used as the measuring stick for Analysis accuracy: candidate analyzers are scored by agreement with it, not by vibe. Tiered by agreement: *gold* where Engine DJ and Rekordbox concur (headline scoring), *disputed* where they disagree — excluded from scoring until hand verification promotes them. Grid phase is Engine-only (no Rekordbox performance data).
+
 **Deck**:
 An independent playback unit: one loaded Track plus its transport state (playhead, playing/paused, Main cue) and pitch. Two Decks exist — Deck A and Deck B — owned by the application, not by any view: a Deck outlives views and keeps playing across them. The library player shows Deck A; the Performance view shows both. Per-Deck sound shaping (trim, EQ, filter, volume) belongs to the Mixer's channel strips, as on hardware.
+
+**Deck color**:
+The per-Deck identity color used across every surface: Deck A cyan, Deck B magenta (as established by the Transition editor). Identity only — state colors (green for active/playing, blue for accents) never denote a Deck, and Deck colors never denote a state.
 
 **Mixer**:
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on safety limiter. Mirrors a hardware DJ mixer.
 
 **Audible surface**:
-A group of playback machinery that can produce sound as a unit — the shared Decks+Mixer, or the Transition editor's private player. Exactly one is audible at a time (one running audio clock); an arbiter owns which, and displaced surfaces go silent rather than coexist. Playback gestures from app-wide inputs (a Controller) route by gesture class — transport, cue, pads, jumps, jog — to whichever surface is audible; a class the surface doesn't register is dropped, mirroring what the keyboard does there. Mixer-state controls and Load are not gesture classes: they belong to the shared Mixer and to the mounted browse view respectively.
+A playback mode's claim on the shared Decks+Mixer — the plain deck-transport semantics of the Performance and library views, or the Transition editor's mix-timeline semantics. Exactly one surface is audible at a time; an arbiter owns which, and a displaced surface's playback pauses rather than coexist. Playback gestures from app-wide inputs (a Controller) route by gesture class — transport, cue, pads, jumps, loops, jog — to the audible surface; a class the surface doesn't register is dropped, mirroring what the keyboard does there. Mixer-state controls and Load are not gesture classes: they belong to the shared Mixer and to the mounted browse view respectively. (Redefined 2026-07-05: formerly a group of playback machinery that could produce sound as a unit — the editor had a private player; every surface now plays through the shared Decks+Mixer.)
 
 **Performance view**:
 The two-deck view for practicing and performing mixes: stacked full-width waveforms with linked zoom, symmetric Deck A/B panels, a central Mixer panel, and the Library's browse surface embedded below. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
@@ -124,6 +179,14 @@ Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. S
 **Nudge**:
 A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Jog rotation on a paused Deck is a seek, not a Nudge. The Transition editor's counterpart of the same intent is the Alignment nudge.
 
+**Play guide**:
+A derived, view-only marker in the Performance view: one per saved Transition from an outgoing-candidate Track to a paused Track, marking the instant to press play on the paused Deck so the pair rides that Transition's alignment. Shown while one Deck plays (that Deck is the outgoing side) and, since 2026-07-05, while both are paused — then both directions show at once, and starting a Deck prunes to the live direction. Computed from the Transition's alignment and tempo-match ratio and the paused Deck's current playhead (works wherever the incoming Track is cued), projected on the trajectory before the Transition's first Jump event. A missed guide (already behind the playhead) stays visible rather than disappearing. Rendered as a single line spanning both waveforms, labeled with the Transition's name and carrying the incoming (to-be-pressed) Deck's color. Purely visual — never stored, never editable, never enforcing pitch (a pitch mismatch against the Transition's tempo-match is surfaced, not corrected).
+_Avoid_: transition guide (collides with Transition template), entry/cue marker ("cue" is overloaded)
+
+**Quantize**:
+An app-wide sticky toggle (default on) making beat-relative performance gestures grid-aligned: cue and Hot Cue placement snap to the nearest beat, auto-loop regions snap to the nearest beat, and Hot Cue jumps while playing are phase-preserving — a whole-beat displacement landing at the cue plus the playhead's intra-beat phase, so the groove never stumbles. Evaluated at gesture time; imports are not gestures and never snap. Gridless Tracks behave as if it were off. Beat jump (inherently whole-beat), cue return, paused-cue seeks, loop halve/double, and Transition-editor snapping are outside its authority.
+_Avoid_: snap (the Transition editor's separate affordance), quantization (the Analysis sense — see Quantized track)
+
 **Key Lock**:
 A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
 _Avoid_: "pitch-preserving", "pitch shift" — "pitch" already means the rate control.
@@ -133,6 +196,13 @@ Realigning the Transition editor's pair by a fixed time step — the editor's co
 
 **Hot Cue**:
 One of 8 persistent saved positions in a Track, used to jump to during performance.
+
+**Active loop**:
+A per-Deck transport region the playhead wraps in while playing — set by auto-loop (a whole-beat length anchored at the playhead, edges snapped per Quantize), resized live by halve/double (start edge fixed; a shrink that strands the playhead re-enters it at its phase modulo the new length). Beat-domain: lengths are powers of two, 1/8–32 beats (default 4); seconds are a projection through the Beatgrid, so gridless Tracks cannot auto-loop. Deck state like the playhead — survives view switches and surface displacement, cleared by Load. Relative motion (beat jump) translates the region with the playhead; absolute relocation (Hot Cue trigger, cue return, seek) cancels it. Manual loop in/out and slip-behind loop rolls are deferred.
+_Avoid_: loop roll (a different, slip-based feature)
+
+**Saved loop**:
+Planned concept: a persisted loop region on a Track, Hot-Cue-like (slots, Sync with Engine DJ's loops), from which an Active loop can be armed. Deferred until the Active loop exists.
 
 **Main cue**:
 The single repositionable cue position of a Track, moved with the "cue" button while DJing — distinct from Hot Cues by being one slot that moves freely during performance. Persisted with the Track (CDJ memory-cue behavior). When unset, it defaults to the Track's first beat if a Beatgrid exists, else the first non-silent audio.
@@ -157,6 +227,9 @@ _Avoid_: headphone cue (as the toggle's name), solo
 
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid. When a Beatgrid exists it is the authority on tempo: the Track's BPM is its projection (the grid's dominant tempo), not an independent field, and editing BPM is a grid operation (ADR 0016). A grid may carry an *anchor* — the downbeat the user explicitly marked — which re-tempo operations never move.
+
+**Quantized track**:
+A Track produced against a fixed tempo grid, so a constant-tempo Beatgrid (BPM + phase) is its correct description — nearly all of the library. Native grid Analysis assumes quantization: it fits a constant grid to detected beats, and bails (no grid, flagged for attention) rather than emit a wobbly variable grid when the fit is poor. Raw beat-tracker ticks are evidence for the fit, never the grid itself.
 
 **Waveform data**:
 The stored Analysis artifact for a Track's audio: broadband peaks plus per-band energies over time, style-agnostic — no aesthetic choices baked in. Internal to manadj — never transferred by Sync; each external library computes its own.
@@ -206,7 +279,7 @@ A record of where a Track's current audio file came from: an origin label (the S
 ### Sync
 
 **Surface**:
-A place a track can exist: Disk (a file in the tracks directory), Library (a manadj Track), Engine DJ, or Rekordbox. The unified sync view shows one row per track matched across Surfaces; row identity comes from Match, so it inherits Match's limits (a renamed file appears as two rows until a Link concept exists).
+A place a track can exist: Disk (a file in the tracks directory), Library (a manadj Track), Engine DJ, or Rekordbox. The unified sync view shows one row per track matched across Surfaces; row identity comes from Match, so it inherits Match's limits (a renamed file appears as two rows until External Correspondence exists).
 
 **External library**:
 A library owned by another program (Engine DJ or Rekordbox) that manadj reads from and writes to. Both are live Export targets.

@@ -34,6 +34,10 @@ export type Binding = BindingBase &
         bits: 7 | 14;
         /** For 14-bit values: the CC number carrying the LSB (MSB is `match.number`). */
         lsbNumber?: number;
+        /** Hardware runs opposite the app's direction — the translator emits
+         * 1 − value. DJ pitch faders are the canonical case (fader down =
+         * faster, but the raw CC grows upward). */
+        invert?: boolean;
       }
     | { controlType: 'relative'; target: RelativeTarget }
   );

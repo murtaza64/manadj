@@ -9,6 +9,15 @@
 /** Varispeed range, percent — the pitch fader's reach. */
 export const PITCH_RANGE_PERCENT = 8;
 
+/**
+ * The engine-level pitch clamp (ADR 0022): range POLICY lives with
+ * callers — the Performance fader/MIDI geometry clamps writes to
+ * ±PITCH_RANGE_PERCENT, the Transition editor's tempo-match to its wider
+ * editor range — and the engine accepts anything up to this hard ceiling
+ * (beat alignment on extreme pairs needs the reach).
+ */
+export const MAX_PITCH_RANGE_PERCENT = 25;
+
 /** Momentary nudge amount, percent (UI constant — tune by ear). */
 export const NUDGE_BEND_PERCENT = 2;
 
@@ -19,6 +28,21 @@ export function composeRate(pitchPercent: number, bendPercent: number): number {
 /** Audible tempo at a pitch setting (bend is momentary and excluded). */
 export function effectiveBpm(baseBpm: number, pitchPercent: number): number {
   return baseBpm * (1 + pitchPercent / 100);
+}
+
+/** Pitch where an unlocked Deck's sounding key has audibly drifted from
+ * the Track's Key — about half a semitone (a semitone is ~5.95%). */
+export const KEY_DRIFT_PITCH_PERCENT = 3;
+
+/**
+ * The KEY readout is lying (key-lock 04): Key Lock is off, so varispeed has
+ * shifted the sounding key by ≥ ~half a semitone — Key-compatibility
+ * judgments are off. Bend is momentary and excluded (same anti-wobble
+ * reasoning as effectiveBpm). No computed "actual key": rejected in the
+ * PRD as false precision.
+ */
+export function keyDrifted(keyLockOn: boolean, pitchPercent: number): boolean {
+  return !keyLockOn && Math.abs(pitchPercent) >= KEY_DRIFT_PITCH_PERCENT;
 }
 
 export type BpmMatchResult =

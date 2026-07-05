@@ -11,6 +11,7 @@ import type { Track } from '../types';
 import { followSummary, getEnergyRange } from '../follow/model';
 import type { EnergyPreset } from '../follow/model';
 import { resetFollowParams, setFollowParams, useFollowParams } from '../follow/paramsStore';
+import { LinkIcon } from '../links/LinkIcon';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import type { ChannelId } from '../playback/mixer';
 
@@ -54,13 +55,17 @@ export default function FollowParamsModal({
   const rawPosition = openPosition || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
   const modalPosition = getClampedPosition(rawPosition);
 
-  // Handle ESC key
+  // Handle ESC key — capture + stopPropagation: a modal's Escape must beat
+  // the staged search-clear and the view hubs (keyboard-focus 02).
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onClose();
+      if (e.key === 'Escape' && isOpen) {
+        e.stopPropagation();
+        onClose();
+      }
     };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
+    document.addEventListener('keydown', handleEsc, { capture: true });
+    return () => document.removeEventListener('keydown', handleEsc, { capture: true });
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -117,7 +122,11 @@ export default function FollowParamsModal({
                   flexWrap: 'wrap',
                 }}
               >
-                <span style={{ color: 'var(--green)', fontWeight: 'bold' }}>⟲{deck}</span>
+                <span
+                  style={{ color: `var(--deck-${deck.toLowerCase()})`, fontWeight: 'bold' }}
+                >
+                  {deck}
+                </span>
                 <span style={{ color: 'var(--text)' }}>
                   {reference.title || reference.filename}
                 </span>
@@ -225,20 +234,22 @@ export default function FollowParamsModal({
             </div>
           </div>
 
-          {/* Proven only */}
+          {/* Known only (linked-pairs 04, formerly "proven only") */}
           <div className="follow-modal-criteria-item">
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
               <input
                 type="checkbox"
-                checked={params.provenOnly}
-                onChange={(e) => setFollowParams({ provenOnly: e.target.checked })}
+                checked={params.knownOnly}
+                onChange={(e) => setFollowParams({ knownOnly: e.target.checked })}
               />
-              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>◆ Proven only</span>
+              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                ◆<LinkIcon size={11} /> Known only
+              </span>
             </label>
             <div style={{ fontSize: '12px', color: 'var(--subtext0)', paddingLeft: '24px' }}>
-              Only tracks with a saved transition from a followed track
-              (otherwise proven moves are always included on top of the
-              criteria above)
+              Only known tracks: a saved transition from a followed track (◆)
+              or Linked with it (<LinkIcon size={10} />). Otherwise known
+              tracks are always included on top of the criteria above.
             </div>
           </div>
         </div>

@@ -57,6 +57,23 @@ const mapping: Mapping = {
       lsbNumber: 0x20,
     },
     {
+      // Inverted 7-bit absolute (hardware direction opposite the app's).
+      match: { message: 'cc', channel: 1, number: 0x14 },
+      controlType: 'absolute',
+      target: { control: 'master' },
+      bits: 7,
+      invert: true,
+    },
+    {
+      // Inverted 14-bit absolute (the DJ pitch-fader convention).
+      match: { message: 'cc', channel: 2, number: 0x00 },
+      controlType: 'absolute',
+      target: { control: 'pitch', deck: 'A' },
+      bits: 14,
+      lsbNumber: 0x20,
+      invert: true,
+    },
+    {
       // Relative encoder.
       match: { message: 'cc', channel: 0, number: 0x18 },
       controlType: 'relative',
@@ -160,6 +177,27 @@ describe('absolute decoding (midi-controller 04)', () => {
     expect(translate([[0xb0, 0x14, 0x00], [0xb0, 0x14, 0x7f]])).toEqual([
       { kind: 'absolute', target: { control: 'master' }, value: 0 },
       { kind: 'absolute', target: { control: 'master' }, value: 1 },
+    ]);
+  });
+
+  it('inverted 7-bit: endpoints swap (hardware runs opposite the app)', () => {
+    expect(translate([[0xb1, 0x14, 0x00], [0xb1, 0x14, 0x7f]])).toEqual([
+      { kind: 'absolute', target: { control: 'master' }, value: 1 },
+      { kind: 'absolute', target: { control: 'master' }, value: 0 },
+    ]);
+  });
+
+  it('inverted 14-bit: endpoints swap and the center stays centered', () => {
+    expect(
+      translate([
+        [0xb2, 0x00, 0x00],
+        [0xb2, 0x20, 0x00],
+        [0xb2, 0x00, 0x7f],
+        [0xb2, 0x20, 0x7f],
+      ])
+    ).toEqual([
+      { kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 1 },
+      { kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0 },
     ]);
   });
 

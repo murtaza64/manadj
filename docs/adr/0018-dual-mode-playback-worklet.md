@@ -40,4 +40,6 @@ instant, and "Playhead = what is sounding" holds without compensation.
 - The Transition editor's private playback surface (ADR 0013) does not get
   Key Lock from this work; tempo-matched editor playback is where Key Lock
   matters most, so the follow-up may force revisiting the private-surface
-  decision (noted in .scratch/key-lock/).
+  decision (noted in .scratch/key-lock/). *(Resolved 2026-07-05 by ADR
+  0022: the private surface is retired — the editor plays through the
+  shared Decks and their sticky Key Lock.)*

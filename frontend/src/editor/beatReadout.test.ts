@@ -6,6 +6,7 @@ import {
   bEntryLabel,
   beatIndexAt,
   beatsBetween,
+  jumpDeltaLabel,
   lengthBeatsLabel,
 } from './beatReadout';
 import type { BeatgridData } from '../types';
@@ -109,5 +110,21 @@ describe('bEntryLabel', () => {
   it('negative anchors read as lead gap in B beats', () => {
     expect(bEntryLabel(grid(), -2.0)).toBe('gap 4 beats');
     expect(bEntryLabel(grid(), -1.25)).toBe('gap 2.5 beats');
+  });
+});
+
+describe('jumpDeltaLabel (transition-takes 01)', () => {
+  it('reads whole B-beats when a grid makes them readable', () => {
+    expect(jumpDeltaLabel(-8, 0.5)).toBe('-16 bt'); // 0.5s beats
+    expect(jumpDeltaLabel(2, 0.5)).toBe('+4 bt');
+  });
+
+  it('falls back to seconds off-grid or without a grid', () => {
+    expect(jumpDeltaLabel(-7.37, 0.5)).toBe('-7.4s');
+    expect(jumpDeltaLabel(3.2, null)).toBe('+3.2s');
+  });
+
+  it('a near-zero delta reads as seconds, never "0 bt"', () => {
+    expect(jumpDeltaLabel(0.01, 0.5)).toBe('+0.0s');
   });
 });

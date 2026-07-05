@@ -1,0 +1,128 @@
+/* Play guides (play-guides PRD): the spanning line + gutter chip over the
+ * Performance view's stacked waveforms, and the minimap marks. Identity
+ * colors only — the PAUSED (incoming) Deck's color; never state colors.
+ * Non-interactive by definition: pointer-events none throughout. */
+
+.perf-playguides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  /* Above the renderer's text-overlay canvases (z-index 1). */
+  z-index: 2;
+}
+
+/* One guide: a zero-width anchor translated to its screen x per frame. */
+.perf-playguide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+}
+
+.perf-playguide-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+}
+.perf-playguide.incoming-a .perf-playguide-line {
+  background: var(--deck-a);
+}
+.perf-playguide.incoming-b .perf-playguide-line {
+  background: var(--deck-b);
+}
+
+/* Label chip: straddles the row boundary, hanging to the RIGHT of the
+ * line (hot-cue badge convention — the marker stays unobscured). Distinct
+ * from a Hot Cue at a glance: play glyph + name, no slot badge. */
+.perf-playguide-chip {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  background: var(--crust);
+  border: 1px solid;
+  font: bold 11px monospace;
+  white-space: nowrap;
+  line-height: 16px;
+}
+.perf-playguide.incoming-a .perf-playguide-chip {
+  border-color: var(--deck-a);
+  color: var(--deck-a);
+}
+.perf-playguide.incoming-b .perf-playguide-chip {
+  border-color: var(--deck-b);
+  color: var(--deck-b);
+}
+
+.perf-playguide-glyph {
+  font-size: 9px;
+}
+
+/* ★ renders smaller than other glyphs at equal size — bump it ~30%
+ * (follow-mode 08 rider convention). Identity color inherits. */
+.perf-playguide-star {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Long Transition names must not walk the chip over the other guides. */
+.perf-playguide-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Pitch precondition warning: the paused Deck's fader is off the
+ * Transition's ratio — show the required pitch (surfaced, never set). */
+.perf-playguide-pitch {
+  color: var(--red);
+}
+
+/* Missed: the press moment is behind the playhead — keep it visible,
+ * dimmed, scrolling away (hiding it would look broken). */
+.perf-playguide.missed {
+  opacity: 0.35;
+}
+
+/* ── Minimap marks ─────────────────────────────────────────────────── */
+
+.perf-minimap-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.perf-minimap-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Top-edge tick: short and 3px wide — hot cues on the minimap are
+ * full-height 2px rects, so shape separates them. */
+.perf-minimap-guide {
+  position: absolute;
+  top: 0;
+  height: 38%;
+  width: 3px;
+  margin-left: -1px;
+}
+.perf-minimap-guide.incoming-a {
+  background: var(--deck-a);
+}
+.perf-minimap-guide.incoming-b {
+  background: var(--deck-b);
+}
+.perf-minimap-guide.missed {
+  opacity: 0.35;
+}

@@ -8,7 +8,7 @@
  * beats; window 32 before / 64 after" — not editable here (a template is
  * saved FROM a Transition; move the window to change it).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   alignmentInstantSec,
   defaultAnchorBase,
@@ -89,6 +89,20 @@ export function SaveTemplateModal({
   );
   const valid = name.trim().length > 0 && derived !== null;
 
+  // Escape cancels wherever focus sits (name input, anchor selects, or
+  // nowhere) — capture + stopPropagation beats the editor hub and the
+  // staged search-clear (keyboard-focus 02). Mounted only while open.
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCancel();
+      }
+    };
+    document.addEventListener('keydown', onEsc, { capture: true });
+    return () => document.removeEventListener('keydown', onEsc, { capture: true });
+  }, [onCancel]);
+
   return (
     <div className="editor-savetpl-overlay" onMouseDown={onCancel}>
       <div className="editor-savetpl" onMouseDown={(e) => e.stopPropagation()}>
@@ -99,9 +113,6 @@ export function SaveTemplateModal({
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') onCancel();
-            }}
             placeholder="bass swap"
           />
         </label>

@@ -43,6 +43,12 @@ function savePrefs(prefs: RoutingPrefs): void {
 }
 
 let mixer: Mixer | null = null;
+
+/** The routable slice of the Mixer. There is exactly one Mixer since
+ * ADR 0022 — the secondary-mixer registry (ADR 0021, retired) lived here
+ * while the Transition editor had a private one. */
+type MasterRoutable = Pick<Mixer, 'setMasterSinkId'>;
+
 let prefs: RoutingPrefs = loadPrefs();
 let devices: AudioOutputDevice[] = [];
 let snapshot: RoutingSnapshot = {
@@ -73,17 +79,21 @@ async function recompute(): Promise<void> {
   snapshot = { prefs, resolved, devices };
   notify();
   if (!mixer) return;
-  try {
-    await mixer.setMasterSinkId(resolved.masterSinkId);
-  } catch (err) {
-    console.warn('[routing] master sink failed; falling back to default', err);
-    await mixer.setMasterSinkId(null).catch(() => undefined);
-  }
+  await applyMasterSink(mixer, resolved.masterSinkId);
   try {
     await mixer.setCueSinkId(resolved.cueSinkId, resolved.cuePair);
   } catch (err) {
     // setCueSinkId already disabled itself; just surface it.
     console.warn('[routing] cue sink failed; cue bus disabled', err);
+  }
+}
+
+async function applyMasterSink(target: MasterRoutable, sinkId: string | null): Promise<void> {
+  try {
+    await target.setMasterSinkId(sinkId);
+  } catch (err) {
+    console.warn('[routing] master sink failed; falling back to default', err);
+    await target.setMasterSinkId(null).catch(() => undefined);
   }
 }
 

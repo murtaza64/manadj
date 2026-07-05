@@ -26,7 +26,9 @@ import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
 import { MixerStrip } from './MixerStrip';
+import { LinkToggle } from '../../links/LinkToggle';
 import { DeckKeys } from './DeckKeys';
+import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
 import './PerformanceView.css';
@@ -179,9 +181,21 @@ export function PerformanceView() {
               onVisibleSecondsChange={setVisibleSeconds}
             />
           </DeckScope>
+          {/* Play guides (play-guides PRD): saved playing→paused Transitions
+              projected as press-play markers — one line spanning both rows,
+              labeled in the gutter. Derived, view-only, non-interactive. */}
+          <PlayGuideOverlay visibleSeconds={visibleSeconds} />
         </div>
         <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
         <div className="perf-decks">
+          {/* Linked toggle (linked-pairs 02): pair-central — on the deck
+              divider, between the two minimaps. */}
+          <div className="perf-decks-link">
+            <LinkToggle
+              aTrackId={A.loadedTrack?.id ?? null}
+              bTrackId={B.loadedTrack?.id ?? null}
+            />
+          </div>
           <DeckScope deck="A">
             <DeckPanel lockHint={lockHint === 'A'} />
             <DeckKeys />

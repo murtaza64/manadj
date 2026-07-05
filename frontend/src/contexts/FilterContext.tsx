@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 
 interface FilterState {
@@ -30,6 +30,9 @@ const DEFAULT_FILTERS: FilterState = {
 interface FilterContextType {
   filters: FilterState;
   setFilters: (filters: FilterState | ((prev: FilterState) => FilterState)) => void;
+  /** Clear the text search only (keyboard-focus 02: the staged Escape).
+   * Other filter axes are untouched — clearing is a separate act. */
+  clearSearch: () => void;
 }
 
 const FilterContext = createContext<FilterContextType | undefined>(undefined);
@@ -57,8 +60,12 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }
   }, [filters.sortColumn, filters.sortDirection]);
 
+  const clearSearch = useCallback(() => {
+    setFilters((prev) => (prev.search === '' ? prev : { ...prev, search: '' }));
+  }, []);
+
   return (
-    <FilterContext.Provider value={{ filters, setFilters }}>
+    <FilterContext.Provider value={{ filters, setFilters, clearSearch }}>
       {children}
     </FilterContext.Provider>
   );

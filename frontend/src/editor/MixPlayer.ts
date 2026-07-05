@@ -1,10 +1,12 @@
 /**
- * MixPlayer — deterministic playback for the Transition editor.
+ * MixPlayer — the Transition editor's deterministic CONDUCTOR.
  *
- * Plays a two-track EditorMix on two DeckEngines fed into
- * the editor's own private Mixer (ADR 0009 one-graph architecture — a single
- * AudioContext, real channel strips, master bus + limiter; audio-isolated
- * from the shared decks by being a separate Mixer instance).
+ * Plays a two-track EditorMix over the SHARED Decks and Mixer (ADR 0022):
+ * the two injected DeckEngines are the app's Decks, and lane values drive
+ * the shared Mixer's automation overlay — user-facing mixer state is
+ * never touched. MixPlayer owns no audio; the borrow lifecycle (claim
+ * audibility, engage the overlay, checkpoint deck pitches) belongs to
+ * TransitionEditor's mount effects.
  *
  * The mix timeline runs on the Mixer's AUDIO clock (issue 08): the decks'
  * playheads derive from the same ctx.currentTime, so mix time and deck time
@@ -14,30 +16,32 @@
  * hundred ms.) The corrector remains as a rare safety net.
  */
 
-import { DeckEngine } from '../playback/DeckEngine';
-import { Mixer } from '../playback/mixer';
-import { isAudible } from '../playback/audibleSurface';
-import { api } from '../api/client';
+import type { DeckEngine } from '../playback/DeckEngine';
+import type { Mixer } from '../playback/mixer';
 import type { EditorMix } from './mixModel';
-import { EDITOR_PITCH_RANGE_PERCENT, arrangementAt, laneValuesAt, tempoMatchPitch } from './mixModel';
+import {
+  arrangementAt,
+  jumpInstantSec,
+  laneValuesAt,
+  tempoMatchPitch,
+} from './mixModel';
 
 const DRIFT_TOLERANCE_S = 0.12;
 
-export interface MixTrackInfo {
-  id: number;
-  bpm: number | null;
+export interface MixPlayerAudio {
+  mixer: Mixer;
+  engineA: DeckEngine;
+  engineB: DeckEngine;
 }
 
 export class MixPlayer {
-  /** Editor-private mixer: own context/master/limiter (audio isolation).
-   * Its ports answer the arbiter tripwire for the 'editor' surface
-   * (ADR 0013) — starts are refused unless the editor holds audibility. */
-  readonly mixer = new Mixer(() => isAudible('editor'));
-  readonly engineA = new DeckEngine(this.mixer.portFor('A'), EDITOR_PITCH_RANGE_PERCENT);
-  readonly engineB = new DeckEngine(this.mixer.portFor('B'), EDITOR_PITCH_RANGE_PERCENT);
+  /** Injected machinery (see header). Public: the editor's UI reads deck
+   * snapshots and subscribes through these. */
+  readonly mixer: Mixer;
+  readonly engineA: DeckEngine;
+  readonly engineB: DeckEngine;
 
   private mix: EditorMix;
-  private durations = { a: 0, b: 0 };
   private bpm: { a: number | null; b: number | null } = { a: null, b: null };
 
   /** Deck mutes override the drawn fader lanes (applyLanes runs per tick,
@@ -45,29 +49,38 @@ export class MixPlayer {
   private muted = { A: false, B: false };
 
   private playing = false;
+  /** Previous tick's mix time — jump-crossing detection (see tick). */
+  private lastTickT = 0;
   private mixTimeAtAnchor = 0;
   /** Audio-clock time (mixer.now()) at the anchor — NOT wall time. */
   private anchorAudioTime = 0;
   private raf = 0;
   private listeners = new Set<() => void>();
 
-  constructor(mix: EditorMix) {
+  // Routing/surface registration lives in TransitionEditor's mount
+  // effects, NOT here (headphone-cue 06 follow-up): StrictMode
+  // double-invokes state initializers (a zombie MixPlayer would stay
+  // registered forever) and fires a spurious dispose on the kept instance
+  // (constructor-paired unregistration would orphan it). Effects pair
+  // setup/cleanup correctly.
+
+  constructor(mix: EditorMix, audio: MixPlayerAudio) {
     this.mix = mix;
+    this.mixer = audio.mixer;
+    this.engineA = audio.engineA;
+    this.engineB = audio.engineB;
   }
 
-  // ── Loading ──────────────────────────────────────────────────────────
+  // ── Deck state reads ─────────────────────────────────────────────────
+  // Loading is NOT the conductor's job (ADR 0022): the editor Loads the
+  // shared Decks through the deck provider's one load path; the conductor
+  // reads what it needs from the engines it drives.
 
-  async loadTrack(deck: 'A' | 'B', info: MixTrackInfo): Promise<void> {
-    const engine = deck === 'A' ? this.engineA : this.engineB;
-    this.bpm[deck === 'A' ? 'a' : 'b'] = info.bpm;
-    await engine.load({
-      trackId: info.id,
-      audioUrl: api.tracks.audioUrl(info.id),
-      bpm: info.bpm,
-    });
-    const snap = engine.getSnapshot();
-    this.durations[deck === 'A' ? 'a' : 'b'] = snap.duration;
-    this.emit();
+  private durations(): { a: number; b: number } {
+    return {
+      a: this.engineA.getSnapshot().duration,
+      b: this.engineB.getSnapshot().duration,
+    };
   }
 
   ready(): boolean {
@@ -112,12 +125,13 @@ export class MixPlayer {
   }
 
   getMixDuration(): number {
-    return arrangementAt(this.mix, 0, this.durations, this.getRateB()).mixDuration;
+    return arrangementAt(this.mix, 0, this.durations(), this.getRateB()).mixDuration;
   }
 
   getTrackTime(deck: 'A' | 'B'): number {
-    const arr = arrangementAt(this.mix, this.getMixTime(), this.durations, this.getRateB());
-    return deck === 'A' ? Math.min(arr.aTrackTime, this.durations.a) : Math.max(0, Math.min(arr.bTrackTime, this.durations.b));
+    const d = this.durations();
+    const arr = arrangementAt(this.mix, this.getMixTime(), d, this.getRateB());
+    return deck === 'A' ? Math.min(arr.aTrackTime, d.a) : Math.max(0, Math.min(arr.bTrackTime, d.b));
   }
 
   isPlaying(): boolean {
@@ -142,6 +156,7 @@ export class MixPlayer {
     // Apply lane values before audio starts so mid-transition playback
     // begins at the drawn gains, not the previous ones.
     this.applyLanes(this.getMixTime());
+    this.lastTickT = this.getMixTime();
     this.syncDecks(this.getMixTime(), true);
     this.raf = requestAnimationFrame(this.tick);
     this.emit();
@@ -160,13 +175,14 @@ export class MixPlayer {
   seek(mixTime: number): void {
     const t = Math.max(0, Math.min(mixTime, this.getMixDuration()));
     this.mixTimeAtAnchor = t;
+    this.lastTickT = t;
     this.anchorAudioTime = this.mixer.now();
     this.applyLanes(t);
     if (this.playing) {
       this.syncDecks(t, true);
     } else {
       // Park deck playheads so the waveforms show the seek target.
-      const arr = arrangementAt(this.mix, t, this.durations, this.getRateB());
+      const arr = arrangementAt(this.mix, t, this.durations(), this.getRateB());
       if (arr.aActive) this.engineA.seek(arr.aTrackTime);
       if (arr.bActive || t >= this.mix.transition.startSec) this.engineB.seek(Math.max(0, arr.bTrackTime));
     }
@@ -183,11 +199,10 @@ export class MixPlayer {
     return () => this.listeners.delete(listener);
   }
 
+  /** Stop conducting. Does NOT dispose the injected machinery — the
+   * owner's lifecycle does (it may outlive this conductor). */
   dispose(): void {
     cancelAnimationFrame(this.raf);
-    this.engineA.dispose();
-    this.engineB.dispose();
-    this.mixer.dispose();
     this.listeners.clear();
   }
 
@@ -200,7 +215,17 @@ export class MixPlayer {
       this.pause();
       return;
     }
-    this.syncDecks(t, false);
+    // Jump events (transition-takes 01): crossing an instant makes B's
+    // arrangement position discontinuous. The drift corrector would catch
+    // deltas past its tolerance anyway; the explicit crossing check makes
+    // sub-tolerance jumps land too, exactly one hard sync per crossing.
+    const tr = this.mix.transition;
+    const crossed = (tr.jumps ?? []).some((j) => {
+      const tj = jumpInstantSec(tr, j);
+      return tj > this.lastTickT && tj <= t;
+    });
+    this.lastTickT = t;
+    this.syncDecks(t, crossed);
     this.applyLanes(t);
     this.raf = requestAnimationFrame(this.tick);
   };
@@ -208,7 +233,7 @@ export class MixPlayer {
   /** Ensure each deck matches the arrangement at mix-time t. `hard` forces
    * exact re-positioning; otherwise re-seek only past the drift tolerance. */
   private syncDecks(t: number, hard: boolean): void {
-    const arr = arrangementAt(this.mix, t, this.durations, this.getRateB());
+    const arr = arrangementAt(this.mix, t, this.durations(), this.getRateB());
     this.syncDeck(this.engineA, arr.aActive, arr.aTrackTime, hard);
     this.syncDeck(this.engineB, arr.bActive, arr.bTrackTime, hard);
   }
@@ -235,18 +260,21 @@ export class MixPlayer {
     }
   }
 
+  /** Lane values go through the Mixer's automation overlay (ADR 0022):
+   * base mixer state — what the user's knobs show — is never touched, and
+   * the overlay must be engaged by the editor session before play. */
   private applyLanes(t: number): void {
     const v = laneValuesAt(this.mix.transition, t);
-    this.mixer.setFader('A', this.muted.A ? 0 : v.faderA);
-    this.mixer.setFader('B', this.muted.B ? 0 : v.faderB);
-    this.mixer.setEq('A', 'low', v.eqLowA);
-    this.mixer.setEq('B', 'low', v.eqLowB);
-    this.mixer.setEq('A', 'mid', v.eqMidA);
-    this.mixer.setEq('B', 'mid', v.eqMidB);
-    this.mixer.setEq('A', 'high', v.eqHighA);
-    this.mixer.setEq('B', 'high', v.eqHighB);
-    this.mixer.setFilter('A', v.filterA * 2 - 1);
-    this.mixer.setFilter('B', v.filterB * 2 - 1);
+    this.mixer.setAutomation('A', {
+      fader: this.muted.A ? 0 : v.faderA,
+      eq: { low: v.eqLowA, mid: v.eqMidA, high: v.eqHighA },
+      filter: v.filterA * 2 - 1,
+    });
+    this.mixer.setAutomation('B', {
+      fader: this.muted.B ? 0 : v.faderB,
+      eq: { low: v.eqLowB, mid: v.eqMidB, high: v.eqHighB },
+      filter: v.filterB * 2 - 1,
+    });
   }
 
   private applyPitch(): void {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Track } from '../types';
+import { isTypingTarget } from '../components/performance/performanceKeys';
 import { GRID_NUDGE_MS } from './useBeatgridData';
 import { useDeck, useDeckReady, useDeckSnapshot } from './useDeck';
 import { useScrubLoop } from './useScrubLoop';
@@ -65,12 +66,11 @@ export function useKeyboardShortcuts({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Conflict prevention: ignore if typing in inputs or using certain modifiers
+      // Conflict prevention: ignore while typing or using certain modifiers.
+      // Shared guard (keyboard-focus 01): only text-entry targets silence
+      // the hub — a focused checkbox/button must not kill transport keys.
       const target = event.target as HTMLElement;
-      const isInputFocused =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.contentEditable === 'true';
+      const isInputFocused = isTypingTarget(event);
 
       // Select all: Cmd/Ctrl-A (before the modifier guard below drops it)
       if (
@@ -126,10 +126,12 @@ export function useKeyboardShortcuts({
 
       // Deck transport: Space/a/s/f
       if (key === ' ' || key === 'a' || key === 's' || key === 'f') {
+        // Claim the key even when the deck can't act yet — Space must
+        // never scroll or re-activate a control (keyboard-focus 01).
+        event.preventDefault();
+
         // Space latches play intent during a load; the rest need audio.
         if (key === ' ' ? !deckCanPlay : !deckReady) return;
-
-        event.preventDefault();
 
         if (key === ' ') {
           engine.togglePlay();
@@ -242,13 +244,9 @@ export function useKeyboardShortcuts({
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement;
-      const isInputFocused =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.contentEditable === 'true';
-
-      if (isInputFocused) {
+      // Typing-target focus is the ONLY keyup guard (releases must land
+      // even if a modifier went down mid-hold — see performanceKeys.ts).
+      if (isTypingTarget(event)) {
         return;
       }
 

@@ -1,6 +1,6 @@
 # One audio graph: the Mixer owns the AudioContext
 
-Status: accepted
+Status: accepted (restored in full by ADR 0022 — the Transition editor's private-mixer deviation is retired)
 
 Two-deck performance requires mixing in-graph, so there is exactly one `AudioContext`, owned by a Mixer module — not by decks. `DeckEngine` no longer creates or revives its own context; it is constructed against the shared context and an output node. Each deck feeds a mixer channel strip, and the signal chain mirrors DJ hardware:
 

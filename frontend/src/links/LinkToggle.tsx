@@ -4,7 +4,11 @@
  * assignment and A/B order never matter. Disabled without a distinct
  * loaded pair (no self-links). Optimistic via linkStore.
  */
+import { useTransitionIndex } from '../editor/transitionIndex';
+import { LinkIcon } from './LinkIcon';
+import { isTogglablePair, pairHasFavoritedTransition } from './linkable';
 import { isLinked, setLinked, useLinks } from './linkStore';
+import './linkToggle.css';
 
 export function LinkToggle({
   aTrackId,
@@ -14,8 +18,13 @@ export function LinkToggle({
   bTrackId: number | null;
 }) {
   const links = useLinks();
-  const canToggle = aTrackId !== null && bTrackId !== null && aTrackId !== bTrackId;
-  const linked = canToggle && isLinked(links, aTrackId, bTrackId);
+  const index = useTransitionIndex();
+  const canToggle = isTogglablePair(aTrackId, bTrackId);
+  const linked =
+    aTrackId !== null && bTrackId !== null && isLinked(links, aTrackId, bTrackId);
+  // Linkable (issue 02): favorited Transition, no Link — suggest promoting.
+  // Display-only; never auto-links.
+  const hint = canToggle && !linked && pairHasFavoritedTransition(index, aTrackId, bTrackId);
 
   const title = !canToggle
     ? aTrackId !== null && aTrackId === bTrackId
@@ -23,17 +32,21 @@ export function LinkToggle({
       : 'Load two tracks to link them'
     : linked
       ? 'Unlink: these Tracks no longer go well together'
-      : 'Link: these Tracks go well together';
+      : hint
+        ? 'This pair has a favorited Transition — link them?'
+        : 'Link: these Tracks go well together';
 
   return (
     <button
-      className={`link-toggle${linked ? ' on' : ''}`}
+      className={`link-toggle${linked ? ' on' : ''}${hint ? ' hint' : ''}`}
       aria-pressed={linked}
       disabled={!canToggle}
       title={title}
-      onClick={() => canToggle && setLinked(aTrackId, bTrackId, !linked)}
+      onClick={() =>
+        aTrackId !== null && bTrackId !== null && setLinked(aTrackId, bTrackId, !linked)
+      }
     >
-      🔗
+      <LinkIcon size={13} />
     </button>
   );
 }

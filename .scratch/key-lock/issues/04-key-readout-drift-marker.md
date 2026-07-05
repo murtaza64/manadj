@@ -1,6 +1,6 @@
 # 04 — KEY readout drift marker (follow-up)
 
-Status: ready-for-agent
+Status: done — landed; eye-verified 2026-07-05
 
 ## Parent
 
@@ -22,3 +22,14 @@ key" (rejected in the PRD as false precision).
 ## Blocked by
 
 - 03-stretch-mode-keylock
+
+## Comments
+
+- Done (change `key-lock: 04-key-readout-drift-marker`). Pure predicate
+  `keyDrifted(keyLockOn, pitchPercent)` in playback/tempo.ts (threshold
+  KEY_DRIFT_PITCH_PERCENT = 3 ≈ half a semitone; bend excluded — same
+  anti-wobble reasoning as effectiveBpm), tested. MixZone KEY readout dims
+  + gains a `~` while drifted; the tilde is always laid out (transparent
+  until drifted) so the readout width never jumps. Eye-verified.
+- Rode along (user-requested foot-row polish): the KEY/BPM readout labels
+  removed (values keep tooltips); dead `.perf-readout-label` rule dropped.

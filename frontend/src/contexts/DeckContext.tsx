@@ -3,8 +3,10 @@ import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
 import { Mixer } from '../playback/mixer';
+import { CaptureRecorder } from '../capture/recorder';
+import { persistTake } from '../capture/takeSink';
 import type { ChannelId } from '../playback/mixer';
-import { isAudible, registerSurface, unregisterSurface } from '../playback/audibleSurface';
+import { registerSurface, unregisterSurface } from '../playback/audibleSurface';
 import { deckControlsFor } from '../midi/controlRegistry';
 import { BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
 import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
@@ -12,6 +14,8 @@ import type { DeckContextValue } from '../hooks/useDeck';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
 import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
+import { initWakeLockBridge } from '../playback/wakeLock';
+import { getKeyLockFlags } from '../playback/keyLockStore';
 import type { BeatgridResponse, Track } from '../types';
 
 const DECK_IDS = ['A', 'B'] as const;
@@ -53,16 +57,20 @@ function readStoredLoadedIds(): Record<ChannelId, number | null> {
  */
 export function DeckProvider({ children }: { children: ReactNode }) {
   const [{ mixer, engines }] = useState(() => {
-    // The shared surface's ports answer the arbiter tripwire (ADR 0013):
-    // start gestures are refused while another surface (the editor) holds
-    // audibility, so nothing can resume the suspended shared clock.
-    const m = new Mixer(() => isAudible('shared'));
+    // THE Mixer and THE Decks (ADRs 0008/0009/0022): every surface —
+    // Performance, library, and the Transition editor's conductor — plays
+    // through these. There is no other Mixer instance in the app.
+    const m = new Mixer();
+    const engineA = new DeckEngine(m.portFor('A'));
+    const engineB = new DeckEngine(m.portFor('B'));
+    // Key Lock boot restore (key-lock 03): sticky per Deck, default ON.
+    // The editor plays through it too (ADR 0022 — carve-out retired).
+    const keyLock = getKeyLockFlags();
+    engineA.setKeyLock(keyLock.A);
+    engineB.setKeyLock(keyLock.B);
     return {
       mixer: m,
-      engines: {
-        A: new DeckEngine(m.portFor('A')),
-        B: new DeckEngine(m.portFor('B')),
-      } as Record<ChannelId, DeckEngine>,
+      engines: { A: engineA, B: engineB } as Record<ChannelId, DeckEngine>,
     };
   });
   useEffect(
@@ -80,6 +88,18 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // reducer, not here).
   useEffect(() => initFollowPlaybackBridge(engines), [engines]);
 
+  // Screen wake lock (screen-wake 01): the display must not dim while a
+  // Deck plays.
+  useEffect(() => initWakeLockBridge(engines), [engines]);
+  // Always-on capture (transition-takes 02, ADR 0020): the recorder taps
+  // this surface's Mixer + decks, the pure detector finds Handovers, and
+  // settled Takes persist to the Transition history. Lives here because
+  // the provider owns the shared surface and outlives every view switch.
+  useEffect(() => {
+    const recorder = new CaptureRecorder(mixer, engines, persistTake);
+    recorder.start();
+    return () => recorder.dispose();
+  }, [engines, mixer]);
   // Dev-only audio routing tracer (headphone-cue 01): console helpers for
   // sink switching + the cue bridge. Lazy import keeps it out of prod.
   useEffect(() => {
@@ -135,10 +155,10 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   );
 
   // ── Loaded-pair persistence ────────────────────────────────────────────
-  // The shared decks are the canonical "what's loaded on A/B" across every
-  // mode (the Transition editor mirrors its loads onto them). Persist track
-  // ids on every Load; restore once on boot (a Load allocates audio memory
-  // but nothing plays until the user does).
+  // The shared decks ARE "what's loaded on A/B" across every mode — the
+  // Transition editor's loads come through this same path (ADR 0022).
+  // Persist track ids on every Load; restore once on boot (a Load
+  // allocates audio memory but nothing plays until the user does).
   const loadedTracksRef = useRef(loadedTracks);
   useEffect(() => {
     loadedTracksRef.current = loadedTracks;
@@ -277,15 +297,15 @@ export function DeckProvider({ children }: { children: ReactNode }) {
         touchTicks: (deck, ticks) => deckControlsFor(deck)?.jogTouchTicks(ticks),
         shiftRimTicks: (deck, ticks) => deckControlsFor(deck)?.jogSeekTicks(ticks),
       },
+      // Pause only (ADR 0022): the one context keeps running — the
+      // claimant (the editor) plays through it.
       silence: () => {
         engines.A.pause();
         engines.B.pause();
-        mixer.suspend();
       },
-      wake: () => mixer.resume(),
     });
     return () => unregisterSurface('shared');
-  }, [engines, mixer]);
+  }, [engines]);
 
   // Throwaway dev handle (performance-mode issue 02): deck B has no UI until
   // issue 03, so it is verified from the console, e.g.

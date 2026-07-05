@@ -25,7 +25,14 @@
   border-bottom: 2px solid var(--surface1);
 }
 
-.perf-waves { flex-shrink: 0; }
+/* Stacked flush rows; position anchors the play-guide overlay (whose
+ * chips straddle the row boundary). */
+.perf-waves {
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
 .perf-waves .waveform-container,
 .perf-waves .waveform-container canvas { height: 76px; }
 
@@ -90,6 +97,26 @@
   grid-template-columns: 1fr 1fr;
   gap: 0;
   padding: 6px 0 8px;
+  position: relative;
+}
+
+/* Linked toggle (linked-pairs 02): pair-central, riding the deck divider
+   between the two minimaps. Solid backing so it reads as sitting ON the
+   rule, not over a waveform. */
+.perf-decks-link {
+  position: absolute;
+  left: 50%;
+  top: 11px; /* perf-decks + deckpanel padding: the minimap row */
+  transform: translateX(-50%);
+  width: 30px; /* square: minimap-container height both ways */
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  background: var(--mantle, #181825);
+  border: 1px solid var(--surface1);
+  border-radius: 4px;
 }
 
 .perf-deckpanel {
@@ -120,6 +147,17 @@
   border: 1px solid var(--text);
   padding: 0 7px;
   flex-shrink: 0;
+}
+
+/* Deck colors (CONTEXT.md: Deck color) — identity, never state. */
+.perf-decktag.deck-a {
+  color: var(--deck-a);
+  border-color: var(--deck-a);
+}
+
+.perf-decktag.deck-b {
+  color: var(--deck-b);
+  border-color: var(--deck-b);
 }
 
 /* ── The band and its zones ───────────────────────────────────── */
@@ -485,7 +523,9 @@
   background: var(--surface1);
 }
 
-/* Level fill (VOL/MASTER): the track lights up to the handle */
+/* Level fill (VOL/MASTER): the track lights up to the handle.
+   Channel VOL overrides the color per Deck (deck-colors 02); the
+   crossfader paints two of these (opposite-side Deck colors). */
 .perf-fader-fill {
   position: absolute;
   top: 50%;
@@ -493,6 +533,15 @@
   height: 2px;
   transform: translateY(-50%);
   background: var(--green);
+}
+
+/* Crossfader end labels: flex siblings of the fader (never over the
+   track), text-colored — the fills carry the Deck colors. */
+.perf-xfade-end {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text);
+  flex-shrink: 0;
 }
 
 .perf-fader-detent {
@@ -538,13 +587,6 @@
   align-items: baseline;
   gap: 3px;
   flex-shrink: 0;
-}
-
-.perf-readout-label {
-  font-size: 7px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  color: var(--overlay0);
 }
 
 .perf-readout-val {
@@ -595,6 +637,22 @@
   display: block;
 }
 .perf-pfl.on {
+  color: var(--green);
+  border-color: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
+/* Key Lock toggle (key-lock 03) — next to the KEY readout, lit while
+   tempo changes leave the Track's Key unchanged */
+.perf-keylock { flex-shrink: 0; }
+
+/* Drift marker (key-lock 04): the readout dims while the sounding key has
+   drifted from the Track's Key (Key Lock off, |pitch| ≥ threshold). The ~
+   is always laid out, transparent until drifted, so the width never jumps. */
+.perf-readout-val.perf-key-drift { opacity: 0.5; }
+.perf-key-tilde { opacity: 0; }
+.perf-key-drift .perf-key-tilde { opacity: 1; }
+.perf-keylock.on {
   color: var(--green);
   border-color: var(--green);
   box-shadow: 0 0 6px var(--green);

@@ -1,4 +1,10 @@
-import { audibleJog, audibleJumps, audiblePads, audibleTransport } from '../playback/audibleSurface';
+import {
+  audibleHolder,
+  audibleJog,
+  audibleJumps,
+  audiblePads,
+  audibleTransport,
+} from '../playback/audibleSurface';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { MidiAction } from './actions';
 import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
@@ -143,6 +149,12 @@ function bipolar(value: number): number {
 function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void {
   switch (target.control) {
     case 'pitch':
+      // Deck rate is the AUDIBLE surface's business (ADR 0022): in the
+      // editor the conductor owns B's rate (tempo-match), so a hardware
+      // pitch move there would fight the arrangement math (perpetual
+      // drift-correct re-seeks). Dropped like any unregistered gesture;
+      // mixer-class controls below stay live pass-throughs by design.
+      if (audibleHolder() !== 'shared') return;
       deckControlsFor(target.deck)?.setPitch(bipolar(value) * PITCH_RANGE_PERCENT);
       return;
     case 'trim':

@@ -286,6 +286,56 @@ class TransitionTemplate(Base):
     )
 
 
+class Take(Base):
+    """A detected Handover captured during live playback (ADR 0020,
+    transition-takes 02).
+
+    a = outgoing Track, b = incoming (directional, matching Transitions).
+    Immutable audit data: rows are created by the frontend detector when a
+    Handover settles and only ever deleted or given a promoted-Transition
+    reference (issue 03). The raw event slice and the detector-parameter
+    snapshot are opaque JSON — the evidence, re-derivable as detection and
+    vectorization improve; the queryable columns are the history/tuning
+    metadata. Identity is the client-generated `uuid`.
+    """
+
+    __tablename__ = "takes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    a_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    b_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    detected_at = Column(DateTime, nullable=False, default=func.now())
+    window_start_s = Column(Float, nullable=False)  # capture-clock seconds
+    window_end_s = Column(Float, nullable=False)
+    confidence = Column(Float, nullable=False)
+    detector_version = Column(Integer, nullable=False)
+    params_json = Column(Text, nullable=False)  # detector-parameter snapshot (opaque)
+    events_json = Column(Text, nullable=False)  # raw capture-event slice (opaque)
+    promoted_transition_uuid = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # ORM-level cascade, as on Transition (SQLite FK PRAGMA is off).
+    a_track = relationship(
+        "Track",
+        foreign_keys=[a_track_id],
+        backref=backref("takes_out", cascade="all, delete-orphan"),
+    )
+    b_track = relationship(
+        "Track",
+        foreign_keys=[b_track_id],
+        backref=backref("takes_in", cascade="all, delete-orphan"),
+    )
+
+    __table_args__ = (
+        Index("idx_takes_uuid", "uuid", unique=True),
+        Index("idx_takes_a", "a_track_id"),
+        Index("idx_takes_b", "b_track_id"),
+        Index("idx_takes_detected_at", "detected_at"),
+    )
+
+
 class HotCue(Base):
     __tablename__ = "hotcues"
 
@@ -338,4 +388,66 @@ class TrackLink(Base):
         CheckConstraint("low_track_id < high_track_id", name="ck_track_links_ordered"),
         Index("idx_track_links_pair", "low_track_id", "high_track_id", unique=True),
         Index("idx_track_links_high", "high_track_id"),
+    )
+
+
+class Set(Base):
+    """A Set (sets PRD): an ordered sequence of Tracks whose adjacencies
+    pin evidence (issue 02). Sidebar sibling of Playlist — but where a
+    Playlist's identity is hand-curated order for Export, a Set's identity
+    is its adjacencies and what they pin. A Set is a plan over the library,
+    never an owner: deleting one touches no Track/Transition/Take.
+    """
+
+    __tablename__ = "sets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    color = Column(String)  # Hex color (sidebar accent)
+    display_order = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    entries = relationship(
+        "SetEntry",
+        back_populates="set",
+        cascade="all, delete-orphan",
+        order_by="SetEntry.position",
+    )
+
+
+class SetEntry(Base):
+    """One ordered Set entry. A Track appears at most once per Set (same
+    invariant as Playlist), which makes track_id the entry identity — the
+    client-authoritative wholesale replace (ADR 0011 pattern) reconciles
+    by it. Position is the payload index.
+
+    The pin columns (sets 02) describe the adjacency this entry HEADS
+    (this entry → the next): an explicit, nullable, stable reference to a
+    saved Transition (by uuid), a Take (by uuid — ADR 0023), or nothing
+    (Unresolved = playback hard-cuts). Deliberately NOT foreign keys: the
+    backend stores what the client asserts, and dangling pins degrade to
+    unresolved client-side rather than break (PRD). The last entry's pin
+    is always null.
+    """
+
+    __tablename__ = "set_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    set_id = Column(Integer, ForeignKey("sets.id", ondelete="CASCADE"), nullable=False)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False)
+    position = Column(Integer, nullable=False)
+    pin_kind = Column(String, nullable=True)  # "transition" | "take" | NULL
+    pin_uuid = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    set = relationship("Set", back_populates="entries")
+    track = relationship("Track")
+
+    __table_args__ = (
+        Index("idx_set_entries_set", "set_id"),
+        Index("idx_set_entries_position", "set_id", "position"),
+        # A Track appears at most once per Set (entry identity).
+        Index("uq_set_entries_set_track", "set_id", "track_id", unique=True),
     )

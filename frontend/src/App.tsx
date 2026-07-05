@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Waveform style panel (edits the persisted style slots live).
@@ -16,20 +16,50 @@ import { MidiControlRegistrar } from './components/MidiControlRegistrar';
 import { MidiFeedbackBridge } from './components/MidiFeedbackBridge';
 import { AudioRoutingBridge } from './components/AudioRoutingBridge';
 import TransitionEditor from './editor/TransitionEditor';
+import { TakeHistoryView } from './components/history/TakeHistoryView';
+import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { ToastProvider } from './components/Toast';
+import { installNoFocusRule } from './focus/noFocusRule';
 
 const queryClient = new QueryClient();
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'sync', 'styles'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles'];
 
-// Deep link: ?view=<mode> opens straight into that mode.
+/** Session-state persistence of the top-panel mode: reopen where you were. */
+const MODE_KEY = 'manadj-app-mode';
+
+// Deep link: ?view=<mode> opens straight into that mode (beats the
+// remembered one); otherwise restore the last mode, defaulting to library.
 const requestedView = new URLSearchParams(window.location.search).get('view');
+const storedView = localStorage.getItem(MODE_KEY);
 const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
   ? (requestedView as AppMode)
-  : 'library';
+  : MODE_IDS.includes(storedView as AppMode)
+    ? (storedView as AppMode)
+    : 'library';
 
 function App() {
-  const [view, setView] = useState<AppMode>(initialView);
+  const [view, setViewState] = useState<AppMode>(initialView);
+  const setView = (mode: AppMode) => {
+    setViewState(mode);
+    try {
+      localStorage.setItem(MODE_KEY, mode);
+    } catch {
+      // persistence is best-effort
+    }
+  };
+
+  // Keyboard-focus hygiene: buttons/checkboxes never take click-focus
+  // (keyboard-focus 01) — one enforcement site for the whole app.
+  useEffect(installNoFocusRule, []);
+
+  // A Take review request (Transition history row) opens the editor; the
+  // mounted editor consumes the pending uuid itself (takeReview.ts).
+  useEffect(() => {
+    const onOpenTake = () => setView('transition');
+    window.addEventListener(OPEN_TAKE_EVENT, onOpenTake);
+    return () => window.removeEventListener(OPEN_TAKE_EVENT, onOpenTake);
+  }, []);
 
   if (window.location.pathname === '/midi-inspect') {
     return (
@@ -56,6 +86,8 @@ function App() {
                 <PerformanceView />
               ) : view === 'transition' ? (
                 <TransitionEditor />
+              ) : view === 'history' ? (
+                <TakeHistoryView />
               ) : view === 'sync' ? (
                 <SyncView />
               ) : view === 'styles' ? (

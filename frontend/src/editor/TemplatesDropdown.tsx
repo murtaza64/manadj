@@ -6,6 +6,7 @@
  * template…" which opens the authoring modal (parent owns it).
  */
 import { useEffect, useRef, useState } from 'react';
+import { useConfirmFlag } from '../hooks/useConfirmFlag';
 import type { TransitionTemplate } from './templateModel';
 
 const MIN_BEATS = 1;
@@ -102,7 +103,8 @@ function TemplateRow({
   onDelete: () => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  // Two-step delete arms then auto-disarms (~3s; keyboard-focus 01).
+  const { armed: confirming, fire: fireDelete } = useConfirmFlag();
   const total = template.beforeBeats + template.afterBeats;
   /** Apply-time TOTAL beat count (scalable templates only), beat-jump
    * idiom; splits proportionally around the anchor (scaleWindow). A
@@ -177,14 +179,8 @@ function TemplateRow({
         className={`editor-switcher-del${confirming ? ' confirming' : ''}`}
         title={confirming ? 'Click again to delete this template' : 'Delete (two-step)'}
         onClick={() => {
-          if (confirming) {
-            setConfirming(false);
-            onDelete();
-          } else {
-            setConfirming(true);
-          }
+          if (fireDelete()) onDelete();
         }}
-        onBlur={() => setConfirming(false)}
       >
         {confirming ? 'sure?' : 'del'}
       </button>

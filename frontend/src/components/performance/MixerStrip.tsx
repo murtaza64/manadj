@@ -80,7 +80,12 @@ export function Knob({
  * label travels with the grab point). Pointer-driven; scroll adjusts;
  * double-click resets to `defaultValue`. `detent` draws a center tick
  * (pitch zero); `fill` paints the track up to the handle (level-style
- * controls like VOL — meaningless for bipolar ones like pitch).
+ * controls like VOL — meaningless for bipolar ones like pitch);
+ * `fillColor` overrides the fill's color (Deck color on channel VOL).
+ * `crossfade` paints opposite-side Deck-color fills instead: the region
+ * right of the handle cyan (A), left magenta (B), so each colored width
+ * tracks that Deck's presence (hard left = full-width cyan = all A);
+ * position-based, never gain-curve-based (deck-colors 02).
  */
 export function HFader({
   label,
@@ -93,6 +98,8 @@ export function HFader({
   accent = false,
   detent = false,
   fill = false,
+  fillColor,
+  crossfade = false,
   title,
 }: {
   label: string;
@@ -105,6 +112,8 @@ export function HFader({
   accent?: boolean;
   detent?: boolean;
   fill?: boolean;
+  fillColor?: string;
+  crossfade?: boolean;
   title?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -145,8 +154,31 @@ export function HFader({
       {fill && (
         <div
           className="perf-fader-fill"
-          style={{ width: `${Math.max(0, Math.min(1, fraction)) * 100}%` }}
+          style={{
+            width: `${Math.max(0, Math.min(1, fraction)) * 100}%`,
+            ...(fillColor ? { background: fillColor } : {}),
+          }}
         />
+      )}
+      {crossfade && (
+        <>
+          <div
+            className="perf-fader-fill"
+            style={{
+              width: `${Math.max(0, Math.min(1, fraction)) * 100}%`,
+              background: 'var(--deck-b)',
+            }}
+          />
+          <div
+            className="perf-fader-fill"
+            style={{
+              left: 'auto',
+              right: 0,
+              width: `${(1 - Math.max(0, Math.min(1, fraction))) * 100}%`,
+              background: 'var(--deck-a)',
+            }}
+          />
+        </>
       )}
       {detent && <div className="perf-fader-detent" />}
       {/* left: X% + translateX(-X%) keeps the handle fully inside the box
@@ -228,6 +260,9 @@ export function MixerStrip({
         >
           XF
         </button>
+        {/* End labels flank the fader (flex flow, never over the track);
+            physical orientation — only the fills are reversed. */}
+        <span className="perf-xfade-end">A</span>
         <HFader
           label="X-FADER"
           min={-1}
@@ -235,10 +270,12 @@ export function MixerStrip({
           value={crossfader}
           defaultValue={0}
           detent
+          crossfade
           disabled={!xfOn}
           onChange={(v) => mixer.setCrossfader(v)}
           title="Crossfader (double-click to center)"
         />
+        <span className="perf-xfade-end">B</span>
         {/* Invisible twin of the XF toggle: keeps the fader's center on the
             deck divider axis. */}
         <span className="player-button perf-strip-toggle perf-strip-ghost" aria-hidden="true">

@@ -1,4 +1,8 @@
 import type {
+  CaptureEvent as CaptureEventWire,
+  DetectorParams as CaptureDetectorParams,
+} from '../capture/events';
+import type {
   Playlist,
   Track,
   PlaylistTrackAdd,
@@ -859,4 +863,168 @@ export const api = {
       return res.json();
     },
   },
+  takes: {
+    /** The Transition history, newest first — metadata only (the raw
+     * event slice stays behind get(); transition-takes 02, ADR 0020). */
+    list: async (): Promise<TakeRowWire[]> => {
+      const res = await fetch(`${API_BASE}/takes`);
+      if (!res.ok) throw new Error('Failed to fetch takes');
+      return res.json();
+    },
+
+    /** One Take with its evidence (raw capture-event slice + detector
+     * parameter snapshot) — vectorization input (issue 03). */
+    get: async (uuid: string): Promise<TakeDetailWire> => {
+      const res = await fetch(`${API_BASE}/takes/${uuid}`);
+      if (!res.ok) throw new Error(`Failed to fetch take (${res.status})`);
+      return res.json();
+    },
+
+    /** Persist a settled Handover (posted by the capture recorder). */
+    create: async (take: TakeCreateWire): Promise<TakeRowWire> => {
+      const res = await fetch(`${API_BASE}/takes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(take),
+      });
+      if (!res.ok) throw new Error(`Failed to create take (${res.status})`);
+      return res.json();
+    },
+
+    delete: async (uuid: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/takes/${uuid}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete take (${res.status})`);
+    },
+
+    /** Record (or clear) the Transition a Take was promoted into. */
+    setPromoted: async (uuid: string, transitionUuid: string | null): Promise<TakeRowWire> => {
+      const res = await fetch(`${API_BASE}/takes/${uuid}/promoted`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promoted_transition_uuid: transitionUuid }),
+      });
+      if (!res.ok) throw new Error(`Failed to set take promotion (${res.status})`);
+      return res.json();
+    },
+  },
+
+  sets: {
+    /** All Sets, in sidebar order (sets 01). */
+    list: async (): Promise<SetRowWire[]> => {
+      const res = await fetch(`${API_BASE}/sets`);
+      if (!res.ok) throw new Error('Failed to fetch sets');
+      return res.json();
+    },
+
+    /** One Set with its ordered entries. */
+    get: async (id: number): Promise<SetWithEntriesWire> => {
+      const res = await fetch(`${API_BASE}/sets/${id}`);
+      if (!res.ok) throw new Error(`Failed to fetch set (${res.status})`);
+      return res.json();
+    },
+
+    create: async (data: { name: string; color?: string }): Promise<SetRowWire> => {
+      const res = await fetch(`${API_BASE}/sets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`Failed to create set (${res.status})`);
+      return res.json();
+    },
+
+    update: async (
+      id: number,
+      data: { name?: string; color?: string; display_order?: number }
+    ): Promise<SetRowWire> => {
+      const res = await fetch(`${API_BASE}/sets/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`Failed to update set (${res.status})`);
+      return res.json();
+    },
+
+    delete: async (id: number): Promise<void> => {
+      const res = await fetch(`${API_BASE}/sets/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete set (${res.status})`);
+    },
+
+    /** Client-authoritative wholesale replace of the ordered entry list
+     * (ADR 0011 pattern): the server reconciles by track_id. */
+    replaceEntries: async (
+      id: number,
+      items: SetEntryItemWire[]
+    ): Promise<SetWithEntriesWire> => {
+      const res = await fetch(`${API_BASE}/sets/${id}/entries`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error(`Failed to save set entries (${res.status})`);
+      return res.json();
+    },
+  },
 };
+
+// ── Take wire types (transition-takes 02) ───────────────────────────────
+
+export interface TakeRowWire {
+  uuid: string;
+  a_track_id: number;
+  b_track_id: number;
+  detected_at: string;
+  /** Take window on the capture clock (glossary: the engagement). */
+  window_start_s: number;
+  window_end_s: number;
+  confidence: number;
+  detector_version: number;
+  promoted_transition_uuid: string | null;
+}
+
+export interface TakeDetailWire extends TakeRowWire {
+  /** The evidence — opaque to the BACKEND, but this client both writes and
+   * reads it, so the wire keeps the capture module's real types. */
+  params: CaptureDetectorParams;
+  events: CaptureEventWire[];
+}
+
+export interface TakeCreateWire {
+  uuid: string;
+  a_track_id: number;
+  b_track_id: number;
+  window_start_s: number;
+  window_end_s: number;
+  confidence: number;
+  detector_version: number;
+  params: CaptureDetectorParams;
+  events: CaptureEventWire[];
+}
+
+// ── Set wire types (sets 01) ────────────────────────────────────────────
+
+export interface SetRowWire {
+  id: number;
+  name: string;
+  color: string | null;
+  display_order: number;
+}
+
+export interface SetEntryItemWire {
+  track_id: number;
+  /** Adjacency pin (sets 02): kind and uuid travel together (both or neither). */
+  pin_kind?: 'transition' | 'take' | null;
+  pin_uuid?: string | null;
+}
+
+export interface SetEntryRowWire {
+  track_id: number;
+  position: number;
+  pin_kind: 'transition' | 'take' | null;
+  pin_uuid: string | null;
+}
+
+export interface SetWithEntriesWire extends SetRowWire {
+  entries: SetEntryRowWire[];
+}

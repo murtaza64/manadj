@@ -9,9 +9,10 @@ import {
 } from '../selection/playlistDrag';
 import { applyReorder, indicatorY, insertionIndexFromPointer, type RowRect } from '../selection/dropIndex';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
+import SetsSidebarSection from '../sets/SetsSidebarSection';
 import type { Playlist } from '../types';
 
-export type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist';
+export type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist' | 'set';
 
 /** Palette for "Change color ▸" — bright, fully saturated (repo preference). */
 const PLAYLIST_COLORS: Array<{ label: string; value: string }> = [
@@ -34,6 +35,9 @@ interface PlaylistSidebarProps {
   onSelectPlaylist: (playlistId: number) => void;
   /** Tracks dropped onto a playlist row (whole selection, selection order). */
   onTrackDrop: (playlistId: number, trackIds: number[]) => void;
+  /** Sets section (sets 01): sidebar siblings of Playlists. */
+  selectedSetId: number | null;
+  onSelectSet: (setId: number) => void;
 }
 
 export default function PlaylistSidebar({
@@ -42,6 +46,8 @@ export default function PlaylistSidebar({
   onSelectView,
   onSelectPlaylist,
   onTrackDrop,
+  selectedSetId,
+  onSelectSet,
 }: PlaylistSidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
@@ -406,6 +412,15 @@ export default function PlaylistSidebar({
             + New Playlist
           </button>
         )}
+      </div>
+
+      {/* Sets: sidebar siblings of Playlists (sets 01) */}
+      <div style={{ maxHeight: '40%', overflow: 'auto' }}>
+        <SetsSidebarSection
+          selectedSetId={selectedView === 'set' ? selectedSetId : null}
+          onSelectSet={onSelectSet}
+          onSelectedSetDeleted={() => onSelectView('all')}
+        />
       </div>
 
       </div>

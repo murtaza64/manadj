@@ -90,6 +90,8 @@ def main() -> int:
         action="store_true",
         help="also launch the desktop shell; quitting it stops everything",
     )
+    parser.add_argument("--backend-port", type=int, default=8000)
+    parser.add_argument("--vite-port", type=int, default=5173)
     args = parser.parse_args()
 
     line_queue: queue.Queue[tuple[str, str]] = queue.Queue()
@@ -107,7 +109,7 @@ def main() -> int:
             "--host",
             "0.0.0.0",
             "--port",
-            "8000",
+            str(args.backend_port),
         ],
         cwd=ROOT,
         line_queue=line_queue,
@@ -116,10 +118,13 @@ def main() -> int:
 
     frontend = spawn_process(
         name="frontend",
-        command=["npm", "run", "dev"],
+        command=["npm", "run", "dev", "--", "--port", str(args.vite_port), "--strictPort"],
         cwd=ROOT / "frontend",
         line_queue=line_queue,
-        env_overrides={"FORCE_COLOR": "1"},
+        env_overrides={
+            "FORCE_COLOR": "1",
+            "VITE_API_URL": f"http://localhost:{args.backend_port}",
+        },
     )
 
     processes = [backend, frontend]
@@ -147,7 +152,7 @@ def main() -> int:
             return 1
         app = spawn_process(
             name="app",
-            command=[str(electron_bin), ".", "--port", "5173"],
+            command=[str(electron_bin), ".", "--port", str(args.vite_port)],
             cwd=ROOT / "desktop",
             line_queue=line_queue,
         )

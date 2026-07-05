@@ -22,7 +22,6 @@ function fakeSurface(): AudibleSurface & { calls: string[] } {
     calls,
     transport: { togglePlay: () => calls.push('togglePlay') },
     silence: () => calls.push('silence'),
-    wake: () => calls.push('wake'),
   };
 }
 
@@ -56,26 +55,26 @@ describe('defaults', () => {
 });
 
 describe('claim / release', () => {
-  it('claim silences the holder and wakes the claimant', () => {
+  it('claim silences (pauses) the displaced holder — nothing else (ADR 0022)', () => {
     claimAudible('editor');
     expect(shared.calls).toEqual(['silence']);
-    expect(editor.calls).toEqual(['wake']);
+    expect(editor.calls).toEqual([]);
     expect(isAudible('editor')).toBe(true);
     expect(audibleTransport()).toBe(editor.transport);
   });
 
-  it('release silences the releaser and wakes the default', () => {
+  it('release silences the releaser and restores the default', () => {
     claimAudible('editor');
     releaseAudible('editor');
-    expect(editor.calls).toEqual(['wake', 'silence']);
-    expect(shared.calls).toEqual(['silence', 'wake']);
+    expect(editor.calls).toEqual(['silence']);
+    expect(shared.calls).toEqual(['silence']);
     expect(isAudible('shared')).toBe(true);
   });
 
   it('re-claim by the holder is a no-op', () => {
     claimAudible('editor');
     claimAudible('editor');
-    expect(editor.calls).toEqual(['wake']);
+    expect(editor.calls).toEqual([]);
     expect(shared.calls).toEqual(['silence']);
   });
 
@@ -102,7 +101,7 @@ describe('claim / release', () => {
     claimAudible('editor');
     unregisterSurface('editor');
     expect(isAudible('shared')).toBe(true);
-    expect(shared.calls).toEqual(['silence', 'wake']);
+    expect(shared.calls).toEqual(['silence']);
   });
 });
 

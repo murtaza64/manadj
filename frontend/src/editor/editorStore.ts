@@ -21,7 +21,7 @@
 import { useCallback } from 'react';
 import { useSyncExternalStore } from 'react';
 import { defaultMix, lanePoints, slideB, slideBToCue } from './mixModel';
-import type { EditorMix, LaneId, LanePoint, Transition } from './mixModel';
+import type { EditorMix, JumpEvent, LaneId, LanePoint, Transition } from './mixModel';
 import {
   freshTransition,
   isPristine,
@@ -44,6 +44,11 @@ export interface EditorSnapshot {
   pairKey: string | null;
   snap: boolean;
   lockedWindow: boolean;
+  /** A vectorized Take under review (transition-takes 03): the session
+   * item `itemUuid` is pristine-LIKE — visible and editable, but filtered
+   * from every persist until promoteTakeDraft(). Browsing costs nothing;
+   * promotion is the explicit act. */
+  takeDraft: { takeUuid: string; itemUuid: string } | null;
 }
 
 /** Persistence seam (defaults to the transition store / pairStore). */
@@ -61,6 +66,7 @@ export class EditorStore {
     pairKey: null,
     snap: true,
     lockedWindow: false,
+    takeDraft: null,
   };
 
   private readonly persist: EditorPersistence;
@@ -127,10 +133,14 @@ export class EditorStore {
     }
     if (!this.savePending || !this.state.pairKey) return;
     this.savePending = false;
-    this.persist.save(
-      this.state.pairKey,
-      toStoredEntry(this.liveItems(), this.state.session.active)
-    );
+    // An unpromoted take draft never persists (pristine-like rule): other
+    // session items save normally around it.
+    const draftUuid = this.state.takeDraft?.itemUuid ?? null;
+    const live = this.liveItems();
+    const items = draftUuid === null ? live : live.filter((it) => it.uuid !== draftUuid);
+    const activeItem = live[this.state.session.active];
+    const active = Math.max(0, items.indexOf(activeItem));
+    this.persist.save(this.state.pairKey, toStoredEntry(items, active));
   }
 
   /** Unmount: don't lose the last ≤300ms of edits. */
@@ -155,8 +165,77 @@ export class EditorStore {
       pairKey,
       session: { items, active },
       mix: { ...this.state.mix, transition: structuredClone(items[active].transition) },
+      takeDraft: null, // an unpromoted draft evaporates with its pair
     });
     this.onTransitionLoaded?.(items[active].transition);
+  }
+
+  // ── Take review (transition-takes 03) ────────────────────────────────
+
+  /** Stamp a vectorized Take into the session as a reviewable draft.
+   * EMIT ONLY — no save is armed; the draft stays out of every persist
+   * until promoted (see flush). */
+  stampTakeDraft(takeUuid: string, transition: Transition): void {
+    // Re-opening a Take on the already-loaded pair: the previous draft is
+    // REPLACED, never orphaned (an orphan named "Take" is non-pristine and
+    // would ride the next armed save — the bug this filter closes).
+    // Pristine items evaporate too — on a fresh pair the draft replaces
+    // "Transition 1" instead of siblinging it (same evaporation rule as
+    // navigating away from an untouched take).
+    const items = this.liveItems().filter(
+      (it) => it.uuid !== this.state.takeDraft?.itemUuid && !isPristine(it)
+    );
+    const item: SavedTransition = {
+      uuid: crypto.randomUUID(),
+      name: 'Take',
+      transition: structuredClone(transition),
+    };
+    this.emit({
+      session: { items: [...items, item], active: items.length },
+      mix: { ...this.state.mix, transition: structuredClone(transition) },
+      takeDraft: { takeUuid, itemUuid: item.uuid },
+    });
+    this.onTransitionLoaded?.(item.transition);
+  }
+
+  /** The explicit promotion act: the draft becomes an ordinary saved
+   * Transition (normal persistence path) and the caller gets the pair of
+   * identifiers to record on the Take. Null when nothing is under review. */
+  promoteTakeDraft(): { takeUuid: string; transitionUuid: string } | null {
+    const draft = this.state.takeDraft;
+    if (!draft) return null;
+    this.touch({ takeDraft: null });
+    this.flush();
+    return { takeUuid: draft.takeUuid, transitionUuid: draft.itemUuid };
+  }
+
+  /** Drop an unpromoted draft on request (the review banner's Discard) —
+   * emit-only: the draft never persisted, so there is nothing to undo. */
+  discardTakeDraft(): void {
+    const draft = this.state.takeDraft;
+    if (!draft) return;
+    const items = this.liveItems().filter((it) => it.uuid !== draft.itemUuid);
+    const nextItems = items.length > 0 ? items : [freshTransition([])];
+    const active = Math.min(this.state.session.active, nextItems.length - 1);
+    this.emit({
+      session: { items: nextItems, active },
+      mix: { ...this.state.mix, transition: structuredClone(nextItems[active].transition) },
+      takeDraft: null,
+    });
+    this.onTransitionLoaded?.(nextItems[active].transition);
+  }
+
+  /** Point the session at a saved Transition by uuid — selection only,
+   * never a mutation (jumping from the history's promoted mark). */
+  selectTransition(uuid: string): void {
+    const items = this.liveItems();
+    const index = items.findIndex((it) => it.uuid === uuid);
+    if (index < 0 || index === this.state.session.active) return;
+    this.emit({
+      session: { items, active: index },
+      mix: { ...this.state.mix, transition: structuredClone(items[index].transition) },
+    });
+    this.onTransitionLoaded?.(items[index].transition);
   }
 
   /** Track assignment (mix identity, not persisted session content). */
@@ -207,6 +286,43 @@ export class EditorStore {
           ...m.transition.lanes,
           [id]: lanePoints(m.transition.lanes, id, m.transition.durationSec),
         },
+      },
+    }));
+  }
+
+  // ── Jump events (transition-takes 01) ───────────────────────────────
+  // Array order is INSERTION order, never re-sorted: the UI addresses
+  // jumps by index across x drags (the math is order-insensitive).
+
+  /** Add a Jump event at normalized window position x (clamped 0..1),
+   * with no distance yet — the marker's editor sets deltaSec. */
+  addJump(x: number): void {
+    const jump = { x: Math.max(0, Math.min(1, x)), deltaSec: 0 };
+    this.updateMix((m) => ({
+      ...m,
+      transition: { ...m.transition, jumps: [...(m.transition.jumps ?? []), jump] },
+    }));
+  }
+
+  /** Patch one Jump event (marker drags patch `x`, the Δ editor patches
+   * `deltaSec`) — addressed by insertion index, stable across x drags. */
+  updateJump(index: number, patch: Partial<JumpEvent>): void {
+    this.updateMix((m) => ({
+      ...m,
+      transition: {
+        ...m.transition,
+        jumps: (m.transition.jumps ?? []).map((j, i) => (i === index ? { ...j, ...patch } : j)),
+      },
+    }));
+  }
+
+  /** Delete one Jump event by insertion index. */
+  removeJump(index: number): void {
+    this.updateMix((m) => ({
+      ...m,
+      transition: {
+        ...m.transition,
+        jumps: (m.transition.jumps ?? []).filter((_, i) => i !== index),
       },
     }));
   }
@@ -322,14 +438,18 @@ export class EditorStore {
   }
 
   /** Session switch: new items/active, mix follows the active Transition,
-   * view choreography fires. */
+   * view choreography fires. A take draft whose item is gone (deleted,
+   * evaporated) drops its reference — a dangling ref would let Promote
+   * record a nonexistent Transition on the Take. */
   private applySession(items: SavedTransition[], active: number): void {
+    const draft = this.state.takeDraft;
     this.touch({
       session: { items, active },
       mix: {
         ...this.state.mix,
         transition: structuredClone(items[active].transition),
       },
+      takeDraft: draft && items.some((it) => it.uuid === draft.itemUuid) ? draft : null,
     });
     this.onTransitionLoaded?.(items[active].transition);
   }

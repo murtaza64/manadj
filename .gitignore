@@ -8,4 +8,5 @@ waveform_tests/
 .claude/
 node_modules/
 .lanes/
+.lane-app/
 

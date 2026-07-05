@@ -16,6 +16,7 @@ import { JogController } from '../midi/jog';
 import Library from '../components/Library';
 import type { LibraryBrowseHandle } from '../components/Library';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
+import { AutoBlurSelect } from '../components/AutoBlurSelect';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import {
@@ -24,6 +25,7 @@ import {
   releaseAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
+import { useMixer } from '../hooks/useMixer';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
@@ -36,6 +38,8 @@ import { beatsToSeconds } from './gestureMath';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
+import { vectorizeTake } from '../capture/vectorize';
+import { OPEN_TAKE_EVENT, consumeTakeReview } from '../capture/takeReview';
 import type { TrackSideInfo, TransitionTemplate } from './templateModel';
 import {
   deleteTemplate,
@@ -83,7 +87,21 @@ function TransitionEditorInner() {
   // only the narrow subscribers (DawTimeline, the center panel).
   const [store] = useState(() => new EditorStore());
   useEffect(() => () => store.dispose(), [store]);
-  const [player] = useState(() => new MixPlayer(defaultMix()));
+  // The conductor drives the SHARED Decks and Mixer (ADR 0022) — no
+  // private machinery, so routing (master AND cue/PFL), Key Lock, and
+  // every future mixer feature cover the editor by construction. The
+  // borrow lifecycle (claim/engage/checkpoint) lives in the surface
+  // effect below.
+  const mixer = useMixer();
+  const sharedDecks = useDecks();
+  const [player] = useState(
+    () =>
+      new MixPlayer(defaultMix(), {
+        mixer,
+        engineA: sharedDecks.A.engine,
+        engineB: sharedDecks.B.engine,
+      })
+  );
   useEffect(() => () => player.dispose(), [player]);
 
   // The player follows the store SYNCHRONOUSLY (notifications are sync) —
@@ -181,11 +199,10 @@ function TransitionEditorInner() {
     return () => store.setTransitionLoadedHandler(null);
   }, [store, onTransitionLoaded]);
 
-  // Shared decks: the canonical loaded pair across modes. Editor loads
-  // mirror onto them (issue 07) so Performance/Library show the same tracks;
-  // read through a ref so assignTrack stays identity-stable for the
-  // keyboard effect.
-  const sharedDecks = useDecks();
+  // The shared decks are the loaded pair (ADR 0022 — mirroring is gone:
+  // editor loads ARE Deck loads through the provider's one path); read
+  // through a ref so assignTrack stays identity-stable for the keyboard
+  // effect.
   const sharedDecksRef = useRef(sharedDecks);
   useEffect(() => {
     sharedDecksRef.current = sharedDecks;
@@ -196,11 +213,13 @@ function TransitionEditorInner() {
       if (deck === 'A') setTrackA(track);
       else setTrackB(track);
       store.setTrackId(deck, track.id);
-      void player.loadTrack(deck, { id: track.id, bpm: track.bpm ?? null });
+      // The one load path (ADR 0022): assigning to the editor pair IS
+      // Loading the shared Deck (Main-cue defaults, persistence and all).
+      // Same track already loaded → nothing to do, buffer's already hot.
       const shared = sharedDecksRef.current[deck];
       if (shared.loadedTrack?.id !== track.id) shared.loadTrack(track);
     },
-    [store, player]
+    [store]
   );
 
   // Swap the loaded pair (issue 29): A's track to deck B and vice versa —
@@ -306,14 +325,22 @@ function TransitionEditorInner() {
     [midiJogA, midiJogB]
   );
 
-  // One audible surface AND one running audio clock at a time (issue 08):
-  // claim audibility while mounted (ADR 0013). The arbiter silences the
-  // shared surface (pauses both decks, suspends its context) and restores
-  // it on release; hardware gestures route to the MixPlayer meanwhile
+  // One audible surface at a time (ADR 0013, shrunk by ADR 0022): claim
+  // audibility while mounted. The arbiter pauses the shared surface's
+  // playback on claim (the one clock keeps running — the editor plays
+  // through it); hardware gestures route to the MixPlayer meanwhile
   // (both PLAYs = the one mix transport, keyboard-parity with Space; CUE
   // has no editor meaning and drops, like F). Pads carry the editor's
   // gesture semantics (ADR 0019); release is absent — editor gestures are
   // taps, so the up edge drops.
+  //
+  // The claim is also the BORROW BOUNDARY (ADR 0022): while the editor
+  // holds audibility, drawn automation owns the shared Mixer's lane
+  // params (engage/disengage — the Mixer reapplies base state itself),
+  // and deck pitches are checkpointed here and restored on release (the
+  // editor's tempo-match pitch must not leak into the ±8% Performance
+  // fader; transport positions deliberately DO persist — transition
+  // editing is not a mid-set activity).
   useEffect(() => {
     registerSurface('editor', {
       transport: { togglePlay: () => player.togglePlay() },
@@ -343,18 +370,22 @@ function TransitionEditorInner() {
         playing: () => player.isPlaying(),
         subscribe: (fn) => player.subscribe(fn),
       },
-      silence: () => {
-        player.pause();
-        player.mixer.suspend();
-      },
-      wake: () => player.mixer.resume(),
+      silence: () => player.pause(),
     });
-    claimAudible('editor');
-    return () => {
-      releaseAudible('editor');
-      unregisterSurface('editor');
+    claimAudible('editor'); // pauses the shared surface's playback
+    const pitches = {
+      A: player.engineA.getSnapshot().pitchPercent,
+      B: player.engineB.getSnapshot().pitchPercent,
     };
-  }, [player, midiJogA, midiJogB]);
+    mixer.engageAutomation();
+    return () => {
+      releaseAudible('editor'); // pauses the audition (editor.silence)
+      unregisterSurface('editor');
+      mixer.disengageAutomation(); // Mixer reapplies base state
+      player.engineA.setPitch(pitches.A);
+      player.engineB.setPitch(pitches.B);
+    };
+  }, [player, mixer, midiJogA, midiJogB]);
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh
@@ -375,6 +406,54 @@ function TransitionEditorInner() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Take review (transition-takes 03): a Transition-history row opens its
+  // Take here. Tracks are assigned by ROLE — outgoing → editor A, whatever
+  // physical deck it played on. An unpromoted Take vectorizes into an
+  // unsaved draft (store.stampTakeDraft); an already-promoted one just
+  // selects its Transition.
+  const openTake = useCallback(
+    async (uuid: string) => {
+      try {
+        const detail = await api.takes.get(uuid);
+        const [a, b] = await Promise.all([
+          api.tracks.getById(detail.a_track_id),
+          api.tracks.getById(detail.b_track_id),
+        ]);
+        assignTrack('A', a);
+        assignTrack('B', b);
+        const pk = `${a.id}:${b.id}`;
+        localStorage.setItem(LAST_PAIR_KEY, pk);
+        store.loadPair(pk);
+        if (detail.promoted_transition_uuid) {
+          store.selectTransition(detail.promoted_transition_uuid);
+          return;
+        }
+        const draft = vectorizeTake(
+          {
+            events: detail.events,
+            windowStartS: detail.window_start_s,
+            windowEndS: detail.window_end_s,
+          },
+          { bpmA: a.bpm ?? null, bpmB: b.bpm ?? null }
+        );
+        if (draft) store.stampTakeDraft(uuid, draft.transition);
+        else console.error('take review: slice has no init head — cannot vectorize', uuid);
+      } catch (err) {
+        console.error('take review: open failed', err);
+      }
+    },
+    [assignTrack, store]
+  );
+  useEffect(() => {
+    const consume = () => {
+      const uuid = consumeTakeReview();
+      if (uuid) void openTake(uuid);
+    };
+    consume(); // a request may be pending from before the view switch
+    window.addEventListener(OPEN_TAKE_EVENT, consume);
+    return () => window.removeEventListener(OPEN_TAKE_EVENT, consume);
+  }, [openTake]);
 
   // Selection/navigation handle into the embedded library panel.
   const libraryRef = useRef<LibraryBrowseHandle>(null);
@@ -518,10 +597,9 @@ function TransitionEditorInner() {
         </div>
       </div>
 
-      {/* Bottom panel: the shared library browse surface (scoped to shared
-          deck A — the editor's own audio runs on its private Mixer). Load
-          affordances match the Performance view: hover row buttons,
-          double-click → A, arrow keys. */}
+      {/* Bottom panel: the shared library browse surface (scoped to deck
+          A). Load affordances match the Performance view: hover row
+          buttons, double-click → A, arrow keys. */}
       <div className="editor-library">{browsePanel}</div>
     </div>
   );
@@ -603,6 +681,17 @@ function EditorCenterPanel({
   const mix = useEditorSelector(store, (s) => s.mix);
   const session = useEditorSelector(store, (s) => s.session);
   const snap = useEditorSelector(store, (s) => s.snap);
+
+  // Take review (transition-takes 03): the banner lives in the center
+  // panel's spare bottom row — the top of the editor is timeline space.
+  const takeDraft = useEditorSelector(store, (s) => s.takeDraft);
+  const promoteTake = useCallback(() => {
+    const ref = store.promoteTakeDraft();
+    if (!ref) return;
+    void api.takes
+      .setPromoted(ref.takeUuid, ref.transitionUuid)
+      .catch((err) => console.error('take review: promoted-reference write failed', err));
+  }, [store]);
   const tr = mix.transition;
   const visibleLanes = useMemo(() => visibleLaneIds(tr), [tr]);
   const addableLanes = LANE_IDS.filter((id) => !visibleLanes.includes(id));
@@ -765,7 +854,7 @@ function EditorCenterPanel({
           snap
         </label>
         {addableLanes.length > 0 && (
-          <select
+          <AutoBlurSelect
             value=""
             onChange={(e) => {
               const id = e.target.value as LaneId;
@@ -778,9 +867,20 @@ function EditorCenterPanel({
                 {id}
               </option>
             ))}
-          </select>
+          </AutoBlurSelect>
         )}
       </div>
+      {takeDraft && (
+        <div className="editor-center-row editor-take-banner">
+          <span>Reviewing a Take — unsaved until promoted</span>
+          <button className="editor-take-promote" onClick={promoteTake}>
+            Promote to library
+          </button>
+          <button className="editor-take-discard" onClick={() => store.discardTakeDraft()}>
+            Discard
+          </button>
+        </div>
+      )}
 
       {saveModalOpen && canSaveTemplate && (
         <SaveTemplateModal

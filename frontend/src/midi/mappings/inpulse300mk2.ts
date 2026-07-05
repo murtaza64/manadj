@@ -116,13 +116,15 @@ export const INPULSE_300_MK2: Mapping = {
       target: { control: 'jog-seek', deck: 'B' },
     },
 
-    // Pitch faders.
+    // Pitch faders. DJ polarity: fader down = faster, so the raw CC (which
+    // grows upward) is inverted (hardware-verified 2026-07-05).
     {
       match: { message: 'cc', channel: 1, number: 0x08 },
       controlType: 'absolute',
       target: { control: 'pitch', deck: 'A' },
       bits: 14,
       lsbNumber: 0x28,
+      invert: true,
     },
     {
       match: { message: 'cc', channel: 2, number: 0x08 },
@@ -130,6 +132,7 @@ export const INPULSE_300_MK2: Mapping = {
       target: { control: 'pitch', deck: 'B' },
       bits: 14,
       lsbNumber: 0x28,
+      invert: true,
     },
 
     // Mixer absolute controls.
