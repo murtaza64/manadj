@@ -26,3 +26,16 @@ export function stepVisibleSeconds(current: number, direction: 'in' | 'out'): nu
   const next = direction === 'in' ? current / STEP_RATIO : current * STEP_RATIO;
   return clampVisibleSeconds(next);
 }
+
+/**
+ * The track-time window a deck playing at `rate` should render for a shared
+ * wall-clock zoom (performance-mode 06). The renderer consumes seconds of
+ * TRACK time; a pitched deck plays them faster, so an unscaled window kept
+ * base-BPM beat spacing on screen. Scaling by the rate makes the viewport a
+ * fixed wall-clock duration on every deck — equal effective BPM (pitch and
+ * bend included) means equal beat spacing, which is what beatmatching eyes
+ * need.
+ */
+export function trackWindowSeconds(visibleSeconds: number, rate: number): number {
+  return visibleSeconds * rate;
+}

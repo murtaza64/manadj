@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { composeRate } from '../playback/tempo';
 import {
   DEFAULT_VISIBLE_SECONDS,
   MAX_VISIBLE_SECONDS,
   MIN_VISIBLE_SECONDS,
   clampVisibleSeconds,
   stepVisibleSeconds,
+  trackWindowSeconds,
 } from './waveformZoom';
 
 describe('clampVisibleSeconds', () => {
@@ -36,5 +38,29 @@ describe('stepVisibleSeconds', () => {
   it('clamps at the bounds', () => {
     expect(stepVisibleSeconds(MIN_VISIBLE_SECONDS, 'in')).toBe(MIN_VISIBLE_SECONDS);
     expect(stepVisibleSeconds(MAX_VISIBLE_SECONDS, 'out')).toBe(MAX_VISIBLE_SECONDS);
+  });
+});
+
+describe('trackWindowSeconds (performance-mode 06)', () => {
+  it('unpitched decks render the shared window unchanged', () => {
+    expect(trackWindowSeconds(20, 1)).toBe(20);
+  });
+
+  it('equal effective BPM means equal beats in the viewport', () => {
+    // Deck A: 120 BPM at 0%. Deck B: 126 BPM pitched down to 120 effective.
+    const sharedZoom = 20;
+    const pitchB = (120 / 126 - 1) * 100;
+    const beatsA = (120 / 60) * trackWindowSeconds(sharedZoom, composeRate(0, 0));
+    const beatsB = (126 / 60) * trackWindowSeconds(sharedZoom, composeRate(pitchB, 0));
+    expect(beatsB).toBeCloseTo(beatsA, 10);
+  });
+
+  it('bend is part of the rate, like the effective-BPM readout', () => {
+    expect(trackWindowSeconds(20, composeRate(0, 2))).toBeCloseTo(20.4, 10);
+  });
+
+  it('the wheel round-trip stays rate-free: scaling then unscaling is exact', () => {
+    const rate = composeRate(5.5, 0);
+    expect(trackWindowSeconds(20, rate) / rate).toBeCloseTo(20, 10);
   });
 });

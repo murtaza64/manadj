@@ -31,6 +31,7 @@ import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, composeRate } from '../../playback/tempo';
+import { trackWindowSeconds } from '../../utils/waveformZoom';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { DECK_KEYS } from './performanceKeys';
 import type { EqBand } from '../../playback/graph';
@@ -80,7 +81,7 @@ export function DeckWaveform({
   visibleSeconds,
   onVisibleSecondsChange,
 }: {
-  /** The one zoom both decks share (seconds visible) — held by the view. */
+  /** The one zoom both decks share (WALL-CLOCK seconds) — held by the view. */
   visibleSeconds: number;
   onVisibleSecondsChange: (seconds: number) => void;
 }) {
@@ -90,6 +91,13 @@ export function DeckWaveform({
 
   const transport = useScrubTransport();
 
+  // Effective-BPM zoom (performance-mode 06): the renderer consumes TRACK
+  // seconds, so scale the shared wall-clock window by this deck's rate —
+  // beat spacing on screen then follows effective BPM, and beatmatched
+  // decks line up visually. The wheel callback divides the multiplicative
+  // step back out, keeping the shared state rate-free.
+  const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, s.bendPercent));
+
   return (
     <WebGLWaveform
       trackId={loadedTrack?.id ?? null}
@@ -97,8 +105,8 @@ export function DeckWaveform({
       cuePoint={cuePoint}
       transport={transport}
       dimmed={loadedTrack !== null && !ready}
-      visibleSeconds={visibleSeconds}
-      onVisibleSecondsChange={onVisibleSecondsChange}
+      visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
+      onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
     />
   );
 }
