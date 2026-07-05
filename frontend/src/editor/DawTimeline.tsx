@@ -446,15 +446,21 @@ export function DawTimeline({
   }, []);
 
   // Re-frame whenever a Transition is loaded/switched (parent bumps the
-  // signal). Also runs on mount for the initial view.
+  // signal). Also runs on mount for the initial view. The frame stays
+  // ARMED until the pair's durations are in: a load that swaps both
+  // tracks (opening a Take) frames before audio/waveforms resolve —
+  // geometry built on zero durations gets scroll-clamped into the weeds
+  // (window start pinned at the viewport edge) and the old once-only
+  // auto-fit never refired. Re-framing on readiness settles it.
+  const framePending = useRef(false);
   useEffect(() => {
+    framePending.current = true;
     frameTransition();
   }, [frameSignal, frameTransition]);
 
-  const didAutoFit = useRef(false);
   useEffect(() => {
-    if (!didAutoFit.current && (durA > 0 || durB > 0)) {
-      didAutoFit.current = true;
+    if (framePending.current && durA > 0 && durB > 0) {
+      framePending.current = false;
       frameTransition();
     }
   }, [durA, durB, frameTransition]);
