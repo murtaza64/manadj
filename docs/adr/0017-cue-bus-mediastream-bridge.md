@@ -31,3 +31,17 @@ worse than room acoustics.
   cue context contains nothing but the bridge source and a gain.
 - If the cue device disappears mid-session, the bridge is torn down and the
   Cue bus goes silent — master audio is never at risk.
+
+## Hardware findings (2026-07-05 smoke test)
+
+- The Inpulse enumerates as ONE 4-channel device (outs 1/2 = rear RCA, 3/4 =
+  front headphone jack), so a plain stereo bridge lands on the RCA. The cue
+  context therefore places the stereo cue on an explicit output pair
+  (splitter → merger, 'discrete') — the picker exposes multichannel devices
+  as stereo-pair entries, and outs 1/2 stay free, so master → same device
+  gives the all-Inpulse setup without the single-context optimization.
+- Measured bridge latency: main context 5.8 ms base / 29 ms output; the cue
+  context reports 0 output latency for non-default sinks (Chrome). No
+  audible glitches; the "constant-ish tens of ms" assumption holds, and
+  headphone-internal blend alignment was confirmed by ear across the full
+  cue/mix sweep.

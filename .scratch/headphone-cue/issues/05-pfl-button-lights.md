@@ -1,6 +1,6 @@
 # 05 — PFL button lights
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -48,6 +48,8 @@ The Controller's PFL buttons light when their channel is cued — Feedback
     button and light cannot drift; resend-on-outputs-change gives correct
     state on connect/replug for free.
   - 456 vitest green; tsc + eslint clean.
+- VERIFIED (hardware, 2026-07-05): PFL LEDs track the cue state from both
+  surfaces — the inferred 0x0C LED address is correct on the MK2. Done.
 - READY-FOR-HUMAN (change srszquvk): toggle PFL on screen and on the
   hardware — that deck's PFL button lights/darkens both ways; replug the
   controller with a PFL active → light correct immediately; quit/reload →

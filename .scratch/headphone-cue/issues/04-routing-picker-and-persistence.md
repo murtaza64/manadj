@@ -1,6 +1,6 @@
 # 04 — Routing picker + persistence
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -73,6 +73,10 @@ Product UI over issue 01's plumbing:
   non-default pair is the single-context optimization ADR 0017 defers.
   NOTE: a cue pref saved before this change (no pair) shows as
   "(missing)" — re-pick once. Selects also use the app font now.
+- VERIFIED (hardware, 2026-07-05): routing live-switches, persists across
+  restarts, unplug/replug drills pass (master never dies, cue tears down
+  and auto-restores), Electron shell works incl. the inline selects in the
+  drag-region bar. Done.
 - READY-FOR-HUMAN (change ytqykolk): route MASTER→Mac speakers, CUE→
   Inpulse; both live without reload. Restart → routing restored. Restart
   with the Inpulse unplugged → master plays on default, OUT red, cue

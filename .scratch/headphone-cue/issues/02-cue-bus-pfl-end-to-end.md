@@ -1,6 +1,6 @@
 # 02 — Cue bus + PFL end-to-end
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -69,6 +69,8 @@ Press PFL (hardware or screen) and hear that channel in the headphones:
   speakers/headphone-port split; Inpulse jack fixed separately — see issue
   01's cue-to-3-4 comment). On-screen PFL now shows a headphone glyph
   instead of the "PFL" text (polish change); "PFL" stays in tooltip/aria.
+- VERIFIED (hardware, 2026-07-05): PFL cueing works end to end — screen and
+  hardware toggles, both-decks blend, no-cue-device silence. Done.
 - READY-FOR-HUMAN (change vlrunqwz): with master on Mac speakers and
   `__routing.setCue('inpulse')`: PFL A with fader down + crossfader hard-B →
   deck A alone in headphones, EQ/filter moves audible; PFL both → blend;

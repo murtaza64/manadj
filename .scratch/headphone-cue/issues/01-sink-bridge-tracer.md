@@ -1,6 +1,6 @@
 # 01 — Sink + bridge tracer
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -92,3 +92,12 @@ None - can start immediately.
   splitter→merger). Side effect: outs 1/2 stay free, so the all-Inpulse
   setup (master → RCA, cue → headphones) works with no extra routing.
   RE-VERIFY: cue → Inpulse must now sound from the headphone jack.
+- VERIFIED (hardware, 2026-07-05, through change qulyrwrn): all acceptance
+  criteria pass — master follows sink changes live, bridge delivers to a
+  second device, cue → Inpulse (outs 3/4) sounds from the headphone jack,
+  unplug kills only the bridged signal, replug/restore works, Electron
+  shell prompts for nothing. Measured latency (main ctx: baseLatency
+  5.8 ms, outputLatency 29 ms; cue ctx: baseLatency 5.8 ms, outputLatency
+  reported 0 — Chrome doesn't report outputLatency for non-default sinks).
+  No glitches observed. ADR 0017's "constant-ish tens of ms" assumption
+  holds. Done.

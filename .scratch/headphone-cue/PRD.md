@@ -1,6 +1,6 @@
 # PRD: Headphone Cueing (Cue bus, PFL, output routing)
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 

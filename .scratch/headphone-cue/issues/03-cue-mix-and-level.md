@@ -1,6 +1,6 @@
 # 03 — Cue/mix blend + cue level
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -60,6 +60,9 @@ The beatmatching half of the headphone mix:
 - Smoke-test feedback (2026-07-05): user decision — session default for
   cue/mix is now 0 (cue only), not the PRD's cue-heavy 0.25
   (`CUE_MIX_DEFAULT = 0`, polish change). Double-click reset follows.
+- VERIFIED (hardware, 2026-07-05): CUE MIX sweep good (beats stay locked in
+  the headphones across the sweep), hardware level knob smooth with screen
+  repaint. Done.
 - READY-FOR-HUMAN (change rwtxtkux): with a matched pair cued/playing,
   sweep CUE MIX end to end — headphones go cue-only → master-only with
   beats staying locked across the sweep; sweep the hardware headphone knob
