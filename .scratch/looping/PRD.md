@@ -1,6 +1,6 @@
 # PRD: Looping — Active loops and first-class Quantize
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, changes rtxmzxzs..wrmvrrkq, workspace looping — awaiting review; see Verification walkthrough below)
 
 ## Problem Statement
 
@@ -94,3 +94,24 @@ Good tests here assert external behavior at pure seams — state in, state/effec
 - Glossary entries for Quantize, Active loop, Saved loop, the amended Jump event and Take, and the extended gesture-class list were written to CONTEXT.md during the grilling session (2026-07-05). No ADR — every decision is reversible and documented there.
 - Multi-tempo (variable) Beatgrids: beat↔seconds projection should go through the Beatgrid rather than a single BPM constant where practical, but the library is Quantized tracks and the existing beatjump has the same constant-tempo assumption — matching it is acceptable for v1.
 - Natural tracer order for slicing: Quantize toggle + gesture-time snapping (backend snap removal) → reducer loop state + kernel wrap (audible loop) → halve/double + motion classes → waveform region rendering → LoopRow + keys → repeatable Jump events in capture/promotion.
+
+## Verification walkthrough (2026-07-05, workspace looping)
+
+All 6 issues implemented (statuses + Done comments in `issues/`). Gate green on the rebased stack: 569 backend + 871 frontend tests, build, ruff, single alembic head.
+
+Lane app: **http://localhost:5263** (desktop shell: `npm --prefix desktop start -- --port 5263`).
+
+The 3–5 clicks:
+
+1. **Quantize toggle**: top bar, `Q` beside MIDI — lit green (default on). Click it off/on; reload — it sticks.
+2. **Placement snap**: load a gridded Track, play, hit a hot-cue pad on an empty slot mid-beat — the marker lands exactly on a beat line. Toggle `Q` off, set another — lands exactly where pressed.
+3. **The loop**: in Performance, press `r` (Deck A) or the LOOP 4 button while playing — button lights green, translucent green region + edge lines on the waveform, thin green band on the minimap; the wrap is click-free (try Key Lock on and off). Press again to release — playback flows past the edge.
+4. **Resize + motion**: while looping, hammer ½ a few times — the roll tightens, stays in the groove (phase-mod re-entry); ×2 doubles from the start edge. Beat jump (`a`/`s`) — the region travels with you. Hit a hot cue or seek on the waveform — loop cancels.
+5. **Quantized triggers**: Q on, playing, hit a set hot cue slightly off the beat — the groove never stumbles (lands at cue + phase, not exactly on the cue: CDJ convention, correct).
+6. **Take promotion** (optional deeper check): perform a handover holding a loop on the incoming deck, promote the Take — the editor shows ONE jump chip labeled `×k`, and audition replays the loop.
+
+What correct looks like: engage never moves the playhead (snap can put the region start slightly ahead — you play into it); gridless Tracks leave LOOP inert; loading a new Track clears the loop but keeps the size.
+
+**Review round 1 (2026-07-05)**: two findings fixed in `wrmvrrkq` — (a) loop row now has its own full-width row in the Performance pad column and the library overlay (it was jammed into the pads grid); (b) audible pops at wrap boundaries with Key Lock ON: the wrap spliced the stretch voice onto the resample path mid-voice — wraps now happen at the stretcher's READ layer (the fill window folds past the region end; no splice, no re-prime), so the stretcher's own overlap-add smooths the boundary. Key Lock OFF keeps the stab-grade declick splice. **Reload the page at :5263** (the worklet module needs a fresh load). Follow-up idea filed: `issues/07-overload-jump-and-loop-controls.md`.
+
+**Review verdict (2026-07-05)**: the library player's on-screen loop controls are removed (deviation from issue 03's "library player's control overlay", sanctioned by the human) — in the library view the loop is `r` + the waveform's green region; the LoopRow lives in the Performance Deck panels only.
