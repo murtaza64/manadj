@@ -28,6 +28,7 @@ import { DeckPanel, DeckWaveform } from './DeckPanel';
 import { MixerStrip } from './MixerStrip';
 import { LinkToggle } from '../../links/LinkToggle';
 import { DeckKeys } from './DeckKeys';
+import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
 import './PerformanceView.css';
@@ -180,6 +181,10 @@ export function PerformanceView() {
               onVisibleSecondsChange={setVisibleSeconds}
             />
           </DeckScope>
+          {/* Play guides (play-guides PRD): saved playing→paused Transitions
+              projected as press-play markers — one line spanning both rows,
+              labeled in the gutter. Derived, view-only, non-interactive. */}
+          <PlayGuideOverlay visibleSeconds={visibleSeconds} />
         </div>
         <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
         <div className="perf-decks">

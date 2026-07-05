@@ -29,6 +29,7 @@ import { BeatjumpRow } from '../deckControls/BeatjumpRow';
 import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons';
 import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
+import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { trackWindowSeconds } from '../../utils/waveformZoom';
@@ -572,13 +573,18 @@ export function DeckPanel({
       <div className="perf-deck-minimap">
         <span className={`perf-decktag deck-${deck.toLowerCase()}`}>{deck}</span>
         {lockHint && <span className="perf-lock-hint">PLAYING — LOAD BLOCKED</span>}
-        <WaveformMinimap
-          trackId={track?.id ?? null}
-          clock={engine}
-          cuePoint={cuePoint}
-          onSeek={(t) => ready && engine.seek(t)}
-          dimmed={track !== null && !ready}
-        />
+        <div className="perf-minimap-wrap">
+          <WaveformMinimap
+            trackId={track?.id ?? null}
+            clock={engine}
+            cuePoint={cuePoint}
+            onSeek={(t) => ready && engine.seek(t)}
+            dimmed={track !== null && !ready}
+          />
+          {/* Play guides at track scale (play-guides PRD): how far out is
+              the press moment. Shows only while this Deck is outgoing. */}
+          <PlayGuideMinimapMarks />
+        </div>
       </div>
       <div className="perf-deck-band">
         <TrackZone track={track} />

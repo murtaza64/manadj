@@ -25,7 +25,14 @@
   border-bottom: 2px solid var(--surface1);
 }
 
-.perf-waves { flex-shrink: 0; }
+/* Stacked flush rows; position anchors the play-guide overlay (whose
+ * chips straddle the row boundary). */
+.perf-waves {
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
 .perf-waves .waveform-container,
 .perf-waves .waveform-container canvas { height: 76px; }
 

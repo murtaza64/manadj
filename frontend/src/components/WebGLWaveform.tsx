@@ -4,7 +4,7 @@ import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useHotCues } from '../hooks/useHotCues';
 import type { PlaybackClock } from '../playback/clock';
-import { stepVisibleSeconds } from '../utils/waveformZoom';
+import { PLAY_MARKER_FRACTION, stepVisibleSeconds } from '../utils/waveformZoom';
 import './Waveform.css';
 
 /** The transport operations drag-to-scrub needs. */
@@ -53,7 +53,7 @@ export default function WebGLWaveform({
     waveformData,
     config: {
       isMinimapMode: false,
-      playMarkerPosition: 0.25,
+      playMarkerPosition: PLAY_MARKER_FRACTION,
       showTimeReadout: true,
     },
     cuePoint,
