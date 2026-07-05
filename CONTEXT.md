@@ -121,6 +121,10 @@ Placing a Track on a Deck for playback — an explicit act, as in DJ hardware. S
 **Nudge**:
 A momentary tempo bend on a Deck used to ride phase alignment against the other Deck — held (a key or button) or impulse-driven (jog wheel rotation); when the input stops, the Deck's pitch is restored exactly. Distinct from a *grid nudge*, which shifts a Track's Beatgrid and changes stored data — a Nudge changes only what is playing right now. Jog rotation on a paused Deck is a seek, not a Nudge. The Transition editor's counterpart of the same intent is the Alignment nudge.
 
+**Key Lock**:
+A sticky per-Deck setting (default on): playback-rate changes on that Deck (pitch fader, Nudge) do not shift the loaded Track's Key. Belongs to the Deck — not to the Track, not to the Mixer. Named tension: DJ-jargon *pitch* (the fader, the Deck's ±% rate) changes tempo; Key Lock keeps the *musical* pitch — the Key — constant while it does. Also known as master tempo (Pioneer).
+_Avoid_: "pitch-preserving", "pitch shift" — "pitch" already means the rate control.
+
 **Alignment nudge**:
 Realigning the Transition editor's pair by a fixed time step — the editor's counterpart of a performance Nudge: both ride the pair's relative alignment, but a Nudge does it live and leaves nothing behind, while an Alignment nudge edits the sketch (autosaved). A Slide variant. Distinct from a grid nudge, which edits the Track's stored Beatgrid.
 
