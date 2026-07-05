@@ -1,6 +1,6 @@
 # 01 — Saturated hotcue slot colors everywhere
 
-Status: ready-for-human
+Status: done (approved and landed, change puywxqvs)
 Type: task
 
 ## Problem
@@ -89,3 +89,9 @@ None - can start immediately.
 4. Full waveform: cue poles + number badges use the same colors as pads.
 5. Sets view → any set: OverviewLadder cue ticks unchanged for colored
    cues, saturated fallback for colorless ones.
+
+**2026-07-05 — approved and landed** (verbal approval in-session). Related
+bugfix landed alongside (change xqpwmtty): right-clicking a set pad to
+delete no longer starts hold-to-preview playback (`HotCue.tsx` now gates
+pointer down/up on the primary button; verified live headless — delete
+fires, no playback, left-hold preview unaffected).
