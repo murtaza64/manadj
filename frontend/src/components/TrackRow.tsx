@@ -171,6 +171,10 @@ const TrackRow = memo(function TrackRow({
           )}
         </td>
         <td className={getCellClasses('title')} style={getCellStyle('title')}>
+          {/* One flex line: marks + title, vertically centered — floats
+              left the glyphs at the line-box top, misaligned per glyph
+              (scaled ★, svg 🔗, ◆). */}
+          <div className="track-title-line">
           {/* Saved-Transition marks: one glyph per source deck, in the
               deck's accent color; ★ when the pair is Preferred. */}
           {(markA !== 'none' || markB !== 'none' || linkedA || linkedB) && (
@@ -205,6 +209,7 @@ const TrackRow = memo(function TrackRow({
           )}
           <div className="track-cell-text">
             {track.title || filename}
+          </div>
           </div>
           {onLoadToDeck && (
             <span className="track-load-buttons">

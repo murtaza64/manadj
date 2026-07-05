@@ -219,15 +219,29 @@ a.provenance-chip:hover {
   text-decoration: underline;
 }
 
+/* The title cell's single flex line: marks + title, vertically centered
+   (glyphs with different metrics — scaled ★, svg 🔗, ◆ — all align). */
+.track-title-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.track-title-line .track-cell-text {
+  flex: 1;
+  min-width: 0;
+}
+
 /* Saved-Transition marks (transition-library 02): per-source-deck glyphs
    in the deck accent colors; ★ = Preferred pair (has a favorite). */
 .track-transition-marks {
-  float: left;
   display: inline-flex;
+  align-items: center;
   gap: 3px;
   margin-right: 6px;
   font-size: 13px;
-  line-height: inherit;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .track-transition-mark.mark-a {
