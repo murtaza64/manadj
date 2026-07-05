@@ -65,6 +65,10 @@ Press PFL (hardware or screen) and hear that channel in the headphones:
 - No cue device yet (issue 04 builds the picker): use the dev tracer —
   `__routing.setCue('inpulse')` routes the real Cue bus; `setCue(null)`
   disables.
+- Smoke-test feedback (2026-07-05): cueing verified working (Mac
+  speakers/headphone-port split; Inpulse jack fixed separately — see issue
+  01's cue-to-3-4 comment). On-screen PFL now shows a headphone glyph
+  instead of the "PFL" text (polish change); "PFL" stays in tooltip/aria.
 - READY-FOR-HUMAN (change vlrunqwz): with master on Mac speakers and
   `__routing.setCue('inpulse')`: PFL A with fader down + crossfader hard-B →
   deck A alone in headphones, EQ/filter moves audible; PFL both → blend;

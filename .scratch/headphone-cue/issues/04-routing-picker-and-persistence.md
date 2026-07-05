@@ -59,6 +59,10 @@ Product UI over issue 01's plumbing:
     degraded. Desktop shell: popover explicitly opted out of the titlebar
     drag region (TopBar.css).
   - 432 vitest green; tsc, eslint, prod build clean.
+- Smoke-test feedback (2026-07-05): picker verified working; user asked for
+  the MASTER/CUE selects inline in the top bar instead of the OUT popover —
+  done in the polish change (`headphone-cue: polish`), popover removed,
+  missing device now paints the select red (title carries the detail).
 - READY-FOR-HUMAN (change ytqykolk): route MASTER→Mac speakers, CUE→
   Inpulse; both live without reload. Restart → routing restored. Restart
   with the Inpulse unplugged → master plays on default, OUT red, cue

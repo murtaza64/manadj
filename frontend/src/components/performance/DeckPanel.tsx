@@ -476,17 +476,29 @@ function MixZone({ track }: { track: Track | null }) {
         </span>
         <span className="perf-mix-spacer" />
         {/* PFL (headphone-cue 02): mixer state, so it works with no track
-            loaded and repaints from hardware toggles (note 0x0C). */}
+            loaded and repaints from hardware toggles (note 0x0C). Headphone
+            glyph like the hardware button; "PFL" stays in the tooltip. */}
         <button
           className={`player-button perf-mini perf-pfl${channel.pfl ? ' on' : ''}`}
           onClick={() => mixer.togglePfl(deck)}
+          aria-label="PFL"
           title={
             channel.pfl
-              ? 'Remove this channel from the headphones'
+              ? 'Remove this channel from the headphones (PFL)'
               : 'Pre-listen this channel in the headphones (PFL)'
           }
         >
-          PFL
+          <svg className="perf-pfl-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M2.5 12 V8 a5.5 5.5 0 0 1 11 0 V12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+            />
+            <rect x="1.2" y="9.4" width="3.1" height="4.8" rx="1" fill="currentColor" />
+            <rect x="11.7" y="9.4" width="3.1" height="4.8" rx="1" fill="currentColor" />
+          </svg>
         </button>
         <button
           className={`player-button perf-mini perf-match${hint ? ' perf-match-hint' : ''}`}

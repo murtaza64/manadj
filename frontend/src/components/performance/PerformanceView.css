@@ -582,8 +582,18 @@
 .perf-match { flex-shrink: 0; }
 .perf-match-hint { color: var(--red); border-color: var(--red); }
 
-/* PFL toggle — lit green while the channel feeds the Cue bus */
-.perf-pfl { flex-shrink: 0; }
+/* PFL toggle (headphone glyph) — lit green while the channel feeds the Cue bus */
+.perf-pfl {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.perf-pfl-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
 .perf-pfl.on {
   color: var(--green);
   border-color: var(--green);
