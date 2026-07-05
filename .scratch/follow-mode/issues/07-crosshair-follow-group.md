@@ -28,3 +28,4 @@ None.
 ## Comments
 
 - Done (mprnvzsp, lane followmode): CrosshairIcon added to icons.tsx; FilterBar group reworked; summary chips removed (`followSummary` now feeds tooltips + the modal's context rows). Gate: 531 pytest / 551 vitest / build / one head.
+- Follow-up (ptqrpwqw): the shared SettingsIcon gear reads as a sun/spark at 14px — params button now uses a new `SlidersIcon` (three mixer faders); gear untouched for its other user (TagEditor).

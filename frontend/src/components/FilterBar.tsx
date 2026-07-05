@@ -5,7 +5,7 @@ import type { Tag, Track } from '../types';
 import { getTagColor } from '../utils/colorUtils';
 import { getBpmColor, getAverageKeyColor } from '../utils/displayColors';
 import EnergySquare from './EnergySquare';
-import { CrosshairIcon, EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, SettingsIcon, TagIcon } from './icons';
+import { CrosshairIcon, EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, SlidersIcon, TagIcon } from './icons';
 import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
 import FollowParamsModal from './FollowParamsModal';
@@ -349,7 +349,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
               alignItems: 'center',
             }}
           >
-            <SettingsIcon width={14} height={14} />
+            <SlidersIcon width={14} height={14} />
           </button>
         </div>
 

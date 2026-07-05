@@ -101,6 +101,18 @@ export const CrosshairIcon = ({ width = 16, height = 16, opacity = 0.7, classNam
   </svg>
 );
 
+/** Parameters/settings as mixer faders — reads crisply at small sizes,
+ * unlike the gear's teeth (follow-mode 07 follow-up). */
+export const SlidersIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
+  <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
+    <path d="M2 4h12M2 8h12M2 12h12"
+          stroke="var(--text)" strokeWidth="1.3" strokeLinecap="round" opacity={opacity} />
+    <rect x="9.5" y="2.5" width="3" height="3" rx="0.5" fill="var(--text)" opacity={opacity} />
+    <rect x="3.5" y="6.5" width="3" height="3" rx="0.5" fill="var(--text)" opacity={opacity} />
+    <rect x="7" y="10.5" width="3" height="3" rx="0.5" fill="var(--text)" opacity={opacity} />
+  </svg>
+);
+
 export const ArrowDownIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
   <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
     <path d="M8 1v12M8 13l-4-4M8 13l4-4"
