@@ -181,17 +181,16 @@ export function PerformanceView() {
             />
           </DeckScope>
         </div>
-        <MixerStrip
-          hintsOn={hintsOn}
-          onToggleHints={toggleHints}
-          linkToggle={
+        <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
+        <div className="perf-decks">
+          {/* Linked toggle (linked-pairs 02): pair-central — on the deck
+              divider, between the two minimaps. */}
+          <div className="perf-decks-link">
             <LinkToggle
               aTrackId={A.loadedTrack?.id ?? null}
               bTrackId={B.loadedTrack?.id ?? null}
             />
-          }
-        />
-        <div className="perf-decks">
+          </div>
           <DeckScope deck="A">
             <DeckPanel lockHint={lockHint === 'A'} />
             <DeckKeys />

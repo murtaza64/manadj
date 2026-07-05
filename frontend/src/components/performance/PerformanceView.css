@@ -90,6 +90,24 @@
   grid-template-columns: 1fr 1fr;
   gap: 0;
   padding: 6px 0 8px;
+  position: relative;
+}
+
+/* Linked toggle (linked-pairs 02): pair-central, riding the deck divider
+   between the two minimaps. Solid backing so it reads as sitting ON the
+   rule, not over a waveform. */
+.perf-decks-link {
+  position: absolute;
+  left: 50%;
+  top: 11px; /* perf-decks + deckpanel padding: the minimap row */
+  transform: translateX(-50%);
+  height: 30px; /* minimap-container height */
+  display: flex;
+  align-items: center;
+  z-index: 2;
+  background: var(--mantle, #181825);
+  border: 1px solid var(--surface1);
+  border-radius: 4px;
 }
 
 .perf-deckpanel {

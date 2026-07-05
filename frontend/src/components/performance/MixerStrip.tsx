@@ -168,14 +168,10 @@ export function HFader({
 export function MixerStrip({
   hintsOn = true,
   onToggleHints,
-  linkToggle,
 }: {
   /** Keyboard-hint visibility (the KBD toggle in the strip's left cell). */
   hintsOn?: boolean;
   onToggleHints?: () => void;
-  /** The pair Link toggle (linked-pairs 02) — pair-central, so it lives on
-   * the strip between the decks rather than on either DeckPanel. */
-  linkToggle?: React.ReactNode;
 }) {
   const mixer = useMixer();
   const crossfader = useMixerValue((m) => m.getCrossfader());
@@ -200,7 +196,6 @@ export function MixerStrip({
             KBD
           </button>
         )}
-        {linkToggle}
         <HFader
           label="CUE MIX"
           min={0}
