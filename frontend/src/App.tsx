@@ -24,14 +24,29 @@ const queryClient = new QueryClient();
 
 const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles'];
 
-// Deep link: ?view=<mode> opens straight into that mode.
+/** Session-state persistence of the top-panel mode: reopen where you were. */
+const MODE_KEY = 'manadj-app-mode';
+
+// Deep link: ?view=<mode> opens straight into that mode (beats the
+// remembered one); otherwise restore the last mode, defaulting to library.
 const requestedView = new URLSearchParams(window.location.search).get('view');
+const storedView = localStorage.getItem(MODE_KEY);
 const initialView: AppMode = MODE_IDS.includes(requestedView as AppMode)
   ? (requestedView as AppMode)
-  : 'library';
+  : MODE_IDS.includes(storedView as AppMode)
+    ? (storedView as AppMode)
+    : 'library';
 
 function App() {
-  const [view, setView] = useState<AppMode>(initialView);
+  const [view, setViewState] = useState<AppMode>(initialView);
+  const setView = (mode: AppMode) => {
+    setViewState(mode);
+    try {
+      localStorage.setItem(MODE_KEY, mode);
+    } catch {
+      // persistence is best-effort
+    }
+  };
 
   // A Take review request (Transition history row) opens the editor; the
   // mounted editor consumes the pending uuid itself (takeReview.ts).
