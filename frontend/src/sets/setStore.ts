@@ -212,6 +212,20 @@ export function reorderSetEntries(setId: number, orderedTrackIds: number[]): voi
   replaceSetEntries(setId, next);
 }
 
+/** Insert a Track at the given entry index (sets 10: accepted insert
+ * suggestion). No-op when the Track is already in the Set (a Track
+ * appears at most once) or the Set is unloaded. The predecessor entry's
+ * pin rides along untouched (the reorder policy): it degrades to an
+ * unresolved display for the new pair, never gets destroyed. */
+export function insertTrackIntoSet(setId: number, trackId: number, index: number): void {
+  const entries = snapshot.entriesBySet[setId];
+  if (!entries) return;
+  if (entries.some((e) => e.trackId === trackId)) return;
+  const next = [...entries];
+  next.splice(Math.max(0, Math.min(index, next.length)), 0, { trackId, pin: null });
+  replaceSetEntries(setId, next);
+}
+
 /** Forget a deleted Set's local state (selection cleared by the caller). */
 export function dropSetLocalState(setId: number): void {
   loadPromises.delete(setId);

@@ -47,6 +47,7 @@ import {
   addTracksToSet,
   ensureSetEntriesLoaded,
   getSetScroll,
+  insertTrackIntoSet,
   removeTrackFromSet,
   reorderSetEntries,
   setAdjacencyPin,
@@ -54,6 +55,7 @@ import {
   setSetScroll,
   useSetEntries,
 } from './setStore';
+import SetSuggestions, { type SuggestTarget } from './SetSuggestions';
 
 interface SetDetailPaneProps {
   setId: number;
@@ -121,6 +123,14 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
     if (pane) pane.scrollTop = getSetScroll(setId);
     // Restore once the rows exist (first data arrival changes scrollHeight).
   }, [setId, entries !== undefined && trackMap !== undefined]);
+
+  // ── Suggestions (sets 10): toolbar append + per-adjacency insert ─────
+  const [suggest, setSuggest] = useState<{ x: number; y: number; target: SuggestTarget } | null>(
+    null
+  );
+  const inSetIds = new Set(trackIds);
+  const lastTrack =
+    entries && entries.length > 0 ? trackMap?.get(entries[entries.length - 1].trackId) : undefined;
 
   // ── Drag-reorder (dropIndex helpers, playlist-pane mechanics) ────────
   const [dropIndicator, setDropIndicator] = useState<{ index: number; y: number } | null>(null);
@@ -207,6 +217,7 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
             {entries?.length ?? 0} tracks
           </span>
         </span>
+        <span style={{ display: 'flex', alignItems: 'center' }}>
         <button
           onClick={() => setAdjacencyPins(setId, autoFillable)}
           disabled={autoFillable.size === 0}
@@ -226,6 +237,31 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
         >
           Auto-fill {autoFillable.size > 0 ? `(${autoFillable.size})` : ''}
         </button>
+        {/* Suggest (sets 10): ranked candidates to append after the last track */}
+        <button
+          onClick={(e) =>
+            lastTrack &&
+            setSuggest({ x: e.clientX, y: e.clientY, target: { kind: 'append', last: lastTrack } })
+          }
+          disabled={!lastTrack}
+          title={
+            lastTrack
+              ? 'Suggest tracks to append, ranked by follow tiering out of the last track'
+              : 'Add a track first — suggestions rank out of the last track'
+          }
+          style={{
+            marginLeft: '8px',
+            padding: '2px 10px',
+            background: lastTrack ? 'var(--blue)' : 'var(--surface0)',
+            color: lastTrack ? 'var(--base)' : 'var(--subtext0)',
+            border: '1px solid var(--surface1)',
+            cursor: lastTrack ? 'pointer' : 'default',
+            fontSize: '12px',
+          }}
+        >
+          Suggest
+        </button>
+        </span>
       </div>
 
       <div
@@ -274,6 +310,17 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
                     pin={entry.pin}
                     evidence={pairEvidence(entry.trackId, next.trackId)}
                     onPin={(pin) => setAdjacencyPin(setId, entry.trackId, pin)}
+                    onSuggestInsert={(() => {
+                      const predecessor = trackMap?.get(entry.trackId);
+                      const successor = trackMap?.get(next.trackId);
+                      if (!predecessor || !successor) return undefined;
+                      return (x: number, y: number) =>
+                        setSuggest({
+                          x,
+                          y,
+                          target: { kind: 'insert', predecessor, successor, insertIndex: i + 1 },
+                        });
+                    })()}
                   />
                 )}
               </div>
@@ -281,6 +328,25 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
           })
         )}
       </div>
+
+      {/* Suggestion popover (sets 10) — accepting adds the Track; pins
+          arrive via the usual auto-fill offer on the new adjacencies. */}
+      {suggest && (
+        <SetSuggestions
+          x={suggest.x}
+          y={suggest.y}
+          target={suggest.target}
+          inSetIds={inSetIds}
+          onAccept={(trackId) => {
+            if (suggest.target.kind === 'append') {
+              void addTracksToSet(setId, [trackId]);
+            } else {
+              insertTrackIntoSet(setId, trackId, suggest.target.insertIndex);
+            }
+          }}
+          onClose={() => setSuggest(null)}
+        />
+      )}
     </div>
   );
 }
@@ -302,10 +368,14 @@ function AdjacencyRow({
   pin,
   evidence,
   onPin,
+  onSuggestInsert,
 }: {
   pin: AdjacencyPin | null;
   evidence: { transitions: TransitionEvidence[]; takes: TakeEvidence[] };
   onPin: (pin: AdjacencyPin | null) => void;
+  /** Open insert suggestions for this adjacency (sets 10); absent while
+   * the pair's track metadata is still loading. */
+  onSuggestInsert?: (x: number, y: number) => void;
 }) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const view = adjacencyView(pin, evidence.transitions, evidence.takes);
@@ -418,6 +488,24 @@ function AdjacencyRow({
         <span style={{ marginLeft: 'auto', color: 'var(--subtext0)' }}>
           {view.counts.transitions} tr · {view.counts.takes} tk
         </span>
+
+        {/* Insert suggestions (sets 10): ranked by the weaker edge */}
+        {onSuggestInsert && (
+          <button
+            onClick={(e) => onSuggestInsert(e.clientX, e.clientY)}
+            title="Suggest a track to insert here, ranked by the weaker of the two edges"
+            style={{
+              padding: '1px 8px',
+              background: 'transparent',
+              border: '1px dashed var(--blue)',
+              color: 'var(--blue)',
+              cursor: 'pointer',
+              fontSize: '12px',
+            }}
+          >
+            + insert
+          </button>
+        )}
       </div>
       {menuPos && (
         <ContextMenu
