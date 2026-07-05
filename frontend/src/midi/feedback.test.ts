@@ -9,6 +9,7 @@ import {
   BLINK_INTERVAL_MS,
   CUE_FLASH_INTERVAL_MS,
   allOffMessages,
+  audibleTransportOverride,
   blinkPhase,
   encodeDeckLeds,
   ledStates,
@@ -98,6 +99,41 @@ describe('ledStates', () => {
   it('PFL is independent of transport state', () => {
     expect(ledStates({ ...idle, playing: true, pfl: true }).pfl).toBe(true);
     expect(ledStates({ ...idle, playing: true, pfl: false }).pfl).toBe(false);
+  });
+});
+
+describe('audibleTransportOverride (editor-midi 05)', () => {
+  const busy = {
+    playing: false,
+    pendingPlay: true,
+    previewing: true,
+    hasCuePoint: true,
+    atCuePoint: true,
+    assignedPads: new Set([1, 4]),
+    pfl: true,
+  };
+
+  it('PLAY follows the audible holder (both decks report the one mix transport)', () => {
+    expect(ledStates(audibleTransportOverride(idle, true)).play).toBe(true);
+    expect(ledStates(audibleTransportOverride({ ...idle, playing: true }, false)).play).toBe(false);
+  });
+
+  it('CUE goes dark regardless of the shared deck cue state — no editor meaning', () => {
+    expect(ledStates(audibleTransportOverride(busy, true), lit).cue).toBe(false);
+    expect(ledStates(audibleTransportOverride(busy, false), dim).cue).toBe(false);
+  });
+
+  it('shared-surface blinks are suppressed (pending-play PLAY never blinks)', () => {
+    expect(ledStates(audibleTransportOverride(busy, false), lit).play).toBe(false);
+    expect(ledStates(audibleTransportOverride(busy, false), dim).play).toBe(false);
+  });
+
+  it('pads and PFL pass through untouched (pair mirroring keeps them true)', () => {
+    const states = ledStates(audibleTransportOverride(busy, true));
+    expect(states.pads[0]).toBe(true);
+    expect(states.pads[3]).toBe(true);
+    expect(states.pads[1]).toBe(false);
+    expect(states.pfl).toBe(true);
   });
 });
 

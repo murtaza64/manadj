@@ -336,6 +336,12 @@ function TransitionEditorInner() {
         touchTicks: (deck, ticks) => (deck === 'A' ? midiJogA : midiJogB).onTouchTicks(ticks),
         shiftRimTicks: (deck, ticks) => (deck === 'A' ? midiJogA : midiJogB).onSeekTicks(ticks),
       },
+      // LED Feedback mirrors the audible surface (editor-midi 05): one mix
+      // transport, reported for both decks — both PLAY LEDs follow it.
+      transportState: {
+        playing: () => player.isPlaying(),
+        subscribe: (fn) => player.subscribe(fn),
+      },
       silence: () => {
         player.pause();
         player.mixer.suspend();

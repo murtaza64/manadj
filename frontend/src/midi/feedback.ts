@@ -103,6 +103,29 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
   };
 }
 
+/**
+ * Audibility-aware transport lights (editor-midi 05, ADR 0019): while a
+ * non-shared surface holds audibility, PLAY mirrors the HOLDER's transport
+ * (the editor reports its one mix transport for both decks) and every
+ * shared-deck transport state is suppressed — CUE dark (no editor
+ * meaning), no pending-blink, no away-from-cue flash. Pads and PFL pass
+ * through: the editor mirrors its pair onto the shared decks, and the Cue
+ * bus belongs to the shared Mixer regardless of audibility.
+ */
+export function audibleTransportOverride(
+  input: DeckLedInput,
+  holderPlaying: boolean
+): DeckLedInput {
+  return {
+    ...input,
+    playing: holderPlaying,
+    pendingPlay: false,
+    previewing: false,
+    hasCuePoint: false,
+    atCuePoint: false,
+  };
+}
+
 const NOTE_ON = 0x9;
 
 function encodeLed(address: LedAddress, lit: boolean): MidiMessage {

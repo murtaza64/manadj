@@ -57,6 +57,16 @@ export interface SurfaceJog {
   shiftRimTicks(deck: ChannelId, ticks: number): void;
 }
 
+/** Minimal observable transport state (ADR 0019): lets LED Feedback
+ * mirror whichever surface is audible instead of lying while the shared
+ * decks are silenced. The editor reports its one mix transport for both
+ * decks. The shared surface deliberately registers none — its truth
+ * already flows to the bridge through the richer deck snapshots. */
+export interface SurfaceTransportState {
+  playing(deck: ChannelId): boolean;
+  subscribe(fn: () => void): () => void;
+}
+
 export interface AudibleSurface {
   transport: SurfaceTransport;
   /** Optional gesture-class sections (ADR 0019): a class the surface
@@ -65,6 +75,7 @@ export interface AudibleSurface {
   pads?: SurfacePads;
   jumps?: SurfaceJumps;
   jog?: SurfaceJog;
+  transportState?: SurfaceTransportState;
   /** Go quiet: pause playback AND suspend the surface's audio clock. */
   silence(): void;
   /** Resume the surface's audio clock only — never starts playback. */
@@ -131,6 +142,11 @@ export function isAudible(id: AudibleSurfaceId): boolean {
   return holder === id;
 }
 
+/** The current holder's id (for subscribers that key behavior on it). */
+export function audibleHolder(): AudibleSurfaceId {
+  return holder;
+}
+
 /** The audible surface's transport — what app-wide inputs route through.
  * Null when the holder never registered (boot order edge). */
 export function audibleTransport(): SurfaceTransport | null {
@@ -151,6 +167,12 @@ export function audibleJumps(): SurfaceJumps | null {
 /** The audible surface's jog section — null when unregistered. */
 export function audibleJog(): SurfaceJog | null {
   return surfaces.get(holder)?.jog ?? null;
+}
+
+/** The audible surface's observable transport state — null when the
+ * holder registered none (LED Feedback then reads the deck snapshots). */
+export function audibleTransportState(): SurfaceTransportState | null {
+  return surfaces.get(holder)?.transportState ?? null;
 }
 
 export function subscribeAudible(fn: Listener): () => void {

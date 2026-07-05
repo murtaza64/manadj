@@ -7,12 +7,18 @@ import { useMixerValue } from '../hooks/useMixer';
 import {
   BLINK_INTERVAL_MS,
   CUE_FLASH_INTERVAL_MS,
+  audibleTransportOverride,
   blinkPhase,
   encodeDeckLeds,
   ledStates,
 } from '../midi/feedback';
 import type { BlinkPhases } from '../midi/feedback';
 import { connectedOutputs, subscribeOutputs } from '../midi/outputStore';
+import {
+  audibleHolder,
+  audibleTransportState,
+  subscribeAudible,
+} from '../playback/audibleSurface';
 
 /**
  * Headless Feedback glue (midi-pad-leds 01/02/03): per deck, subscribes to
@@ -64,12 +70,31 @@ function DeckFeedbackPublisher({
     [loadedTrack, hotCues]
   );
 
+  // Audibility-aware transport lights (editor-midi 05, ADR 0019): while a
+  // non-shared holder exposes a transport state, PLAY mirrors it (the
+  // editor reports its one mix transport for both decks) and the shared
+  // deck's transport inputs are suppressed through the pure override
+  // below. `null` = no override (shared audible, or a holder without the
+  // section). Resubscribes when the holder flips — subscribeAudible fires
+  // on claim/release, which re-renders and rebuilds the subscription.
+  const holder = useSyncExternalStore(subscribeAudible, audibleHolder);
+  const subscribeHolderPlaying = useCallback(
+    (cb: () => void) => audibleTransportState()?.subscribe(cb) ?? (() => undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [holder]
+  );
+  const holderPlaying = useSyncExternalStore(subscribeHolderPlaying, () =>
+    holder === 'shared' ? null : (audibleTransportState()?.playing(deck) ?? null)
+  );
+  const overridden = holderPlaying !== null;
+
   // Which lights of THIS deck are blinking right now. Drives the shared
   // clock, and gates the phase values entering the effect below — a deck
   // with nothing blinking sees constant `true` phases, so the other deck's
-  // blinking never causes resends here.
-  const cueFlashing = !playing && !previewing && hasCuePoint && !atCuePoint;
-  const needsClock = pendingPlay || cueFlashing;
+  // blinking never causes resends here. Overridden transport never blinks
+  // (pending-blink and cue-flash are shared-surface behaviors).
+  const cueFlashing = !overridden && !playing && !previewing && hasCuePoint && !atCuePoint;
+  const needsClock = (!overridden && pendingPlay) || cueFlashing;
   useEffect(() => {
     onNeedsClock(needsClock);
     return () => onNeedsClock(false);
@@ -80,8 +105,9 @@ function DeckFeedbackPublisher({
 
   useEffect(() => {
     if (outputs.length === 0) return;
+    const input = { playing, pendingPlay, previewing, hasCuePoint, atCuePoint, assignedPads, pfl };
     const states = ledStates(
-      { playing, pendingPlay, previewing, hasCuePoint, atCuePoint, assignedPads, pfl },
+      holderPlaying === null ? input : audibleTransportOverride(input, holderPlaying),
       { pending: pendingPhase, cueFlash: cueFlashPhase }
     );
     for (const output of outputs) {
@@ -99,6 +125,7 @@ function DeckFeedbackPublisher({
     atCuePoint,
     assignedPads,
     pfl,
+    holderPlaying,
     pendingPhase,
     cueFlashPhase,
     outputs,
