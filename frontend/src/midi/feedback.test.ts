@@ -121,11 +121,21 @@ describe('encodeDeckLeds', () => {
     expect(messagesB).toContainEqual([0x97, 0x00, 0x7e]); // deck B channel
   });
 
+  it('mirrors pad states onto the SHIFT-layer addresses (notes +8)', () => {
+    const states = ledStates({ ...idle, assignedPads: new Set([1, 8]) });
+    const messagesA = encodeDeckLeds(feedback, 'A', states);
+    expect(messagesA).toContainEqual([0x96, 0x08, 0x7e]); // shifted pad 1 lit
+    expect(messagesA).toContainEqual([0x96, 0x0f, 0x7e]); // shifted pad 8 lit
+    expect(messagesA).toContainEqual([0x96, 0x0b, 0x00]); // shifted pad 4 dark
+    const messagesB = encodeDeckLeds(feedback, 'B', states);
+    expect(messagesB).toContainEqual([0x97, 0x08, 0x7e]); // deck B shifted layer
+  });
+
   it('covers every light of the deck exactly once', () => {
     const messages = encodeDeckLeds(feedback, 'A', dark);
     const addresses = messages.map(([status, number]) => `${status}:${number}`);
     expect(new Set(addresses).size).toBe(addresses.length);
-    expect(addresses.length).toBeGreaterThanOrEqual(10); // PLAY + CUE + 8 pads
+    expect(addresses.length).toBeGreaterThanOrEqual(18); // PLAY + CUE + 2×8 pads
   });
 });
 
@@ -161,12 +171,14 @@ describe('allOffMessages', () => {
       expect(status >> 4).toBe(0x9);
       expect(velocity).toBe(0x00);
     }
-    // Both decks' PLAY + CUE LEDs and pad grids are covered.
+    // Both decks' PLAY + CUE LEDs and pad grids (both layers) are covered.
     expect(messages).toContainEqual([0x91, 0x07, 0x00]);
     expect(messages).toContainEqual([0x92, 0x07, 0x00]);
     expect(messages).toContainEqual([0x91, 0x06, 0x00]);
     expect(messages).toContainEqual([0x92, 0x06, 0x00]);
     expect(messages).toContainEqual([0x96, 0x05, 0x00]);
     expect(messages).toContainEqual([0x97, 0x02, 0x00]);
+    expect(messages).toContainEqual([0x96, 0x0d, 0x00]);
+    expect(messages).toContainEqual([0x97, 0x0a, 0x00]);
   });
 });

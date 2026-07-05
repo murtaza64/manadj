@@ -47,3 +47,11 @@ note-isolated on this device; never write other modes' addresses).
   hardware pad (pad lights), delete on screen (pad darkens), unload/empty
   deck (all eight dark), switch pad mode (other modes' lights untouched),
   replug (pads correct immediately).
+- 2026-07-04 (padleds lane, follow-up in jj change `qlqvtyqp`): pad states
+  are now mirrored onto the HOTCUE SHIFT-layer addresses (same channels,
+  notes 0x08-0x0F — Mixxx maps both layers to the same hotcue_N_status),
+  so pads stay lit while SHIFT is held (pairs with midi-controller 13,
+  SHIFT+pad clears). Stateless: both layers are written on every resend;
+  no shift tracking. Smoke test addition: hold SHIFT in HOTCUE mode —
+  assigned pads stay lit; clear one via SHIFT+pad — it darkens on both
+  layers.

@@ -101,7 +101,7 @@ function encodeLed(address: LedAddress, lit: boolean): MidiMessage {
 }
 
 function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
-  return [deck.play, deck.cue, ...deck.hotCuePads];
+  return [deck.play, deck.cue, ...deck.hotCuePads, ...deck.hotCuePadsShifted];
 }
 
 /** Desired light states for one deck → the full message set to send. */
@@ -115,6 +115,11 @@ export function encodeDeckLeds(
     encodeLed(addresses.play, states.play),
     encodeLed(addresses.cue, states.cue),
     ...addresses.hotCuePads.map((address, i) => encodeLed(address, states.pads[i] ?? false)),
+    // The SHIFT layer mirrors the base layer (same hotcue_N_status source
+    // in Mixxx), so pads stay lit while SHIFT is held — no shift tracking.
+    ...addresses.hotCuePadsShifted.map((address, i) =>
+      encodeLed(address, states.pads[i] ?? false)
+    ),
   ];
 }
 

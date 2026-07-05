@@ -62,6 +62,13 @@ export interface DeckFeedback {
    * written.
    */
   hotCuePads: readonly LedAddress[];
+  /**
+   * Pads 1..8 by index, HOTCUE SHIFT-layer addresses (SHIFT is
+   * hardware-layered: the shifted pads are separate lights). Feedback
+   * mirrors the same assigned/empty state onto them, so pads stay lit
+   * while SHIFT is held (e.g. showing which slots SHIFT+pad can clear).
+   */
+  hotCuePadsShifted: readonly LedAddress[];
 }
 
 /** Device knowledge for Feedback: every light the app writes, per deck. */

@@ -369,8 +369,10 @@ export const INPULSE_300_MK2: Mapping = {
   // "LED Outputs" section) — PLAY LED is note 0x07 / CUE 0x06 on the deck's
   // transport channel (status 0x91/0x92), velocity 0x7f lit / 0x00 dark;
   // hot cue pads are notes 0x00-0x07 on the pads' HOTCUE base-layer channel
-  // (status 0x96/0x97), velocity 0x7e lit. Other pad modes are
-  // note-isolated and never written.
+  // (status 0x96/0x97), velocity 0x7e lit; the SHIFT-layer pads are the
+  // same channels at notes 0x08-0x0F (Mixxx maps both layers to the same
+  // hotcue_N_status, so shifted lights mirror the base layer). Other pad
+  // modes are note-isolated and never written.
   // The device does not dump LED state on connect (tested); full sync on
   // connect is the app's job. TODO(hardware-verify): smoke-test on the MK2.
   feedback: {
@@ -383,6 +385,11 @@ export const INPULSE_300_MK2: Mapping = {
           number: i,
           onVelocity: 0x7e,
         })),
+        hotCuePadsShifted: Array.from({ length: 8 }, (_, i) => ({
+          channel: 6,
+          number: 0x08 + i,
+          onVelocity: 0x7e,
+        })),
       },
       B: {
         play: { channel: 2, number: 0x07, onVelocity: 0x7f },
@@ -390,6 +397,11 @@ export const INPULSE_300_MK2: Mapping = {
         hotCuePads: Array.from({ length: 8 }, (_, i) => ({
           channel: 7,
           number: i,
+          onVelocity: 0x7e,
+        })),
+        hotCuePadsShifted: Array.from({ length: 8 }, (_, i) => ({
+          channel: 7,
+          number: 0x08 + i,
           onVelocity: 0x7e,
         })),
       },
