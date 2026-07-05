@@ -1,6 +1,6 @@
 # 16 — Pickup: Conductor resumes from manual deck state
 
-Status: ready-for-human
+Status: done (approved + landed 2026-07-05, change `mylmsyuu`)
 
 ## Parent
 
