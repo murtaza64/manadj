@@ -12,6 +12,7 @@
  */
 import { useRef } from 'react';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
+import { CUE_LEVEL_DEFAULT, CUE_MIX_DEFAULT } from '../../playback/mixer';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
 const KNOB_DRAG_RANGE_PX = 150;
@@ -178,6 +179,10 @@ export function MixerStrip({
   // Crossfader bypass — audio truth lives in the Mixer; UI repaints
   // through the same subscription as every other mixer control.
   const xfOn = useMixerValue((m) => m.getCrossfaderEnabled());
+  // Cue bus (headphone-cue 03): blend + headphone level. Same subscription,
+  // so the hardware level knob repaints PHONES live.
+  const cueMix = useMixerValue((m) => m.getCueMix());
+  const cueLevel = useMixerValue((m) => m.getCueLevel());
 
   return (
     <div className="perf-strip">
@@ -191,6 +196,25 @@ export function MixerStrip({
             KBD
           </button>
         )}
+        <HFader
+          label="CUE MIX"
+          min={0}
+          max={1}
+          value={cueMix}
+          defaultValue={CUE_MIX_DEFAULT}
+          onChange={(v) => mixer.setCueMix(v)}
+          title="Headphone blend: cue only ← → master only (double-click = cue-heavy default)"
+        />
+        <HFader
+          label="PHONES"
+          min={0}
+          max={1}
+          value={cueLevel}
+          defaultValue={CUE_LEVEL_DEFAULT}
+          fill
+          onChange={(v) => mixer.setCueLevel(v)}
+          title="Headphone (cue) level"
+        />
       </div>
       <div className="perf-strip-slot wide">
         <button

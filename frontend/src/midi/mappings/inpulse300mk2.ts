@@ -231,6 +231,15 @@ export const INPULSE_300_MK2: Mapping = {
       bits: 14,
       lsbNumber: 0x23,
     },
+    // Headphone-level knob → cue level (headphone-cue 03). Hardware-learned.
+    // The device has no cue/mix control — that target stays screen-only.
+    {
+      match: { message: 'cc', channel: 0, number: 0x04 },
+      controlType: 'absolute',
+      target: { control: 'cue-level' },
+      bits: 14,
+      lsbNumber: 0x24,
+    },
 
     // PFL buttons (headphone-cue 02): the headphone icon under each VU
     // strip puts that channel in the Cue bus. Hardware-learned.

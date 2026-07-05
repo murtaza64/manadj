@@ -53,7 +53,15 @@
 
 .perf-strip-slot.wide .perf-fader { flex: 1; min-width: 0; }
 
-.perf-strip-left { justify-self: start; }
+.perf-strip-left {
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Cue controls ride the strip's left cell (headphone-cue 03) */
+.perf-strip-left .perf-fader { width: 110px; flex-shrink: 0; }
 
 .perf-strip-toggle {
   padding: 1px 6px;

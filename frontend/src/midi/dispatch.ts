@@ -156,5 +156,11 @@ function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void
     case 'master':
       midiMixerControls()?.setMaster(value);
       return;
+    case 'cue-level':
+      midiMixerControls()?.setCueLevel(value);
+      return;
+    case 'cue-mix':
+      midiMixerControls()?.setCueMix(value);
+      return;
   }
 }

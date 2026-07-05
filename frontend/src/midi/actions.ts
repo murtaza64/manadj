@@ -38,7 +38,11 @@ export type AbsoluteTarget =
   | { control: 'filter'; channel: ChannelId }
   | { control: 'channel-fader'; channel: ChannelId }
   | { control: 'crossfader' }
-  | { control: 'master' };
+  | { control: 'master' }
+  /** Cue bus volume — the hardware headphone-level knob (headphone-cue 03). */
+  | { control: 'cue-level' }
+  /** Cue/mix blend. No control on this device; bindable for others. */
+  | { control: 'cue-mix' };
 
 export type RelativeTarget =
   | { control: 'jog'; deck: ChannelId }

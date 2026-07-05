@@ -1,6 +1,6 @@
 # 03 — Cue/mix blend + cue level
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -32,3 +32,33 @@ The beatmatching half of the headphone mix:
 ## Blocked by
 
 - 02-cue-bus-pfl-end-to-end
+
+## Comments
+
+- (hpcue lane, change rwtxtkux) Implemented:
+  - Blend in the MAIN graph, before the bridge (ADR 0017): new `program`
+    sum node (post-crossfader, PRE master volume — the master fader never
+    changes headphone loudness); `cueSum → cueMixCueGain` +
+    `program → cueMixMasterGain` → `cueGain` (level) → cue limiter →
+    bridge. `mixerMath.cueMixGains` is equal-power (cos/sin: constant
+    energy across the sweep, both signals present at center) — tested for
+    endpoints/equal-power/monotonicity/clamping.
+  - `Mixer.getCueMix/setCueMix` (0 = cue only, 1 = master only), session
+    default `CUE_MIX_DEFAULT = 0.25` (cue-heavy, PRD); cue level default
+    `CUE_LEVEL_DEFAULT = 0.7` (from issue 02); both exported for UI resets,
+    both reset per session like all mixer state.
+  - Actions: `AbsoluteTarget` += `cue-level`, `cue-mix`; dispatch passes the
+    normalized 0..1 through to `setCueLevel`/`setCueMix` (jump semantics);
+    `MidiMixerControls` grew both.
+  - Inpulse mapping: headphone-level knob = 14-bit CC 0x04/0x24 on the mixer
+    channel (ch 0) → cue-level (hardware-learned). No cue/mix control on
+    this device — screen-only, target bindable for other devices.
+  - Screen: CUE MIX + PHONES HFaders in the mixer strip's left cell,
+    subscribed via useMixerValue (hardware knob repaints PHONES live);
+    double-click resets to the session defaults.
+  - 428 vitest green; tsc + eslint clean.
+- READY-FOR-HUMAN (change rwtxtkux): with a matched pair cued/playing,
+  sweep CUE MIX end to end — headphones go cue-only → master-only with
+  beats staying locked across the sweep; sweep the hardware headphone knob
+  — smooth (14-bit) volume, PHONES fader tracks it; reload the app — PFL
+  off, CUE MIX back to cue-heavy.

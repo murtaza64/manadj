@@ -54,6 +54,8 @@ function registerFakeMixerControls(): void {
     setCrossfader: (position) => calls.push(`mixer:crossfader:${position}`),
     setMaster: (value) => calls.push(`mixer:master:${value}`),
     togglePfl: (channel) => calls.push(`mixer:pfl:${channel}`),
+    setCueLevel: (value) => calls.push(`mixer:cueLevel:${value}`),
+    setCueMix: (value) => calls.push(`mixer:cueMix:${value}`),
   });
 }
 
@@ -301,6 +303,13 @@ describe('cue bus (headphone-cue 02)', () => {
   it('no registered mixer: PFL drops silently', () => {
     dispatchMidiAction(pfl('A', 'down'));
     expect(calls).toEqual([]);
+  });
+
+  it('cue-level and cue-mix pass the normalized value through (headphone-cue 03)', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-level' }, value: 0.5 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-mix' }, value: 0.25 });
+    expect(calls).toEqual(['mixer:cueLevel:0.5', 'mixer:cueMix:0.25']);
   });
 });
 

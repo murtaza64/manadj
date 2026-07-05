@@ -7,9 +7,17 @@
  *   safety limiter (always on) -> destination
  *
  * Cue bus (headphone-cue, ADR 0017), all in the same graph/clock:
- *   per-channel PFL tap (post-EQ/filter, pre-fader) -> cue sum ->
- *   cue gain (cue level) -> cue limiter -> MediaStream bridge ->
- *   second context sunk to the cue device (cueBridge.ts)
+ *   per-channel PFL tap (post-EQ/filter, pre-fader) -> cue sum ->\
+ *     cue-side blend gain  \
+ *                           +-> cue gain (cue level) -> cue limiter ->
+ *   program -> master-side /    MediaStream bridge -> second context
+ *     blend gain (cue/mix)      sunk to the cue device (cueBridge.ts)
+ *
+ * "Program" is the summed post-crossfader signal BEFORE the master volume:
+ * the cue/mix blend brings the room mix into the headphones without the
+ * master fader changing headphone loudness. Blending in-graph (not across
+ * the bridge) keeps cue and master sample-aligned where beatmatching
+ * happens — inside the headphones.
  *
  * The context is created lazily and revived if closed (StrictMode dev
  * double-mount disposes once before the real mount) — this responsibility
@@ -28,7 +36,13 @@ import {
 } from './graph';
 import type { EqBand } from './graph';
 import { CueBridge } from './cueBridge';
-import { channelFaderToGain, crossfaderGains, cueLevelToGain, trimToGain } from './mixerMath';
+import {
+  channelFaderToGain,
+  crossfaderGains,
+  cueLevelToGain,
+  cueMixGains,
+  trimToGain,
+} from './mixerMath';
 
 export type ChannelId = 'A' | 'B';
 
@@ -71,7 +85,11 @@ const GAIN_RAMP_S = 0.05;
 
 /** Session-default cue level: moderate, not unity — it feeds headphones
  * directly and the hardware knob jumps on first touch anyway. */
-const CUE_LEVEL_DEFAULT = 0.7;
+export const CUE_LEVEL_DEFAULT = 0.7;
+
+/** Session-default cue/mix: cue-heavy (PRD) — mostly the cued channel with
+ * a taste of master, the position you audition the next track from. */
+export const CUE_MIX_DEFAULT = 0.25;
 
 function makeFilter(
   ctx: AudioContext,
@@ -87,6 +105,18 @@ function makeFilter(
 
 function chain(nodes: AudioNode[]): void {
   for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
+}
+
+/** Safety limiter — two summed full-scale tracks clip otherwise. Used on
+ * both bus outputs (master and cue). */
+function makeLimiter(ctx: AudioContext): DynamicsCompressorNode {
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -3;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.25;
+  return limiter;
 }
 
 /**
@@ -191,6 +221,8 @@ export class Mixer {
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
   private cueGain: GainNode | null = null;
+  private blendCueGain: GainNode | null = null;
+  private blendMasterGain: GainNode | null = null;
   private cueBridge: CueBridge | null = null;
   private listeners = new Set<() => void>();
 
@@ -210,6 +242,7 @@ export class Mixer {
    * PFL state still toggles, it just reaches no ears (PRD). */
   private cueSinkId: string | null = null;
   private cueLevel = CUE_LEVEL_DEFAULT; // 0..1, session-scoped like the rest
+  private cueMix = CUE_MIX_DEFAULT; // 0 (cue only) .. 1 (master only)
 
   /** Get (lazily creating / reviving) the live context and graph. */
   private ensure(): { ctx: AudioContext; strips: Record<ChannelId, ChannelStrip> } {
@@ -224,35 +257,39 @@ export class Mixer {
       const masterGain = ctx.createGain();
       masterGain.gain.value = this.master;
 
-      // Always-on safety limiter: two summed full-scale tracks clip otherwise.
-      const limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.value = -3;
-      limiter.knee.value = 0;
-      limiter.ratio.value = 20;
-      limiter.attack.value = 0.003;
-      limiter.release.value = 0.25;
+      // Always-on master safety limiter.
+      const limiter = makeLimiter(ctx);
 
-      strips.A.crossfadeGain.connect(masterGain);
-      strips.B.crossfadeGain.connect(masterGain);
+      // "Program" = the summed post-crossfader signal, pre master volume —
+      // what the room hears, before how loud the room hears it. The cue/mix
+      // blend taps it here so the master fader never changes the headphones.
+      const program = ctx.createGain();
+      strips.A.crossfadeGain.connect(program);
+      strips.B.crossfadeGain.connect(program);
+      program.connect(masterGain);
       masterGain.connect(limiter);
       limiter.connect(ctx.destination);
 
-      // Cue bus (headphone-cue 02, ADR 0017): PFL taps sum in the MAIN
-      // graph and leave over the MediaStream bridge. Its own safety limiter
-      // — two full-scale cued tracks clip like the master case above.
+      // Cue bus (headphone-cue 02/03, ADR 0017): PFL taps and the master
+      // blend are mixed IN THE MAIN GRAPH and leave over the MediaStream
+      // bridge. Its own safety limiter — two full-scale cued tracks clip
+      // like the master case above.
       const cueSum = ctx.createGain();
       strips.A.pflGain.connect(cueSum);
       strips.B.pflGain.connect(cueSum);
+      const { cue: cueSide, master: masterSide } = cueMixGains(this.cueMix);
+      const blendCueGain = ctx.createGain();
+      blendCueGain.gain.value = cueSide;
+      const blendMasterGain = ctx.createGain();
+      blendMasterGain.gain.value = masterSide;
       const cueGain = ctx.createGain();
       cueGain.gain.value = cueLevelToGain(this.cueLevel);
-      const cueLimiter = ctx.createDynamicsCompressor();
-      cueLimiter.threshold.value = -3;
-      cueLimiter.knee.value = 0;
-      cueLimiter.ratio.value = 20;
-      cueLimiter.attack.value = 0.003;
-      cueLimiter.release.value = 0.25;
+      const cueLimiter = makeLimiter(ctx);
       const cueBridge = new CueBridge(ctx);
-      cueSum.connect(cueGain);
+      cueSum.connect(blendCueGain);
+      program.connect(blendMasterGain);
+      blendCueGain.connect(cueGain);
+      blendMasterGain.connect(cueGain);
       cueGain.connect(cueLimiter);
       cueLimiter.connect(cueBridge.input);
 
@@ -260,6 +297,8 @@ export class Mixer {
       this.strips = strips;
       this.masterGain = masterGain;
       this.cueGain = cueGain;
+      this.blendCueGain = blendCueGain;
+      this.blendMasterGain = blendMasterGain;
       this.cueBridge = cueBridge;
 
       // Reapply position-dependent settings on the fresh graph.
@@ -444,6 +483,21 @@ export class Mixer {
     if (this.cueGain) rampGain(ctx, this.cueGain.gain, cueLevelToGain(value));
   }
 
+  getCueMix(): number {
+    return this.cueMix;
+  }
+
+  /** Cue/mix blend, 0 (cue only) .. 1 (master only). Equal-power, applied
+   * before the bridge so the headphones stay sample-aligned (ADR 0017). */
+  setCueMix(value: number): void {
+    this.cueMix = value;
+    this.notify();
+    const { ctx } = this.ensure();
+    const { cue, master } = cueMixGains(value);
+    if (this.blendCueGain) rampGain(ctx, this.blendCueGain.gain, cue);
+    if (this.blendMasterGain) rampGain(ctx, this.blendMasterGain.gain, master);
+  }
+
   getCueSinkId(): string | null {
     return this.cueSinkId;
   }
@@ -481,6 +535,8 @@ export class Mixer {
     this.strips = null;
     this.masterGain = null;
     this.cueGain = null;
+    this.blendCueGain = null;
+    this.blendMasterGain = null;
     this.cueBridge = null;
   }
 

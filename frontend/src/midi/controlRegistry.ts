@@ -71,6 +71,10 @@ export interface MidiMixerControls {
   setMaster(value: number): void;
   /** PFL this channel into the Cue bus (headphone-cue 02). */
   togglePfl(channel: ChannelId): void;
+  /** Cue bus volume, 0..1 (headphone-cue 03). */
+  setCueLevel(value: number): void;
+  /** Cue/mix blend, 0 (cue only) .. 1 (master only) (headphone-cue 03). */
+  setCueMix(value: number): void;
 }
 
 const deckControls = new Map<ChannelId, MidiDeckControls>();

@@ -35,6 +35,23 @@ export function cueLevelToGain(value: number): number {
 }
 
 /**
+ * Cue/mix blend position [0 (cue only), 1 (master only)] → gains for the
+ * two signals feeding the headphones (headphone-cue 03). Equal-power curve
+ * (constant summed energy) — the standard monitor-blend law: sweeping the
+ * knob changes the balance, not the loudness, and both signals are clearly
+ * present at the middle. Both gains are applied IN THE MAIN GRAPH before
+ * the bridge (ADR 0017), which is what keeps cue and master sample-aligned
+ * inside the headphones.
+ */
+export function cueMixGains(position: number): { cue: number; master: number } {
+  const x = clamp01(position);
+  return {
+    cue: Math.cos((x * Math.PI) / 2),
+    master: Math.sin((x * Math.PI) / 2),
+  };
+}
+
+/**
  * Crossfader position [-1 (full A), 1 (full B)] → per-channel gains.
  * Dipless curve: a channel is at unity anywhere in its own half INCLUDING
  * center, and fades linearly to a full kill at the opposite end. Center is
