@@ -109,6 +109,9 @@ Automatically determining a property of a Track from its audio — key, BPM, bea
 **Deck**:
 An independent playback unit: one loaded Track plus its transport state (playhead, playing/paused, Main cue) and pitch. Two Decks exist — Deck A and Deck B — owned by the application, not by any view: a Deck outlives views and keeps playing across them. The library player shows Deck A; the Performance view shows both. Per-Deck sound shaping (trim, EQ, filter, volume) belongs to the Mixer's channel strips, as on hardware.
 
+**Deck color**:
+The per-Deck identity color used across every surface: Deck A cyan, Deck B magenta (as established by the Transition editor). Identity only — state colors (green for active/playing, blue for accents) never denote a Deck, and Deck colors never denote a state.
+
 **Mixer**:
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on safety limiter. Mirrors a hardware DJ mixer.
 
