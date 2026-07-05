@@ -8,6 +8,7 @@ import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import { getColumnConfig } from './columnConfig';
 import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDrag';
+import { LinkIcon } from '../links/LinkIcon';
 import './TrackRow.css';
 
 /** Saved-Transition mark state for one source deck (transition-library
@@ -184,7 +185,7 @@ const TrackRow = memo(function TrackRow({
               )}
               {linkedA && (
                 <span className="track-link-mark mark-a" title="Linked with deck A's track">
-                  🔗
+                  <LinkIcon size={10} />
                 </span>
               )}
               {markB !== 'none' && (
@@ -197,7 +198,7 @@ const TrackRow = memo(function TrackRow({
               )}
               {linkedB && (
                 <span className="track-link-mark mark-b" title="Linked with deck B's track">
-                  🔗
+                  <LinkIcon size={10} />
                 </span>
               )}
             </span>

@@ -11,6 +11,7 @@ import type { Track } from '../types';
 import { followSummary, getEnergyRange } from '../follow/model';
 import type { EnergyPreset } from '../follow/model';
 import { resetFollowParams, setFollowParams, useFollowParams } from '../follow/paramsStore';
+import { LinkIcon } from '../links/LinkIcon';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import type { ChannelId } from '../playback/mixer';
 
@@ -237,12 +238,14 @@ export default function FollowParamsModal({
                 checked={params.knownOnly}
                 onChange={(e) => setFollowParams({ knownOnly: e.target.checked })}
               />
-              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>◆🔗 Known only</span>
+              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                ◆<LinkIcon size={11} /> Known only
+              </span>
             </label>
             <div style={{ fontSize: '12px', color: 'var(--subtext0)', paddingLeft: '24px' }}>
               Only known tracks: a saved transition from a followed track (◆)
-              or Linked with it (🔗). Otherwise known tracks are always
-              included on top of the criteria above.
+              or Linked with it (<LinkIcon size={10} />). Otherwise known
+              tracks are always included on top of the criteria above.
             </div>
           </div>
         </div>

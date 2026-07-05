@@ -239,19 +239,19 @@ a.provenance-chip:hover {
 }
 
 /* Linked marks (linked-pairs 03): a chain per loaded deck the row is
-   Linked with — symmetric pair knowledge alongside the directional ◆/★.
-   The emoji ignores `color`, so the deck accent rides an underline. */
+   Linked with — symmetric pair knowledge alongside the directional ◆/★,
+   in the same deck accents (the SVG takes currentColor). */
 .track-link-mark {
-  font-size: 10px;
-  line-height: inherit;
+  display: inline-flex;
+  align-items: center;
 }
 
 .track-link-mark.mark-a {
-  box-shadow: 0 2px 0 -0.5px var(--deck-a);
+  color: var(--deck-a);
 }
 
 .track-link-mark.mark-b {
-  box-shadow: 0 2px 0 -0.5px var(--deck-b);
+  color: var(--deck-b);
 }
 
 /* Load-to-deck hover buttons (Performance view's embedded library). The
