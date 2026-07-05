@@ -426,15 +426,6 @@ function TransitionEditorInner() {
     return () => window.removeEventListener(OPEN_TAKE_EVENT, consume);
   }, [openTake]);
 
-  const takeDraft = useEditorSelector(store, (s) => s.takeDraft);
-  const promoteTake = useCallback(() => {
-    const ref = store.promoteTakeDraft();
-    if (!ref) return;
-    void api.takes
-      .setPromoted(ref.takeUuid, ref.transitionUuid)
-      .catch((err) => console.error('take review: promoted-reference write failed', err));
-  }, [store]);
-
   // Selection/navigation handle into the embedded library panel.
   const libraryRef = useRef<LibraryBrowseHandle>(null);
 
@@ -502,19 +493,6 @@ function TransitionEditorInner() {
     <div className="editor-root">
       {/* Top panel: the transition editor (sibling of Library / Performance) */}
       <div className="editor-top">
-        {takeDraft && (
-          <div className="editor-take-banner">
-            <span>
-              Reviewing a Take — audition and tweak freely; nothing persists until promoted.
-            </span>
-            <button className="editor-take-promote" onClick={promoteTake}>
-              Promote to library
-            </button>
-            <button className="editor-take-discard" onClick={() => store.discardTakeDraft()}>
-              Discard
-            </button>
-          </div>
-        )}
         <div className="editor-arranger">
           <DawTimeline
             store={store}
@@ -675,6 +653,17 @@ function EditorCenterPanel({
   const mix = useEditorSelector(store, (s) => s.mix);
   const session = useEditorSelector(store, (s) => s.session);
   const snap = useEditorSelector(store, (s) => s.snap);
+
+  // Take review (transition-takes 03): the banner lives in the center
+  // panel's spare bottom row — the top of the editor is timeline space.
+  const takeDraft = useEditorSelector(store, (s) => s.takeDraft);
+  const promoteTake = useCallback(() => {
+    const ref = store.promoteTakeDraft();
+    if (!ref) return;
+    void api.takes
+      .setPromoted(ref.takeUuid, ref.transitionUuid)
+      .catch((err) => console.error('take review: promoted-reference write failed', err));
+  }, [store]);
   const tr = mix.transition;
   const visibleLanes = useMemo(() => visibleLaneIds(tr), [tr]);
   const addableLanes = LANE_IDS.filter((id) => !visibleLanes.includes(id));
@@ -853,6 +842,17 @@ function EditorCenterPanel({
           </select>
         )}
       </div>
+      {takeDraft && (
+        <div className="editor-center-row editor-take-banner">
+          <span>Reviewing a Take — unsaved until promoted</span>
+          <button className="editor-take-promote" onClick={promoteTake}>
+            Promote to library
+          </button>
+          <button className="editor-take-discard" onClick={() => store.discardTakeDraft()}>
+            Discard
+          </button>
+        </div>
+      )}
 
       {saveModalOpen && canSaveTemplate && (
         <SaveTemplateModal
