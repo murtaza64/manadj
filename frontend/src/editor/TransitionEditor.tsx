@@ -40,6 +40,7 @@ import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
 import { vectorizeTake } from '../capture/vectorize';
 import { OPEN_TAKE_EVENT, consumeTakeReview } from '../capture/takeReview';
+import { OPEN_PAIR_EVENT, consumePairEdit, type PairEditRequest } from './openPair';
 import type { TrackSideInfo, TransitionTemplate } from './templateModel';
 import {
   deleteTemplate,
@@ -455,6 +456,47 @@ function TransitionEditorInner() {
     window.addEventListener(OPEN_TAKE_EVENT, consume);
     return () => window.removeEventListener(OPEN_TAKE_EVENT, consume);
   }, [openTake]);
+
+  // Adjacency click-through (sets 09): a Set-view adjacency opens its
+  // ordered pair here — outgoing → editor A, incoming → editor B (the
+  // editor always presents outgoing-as-A; Conductor parity is irrelevant).
+  // A Transition pin arrives with its uuid and gets selected; unresolved
+  // arrives with null and lands on a blank sketch.
+  const openPair = useCallback(
+    async (req: PairEditRequest) => {
+      // The editor's mount already claimed audibility, but a Conductor
+      // started from the Set pane UNDER the mounted editor claims over it
+      // — re-claim so clicking an adjacency stops Set playback (the
+      // arbiter's claim-over-claim: the Conductor stands down; idempotent
+      // when the editor already holds).
+      claimAudible('editor');
+      try {
+        const [a, b] = await Promise.all([
+          api.tracks.getById(req.aTrackId),
+          api.tracks.getById(req.bTrackId),
+        ]);
+        assignTrack('A', a);
+        assignTrack('B', b);
+        const pk = `${a.id}:${b.id}`;
+        localStorage.setItem(LAST_PAIR_KEY, pk);
+        store.loadPair(pk);
+        if (req.transitionUuid) store.selectTransition(req.transitionUuid);
+        else store.startBlankSketch();
+      } catch (err) {
+        console.error('adjacency edit: open failed', err);
+      }
+    },
+    [assignTrack, store]
+  );
+  useEffect(() => {
+    const consume = () => {
+      const req = consumePairEdit();
+      if (req) void openPair(req);
+    };
+    consume(); // a request may be pending from before the view switch
+    window.addEventListener(OPEN_PAIR_EVENT, consume);
+    return () => window.removeEventListener(OPEN_PAIR_EVENT, consume);
+  }, [openPair]);
 
   // Selection/navigation handle into the embedded library panel.
   const libraryRef = useRef<LibraryBrowseHandle>(null);

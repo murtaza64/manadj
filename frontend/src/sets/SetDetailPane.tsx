@@ -39,6 +39,8 @@ import {
   snapshotPairStore,
   subscribePairStore,
 } from '../editor/pairStore';
+import { requestPairEdit } from '../editor/openPair';
+import { requestTakeReview } from '../capture/takeReview';
 import {
   adjacencyView,
   autoFillProposal,
@@ -106,6 +108,30 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
       .filter((t) => t.a_track_id === a && t.b_track_id === b)
       .map((t) => ({ uuid: t.uuid, detectedAt: t.detected_at }));
     return { transitions, takes: pairTakes };
+  };
+
+  // Adjacency click-through (sets 09): route by RESOLVED pin kind — a
+  // Transition pin opens the editor with that Transition selected, a Take
+  // pin opens the existing Take-review flow, unresolved (including
+  // dangling pins) opens a blank sketch for the pair. The request rides a
+  // window event; App flips the mode; the mounted editor consumes it —
+  // this pane's state (set store) survives the switch untouched.
+  const openAdjacencyEditor = (
+    aTrackId: number,
+    bTrackId: number,
+    pin: AdjacencyPin | null
+  ) => {
+    const { transitions, takes: pairTakes } = pairEvidence(aTrackId, bTrackId);
+    const view = adjacencyView(pin, transitions, pairTakes);
+    if (view.status === 'take') {
+      requestTakeReview(view.take!.uuid);
+      return;
+    }
+    requestPairEdit({
+      aTrackId,
+      bTrackId,
+      transitionUuid: view.status === 'transition' ? view.transition!.uuid : null,
+    });
   };
 
   // Set-wide auto-fill: one click accepts every proposal on a pin-less
@@ -501,6 +527,9 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
                     evidence={pairEvidence(entry.trackId, next.trackId)}
                     warnings={plan?.warnings.filter((w) => w.adjacencyIndex === i)}
                     onPin={(pin) => setAdjacencyPin(setId, entry.trackId, pin)}
+                    onOpenEditor={() =>
+                      openAdjacencyEditor(entry.trackId, next.trackId, entry.pin)
+                    }
                     onSuggestInsert={(() => {
                       const predecessor = trackMap?.get(entry.trackId);
                       const successor = trackMap?.get(next.trackId);
@@ -599,6 +628,7 @@ function AdjacencyRow({
   evidence,
   warnings,
   onPin,
+  onOpenEditor,
   onSuggestInsert,
 }: {
   pin: AdjacencyPin | null;
@@ -606,11 +636,15 @@ function AdjacencyRow({
   /** This adjacency's plan degeneracies (sets 06), if any. */
   warnings?: PlanWarning[];
   onPin: (pin: AdjacencyPin | null) => void;
+  /** Click-through (sets 09): open this adjacency in the Transition
+   * editor (pin-kind routing lives with the caller). */
+  onOpenEditor: () => void;
   /** Open insert suggestions for this adjacency (sets 10); absent while
    * the pair's track metadata is still loading. */
   onSuggestInsert?: (x: number, y: number) => void;
 }) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [hovered, setHovered] = useState(false);
   const view = adjacencyView(pin, evidence.transitions, evidence.takes);
   const proposal = pin === null ? autoFillProposal(evidence.transitions) : null;
   const chip = pinChip(view);
@@ -645,19 +679,27 @@ function AdjacencyRow({
   return (
     <>
       <div
+        onClick={onOpenEditor}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        title="Open this handover in the Transition editor"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
           padding: '2px 12px 2px 48px',
-          background: 'var(--crust)',
+          background: hovered ? 'var(--surface0)' : 'var(--crust)',
           borderBottom: '1px solid var(--surface0)',
           fontSize: '12px',
+          cursor: 'pointer',
         }}
       >
         {/* Pin chip — click opens the manual pin picker */}
         <button
-          onClick={(e) => setMenuPos({ x: e.clientX, y: e.clientY })}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuPos({ x: e.clientX, y: e.clientY });
+          }}
           title="Pin a transition or take for this handover"
           style={{
             padding: '1px 8px',
@@ -674,7 +716,10 @@ function AdjacencyRow({
         {/* One-click auto-fill accept (Transitions only, favorite first) */}
         {proposal && view.status === 'unresolved' && (
           <button
-            onClick={() => onPin({ kind: 'transition', uuid: proposal.uuid })}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPin({ kind: 'transition', uuid: proposal.uuid });
+            }}
             title="Pin the proposed Transition"
             style={{
               padding: '1px 8px',
@@ -736,7 +781,10 @@ function AdjacencyRow({
         {/* Insert suggestions (sets 10): ranked by the weaker edge */}
         {onSuggestInsert && (
           <button
-            onClick={(e) => onSuggestInsert(e.clientX, e.clientY)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSuggestInsert(e.clientX, e.clientY);
+            }}
             title="Suggest a track to insert here, ranked by the weaker of the two edges"
             style={{
               padding: '1px 8px',

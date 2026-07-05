@@ -344,6 +344,33 @@ describe('session semantics (ported behavior)', () => {
   });
 });
 
+describe('startBlankSketch (sets 09)', () => {
+  it('appends a fresh pristine take when the active item has real edits', () => {
+    const p = fakePersistence({ '1:2': { items: [edited('u1')], active: 0 } });
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.startBlankSketch();
+    const s = store.getSnapshot();
+    expect(s.session.items).toHaveLength(2);
+    expect(s.session.active).toBe(1);
+    expect(s.session.items[1].name).toBe('Transition 1'); // fresh pristine
+    // A blank sketch is pristine: leaving without edits persists nothing.
+    vi.runAllTimers();
+    store.dispose();
+    expect(p.saves).toEqual([]);
+  });
+
+  it('is a no-op when the active item is already a blank sketch', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2'); // seeds a pristine Transition 1
+    store.startBlankSketch();
+    const s = store.getSnapshot();
+    expect(s.session.items).toHaveLength(1);
+    expect(s.session.active).toBe(0);
+  });
+});
+
 describe('view toggles', () => {
   it('snap/lock changes never arm a save', () => {
     const p = fakePersistence();

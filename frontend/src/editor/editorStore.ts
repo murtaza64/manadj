@@ -225,6 +225,23 @@ export class EditorStore {
     this.onTransitionLoaded?.(nextItems[active].transition);
   }
 
+  /** Land the session on a fresh pristine Transition — the unresolved
+   * adjacency's click-through target (sets 09). No-op when the active one
+   * is already pristine (it IS the blank sketch); otherwise appends a
+   * fresh take, which evaporates untouched like any pristine item.
+   * EMIT ONLY — opening an adjacency is not an edit, so no save is armed
+   * (the pristine sketch is filtered from persists regardless). */
+  startBlankSketch(): void {
+    const items = this.liveItems();
+    if (isPristine(items[this.state.session.active])) return;
+    const fresh = freshTransition(items);
+    this.emit({
+      session: { items: [...items, fresh], active: items.length },
+      mix: { ...this.state.mix, transition: structuredClone(fresh.transition) },
+    });
+    this.onTransitionLoaded?.(fresh.transition);
+  }
+
   /** Point the session at a saved Transition by uuid — selection only,
    * never a mutation (jumping from the history's promoted mark). */
   selectTransition(uuid: string): void {

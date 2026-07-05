@@ -18,6 +18,7 @@ import { AudioRoutingBridge } from './components/AudioRoutingBridge';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
+import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
 import { installNoFocusRule } from './focus/noFocusRule';
 
@@ -59,6 +60,14 @@ function App() {
     const onOpenTake = () => setView('transition');
     window.addEventListener(OPEN_TAKE_EVENT, onOpenTake);
     return () => window.removeEventListener(OPEN_TAKE_EVENT, onOpenTake);
+  }, []);
+
+  // A pair-edit request (Set-view adjacency, sets 09) opens the editor the
+  // same way; the mounted editor consumes the pending request (openPair.ts).
+  useEffect(() => {
+    const onOpenPair = () => setView('transition');
+    window.addEventListener(OPEN_PAIR_EVENT, onOpenPair);
+    return () => window.removeEventListener(OPEN_PAIR_EVENT, onOpenPair);
   }, []);
 
   if (window.location.pathname === '/midi-inspect') {
