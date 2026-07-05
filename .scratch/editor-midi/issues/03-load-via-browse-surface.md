@@ -1,6 +1,6 @@
 # 03 — LOAD via the browse surface
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -33,3 +33,21 @@ deck-controls registry and joins the browse-surface registration (ADR 0019's
 ## Blocked by
 
 None - can start immediately.
+
+## Comments
+
+- 2026-07-05 (edmidi lane): implemented in jj change `mqpotnws`. `load`
+  left MidiDeckControls (and the registrar's lock-always handler) and
+  joined MidiBrowseSurface: dispatch hands the selected Track to the
+  registered browse surface's `load(deck, track)`; no surface or no
+  selection drops. Library registers the view's policy — `onLoadToDeck`
+  when embedded (editor `assignTrack` = assign-to-pair + mirror + re-seed;
+  Performance `tryLoad` = lock with silent refusal) else the library's free
+  replace onto the shared Decks; the row context menu routes through the
+  same function (`loadWithViewPolicy`). Dispatch tests cover policy fakes,
+  no-surface and no-selection drops. Status → ready-for-human: HARDWARE
+  SMOKE TEST — editor: LOAD A/B assigns the selection to the pair and the
+  editor UI shows it (saved Transitions re-seed); Performance: LOAD refused
+  silently on a running deck, loads on a stopped one; library view: LOAD
+  replaces freely even while playing; sync/styles views: encoder + LOAD do
+  nothing.

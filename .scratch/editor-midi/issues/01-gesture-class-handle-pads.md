@@ -1,6 +1,6 @@
 # 01 — Gesture-class handle + pads in both modes
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -36,3 +36,22 @@ The ADR 0019 refactor, proven end-to-end through the pads class:
 ## Blocked by
 
 None - can start immediately.
+
+## Comments
+
+- 2026-07-05 (edmidi lane): implemented in jj change `qvrpzsqk`. The
+  audible-surface handle grew an optional `pads` section (hotCueDown /
+  optional hotCueUp / hotCueClear, all deck-addressed); dispatch routes
+  hot-cue and hot-cue-clear through `audiblePads()` — unregistered section
+  drops, like CUE. Shared surface (DeckContext) delegates to the registered
+  deck controls (zero behavior change); the editor registers pads over
+  `useHotCueSlots` with the same triggers as DeckCard (A: `player.seek(cue)`,
+  B: `slideDeckB('cue', cue)`; set-on-empty at the deck's track playhead;
+  SHIFT+pad clears; no release handler — taps). Dispatch tests cover
+  routing, drops, claim/release flips. Status → ready-for-human: HARDWARE
+  SMOKE TEST — in the editor: A-pad on a set slot restarts the mix at that
+  cue; B-pad Slides the cue under the playhead; pad on an empty slot sets a
+  cue at that deck's playhead (visible on screen); SHIFT+pad clears; holding
+  a pad does nothing extra on release. Library/Performance: pads behave
+  exactly as before (set / jump / hold-preview / SHIFT-clear). Switch
+  library → editor → library without reload and confirm routing flips.

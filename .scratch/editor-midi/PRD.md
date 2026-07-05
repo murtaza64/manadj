@@ -1,6 +1,6 @@
 # PRD: Editor MIDI (surface-routed gesture classes)
 
-Status: ready-for-agent
+Status: ready-for-human (implemented; hardware smoke tests pending — see issues)
 
 ## Problem Statement
 

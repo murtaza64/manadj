@@ -1,6 +1,6 @@
 # 02 — Editor jumps
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -31,3 +31,17 @@ The jumps gesture class, mirroring the editor's on-screen ◀/▶ cluster:
 ## Blocked by
 
 - 01-gesture-class-handle-pads
+
+## Comments
+
+- 2026-07-05 (edmidi lane): implemented in jj change `kwtmmlzq`. `jumps`
+  section on the surface handle (beatjump deck+direction); shared surface
+  delegates to deck beatjump; editor: A seeks the mix ±N of A's beats, B
+  Slides ±N of its own beats (both via the shared per-deck size and the new
+  pure `beatsToSeconds` in editor/gestureMath.ts, which the on-screen
+  cluster now also uses). Beatjump-size stays registry-direct. Status →
+  ready-for-human: HARDWARE SMOKE TEST — editor: jump buttons on A move the
+  playhead by the size shown in A's cluster (both directions); on B they
+  Slide B (playhead stays put); SHIFT+jump halves/doubles the size shown in
+  the editor cluster and the change carries to Performance view.
+  Library/Performance beatjump unchanged.

@@ -1,6 +1,6 @@
 # 05 — Audibility-aware transport LEDs
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -32,3 +32,21 @@ Stop the transport lights lying while the editor is audible:
 ## Blocked by
 
 - 01-gesture-class-handle-pads
+
+## Comments
+
+- 2026-07-05 (edmidi lane): implemented in jj change `uukmzros`. The handle
+  grew an optional `transportState` (playing per deck + subscribe); the
+  editor reports its one mix transport for both decks. The feedback bridge
+  subscribes to the audible holder (resubscribes on claim/release) and,
+  while a non-shared holder exposes transport state, feeds ledStates
+  through the pure `audibleTransportOverride` — PLAY mirrors the mix, CUE
+  dark, pending-blink and cue-flash suppressed (blink clock gated off).
+  Pads/PFL pass through (pair mirroring keeps pads true) — verified, not
+  rebuilt. Override derivation under vitest at the ledStates seam. Status →
+  ready-for-human: HARDWARE SMOKE TEST — editor audible: both PLAY LEDs
+  follow mix play/pause; CUE LEDs dark throughout; pad lights match the
+  pair. Back in library/performance: PLAY per deck, pending-blink during a
+  load with play latched, CUE solid at cue / flashing away-from-cue /
+  lit through hold-preview; pad lights still correct after several mode
+  switches.

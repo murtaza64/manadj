@@ -337,4 +337,47 @@ describe('touch surface (midi-controller 11)', () => {
       jog.dispose();
     });
   });
+
+  /**
+   * The editor's deck-B port (editor-midi 04): `isPlaying` pinned false and
+   * `getPlayhead` pinned 0 turn the controller's absolute seeks into signed
+   * slide-by-seconds deltas, keeping the three-tier feel.
+   */
+  describe('delta port (editor-midi 04: continuous Slide)', () => {
+    let deltas: number[];
+    let bends: number[];
+    let deltaPort: JogDeckPort;
+
+    beforeEach(() => {
+      deltas = [];
+      bends = [];
+      deltaPort = {
+        isPlaying: () => false,
+        getPlayhead: () => 0,
+        seek: (d) => deltas.push(d),
+        setBend: (p) => bends.push(p),
+      };
+    });
+
+    it('all three tiers emit signed deltas at their own rates, never a bend', () => {
+      const jog = new JogController(deltaPort);
+      jog.onTicks(2, 1000); // gentle rim tier
+      jog.onTouchTicks(-3, 2000); // fine tier (gap ends any continuation)
+      jog.onSeekTicks(1, 4000); // fast tier (velocity-accelerated)
+      expect(deltas[0]).toBeCloseTo(2 * JOG_SEEK_SECONDS_PER_TICK, 10);
+      expect(deltas[1]).toBeCloseTo(-3 * JOG_TOUCH_SEEK_SECONDS_PER_TICK, 10);
+      expect(deltas[2]).toBeGreaterThanOrEqual(JOG_SEEK_SECONDS_PER_TICK);
+      vi.advanceTimersByTime(10 * JOG_BEND_FILTER_PERIOD_MS);
+      expect(bends).toEqual([]); // a never-playing port cannot bend
+      jog.dispose();
+    });
+
+    it('deltas are relative to zero — travel never accumulates into the next gesture', () => {
+      const jog = new JogController(deltaPort);
+      jog.onTicks(1, 1000);
+      jog.onTicks(1, 2000);
+      expect(deltas[0]).toBeCloseTo(deltas[1], 10);
+      jog.dispose();
+    });
+  });
 });
