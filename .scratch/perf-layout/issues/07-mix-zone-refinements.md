@@ -1,6 +1,6 @@
 # 07: Mix zone refinements
 
-Status: ready-for-human (implementation parked on lane perfui, change mywmmnyy)
+Status: done (landed mywmmnyy 2026-07-05; lane perfui stays open for further UI iteration)
 
 User-requested refinements to the deck MIX zone (screenshot 2026-07-05):
 
@@ -23,3 +23,11 @@ vitest as regression floor. Review-gated — do not land without approval.
   (`perf-layout: 07-mix-zone-refinements`) touching DeckPanel.tsx MixZone +
   PerformanceView.css. Verified: frontend build clean, 923/923 vitest.
   Lane app serving on http://localhost:5323 for review.
+- Scope grew during review (same change): loop + beatjump rows and the
+  nudge pair restyled as joined segmented panels (`.deck-bpm` idiom) in
+  deckControls.css / PerformanceView.css; LOOP word replaced with a
+  repeat-cycle icon (LoopRow.tsx). BeatjumpRow is shared, so the editor
+  player gets the same look.
+- Done (2026-07-05): approved in-session; rebased onto trunk (one CSS
+  conflict vs sets-15 automation ghosts, resolved), gate green (build,
+  968/968 vitest, single alembic head), `main` → `mywmmnyy`.
