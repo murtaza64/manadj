@@ -20,6 +20,10 @@ Live reload: the window renders the Vite dev server, so frontend HMR and
 `uvicorn --reload` work as in a browser. Changes to `main.js` itself require
 relaunching the shell (rare; no electronmon dependency on purpose).
 
+Renderer console (`console.*` in the frontend) is forwarded to stdout as
+`[browser] ...` lines; `make dev-app` gives them their own label in the
+multiplexed stream. DevTools (Cmd+Option+I) remains the richer surface.
+
 ## Behavior
 
 - `backgroundThrottling: false` — rAF/timers keep running while occluded;

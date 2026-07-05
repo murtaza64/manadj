@@ -7,6 +7,11 @@ const { app, BrowserWindow, net, session } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
+// The Vite dev target has no CSP, so Electron's renderer-console security
+// warning is permanent noise — especially now that renderer console is
+// forwarded to stdout. Dev-machine shell; suppress it.
+process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
+
 const DEFAULT_URL = "http://localhost:5173";
 const RETRY_INTERVAL_MS = 2000;
 const STATE_FILE = path.join(__dirname, "window-state.json");
@@ -108,7 +113,30 @@ function createWindow() {
     },
   });
   win.on("close", () => saveBounds(win));
+  forwardConsole(win.webContents);
   attach(win);
+}
+
+// Forward the renderer's console to stdout with a "[browser] " prefix.
+// scripts/dev.py recognizes the prefix and relabels the line into its
+// multiplexed stream; in a bare `make app` terminal it reads fine as-is.
+const LEGACY_LEVELS = ["debug", "log", "warning", "error"];
+
+function forwardConsole(webContents) {
+  webContents.on("console-message", (event, legacyLevel, legacyMessage, legacyLine, legacySource) => {
+    // Electron 32+ packs params on the event; older signature is positional.
+    const level =
+      typeof event.level === "string" ? event.level : LEGACY_LEVELS[legacyLevel] ?? "log";
+    const message = String(event.message ?? legacyMessage ?? "");
+    const source = event.sourceId ?? legacySource;
+    const line = event.lineNumber ?? legacyLine;
+    const where =
+      (level === "warning" || level === "error") && source ? ` (${source}:${line})` : "";
+    const tag = level === "log" || level === "info" ? "" : `${level}: `;
+    for (const text of message.split("\n")) {
+      process.stdout.write(`[browser] ${tag}${text}${where}\n`);
+    }
+  });
 }
 
 app.whenReady().then(() => {

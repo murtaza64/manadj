@@ -18,7 +18,12 @@ LABEL_COLORS = {
     "backend": "\033[1;34m",
     "frontend": "\033[1;32m",
     "app": "\033[1;35m",
+    "browser": "\033[1;36m",
 }
+
+# The shell prefixes forwarded renderer-console lines (desktop/main.js);
+# relabel them from [app] to [browser].
+BROWSER_PREFIX = "[browser] "
 
 
 def format_label(name: str, use_color: bool) -> str:
@@ -158,6 +163,9 @@ def main() -> int:
     while True:
         try:
             source, line = line_queue.get(timeout=0.1)
+            if source == "app" and line.startswith(BROWSER_PREFIX):
+                source = "browser"
+                line = line[len(BROWSER_PREFIX):]
             print(f"{format_label(source, use_color)} {line}", flush=True)
         except queue.Empty:
             pass
