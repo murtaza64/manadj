@@ -1,6 +1,6 @@
 # 18 — Set view: row selection + group drag-reorder
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -85,3 +85,66 @@ degradation otherwise (coordinate — 07 is expected to land first).
 
 - 17-set-row-context-menu (targeting rule + multi-aware menu core) — parked ready-for-human at triage time
 - 07-reorder-preview-dormant-pins (edge-pin semantics) — dispatch 07 first
+
+## Comments
+
+**2026-07-06 — implemented (lane setui, change `pppnwyvw`, on top of
+23's list preview); parked ready-for-human.** All acceptance criteria.
+
+- Selection lives in the set store (`selectionBySet` beside entries/
+  dormant — sets 18): readable by the menu, keyboard, and drag
+  handlers; survives mode switches like the scroll position; pruned at
+  the store's one entry-write point. The pure gestures are the
+  Library's own `selectionModel` — `selectGesture` and the 17 targeting
+  rule (`menuTargets`) were extracted there and are now shared by
+  Library and the Set pane (three near-copies became one).
+- Group drag: a selected row drags the whole selection in SET order
+  (payload order = compaction order, so non-contiguous selections land
+  as one contiguous run at the drop point); an unselected row
+  selects-and-drags just itself (`selectAndGetDragIds` — deliberately
+  diverges from Library's pure `getDragIds`, per Decisions). 23's list
+  preview and 07's reconcile rule needed NO changes — id lists were the
+  interface all along; interior sub-run pins survive via
+  `reconcileOrderChange` (store tests cover contiguous block + true
+  non-contiguous sub-runs).
+- 17's menu: verified, not rebuilt — targets = selection when the
+  clicked row is in it (right-click outside selects first, so menu and
+  highlight agree); multi labels and Load-disabled-on-multi come from
+  the menu core; Remove gets the counted multi label and routes through
+  `removeTracksFromSet` (ONE reconcile pass — `removeTrackFromSet`
+  dropped, no back-compat concerns).
+- Keyboard: Esc clears, Delete/Backspace removes the selection —
+  bubble-phase window listener, so ContextMenu's capture-phase Escape
+  wins (closing a menu never clears rows); input/textarea/
+  contentEditable targets are ignored. Empty-space click on the pane
+  clears. Selection = blue wash + inset blue ring; conducting keeps
+  the mauve wash and wears the ring when both (distinct, simultaneous).
+- Known-latent (flagging, not fixing): if this pane is ever EMBEDDED
+  beside another keyboard surface, the window-level Delete acts on the
+  store-persisted selection even when the pane is out of sight. Today
+  one browse instance mounts at a time, so unreachable.
+- Verification: frontend build clean; vitest 1048; pytest 666;
+  `alembic heads` = `0022_mwzqllkt` only; eslint clean on touched
+  files (one pre-existing warning).
+
+**Verification walkthrough** (lane app on ports 8140/5313):
+open http://localhost:5313 → the demo Set →
+1. Click a row (blue wash + ring). Shift-click two rows down (range).
+   Cmd-click a distant row (toggle in). Cmd-click it again (out).
+2. Play the set (▶ Play set): the conducting row's mauve wash and a
+   selected row's blue render simultaneously; select the conducting
+   row — mauve wash + blue ring together. Stop.
+3. Pin two adjacent handovers inside a selection block, then drag any
+   selected row: the whole block moves in the list preview (all
+   dimmed); drop elsewhere — the interior pin's chip rode along, only
+   the block's edges degraded (violet ↺ on re-approach, per 07/23).
+4. Select a NON-contiguous set (click + cmd-click): drag — the rows
+   compact into one contiguous run at the pointer, in set order; the
+   preview shows the edge consequences live. Drop commits exactly it.
+5. Right-click a selected row: menu shows counted labels ("Add 3 to
+   playlist ▸", "Remove 3 from set"), Load disabled. Right-click an
+   UNselected row: selection jumps to it, menu targets just it.
+6. Esc clears the selection; click empty space below the rows —
+   clears too. Select rows and press Delete: they leave the Set, pins
+   go Dormant (drag one back later: ↺ restore, per 07).
+7. Hover ▶ and ✕ still work and never change the selection.

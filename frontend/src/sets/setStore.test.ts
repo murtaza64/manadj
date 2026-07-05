@@ -21,6 +21,7 @@ vi.mock('../api/client', () => ({
 }));
 
 import { api } from '../api/client';
+import { EMPTY_SELECTION } from '../selection/selectionModel';
 import type { DormantPin } from './dormancy';
 import {
   _resetSetStoreForTests,
@@ -28,13 +29,15 @@ import {
   ensureSetEntriesLoaded,
   getSetDormantPins,
   getSetEntries,
+  getSetSelection,
   insertTrackIntoSet,
-  removeTrackFromSet,
+  removeTracksFromSet,
   reorderSetEntries,
   replaceSetEntries,
   repointTakePinsLocal,
   setAdjacencyPin,
   setAdjacencyPins,
+  setSetSelection,
 } from './setStore';
 
 const mocked = api as unknown as {
@@ -181,7 +184,7 @@ describe('dormancy wiring (sets 07)', () => {
       { trackId: 12, pin: null },
     ]);
 
-    removeTrackFromSet(1, 11);
+    removeTracksFromSet(1, [11]);
     expect(getSetEntries(1)).toEqual([
       { trackId: 10, pin: null },
       { trackId: 12, pin: null },
@@ -297,6 +300,106 @@ describe('dormancy wiring (sets 07)', () => {
       { aTrackId: 11, bTrackId: 12, pin: { kind: 'transition', uuid: 'shared' } },
     ]);
     expect(mocked.sets.replaceEntries).not.toHaveBeenCalled();
+  });
+});
+
+describe('selection + group removal (sets 18)', () => {
+  const dormantOf = (setId: number) => getSetDormantPins(setId) ?? [];
+
+  it('selection round-trips per Set, isolated', () => {
+    setSetSelection(1, { ids: [10, 12], anchorId: 12 });
+
+    expect(getSetSelection(1)).toEqual({ ids: [10, 12], anchorId: 12 });
+    expect(getSetSelection(2)).toBe(EMPTY_SELECTION);
+  });
+
+  it('entry changes prune the selection (removed rows drop out)', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: null },
+      { trackId: 11, pin: null },
+      { trackId: 12, pin: null },
+    ]);
+    setSetSelection(1, { ids: [11, 12], anchorId: 11 });
+
+    removeTracksFromSet(1, [11]);
+
+    expect(getSetSelection(1)).toEqual({ ids: [12], anchorId: 12 });
+  });
+
+  it('removeTracksFromSet removes in ONE reconcile pass with single-row pin handling', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: { kind: 'transition', uuid: 'tr-1' } },
+      { trackId: 11, pin: { kind: 'transition', uuid: 'tr-2' } },
+      { trackId: 12, pin: { kind: 'take', uuid: 'tk-1' } },
+      { trackId: 13, pin: null },
+    ]);
+    mocked.sets.replaceEntries.mockClear();
+
+    removeTracksFromSet(1, [11, 12]);
+
+    expect(getSetEntries(1)).toEqual([
+      { trackId: 10, pin: null },
+      { trackId: 13, pin: null },
+    ]);
+    // Every broken pin goes Dormant for its original ordered pair —
+    // including the interior 11|12 pin (the pair left together).
+    expect(dormantOf(1)).toEqual([
+      { aTrackId: 10, bTrackId: 11, pin: { kind: 'transition', uuid: 'tr-1' } },
+      { aTrackId: 11, bTrackId: 12, pin: { kind: 'transition', uuid: 'tr-2' } },
+      { aTrackId: 12, bTrackId: 13, pin: { kind: 'take', uuid: 'tk-1' } },
+    ]);
+    // ONE wholesale push, not one per removed row.
+    expect(mocked.sets.replaceEntries).toHaveBeenCalledTimes(1);
+  });
+
+  it('group reorder keeps a contiguous block\u2019s interior pin (sets 18 via the reconcile rule)', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: { kind: 'transition', uuid: 'tr-1' } },
+      { trackId: 11, pin: { kind: 'transition', uuid: 'tr-2' } },
+      { trackId: 12, pin: null },
+      { trackId: 13, pin: null },
+    ]);
+
+    // Move the contiguous block [10, 11] after 13 (as a group drag does).
+    reorderSetEntries(1, [12, 13, 10, 11]);
+
+    expect(getSetEntries(1)).toEqual([
+      { trackId: 12, pin: null },
+      { trackId: 13, pin: null },
+      { trackId: 10, pin: { kind: 'transition', uuid: 'tr-1' } }, // interior 10|11 pin rode along
+      { trackId: 11, pin: null },
+    ]);
+    // Only the block's true edge (11|12) degraded — Dormant, per 07.
+    expect(dormantOf(1)).toEqual([
+      { aTrackId: 11, bTrackId: 12, pin: { kind: 'transition', uuid: 'tr-2' } },
+    ]);
+  });
+
+  it('non-contiguous compaction keeps each sub-run\u2019s interior pins; only true edges degrade', () => {
+    // Selection {10, 11, 13} over 10-11-12-13-14: sub-runs [10, 11] and
+    // [13]. Compacted (in set order) to the end: 12, 14, 10, 11, 13.
+    replaceSetEntries(1, [
+      { trackId: 10, pin: { kind: 'transition', uuid: 'tr-10-11' } }, // interior to sub-run
+      { trackId: 11, pin: { kind: 'transition', uuid: 'tr-11-12' } }, // true edge
+      { trackId: 12, pin: { kind: 'transition', uuid: 'tr-12-13' } }, // true edge
+      { trackId: 13, pin: { kind: 'transition', uuid: 'tr-13-14' } }, // true edge
+      { trackId: 14, pin: null },
+    ]);
+
+    reorderSetEntries(1, [12, 14, 10, 11, 13]);
+
+    expect(getSetEntries(1)).toEqual([
+      { trackId: 12, pin: null },
+      { trackId: 14, pin: null },
+      { trackId: 10, pin: { kind: 'transition', uuid: 'tr-10-11' } }, // survived the move
+      { trackId: 11, pin: null },
+      { trackId: 13, pin: null },
+    ]);
+    expect(dormantOf(1)).toEqual([
+      { aTrackId: 11, bTrackId: 12, pin: { kind: 'transition', uuid: 'tr-11-12' } },
+      { aTrackId: 12, bTrackId: 13, pin: { kind: 'transition', uuid: 'tr-12-13' } },
+      { aTrackId: 13, bTrackId: 14, pin: { kind: 'transition', uuid: 'tr-13-14' } },
+    ]);
   });
 });
 

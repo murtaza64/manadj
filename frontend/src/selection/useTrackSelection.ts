@@ -19,12 +19,10 @@ import { scrollTrackIntoView } from '../hooks/useKeyboardShortcuts';
 import type { SelectMods } from '../components/TrackRow';
 import {
   EMPTY_SELECTION,
-  click,
   navigate as navigateSelection,
   prune,
-  rangeClick,
   selectAll,
-  toggleClick,
+  selectGesture,
   type Selection,
 } from './selectionModel';
 
@@ -66,13 +64,7 @@ export function useTrackSelection(tracks: Track[]): TrackSelection {
   displayedIdsRef.current = displayedIds;
 
   const handleRowSelect = useCallback((track: Track, mods: SelectMods) => {
-    setSelection((prev) =>
-      mods.shift
-        ? rangeClick(prev, track.id, displayedIdsRef.current)
-        : mods.toggle
-          ? toggleClick(prev, track.id)
-          : click(prev, track.id)
-    );
+    setSelection((prev) => selectGesture(prev, track.id, mods, displayedIdsRef.current));
   }, []);
 
   const handleNavigate = useCallback((delta: 1 | -1) => {

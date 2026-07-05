@@ -83,6 +83,15 @@ describe('applyReorder', () => {
     expect(applyReorder(displayed, [2], blockStart)).toEqual(displayed);
     expect(applyReorder(displayed, [2], blockStart + 1)).toEqual(displayed);
   });
+
+  it('is a fixed point across a previewed multi-row block (sets 18 group drag)', () => {
+    const displayed = [3, 1, 4, 2, 5]; // mid-drag: block [1, 4] previewed after 3
+    // Every insertion index the pointer can produce while inside the
+    // block's own displayed slots reproduces the displayed order.
+    for (const index of [1, 2, 3]) {
+      expect(applyReorder(displayed, [1, 4], index)).toEqual(displayed);
+    }
+  });
 });
 
 describe('splitByMembership', () => {

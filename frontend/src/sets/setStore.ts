@@ -19,6 +19,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { api } from '../api/client';
+import { EMPTY_SELECTION, prune, type Selection } from '../selection/selectionModel';
 import type { AdjacencyPin } from './adjacency';
 import { reconcileOrderChange, type DormantPin } from './dormancy';
 
@@ -38,9 +39,19 @@ interface SetStoreSnapshot {
   /** Dormant pins per Set id (sets 07): broken-pin memories, strictly
    * per-Set, keyed by ordered track pair. Loaded with the entries. */
   dormantBySet: Record<number, DormantPin[]>;
+  /** Row selection per Set id (sets 18): lives here, not in component
+   * state, so the context menu, keyboard handlers, and group drag all
+   * read the same selection — and it survives mode switches like the
+   * scroll position does. Pruned whenever the Set's entries change. */
+  selectionBySet: Record<number, Selection>;
 }
 
-let snapshot: SetStoreSnapshot = { selectedSetId: null, entriesBySet: {}, dormantBySet: {} };
+let snapshot: SetStoreSnapshot = {
+  selectedSetId: null,
+  entriesBySet: {},
+  dormantBySet: {},
+  selectionBySet: {},
+};
 
 /** Scroll position of the Set detail pane, per Set (session state — read
  * imperatively on mount, written on scroll; not reactive). */
@@ -160,10 +171,40 @@ async function doLoad(setId: number): Promise<void> {
 }
 
 function setSetStateLocal(setId: number, entries: SetEntryLocal[], dormant: DormantPin[]): void {
+  // Selected rows that left the Set drop out of the selection (sets 18)
+  // — the one write point for entries is the one prune point.
+  const selection = prune(
+    getSetSelection(setId),
+    entries.map((e) => e.trackId)
+  );
   snapshot = {
     ...snapshot,
     entriesBySet: { ...snapshot.entriesBySet, [setId]: entries },
     dormantBySet: { ...snapshot.dormantBySet, [setId]: dormant },
+    selectionBySet: { ...snapshot.selectionBySet, [setId]: selection },
+  };
+  notify();
+}
+
+// ── Row selection (sets 18) ────────────────────────────────────────────
+
+/** The Set's row selection; EMPTY_SELECTION until someone selects. */
+export function useSetSelection(setId: number): Selection {
+  return useSyncExternalStore(
+    subscribeSetStore,
+    () => snapshot.selectionBySet[setId] ?? EMPTY_SELECTION
+  );
+}
+
+export function getSetSelection(setId: number): Selection {
+  return snapshot.selectionBySet[setId] ?? EMPTY_SELECTION;
+}
+
+export function setSetSelection(setId: number, selection: Selection): void {
+  if (getSetSelection(setId) === selection) return;
+  snapshot = {
+    ...snapshot,
+    selectionBySet: { ...snapshot.selectionBySet, [setId]: selection },
   };
   notify();
 }
@@ -296,15 +337,17 @@ export function setAdjacencyPins(
   );
 }
 
-/** Remove a Track. Both broken adjacencies' pins go Dormant, and the
- * newly-touching neighbors may restore their own memory (sets 07). */
-export function removeTrackFromSet(setId: number, trackId: number): void {
+/** Remove Tracks in one order change (the row ✕; sets 18's
+ * Delete/Backspace on the selection and the multi context-menu Remove).
+ * One reconcile pass (sets 07): broken adjacencies' pins go Dormant,
+ * newly-touching survivors may restore their own memory. */
+export function removeTracksFromSet(setId: number, trackIds: readonly number[]): void {
   const entries = snapshot.entriesBySet[setId];
-  if (!entries) return;
-  applyOrderChange(
-    setId,
-    entries.filter((e) => e.trackId !== trackId).map((e) => e.trackId)
-  );
+  if (!entries || trackIds.length === 0) return;
+  const drop = new Set(trackIds);
+  const remaining = entries.filter((e) => !drop.has(e.trackId)).map((e) => e.trackId);
+  if (remaining.length === entries.length) return;
+  applyOrderChange(setId, remaining);
 }
 
 /** Reorder to the given track-id order (must be a permutation; ids
@@ -405,19 +448,25 @@ export function dropSetLocalState(setId: number): void {
   if (snapshot.selectedSetId === setId) {
     snapshot = { ...snapshot, selectedSetId: null };
   }
-  if (snapshot.entriesBySet[setId] || snapshot.dormantBySet[setId]) {
+  if (
+    snapshot.entriesBySet[setId] ||
+    snapshot.dormantBySet[setId] ||
+    snapshot.selectionBySet[setId]
+  ) {
     const entriesBySet = { ...snapshot.entriesBySet };
     const dormantBySet = { ...snapshot.dormantBySet };
+    const selectionBySet = { ...snapshot.selectionBySet };
     delete entriesBySet[setId];
     delete dormantBySet[setId];
-    snapshot = { ...snapshot, entriesBySet, dormantBySet };
+    delete selectionBySet[setId];
+    snapshot = { ...snapshot, entriesBySet, dormantBySet, selectionBySet };
   }
   notify();
 }
 
 /** Reset module state (tests only). */
 export function _resetSetStoreForTests(): void {
-  snapshot = { selectedSetId: null, entriesBySet: {}, dormantBySet: {} };
+  snapshot = { selectedSetId: null, entriesBySet: {}, dormantBySet: {}, selectionBySet: {} };
   scrollTopBySet.clear();
   ladderViewBySet.clear();
   loadPromises.clear();

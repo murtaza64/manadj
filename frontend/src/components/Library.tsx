@@ -29,7 +29,7 @@ import {
 import type { FollowReference } from '../follow/model';
 import { useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
-import { EMPTY_SELECTION, click } from '../selection/selectionModel';
+import { EMPTY_SELECTION, click, menuTargets } from '../selection/selectionModel';
 import { useTrackSelection } from '../selection/useTrackSelection';
 import {
   applyReorder,
@@ -622,14 +622,9 @@ export default function Library({
   const rowMenuTargets: Track[] = (() => {
     if (!rowMenu) return EMPTY_TRACKS;
     const { track: menuTrack, pane } = rowMenu.context;
-    const paneSelection = selForPane(pane).selection;
-    if (!paneSelection.ids.includes(menuTrack.id)) return [menuTrack];
     const paneTracks = pane === 'editLibrary' ? libraryTracks : currentTracks;
     const byId = new Map<number, Track>(paneTracks.map((t: Track) => [t.id, t]));
-    return paneSelection.ids.flatMap((id): Track[] => {
-      const t = id === menuTrack.id ? menuTrack : byId.get(id);
-      return t ? [t] : [];
-    });
+    return menuTargets(selForPane(pane).selection, menuTrack, (id) => byId.get(id));
   })();
   const menuInViewedPlaylist = canRemoveFromPlaylist && rowMenu?.context.pane === 'main';
   const rowMenuItems = useTrackMenuItems({

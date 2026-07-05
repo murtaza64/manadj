@@ -52,6 +52,36 @@ export function rangeClick(sel: Selection, id: number, order: readonly number[])
   return { ids: order.slice(lo, hi + 1), anchorId: id };
 }
 
+/** The standard click-gesture dispatch (playlist-editing 02, shared by
+ * the Library panes and the Set pane — sets 18): shift = range from the
+ * anchor in visible order, cmd/ctrl = toggle, plain = select one. */
+export function selectGesture(
+  sel: Selection,
+  id: number,
+  mods: { shift: boolean; toggle: boolean },
+  order: readonly number[]
+): Selection {
+  return mods.shift ? rangeClick(sel, id, order) : mods.toggle ? toggleClick(sel, id) : click(sel, id);
+}
+
+/**
+ * Context-menu targets under the universal targeting rule (sets 17):
+ * the selection if the clicked row is in it, else the clicked row —
+ * resolved to rows in selection order (ids that resolve to nothing are
+ * skipped, e.g. rows whose metadata is still loading).
+ */
+export function menuTargets<T extends { id: number }>(
+  sel: Selection,
+  clicked: T,
+  byId: (id: number) => T | undefined
+): T[] {
+  if (!sel.ids.includes(clicked.id)) return [clicked];
+  return sel.ids.flatMap((id): T[] => {
+    const t = id === clicked.id ? clicked : byId(id);
+    return t ? [t] : [];
+  });
+}
+
 /**
  * j/k navigation: collapse to a single row, moving from the anchor
  * (clamped to the list; first row when nothing was selected).

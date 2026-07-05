@@ -32,6 +32,13 @@ import {
   readTrackDragSource,
   setTrackDragPayload,
 } from '../selection/trackDrag';
+import {
+  EMPTY_SELECTION,
+  click,
+  menuTargets,
+  selectGesture,
+} from '../selection/selectionModel';
+import type { SelectMods } from '../components/TrackRow';
 import { useToast } from '../components/Toast';
 import ContextMenu, { useContextMenuState, type MenuItem } from '../components/ContextMenu';
 import { useTrackMenuItems } from '../components/useTrackMenuItems';
@@ -84,14 +91,17 @@ import {
   addTracksToSet,
   ensureSetEntriesLoaded,
   getSetScroll,
+  getSetSelection,
   insertTrackIntoSet,
-  removeTrackFromSet,
+  removeTracksFromSet,
   reorderSetEntries,
   setAdjacencyPin,
   setAdjacencyPins,
   setSetScroll,
+  setSetSelection,
   useSetDormantPins,
   useSetEntries,
+  useSetSelection,
 } from './setStore';
 import SetSuggestions, { type SuggestTarget } from './SetSuggestions';
 import { ArchivedTrackFlag, ArchivedTrackRowMark } from './archivedFlag';
@@ -449,23 +459,83 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const lastTrack =
     entries && entries.length > 0 ? trackMap?.get(entries[entries.length - 1].trackId) : undefined;
 
+  // ── Row selection (sets 18): standard gestures — click selects one,
+  // shift-click ranges from the anchor (in set order), cmd-click
+  // toggles; Esc / empty-space click clears. The selection lives in the
+  // set store (survives mode switches; readable by the menu, keyboard,
+  // and drag handlers). Entry mutations prune it store-side.
+  const selection = useSetSelection(setId);
+  const selectedIds = useMemo(() => new Set(selection.ids), [selection.ids]);
+  const handleRowSelect = (trackId: number, mods: SelectMods) => {
+    if (!entries) return;
+    const sel = getSetSelection(setId);
+    setSetSelection(setId, selectGesture(sel, trackId, mods, entries.map((e) => e.trackId)));
+  };
+  // Keyboard: Esc clears; Delete/Backspace removes the selection with
+  // standard pin handling (one reconcile pass — identical semantics to
+  // the single-row ✕). Bubble-phase on purpose: an open ContextMenu
+  // eats Escape on capture, so closing a menu never clears the rows.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const sel = getSetSelection(setId);
+      if (sel.ids.length === 0) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === 'Escape') {
+        setSetSelection(setId, EMPTY_SELECTION);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        removeTracksFromSet(setId, sel.ids);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [setId]);
+  /** Group drag (sets 18): a selected row drags the whole selection —
+   * in SET order, so a non-contiguous selection compacts at the drop
+   * point as one contiguous run (playlist-editor convention). An
+   * unselected row SELECTS-and-drags just itself (the name says the
+   * write: this deliberately diverges from the Library's pure
+   * getDragIds, per the issue's Decisions). */
+  const selectAndGetDragIds = (trackId: number): number[] => {
+    const sel = getSetSelection(setId);
+    if (sel.ids.includes(trackId) && entries) {
+      const member = new Set(sel.ids);
+      return entries.filter((e) => member.has(e.trackId)).map((e) => e.trackId);
+    }
+    setSetSelection(setId, click(sel, trackId));
+    return [trackId];
+  };
+
   // ── Track-row context menu (sets 17): the universal track menu plus
   // the surface's Remove from set. Targeting bakes in Library's rule —
   // targets = the selection if the clicked row is in it, else the
-  // clicked row; with no selection model yet (issue 18) that is de
-  // facto the clicked row, and 18 upgrades to multi for free.
+  // clicked row (sets 18: right-clicking outside the selection selects
+  // the row, so menu and highlight always agree).
   const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } =
     useContextMenuState<Track>();
+  const rowMenuTargets: Track[] = rowMenu
+    ? menuTargets(selection, rowMenu.context, (id) => trackMap?.get(id))
+    : [];
   const rowMenuItems = useTrackMenuItems({
-    tracks: rowMenu ? [rowMenu.context] : [],
+    tracks: rowMenuTargets,
     excludeSetId: setId,
     loadToDeck: onLoadToDeck,
     surfaceItems: rowMenu
       ? [
           {
-            label: 'Remove from set',
+            label:
+              rowMenuTargets.length > 1
+                ? `Remove ${rowMenuTargets.length} from set`
+                : 'Remove from set',
             danger: true,
-            onSelect: () => removeTrackFromSet(setId, rowMenu.context.id),
+            onSelect: () => removeTracksFromSet(setId, rowMenuTargets.map((t) => t.id)),
           },
         ]
       : [],
@@ -761,6 +831,17 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onClick={(e) => {
+          // Empty-space click clears the selection (sets 18). Clicks on
+          // rows (track or adjacency) are theirs — only the bare pane
+          // beneath/between counts as empty space.
+          if ((e.target as HTMLElement).closest('[data-set-track-row], [data-set-adjacency-row]')) {
+            return;
+          }
+          if (getSetSelection(setId).ids.length > 0) {
+            setSetSelection(setId, EMPTY_SELECTION);
+          }
+        }}
         style={{ position: 'relative', flex: 1, overflow: 'auto' }}
       >
         {dropIndicator && (
@@ -797,11 +878,16 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   track={track}
                   planned={planned}
                   conducting={conductingThis && conductingTrackId === entry.trackId}
+                  selected={selectedIds.has(entry.trackId)}
                   dragging={dragIds?.includes(entry.trackId) ?? false}
+                  onSelect={(mods) => handleRowSelect(entry.trackId, mods)}
                   onDragStart={(e) => {
-                    setTrackDragPayload(e.dataTransfer, [entry.trackId], 'set-pane');
-                    dragIdsRef.current = [entry.trackId];
-                    setDragIds([entry.trackId]);
+                    // Group drag (sets 18): the whole selection when the
+                    // row is in it, in set order.
+                    const ids = selectAndGetDragIds(entry.trackId);
+                    setTrackDragPayload(e.dataTransfer, ids, 'set-pane');
+                    dragIdsRef.current = ids;
+                    setDragIds(ids);
                   }}
                   onDragEnd={() => {
                     // Fires after drop AND on cancel (Esc / drop outside):
@@ -811,11 +897,18 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                     setPreviewOrder(null);
                   }}
                   onPlayFrom={plan ? () => playFromEntry(i) : undefined}
-                  onRemove={() => removeTrackFromSet(setId, entry.trackId)}
+                  onRemove={() => removeTracksFromSet(setId, [entry.trackId])}
                   onContextMenu={
                     track
                       ? (e) => {
                           e.preventDefault();
+                          // Standard: right-click outside the selection
+                          // selects the row (sets 18) — the menu then
+                          // targets exactly the highlighted rows.
+                          const sel = getSetSelection(setId);
+                          if (!sel.ids.includes(track.id)) {
+                            setSetSelection(setId, click(sel, track.id));
+                          }
                           openRowMenu(e.clientX, e.clientY, track);
                         }
                       : undefined
@@ -1018,6 +1111,7 @@ function AdjacencyRow({
   return (
     <>
       <div
+        data-set-adjacency-row
         onClick={onOpenEditor}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -1219,7 +1313,9 @@ function SetTrackRow({
   track,
   planned,
   conducting,
+  selected,
   dragging,
+  onSelect,
   onDragStart,
   onDragEnd,
   onPlayFrom,
@@ -1233,10 +1329,16 @@ function SetTrackRow({
   planned: PlannedEntry | undefined;
   /** The Conductor's playhead is inside this entry (sets 04). */
   conducting: boolean;
+  /** In the pane's row selection (sets 18): blue wash + inset blue ring.
+   * Coexists with the conducting highlight — when both, the mauve wash
+   * keeps the background and the ring marks the selection. */
+  selected: boolean;
   /** This row is the drag source (sets 23) — dimmed, sortable-style,
    * wherever it currently displays (its hypothetical slot mid-preview,
    * its committed one when the pointer is back over it). */
   dragging: boolean;
+  /** Selection gestures (sets 18): plain / shift-range / cmd-toggle. */
+  onSelect: (mods: { shift: boolean; toggle: boolean }) => void;
   /** Row drag lifecycle (sets 07): the pane sets the drag payload and
    * tracks the dragged ids for the ladder's live preview. */
   onDragStart: (e: React.DragEvent) => void;
@@ -1253,6 +1355,7 @@ function SetTrackRow({
     <div
       data-set-track-row
       draggable
+      onClick={(e) => onSelect({ shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onContextMenu={onContextMenu}
@@ -1267,17 +1370,26 @@ function SetTrackRow({
         borderLeft: planned
           ? `3px solid ${DECK_COLORS[planned.deck]}`
           : '3px solid transparent',
+        // Selection and conducting coexist, distinct (sets 18): mauve
+        // wash = Conductor position, blue = selection; a selected
+        // conducting row keeps the mauve wash and wears the blue ring.
         background: conducting
           ? 'color-mix(in srgb, var(--mauve) 18%, transparent)'
-          : hovered
-            ? 'var(--surface0)'
-            : 'transparent',
+          : selected
+            ? 'color-mix(in srgb, var(--blue) 22%, transparent)'
+            : hovered
+              ? 'var(--surface0)'
+              : 'transparent',
+        boxShadow: selected ? 'inset 0 0 0 2px var(--blue)' : undefined,
         opacity: dragging ? 0.45 : 1,
         cursor: 'grab',
       }}
     >
       <button
-        onClick={onPlayFrom}
+        onClick={(e) => {
+          e.stopPropagation(); // never doubles as a selection click
+          onPlayFrom?.();
+        }}
         disabled={!onPlayFrom}
         title="Play the set from this track's planned entry"
         style={{
@@ -1318,7 +1430,10 @@ function SetTrackRow({
         {track?.bpm ? `${track.bpm.toFixed(1)} BPM` : '—'}
       </span>
       <button
-        onClick={onRemove}
+        onClick={(e) => {
+          e.stopPropagation(); // never doubles as a selection click
+          onRemove();
+        }}
         title="Remove from set"
         style={{
           visibility: hovered ? 'visible' : 'hidden',
