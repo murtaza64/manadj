@@ -124,3 +124,5 @@ issue 13 (needs-triage). (4) Overlapping windows edge (B→C window opens
 before A→B closes): the shared deck gets an instantaneous jump, aggravated
 by load delays — needs visual surfacing (ladder) and graceful handling
 (e.g. early fade-out to free the deck ~5s for loading); in the same grill.
+
+**2026-07-05 — grilling round 3 (rehearsal loop).** Assessed the "notice gap → mix live → Take appears → pin" story: capture machinery and evidence model already cover it; two connecting gestures were missing. Decisions: a practice affordance per adjacency (loads outgoing→A/incoming→B in the Performance view, runway/hot-cue/Main-cue positioning, re-press re-cues) distinct from issue 09's editor click-through; fresh Takes invalidate the takes query and surface a transient "new take — pin?" chip on the matching adjacency (latest attempt; never auto-pinned). Filed as issue 13; Conductor practice-mode (pause at unresolved) stays deferred.
