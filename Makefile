@@ -1,9 +1,14 @@
-.PHONY: dev app test typecheck waveforms
+.PHONY: dev dev-app app test typecheck waveforms
 
 PORT ?= 5173
 
 dev: frontend/node_modules/.package-lock.json
 	uv run scripts/dev.py
+
+# Everything in one command: backend + frontend + desktop shell.
+# Quitting the window (Cmd+Q) shuts the servers down too.
+dev-app: frontend/node_modules/.package-lock.json desktop/node_modules/.package-lock.json
+	uv run scripts/dev.py --app
 
 # npm creates node_modules/.package-lock.json on install; rebuild when the
 # real lockfile (or package.json) is newer.

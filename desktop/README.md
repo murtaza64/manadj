@@ -6,12 +6,19 @@ state — `make dev` still runs the backend and Vite; this is just the window
 
 ## Usage
 
-    make app              # attaches to http://localhost:5173
+    make dev-app          # backend + frontend + shell in one command;
+                          # Cmd+Q shuts everything down
+    make app              # window only — attaches to http://localhost:5173
     make app PORT=5193    # attaches to a lane's Vite port
     npx electron . --url http://localhost:5193   # arbitrary URL
 
 If nothing is running at the target, the shell shows a retry page and
-auto-loads once the server comes up.
+auto-loads once the server comes up. `make dev-app` is orchestration in
+`scripts/dev.py`, not in the shell — the shell itself stays attach-only.
+
+Live reload: the window renders the Vite dev server, so frontend HMR and
+`uvicorn --reload` work as in a browser. Changes to `main.js` itself require
+relaunching the shell (rare; no electronmon dependency on purpose).
 
 ## Behavior
 

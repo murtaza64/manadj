@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import queue
 import signal
@@ -16,6 +17,7 @@ RESET = "\033[0m"
 LABEL_COLORS = {
     "backend": "\033[1;34m",
     "frontend": "\033[1;32m",
+    "app": "\033[1;35m",
 }
 
 
@@ -77,6 +79,14 @@ def stop_processes(processes: list[subprocess.Popen[str]]) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Run the manadj dev processes.")
+    parser.add_argument(
+        "--app",
+        action="store_true",
+        help="also launch the desktop shell; quitting it stops everything",
+    )
+    args = parser.parse_args()
+
     line_queue: queue.Queue[tuple[str, str]] = queue.Queue()
     shutting_down = False
     use_color = sys.stdout.isatty()
@@ -108,6 +118,35 @@ def main() -> int:
     )
 
     processes = [backend, frontend]
+
+    if args.app:
+        # The shell is attach-only (desktop/README.md): it polls until Vite is
+        # up, so spawn order doesn't matter. It is a full peer child — any
+        # child exiting (including Cmd+Q on the window) tears everything down.
+        #
+        # Spawn the Electron binary directly (resolved via electron's own
+        # path.txt contract): wrapper layers (npx, cli.js) don't reliably
+        # forward SIGTERM, orphaning the window on teardown.
+        electron_dir = ROOT / "desktop" / "node_modules" / "electron"
+        try:
+            electron_bin = electron_dir / "dist" / (
+                (electron_dir / "path.txt").read_text().strip()
+            )
+        except OSError:
+            print(
+                "electron is not installed — run `make dev-app` (or "
+                "`cd desktop && npm install`; see desktop/README.md "
+                "troubleshooting if that fails)",
+                file=sys.stderr,
+            )
+            return 1
+        app = spawn_process(
+            name="app",
+            command=[str(electron_bin), ".", "--port", "5173"],
+            cwd=ROOT / "desktop",
+            line_queue=line_queue,
+        )
+        processes.append(app)
 
     def handle_signal(_signum: int, _frame: object) -> None:
         nonlocal shutting_down
