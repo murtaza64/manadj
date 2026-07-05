@@ -429,8 +429,21 @@ class SetEntryItem(BaseModel):
 
     Position is NOT in the payload: it is the item's index in the list.
     track_id is the entry identity (a Track at most once per Set).
+
+    The pin (sets 02) describes the adjacency this entry heads: a
+    Transition uuid, a Take uuid, or nothing (Unresolved). Kind and uuid
+    travel together; the uuid is stored as asserted (never validated
+    against the transitions/takes tables — dangling degrades client-side).
     """
     track_id: int
+    pin_kind: str | None = Field(default=None, pattern=r"^(transition|take)$")
+    pin_uuid: str | None = None
+
+    @model_validator(mode="after")
+    def _pin_fields_travel_together(self) -> "SetEntryItem":
+        if (self.pin_kind is None) != (self.pin_uuid is None):
+            raise ValueError("pin_kind and pin_uuid must both be set or both be null")
+        return self
 
 
 class SetEntriesReplace(BaseModel):
@@ -442,6 +455,8 @@ class SetEntryRow(BaseModel):
     """A persisted Set entry (GET response)."""
     track_id: int
     position: int
+    pin_kind: str | None
+    pin_uuid: str | None
 
     model_config = ConfigDict(from_attributes=True)
 

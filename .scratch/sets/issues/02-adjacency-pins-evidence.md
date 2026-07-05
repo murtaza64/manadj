@@ -1,6 +1,6 @@
 # 02 — Adjacency pins, evidence, badges
 
-Status: ready-for-agent
+Status: done (landed on main, change ooytvuot)
 
 ## Parent
 
@@ -24,3 +24,23 @@ Write the ADR "Set adjacencies may pin unpromoted Takes" (contradicts the prior 
 ## Blocked by
 
 - 01-set-model-sidebar-crud
+
+## Comments
+
+**2026-07-05 — Done (change ooytvuot, landed on main).** Migration
+`0020_ooytvuot` adds nullable `pin_kind`/`pin_uuid` to set_entries (pin =
+the adjacency the entry HEADS; stored as asserted, no FK — dangling
+degrades client-side). Schemas validate kind∈{transition,take} and
+kind/uuid travel together; router persists pins through the wholesale
+replace (tests extended). Frontend: `sets/adjacency.ts` pure model
+(autoFillProposal: favorite first, else sole Transition, never a Take;
+adjacencyView: pin resolution w/ dangling→unresolved, orthogonal
+Unresolved/Unpracticed, evidence counts) under `adjacency.test.ts`;
+`SetDetailPane` grew adjacency rows between track rows — pin chip
+(◆ transition / ● take / ✕ hard cut), per-adjacency one-click accept +
+header set-wide Auto-fill (fills only pin-less adjacencies), manual pin
+picker (ContextMenu) listing the pair's Transitions AND Takes + Unpin,
+UNRESOLVED and UNPRACTICED badges rendered distinctly, `N tr · M tk`
+counts from the pair store / takes history. ADR
+`docs/adr/0023-set-adjacencies-may-pin-unpromoted-takes.md` written.
+Promotion re-pointing of Take pins is issue 03+ scope (per PRD hook).

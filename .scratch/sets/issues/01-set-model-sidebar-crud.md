@@ -1,6 +1,6 @@
 # 01 — Set model, sidebar siblings, CRUD
 
-Status: ready-for-agent
+Status: done (landed on main, change mtwlsrnp)
 
 ## Parent
 
@@ -24,3 +24,18 @@ Set-view state (selected Set, scroll position) lives in a store, not component s
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+**2026-07-05 — Done (change mtwlsrnp, landed on main).** Migration
+`0019_mtwlsrnp` (sets + set_entries, unique (set_id, track_id));
+`backend/routers/sets.py` (CRUD + wholesale entries replace reconciled by
+track_id, per ADR 0011) with `tests/test_sets_router.py` in the takes-router
+mold; `api.sets` resource appended to `api/client.ts`; new
+`frontend/src/sets/` — `setStore.ts` (module store: selected Set + scroll +
+client-authoritative entries, followStore/pairStore patterns),
+`SetsSidebarSection.tsx` (section under Playlists: create/rename/recolor/
+delete, drop-to-add), `SetDetailPane.tsx` (ordered rows w/ key+BPM,
+drag-reorder, remove, drop-to-add). Library/PlaylistSidebar touched
+additively; `ViewType` gained `'set'`; track context menu gained
+"Add to set ▸". Set view + scroll survive mode switches via the store.

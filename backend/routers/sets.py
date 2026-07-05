@@ -128,9 +128,19 @@ def replace_entries(
     for position, item in enumerate(payload.items):
         entry = existing.get(item.track_id)
         if entry is None:
-            db.add(models.SetEntry(set_id=set_id, track_id=item.track_id, position=position))
+            db.add(
+                models.SetEntry(
+                    set_id=set_id,
+                    track_id=item.track_id,
+                    position=position,
+                    pin_kind=item.pin_kind,
+                    pin_uuid=item.pin_uuid,
+                )
+            )
         else:
             entry.position = position
+            entry.pin_kind = item.pin_kind
+            entry.pin_uuid = item.pin_uuid
 
     for track_id, entry in existing.items():
         if track_id not in seen:

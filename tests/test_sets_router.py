@@ -195,3 +195,92 @@ def test_sidebar_reorder(client):
     assert resp.status_code == 200
     rows = client.get("/api/sets").json()
     assert [r["id"] for r in rows] == [b["id"], a["id"]]
+
+
+# ── Adjacency pins (sets 02) ────────────────────────────────────────────
+# The entry's pin describes the adjacency it heads (this entry → the
+# next). Pins are explicit, nullable, stable references: a Transition
+# uuid, a Take uuid, or nothing (Unresolved). The backend stores what the
+# client asserts — it never resolves or validates pin uuids against the
+# transitions/takes tables (dangling pins degrade client-side).
+
+
+def test_pins_round_trip(client, make_track):
+    t1, t2, t3 = make_track(), make_track(), make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={
+            "items": [
+                {"track_id": t1.id, "pin_kind": "transition", "pin_uuid": "tr-1"},
+                {"track_id": t2.id, "pin_kind": "take", "pin_uuid": "tk-1"},
+                {"track_id": t3.id},
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    entries = resp.json()["entries"]
+    assert [(e["pin_kind"], e["pin_uuid"]) for e in entries] == [
+        ("transition", "tr-1"),
+        ("take", "tk-1"),
+        (None, None),
+    ]
+
+    detail = client.get(f"/api/sets/{s['id']}").json()
+    assert [(e["pin_kind"], e["pin_uuid"]) for e in detail["entries"]] == [
+        ("transition", "tr-1"),
+        ("take", "tk-1"),
+        (None, None),
+    ]
+
+
+def test_replace_updates_and_clears_pins(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [
+            {"track_id": t1.id, "pin_kind": "transition", "pin_uuid": "tr-1"},
+            {"track_id": t2.id},
+        ]},
+    )
+    # Re-pin to a different Transition, then unpin entirely.
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [
+            {"track_id": t1.id, "pin_kind": "transition", "pin_uuid": "tr-2"},
+            {"track_id": t2.id},
+        ]},
+    )
+    assert resp.json()["entries"][0]["pin_uuid"] == "tr-2"
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [{"track_id": t1.id}, {"track_id": t2.id}]},
+    )
+    assert resp.json()["entries"][0]["pin_kind"] is None
+    assert resp.json()["entries"][0]["pin_uuid"] is None
+
+
+def test_pin_kind_requires_uuid_and_vice_versa(client, make_track):
+    t1 = make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [{"track_id": t1.id, "pin_kind": "transition"}]},
+    )
+    assert resp.status_code == 422
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [{"track_id": t1.id, "pin_uuid": "tr-1"}]},
+    )
+    assert resp.status_code == 422
+
+
+def test_pin_kind_vocabulary(client, make_track):
+    t1 = make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [{"track_id": t1.id, "pin_kind": "vibes", "pin_uuid": "x"}]},
+    )
+    assert resp.status_code == 422

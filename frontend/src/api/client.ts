@@ -1013,11 +1013,16 @@ export interface SetRowWire {
 
 export interface SetEntryItemWire {
   track_id: number;
+  /** Adjacency pin (sets 02): kind and uuid travel together (both or neither). */
+  pin_kind?: 'transition' | 'take' | null;
+  pin_uuid?: string | null;
 }
 
 export interface SetEntryRowWire {
   track_id: number;
   position: number;
+  pin_kind: 'transition' | 'take' | null;
+  pin_uuid: string | null;
 }
 
 export interface SetWithEntriesWire extends SetRowWire {

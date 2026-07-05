@@ -1,11 +1,18 @@
 /**
- * The Set detail pane (sets 01): replaces the track table on the browse
- * surface when a Set is selected. Ordered track rows (title/artist, key,
- * BPM) with drag-reorder and remove; adds arrive by dropping tracks onto
- * the Set's sidebar row or the pane itself. Scroll position and selection
- * live in the set store — the pane survives mode switches unmoved.
+ * The Set detail pane (sets 01+02): replaces the track table on the
+ * browse surface when a Set is selected. Ordered track rows (title/
+ * artist, key, BPM) with drag-reorder and remove; adds arrive by dropping
+ * tracks onto the Set's sidebar row or the pane itself. Scroll position
+ * and selection live in the set store — the pane survives mode switches
+ * unmoved.
+ *
+ * Between track rows sit adjacency rows (sets 02): pin chip, evidence
+ * counts (N tr · M tk against the Transition library / Take history),
+ * and the orthogonal Unresolved ("will hard-cut") and Unpracticed
+ * badges. Auto-fill (per-adjacency and set-wide) proposes Transitions
+ * only; the manual pin picker also lists the pair's Takes (ADR 0023).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Track } from '../types';
@@ -23,12 +30,27 @@ import {
   setTrackDragPayload,
 } from '../selection/trackDrag';
 import { useToast } from '../components/Toast';
+import ContextMenu, { type MenuItem } from '../components/ContextMenu';
+import {
+  initTransitionStore,
+  snapshotPairStore,
+  subscribePairStore,
+} from '../editor/pairStore';
+import {
+  adjacencyView,
+  autoFillProposal,
+  type AdjacencyPin,
+  type TakeEvidence,
+  type TransitionEvidence,
+} from './adjacency';
 import {
   addTracksToSet,
   ensureSetEntriesLoaded,
   getSetScroll,
   removeTrackFromSet,
   reorderSetEntries,
+  setAdjacencyPin,
+  setAdjacencyPins,
   setSetScroll,
   useSetEntries,
 } from './setStore';
@@ -46,6 +68,39 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
 
   const { data: sets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
   const set = sets.find((s) => s.id === setId);
+
+  // ── Adjacency evidence (sets 02) ─────────────────────────────────────
+  // Transitions per ordered pair from the pair store (the Transition
+  // library's own source of truth); Takes from the history list.
+  const pairStore = useSyncExternalStore(subscribePairStore, snapshotPairStore);
+  useEffect(() => {
+    void initTransitionStore();
+  }, []);
+  const { data: takes = [] } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+
+  const pairEvidence = (a: number, b: number) => {
+    const transitions: TransitionEvidence[] = (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
+      uuid: it.uuid,
+      name: it.name,
+      favorite: it.favorite ?? false,
+    }));
+    const pairTakes: TakeEvidence[] = takes
+      .filter((t) => t.a_track_id === a && t.b_track_id === b)
+      .map((t) => ({ uuid: t.uuid, detectedAt: t.detected_at }));
+    return { transitions, takes: pairTakes };
+  };
+
+  // Set-wide auto-fill: one click accepts every proposal on a pin-less
+  // adjacency. Existing pins (even dangling ones) are never overwritten.
+  const autoFillable = new Map<number, AdjacencyPin>();
+  if (entries) {
+    for (let i = 0; i < entries.length - 1; i++) {
+      if (entries[i].pin !== null) continue;
+      const { transitions } = pairEvidence(entries[i].trackId, entries[i + 1].trackId);
+      const proposal = autoFillProposal(transitions);
+      if (proposal) autoFillable.set(entries[i].trackId, { kind: 'transition', uuid: proposal.uuid });
+    }
+  }
 
   // Track metadata for the entry rows (batch-by-Promise.all pattern, as in
   // TakeHistoryView's labels query).
@@ -129,6 +184,7 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
         style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           padding: '4px 12px',
           borderBottom: '1px solid var(--surface0)',
           background: 'var(--crust)',
@@ -151,6 +207,25 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
             {entries?.length ?? 0} tracks
           </span>
         </span>
+        <button
+          onClick={() => setAdjacencyPins(setId, autoFillable)}
+          disabled={autoFillable.size === 0}
+          title={
+            autoFillable.size === 0
+              ? 'No unresolved adjacency has an unambiguous Transition'
+              : 'Pin the proposed Transition on every unresolved adjacency'
+          }
+          style={{
+            padding: '2px 10px',
+            background: autoFillable.size > 0 ? 'var(--green)' : 'var(--surface0)',
+            color: autoFillable.size > 0 ? 'var(--base)' : 'var(--subtext0)',
+            border: '1px solid var(--surface1)',
+            cursor: autoFillable.size > 0 ? 'pointer' : 'default',
+            fontSize: '12px',
+          }}
+        >
+          Auto-fill {autoFillable.size > 0 ? `(${autoFillable.size})` : ''}
+        </button>
       </div>
 
       <div
@@ -185,19 +260,174 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
         ) : (
           entries.map((entry, i) => {
             const track = trackMap?.get(entry.trackId);
+            const next = entries[i + 1];
             return (
-              <SetTrackRow
-                key={entry.trackId}
-                index={i}
-                trackId={entry.trackId}
-                track={track}
-                onRemove={() => removeTrackFromSet(setId, entry.trackId)}
-              />
+              <div key={entry.trackId}>
+                <SetTrackRow
+                  index={i}
+                  trackId={entry.trackId}
+                  track={track}
+                  onRemove={() => removeTrackFromSet(setId, entry.trackId)}
+                />
+                {next && (
+                  <AdjacencyRow
+                    pin={entry.pin}
+                    evidence={pairEvidence(entry.trackId, next.trackId)}
+                    onPin={(pin) => setAdjacencyPin(setId, entry.trackId, pin)}
+                  />
+                )}
+              </div>
             );
           })
         )}
       </div>
     </div>
+  );
+}
+
+/** Pin-chip text per resolved status. */
+function pinChip(view: ReturnType<typeof adjacencyView>): { text: string; color: string } {
+  if (view.status === 'transition') {
+    const star = view.transition!.favorite ? '★ ' : '';
+    return { text: `◆ ${star}${view.transition!.name}`, color: 'var(--green)' };
+  }
+  if (view.status === 'take') {
+    const date = new Date(view.take!.detectedAt).toLocaleDateString();
+    return { text: `● take · ${date} (unpromoted)`, color: 'var(--mauve)' };
+  }
+  return { text: '✕ hard cut', color: 'var(--subtext0)' };
+}
+
+function AdjacencyRow({
+  pin,
+  evidence,
+  onPin,
+}: {
+  pin: AdjacencyPin | null;
+  evidence: { transitions: TransitionEvidence[]; takes: TakeEvidence[] };
+  onPin: (pin: AdjacencyPin | null) => void;
+}) {
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const view = adjacencyView(pin, evidence.transitions, evidence.takes);
+  const proposal = pin === null ? autoFillProposal(evidence.transitions) : null;
+  const chip = pinChip(view);
+
+  // Manual pin picker: the pair's Transitions AND Takes (Takes are never
+  // auto-filled — pinning one is always this explicit act, ADR 0023).
+  const pickerItems: MenuItem[] = [
+    ...evidence.transitions.map((t) => ({
+      label: `${t.favorite ? '★ ' : ''}${t.name}${pin?.uuid === t.uuid ? ' ✓' : ''}`,
+      onSelect: () => onPin({ kind: 'transition', uuid: t.uuid }),
+    })),
+    ...evidence.takes.map((t, i) => ({
+      label: `Take · ${new Date(t.detectedAt).toLocaleString()}${pin?.uuid === t.uuid ? ' ✓' : ''}`,
+      separatorBefore: i === 0 && evidence.transitions.length > 0,
+      onSelect: () => onPin({ kind: 'take', uuid: t.uuid }),
+    })),
+    ...(evidence.transitions.length === 0 && evidence.takes.length === 0
+      ? [{ label: 'No transitions or takes for this pair', disabled: true }]
+      : []),
+    ...(pin !== null
+      ? [
+          {
+            label: 'Unpin (hard cut)',
+            danger: true,
+            separatorBefore: true,
+            onSelect: () => onPin(null),
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '2px 12px 2px 48px',
+          background: 'var(--crust)',
+          borderBottom: '1px solid var(--surface0)',
+          fontSize: '12px',
+        }}
+      >
+        {/* Pin chip — click opens the manual pin picker */}
+        <button
+          onClick={(e) => setMenuPos({ x: e.clientX, y: e.clientY })}
+          title="Pin a transition or take for this handover"
+          style={{
+            padding: '1px 8px',
+            background: 'var(--surface0)',
+            border: '1px solid var(--surface1)',
+            color: chip.color,
+            cursor: 'pointer',
+            fontSize: '12px',
+          }}
+        >
+          {chip.text}
+        </button>
+
+        {/* One-click auto-fill accept (Transitions only, favorite first) */}
+        {proposal && view.status === 'unresolved' && (
+          <button
+            onClick={() => onPin({ kind: 'transition', uuid: proposal.uuid })}
+            title="Pin the proposed Transition"
+            style={{
+              padding: '1px 8px',
+              background: 'transparent',
+              border: '1px dashed var(--green)',
+              color: 'var(--green)',
+              cursor: 'pointer',
+              fontSize: '12px',
+            }}
+          >
+            ↳ pin {proposal.favorite ? '★ ' : ''}{proposal.name}
+          </button>
+        )}
+
+        {/* Orthogonal badges: Unresolved (will hard-cut) · Unpracticed */}
+        {view.status === 'unresolved' && (
+          <span
+            style={{
+              padding: '1px 6px',
+              background: 'var(--red)',
+              color: 'var(--base)',
+              fontSize: '11px',
+              fontWeight: 600,
+            }}
+          >
+            UNRESOLVED — will hard-cut
+          </span>
+        )}
+        {view.unpracticed && (
+          <span
+            style={{
+              padding: '1px 6px',
+              background: 'var(--yellow)',
+              color: 'var(--base)',
+              fontSize: '11px',
+              fontWeight: 600,
+            }}
+          >
+            UNPRACTICED
+          </span>
+        )}
+
+        {/* Evidence counts for the ordered pair */}
+        <span style={{ marginLeft: 'auto', color: 'var(--subtext0)' }}>
+          {view.counts.transitions} tr · {view.counts.takes} tk
+        </span>
+      </div>
+      {menuPos && (
+        <ContextMenu
+          x={menuPos.x}
+          y={menuPos.y}
+          items={pickerItems}
+          onClose={() => setMenuPos(null)}
+        />
+      )}
+    </>
   );
 }
 

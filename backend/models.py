@@ -421,6 +421,14 @@ class SetEntry(Base):
     invariant as Playlist), which makes track_id the entry identity — the
     client-authoritative wholesale replace (ADR 0011 pattern) reconciles
     by it. Position is the payload index.
+
+    The pin columns (sets 02) describe the adjacency this entry HEADS
+    (this entry → the next): an explicit, nullable, stable reference to a
+    saved Transition (by uuid), a Take (by uuid — ADR 0023), or nothing
+    (Unresolved = playback hard-cuts). Deliberately NOT foreign keys: the
+    backend stores what the client asserts, and dangling pins degrade to
+    unresolved client-side rather than break (PRD). The last entry's pin
+    is always null.
     """
 
     __tablename__ = "set_entries"
@@ -429,6 +437,8 @@ class SetEntry(Base):
     set_id = Column(Integer, ForeignKey("sets.id", ondelete="CASCADE"), nullable=False)
     track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False)
     position = Column(Integer, nullable=False)
+    pin_kind = Column(String, nullable=True)  # "transition" | "take" | NULL
+    pin_uuid = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

@@ -14,9 +14,15 @@
  */
 import { useSyncExternalStore } from 'react';
 import { api } from '../api/client';
+import type { AdjacencyPin } from './adjacency';
 
 export interface SetEntryLocal {
   trackId: number;
+  /** The pin of the adjacency this entry heads (sets 02): a Transition
+   * uuid, a Take uuid, or null (Unresolved). Meaningless on the last
+   * entry. Stable — only explicit user acts (pin/unpin/auto-fill accept)
+   * change it; saving new Transitions for the pair never does. */
+  pin: AdjacencyPin | null;
 }
 
 interface SetStoreSnapshot {
@@ -98,7 +104,16 @@ async function doLoad(setId: number): Promise<void> {
   try {
     const detail = await api.sets.get(setId);
     if (snapshot.entriesBySet[setId]) return; // a local write beat the load
-    setEntriesLocal(setId, detail.entries.map((e) => ({ trackId: e.track_id })));
+    setEntriesLocal(
+      setId,
+      detail.entries.map((e) => ({
+        trackId: e.track_id,
+        pin:
+          e.pin_kind === 'transition' || e.pin_kind === 'take'
+            ? { kind: e.pin_kind, uuid: e.pin_uuid! }
+            : null,
+      }))
+    );
   } catch (err) {
     console.error(`set store: entries load failed for set ${setId}`, err);
     if (!snapshot.entriesBySet[setId]) setEntriesLocal(setId, []);
@@ -122,7 +137,14 @@ export function replaceSetEntries(setId: number, entries: SetEntryLocal[]): void
 
 async function pushEntries(setId: number, entries: SetEntryLocal[]): Promise<void> {
   try {
-    await api.sets.replaceEntries(setId, entries.map((e) => ({ track_id: e.trackId })));
+    await api.sets.replaceEntries(
+      setId,
+      entries.map((e) => ({
+        track_id: e.trackId,
+        pin_kind: e.pin?.kind ?? null,
+        pin_uuid: e.pin?.uuid ?? null,
+      }))
+    );
   } catch (err) {
     console.error(`set store: save failed for set ${setId}`, err);
   }
@@ -136,9 +158,40 @@ export async function addTracksToSet(setId: number, trackIds: number[]): Promise
   const present = new Set(entries.map((e) => e.trackId));
   const fresh = trackIds.filter((id) => !present.has(id));
   if (fresh.length > 0) {
-    replaceSetEntries(setId, [...entries, ...fresh.map((trackId) => ({ trackId }))]);
+    replaceSetEntries(setId, [...entries, ...fresh.map((trackId) => ({ trackId, pin: null }))]);
   }
   return trackIds.length - fresh.length;
+}
+
+/** Pin (or unpin, with null) the adjacency headed by the given track. */
+export function setAdjacencyPin(
+  setId: number,
+  headTrackId: number,
+  pin: AdjacencyPin | null
+): void {
+  const entries = snapshot.entriesBySet[setId];
+  if (!entries) return;
+  replaceSetEntries(
+    setId,
+    entries.map((e) => (e.trackId === headTrackId ? { ...e, pin } : e))
+  );
+}
+
+/** Apply several pins at once (set-wide auto-fill accept), keyed by head
+ * track id. Entries not in the map keep their pin. */
+export function setAdjacencyPins(
+  setId: number,
+  pinsByHeadTrackId: ReadonlyMap<number, AdjacencyPin>
+): void {
+  const entries = snapshot.entriesBySet[setId];
+  if (!entries) return;
+  replaceSetEntries(
+    setId,
+    entries.map((e) => {
+      const pin = pinsByHeadTrackId.get(e.trackId);
+      return pin ? { ...e, pin } : e;
+    })
+  );
 }
 
 export function removeTrackFromSet(setId: number, trackId: number): void {
