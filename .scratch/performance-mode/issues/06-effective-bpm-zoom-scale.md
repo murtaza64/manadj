@@ -33,3 +33,6 @@ view's shared zoom state stays rate-free.
   breathed the zoom scale mid-beatmatch — exactly when the ruler must hold
   still. The window rate is now pitch-only; the effective-BPM readout keeps
   bend (ears vs eyes).
+- Second follow-up (change nvlxzxny): the effective-BPM READOUT also
+  included bend — it wobbled during nudges. Both the ruler and the number
+  now answer "where is the tempo fader", not "what is this instant's rate".

@@ -30,7 +30,7 @@ import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons'
 import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { TagPopover } from './TagPopover';
-import { NUDGE_BEND_PERCENT, composeRate } from '../../playback/tempo';
+import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm } from '../../playback/tempo';
 import { trackWindowSeconds } from '../../utils/waveformZoom';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { DECK_KEYS } from './performanceKeys';
@@ -370,9 +370,10 @@ function MixZone({ track }: { track: Track | null }) {
   const channel = useMixerValue((m) => m.getChannelState(deck));
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
-  // Effective BPM — live with pitch AND bend (what your ears get right now).
-  const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, s.bendPercent));
-  const effective = track?.bpm ? track.bpm * rate : null;
+  // Effective BPM follows the pitch fader only: a nudge's momentary bend is
+  // a phase correction, not a tempo change — the readout must not wobble
+  // mid-beatmatch (same reasoning as the zoom window, performance-mode 06).
+  const effective = track?.bpm ? effectiveBpm(track.bpm, pitch) : null;
 
   const [hint, setHint] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
