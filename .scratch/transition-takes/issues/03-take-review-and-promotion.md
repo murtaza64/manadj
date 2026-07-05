@@ -46,3 +46,8 @@ Discrete gestures (beat jumps, hot cues) are ignored by the vectorizer in this s
 - Takes themselves stay immutable apart from the promoted reference.
 
 Deviation from the issue's letter: "saving promotes" — the editor autosaves, so the explicit **Promote** act plays the save role for drafts (browsing must cost nothing; ADR 0011's lazy-persistence spirit). Recorded here as the intended reading.
+
+**Post-landing follow-ups** (2026-07-05):
+- `kumnlusn` — take draft replaces the pristine "Transition 1" on fresh pairs (session-evaporation parity)
+- `owvttxkz` — review banner moved into the center panel's spare row (top strip overflowed the editor)
+- Timeline re-frames when the opened Take's durations arrive (window used to frame off-viewport / pinned at the right edge). NOTE: this code change landed inside `txzzvmmx` ("issue 06 grilled — docs") via a concurrent-snapshot interleave; the empty `lqtvktkx` on main carries its intended description. Recorded here since neither can be rewritten.
