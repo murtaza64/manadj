@@ -1,6 +1,6 @@
 # 06 — Editor's private mixer ignores the routed master device (bug)
 
-Status: done — pending user ear-verify
+Status: done — ear-verified 2026-07-05
 
 ## Parent
 
