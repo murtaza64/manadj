@@ -23,6 +23,7 @@ export type ButtonTarget =
   | { control: 'transport'; deck: ChannelId }
   | { control: 'cue'; deck: ChannelId }
   | { control: 'hot-cue'; deck: ChannelId; pad: number }
+  | { control: 'hot-cue-clear'; deck: ChannelId; pad: number }
   | { control: 'beatjump'; deck: ChannelId; direction: 'back' | 'forward' }
   | { control: 'beatjump-size'; deck: ChannelId; change: 'halve' | 'double' }
   | { control: 'match'; deck: ChannelId }

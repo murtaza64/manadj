@@ -75,6 +75,11 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       else controls?.hotCueUp(target.pad);
       return;
     }
+    case 'hot-cue-clear': {
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.hotCueClear(target.pad);
+      return;
+    }
     case 'beatjump': {
       if (edge !== 'down') return;
       deckControlsFor(target.deck)?.beatjump(target.direction);

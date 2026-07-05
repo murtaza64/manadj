@@ -21,6 +21,8 @@ export interface MidiDeckControls {
   hotCueDown(pad: number): void;
   /** Release a hot cue pad: ends a hold-to-preview. */
   hotCueUp(pad: number): void;
+  /** SHIFT+pad: delete the slot's hot cue (no-op when empty). */
+  hotCueClear(pad: number): void;
   /** Jump by the deck's current beatjump size. */
   beatjump(direction: 'back' | 'forward'): void;
   /** Halve/double the deck's beatjump size (shared with on-screen controls). */

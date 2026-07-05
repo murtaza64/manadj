@@ -1,4 +1,13 @@
-import type { Mapping } from '../mapping';
+import type { Binding, Mapping } from '../mapping';
+
+/** The shifted pad layer of a deck's HOTCUE mode: notes 0x08-0x0F. */
+function shiftedPadClears(deck: 'A' | 'B', channel: number): Binding[] {
+  return Array.from({ length: 8 }, (_, i) => ({
+    match: { message: 'note' as const, channel, number: 0x08 + i },
+    controlType: 'button' as const,
+    target: { control: 'hot-cue-clear' as const, deck, pad: i + 1 },
+  }));
+}
 
 /**
  * Hercules DJControl Inpulse 300 MK2 (glossary: Controller, Mapping).
@@ -362,6 +371,13 @@ export const INPULSE_300_MK2: Mapping = {
       controlType: 'button',
       target: { control: 'hot-cue', deck: 'B', pad: 8 },
     },
+
+    // SHIFT+pad clears the slot's hot cue. SHIFT is hardware-layered:
+    // shifted pads emit notes 0x08-0x0F on the same HOTCUE channels
+    // (deck A shifted pad 1 = note 0x08 ch 6, hardware-learned; the other
+    // 15 follow the layout — TODO(hardware-verify) at the next smoke test).
+    ...shiftedPadClears('A', 6),
+    ...shiftedPadClears('B', 7),
   ],
 
   // LED Feedback addresses. Ground truth: Mixxx's Inpulse 300 mapping

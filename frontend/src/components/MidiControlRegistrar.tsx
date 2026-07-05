@@ -75,6 +75,9 @@ function DeckControlsRegistrar() {
       registerDeckControls(deck, {
         hotCueDown: (pad) => latest.current.hotCues.down(pad),
         hotCueUp: (pad) => latest.current.hotCues.up(pad),
+        // Same remove path as the on-screen pads (React Query curation), so
+        // screen state and pad lights follow the clear.
+        hotCueClear: (pad) => latest.current.hotCues.remove(pad),
         beatjump: (direction) => {
           const { engine: e, ready: r, beatjumpBeats: beats } = latest.current;
           if (!r) return; // same gate as BeatjumpRow's disabled jumps

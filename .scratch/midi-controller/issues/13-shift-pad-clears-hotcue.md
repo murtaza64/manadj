@@ -1,6 +1,6 @@
 # 13 — SHIFT+pad clears the hot cue
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change qstrpums; checks green — hardware smoke test pending)
 
 ## Parent
 
@@ -36,3 +36,14 @@ action.
 - Coordination only: change 12 (gentle-rim-shift-fast-seek) is in flight in
   the midi lane and touches the same dispatch/registry/mapping files — land
   after it.
+
+## Comments
+
+- hot-cue-clear button target added to the vocabulary; dispatch routes the
+  down edge to the registered deck controls; registrar wires it to the same
+  React Query remove path as the on-screen pads, so screen state and the
+  padleds lights follow a hardware clear automatically.
+- Mapping: 16 shifted-pad bindings via a shiftedPadClears helper (notes
+  0x08-0x0F on the HOTCUE channels). Deck A shifted pad 1 is
+  hardware-learned; the other 15 carry TODO(hardware-verify).
+- Empty-slot clear is a silent no-op (remove() checks the slot).

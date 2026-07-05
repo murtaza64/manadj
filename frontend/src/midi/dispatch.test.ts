@@ -33,6 +33,7 @@ function registerFakeDeckControls(deck: ChannelId): void {
   registerDeckControls(deck, {
     hotCueDown: (pad) => calls.push(`${deck}:hotCueDown:${pad}`),
     hotCueUp: (pad) => calls.push(`${deck}:hotCueUp:${pad}`),
+    hotCueClear: (pad) => calls.push(`${deck}:hotCueClear:${pad}`),
     beatjump: (direction) => calls.push(`${deck}:beatjump:${direction}`),
     beatjumpSize: (change) => calls.push(`${deck}:beatjumpSize:${change}`),
     setPitch: (percent) => calls.push(`${deck}:setPitch:${percent}`),
@@ -172,6 +173,21 @@ describe('pads (midi-controller 02)', () => {
       target: { control: 'beatjump', deck: 'A', direction: 'back' },
     });
     expect(calls).toEqual([]);
+  });
+
+  it('hot cue clear fires on the down edge only (midi-controller 13)', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'hot-cue-clear', deck: 'A', pad: 3 },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'hot-cue-clear', deck: 'A', pad: 3 },
+    });
+    expect(calls).toEqual(['A:hotCueClear:3']);
   });
 
   it('deck controls only affect their own deck', () => {
