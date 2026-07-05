@@ -85,6 +85,10 @@ export interface FollowParams {
   tags: boolean;
   energy: boolean;
   energyPreset: EnergyPreset;
+  /** Narrow the candidates to the proven tier only (the retired
+   * transitions chip's job). Consumed by candidateIdSet, not by the
+   * per-reference query derivation. */
+  provenOnly: boolean;
 }
 
 /** Canonical defaults. Production currently projects the stored one-shot
@@ -97,6 +101,7 @@ export const DEFAULT_FOLLOW_PARAMS: FollowParams = {
   tags: false,
   energy: false,
   energyPreset: 'near',
+  provenOnly: false,
 };
 
 // ── Derivation ──────────────────────────────────────────────────────────
@@ -201,6 +206,27 @@ export function unionIds(resultSets: Track[][]): Set<number> {
   const ids = new Set<number>();
   for (const tracks of resultSets) {
     for (const t of tracks) ids.add(t.id);
+  }
+  return ids;
+}
+
+/**
+ * The full candidate id set (follow-mode 03): both evidence tiers.
+ * Heuristics propose (per-reference query results), the Transition
+ * library confirms — Tracks with a saved Transition from a followed
+ * reference are always candidates, even when the heuristic parameters
+ * would exclude them. `provenOnly` narrows to just the proven tier.
+ */
+export function candidateIdSet(
+  heuristicSets: Track[][],
+  // Anything keyed by track id — a Set of ids or the transition index's
+  // per-reference Map (trackId → PairInfo).
+  provenSets: ReadonlyArray<{ keys(): IterableIterator<number> }>,
+  provenOnly: boolean
+): Set<number> {
+  const ids = provenOnly ? new Set<number>() : unionIds(heuristicSets);
+  for (const proven of provenSets) {
+    for (const id of proven.keys()) ids.add(id);
   }
   return ids;
 }

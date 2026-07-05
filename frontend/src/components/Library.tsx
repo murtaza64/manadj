@@ -16,7 +16,7 @@ import type { ChannelId } from '../playback/mixer';
 import { useFilters } from '../contexts/FilterContext';
 import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { transitionsFrom, useTransitionIndex } from '../editor/transitionIndex';
-import { deriveFollowQuery, getEnergyRange, getHarmonicKeys, unionIds } from '../follow/model';
+import { candidateIdSet, deriveFollowQuery, getEnergyRange, getHarmonicKeys } from '../follow/model';
 import type { FollowParams } from '../follow/model';
 import { useFollowFlags } from '../follow/followStore';
 import { EMPTY_SELECTION, click } from '../selection/selectionModel';
@@ -54,6 +54,10 @@ export interface RelatedTracksSettings {
   /** Which loaded deck's track the match runs from (transition-library
    * 03: loaded-deck reference model — the quick-apply arrow reuses it). */
   refDeck: 'A' | 'B';
+  /** Follow's proven-tier narrowing (follow-mode 03). Stored with these
+   * settings until the parameters get their own key + modal control
+   * (issue 05); the retired one-shot path ignores it. */
+  provenOnly: boolean;
 }
 
 const STORAGE_KEY = 'findRelatedTracksSettings';
@@ -66,6 +70,7 @@ export const DEFAULT_SETTINGS: RelatedTracksSettings = {
   energy: false,
   energyPreset: 'near',
   refDeck: 'A',
+  provenOnly: false,
 };
 
 // Related-tracks utilities now live in the follow model (follow-mode 01);
@@ -236,6 +241,7 @@ export default function Library({
     tags: storedSettings.tags,
     energy: storedSettings.energy,
     energyPreset: storedSettings.energyPreset,
+    provenOnly: storedSettings.provenOnly,
   };
   const followRefs = (['A', 'B'] as const).flatMap((deck) => {
     const reference = decks[deck].loadedTrack;
@@ -261,16 +267,27 @@ export default function Library({
       };
     }),
   });
-  /** Candidate ids while following. Built from the reference queries that
+  /** Candidate ids while following: both evidence tiers (follow-mode 03) —
+   * heuristic query results unioned with the proven tier (saved
+   * Transitions from each followed reference), or the proven tier alone
+   * under provenOnly. Heuristic sets come from the reference queries that
    * have data: a still-loading second reference doesn't un-narrow the
    * already-followed list. Null (= no filtering) only when nothing is
-   * followed or no reference has resolved yet — the manual list shows
-   * unfiltered rather than flashing empty. */
+   * followed, or when heuristics are wanted but none have resolved yet —
+   * the manual list shows unfiltered rather than flashing empty. */
+  const followProvenSets = followRefs.map(({ reference }) =>
+    transitionsFrom(transitionIndex, reference.id)
+  );
   const resolvedFollowQueries = followQueries.filter((q) => q.data !== undefined);
-  const followCandidateIds =
-    followRefs.length > 0 && resolvedFollowQueries.length > 0
-      ? unionIds(resolvedFollowQueries.map((q) => q.data!.items ?? []))
-      : null;
+  const followCandidateIds = (() => {
+    if (followRefs.length === 0) return null;
+    if (!followParams.provenOnly && resolvedFollowQueries.length === 0) return null;
+    return candidateIdSet(
+      resolvedFollowQueries.map((q) => q.data!.items ?? []),
+      followProvenSets,
+      followParams.provenOnly
+    );
+  })();
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
@@ -552,11 +569,7 @@ export default function Library({
     const reference = referenceFor(settings.refDeck);
     if (!reference) return;
 
-    const newFilters = deriveRelatedFilters(reference, settings);
-
-    // Replace the four heuristic criteria; the transition axis survives
-    // (transition-library composition rule).
-    setFilters((f) => ({ ...newFilters, hasTransitionFromDecks: f.hasTransitionFromDecks }));
+    setFilters(deriveRelatedFilters(reference, settings));
   };
 
   const handleApplySettings = (settings: RelatedTracksSettings) => {
@@ -565,8 +578,7 @@ export default function Library({
 
     // Save settings and apply filters
     saveSettings(settings);
-    const newFilters = deriveRelatedFilters(reference, settings);
-    setFilters((f) => ({ ...newFilters, hasTransitionFromDecks: f.hasTransitionFromDecks }));
+    setFilters(deriveRelatedFilters(reference, settings));
   };
 
   // Beatgrid edits are playhead-dependent, so they act on the loaded Track
@@ -585,22 +597,16 @@ export default function Library({
 
   // ── Track lists per pane ───────────────────────────────────────────────
   // Library list ('all'/'unprocessed' views and the edit-mode library pane),
-  // with the proven-tier filter composed client-side (transition-library 02).
+  // with the Follow candidate set composed client-side (follow-mode 01/03).
   let libraryTracks = allTracksData?.items || [];
-  if (filters.hasTransitionFromDecks) {
-    libraryTracks = libraryTracks.filter((t: Track) => fromA.has(t.id) || fromB.has(t.id));
-  }
   if (followCandidateIds) {
     libraryTracks = libraryTracks.filter((t: Track) => followCandidateIds.has(t.id));
   }
 
-  // Playlist list, in the view-only playlist sort. The proven-tier and
-  // Follow filters apply only outside edit mode — in the split, the
-  // FilterBar belongs to the library pane.
+  // Playlist list, in the view-only playlist sort. The Follow filter
+  // applies only outside edit mode — in the split, the FilterBar belongs
+  // to the library pane.
   let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
-  if (filters.hasTransitionFromDecks && !splitView) {
-    playlistTracks = playlistTracks.filter((t: Track) => fromA.has(t.id) || fromB.has(t.id));
-  }
   if (followCandidateIds && !splitView) {
     playlistTracks = playlistTracks.filter((t: Track) => followCandidateIds.has(t.id));
   }

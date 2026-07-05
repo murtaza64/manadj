@@ -7,8 +7,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { buildTransitionIndex, transitionsFrom } from '../editor/transitionIndex';
+import type { PairStore } from '../editor/pairStore';
 import type { Tag, Track } from '../types';
 import {
+  candidateIdSet,
   DEFAULT_FOLLOW_PARAMS,
   deriveFollowQuery,
   reduceFollow,
@@ -150,6 +153,44 @@ describe('unionIds — per-track OR of candidate sets', () => {
   it('a single reference passes through; no references yields an empty set', () => {
     expect([...unionIds([[t(7)]])]).toEqual([7]);
     expect(unionIds([]).size).toBe(0);
+  });
+});
+
+describe('candidateIdSet — proven tier folded in (follow-mode 03)', () => {
+  const t = (id: number) => track({ id });
+
+  it('proven candidates OR in beyond the heuristic sets', () => {
+    // Track 30 has a saved Transition from a followed reference but fails
+    // the heuristics (e.g. a favorited tempo-jump outside the BPM window).
+    const ids = candidateIdSet([[t(1), t(2)]], [new Set([2, 30])], false);
+    expect([...ids].sort()).toEqual([1, 2, 30]);
+  });
+
+  it('proven only narrows to just the proven tier', () => {
+    const ids = candidateIdSet([[t(1), t(2)]], [new Set([2, 30])], true);
+    expect([...ids].sort()).toEqual([2, 30]);
+  });
+
+  it('dual follow unions the proven tiers of both references', () => {
+    const ids = candidateIdSet([], [new Set([5]), new Set([6, 5])], true);
+    expect([...ids].sort()).toEqual([5, 6]);
+  });
+
+  it('no proven Transitions leaves the heuristic union untouched', () => {
+    expect([...candidateIdSet([[t(1)]], [new Set()], false)]).toEqual([1]);
+  });
+
+  it("accepts the transition index's from-direction map (constructed index)", () => {
+    // The production shape: a real index built from a pair store. Track 7
+    // has a saved Transition into 30; the 7:31 pair is empty (pristine
+    // pairs never persist as items) and must not produce a candidate.
+    const index = buildTransitionIndex({
+      '7:30': { items: [{ favorite: false }], active: null },
+      '7:31': { items: [], active: null },
+    } as unknown as PairStore);
+    const ids = candidateIdSet([[t(1)]], [transitionsFrom(index, 7)], false);
+    expect([...ids].sort()).toEqual([1, 30]);
+    expect([...candidateIdSet([[t(1)]], [transitionsFrom(index, 7)], true)]).toEqual([30]);
   });
 });
 

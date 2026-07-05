@@ -11,10 +11,6 @@ interface FindRelatedTracksModalProps {
    * these — chosen via the A/B buttons, persisted with the settings. */
   loadedA: Track | null;
   loadedB: Track | null;
-  /** Proven-tier switch: bound to the SAME filter state as the filter
-   * bar's toggle (one source of truth, two controls). */
-  hasTransition: boolean;
-  onToggleTransition: (on: boolean) => void;
   onApply: (settings: RelatedTracksSettings) => void;
   openPosition?: { x: number; y: number };
 }
@@ -24,8 +20,6 @@ export default function FindRelatedTracksModal({
   onClose,
   loadedA,
   loadedB,
-  hasTransition,
-  onToggleTransition,
   onApply,
   openPosition,
 }: FindRelatedTracksModalProps) {
@@ -346,27 +340,10 @@ export default function FindRelatedTracksModal({
             </div>
           </div>
 
-          {/* Proven tier (transition-library 03): NOT one of the four
-              heuristic criteria — this switch IS the library filter-bar
-              toggle (same filter state), applied live and preserved by
-              Apply/quick-apply. */}
-          <div className="related-criteria-item">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={hasTransition}
-                onChange={(e) => onToggleTransition(e.target.checked)}
-              />
-              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>
-                Has transition from loaded decks
-              </span>
-            </label>
-            <div style={{ fontSize: '12px', color: 'var(--subtext0)', paddingLeft: '24px' }}>
-              Proven tier: only tracks you already built a transition into
-              (synced with the ◆ toggle in the filter bar; takes effect
-              immediately)
-            </div>
-          </div>
+          {/* The proven tier is Follow mode's business now (follow-mode
+              03): proven candidates always OR into the followed list;
+              the provenOnly parameter gets its control when this modal
+              becomes the Follow parameters modal (issue 05). */}
         </div>
 
         {/* Footer */}

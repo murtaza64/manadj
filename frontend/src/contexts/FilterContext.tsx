@@ -10,10 +10,6 @@ interface FilterState {
   bpmCenter: number | null;
   bpmThresholdPercent: number;
   selectedKeyCamelotIds: string[];
-  /** Transition-library axis (proven tier): only tracks with a saved
-   * Transition FROM either loaded deck. First-class so Find Compatible
-   * composes with it instead of clobbering it (transition-library 02/03). */
-  hasTransitionFromDecks: boolean;
   sortColumn: 'key' | 'bpm' | 'energy' | 'title' | 'artist' | 'created_at' | 'bitrate_kbps' | 'filesize_bytes' | 'provenance' | null;
   sortDirection: 'asc' | 'desc';
 }
@@ -27,7 +23,6 @@ const DEFAULT_FILTERS: FilterState = {
   bpmCenter: null,
   bpmThresholdPercent: 5,
   selectedKeyCamelotIds: [],
-  hasTransitionFromDecks: false,
   sortColumn: 'created_at',
   sortDirection: 'desc',
 };

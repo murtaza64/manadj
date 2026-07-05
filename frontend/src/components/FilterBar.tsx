@@ -98,8 +98,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
     filters.energyMin !== 1 ||
     filters.energyMax !== 5 ||
     filters.bpmCenter !== null ||
-    filters.selectedKeyCamelotIds.length > 0 ||
-    filters.hasTransitionFromDecks;
+    filters.selectedKeyCamelotIds.length > 0;
 
   return (
     <div style={{
@@ -385,28 +384,9 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
           </button>
         </div>
 
-        {/* Proven tier (transition-library 02): only tracks with a saved
-            Transition FROM either loaded deck. One filter axis, two
-            controls — the Find Compatible modal binds to the same state. */}
-        <button
-          onClick={() =>
-            setFilters({ ...filters, hasTransitionFromDecks: !filters.hasTransitionFromDecks })
-          }
-          className="filter-bar-transition-btn"
-          aria-pressed={filters.hasTransitionFromDecks}
-          title="Only tracks with a saved transition from a loaded deck"
-          style={{
-            padding: '4px 8px',
-            background: 'transparent',
-            color: filters.hasTransitionFromDecks ? 'var(--sapphire)' : 'var(--text)',
-            border: `1px solid ${filters.hasTransitionFromDecks ? 'var(--sapphire)' : 'var(--surface0)'}`,
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: 'bold',
-          }}
-        >
-          ◆ transitions
-        </button>
+        {/* The standalone ◆ transitions chip is retired (follow-mode 03):
+            the proven tier is part of Follow's candidate set now, with
+            provenOnly as a Follow parameter. */}
 
         {/* Clear All Filters Button */}
         <button
@@ -539,8 +519,6 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
         onClose={() => setShowRelatedModal(false)}
         loadedA={loadedA}
         loadedB={loadedB}
-        hasTransition={filters.hasTransitionFromDecks}
-        onToggleTransition={(on) => setFilters({ ...filters, hasTransitionFromDecks: on })}
         onApply={handleApplySettings}
         openPosition={relatedModalPosition}
       />
