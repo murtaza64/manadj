@@ -143,3 +143,5 @@ next-entry buffer prefetch into the decode cache. Filed as issue 14.
 **2026-07-05 — tracker hygiene.** Two sessions filed an issue 13 in
 parallel (rehearsal loop / visualize-conductor-automation); the
 visualization issue is renumbered to 15.
+
+**2026-07-05 — grilling round 4 (Pickup).** Designed the Conductor's inverse-of-takeover: explicit gesture + automatic mapping (never auto re-engage), anchored on the audibly dominant Deck; predicate lit for one-audible-deck-in-span or two-deck-aligned-blend, unlit-with-reason otherwise (reasons teach the fix); never audibly destructive; mixer/pitch converge by ramps; mid-engagement pickup abandons the in-flight Take. Glossary term Pickup added; filed as issue 16 (blocked by 05). No re-planning around the user — plan stays fixed (named and rejected).

@@ -85,6 +85,9 @@ A Set adjacency with nothing pinned — no Transition, no Take. Says only "playb
 **Unpracticed**:
 A Set adjacency whose ordered pair has no saved Transition and no Take — these two Tracks have never been mixed, in either artifact's sense. The Set's rehearsal to-do list. Orthogonal to Unresolved: an adjacency can be unresolved yet practiced, and (via a pinned Take) resolved yet never promoted.
 
+**Pickup**:
+The Conductor's inverse of takeover: adopting the current Deck state as a mix instant and resuming Set playback from it. Always an explicit gesture with automatic mapping — the control is lit exactly when the state maps cleanly onto the plan, anchored on the audibly dominant Deck (Master-bus audibility, as in Handover detection): one audible Deck within its planned span, or two audible Decks aligned with their pinned Transition within tolerance. Unlit otherwise, showing the reason (track not in the Set; outside its planned span; misaligned blend — fade the stray Deck out and it lights). Never audibly destructive: the anchor Deck is untouched; only silent Decks are reconciled; mixer and pitch converge to the plan via short ramps (the pitch ramp is a Tempo return). Picking up mid-Handover abandons the in-flight capture engagement — finishing a mix by machine forfeits the Take.
+
 **Tempo policy**:
 A per-Set choice governing tempo during Set playback. **Riding**: each incoming Track eases back to its native tempo between Transitions (see Tempo return). **Fixed**: the entire Set plays at the Set tempo — every Track pitched to it, Transitions rate-scaled as a whole; a pinned Transition's tempo-match flag is moot. One policy per Set; per-section tempo progression is deferred.
 
