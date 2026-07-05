@@ -90,6 +90,17 @@ export const SettingsIcon = ({ width = 16, height = 16, opacity = 0.7, className
   </svg>
 );
 
+/** Follow mode (follow-mode 07): crosshair — the list is locked onto the
+ * playing Deck. Ring + four ticks + center dot, stroke-based. */
+export const CrosshairIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
+  <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
+    <circle cx="8" cy="8" r="5" stroke="var(--text)" strokeWidth="1.5" opacity={opacity} />
+    <path d="M8 1v2.5M8 12.5V15M1 8h2.5M12.5 8H15"
+          stroke="var(--text)" strokeWidth="1.5" strokeLinecap="round" opacity={opacity} />
+    <circle cx="8" cy="8" r="1.2" fill="var(--text)" opacity={opacity} />
+  </svg>
+);
+
 export const ArrowDownIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
   <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
     <path d="M8 1v12M8 13l-4-4M8 13l4-4"

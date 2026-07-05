@@ -85,7 +85,7 @@
   opacity: 0.5;
 }
 
-.follow-summary-chip:hover {
+.filter-bar-follow-btn:hover:not(:disabled) {
   background: var(--surface0) !important;
 }
 

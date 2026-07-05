@@ -5,7 +5,7 @@ import type { Tag, Track } from '../types';
 import { getTagColor } from '../utils/colorUtils';
 import { getBpmColor, getAverageKeyColor } from '../utils/displayColors';
 import EnergySquare from './EnergySquare';
-import { EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, TagIcon } from './icons';
+import { CrosshairIcon, EnergyIcon, SearchIcon, SpeedIcon, KeyIcon, SettingsIcon, TagIcon } from './icons';
 import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
 import FollowParamsModal from './FollowParamsModal';
@@ -290,32 +290,39 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
           }
         </button>
 
-        {/* Follow mode (follow-mode 01): per-Deck toggles. Follow composes
-            beside the manual filters (never writes them); the list keeps
-            matching the followed Deck's loaded Track hands-off. A toggle is
-            disabled while its Deck is empty. */}
+        {/* Follow mode: ◎ [A][B][⚙] (follow-mode 07). Per-Deck toggles
+            compose beside the manual filters (never writes them); the list
+            keeps matching the followed Deck's loaded Track hands-off. The
+            derived summary lives in the toggles' tooltips (no layout
+            shift); the gear opens the parameters modal. */}
+        <div style={{ width: '16px', flexShrink: 0 }}>
+          <CrosshairIcon />
+        </div>
         <div style={{ display: 'flex', gap: 0 }}>
           {(['A', 'B'] as const).map((deck) => {
-            const loaded = loadedByDeck[deck] !== null;
+            const reference = loadedByDeck[deck];
             const on = followFlags[deck];
             // Only ENABLING requires a loaded Track — an on-flag must
             // always be turn-off-able, even if the Deck somehow emptied.
             // (The reducer enforces the same rule; disabled is just UI.)
-            const actionable = loaded || on;
+            const actionable = reference !== null || on;
             return (
               <button
                 key={deck}
-                onClick={() => dispatchFollow({ type: 'toggle', deck, loaded })}
+                onClick={() => dispatchFollow({ type: 'toggle', deck, loaded: reference !== null })}
                 disabled={!actionable}
                 className="filter-bar-follow-btn"
                 aria-pressed={on}
                 title={
-                  actionable
-                    ? `Follow Deck ${deck}: keep the list matched to its loaded track`
-                    : `Load Deck ${deck} first`
+                  on && reference
+                    ? `Following Deck ${deck} — deriving: ${followSummary(reference, followParams)}`
+                    : actionable
+                      ? `Follow Deck ${deck}: keep the list matched to its loaded track`
+                      : `Load Deck ${deck} first`
                 }
                 style={{
-                  padding: '4px 8px',
+                  padding: '4px 0',
+                  width: '28px',
                   background: 'transparent',
                   color: on ? 'var(--green)' : actionable ? 'var(--text)' : 'var(--overlay0)',
                   border: `1px solid ${on ? 'var(--green)' : 'var(--surface0)'}`,
@@ -324,54 +331,26 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
                   fontWeight: 'bold',
                 }}
               >
-                ⟲{deck}
+                {deck}
               </button>
             );
           })}
-
-          {/* Derived summary per followed Deck (follow-mode 05); any chip
-              opens the parameters modal. With nothing followed, a plain
-              params button keeps the modal reachable for pre-configuring.
-              (The one-shot Find Compatible group and the ◆ transitions
-              chip are retired — Follow is the single surface now.) */}
-          {followedRefs.length > 0 ? (
-            followedRefs.map(({ deck, reference }) => (
-              <button
-                key={`summary-${deck}`}
-                onClick={openParamsModal}
-                className="follow-summary-chip"
-                title={`Follow ${deck} is deriving these criteria — click to edit`}
-                style={{
-                  padding: '4px 8px',
-                  background: 'transparent',
-                  color: 'var(--green)',
-                  border: '1px solid var(--surface0)',
-                  borderLeft: 'none',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                }}
-              >
-                {deck}▸{followSummary(reference, followParams)}
-              </button>
-            ))
-          ) : (
-            <button
-              onClick={openParamsModal}
-              className="follow-summary-chip"
-              title="Follow parameters"
-              style={{
-                padding: '4px 8px',
-                background: 'transparent',
-                color: 'var(--text)',
-                border: '1px solid var(--surface0)',
-                borderLeft: 'none',
-                cursor: 'pointer',
-                fontSize: '12px',
-              }}
-            >
-              ⟲…
-            </button>
-          )}
+          <button
+            onClick={openParamsModal}
+            className="filter-bar-follow-btn"
+            title="Follow parameters"
+            style={{
+              padding: '4px 6px',
+              background: 'transparent',
+              border: '1px solid var(--surface0)',
+              borderLeft: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <SettingsIcon width={14} height={14} />
+          </button>
         </div>
 
         {/* Clear All Filters Button */}
