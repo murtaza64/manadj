@@ -110,4 +110,17 @@ describe('decoded-buffer cache (mix-editor 28)', () => {
     await engine.load({ trackId: 8, audioUrl: 'http://127.0.0.1:1/none', bpm: 128 });
     expect(engine.getSnapshot().loadState).toBe('error');
   });
+
+  it('setTrackBpm keeps beat-jump math honest after a BPM edit', async () => {
+    putCachedBuffer(9, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({ trackId: 9, audioUrl: 'http://127.0.0.1:1/none', bpm: 120 });
+    engine.seek(10);
+    engine.jumpBeats(4); // 4 beats at 120 = 2s
+    expect(engine.getPlayhead()).toBeCloseTo(12);
+    engine.setTrackBpm(240);
+    expect(engine.getSnapshot().bpm).toBe(240);
+    engine.jumpBeats(4); // 4 beats at 240 = 1s
+    expect(engine.getPlayhead()).toBeCloseTo(13);
+  });
 });

@@ -330,6 +330,12 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
               recommendedBpms={analysisResults?.bpm?.recommended_bpms}
               disabled={isDisabled}
               onSave={(bpm) => onSave({ bpm })}
+              // Keep the loaded deck's beat-jump math honest (the engine
+              // learns bpm at Load; TagEditor edits the loaded track —
+              // issue 23).
+              onCommitted={(bpm) => {
+                if (loadedTrack?.id === track?.id) engine.setTrackBpm(bpm);
+              }}
               grid={{
                 getPlayhead: () => engine.getPlayhead(),
                 disabled: !isBeatgridEditable,

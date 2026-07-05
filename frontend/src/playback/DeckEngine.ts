@@ -277,6 +277,15 @@ export class DeckEngine {
     this.dispatch({ type: 'seek', time: this.clampTime(target) });
   }
 
+  /** A BPM edit landed for the loaded Track: keep beat-domain math (beat
+   * jumps) honest without a re-Load. The engine learns bpm at Load
+   * otherwise — editing used to leave jumps sized by the OLD tempo. */
+  setTrackBpm(bpm: number | null): void {
+    if (!this.trackInfo) return;
+    this.trackInfo = { ...this.trackInfo, bpm };
+    this.emit();
+  }
+
   cueDown(): void {
     // Cue-down starts audio (hold-to-preview) — same tripwire as play.
     if (this.startBlocked()) return;

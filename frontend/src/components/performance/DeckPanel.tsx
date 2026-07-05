@@ -152,6 +152,7 @@ function BeatgridBlock({ track }: { track: Track | null }) {
           dense
           disabled={!enabled}
           onSave={saveBpm}
+          onCommitted={(bpm) => engine.setTrackBpm(bpm)}
           grid={{ getPlayhead: () => engine.getPlayhead(), disabled: !enabled }}
         />
         <span className="perf-effbpm" title="Effective BPM (base × pitch × bend)">

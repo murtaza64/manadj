@@ -551,13 +551,22 @@
    accent (it scopes slides), disengaged = default chrome — the color IS
    the state cue (user feedback: open padlock alone read ambiguously). */
 
-/* Shared HotCue pads sized for the card rows; set pads keep their cue
-   colors (identity), the ROW carries the accent. */
-.editor-slides .hot-cue {
-  height: 22px;
-  width: 24px;
+/* Shared HotCue pads: 4×2 grid (1-4 over 5-8) so the row fits the card
+   width; set pads keep their cue colors (identity), the ROW carries the
+   accent. Compact sizing beats HotCue.css's pad metrics. */
+.editor-slides .editor-cuegrid {
+  display: grid;
+  grid-template-columns: repeat(4, min-content);
+  gap: 2px;
+}
+
+.editor-slides .editor-cuegrid .hot-cue {
+  height: 20px;
+  width: 26px;
+  min-width: 26px;
   padding: 0;
   font-size: 11px;
+  box-sizing: border-box;
 }
 
 /* Cue slots always read 1-8 left-to-right: the card's mirrored layout

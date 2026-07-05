@@ -106,6 +106,11 @@ export function DeckCard({
           dense
           onCommitted={(bpm) => {
             player.setBpm(deck, bpm);
+            // Editor loads mirror onto the shared decks (issue 07): keep
+            // the shared engine's beat-jump math honest too.
+            if (deckScope.loadedTrack?.id === track.id) {
+              deckScope.engine.setTrackBpm(bpm);
+            }
             onBpmSaved(bpm);
           }}
           grid={{ getPlayhead: () => player.getTrackTime(deck) }}
@@ -208,19 +213,22 @@ export function DeckCard({
           )}
           {/* All 8 slots, shared pad surface + curation (set-empty at this
               deck's playhead, right-click deletes); pressing a SET pad is
-              this card's gesture (slide/jump). Always 1-8 left-to-right. */}
-          {SLOTS.map((slot) => (
-            <HotCue
-              key={slot}
-              slotNumber={slot}
-              hotCue={cueActions.bySlot.get(slot)}
-              disabled={!cueActions.enabled}
-              isPreviewing={false}
-              onDown={cueActions.down}
-              onUp={cueActions.up}
-              onDelete={cueActions.remove}
-            />
-          ))}
+              this card's gesture (slide/jump). Two-row 4×2 stack (1-4 over
+              5-8, left-to-right) so the row fits the card width. */}
+          <span className="editor-cuegrid">
+            {SLOTS.map((slot) => (
+              <HotCue
+                key={slot}
+                slotNumber={slot}
+                hotCue={cueActions.bySlot.get(slot)}
+                disabled={!cueActions.enabled}
+                isPreviewing={false}
+                onDown={cueActions.down}
+                onUp={cueActions.up}
+                onDelete={cueActions.remove}
+              />
+            ))}
+          </span>
         </div>
       )}
     </div>
