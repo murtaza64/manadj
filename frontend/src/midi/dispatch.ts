@@ -1,4 +1,4 @@
-import { audibleTransport } from '../playback/audibleSurface';
+import { audiblePads, audibleTransport } from '../playback/audibleSurface';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { MidiAction } from './actions';
 import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
@@ -8,17 +8,19 @@ import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegi
 const MAX_SELECTION_STEPS = 8;
 
 /**
- * Thin glue, view-blind forever. Two routing classes (ADR 0013):
+ * Thin glue, view-blind forever. Two routing classes (ADR 0013, gesture
+ * classes per ADR 0019):
  *
- * - Transport-class gestures (transport, cue) go through the AUDIBLE
- *   SURFACE's transport — never to decks directly, never synthetic key
- *   events. The shared surface carries the library/performance guards; the
- *   Transition editor maps both PLAYs to its one mix transport and registers
- *   no cue handlers, so CUE drops there like keyboard F.
+ * - Surface-routed gesture classes (transport, cue, pads) go through the
+ *   AUDIBLE SURFACE's handle — never to decks directly, never synthetic
+ *   key events. The shared surface carries the library/performance guards
+ *   and delegates to the deck behavior; the editor registers its own
+ *   gesture semantics. A class (or handler) the holder didn't register is
+ *   dropped — CUE drops in the editor like keyboard F.
  *
- * - Everything else aims at the shared decks' registered controls
- *   (controlRegistry). While the editor is audible the shared decks are
- *   silenced and the engine's mayStart tripwire keeps stabs inert.
+ * - Everything else (mixer, pitch, PFL, beatjump-size — state, not
+ *   playback gestures) aims at the shared decks' registered controls
+ *   (controlRegistry) regardless of audibility.
  *
  * Targets without a registered handler are silent no-ops, like unmapped
  * messages.
@@ -70,14 +72,15 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       return;
     }
     case 'hot-cue': {
-      const controls = deckControlsFor(target.deck);
-      if (edge === 'down') controls?.hotCueDown(target.pad);
-      else controls?.hotCueUp(target.pad);
+      const pads = audiblePads();
+      if (!pads) return; // holder registered no pads: the class drops
+      if (edge === 'down') pads.hotCueDown(target.deck, target.pad);
+      else pads.hotCueUp?.(target.deck, target.pad);
       return;
     }
     case 'hot-cue-clear': {
       if (edge !== 'down') return;
-      deckControlsFor(target.deck)?.hotCueClear(target.pad);
+      audiblePads()?.hotCueClear(target.deck, target.pad);
       return;
     }
     case 'beatjump': {

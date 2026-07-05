@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client';
 import { useBeatgridData } from '../hooks/useBeatgridData';
+import { useHotCueSlots } from '../hooks/useHotCueActions';
 import { useHotCues } from '../hooks/useHotCues';
 import Library from '../components/Library';
 import type { LibraryBrowseHandle } from '../components/Library';
@@ -234,15 +235,42 @@ function TransitionEditorInner() {
     store.loadPair(pairKey);
   }, [pairKey, store]);
 
+  // Hardware pad gestures (editor-midi 01, ADR 0019): the same hot-cue
+  // slot behavior as the on-screen pads in DeckCard — set on empty at the
+  // deck's track playhead, trigger = the deck's gesture (A jumps the mix,
+  // B Slides the cue under the playhead), SHIFT+pad clears. Registered
+  // into the surface handle below; handlers read the latest hook values
+  // through a ref so loads/rate changes never re-register.
+  const midiCuesA = useHotCueSlots(trackA?.id ?? null, {
+    enabled: trackA !== null,
+    getPlayhead: () => player.getTrackTime('A'),
+    trigger: (_slot, t) => player.seek(t),
+  });
+  const midiCuesB = useHotCueSlots(trackB?.id ?? null, {
+    enabled: trackB !== null,
+    getPlayhead: () => player.getTrackTime('B'),
+    trigger: (_slot, t) => slideDeckB('cue', t),
+  });
+  const midiCues = useRef({ A: midiCuesA, B: midiCuesB });
+  useEffect(() => {
+    midiCues.current = { A: midiCuesA, B: midiCuesB };
+  });
+
   // One audible surface AND one running audio clock at a time (issue 08):
   // claim audibility while mounted (ADR 0013). The arbiter silences the
   // shared surface (pauses both decks, suspends its context) and restores
-  // it on release; hardware transport routes to the MixPlayer meanwhile
+  // it on release; hardware gestures route to the MixPlayer meanwhile
   // (both PLAYs = the one mix transport, keyboard-parity with Space; CUE
-  // has no editor meaning and drops, like F).
+  // has no editor meaning and drops, like F). Pads carry the editor's
+  // gesture semantics (ADR 0019); release is absent — editor gestures are
+  // taps, so the up edge drops.
   useEffect(() => {
     registerSurface('editor', {
       transport: { togglePlay: () => player.togglePlay() },
+      pads: {
+        hotCueDown: (deck, pad) => midiCues.current[deck].down(pad),
+        hotCueClear: (deck, pad) => midiCues.current[deck].remove(pad),
+      },
       silence: () => {
         player.pause();
         player.mixer.suspend();

@@ -1,20 +1,24 @@
 /**
- * MIDI dispatch routing (ADR 0013): transport-class gestures go through the
- * audible surface (gestures without a handler there are dropped — the editor
- * registers no cue handlers); pad-class gestures go to the registered deck
- * controls and drop silently when nothing is registered.
+ * MIDI dispatch routing (ADR 0013, gesture classes per ADR 0019):
+ * transport-class gestures AND the promoted gesture classes (pads) go
+ * through the audible surface — a class the holder didn't register drops,
+ * like CUE on the editor. The shared surface's sections delegate to the
+ * registered deck controls; everything else (mixer/pitch/PFL/beatjump-size)
+ * stays registry-direct and drops silently when nothing is registered.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   _resetAudibleSurfacesForTests,
   claimAudible,
   registerSurface,
+  releaseAudible,
 } from '../playback/audibleSurface';
 import type { ChannelId } from '../playback/mixer';
 import type { MidiAction } from './actions';
 import type { Track } from '../types';
 import {
   _resetMidiControlsForTests,
+  deckControlsFor,
   registerBrowseSurface,
   registerDeckControls,
   registerMixerControls,
@@ -67,11 +71,20 @@ beforeEach(() => {
       cueDown: (d) => calls.push(`shared:cueDown:${d}`),
       cueUp: (d) => calls.push(`shared:cueUp:${d}`),
     },
+    // Production wiring (ADR 0019): the shared surface's gesture classes
+    // delegate to the registered deck controls.
+    pads: {
+      hotCueDown: (deck, pad) => deckControlsFor(deck)?.hotCueDown(pad),
+      hotCueUp: (deck, pad) => deckControlsFor(deck)?.hotCueUp(pad),
+      hotCueClear: (deck, pad) => deckControlsFor(deck)?.hotCueClear(pad),
+    },
     silence: () => undefined,
     wake: () => undefined,
   });
   registerSurface('editor', {
     // No cue handlers: CUE drops in the editor, like keyboard F.
+    // No pads by default: tests that want the editor's pad semantics
+    // re-register with a pads section (registerSurface overwrites).
     transport: { togglePlay: () => calls.push('editor:toggle') },
     silence: () => undefined,
     wake: () => undefined,
@@ -197,6 +210,70 @@ describe('pads (midi-controller 02)', () => {
     registerFakeDeckControls('A');
     dispatchMidiAction(hotCue('B', 1, 'down'));
     expect(calls).toEqual([]);
+  });
+});
+
+describe('pads route per audible surface (ADR 0019, editor-midi 01)', () => {
+  const hotCue = (deck: ChannelId, pad: number, edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'hot-cue', deck, pad },
+  });
+  const clear = (deck: ChannelId, pad: number): MidiAction => ({
+    kind: 'button',
+    edge: 'down',
+    target: { control: 'hot-cue-clear', deck, pad },
+  });
+
+  /** An editor surface that registers pad gestures (issue 01's semantics
+   * are the editor's business — dispatch only sees the section). Release
+   * is deliberately absent: editor gestures are taps. */
+  function registerEditorWithPads(): void {
+    registerSurface('editor', {
+      transport: { togglePlay: () => calls.push('editor:toggle') },
+      pads: {
+        hotCueDown: (deck, pad) => calls.push(`editor:padDown:${deck}:${pad}`),
+        hotCueClear: (deck, pad) => calls.push(`editor:padClear:${deck}:${pad}`),
+      },
+      silence: () => undefined,
+      wake: () => undefined,
+    });
+  }
+
+  it('editor claimed with pads: down and clear route with deck and pad', () => {
+    registerFakeDeckControls('A');
+    registerEditorWithPads();
+    claimAudible('editor');
+    dispatchMidiAction(hotCue('A', 3, 'down'));
+    dispatchMidiAction(hotCue('B', 8, 'down'));
+    dispatchMidiAction(clear('B', 2));
+    expect(calls).toEqual(['editor:padDown:A:3', 'editor:padDown:B:8', 'editor:padClear:B:2']);
+  });
+
+  it('editor pads without a release handler: the up edge drops (taps)', () => {
+    registerEditorWithPads();
+    claimAudible('editor');
+    dispatchMidiAction(hotCue('A', 1, 'up'));
+    expect(calls).toEqual([]);
+  });
+
+  it('editor claimed without a pads section: the whole class drops, like CUE', () => {
+    registerFakeDeckControls('A');
+    claimAudible('editor');
+    dispatchMidiAction(hotCue('A', 1, 'down'));
+    dispatchMidiAction(clear('A', 1));
+    expect(calls).toEqual([]);
+  });
+
+  it('claim/release flips pad routing between surfaces', () => {
+    registerFakeDeckControls('A');
+    registerEditorWithPads();
+    dispatchMidiAction(hotCue('A', 1, 'down'));
+    claimAudible('editor');
+    dispatchMidiAction(hotCue('A', 1, 'down'));
+    releaseAudible('editor');
+    dispatchMidiAction(hotCue('A', 1, 'down'));
+    expect(calls).toEqual(['A:hotCueDown:1', 'editor:padDown:A:1', 'A:hotCueDown:1']);
   });
 });
 

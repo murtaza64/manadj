@@ -25,8 +25,22 @@ export interface SurfaceTransport {
   cueUp?(deck: ChannelId): void;
 }
 
+/** Pad gesture class (ADR 0019): hot cue down/up/clear. What a press MEANS
+ * is the surface's business (the shared surface delegates to the deck
+ * behavior; the editor's pads jump the mix / Slide the pair). Release is
+ * optional — surfaces whose pad gestures are taps simply omit it. */
+export interface SurfacePads {
+  hotCueDown(deck: ChannelId, pad: number): void;
+  hotCueUp?(deck: ChannelId, pad: number): void;
+  hotCueClear(deck: ChannelId, pad: number): void;
+}
+
 export interface AudibleSurface {
   transport: SurfaceTransport;
+  /** Optional gesture-class sections (ADR 0019): a class the surface
+   * doesn't register is dropped by dispatch, exactly like CUE on the
+   * editor. */
+  pads?: SurfacePads;
   /** Go quiet: pause playback AND suspend the surface's audio clock. */
   silence(): void;
   /** Resume the surface's audio clock only — never starts playback. */
@@ -97,6 +111,12 @@ export function isAudible(id: AudibleSurfaceId): boolean {
  * Null when the holder never registered (boot order edge). */
 export function audibleTransport(): SurfaceTransport | null {
   return surfaces.get(holder)?.transport ?? null;
+}
+
+/** The audible surface's pads section — null when the holder never
+ * registered one (the class drops, ADR 0019). */
+export function audiblePads(): SurfacePads | null {
+  return surfaces.get(holder)?.pads ?? null;
 }
 
 export function subscribeAudible(fn: Listener): () => void {

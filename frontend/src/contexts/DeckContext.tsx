@@ -5,6 +5,7 @@ import { DeckEngine } from '../playback/DeckEngine';
 import { Mixer } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 import { isAudible, registerSurface, unregisterSurface } from '../playback/audibleSurface';
+import { deckControlsFor } from '../midi/controlRegistry';
 import { BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
 import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
@@ -236,6 +237,11 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // play, like Space; cue needs decoded audio of the loaded Track, like F).
   // The registry's identity changes on every Load, so transport reads it
   // through a ref and registration runs once.
+  //
+  // Gesture-class sections (ADR 0019) delegate to the exact deck behavior
+  // hardware has today — the React-owned handlers MidiControlRegistrar
+  // registers into the control registry (hot-cue curation is React Query,
+  // so it cannot live here directly).
   const registryRef = useRef(registry);
   useEffect(() => {
     registryRef.current = registry;
@@ -257,6 +263,11 @@ export function DeckProvider({ children }: { children: ReactNode }) {
           const d = registryRef.current[deck];
           if (deckReadyNow(d)) d.engine.cueUp();
         },
+      },
+      pads: {
+        hotCueDown: (deck, pad) => deckControlsFor(deck)?.hotCueDown(pad),
+        hotCueUp: (deck, pad) => deckControlsFor(deck)?.hotCueUp(pad),
+        hotCueClear: (deck, pad) => deckControlsFor(deck)?.hotCueClear(pad),
       },
       silence: () => {
         engines.A.pause();
