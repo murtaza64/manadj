@@ -1,6 +1,6 @@
 """SQLAlchemy models for music library database."""
 
-from sqlalchemy import Boolean, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index
+from sqlalchemy import Boolean, CheckConstraint, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref, deferred, relationship, DeclarativeBase
 from sqlalchemy.sql import func
@@ -304,4 +304,38 @@ class HotCue(Base):
     __table_args__ = (
         Index("idx_hotcues_track", "track_id"),
         Index("idx_hotcues_unique", "track_id", "slot_number", unique=True),
+    )
+
+
+class TrackLink(Base):
+    """A Linked pair (linked-pairs PRD): a stored, symmetric assertion that
+    two Tracks go well together. One row per unordered pair of distinct
+    Tracks, stored canonically (low_track_id < high_track_id). Bare edge —
+    no payload beyond created_at. Write-independent of Transition favorites.
+    """
+
+    __tablename__ = "track_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    low_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    high_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    # ORM-level cascade (SQLite FK PRAGMA is off in this app; the ondelete
+    # markers above record intent), matching the transitions pattern.
+    low_track = relationship(
+        "Track",
+        foreign_keys=[low_track_id],
+        backref=backref("links_low", cascade="all, delete-orphan"),
+    )
+    high_track = relationship(
+        "Track",
+        foreign_keys=[high_track_id],
+        backref=backref("links_high", cascade="all, delete-orphan"),
+    )
+
+    __table_args__ = (
+        CheckConstraint("low_track_id < high_track_id", name="ck_track_links_ordered"),
+        Index("idx_track_links_pair", "low_track_id", "high_track_id", unique=True),
+        Index("idx_track_links_high", "high_track_id"),
     )

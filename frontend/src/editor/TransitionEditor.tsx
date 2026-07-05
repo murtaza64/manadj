@@ -52,6 +52,7 @@ import {
   visibleLaneIds,
 } from './mixModel';
 import type { LaneId, Transition } from './mixModel';
+import { LinkToggle } from '../links/LinkToggle';
 import type { Track } from '../types';
 import './transitionEditor.css';
 
@@ -488,6 +489,8 @@ function TransitionEditorInner() {
               rateB={rateB}
               trackATitle={trackA?.title ?? 'A'}
               trackBTitle={trackB?.title ?? 'B'}
+              trackAId={trackA?.id ?? null}
+              trackBId={trackB?.id ?? null}
               pairLoaded={pairKey !== null}
               onSwapDecks={swapDecks}
               canSwapDecks={trackA !== null && trackB !== null}
@@ -563,6 +566,8 @@ function EditorCenterPanel({
   rateB,
   trackATitle,
   trackBTitle,
+  trackAId,
+  trackBId,
   pairLoaded,
   onSwapDecks,
   canSwapDecks,
@@ -576,6 +581,8 @@ function EditorCenterPanel({
   rateB: number;
   trackATitle: string;
   trackBTitle: string;
+  trackAId: number | null;
+  trackBId: number | null;
   pairLoaded: boolean;
   /** Swap the loaded pair A ⇄ B (issue 29 — shell owns track assignment). */
   onSwapDecks: () => void;
@@ -697,6 +704,9 @@ function EditorCenterPanel({
           onToggleFavorite={() => store.toggleFavorite()}
           onDelete={() => store.deleteActive()}
         />
+        {/* Linked (linked-pairs 01): symmetric pair fact, independent of
+            the ★ on the active Transition. */}
+        <LinkToggle aTrackId={trackAId} bTrackId={trackBId} />
         <TemplatesDropdown
           templates={templates}
           canSave={canSaveTemplate}

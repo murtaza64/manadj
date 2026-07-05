@@ -297,6 +297,22 @@ class TransitionRow(BaseModel):
     data: dict
 
 
+# Track-link Schemas (linked-pairs PRD — symmetric Linked pairs)
+
+class TrackLinkRow(BaseModel):
+    """A persisted Linked pair (GET response), canonical order low < high."""
+    low_track_id: int
+    high_track_id: int
+    created_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TrackLinkState(BaseModel):
+    """The Linked fact for an unordered pair (PUT payload and response)."""
+    linked: bool
+
+
 # Transition-template Schemas (mix-editor issue 03 — plain CRUD)
 
 ANCHOR_BASE_PATTERN = r"^(cue_[1-8]|grid_origin)$"

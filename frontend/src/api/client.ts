@@ -838,4 +838,25 @@ export const api = {
       if (!res.ok) throw new Error(`Failed to delete transition template (${res.status})`);
     },
   },
+
+  trackLinks: {
+    /** All Linked pairs (boot load), canonical order low < high. */
+    list: async (): Promise<{ low_track_id: number; high_track_id: number }[]> => {
+      const res = await fetch(`${API_BASE}/track-links`);
+      if (!res.ok) throw new Error('Failed to fetch track links');
+      return res.json();
+    },
+
+    /** Idempotently set/clear the Linked fact for an unordered pair —
+     * the server normalizes order, so a/b and b/a address the same fact. */
+    setPair: async (aTrackId: number, bTrackId: number, linked: boolean) => {
+      const res = await fetch(`${API_BASE}/track-links/pair/${aTrackId}/${bTrackId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linked }),
+      });
+      if (!res.ok) throw new Error(`Failed to save track link (${res.status})`);
+      return res.json();
+    },
+  },
 };
