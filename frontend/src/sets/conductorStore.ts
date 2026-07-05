@@ -11,6 +11,13 @@
  */
 import { useSyncExternalStore } from 'react';
 import { Conductor, type ConductorAudio, type ConductorHooks } from './Conductor';
+import {
+  evaluatePickup,
+  flipPlanDecks,
+  pickupStartLanes,
+  readPickupSnapshot,
+  type PickupDecision,
+} from './pickup';
 import type { SetPlan } from './planner';
 
 export interface ConductorState {
@@ -27,6 +34,10 @@ const IDLE: ConductorState = { setId: null, status: 'idle', activeEntryIndex: nu
 
 let conductor: Conductor | null = null;
 let conductorSetId: number | null = null;
+/** The plan as the VIEW built it — the identity the same-set checks
+ * compare. A pickup may execute a deck-mirrored copy (sets 16), so
+ * `conductor.plan` is not always this object. */
+let conductorSourcePlan: SetPlan | null = null;
 let conductorUnsub: (() => void) | null = null;
 let follow = false;
 let snapshot: ConductorState = IDLE;
@@ -63,8 +74,36 @@ function clearInstance(): void {
   conductorUnsub = null;
   conductor = null;
   conductorSetId = null;
+  conductorSourcePlan = null;
   follow = false;
   refreshSnapshot();
+}
+
+/** Install a fresh Conductor as the one running instance. */
+function installInstance(
+  setId: number,
+  sourcePlan: SetPlan,
+  execPlan: SetPlan,
+  audio: ConductorAudio,
+  loadTrack: ConductorHooks['loadTrack'],
+  prefetch?: ConductorHooks['prefetch']
+): Conductor {
+  conductor?.stop();
+  clearInstance();
+  const instance = new Conductor(execPlan, audio, {
+    loadTrack,
+    prefetch,
+    onStopped: () => {
+      // Every end (stop, natural end, takeover, displaced) settles idle.
+      if (conductor === instance) clearInstance();
+    },
+  });
+  conductor = instance;
+  conductorSetId = setId;
+  conductorSourcePlan = sourcePlan;
+  conductorUnsub = instance.subscribe(refreshSnapshot);
+  follow = true; // on at playback start (sets 05)
+  return instance;
 }
 
 /** Start playing a Set from an entry (0 = the top). Replaces any running
@@ -81,26 +120,13 @@ export function startSetPlayback(
 ): void {
   // Same Set, same plan, still conducting: just re-seek (row play button)
   // instead of bouncing the claim/overlay through a stop-start.
-  if (conductor?.isActive() && conductorSetId === setId && conductor.plan === plan) {
+  if (conductor?.isActive() && conductorSetId === setId && conductorSourcePlan === plan) {
     follow = true; // seeking re-engages follow (sets 05)
     conductor.playFromEntry(fromEntryIndex);
     refreshSnapshot();
     return;
   }
-  conductor?.stop();
-  clearInstance();
-  const instance = new Conductor(plan, audio, {
-    loadTrack,
-    prefetch,
-    onStopped: () => {
-      // Every end (stop, natural end, takeover, displaced) settles idle.
-      if (conductor === instance) clearInstance();
-    },
-  });
-  conductor = instance;
-  conductorSetId = setId;
-  conductorUnsub = instance.subscribe(refreshSnapshot);
-  follow = true; // on at playback start (sets 05)
+  const instance = installInstance(setId, plan, plan, audio, loadTrack, prefetch);
   instance.playFromEntry(fromEntryIndex);
   refreshSnapshot();
 }
@@ -119,28 +145,48 @@ export function seekSetPlayback(
   mixTime: number,
   prefetch?: ConductorHooks['prefetch']
 ): void {
-  if (conductor?.isActive() && conductorSetId === setId && conductor.plan === plan) {
+  if (conductor?.isActive() && conductorSetId === setId && conductorSourcePlan === plan) {
     follow = true;
     conductor.seek(mixTime);
     refreshSnapshot();
     return;
   }
-  conductor?.stop();
-  clearInstance();
-  const instance = new Conductor(plan, audio, {
-    loadTrack,
-    prefetch,
-    onStopped: () => {
-      if (conductor === instance) clearInstance();
-    },
-  });
-  conductor = instance;
-  conductorSetId = setId;
-  conductorUnsub = instance.subscribe(refreshSnapshot);
-  follow = true;
+  const instance = installInstance(setId, plan, plan, audio, loadTrack, prefetch);
   instance.seek(mixTime);
   instance.play();
   refreshSnapshot();
+}
+
+/**
+ * Pickup (sets 16): adopt the live deck/mixer state as a mix instant and
+ * resume Set playback from it — the inverse of takeover. Takes ONE
+ * coherent snapshot, evaluates the pure predicate against it, and — when
+ * lit — executes the decision from that same read: the Conductor runs
+ * the deck-mirrored plan when the anchor sits on the other physical deck
+ * (flip), the mixer/pitch converge to the plan over `rampSec`, and the
+ * anchors are never touched at the instant. Returns the decision so the
+ * caller can surface an unlit verdict (a stale-button click).
+ */
+export function pickupSetPlayback(
+  setId: number,
+  plan: SetPlan,
+  audio: ConductorAudio,
+  loadTrack: ConductorHooks['loadTrack'],
+  opts: { rampSec: number; toleranceSec?: number },
+  prefetch?: ConductorHooks['prefetch']
+): PickupDecision {
+  const snap = readPickupSnapshot(audio.mixer, audio.engines);
+  const decision = evaluatePickup(plan, snap, { toleranceSec: opts.toleranceSec });
+  if (!decision.lit) return decision;
+  const execPlan = decision.flip ? flipPlanDecks(plan) : plan;
+  const instance = installInstance(setId, plan, execPlan, audio, loadTrack, prefetch);
+  instance.pickup(decision.mixTime, {
+    rampSec: opts.rampSec,
+    rampDecks: decision.anchors,
+    startLanes: pickupStartLanes(snap),
+  });
+  refreshSnapshot();
+  return decision;
 }
 
 /** Follow-playback toggle/disengage (sets 05). */

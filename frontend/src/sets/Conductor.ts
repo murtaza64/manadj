@@ -48,6 +48,18 @@ import {
 
 const DRIFT_TOLERANCE_S = 0.12;
 
+const lerp = (a: number, b: number, p: number): number => a + (b - a) * p;
+
+const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAutomation => ({
+  fader: lerp(from.fader, to.fader, p),
+  eq: {
+    low: lerp(from.eq.low, to.eq.low, p),
+    mid: lerp(from.eq.mid, to.eq.mid, p),
+    high: lerp(from.eq.high, to.eq.high, p),
+  },
+  filter: lerp(from.filter, to.filter, p),
+});
+
 export type ConductorStopReason = 'ended' | 'stopped' | 'takeover' | 'displaced';
 
 export interface ConductorAudio {
@@ -99,6 +111,17 @@ export class Conductor {
   /** A seek landed: the next tick re-positions decks unconditionally
    * (sub-tolerance seeks must not be swallowed by the drift check). */
   private pendingHardSync = false;
+  /** Pickup convergence (sets 16): mixer lanes ramp from the adopted
+   * base values to the plan's, and the anchor decks' pitch eases to the
+   * plan's rate, over a short tunable window — the mirror of takeover's
+   * inaudible disengage. Anchor decks are never re-seeked mid-ramp. */
+  private pickupRamp: {
+    startAudio: number;
+    durationSec: number;
+    startLanes: Record<ChannelId, PlanAutomation>;
+    /** Present only for the anchor (audible-at-pickup) decks. */
+    startPitch: Partial<Record<ChannelId, number>>;
+  } | null = null;
 
   private unsubs: (() => void)[] = [];
   private listeners = new Set<() => void>();
@@ -153,6 +176,7 @@ export class Conductor {
     if (!this.playing) return;
     this.mixTimeAtAnchor = this.getMixTime();
     this.playing = false;
+    this.pickupRamp = null; // a paused pickup finishes converging silently
     cancelAnimationFrame(this.raf);
     this.pauseDecks();
     this.emit();
@@ -189,6 +213,64 @@ export class Conductor {
     this.emit();
   }
 
+  /**
+   * Pickup (sets 16): the inverse of takeover — adopt the live deck/mixer
+   * state as mix instant `mixTime` and resume conducting from it. The
+   * decision (instant, anchors, ramp start) comes from the pure predicate
+   * (pickup.ts); this method only executes it:
+   * - claims audibility WITHOUT silencing the shared decks (the anchors
+   *   keep sounding; the claim alone re-gates capture, abandoning any
+   *   in-flight Handover engagement);
+   * - engages automation and immediately writes `startLanes` — the
+   *   current base values with the crossfader folded in — so engaging is
+   *   inaudible, then converges every control to the plan over `rampSec`;
+   * - eases each anchor deck's pitch to the plan's rate (a Tempo return
+   *   in a new costume) instead of snapping, and never re-seeks an anchor
+   *   mid-ramp. The residual drift the ease accrues is |Δpitch|/100 ·
+   *   rampSec/2 — sub-tolerance for realistic offsets; anything larger is
+   *   corrected by the normal drift check after the ramp.
+   * Fresh instances only (the store constructs one per pickup).
+   */
+  pickup(
+    mixTime: number,
+    opts: {
+      rampSec: number;
+      rampDecks: ChannelId[];
+      startLanes: Record<ChannelId, PlanAutomation>;
+    }
+  ): void {
+    if (this.active || this.playing) return;
+    this.activate({ silencePrevious: false });
+    if (!this.active) return;
+    const t = Math.max(0, Math.min(mixTime, Math.max(this.plan.totalSec - 0.001, 0)));
+    this.mixTimeAtAnchor = t;
+    this.anchorAudioTime = this.mixer.now();
+    this.lastTickT = t;
+    this.activeEntryIndex = planStateAt(this.plan, t).activeEntryIndex;
+    this.pendingHardSync = true; // silent decks position hard on the first tick
+    const startPitch: Partial<Record<ChannelId, number>> = {};
+    for (const deck of opts.rampDecks) {
+      startPitch[deck] = this.engines[deck].getSnapshot().pitchPercent;
+    }
+    this.pickupRamp = {
+      startAudio: this.mixer.now(),
+      durationSec: Math.max(opts.rampSec, 0),
+      startLanes: opts.startLanes,
+      startPitch,
+    };
+    // Written in the same synchronous span as engageAutomation's
+    // crossfader pin: both 50ms node ramps run together and the start
+    // lanes reproduce the sounding gains, so the engage is inaudible.
+    this.self(() => {
+      this.mixer.setAutomation('A', opts.startLanes.A);
+      this.mixer.setAutomation('B', opts.startLanes.B);
+    });
+    this.lastLanes = opts.startLanes;
+    this.playing = true;
+    this.raf = requestAnimationFrame(this.tick);
+    this.emit();
+  }
+
   /** Stop conducting (user stop or natural end): decks pause, the borrow
    * unwinds, capture resumes gated on 'shared'. */
   stop(reason: 'stopped' | 'ended' = 'stopped'): void {
@@ -202,7 +284,7 @@ export class Conductor {
 
   // ── Borrow lifecycle ─────────────────────────────────────────────────
 
-  private activate(): void {
+  private activate(opts: { silencePrevious?: boolean } = {}): void {
     registerSurface('conductor', {
       // Hardware transport mirrors the Conductor while it holds audibility
       // (ADR 0019); pads/jumps/jog are deliberately unregistered — those
@@ -214,7 +296,9 @@ export class Conductor {
       },
       silence: () => this.handleSilence(),
     });
-    claimAudible('conductor'); // pauses the shared decks' free-running playback
+    // Pauses the shared decks' free-running playback — except at pickup,
+    // which adopts them live (silencePrevious: false).
+    claimAudible('conductor', opts);
     if (!isAudible('conductor')) {
       unregisterSurface('conductor');
       return;
@@ -438,13 +522,24 @@ export class Conductor {
       this.pendingHardSync || joining || jumpCrossed(this.plan, this.lastTickT, t);
     this.pendingHardSync = false;
     this.lastTickT = t;
+    // Pickup convergence (sets 16): while the ramp runs, every mixer
+    // control lerps from its adopted start value toward the (moving)
+    // plan value — p→1 guarantees convergence.
+    const p = this.rampProgress();
+    const ramp = this.pickupRamp;
+    const lanes = ramp
+      ? {
+          A: lerpLanes(ramp.startLanes.A, state.lanes.A, p),
+          B: lerpLanes(ramp.startLanes.B, state.lanes.B, p),
+        }
+      : state.lanes;
     this.self(() => {
-      if (readyA) this.syncDeck('A', state, hard);
-      if (readyB) this.syncDeck('B', state, hard);
-      this.mixer.setAutomation('A', state.lanes.A);
-      this.mixer.setAutomation('B', state.lanes.B);
+      if (readyA) this.syncDeck('A', state, hard, p);
+      if (readyB) this.syncDeck('B', state, hard, p);
+      this.mixer.setAutomation('A', lanes.A);
+      this.mixer.setAutomation('B', lanes.B);
     });
-    this.lastLanes = state.lanes;
+    this.lastLanes = lanes;
 
     if (state.activeEntryIndex !== this.activeEntryIndex) {
       this.activeEntryIndex = state.activeEntryIndex;
@@ -459,6 +554,7 @@ export class Conductor {
    * via the watchEngine ready hook. */
   private reconcilePaused(): void {
     if (!this.active || this.playing) return;
+    this.pickupRamp = null; // positions/lanes snap silently while paused
     const t = this.getMixTime();
     const state = planStateAt(this.plan, t);
     const readyA = this.ensureDeckTrack('A', state);
@@ -515,12 +611,31 @@ export class Conductor {
     return snap.loadState === 'ready';
   }
 
+  /** Pickup ramp progress ∈ [0,1] on the audio clock; clears the ramp
+   * when it completes. 1 when no ramp is running. */
+  private rampProgress(): number {
+    const ramp = this.pickupRamp;
+    if (!ramp) return 1;
+    const p =
+      ramp.durationSec <= 0 ? 1 : (this.mixer.now() - ramp.startAudio) / ramp.durationSec;
+    if (p >= 1) {
+      this.pickupRamp = null;
+      return 1;
+    }
+    return p;
+  }
+
   /** MixPlayer's reconcile: pause inactive, start + position active,
-   * re-seek past the drift tolerance (or hard, on jump crossings). */
-  private syncDeck(deck: ChannelId, state: PlanState, hard: boolean): void {
+   * re-seek past the drift tolerance (or hard, on jump crossings).
+   * `rampP` < 1 = pickup convergence: an anchor deck's pitch eases from
+   * its adopted value to the plan's, and the anchor is never re-seeked
+   * mid-ramp (seamless by construction — sets 16). */
+  private syncDeck(deck: ChannelId, state: PlanState, hard: boolean, rampP = 1): void {
     const engine = this.engines[deck];
     const target = state.decks[deck];
     const snap: DeckSnapshot = engine.getSnapshot();
+    const startPitch = this.pickupRamp?.startPitch[deck];
+    const ramping = startPitch !== undefined && rampP < 1;
     if (!target.playing) {
       if (snap.playing) engine.pause();
       // Park at the planned position (entry point before, exit after) so
@@ -530,12 +645,13 @@ export class Conductor {
       }
       return;
     }
-    engine.setPitch(target.pitchPercent);
+    engine.setPitch(ramping ? lerp(startPitch, target.pitchPercent, rampP) : target.pitchPercent);
     if (!snap.playing) {
       engine.seek(target.trackTime);
       engine.play();
       return;
     }
+    if (ramping) return; // anchor: untouched while converging
     const drift = engine.getPlayhead() - target.trackTime;
     if (hard || Math.abs(drift) > DRIFT_TOLERANCE_S) {
       engine.seek(target.trackTime);

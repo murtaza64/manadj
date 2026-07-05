@@ -122,8 +122,16 @@ export function unregisterSurface(id: AudibleSurfaceId): void {
  * Idempotent for the holder. Claim-over-claim (neither party is 'shared')
  * is last-wins: the Conductor yields to an editor claim by halting and
  * leaving the claimant in charge (sets 04 ADR — it subscribes and stands
- * down instead of releasing, since only the holder may release). */
-export function claimAudible(id: AudibleSurfaceId): void {
+ * down instead of releasing, since only the holder may release).
+ *
+ * `silencePrevious: false` is the Pickup claim (sets 16): the claimant
+ * ADOPTS the holder's running playback instead of displacing it — the
+ * mirror of takeover's suppressed release-silence. Everything else
+ * (holder flip, capture gating, transport routing) is unchanged. */
+export function claimAudible(
+  id: AudibleSurfaceId,
+  opts: { silencePrevious?: boolean } = {}
+): void {
   if (holder === id) return;
   const claimant = surfaces.get(id);
   if (!claimant) {
@@ -133,7 +141,7 @@ export function claimAudible(id: AudibleSurfaceId): void {
   if (holder !== 'shared') {
     console.warn(`[audibleSurface] '${id}' displaces '${holder}' (last claim wins)`);
   }
-  surfaces.get(holder)?.silence();
+  if (opts.silencePrevious !== false) surfaces.get(holder)?.silence();
   holder = id;
   notify();
 }

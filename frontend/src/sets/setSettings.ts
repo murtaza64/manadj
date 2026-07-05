@@ -6,6 +6,7 @@
  * Edits apply live: the next plan recompute reads the new values.
  */
 import { useSyncExternalStore } from 'react';
+import { DEFAULT_PICKUP_RAMP_SEC, DEFAULT_PICKUP_TOLERANCE_S } from './pickup';
 import {
   DEFAULT_GRACE_FADE_SEC,
   DEFAULT_GRACE_HEADROOM_SEC,
@@ -21,12 +22,18 @@ export interface SetPlaybackSettings {
   graceHeadroomSec: number;
   /** …fading the dying track out over this long, ending at the cut. */
   graceFadeSec: number;
+  /** Pickup (sets 16): mixer/pitch convergence ramp at the instant. */
+  pickupRampSec: number;
+  /** Pickup two-deck blend alignment tolerance, seconds. */
+  pickupToleranceSec: number;
 }
 
 export const DEFAULT_SET_SETTINGS: SetPlaybackSettings = {
   tempoReturnSecPerPercent: DEFAULT_TEMPO_RETURN_SEC_PER_PERCENT,
   graceHeadroomSec: DEFAULT_GRACE_HEADROOM_SEC,
   graceFadeSec: DEFAULT_GRACE_FADE_SEC,
+  pickupRampSec: DEFAULT_PICKUP_RAMP_SEC,
+  pickupToleranceSec: DEFAULT_PICKUP_TOLERANCE_S,
 };
 
 const STORAGE_KEY = 'manadj-set-settings';
@@ -46,6 +53,11 @@ function load(): SetPlaybackSettings {
         DEFAULT_SET_SETTINGS.graceHeadroomSec
       ),
       graceFadeSec: clampNonNegative(parsed.graceFadeSec, DEFAULT_SET_SETTINGS.graceFadeSec),
+      pickupRampSec: clampNonNegative(parsed.pickupRampSec, DEFAULT_SET_SETTINGS.pickupRampSec),
+      pickupToleranceSec: clampNonNegative(
+        parsed.pickupToleranceSec,
+        DEFAULT_SET_SETTINGS.pickupToleranceSec
+      ),
     };
   } catch {
     return DEFAULT_SET_SETTINGS;

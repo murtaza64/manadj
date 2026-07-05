@@ -8,6 +8,8 @@
  * - the same blend while the editor holds audibility → nothing
  * - audibility lost mid-engagement → the engagement is discarded
  * - a blend performed after regaining audibility → one Take (re-seed)
+ * - the Conductor's Pickup claim (sets 16): mid-engagement → no Take;
+ *   after settle → the completed Take is preserved
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CaptureRecorder } from './recorder';
@@ -212,6 +214,43 @@ describe('capture gate (ADR 0022)', () => {
     expect(r.takes).toHaveLength(1);
     expect(r.takes[0].outgoingTrackId).toBe(1);
     expect(r.takes[0].incomingTrackId).toBe(2);
+    r.recorder.dispose();
+  });
+
+  // Pickup (sets 16) capture rule: the Conductor's claim is the gate
+  // flip, so picking up mid-Handover abandons the in-flight engagement
+  // (finishing a mix by machine forfeits the Take)…
+  it('a Conductor claim mid-engagement (pickup) yields no Take', () => {
+    const r = rig();
+    registerSurface('conductor', surface());
+    r.recorder.start();
+    r.decks.A.load(1);
+    r.decks.B.load(2);
+    r.mixer.setFader('B', 0);
+    r.decks.A.play();
+    r.advance(10);
+    r.decks.B.play();
+    r.advance(2);
+    r.mixer.setFader('B', 1); // blend under way: engagement in flight
+    r.advance(3);
+    // Pickup's exact claim: adopt the decks live (no silence) mid-blend.
+    claimAudible('conductor', { silencePrevious: false });
+    r.mixer.setFader('A', 0); // the Conductor finishes the handover
+    r.advance(HORIZON + 1);
+    expect(r.takes).toHaveLength(0);
+    r.recorder.dispose();
+  });
+
+  // …while a pickup AFTER the settle horizon keeps the completed Take.
+  it('a Conductor claim after settle (post-settle pickup) preserves the Take', () => {
+    const r = rig();
+    registerSurface('conductor', surface());
+    r.recorder.start();
+    performBlend(r); // settles: one Take emitted
+    expect(r.takes).toHaveLength(1);
+    claimAudible('conductor', { silencePrevious: false }); // pickup after the fact
+    r.advance(HORIZON + 1);
+    expect(r.takes).toHaveLength(1); // nothing lost, nothing added
     r.recorder.dispose();
   });
 

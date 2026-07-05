@@ -60,6 +60,7 @@ import {
 } from './adjacency';
 import {
   conductorTogglePlay,
+  pickupSetPlayback,
   seekSetPlayback,
   setFollowPlayback,
   startSetPlayback,
@@ -67,9 +68,11 @@ import {
   useConductorState,
 } from './conductorStore';
 import { OverviewLadder } from './OverviewLadder';
+import { evaluatePickup, readPickupSnapshot } from './pickup';
 import { fmtSec, type PlannedEntry, type PlanWarning } from './planner';
 import { prefetchTrackBuffer } from './prefetch';
 import { useSetPlan } from './useSetPlan';
+import { useSetSettings } from './setSettings';
 import {
   addTracksToSet,
   ensureSetEntriesLoaded,
@@ -234,6 +237,53 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const seekToMixTime = (mixTime: number) => {
     if (!plan) return;
     seekSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, mixTime, prefetchTrack);
+  };
+
+  // ── Pickup (sets 16): resume the set from the live deck state ────────
+  // The button is lit exactly when the state maps cleanly onto the plan
+  // (pure predicate); unlit shows the reason that teaches the fix. The
+  // live state moves outside React (playheads, mixer), so poll while the
+  // Conductor is idle — only the lit/reason summary enters React state.
+  const { pickupRampSec, pickupToleranceSec } = useSetSettings();
+  const [pickupState, setPickupState] = useState<{ lit: boolean; message: string } | null>(null);
+  const canPickup =
+    conductorState.status === 'idle' && plan !== undefined && plan.entries.length > 0;
+  useEffect(() => {
+    if (!canPickup || !plan) return;
+    const evaluate = () => {
+      const decision = evaluatePickup(
+        plan,
+        readPickupSnapshot(mixer, { A: decks.A.engine, B: decks.B.engine }),
+        { toleranceSec: pickupToleranceSec }
+      );
+      const next = decision.lit
+        ? { lit: true, message: 'Resume set playback from the current deck state' }
+        : { lit: false, message: decision.message };
+      setPickupState((prev) =>
+        prev && prev.lit === next.lit && prev.message === next.message ? prev : next
+      );
+    };
+    // First evaluation next tick (setState inside an effect body cascades);
+    // the interval keeps it fresh against the moving playheads.
+    const kick = setTimeout(evaluate, 0);
+    const timer = setInterval(evaluate, 250);
+    return () => {
+      clearTimeout(kick);
+      clearInterval(timer);
+    };
+  }, [canPickup, plan, mixer, decks, pickupToleranceSec]);
+  const pickUp = () => {
+    if (!plan) return;
+    // The store re-evaluates against ONE fresh snapshot (the polled
+    // summary may be 250ms stale); an unlit verdict is simply a no-op.
+    pickupSetPlayback(
+      setId,
+      plan,
+      conductorAudio(),
+      loadTrackOnDeck,
+      { rampSec: pickupRampSec, toleranceSec: pickupToleranceSec },
+      prefetchTrack
+    );
   };
 
   // ── Practice (sets 13): mix an adjacency live on the shared decks ────
@@ -509,6 +559,26 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   }}
                 >
                   ⏹
+                </button>
+              )}
+              {/* Pickup (sets 16): the inverse of takeover. Lit exactly
+                  when the live deck state maps cleanly onto the plan;
+                  unlit teaches the fix via the tooltip. */}
+              {canPickup && pickupState && (
+                <button
+                  onClick={pickUp}
+                  disabled={!pickupState.lit}
+                  title={pickupState.message}
+                  style={{
+                    padding: '2px 10px',
+                    background: pickupState.lit ? 'var(--peach)' : 'var(--surface0)',
+                    color: pickupState.lit ? 'var(--base)' : 'var(--subtext0)',
+                    border: '1px solid var(--surface1)',
+                    cursor: pickupState.lit ? 'pointer' : 'default',
+                    fontSize: '12px',
+                  }}
+                >
+                  ⤴ Pick up
                 </button>
               )}
             </>
