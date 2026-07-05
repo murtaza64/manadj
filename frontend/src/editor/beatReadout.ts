@@ -99,6 +99,20 @@ export function lengthBeatsLabel(
   return `${isWhole ? whole : beats.toFixed(1)} beats`;
 }
 
+/** Jump-event Δ label (transition-takes 01): whole B-beats when a grid
+ * makes them readable ("−16 bt"), seconds otherwise ("−7.4s"). The 0.05
+ * beat tolerance mirrors WHOLE_BEAT_EPS: close enough to read as the
+ * musical intent, tight enough not to lie about off-grid distances. */
+export function jumpDeltaLabel(deltaSec: number, beatSec: number | null): string {
+  if (beatSec) {
+    const beats = deltaSec / beatSec;
+    if (Math.abs(beats - Math.round(beats)) < 0.05 && Math.round(beats) !== 0) {
+      return `${beats > 0 ? '+' : ''}${Math.round(beats)} bt`;
+    }
+  }
+  return `${deltaSec > 0 ? '+' : ''}${deltaSec.toFixed(1)}s`;
+}
+
 /**
  * B-entry label on the INCOMING track's grid. Non-negative anchors read
  * as the grid position where B enters; a negative anchor is the silent

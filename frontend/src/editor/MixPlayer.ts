@@ -19,7 +19,13 @@ import { Mixer } from '../playback/mixer';
 import { isAudible } from '../playback/audibleSurface';
 import { api } from '../api/client';
 import type { EditorMix } from './mixModel';
-import { EDITOR_PITCH_RANGE_PERCENT, arrangementAt, laneValuesAt, tempoMatchPitch } from './mixModel';
+import {
+  EDITOR_PITCH_RANGE_PERCENT,
+  arrangementAt,
+  jumpInstantSec,
+  laneValuesAt,
+  tempoMatchPitch,
+} from './mixModel';
 
 const DRIFT_TOLERANCE_S = 0.12;
 
@@ -45,6 +51,8 @@ export class MixPlayer {
   private muted = { A: false, B: false };
 
   private playing = false;
+  /** Previous tick's mix time — jump-crossing detection (see tick). */
+  private lastTickT = 0;
   private mixTimeAtAnchor = 0;
   /** Audio-clock time (mixer.now()) at the anchor — NOT wall time. */
   private anchorAudioTime = 0;
@@ -142,6 +150,7 @@ export class MixPlayer {
     // Apply lane values before audio starts so mid-transition playback
     // begins at the drawn gains, not the previous ones.
     this.applyLanes(this.getMixTime());
+    this.lastTickT = this.getMixTime();
     this.syncDecks(this.getMixTime(), true);
     this.raf = requestAnimationFrame(this.tick);
     this.emit();
@@ -160,6 +169,7 @@ export class MixPlayer {
   seek(mixTime: number): void {
     const t = Math.max(0, Math.min(mixTime, this.getMixDuration()));
     this.mixTimeAtAnchor = t;
+    this.lastTickT = t;
     this.anchorAudioTime = this.mixer.now();
     this.applyLanes(t);
     if (this.playing) {
@@ -200,7 +210,17 @@ export class MixPlayer {
       this.pause();
       return;
     }
-    this.syncDecks(t, false);
+    // Jump events (transition-takes 01): crossing an instant makes B's
+    // arrangement position discontinuous. The drift corrector would catch
+    // deltas past its tolerance anyway; the explicit crossing check makes
+    // sub-tolerance jumps land too, exactly one hard sync per crossing.
+    const tr = this.mix.transition;
+    const crossed = (tr.jumps ?? []).some((j) => {
+      const tj = jumpInstantSec(tr, j);
+      return tj > this.lastTickT && tj <= t;
+    });
+    this.lastTickT = t;
+    this.syncDecks(t, crossed);
     this.applyLanes(t);
     this.raf = requestAnimationFrame(this.tick);
   };

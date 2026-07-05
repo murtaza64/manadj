@@ -48,6 +48,16 @@ describe('isPristine (what counts as a real edit)', () => {
     }
   });
 
+  it('a Jump event materializes (transition-takes 01)', () => {
+    const item = pristine();
+    item.transition = { ...item.transition, jumps: [{ x: 0.5, deltaSec: -8 }] };
+    expect(isPristine(item)).toBe(false);
+    // An emptied jumps array is no edit — same rule as empty lanes.
+    const emptied = pristine();
+    emptied.transition = { ...emptied.transition, jumps: [] };
+    expect(isPristine(emptied)).toBe(true);
+  });
+
   it('hiding a lane materializes', () => {
     const item = pristine();
     item.transition = { ...item.transition, hiddenLanes: ['faderA'] };

@@ -21,7 +21,7 @@
 import { useCallback } from 'react';
 import { useSyncExternalStore } from 'react';
 import { defaultMix, lanePoints, slideB, slideBToCue } from './mixModel';
-import type { EditorMix, LaneId, LanePoint, Transition } from './mixModel';
+import type { EditorMix, JumpEvent, LaneId, LanePoint, Transition } from './mixModel';
 import {
   freshTransition,
   isPristine,
@@ -207,6 +207,43 @@ export class EditorStore {
           ...m.transition.lanes,
           [id]: lanePoints(m.transition.lanes, id, m.transition.durationSec),
         },
+      },
+    }));
+  }
+
+  // ── Jump events (transition-takes 01) ───────────────────────────────
+  // Array order is INSERTION order, never re-sorted: the UI addresses
+  // jumps by index across x drags (the math is order-insensitive).
+
+  /** Add a Jump event at normalized window position x (clamped 0..1),
+   * with no distance yet — the marker's editor sets deltaSec. */
+  addJump(x: number): void {
+    const jump = { x: Math.max(0, Math.min(1, x)), deltaSec: 0 };
+    this.updateMix((m) => ({
+      ...m,
+      transition: { ...m.transition, jumps: [...(m.transition.jumps ?? []), jump] },
+    }));
+  }
+
+  /** Patch one Jump event (marker drags patch `x`, the Δ editor patches
+   * `deltaSec`) — addressed by insertion index, stable across x drags. */
+  updateJump(index: number, patch: Partial<JumpEvent>): void {
+    this.updateMix((m) => ({
+      ...m,
+      transition: {
+        ...m.transition,
+        jumps: (m.transition.jumps ?? []).map((j, i) => (i === index ? { ...j, ...patch } : j)),
+      },
+    }));
+  }
+
+  /** Delete one Jump event by insertion index. */
+  removeJump(index: number): void {
+    this.updateMix((m) => ({
+      ...m,
+      transition: {
+        ...m.transition,
+        jumps: (m.transition.jumps ?? []).filter((_, i) => i !== index),
       },
     }));
   }

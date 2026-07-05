@@ -6,12 +6,15 @@ import {
   EDITOR_PITCH_RANGE_PERCENT,
   arrangementAt,
   bTrackTimeAt,
+  cropRemapJumps,
+  cropRemapJumpsLeft,
   evalLane,
   insertChop,
   laneValuesAt,
   slideB,
   slideBToCue,
   tempoMatchPitch,
+  type JumpEvent,
   type LanePoint,
   type EditorMix,
   type Transition,
@@ -181,6 +184,114 @@ describe('arrangementAt with negative entry anchor', () => {
     expect(arrangementAt(mix, 0, durations, 1).mixDuration).toBe(100);
     const long = { ...mix, transition: tr({ startSec: 60, durationSec: 20, bInSec: -10 }) };
     expect(arrangementAt(long, 0, durations, 1).mixDuration).toBe(130);
+  });
+});
+
+// ── Jump events (transition-takes 01) ──────────────────────────────────
+// A Jump event is a playback discontinuity of the INCOMING track at a mix
+// instant (glossary; ADR 0020) — beat jump / hot-cue press mid-mix, e.g.
+// doubling a buildup. Incoming-only: A's time ≡ mix time stays inviolate.
+
+describe('bTrackTimeAt with jump events', () => {
+  // Window 30..50; B enters at track-time 10. A jump halfway (mix 40)
+  // back 8 B-seconds doubles the 32..40 stretch of B.
+  const jump = (over: Partial<JumpEvent> = {}): JumpEvent => ({ x: 0.5, deltaSec: -8, ...over });
+
+  it('is linear before the jump instant and offset after it', () => {
+    const t = tr({ jumps: [jump()] });
+    expect(bTrackTimeAt(t, 39.9, 1)).toBeCloseTo(19.9);
+    expect(bTrackTimeAt(t, 40, 1)).toBeCloseTo(12); // 20 − 8, at the instant
+    expect(bTrackTimeAt(t, 45, 1)).toBeCloseTo(17);
+  });
+
+  it('jump instants sit on the MIX axis: x maps through the window, deltas are B-seconds', () => {
+    const t = tr({ jumps: [jump()] });
+    // rateB 2: same mix instant (40), B-time runs twice as fast.
+    expect(bTrackTimeAt(t, 39.9, 2)).toBeCloseTo(10 + 9.9 * 2);
+    expect(bTrackTimeAt(t, 41, 2)).toBeCloseTo(10 + 11 * 2 - 8);
+  });
+
+  it('accumulates multiple jumps regardless of array order', () => {
+    const jumps: JumpEvent[] = [jump({ x: 0.75, deltaSec: 4 }), jump({ x: 0.25, deltaSec: -8 })];
+    const t = tr({ jumps });
+    expect(bTrackTimeAt(t, 34, 1)).toBeCloseTo(14); // before both
+    expect(bTrackTimeAt(t, 36, 1)).toBeCloseTo(8); // after the first
+    expect(bTrackTimeAt(t, 46, 1)).toBeCloseTo(22); // 10 + 16 − 8 + 4, after both
+  });
+});
+
+describe('arrangementAt with jump events', () => {
+  const durations = { a: 100, b: 60 };
+  const mixWith = (jumps: JumpEvent[], over: Partial<Transition> = {}): EditorMix => ({
+    trackAId: 1,
+    trackBId: 2,
+    transition: tr({ startSec: 30, durationSec: 20, bInSec: 10, jumps, ...over }),
+  });
+
+  it('a backward jump (doubled buildup) extends the mix duration', () => {
+    // Without jumps B ends at mix 80; the −8 replay pushes it to 88.
+    expect(arrangementAt(mixWith([]), 0, durations, 1).mixDuration).toBeCloseTo(80);
+    const m = mixWith([{ x: 0.5, deltaSec: -8 }]);
+    expect(arrangementAt(m, 0, durations, 1).mixDuration).toBeCloseTo(88);
+    expect(arrangementAt(m, 85, durations, 1).bActive).toBe(true);
+    expect(arrangementAt(m, 85, durations, 1).bTrackTime).toBeCloseTo(57);
+  });
+
+  it('a forward jump past B\'s end ends B at the jump instant', () => {
+    const m = mixWith([{ x: 0.5, deltaSec: 45 }]); // mix 40: B-time 20 → 65 > 60
+    expect(arrangementAt(m, 39, durations, 1).bActive).toBe(true);
+    expect(arrangementAt(m, 41, durations, 1).bActive).toBe(false);
+    // A still runs to the window end (aEnd 50), which now bounds the mix.
+    expect(arrangementAt(m, 0, durations, 1).mixDuration).toBeCloseTo(50);
+  });
+
+  it('a backward jump firing exactly as B ends rescues it (instant belongs to the jump)', () => {
+    // bInSec 50 runs B's tape out at mix 40 — the same instant a −8 jump
+    // fires (x 0.5). bTrackTimeAt applies deltas AT their instant, so the
+    // jump wins: B replays its last stretch instead of ending, and now
+    // runs out at mix 48. A's window end (50) bounds the mix.
+    const m = mixWith([{ x: 0.5, deltaSec: -8 }], { bInSec: 50 });
+    expect(arrangementAt(m, 39.9, durations, 1).bActive).toBe(true);
+    expect(arrangementAt(m, 40, durations, 1).bActive).toBe(true); // rescued, not ended
+    expect(arrangementAt(m, 40, durations, 1).bTrackTime).toBeCloseTo(52);
+    expect(arrangementAt(m, 47.9, durations, 1).bActive).toBe(true);
+    expect(arrangementAt(m, 48.1, durations, 1).bActive).toBe(false);
+    expect(arrangementAt(m, 0, durations, 1).mixDuration).toBeCloseTo(50);
+  });
+
+  it('a jump below B\'s start deactivates B until its audio recovers', () => {
+    // Mix 32: B-time 12 − 20 = −8 → silent, back at 0 by mix 40.
+    const m = mixWith([{ x: 0.1, deltaSec: -20 }]);
+    expect(arrangementAt(m, 31, durations, 1).bActive).toBe(true);
+    expect(arrangementAt(m, 35, durations, 1).bActive).toBe(false);
+    expect(arrangementAt(m, 41, durations, 1).bActive).toBe(true);
+    expect(arrangementAt(m, 41, durations, 1).bTrackTime).toBeCloseTo(1);
+  });
+});
+
+describe('crop remaps for jump events (duration changes keep absolute time)', () => {
+  const jumps: JumpEvent[] = [
+    { x: 0.25, deltaSec: -8 },
+    { x: 0.75, deltaSec: 4 },
+  ];
+
+  it('right-edge crop: instants keep absolute time, cut-off jumps drop', () => {
+    expect(cropRemapJumps(jumps, 20, 10)).toEqual([{ x: 0.5, deltaSec: -8 }]);
+    // Growing compresses leftward, nothing drops.
+    expect(cropRemapJumps(jumps, 20, 40)).toEqual([
+      { x: 0.125, deltaSec: -8 },
+      { x: 0.375, deltaSec: 4 },
+    ]);
+  });
+
+  it('left-edge crop: instants keep absolute time, cut-off jumps drop', () => {
+    // Window shrinks 20 → 15 from the left (start moves +5s): 5s abs → 0,
+    // 15s abs → 10/15.
+    expect(cropRemapJumpsLeft(jumps, 20, 15)).toEqual([
+      { x: 0, deltaSec: -8 },
+      { x: expect.closeTo(10 / 15), deltaSec: 4 },
+    ]);
+    expect(cropRemapJumpsLeft(jumps, 20, 10)).toEqual([{ x: 0.5, deltaSec: 4 }]);
   });
 });
 

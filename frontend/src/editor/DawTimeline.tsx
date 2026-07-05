@@ -18,6 +18,8 @@ import { LANE_COLORS } from './laneColors';
 import type { LaneGuide } from './LaneCanvas';
 import {
   LANE_IDS,
+  cropRemapJumps,
+  cropRemapJumpsLeft,
   cropRemapLanes,
   cropRemapLanesLeft,
   defaultLanePoints,
@@ -26,8 +28,10 @@ import {
   nearestTime,
   visibleLaneIds,
 } from './mixModel';
-import type { LaneId, LanePoint, Lanes, EditorMix } from './mixModel';
+import type { JumpEvent, LaneId, LanePoint, Lanes, EditorMix } from './mixModel';
 import { EditorStore, useEditorSelector } from './editorStore';
+import { jumpDeltaLabel } from './beatReadout';
+import { beatPeriodSec } from './templateModel';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData } from '../types';
 
@@ -132,6 +136,7 @@ export function DawTimeline({
     /** Lane/duration snapshot at drag start — crop remaps derive from these
      * so incremental moves never compound (and toggling alt mid-drag works). */
     origLanes: Lanes;
+    origJumps: JumpEvent[] | undefined;
     origDur: number;
     origStart: number;
   }>(null);
@@ -546,6 +551,7 @@ export function DawTimeline({
       grabOffsetSec:
         zone === 'bMove' ? sec - (snapRef.current.lockedWindow ? tr0.startSec : originMix) : 0,
       origLanes: structuredClone(tr0.lanes),
+      origJumps: tr0.jumps ? structuredClone(tr0.jumps) : undefined,
       origDur: tr0.durationSec,
       origStart: tr0.startSec,
     };
@@ -624,10 +630,13 @@ export function DawTimeline({
         bIn = Math.min(Math.max(bIn, 0), Math.max(durB - 0.1, 0));
         const newStart = originMix + bIn / s.rateB;
         const newDur = Math.max(origEnd - newStart, 0);
-        // Default = crop (lanes keep absolute timing); alt = stretch.
+        // Default = crop (lanes/jumps keep absolute timing); alt = stretch.
         const lanes = e.altKey
           ? d.origLanes
           : cropRemapLanesLeft(d.origLanes, d.origDur, newDur);
+        const jumps = e.altKey
+          ? d.origJumps
+          : cropRemapJumpsLeft(d.origJumps, d.origDur, newDur);
         return {
           ...m,
           transition: {
@@ -639,6 +648,7 @@ export function DawTimeline({
             // drag-start snapshot, which is itself a private clone and lane
             // edits never mutate point arrays in place.
             lanes,
+            jumps,
           },
         };
       }
@@ -649,20 +659,74 @@ export function DawTimeline({
         if (snapped !== null) newEnd = Math.min(Math.max(snapped, m.transition.startSec), maxEnd);
       }
       const newDur = newEnd - m.transition.startSec;
-      // Default = crop (lanes keep absolute timing); alt = stretch (shapes
-      // scale with the region — normalized points, no remap). Both derive
-      // from the drag-start snapshot.
+      // Default = crop (lanes/jumps keep absolute timing); alt = stretch
+      // (shapes scale with the region — normalized points, no remap). Both
+      // derive from the drag-start snapshot.
       const lanes = e.altKey
         ? d.origLanes
         : cropRemapLanes(d.origLanes, d.origDur, newDur);
+      const jumps = e.altKey ? d.origJumps : cropRemapJumps(d.origJumps, d.origDur, newDur);
       return {
         ...m,
-        transition: { ...m.transition, durationSec: newDur, lanes },
+        transition: { ...m.transition, durationSec: newDur, lanes, jumps },
       };
     });
   };
 
   const endDrag = () => (drag.current = null);
+
+  // ── Jump events (transition-takes 01) ─────────────────────────────────
+  // Markers on the mix axis: drag moves the instant (A-grid snap — the
+  // instant lives on mix time), click opens the delta editor, double-click
+  // on row B inside the window adds one. B's waveform keeps its base
+  // (no-jump) alignment mapping — post-jump content on screen is a known
+  // v1 approximation; the AUDIO is authoritative (arrangementAt).
+  const [editingJump, setEditingJump] = useState<number | null>(null);
+  const jumpDrag = useRef<null | { index: number; downClientX: number; moved: boolean }>(null);
+
+  // A Transition switch invalidates jump indices — close the editor.
+  useEffect(() => setEditingJump(null), [frameSignal]);
+
+  const onJumpPointerDown = (i: number) => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    jumpDrag.current = { index: i, downClientX: e.clientX, moved: false };
+  };
+
+  const onJumpPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = jumpDrag.current;
+    if (!d) return;
+    // Same ≤4px click-vs-drag threshold as the row drags above.
+    if (!d.moved && Math.abs(e.clientX - d.downClientX) <= 4) return;
+    d.moved = true;
+    const m = mixRef.current;
+    const s = snapRef.current;
+    let sec = secAtClientX(e.clientX);
+    if (s.snap && !e.shiftKey && s.beatsA?.length) sec = nearestTime(s.beatsA, sec) ?? sec;
+    const dur = m.transition.durationSec;
+    const x = dur > 0 ? (sec - m.transition.startSec) / dur : 0;
+    store.updateJump(d.index, { x: Math.max(0, Math.min(1, x)) });
+  };
+
+  const onJumpPointerUp = () => {
+    const d = jumpDrag.current;
+    jumpDrag.current = null;
+    if (d && !d.moved) setEditingJump((cur) => (cur === d.index ? null : d.index));
+  };
+
+  /** Double-click on row B inside the window: add a jump there (Δ 0 —
+   * the editor that opens sets the distance). */
+  const onRowBDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const m = mixRef.current;
+    const dur = m.transition.durationSec;
+    const sec = secAtClientX(e.clientX);
+    if (dur <= 0 || sec < m.transition.startSec || sec > m.transition.startSec + dur) return;
+    store.addJump((sec - m.transition.startSec) / dur);
+    setEditingJump(m.transition.jumps?.length ?? 0); // appended index
+  };
+
+  /** One B beat in B's own seconds (Δ steppers and chip labels). */
+  const beatSecB = beatgridB ? beatPeriodSec(beatgridB) : null;
 
   // Beat/cue guide lines continued through the lane strips (normalized to the
   // transition window). Non-downbeats hidden when tighter than ~12px.
@@ -818,6 +882,7 @@ export function DawTimeline({
             onPointerMove={onRowPointerMove('B')}
             onPointerUp={onRowPointerUp}
             onPointerCancel={endDrag}
+            onDoubleClick={onRowBDoubleClick}
           >
             <div ref={waveWrapBRef} className="editor-wavecanvas" style={{ width: viewW }}>
               <canvas ref={rendB.canvasRef} />
@@ -848,6 +913,71 @@ export function DawTimeline({
               className="editor-overlap"
               style={{ left: tr.startSec * pxPerSec, width: tr.durationSec * pxPerSec }}
             />
+          )}
+
+          {/* Jump events: incoming-track discontinuities (glossary). */}
+          {(tr.jumps ?? []).map((j, i) => (
+            <div
+              key={i}
+              className="editor-jump"
+              style={{ left: (tr.startSec + j.x * tr.durationSec) * pxPerSec }}
+              onPointerDown={onJumpPointerDown(i)}
+              onPointerMove={onJumpPointerMove}
+              onPointerUp={onJumpPointerUp}
+              onPointerCancel={() => (jumpDrag.current = null)}
+              title="Jump event — drag to move, click to edit"
+            >
+              <span className="editor-jump-chip">⤺ {jumpDeltaLabel(j.deltaSec, beatSecB)}</span>
+            </div>
+          ))}
+          {editingJump !== null && tr.jumps?.[editingJump] && (
+            <div
+              className="editor-jump-popover"
+              style={{
+                left: (tr.startSec + tr.jumps[editingJump].x * tr.durationSec) * pxPerSec + 8,
+              }}
+            >
+              <label>
+                Δ
+                <input
+                  type="number"
+                  step={0.1}
+                  value={Number(tr.jumps[editingJump].deltaSec.toFixed(2))}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) store.updateJump(editingJump, { deltaSec: v });
+                  }}
+                />
+                s
+              </label>
+              {beatSecB && (
+                <span className="editor-jump-beatsteps">
+                  {[-4, -1, 1, 4].map((n) => (
+                    <button
+                      key={n}
+                      title={`${n > 0 ? '+' : ''}${n} B beat${Math.abs(n) > 1 ? 's' : ''}`}
+                      onClick={() =>
+                        store.updateJump(editingJump, {
+                          deltaSec: tr.jumps![editingJump].deltaSec + n * beatSecB,
+                        })
+                      }
+                    >
+                      {n > 0 ? `+${n}` : n}
+                    </button>
+                  ))}
+                </span>
+              )}
+              <button
+                className="editor-jump-delete"
+                onClick={() => {
+                  store.removeJump(editingJump);
+                  setEditingJump(null);
+                }}
+              >
+                delete
+              </button>
+              <button onClick={() => setEditingJump(null)}>✕</button>
+            </div>
           )}
 
           {/* Mix playhead */}

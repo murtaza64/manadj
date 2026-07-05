@@ -366,6 +366,90 @@
   pointer-events: none;
 }
 
+/* ── Jump events (transition-takes 01): incoming-track discontinuities.
+   Bright saturated cyan — distinct from the pink playhead/window edges
+   and the green cue guides. */
+.editor-jump {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed #00e5ff;
+  cursor: grab;
+  z-index: 60;
+}
+
+/* Widen the grab target beyond the 2px line. */
+.editor-jump::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 12px;
+}
+
+.editor-jump-chip {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: #001114;
+  background: #00e5ff;
+  border-radius: 3px;
+  user-select: none;
+}
+
+.editor-jump-popover {
+  position: absolute;
+  top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #0b0b12;
+  border: 1px solid #00e5ff;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #e8e8f0;
+  z-index: 120;
+}
+
+.editor-jump-popover input {
+  width: 62px;
+  background: #14141f;
+  color: #e8e8f0;
+  border: 1px solid #333;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+.editor-jump-popover button {
+  background: #14141f;
+  color: #e8e8f0;
+  border: 1px solid #333;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.editor-jump-popover button:hover {
+  border-color: #00e5ff;
+}
+
+.editor-jump-popover .editor-jump-delete {
+  color: #ff2d95;
+}
+
+.editor-jump-beatsteps {
+  display: flex;
+  gap: 2px;
+}
+
 .editor-playhead {
   position: absolute;
   top: 0;

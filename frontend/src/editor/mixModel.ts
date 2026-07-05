@@ -39,6 +39,20 @@ export const DEFAULT_LANE_IDS: LaneId[] = [
 
 export type Lanes = Partial<Record<LaneId, LanePoint[]>>;
 
+/** A Jump event (glossary; ADR 0020, transition-takes 01): a playback
+ * discontinuity of the INCOMING track — at a mix instant, B's playhead
+ * jumps by `deltaSec` of its own track time (negative = back, e.g.
+ * doubling a buildup). Incoming-only: the Sketch origin invariant (A's
+ * track time ≡ mix time) is untouched. The instant lives on the mix axis
+ * as a normalized window position, like LanePoint.x; the array is
+ * order-insensitive (indices stay stable across x drags). */
+export interface JumpEvent {
+  /** 0..1 position within the transition window. */
+  x: number;
+  /** Jump distance in B's OWN seconds (+ = forward, − = back/replay). */
+  deltaSec: number;
+}
+
 export interface Transition {
   /** Mix-time (s) when the transition window begins. The only clamp in the
    * model: startSec ≥ 0 (a transition can't begin before A exists). */
@@ -52,6 +66,8 @@ export interface Transition {
   /** BPM-match the incoming track to the outgoing for the whole mix. */
   tempoMatch: boolean;
   lanes: Lanes;
+  /** Jump events on the incoming track (absent/empty = none). */
+  jumps?: JumpEvent[];
   /** Lanes removed from the editor (any lane is removable, defaults too).
    * Hidden lanes keep their drawn envelope in `lanes` — re-adding restores
    * it — but read as their DEFAULT value during playback (an invisible
@@ -169,15 +185,17 @@ export function arrangementAt(
   const tr = mix.transition;
   const aEnd = Math.min(tr.startSec + tr.durationSec, durations.a);
   const bTrackTime = bTrackTimeAt(tr, mixTime, rateB);
-  const bEndMixTime = tr.startSec + (durations.b - tr.bInSec) / rateB;
+  const bEnd = bEndMixTime(tr, durations.b, rateB);
   return {
     aActive: mixTime >= 0 && mixTime < aEnd,
     aTrackTime: mixTime,
     // bTrackTime ≥ 0 defers B past a negative entry anchor's silent lead
-    // gap: the deck stays inactive until B's true audio start.
-    bActive: mixTime >= tr.startSec && bTrackTime >= 0 && bTrackTime < durations.b,
+    // gap (and past a mid-window jump below B's start): the deck stays
+    // inactive until B's audio (re)starts. B's FIRST end is its end —
+    // mixTime < bEnd, which without jumps is exactly bTrackTime < durB.
+    bActive: mixTime >= tr.startSec && bTrackTime >= 0 && mixTime < bEnd,
     bTrackTime,
-    mixDuration: Math.max(aEnd, bEndMixTime),
+    mixDuration: Math.max(aEnd, bEnd),
   };
 }
 
@@ -186,13 +204,59 @@ export function arrangementAt(
 // the playhead's mix position. The lock chooses which track the window
 // sticks to. PRD § Deck slides — the quadrant table is the spec.
 
-/** B's track-time under the playhead at mix-time t. */
+/** A jump's instant on the mix axis. */
+export function jumpInstantSec(
+  tr: Pick<Transition, 'startSec' | 'durationSec'>,
+  j: JumpEvent
+): number {
+  return tr.startSec + j.x * tr.durationSec;
+}
+
+/** B's track-time under the playhead at mix-time t: linear in rateB, plus
+ * the deltas of every Jump event whose instant has passed (piecewise —
+ * transition-takes 01). */
 export function bTrackTimeAt(
-  tr: Pick<Transition, 'startSec' | 'bInSec'>,
+  tr: Pick<Transition, 'startSec' | 'bInSec' | 'durationSec' | 'jumps'>,
   mixTime: number,
   rateB: number
 ): number {
-  return tr.bInSec + (mixTime - tr.startSec) * rateB;
+  let t = tr.bInSec + (mixTime - tr.startSec) * rateB;
+  for (const j of tr.jumps ?? []) {
+    if (mixTime >= jumpInstantSec(tr, j)) t += j.deltaSec;
+  }
+  return t;
+}
+
+/**
+ * Mix-time when B's audio ends: the FIRST instant its track time reaches
+ * durB, walking the linear segments between Jump events. A forward jump
+ * past the end ends B at that instant; a backward jump can extend B's
+ * mix-time footprint (a replayed stretch plays twice). Without jumps this
+ * is the plain `startSec + (durB − bInSec)/rateB`.
+ */
+export function bEndMixTime(
+  tr: Pick<Transition, 'startSec' | 'bInSec' | 'durationSec' | 'jumps'>,
+  durB: number,
+  rateB: number
+): number {
+  const jumps = [...(tr.jumps ?? [])].sort((a, b) => a.x - b.x);
+  let t0 = tr.startSec;
+  let b0 = tr.bInSec;
+  for (const j of jumps) {
+    const tj = jumpInstantSec(tr, j);
+    if (tj > t0) {
+      const tHit = t0 + (durB - b0) / rateB;
+      // STRICT before the instant: bTrackTimeAt applies a delta AT its
+      // instant, so a jump firing exactly as B's tape runs out wins — a
+      // backward jump there rescues B rather than ending it.
+      if (b0 < durB && tHit < tj) return tHit;
+      b0 += (tj - t0) * rateB;
+      t0 = tj;
+    }
+    b0 += j.deltaSec;
+    if (b0 >= durB) return t0;
+  }
+  return t0 + (durB - b0) / rateB;
 }
 
 /**
@@ -256,6 +320,34 @@ export function cropRemapLanes(lanes: Lanes, oldDur: number, newDur: number): La
     out[id] = mapped;
   }
   return out;
+}
+
+/** CROP remap for Jump events, right-edge resize: instants keep their
+ * absolute time; jumps past the new end drop (nothing to pin — a jump is
+ * an instant, not an envelope). Stretch semantics need no remap. */
+export function cropRemapJumps(
+  jumps: JumpEvent[] | undefined,
+  oldDur: number,
+  newDur: number
+): JumpEvent[] | undefined {
+  if (!jumps || jumps.length === 0 || oldDur <= 0 || newDur <= 0) return jumps;
+  return jumps
+    .map((j) => ({ ...j, x: (j.x * oldDur) / newDur }))
+    .filter((j) => j.x <= 1);
+}
+
+/** CROP remap for Jump events, LEFT-edge resize (start moves, end
+ * anchored): absolute time kept, jumps cut off the front drop. */
+export function cropRemapJumpsLeft(
+  jumps: JumpEvent[] | undefined,
+  oldDur: number,
+  newDur: number
+): JumpEvent[] | undefined {
+  if (!jumps || jumps.length === 0 || oldDur <= 0 || newDur <= 0) return jumps;
+  const deltaSec = oldDur - newDur; // > 0 when shrinking from the left
+  return jumps
+    .map((j) => ({ ...j, x: (j.x * oldDur - deltaSec) / newDur }))
+    .filter((j) => j.x >= 0 && j.x <= 1);
 }
 
 /**

@@ -80,6 +80,58 @@ describe('flush-before-repoint', () => {
   });
 });
 
+describe('jump events (transition-takes 01)', () => {
+  it('adding a jump is a real edit: it persists with the transition', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.addJump(0.5);
+    vi.runAllTimers();
+    expect(p.saves).toHaveLength(1);
+    expect(p.saves[0].entry!.items[0].transition.jumps).toEqual([{ x: 0.5, deltaSec: 0 }]);
+  });
+
+  it('update and remove address jumps by stable index', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.addJump(0.75);
+    store.addJump(0.25);
+    // Updating the FIRST-added jump's x must not re-key the second.
+    store.updateJump(0, { deltaSec: -8 });
+    store.updateJump(1, { x: 0.3 });
+    expect(store.getSnapshot().mix.transition.jumps).toEqual([
+      { x: 0.75, deltaSec: -8 },
+      { x: 0.3, deltaSec: 0 },
+    ]);
+    store.removeJump(0);
+    expect(store.getSnapshot().mix.transition.jumps).toEqual([{ x: 0.3, deltaSec: 0 }]);
+  });
+
+  it('jumps survive the reload round trip (persisted entry → loaded mix)', () => {
+    const withJumps: SavedTransition = {
+      ...edited('u1'),
+      transition: { ...edited('u1').transition, jumps: [{ x: 0.5, deltaSec: -8 }] },
+    };
+    const p = fakePersistence({ '1:2': { items: [withJumps], active: 0 } });
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    expect(store.getSnapshot().mix.transition.jumps).toEqual([{ x: 0.5, deltaSec: -8 }]);
+  });
+
+  it('add clamps x into the window (0..1)', () => {
+    const p = fakePersistence();
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.addJump(1.4);
+    store.addJump(-0.2);
+    expect(store.getSnapshot().mix.transition.jumps).toEqual([
+      { x: 1, deltaSec: 0 },
+      { x: 0, deltaSec: 0 },
+    ]);
+  });
+});
+
 describe('debounce and dispose', () => {
   it('rapid mutations coalesce into one save', () => {
     const p = fakePersistence();
