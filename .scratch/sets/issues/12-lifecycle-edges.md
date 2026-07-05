@@ -69,6 +69,10 @@ pin on 549→171, favorite-transition pin on 171→600, unresolved on
    mid-set). Sidebar "Lifecycle demo" row grows an orange ⚑; open the
    set → header shows "⚑ ARCHIVED TRACKS"; entries, order, pins all
    unchanged. Unarchive (Archived view) → flag clears.
+   *(Review feedback 2026-07-05, amended into kkmpuxuw: the archived
+   track is now identified — its set row carries a "⚑ archived" mark
+   with an unarchive/remove hint, and the header badge's tooltip names
+   the archived tracks.)*
 2. *Take delete degrades (12)*: open the set, note the "● take" chip on
    the 792→665 adjacency. History → Takes → delete the 792→665 take.
    Reload → that adjacency is "✕ hard cut" + red UNRESOLVED; every other
