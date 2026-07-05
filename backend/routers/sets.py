@@ -23,8 +23,10 @@ router = APIRouter()
 def degrade_pins(db: Session, kind: str, uuids: set[str]) -> None:
     """Degrade dangling pins to Unresolved (sets 12): null every Set pin
     of the given kind referencing a deleted artifact — the DB never keeps
-    a broken reference. Called from the deletion paths (takes router,
-    transitions pair replace); the caller commits.
+    a broken reference. Dormant pins (sets 07) referencing it are DROPPED
+    outright: a memory of a deleted artifact restores nothing. Called
+    from the deletion paths (takes router, transitions pair replace);
+    the caller commits.
     """
     if not uuids:
         return
@@ -35,6 +37,10 @@ def degrade_pins(db: Session, kind: str, uuids: set[str]) -> None:
         {models.SetEntry.pin_kind: None, models.SetEntry.pin_uuid: None},
         synchronize_session=False,
     )
+    db.query(models.SetDormantPin).filter(
+        models.SetDormantPin.pin_kind == kind,
+        models.SetDormantPin.pin_uuid.in_(uuids),
+    ).delete(synchronize_session=False)
 
 
 def _archived_set_ids(db: Session, set_ids: list[int]) -> set[int]:
@@ -65,7 +71,7 @@ def _get_set(db: Session, set_id: int) -> models.Set:
 def _with_entries(db: Session, set_id: int) -> models.Set:
     row = (
         db.query(models.Set)
-        .options(selectinload(models.Set.entries))
+        .options(selectinload(models.Set.entries), selectinload(models.Set.dormant_pins))
         .filter(models.Set.id == set_id)
         .first()
     )
@@ -146,10 +152,12 @@ def replace_entries(
     payload: schemas.SetEntriesReplace,
     db: Session = Depends(get_db),
 ):
-    """Replace the Set's ordered entry list (reconcile by track_id).
+    """Replace the Set's ordered entry list (reconcile by track_id) and
+    its Dormant pins (sets 07, replaced wholesale — memories have no
+    identity beyond their ordered pair).
 
     An empty items list clears the Set. Idempotent: re-PUTting the same
-    payload is a no-op (rows keep their ids).
+    payload is a no-op (entry rows keep their ids).
     """
     _get_set(db, set_id)
 
@@ -160,6 +168,20 @@ def replace_entries(
         seen.add(item.track_id)
         if db.query(models.Track.id).filter(models.Track.id == item.track_id).first() is None:
             raise HTTPException(status_code=404, detail=f"Track {item.track_id} not found")
+
+    seen_pairs: set[tuple[int, int]] = set()
+    for d in payload.dormant:
+        pair = (d.a_track_id, d.b_track_id)
+        if pair in seen_pairs:
+            raise HTTPException(
+                status_code=400, detail=f"Duplicate dormant pair {pair[0]}→{pair[1]}"
+            )
+        seen_pairs.add(pair)
+        for track_id in pair:
+            if track_id in seen:
+                continue
+            if db.query(models.Track.id).filter(models.Track.id == track_id).first() is None:
+                raise HTTPException(status_code=404, detail=f"Track {track_id} not found")
 
     existing = {
         e.track_id: e
@@ -186,6 +208,21 @@ def replace_entries(
     for track_id, entry in existing.items():
         if track_id not in seen:
             db.delete(entry)
+
+    # Dormant pins: wholesale replace (delete-and-insert — no row identity).
+    db.query(models.SetDormantPin).filter(models.SetDormantPin.set_id == set_id).delete(
+        synchronize_session=False
+    )
+    for d in payload.dormant:
+        db.add(
+            models.SetDormantPin(
+                set_id=set_id,
+                a_track_id=d.a_track_id,
+                b_track_id=d.b_track_id,
+                pin_kind=d.pin_kind,
+                pin_uuid=d.pin_uuid,
+            )
+        )
 
     db.commit()
     return _with_entries(db, set_id)

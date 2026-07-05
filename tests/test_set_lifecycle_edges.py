@@ -9,9 +9,9 @@ boundaries with the rest of the library.
 - Archiving a Track that belongs to a Set flags the Set
   (has_archived_tracks on Set serializations) rather than silently
   altering it — archive_track removes from Playlists but never from Sets.
-
-Dormant pins (issue 07, unstarted) are out of scope here — dropping
-dormant pins that reference deleted artifacts is deferred to 07.
+- Dormant pins (sets 07) referencing a deleted artifact are DROPPED by
+  the same degrade paths — a memory of a deleted artifact restores
+  nothing.
 
 Mounts sets + takes + transitions + tracks routers as needed, in the
 style of tests/test_track_archival.py.
@@ -228,3 +228,71 @@ def test_flag_is_per_set(client, make_track):
 
     rows = {r["name"]: r["has_archived_tracks"] for r in client.get("/api/sets").json()}
     assert rows == {"One": True, "Two": False}
+
+
+# ── Deleting an artifact drops Dormant pins referencing it (sets 07) ────
+
+
+def put_state(client: TestClient, set_id: int, items: list[dict], dormant: list[dict]):
+    resp = client.put(f"/api/sets/{set_id}/entries", json={"items": items, "dormant": dormant})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def get_dormant(client: TestClient, set_id: int) -> list[tuple]:
+    detail = client.get(f"/api/sets/{set_id}").json()
+    return [(d["pin_kind"], d["pin_uuid"]) for d in detail["dormant"]]
+
+
+def test_deleting_take_drops_dormant_memories_of_it(client, make_track):
+    a, b, c = make_track(), make_track(), make_track()
+    client.post("/api/takes", json=take_payload("tk-1", a.id, b.id))
+    s = make_set(client)
+    put_state(client, s, [{"track_id": a.id}, {"track_id": c.id}, {"track_id": b.id}], [
+        {"a_track_id": a.id, "b_track_id": b.id, "pin_kind": "take", "pin_uuid": "tk-1"},
+        {"a_track_id": b.id, "b_track_id": c.id, "pin_kind": "transition", "pin_uuid": "tr-1"},
+    ])
+
+    assert client.delete("/api/takes/tk-1").status_code == 200
+
+    # The Take memory is gone; the Transition memory survives.
+    assert get_dormant(client, s) == [("transition", "tr-1")]
+
+
+def test_transition_dropped_from_pair_drops_dormant_memories_of_it(client, make_track):
+    a, b = make_track(), make_track()
+    client.put(
+        f"/api/transitions/pair/{a.id}/{b.id}",
+        json={"items": [transition_item("tr-1"), transition_item("tr-2")]},
+    )
+    s = make_set(client)
+    put_state(client, s, [{"track_id": b.id}, {"track_id": a.id}], [
+        {"a_track_id": a.id, "b_track_id": b.id, "pin_kind": "transition", "pin_uuid": "tr-1"},
+    ])
+
+    # The editor's autosave drops tr-1 from the pair.
+    resp = client.put(
+        f"/api/transitions/pair/{a.id}/{b.id}",
+        json={"items": [transition_item("tr-2")]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert get_dormant(client, s) == []
+
+
+def test_dormant_drop_is_kind_aware(client, make_track):
+    """A Take memory whose uuid coincides with a deleted Transition uuid
+    is untouched (uuids are namespaced by kind), and vice versa."""
+    a, b = make_track(), make_track()
+    client.put(
+        f"/api/transitions/pair/{a.id}/{b.id}",
+        json={"items": [transition_item("shared-uuid")]},
+    )
+    s = make_set(client)
+    put_state(client, s, [{"track_id": b.id}, {"track_id": a.id}], [
+        {"a_track_id": a.id, "b_track_id": b.id, "pin_kind": "take", "pin_uuid": "shared-uuid"},
+    ])
+
+    client.put(f"/api/transitions/pair/{a.id}/{b.id}", json={"items": []})
+
+    assert get_dormant(client, s) == [("take", "shared-uuid")]

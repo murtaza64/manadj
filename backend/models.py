@@ -420,6 +420,13 @@ class Set(Base):
         cascade="all, delete-orphan",
         order_by="SetEntry.position",
     )
+    # Dormant pins (sets 07): broken-pin memories, per ordered pair.
+    dormant_pins = relationship(
+        "SetDormantPin",
+        back_populates="set",
+        cascade="all, delete-orphan",
+        order_by="SetDormantPin.id",
+    )
 
 
 class SetEntry(Base):
@@ -456,4 +463,40 @@ class SetEntry(Base):
         Index("idx_set_entries_position", "set_id", "position"),
         # A Track appears at most once per Set (entry identity).
         Index("uq_set_entries_set_track", "set_id", "track_id", unique=True),
+    )
+
+
+class SetDormantPin(Base):
+    """A Set's memory of a broken pin (sets 07, "Dormant pin"): when a
+    reorder/removal breaks a pinned adjacency, the pin is remembered per
+    ORDERED track pair, per Set, and restored automatically when that
+    pair becomes adjacent in that Set again. Strictly per-Set — other
+    Sets never see it. At most one memory per (set, ordered pair).
+
+    Like SetEntry pins, pin_uuid is deliberately NOT a foreign key (the
+    backend stores what the client asserts) — but the deletion paths
+    DROP Dormant memories referencing deleted artifacts (degrade_pins),
+    and promotion re-points Dormant Take pins, exactly like active pins.
+    Track ids ARE foreign keys: a Track deleted from the library takes
+    its memories with it.
+    """
+
+    __tablename__ = "set_dormant_pins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    set_id = Column(Integer, ForeignKey("sets.id", ondelete="CASCADE"), nullable=False)
+    a_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    b_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    pin_kind = Column(String, nullable=False)  # "transition" | "take"
+    pin_uuid = Column(String, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    set = relationship("Set", back_populates="dormant_pins")
+
+    __table_args__ = (
+        Index("idx_set_dormant_pins_set", "set_id"),
+        # One memory per ordered pair per Set (a fresh break overwrites).
+        Index(
+            "uq_set_dormant_pins_set_pair", "set_id", "a_track_id", "b_track_id", unique=True
+        ),
     )

@@ -12,7 +12,7 @@
  * badges. Auto-fill (per-adjacency and set-wide) proposes Transitions
  * only; the manual pin picker also lists the pair's Takes (ADR 0023).
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type SetRowWire } from '../api/client';
 import { useDecks } from '../hooks/useDeck';
@@ -58,6 +58,7 @@ import {
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
+import { previewAdjacencyFutures, reconcileOrderChange } from './dormancy';
 import {
   conductorTogglePlay,
   pickupSetPlayback,
@@ -83,6 +84,7 @@ import {
   setAdjacencyPin,
   setAdjacencyPins,
   setSetScroll,
+  useSetDormantPins,
   useSetEntries,
 } from './setStore';
 import SetSuggestions, { type SuggestTarget } from './SetSuggestions';
@@ -188,6 +190,40 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     entries,
     trackMap,
     set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
+  );
+
+  // ── Live drag preview (sets 07): during an in-pane row drag the ladder
+  // recomputes optimistically for the hypothetical order. The planner is
+  // a read-only dependency — the hypothetical entries come from the same
+  // pure reconcile rule the drop will commit through, so what the
+  // preview shows is exactly what a drop produces. Drop commits; cancel
+  // (dragend/leave without a drop) simply discards the hypothesis.
+  const dormant = useSetDormantPins(setId);
+  const dragIdsRef = useRef<number[] | null>(null);
+  const [previewOrder, setPreviewOrder] = useState<number[] | null>(null);
+  const previewState = useMemo(
+    () =>
+      previewOrder && entries
+        ? reconcileOrderChange(entries, dormant ?? [], previewOrder)
+        : null,
+    [previewOrder, entries, dormant]
+  );
+  const previewPlan = useSetPlan(
+    previewState?.entries,
+    trackMap,
+    set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
+  );
+  const previewFutures = useMemo(
+    () =>
+      previewOrder && entries
+        ? previewAdjacencyFutures(
+            entries,
+            dormant ?? [],
+            previewOrder,
+            (a, b) => (pairStore[`${a}:${b}`]?.items ?? []).length > 0
+          )
+        : undefined,
+    [previewOrder, entries, dormant, pairStore]
   );
 
   // Real hot cues for the ladder clips (same cache keys as useHotCues).
@@ -428,11 +464,25 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
     const index = insertionIndexFromPointer(pointerY, rects);
     setDropIndicator({ index, y: indicatorY(index, rects) });
+
+    // In-pane reorder drags feed the ladder preview (sets 07). The drag
+    // payload is unreadable during dragover, so the dragged ids ride a
+    // ref set at the row's dragstart — foreign drags leave it null.
+    if (dragIdsRef.current && entries) {
+      const orderIds = entries.map((en) => en.trackId);
+      const hypothetical = applyReorder(orderIds, dragIdsRef.current, index);
+      setPreviewOrder((prev) => {
+        const next = hypothetical.join(',') === orderIds.join(',') ? null : hypothetical;
+        if (prev !== null && next !== null && prev.join(',') === next.join(',')) return prev;
+        return next;
+      });
+    }
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
     if (!paneRef.current?.contains(e.relatedTarget as Node)) {
       setDropIndicator(null);
+      setPreviewOrder(null); // cancelled hypothesis — the ladder snaps back
     }
   };
 
@@ -440,6 +490,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     e.preventDefault();
     const indicator = dropIndicator;
     setDropIndicator(null);
+    setPreviewOrder(null);
     if (!entries) return;
     const droppedIds = readTrackDragPayload(e.dataTransfer);
     if (droppedIds.length === 0) return;
@@ -630,12 +681,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       </div>
 
       {/* Overview ladder (sets 03; freed in 05): pan/zoom minimap with
-          click-to-seek, playhead, and follow-playback paging. */}
+          click-to-seek, playhead, and follow-playback paging. During an
+          in-pane row drag it shows the HYPOTHETICAL order's plan with
+          each affected adjacency's future marked (sets 07). */}
       {plan && trackMap && plan.entries.length > 0 && (
         <OverviewLadder
           key={setId}
           setId={setId}
-          plan={plan}
+          plan={previewOrder && previewPlan ? previewPlan : plan}
+          previewFutures={previewOrder && previewPlan ? previewFutures : undefined}
           tracks={trackMap}
           hotCuesByTrack={hotCuesByTrack}
           conducting={conductingThis}
@@ -697,6 +751,16 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   track={track}
                   planned={planned}
                   conducting={conductingThis && conductorState.activeEntryIndex === i}
+                  onDragStart={(e) => {
+                    setTrackDragPayload(e.dataTransfer, [entry.trackId], 'set-pane');
+                    dragIdsRef.current = [entry.trackId];
+                  }}
+                  onDragEnd={() => {
+                    // Fires after drop AND on cancel (Esc / drop outside):
+                    // either way the hypothesis is over.
+                    dragIdsRef.current = null;
+                    setPreviewOrder(null);
+                  }}
                   onPlayFrom={plan ? () => playFromEntry(i) : undefined}
                   onRemove={() => removeTrackFromSet(setId, entry.trackId)}
                   onContextMenu={
@@ -1079,6 +1143,8 @@ function SetTrackRow({
   track,
   planned,
   conducting,
+  onDragStart,
+  onDragEnd,
   onPlayFrom,
   onRemove,
   onContextMenu,
@@ -1090,6 +1156,10 @@ function SetTrackRow({
   planned: PlannedEntry | undefined;
   /** The Conductor's playhead is inside this entry (sets 04). */
   conducting: boolean;
+  /** Row drag lifecycle (sets 07): the pane sets the drag payload and
+   * tracks the dragged ids for the ladder's live preview. */
+  onDragStart: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
   /** Row play button: start Set playback at this track's planned entry. */
   onPlayFrom: (() => void) | undefined;
   onRemove: () => void;
@@ -1102,7 +1172,8 @@ function SetTrackRow({
     <div
       data-set-track-row
       draggable
-      onDragStart={(e) => setTrackDragPayload(e.dataTransfer, [trackId], 'set-pane')}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onContextMenu={onContextMenu}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

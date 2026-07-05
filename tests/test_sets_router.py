@@ -323,3 +323,124 @@ def test_pin_kind_vocabulary(client, make_track):
         json={"items": [{"track_id": t1.id, "pin_kind": "vibes", "pin_uuid": "x"}]},
     )
     assert resp.status_code == 422
+
+
+# ── Dormant pins (sets 07) ──────────────────────────────────────────────
+# A Dormant pin is the Set's memory of a pin whose adjacency was broken
+# by reorder/removal — per ORDERED pair, per Set, replaced wholesale with
+# the entries (dormancy is Set state, client-authoritative like the rest).
+
+
+def put_state(client: TestClient, set_id: int, items: list[dict], dormant: list[dict]):
+    return client.put(
+        f"/api/sets/{set_id}/entries", json={"items": items, "dormant": dormant}
+    )
+
+
+def dormant_item(a_id: int, b_id: int, kind: str = "transition", uuid: str = "tr-1") -> dict:
+    return {"a_track_id": a_id, "b_track_id": b_id, "pin_kind": kind, "pin_uuid": uuid}
+
+
+def test_dormant_pins_round_trip(client, make_track):
+    t1, t2, t3 = make_track(), make_track(), make_track()
+    s = make_set(client)
+    resp = put_state(
+        client,
+        s["id"],
+        [{"track_id": t2.id}, {"track_id": t1.id}, {"track_id": t3.id}],
+        [
+            dormant_item(t1.id, t2.id, "transition", "tr-1"),
+            dormant_item(t2.id, t3.id, "take", "tk-1"),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    assert [(d["a_track_id"], d["b_track_id"], d["pin_kind"], d["pin_uuid"])
+            for d in resp.json()["dormant"]] == [
+        (t1.id, t2.id, "transition", "tr-1"),
+        (t2.id, t3.id, "take", "tk-1"),
+    ]
+
+    # Round-trips through GET (persists across reloads).
+    detail = client.get(f"/api/sets/{s['id']}").json()
+    assert [(d["a_track_id"], d["b_track_id"], d["pin_kind"], d["pin_uuid"])
+            for d in detail["dormant"]] == [
+        (t1.id, t2.id, "transition", "tr-1"),
+        (t2.id, t3.id, "take", "tk-1"),
+    ]
+
+
+def test_dormant_defaults_empty_and_replaces_wholesale(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+
+    # A dormant-less PUT (and a fresh Set) reads back empty.
+    put_entries(client, s["id"], [t1.id, t2.id])
+    assert client.get(f"/api/sets/{s['id']}").json()["dormant"] == []
+
+    # Wholesale: the next PUT's dormant list is the whole truth.
+    put_state(client, s["id"], [{"track_id": t1.id}, {"track_id": t2.id}],
+              [dormant_item(t1.id, t2.id)])
+    assert len(client.get(f"/api/sets/{s['id']}").json()["dormant"]) == 1
+    put_state(client, s["id"], [{"track_id": t1.id}, {"track_id": t2.id}], [])
+    assert client.get(f"/api/sets/{s['id']}").json()["dormant"] == []
+
+
+def test_dormant_never_leaks_to_other_sets(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s1, s2 = make_set(client, "One"), make_set(client, "Two")
+    put_state(client, s1["id"], [{"track_id": t1.id}, {"track_id": t2.id}],
+              [dormant_item(t1.id, t2.id)])
+    put_entries(client, s2["id"], [t1.id, t2.id])
+
+    assert len(client.get(f"/api/sets/{s1['id']}").json()["dormant"]) == 1
+    assert client.get(f"/api/sets/{s2['id']}").json()["dormant"] == []
+
+
+def test_dormant_may_reference_tracks_outside_the_set(client, make_track):
+    """A removed track's memory survives — its pair may return someday."""
+    t1, t2, gone = make_track(), make_track(), make_track()
+    s = make_set(client)
+    resp = put_state(client, s["id"], [{"track_id": t1.id}, {"track_id": t2.id}],
+                     [dormant_item(t1.id, gone.id, "take", "tk-1")])
+    assert resp.status_code == 200, resp.text
+    assert client.get(f"/api/sets/{s['id']}").json()["dormant"][0]["b_track_id"] == gone.id
+
+
+def test_dormant_duplicate_pair_400(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    resp = put_state(client, s["id"], [],
+                     [dormant_item(t1.id, t2.id, uuid="tr-1"),
+                      dormant_item(t1.id, t2.id, uuid="tr-2")])
+    assert resp.status_code == 400
+
+
+def test_dormant_unknown_track_404(client, make_track):
+    t1 = make_track()
+    s = make_set(client)
+    resp = put_state(client, s["id"], [], [dormant_item(t1.id, 99999)])
+    assert resp.status_code == 404
+
+
+def test_dormant_validation_422(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    # Unknown kind.
+    resp = put_state(client, s["id"], [], [dormant_item(t1.id, t2.id, kind="vibes")])
+    assert resp.status_code == 422
+    # A memory always carries a pin — no null uuid.
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [], "dormant": [
+            {"a_track_id": t1.id, "b_track_id": t2.id, "pin_kind": "transition"}
+        ]},
+    )
+    assert resp.status_code == 422
+
+
+def test_delete_set_drops_its_dormant_pins(client, db_session, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    put_state(client, s["id"], [{"track_id": t1.id}], [dormant_item(t1.id, t2.id)])
+    assert client.delete(f"/api/sets/{s['id']}").status_code == 204
+    assert db_session.query(models.SetDormantPin).count() == 0
