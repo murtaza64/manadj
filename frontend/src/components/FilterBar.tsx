@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, Track } from '../types';
@@ -10,6 +10,7 @@ import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
 import FollowParamsModal from './FollowParamsModal';
 import { DEFAULT_FILTERS, useFilters } from '../contexts/FilterContext';
+import { useSearchKeys } from './searchKeys';
 import { dispatchFollow, useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
 import { followedReferences, followSummary } from '../follow/model';
@@ -27,6 +28,11 @@ interface FilterBarProps {
 export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB }: FilterBarProps) {
   const { filters, setFilters } = useFilters();
   const [searchInput, setSearchInput] = useState(filters.search);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Cmd+F focus + staged Escape clear (keyboard-focus 02) — document
+  // listener; FilterBar rides along in every view with a browse surface.
+  useSearchKeys(searchRef);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [keyModalPosition, setKeyModalPosition] = useState<{ x: number; y: number } | undefined>(undefined);
   const [isBpmModalOpen, setIsBpmModalOpen] = useState(false);
@@ -51,6 +57,16 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
 
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  // Follow external search changes (the staged Escape clears through
+  // FilterContext.clearSearch): committed search moved → mirror it in the
+  // field (adjust-during-render pattern, same as TransitionSwitcher's nav
+  // reset). On a debounce commit the values are already equal — no-op.
+  const [seenSearch, setSeenSearch] = useState(filters.search);
+  if (filters.search !== seenSearch) {
+    setSeenSearch(filters.search);
+    setSearchInput(filters.search);
+  }
 
   const toggleTag = (tagId: number) => {
     const newSet = new Set(filters.selectedTagIds);
@@ -142,10 +158,22 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
           )}
         </div>
         <input
+          ref={searchRef}
           type="text"
           placeholder="Search by filename..."
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
+          onKeyDown={(e) => {
+            // Keyboard exit (keyboard-focus 02): Enter and Escape hand the
+            // keyboard back to the decks, filter KEPT (Escape-clearing is
+            // the staged, unfocused Escape — searchKeys.ts). stopPropagation
+            // keeps this Escape from doubling as the staged clear.
+            if (e.key === 'Enter' || e.key === 'Escape') {
+              e.preventDefault();
+              e.stopPropagation();
+              e.currentTarget.blur();
+            }
+          }}
           style={{
             flex: 1,
             padding: '8px 12px',

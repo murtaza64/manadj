@@ -44,3 +44,43 @@ filter. Modal/popover Escape is never swallowed by the filter.
 
 - `01-controls-stop-stealing-focus.md` (shares the guard changes; land
   order avoids conflicts in performanceKeys/useKeyboardShortcuts)
+
+## Comments
+
+**Done** (kbfocus lane, change pzxrqxou — keyboard-focus: 02-search-field-keyboard-flow)
+
+Built:
+- `components/searchKeys.ts`: `isFindChord` (Cmd/Ctrl+F, no extra
+  modifiers), `shouldClearSearch` (staged-Escape rule: Escape, unmodified,
+  active search, no typing target), and `useSearchKeys` — one document
+  bubble-phase listener that focuses + select-alls the search on Cmd+F
+  (preventDefault suppresses browser find) and calls `clearSearch()` on a
+  staged Escape. Mounted by FilterBar, which every browse surface renders
+  (library, Performance, editor's embedded panel) — the rule lives once
+  and covers all three views without per-hub wiring.
+- `FilterContext.clearSearch()`: clears search only, other axes untouched.
+  FilterBar mirrors external clears into the field via adjust-during-render
+  (debounce untouched).
+- Search field: Enter and Escape blur (preventDefault + stopPropagation),
+  filter KEPT.
+- Escape ordering (modals beat the staged clear): BpmModal,
+  CircleOfFifthsModal, FollowParamsModal moved from window-bubble to
+  document-capture + stopPropagation; ContextMenu's Escape likewise;
+  SaveTemplateModal got a document-capture Escape (cancels from any focus,
+  not just the name input — its input-level handler removed). TagPopover
+  already stopped propagation (React root — beats document bubble);
+  AutoBlurSelect Escape already stops propagation (issue 01).
+
+Tests: 11 new in `searchKeys.test.tsx` — chord + staged-rule tables, and
+hook integration through a real FilterProvider (Cmd+F focuses + prevents
+default; staged Escape clears search and keeps other filters; no-op when
+search empty; an upstream capture stopPropagation starves the clear).
+localStorage stubbed (vitest's jsdom bridge doesn't expose it).
+
+Manual pass still needed (listed in .lanes/kbfocus.md): modal-ordering by
+hand, Cmd+F in all three views, transport keys after Enter/Escape.
+
+Gate: 739 vitest / 51 files, frontend build, 547 pytest, one alembic head
+(0018), eslint on touched files (two pre-existing baseline items:
+react-refresh export errors in ContextMenu/FilterContext, exhaustive-deps
+warning on FilterBar's debounce — all present at main).

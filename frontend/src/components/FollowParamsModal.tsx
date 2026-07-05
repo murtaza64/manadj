@@ -55,13 +55,17 @@ export default function FollowParamsModal({
   const rawPosition = openPosition || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
   const modalPosition = getClampedPosition(rawPosition);
 
-  // Handle ESC key
+  // Handle ESC key — capture + stopPropagation: a modal's Escape must beat
+  // the staged search-clear and the view hubs (keyboard-focus 02).
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onClose();
+      if (e.key === 'Escape' && isOpen) {
+        e.stopPropagation();
+        onClose();
+      }
     };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
+    document.addEventListener('keydown', handleEsc, { capture: true });
+    return () => document.removeEventListener('keydown', handleEsc, { capture: true });
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
