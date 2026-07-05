@@ -123,7 +123,8 @@
 
 .perf-track-tempo { margin-top: auto; }
 
-.perf-deckpanel.mirrored .perf-zone-track { align-items: flex-end; }
+/* Mirrored rows stay FULL WIDTH (shrinking them starves the inline
+   edits); row-reversal alone right-aligns the content. */
 .perf-deckpanel.mirrored .perf-track-row,
 .perf-deckpanel.mirrored .perf-tagrow { flex-direction: row-reverse; }
 
@@ -152,8 +153,17 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.perf-tagrow-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   overflow: hidden;
 }
+
+.perf-deckpanel.mirrored .perf-tagrow-pills { justify-content: flex-end; }
 
 .perf-tag-add {
   background: transparent;

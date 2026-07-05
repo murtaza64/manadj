@@ -154,9 +154,12 @@ function TagRow({ track, onOpen }: { track: Track | null; onOpen?: () => void })
       title={onOpen ? 'Edit tags' : undefined}
       onClick={onOpen}
     >
-      {tags.map((tag) => (
-        <TagPill key={tag.id} tag={tag} />
-      ))}
+      {/* Pills clip in their own shrinkable box so the + never overflows away */}
+      <div className="perf-tagrow-pills">
+        {tags.map((tag) => (
+          <TagPill key={tag.id} tag={tag} />
+        ))}
+      </div>
       <button className="perf-tag-add" disabled={!onOpen} title="Edit tags">
         +
       </button>
