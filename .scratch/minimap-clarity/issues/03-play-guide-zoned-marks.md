@@ -1,6 +1,6 @@
 # 03 — Play-guide minimap marks: bar + mid-height play arrow
 
-Status: ready-for-human
+Status: done (approved and landed, change wmmuzpzl)
 Type: task
 
 ## Parent

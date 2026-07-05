@@ -1,6 +1,6 @@
 # 02 — Zoned marks + played-dim in the minimap renderer
 
-Status: ready-for-human
+Status: done (approved and landed, change xlnwqstv)
 Type: task
 
 ## Parent

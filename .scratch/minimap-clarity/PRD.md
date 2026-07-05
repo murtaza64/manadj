@@ -94,9 +94,10 @@ vertical zone:
 Loop rendering itself belongs to `.scratch/looping/` (their issue 05) —
 this feature hands over the visual verdict only.
 
-Port issues: 02 (marks vocabulary), 03 (played-dim), 04 (play-guide
-marks). Prototype lab (`?view=minimap-lab`, change oyrprrqt) is retired —
-abandoned, never landed — once the port issues are done.
+Port issues: 02 (marks vocabulary + played-dim), 03 (play-guide marks) —
+both approved and landed 2026-07-05 (changes xlnwqstv, wmmuzpzl). The
+prototype lab (`?view=minimap-lab`, change oyrprrqt) is retired —
+abandoned, never landed.
 
 ## Follow-ups (out of scope here)
 
