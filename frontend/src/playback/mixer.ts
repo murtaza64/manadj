@@ -24,6 +24,13 @@
  * moved up from DeckEngine. On revival the whole graph is rebuilt and all
  * control settings are reapplied.
  *
+ * Automation overlay (ADR 0022): the Transition editor's conductor drives
+ * the 10 lane-driven params (fader/EQ/filter × 2) through a distinct
+ * write-path with replacement semantics — engage/setAutomation/disengage.
+ * Base state is never mutated by automation; disengage reapplies it. The
+ * crossfader pins to neutral while engaged. Trim, master, cue, and PFL
+ * stay live user controls throughout.
+ *
  * Decks reach their channel through a DeckAudioPort, so DeckEngine depends on
  * an interface, not on the Mixer.
  */
@@ -64,6 +71,18 @@ export interface ChannelState {
   fader: number;
   /** PFL (glossary): this channel feeds the Cue bus, pre-fader. */
   pfl: boolean;
+}
+
+/**
+ * The per-channel controls the automation overlay owns (ADR 0022): the 10
+ * lane-driven params — fader, 3-band EQ, sweep filter, per channel. Trim,
+ * master, cue level/mix, and PFL are deliberately NOT here: they stay live
+ * user controls during editor auditions.
+ */
+export interface AutomationChannelValues {
+  fader: number;
+  eq: Record<EqBand, number>;
+  filter: number;
 }
 
 const FLAT_CHANNEL: ChannelState = {
@@ -236,6 +255,17 @@ export class Mixer {
   /** Crossfader bypass: while false the fader position is kept but both
    * channels run at unity (as if centered) — an accidental-kill guard. */
   private crossfaderEnabled = true;
+  /**
+   * Automation overlay (ADR 0022): while non-null, drawn automation owns
+   * the lane-driven node params (AutomationChannelValues) with REPLACEMENT
+   * semantics, and the crossfader is pinned to neutral. Base state
+   * (`channels`, `crossfader`) is never mutated by automation and never
+   * applied to the owned nodes until disengage reapplies it — a user knob
+   * move mid-audition updates base state and lands on release (DAW
+   * automation-read behavior). Per-channel values stay null until the
+   * first write (nothing plays before the conductor applies its lanes).
+   */
+  private automation: Record<ChannelId, AutomationChannelValues | null> | null = null;
   private master = 1; // 0..1
   /** Master bus output device (headphone-cue 01); null = system default. */
   private masterSinkId: string | null = null;
@@ -304,10 +334,22 @@ export class Mixer {
       this.blendMasterGain = blendMasterGain;
       this.cueBridge = cueBridge;
 
-      // Reapply position-dependent settings on the fresh graph.
+      // Reapply position-dependent settings on the fresh graph. These are
+      // automation-aware: a revival while the overlay is engaged restores
+      // automation ownership (ADR 0022), not base state.
       this.applyCrossfader(false);
       this.applyFilter('A');
       this.applyFilter('B');
+      if (this.automation) {
+        for (const channel of ['A', 'B'] as const) {
+          const v = this.automation[channel];
+          if (!v) continue;
+          strips[channel].faderGain.gain.value = channelFaderToGain(v.fader);
+          for (const band of ['low', 'mid', 'high'] as const) {
+            strips[channel].bandGains[band].gain.value = eqValueToGain(v.eq[band]);
+          }
+        }
+      }
       if (this.masterSinkId !== null) {
         void ctx.setSinkId(this.masterSinkId).catch((err: unknown) => {
           // Saved device gone at revival: stay on the default — master
@@ -349,6 +391,78 @@ export class Mixer {
 
   resume(): void {
     if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /** The live graph, or null. Policy paths (automation, engage/disengage)
+   * use this instead of ensure(): they must never force-create a context
+   * (headphone-cue 06 — side-effectful creation leaked zombie contexts). */
+  private liveGraph(): { ctx: AudioContext; strips: Record<ChannelId, ChannelStrip> } | null {
+    if (!this.ctx || !this.strips || this.ctx.state === 'closed') return null;
+    return { ctx: this.ctx, strips: this.strips };
+  }
+
+  // ── Automation overlay (ADR 0022) ────────────────────────────────────
+
+  /**
+   * Engage the overlay: automation owns the lane-driven params from now
+   * on, and the crossfader pins to neutral (the conductor mixes via fader
+   * lanes; a stale crossfader would silence a deck). Idempotent. Applies
+   * to a live graph only — never creates one; ensure() restores overlay
+   * ownership on creation/revival.
+   */
+  engageAutomation(): void {
+    if (this.automation) return;
+    this.automation = { A: null, B: null };
+    if (this.liveGraph()) this.applyCrossfader(true);
+  }
+
+  /**
+   * Disengage: reapply base state to every param the overlay owned (the
+   * reapply lives HERE so no consumer can forget it) and unpin the
+   * crossfader. Idempotent; safe with no live graph (the next ensure()
+   * builds from base state anyway).
+   */
+  disengageAutomation(): void {
+    if (!this.automation) return;
+    this.automation = null;
+    const live = this.liveGraph();
+    if (!live) return;
+    const { ctx, strips } = live;
+    for (const channel of ['A', 'B'] as const) {
+      const st = this.channels[channel];
+      rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(st.fader));
+      for (const band of ['low', 'mid', 'high'] as const) {
+        rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(st.eq[band]));
+      }
+      this.applyFilter(channel);
+    }
+    this.applyCrossfader(true);
+  }
+
+  isAutomationEngaged(): boolean {
+    return this.automation !== null;
+  }
+
+  /**
+   * Automation write (the conductor's per-tick lane application). Stores
+   * first, applies to a live graph only. Never touches base state, never
+   * notifies subscribers — on-screen knobs and the capture recorder see
+   * base state, not automation (ADR 0022).
+   */
+  setAutomation(channel: ChannelId, values: AutomationChannelValues): void {
+    if (!this.automation) {
+      console.warn('[Mixer] setAutomation while disengaged ignored (ADR 0022)');
+      return;
+    }
+    this.automation[channel] = values;
+    const live = this.liveGraph();
+    if (!live) return;
+    const { ctx, strips } = live;
+    rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(values.fader));
+    for (const band of ['low', 'mid', 'high'] as const) {
+      rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(values.eq[band]));
+    }
+    this.applyFilterPosition(channel, values.filter);
   }
 
   /** The audio access a deck is constructed against. */
@@ -402,6 +516,7 @@ export class Mixer {
     const ch = this.channels[channel];
     this.channels[channel] = { ...ch, eq: { ...ch.eq, [band]: value } };
     this.notify();
+    if (this.automation) return; // overlay owns the node; lands on disengage
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(value));
   }
@@ -410,6 +525,7 @@ export class Mixer {
   setFilter(channel: ChannelId, position: number): void {
     this.channels[channel] = { ...this.channels[channel], filter: position };
     this.notify();
+    if (this.automation) return; // overlay owns the node; lands on disengage
     this.ensure();
     this.applyFilter(channel);
   }
@@ -417,6 +533,7 @@ export class Mixer {
   setFader(channel: ChannelId, value: number): void {
     this.channels[channel] = { ...this.channels[channel], fader: value };
     this.notify();
+    if (this.automation) return; // overlay owns the node; lands on disengage
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(value));
   }
@@ -425,6 +542,7 @@ export class Mixer {
   setCrossfader(position: number): void {
     this.crossfader = position;
     this.notify();
+    if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();
     this.applyCrossfader(true);
   }
@@ -436,6 +554,7 @@ export class Mixer {
   setCrossfaderEnabled(enabled: boolean): void {
     this.crossfaderEnabled = enabled;
     this.notify();
+    if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();
     this.applyCrossfader(true);
   }
@@ -556,7 +675,9 @@ export class Mixer {
 
   private applyCrossfader(ramp: boolean): void {
     if (!this.ctx || !this.strips) return;
-    const { a, b } = crossfaderGains(this.crossfaderEnabled ? this.crossfader : 0);
+    // Overlay engaged → pinned neutral (ADR 0022); bypass guard → neutral.
+    const position = this.automation ? 0 : this.crossfaderEnabled ? this.crossfader : 0;
+    const { a, b } = crossfaderGains(position);
     if (ramp) {
       rampGain(this.ctx, this.strips.A.crossfadeGain.gain, a);
       rampGain(this.ctx, this.strips.B.crossfadeGain.gain, b);
@@ -566,10 +687,17 @@ export class Mixer {
     }
   }
 
+  /** Apply the EFFECTIVE filter position: a written automation value while
+   * the overlay is engaged, base state otherwise. */
   private applyFilter(channel: ChannelId): void {
+    const auto = this.automation?.[channel];
+    this.applyFilterPosition(channel, auto ? auto.filter : this.channels[channel].filter);
+  }
+
+  private applyFilterPosition(channel: ChannelId, position: number): void {
     if (!this.ctx || !this.strips) return;
     const sweep = this.strips[channel].sweep;
-    const { type, frequency, qDb } = sweepPositionToFilter(this.channels[channel].filter);
+    const { type, frequency, qDb } = sweepPositionToFilter(position);
     const now = this.ctx.currentTime;
     if (sweep.type !== type) {
       // `type` is not an AudioParam and flips instantaneously. Make the new
