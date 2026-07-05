@@ -108,6 +108,7 @@
 .perf-zone-track { flex: 1; }
 
 .perf-track-row {
+  position: relative; /* anchors the tag popover */
   display: flex;
   align-items: center;
   gap: 6px;
@@ -167,6 +168,86 @@
 }
 
 .perf-tag-add:disabled { opacity: 0.5; cursor: default; }
+
+.perf-tagrow.editable { cursor: pointer; }
+.perf-tagrow.editable:hover .perf-tag-add { border-color: var(--text); color: var(--text); }
+
+/* Tag popover (perf-layout 02): anchored under the tag row */
+.perf-tagpop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 120;
+  width: 420px;
+  max-width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--mantle);
+  border: 1px solid var(--overlay1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  cursor: default;
+}
+
+.perf-deckpanel.mirrored .perf-tagpop { left: auto; right: 0; }
+
+.perf-tagpop-search {
+  background: var(--base);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 8px;
+  outline: none;
+}
+
+.perf-tagpop-search:focus { border-color: var(--lavender); }
+
+.perf-tagpop-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.perf-tagpop-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.perf-tagpop-cat {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--overlay0);
+}
+
+.perf-tagpop-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.perf-tagpop-tag {
+  padding: 3px 8px;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--subtext1);
+  cursor: pointer;
+}
+
+.perf-tagpop-tag:hover { border-color: var(--text); color: var(--text); }
+
+.perf-tagpop-empty {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--overlay0);
+}
 
 /* Energy picker: five mini squares, the set one lit */
 .perf-energy-picker { display: flex; gap: 2px; flex-shrink: 0; }

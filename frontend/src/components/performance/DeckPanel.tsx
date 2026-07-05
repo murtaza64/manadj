@@ -28,6 +28,7 @@ import { BeatjumpRow } from '../deckControls/BeatjumpRow';
 import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons';
 import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
+import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { DECK_KEYS } from './performanceKeys';
@@ -138,9 +139,9 @@ function InlineEdit({
   );
 }
 
-/** Read-only tag pills (category order, then tag order). Editing is
- * perf-layout issue 02 (TagEditor popover). */
-function TagRow({ track }: { track: Track | null }) {
+/** Tag pills (category order, then tag order); the row opens the tag
+ * popover (perf-layout 02) when editable. */
+function TagRow({ track, onOpen }: { track: Track | null; onOpen?: () => void }) {
   const tags = [...(track?.tags ?? [])].sort(
     (a, b) =>
       (a.category?.display_order ?? 0) - (b.category?.display_order ?? 0) ||
@@ -148,15 +149,15 @@ function TagRow({ track }: { track: Track | null }) {
       a.id - b.id
   );
   return (
-    <div className="perf-tagrow">
+    <div
+      className={`perf-tagrow${onOpen ? ' editable' : ''}`}
+      title={onOpen ? 'Edit tags' : undefined}
+      onClick={onOpen}
+    >
       {tags.map((tag) => (
         <TagPill key={tag.id} tag={tag} />
       ))}
-      <button
-        className="perf-tag-add"
-        disabled
-        title="Edit tags (perf-layout issue 02)"
-      >
+      <button className="perf-tag-add" disabled={!onOpen} title="Edit tags">
         +
       </button>
     </div>
@@ -169,6 +170,12 @@ function TrackZone({ track }: { track: Track | null }) {
   const queryClient = useQueryClient();
   const edit = useTrackEdit(track);
   const tempoEnabled = ready && track !== null;
+
+  // Open state is PER TRACK ID: loading a different track implicitly
+  // closes the popover (no effect needed — the ids stop matching).
+  const [tagsOpenFor, setTagsOpenFor] = useState<number | null>(null);
+  const tagsOpen = track !== null && tagsOpenFor === track.id;
+  const tagRowRef = useRef<HTMLDivElement>(null);
 
   const commitField = (field: 'title' | 'artist') => (value: string) => {
     const trimmed = value.trim();
@@ -211,11 +218,27 @@ function TrackZone({ track }: { track: Track | null }) {
           onCommit={commitField('artist')}
         />
       </div>
-      <div className="perf-track-row">
+      <div className="perf-track-row" ref={tagRowRef}>
         <span className="perf-row-icon" title="Tags">
           <TagIcon width={13} height={13} />
         </span>
-        <TagRow track={track} />
+        <TagRow
+          track={track}
+          onOpen={
+            edit.enabled
+              ? () => setTagsOpenFor((open) => (open === track!.id ? null : track!.id))
+              : undefined
+          }
+        />
+        {tagsOpen && track && (
+          <TagPopover
+            key={track.id}
+            track={track}
+            anchorRef={tagRowRef}
+            commit={(tagIds) => edit.commit({ tag_ids: tagIds })}
+            onClose={() => setTagsOpenFor(null)}
+          />
+        )}
       </div>
       <div className="perf-track-row" title="Energy">
         <span className="perf-row-icon">
