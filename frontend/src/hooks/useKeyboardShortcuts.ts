@@ -313,12 +313,25 @@ export function useKeyboardShortcuts({
 }
 
 // Helper function for scrolling selected track into view (also used by the
-// Library's imperative browse handle for the Performance view's table keys)
+// Library's imperative browse handle for the Performance view's table keys
+// and the hardware browser encoder).
+//
+// Burst-aware (midi-controller 10): rapid successive navigations (a spun
+// encoder, held arrow keys) restart a smooth scroll animation on every call
+// — it never completes and the list stutters. Within a burst we jump
+// instantly (the row stays centered tick by tick); a lone navigation keeps
+// the smooth glide.
+const SCROLL_BURST_MS = 200;
+let lastScrollMs = -Infinity;
+
 export function scrollTrackIntoView(trackId: number) {
+  const now = performance.now();
+  const inBurst = now - lastScrollMs < SCROLL_BURST_MS;
+  lastScrollMs = now;
   const rowElement = document.querySelector(`[data-track-id="${trackId}"]`);
   if (rowElement) {
     rowElement.scrollIntoView({
-      behavior: 'smooth',
+      behavior: inBurst ? 'auto' : 'smooth',
       block: 'center'
     });
   }
