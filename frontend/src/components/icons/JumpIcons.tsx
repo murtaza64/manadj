@@ -1,39 +1,40 @@
 /**
  * Shared inline-SVG control icons (deck-controls PRD, "Icon language"):
  * left/right-coded operations stop sharing glyphs — the icon says which
- * OPERATION. Beatjump carries the curved jump arrow; nudge/bend is the
- * ◀◀/▶▶ text glyph; halve/double is plain text (`1/2` / `x2`).
+ * OPERATION. Beatjump is the DASHED SKIP ARROW (re-glyphed 2026-07-05,
+ * replacing the leap arc, which read as undo/redo at 13px): a straight
+ * transport arrow whose broken middle IS the skipped audio. Nudge/bend
+ * stays the ◀◀/▶▶ text glyph; halve/double is plain text (`1/2` / `x2`).
  */
 
-/** Jump-back arrow: a symmetric leap trajectory — launch and landing at
- * the same height, arc symmetric about center, arrowhead angled along the
- * descending tangent (mirror of the launch angle) so it reads as a JUMP,
- * not a rotate/redo glyph. */
-export function JumpBackIcon() {
+/** Jump-forward: lead-in, the skip gap, then the landing arrow. */
+export function JumpForwardIcon({ size = 13 }: { size?: number }) {
   return (
-    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+    <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false">
       <path
-        d="M13.5 10.5 C 11.5 3.2, 5.2 2.7, 3.5 7.05"
+        d="M1.5 8 H6.2 M9.2 8 H12"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.6"
+        strokeLinecap="round"
       />
-      <path d="M2.5 10.5 L5.3 7.6 L1.7 6.5 Z" fill="currentColor" stroke="none" />
+      <path d="M14.6 8 L11.4 6 L11.4 10 Z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
 
-/** Jump-forward arrow: symmetric leap trajectory landing down-right. */
-export function JumpForwardIcon() {
+/** Jump-back: mirror of the forward skip. */
+export function JumpBackIcon({ size = 13 }: { size?: number }) {
   return (
-    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+    <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false">
       <path
-        d="M2.5 10.5 C 4.5 3.2, 10.8 2.7, 12.5 7.05"
+        d="M14.5 8 H9.8 M6.8 8 H4"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.6"
+        strokeLinecap="round"
       />
-      <path d="M13.5 10.5 L10.7 7.6 L14.3 6.5 Z" fill="currentColor" stroke="none" />
+      <path d="M1.4 8 L4.6 6 L4.6 10 Z" fill="currentColor" stroke="none" />
     </svg>
   );
 }

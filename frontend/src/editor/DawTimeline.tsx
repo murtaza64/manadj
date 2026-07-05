@@ -32,6 +32,7 @@ import {
 import type { JumpEvent, LaneId, LanePoint, Lanes, EditorMix } from './mixModel';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { jumpDeltaLabel } from './beatReadout';
+import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
 import { beatPeriodSec } from './templateModel';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData } from '../types';
@@ -1033,7 +1034,10 @@ export function DawTimeline({
                 onDoubleClick={(e) => e.stopPropagation()}
                 title="Jump event — drag to move, click to edit"
               >
-                <span className="editor-jump-chip">⤺ {jumpDeltaLabel(j.deltaSec, beatSecB)}</span>
+                <span className="editor-jump-chip">
+                  {j.deltaSec < 0 ? <JumpBackIcon size={11} /> : <JumpForwardIcon size={11} />}{' '}
+                  {jumpDeltaLabel(j.deltaSec, beatSecB)}
+                </span>
               </div>
             ))}
             {editingJump !== null && tr.jumps?.[editingJump] && (

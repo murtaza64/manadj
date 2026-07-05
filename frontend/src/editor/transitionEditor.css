@@ -423,6 +423,10 @@
   width: 12px;
 }
 
+.editor-jump-chip svg {
+  vertical-align: -2px;
+}
+
 .editor-jump-chip {
   position: absolute;
   /* Readout rides the waveform's bottom edge (B's baseline — peaks grow
