@@ -4,28 +4,29 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  JOG_BEND_FILTER_PERIOD_MS,
+  JOG_BEND_FILTER_WINDOW,
   JOG_BEND_MAX_PERCENT,
+  JOG_BEND_PERCENT_PER_TICK,
   JOG_FINE_CONTINUATION_MS,
-  JOG_IDLE_MS,
   JOG_TOUCH_SEEK_SECONDS_PER_TICK,
   JogController,
-  jogBendPercent,
+  bendFromWindowAverage,
   jogSeekDelta,
   smoothedRate,
 } from './jog';
 import type { JogDeckPort } from './jog';
 
 describe('jog math', () => {
-  it('bend is linear in rate and signed', () => {
-    expect(jogBendPercent(0)).toBe(0);
-    expect(jogBendPercent(50)).toBeGreaterThan(0);
-    expect(jogBendPercent(-50)).toBeLessThan(0);
-    expect(jogBendPercent(-50)).toBe(-jogBendPercent(50));
+  it('bend is linear in the window average and signed', () => {
+    expect(bendFromWindowAverage(0)).toBe(0);
+    expect(bendFromWindowAverage(0.2)).toBeCloseTo(0.2 * JOG_BEND_PERCENT_PER_TICK, 10);
+    expect(bendFromWindowAverage(-0.2)).toBe(-bendFromWindowAverage(0.2));
   });
 
   it('bend clamps at ±JOG_BEND_MAX_PERCENT', () => {
-    expect(jogBendPercent(1e6)).toBe(JOG_BEND_MAX_PERCENT);
-    expect(jogBendPercent(-1e6)).toBe(-JOG_BEND_MAX_PERCENT);
+    expect(bendFromWindowAverage(1e6)).toBe(JOG_BEND_MAX_PERCENT);
+    expect(bendFromWindowAverage(-1e6)).toBe(-JOG_BEND_MAX_PERCENT);
   });
 
   it('seek travel is per-tick at rest and grows with rate', () => {
@@ -76,36 +77,72 @@ describe('JogController', () => {
     vi.useRealTimers();
   });
 
-  it('playing: ticks bend, idle window releases bend to exactly zero', () => {
+  it('playing: accumulated ticks bend after one filter period, sign follows direction', () => {
     playing = true;
     const jog = new JogController(port);
-    jog.onTicks(1, 1000);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].startsWith('bend:')).toBe(true);
-    expect(parseFloat(calls[0].slice(5))).toBeGreaterThan(0);
+    jog.onTicks(4, 1000);
+    expect(calls).toHaveLength(0); // nothing until the filter drains
+    vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS);
+    expect(calls).toEqual([
+      `bend:${((4 / JOG_BEND_FILTER_WINDOW) * JOG_BEND_PERCENT_PER_TICK).toFixed(3)}`,
+    ]);
 
-    vi.advanceTimersByTime(JOG_IDLE_MS + 1);
-    expect(calls[calls.length - 1]).toBe('bend:0.000');
-  });
-
-  it('playing: continued rotation keeps re-arming the release window', () => {
-    playing = true;
-    const jog = new JogController(port);
-    jog.onTicks(1, 1000);
-    vi.advanceTimersByTime(JOG_IDLE_MS - 10);
-    jog.onTicks(1, 1000 + JOG_IDLE_MS - 10);
-    vi.advanceTimersByTime(JOG_IDLE_MS - 10);
-    // Window re-armed by the second burst: no release yet.
-    expect(calls.filter((c) => c === 'bend:0.000')).toHaveLength(0);
-    vi.advanceTimersByTime(20);
-    expect(calls[calls.length - 1]).toBe('bend:0.000');
-  });
-
-  it('playing: counter-clockwise ticks bend negative', () => {
-    playing = true;
-    const jog = new JogController(port);
-    jog.onTicks(-1, 1000);
+    const ccw = new JogController(port);
+    calls = [];
+    ccw.onTicks(-4, 2000);
+    vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS);
     expect(parseFloat(calls[0].slice(5))).toBeLessThan(0);
+    ccw.dispose();
+    jog.dispose();
+  });
+
+  it('playing: bend springs back to exactly zero, stepwise, after rotation stops', () => {
+    playing = true;
+    const jog = new JogController(port);
+    // Sustained rotation: 1 tick per period for 10 periods.
+    for (let i = 0; i < 10; i++) {
+      jog.onTicks(1, 1000 + i * JOG_BEND_FILTER_PERIOD_MS);
+      vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS);
+    }
+    const peak = parseFloat(calls[calls.length - 1].slice(5));
+    expect(peak).toBeCloseTo((10 / JOG_BEND_FILTER_WINDOW) * JOG_BEND_PERCENT_PER_TICK, 10);
+
+    // Stop feeding: the window empties slot by slot — monotone decay to 0.
+    const before = calls.length;
+    vi.advanceTimersByTime(JOG_BEND_FILTER_WINDOW * JOG_BEND_FILTER_PERIOD_MS);
+    const decay = calls.slice(before).map((c) => parseFloat(c.slice(5)));
+    for (let i = 1; i < decay.length; i++) expect(decay[i]).toBeLessThan(decay[i - 1]);
+    expect(calls[calls.length - 1]).toBe('bend:0.000');
+
+    // The filter stops itself: no further engine calls.
+    const settled = calls.length;
+    vi.advanceTimersByTime(10 * JOG_BEND_FILTER_PERIOD_MS);
+    expect(calls.length).toBe(settled);
+  });
+
+  it('playing: a violent spin clamps at ±JOG_BEND_MAX_PERCENT', () => {
+    playing = true;
+    const jog = new JogController(port);
+    jog.onTicks(100, 1000);
+    vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS);
+    expect(calls[0]).toBe(`bend:${JOG_BEND_MAX_PERCENT.toFixed(3)}`);
+    jog.dispose();
+  });
+
+  it('playing: steady rotation holds a steady bend without engine spam', () => {
+    playing = true;
+    const jog = new JogController(port);
+    for (let i = 0; i < JOG_BEND_FILTER_WINDOW + 10; i++) {
+      jog.onTicks(1, 1000 + i * JOG_BEND_FILTER_PERIOD_MS);
+      vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS);
+    }
+    // Window full of 1s: value stable, so setBend stops being re-sent.
+    const stable = calls[calls.length - 1];
+    expect(stable).toBe(
+      `bend:${Math.min((1 * JOG_BEND_PERCENT_PER_TICK), JOG_BEND_MAX_PERCENT).toFixed(3)}`
+    );
+    expect(calls.filter((c) => c === stable).length).toBe(1);
+    jog.dispose();
   });
 
   it('paused: ticks seek relative to the playhead, no bend', () => {
@@ -138,6 +175,7 @@ describe('JogController', () => {
     playing = true;
     const jog = new JogController(port);
     jog.onTicks(1, 1000);
+    vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS); // bend applied
     playing = false;
     jog.onTicks(1, 1050);
     expect(calls[1]).toBe('bend:0.000');
@@ -148,6 +186,7 @@ describe('JogController', () => {
     playing = true;
     const jog = new JogController(port);
     jog.onTicks(1, 1000);
+    vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS);
     jog.dispose();
     expect(calls[calls.length - 1]).toBe('bend:0.000');
   });
@@ -215,9 +254,12 @@ describe('touch surface (midi-controller 11)', () => {
     playing = true;
     const jog = new JogController(port);
     jog.onTicks(1, 1000);
+    vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS); // bend applied
     const bendCalls = calls.length;
+    expect(bendCalls).toBeGreaterThan(0);
     jog.onTouchTicks(1, 1010);
     expect(calls.length).toBe(bendCalls);
+    jog.dispose();
   });
 
   describe('release continuation (the wheel keeps spinning after letting go)', () => {
@@ -265,7 +307,9 @@ describe('touch surface (midi-controller 11)', () => {
       jog.onTouchTicks(1, 1000);
       playing = true;
       jog.onTicks(1, 1010);
+      vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS);
       expect(calls[calls.length - 1].startsWith('bend:')).toBe(true);
+      jog.dispose();
     });
   });
 });

@@ -49,3 +49,12 @@ Status: ready-for-human (implemented, change plppovrq; checks green — hardware
 - Constants (JOG_BEND_PERCENT_PER_TPS, JOG_SEEK_SECONDS_PER_TICK, accel
   knee/cap, JOG_IDLE_MS) are first-guess tunables — expect a feel-tuning
   pass on hardware; shapes are the tested contract.
+- Bend retuned on Mixxx prior art (change nkqlrnsz): replaced the EMA
+  velocity model + 150ms idle cliff with Mixxx's engine nudge model
+  (RateControl::getJogFactor + Rotary(25)): ticks accumulate, a 25ms filter
+  timer drains them into a 20-slot moving average, bend = avg ×
+  JOG_BEND_PERCENT_PER_TICK (10, ≈ Mixxx jogSensitivity 0.1) clamped ±8%.
+  Spring-back is inherent — the window empties slot by slot (~0.5s), bend
+  lands on exactly 0 and the timer stops. Effective gain is ~10× the old
+  guess. setBend is only re-sent on value change. smoothedRate stays for
+  paused rim seek acceleration only.

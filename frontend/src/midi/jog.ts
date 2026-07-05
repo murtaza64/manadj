@@ -1,20 +1,20 @@
 /**
- * Jog wheel behavior (midi-controller 03): relative ticks in, bend or seek
- * out. Pure math + a small stateful controller; no Web MIDI, no React —
- * the registrar builds one per deck over the engine, dispatch feeds it
+ * Jog wheel behavior (midi-controller 03/11): relative ticks in, bend or
+ * seek out. Pure math + a small stateful controller; no Web MIDI, no React
+ * — the registrar builds one per deck over the engine, dispatch feeds it
  * ticks, tests feed it synthetic ticks and a fake port.
  *
- * Two modes, decided per tick burst by the deck's transport state:
- * - Playing: rotation drives the engine's bend API (Nudge, widened for
- *   impulse-driven bend). A rotation-activity window replaces key-up —
- *   when ticks stop, bend returns to zero and pitch is restored exactly
- *   (setBend(0); bend never touches pitch).
- * - Paused: velocity-sensitive seek — slow single ticks give beat-level
- *   placement, hard spins traverse minutes.
+ * Playing (rim): Mixxx's nudge model (RateControl::getJogFactor +
+ * Rotary(25), ported): ticks accumulate; every filter period the
+ * accumulator drains into a moving-average window whose value (× gain,
+ * clamped) is the bend. Spring-back is inherent — when rotation stops, the
+ * window empties slot by slot and the bend decays to exactly zero, no idle
+ * cliff. setBend(0) restores the pitch-only rate exactly.
  *
- * Constants are first-guess tunables pending the hardware session; the
- * shapes (linear bend in rate, quadratic seek acceleration) are the tested
- * contract.
+ * Paused: rim ticks seek with velocity-sensitive acceleration (hard spins
+ * travel far); touch-surface ticks seek finely and linearly, and rim ticks
+ * that continue a touch gesture (a released, still-spinning platter) keep
+ * the fine rate (issue 11).
  */
 
 export interface JogDeckPort {
@@ -24,11 +24,17 @@ export interface JogDeckPort {
   setBend(percent: number): void;
 }
 
-/** Bend released this long after the last tick (the "activity window"). */
-export const JOG_IDLE_MS = 150;
-
-/** Bend percent per tick/second of rotation; clamped to ±JOG_BEND_MAX. */
-export const JOG_BEND_PERCENT_PER_TPS = 0.02;
+/**
+ * Bend filter (Mixxx prior art): the engine drains its jog accumulator
+ * every audio buffer (~23ms) into a 25-slot moving average and adds
+ * `avg × 0.1` to the playback rate. We mirror it on a 25ms timer with a
+ * 20-slot window (~0.5s spring-back) and a gain in percent.
+ */
+export const JOG_BEND_FILTER_PERIOD_MS = 25;
+export const JOG_BEND_FILTER_WINDOW = 20;
+/** Percent bend per average tick-per-period (Mixxx jogSensitivity 0.1 of
+ * rate ≈ 10%); clamped to ±JOG_BEND_MAX_PERCENT. */
+export const JOG_BEND_PERCENT_PER_TICK = 10;
 export const JOG_BEND_MAX_PERCENT = 8;
 
 /** Paused seek (rim): seconds per tick at rest, accelerated quadratically. */
@@ -60,7 +66,8 @@ export const JOG_TOUCH_SEEK_SECONDS_PER_TICK = 0.01;
  */
 export const JOG_FINE_CONTINUATION_MS = 250;
 
-/** Rate smoothing: how much of the instantaneous rate each burst carries. */
+/** Rate smoothing (paused rim seek): how much of the instantaneous rate
+ * each burst carries. */
 const RATE_BLEND = 0.6;
 /** dt clamp bounds (ms): messages closer than MIN share a burst; a gap
  * beyond MAX starts fresh instead of diluting the rate toward zero. */
@@ -74,13 +81,13 @@ export function smoothedRate(prevRate: number, ticks: number, dtMs: number): num
   return RATE_BLEND * instantaneous + (1 - RATE_BLEND) * prevRate;
 }
 
-/** Momentary bend for a playing deck: linear in rate, clamped. */
-export function jogBendPercent(rate: number): number {
-  const bend = rate * JOG_BEND_PERCENT_PER_TPS;
+/** Bend for a window-average of ticks-per-period: linear, clamped. */
+export function bendFromWindowAverage(averageTicksPerPeriod: number): number {
+  const bend = averageTicksPerPeriod * JOG_BEND_PERCENT_PER_TICK;
   return Math.min(Math.max(bend, -JOG_BEND_MAX_PERCENT), JOG_BEND_MAX_PERCENT);
 }
 
-/** Seek travel for a paused deck: per-tick base, quadratic in rate. */
+/** Seek travel for a paused deck (rim): per-tick base, quadratic in rate. */
 export function jogSeekDelta(ticks: number, rate: number): number {
   const accel = 1 + (Math.abs(rate) / JOG_SEEK_ACCEL_TPS) ** 2;
   return ticks * JOG_SEEK_SECONDS_PER_TICK * Math.min(accel, JOG_SEEK_ACCEL_MAX);
@@ -90,10 +97,15 @@ export class JogController {
   private readonly port: JogDeckPort;
   private rate = 0;
   private lastTickMs: number | null = null;
-  private bending = false;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
   /** Last fine-rate seek — touch tick or continuation rim tick. */
   private lastFineActivityMs: number | null = null;
+
+  // Bend filter state (Mixxx model).
+  private pendingBendTicks = 0;
+  private bendWindow: number[] = new Array<number>(JOG_BEND_FILTER_WINDOW).fill(0);
+  private bendHead = 0;
+  private bendTimer: ReturnType<typeof setInterval> | null = null;
+  private appliedBend = 0;
 
   constructor(port: JogDeckPort) {
     this.port = port;
@@ -102,7 +114,7 @@ export class JogController {
   /**
    * Touch-surface rotation (CC #10): fine linear seek on a paused deck;
    * ignored while playing — there is no scratch model, and the dense touch
-   * stream would swamp the rim's bend velocity math.
+   * stream would swamp the rim's bend filter.
    */
   onTouchTicks(ticks: number, nowMs: number = performance.now()): void {
     if (this.port.isPlaying()) return;
@@ -120,9 +132,8 @@ export class JogController {
     this.lastTickMs = nowMs;
 
     if (this.port.isPlaying()) {
-      this.bending = true;
-      this.port.setBend(jogBendPercent(this.rate));
-      this.armIdleRelease();
+      this.pendingBendTicks += ticks;
+      this.startBendFilter();
       return;
     }
 
@@ -143,23 +154,42 @@ export class JogController {
     this.releaseBend();
   }
 
-  private armIdleRelease(): void {
-    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null;
-      this.rate = 0;
-      this.lastTickMs = null;
-      this.releaseBend();
-    }, JOG_IDLE_MS);
+  private startBendFilter(): void {
+    if (this.bendTimer !== null) return;
+    this.bendTimer = setInterval(() => this.onBendPeriod(), JOG_BEND_FILTER_PERIOD_MS);
+  }
+
+  private onBendPeriod(): void {
+    // Drain the accumulator into the window (Mixxx: getJogFactor per buffer).
+    this.bendWindow[this.bendHead] = this.pendingBendTicks;
+    this.pendingBendTicks = 0;
+    this.bendHead = (this.bendHead + 1) % JOG_BEND_FILTER_WINDOW;
+
+    let sum = 0;
+    for (const slot of this.bendWindow) sum += slot;
+    const bend = bendFromWindowAverage(sum / JOG_BEND_FILTER_WINDOW);
+    this.applyBend(bend);
+
+    // Window empty and nothing pending: the gesture has fully decayed.
+    if (sum === 0 && this.pendingBendTicks === 0) this.stopBendFilter();
+  }
+
+  private applyBend(bend: number): void {
+    if (bend === this.appliedBend) return; // don't spam the engine
+    this.appliedBend = bend;
+    this.port.setBend(bend);
+  }
+
+  private stopBendFilter(): void {
+    if (this.bendTimer === null) return;
+    clearInterval(this.bendTimer);
+    this.bendTimer = null;
   }
 
   private releaseBend(): void {
-    if (this.idleTimer !== null) {
-      clearTimeout(this.idleTimer);
-      this.idleTimer = null;
-    }
-    if (!this.bending) return;
-    this.bending = false;
-    this.port.setBend(0);
+    this.stopBendFilter();
+    this.pendingBendTicks = 0;
+    this.bendWindow.fill(0);
+    this.applyBend(0);
   }
 }
