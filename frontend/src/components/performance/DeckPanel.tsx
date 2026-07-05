@@ -25,7 +25,7 @@ import TagPill from '../TagPill';
 import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
 import { BeatjumpRow } from '../deckControls/BeatjumpRow';
-import { EnergyIcon, SpeedIcon } from '../icons';
+import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons';
 import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { NUDGE_BEND_PERCENT, bpmMatch, composeRate } from '../../playback/tempo';
@@ -187,21 +187,36 @@ function TrackZone({ track }: { track: Track | null }) {
 
   return (
     <div className="perf-zone perf-zone-track">
-      <InlineEdit
-        className="perf-inline-edit perf-title"
-        value={track?.title ?? ''}
-        placeholder="—"
-        disabled={!edit.enabled}
-        onCommit={commitField('title')}
-      />
-      <InlineEdit
-        className="perf-inline-edit"
-        value={track?.artist ?? ''}
-        placeholder="—"
-        disabled={!edit.enabled}
-        onCommit={commitField('artist')}
-      />
-      <TagRow track={track} />
+      <div className="perf-track-row">
+        <span className="perf-row-icon" title="Title">
+          <MusicIcon width={13} height={13} />
+        </span>
+        <InlineEdit
+          className="perf-inline-edit perf-title"
+          value={track?.title ?? ''}
+          placeholder="—"
+          disabled={!edit.enabled}
+          onCommit={commitField('title')}
+        />
+      </div>
+      <div className="perf-track-row">
+        <span className="perf-row-icon" title="Artist">
+          <PersonIcon width={13} height={13} />
+        </span>
+        <InlineEdit
+          className="perf-inline-edit"
+          value={track?.artist ?? ''}
+          placeholder="—"
+          disabled={!edit.enabled}
+          onCommit={commitField('artist')}
+        />
+      </div>
+      <div className="perf-track-row">
+        <span className="perf-row-icon" title="Tags">
+          <TagIcon width={13} height={13} />
+        </span>
+        <TagRow track={track} />
+      </div>
       <div className="perf-track-row" title="Energy">
         <span className="perf-row-icon">
           <EnergyIcon width={14} height={14} />
@@ -390,6 +405,7 @@ function MixZone({ track }: { track: Track | null }) {
       </div>
       <HFader
         label="VOL"
+        fill
         min={0}
         max={1}
         value={fader}

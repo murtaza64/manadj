@@ -16,6 +16,14 @@ import { useMixer } from '../../hooks/useMixer';
 /** Vertical drag distance (px) that sweeps a knob end to end. */
 const KNOB_DRAG_RANGE_PX = 150;
 
+/** Wheel delta that sweeps a control end to end (scroll-to-adjust). */
+const WHEEL_RANGE = 1000;
+
+/** Per-event wheel step, sign flipped so scroll-up increases. */
+function wheelDelta(e: React.WheelEvent, min: number, max: number): number {
+  return (-e.deltaY / WHEEL_RANGE) * (max - min);
+}
+
 export function Knob({
   label,
   min,
@@ -60,6 +68,7 @@ export function Knob({
         onPointerUp={() => (drag.current = null)}
         onPointerCancel={() => (drag.current = null)}
         onDoubleClick={() => set(defaultValue)}
+        onWheel={(e) => set(value + wheelDelta(e, min, max))}
       >
         <div className="perf-knob-pointer" style={{ transform: `rotate(${angle}deg)` }} />
       </div>
@@ -70,8 +79,10 @@ export function Knob({
 
 /**
  * Horizontal fader with the label ON the handle (no label column — the
- * label travels with the grab point). Pointer-driven; double-click resets
- * to `defaultValue`. `detent` draws a center tick (pitch zero).
+ * label travels with the grab point). Pointer-driven; scroll adjusts;
+ * double-click resets to `defaultValue`. `detent` draws a center tick
+ * (pitch zero); `fill` paints the track up to the handle (level-style
+ * controls like VOL — meaningless for bipolar ones like pitch).
  */
 export function HFader({
   label,
@@ -83,6 +94,7 @@ export function HFader({
   disabled = false,
   accent = false,
   detent = false,
+  fill = false,
   title,
 }: {
   label: string;
@@ -94,6 +106,7 @@ export function HFader({
   disabled?: boolean;
   accent?: boolean;
   detent?: boolean;
+  fill?: boolean;
   title?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -125,8 +138,18 @@ export function HFader({
       onPointerUp={() => (dragging.current = false)}
       onPointerCancel={() => (dragging.current = false)}
       onDoubleClick={() => !disabled && onChange(defaultValue)}
+      onWheel={(e) => {
+        if (disabled) return;
+        onChange(Math.max(min, Math.min(max, value + wheelDelta(e, min, max))));
+      }}
     >
       <div className="perf-fader-track" />
+      {fill && (
+        <div
+          className="perf-fader-fill"
+          style={{ width: `${Math.max(0, Math.min(1, fraction)) * 100}%` }}
+        />
+      )}
       {detent && <div className="perf-fader-detent" />}
       <div
         className="perf-fader-handle"
@@ -146,44 +169,36 @@ export function MixerStrip() {
   return (
     <div className="perf-strip">
       <div />
-      <label className="perf-strip-fader wide" title="Crossfader (double-click to center)">
-        <span>X-FADER</span>
-        <input
-          type="range"
+      <div className="perf-strip-slot wide">
+        <HFader
+          label="X-FADER"
           min={-1}
           max={1}
-          step={0.01}
           value={crossfader}
-          onChange={(e) => {
-            const v = Number(e.target.value);
+          defaultValue={0}
+          detent
+          onChange={(v) => {
             setCrossfader(v);
             mixer.setCrossfader(v);
           }}
-          onDoubleClick={() => {
-            setCrossfader(0);
-            mixer.setCrossfader(0);
-          }}
+          title="Crossfader (double-click to center)"
         />
-      </label>
-      <label className="perf-strip-fader" title="Master volume">
-        <span>MASTER</span>
-        <input
-          type="range"
+      </div>
+      <div className="perf-strip-slot">
+        <HFader
+          label="MASTER"
           min={0}
           max={1}
-          step={0.01}
           value={master}
-          onChange={(e) => {
-            const v = Number(e.target.value);
+          defaultValue={1}
+          fill
+          onChange={(v) => {
             setMaster(v);
             mixer.setMaster(v);
           }}
-          onDoubleClick={() => {
-            setMaster(1);
-            mixer.setMaster(1);
-          }}
+          title="Master volume"
         />
-      </label>
+      </div>
     </div>
   );
 }

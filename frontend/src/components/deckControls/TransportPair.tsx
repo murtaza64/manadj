@@ -50,6 +50,9 @@ export function TransportPair({
     return () => clearInterval(interval);
   }, [engine]);
 
+  const flashing =
+    !previewing && !playing && cuePoint !== null && !atCuePoint;
+
   return (
     <>
       <button
@@ -70,6 +73,17 @@ export function TransportPair({
               : 'player-button-cue-away-from-cue'
             : ''
         }`}
+        // Phase-lock the 1s cue flash to the document timeline: the
+        // animation starts when the class lands (any moment), so two decks
+        // would flash out of phase — a negative delay of (now mod period)
+        // re-anchors every instance to the same global epoch. Set via ref
+        // (commit phase): render must stay pure.
+        ref={(el) => {
+          if (!el) return;
+          el.style.animationDelay = flashing
+            ? `-${(performance.now() % 1000).toFixed(0)}ms`
+            : '';
+        }}
         title={cueTitle}
       >
         CUE

@@ -41,20 +41,8 @@
   background: var(--mantle);
 }
 
-.perf-strip-fader {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--subtext0);
-  justify-self: center;
-}
-
-.perf-strip > .perf-strip-fader:last-child { justify-self: end; }
-
-.perf-strip-fader input { width: 120px; accent-color: var(--overlay2); }
-.perf-strip-fader.wide input { width: 220px; accent-color: var(--text); }
+.perf-strip-slot { width: 130px; justify-self: end; }
+.perf-strip-slot.wide { width: 240px; justify-self: center; }
 
 /* ── Deck panels ──────────────────────────────────────────────── */
 
@@ -100,7 +88,7 @@
 .perf-deck-band {
   display: flex;
   align-items: stretch;
-  gap: 16px;
+  gap: 22px;
   min-height: 0;
 }
 
@@ -111,7 +99,7 @@
 .perf-zone {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -138,13 +126,17 @@
 .perf-deckpanel.mirrored .perf-track-row,
 .perf-deckpanel.mirrored .perf-tagrow { flex-direction: row-reverse; }
 
+/* Inline edits sit in icon rows; the negative margin cancels the border +
+   padding inset so the TEXT left-aligns with the tag pills and pickers
+   below (border appears on hover without shifting anything). */
 .perf-inline-edit {
-  width: 100%;
+  flex: 1;
   background: transparent;
   border: 1px solid transparent;
   color: var(--subtext1);
   font-size: 11px;
   padding: 0 4px;
+  margin: 0 -5px;
   min-width: 0;
 }
 
@@ -363,6 +355,16 @@
   height: 2px;
   transform: translateY(-50%);
   background: var(--surface1);
+}
+
+/* Level fill (VOL/MASTER): the track lights up to the handle */
+.perf-fader-fill {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 2px;
+  transform: translateY(-50%);
+  background: var(--green);
 }
 
 .perf-fader-detent {
