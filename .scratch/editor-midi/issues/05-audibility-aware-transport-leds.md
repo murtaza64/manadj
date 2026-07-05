@@ -1,6 +1,6 @@
 # 05 — Audibility-aware transport LEDs
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -50,3 +50,4 @@ Stop the transport lights lying while the editor is audible:
   load with play latched, CUE solid at cue / flashing away-from-cue /
   lit through hold-preview; pad lights still correct after several mode
   switches.
+- 2026-07-05 (edmidi lane): hardware smoke tests verified by the user; closed (jj change `owmzxpnt`).

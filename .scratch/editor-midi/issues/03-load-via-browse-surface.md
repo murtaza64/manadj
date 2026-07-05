@@ -1,6 +1,6 @@
 # 03 — LOAD via the browse surface
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -51,3 +51,4 @@ None - can start immediately.
   silently on a running deck, loads on a stopped one; library view: LOAD
   replaces freely even while playing; sync/styles views: encoder + LOAD do
   nothing.
+- 2026-07-05 (edmidi lane): hardware smoke tests verified by the user; closed (jj change `owmzxpnt`).

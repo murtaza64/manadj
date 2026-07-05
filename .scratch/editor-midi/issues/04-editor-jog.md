@@ -1,6 +1,6 @@
 # 04 — Editor jog: scrub A / Slide B
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -57,3 +57,4 @@ The jog gesture class, with the performance side's three-tier feel:
   a Slide via jog persists (reload the pair). Performance/library jog feel
   unchanged (bend while playing, seek paused, touch fine, release
   continuation).
+- 2026-07-05 (edmidi lane): hardware smoke tests verified by the user; closed (jj change `owmzxpnt`).

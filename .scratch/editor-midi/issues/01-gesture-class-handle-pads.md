@@ -1,6 +1,6 @@
 # 01 — Gesture-class handle + pads in both modes
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -55,3 +55,4 @@ None - can start immediately.
   a pad does nothing extra on release. Library/Performance: pads behave
   exactly as before (set / jump / hold-preview / SHIFT-clear). Switch
   library → editor → library without reload and confirm routing flips.
+- 2026-07-05 (edmidi lane): hardware smoke tests verified by the user; closed (jj change `owmzxpnt`).

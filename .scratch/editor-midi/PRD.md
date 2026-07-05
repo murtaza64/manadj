@@ -1,6 +1,6 @@
 # PRD: Editor MIDI (surface-routed gesture classes)
 
-Status: ready-for-human (implemented; hardware smoke tests pending — see issues)
+Status: done (implemented + hardware-verified 2026-07-05)
 
 ## Problem Statement
 

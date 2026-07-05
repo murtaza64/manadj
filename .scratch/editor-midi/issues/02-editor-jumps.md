@@ -1,6 +1,6 @@
 # 02 — Editor jumps
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -45,3 +45,4 @@ The jumps gesture class, mirroring the editor's on-screen ◀/▶ cluster:
   Slide B (playhead stays put); SHIFT+jump halves/doubles the size shown in
   the editor cluster and the change carries to Performance view.
   Library/Performance beatjump unchanged.
+- 2026-07-05 (edmidi lane): hardware smoke tests verified by the user; closed (jj change `owmzxpnt`).
