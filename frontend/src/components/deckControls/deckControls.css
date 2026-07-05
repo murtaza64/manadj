@@ -31,12 +31,12 @@
   font-size: 13px;
 }
 
-/* Loop row (looping 03): one stateful LOOP button, lit green while a loop
-   is active — bright saturated green is the active-STATE color (never a
-   Deck identity color). */
+/* Loop row (looping 03/04): 1/2 / LOOP N / x2 — the stateful LOOP button
+   lights green while a loop is active (bright saturated green is the
+   active-STATE color, never a Deck identity color). */
 .deck-looprow {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: auto 1fr auto;
   gap: 4px;
   align-items: stretch;
 }

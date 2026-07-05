@@ -29,6 +29,12 @@ export function formatLoopBeats(beats: number): string {
   return beats < 1 ? `1/${Math.round(1 / beats)}` : String(beats);
 }
 
+/** Clamp a loop size to the legal range (powers of two stay powers of two:
+ * halve/double from an in-range power of two can only hit the bounds). */
+export function clampLoopBeats(beats: number): number {
+  return Math.max(LOOP_MIN_BEATS, Math.min(LOOP_MAX_BEATS, beats));
+}
+
 /**
  * Fold a monotonically advancing clock estimate into an active loop region
  * — the engine-side mirror of the kernel's sample wrap, so the reported

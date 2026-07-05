@@ -344,7 +344,9 @@ export class DeckEngine {
     const bpm = this.trackInfo?.bpm ?? 120;
     const target = this.clampTime(this.getPlayhead() + beats * (60 / bpm));
     this.fireTransportEvent({ action: 'jumpBeats', playhead: target, detail: beats });
-    this.dispatch({ type: 'seek', time: target });
+    // Relative displacement, not a seek: an active loop translates with
+    // the playhead (looping 04).
+    this.dispatch({ type: 'jump', time: target });
   }
 
   /** A BPM edit landed for the loaded Track: keep beat-domain math (beat
@@ -388,6 +390,24 @@ export class DeckEngine {
    * reducer refuses to guess); the playhead never moves on engage. */
   toggleLoop(): void {
     this.dispatch({ type: 'loop-toggle' });
+  }
+
+  /** Halve/double (looping 04): pending size when idle, live resize while
+   * looping. Works without a loaded Track — the pending size is a Deck
+   * preference, like the beatjump size. */
+  resizeLoop(change: 'halve' | 'double'): void {
+    if (!this.buffer) {
+      const [next] = reduceTransport(
+        this.transport,
+        { type: 'loop-resize', change },
+        this.transportContext()
+      );
+      if (next === this.transport) return;
+      this.transport = next;
+      this.emit();
+      return;
+    }
+    this.dispatch({ type: 'loop-resize', change });
   }
 
   // ── Sound controls ─────────────────────────────────────────────────────

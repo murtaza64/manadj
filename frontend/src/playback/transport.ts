@@ -12,7 +12,7 @@
  */
 
 import { addBeats, phasePreservingJumpTarget, snapToNearestBeat } from './quantize';
-import { LOOP_DEFAULT_BEATS } from './loop';
+import { clampLoopBeats, LOOP_DEFAULT_BEATS } from './loop';
 import type { LoopRegion } from './loop';
 
 export interface TransportState {
@@ -39,13 +39,20 @@ export type TransportEvent =
   | { type: 'play' }
   | { type: 'pause' }
   | { type: 'toggle-play' }
+  /** Absolute relocation (waveform seek, scrub): cancels an active loop. */
   | { type: 'seek'; time: number }
+  /** Relative displacement (beat jump, looping 04): translates an active
+   * loop with the playhead — position-in-loop is preserved. */
+  | { type: 'jump'; time: number }
   | { type: 'cue-down' }
   | { type: 'cue-up' }
   | { type: 'hot-cue-down'; slot: number; time: number | null }
   | { type: 'hot-cue-up'; slot: number; time: number | null }
   /** Auto-loop engage/release (looping 03). Inert on gridless Tracks. */
   | { type: 'loop-toggle' }
+  /** Halve/double (looping 04): pending size when idle, live region resize
+   * when looping — start-edge anchored, phase-mod re-entry on shrink. */
+  | { type: 'loop-resize'; change: 'halve' | 'double' }
   /** Audio reached the end of the buffer on its own. */
   | { type: 'ended' };
 
@@ -121,13 +128,29 @@ export function reduceTransport(
       return reduceTransport(s, { type: s.playing ? 'pause' : 'play' }, ctx);
 
     case 'seek': {
-      const next = { ...s, playhead: e.time };
+      // Absolute relocation cancels the loop — even to a point inside the
+      // region; there is no "armed but playhead elsewhere" state.
+      const next = { ...s, playhead: e.time, loop: null };
+      return [next, isAudioRunning(s) ? [{ type: 'start', at: e.time }] : []];
+    }
+
+    case 'jump': {
+      // Relative displacement: the region translates with the playhead —
+      // you cannot beat-jump out of a loop. Clamp so a jump at the track
+      // head can't push the region before 0 (length preserved).
+      let loop = s.loop;
+      if (loop) {
+        const start = Math.max(0, loop.start + (e.time - s.playhead));
+        loop = { ...loop, start, end: start + (loop.end - loop.start) };
+      }
+      const next = { ...s, playhead: e.time, loop };
       return [next, isAudioRunning(s) ? [{ type: 'start', at: e.time }] : []];
     }
 
     case 'cue-down': {
       if (s.playing) {
-        // Return to cue and pause the deck.
+        // Return to cue and pause the deck (absolute relocation: the loop
+        // cancels — looping 04).
         if (s.cuePoint === null) return [s, []];
         return [
           {
@@ -136,6 +159,7 @@ export function reduceTransport(
             previewing: false,
             hotCuePreviewSlot: null,
             playhead: s.cuePoint,
+            loop: null,
           },
           [{ type: 'stop', at: s.cuePoint }],
         ];
@@ -157,15 +181,19 @@ export function reduceTransport(
         // Play was pressed during the preview: deck keeps running.
         return [{ ...s, previewing: false }, []];
       }
+      // Preview return is a cue return (absolute relocation): loop cancels.
       const at = s.cuePoint ?? s.playhead;
       return [
-        { ...s, previewing: false, playhead: at },
+        { ...s, previewing: false, playhead: at, loop: null },
         [{ type: 'stop', at }],
       ];
     }
 
     case 'hot-cue-down': {
       if (e.time === null) return [s, []];
+      // A Hot Cue trigger is an absolute relocation: the loop cancels
+      // (looping 04) — jumping to the drop never traps you in a leftover
+      // region.
       if (s.playing) {
         // Jump and keep playing. Quantize governs the trigger: the jump is
         // immediate but lands at cue + intra-beat phase (a whole-beat
@@ -174,11 +202,11 @@ export function reduceTransport(
         const at = ctx.quantize
           ? phasePreservingJumpTarget(e.time, s.playhead, ctx.beatTimes)
           : e.time;
-        return [{ ...s, playhead: at }, [{ type: 'start', at }]];
+        return [{ ...s, playhead: at, loop: null }, [{ type: 'start', at }]];
       }
       // Hold-to-preview from the hot cue.
       return [
-        { ...s, hotCuePreviewSlot: e.slot, playhead: e.time },
+        { ...s, hotCuePreviewSlot: e.slot, playhead: e.time, loop: null },
         [{ type: 'start', at: e.time }],
       ];
     }
@@ -210,6 +238,40 @@ export function reduceTransport(
         { ...s, loop: { start, end, lengthBeats: s.pendingLoopBeats } },
         [],
       ];
+    }
+
+    case 'loop-resize': {
+      const factor = e.change === 'halve' ? 0.5 : 2;
+      // Idle: halve/double adjust the per-Deck pending size.
+      if (!s.loop) {
+        const pending = clampLoopBeats(s.pendingLoopBeats * factor);
+        if (pending === s.pendingLoopBeats) return [s, []];
+        return [{ ...s, pendingLoopBeats: pending }, []];
+      }
+      // Looping: resize the active region live, anchored at the START edge
+      // (never the playhead). The pending size tracks it, so the next
+      // engagement remembers.
+      const lengthBeats = clampLoopBeats(s.loop.lengthBeats * factor);
+      if (lengthBeats === s.loop.lengthBeats) return [s, []];
+      const grid = ctx.beatTimes;
+      const end =
+        grid && grid.length >= 2
+          ? addBeats(s.loop.start, lengthBeats, grid)
+          : // Grid vanished mid-loop: scale the seconds proportionally.
+            s.loop.start + (s.loop.end - s.loop.start) * (lengthBeats / s.loop.lengthBeats);
+      const loop = { start: s.loop.start, end, lengthBeats };
+      // A shrink that strands the playhead pulls it back in at its phase
+      // modulo the new length — rapid halve-halve-halve stays in the groove.
+      const length = loop.end - loop.start;
+      const offset = s.playhead - loop.start;
+      if (length > 0 && offset >= length && s.playhead < s.loop.end) {
+        const at = loop.start + (offset % length);
+        return [
+          { ...s, loop, pendingLoopBeats: lengthBeats, playhead: at },
+          isAudioRunning(s) ? [{ type: 'start', at }] : [],
+        ];
+      }
+      return [{ ...s, loop, pendingLoopBeats: lengthBeats }, []];
     }
 
     case 'ended': {

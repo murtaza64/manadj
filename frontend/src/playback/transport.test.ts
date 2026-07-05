@@ -380,6 +380,179 @@ describe('loop-toggle', () => {
   });
 });
 
+describe('loop-resize', () => {
+  const active = { start: 10, end: 12, lengthBeats: 4 }; // 0.5s/beat
+
+  /** Constant 0.5s grid spanning the loop neighborhood. */
+  const wideGrid = Array.from({ length: 60 }, (_, i) => i * 0.5);
+
+  it('adjusts the pending size when idle, clamping to 1/8..32', () => {
+    let s = state({ pendingLoopBeats: 4 });
+    [s] = reduceTransport(s, { type: 'loop-resize', change: 'halve' }, quantized());
+    expect(s.pendingLoopBeats).toBe(2);
+    for (let i = 0; i < 10; i++) {
+      [s] = reduceTransport(s, { type: 'loop-resize', change: 'halve' }, quantized());
+    }
+    expect(s.pendingLoopBeats).toBe(0.125);
+    for (let i = 0; i < 20; i++) {
+      [s] = reduceTransport(s, { type: 'loop-resize', change: 'double' }, quantized());
+    }
+    expect(s.pendingLoopBeats).toBe(32);
+  });
+
+  it('halves the active region keeping the start edge', () => {
+    const s = state({ playing: true, playhead: 10.3, loop: active });
+    const [next, effects] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'halve' },
+      { quantize: true, beatTimes: wideGrid }
+    );
+    expect(next.loop!.start).toBe(10);
+    expect(next.loop!.end).toBeCloseTo(11, 10);
+    expect(next.loop!.lengthBeats).toBe(2);
+    // Playhead inside the shrunk region: no relocation, no effect.
+    expect(next.playhead).toBe(10.3);
+    expect(effects).toEqual([]);
+  });
+
+  it('doubles the active region extending the end edge', () => {
+    const s = state({ playing: true, playhead: 10.3, loop: active });
+    const [next] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'double' },
+      { quantize: true, beatTimes: wideGrid }
+    );
+    expect(next.loop!.start).toBe(10);
+    expect(next.loop!.end).toBeCloseTo(14, 10);
+    expect(next.loop!.lengthBeats).toBe(8);
+  });
+
+  it('keeps the pending size in step with an active resize', () => {
+    const s = state({ playing: true, playhead: 10.3, loop: active, pendingLoopBeats: 4 });
+    const [next] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'halve' },
+      { quantize: true, beatTimes: wideGrid }
+    );
+    expect(next.pendingLoopBeats).toBe(2);
+  });
+
+  it('re-enters a stranded playhead at its phase modulo the new length', () => {
+    // Shrink 4 → 2 beats with the playhead at offset 1.5s (in the back half).
+    const s = state({ playing: true, playhead: 11.5, loop: active });
+    const [next, effects] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'halve' },
+      { quantize: true, beatTimes: wideGrid }
+    );
+    // offset 1.5 mod new length 1.0 → 0.5 → playhead 10.5, restart splice.
+    expect(next.playhead).toBeCloseTo(10.5, 10);
+    expect(effects).toHaveLength(1);
+    expect(effects[0].at).toBeCloseTo(10.5, 10);
+  });
+
+  it('does not relocate a paused stranded playhead audibly (no effect)', () => {
+    const s = state({ playhead: 11.5, loop: active });
+    const [next, effects] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'halve' },
+      { quantize: true, beatTimes: wideGrid }
+    );
+    expect(next.playhead).toBeCloseTo(10.5, 10);
+    expect(effects).toEqual([]);
+  });
+
+  it('leaves a playhead ahead of the region alone (still playing into it)', () => {
+    const s = state({ playing: true, playhead: 9.8, loop: active });
+    const [next, effects] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'halve' },
+      { quantize: true, beatTimes: wideGrid }
+    );
+    expect(next.playhead).toBe(9.8);
+    expect(effects).toEqual([]);
+  });
+
+  it('clamps an active resize at the size limits (no-op past them)', () => {
+    const tiny = { start: 10, end: 10.0625, lengthBeats: 0.125 };
+    const s = state({ playing: true, playhead: 10.03, loop: tiny });
+    const [next] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'halve' },
+      { quantize: true, beatTimes: wideGrid }
+    );
+    expect(next.loop).toEqual(tiny);
+  });
+});
+
+describe('loop motion classes', () => {
+  const active = { start: 10, end: 12, lengthBeats: 4 };
+
+  it('beat jump translates the region with the playhead', () => {
+    const s = state({ playing: true, playhead: 10.5, loop: active });
+    const [next, effects] = reduceTransport(s, { type: 'jump', time: 12.5 }, quantized());
+    expect(next.playhead).toBe(12.5);
+    expect(next.loop!.start).toBeCloseTo(12, 10);
+    expect(next.loop!.end).toBeCloseTo(14, 10);
+    expect(next.loop!.lengthBeats).toBe(4);
+    expect(effects).toEqual([{ type: 'start', at: 12.5 }]);
+  });
+
+  it('beat jump back cannot push the region before the track start', () => {
+    // Translation of -1s would put the start at -0.5: clamp, keep length.
+    const s = state({ playing: true, playhead: 1.0, loop: { start: 0.5, end: 2.5, lengthBeats: 4 } });
+    const [next] = reduceTransport(s, { type: 'jump', time: 0 }, quantized());
+    expect(next.loop!.start).toBe(0);
+    expect(next.loop!.end).toBeCloseTo(2, 10);
+  });
+
+  it('waveform seek cancels the loop', () => {
+    const s = state({ playing: true, playhead: 10.5, loop: active });
+    const [next] = reduceTransport(s, { type: 'seek', time: 11 }, quantized());
+    expect(next.loop).toBeNull();
+    expect(next.playhead).toBe(11);
+  });
+
+  it('a seek inside the region still cancels (no armed state)', () => {
+    const s = state({ playhead: 10.5, loop: active });
+    const [next] = reduceTransport(s, { type: 'seek', time: 10.6 }, quantized());
+    expect(next.loop).toBeNull();
+  });
+
+  it('hot cue trigger cancels the loop', () => {
+    const s = state({ playing: true, playhead: 10.5, loop: active });
+    const [next] = reduceTransport(s, { type: 'hot-cue-down', slot: 1, time: 30 }, quantized(null));
+    expect(next.loop).toBeNull();
+  });
+
+  it('cue return while playing cancels the loop', () => {
+    const s = state({ playing: true, playhead: 10.5, cuePoint: 5, loop: active });
+    const [next] = reduceTransport(s, { type: 'cue-down' }, quantized());
+    expect(next.loop).toBeNull();
+    expect(next.playhead).toBe(5);
+  });
+
+  it('cue preview return cancels the loop', () => {
+    const s = state({ previewing: true, cuePoint: 5, playhead: 10.5, loop: active });
+    const [next] = reduceTransport(s, { type: 'cue-up' }, quantized());
+    expect(next.loop).toBeNull();
+  });
+
+  it('setting the cue while paused keeps the loop (placement, not relocation)', () => {
+    const s = state({ playhead: 10.5, loop: active });
+    const [next] = reduceTransport(s, { type: 'cue-down' }, quantized(null));
+    expect(next.loop).not.toBeNull();
+  });
+
+  it('pause and play leave the loop set', () => {
+    const s = state({ playing: true, playhead: 10.5, loop: active });
+    const [paused] = reduceTransport(s, { type: 'pause' }, quantized());
+    expect(paused.loop).not.toBeNull();
+    const [resumed] = reduceTransport(paused, { type: 'play' }, quantized());
+    expect(resumed.loop).not.toBeNull();
+  });
+});
+
 describe('ended', () => {
   it('returns to the cue when the track ends during a main-cue preview', () => {
     const s = state({ previewing: true, cuePoint: 170, playhead: 180 });

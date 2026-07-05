@@ -173,6 +173,28 @@ describe('DeckEngine active loop (looping 03)', () => {
     expect(s.pendingLoopBeats).toBe(4);
   });
 
+  it('adjusts the pending size without a loaded Track (Deck preference)', () => {
+    const engine = new DeckEngine(unusedPort);
+    engine.resizeLoop('halve');
+    expect(engine.getSnapshot().pendingLoopBeats).toBe(2);
+    engine.resizeLoop('double');
+    engine.resizeLoop('double');
+    expect(engine.getSnapshot().pendingLoopBeats).toBe(8);
+  });
+
+  it('beat jump translates an active loop; seek cancels it', async () => {
+    const engine = await loadedEngine(26);
+    engine.seek(10);
+    engine.toggleLoop(); // [10, 12)
+    engine.jumpBeats(4); // +2s at 120 BPM
+    let s = engine.getSnapshot();
+    expect(s.loop!.start).toBeCloseTo(12, 10);
+    expect(s.loop!.end).toBeCloseTo(14, 10);
+    engine.seek(13);
+    s = engine.getSnapshot();
+    expect(s.loop).toBeNull();
+  });
+
   it('loop state survives a pause (Deck state, not playback state)', async () => {
     const engine = await loadedEngine(25);
     engine.seek(10);
