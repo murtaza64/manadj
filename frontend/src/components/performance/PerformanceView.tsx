@@ -26,6 +26,7 @@ import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
 import { MixerStrip } from './MixerStrip';
+import { LinkToggle } from '../../links/LinkToggle';
 import { DeckKeys } from './DeckKeys';
 import { isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
@@ -180,7 +181,16 @@ export function PerformanceView() {
             />
           </DeckScope>
         </div>
-        <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
+        <MixerStrip
+          hintsOn={hintsOn}
+          onToggleHints={toggleHints}
+          linkToggle={
+            <LinkToggle
+              aTrackId={A.loadedTrack?.id ?? null}
+              bTrackId={B.loadedTrack?.id ?? null}
+            />
+          }
+        />
         <div className="perf-decks">
           <DeckScope deck="A">
             <DeckPanel lockHint={lockHint === 'A'} />

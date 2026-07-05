@@ -1,0 +1,44 @@
+/* Linked toggle (linked-pairs 01/02): chain lights up when the loaded
+   pair is Linked; greyscale when not; near-invisible without a pair.
+   The hint state (favorited Transition, no Link) pulses to suggest
+   promoting a proven pair — display-only, never auto-links. */
+.link-toggle {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 4px;
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+.link-toggle.on {
+  filter: none;
+  opacity: 1;
+}
+
+.link-toggle.hint {
+  animation: link-toggle-pulse 2s ease-in-out infinite;
+}
+
+.link-toggle:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.link-toggle:disabled {
+  cursor: default;
+  opacity: 0.15;
+  animation: none;
+}
+
+@keyframes link-toggle-pulse {
+  0%,
+  100% {
+    filter: grayscale(1);
+    opacity: 0.45;
+  }
+  50% {
+    filter: none;
+    opacity: 1;
+  }
+}
