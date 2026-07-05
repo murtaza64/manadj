@@ -10,7 +10,7 @@ import CircleOfFifthsModal from './CircleOfFifthsModal';
 import BpmModal from './BpmModal';
 import FindRelatedTracksModal from './FindRelatedTracksModal';
 import { DEFAULT_FILTERS, useFilters } from '../contexts/FilterContext';
-import { setDeckFollow, useFollowFlags } from '../follow/followStore';
+import { dispatchFollow, useFollowFlags } from '../follow/followStore';
 import type { RelatedTracksSettings } from './Library';
 import './FilterBar.css';
 
@@ -310,11 +310,12 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
             const on = followFlags[deck];
             // Only ENABLING requires a loaded Track — an on-flag must
             // always be turn-off-able, even if the Deck somehow emptied.
+            // (The reducer enforces the same rule; disabled is just UI.)
             const actionable = loaded || on;
             return (
               <button
                 key={deck}
-                onClick={() => actionable && setDeckFollow(deck, !on)}
+                onClick={() => dispatchFollow({ type: 'toggle', deck, loaded })}
                 disabled={!actionable}
                 className="filter-bar-follow-btn"
                 aria-pressed={on}

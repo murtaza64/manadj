@@ -12,7 +12,61 @@
  * state machine (spread/drop/sticky rules) is issue 02; ranking is 04.
  */
 import type { Track } from '../types';
+import type { ChannelId } from '../playback/mixer';
 import { formatKeyDisplay } from '../utils/keyUtils';
+
+// ── State machine (follow-mode 02) ──────────────────────────────────────
+
+/** Which Decks are being followed. */
+export type FollowFlags = Readonly<Record<ChannelId, boolean>>;
+
+/**
+ * Inputs to the Follow state machine. Transport events carry the
+ * POST-event deck-running map (`playing`) — the reducer never asks the
+ * Decks anything.
+ */
+export type FollowEvent =
+  | { type: 'toggle'; deck: ChannelId; loaded: boolean }
+  | { type: 'play'; deck: ChannelId; playing: Record<ChannelId, boolean> }
+  | { type: 'pause'; deck: ChannelId; playing: Record<ChannelId, boolean> };
+
+const DECKS: readonly ChannelId[] = ['A', 'B'];
+
+/**
+ * Follow rides playback (mirrors the transport-reducer pattern):
+ *
+ * - toggle: off always works; on requires a loaded Track. A manual enable
+ *   is never blocked by playback state — the user's act wins; the rules
+ *   re-assert on the next transport event.
+ * - play: never self-enables (with Follow off everywhere, playback changes
+ *   nothing). Otherwise the starting Deck begins following, and any
+ *   following Deck that is not playing loses Follow — sticky expiry: a
+ *   paused Deck may only follow while nothing plays.
+ * - pause: the pausing Deck stops following unless it was the only Deck
+ *   playing (the list survives mid-set silence).
+ */
+export function reduceFollow(flags: FollowFlags, event: FollowEvent): FollowFlags {
+  switch (event.type) {
+    case 'toggle': {
+      if (flags[event.deck]) return { ...flags, [event.deck]: false };
+      if (!event.loaded) return flags;
+      return { ...flags, [event.deck]: true };
+    }
+    case 'play': {
+      if (!DECKS.some((d) => flags[d])) return flags;
+      const next: Record<ChannelId, boolean> = { ...flags, [event.deck]: true };
+      for (const d of DECKS) {
+        if (next[d] && !event.playing[d]) next[d] = false;
+      }
+      return next;
+    }
+    case 'pause': {
+      if (!flags[event.deck]) return flags;
+      const otherStillPlaying = DECKS.some((d) => d !== event.deck && event.playing[d]);
+      return otherStillPlaying ? { ...flags, [event.deck]: false } : flags;
+    }
+  }
+}
 
 // ── Parameters ──────────────────────────────────────────────────────────
 

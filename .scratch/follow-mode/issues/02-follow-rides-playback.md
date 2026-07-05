@@ -32,3 +32,7 @@ Also: persist the per-Deck flags as session state (localStorage, alongside the l
 ## Blocked by
 
 - 01-follow-core-manual-toggles
+
+## Comments
+
+- Done (nmsouxlr, lane followmode): `reduceFollow` state machine in the follow model (toggle/play/pause events carrying the post-event deck-running map) — spread-on-play, drop-on-pause-unless-sole, sticky expiry, never-self-enable, enable-requires-loaded; 10 reducer tests incl. a pinned interpretation: a manual enable is never blocked by playback state (rules re-assert on the next transport event). `followPlaybackBridge` subscribes to both engines and edge-detects the snapshot `playing` flag (previews never touch it), mounted from DeckProvider. Store reworked: all writes dispatch through the reducer; flags persist to `manadj-follow-flags` and restore on boot; persistence face tested against a faked localStorage (4 tests). Spec deviation, deliberate: play/pause events omit the loaded map (a running Deck is necessarily loaded); rider (shared localStorage helper) skipped again — third hand-rolled instance now exists, worth an issue if a fourth appears. Gate: 530 pytest / 515 vitest / build / one head.

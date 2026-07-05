@@ -8,7 +8,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Tag, Track } from '../types';
-import { DEFAULT_FOLLOW_PARAMS, deriveFollowQuery, unionIds } from './model';
+import {
+  DEFAULT_FOLLOW_PARAMS,
+  deriveFollowQuery,
+  reduceFollow,
+  unionIds,
+  type FollowEvent,
+  type FollowFlags,
+} from './model';
 
 /** Minimal Track for derivation: only key/bpm/energy/tags are read. */
 function track(fields: Partial<Track> = {}): Track {
@@ -143,5 +150,105 @@ describe('unionIds — per-track OR of candidate sets', () => {
   it('a single reference passes through; no references yields an empty set', () => {
     expect([...unionIds([[t(7)]])]).toEqual([7]);
     expect(unionIds([]).size).toBe(0);
+  });
+});
+
+describe('reduceFollow — the Follow state machine', () => {
+  // Event `playing` maps are POST-event deck-running state.
+  const OFF: FollowFlags = { A: false, B: false };
+  const play = (deck: 'A' | 'B', playing: Record<'A' | 'B', boolean>): FollowEvent => ({
+    type: 'play',
+    deck,
+    playing,
+  });
+  const pause = (deck: 'A' | 'B', playing: Record<'A' | 'B', boolean>): FollowEvent => ({
+    type: 'pause',
+    deck,
+    playing,
+  });
+
+  describe('manual toggle', () => {
+    it('enables a Deck with a loaded Track', () => {
+      expect(reduceFollow(OFF, { type: 'toggle', deck: 'A', loaded: true })).toEqual({
+        A: true,
+        B: false,
+      });
+    });
+
+    it('rejects enabling an empty Deck', () => {
+      expect(reduceFollow(OFF, { type: 'toggle', deck: 'A', loaded: false })).toEqual(OFF);
+    });
+
+    it('disables regardless of loaded state', () => {
+      expect(
+        reduceFollow({ A: true, B: false }, { type: 'toggle', deck: 'A', loaded: false })
+      ).toEqual(OFF);
+    });
+
+    it("is never blocked by playback state — the user's act wins", () => {
+      // Enabling a paused Deck while the other plays is allowed (toggle
+      // events carry no playing context at all); the spread/expiry rules
+      // re-assert on the next transport event.
+      expect(
+        reduceFollow({ A: false, B: true }, { type: 'toggle', deck: 'A', loaded: true })
+      ).toEqual({ A: true, B: true });
+    });
+  });
+
+  describe('spread on play', () => {
+    it('a Deck starting while any Deck follows begins following', () => {
+      expect(reduceFollow({ A: true, B: false }, play('B', { A: true, B: true }))).toEqual({
+        A: true,
+        B: true,
+      });
+    });
+
+    it('never self-enables: with Follow off everywhere, play changes nothing', () => {
+      expect(reduceFollow(OFF, play('A', { A: true, B: false }))).toEqual(OFF);
+    });
+  });
+
+  describe('drop on pause', () => {
+    it('a pausing Deck stops following when another Deck still plays', () => {
+      expect(reduceFollow({ A: true, B: true }, pause('A', { A: false, B: true }))).toEqual({
+        A: false,
+        B: true,
+      });
+    });
+
+    it('the sole playing Deck keeps following through mid-set silence', () => {
+      expect(reduceFollow({ A: true, B: false }, pause('A', { A: false, B: false }))).toEqual({
+        A: true,
+        B: false,
+      });
+    });
+
+    it('pausing a non-following Deck changes nothing', () => {
+      expect(reduceFollow({ A: true, B: false }, pause('B', { A: true, B: false }))).toEqual({
+        A: true,
+        B: false,
+      });
+    });
+  });
+
+  describe('sticky expiry', () => {
+    it('any Deck starting revokes Follow from a paused following Deck', () => {
+      // A follows from the sole-playing exception (paused); starting B
+      // spreads to B and expires A's stickiness.
+      expect(reduceFollow({ A: true, B: false }, play('B', { A: false, B: true }))).toEqual({
+        A: false,
+        B: true,
+      });
+    });
+  });
+
+  it('rides a whole transition: enable → spread → fade out → hand over', () => {
+    // Enable Follow on A (loaded, playing), start B, then pause A.
+    let flags = reduceFollow(OFF, { type: 'toggle', deck: 'A', loaded: true });
+    flags = reduceFollow(flags, play('A', { A: true, B: false }));
+    flags = reduceFollow(flags, play('B', { A: true, B: true }));
+    expect(flags).toEqual({ A: true, B: true });
+    flags = reduceFollow(flags, pause('A', { A: false, B: true }));
+    expect(flags).toEqual({ A: false, B: true });
   });
 });

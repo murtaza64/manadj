@@ -10,6 +10,7 @@ import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
+import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
 import type { BeatgridResponse, Track } from '../types';
 
 const DECK_IDS = ['A', 'B'] as const;
@@ -72,6 +73,11 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     },
     [engines, mixer]
   );
+
+  // Follow rides playback (follow-mode 02): deck play/pause transitions
+  // feed the Follow state machine (spread/drop/sticky rules live in the
+  // reducer, not here).
+  useEffect(() => initFollowPlaybackBridge(engines), [engines]);
 
   // Dev-only audio routing tracer (headphone-cue 01): console helpers for
   // sink switching + the cue bridge. Lazy import keeps it out of prod.
