@@ -1017,6 +1017,76 @@ export function DawTimeline({
                   }}
                 />
               )}
+
+            {/* Jump events (glossary): discontinuities of THIS deck — the
+                seam line spans row B only, deck-B colored, with the Δ chip
+                riding the waveform's bottom edge. */}
+            {(tr.jumps ?? []).map((j, i) => (
+              <div
+                key={i}
+                className="editor-jump"
+                style={{ left: (tr.startSec + j.x * tr.durationSec) * pxPerSec }}
+                onPointerDown={onJumpPointerDown(i)}
+                onPointerMove={onJumpPointerMove}
+                onPointerUp={onJumpPointerUp}
+                onPointerCancel={() => (jumpDrag.current = null)}
+                onDoubleClick={(e) => e.stopPropagation()}
+                title="Jump event — drag to move, click to edit"
+              >
+                <span className="editor-jump-chip">⤺ {jumpDeltaLabel(j.deltaSec, beatSecB)}</span>
+              </div>
+            ))}
+            {editingJump !== null && tr.jumps?.[editingJump] && (
+              <div
+                className="editor-jump-popover"
+                style={{
+                  left: (tr.startSec + tr.jumps[editingJump].x * tr.durationSec) * pxPerSec + 8,
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                <label>
+                  Δ
+                  <input
+                    type="number"
+                    step={0.1}
+                    value={Number(tr.jumps[editingJump].deltaSec.toFixed(2))}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) store.updateJump(editingJump, { deltaSec: v });
+                    }}
+                  />
+                  s
+                </label>
+                {beatSecB && (
+                  <span className="editor-jump-beatsteps">
+                    {[-4, -1, 1, 4].map((n) => (
+                      <button
+                        key={n}
+                        title={`${n > 0 ? '+' : ''}${n} B beat${Math.abs(n) > 1 ? 's' : ''}`}
+                        onClick={() =>
+                          store.updateJump(editingJump, {
+                            deltaSec: tr.jumps![editingJump].deltaSec + n * beatSecB,
+                          })
+                        }
+                      >
+                        {n > 0 ? `+${n}` : n}
+                      </button>
+                    ))}
+                  </span>
+                )}
+                <button
+                  className="editor-jump-delete"
+                  onClick={() => {
+                    store.removeJump(editingJump);
+                    setEditingJump(null);
+                  }}
+                >
+                  delete
+                </button>
+                <button onClick={() => setEditingJump(null)}>✕</button>
+              </div>
+            )}
           </div>
           {lanesB.map(laneStrip)}
 
@@ -1026,71 +1096,6 @@ export function DawTimeline({
               className="editor-overlap"
               style={{ left: tr.startSec * pxPerSec, width: tr.durationSec * pxPerSec }}
             />
-          )}
-
-          {/* Jump events: incoming-track discontinuities (glossary). */}
-          {(tr.jumps ?? []).map((j, i) => (
-            <div
-              key={i}
-              className="editor-jump"
-              style={{ left: (tr.startSec + j.x * tr.durationSec) * pxPerSec }}
-              onPointerDown={onJumpPointerDown(i)}
-              onPointerMove={onJumpPointerMove}
-              onPointerUp={onJumpPointerUp}
-              onPointerCancel={() => (jumpDrag.current = null)}
-              title="Jump event — drag to move, click to edit"
-            >
-              <span className="editor-jump-chip">⤺ {jumpDeltaLabel(j.deltaSec, beatSecB)}</span>
-            </div>
-          ))}
-          {editingJump !== null && tr.jumps?.[editingJump] && (
-            <div
-              className="editor-jump-popover"
-              style={{
-                left: (tr.startSec + tr.jumps[editingJump].x * tr.durationSec) * pxPerSec + 8,
-              }}
-            >
-              <label>
-                Δ
-                <input
-                  type="number"
-                  step={0.1}
-                  value={Number(tr.jumps[editingJump].deltaSec.toFixed(2))}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (Number.isFinite(v)) store.updateJump(editingJump, { deltaSec: v });
-                  }}
-                />
-                s
-              </label>
-              {beatSecB && (
-                <span className="editor-jump-beatsteps">
-                  {[-4, -1, 1, 4].map((n) => (
-                    <button
-                      key={n}
-                      title={`${n > 0 ? '+' : ''}${n} B beat${Math.abs(n) > 1 ? 's' : ''}`}
-                      onClick={() =>
-                        store.updateJump(editingJump, {
-                          deltaSec: tr.jumps![editingJump].deltaSec + n * beatSecB,
-                        })
-                      }
-                    >
-                      {n > 0 ? `+${n}` : n}
-                    </button>
-                  ))}
-                </span>
-              )}
-              <button
-                className="editor-jump-delete"
-                onClick={() => {
-                  store.removeJump(editingJump);
-                  setEditingJump(null);
-                }}
-              >
-                delete
-              </button>
-              <button onClick={() => setEditingJump(null)}>✕</button>
-            </div>
           )}
 
           {/* Mix playhead */}

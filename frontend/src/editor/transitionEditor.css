@@ -405,10 +405,10 @@
   top: 0;
   bottom: 0;
   width: 0;
-  /* Solid + brighter since the splice rendering (transition-takes 06):
-     the marker is now the SEAM between re-anchored content segments. */
-  border-left: 2px solid #5ff0ff;
-  box-shadow: 0 0 4px rgba(0, 229, 255, 0.7);
+  /* The splice seam (transition-takes 06), scoped to ROW B — the deck
+     that jumps (Jump events are incoming-only) — in that deck's color. */
+  border-left: 2px solid var(--deck-b);
+  box-shadow: 0 0 4px rgba(var(--deck-b-rgb), 0.7);
   cursor: grab;
   z-index: 60;
 }
@@ -425,26 +425,29 @@
 
 .editor-jump-chip {
   position: absolute;
-  top: 2px;
+  /* Readout rides the waveform's bottom edge (B's baseline — peaks grow
+     up from here), not the top of the timeline. */
+  bottom: 1px;
   left: 3px;
   padding: 1px 5px;
   font-size: 10px;
   white-space: nowrap;
   color: #001114;
-  background: #00e5ff;
+  background: var(--deck-b);
   border-radius: 3px;
   user-select: none;
 }
 
 .editor-jump-popover {
   position: absolute;
-  top: 24px;
+  /* Just under row B (rows don't clip): the editor opens at the seam. */
+  top: calc(100% + 2px);
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
   background: #0b0b12;
-  border: 1px solid #00e5ff;
+  border: 1px solid var(--deck-b);
   border-radius: 4px;
   font-size: 11px;
   color: #e8e8f0;
