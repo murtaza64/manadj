@@ -21,6 +21,21 @@ export function effectiveBpm(baseBpm: number, pitchPercent: number): number {
   return baseBpm * (1 + pitchPercent / 100);
 }
 
+/** Pitch where an unlocked Deck's sounding key has audibly drifted from
+ * the Track's Key — about half a semitone (a semitone is ~5.95%). */
+export const KEY_DRIFT_PITCH_PERCENT = 3;
+
+/**
+ * The KEY readout is lying (key-lock 04): Key Lock is off, so varispeed has
+ * shifted the sounding key by ≥ ~half a semitone — Key-compatibility
+ * judgments are off. Bend is momentary and excluded (same anti-wobble
+ * reasoning as effectiveBpm). No computed "actual key": rejected in the
+ * PRD as false precision.
+ */
+export function keyDrifted(keyLockOn: boolean, pitchPercent: number): boolean {
+  return !keyLockOn && Math.abs(pitchPercent) >= KEY_DRIFT_PITCH_PERCENT;
+}
+
 export type BpmMatchResult =
   | { kind: 'match'; pitchPercent: number }
   | { kind: 'out-of-reach' };

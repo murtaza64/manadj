@@ -30,7 +30,7 @@ import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons'
 import { BpmControl } from '../deckControls/BpmControl';
 import { HFader, Knob } from './MixerStrip';
 import { TagPopover } from './TagPopover';
-import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm } from '../../playback/tempo';
+import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { trackWindowSeconds } from '../../utils/waveformZoom';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { setKeyLockFlag } from '../../playback/keyLockStore';
@@ -372,6 +372,7 @@ function MixZone({ track }: { track: Track | null }) {
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
   const keyLock = useDeckSnapshot((s) => s.keyLock);
+  const drifted = keyDrifted(keyLock, pitch);
   // Effective BPM follows the pitch fader only: a nudge's momentary bend is
   // a phase correction, not a tempo change — the readout must not wobble
   // mid-beatmatch (same reasoning as the zoom window, performance-mode 06).
@@ -460,9 +461,27 @@ function MixZone({ track }: { track: Track | null }) {
         title="Pitch (right = faster; double-click resets)"
       />
       <div className="perf-mix-foot">
-        <span className="perf-readout" title="Key">
-          <span className="perf-readout-label">KEY</span>
-          <span className="perf-readout-val perf-readout-key">
+        {/* Drift marker (key-lock 04): unlocked + |pitch| ≥ ~half a
+            semitone means the sounding key is no longer the Track's Key —
+            dim it and mark with ~ (no computed "actual key"; PRD). */}
+        <span
+          className="perf-readout"
+          title={
+            drifted
+              ? 'Key drifted: Key Lock is off and pitch has shifted the sounding key'
+              : 'Key'
+          }
+        >
+          <span
+            className={`perf-readout-val perf-readout-key${
+              drifted ? ' perf-key-drift' : ''
+            }`}
+          >
+            {/* Always rendered so the readout width never jumps; invisible
+                until the key has drifted. */}
+            <span className="perf-key-tilde" aria-hidden={!drifted}>
+              ~
+            </span>
             {formatKeyDisplay(track?.key)}
           </span>
         </span>
@@ -485,7 +504,6 @@ function MixZone({ track }: { track: Track | null }) {
           LOCK
         </button>
         <span className="perf-readout" title="Effective BPM (base × pitch × bend)">
-          <span className="perf-readout-label">BPM</span>
           <span className="perf-readout-val">
             {effective !== null ? effective.toFixed(1) : '-'}
           </span>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bpmMatch, composeRate, effectiveBpm } from './tempo';
+import { bpmMatch, composeRate, effectiveBpm, keyDrifted } from './tempo';
 
 describe('composeRate', () => {
   it('is unity with no pitch and no bend', () => {
@@ -31,6 +31,25 @@ describe('effectiveBpm', () => {
   it('scales with pitch', () => {
     expect(effectiveBpm(100, 8)).toBeCloseTo(108, 10);
     expect(effectiveBpm(100, -8)).toBeCloseTo(92, 10);
+  });
+});
+
+describe('keyDrifted (key-lock 04)', () => {
+  it('marks an unlocked deck at |pitch| ≥ the threshold, both directions', () => {
+    expect(keyDrifted(false, 3)).toBe(true);
+    expect(keyDrifted(false, -3)).toBe(true);
+    expect(keyDrifted(false, 8)).toBe(true);
+  });
+
+  it('stays quiet below the threshold', () => {
+    expect(keyDrifted(false, 0)).toBe(false);
+    expect(keyDrifted(false, 2.9)).toBe(false);
+    expect(keyDrifted(false, -2.9)).toBe(false);
+  });
+
+  it('a locked Deck never drifts, regardless of pitch', () => {
+    expect(keyDrifted(true, 8)).toBe(false);
+    expect(keyDrifted(true, -8)).toBe(false);
   });
 });
 

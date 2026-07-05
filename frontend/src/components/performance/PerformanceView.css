@@ -558,13 +558,6 @@
   flex-shrink: 0;
 }
 
-.perf-readout-label {
-  font-size: 7px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  color: var(--overlay0);
-}
-
 .perf-readout-val {
   font-size: 16px;
   font-weight: 800;
@@ -621,6 +614,13 @@
 /* Key Lock toggle (key-lock 03) — next to the KEY readout, lit while
    tempo changes leave the Track's Key unchanged */
 .perf-keylock { flex-shrink: 0; }
+
+/* Drift marker (key-lock 04): the readout dims while the sounding key has
+   drifted from the Track's Key (Key Lock off, |pitch| ≥ threshold). The ~
+   is always laid out, transparent until drifted, so the width never jumps. */
+.perf-readout-val.perf-key-drift { opacity: 0.5; }
+.perf-key-tilde { opacity: 0; }
+.perf-key-drift .perf-key-tilde { opacity: 1; }
 .perf-keylock.on {
   color: var(--green);
   border-color: var(--green);
