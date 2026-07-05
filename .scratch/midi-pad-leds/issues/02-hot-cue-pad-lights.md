@@ -1,6 +1,6 @@
 # 02 — Hot cue pad lights
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -55,3 +55,5 @@ note-isolated on this device; never write other modes' addresses).
   no shift tracking. Smoke test addition: hold SHIFT in HOTCUE mode —
   assigned pads stay lit; clear one via SHIFT+pad — it darkens on both
   layers.
+- 2026-07-04 (padleds lane): closed out at the user's direction (jj change
+  `vupwxlyw`).

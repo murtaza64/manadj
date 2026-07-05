@@ -1,6 +1,6 @@
 # 03 — CUE LED + pending-play blink
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -52,3 +52,5 @@ The remaining transport light semantics:
   resends on the deck that isn't blinking. Smoke test addition: pause away
   from the cue → CUE flashes in step with the on-screen button; seek onto
   the cue → solid.
+- 2026-07-04 (padleds lane): closed out at the user's direction (jj change
+  `vupwxlyw`).

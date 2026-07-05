@@ -1,6 +1,6 @@
 # 01 — Output seam + PLAY LED end-to-end
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -54,3 +54,6 @@ None - can start immediately.
   TEST — connect the MK2 with a deck playing (PLAY already solid), flip
   pause/play live, replug mid-session, reload the app (lights must go
   dark), verify A/B independence and any-view operation.
+- 2026-07-04 (padleds lane): closed out at the user's direction (jj change
+  `vupwxlyw`). Feature landed through main; smoke-test checklist above
+  stands as reference if hardware behaves unexpectedly.
