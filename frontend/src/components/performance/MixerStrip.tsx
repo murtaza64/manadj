@@ -151,9 +151,15 @@ export function HFader({
         />
       )}
       {detent && <div className="perf-fader-detent" />}
+      {/* left: X% + translateX(-X%) keeps the handle fully inside the box
+          at both extremes (slider-thumb idiom) instead of overflowing by
+          half its label width. */}
       <div
         className="perf-fader-handle"
-        style={{ left: `${Math.max(0, Math.min(1, fraction)) * 100}%` }}
+        style={{
+          left: `${Math.max(0, Math.min(1, fraction)) * 100}%`,
+          transform: `translate(-${Math.max(0, Math.min(1, fraction)) * 100}%, -50%)`,
+        }}
       >
         {label}
       </div>

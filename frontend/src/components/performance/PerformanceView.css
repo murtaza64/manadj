@@ -380,7 +380,7 @@
 .perf-fader-handle {
   position: absolute;
   top: 50%;
-  transform: translate(-50%, -50%);
+  /* transform set inline: translate(-X%, -50%) — bounded thumb */
   padding: 1px 5px;
   font-size: 7px;
   font-weight: 800;
