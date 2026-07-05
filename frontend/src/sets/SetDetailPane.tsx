@@ -13,9 +13,10 @@
  * only; the manual pin picker also lists the pair's Takes (ADR 0023).
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Track } from '../types';
+import { DECK_COLORS } from '../theme/deckColors';
+import type { HotCue, Track } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import {
   applyReorder,
@@ -43,6 +44,9 @@ import {
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
+import { OverviewLadder } from './OverviewLadder';
+import { fmtSec, type PlannedEntry } from './planner';
+import { useSetPlan } from './useSetPlan';
 import {
   addTracksToSet,
   ensureSetEntriesLoaded,
@@ -114,6 +118,23 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
       const tracks = await Promise.all(trackIds.map((id) => api.tracks.getById(id)));
       return new Map<number, Track>(tracks.map((t) => [t.id, t]));
     },
+  });
+
+  // ── Playback plan (sets 03): drives the ladder + played durations ────
+  const plan = useSetPlan(entries, trackMap);
+
+  // Real hot cues for the ladder clips (same cache keys as useHotCues).
+  const hotCueQueries = useQueries({
+    queries: trackIds.map((id) => ({
+      queryKey: ['hotcues', id],
+      queryFn: () => api.hotcues.get(id),
+      staleTime: 0,
+    })),
+  });
+  const hotCuesByTrack = new Map<number, HotCue[]>();
+  trackIds.forEach((id, i) => {
+    const cues = hotCueQueries[i]?.data;
+    if (cues) hotCuesByTrack.set(id, cues);
   });
 
   // ── Scroll persistence (set store — survives mode switches) ──────────
@@ -215,6 +236,7 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
           {set?.name ?? 'Set'}
           <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>
             {entries?.length ?? 0} tracks
+            {plan && ` · ${fmtSec(plan.totalSec)}`}
           </span>
         </span>
         <span style={{ display: 'flex', alignItems: 'center' }}>
@@ -264,6 +286,17 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
         </span>
       </div>
 
+      {/* Overview ladder (sets 03): zoomed staircase minimap, scroll-pinned
+          to the list below through one progress value. */}
+      {plan && trackMap && plan.entries.length > 0 && (
+        <OverviewLadder
+          plan={plan}
+          tracks={trackMap}
+          hotCuesByTrack={hotCuesByTrack}
+          listRef={paneRef}
+        />
+      )}
+
       <div
         ref={paneRef}
         onScroll={(e) => setSetScroll(setId, e.currentTarget.scrollTop)}
@@ -297,12 +330,14 @@ export default function SetDetailPane({ setId }: SetDetailPaneProps) {
           entries.map((entry, i) => {
             const track = trackMap?.get(entry.trackId);
             const next = entries[i + 1];
+            const planned = plan?.entries[i];
             return (
               <div key={entry.trackId}>
                 <SetTrackRow
                   index={i}
                   trackId={entry.trackId}
                   track={track}
+                  planned={planned}
                   onRemove={() => removeTrackFromSet(setId, entry.trackId)}
                 />
                 {next && (
@@ -523,11 +558,14 @@ function SetTrackRow({
   index,
   trackId,
   track,
+  planned,
   onRemove,
 }: {
   index: number;
   trackId: number;
   track: Track | undefined;
+  /** This entry's slice of the playback plan (sets 03). */
+  planned: PlannedEntry | undefined;
   onRemove: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -544,6 +582,9 @@ function SetTrackRow({
         gap: '12px',
         padding: '8px 12px',
         borderBottom: '1px solid var(--surface0)',
+        borderLeft: planned
+          ? `3px solid ${DECK_COLORS[planned.deck]}`
+          : '3px solid transparent',
         background: hovered ? 'var(--surface0)' : 'transparent',
         cursor: 'grab',
       }}
@@ -556,6 +597,12 @@ function SetTrackRow({
         {track?.artist && (
           <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>{track.artist}</span>
         )}
+      </span>
+      {/* "plays m:ss of m:ss" — the plan's audible footprint (sets 03) */}
+      <span style={{ width: '110px', color: 'var(--subtext0)', fontSize: '12px', textAlign: 'right' }}>
+        {planned && track?.duration_secs
+          ? `plays ${fmtSec(Math.max(planned.exitSec - planned.entrySec, 0))} of ${fmtSec(track.duration_secs)}`
+          : ''}
       </span>
       <span style={{ width: '40px', color: 'var(--sapphire)', fontSize: '12px' }}>
         {formatKeyDisplay(track?.key ?? null)}
