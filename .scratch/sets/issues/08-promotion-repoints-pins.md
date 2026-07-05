@@ -1,6 +1,6 @@
 # 08 — Take promotion re-points Set pins
 
-Status: ready-for-human
+Status: done (landed on main, change xkwwqkuv)
 
 ## Parent
 

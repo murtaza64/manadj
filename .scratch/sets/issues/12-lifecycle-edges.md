@@ -1,6 +1,6 @@
 # 12 — Lifecycle edges
 
-Status: ready-for-human
+Status: done (landed on main, change kkmpuxuw)
 
 ## Parent
 
@@ -85,3 +85,9 @@ pin on 549→171, favorite-transition pin on 171→600, unresolved on
    no reload needed there.
 4. Semantics beyond clicks are pinned by the router/store suites named
    in the Done comments above.
+
+**2026-07-05 — approved and landed.** Human click-through (including the
+archived-track row-mark feedback round, amended into kkmpuxuw); stack
+rebased onto trunk, re-gated (pytest 648, vitest 919, build, single
+alembic head), landed as snmnnqwn + xkwwqkuv + kkmpuxuw. Follow-up
+gap (track-row context menu in the Set view) filed as issue 17.
