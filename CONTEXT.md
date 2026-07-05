@@ -58,7 +58,7 @@ A first-class persisted artifact: the handover between an ordered pair of Tracks
 The Transition editor's timeline starts at the outgoing Track's start — an invariant, not a setting. The outgoing Track never moves on the timeline; every alignment gesture is expressible as a Slide of the incoming Track, the window, or both.
 
 **Transition editor**:
-The top-panel mode (a sibling of the library and Performance views) for editing the saved Transition between two loaded Tracks on a DAW-style timeline. Entering it pauses other playback surfaces: one audible surface at a time.
+The top-panel mode (a sibling of the library and Performance views) for editing the saved Transition between two loaded Tracks on a DAW-style timeline. Its auditions play through the shared Decks and Mixer; entering it pauses shared playback — one audible surface at a time.
 
 **Mix**:
 Future concept: an ordered sequence of Tracks whose adjacencies reference saved Transitions. Deferred until the Transition library exists. Distinct from a Playlist, and from the Classification value "mix" (an externally recorded DJ mix on a Source).
@@ -85,7 +85,7 @@ Planned concept (formerly "Link", renamed 2026-07-05 to free Linked for the Trac
 The queryable index over saved Transitions — "what mixes out of / into this Track" — surfaced as library-row marks and discovery filters. Directional, like the Transitions it indexes. Takes are not in it: only promotion adds to the library.
 
 **Take**:
-A Handover detected and captured automatically during live playback on the shared Decks+Mixer — a track pair plus the recorded performance, weaker than a Transition. Takes live in the Transition history, never in the Transition library. Reviewed in the Transition editor; **promoting** a Take converts it into an ordinary saved Transition (recording is a capture method, not a new artifact kind downstream). Promotion idealizes: continuous gestures (Nudge, pitch riding) collapse into the Transition's single alignment and tempo-match; crossfader and channel-fader work compose into the per-deck fader lanes; discrete gestures (beat jumps, hot-cue jumps) are preserved as Jump events. Unpromoted Takes are audit data.
+A Handover detected and captured automatically during live performance playback — playback while the shared Decks+Mixer surface is audible; Transition-editor auditions are invisible to capture, even though they play through the same Decks — a track pair plus the recorded performance, weaker than a Transition. Takes live in the Transition history, never in the Transition library. Reviewed in the Transition editor; **promoting** a Take converts it into an ordinary saved Transition (recording is a capture method, not a new artifact kind downstream). Promotion idealizes: continuous gestures (Nudge, pitch riding) collapse into the Transition's single alignment and tempo-match; crossfader and channel-fader work compose into the per-deck fader lanes; discrete gestures (beat jumps, hot-cue jumps) are preserved as Jump events. Unpromoted Takes are audit data.
 _Avoid_: recorded Transition (a Take is not a Transition until promoted)
 
 **Handover**:
@@ -143,7 +143,7 @@ The per-Deck identity color used across every surface: Deck A cyan, Deck B magen
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on safety limiter. Mirrors a hardware DJ mixer.
 
 **Audible surface**:
-A group of playback machinery that can produce sound as a unit — the shared Decks+Mixer, or the Transition editor's private player. Exactly one is audible at a time (one running audio clock); an arbiter owns which, and displaced surfaces go silent rather than coexist. Playback gestures from app-wide inputs (a Controller) route by gesture class — transport, cue, pads, jumps, jog — to whichever surface is audible; a class the surface doesn't register is dropped, mirroring what the keyboard does there. Mixer-state controls and Load are not gesture classes: they belong to the shared Mixer and to the mounted browse view respectively.
+A playback mode's claim on the shared Decks+Mixer — the plain deck-transport semantics of the Performance and library views, or the Transition editor's mix-timeline semantics. Exactly one surface is audible at a time; an arbiter owns which, and a displaced surface's playback pauses rather than coexist. Playback gestures from app-wide inputs (a Controller) route by gesture class — transport, cue, pads, jumps, jog — to the audible surface; a class the surface doesn't register is dropped, mirroring what the keyboard does there. Mixer-state controls and Load are not gesture classes: they belong to the shared Mixer and to the mounted browse view respectively. (Redefined 2026-07-05: formerly a group of playback machinery that could produce sound as a unit — the editor had a private player; every surface now plays through the shared Decks+Mixer.)
 
 **Performance view**:
 The two-deck view for practicing and performing mixes: stacked full-width waveforms with linked zoom, symmetric Deck A/B panels, a central Mixer panel, and the Library's browse surface embedded below. Replaces the Practice view. Curation beyond quick edits (tags, provenance) stays in the library view.
