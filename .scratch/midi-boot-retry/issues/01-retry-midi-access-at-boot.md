@@ -1,6 +1,6 @@
 # 01 — Retry MIDI access at boot (one failed request bricks the Controller layer)
 
-Status: ready-for-human
+Status: done (approved and landed 2026-07-05, change zpnxqvwu)
 Type: task
 
 ## What to build
