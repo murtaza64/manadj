@@ -178,8 +178,6 @@ export function HFader({
               background: 'var(--deck-a)',
             }}
           />
-          <span className="perf-xfade-end a">A</span>
-          <span className="perf-xfade-end b">B</span>
         </>
       )}
       {detent && <div className="perf-fader-detent" />}
@@ -262,6 +260,9 @@ export function MixerStrip({
         >
           XF
         </button>
+        {/* End labels flank the fader (flex flow, never over the track);
+            physical orientation — only the fills are reversed. */}
+        <span className="perf-xfade-end">A</span>
         <HFader
           label="X-FADER"
           min={-1}
@@ -274,6 +275,7 @@ export function MixerStrip({
           onChange={(v) => mixer.setCrossfader(v)}
           title="Crossfader (double-click to center)"
         />
+        <span className="perf-xfade-end">B</span>
         {/* Invisible twin of the XF toggle: keeps the fader's center on the
             deck divider axis. */}
         <span className="player-button perf-strip-toggle perf-strip-ghost" aria-hidden="true">

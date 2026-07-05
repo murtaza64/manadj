@@ -526,25 +526,13 @@
   background: var(--green);
 }
 
-/* Crossfader end labels: physical orientation (A left, B right) — only
-   the fills are reversed. */
+/* Crossfader end labels: flex siblings of the fader (never over the
+   track), text-colored — the fills carry the Deck colors. */
 .perf-xfade-end {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
-  pointer-events: none;
-}
-
-.perf-xfade-end.a {
-  left: 3px;
-  color: var(--deck-a);
-}
-
-.perf-xfade-end.b {
-  right: 3px;
-  color: var(--deck-b);
+  color: var(--text);
+  flex-shrink: 0;
 }
 
 .perf-fader-detent {
