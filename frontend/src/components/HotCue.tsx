@@ -55,9 +55,19 @@ export default function HotCue({
             ? `Set Hot Cue ${slotNumber} (${slotNumber})`
             : `Hot Cue ${slotNumber} @ ${hotCue.time_seconds.toFixed(2)}s (${slotNumber} to trigger, Shift+${slotNumber} to delete)`
       }
-      style={{
-        backgroundColor: isSet && hotCue.color ? hotCue.color : undefined,
-      }}
+      style={
+        // A stored color (e.g. imported from Engine) renders THROUGH the
+        // site idiom — colored border + 12% tint + colored number — not as
+        // an opaque fill that ignores the theme. Colorless cues keep their
+        // per-slot theme colors from the cue-N classes.
+        isSet && hotCue.color
+          ? {
+              borderColor: hotCue.color,
+              backgroundColor: `color-mix(in srgb, ${hotCue.color} 12%, transparent)`,
+              color: hotCue.color,
+            }
+          : undefined
+      }
     >
       {slotNumber}
     </button>
