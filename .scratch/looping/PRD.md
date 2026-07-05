@@ -1,6 +1,6 @@
 # PRD: Looping — Active loops and first-class Quantize
 
-Status: ready-for-human (implemented, changes rtxmzxzs..wrmvrrkq, workspace looping — awaiting review; see Verification walkthrough below)
+Status: done (landed 2026-07-05 — approved after review round 1; stack rtxmzxzs..uqxvpmlt, main @ uqxvpmlt)
 
 ## Problem Statement
 
