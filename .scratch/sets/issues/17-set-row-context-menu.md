@@ -1,6 +1,6 @@
 # 17 — Set view: track-row context menu (+ shared track menu module)
 
-Status: ready-for-human
+Status: done (approved + landed 2026-07-05, change `xktvupxn`; follow-up bugfix `tzwypmpr` — set-tracks query joined the ['tracks'] prefix so rows refresh on archive/unarchive)
 
 ## Parent
 
