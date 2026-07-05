@@ -23,3 +23,11 @@ feel laggy). Held arrow keys get the same treatment for free.
 - [ ] Fast encoder spins track the selection with no scroll stutter
 - [ ] Single encoder detents / single arrow presses still glide smoothly
 - [ ] make typecheck, eslint on touched files, vitest green
+
+## Comments
+
+- Follow-up (change sxmurkwz): center pinning dropped — the list holds
+  still while the selection moves inside the viewport, scrolls a half-page
+  burst only when the row nears the top/bottom edge (2-row margin), and
+  lands far-off selections a margin inside the entry edge. Burst-aware
+  jump-vs-smooth behavior kept from the first pass.

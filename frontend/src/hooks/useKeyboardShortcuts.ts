@@ -312,27 +312,65 @@ export function useKeyboardShortcuts({
   useScrubLoop(engine, scrubDirection);
 }
 
-// Helper function for scrolling selected track into view (also used by the
-// Library's imperative browse handle for the Performance view's table keys
-// and the hardware browser encoder).
+// Keep the selected track's row visible (used by keyboard navigation, the
+// Library's imperative browse handle, and the hardware browser encoder).
 //
-// Burst-aware (midi-controller 10): rapid successive navigations (a spun
-// encoder, held arrow keys) restart a smooth scroll animation on every call
-// — it never completes and the list stutters. Within a burst we jump
-// instantly (the row stays centered tick by tick); a lone navigation keeps
-// the smooth glide.
+// Motion-minimizing (midi-controller 10): no center pinning — while the row
+// is comfortably inside the viewport, nothing moves. Only when it nears the
+// top or bottom edge does the list scroll, and then by a half-page burst in
+// the direction of travel, so the screen moves once per half page of
+// navigation instead of once per row. Bursts are jump-scrolled when calls
+// arrive in rapid succession (a spun encoder, held arrow keys): restarting
+// a smooth animation per tick never lets it finish and stutters.
 const SCROLL_BURST_MS = 200;
+/** "Nears the edge" margin, in row heights. */
+const EDGE_MARGIN_ROWS = 2;
 let lastScrollMs = -Infinity;
+
+function scrollableAncestor(el: Element): HTMLElement | null {
+  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+    if (parent.scrollHeight <= parent.clientHeight) continue;
+    const overflowY = getComputedStyle(parent).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') return parent;
+  }
+  return null;
+}
 
 export function scrollTrackIntoView(trackId: number) {
   const now = performance.now();
   const inBurst = now - lastScrollMs < SCROLL_BURST_MS;
   lastScrollMs = now;
-  const rowElement = document.querySelector(`[data-track-id="${trackId}"]`);
-  if (rowElement) {
-    rowElement.scrollIntoView({
-      behavior: inBurst ? 'auto' : 'smooth',
-      block: 'center'
+  const behavior: ScrollBehavior = inBurst ? 'auto' : 'smooth';
+
+  const row = document.querySelector(`[data-track-id="${trackId}"]`);
+  if (!row) return;
+  const container = scrollableAncestor(row);
+  if (!container) {
+    row.scrollIntoView({ behavior, block: 'nearest' });
+    return;
+  }
+
+  const rowRect = row.getBoundingClientRect();
+  const viewRect = container.getBoundingClientRect();
+  const margin = rowRect.height * EDGE_MARGIN_ROWS;
+  const halfPage = viewRect.height / 2;
+
+  // Far outside the viewport (selection jumped, e.g. filter change): land
+  // the row a comfortable margin inside the edge it enters from.
+  if (rowRect.bottom < viewRect.top || rowRect.top > viewRect.bottom) {
+    const fromTop = rowRect.top < viewRect.top;
+    container.scrollBy({
+      top: fromTop
+        ? rowRect.top - viewRect.top - margin
+        : rowRect.bottom - viewRect.bottom + margin,
+      behavior,
     });
+    return;
+  }
+
+  if (rowRect.top < viewRect.top + margin) {
+    container.scrollBy({ top: -halfPage, behavior });
+  } else if (rowRect.bottom > viewRect.bottom - margin) {
+    container.scrollBy({ top: halfPage, behavior });
   }
 }
