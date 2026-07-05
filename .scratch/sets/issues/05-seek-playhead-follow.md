@@ -1,6 +1,6 @@
 # 05 — Seek, playhead, follow — and the free ladder
 
-Status: ready-for-human
+Status: done (landed on main, change osyqtrou)
 
 ## Parent
 
@@ -97,3 +97,7 @@ scroll disengages. 03's scroll-pin, dimming, and zoom-1 band-aid removed.
    re-park at the target without playing; ▶ resumes exactly there.
 6. Row ▶ still starts at a track's planned entry; deck/mixer gestures
    still take over (stop the Conductor, audio keeps playing).
+
+**2026-07-05 — Approved and landed.** Human approval ("these are
+landable"); rebased onto trunk tip (clean), gate green (817 vitest, build
++ tsc clean, single alembic head; no backend changes). main → osyqtrou.
