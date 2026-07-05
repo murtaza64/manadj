@@ -1,6 +1,6 @@
 # 02 — Hot cue pad lights
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -35,3 +35,15 @@ note-isolated on this device; never write other modes' addresses).
 ## Blocked by
 
 - 01-output-seam-play-led
+
+## Comments
+
+- 2026-07-04 (padleds lane): implemented in jj change `qzzrzxnv`. Pads
+  derive from the same `useHotCues` query cache the on-screen pads render
+  (screen and hardware cannot drift; optimistic mutation updates included);
+  HOTCUE base-layer addresses only (0x96/0x97 notes 0x00-0x07, velocity
+  0x7e lit — Mixxx ground truth). Status → ready-for-human: HARDWARE SMOKE
+  TEST — load a track with hot cues (exact slots lit), set a cue from a
+  hardware pad (pad lights), delete on screen (pad darkens), unload/empty
+  deck (all eight dark), switch pad mode (other modes' lights untouched),
+  replug (pads correct immediately).

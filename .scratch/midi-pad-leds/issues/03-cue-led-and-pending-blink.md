@@ -1,6 +1,6 @@
 # 03 — CUE LED + pending-play blink
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -31,3 +31,15 @@ The remaining transport light semantics:
 ## Blocked by
 
 - 01-output-seam-play-led
+
+## Comments
+
+- 2026-07-04 (padleds lane): implemented in jj change `qwwrzopt`. CUE =
+  previewing OR paused-at-cue; at-cue predicate extracted to
+  `hooks/useAtCuePoint.ts` and shared with the on-screen CUE button
+  (TransportPair). Blink: one clock-derived ~2 Hz timer (feedback.ts
+  `blinkPhase`, 250ms half-period), runs only while some deck is
+  pendingPlay; both decks blink in step. Status → ready-for-human:
+  HARDWARE SMOKE TEST — pause at cue (CUE solid), hold CUE (lit through
+  preview), play (CUE off), latch play during a load (PLAY blinks ~2 Hz
+  then solid; off if load fails), confirm no blink resends while idle.
