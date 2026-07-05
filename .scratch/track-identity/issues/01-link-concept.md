@@ -1,6 +1,8 @@
-# Link: persistent Track ↔ external-library association
+# External Correspondence: persistent Track ↔ external-library association
 
 Status: needs-triage
+
+(Renamed 2026-07-05, formerly "Link" — that name now belongs to the Linked Track-pair assertion. See CONTEXT.md.)
 
 ## Problem
 
@@ -8,11 +10,11 @@ Matching between manadj Tracks and external-library rows is recomputed on every 
 
 ## Idea
 
-Introduce a **Link**: a stored association between a Track and its counterpart row in a specific external library, keyed by that library's stable internal ID (Engine track ID, Rekordbox content ID).
+Introduce an **External Correspondence**: a stored association between a Track and its counterpart row in a specific external library, keyed by that library's stable internal ID (Engine track ID, Rekordbox content ID). The sibling of Source Correspondence.
 
-- Matching (path, then filename) becomes the bootstrap that runs only when no Link exists; its output is a Link.
-- Sync operations work over Links, so path changes become in-place updates of the linked external row, preserving downstream history and playlist entries.
-- A deleted external row breaks the Link; the next Export re-adds and re-links.
+- Matching (path, then filename) becomes the bootstrap that runs only when no External Correspondence exists; its output is an External Correspondence.
+- Sync operations work over External Correspondences, so path changes become in-place updates of the corresponding external row, preserving downstream history and playlist entries.
+- A deleted external row breaks the External Correspondence; the next Export re-adds and re-establishes it.
 
 ## Notes
 
