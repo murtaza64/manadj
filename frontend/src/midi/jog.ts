@@ -37,7 +37,11 @@ export const JOG_BEND_FILTER_WINDOW = 20;
 export const JOG_BEND_PERCENT_PER_TICK = 10;
 export const JOG_BEND_MAX_PERCENT = 8;
 
-/** Paused seek (rim): seconds per tick at rest, accelerated quadratically. */
+/**
+ * Paused seek (bare rim): strictly linear gentle nudges — a casual spin
+ * must never cause surprise travel (issue 12). The accelerated fast seek
+ * lives on SHIFT+wheel (jog-seek), deliberate by construction.
+ */
 export const JOG_SEEK_SECONDS_PER_TICK = 0.05;
 export const JOG_SEEK_ACCEL_TPS = 50;
 export const JOG_SEEK_ACCEL_MAX = 100;
@@ -87,7 +91,7 @@ export function bendFromWindowAverage(averageTicksPerPeriod: number): number {
   return Math.min(Math.max(bend, -JOG_BEND_MAX_PERCENT), JOG_BEND_MAX_PERCENT);
 }
 
-/** Seek travel for a paused deck (rim): per-tick base, quadratic in rate. */
+/** Fast-seek travel (SHIFT+wheel): per-tick base, quadratic in rate. */
 export function jogSeekDelta(ticks: number, rate: number): number {
   const accel = 1 + (Math.abs(rate) / JOG_SEEK_ACCEL_TPS) ** 2;
   return ticks * JOG_SEEK_SECONDS_PER_TICK * Math.min(accel, JOG_SEEK_ACCEL_MAX);
@@ -122,14 +126,11 @@ export class JogController {
     this.port.seek(this.port.getPlayhead() + ticks * JOG_TOUCH_SEEK_SECONDS_PER_TICK);
   }
 
-  /** Rim rotation (CC #9): bend when playing, accelerated seek when paused
-   * — unless the ticks continue a touch gesture (a released, still-spinning
-   * platter), which keeps the fine rate. */
+  /** Rim rotation (CC #9): bend when playing, gentle linear nudge-seek when
+   * paused — unless the ticks continue a touch gesture (a released,
+   * still-spinning platter), which keeps the fine rate. */
   onTicks(ticks: number, nowMs: number = performance.now()): void {
-    const dtMs = this.lastTickMs === null ? DT_MAX_MS : nowMs - this.lastTickMs;
-    // A gap past the activity window is a fresh gesture, not a continuation.
-    this.rate = smoothedRate(dtMs > DT_MAX_MS ? 0 : this.rate, ticks, dtMs);
-    this.lastTickMs = nowMs;
+    this.foldRate(ticks, nowMs);
 
     if (this.port.isPlaying()) {
       this.pendingBendTicks += ticks;
@@ -146,7 +147,29 @@ export class JogController {
       return;
     }
 
+    // Gentle by design: no velocity acceleration on the bare rim.
+    this.port.seek(this.port.getPlayhead() + ticks * JOG_SEEK_SECONDS_PER_TICK);
+  }
+
+  /**
+   * SHIFT+wheel (jog-seek): deliberate fast seek, velocity-accelerated,
+   * playing or paused (an explicit gesture may jump the playhead — Mixxx's
+   * shift+wheel does the same). Releases any bend first so a mid-bend shift
+   * press never leaves a stale rate offset.
+   */
+  onSeekTicks(ticks: number, nowMs: number = performance.now()): void {
+    this.foldRate(ticks, nowMs);
+    this.releaseBend();
     this.port.seek(this.port.getPlayhead() + jogSeekDelta(ticks, this.rate));
+  }
+
+  /** Shared velocity fold: shifted and unshifted streams are one physical
+   * wheel, so rate continuity survives pressing SHIFT mid-spin. */
+  private foldRate(ticks: number, nowMs: number): void {
+    const dtMs = this.lastTickMs === null ? DT_MAX_MS : nowMs - this.lastTickMs;
+    // A gap past the activity window is a fresh gesture, not a continuation.
+    this.rate = smoothedRate(dtMs > DT_MAX_MS ? 0 : this.rate, ticks, dtMs);
+    this.lastTickMs = nowMs;
   }
 
   /** Detach hook for the registrar: release any held bend immediately. */

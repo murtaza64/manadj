@@ -41,6 +41,8 @@ export type RelativeTarget =
   | { control: 'jog'; deck: ChannelId }
   /** The jog's touch surface: a denser tick stream for fine paused seeks. */
   | { control: 'jog-touch'; deck: ChannelId }
+  /** The jog's SHIFT layer: deliberate velocity-accelerated fast seek. */
+  | { control: 'jog-seek'; deck: ChannelId }
   | { control: 'selection-move' };
 
 /** A domain action emitted by the translator, dispatched by thin glue. */

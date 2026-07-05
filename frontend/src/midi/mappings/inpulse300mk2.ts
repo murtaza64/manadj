@@ -79,6 +79,33 @@ export const INPULSE_300_MK2: Mapping = {
       controlType: 'relative',
       target: { control: 'jog-touch', deck: 'B' },
     },
+    // SHIFT+wheel = fast seek (issue 12). Shifted controls emit on ch+3;
+    // Mixxx's Inpulse 300 XML corroborates (shift-mode wheel on 0x94/0x95).
+    // Both the shifted rim and shifted touch-spin streams seek fast.
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'cc', channel: 4, number: 0x09 },
+      controlType: 'relative',
+      target: { control: 'jog-seek', deck: 'A' },
+    },
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'cc', channel: 4, number: 0x0a },
+      controlType: 'relative',
+      target: { control: 'jog-seek', deck: 'A' },
+    },
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'cc', channel: 5, number: 0x09 },
+      controlType: 'relative',
+      target: { control: 'jog-seek', deck: 'B' },
+    },
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'cc', channel: 5, number: 0x0a },
+      controlType: 'relative',
+      target: { control: 'jog-seek', deck: 'B' },
+    },
 
     // Pitch faders.
     {

@@ -9,6 +9,7 @@ import {
   JOG_BEND_MAX_PERCENT,
   JOG_BEND_PERCENT_PER_TICK,
   JOG_FINE_CONTINUATION_MS,
+  JOG_SEEK_SECONDS_PER_TICK,
   JOG_TOUCH_SEEK_SECONDS_PER_TICK,
   JogController,
   bendFromWindowAverage,
@@ -145,7 +146,7 @@ describe('JogController', () => {
     jog.dispose();
   });
 
-  it('paused: ticks seek relative to the playhead, no bend', () => {
+  it('paused: rim ticks seek relative to the playhead, no bend', () => {
     const jog = new JogController(port);
     jog.onTicks(1, 1000);
     expect(calls).toHaveLength(1);
@@ -153,22 +154,46 @@ describe('JogController', () => {
     expect(parseFloat(calls[0].slice(5))).toBeGreaterThan(60);
   });
 
-  it('paused: hard spins travel much farther per tick than slow ones', () => {
+  it('paused: bare rim spins are GENTLE — linear per tick, no velocity surprise (issue 12)', () => {
     const jog = new JogController(port);
-    jog.onTicks(1, 1000); // slow: fresh gesture
+    // Hard spin: many ticks in tight succession. The playhead is pinned at
+    // 60 in this harness, so every call must travel exactly ticks × base —
+    // a velocity term would make later calls travel farther.
+    let t = 1000;
+    for (let i = 0; i < 10; i++) {
+      jog.onTicks(8, t);
+      t += 10;
+    }
+    const expected = `seek:${(60 + 8 * JOG_SEEK_SECONDS_PER_TICK).toFixed(3)}`;
+    expect(calls).toHaveLength(10);
+    expect(calls.every((c) => c === expected)).toBe(true);
+  });
+
+  it('SHIFT+wheel: hard spins travel much farther per tick than slow ones', () => {
+    const jog = new JogController(port);
+    jog.onSeekTicks(1, 1000); // slow: fresh gesture
     const slowTravel = parseFloat(calls[0].slice(5)) - 60;
 
-    // Hard spin: many ticks in tight succession build a high rate.
     const spun = new JogController(port);
     calls = [];
     playhead = 60;
     let t = 2000;
     for (let i = 0; i < 10; i++) {
-      spun.onTicks(8, t);
+      spun.onSeekTicks(8, t);
       t += 10;
     }
     const last = parseFloat(calls[calls.length - 1].slice(5));
     expect(last - 60).toBeGreaterThan(slowTravel * 20);
+  });
+
+  it('SHIFT+wheel: seeks while playing too, releasing any bend first', () => {
+    playing = true;
+    const jog = new JogController(port);
+    jog.onTicks(1, 1000);
+    vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS); // bend applied
+    jog.onSeekTicks(1, 1030);
+    expect(calls[calls.length - 2]).toBe('bend:0.000');
+    expect(calls[calls.length - 1].startsWith('seek:')).toBe(true);
   });
 
   it('pausing mid-gesture releases the bend before seeking', () => {
@@ -287,19 +312,19 @@ describe('touch surface (midi-controller 11)', () => {
       expect(last).toBeCloseTo(60 + 11 * JOG_TOUCH_SEEK_SECONDS_PER_TICK, 10);
     });
 
-    it('after the gesture gap, rim ticks return to the classic accelerated seek', () => {
+    it('after the gesture gap, rim ticks return to the gentle rim rate', () => {
       const jog = new JogController(port);
       jog.onTouchTicks(1, 1000);
       jog.onTicks(1, 1000 + JOG_FINE_CONTINUATION_MS + 100);
       const travel = parseFloat(calls[1].slice(5)) - parseFloat(calls[0].slice(5));
-      expect(travel).toBeGreaterThan(JOG_TOUCH_SEEK_SECONDS_PER_TICK * 2);
+      expect(travel).toBeCloseTo(JOG_SEEK_SECONDS_PER_TICK, 10);
     });
 
-    it('a fresh rim gesture with no touch history seeks classically', () => {
+    it('a fresh rim gesture with no touch history seeks at the gentle rim rate', () => {
       const jog = new JogController(port);
       jog.onTicks(1, 5000);
       const travel = parseFloat(calls[0].slice(5)) - 60;
-      expect(travel).toBeGreaterThan(JOG_TOUCH_SEEK_SECONDS_PER_TICK * 2);
+      expect(travel).toBeCloseTo(JOG_SEEK_SECONDS_PER_TICK, 10);
     });
 
     it('playing is untouched by continuation: rim ticks still bend', () => {

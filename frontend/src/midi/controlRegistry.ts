@@ -33,6 +33,8 @@ export interface MidiDeckControls {
   jogTicks(ticks: number): void;
   /** Jog touch-surface ticks (signed): fine seek when paused only. */
   jogTouchTicks(ticks: number): void;
+  /** SHIFT+jog ticks (signed): deliberate fast seek, playing or paused. */
+  jogSeekTicks(ticks: number): void;
   /**
    * Load a Track onto this deck, honoring the load lock (refused onto a
    * playing deck, silently — no hardware feedback channel).

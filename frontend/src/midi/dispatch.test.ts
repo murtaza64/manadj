@@ -39,6 +39,7 @@ function registerFakeDeckControls(deck: ChannelId): void {
     match: () => calls.push(`${deck}:match`),
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
     jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
+    jogSeekTicks: (ticks) => calls.push(`${deck}:jogSeek:${ticks}`),
     load: (track) => calls.push(`${deck}:load:${track.id}`),
   });
 }
@@ -277,6 +278,12 @@ describe('jog (midi-controller 03)', () => {
     dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 1 });
     dispatchMidiAction({ kind: 'relative', target: { control: 'jog-touch', deck: 'A' }, ticks: -2 });
     expect(calls).toEqual(['A:jog:1', 'A:jogTouch:-2']);
+  });
+
+  it('SHIFT+wheel routes to the fast-seek handler (midi-controller 12)', () => {
+    registerFakeDeckControls('B');
+    dispatchMidiAction({ kind: 'relative', target: { control: 'jog-seek', deck: 'B' }, ticks: 3 });
+    expect(calls).toEqual(['B:jogSeek:3']);
   });
 });
 
