@@ -109,6 +109,20 @@ To test lanes together before they land:
   comments; fixes go to the owning lanes; the probe is abandoned the same session.
 - Topology queries (`heads(mutable())`) must ignore `tmp:` changes.
 
+## Prototypes and exploratory work
+
+Prototype/exploratory changes (throwaway UI variants, spike code, anything
+built under the prototype skill's constraints) **never land on `main`**:
+
+- They live on their own change/lane off `main`, clearly described as
+  throwaway (e.g. `perf-layout: ultra-flat prototype (throwaway)`).
+- To test against current `main`, use a `tmp:` probe merge in the default
+  workspace — never advance `main` to include the prototype.
+- When a prototype has answered its question, capture the verdict, then
+  absorb it as a **fresh implementation change** (prototype code is written
+  without tests/error handling — rewrite, don't promote) and abandon the
+  prototype change.
+
 ## Docs fast-path and the tracked/ephemeral split
 
 Rule of thumb: **if it needs history, it's tracked and lands via trunk; if it
