@@ -8,7 +8,7 @@ import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData, HotCue } from '../types';
 import type { DecodedWaveform } from './blob';
 import { WaveformRendererV2 } from './WaveformRendererV2';
-import type { WaveformRendererConfig } from './WaveformRendererV2';
+import type { OverlayRegion, WaveformRendererConfig } from './WaveformRendererV2';
 import { useStyleSlot } from './styleSlots';
 import type { SlotName } from './styleSlots';
 
@@ -19,6 +19,8 @@ interface Options {
   cuePoint?: number | null;
   hotCues?: HotCue[];
   beatgrid?: BeatgridData | null;
+  /** Shaded overlay regions (looping 05), e.g. the active loop. */
+  regions?: OverlayRegion[];
   /** Driven mode: no self-running render loop — the caller's own motion
    * clock calls the returned `draw()` once per frame. */
   driven?: boolean;
@@ -34,6 +36,7 @@ export function useWaveformRendererV2({
   cuePoint = null,
   hotCues,
   beatgrid,
+  regions,
   driven = false,
   slot = 'full',
 }: Options) {
@@ -83,6 +86,10 @@ export function useWaveformRendererV2({
       rendererRef.current?.setBeatgrid(beatgrid.beat_times, beatgrid.downbeat_times);
     }
   }, [beatgrid, waveformData]);
+
+  useEffect(() => {
+    if (regions) rendererRef.current?.setRegions(regions);
+  }, [regions, waveformData]);
 
   return { canvasRef, rendererRef, initError, draw };
 }

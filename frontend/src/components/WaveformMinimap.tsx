@@ -1,7 +1,10 @@
+import { useMemo } from 'react';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
+import { loopOverlayRegions } from '../waveform/loopOverlay';
 import { useHotCues } from '../hooks/useHotCues';
 import type { PlaybackClock } from '../playback/clock';
+import type { LoopRegion } from '../playback/loop';
 import type { BeatgridData } from '../types';
 import './Waveform.css';
 
@@ -10,6 +13,8 @@ interface WaveformMinimapProps {
   clock: PlaybackClock;
   cuePoint: number | null;
   onSeek: (time: number) => void;
+  /** Active loop (looping 05): drawn as a thin green band. */
+  loop?: LoopRegion | null;
   /** Grey out (and ignore input) while the deck can't play — e.g. decoding. */
   dimmed?: boolean;
   /** Optional beat/downbeat ticks (useful at DAW-style zoom levels). */
@@ -22,12 +27,14 @@ export default function WaveformMinimap({
   clock,
   cuePoint,
   onSeek,
+  loop = null,
   dimmed = false,
   beatgrid = null,
   className,
 }: WaveformMinimapProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: hotCues = [] } = useHotCues(trackId);
+  const regions = useMemo(() => loopOverlayRegions(loop), [loop]);
 
   const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
     clock,
@@ -38,6 +45,7 @@ export default function WaveformMinimap({
     cuePoint,
     hotCues,
     beatgrid,
+    regions,
     slot: 'minimap',
   });
 

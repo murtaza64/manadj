@@ -19,6 +19,7 @@ export default function Player() {
   const loadState = useDeckSnapshot((s) => s.loadState);
   const loadError = useDeckSnapshot((s) => s.loadError);
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
+  const loop = useDeckSnapshot((s) => s.loop);
   const trackId = loadedTrack?.id ?? null;
 
   const scrubTransport = useScrubTransport();
@@ -31,6 +32,7 @@ export default function Player() {
           trackId={trackId}
           clock={engine}
           cuePoint={cuePoint}
+          loop={loop}
           transport={scrubTransport}
           dimmed={trackId !== null && !ready}
         />

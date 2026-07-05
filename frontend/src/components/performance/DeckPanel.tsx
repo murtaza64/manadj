@@ -91,6 +91,7 @@ export function DeckWaveform({
   const { engine, loadedTrack } = useDeck();
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
+  const loop = useDeckSnapshot((s) => s.loop);
 
   const transport = useScrubTransport();
 
@@ -110,6 +111,7 @@ export function DeckWaveform({
       trackId={loadedTrack?.id ?? null}
       clock={engine}
       cuePoint={cuePoint}
+      loop={loop}
       transport={transport}
       dimmed={loadedTrack !== null && !ready}
       visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
@@ -568,6 +570,7 @@ export function DeckPanel({
   const { deck, engine } = useDeck();
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
+  const loop = useDeckSnapshot((s) => s.loop);
   const track = useDeckTrack();
 
   return (
@@ -580,6 +583,7 @@ export function DeckPanel({
             trackId={track?.id ?? null}
             clock={engine}
             cuePoint={cuePoint}
+            loop={loop}
             onSeek={(t) => ready && engine.seek(t)}
             dimmed={track !== null && !ready}
           />

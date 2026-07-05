@@ -1,9 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
+import { loopOverlayRegions } from '../waveform/loopOverlay';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useHotCues } from '../hooks/useHotCues';
 import type { PlaybackClock } from '../playback/clock';
+import type { LoopRegion } from '../playback/loop';
 import { PLAY_MARKER_FRACTION, stepVisibleSeconds } from '../utils/waveformZoom';
 import './Waveform.css';
 
@@ -20,6 +22,8 @@ interface WebGLWaveformProps {
   clock: PlaybackClock;
   cuePoint: number | null;
   transport: ScrubTransport;
+  /** Active loop region (looping 05): shaded green while a loop wraps. */
+  loop?: LoopRegion | null;
   /** Grey out (and ignore input) while the deck can't play — e.g. decoding. */
   dimmed?: boolean;
   /**
@@ -39,6 +43,7 @@ export default function WebGLWaveform({
   clock,
   cuePoint,
   transport,
+  loop = null,
   dimmed = false,
   visibleSeconds,
   onVisibleSecondsChange,
@@ -47,6 +52,7 @@ export default function WebGLWaveform({
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: beatgridData } = useBeatgridData(trackId);
   const { data: hotCues = [] } = useHotCues(trackId);
+  const regions = useMemo(() => loopOverlayRegions(loop), [loop]);
 
   const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
     clock,
@@ -59,6 +65,7 @@ export default function WebGLWaveform({
     cuePoint,
     hotCues,
     beatgrid: beatgridData?.data ?? null,
+    regions,
   });
 
   // Apply the shared time-zoom (also after re-init when new data lands).

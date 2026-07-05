@@ -310,6 +310,25 @@ interface TexBinding {
   pack: LodPack;
 }
 
+/**
+ * A shaded track-time region for the overlay pass (looping 05) — the
+ * renderer's general filled-region primitive (active loop today; manual
+ * loop in/out and Saved loops reuse it). Fill and edges draw additively,
+ * so the waveform body stays readable underneath; minimaps render the
+ * region as a thin band instead of a full-height fill.
+ */
+export interface OverlayRegion {
+  /** Track-time bounds in seconds. */
+  start: number;
+  end: number;
+  /** 0..1 RGB. */
+  color: [number, number, number];
+  /** Fill strength (additive: the color is scaled by this). */
+  fillAlpha: number;
+  /** Draw solid edge lines at the bounds (full waveforms only). */
+  edges?: boolean;
+}
+
 /** The view actually rendered this frame (one source of truth for overlays). */
 interface FrameView {
   startTime: number;
@@ -387,6 +406,7 @@ export class WaveformRendererV2 {
   private overlayCtx: CanvasRenderingContext2D | null = null;
 
   private cuePoint: number | null = null;
+  private regions: OverlayRegion[] = [];
   private hotCues = new Map<number, { time: number; color?: string }>();
   private beatTimes: Float32Array | null = null;
   private downbeatTimes: Float32Array | null = null;
@@ -428,6 +448,12 @@ export class WaveformRendererV2 {
 
   public setCuePoint(cueTime: number | null): void {
     this.cuePoint = cueTime;
+  }
+
+  /** Shaded overlay regions (looping 05); empty clears. Positions are
+   * track-time, so a region drawn per frame translates with the content. */
+  public setRegions(regions: OverlayRegion[]): void {
+    this.regions = regions;
   }
 
   public setHotCues(
@@ -744,6 +770,7 @@ export class WaveformRendererV2 {
     gl.uniform1f(uOffset, 0);
 
     const scratch: number[] = [];
+    this.pushRegions(view, scratch); // under the markers
     if (this.cuePoint !== null) this.pushCuePoint(view, scratch);
     this.drawTriangles(scratch, this.overlayVao!, this.overlayBuffer!);
 
@@ -838,6 +865,39 @@ export class WaveformRendererV2 {
 
   private timeToX(t: number, view: FrameView): number {
     return ((t - view.startTime) / view.visibleSeconds) * view.w;
+  }
+
+  /** Shaded regions (looping 05): translucent full-height fill spanning
+   * the region, plus solid edge lines on full waveforms or a 2px guide
+   * line at the strip's TOP edge on the minimap (minimap-clarity verdict —
+   * the bottom edge is the body's zero line, kept clean). Additive blend:
+   * colors arrive premultiplied by their alpha. */
+  private pushRegions(view: FrameView, verts: number[]): void {
+    for (const region of this.regions) {
+      const x0 = this.timeToX(region.start, view);
+      const x1 = this.timeToX(region.end, view);
+      if (x1 <= x0 || x1 <= 0 || x0 >= view.w) continue;
+      const [r, g, b] = region.color;
+      const cx0 = Math.max(x0, 0);
+      const cx1 = Math.min(x1, view.w);
+      const a = region.fillAlpha;
+      pushRect(verts, cx0, 0, cx1 - cx0, view.h, r * a, g * a, b * a);
+      const edgeAlpha = 0.85;
+      const edgeWidth = 2 * view.dpr;
+      if (this.isMinimap) {
+        pushRect(
+          verts, cx0, 0, cx1 - cx0, edgeWidth,
+          r * edgeAlpha, g * edgeAlpha, b * edgeAlpha,
+        );
+        continue;
+      }
+      if (region.edges) {
+        for (const x of [x0, x1 - edgeWidth]) {
+          if (x + edgeWidth <= 0 || x >= view.w) continue;
+          pushRect(verts, x, 0, edgeWidth, view.h, r * edgeAlpha, g * edgeAlpha, b * edgeAlpha);
+        }
+      }
+    }
   }
 
   private pushCuePoint(view: FrameView, verts: number[]): void {

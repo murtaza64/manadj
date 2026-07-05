@@ -1,6 +1,6 @@
 # Waveform loop region rendering
 
-Status: ready-for-agent
+Status: done (implemented, change svvlstrq)
 
 ## Parent
 
@@ -39,3 +39,7 @@ in the minimap-clarity lab; human-approved verdict to converge on
 - Interaction with played-portion dim (minimap-clarity issue 03): while the
   playhead is inside an active loop, the dim wash stops at the loop's left
   edge — the loop body is about to replay, never "already heard".
+
+**2026-07-05 — Done** (jj change `svvlstrq`, workspace looping). Renderer gains its first filled-region overlay primitive: `OverlayRegion` (`{start, end, color, fillAlpha, edges?}`) + `setRegions(...)`, drawn in the overlay pass under the cue/hot-cue markers — additive translucent fill spanning the region + solid 2px edge lines at the bounds on full waveforms; a thin (5px·dpr) top band on minimaps; positions are track-time so the region translates/resizes frame-accurately against the moving content for free. Loop's rendering identity centralized in `waveform/loopOverlay.ts` (`loopOverlayRegions`: bright saturated green [0.15,1,0.35], fill alpha 0.16 — state color, peaks stay readable; null loop → empty list, nothing renders). Plumbed as `regions` through `useWaveformRendererV2` and as a `loop` prop on `WebGLWaveform` + `WaveformMinimap`, fed from the Deck snapshot by the library Player, the Performance DeckWaveform, and the Performance minimap. No component tests, per the pure-models-only convention.
+
+**2026-07-05 — Convergence with minimap-clarity's verdict** (applied at landing, same change): loop color `#00f900`, minimap renders the full-height wash plus a 2px guide line at the strip's TOP edge over the region (replacing the 5px band). The played-dim interaction stays with minimap-clarity issue 03 (their machinery).
