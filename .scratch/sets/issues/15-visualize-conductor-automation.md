@@ -2,7 +2,7 @@
 
 (Renumbered from 13, 2026-07-05 — parallel filing collided with 13-rehearsal-loop.)
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -40,6 +40,34 @@ so control surfaces (which render base state) sit still while automation
 sounds. No automation read API or ghost indicator exists anywhere today;
 the editor's timeline lanes are the only automation visualization. Not
 already implemented; no prior rejection on record.
+
+> **Review requested (2026-07-05, lane setpins, change `uqntzoto`).**
+> Implemented: `Mixer.getAutomation(channel)` read accessor (null while
+> disengaged / before first write; never notifies — ADR 0022 untouched),
+> `useAutomationGhost(channel)` rAF-polling hook in `hooks/useMixer.ts`
+> (value-gated setState), optional `ghost` prop on `Knob`/`HFader`, wired
+> to EQ/FLT/VOL in the perf MixZone. Translucent saturated-orange
+> markers; real thumbs keep rendering base state. Write path, capture,
+> MIDI Feedback, crossfader untouched.
+>
+> **Verification walkthrough** (lane app running, backend 8120):
+> 1. Open http://localhost:5293 → Library → Sets → "Lifecycle demo".
+> 2. Play the set via the Conductor (row play / transport).
+> 3. Switch to the Performance view: on both decks' MIX zones the VOL
+>    fader shows an orange tick and LOW/MID/HI/FLT knobs a second orange
+>    pointer, moving with the audible mix; the labeled handles/white
+>    pointers stay put at base state.
+> 4. Drag any automated control mid-playback → takeover: Conductor
+>    stops, ghosts vanish instantly, control behaves exactly as before.
+> 5. Stop the Conductor from the set pane → ghosts vanish; knobs read
+>    base state.
+>
+> Known v1 limit (flagging, per brief expectation of an iteration
+> round): editor auditions engage the same overlay and the ghost path is
+> engager-agnostic, but the perf MixZone and the Transition editor are
+> mutually exclusive views, and leaving the editor ends its audition —
+> so editor-audition ghosts have no on-screen venue today. Styling is a
+> first DAW-style cut; iterate freely.
 
 ## Agent Brief
 
