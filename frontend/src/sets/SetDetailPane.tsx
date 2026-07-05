@@ -68,11 +68,12 @@ import {
   stopSetPlayback,
   useConductorState,
 } from './conductorStore';
+import { NeverAudibleBadge } from './NeverAudibleBadge';
 import { OverviewLadder } from './OverviewLadder';
 import { evaluatePickup, readPickupSnapshot } from './pickup';
-import { fmtSec, type PlannedEntry, type PlanWarning } from './planner';
+import { fmtSec, isNeverAudible, type PlannedEntry, type PlanWarning } from './planner';
 import { prefetchTrackBuffer } from './prefetch';
-import { useSetPlan } from './useSetPlan';
+import { hotCue1Sec, useSetPlan } from './useSetPlan';
 import { useSetSettings } from './setSettings';
 import {
   addTracksToSet,
@@ -363,7 +364,8 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
 
   // The second adjacency verb (issue 09 sketches it; this mixes it live):
   // outgoing→A, incoming→B, cued by the plan when the adjacency is pinned,
-  // by the hot-cue/Main-cue fallbacks when unresolved. Stays in this view;
+  // by the hot-cue fallbacks when unresolved (B at its Hot Cue 1 → track
+  // start — the plan's hard-cut entry, sets 19). Stays in this view;
   // the shared surface keeps audibility, so capture stays armed — mixing
   // the pair by hand is exactly what produces the Take.
   const practiceAdjacency = (i: number) => {
@@ -383,7 +385,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       outgoingHotCueSecs: (hotCuesByTrack.get(outgoing.trackId) ?? []).map(
         (c) => c.time_seconds
       ),
-      incomingMainCueSec: inTrack.cue_point_time ?? 0,
+      incomingHotCue1Sec: hotCue1Sec(hotCuesByTrack.get(incoming.trackId)),
     });
     cueDeckAt('A', outgoing.trackId, positions.outgoingSec);
     cueDeckAt('B', incoming.trackId, positions.incomingSec);
@@ -892,6 +894,7 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'pitch-clamped': 'pitch clamped',
   'grace-fade': 'overlap: previous track fades early',
   'grace-floor': 'overlap pileup',
+  'entry-after-exit': 'never audible',
 };
 
 function AdjacencyRow({
@@ -1221,9 +1224,11 @@ function SetTrackRow({
         )}
         {track?.archived_at != null && <ArchivedTrackRowMark />}
       </span>
+      {/* NEVER AUDIBLE (sets 19): replaces the innocuous "plays 0:00" */}
+      <NeverAudibleBadge planned={planned} />
       {/* "plays m:ss of m:ss" — the plan's audible footprint (sets 03) */}
       <span style={{ width: '110px', color: 'var(--subtext0)', fontSize: '12px', textAlign: 'right' }}>
-        {planned && track?.duration_secs
+        {planned && track?.duration_secs && !isNeverAudible(planned)
           ? `plays ${fmtSec(Math.max(planned.exitSec - planned.entrySec, 0))} of ${fmtSec(track.duration_secs)}`
           : ''}
       </span>

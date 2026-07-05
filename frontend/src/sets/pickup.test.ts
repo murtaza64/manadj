@@ -26,10 +26,10 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
   return { entries: [], tracks: {}, transitionsByUuid: {}, takesByUuid: {}, ...over };
 }
 
-const facts = (durationSec: number, mainCueSec = 0, bpm: number | null = 120) => ({
+const facts = (durationSec: number, hotCue1Sec: number | null = null, bpm: number | null = 120) => ({
   durationSec,
   bpm,
-  mainCueSec,
+  hotCue1Sec,
 });
 
 const tr = (over: Partial<Transition> = {}): Transition => ({

@@ -165,8 +165,8 @@ function overlapPlan(): SetPlan {
       { trackId: 2, pin: null },
     ],
     tracks: {
-      1: { durationSec: 120, bpm: null, mainCueSec: 0 },
-      2: { durationSec: 120, bpm: null, mainCueSec: 0 },
+      1: { durationSec: 120, bpm: null, hotCue1Sec: null },
+      2: { durationSec: 120, bpm: null, hotCue1Sec: null },
     },
     transitionsByUuid: { t1: transition },
     takesByUuid: {},
@@ -182,8 +182,8 @@ function hardCutPlan(dur1 = 120): SetPlan {
       { trackId: 2, pin: null },
     ],
     tracks: {
-      1: { durationSec: dur1, bpm: null, mainCueSec: 0 },
-      2: { durationSec: 120, bpm: null, mainCueSec: 20 },
+      1: { durationSec: dur1, bpm: null, hotCue1Sec: null },
+      2: { durationSec: 120, bpm: null, hotCue1Sec: 20 },
     },
     transitionsByUuid: {},
     takesByUuid: {},

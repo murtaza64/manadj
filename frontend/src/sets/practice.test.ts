@@ -13,7 +13,7 @@ describe('planned adjacency (pinned, windowed)', () => {
     incomingEntry: { entrySec: 12.5 },
     outgoingDurationSec: 300,
     outgoingHotCueSecs: [50, 180], // ignored on the planned path
-    incomingMainCueSec: 30, // ignored on the planned path
+    incomingHotCue1Sec: 30, // ignored on the planned path
   };
 
   it('cues A a runway before the planned window start, B at its planned entry', () => {
@@ -49,11 +49,18 @@ describe('unresolved adjacency (hard cut / no plan)', () => {
     incomingEntry: { entrySec: 30 },
     outgoingDurationSec: 300,
     outgoingHotCueSecs: [50, 240, 180],
-    incomingMainCueSec: 30,
+    incomingHotCue1Sec: 30,
   };
 
-  it('cues A at its LAST hot cue (the mix-out convention), B at its Main cue', () => {
+  it('cues A at its LAST hot cue (the mix-out convention), B at its Hot Cue 1', () => {
     expect(practiceCuePositions(base)).toEqual({ outgoingSec: 240, incomingSec: 30 });
+  });
+
+  it('cues B at the track start when Hot Cue 1 is unset (Main cue is never consulted)', () => {
+    expect(practiceCuePositions({ ...base, incomingHotCue1Sec: null })).toEqual({
+      outgoingSec: 240,
+      incomingSec: 0,
+    });
   });
 
   it('falls back to a runway before the end when the outgoing has no hot cues', () => {

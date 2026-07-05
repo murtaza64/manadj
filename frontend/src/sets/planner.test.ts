@@ -12,7 +12,7 @@ import type { CaptureEvent } from '../capture/events';
 import type { Transition } from '../editor/mixModel';
 import { jumpCrossed, planSet, planStateAt, type PlanInput } from './planner';
 
-/** Track facts shorthand: id → { durationSec, bpm, mainCueSec }. */
+/** Track facts shorthand: id → { durationSec, bpm, hotCue1Sec }. */
 function input(over: Partial<PlanInput> = {}): PlanInput {
   return {
     entries: [],
@@ -23,10 +23,10 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
   };
 }
 
-const facts = (durationSec: number, mainCueSec = 0, bpm: number | null = 120) => ({
+const facts = (durationSec: number, hotCue1Sec: number | null = null, bpm: number | null = 120) => ({
   durationSec,
   bpm,
-  mainCueSec,
+  hotCue1Sec,
 });
 
 const tr = (over: Partial<Transition> = {}): Transition => ({
@@ -46,8 +46,8 @@ describe('boundaries', () => {
     expect(plan.totalSec).toBe(0);
   });
 
-  it('starts the first track at its BEGINNING (Main cue is not a set boundary) and stops after the last', () => {
-    // Review verdict 2026-07-05: even with a Main cue set (30s here), the
+  it('starts the first track at its BEGINNING (Hot Cue 1 is not a set boundary) and stops after the last', () => {
+    // Review verdict 2026-07-05: even with Hot Cue 1 set (30s here), the
     // set opens with the whole first track.
     const plan = planSet(
       input({
@@ -77,7 +77,7 @@ describe('ping-pong parity', () => {
 });
 
 describe('hard cuts (unresolved adjacencies)', () => {
-  it('plays the outgoing to its end and starts the incoming at its Main cue', () => {
+  it('plays the outgoing to its end and starts the incoming at its Hot Cue 1', () => {
     const plan = planSet(
       input({
         entries: [
@@ -89,7 +89,7 @@ describe('hard cuts (unresolved adjacencies)', () => {
     );
     const [a, b] = plan.entries;
     const [adj] = plan.adjacencies;
-    // Outgoing: whole track (its Main cue at 10 is no boundary) → cut at 90.
+    // Outgoing: whole track (its Hot Cue 1 at 10 is no boundary) → cut at 90.
     expect(a.entrySec).toBe(0);
     expect(a.exitSec).toBe(90);
     expect(a.exitMixSec).toBeCloseTo(90);
@@ -97,11 +97,27 @@ describe('hard cuts (unresolved adjacencies)', () => {
     expect(adj.kind).toBe('hardcut');
     expect(adj.mixStartSec).toBeCloseTo(90);
     expect(adj.mixEndSec).toBeCloseTo(90);
-    // Incoming from its own Main cue at the cut.
+    // Incoming from its own Hot Cue 1 at the cut.
     expect(b.entrySec).toBe(25);
     expect(b.entryMixSec).toBeCloseTo(90);
     expect(b.exitSec).toBe(100);
     expect(plan.totalSec).toBeCloseTo(90 + 75);
+  });
+
+  it('falls back to the track start when the incoming has no Hot Cue 1', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90), 2: facts(100, null) },
+      })
+    );
+    const b = plan.entries[1];
+    expect(b.entrySec).toBe(0);
+    expect(b.entryMixSec).toBeCloseTo(90);
+    expect(plan.totalSec).toBeCloseTo(90 + 100);
   });
 
   it('hard-cuts every unresolved adjacency in a chain without stalling', () => {
@@ -129,8 +145,72 @@ describe('hard cuts (unresolved adjacencies)', () => {
   });
 });
 
+describe('entry after exit (never audible)', () => {
+  // The real-world shape (Slow Motion → RUN): the middle track enters via
+  // a hard cut at its Hot Cue 1 (2:35) but its own pinned window mixes it
+  // out at 1:51 — it is never audible.
+  const neverAudible = () =>
+    input({
+      entries: [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: { kind: 'transition', uuid: 't1' } },
+        { trackId: 3, pin: null },
+      ],
+      tracks: { 1: facts(90), 2: facts(200, 155), 3: facts(100) },
+      // Window 91..111 in track-2 time: pinned mix-out at 1:51.
+      transitionsByUuid: { t1: tr({ startSec: 91, durationSec: 20 }) },
+    });
+
+  it('flags an entry planned after a pinned mix-out as an error, naming both numbers', () => {
+    const plan = planSet(neverAudible());
+    const e = plan.entries[1];
+    expect(e.entrySec).toBe(155);
+    expect(e.exitSec).toBeLessThan(155);
+    const w = plan.warnings.filter((x) => x.kind === 'entry-after-exit');
+    expect(w).toHaveLength(1);
+    expect(w[0].severity).toBe('error');
+    expect(w[0].entryIndex).toBe(1);
+    expect(w[0].message).toContain('2:35');
+    expect(w[0].message).toContain('1:51');
+    expect(w[0].message).toContain('pinned mix-out');
+  });
+
+  it('flags an entry past the track end on a hard-cut exit, naming the track end', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null },
+          { trackId: 2, pin: null },
+          { trackId: 3, pin: null },
+        ],
+        // Track 2's Hot Cue 1 (150) sits past its own end (100).
+        tracks: { 1: facts(90), 2: facts(100, 150), 3: facts(100) },
+      })
+    );
+    const w = plan.warnings.filter((x) => x.kind === 'entry-after-exit');
+    expect(w).toHaveLength(1);
+    expect(w[0].entryIndex).toBe(1);
+    expect(w[0].message).toContain('2:30');
+    expect(w[0].message).toContain('1:40');
+    expect(w[0].message).toContain('track end');
+  });
+
+  it('does not flag an audible entry', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90), 2: facts(100, 25) },
+      })
+    );
+    expect(plan.warnings.filter((x) => x.kind === 'entry-after-exit')).toEqual([]);
+  });
+});
+
 describe('pinned Transition windows', () => {
-  /** Track 1: dur 90 (its Main cue at 10 is not a boundary — time 0 at
+  /** Track 1: dur 90 (its Hot Cue 1 at 10 is not a boundary — time 0 at
    * mix 0). Transition: window 60..80 in track-1 time (= mix 60..80),
    * B in at 8. */
   const twoTracks = (transition: Transition, dur2 = 100) =>
@@ -430,7 +510,7 @@ describe('planStateAt', () => {
     expect(later.decks.B.trackTime).toBeCloseTo(2);
   });
 
-  it('hard-cuts: outgoing solo to the cut, incoming solo from its Main cue after', () => {
+  it('hard-cuts: outgoing solo to the cut, incoming solo from its Hot Cue 1 after', () => {
     const plan = planSet(
       input({
         entries: [
@@ -636,7 +716,7 @@ describe('Fixed tempo policy (global rate scaling)', () => {
     );
   });
 
-  it('hard-cuts scale too: cut at the outgoing end ÷ rate, incoming from its Main cue', () => {
+  it('hard-cuts scale too: cut at the outgoing end ÷ rate, incoming from its Hot Cue 1', () => {
     const plan = planSet(
       input({
         entries: [
