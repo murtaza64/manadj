@@ -215,6 +215,11 @@ export function MixerStrip({
           onChange={(v) => mixer.setCrossfader(v)}
           title="Crossfader (double-click to center)"
         />
+        {/* Invisible twin of the XF toggle: keeps the fader's center on the
+            deck divider axis. */}
+        <span className="player-button perf-strip-toggle perf-strip-ghost" aria-hidden="true">
+          XF
+        </span>
       </div>
       <div className="perf-strip-slot">
         <HFader

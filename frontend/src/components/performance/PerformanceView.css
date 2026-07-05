@@ -70,6 +70,8 @@
   border-color: var(--yellow);
 }
 
+.perf-strip-ghost { visibility: hidden; }
+
 /* The toggle hides every on-control key hint */
 .perf-root.kbd-hints-off .perf-kbd { display: none; }
 
