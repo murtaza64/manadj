@@ -1,6 +1,6 @@
 # 01 — Cue quantization ignores BPM re-tempo (stale beatgrid)
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 
 ## Symptom (reported 2026-07-05)
@@ -57,3 +57,12 @@ re-check the repro on current trunk first — the bug may predate or
 postdate today's looping landings.
 
 ## Comments
+
+**2026-07-05 — reporter answer:** BPM was doubled via the **deck BPM
+control**. That path DOES invalidate `['beatgrid', id]`
+(`BpmControl.tsx:118`), which weakens hypothesis 2 and makes hypothesis 1
+the lead: the server's BPM write path likely isn't regenerating
+`beat_times` (or not for the doubling case). Start there — inspect
+`GET /api/beatgrids/{id}` before/after a re-tempo; if `beat_times` spacing
+is unchanged, it's a backend bug and the frontend cache machinery is
+innocent. Flipped needs-triage → ready-for-agent.
