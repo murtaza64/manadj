@@ -22,3 +22,7 @@ Out of scope: the Transition editor's private player (a paused-decks editing ses
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+- Done (smrouvol, lane followmode): `playback/wakeLock.ts` bridge (followPlaybackBridge idiom) — edge-detects any-Deck-playing across both engines, `navigator.wakeLock.request('screen')` on rise, release on fall, visibilitychange re-acquire, feature-detected no-op, never throws. Mounted in DeckProvider beside the follow bridge. Untested-by-design glue per the issue. Gate: 539 pytest / 607 vitest / build / one head. Eye-verify: play a deck, watch the display not dim (browser + shell); pause everything, dimming resumes.
