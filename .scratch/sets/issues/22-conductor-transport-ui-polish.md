@@ -154,3 +154,8 @@ Additional acceptance criteria:
   whose tooltip carries the teaching ("no saved Transition and no Take;
   ⏵ practice cues it on the decks"). Same signal, orthogonal to
   resolution as before.
+- Follow-up (2026-07-05, approved in-session): ✎ edit and ⏵ practice
+  chips became icon-only and uncolored (plain --text on the quiet
+  chip): ⋈ for edit (the Transition editor's own TopBar icon) and ◉
+  (vinyl) for practice. Verbs ride the tooltips, as with the [+]
+  insert affordance (sets 20 precedent).

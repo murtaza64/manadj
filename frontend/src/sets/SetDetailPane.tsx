@@ -1195,7 +1195,9 @@ function AdjacencyRow({
         )}
 
         {/* Edit (sets 20): the sketch-it verb made visible — delegates
-            to the row click-through (sets 09). Practice = mix it live. */}
+            to the row click-through (sets 09). Practice = mix it live.
+            Icon-only, uncolored (22 follow-up): ⋈ is the Transition
+            editor's own icon (TopBar); the verbs ride the tooltips. */}
         <button
           className="set-chip-btn"
           onClick={(e) => {
@@ -1203,14 +1205,13 @@ function AdjacencyRow({
             onOpenEditor();
           }}
           title="Open this handover in the Transition editor"
-          style={{ color: 'var(--sapphire)' }}
         >
-          ✎ edit
+          ⋈
         </button>
 
         {/* Practice (sets 13): the mix-it-live verb — outgoing cued on A
-            with a runway, incoming on B; press again to re-cue. Plain
-            quiet button like its neighbors (sets 20). */}
+            with a runway, incoming on B; press again to re-cue. Icon-only
+            vinyl glyph, uncolored (22 follow-up). */}
         {onPractice && (
           <button
             className="set-chip-btn"
@@ -1219,9 +1220,8 @@ function AdjacencyRow({
               onPractice();
             }}
             title="Practice this handover: cue outgoing on deck A (with a runway), incoming on deck B — press again to re-cue"
-            style={{ color: 'var(--yellow)' }}
           >
-            ⏵ practice
+            ◉
           </button>
         )}
 
