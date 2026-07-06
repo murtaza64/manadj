@@ -10,7 +10,15 @@
 import { describe, expect, it } from 'vitest';
 import type { CaptureEvent } from '../capture/events';
 import type { Transition } from '../editor/mixModel';
-import { jumpCrossed, planSet, planStateAt, type PlanInput } from './planner';
+import type { Track } from '../types';
+import {
+  jumpCrossed,
+  planSet,
+  plannerTrackFacts,
+  planStateAt,
+  trackEffectiveBpm,
+  type PlanInput,
+} from './planner';
 
 /** Track facts shorthand: id → { durationSec, bpm, hotCue1Sec }. */
 function input(over: Partial<PlanInput> = {}): PlanInput {
@@ -916,5 +924,71 @@ describe('grace fade (planner transform)', () => {
     expect(plan.warnings.some((w) => w.kind === 'grace-fade' || w.kind === 'grace-floor')).toBe(
       false
     );
+  });
+});
+
+describe('BPM authority (bpm-authority bugfix, ADR 0016)', () => {
+  // The Kambi→Raskal incident (2026-07-05): Raskal's bpm column is a stale
+  // half-time projection (87) of its 174 grid. The Transition editor plays
+  // grid-first; the plan must assemble the same authority chain or ladder
+  // mapping and Conductor playback run ~2× off the editor.
+  const mkTrack = (id: number, over: Partial<Track>): Track => ({
+    id,
+    filename: `/tracks/${id}.mp3`,
+    created_at: '2026-01-01',
+    updated_at: '2026-01-01',
+    tags: [],
+    ...over,
+  });
+  const kambi = mkTrack(511, { bpm: 172, bpm_effective: 172, duration_secs: 300 });
+  const raskal = mkTrack(512, { bpm: 87, bpm_effective: 174, duration_secs: 300 });
+
+  it('trackEffectiveBpm prefers the grid projection over the bpm column', () => {
+    expect(trackEffectiveBpm(raskal)).toBe(174);
+    expect(trackEffectiveBpm(kambi)).toBe(172);
+    expect(trackEffectiveBpm(mkTrack(1, { bpm: 128 }))).toBe(128); // no grid
+    expect(trackEffectiveBpm(mkTrack(2, {}))).toBeNull();
+  });
+
+  it('plans a half-time-stale pair at the grid rate, matching the editor', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 511, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 512, pin: null },
+        ],
+        tracks: {
+          511: plannerTrackFacts(kambi, null),
+          512: plannerTrackFacts(raskal, null),
+        },
+        transitionsByUuid: { t1: tr({ startSec: 68.1, bInSec: 20.1, tempoMatch: true }) },
+        tempo: { policy: 'riding', returnSecPerPercent: 0 },
+      })
+    );
+    const [adj] = plan.adjacencies;
+    // Editor rate: 172/174 ≈ −1.1% — NOT the bpm-column ~+98% (172/87).
+    expect(adj.rateIncoming).toBeCloseTo(172 / 174, 5);
+    expect(adj.pitchIncomingPercent).toBeCloseTo((172 / 174 - 1) * 100, 3);
+    expect(adj.pitchIncomingPercent).toBeGreaterThan(-2);
+    expect(adj.pitchIncomingPercent).toBeLessThan(0);
+  });
+
+  it('defaults the Fixed Set tempo from the first track\'s grid BPM', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 512, pin: null },
+          { trackId: 511, pin: null },
+        ],
+        tracks: {
+          512: plannerTrackFacts(raskal, null),
+          511: plannerTrackFacts(kambi, null),
+        },
+        tempo: { policy: 'fixed', setTempoBpm: null },
+      })
+    );
+    // Set tempo defaults to Raskal's effective 174 → Kambi pitches to it.
+    expect(plan.entries[0].rate).toBeCloseTo(1);
+    expect(plan.entries[1].rate).toBeCloseTo(174 / 172, 5);
   });
 });
