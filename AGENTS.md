@@ -10,7 +10,7 @@ this project does NOT prefer pastel colors as per my global theme, instead prefe
 
 ### Issue tracker
 
-Issues and PRDs are local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are markdown files in the tracker repo at `/Users/murtaza/manadj/.scratch/<feature>/` — outside the main repo, shared live across all lanes, its own jj repo. Write via `uv run scripts/agent/tracker.py new|comment|flip` (validating path). See `docs/agents/issue-tracker.md`.
 
 ### Version control
 

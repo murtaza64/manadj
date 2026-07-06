@@ -199,8 +199,9 @@ is untracked: writing it is exempt from the default workspace's read-only rule.
 
 The files multiple lanes touch, and how to touch them:
 
-- **Tracker (`.scratch/`)**: append-only across lanes — comments under
-  `## Comments`; status-line edits only on issues your lane owns.
+- **Tracker**: lives outside the repo (`/Users/murtaza/manadj/.scratch`, its own jj
+  repo — see issue-tracker.md): flips only on issues your lane owns, comments
+  append-only via `tracker.py`, every write commits.
 - **Docs (`CONTEXT.md`, `docs/`)**: ride a dedicated change at the base of the
   lane (`<feature>: grill (docs)`), so integrators can move them independently.
   Glossary additions union cleanly.
@@ -256,8 +257,8 @@ built under the prototype skill's constraints) **never land on `main`**:
 Rule of thumb: **if it needs history, it's tracked and lands via trunk; if it
 needs real-time visibility and no history, it lives in `.lanes/`.**
 
-- **Docs fast-path**: a change touching only docs/tracker files (`.scratch/`,
-  `docs/`, `CONTEXT.md`, `AGENTS.md`) may land on `main` immediately with a
+- **Docs fast-path**: a change touching only docs files (`docs/`,
+  `CONTEXT.md`, `AGENTS.md`) may land on `main` immediately with a
   reduced gate (nothing to build or test — sanity-read the diff). Any lane may
   do this for cross-lane-relevant updates: triage, status flips, PRDs, filed
   issues, convention changes. Change-specific Done comments keep riding their

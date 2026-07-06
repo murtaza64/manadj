@@ -1,9 +1,0 @@
-# Hand-verified ground truth overrides (promotes disputed corpus entries to gold).
-# One table per track filename (full path, as in tracks.filename).
-# `key` accepts any notation (OpenKey "2m", Camelot "8A", "F Minor").
-# `bpm` is a float. Either field may be omitted.
-#
-# Example:
-# ["/Users/murtaza/Music/tracks/example.mp3"]
-# key = "8A"
-# bpm = 174.0

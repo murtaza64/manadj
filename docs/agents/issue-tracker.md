@@ -43,3 +43,14 @@ File like Takes, promote like Transitions: filing is cheap capture, `ready-for-a
 ## PRD user stories: default actor
 
 The actor defaults to the DJ and is omitted ("Loop N beats from where I am, so I can hold a section"); name the actor only when it differs ("As the developer tuning detection…"). Benefit clauses stay — they carry spec weight.
+
+## Location and write path (tracker exodus, 2026-07-06)
+
+The tracker lives at `/Users/murtaza/manadj/.scratch/` — outside the main repo, one shared live copy for all lanes, versioned as its own jj repo (git-backed `jj git init`; jj 0.43 has no bare init — the git backend is an implementation detail, interact via jj only). Paths in skills/issues stay `<feature>/issues/NN-…` relative to the tracker root.
+
+Write via `uv run scripts/agent/tracker.py`:
+- `new <feature>/issues/NN-slug.md` (body on stdin; refuses existing paths — numbering races surface here)
+- `comment <path> "text"` (O_APPEND under `## Comments`)
+- `flip <path> "<status>"` (validates against triage vocabulary; done-notes allowed)
+
+Every subcommand commits to the tracker repo with session attribution. Raw edits remain possible; own-file flips and append-only comments stay the law. Rationale + rejected SQLite alternative and its escalation trigger: ADR 0026 amendment.
