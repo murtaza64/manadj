@@ -108,12 +108,14 @@ export interface BeatgridData {
   downbeat_times: number[];
 }
 
+/** A computed placeholder (ADR 0027 §3 — gridless tracks project the bpm
+ * column on the fly, no row) has id/created_at/updated_at = null. */
 export interface BeatgridResponse {
-  id: number;
+  id: number | null;
   track_id: number;
   data: BeatgridData;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface TrackEntry {

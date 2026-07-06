@@ -30,22 +30,28 @@ def get_beatgrid(track_id: int, db: Session = Depends(get_db)):
     """
     Get beatgrid data for a track.
 
-    If beatgrid doesn't exist, generates it from track BPM.
-    Requires waveform to exist (for duration).
+    Gridless tracks get a computed placeholder (ADR 0027 §3): a grid-shaped
+    view of the bpm column, origin "generated", never persisted — grid rows
+    come into existence only via deliberate gestures (grid edit, import,
+    re-tempo). Requires waveform to exist (for duration).
     """
-    # Check if beatgrid exists
     beatgrid = crud.get_beatgrid(db, track_id)
+    if beatgrid:
+        return _format_beatgrid_response(beatgrid, db)
 
-    if not beatgrid:
-        # Generate from track BPM
-        try:
-            beatgrid = crud.create_beatgrid_from_track_bpm(db, track_id)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to generate beatgrid: {str(e)}")
-
-    return _format_beatgrid_response(beatgrid, db)
+    try:
+        data = crud.compute_placeholder_beatgrid_data(db, track_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "id": None,
+        "track_id": track_id,
+        "data": data,
+        "origin": "generated",
+        "anchor_time": None,
+        "created_at": None,
+        "updated_at": None,
+    }
 
 
 def _format_beatgrid_response(beatgrid, db: Session):

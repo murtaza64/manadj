@@ -620,10 +620,11 @@ def get_beatgrid(db: Session, track_id: int):
     ).first()
 
 
-def create_beatgrid_from_track_bpm(db: Session, track_id: int):
-    """
-    Generate beatgrid from track's BPM value.
-    Requires waveform to exist (for duration).
+def compute_placeholder_beatgrid_data(db: Session, track_id: int) -> dict:
+    """Placeholder beatgrid data as a pure projection of the bpm column
+    (ADR 0027 §3) — computed, never persisted. Requires the waveform (for
+    duration). Raises ValueError when the track, its BPM, or the waveform
+    is missing.
     """
     track = get_track(db, track_id)
     if not track:
@@ -636,7 +637,17 @@ def create_beatgrid_from_track_bpm(db: Session, track_id: int):
     if not waveform:
         raise ValueError("Waveform must exist before generating beatgrid")
 
-    beatgrid_data = generate_beatgrid_from_bpm(centibpm_to_bpm(track.bpm), waveform.duration)
+    return generate_beatgrid_from_bpm(centibpm_to_bpm(track.bpm), waveform.duration)
+
+
+def create_beatgrid_from_track_bpm(db: Session, track_id: int):
+    """
+    Generate AND PERSIST a beatgrid row from the track's BPM value.
+
+    Reads never call this (ADR 0027 §3): rows come into existence only via
+    deliberate gestures — the nudge auto-create is the caller.
+    """
+    beatgrid_data = compute_placeholder_beatgrid_data(db, track_id)
 
     db_beatgrid = models.Beatgrid(
         track_id=track_id,

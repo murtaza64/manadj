@@ -53,21 +53,27 @@ def get_origin(db: Session, track_id: int) -> str:
     return db.query(Beatgrid).filter(Beatgrid.track_id == track_id).one().origin
 
 
-def test_lazy_get_creates_generated_placeholder(client, db, make_track, make_waveform):
+def row_count(db: Session, track_id: int) -> int:
+    return db.query(Beatgrid).filter(Beatgrid.track_id == track_id).count()
+
+
+def test_get_serves_generated_placeholder_without_a_row(
+    client, db, make_track, make_waveform
+):
+    """ADR 0027 §3: reads never persist placeholders — the payload is a
+    computed projection of the bpm column."""
     track = make_track(bpm=12800)
     make_waveform(track.id)
 
     response = client.get(f"/api/beatgrids/{track.id}")
     assert response.status_code == 200
     assert response.json()["origin"] == "generated"
-    assert get_origin(db, track.id) == "generated"
+    assert row_count(db, track.id) == 0
 
 
 def test_set_downbeat_flips_to_edited(client, db, make_track, make_waveform):
     track = make_track(bpm=12800)
     make_waveform(track.id)
-    client.get(f"/api/beatgrids/{track.id}")  # create placeholder
-
     response = client.post(f"/api/beatgrids/{track.id}/set-downbeat", json={"downbeat_time": 0.5})
     assert response.status_code == 200
     assert response.json()["origin"] == "edited"
@@ -77,23 +83,22 @@ def test_set_downbeat_flips_to_edited(client, db, make_track, make_waveform):
 def test_nudge_flips_to_edited(client, db, make_track, make_waveform):
     track = make_track(bpm=12800)
     make_waveform(track.id)
-    client.get(f"/api/beatgrids/{track.id}")
 
     response = client.post(f"/api/beatgrids/{track.id}/nudge", json={"offset_ms": 10.0})
     assert response.status_code == 200
     assert response.json()["origin"] == "edited"
 
 
-def test_delete_and_regenerate_yields_generated(client, db, make_track, make_waveform):
+def test_delete_falls_back_to_computed_placeholder(client, db, make_track, make_waveform):
     track = make_track(bpm=12800)
     make_waveform(track.id)
-    client.get(f"/api/beatgrids/{track.id}")
     client.post(f"/api/beatgrids/{track.id}/set-downbeat", json={"downbeat_time": 0.5})
     assert get_origin(db, track.id) == "edited"
 
     client.delete(f"/api/beatgrids/{track.id}")
-    client.get(f"/api/beatgrids/{track.id}")
-    assert get_origin(db, track.id) == "generated"
+    response = client.get(f"/api/beatgrids/{track.id}")
+    assert response.json()["origin"] == "generated"
+    assert row_count(db, track.id) == 0  # projection, not a regenerated row
 
 
 def test_migration_backfills_origin_via_heuristic():

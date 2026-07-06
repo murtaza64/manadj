@@ -162,6 +162,45 @@ class TestBackfill:
         assert backfill_bpm_from_grids(db_session) == 0
 
 
+class TestPlaceholderRowCleanup:
+    """Data cleanup (ADR 0027 §3): persisted `generated` rows that are pure
+    derivations of the column get deleted; diverged ones are kept for hand
+    reconciliation."""
+
+    def test_pure_derivation_row_deleted(self, db_session, make_track):
+        from backend.beatgrid_ops import cleanup_placeholder_rows
+
+        track = make_track(bpm=12800, duration_secs=240.0)
+        make_grid(db_session, track.id, [tc(0.0, 128.0)], origin="generated")
+
+        deleted, kept = cleanup_placeholder_rows(db_session)
+        db_session.commit()
+        assert deleted == 1
+        assert kept == []
+        assert db_session.query(Beatgrid).count() == 0
+
+    def test_diverged_placeholder_kept_and_reported(self, db_session, make_track):
+        from backend.beatgrid_ops import cleanup_placeholder_rows
+
+        track = make_track(bpm=12800, duration_secs=240.0)
+        make_grid(db_session, track.id, [tc(0.0, 174.0)], origin="generated")
+
+        deleted, kept = cleanup_placeholder_rows(db_session)
+        assert deleted == 0
+        assert kept == [track.id]
+        assert db_session.query(Beatgrid).count() == 1
+
+    def test_real_grids_untouched(self, db_session, make_track):
+        from backend.beatgrid_ops import cleanup_placeholder_rows
+
+        track = make_track(bpm=8700, duration_secs=240.0)
+        make_grid(db_session, track.id, [tc(0.0, 174.0)], origin="edited")
+
+        deleted, kept = cleanup_placeholder_rows(db_session)
+        assert (deleted, kept) == (0, [])
+        assert db_session.query(Beatgrid).count() == 1
+
+
 def test_list_endpoint_serves_grid_first_bpm(client, db_session, make_track):
     with_grid = make_track(bpm=8700, duration_secs=240.0)
     without = make_track(bpm=12800)

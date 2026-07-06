@@ -183,15 +183,19 @@ class BeatgridData(BaseModel):
 
 
 class BeatgridResponse(BaseModel):
-    """Full beatgrid API response."""
-    id: int
+    """Full beatgrid API response.
+
+    A computed placeholder (ADR 0027 §3: gridless tracks project the bpm
+    column on the fly, no row) has id/created_at/updated_at = None.
+    """
+    id: int | None = None
     track_id: int
     data: BeatgridData
     origin: str  # "generated" (placeholder), "edited", or "imported"
     # User-marked downbeat (seconds, ADR 0016); None = no mark
     anchor_time: float | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

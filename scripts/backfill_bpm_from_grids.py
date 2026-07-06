@@ -19,7 +19,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.beatgrid_ops import backfill_bpm_from_grids  # noqa: E402
+from backend.beatgrid_ops import (  # noqa: E402
+    backfill_bpm_from_grids,
+    cleanup_placeholder_rows,
+)
 from backend.database import SessionLocal  # noqa: E402
 
 
@@ -30,12 +33,17 @@ def main() -> None:
     db = SessionLocal()
     try:
         changed = backfill_bpm_from_grids(db)
+        deleted, kept = cleanup_placeholder_rows(db)
+        if kept:
+            print(f"kept {len(kept)} diverged placeholder rows (reconcile the "
+                  f"column by hand, then re-run): tracks {kept}")
         if args.apply:
             db.commit()
-            print(f"reconciled {changed} tracks")
+            print(f"reconciled {changed} tracks; deleted {deleted} pure-derivation placeholder rows")
         else:
             db.rollback()
-            print(f"would reconcile {changed} tracks (dry run; use --apply)")
+            print(f"would reconcile {changed} tracks and delete {deleted} "
+                  "pure-derivation placeholder rows (dry run; use --apply)")
     finally:
         db.close()
 

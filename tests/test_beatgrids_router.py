@@ -263,6 +263,52 @@ def test_nudge_clamps_at_track_start_and_moves_anchor_by_the_applied_offset(
     assert grid["anchor_time"] == pytest.approx(-0.1)
 
 
+class TestPlaceholderProjection:
+    """Placeholders are computed projections, never persisted by reads
+    (ADR 0027 §3)."""
+
+    def test_get_on_gridless_track_persists_no_row(
+        self, client, make_track, make_waveform, db_session
+    ):
+        track = make_track(bpm=12800)
+        make_waveform(track.id)
+
+        grid = get_grid(client, track.id)
+        assert grid["origin"] == "generated"
+        assert grid["id"] is None  # not a row — a view of the column
+        assert grid["anchor_time"] is None
+        assert grid["data"]["tempo_changes"] == [tc(0.0, 128.0)]
+        assert grid["data"]["beat_times"]  # expanded against the waveform
+        assert db_session.query(Beatgrid).count() == 0
+
+    def test_placeholder_tracks_the_column_with_no_row_to_freeze(
+        self, client, make_track, make_waveform, db_session
+    ):
+        """The stale-frozen-placeholder failure mode is unrepresentable:
+        a BPM edit moves the column, and the next GET projects the new
+        value — there is no second copy."""
+        track = make_track(bpm=12800)
+        make_waveform(track.id)
+        assert get_grid(client, track.id)["data"]["tempo_changes"] == [tc(0.0, 128.0)]
+
+        assert patch_bpm(client, track.id, 140.0).status_code == 200
+        assert get_grid(client, track.id)["data"]["tempo_changes"] == [tc(0.0, 140.0)]
+        assert db_session.query(Beatgrid).count() == 0
+
+    def test_nudge_on_gridless_creates_and_promotes_exactly_one_row(
+        self, client, make_track, make_waveform, db_session
+    ):
+        track = make_track(bpm=12800)
+        make_waveform(track.id)
+
+        grid = nudge(client, track.id, 50.0)
+        rows = db_session.query(Beatgrid).filter_by(track_id=track.id).all()
+        assert len(rows) == 1
+        assert rows[0].origin == "edited"  # deliberate gesture promotes
+        assert grid["id"] == rows[0].id
+        assert grid["data"]["tempo_changes"][0]["start_time"] == pytest.approx(0.05)
+
+
 def test_bpm_edit_without_grid_is_a_plain_metadata_write(client, make_track, db_session):
     track = make_track(bpm=12800)  # no waveform, no grid
 
