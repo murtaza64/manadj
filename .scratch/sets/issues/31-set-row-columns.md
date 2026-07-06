@@ -90,6 +90,15 @@ Implemented 2026-07-06 (setui lane, jj change `zqqlwplx` — `sets: 31-set-row-c
   reading it off the plan — the planner doesn't export its resolved tempo,
   and planner.ts is contested (setlist lane, 24) so it wasn't touched.
 
+Review iteration 2026-07-06 (amended into `zqqlwplx`; descendants rebased
+clean): (1) key column narrowed 36→28px ("12m" is the widest value);
+(2) "in" moved LEFT beside the play-order index — # · in read together
+as the running order against the mix clock; (3) energy column added
+(the library's EnergySquare, key→BPM→energy order as in the track
+table; blank when unrated). Row now reads
+▶ · # · in · key · BPM · energy · title/artist · … · play · ✕.
+TITLE_X 189→283; adjacency chips follow via the shared constants.
+
 ## Verification walkthrough (ready-for-human)
 
 Lane app on setui (ports +140): open http://localhost:5313 (or
