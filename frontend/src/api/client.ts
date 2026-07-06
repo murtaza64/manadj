@@ -3,6 +3,7 @@ import type {
   DetectorParams as CaptureDetectorParams,
 } from '../capture/events';
 import type {
+  HotCue,
   Playlist,
   Track,
   PlaylistTrackAdd,
@@ -340,6 +341,17 @@ export const api = {
   hotcues: {
     get: async (trackId: number) => {
       const response = await fetch(`${API_BASE}/hotcues/${trackId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch hot cues: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    /** Hot cues for many tracks in one request, keyed by track id —
+     * every id is present (empty list = no cues). Set open fetches the
+     * whole set's cues through this (issue 43: N GETs → 1). */
+    getBulk: async (trackIds: number[]): Promise<Record<number, HotCue[]>> => {
+      const response = await fetch(`${API_BASE}/hotcues/bulk?track_ids=${trackIds.join(',')}`);
       if (!response.ok) {
         throw new Error(`Failed to fetch hot cues: ${response.statusText}`);
       }

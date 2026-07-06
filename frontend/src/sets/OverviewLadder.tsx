@@ -17,7 +17,7 @@
  * ~78% of the viewport; a seek discontinuity centers instead). Manual
  * pan disengages follow; zoom never does.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
@@ -48,6 +48,9 @@ const SEEK_JUMP_S = 2;
 /** Scroll events within this window of a programmatic scrollTo are ours,
  * not the user's (smooth scrolling animates through many events). */
 const AUTO_SCROLL_WINDOW_MS = 700;
+/** Shared empty-cues identity — a fresh [] per render would defeat the
+ * LadderClip memo (issue 43). */
+const EMPTY_CUES: HotCue[] = [];
 
 // ── Clip-draw scheduler ────────────────────────────────────────────────
 // Opening a Set mounts 20-40 clip canvases whose effects all want to
@@ -102,7 +105,11 @@ interface OverviewLadderProps {
   previewFutures?: (AdjacencyFuture | null)[];
 }
 
-export function OverviewLadder({
+/** Memoized (issue 43): the ladder subtree is ~90 positioned divs plus a
+ * canvas per entry — it must not re-render on unrelated pane commits
+ * (query resolutions, selection). All props are identity-stable at the
+ * call site: plan/tracks/cue-map from stable queries, onSeek ref-backed. */
+export const OverviewLadder = memo(function OverviewLadder({
   setId,
   plan,
   tracks,
@@ -342,7 +349,7 @@ export function OverviewLadder({
               entry={entry}
               position={i + 1}
               track={tracks.get(entry.trackId)}
-              hotCues={hotCuesByTrack.get(entry.trackId) ?? []}
+              hotCues={hotCuesByTrack.get(entry.trackId) ?? EMPTY_CUES}
               total={total}
               redrawKey={settledZoom}
             />
@@ -445,7 +452,7 @@ export function OverviewLadder({
       )}
     </div>
   );
-}
+});
 
 function AdjacencyBand({
   adj,
@@ -539,7 +546,11 @@ function AdjacencyBand({
   );
 }
 
-function LadderClip({
+/** Memoized (issue 43): a big set mounts ~90 of these; without the memo
+ * every ladder render re-ran them all (528 clip renders per 88-track
+ * open). Props are stable plan/track slices; the blob arrives through
+ * the clip's own query subscription. */
+const LadderClip = memo(function LadderClip({
   entry,
   position,
   track,
@@ -556,7 +567,6 @@ function LadderClip({
   /** Bumps when the canvas backing store should re-render (zoom settle). */
   redrawKey: number;
 }) {
-  const { data } = useWaveformBlob(entry.trackId);
   const isA = entry.deck === 'A';
   const title = track ? (track.title ?? track.filename) : `Track ${entry.trackId}`;
   const cues = hotCues.map((c) => ({
@@ -581,7 +591,7 @@ function LadderClip({
     >
       {isA && <ClipTitle position={position} title={title} color={DECK_COLORS.A} />}
       <LadderWave
-        wave={data ?? null}
+        trackId={entry.trackId}
         height={LANE_H - TITLE_H - 2}
         range={[entry.entrySec, entry.exitSec]}
         cues={cues}
@@ -591,7 +601,7 @@ function LadderClip({
       {!isA && <ClipTitle position={position} title={title} color={DECK_COLORS.B} />}
     </div>
   );
-}
+});
 
 function ClipTitle({
   position,
@@ -637,14 +647,18 @@ function ClipTitle({
  * flag — with the flag on the OUTER (title-side) edge, keeping the center
  * line clean. */
 function LadderWave({
-  wave,
+  trackId,
   height,
   range,
   cues,
   dir,
   redrawKey,
 }: {
-  wave: DecodedWaveform | null;
+  /** The blob is fetched HERE, not passed down (issue 43): a decoded
+   * waveform in props is deep-walked — typed arrays and all — by React's
+   * dev-build props diff on every arrival, seconds per set open. Hook
+   * state is never serialized. */
+  trackId: number;
   height: number;
   /** Track-time span this clip plays. */
   range: [number, number];
@@ -652,6 +666,8 @@ function LadderWave({
   dir: 'up' | 'down';
   redrawKey: number;
 }) {
+  const { data } = useWaveformBlob(trackId);
+  const wave: DecodedWaveform | null = data ?? null;
   const ref = useRef<HTMLCanvasElement>(null);
   const cueKey = cues.map((c) => `${c.t}:${c.color}`).join('|');
   const slot = useStyleSlot('minimap');

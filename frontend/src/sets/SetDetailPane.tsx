@@ -14,13 +14,13 @@
  * only; the manual pin picker also lists the pair's Takes (ADR 0023).
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type SetRowWire, type TakeRowWire } from '../api/client';
 import { useDecks, type DeckContextValue } from '../hooks/useDeck';
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import { useMixer } from '../hooks/useMixer';
 import { DECK_COLORS } from '../theme/deckColors';
-import type { HotCue, Track } from '../types';
+import type { Track } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import {
   applyReorder,
@@ -129,7 +129,7 @@ import {
   type DeckOccupancyMap,
 } from './rowMarks';
 import { prefetchTrackBuffer } from './prefetch';
-import { hotCue1Sec, useSetPlan } from './useSetPlan';
+import { hotCue1Sec, useSetHotCues, useSetPlan } from './useSetPlan';
 import { useSetSettings } from './setSettings';
 import {
   addTracksToSet,
@@ -401,19 +401,10 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     });
   }, [displayEntries, trackMap, set?.tempo_policy, set?.set_tempo_bpm]);
 
-  // Real hot cues for the ladder clips (same cache keys as useHotCues).
-  const hotCueQueries = useQueries({
-    queries: trackIds.map((id) => ({
-      queryKey: ['hotcues', id],
-      queryFn: () => api.hotcues.get(id),
-      staleTime: 0,
-    })),
-  });
-  const hotCuesByTrack = new Map<number, HotCue[]>();
-  trackIds.forEach((id, i) => {
-    const cues = hotCueQueries[i]?.data;
-    if (cues) hotCuesByTrack.set(id, cues);
-  });
+  // Real hot cues for the ladder clips — the same bulk query useSetPlan
+  // rides (issue 43: one GET + one resolution for the whole set, and a
+  // stable Map identity so the memoized ladder doesn't re-render).
+  const { byTrack: hotCuesByTrack } = useSetHotCues(trackIds);
 
   // ── Conductor (sets 04): play the Set through the shared Decks/Mixer ─
   const mixer = useMixer();

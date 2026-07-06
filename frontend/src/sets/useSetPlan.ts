@@ -17,7 +17,7 @@
  * projection, deliberately without a refresh button.
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { VectorizeInput } from '../capture/vectorize';
 import type { Transition } from '../editor/mixModel';
@@ -34,6 +34,38 @@ import { resolvePlanPins } from './adjacency';
  * hard-cut entry anchor and the practice affordance both read it). */
 export function hotCue1Sec(cues: HotCue[] | undefined): number | null {
   return cues?.find((c) => c.slot_number === 1)?.time_seconds ?? null;
+}
+
+const EMPTY_CUE_MAP = new Map<number, HotCue[]>();
+
+/**
+ * The whole set's hot cues in ONE request (issue 43): a set open used to
+ * fan out N per-track GETs from three mounts (the pane + two useSetPlan
+ * instances) — hundreds of staggered resolutions, each a render. One
+ * bulk query, shared by key across all three, collapses that to a single
+ * resolution. Cue mutations invalidate the `['hotcues']` prefix (see
+ * useHotCues), which reaches this key too — moving a cue still recomputes
+ * the plan with no reload.
+ */
+export function useSetHotCues(trackIds: number[]): {
+  /** Cues per track — always a Map (empty while loading). */
+  byTrack: Map<number, HotCue[]>;
+  isLoading: boolean;
+} {
+  const idsKey = [...new Set(trackIds)].sort((a, b) => a - b).join(',');
+  const { data, isLoading } = useQuery({
+    queryKey: ['hotcues', 'bulk', idsKey],
+    enabled: idsKey.length > 0,
+    staleTime: 0,
+    queryFn: () => api.hotcues.getBulk(idsKey.split(',').map(Number)),
+  });
+  const byTrack = useMemo(() => {
+    if (!data) return EMPTY_CUE_MAP;
+    return new Map<number, HotCue[]>(
+      Object.entries(data).map(([id, cues]) => [Number(id), cues])
+    );
+  }, [data]);
+  return { byTrack, isLoading: idsKey.length > 0 && isLoading };
 }
 import {
   planSet,
@@ -101,20 +133,14 @@ export function useSetPlanParts(
   });
   const takesLoading = takeQueries.some((q) => q.isLoading);
 
-  // Hot Cue 1 per track — the hard-cut entry anchor (sets 19). Same cache
-  // keys as useHotCues/SetDetailPane, so cue edits invalidate the plan.
+  // Hot Cue 1 per track — the hard-cut entry anchor (sets 19). One bulk
+  // query for the whole set (issue 43); cue mutations invalidate the
+  // ['hotcues'] prefix, so cue edits still invalidate the plan.
   const planTrackIds = [...new Set((entries ?? []).map((e) => e.trackId))];
-  const hotCueQueries = useQueries({
-    queries: planTrackIds.map((id) => ({
-      queryKey: ['hotcues', id],
-      queryFn: () => api.hotcues.get(id),
-      staleTime: 0,
-    })),
-  });
-  const hotCuesLoading = hotCueQueries.some((q) => q.isLoading);
+  const { byTrack: cuesByTrack, isLoading: hotCuesLoading } = useSetHotCues(planTrackIds);
   const hotCue1ByTrack = new Map<number, number>();
-  planTrackIds.forEach((id, i) => {
-    const sec = hotCue1Sec(hotCueQueries[i]?.data as HotCue[] | undefined);
+  planTrackIds.forEach((id) => {
+    const sec = hotCue1Sec(cuesByTrack.get(id));
     if (sec !== null) hotCue1ByTrack.set(id, sec);
   });
   const hotCue1Signature = planTrackIds

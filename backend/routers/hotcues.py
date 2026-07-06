@@ -1,12 +1,33 @@
 """API routes for hot cues."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import Dict, List
 from .. import crud, schemas
 from ..database import get_db
 
 router = APIRouter()
+
+
+# Declared before /{track_id} so "bulk" never parses as a track id.
+@router.get("/bulk", response_model=Dict[int, List[schemas.HotCue]])
+def get_hotcues_bulk(
+    track_ids: str = Query(..., description="Comma-separated track ids"),
+    db: Session = Depends(get_db),
+):
+    """Hot cues for many tracks in one request, keyed by track id.
+
+    Tracks without cues are present with an empty list, so the client can
+    distinguish "no cues" from "not asked". (Set open: issue 43.)
+    """
+    try:
+        ids = [int(part) for part in track_ids.split(",") if part.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="track_ids must be comma-separated integers")
+    result: Dict[int, List[schemas.HotCue]] = {tid: [] for tid in ids}
+    for cue in crud.get_hotcues_bulk(db, ids):
+        result[cue.track_id].append(schemas.HotCue.model_validate(cue))
+    return result
 
 
 @router.get("/{track_id}", response_model=List[schemas.HotCue])

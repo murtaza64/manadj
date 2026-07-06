@@ -794,6 +794,14 @@ def get_hotcues(db: Session, track_id: int):
     ).order_by(models.HotCue.slot_number).all()
 
 
+def get_hotcues_bulk(db: Session, track_ids: list[int]):
+    """Hot cues for many tracks in one query (set open fetches per-track
+    cues for every entry; issue 43 collapsed N GETs into this)."""
+    return db.query(models.HotCue).filter(
+        models.HotCue.track_id.in_(track_ids)
+    ).order_by(models.HotCue.track_id, models.HotCue.slot_number).all()
+
+
 def set_hotcue(
     db: Session,
     track_id: int,

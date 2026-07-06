@@ -80,9 +80,11 @@ export function useSetHotCue() {
         queryClient.setQueryData(['hotcues', variables.trackId], context.previousHotCues);
       }
     },
-    onSettled: (_, __, variables) => {
-      // Refetch to get server state
-      queryClient.invalidateQueries({ queryKey: ['hotcues', variables.trackId] });
+    onSettled: () => {
+      // Refetch to get server state. Prefix-wide on purpose (issue 43):
+      // the set views read cues through the ['hotcues', 'bulk', ids]
+      // query, which per-id invalidation would miss.
+      queryClient.invalidateQueries({ queryKey: ['hotcues'] });
     },
   });
 }
@@ -119,9 +121,9 @@ export function useDeleteHotCue() {
         queryClient.setQueryData(['hotcues', variables.trackId], context.previousHotCues);
       }
     },
-    onSettled: (_, __, variables) => {
-      // Refetch to get server state
-      queryClient.invalidateQueries({ queryKey: ['hotcues', variables.trackId] });
+    onSettled: () => {
+      // Refetch to get server state (prefix-wide — see useSetHotCue).
+      queryClient.invalidateQueries({ queryKey: ['hotcues'] });
     },
   });
 }

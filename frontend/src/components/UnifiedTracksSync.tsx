@@ -184,9 +184,10 @@ export function UnifiedTracksSync() {
     void queryClient.invalidateQueries({
       queryKey: trackId != null ? ['beatgrid', trackId] : ['beatgrid'],
     });
-    void queryClient.invalidateQueries({
-      queryKey: trackId != null ? ['hotcues', trackId] : ['hotcues'],
-    });
+    // Prefix-wide even for one track (issue 43): the set views read cues
+    // through the ['hotcues', 'bulk', ids] query, which per-id
+    // invalidation would miss.
+    void queryClient.invalidateQueries({ queryKey: ['hotcues'] });
     invalidateTrackCaches(trackId);
   };
   const done = (msg: string) => {
