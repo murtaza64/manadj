@@ -426,6 +426,25 @@ export class DeckEngine {
     this.dispatch({ type: 'loop-resize', change });
   }
 
+  /** LOOP pad preset (midi-performance-ops 02): no loop → engage at the
+   * playhead at `beats` (remembered as the pending size); same size →
+   * release; different size → set-length resize in place. Works without a
+   * loaded Track — the pending size is a Deck preference, like resize. */
+  loopPreset(beats: number): void {
+    if (!this.buffer) {
+      const [next] = reduceTransport(
+        this.transport,
+        { type: 'loop-preset', beats },
+        this.transportContext()
+      );
+      if (next === this.transport) return;
+      this.transport = next;
+      this.emit();
+      return;
+    }
+    this.dispatch({ type: 'loop-preset', beats });
+  }
+
   // ── Sound controls ─────────────────────────────────────────────────────
   // (EQ/filter/fader live on the Mixer's channel strip — ADR 0009. The deck
   // keeps only varispeed.)

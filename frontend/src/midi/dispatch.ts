@@ -119,6 +119,13 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       midiMixerControls()?.togglePfl(target.channel);
       return;
     }
+    case 'loop-preset': {
+      // Loops gesture class (ADR 0019, midi-performance-ops 02): dropped
+      // where the audible surface registers no loops (e.g. the editor).
+      if (edge !== 'down') return;
+      audibleLoops()?.loopPreset(target.deck, target.beats);
+      return;
+    }
     case 'load': {
       // Load policy is VIEW-owned (editor-midi 03, ADR 0019): the browse
       // surface registration carries the embedding view's policy. No

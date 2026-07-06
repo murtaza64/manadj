@@ -1,4 +1,4 @@
-import type { Binding, Mapping } from '../mapping';
+import type { Binding, LoopPadLamp, Mapping } from '../mapping';
 
 /** The shifted pad layer of a deck's HOTCUE mode: notes 0x08-0x0F. */
 function shiftedPadClears(deck: 'A' | 'B', channel: number): Binding[] {
@@ -7,6 +7,54 @@ function shiftedPadClears(deck: 'A' | 'B', channel: number): Binding[] {
     controlType: 'button' as const,
     target: { control: 'hot-cue-clear' as const, deck, pad: i + 1 },
   }));
+}
+
+/**
+ * LOOP pad mode preset ladders (midi-performance-ops 02): the base page
+ * walks 1–128 beats, the shifted page holds the stutter/dotted sizes —
+ * fractions ascending across the top row (pads 1–3), the dotted 3/4 alone
+ * on the bottom row (pad 5, review nit 2026-07-06). Entry points over the
+ * dyadic loop domain, not the domain (CONTEXT.md: Active loop). `null` =
+ * unbound pad — silent, dark. One source for both the bindings and the
+ * lamp addresses below.
+ */
+const LOOP_LADDER_BASE = [1, 2, 4, 8, 16, 32, 64, 128] as const;
+const LOOP_LADDER_SHIFTED = [0.125, 0.25, 0.5, null, 0.75, null, null, null] as const;
+const LOOP_PADS_BASE_FIRST_NOTE = 0x10;
+const LOOP_PADS_SHIFTED_FIRST_NOTE = 0x18;
+
+/** A deck's LOOP-mode pads: base page notes 0x10-0x17 / shifted page notes
+ * 0x18-0x1F on the deck's pad channel, per Mixxx's Inpulse 300 file.
+ * Unbound ladder slots (null) get no binding. */
+function loopPadBindings(deck: 'A' | 'B', channel: number): Binding[] {
+  const page = (ladder: readonly (number | null)[], firstNote: number): Binding[] =>
+    ladder.flatMap((beats, i) =>
+      beats === null
+        ? []
+        : [
+            {
+              match: { message: 'note' as const, channel, number: firstNote + i },
+              controlType: 'button' as const,
+              target: { control: 'loop-preset' as const, deck, beats },
+            },
+          ]
+    );
+  return [
+    ...page(LOOP_LADDER_BASE, LOOP_PADS_BASE_FIRST_NOTE),
+    ...page(LOOP_LADDER_SHIFTED, LOOP_PADS_SHIFTED_FIRST_NOTE),
+  ];
+}
+
+/** A deck's LOOP-mode pad lamps, addresses mirroring the bindings —
+ * unbound pads get no lamp and are never written. */
+function loopPadLamps(
+  channel: number,
+  firstNote: number,
+  ladder: readonly (number | null)[]
+): LoopPadLamp[] {
+  return ladder.flatMap((beats, i) =>
+    beats === null ? [] : [{ channel, number: firstNote + i, onVelocity: 0x7e, beats }]
+  );
 }
 
 /**
@@ -403,6 +451,16 @@ export const INPULSE_300_MK2: Mapping = {
     // 15 follow the layout — TODO(hardware-verify) at the next smoke test).
     ...shiftedPadClears('A', 6),
     ...shiftedPadClears('B', 7),
+
+    // LOOP pad mode (midi-performance-ops 02): size presets, engage/
+    // release/resize semantics live behind the loop-preset target. Pad
+    // modes are note-isolated on this device; per Mixxx's Inpulse 300 file
+    // the LOOP pads emit notes 0x10-0x17 (base) / 0x18-0x1F (shifted) on
+    // the same pad channels as HOTCUE mode.
+    // TODO(hardware-verify): inferred from Mixxx, not yet learned on the
+    // MK2 — smoke-test both pages at the next hands-on session.
+    ...loopPadBindings('A', 6),
+    ...loopPadBindings('B', 7),
   ],
 
   // LED Feedback addresses. Ground truth: Mixxx's Inpulse 300 mapping
@@ -414,9 +472,12 @@ export const INPULSE_300_MK2: Mapping = {
   // HOTCUE base-layer channel (status 0x96/0x97), velocity 0x7e lit; the
   // SHIFT-layer pads are the same channels at notes 0x08-0x0F (Mixxx maps
   // both layers to the same hotcue_N_status, so shifted lights mirror the
-  // base layer). Other pad modes are note-isolated and never written.
-  // The device does not dump LED state on connect (tested); full sync on
-  // connect is the app's job. TODO(hardware-verify): smoke-test on the MK2.
+  // base layer). LOOP-mode pad lamps echo their notes (0x10-0x17 base;
+  // shifted page 0x18-0x1A + 0x1C — midi-performance-ops 02); the unbound
+  // shifted pads (4, 6-8) are never written. Other pad modes are note-isolated and
+  // never written. The device does not dump LED state on connect (tested);
+  // full sync on connect is the app's job. TODO(hardware-verify):
+  // smoke-test on the MK2, including the LOOP pad lamp addresses.
   feedback: {
     decks: {
       A: {
@@ -433,6 +494,8 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x08 + i,
           onVelocity: 0x7e,
         })),
+        loopPads: loopPadLamps(6, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),
+        loopPadsShifted: loopPadLamps(6, LOOP_PADS_SHIFTED_FIRST_NOTE, LOOP_LADDER_SHIFTED),
       },
       B: {
         play: { channel: 2, number: 0x07, onVelocity: 0x7f },
@@ -448,6 +511,8 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x08 + i,
           onVelocity: 0x7e,
         })),
+        loopPads: loopPadLamps(7, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),
+        loopPadsShifted: loopPadLamps(7, LOOP_PADS_SHIFTED_FIRST_NOTE, LOOP_LADDER_SHIFTED),
       },
     },
   },

@@ -26,6 +26,7 @@ const idle = {
   atCuePoint: false,
   assignedPads: new Set<number>(),
   pfl: false,
+  loopBeats: null,
 };
 
 const lit = { pending: true, cueFlash: true };
@@ -100,6 +101,11 @@ describe('ledStates', () => {
     expect(ledStates({ ...idle, playing: true, pfl: true }).pfl).toBe(true);
     expect(ledStates({ ...idle, playing: true, pfl: false }).pfl).toBe(false);
   });
+
+  it('carries the active loop length through for the LOOP pad lamps', () => {
+    expect(ledStates({ ...idle, loopBeats: 4 }).loopBeats).toBe(4);
+    expect(ledStates(idle).loopBeats).toBeNull();
+  });
 });
 
 describe('audibleTransportOverride (editor-midi 05)', () => {
@@ -111,6 +117,7 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     atCuePoint: true,
     assignedPads: new Set([1, 4]),
     pfl: true,
+    loopBeats: 4,
   };
 
   it('PLAY follows the audible holder (both decks report the one mix transport)', () => {
@@ -134,6 +141,10 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     expect(states.pads[3]).toBe(true);
     expect(states.pads[1]).toBe(false);
     expect(states.pfl).toBe(true);
+  });
+
+  it('loop pad state passes through like the hot cue pads', () => {
+    expect(ledStates(audibleTransportOverride(busy, true)).loopBeats).toBe(4);
   });
 });
 
@@ -188,11 +199,51 @@ describe('encodeDeckLeds', () => {
     ]);
   });
 
+  it('lights exactly the LOOP pad whose preset equals the active length, per page', () => {
+    // 8 beats: base page pad 4 (note 0x13) lit, everything else dark.
+    const states = ledStates({ ...idle, loopBeats: 8 });
+    const messages = encodeDeckLeds(feedback, 'A', states);
+    expect(messages).toContainEqual([0x96, 0x13, 0x7e]);
+    expect(messages).toContainEqual([0x96, 0x10, 0x00]); // base pad 1 (1 beat) dark
+    expect(messages).toContainEqual([0x96, 0x18, 0x00]); // shifted pad 1 (1/8) dark
+    const messagesB = encodeDeckLeds(feedback, 'B', states);
+    expect(messagesB).toContainEqual([0x97, 0x13, 0x7e]); // deck B channel
+  });
+
+  it('lights the shifted-page pad for fractional presets (3/4 → shifted pad 5)', () => {
+    const states = ledStates({ ...idle, loopBeats: 0.75 });
+    const messages = encodeDeckLeds(feedback, 'A', states);
+    expect(messages).toContainEqual([0x96, 0x1c, 0x7e]); // shifted pad 5 lit
+    for (let note = 0x10; note <= 0x17; note++) {
+      expect(messages).toContainEqual([0x96, note, 0x00]); // whole base page dark
+    }
+  });
+
+  it('all LOOP pads are dark with no loop or an off-ladder length', () => {
+    const loopMessages = (states: ReturnType<typeof ledStates>) =>
+      encodeDeckLeds(feedback, 'A', states).filter(([, note]) => note >= 0x10 && note <= 0x1f);
+    for (const [, , velocity] of loopMessages(ledStates(idle))) {
+      expect(velocity).toBe(0x00);
+    }
+    // 3 beats is a legal dyadic length but on neither page's ladder.
+    for (const [, , velocity] of loopMessages(ledStates({ ...idle, loopBeats: 3 }))) {
+      expect(velocity).toBe(0x00);
+    }
+  });
+
+  it('never writes the unbound shifted LOOP pads (notes 0x1b, 0x1d-0x1f)', () => {
+    const messages = encodeDeckLeds(feedback, 'A', ledStates({ ...idle, loopBeats: 0.5 }));
+    for (const [, note] of messages) {
+      expect([0x1b, 0x1d, 0x1e, 0x1f].includes(note)).toBe(false);
+    }
+  });
+
   it('covers every light of the deck exactly once', () => {
     const messages = encodeDeckLeds(feedback, 'A', dark);
     const addresses = messages.map(([status, number]) => `${status}:${number}`);
     expect(new Set(addresses).size).toBe(addresses.length);
-    expect(addresses.length).toBeGreaterThanOrEqual(19); // PLAY + CUE + PFL + 2×8 pads
+    // PLAY + CUE + PFL + 2×8 hot cue pads + 8 + 4 LOOP pads
+    expect(addresses.length).toBeGreaterThanOrEqual(31);
   });
 });
 
@@ -239,5 +290,10 @@ describe('allOffMessages', () => {
     expect(messages).toContainEqual([0x97, 0x02, 0x00]);
     expect(messages).toContainEqual([0x96, 0x0d, 0x00]);
     expect(messages).toContainEqual([0x97, 0x0a, 0x00]);
+    // LOOP pads (both pages) are covered on both decks.
+    expect(messages).toContainEqual([0x96, 0x10, 0x00]);
+    expect(messages).toContainEqual([0x96, 0x1c, 0x00]);
+    expect(messages).toContainEqual([0x97, 0x17, 0x00]);
+    expect(messages).toContainEqual([0x97, 0x18, 0x00]);
   });
 });

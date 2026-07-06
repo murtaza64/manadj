@@ -75,7 +75,21 @@ export interface DeckFeedback {
    * while SHIFT is held (e.g. showing which slots SHIFT+pad can clear).
    */
   hotCuePadsShifted: readonly LedAddress[];
+  /**
+   * LOOP pad mode, base page (midi-performance-ops 02): each pad's light
+   * plus the preset size it stands for — lit iff the active loop's length
+   * equals `beats`, so off-ladder lengths (and no loop) show all dark.
+   */
+  loopPads: readonly LoopPadLamp[];
+  /**
+   * LOOP pad mode, shifted page. Only the BOUND pads appear (the Inpulse
+   * binds 1..4); unbound pads are never written and stay dark.
+   */
+  loopPadsShifted: readonly LoopPadLamp[];
 }
+
+/** A LOOP-mode pad light: its address plus the preset size it represents. */
+export type LoopPadLamp = LedAddress & { beats: number };
 
 /** Device knowledge for Feedback: every light the app writes, per deck. */
 export interface MappingFeedback {

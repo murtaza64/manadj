@@ -85,6 +85,10 @@ beforeEach(() => {
       touchTicks: (deck, ticks) => deckControlsFor(deck)?.jogTouchTicks(ticks),
       shiftRimTicks: (deck, ticks) => deckControlsFor(deck)?.jogSeekTicks(ticks),
     },
+    loops: {
+      toggleLoop: (deck) => calls.push(`shared:toggleLoop:${deck}`),
+      loopPreset: (deck, beats) => calls.push(`shared:loopPreset:${deck}:${beats}`),
+    },
     silence: () => undefined,
   });
   registerSurface('editor', {
@@ -325,6 +329,41 @@ describe('jumps route per audible surface (editor-midi 02)', () => {
       target: { control: 'beatjump-size', deck: 'A', change: 'double' },
     });
     expect(calls).toEqual(['A:beatjumpSize:double']);
+  });
+});
+
+describe('loops route per audible surface (midi-performance-ops 02)', () => {
+  const preset = (deck: ChannelId, beats: number, edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'loop-preset', deck, beats },
+  });
+
+  it('loop-preset routes to the audible loops handler with deck and size, down edge only', () => {
+    dispatchMidiAction(preset('A', 8, 'down'));
+    dispatchMidiAction(preset('B', 0.75, 'down'));
+    dispatchMidiAction(preset('A', 8, 'up'));
+    expect(calls).toEqual(['shared:loopPreset:A:8', 'shared:loopPreset:B:0.75']);
+  });
+
+  it('loop-toggle routes through the same loops section', () => {
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'loop-toggle', deck: 'B' },
+    });
+    expect(calls).toEqual(['shared:toggleLoop:B']);
+  });
+
+  it('editor claimed (no loops section): loop gestures drop', () => {
+    claimAudible('editor');
+    dispatchMidiAction(preset('A', 4, 'down'));
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'loop-toggle', deck: 'A' },
+    });
+    expect(calls).toEqual([]);
   });
 });
 

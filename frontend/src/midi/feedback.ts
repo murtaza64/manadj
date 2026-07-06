@@ -42,6 +42,13 @@ export interface DeckLedInput {
    * subscription like the on-screen PFL button.
    */
   pfl: boolean;
+  /**
+   * The active loop's length in beats, or null when no loop runs
+   * (midi-performance-ops 02) — drives the LOOP-mode pad lamps: the pad
+   * whose preset equals this lights, per page; off-ladder lengths match
+   * no pad and show all dark (the screen stays the truth).
+   */
+  loopBeats: number | null;
 }
 
 /** Desired on/off per light of one deck. */
@@ -52,6 +59,10 @@ export interface DeckLedStates {
   pfl: boolean;
   /** Pads 1..8 by index (index 0 = pad 1), HOTCUE base layer only. */
   pads: readonly boolean[];
+  /** Active loop length in beats or null — encodeDeckLeds lights the
+   * LOOP-mode pad whose mapped preset equals it (exact dyadic equality;
+   * lengths and presets are both exact binary fractions). */
+  loopBeats: number | null;
 }
 
 /** [status, data1, data2] — ready for MIDIOutput.send. */
@@ -100,6 +111,7 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
         (input.atCuePoint || phases.cueFlash)),
     pfl: input.pfl,
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
+    loopBeats: input.loopBeats,
   };
 }
 
@@ -133,7 +145,15 @@ function encodeLed(address: LedAddress, lit: boolean): MidiMessage {
 }
 
 function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
-  return [deck.play, deck.cue, deck.pfl, ...deck.hotCuePads, ...deck.hotCuePadsShifted];
+  return [
+    deck.play,
+    deck.cue,
+    deck.pfl,
+    ...deck.hotCuePads,
+    ...deck.hotCuePadsShifted,
+    ...deck.loopPads,
+    ...deck.loopPadsShifted,
+  ];
 }
 
 /** Desired light states for one deck → the full message set to send. */
@@ -152,6 +172,13 @@ export function encodeDeckLeds(
     // in Mixxx), so pads stay lit while SHIFT is held — no shift tracking.
     ...addresses.hotCuePadsShifted.map((address, i) =>
       encodeLed(address, states.pads[i] ?? false)
+    ),
+    // LOOP-mode pads (midi-performance-ops 02), both pages: lit iff the
+    // active loop's length equals the pad's preset — no loop or an
+    // off-ladder length lights nothing. Unbound shifted pads aren't in
+    // the mapping and are never written.
+    ...[...addresses.loopPads, ...addresses.loopPadsShifted].map((pad) =>
+      encodeLed(pad, states.loopBeats === pad.beats)
     ),
   ];
 }

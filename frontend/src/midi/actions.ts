@@ -32,7 +32,11 @@ export type ButtonTarget =
   | { control: 'match'; deck: ChannelId }
   | { control: 'load'; deck: ChannelId }
   /** PFL toggle (headphone-cue 02) — mixer-facing, hence `channel`. */
-  | { control: 'pfl'; channel: ChannelId };
+  | { control: 'pfl'; channel: ChannelId }
+  /** LOOP pad mode (midi-performance-ops 02) — loops gesture class. The
+   * target carries the pad's preset size in beats: no loop → engage at
+   * the playhead; same size → release; different size → resize in place. */
+  | { control: 'loop-preset'; deck: ChannelId; beats: number };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }

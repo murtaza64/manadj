@@ -52,6 +52,9 @@ function DeckFeedbackPublisher({
   const pendingPlay = useDeckSnapshot((s) => s.pendingPlay);
   const previewing = useDeckSnapshot((s) => s.previewing);
   const hasCuePoint = useDeckSnapshot((s) => s.cuePoint !== null);
+  // LOOP pad lamps (midi-performance-ops 02): the active loop's length,
+  // straight off the same snapshot the on-screen LOOP row renders.
+  const loopBeats = useDeckSnapshot((s) => s.loop?.lengthBeats ?? null);
   // The on-screen CUE button's own at-cue predicate; ledStates adds the
   // paused gate (tested at the seam).
   const atCuePoint = useAtCuePoint();
@@ -105,7 +108,16 @@ function DeckFeedbackPublisher({
 
   useEffect(() => {
     if (outputs.length === 0) return;
-    const input = { playing, pendingPlay, previewing, hasCuePoint, atCuePoint, assignedPads, pfl };
+    const input = {
+      playing,
+      pendingPlay,
+      previewing,
+      hasCuePoint,
+      atCuePoint,
+      assignedPads,
+      pfl,
+      loopBeats,
+    };
     const states = ledStates(
       holderPlaying === null ? input : audibleTransportOverride(input, holderPlaying),
       { pending: pendingPhase, cueFlash: cueFlashPhase }
@@ -125,6 +137,7 @@ function DeckFeedbackPublisher({
     atCuePoint,
     assignedPads,
     pfl,
+    loopBeats,
     holderPlaying,
     pendingPhase,
     cueFlashPhase,

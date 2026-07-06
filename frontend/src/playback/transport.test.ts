@@ -559,6 +559,77 @@ describe('loop-resize', () => {
   });
 });
 
+describe('loop-preset', () => {
+  const active = { start: 10, end: 12, lengthBeats: 4 }; // 0.5s/beat
+  const wideGrid = Array.from({ length: 60 }, (_, i) => i * 0.5);
+  const ctx: TransportContext = { quantize: true, beatTimes: wideGrid };
+
+  it('engages at the playhead at the preset size and remembers it as pending', () => {
+    const s = state({ playing: true, playhead: 10.2, pendingLoopBeats: 4 });
+    const [next, effects] = reduceTransport(s, { type: 'loop-preset', beats: 8 }, ctx);
+    // Quantize snaps the start to the nearest beat (10.0); 8 beats → 14.0.
+    expect(next.loop!.start).toBeCloseTo(10, 10);
+    expect(next.loop!.end).toBeCloseTo(14, 10);
+    expect(next.loop!.lengthBeats).toBe(8);
+    expect(next.pendingLoopBeats).toBe(8);
+    // Engage never moves the playhead, no audio effect.
+    expect(next.playhead).toBe(10.2);
+    expect(effects).toEqual([]);
+  });
+
+  it('releases when the pressed size equals the active length', () => {
+    const s = state({ playing: true, playhead: 10.5, loop: active, pendingLoopBeats: 4 });
+    const [next, effects] = reduceTransport(s, { type: 'loop-preset', beats: 4 }, ctx);
+    expect(next.loop).toBeNull();
+    expect(next.playhead).toBe(10.5);
+    expect(effects).toEqual([]);
+  });
+
+  it('resizes in place when a different size is pressed (start edge fixed)', () => {
+    const s = state({ playing: true, playhead: 10.3, loop: active });
+    const [next] = reduceTransport(s, { type: 'loop-preset', beats: 1 }, ctx);
+    expect(next.loop!.start).toBe(10);
+    expect(next.loop!.end).toBeCloseTo(10.5, 10);
+    expect(next.loop!.lengthBeats).toBe(1);
+    expect(next.pendingLoopBeats).toBe(1);
+  });
+
+  it('a preset shrink re-enters a stranded playhead at phase mod new length', () => {
+    const s = state({ playing: true, playhead: 11.7, loop: active });
+    const [next, effects] = reduceTransport(s, { type: 'loop-preset', beats: 1 }, ctx);
+    // Offset 1.7 mod 0.5 → 0.2.
+    expect(next.playhead).toBeCloseTo(10.2, 10);
+    expect(effects).toHaveLength(1);
+    expect(effects[0]).toEqual({ type: 'start', at: expect.closeTo(10.2, 10) });
+  });
+
+  it('engages fractional presets (3/4) through the same path', () => {
+    const s = state({ playhead: 10, pendingLoopBeats: 4 });
+    const [next] = reduceTransport(s, { type: 'loop-preset', beats: 0.75 }, ctx);
+    expect(next.loop!.end).toBeCloseTo(10.375, 10);
+    expect(next.loop!.lengthBeats).toBe(0.75);
+    expect(next.pendingLoopBeats).toBe(0.75);
+  });
+
+  it('still remembers the pending size on a gridless Track (engage stays inert)', () => {
+    const s = state({ playhead: 10, pendingLoopBeats: 4 });
+    const [next, effects] = reduceTransport(
+      s,
+      { type: 'loop-preset', beats: 16 },
+      { quantize: true, beatTimes: null }
+    );
+    expect(next.loop).toBeNull();
+    expect(next.pendingLoopBeats).toBe(16);
+    expect(effects).toEqual([]);
+  });
+
+  it('clamps presets to the dyadic domain', () => {
+    const s = state({ playhead: 10 });
+    const [next] = reduceTransport(s, { type: 'loop-preset', beats: 512 }, ctx);
+    expect(next.loop!.lengthBeats).toBe(128);
+  });
+});
+
 describe('loop motion classes', () => {
   const active = { start: 10, end: 12, lengthBeats: 4 };
 
