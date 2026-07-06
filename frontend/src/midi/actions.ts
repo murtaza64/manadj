@@ -39,7 +39,11 @@ export type ButtonTarget =
   | { control: 'quantize' }
   /** SHIFT+Q: that Deck's Key Lock toggle (midi-performance-ops 07) —
    * registry-direct sticky Deck state, never surface-routed. */
-  | { control: 'key-lock'; deck: ChannelId };
+  | { control: 'key-lock'; deck: ChannelId }
+  /** The assistant button (midi-performance-ops 08): a macro over the
+   * per-Deck Follow model — all on (playing Decks, or both when nothing
+   * plays) or all off. Registry-direct, browse-adjacent. */
+  | { control: 'follow-macro' };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }

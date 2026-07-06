@@ -4,11 +4,14 @@ import { useAtCuePoint } from '../hooks/useAtCuePoint';
 import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
 import { useHotCues } from '../hooks/useHotCues';
 import { useMixerValue } from '../hooks/useMixer';
+import { useFollowFlags } from '../follow/followStore';
 import {
   BLINK_INTERVAL_MS,
   CUE_FLASH_INTERVAL_MS,
+  assistantLedLit,
   audibleTransportOverride,
   blinkPhase,
+  encodeAssistantLed,
   encodeDeckLeds,
   ledStates,
 } from '../midi/feedback';
@@ -154,6 +157,30 @@ function DeckFeedbackPublisher({
   return null;
 }
 
+/**
+ * The assistant lamp (midi-performance-ops 08): lit iff any Deck follows.
+ * Not deck-scoped — one button over both Decks — so it publishes beside
+ * the per-deck publishers. Subscribes to the follow store (every change
+ * source funnels through it: the hardware macro, the FilterBar toggles,
+ * playback spread/revoke), and resends on output-set changes, which is the
+ * full sync a connect/replug needs.
+ */
+function AssistantFeedbackPublisher() {
+  const follows = useFollowFlags();
+  const outputs = useSyncExternalStore(subscribeOutputs, connectedOutputs);
+  useEffect(() => {
+    if (outputs.length === 0) return;
+    const lit = assistantLedLit(follows);
+    for (const output of outputs) {
+      if (!output.mapping.feedback) continue;
+      for (const message of encodeAssistantLed(output.mapping.feedback, lit)) {
+        output.send(message);
+      }
+    }
+  }, [follows, outputs]);
+  return null;
+}
+
 /** The one app-driven blink clock (the device has no native blink),
  * running only while some deck has a blinking light (pending-play PLAY or
  * away-from-cue CUE flash). Phases are clock-derived so both decks and the
@@ -197,6 +224,7 @@ export function MidiFeedbackBridge() {
       <DeckScope deck="B">
         <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsB} />
       </DeckScope>
+      <AssistantFeedbackPublisher />
     </>
   );
 }

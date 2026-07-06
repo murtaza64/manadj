@@ -102,6 +102,12 @@ const mapping: Mapping = {
       controlType: 'button',
       target: { control: 'key-lock', deck: 'B' },
     },
+    {
+      // Assistant button (midi-performance-ops 08): the Follow macro.
+      match: { message: 'note', channel: 0, number: 0x0e },
+      controlType: 'button',
+      target: { control: 'follow-macro' },
+    },
   ],
 };
 
@@ -190,6 +196,15 @@ describe('quantize and key-lock bindings (midi-performance-ops 07)', () => {
     expect(translate([[0x93, 0x02, 0x7f], [0x83, 0x02, 0x00]])).toEqual([
       { kind: 'button', target: { control: 'key-lock', deck: 'A' }, edge: 'down' },
       { kind: 'button', target: { control: 'key-lock', deck: 'A' }, edge: 'up' },
+    ]);
+  });
+});
+
+describe('assistant follow-macro binding (midi-performance-ops 08)', () => {
+  it('emits the deck-less follow-macro action on press', () => {
+    expect(translate([[0x90, 0x0e, 0x7f], [0x80, 0x0e, 0x00]])).toEqual([
+      { kind: 'button', target: { control: 'follow-macro' }, edge: 'down' },
+      { kind: 'button', target: { control: 'follow-macro' }, edge: 'up' },
     ]);
   });
 });

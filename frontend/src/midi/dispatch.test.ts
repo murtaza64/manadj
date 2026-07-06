@@ -22,6 +22,7 @@ import {
   deckControlsFor,
   registerBrowseSurface,
   registerDeckControls,
+  registerFollowMacro,
   registerMixerControls,
 } from './controlRegistry';
 import { dispatchMidiAction } from './dispatch';
@@ -660,6 +661,40 @@ describe('quantize and key lock (midi-performance-ops 07)', () => {
 
   it('no registered deck controls: key lock drops silently', () => {
     dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'key-lock', deck: 'A' } });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('assistant follow macro (midi-performance-ops 08)', () => {
+  const press = (edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'follow-macro' },
+  });
+
+  it('routes to the registered macro on the down edge only', () => {
+    registerFollowMacro(() => calls.push('followMacro'));
+    dispatchMidiAction(press('down'));
+    dispatchMidiAction(press('up'));
+    expect(calls).toEqual(['followMacro']);
+  });
+
+  it('bypasses the audible-surface arbiter (Follow means the same thing everywhere)', () => {
+    registerFollowMacro(() => calls.push('followMacro'));
+    claimAudible('editor');
+    dispatchMidiAction(press('down'));
+    expect(calls).toEqual(['followMacro']);
+  });
+
+  it('no registered macro: drops silently', () => {
+    dispatchMidiAction(press('down'));
+    expect(calls).toEqual([]);
+  });
+
+  it('unregister restores silence', () => {
+    const unregister = registerFollowMacro(() => calls.push('followMacro'));
+    unregister();
+    dispatchMidiAction(press('down'));
     expect(calls).toEqual([]);
   });
 });

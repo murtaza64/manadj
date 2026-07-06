@@ -95,6 +95,12 @@ export interface DeckFeedback {
 /** Device knowledge for Feedback: every light the app writes, per deck. */
 export interface MappingFeedback {
   decks: Record<'A' | 'B', DeckFeedback>;
+  /**
+   * The assistant button's light (midi-performance-ops 08) — lit iff any
+   * Deck follows (mirrors the FilterBar). One button, so it lives beside
+   * the decks. Optional: absent until the address is hardware-learned.
+   */
+  assistant?: LedAddress;
 }
 
 export interface Mapping {

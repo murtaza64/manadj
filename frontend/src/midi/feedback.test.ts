@@ -9,8 +9,10 @@ import {
   BLINK_INTERVAL_MS,
   CUE_FLASH_INTERVAL_MS,
   allOffMessages,
+  assistantLedLit,
   audibleTransportOverride,
   blinkPhase,
+  encodeAssistantLed,
   encodeDeckLeds,
   ledStates,
 } from './feedback';
@@ -287,6 +289,30 @@ describe('blinkPhase', () => {
       !blinkPhase(t, CUE_FLASH_INTERVAL_MS)
     );
     expect(blinkPhase(t + 1000, CUE_FLASH_INTERVAL_MS)).toBe(blinkPhase(t, CUE_FLASH_INTERVAL_MS));
+  });
+});
+
+describe('assistant lamp (midi-performance-ops 08)', () => {
+  it('is lit iff any Deck follows (mirrors the FilterBar)', () => {
+    expect(assistantLedLit({ A: false, B: false })).toBe(false);
+    expect(assistantLedLit({ A: true, B: false })).toBe(true);
+    expect(assistantLedLit({ A: false, B: true })).toBe(true);
+    expect(assistantLedLit({ A: true, B: true })).toBe(true);
+  });
+
+  it('encodes at the mapping\u2019s assistant address (hardware-learned note 0x03 ch 0)', () => {
+    expect(encodeAssistantLed(feedback, true)).toEqual([[0x90, 0x03, 0x7f]]);
+    expect(encodeAssistantLed(feedback, false)).toEqual([[0x90, 0x03, 0x00]]);
+  });
+
+  it('emits nothing when a mapping has no assistant address', () => {
+    const withoutAssistant = { decks: feedback.decks };
+    expect(encodeAssistantLed(withoutAssistant, true)).toEqual([]);
+    expect(encodeAssistantLed(withoutAssistant, false)).toEqual([]);
+  });
+
+  it('allOffMessages darkens the assistant lamp too', () => {
+    expect(allOffMessages(feedback)).toContainEqual([0x90, 0x03, 0x00]);
   });
 });
 

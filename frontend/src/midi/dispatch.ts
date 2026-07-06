@@ -9,7 +9,12 @@ import {
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import type { MidiAction } from './actions';
-import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
+import {
+  browseSurface,
+  deckControlsFor,
+  midiFollowMacro,
+  midiMixerControls,
+} from './controlRegistry';
 
 /** Encoder detents per action are tiny; cap steps so a burst can't warp the
  * selection across the whole library in one message. */
@@ -146,6 +151,16 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       // like beatjump-size — registry-direct, never surface-routed.
       if (edge !== 'down') return;
       deckControlsFor(target.deck)?.toggleKeyLock();
+      return;
+    }
+    case 'follow-macro': {
+      // Assistant button (midi-performance-ops 08): registry-direct like
+      // the other sticky/browse-adjacent state — Follow means the same
+      // thing regardless of the audible surface. The registered handler
+      // owns reading playing/loaded (React-owned) and runs the pure
+      // decision (follow/model.ts: followMacroToggles).
+      if (edge !== 'down') return;
+      midiFollowMacro()?.();
       return;
     }
     default:

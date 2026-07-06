@@ -185,11 +185,34 @@ export function encodeDeckLeds(
 }
 
 /**
+ * The assistant lamp's state (midi-performance-ops 08): lit iff any Deck
+ * follows — mirrors the FilterBar, whatever caused the change (button
+ * macro, screen toggles, playback spread/revoke).
+ */
+export function assistantLedLit(follows: Record<'A' | 'B', boolean>): boolean {
+  return follows.A || follows.B;
+}
+
+/**
+ * Assistant lamp state → messages. Empty when the mapping has no learned
+ * assistant address (TODO(hardware-verify) in the mapping file).
+ */
+export function encodeAssistantLed(
+  feedback: MappingFeedback,
+  lit: boolean
+): readonly MidiMessage[] {
+  return feedback.assistant ? [encodeLed(feedback.assistant, lit)] : [];
+}
+
+/**
  * Every mapped light dark — sent on detach and dispose so stale state
  * never lingers on the hardware.
  */
 export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[] {
-  return (['A', 'B'] as const).flatMap((deck) =>
-    deckAddresses(feedback.decks[deck]).map((address) => encodeLed(address, false))
-  );
+  return [
+    ...(['A', 'B'] as const).flatMap((deck) =>
+      deckAddresses(feedback.decks[deck]).map((address) => encodeLed(address, false))
+    ),
+    ...encodeAssistantLed(feedback, false),
+  ];
 }

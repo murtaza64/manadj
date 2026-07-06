@@ -69,6 +69,33 @@ export function reduceFollow(flags: FollowFlags, event: FollowEvent): FollowFlag
   }
 }
 
+/**
+ * The assistant button's Follow macro (midi-performance-ops 08): a pure
+ * decision over the untouched per-Deck model — follow states + playing
+ * states in, the decks to toggle out. The caller dispatches ordinary
+ * `toggle` events, so the reducer's own rules (the loaded gate) still
+ * apply: the macro is a shortcut, not a new model.
+ *
+ * - No Deck follows → enable Follow on all playing Decks; if nothing
+ *   plays, on both Decks (legal: paused Decks may follow while nothing
+ *   plays). The press satisfies "turning Follow on from nothing is the
+ *   user's act".
+ * - Any Deck follows → all Follow off, regardless of which deck had it or
+ *   how it got there.
+ *
+ * Asymmetric on purpose: adding a second following Deck while one already
+ * follows is a screen action, not the button's.
+ */
+export function followMacroToggles(
+  flags: FollowFlags,
+  playing: Record<ChannelId, boolean>
+): readonly ChannelId[] {
+  const following = DECKS.filter((d) => flags[d]);
+  if (following.length > 0) return following; // toggle-off always works
+  const playingDecks = DECKS.filter((d) => playing[d]);
+  return playingDecks.length > 0 ? playingDecks : [...DECKS];
+}
+
 // ── Parameters ──────────────────────────────────────────────────────────
 
 /** Energy relation of candidates to the reference. */

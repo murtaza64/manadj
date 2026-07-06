@@ -409,13 +409,13 @@ export const INPULSE_300_MK2: Mapping = {
     // on one switch, so both bind to the same deck-less target. Mixxx's
     // Inpulse 300 file puts Q at note 0x02 on the deck transport channels.
     {
-      // TODO(hardware-verify): from Mixxx's Inpulse 300 XML (Q = note 0x02).
+      // From Mixxx's Inpulse 300 XML (Q = note 0x02); hardware-verified 2026-07-06.
       match: { message: 'note', channel: 1, number: 0x02 },
       controlType: 'button',
       target: { control: 'quantize' },
     },
     {
-      // TODO(hardware-verify): from Mixxx's Inpulse 300 XML (Q = note 0x02).
+      // From Mixxx's Inpulse 300 XML (Q = note 0x02); hardware-verified 2026-07-06.
       match: { message: 'note', channel: 2, number: 0x02 },
       controlType: 'button',
       target: { control: 'quantize' },
@@ -423,16 +423,26 @@ export const INPULSE_300_MK2: Mapping = {
     // SHIFT+Q = that deck's Key Lock (time guard unshifted, pitch guard
     // shifted — one physical home). Shifted controls emit on channel+3.
     {
-      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      // Inferred from the ch+3 shift pattern; hardware-verified 2026-07-06.
       match: { message: 'note', channel: 4, number: 0x02 },
       controlType: 'button',
       target: { control: 'key-lock', deck: 'A' },
     },
     {
-      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      // Inferred from the ch+3 shift pattern; hardware-verified 2026-07-06.
       match: { message: 'note', channel: 5, number: 0x02 },
       controlType: 'button',
       target: { control: 'key-lock', deck: 'B' },
+    },
+
+    // Assistant button (midi-performance-ops 08): the Follow macro — all
+    // on (playing Decks, or both when nothing plays) / all off.
+    // Hardware-learned 2026-07-06 via the inspector: note 0x03 on the
+    // browse channel (0). SHIFT+assistant not captured; unbound.
+    {
+      match: { message: 'note', channel: 0, number: 0x03 },
+      controlType: 'button',
+      target: { control: 'follow-macro' },
     },
   ],
 
@@ -502,5 +512,10 @@ export const INPULSE_300_MK2: Mapping = {
         keyLockShifted: { channel: 5, number: 0x02, onVelocity: 0x7f },
       },
     },
+    // Assistant lamp (midi-performance-ops 08): lit iff any Deck follows.
+    // The button's own address — lamps on this device echo their button's
+    // note (PLAY/CUE/PFL all do). Hardware-verified 2026-07-06 (macro and
+    // lamp both confirmed on device).
+    assistant: { channel: 0, number: 0x03, onVelocity: 0x7f },
   },
 };

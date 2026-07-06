@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
-import { useDeck, useDeckReady } from '../hooks/useDeck';
+import { followMacroToggles } from '../follow/model';
+import { dispatchFollow, getFollowFlags } from '../follow/followStore';
+import { useDeck, useDeckReady, useDecks } from '../hooks/useDeck';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { useMatchAction } from '../hooks/useMatchAction';
 import { useMixer } from '../hooks/useMixer';
-import { registerDeckControls, registerMixerControls } from '../midi/controlRegistry';
+import {
+  registerDeckControls,
+  registerFollowMacro,
+  registerMixerControls,
+} from '../midi/controlRegistry';
 import { JogController } from '../midi/jog';
 import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
 import { setKeyLockFlag } from '../playback/keyLockStore';
@@ -137,6 +143,42 @@ function MixerRegistrar() {
   return null;
 }
 
+/**
+ * The assistant button's Follow macro (midi-performance-ops 08). Cross-deck
+ * by nature, so it registers whole rather than per deck. On press: read
+ * follow flags (module store) and each engine's live `playing`, run the
+ * pure decision (followMacroToggles — the tested seam), and dispatch
+ * ordinary `toggle` events. The reducer's loaded gate still applies —
+ * enabling an empty Deck no-ops exactly like a FilterBar click, so the
+ * button stays a shortcut over the untouched model.
+ */
+function FollowMacroRegistrar() {
+  const decks = useDecks();
+  const latest = useRef(decks);
+  useEffect(() => {
+    latest.current = decks;
+  });
+  useEffect(
+    () =>
+      registerFollowMacro(() => {
+        const registry = latest.current;
+        const playing = {
+          A: registry.A.engine.getSnapshot().playing,
+          B: registry.B.engine.getSnapshot().playing,
+        };
+        for (const deck of followMacroToggles(getFollowFlags(), playing)) {
+          dispatchFollow({
+            type: 'toggle',
+            deck,
+            loaded: registry[deck].loadedTrack !== null,
+          });
+        }
+      }),
+    []
+  );
+  return null;
+}
+
 /** Mounted once inside DeckProvider, alongside MidiControllerBridge. */
 export function MidiControlRegistrar() {
   return (
@@ -148,6 +190,7 @@ export function MidiControlRegistrar() {
         <DeckControlsRegistrar />
       </DeckScope>
       <MixerRegistrar />
+      <FollowMacroRegistrar />
     </>
   );
 }
