@@ -37,7 +37,7 @@ Use these terms bare; never restate their mechanics (a handoff/issue that re-exp
 - **Sneak fix**: an auto-land-eligible fix with no tracker artifact; the change description is the whole record; ephemeral `sneak-<slug>` lane.
 - Bare-use (defined in parallel-work.md): Lane, Land, fast-path, additive-append, Probe, Sandbox DB, Claim, review-gated, auto-land, idle placeholder.
 
-Rules: run `guard.py` on session resume and before landing (stale-ownership check). Never dump full `--git` diffs into a session — `--stat` first, then targeted reads.
+Rules: run `guard.py` on session resume and before landing (stale-ownership check). Never dump full `--git` diffs into a session — `--stat` first, then targeted reads. Your shell runs with `$OPENCODE_SESSION_ID` set (session-identity plugin, invisible env injection); scripts read it for ownership checks.
 
 ### Database migrations
 
