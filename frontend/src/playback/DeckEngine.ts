@@ -351,9 +351,11 @@ export class DeckEngine {
 
   /** A BPM edit landed for the loaded Track: keep beat-domain math (beat
    * jumps) honest without a re-Load. The engine learns bpm at Load
-   * otherwise — editing used to leave jumps sized by the OLD tempo. */
-  setTrackBpm(bpm: number | null): void {
-    if (!this.trackInfo) return;
+   * otherwise — editing used to leave jumps sized by the OLD tempo.
+   * Addressed by trackId (like setBeatTimes): a late push for a previous
+   * Load must not cross tracks (cue-quantize-bpm 02). */
+  setTrackBpm(trackId: number, bpm: number | null): void {
+    if (this.trackInfo?.trackId !== trackId) return;
     this.trackInfo = { ...this.trackInfo, bpm };
     this.emit();
   }

@@ -109,7 +109,7 @@ export function DeckCard({
             // Editor loads mirror onto the shared decks (issue 07): keep
             // the shared engine's beat-jump math honest too.
             if (deckScope.loadedTrack?.id === track.id) {
-              deckScope.engine.setTrackBpm(bpm);
+              deckScope.engine.setTrackBpm(track.id, bpm);
             }
             onBpmSaved(bpm);
           }}
