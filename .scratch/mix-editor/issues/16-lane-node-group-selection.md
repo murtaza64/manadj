@@ -1,10 +1,7 @@
 # 16 — Lane editor: node group selection and dragging
 
-Status: ready-for-human (implemented, change rlrspylz on lane lanesel —
-eye-verify: cmd/ctrl+drag rubber-band, cmd/ctrl+click toggle, group drag
-clamping at neighbors/bounds, Esc/click-away deselect, Delete/Backspace,
-and that click-add / single drag / dblclick remove / shift chop still feel
-unchanged)
+Status: done (2026-07-06, user-approved in session; change rlrspylz landed
+via merge nmqmxkpy)
 
 ## Parent
 
