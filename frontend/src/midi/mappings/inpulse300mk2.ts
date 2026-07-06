@@ -15,8 +15,7 @@ function shiftedPadClears(deck: 'A' | 'B', channel: number): Binding[] {
  * 05; PRD: the label lies deliberately — manadj will never have a sampler,
  * and a mode never pressed mid-performance protects stored data). Base
  * notes 0x30-0x37 on the deck's pad channel per Mixxx's
- * Hercules_DJControl_Inpulse_300.midi.xml.
- * TODO(hardware-verify): inferred from Mixxx, not yet smoke-tested.
+ * Hercules_DJControl_Inpulse_300.midi.xml (hardware-verified 2026-07-06).
  *
  * Layout: top row mirrors the on-screen grid-edit triple (nudge left /
  * anchor / — / nudge right), bottom row the BPM cluster (shrink / grow /
@@ -442,8 +441,8 @@ export const INPULSE_300_MK2: Mapping = {
     ...shiftedPadClears('B', 7),
 
     // Grid editing on the SAMPLER pad mode (midi-performance-ops 05):
-    // notes 0x30-0x37 on the pad channels, per Mixxx.
-    // TODO(hardware-verify): inferred from Mixxx, not yet smoke-tested.
+    // notes 0x30-0x37 on the pad channels, per Mixxx (hardware-verified
+    // 2026-07-06).
     ...gridEditPads('A', 6),
     ...gridEditPads('B', 7),
   ],
@@ -477,8 +476,8 @@ export const INPULSE_300_MK2: Mapping = {
           onVelocity: 0x7e,
         })),
         // Grid-edit (SAMPLER) pad lamps echo their button notes 0x30-0x37
-        // on the pad channel, like every other pad lamp on this device.
-        // TODO(hardware-verify): inferred from Mixxx, not yet smoke-tested.
+        // on the pad channel, like every other pad lamp on this device
+        // (hardware-verified 2026-07-06).
         gridPads: Array.from({ length: 8 }, (_, i) => ({
           channel: 6,
           number: 0x30 + i,
@@ -499,7 +498,7 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x08 + i,
           onVelocity: 0x7e,
         })),
-        // TODO(hardware-verify): inferred from Mixxx, not yet smoke-tested.
+        // Hardware-verified 2026-07-06.
         gridPads: Array.from({ length: 8 }, (_, i) => ({
           channel: 7,
           number: 0x30 + i,
