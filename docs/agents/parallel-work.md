@@ -47,7 +47,7 @@ abandoned.
 
 ## Trunk-based flow
 
-- Lanes branch off trunk (`jj workspace add --name <lane> -r main ../manadj-<lane>`).
+- Lanes branch off trunk (`jj workspace add --name <lane> -r main ../<lane>`).
 - **Landing is merge-based** (revised 2026-07-05 after rebase-landing retry
   storms; head-to-head in the change history of this file):
   1. Pick the `main` commit you are integrating with (usually the tip; pin it).
@@ -127,21 +127,16 @@ issue's Testing Decisions will ever catch it.)
    relayed) is the gate; the agent then moves `main` and stops the lane app
    (or keeps it running for the next review round).
 
-## Directory layout (target adopted 2026-07-05; migration pending)
+## Directory layout (migrated 2026-07-06)
 
-Umbrella root `/Users/murtaza/manadj/` will contain **every** workspace:
+Umbrella root `/Users/murtaza/manadj/` contains **every** workspace:
 `default/` (the repo's default workspace — real DB, real app, the human's
 working copy) plus one directory per lane (`/Users/murtaza/manadj/<lane>`).
 One root means no external-directory permission prompts and a tidy tree; the
-opencode project path stays `/Users/murtaza/manadj` throughout the move. The
-`.lanes/` registry moves to the umbrella root (outside any working copy).
-Lane creation becomes `jj workspace add --name <lane> -r main ../<lane>`.
-
-**Until the migration runs** (runbook:
-`.scratch/parallel-process/issues/01-umbrella-migration.md` — requires all
-lanes idle, human calls the moment), lanes remain siblings at
-`~/manadj-<lane>` and everything below describing paths refers to the
-current layout.
+opencode project path is `/Users/murtaza/manadj` (the umbrella — one project
+for all workspaces). The `.lanes/` registry lives at the umbrella root,
+outside any working copy. Lane creation, from `default/`:
+`jj workspace add --name <lane> -r main ../<lane>`.
 
 ## Lane registry: `.lanes/`
 
@@ -177,7 +172,7 @@ The files multiple lanes touch, and how to touch them:
 - **The real DB exists only in the default workspace** (`data/library.db` is
   workspace-relative). Lanes never reference the default workspace's `data/`.
 - Lanes needing data **clone, never symlink, never plain-copy**:
-  `cp -c /Users/murtaza/manadj/data/library.db data/library.db`
+  `cp -c /Users/murtaza/manadj/default/data/library.db data/library.db`
   (APFS clone: instant, block-shared, fully isolated). Staleness is a feature;
   re-clone for fresher data. Track audio is referenced by absolute path and is
   read-only — nothing to copy.
@@ -253,7 +248,7 @@ report instead. Each lane records a port offset in its `.lanes/` file (e.g.
   there until that working copy moves. After advancing `main`, check the
   default workspace's `@`: if it is an idle placeholder (empty change, no
   description — or its own stale "post-landing" empty), move it to a fresh
-  change on the new trunk: `jj -R /Users/murtaza/manadj new main`. Vite and
+  change on the new trunk: `jj -R /Users/murtaza/manadj/default new main`. Vite and
   the auto-reload backend pick the landed change up immediately. If `@` has
   file changes or a real description, it's the human's — leave it alone and
   say the app needs a manual update instead. (Note: moving default@ onto a

@@ -29,7 +29,8 @@ import sys
 import time
 from pathlib import Path
 
-MAIN_ROOT = Path("/Users/murtaza/manadj")
+MAIN_ROOT = Path("/Users/murtaza/manadj/default")
+UMBRELLA = MAIN_ROOT.parent
 LANE_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_DIR = LANE_ROOT / ".lane-app"
 PID_FILE = RUNTIME_DIR / "dev.pid"
@@ -44,7 +45,7 @@ def lane_name() -> str:
 
 def registry_ports() -> tuple[int, int] | None:
     """Parse 'backend NNNN, vite NNNN' from this lane's .lanes file."""
-    lane_file = MAIN_ROOT / ".lanes" / f"{lane_name()}.md"
+    lane_file = UMBRELLA / ".lanes" / f"{lane_name()}.md"
     if not lane_file.exists():
         return None
     m = re.search(r"backend\s+(\d+).*?vite\s+(\d+)", lane_file.read_text())

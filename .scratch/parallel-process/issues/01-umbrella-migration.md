@@ -1,6 +1,6 @@
 # Umbrella directory migration
 
-Status: ready-for-agent
+Status: done (executed 2026-07-06 by the workflow session; smoke + acceptance below)
 Blocked by: all lanes landed/forgotten and all agent sessions idle — the human calls the moment.
 
 ## What to do

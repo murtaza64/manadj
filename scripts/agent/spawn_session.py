@@ -33,6 +33,7 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_DIR = Path("/Users/murtaza/manadj")  # umbrella — one opencode project for all workspaces
 
 FRESH_LANE_INSTRUCTIONS = (
     "Work in a FRESH lane: set up a new jj workspace per "
@@ -143,7 +144,7 @@ def main() -> None:
         create_body["model"] = {"providerID": provider_id, "id": model_id}
 
     prompt = build_prompt(args.handoff, args.task, args.workspace)
-    directory = f"directory={REPO_ROOT}"
+    directory = f"directory={PROJECT_DIR}"
 
     if args.dry_run:
         print(f"would POST /session?{directory}  {json.dumps(create_body)}")
