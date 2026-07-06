@@ -1199,7 +1199,7 @@ function AdjacencyRow({
             Icon-only, uncolored (22 follow-up): ⋈ is the Transition
             editor's own icon (TopBar); the verbs ride the tooltips. */}
         <button
-          className="set-chip-btn"
+          className="set-chip-btn set-icon-btn"
           onClick={(e) => {
             e.stopPropagation();
             onOpenEditor();
@@ -1214,7 +1214,7 @@ function AdjacencyRow({
             vinyl glyph, uncolored (22 follow-up). */}
         {onPractice && (
           <button
-            className="set-chip-btn"
+            className="set-chip-btn set-icon-btn"
             onClick={(e) => {
               e.stopPropagation();
               onPractice();

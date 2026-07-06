@@ -198,6 +198,20 @@
   background: var(--surface1);
 }
 
+/* Icon-only chips (⋈ edit, ◉ practice — 22 follow-up): the glyphs'
+   font metrics differ (math operator vs geometric shape), so baseline
+   layout leaves them visually off-center at different heights.
+   Flex-center them in one fixed box instead. */
+.set-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 18px;
+  padding: 0 8px;
+  line-height: 1;
+}
+
 /* Header-sized chip (tempo policy) */
 .set-header-chip {
   padding: 2px 10px;
