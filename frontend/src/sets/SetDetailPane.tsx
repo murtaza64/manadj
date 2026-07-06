@@ -38,8 +38,10 @@ import {
   EMPTY_SELECTION,
   click,
   menuTargets,
+  navigate as navigateSelection,
   selectGesture,
 } from '../selection/selectionModel';
+import { registerBrowseSurface } from '../midi/controlRegistry';
 import type { SelectMods } from '../components/TrackRow';
 import { useToast } from '../components/Toast';
 import ContextMenu, { useContextMenuState, type MenuItem } from '../components/ContextMenu';
@@ -578,6 +580,58 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     setSetSelection(setId, click(sel, trackId));
     return [trackId];
   };
+
+  // ── Controller browse target (sets 33): the Set pane implements the
+  // library's browse-surface contract (midi-controller 05) instead of
+  // inventing a parallel one. The embedding Library YIELDS its own
+  // registration while a Set is the visible browse list (stack order
+  // alone can't be trusted: child effects run before parent effects),
+  // so the encoder walks THIS list and LOAD A/B load THIS selection —
+  // through the same view policy as the on-screen paths (the
+  // onLoadToDeck prop IS Library's loadWithViewPolicy). Encoder select
+  // ≡ click select: one selection
+  // model (the set store) that 17's menu and 18's ops already read; the
+  // encoder walks tracks only (adjacency rows have no selection —
+  // pointer/keyboard territory). Handlers read live state through refs;
+  // registration is mount-scoped per set.
+  const entriesRef = useRef(entries);
+  useEffect(() => {
+    entriesRef.current = entries;
+  });
+  const onLoadToDeckRef = useRef(onLoadToDeck);
+  useEffect(() => {
+    onLoadToDeckRef.current = onLoadToDeck;
+  });
+  useEffect(
+    () =>
+      registerBrowseSurface({
+        navigate: (delta) => {
+          const order = (entriesRef.current ?? []).map((e) => e.trackId);
+          if (order.length === 0) return;
+          const next = navigateSelection(getSetSelection(setId), delta, order);
+          setSetSelection(setId, next);
+          // Keep the encoder's selection visible (scoped to this pane).
+          // The pane's manual-scroll detection sees this as a user
+          // scroll and disengages Conductor follow — deliberate: encoder
+          // browsing IS browsing, same as a hand scroll (sets 05).
+          if (next.anchorId !== null) {
+            const row = paneRef.current?.querySelector(
+              `[data-set-track-row="${next.anchorId}"]`
+            );
+            (row as HTMLElement | null)?.scrollIntoView({
+              block: 'nearest',
+              behavior: 'smooth',
+            });
+          }
+        },
+        getSelectedTrack: () => {
+          const anchorId = getSetSelection(setId).anchorId;
+          return anchorId !== null ? (trackMapRef.current?.get(anchorId) ?? null) : null;
+        },
+        load: (deck, track) => onLoadToDeckRef.current(deck, track),
+      }),
+    [setId]
+  );
 
   // ── Track-row context menu (sets 17): the universal track menu plus
   // the surface's Remove from set. Targeting bakes in Library's rule —
@@ -1481,7 +1535,10 @@ function SetTrackRow({
   const keyText = formatKeyDisplay(track?.key ?? null);
   return (
     <div
-      data-set-track-row
+      // Value = the track id (sets 33: the controller browse target
+      // scrolls the selected row into view by it); presence selectors
+      // ([data-set-track-row]) keep working for row rects / convergence.
+      data-set-track-row={trackId}
       draggable
       className={`set-track-row${selected ? ' selected' : ''}`}
       onClick={(e) => onSelect({ shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}

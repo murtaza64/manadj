@@ -43,9 +43,11 @@ export interface MidiDeckControls {
 }
 
 /**
- * The active browse surface — whatever Library instance is currently
- * mounted (any view). Views without a browse surface simply leave this
- * empty: encoder/LOAD no-op (PRD scope decision).
+ * The active browse surface — whatever browse list is currently visible:
+ * the mounted Library instance (any view), or the Set pane when a Set
+ * replaces the track table (sets 33 — the Library yields while a Set is
+ * viewed). Views without a browse surface simply leave this empty:
+ * encoder/LOAD no-op (PRD scope decision).
  */
 export interface MidiBrowseSurface {
   /** Move the selection up (-1) / down (+1), scrolling it into view. */
