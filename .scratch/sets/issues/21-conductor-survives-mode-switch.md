@@ -1,6 +1,6 @@
 # 21 — Conductor playback survives entering the Transition editor
 
-Status: ready-for-human
+Status: done (approved + landed 2026-07-05, change `xlmtsrpk`)
 
 ## Parent
 
