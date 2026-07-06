@@ -1,6 +1,6 @@
 # 38 — Editor: live Conductor playhead over the loaded transition
 
-Status: ready-for-human (implemented 2026-07-06, change `pytsnqou`, lane conductor — awaiting review, stacked on 34's park `vkwnvxvv`)
+Status: done (human-approved + landed 2026-07-06, merge `oksyuznn`, lane conductor; incl. review fixes — whole-pair marker, take-pin matching)
 
 ## Parent
 
