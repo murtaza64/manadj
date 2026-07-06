@@ -1,10 +1,11 @@
 /**
  * The Set detail pane (sets 01+02): replaces the track table on the
- * browse surface when a Set is selected. Ordered track rows (title/
- * artist, key, BPM) with drag-reorder and remove; adds arrive by dropping
- * tracks onto the Set's sidebar row or the pane itself. Scroll position
- * and selection live in the set store — the pane survives mode switches
- * unmoved.
+ * browse surface when a Set is selected. Ordered track rows on a shared
+ * column grid (sets 31, rowColumns.ts: ▶ · # · in · key · BPM · energy ·
+ * title/artist · play · ✕) with drag-reorder and remove; adds arrive by
+ * dropping tracks onto the Set's sidebar row or the pane itself. Scroll
+ * position and selection live in the set store — the pane survives mode
+ * switches unmoved.
  *
  * Between track rows sit adjacency rows (sets 02): pin chip, evidence
  * counts (N tr · M tk against the Transition library / Take history),
@@ -41,6 +42,7 @@ import {
 import type { SelectMods } from '../components/TrackRow';
 import { useToast } from '../components/Toast';
 import ContextMenu, { useContextMenuState, type MenuItem } from '../components/ContextMenu';
+import EnergySquare from '../components/EnergySquare';
 import { useTrackMenuItems } from '../components/useTrackMenuItems';
 import type { ChannelId } from '../playback/mixer';
 import {
@@ -85,11 +87,34 @@ import { OverviewLadder } from './OverviewLadder';
 import { evaluatePickup, readPickupSnapshot } from './pickup';
 import {
   fmtSec,
-  isNeverAudible,
   trackEffectiveBpm,
   type PlannedEntry,
   type PlanWarning,
 } from './planner';
+import { getKeyColor } from '../utils/displayColors';
+import {
+  ADJ_GUTTER_W,
+  ADJ_PAD_LEFT,
+  ADJ_ROW_GAP,
+  BPM_COL_W,
+  bpmDeltaColor,
+  bpmDeltaPercent,
+  bpmDeltaTitle,
+  cellStyle,
+  ENERGY_COL_W,
+  fmtInTime,
+  fmtPlayTime,
+  IN_TIME_COL_W,
+  INDEX_COL_W,
+  KEY_COL_W,
+  PLAY_COL_W,
+  PLAY_TIME_COL_W,
+  REMOVE_COL_W,
+  ROW_ACCENT_W,
+  ROW_GAP,
+  ROW_PAD_X,
+  type BpmDeltaRef,
+} from './rowColumns';
 import { prefetchTrackBuffer } from './prefetch';
 import { hotCue1Sec, useSetPlan } from './useSetPlan';
 import { useSetSettings } from './setSettings';
@@ -262,6 +287,32 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // can happen during an HTML5 drag.
   const displayEntries = previewState?.entries ?? entries;
   const displayPlan = previewState ? previewPlan : plan;
+
+  // BPM delta reference (sets 31): under Fixed every row measures against
+  // the Set tempo (the planner's own fallback when unset: the first
+  // track's effective BPM); under Riding each row measures against its
+  // predecessor — resolved per-row at render, against the DISPLAYED
+  // order, so a live drag preview colors the hypothetical neighbors.
+  const effectiveBpmOf = (trackId: number): number | null => {
+    const t = trackMap?.get(trackId);
+    return t ? trackEffectiveBpm(t) : null;
+  };
+  const fixedTempoRef: BpmDeltaRef | null = (() => {
+    if (set?.tempo_policy !== 'fixed') return null;
+    const bpm =
+      set.set_tempo_bpm ??
+      (displayEntries && displayEntries.length > 0
+        ? effectiveBpmOf(displayEntries[0].trackId)
+        : null);
+    return bpm ? { kind: 'set-tempo', bpm } : null;
+  })();
+  const bpmRefFor = (i: number): BpmDeltaRef | null => {
+    if (set?.tempo_policy === 'fixed') return fixedTempoRef;
+    const prev = displayEntries?.[i - 1];
+    if (!prev) return null; // first row under Riding: no reference
+    const bpm = effectiveBpmOf(prev.trackId);
+    return bpm ? { kind: 'predecessor', bpm } : null;
+  };
 
   // Real hot cues for the ladder clips (same cache keys as useHotCues).
   const hotCueQueries = useQueries({
@@ -850,6 +901,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   trackId={entry.trackId}
                   track={track}
                   planned={planned}
+                  bpmRef={bpmRefFor(i)}
                   conducting={conductingThis && conductingTrackId === entry.trackId}
                   selected={selectedIds.has(entry.trackId)}
                   dragging={dragIds?.includes(entry.trackId) ?? false}
@@ -1112,11 +1164,9 @@ function AdjacencyRow({
       : []),
   ];
 
-  // Left-gutter geometry (sets 20): the chips start at the same x as the
-  // track-row titles. Track rows: 3px accent + 12px padding + 18px play
-  // + 12px gap + 24px index + 12px gap = 81px. Here: 15px padding (the
-  // 3px bar is a background layer) + 58px gutter + 8px row gap = 81px.
-  const GUTTER_WIDTH = 58;
+  // Left-gutter geometry: the chips start at the same x as the track-row
+  // titles — driven by the shared column grid (sets 31, rowColumns.ts;
+  // replaces sets 20's hand-derived 58px).
   // The two-deck gradient bar (sets 20): outgoing deck's color on top,
   // incoming below — the handover visually ties to its tracks. Painted
   // as a background-image layer (geometry in the CSS) so the CSS hover
@@ -1132,12 +1182,17 @@ function AdjacencyRow({
         className="set-adjacency-row"
         onClick={onOpenEditor}
         title="Open this handover in the Transition editor"
-        style={{ backgroundImage: barImage }}
+        style={{
+          // Geometry from the shared column grid (sets 31, rowColumns.ts)
+          gap: `${ADJ_ROW_GAP}px`,
+          padding: `2px ${ROW_PAD_X}px 2px ${ADJ_PAD_LEFT}px`,
+          backgroundImage: barImage,
+        }}
       >
         {/* Left gutter: the insert affordance as a small + (sets 20 —
             the old labeled button's verb rides the tooltip), sitting
             under the track rows' play-button column. */}
-        <span style={{ width: `${GUTTER_WIDTH}px`, flexShrink: 0, display: 'flex' }}>
+        <span style={{ width: `${ADJ_GUTTER_W}px`, flexShrink: 0, display: 'flex' }}>
           {onSuggestInsert && (
             <button
               className="set-glyph-btn"
@@ -1302,6 +1357,7 @@ function SetTrackRow({
   trackId,
   track,
   planned,
+  bpmRef,
   conducting,
   selected,
   dragging,
@@ -1317,6 +1373,10 @@ function SetTrackRow({
   track: Track | undefined;
   /** This entry's slice of the playback plan (sets 03). */
   planned: PlannedEntry | undefined;
+  /** The BPM the delta color is measured against (sets 31): the Set
+   * tempo under Fixed, the predecessor's BPM under Riding; null when
+   * there is no reference (first row under Riding, missing BPMs). */
+  bpmRef: BpmDeltaRef | null;
   /** The Conductor's playhead is inside this entry (sets 04). */
   conducting: boolean;
   /** In the pane's row selection (sets 18): blue wash + inset blue ring.
@@ -1344,6 +1404,16 @@ function SetTrackRow({
   // Conductor position, blue = selection; a selected conducting row
   // keeps the mauve wash and wears the blue ring. Both are STATES —
   // the CSS keeps them above the hover wash (perf-layout 08).
+  //
+  // Column grid (sets 31, geometry in rowColumns.ts):
+  //   ▶ · # · in · key · BPM · energy · title/artist · … · play · ✕
+  // Key/BPM sit LEFT (fixed widths, values align down the list); key is
+  // identity-colored (Camelot hue — the app's key convention), BPM is
+  // delta-colored against `bpmRef` with the absolute value as text. The
+  // tempo authority is the effective BPM (ADR 0016) — same as the plan.
+  const bpm = track ? trackEffectiveBpm(track) : null;
+  const deltaColor = bpmDeltaColor(bpmDeltaPercent(bpm, bpmRef));
+  const keyText = formatKeyDisplay(track?.key ?? null);
   return (
     <div
       data-set-track-row
@@ -1354,9 +1424,13 @@ function SetTrackRow({
       onDragEnd={onDragEnd}
       onContextMenu={onContextMenu}
       style={{
+        // The grid's gap/padding come from the shared constants — the
+        // CSS carries the non-geometric treatments only (sets 31).
+        gap: `${ROW_GAP}px`,
+        padding: `8px ${ROW_PAD_X}px`,
         borderLeft: planned
-          ? `3px solid ${DECK_COLORS[planned.deck]}`
-          : '3px solid transparent',
+          ? `${ROW_ACCENT_W}px solid ${DECK_COLORS[planned.deck]}`
+          : `${ROW_ACCENT_W}px solid transparent`,
         opacity: dragging ? 0.45 : 1,
       }}
     >
@@ -1369,7 +1443,7 @@ function SetTrackRow({
         disabled={!onPlayFrom}
         title="Play the set from this track's planned entry"
         style={{
-          width: '18px',
+          width: `${PLAY_COL_W}px`,
           color: 'var(--mauve)',
           // Inline wins over the row-hover reveal while there is no plan
           ...(onPlayFrom ? undefined : { visibility: 'hidden' as const }),
@@ -1377,8 +1451,47 @@ function SetTrackRow({
       >
         ▶
       </button>
-      <span style={{ width: '24px', textAlign: 'right', color: 'var(--subtext0)', fontSize: '12px' }}>
+      <span style={{ ...cellStyle(INDEX_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}>
         {index + 1}
+      </span>
+      {/* "in" rides next to the play order (review iteration): # and in
+          together read as the running order against the mix clock. */}
+      <span
+        title="When this track enters the mix (mix clock)"
+        style={{ ...cellStyle(IN_TIME_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}
+      >
+        {fmtInTime(planned)}
+      </span>
+      {/* Right-aligned like its numeric neighbors: a left-aligned key
+          stacks its slack against the BPM's (right-aligned) slack and
+          the pair reads as a gulf. */}
+      <span
+        style={{
+          ...cellStyle(KEY_COL_W),
+          textAlign: 'right',
+          fontWeight: 500,
+          color: getKeyColor(keyText) ?? 'var(--subtext1)',
+        }}
+      >
+        {keyText}
+      </span>
+      <span
+        title={bpmDeltaTitle(bpm, bpmRef)}
+        style={{
+          ...cellStyle(BPM_COL_W),
+          textAlign: 'right',
+          color: deltaColor ?? 'var(--subtext1)',
+        }}
+      >
+        {bpm ? bpm.toFixed(1) : '—'}
+      </span>
+      {/* Energy (review iteration): the library's energy circle, same
+          key→BPM→energy order as the track table; blank when unrated. */}
+      <span
+        className="set-energy-cell"
+        style={{ ...cellStyle(ENERGY_COL_W), display: 'flex', justifyContent: 'center' }}
+      >
+        {track?.energy ? <EnergySquare level={track.energy} filled showNumber /> : null}
       </span>
       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         <span style={{ color: 'var(--text)' }}>{track?.title ?? `Track ${trackId}`}</span>
@@ -1387,19 +1500,16 @@ function SetTrackRow({
         )}
         {track?.archived_at != null && <ArchivedTrackRowMark />}
       </span>
-      {/* NEVER AUDIBLE (sets 19): replaces the innocuous "plays 0:00" */}
+      {/* NEVER AUDIBLE (sets 19): the badge carries the signal; both
+          time cells go blank (rowColumns blanks them). */}
       <NeverAudibleBadge planned={planned} />
-      {/* "plays m:ss of m:ss" — the plan's audible footprint (sets 03) */}
-      <span style={{ width: '110px', color: 'var(--subtext0)', fontSize: '12px', textAlign: 'right' }}>
-        {planned && track?.duration_secs && !isNeverAudible(planned)
-          ? `plays ${fmtSec(Math.max(planned.exitSec - planned.entrySec, 0))} of ${fmtSec(track.duration_secs)}`
-          : ''}
-      </span>
-      <span style={{ width: '40px', color: 'var(--sapphire)', fontSize: '12px' }}>
-        {formatKeyDisplay(track?.key ?? null)}
-      </span>
-      <span style={{ width: '64px', color: 'var(--subtext1)', fontSize: '12px', textAlign: 'right' }}>
-        {track?.bpm ? `${track.bpm.toFixed(1)} BPM` : '—'}
+      {/* Play-time column (sets 31): the audible span over the track
+          length ("in" sits left, beside the play order). */}
+      <span
+        title="How long this track is audible, over its full length"
+        style={{ ...cellStyle(PLAY_TIME_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}
+      >
+        {fmtPlayTime(planned, track?.duration_secs)}
       </span>
       <button
         className="set-glyph-btn set-row-reveal"
@@ -1408,7 +1518,7 @@ function SetTrackRow({
           onRemove();
         }}
         title="Remove from set"
-        style={{ padding: '2px 8px', color: 'var(--red)' }}
+        style={{ width: `${REMOVE_COL_W}px`, flexShrink: 0, padding: '2px 0', color: 'var(--red)' }}
       >
         ✕
       </button>

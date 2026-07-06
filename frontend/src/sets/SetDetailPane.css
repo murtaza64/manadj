@@ -92,14 +92,32 @@
 /* Track rows: hover = tint. Selection (blue wash + inset blue ring,
    sets 18) and conducting (mauve wash) are states — they keep the
    background under the pointer; a selected conducting row keeps the
-   mauve wash and wears the blue ring. */
+   mauve wash and wears the blue ring.
+   Gap/padding ride inline from the shared column grid (sets 31,
+   rowColumns.ts) — this rule carries the non-geometric treatments. */
 .set-track-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
   border-bottom: 1px solid var(--surface0);
   cursor: grab;
+  /* The library track table's text scale (TrackRow.css .track-cell-text);
+     the fixed-width cells match via rowColumns.cellStyle. */
+  font-size: 13px;
+}
+
+/* Energy circle (review iteration): the library track table's energy
+   idiom (TrackRow.css .track-energy-cell overrides) — 20px circle,
+   level-tinted fill, colored number. One rule here instead of five:
+   EnergySquare.css already exposes --energy-color per level (TrackRow's
+   per-level copies predate that property). */
+.set-energy-cell .energy-square {
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: color-mix(in srgb, var(--energy-color) 30%, var(--base));
+  color: var(--energy-color);
 }
 
 .set-track-row:hover {
@@ -124,12 +142,12 @@
 }
 
 /* Adjacency rows: hover = tint. The deck-gradient left bar rides
-   background-image inline (sets 20), composing over this color. */
+   background-image inline (sets 20), composing over this color.
+   Gap/padding ride inline from the shared column grid (sets 31,
+   rowColumns.ts) — this rule carries the non-geometric treatments. */
 .set-adjacency-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 12px 2px 15px;
   background-color: var(--crust);
   background-position: left;
   background-size: 3px 100%;
@@ -165,7 +183,8 @@
 }
 
 /* Hover-revealed row actions: visibility (not display) keeps the
-   left-gutter geometry that aligns titles and chips at x=81 (sets 20). */
+   left-gutter geometry that aligns titles and chips at TITLE_X
+   (rowColumns.ts, sets 31). */
 .set-row-reveal {
   visibility: hidden;
 }
