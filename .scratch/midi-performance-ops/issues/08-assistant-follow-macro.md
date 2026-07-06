@@ -1,6 +1,6 @@
 # Assistant button: Follow-mode macro with lamp
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -27,3 +27,22 @@ The assistant button (under the browse knob) as a macro over the untouched per-D
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+- 2026-07-06 (miditog lane): implemented in jj change `ttuqsxqw` (on top of 07). The
+  decision is a pure `followMacroToggles` beside `reduceFollow` (follow flags +
+  playing states in, decks-to-toggle out); a `FollowMacroRegistrar` registers the
+  app-wide handler (cross-deck, so it registers whole, not per deck) which dispatches
+  ordinary `toggle` events — the reducer's loaded gate still applies, so the button
+  stays a shortcut over the untouched model (FilterBar, spread/revoke bridge
+  untouched). New `follow-macro` target dispatches registry-direct. Feedback:
+  `assistantLedLit` (lit iff any Deck follows) + `encodeAssistantLed` over an optional
+  `MappingFeedback.assistant` address; an `AssistantFeedbackPublisher` subscribes to
+  the follow store (all change sources funnel through it) and resends on output-set
+  changes (connect sync). The Inpulse binding and lamp address are UNKNOWN — per the
+  handoff, nothing inferred: matcher and address are documented TODO(hardware-verify)
+  comment blocks in the mapping awaiting the inspector pass, so the shipped device is
+  inert on this button until learned. Covered at the macro, translator, dispatch, and
+  LED seams; full vitest (1194) + tsc build green. Status → ready-for-human: review at
+  http://localhost:5393 (lane miditog); walkthrough in the review request.
