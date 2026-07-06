@@ -74,3 +74,39 @@ describe('LOOP pad mode bindings', () => {
     }
   });
 });
+
+describe('SHIFT+IN/OUT overload bindings (midi-performance-ops 03)', () => {
+  it('the shifted jump buttons emit loop-or-jump-size per deck (ch+3 layer)', () => {
+    const cases: [number, number, 'A' | 'B', 'halve' | 'double'][] = [
+      [4, 0x09, 'A', 'halve'],
+      [4, 0x0a, 'A', 'double'],
+      [5, 0x09, 'B', 'halve'],
+      [5, 0x0a, 'B', 'double'],
+    ];
+    for (const [channel, note, deck, change] of cases) {
+      expect(translate(padPress(channel, note))).toEqual([
+        {
+          kind: 'button',
+          target: { control: 'loop-or-jump-size', deck, change },
+          edge: 'down',
+        },
+        {
+          kind: 'button',
+          target: { control: 'loop-or-jump-size', deck, change },
+          edge: 'up',
+        },
+      ]);
+    }
+  });
+
+  it('the unshifted IN/OUT buttons still mean beatjump back/forward', () => {
+    expect(translate(padPress(1, 0x09))).toEqual([
+      { kind: 'button', target: { control: 'beatjump', deck: 'A', direction: 'back' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beatjump', deck: 'A', direction: 'back' }, edge: 'up' },
+    ]);
+    expect(translate(padPress(2, 0x0a))).toEqual([
+      { kind: 'button', target: { control: 'beatjump', deck: 'B', direction: 'forward' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beatjump', deck: 'B', direction: 'forward' }, edge: 'up' },
+    ]);
+  });
+});

@@ -426,6 +426,16 @@ export class DeckEngine {
     this.dispatch({ type: 'loop-resize', change });
   }
 
+  /** Resize the RUNNING loop only (midi-performance-ops 03): returns
+   * false — touching nothing, not even the pending size — when no loop is
+   * active, so the SHIFT+IN/OUT overload can fall back to its idle
+   * beatjump-size meaning. */
+  resizeActiveLoop(change: 'halve' | 'double'): boolean {
+    if (!this.transport.loop) return false;
+    this.resizeLoop(change);
+    return true;
+  }
+
   /** LOOP pad preset (midi-performance-ops 02): no loop → engage at the
    * playhead at `beats` (remembered as the pending size); same size →
    * release; different size → set-length resize in place. Works without a

@@ -36,7 +36,13 @@ export type ButtonTarget =
   /** LOOP pad mode (midi-performance-ops 02) — loops gesture class. The
    * target carries the pad's preset size in beats: no loop → engage at
    * the playhead; same size → release; different size → resize in place. */
-  | { control: 'loop-preset'; deck: ChannelId; beats: number };
+  | { control: 'loop-preset'; deck: ChannelId; beats: number }
+  /** SHIFT+IN/OUT (midi-performance-ops 03): state-disambiguated overload.
+   * While the deck has an active loop it resizes the loop (loops gesture
+   * class); idle it changes the beatjump size, exactly like the dedicated
+   * `beatjump-size` target (which stays in the vocabulary for devices
+   * without the overload). */
+  | { control: 'loop-or-jump-size'; deck: ChannelId; change: 'halve' | 'double' };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }

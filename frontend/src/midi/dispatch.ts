@@ -126,6 +126,16 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       audibleLoops()?.loopPreset(target.deck, target.beats);
       return;
     }
+    case 'loop-or-jump-size': {
+      // State-disambiguated overload (midi-performance-ops 03): a running
+      // loop consumes the press as a resize (loops gesture class); idle —
+      // or where the audible surface registers no loops — it falls back
+      // to the registry-direct beatjump-size meaning, unchanged.
+      if (edge !== 'down') return;
+      if (audibleLoops()?.resizeActiveLoop(target.deck, target.change)) return;
+      deckControlsFor(target.deck)?.beatjumpSize(target.change);
+      return;
+    }
     case 'load': {
       // Load policy is VIEW-owned (editor-midi 03, ADR 0019): the browse
       // surface registration carries the embedding view's policy. No

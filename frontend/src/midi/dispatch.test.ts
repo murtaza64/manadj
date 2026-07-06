@@ -32,6 +32,9 @@ const button = (
 ): MidiAction => ({ kind: 'button', edge, target: { control, deck } });
 
 let calls: string[];
+/** Whether the shared surface's fake decks report a running loop
+ * (drives the loop-or-jump-size disambiguation tests). */
+let sharedLoopActive: boolean;
 
 function registerFakeDeckControls(deck: ChannelId): void {
   registerDeckControls(deck, {
@@ -64,6 +67,7 @@ function registerFakeMixerControls(): void {
 
 beforeEach(() => {
   calls = [];
+  sharedLoopActive = false;
   registerSurface('shared', {
     transport: {
       togglePlay: (d) => calls.push(`shared:toggle:${d}`),
@@ -88,6 +92,11 @@ beforeEach(() => {
     loops: {
       toggleLoop: (deck) => calls.push(`shared:toggleLoop:${deck}`),
       loopPreset: (deck, beats) => calls.push(`shared:loopPreset:${deck}:${beats}`),
+      resizeActiveLoop: (deck, change) => {
+        if (!sharedLoopActive) return false;
+        calls.push(`shared:resizeLoop:${deck}:${change}`);
+        return true;
+      },
     },
     silence: () => undefined,
   });
@@ -364,6 +373,46 @@ describe('loops route per audible surface (midi-performance-ops 02)', () => {
       target: { control: 'loop-toggle', deck: 'A' },
     });
     expect(calls).toEqual([]);
+  });
+});
+
+describe('loop-or-jump-size overload (midi-performance-ops 03)', () => {
+  const sizePress = (deck: ChannelId, change: 'halve' | 'double', edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'loop-or-jump-size', deck, change },
+  });
+
+  it('resizes the running loop and never touches the beatjump size, per deck', () => {
+    registerFakeDeckControls('A');
+    registerFakeDeckControls('B');
+    sharedLoopActive = true;
+    dispatchMidiAction(sizePress('A', 'halve', 'down'));
+    dispatchMidiAction(sizePress('B', 'double', 'down'));
+    expect(calls).toEqual(['shared:resizeLoop:A:halve', 'shared:resizeLoop:B:double']);
+  });
+
+  it('keeps the beatjump-size meaning while no loop runs, per deck', () => {
+    registerFakeDeckControls('A');
+    registerFakeDeckControls('B');
+    dispatchMidiAction(sizePress('A', 'halve', 'down'));
+    dispatchMidiAction(sizePress('B', 'double', 'down'));
+    expect(calls).toEqual(['A:beatjumpSize:halve', 'B:beatjumpSize:double']);
+  });
+
+  it('ignores the up edge in both states', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction(sizePress('A', 'halve', 'up'));
+    sharedLoopActive = true;
+    dispatchMidiAction(sizePress('A', 'halve', 'up'));
+    expect(calls).toEqual([]);
+  });
+
+  it('falls back to beatjump-size where the surface registers no loops (editor)', () => {
+    registerFakeDeckControls('A');
+    claimAudible('editor');
+    dispatchMidiAction(sizePress('A', 'double', 'down'));
+    expect(calls).toEqual(['A:beatjumpSize:double']);
   });
 });
 

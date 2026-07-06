@@ -199,6 +199,20 @@ describe('DeckEngine active loop (looping 03)', () => {
     expect(engine.getSnapshot().loop).toBeNull();
   });
 
+  it('resizeActiveLoop resizes only a running loop (midi-performance-ops 03)', async () => {
+    const engine = await loadedEngine(28);
+    engine.seek(10);
+    // No loop: consumed = false, and even the pending size stays put (the
+    // idle press belongs to beatjump-size).
+    expect(engine.resizeActiveLoop('halve')).toBe(false);
+    expect(engine.getSnapshot().pendingLoopBeats).toBe(4);
+    engine.toggleLoop(); // [10, 12)
+    expect(engine.resizeActiveLoop('halve')).toBe(true);
+    const s = engine.getSnapshot();
+    expect(s.loop!.end).toBeCloseTo(11, 10);
+    expect(s.loop!.lengthBeats).toBe(2);
+  });
+
   it('loopPreset remembers the pending size without a loaded Track', () => {
     const engine = new DeckEngine(unusedPort);
     engine.loopPreset(16);

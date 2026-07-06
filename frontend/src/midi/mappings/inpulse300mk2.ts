@@ -336,31 +336,33 @@ export const INPULSE_300_MK2: Mapping = {
       controlType: 'button',
       target: { control: 'beatjump', deck: 'B', direction: 'forward' },
     },
-    // Beatjump size on the SHIFT layer of the jump buttons. SHIFT is
+    // SHIFT layer of the jump (IN/OUT) buttons: the state-disambiguated
+    // overload (midi-performance-ops 03) — loop resize while a loop runs,
+    // beatjump-size when idle (its original, unchanged meaning). SHIFT is
     // hardware-layered: shifted controls emit on channel+3 (learned:
     // SHIFT+jump-back deck A = note ch 4 #9, vs ch 1 #9 unshifted).
     {
       match: { message: 'note', channel: 4, number: 0x09 },
       controlType: 'button',
-      target: { control: 'beatjump-size', deck: 'A', change: 'halve' },
+      target: { control: 'loop-or-jump-size', deck: 'A', change: 'halve' },
     },
     {
       // TODO(hardware-verify): inferred from the ch+3 shift pattern.
       match: { message: 'note', channel: 4, number: 0x0a },
       controlType: 'button',
-      target: { control: 'beatjump-size', deck: 'A', change: 'double' },
+      target: { control: 'loop-or-jump-size', deck: 'A', change: 'double' },
     },
     {
       // TODO(hardware-verify): inferred from the ch+3 shift pattern.
       match: { message: 'note', channel: 5, number: 0x09 },
       controlType: 'button',
-      target: { control: 'beatjump-size', deck: 'B', change: 'halve' },
+      target: { control: 'loop-or-jump-size', deck: 'B', change: 'halve' },
     },
     {
       // TODO(hardware-verify): inferred from the ch+3 shift pattern.
       match: { message: 'note', channel: 5, number: 0x0a },
       controlType: 'button',
-      target: { control: 'beatjump-size', deck: 'B', change: 'double' },
+      target: { control: 'loop-or-jump-size', deck: 'B', change: 'double' },
     },
 
     // Hot cues.
