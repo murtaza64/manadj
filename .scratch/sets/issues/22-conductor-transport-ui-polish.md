@@ -149,3 +149,8 @@ Additional acceptance criteria:
   Softened to red bold text on the standard quiet chip, matching the
   transition (green) / take (mauve) chips. Red still keys off pin
   state, never the name (sets 20 invariant).
+- Follow-up (2026-07-05, approved in-session): the solid yellow
+  UNPRACTICED badge was similarly noisy — now a bare yellow ⚠ glyph
+  whose tooltip carries the teaching ("no saved Transition and no Take;
+  ⏵ practice cues it on the decks"). Same signal, orthogonal to
+  resolution as before.

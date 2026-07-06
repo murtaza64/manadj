@@ -1256,19 +1256,16 @@ function AdjacencyRow({
           </button>
         )}
 
-        {/* The Unpracticed badge (orthogonal to resolution; the old
-            UNRESOLVED badge merged into the red hard-cut chip, sets 20) */}
+        {/* Unpracticed marker (orthogonal to resolution; the old
+            UNRESOLVED badge merged into the red hard-cut chip, sets 20).
+            A quiet ⚠ glyph — the shouty yellow badge was noise at scale
+            (22 follow-up); the teaching rides the tooltip. */}
         {view.unpracticed && (
           <span
-            style={{
-              padding: '1px 6px',
-              background: 'var(--yellow)',
-              color: 'var(--base)',
-              fontSize: '11px',
-              fontWeight: 600,
-            }}
+            title="Unpracticed — this pair has never been mixed: no saved Transition and no Take. ⏵ practice cues it on the decks"
+            style={{ color: 'var(--yellow)', fontWeight: 700, cursor: 'help' }}
           >
-            UNPRACTICED
+            ⚠
           </span>
         )}
 
