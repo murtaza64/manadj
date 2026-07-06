@@ -33,6 +33,7 @@ def list_tracks(
     bpm_threshold_percent: int | None = Query(None, ge=0, le=100),
     key_camelot_ids: List[str] | None = Query(None),
     unprocessed: bool | None = Query(None),
+    needs_attention: bool | None = Query(None),
     archived: bool = Query(False),
     sort_column: str | None = Query(
         None,
@@ -66,6 +67,7 @@ def list_tracks(
         bpm_threshold_percent=bpm_threshold_percent,
         key_camelot_ids=key_camelot_ids,
         unprocessed=unprocessed,
+        needs_attention=needs_attention,
         archived=archived,
         sort_column=sort_column,
         sort_direction=sort_direction

@@ -316,3 +316,16 @@ a.provenance-chip:hover {
   transform-origin: center;
 }
 
+/* Needs-attention worklist badge (ADR 0024): grid analysis bailed and the
+   track has no saved grid yet. Bright, fully saturated red per repo style. */
+.needs-attention-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #ff0033;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}

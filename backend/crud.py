@@ -24,6 +24,7 @@ def get_tracks(
     bpm_threshold_percent: int | None = None,
     key_camelot_ids: list[str] | None = None,
     unprocessed: bool | None = None,
+    needs_attention: bool | None = None,
     archived: bool = False,
     sort_column: str | None = None,
     sort_direction: str = "desc"
@@ -32,6 +33,8 @@ def get_tracks(
         joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category),
         # bpm_effective reads the grid (ADR 0016) — eager, not N+1 lazy loads.
         joinedload(models.Track.beatgrid),
+        # needs_attention reads the analysis diagnostics (ADR 0024) — same.
+        joinedload(models.Track.grid_analysis),
     )
 
     # Archived (CONTEXT.md): out of the active Library. Default listings
@@ -72,6 +75,10 @@ def get_tracks(
             (models.Track.energy.is_(None)) |
             (~models.Track.track_tags.any())
         )
+
+    # Needs-attention worklist (ADR 0024): analysis bailed, no saved grid
+    if needs_attention:
+        query = query.filter(models.Track.needs_attention)
 
     # Tag filtering with ANY/ALL logic
     if tag_ids:

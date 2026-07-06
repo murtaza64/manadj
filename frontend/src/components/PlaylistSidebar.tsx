@@ -14,7 +14,7 @@ import './PlaylistSidebar.css';
 import { createSetFromPlaylist } from '../sets/playlistFlows';
 import type { Playlist } from '../types';
 
-export type ViewType = 'all' | 'unprocessed' | 'archived' | 'playlist' | 'set';
+export type ViewType = 'all' | 'unprocessed' | 'needs-attention' | 'archived' | 'playlist' | 'set';
 
 /** Palette for "Change color ▸" — bright, fully saturated (repo preference). */
 const PLAYLIST_COLORS: Array<{ label: string; value: string }> = [
@@ -250,6 +250,17 @@ export default function PlaylistSidebar({
         style={{ borderBottom: '1px solid var(--surface0)' }}
       >
         Unprocessed
+      </div>
+
+      {/* "Needs attention" worklist (ADR 0024): tracks whose grid analysis
+          bailed and that still have no saved grid — resolve by manual
+          gridding or External Import */}
+      <div
+        onClick={() => onSelectView('needs-attention')}
+        className={`pl-sidebar-row${selectedView === 'needs-attention' ? ' selected' : ''}`}
+        style={{ borderBottom: '1px solid var(--surface0)' }}
+      >
+        Needs attention
       </div>
 
       {/* "Archived" special view (CONTEXT.md: Archived — out of the active

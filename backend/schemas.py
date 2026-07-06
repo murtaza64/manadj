@@ -81,6 +81,8 @@ class Track(TrackBase):
     archived_at: datetime | None = None  # Archived verdict; NULL = active
     # Key provenance (ADR 0024): analyzed | imported | manual; NULL = unknown
     key_provenance: str | None = None
+    # Worklist flag (ADR 0024): analysis bailed and no saved grid yet
+    needs_attention: bool = False
     tags: list[Tag] = []
     provenance: TrackProvenance | None = None
     # Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a grid

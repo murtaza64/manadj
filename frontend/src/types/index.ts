@@ -36,6 +36,10 @@ export interface Track {
   title?: string;
   artist?: string;
   key?: number;  // Engine DJ key ID (0-23)
+  /** Key provenance (ADR 0024): analyzed | imported | manual; null = unknown */
+  key_provenance?: string | null;
+  /** Worklist flag (ADR 0024): grid analysis bailed and no saved grid yet */
+  needs_attention?: boolean;
   bpm?: number;
   /** Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a grid
    * exists, else bpm. Tempo consumers (Set planner) read this, never bpm —

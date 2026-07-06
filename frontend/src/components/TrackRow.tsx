@@ -214,6 +214,14 @@ const TrackRow = memo(function TrackRow({
         </td>
         <td className={getCellClasses('title')} style={getCellStyle('title')}>
           <div className="track-cell-text">
+            {track.needs_attention && (
+              <span
+                className="needs-attention-badge"
+                title="Grid analysis bailed — no grid or BPM; grid it by hand or import one"
+              >
+                !
+              </span>
+            )}
             {track.title || filename}
           </div>
           {onLoadToDeck && (

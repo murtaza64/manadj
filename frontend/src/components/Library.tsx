@@ -241,6 +241,7 @@ export default function Library({
       bpmThresholdPercent: filters.bpmCenter !== null ? filters.bpmThresholdPercent : null,
       keyCamelotIds: filters.selectedKeyCamelotIds,
       unprocessed: selectedView === 'unprocessed' ? true : undefined,
+      needsAttention: selectedView === 'needs-attention' ? true : undefined,
       archived: selectedView === 'archived' ? true : undefined,
       sortColumn: filters.sortColumn,
       sortDirection: filters.sortDirection,

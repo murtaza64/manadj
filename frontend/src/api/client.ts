@@ -74,6 +74,7 @@ export const api = {
         bpmThresholdPercent?: number | null;
         keyCamelotIds?: string[];
         unprocessed?: boolean;
+        needsAttention?: boolean;
         archived?: boolean;
         sortColumn?: string | null;
         sortDirection?: 'asc' | 'desc';
@@ -114,6 +115,10 @@ export const api = {
         // Unprocessed filter
         if (filters.unprocessed) {
           params.append('unprocessed', 'true');
+        }
+        // Needs-attention worklist (ADR 0024)
+        if (filters.needsAttention) {
+          params.append('needs_attention', 'true');
         }
         // Archived view (default listings exclude archived server-side)
         if (filters.archived) {
