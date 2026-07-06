@@ -50,6 +50,7 @@ function registerFakeDeckControls(deck: ChannelId): void {
     gridBpm: (change) => calls.push(`${deck}:gridBpm:${change}`),
     gridNudgeLocal: (offsetMs) => calls.push(`${deck}:gridLocal:${offsetMs}`),
     gridNudgeCommit: (offsetMs) => calls.push(`${deck}:gridCommit:${offsetMs}`),
+    gridBpmAdjust: (deltaBpm) => calls.push(`${deck}:gridBpmAdjust:${deltaBpm}`),
   });
 }
 
@@ -393,10 +394,12 @@ describe('grid-edit pads are registry-direct (midi-performance-ops 05, ADR 0019)
     edge,
     target: { control: 'grid-anchor', deck },
   });
-  const gridBpm = (
-    deck: ChannelId,
-    change: 'grow' | 'shrink' | 'halve' | 'double'
-  ): MidiAction => ({ kind: 'button', edge: 'down', target: { control: 'grid-bpm', deck, change } });
+  /** A full press: grow/shrink are chorded (the tap fires on the zero-tick
+   * release); halve/double fire on the down edge and ignore the up. */
+  const gridBpm = (deck: ChannelId, change: 'grow' | 'shrink' | 'halve' | 'double') => {
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'grid-bpm', deck, change } });
+    dispatchMidiAction({ kind: 'button', edge: 'up', target: { control: 'grid-bpm', deck, change } });
+  };
 
   /** A tap: press and release with no jog ticks in between (issue 06 made
    * grid-nudge chorded — the step fires on the zero-tick release). */
@@ -411,10 +414,10 @@ describe('grid-edit pads are registry-direct (midi-performance-ops 05, ADR 0019)
     tap('A', 'later');
     dispatchMidiAction(anchor('A', 'down'));
     dispatchMidiAction(anchor('A', 'up'));
-    dispatchMidiAction(gridBpm('A', 'grow'));
-    dispatchMidiAction(gridBpm('A', 'shrink'));
-    dispatchMidiAction(gridBpm('A', 'halve'));
-    dispatchMidiAction(gridBpm('A', 'double'));
+    gridBpm('A', 'grow');
+    gridBpm('A', 'shrink');
+    gridBpm('A', 'halve');
+    gridBpm('A', 'double');
     expect(calls).toEqual([
       'A:gridNudge:earlier',
       'A:gridNudge:later',
@@ -431,7 +434,7 @@ describe('grid-edit pads are registry-direct (midi-performance-ops 05, ADR 0019)
     claimAudible('editor');
     tap('B', 'later');
     dispatchMidiAction(anchor('B', 'down'));
-    dispatchMidiAction(gridBpm('B', 'double'));
+    gridBpm('B', 'double');
     expect(calls).toEqual(['B:gridNudge:later', 'B:gridAnchor', 'B:gridBpm:double']);
   });
 
@@ -445,7 +448,7 @@ describe('grid-edit pads are registry-direct (midi-performance-ops 05, ADR 0019)
   it('no registered deck controls: grid actions drop silently', () => {
     tap('A', 'earlier');
     dispatchMidiAction(anchor('A', 'down'));
-    dispatchMidiAction(gridBpm('A', 'grow'));
+    gridBpm('A', 'grow');
     expect(calls).toEqual([]);
   });
 });
@@ -515,6 +518,46 @@ describe('spin-to-nudge chord (midi-performance-ops 06)', () => {
     dispatchMidiAction(nudge('A', 'later', 'up'));
     dispatchMidiAction(tick('jog', 'A', 1));
     expect(calls).toEqual(['A:gridLocal:2', 'A:gridCommit:2', 'editor:rim:A:1']);
+  });
+
+  it('hold grow/shrink + spin: fine BPM adjust, one commit on release, jog suppressed', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'grid-bpm', deck: 'A', change: 'shrink' },
+    });
+    dispatchMidiAction(tick('jog', 'A', 3));
+    dispatchMidiAction(tick('jog-touch', 'A', -1));
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'grid-bpm', deck: 'A', change: 'shrink' },
+    });
+    dispatchMidiAction(tick('jog', 'A', 1)); // released: plain jog again
+    // 2 net ticks × 0.01 BPM — the reducer accumulates integer ticks and
+    // converts once at release, so the delta is exactly 2 × the rate.
+    expect(calls).toEqual([`A:gridBpmAdjust:${2 * 0.01}`, 'A:jog:1']);
+  });
+
+  it('grow/shrink taps still fire the discrete step; halve/double stay plain taps', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'grid-bpm', deck: 'A', change: 'grow' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'grid-bpm', deck: 'A', change: 'grow' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'grid-bpm', deck: 'A', change: 'halve' },
+    });
+    expect(calls).toEqual(['A:gridBpm:grow', 'A:gridBpm:halve']);
   });
 
   it('the shifted jog-seek stream stays surface-routed while armed (SHIFT is its own gesture)', () => {

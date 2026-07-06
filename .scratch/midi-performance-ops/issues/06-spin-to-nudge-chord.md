@@ -1,6 +1,6 @@
 # Spin-to-nudge: hold a grid-nudge pad and turn the jog for fine grid nudging
 
-Status: ready-for-human
+Status: done (verified 2026-07-06, incl. hardware smoke test)
 Review: parked on lane midigrid (grid track stack, review lands the prefix); walkthrough in .lanes/midigrid.md and the requesting session; lane app http://localhost:5423
 
 ## Parent
@@ -33,3 +33,7 @@ The chorded fine-nudge gesture, built on one new tested seam — a pure grid-edi
 ## Comments
 
 **2026-07-06 (lane midigrid)**: The new tested seam is `frontend/src/midi/gridChord.ts` — pure reducer (`reduceGridChord`: pad-down/up + jog-ticks in; pass-jog / local-nudge / tap-step / commit out; 1ms/tick; any-tick-received = hold, zero-net hold commits nothing; second pad ignored mid-gesture; per-deck state) + `shiftBeatgrid` (the rigid optimistic cache translate). Dispatch folds it as its one piece of state (`_resetGridChordForTests`); rim and touch ticks flow through the fold BEFORE surface routing, so armed ticks reach no surface's jog meanings (editor included); jog-seek (SHIFT) stays surface-routed. `grid-nudge` down now arms, release decides tap vs commit. Registry gained `gridNudgeLocal` (queryClient.setQueryData shift — engine + waveform follow the cache live via useDeckBeatgridSync) and `gridNudgeCommit` (one POST with the net offset through the serialized nudge chain; refetch settles local vs server). ADR 0019 carries the carve-out amendment. Tests: gridChord.test.ts (17, modeled on transport.test.ts) + spin-to-nudge describe in dispatch.test.ts. `npx vitest run` 1192 green, tsc clean.
+
+**2026-07-06 (lane midigrid, in-session follow-ups after review)**: Grid track 04-06 verified by the human and landed (merge `zokurwzq`). Two in-session-approved additions landed after: (1) BPM readouts show 2dp when non-integer (`formatBpm` at rest + in the `(var)` readout — a Grow/Shrink step is now visible without focusing); (2) hold-to-jog grow/shrink — holding pad 5/6 arms a BPM chord in the same reducer (0.01 BPM/tick, integer tick accumulation, sign = spin direction with clockwise up; tap still ±0.03; one serialized commit of the net delta on release via new `gridBpmAdjust`; no per-tick optimistic apply since re-tempo math is server-side). Halve/double stay plain taps. One chord per deck across kinds. ADR 0019 amendment wording widened to both chords.
+
+**2026-07-06 (lane midigrid)**: Hardware smoke test passed ("sampler pad worked as expected, verified" — human, in-session). SAMPLER pad TODO(hardware-verify) markers flipped to hardware-verified 2026-07-06 in inpulse300mk2.ts; issues 04-06 flipped to done.

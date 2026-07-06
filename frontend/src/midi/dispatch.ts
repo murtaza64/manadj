@@ -79,6 +79,12 @@ function executeGridChordCommand(command: GridChordCommand): void {
     case 'commit':
       deckControlsFor(command.deck)?.gridNudgeCommit(command.offsetMs);
       return;
+    case 'bpm-tap':
+      deckControlsFor(command.deck)?.gridBpm(command.op);
+      return;
+    case 'bpm-commit':
+      deckControlsFor(command.deck)?.gridBpmAdjust(command.deltaBpm);
+      return;
   }
 }
 
@@ -197,6 +203,17 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       return;
     }
     case 'grid-bpm': {
+      // Grow/shrink are chorded like the nudge pads (hold + jog = fine
+      // BPM adjust, in-session decision 2026-07-06); halve/double stay
+      // plain taps.
+      if (target.change === 'grow' || target.change === 'shrink') {
+        runGridChord({
+          type: edge === 'down' ? 'bpm-pad-down' : 'bpm-pad-up',
+          deck: target.deck,
+          op: target.change,
+        });
+        return;
+      }
       if (edge !== 'down') return;
       deckControlsFor(target.deck)?.gridBpm(target.change);
       return;

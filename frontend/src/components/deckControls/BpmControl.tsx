@@ -151,17 +151,17 @@ export function BpmControl({
           className="deck-bpm-var"
           title="variable beatgrid — edit the grid"
         >
-          ~{Math.round(projection.bpm)} (var)
+          ~{formatBpm(projection.bpm)} (var)
         </span>
         {gridConfig && <GridEditButtons trackId={track?.id ?? null} {...gridConfig} />}
       </span>
     );
   }
 
-  // At rest the input is 3 digits wide (user decision): show the rounded
-  // value; the exact tempo lives in the tooltip and appears (full
-  // precision) the moment the input focuses for editing.
-  const displayValue = isFocused ? draft : base !== null ? String(Math.round(base)) : '';
+  // At rest the readout shows the exact tempo to 2dp when non-integer
+  // (user decision 2026-07-06, revising the earlier rounded-integer rest
+  // display: a Grow/Shrink step must be visible without focusing).
+  const displayValue = isFocused ? draft : base !== null ? formatBpm(base) : '';
   const exactTitle =
     base !== null ? `${formatBpm(base)} BPM — click to edit` : 'BPM';
   const inputDisabled = disabled || !track;
