@@ -709,7 +709,12 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                     : 'Play the set through the decks'
                 }
               >
-                {conductingThis && conductorState.status === 'playing' ? '⏸ Playing' : '▶ Play set'}
+                {/* \uFE0E forces text presentation — Apple renders these
+                    glyphs as emoji by default, at emoji metrics (the ⤴
+                    button visibly outgrew its siblings). */}
+                {conductingThis && conductorState.status === 'playing'
+                  ? '⏸\uFE0E Playing'
+                  : '▶\uFE0E Play set'}
               </button>
               {conductingThis && (
                 <button
@@ -717,7 +722,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   onClick={stopSetPlayback}
                   title="Stop the Conductor (decks pause)"
                 >
-                  ⏹
+                  {'⏹\uFE0E'}
                 </button>
               )}
               {/* Pickup (sets 16): the inverse of takeover. Lit exactly
@@ -731,7 +736,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   disabled={!pickupState.lit}
                   title={pickupState.message}
                 >
-                  ⤴ Pick up
+                  {'⤴\uFE0E Pick up'}
                 </button>
               )}
             </>

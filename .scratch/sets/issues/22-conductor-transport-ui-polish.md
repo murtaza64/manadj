@@ -159,3 +159,12 @@ Additional acceptance criteria:
   chip): ⋈ for edit (the Transition editor's own TopBar icon) and ◉
   (vinyl) for practice. Verbs ride the tooltips, as with the [+]
   insert affordance (sets 20 precedent).
+- Follow-up (2026-07-05, approved in-session, lane setpolish): the ⋈/◉
+  glyphs sat off-center (different font metrics) — flex-centered in a
+  fixed box (`.set-icon-btn`). Transport sizing fixed in the same
+  pass: `.set-transport-btn` gets a locked 30px flex box (glyph
+  metrics no longer set button height), `.set-play` reserves the wider
+  label's width so ▶ Play set ↔ ⏸ Playing never re-centers the
+  transport, and the transport glyphs carry U+FE0E — Apple was
+  rendering ⤴ (and friends) as emoji, which inflated Pick up past its
+  siblings.
