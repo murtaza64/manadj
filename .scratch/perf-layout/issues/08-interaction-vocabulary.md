@@ -54,3 +54,32 @@ vitest as regression floor. Review-gated.
   text (inverted fill overweights a table header); row selection =
   surface0 (not a button engaged state); .editor-fit keeps its crust
   backdrop (floats over the timeline).
+- Vocabulary gap found during sets 22 (Set view migration, lane setui):
+  borderless glyph controls NESTED IN hover-tinted rows (the Set rows'
+  ▶ play-from / ✕ remove / [+] insert). The FilterBar ×-button idiom
+  (hover = surface0, press = surface1) is invisible there — the row
+  under the pointer is already surface0. Sets 22 shifts them one fill
+  step up (hover = surface1, press = surface2, `.set-glyph-btn` in
+  SetDetailPane.css), leaning on this issue's own load-button precedent
+  ("press = one fill step up … load buttons --surface2"). Bordered
+  controls in the same rows stay on the standard steps — the border
+  brightening carries their feedback. Flagging for adoption into the
+  vocabulary (or correction) rather than forking silently.
+- SetsSidebarSection.tsx unmigrated flag above is resolved: sets 22
+  migrated it (SetsSidebarSection.css mirrors the PlaylistSidebar
+  patterns, as prescribed).
+- Vocabulary edge found during sets 35 (loaded/playing row marks, lane
+  setui): a STATE mark occupying the same column as a hover-revealed
+  affordance. The Set rows' play column shows the animated playing mark
+  (green EQ bars) at rest; row hover reveals the ▶ play-from affordance
+  in that slot, so the mark yields to it (`.set-mark-yields-to-hover`,
+  SetDetailPane.css) — the Spotify number→play idiom. Strictly read,
+  "states outrank hovers" says the mark should stay; but the state is
+  still carried under hover by the row's deck-identity wash, and the
+  mark only yields when the affordance actually appears (a plan-less
+  playing row keeps its bars). Also: the mark animates `transform:
+  scaleY` — reading the "no scale effects" rule as governing
+  interaction feedback (hover/press), not state animations; a
+  `prefers-reduced-motion` fallback renders it static. Flagging both
+  for adoption into the vocabulary (or correction) rather than forking
+  silently.

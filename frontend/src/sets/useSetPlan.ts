@@ -34,7 +34,13 @@ import type { HotCue, Track } from '../types';
 export function hotCue1Sec(cues: HotCue[] | undefined): number | null {
   return cues?.find((c) => c.slot_number === 1)?.time_seconds ?? null;
 }
-import { planSet, type PlanInput, type SetPlan, type TempoPolicyInput } from './planner';
+import {
+  planSet,
+  plannerTrackFacts,
+  type PlanInput,
+  type SetPlan,
+  type TempoPolicyInput,
+} from './planner';
 import { useSetSettings } from './setSettings';
 import type { SetEntryLocal } from './setStore';
 
@@ -119,11 +125,9 @@ export function useSetPlanParts(
     const tracks: PlanInput['tracks'] = {};
     for (const e of entries) {
       const t = trackMap.get(e.trackId)!;
-      tracks[e.trackId] = {
-        durationSec: t.duration_secs ?? 0,
-        bpm: t.bpm ?? null,
-        hotCue1Sec: hotCue1ByTrack.get(e.trackId) ?? null,
-      };
+      // plannerTrackFacts reads the grid-first effective BPM (ADR 0016) —
+      // never t.bpm, which can be a stale projection of the grid.
+      tracks[e.trackId] = plannerTrackFacts(t, hotCue1ByTrack.get(e.trackId) ?? null);
     }
 
     // Full Transition payloads for each adjacency's ordered pair, keyed by

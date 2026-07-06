@@ -243,3 +243,60 @@ describe('decoded-buffer cache (mix-editor 28)', () => {
     expect(engine.getPlayhead()).toBeCloseTo(13);
   });
 });
+
+describe('DeckEngine beatgrid refresh (cue-quantize-bpm 01)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** A 120 BPM grid from 0s: beats every 0.5s. */
+  const grid120 = Array.from({ length: 360 }, (_, i) => i * 0.5);
+  /** The same track re-tempo'd to 240 BPM: beats every 0.25s. */
+  const grid240 = Array.from({ length: 720 }, (_, i) => i * 0.25);
+
+  async function loadedEngine(trackId: number, grid: number[] | null = grid120) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+    });
+    return engine;
+  }
+
+  it('a refreshed grid governs quantized cue placement (BPM re-tempo)', async () => {
+    const engine = await loadedEngine(30);
+    engine.setBeatTimes(30, grid240);
+    engine.seek(10.35);
+    // Paused, away from the cue: cue-down is a placement gesture —
+    // Quantize (default ON) snaps it to the nearest beat.
+    engine.cueDown();
+    // The re-tempo'd grid gives 10.25; the stale load-time grid gave 10.5.
+    expect(engine.getSnapshot().cuePoint).toBeCloseTo(10.25, 10);
+  });
+
+  it('ignores a refresh addressed to a track that is not loaded', async () => {
+    const engine = await loadedEngine(31);
+    engine.setBeatTimes(99, grid240);
+    engine.seek(10.35);
+    engine.cueDown();
+    expect(engine.getSnapshot().cuePoint).toBeCloseTo(10.5, 10);
+  });
+
+  it('a grid removed by refresh leaves the deck gridless', async () => {
+    const engine = await loadedEngine(32);
+    expect(engine.getSnapshot().hasBeatgrid).toBe(true);
+    engine.setBeatTimes(32, null);
+    expect(engine.getSnapshot().hasBeatgrid).toBe(false);
+    engine.seek(10);
+    engine.toggleLoop(); // auto-loop is inert without a grid
+    expect(engine.getSnapshot().loop).toBeNull();
+  });
+});
