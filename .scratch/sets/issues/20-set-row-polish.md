@@ -1,6 +1,6 @@
 # 20 — Set view row polish (batch of human review feedback)
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -82,3 +82,5 @@ open http://localhost:5313 → the demo Set →
 5. Hover the `+`: tooltip reads the old "Suggest a track to insert
    here…" label; click it: the insert-suggestions popover opens as
    before.
+
+**2026-07-06 — approved and landed** (`tvvvnmok`, re-gated after the stack rebased onto trunk with 19's row badge: vitest 1063, pytest 666, frontend build clean, single alembic head `0022_mwzqllkt`).

@@ -2,7 +2,7 @@
 
 (Renumbered from 20, 2026-07-05 — parallel filing collided with 20-set-row-polish.)
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -113,3 +113,5 @@ open http://localhost:5313 →
    (or drag out of the pane) — the list and ladder snap back untouched.
 6. Drag a track in from the Library/a playlist: today's blue indicator
    line behavior, no row motion.
+
+**2026-07-06 — approved and landed** (`pykptyny`, re-gated after the stack rebased onto trunk with 19's row badge: vitest 1063, pytest 666, frontend build clean, single alembic head `0022_mwzqllkt`).

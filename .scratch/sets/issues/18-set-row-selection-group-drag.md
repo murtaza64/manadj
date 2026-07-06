@@ -1,6 +1,6 @@
 # 18 — Set view: row selection + group drag-reorder
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -148,3 +148,5 @@ open http://localhost:5313 → the demo Set →
    clears too. Select rows and press Delete: they leave the Set, pins
    go Dormant (drag one back later: ↺ restore, per 07).
 7. Hover ▶ and ✕ still work and never change the selection.
+
+**2026-07-06 — approved and landed** (`pppnwyvw`, re-gated after the stack rebased onto trunk with 19's row badge: vitest 1063, pytest 666, frontend build clean, single alembic head `0022_mwzqllkt`).
