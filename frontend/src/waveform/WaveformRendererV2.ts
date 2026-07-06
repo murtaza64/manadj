@@ -81,6 +81,14 @@ export const HOT_CUE_CSS_COLORS: Record<number, string> = {
 
 const CUE_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
+/** CSS-side cue color resolution (hotcue-colors 01): the stored per-cue
+ * color wins when it's a trustworthy hex; otherwise the slot palette.
+ * Shared by every 2D canvas/DOM render site (editor lane guides, editor
+ * minimap) so no surface grows its own fallback. */
+export function cueCssColor(slot: number, stored?: string): string {
+  return stored && CUE_COLOR_RE.test(stored) ? stored : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');
+}
+
 /** '#RRGGBB' → 0-1 floats; null for anything else (falls back to the
  * slot palette — stored colors are Engine-import hex, but don't trust). */
 function parseCueColor(color: string | undefined): [number, number, number] | null {
@@ -982,22 +990,19 @@ export class WaveformRendererV2 {
         pushRect(verts, x + 1 * view.dpr, 0, 5 * view.dpr, 5 * view.dpr, r, g, b);
         continue;
       }
-      const width = 3 * view.dpr;
-      pushRect(verts, x, 0, width, view.h, r, g, b);
-      // Edge-anchored rows: fixed-size triangle at the baseline edge.
+      // Edge-anchored rows (editor timeline): zoned-mark idiom
+      // (mix-editor 32 / hotcue-colors 01) — 2px pole flying a 5×5
+      // square flag at the row's OUTER edge (A top, B bottom), matching
+      // the minimap marks above; the numbered badge (2D overlay) stays.
       if (this.anchor !== 'center') {
-        const tri = 10 * view.dpr;
-        const cx = x + width / 2;
-        if (this.anchor === 'top') {
-          verts.push(cx - tri / 2, 0, r, g, b, cx + tri / 2, 0, r, g, b, cx, tri, r, g, b);
-        } else {
-          verts.push(
-            cx - tri / 2, view.h, r, g, b,
-            cx + tri / 2, view.h, r, g, b,
-            cx, view.h - tri, r, g, b,
-          );
-        }
+        const poleW = 2 * view.dpr;
+        const flag = 5 * view.dpr;
+        pushRect(verts, x - poleW / 2, 0, poleW, view.h, r, g, b);
+        const flagY = this.anchor === 'top' ? 0 : view.h - flag;
+        pushRect(verts, x + poleW / 2, flagY, flag, flag, r, g, b);
+        continue;
       }
+      pushRect(verts, x, 0, 3 * view.dpr, view.h, r, g, b);
     }
   }
 
@@ -1055,7 +1060,10 @@ export class WaveformRendererV2 {
     for (const [slot, hc] of this.hotCues.entries()) {
       const x = this.timeToX(hc.time, view);
       if (x < 0 || x >= view.w) continue;
-      const squareX = x + 3 * view.dpr + 2 * view.dpr;
+      // Edge-anchored rows: clear the zoned mark's pole (2px, centered)
+      // + 5×5 flag; center-anchored keeps the legacy 3px-line offset.
+      const squareX =
+        this.anchor === 'center' ? x + 5 * view.dpr : x + 8 * view.dpr;
       // Stored per-cue color first, like the marks (hotcue-colors 01).
       const color =
         hc.color && CUE_COLOR_RE.test(hc.color)

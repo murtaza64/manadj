@@ -15,7 +15,8 @@ import { MixPlayer } from './MixPlayer';
 import { ConductorLanePlayhead } from './ConductorLanePlayhead';
 import { GlobalMinimap } from './GlobalMinimap';
 import { LaneCanvas } from './LaneCanvas';
-import { LANE_COLORS } from './laneColors';
+import { DECK_LANE_ORDER, LANE_COLORS, LANE_LABELS } from './laneColors';
+import { cueCssColor } from '../waveform/WaveformRendererV2';
 import type { LaneGuide } from './LaneCanvas';
 import {
   LANE_IDS,
@@ -110,8 +111,6 @@ export function DawTimeline({
     (id: LaneId, points: LanePoint[] | null) => store.setLane(id, points),
     [store]
   );
-  /** Remove the lane from the editor (envelope kept; re-add restores). */
-  const onLaneHide = useCallback((id: LaneId) => store.hideLane(id), [store]);
 
   // ── Lane node group selection (mix-editor 16) ──
   // One selection at a time, KEYED BY LANE ID (v1 is per-lane; v2's
@@ -904,7 +903,12 @@ export function DawTimeline({
     }
     for (const c of hotCuesA) {
       if (c.time_seconds < tr.startSec || c.time_seconds > tr.startSec + dur) continue;
-      out.push({ x: (c.time_seconds - tr.startSec) / dur, strong: true, color: c.color || '#39ff14' });
+      out.push({
+        x: (c.time_seconds - tr.startSec) / dur,
+        strong: true,
+        // Slot palette fallback, stored-color-wins (mix-editor 32).
+        color: cueCssColor(c.slot_number, c.color),
+      });
     }
     return out;
   }, [beatgridA, hotCuesA, tr.startSec, tr.durationSec, pxPerSec]);
@@ -948,7 +952,11 @@ export function DawTimeline({
         const mixT = g.mixStartSec + (c.time_seconds - g.bStartSec) / rateB;
         if (mixT < Math.max(g.mixStartSec, tr.startSec)) continue;
         if (mixT > Math.min(g.mixEndSec, tr.startSec + dur)) continue;
-        out.push({ x: (mixT - tr.startSec) / dur, strong: true, color: c.color || '#39ff14' });
+        out.push({
+          x: (mixT - tr.startSec) / dur,
+          strong: true,
+          color: cueCssColor(c.slot_number, c.color),
+        });
       }
     }
     return out;
@@ -964,14 +972,7 @@ export function DawTimeline({
           else laneLabelRefs.current.delete(id);
         }}
       >
-        {id}
-        <button
-          className="editor-laneclear"
-          title="Remove lane (envelope kept — re-add restores it)"
-          onClick={() => onLaneHide(id)}
-        >
-          ×
-        </button>
+        {LANE_LABELS[id]}
       </span>
       <div
         className="editor-lanewindow"
@@ -995,8 +996,11 @@ export function DawTimeline({
     </div>
   );
 
-  const lanesA = visibleLanes.filter((id) => id.endsWith('A'));
-  const lanesB = visibleLanes.filter((id) => id.endsWith('B'));
+  // Strips render in the fixed mirrored display order (review nit
+  // 2026-07-06): A top→bottom FILTER→FADER, B FADER→FILTER — never the
+  // model's insertion order.
+  const lanesA = DECK_LANE_ORDER.A.filter((id) => visibleLanes.includes(id));
+  const lanesB = DECK_LANE_ORDER.B.filter((id) => visibleLanes.includes(id));
 
   // Stable default-shape identities: lanePoints() mints a fresh default
   // array per call, which made every DawTimeline render redraw every
@@ -1009,7 +1013,46 @@ export function DawTimeline({
 
   return (
     <div className="editor-timeline-wrap">
-      <div ref={viewportRef} className="editor-timeline">
+      <div className="editor-timeline">
+        {/* Lane toggle gutter (mix-editor 32): per-deck chip strips at the
+            left edge of each deck's lane region — A's at the top, B's at
+            the bottom, mirroring the strip stack. On = addLane (unhide,
+            envelope restored), off = hideLane (envelope kept; hidden
+            lanes play their default) — per-Transition, persisted. */}
+        <div className="editor-lanegutter">
+          {(['A', 'B'] as const).map((deck) => (
+            <div key={deck} className="editor-lanetoggles">
+              {DECK_LANE_ORDER[deck].map((id) => {
+                const on = visibleLanes.includes(id);
+                return (
+                  <button
+                    key={id}
+                    className={`editor-lanetoggle${on ? ' on' : ''}`}
+                    aria-pressed={on}
+                    style={
+                      on
+                        ? { background: LANE_COLORS[id], borderColor: LANE_COLORS[id] }
+                        : { color: LANE_COLORS[id], borderColor: LANE_COLORS[id] }
+                    }
+                    title={
+                      on
+                        ? `Hide the ${LANE_LABELS[id]} ${deck} lane (envelope kept — it plays its default)`
+                        : `Show the ${LANE_LABELS[id]} ${deck} lane (drawn envelope restored)`
+                    }
+                    onClick={(e) => {
+                      if (on) store.hideLane(id);
+                      else store.addLane(id);
+                      e.currentTarget.blur();
+                    }}
+                  >
+                    {LANE_LABELS[id]}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <div ref={viewportRef} className="editor-timeline-viewport">
         <div
           ref={contentRef}
           className="editor-timeline-content"
@@ -1176,6 +1219,7 @@ export function DawTimeline({
               on THIS pair's timeline — the outgoing's solo, the window,
               and the incoming's tail. */}
           <ConductorLanePlayhead store={store} pxPerSec={pxPerSec} />
+        </div>
         </div>
       </div>
 

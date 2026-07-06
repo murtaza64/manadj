@@ -454,3 +454,31 @@ file moved from `frontend/src/prototype/NOTES.md` to the tracker and stops
 accumulating; future work is ordinary issue-tracked development. The
 "real-module fixes" list above was honored by the 2026-07-04 merge (all
 rode in with the stack).
+
+## Post-graduation addendum: lane UI/UX pass (issue 32, 2026-07-06)
+
+Ten-item polish pass (lane laneux, change xsouwpxm), all settled in the
+2026-07-05 grill:
+
+- Lane toggles: add-lane dropdown + per-strip × replaced by a per-deck
+  chip gutter at the timeline's left edge (five chips per deck, FADER LOW
+  MID HIGH FILTER, engaged = inverted lane-color fill). Same addLane/
+  hideLane semantics — envelopes survive off/on round-trips.
+- Lane colors moved into deck hue families (laneColors.ts stays the
+  single source; exact table under vitest). LANE_LABELS display-name map
+  added; raw LaneIds survive only in model/persistence.
+- Editor cue marks adopted the zoned-mark idiom: rows fly a 2px pole +
+  5×5 square flag at the row's outer edge (badge kept); the editor
+  GlobalMinimap matches the performance minimap; every #39ff14 fallback
+  replaced by cueCssColor (stored-color-wins, slot palette).
+- TEMPO/SNAP button toggles replaced the checkboxes (green engaged fill;
+  templates-trigger open state also sapphire → green; both blur after
+  click). Lane strips flattened (gradient dropped, deck edge kept).
+- lockedWindow defaults true (accepted tension: double-drop starts with
+  a lock-off press).
+- B slide polarity flipped to apparent motion at the gesture layer only
+  (slideBeatsToSeconds in gestureMath; DeckCard arrows, MIDI beatjump;
+  alignmentNudge now deck-agnostic "+δ = block right"). slideB/mixModel
+  math untouched; jog B exempt (platter metaphor).
+- Arranger padding stripped; editor column is a flex height budget (no
+  fixed 34vh timeline, no overflow-y scrollbar).

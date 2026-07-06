@@ -1,6 +1,6 @@
 # 32 — Lane UI/UX pass: toggles, deck-family colors, control idiom, polarity
 
-Status: ready-for-human (implemented 2026-07-06, lane laneux, change xsouwpxm — verification walkthrough in Comments)
+Status: done (landed 2026-07-06, merge ukymqmzk — changes xsouwpxm + review nits vozoowkl; approved in session)
 
 ## Parent
 
@@ -79,3 +79,14 @@ None. Coordinate: same LaneCanvas/DawTimeline surface as 16 (ready-for-human, ch
   7. B card slide ▶ moves B's block visibly RIGHT with lock on AND off;
      align ▶ (either card) also moves the block right; tooltips match.
   8. Editor top panel edge-to-edge, no vertical scrollbar at any sane size.
+
+- 2026-07-06 (lane laneux, change vozoowkl — review nits): lane strips and
+  toggle chips now render in a FIXED mirrored display order — A top→bottom
+  FILTER HIGH MID LOW FADER (LOW beside the fader), B the reverse (fader
+  hugs the waveform seam, filter at the outer edge) — never the model's
+  insertion order. Lane hues re-tabled as one spectrum ramp per deck along
+  that order (uniform −80/−60/−40/−20/0° offsets into the deck anchor,
+  anchor channel-floor kept): A #3bff00→#00ff1a→#00ff6f→#00ffc4→#00e5ff,
+  B #512dff→#972dff→#dd2dff→#ff2ddb→#ff2d95. Table + order +
+  monotonic-ramp property under vitest. Supersedes the grill's
+  scattered-offset table.
