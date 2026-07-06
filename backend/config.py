@@ -24,12 +24,6 @@ class LibraryConfig:
 
 
 @dataclass
-class AnalysisConfig:
-    """Analysis configuration."""
-    key_detection_backend: str = "essentia"  # "essentia" or "keyfinder"
-
-
-@dataclass
 class SoundCloudConfig:
     """SoundCloud Source configuration."""
     oauth_token: str | None = None
@@ -47,7 +41,6 @@ class Config:
     """Application configuration."""
     database: DatabaseConfig
     library: LibraryConfig
-    analysis: AnalysisConfig
     soundcloud: SoundCloudConfig
     acquisition: AcquisitionConfig
 
@@ -116,7 +109,6 @@ def load_config() -> Config:
             library=LibraryConfig(
                 tracks_directory=None
             ),
-            analysis=AnalysisConfig(),
             soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token({})),
             acquisition=AcquisitionConfig()
         )
@@ -138,18 +130,6 @@ def load_config() -> Config:
     tracks_dir = lib_config.get("tracks_directory", "")
     tracks_dir = tracks_dir if tracks_dir else None
 
-    # Parse analysis config
-    analysis_config = data.get("analysis", {})
-    key_backend = analysis_config.get("key_detection_backend", "essentia")
-
-    # Validate key detection backend
-    valid_backends = ["essentia", "keyfinder"]
-    if key_backend not in valid_backends:
-        raise ValueError(
-            f"Invalid key_detection_backend: '{key_backend}'. "
-            f"Must be one of: {', '.join(valid_backends)}"
-        )
-
     return Config(
         database=DatabaseConfig(
             engine_dj_path=engine_path,
@@ -157,9 +137,6 @@ def load_config() -> Config:
         ),
         library=LibraryConfig(
             tracks_directory=tracks_dir
-        ),
-        analysis=AnalysisConfig(
-            key_detection_backend=key_backend
         ),
         soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data)),
         acquisition=AcquisitionConfig(

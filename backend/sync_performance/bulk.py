@@ -167,10 +167,12 @@ def bulk_import(
         if engine.key is not None:
             if track.key is None:
                 track.key = engine.key
+                track.key_provenance = "imported"
                 applied["key"] += 1
             elif track.key != engine.key:
                 if (track.id, "key") in authorized:
                     track.key = engine.key
+                    track.key_provenance = "imported"
                     applied["key"] += 1
                 else:
                     pend("key", f"saved key {track.key} vs Engine {engine.key}")

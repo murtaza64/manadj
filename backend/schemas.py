@@ -79,6 +79,8 @@ class Track(TrackBase):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None = None  # Archived verdict; NULL = active
+    # Key provenance (ADR 0024): analyzed | imported | manual; NULL = unknown
+    key_provenance: str | None = None
     tags: list[Tag] = []
     provenance: TrackProvenance | None = None
     # Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a grid
@@ -198,31 +200,6 @@ class BeatgridResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-
-
-# Analysis Schemas
-
-class KeyFormats(BaseModel):
-    """Musical key in different notation formats."""
-    musical: str
-    openkey: str | None
-    camelot: str | None
-    engine_id: int | None
-
-
-class KeyAnalysisMetadata(BaseModel):
-    """Metadata about key analysis."""
-    scale: str
-    analyzed_at: str
-
-
-class KeyAnalysisResponse(BaseModel):
-    """Key analysis response."""
-    track_id: int
-    key: str
-    formats: KeyFormats
-    confidence: float
-    metadata: KeyAnalysisMetadata
 
 
 # Hot Cue Schemas

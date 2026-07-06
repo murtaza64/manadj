@@ -316,18 +316,16 @@ export interface GridAnalysisResponse {
 
 export interface KeyAnalysisResponse {
   track_id: number;
-  key: string;
-  formats: {
-    musical: string;
+  candidate: string;
+  // null = undetected (nothing written server-side)
+  key: {
+    musical: string | null;
     openkey: string | null;
     camelot: string | null;
     engine_id: number | null;
-  };
-  confidence: number;
-  metadata: {
-    scale: string;
-    analyzed_at: string;
-  };
+  } | null;
+  confidence: number | null;
+  provenance: 'analyzed' | null;
 }
 
 // Metadata Sync types

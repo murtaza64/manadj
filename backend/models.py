@@ -22,6 +22,11 @@ class Track(Base):
     title = Column(String, nullable=True)
     artist = Column(String, nullable=True)
     key = Column(Integer, nullable=True)  # Engine DJ key ID (0-23)
+    # Where the key came from (ADR 0024): "analyzed" (native key Analysis),
+    # "imported" (External Import), "manual" (direct user edit). NULL =
+    # unknown (e.g. seeded from file tags) — ranks below everything on the
+    # overwrite ladder, freely overwritable by bulk runs.
+    key_provenance = Column(String, nullable=True)
     bpm = Column(Integer, nullable=True)  # Beats per minute
     duration_secs = Column(Float, nullable=True)  # audio duration, read from the file
     # Main cue (seconds) — performance data, lives with the Track (moved off
@@ -241,25 +246,6 @@ class GridAnalysis(Base):
 
     # Relationship (one-to-one: track_id is unique)
     track = relationship("Track", backref=backref("grid_analysis", uselist=False))
-
-
-class KeyAnalysis(Base):
-    __tablename__ = "key_analyses"
-
-    id = Column(Integer, primary_key=True, index=True)
-    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
-    key = Column(String, nullable=False)  # Musical notation (e.g., "Am", "C")
-    musical = Column(String, nullable=False)  # Musical notation
-    openkey = Column(String, nullable=True)  # OpenKey notation
-    camelot = Column(String, nullable=True)  # Camelot notation
-    engine_id = Column(Integer, nullable=True)  # Engine DJ key ID (0-23)
-    confidence = Column(Float, nullable=False)  # Detection confidence
-    scale = Column(String, nullable=False)  # "major" or "minor"
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-
-    # Relationship
-    track = relationship("Track", backref="key_analysis", uselist=False)
 
 
 class Transition(Base):

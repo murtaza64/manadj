@@ -11,10 +11,6 @@ rekordbox_path = "/Users/murtaza/Library/Pioneer/rekordbox"
 # Path to music library directory for importing tracks
 tracks_directory = "/Users/murtaza/Music/Tracks"
 
-[analysis]
-# Key detection backend: "essentia" (default) or "keyfinder" (DJ-optimized)
-key_detection_backend = "essentia"
-
 [acquisition.classification]
 # Heuristics that classify Source Items as track / mix / clip.
 # Items shorter than clip_max_duration_secs are clips; longer than

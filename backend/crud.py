@@ -699,52 +699,6 @@ def update_beatgrid_tempo_changes(
     return beatgrid
 
 
-# Key Analysis CRUD operations
-
-def get_key_analysis(db: Session, track_id: int):
-    """Get key analysis for a track."""
-    return db.query(models.KeyAnalysis).filter(models.KeyAnalysis.track_id == track_id).first()
-
-
-def create_or_update_key_analysis(
-    db: Session,
-    track_id: int,
-    key: str,
-    formats: dict,
-    confidence: float,
-    scale: str
-):
-    """Create or update key analysis for a track."""
-    analysis = db.query(models.KeyAnalysis).filter(models.KeyAnalysis.track_id == track_id).first()
-
-    if analysis:
-        # Update existing
-        analysis.key = key
-        analysis.musical = formats['musical']
-        analysis.openkey = formats['openkey']
-        analysis.camelot = formats['camelot']
-        analysis.engine_id = formats['engine_id']
-        analysis.confidence = confidence
-        analysis.scale = scale
-    else:
-        # Create new
-        analysis = models.KeyAnalysis(
-            track_id=track_id,
-            key=key,
-            musical=formats['musical'],
-            openkey=formats['openkey'],
-            camelot=formats['camelot'],
-            engine_id=formats['engine_id'],
-            confidence=confidence,
-            scale=scale
-        )
-        db.add(analysis)
-
-    db.commit()
-    db.refresh(analysis)
-    return analysis
-
-
 # Hot Cue Functions
 
 def get_hotcues(db: Session, track_id: int):

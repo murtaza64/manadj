@@ -54,6 +54,8 @@ def apply_update(
         track.energy = changes.energy
     if changes.key is not None:
         track.key = changes.key
+        # Direct user edit — the top rung of the key ladder (ADR 0024)
+        track.key_provenance = "manual"
     if changes.bpm is not None:
         # BPM is a projection of the Beatgrid (ADR 0016): when a grid exists,
         # editing BPM is a grid operation (regenerate/re-tempo/409), and
@@ -113,6 +115,8 @@ def refresh_from_files(db: Session, track_id: int | None = None) -> int:
         track.title = meta.title
         track.artist = meta.artist
         track.key = meta.key
+        # File tags carry no provenance — NULL = unknown (ADR 0024)
+        track.key_provenance = None
         track.bpm = bpm_to_centibpm(meta.bpm)
         refreshed += 1
 
@@ -226,6 +230,8 @@ def sync_to_db(db: Session, request: MetadataSyncRequest) -> MetadataSyncResult:
                 if track.key != key.engine_id:
                     if not request.dry_run:
                         track.key = key.engine_id
+                        # File tags carry no provenance (ADR 0024)
+                        track.key_provenance = None
                     updated = True
             elif field in ("title", "artist"):
                 if getattr(track, field) != value:

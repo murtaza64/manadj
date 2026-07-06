@@ -160,13 +160,11 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
       setAnalysisResults({ grid: gridResult, key: keyResult });
 
-      // Grid analysis writes server-side (analyzed Beatgrid + BPM
-      // projection, ADR 0024) — or bails and writes nothing; the client
-      // only refetches. Key still rides the PATCH until issue 08 gives
-      // the key path its own server-side write.
-      await onSave({
-        key: keyResult.formats.engine_id ?? undefined
-      });
+      // Both analyses write server-side (ADR 0024): the grid path stores
+      // the analyzed Beatgrid + BPM projection (or bails and writes
+      // nothing); the key path stores Track.key with provenance
+      // "analyzed" (or detects nothing and writes nothing). The client
+      // only refetches.
       queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
       queryClient.invalidateQueries({ queryKey: ['tracks'] });
 

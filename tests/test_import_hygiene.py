@@ -19,6 +19,7 @@ def test_no_heavy_audio_deps_in_import_chain():
     import backend.crud  # noqa: F401
     import backend.grid_analysis  # noqa: F401
     import backend.key  # noqa: F401
+    import backend.key_analysis  # noqa: F401
     import backend.library.import_manager  # noqa: F401
     import backend.routers.analyze  # noqa: F401
     import backend.routers.tracks  # noqa: F401
@@ -33,6 +34,7 @@ def test_no_heavy_audio_deps_in_import_chain():
     import harness.fit  # noqa: F401
     import harness.grid_candidates  # noqa: F401
     import harness.grid_scoring  # noqa: F401
+    import harness.key_candidates  # noqa: F401
     import harness.key_scoring  # noqa: F401
 
     loaded = [m for m in HEAVY_MODULES if m in sys.modules]
