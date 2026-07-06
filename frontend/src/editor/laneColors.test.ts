@@ -1,6 +1,7 @@
 /**
- * Lane color table (mix-editor 32): deck hue families — every lane's hue
- * is its deck anchor plus a uniform role offset, at full saturation.
+ * Lane color table (mix-editor 32 + review nit): each deck's lanes are
+ * one spectrum ramp along the display order (FILTER→LOW→MID→HIGH→FADER),
+ * uniform hue steps into the deck anchor; decks mirror around the seam.
  */
 import { describe, expect, it } from 'vitest';
 import { DECK_COLORS } from '../theme/deckColors';
@@ -33,45 +34,62 @@ function hueDelta(a: number, b: number): number {
   return ((b - a + 540) % 360) - 180;
 }
 
+/** Spectrum ramp: role → hue offset from the deck anchor (uniform 20°
+ * steps along the display order, ending at the fader = anchor). */
 const ROLE_OFFSETS: [role: string, offset: number][] = [
-  ['eqLow', -40],
-  ['filter', -22],
+  ['filter', -80],
+  ['eqHigh', -60],
+  ['eqMid', -40],
+  ['eqLow', -20],
   ['fader', 0],
-  ['eqMid', 22],
-  ['eqHigh', 42],
 ];
 
-describe('LANE_COLORS (deck hue families)', () => {
+describe('LANE_COLORS (deck spectrum ramps)', () => {
   it('fader lanes ARE the deck colors', () => {
     expect(LANE_COLORS.faderA).toBe(DECK_COLORS.A);
     expect(LANE_COLORS.faderB).toBe(DECK_COLORS.B);
   });
 
-  it('matches the settled table (issue 32) exactly', () => {
+  it('matches the settled table (issue 32 + review nit) exactly', () => {
     expect(LANE_COLORS).toEqual({
       faderA: '#00e5ff',
       faderB: '#ff2d95',
-      eqLowA: '#00ff6e',
-      eqLowB: '#b52dff',
-      eqMidA: '#008cff',
-      eqMidB: '#ff2d4e',
-      eqHighA: '#2d50ff',
-      eqHighB: '#ff5c2d',
-      filterA: '#00ffc3',
-      filterB: '#f22dff',
+      eqLowA: '#00ffc4',
+      eqLowB: '#ff2ddb',
+      eqMidA: '#00ff6f',
+      eqMidB: '#dd2dff',
+      eqHighA: '#00ff1a',
+      eqHighB: '#972dff',
+      filterA: '#3bff00',
+      filterB: '#512dff',
     });
   });
 
   it.each(['A', 'B'] as const)(
-    'deck %s lanes sit near the uniform role offsets from the deck anchor',
+    'deck %s lanes sit at the uniform spectrum offsets from the deck anchor',
     (deck) => {
       const [anchorHue] = hueSat(DECK_COLORS[deck]);
       for (const [role, offset] of ROLE_OFFSETS) {
         const id = `${role}${deck}` as LaneId;
         const [h] = hueSat(LANE_COLORS[id]);
-        // The settled hexes were eyeballed off the nominal offsets — the
-        // family relationship (order + rough spacing) is what's guarded.
-        expect(Math.abs(hueDelta(anchorHue + offset, h)), `${id} hue`).toBeLessThan(15);
+        expect(Math.abs(hueDelta(anchorHue + offset, h)), `${id} hue`).toBeLessThan(2);
+      }
+    }
+  );
+
+  it.each(['A', 'B'] as const)(
+    'deck %s hues ramp monotonically along the display order (spectrum reading)',
+    (deck) => {
+      const [anchorHue] = hueSat(DECK_COLORS[deck]);
+      // Walk A's order FILTER→FADER (B's array is the mirror — same walk).
+      const roles = deck === 'A' ? DECK_LANE_ORDER.A : [...DECK_LANE_ORDER.B].reverse();
+      let prev = -Infinity;
+      for (const id of roles) {
+        const [h] = hueSat(LANE_COLORS[id]);
+        const rel = hueDelta(anchorHue, h); // offset from anchor, ≤ 0
+        expect(rel, `${id} offset order`).toBeGreaterThan(prev);
+        expect(rel, `${id} offset sign`).toBeLessThanOrEqual(0.5);
+        prev = rel;
       }
     }
   );
@@ -91,17 +109,19 @@ describe('LANE_LABELS / DECK_LANE_ORDER', () => {
     expect(LANE_LABELS.eqLowA).toBe(LANE_LABELS.eqLowB);
   });
 
-  it('chip order is FADER LOW MID HIGH FILTER, deck-pure', () => {
+  it('display order is mirrored: A FILTER→FADER (LOW beside fader), B reversed, deck-pure', () => {
+    expect(DECK_LANE_ORDER.A.map((id) => LANE_LABELS[id])).toEqual([
+      'FILTER',
+      'HIGH',
+      'MID',
+      'LOW',
+      'FADER',
+    ]);
+    expect(DECK_LANE_ORDER.B.map((id) => LANE_LABELS[id])).toEqual(
+      [...DECK_LANE_ORDER.A.map((id) => LANE_LABELS[id])].reverse()
+    );
     for (const deck of ['A', 'B'] as const) {
-      const order = DECK_LANE_ORDER[deck];
-      expect(order.map((id) => LANE_LABELS[id])).toEqual([
-        'FADER',
-        'LOW',
-        'MID',
-        'HIGH',
-        'FILTER',
-      ]);
-      for (const id of order) expect(id.endsWith(deck)).toBe(true);
+      for (const id of DECK_LANE_ORDER[deck]) expect(id.endsWith(deck)).toBe(true);
     }
   });
 });

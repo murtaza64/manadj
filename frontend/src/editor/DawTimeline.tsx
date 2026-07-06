@@ -996,8 +996,11 @@ export function DawTimeline({
     </div>
   );
 
-  const lanesA = visibleLanes.filter((id) => id.endsWith('A'));
-  const lanesB = visibleLanes.filter((id) => id.endsWith('B'));
+  // Strips render in the fixed mirrored display order (review nit
+  // 2026-07-06): A top→bottom FILTER→FADER, B FADER→FILTER — never the
+  // model's insertion order.
+  const lanesA = DECK_LANE_ORDER.A.filter((id) => visibleLanes.includes(id));
+  const lanesB = DECK_LANE_ORDER.B.filter((id) => visibleLanes.includes(id));
 
   // Stable default-shape identities: lanePoints() mints a fresh default
   // array per call, which made every DawTimeline render redraw every
