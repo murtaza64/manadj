@@ -45,6 +45,7 @@ import {
   type PlanState,
   type SetPlan,
 } from './planner';
+import { soundingWindowAt, soundingWindowKey } from './replan';
 
 const DRIFT_TOLERANCE_S = 0.12;
 
@@ -63,6 +64,20 @@ const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAut
   },
   filter: lerp(from.filter, to.filter, p),
 });
+
+const LANE_EPS = 1e-3;
+
+const laneDiffers = (a: PlanAutomation, b: PlanAutomation): boolean =>
+  Math.abs(a.fader - b.fader) > LANE_EPS ||
+  Math.abs(a.eq.low - b.eq.low) > LANE_EPS ||
+  Math.abs(a.eq.mid - b.eq.mid) > LANE_EPS ||
+  Math.abs(a.eq.high - b.eq.high) > LANE_EPS ||
+  Math.abs(a.filter - b.filter) > LANE_EPS;
+
+const lanesDiffer = (
+  a: Record<ChannelId, PlanAutomation>,
+  b: Record<ChannelId, PlanAutomation>
+): boolean => laneDiffers(a.A, b.A) || laneDiffers(a.B, b.B);
 
 export type ConductorStopReason = 'ended' | 'stopped' | 'takeover' | 'displaced';
 
@@ -83,7 +98,9 @@ export interface ConductorHooks {
 }
 
 export class Conductor {
-  readonly plan: SetPlan;
+  /** The plan being conducted. Replaced in flight by live re-plan
+   * (sets 24) — via replacePlan only, never assigned elsewhere. */
+  private _plan: SetPlan;
   private readonly mixer: Mixer;
   private readonly engines: Record<ChannelId, DeckEngine>;
   private readonly hooks: ConductorHooks;
@@ -122,7 +139,9 @@ export class Conductor {
   private pickupRamp: {
     startAudio: number;
     durationSec: number;
-    startLanes: Record<ChannelId, PlanAutomation>;
+    /** Null = lanes swap immediately (a live re-plan whose lane values
+     * ride the mix — sets 24); the pitch ease still runs. */
+    startLanes: Record<ChannelId, PlanAutomation> | null;
     /** Present only for the anchor (audible-at-pickup) decks. */
     startPitch: Partial<Record<ChannelId, number>>;
   } | null = null;
@@ -136,13 +155,17 @@ export class Conductor {
   private activeEntryIndex = 0;
 
   constructor(plan: SetPlan, audio: ConductorAudio, hooks: ConductorHooks) {
-    this.plan = plan;
+    this._plan = plan;
     this.mixer = audio.mixer;
     this.engines = audio.engines;
     this.hooks = hooks;
   }
 
   // ── Reads ────────────────────────────────────────────────────────────
+
+  get plan(): SetPlan {
+    return this._plan;
+  }
 
   isActive(): boolean {
     return this.active;
@@ -276,6 +299,85 @@ export class Conductor {
     this.playing = true;
     this.raf = requestAnimationFrame(this.tick);
     this.emit();
+  }
+
+  /**
+   * Live re-plan (sets 24): swap the plan under the ongoing run — an
+   * automatic Pickup into the new plan. `mixTime` is the remapped
+   * instant (replan.ts evaluateReplan): the audibly dominant deck's
+   * current track-time maps to the same audio there, so re-anchoring
+   * the clock here never moves the anchor. The borrow (claim, overlay,
+   * watchers) is never rebuilt — this is the same run continuing.
+   *
+   * Convergence (the pickup machinery, re-plan flavored):
+   * - Lane values swap immediately while the SAME window keeps sounding
+   *   (values under the playhead are riding the mix — the editor's own
+   *   idiom); any other audible lane discontinuity (a window collapsing
+   *   at the playhead, a grace fade moving) converges from the sounding
+   *   values over `rampSec` instead of snapping.
+   * - A playing deck whose planned pitch changed (tempo policy / Set
+   *   tempo) eases over `rampSec` and is never re-seeked mid-ramp;
+   *   silent decks snap (inaudible) via the normal tick reconcile.
+   * - An in-flight convergence ramp re-arms from the current sounding
+   *   values — continuous by construction.
+   */
+  replacePlan(newPlan: SetPlan, mixTime: number, opts: { rampSec: number }): void {
+    const oldPlan = this._plan;
+    const oldT = this.getMixTime();
+    const t = Math.max(0, Math.min(mixTime, Math.max(newPlan.totalSec - 0.001, 0)));
+    this._plan = newPlan;
+    this.mixTimeAtAnchor = t;
+    this.anchorAudioTime = this.mixer.now();
+    this.lastTickT = t;
+    this.prefetchedIndex = -1;
+    const state = planStateAt(newPlan, t);
+    this.activeEntryIndex = state.activeEntryIndex;
+    if (!this.playing) {
+      // Paused: positions/lanes snap silently (reconcilePaused's rule).
+      this.pickupRamp = null;
+      if (this.active) this.reconcilePaused();
+      this.emit();
+      return;
+    }
+    const startPitch: Partial<Record<ChannelId, number>> = {};
+    for (const deck of ['A', 'B'] as const) {
+      const snap = this.engines[deck].getSnapshot();
+      if (!snap.playing || !state.decks[deck].playing) continue;
+      if (Math.abs(snap.pitchPercent - state.decks[deck].pitchPercent) > 0.01) {
+        startPitch[deck] = snap.pitchPercent;
+      }
+    }
+    // "Same window still sounding" (the lanes-swap-immediately rule):
+    // the window's identity is its track pair, not its geometry.
+    const oldWindow = soundingWindowKey(soundingWindowAt(oldPlan, oldT));
+    const sameWindow =
+      oldWindow !== null && oldWindow === soundingWindowKey(soundingWindowAt(newPlan, t));
+    const rampLanes =
+      this.lastLanes !== null &&
+      lanesDiffer(this.lastLanes, state.lanes) &&
+      (this.pickupRamp !== null || !sameWindow);
+    this.pickupRamp =
+      rampLanes || Object.keys(startPitch).length > 0
+        ? {
+            startAudio: this.mixer.now(),
+            durationSec: Math.max(opts.rampSec, 0),
+            startLanes: rampLanes ? this.lastLanes : null,
+            startPitch,
+          }
+        : null;
+    this.emit();
+  }
+
+  /**
+   * Live re-plan fallback (sets 24): the new plan no longer accounts
+   * for what is sounding (the anchor's track left the Set mid-playback).
+   * Stop conducting the way a takeover does — the decks keep playing,
+   * the sounding mix is written into base state (inaudible disengage),
+   * capture re-seeds. The Pickup button then surfaces the unresolvable
+   * state exactly like an unlit Pickup ("not in the set").
+   */
+  standDown(): void {
+    this.takeover();
   }
 
   /** Stop conducting (user stop or natural end): decks pause, the borrow
@@ -561,7 +663,7 @@ export class Conductor {
     // plan value — p→1 guarantees convergence.
     const p = this.rampProgress();
     const ramp = this.pickupRamp;
-    const lanes = ramp
+    const lanes = ramp?.startLanes
       ? {
           A: lerpLanes(ramp.startLanes.A, state.lanes.A, p),
           B: lerpLanes(ramp.startLanes.B, state.lanes.B, p),

@@ -45,6 +45,21 @@ export function useSetPlan(
    * planned as Riding at the tuned return speed. */
   tempo?: { policy: 'riding' | 'fixed'; setTempoBpm: number | null }
 ): SetPlan | undefined {
+  return useSetPlanParts(entries, trackMap, tempo).plan;
+}
+
+/**
+ * The plan AND the input it was planned from (sets 24): live re-plan
+ * feeds the raw PlanInput to the Conductor store, which re-plans it
+ * with the sounding window's geometry grafted. THE plan-input
+ * subscription seam — every future plan input (issue 26's auto-resolves
+ * included) plugs in here and reaches both the view and the live run.
+ */
+export function useSetPlanParts(
+  entries: SetEntryLocal[] | undefined,
+  trackMap: Map<number, Track> | undefined,
+  tempo?: { policy: 'riding' | 'fixed'; setTempoBpm: number | null }
+): { input: PlanInput | undefined; plan: SetPlan | undefined } {
   const { tempoReturnSecPerPercent, graceHeadroomSec, graceFadeSec } = useSetSettings();
   const pairStore = useSyncExternalStore(subscribePairStore, snapshotPairStore);
 
@@ -65,6 +80,7 @@ export function useSetPlan(
   const takeUuids = (entries ?? [])
     .filter((e) => e.pin?.kind === 'take')
     .map((e) => e.pin!.uuid);
+  const takeUuidsKey = takeUuids.join(',');
   const takeQueries = useQueries({
     queries: takeUuids.map((uuid) => ({
       queryKey: ['take', uuid],
@@ -95,7 +111,7 @@ export function useSetPlan(
     .map((id) => `${id}:${hotCue1ByTrack.get(id) ?? ''}`)
     .join(',');
 
-  return useMemo(() => {
+  const input = useMemo<PlanInput | undefined>(() => {
     if (!entries || entries.length === 0) return undefined;
     if (!transitionsReady || takesLoading || hotCuesLoading) return undefined;
     if (!trackMap || entries.some((e) => !trackMap.has(e.trackId))) return undefined;
@@ -136,14 +152,14 @@ export function useSetPlan(
         ? { policy: 'fixed', setTempoBpm: tempo.setTempoBpm }
         : { policy: 'riding', returnSecPerPercent: tempoReturnSecPerPercent };
 
-    return planSet({
+    return {
       entries,
       tracks,
       transitionsByUuid,
       takesByUuid,
       tempo: tempoInput,
       grace: { headroomSec: graceHeadroomSec, fadeSec: graceFadeSec },
-    });
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     entries,
@@ -153,11 +169,13 @@ export function useSetPlan(
     takesLoading,
     hotCuesLoading,
     hotCue1Signature,
-    takeUuids.join(','),
+    takeUuidsKey,
     tempo?.policy,
     tempo?.setTempoBpm,
     tempoReturnSecPerPercent,
     graceHeadroomSec,
     graceFadeSec,
   ]);
+  const plan = useMemo(() => (input ? planSet(input) : undefined), [input]);
+  return { input, plan };
 }

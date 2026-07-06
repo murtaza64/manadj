@@ -99,6 +99,10 @@ interface PlannedAdjacencyBase {
   /** Window span on the mix axis. mixStart === mixEnd for hard cuts. */
   mixStartSec: number;
   mixEndSec: number;
+  /** The pin this adjacency resolved from (sets 24: live re-plan matches
+   * the sounding window across plan recomputes by it). Absent for hard
+   * cuts (nothing pinned, or the pin dangled). */
+  pinUuid?: string;
   /** Tempo return (Riding): the incoming eases from the window rate back
    * to native, completing here. === mixEndSec when there is no ramp
    * (hard cuts, native windows, Fixed policy, zero runway). */
@@ -422,6 +426,7 @@ export function planSet(input: PlanInput): SetPlan {
     adjacencies.push({
       kind,
       transition,
+      pinUuid: input.entries[i].pin?.uuid,
       rateIncoming: rateB,
       pitchIncomingPercent: pitchIncoming,
       rateOutgoing: rate,
