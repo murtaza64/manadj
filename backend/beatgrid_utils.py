@@ -5,7 +5,16 @@ def calculate_beats_from_tempo_changes(tempo_changes: list[dict], duration: floa
     """
     Calculate beat times and downbeat times from tempo changes.
 
-    For initial implementation, only uses first tempo change (constant BPM).
+    Walks every segment (ADR 0027 §4): within each tempo change, beats run
+    at that segment's interval from its start_time; each segment's declared
+    bar_position sets the bar phase at its start beat, so downbeats stay
+    consistent with stored data. The boundary beat is placed once — it
+    belongs to the segment it starts; an accumulated beat landing within
+    half an interval of the boundary is absorbed into it.
+
+    Single-segment grids follow the exact accumulation of the original
+    constant-BPM expansion (byte-identical outputs — the waveform renderer
+    matches downbeats to beats by exact float equality).
 
     Args:
         tempo_changes: List of tempo change dicts with start_time, bpm, time_signature_num, bar_position
@@ -17,28 +26,29 @@ def calculate_beats_from_tempo_changes(tempo_changes: list[dict], duration: floa
     if not tempo_changes:
         return [], []
 
-    # Use only first tempo change for now
-    first_tempo = tempo_changes[0]
-    start_time = first_tempo["start_time"]
-    bpm = first_tempo["bpm"]
-    time_sig_num = first_tempo["time_signature_num"]
-    bar_position = first_tempo["bar_position"]
+    beat_times: list[float] = []
+    downbeat_times: list[float] = []
 
-    beat_interval = 60.0 / bpm  # seconds per beat
+    for i, tc in enumerate(tempo_changes):
+        beat_interval = 60.0 / tc["bpm"]  # seconds per beat
+        time_sig_num = tc["time_signature_num"]
+        next_start = (
+            tempo_changes[i + 1]["start_time"] if i + 1 < len(tempo_changes) else None
+        )
 
-    beat_times = []
-    downbeat_times = []
-    current_time = start_time
-    current_bar_position = bar_position
+        current_time = tc["start_time"]
+        current_bar_position = tc["bar_position"]
 
-    while current_time <= duration:
-        beat_times.append(current_time)
+        while current_time <= duration:
+            if next_start is not None and current_time >= next_start - beat_interval / 2:
+                break  # the boundary beat belongs to the next segment
+            beat_times.append(current_time)
 
-        if current_bar_position == 1:
-            downbeat_times.append(current_time)
+            if current_bar_position == 1:
+                downbeat_times.append(current_time)
 
-        current_time += beat_interval
-        current_bar_position = (current_bar_position % time_sig_num) + 1
+            current_time += beat_interval
+            current_bar_position = (current_bar_position % time_sig_num) + 1
 
     return beat_times, downbeat_times
 
@@ -162,29 +172,13 @@ def nudge_beatgrid(
 
 
 def _downbeat_times(tempo_changes: list[dict], until: float) -> list[float]:
-    """Downbeat times up to `until`, walked segment-by-segment.
+    """Downbeat times up to `until`.
 
-    Unlike calculate_beats_from_tempo_changes (display path, first tempo
-    change only), this honors every tempo change: each segment's beats run
-    at its own BPM from its own start_time/bar_position until the next
-    segment begins.
+    Derived FROM the beat expansion (ADR 0027 §4): one derivation, so the
+    re-anchor path and the display path produce identical floats for shared
+    downbeats by construction.
     """
-    downbeats: list[float] = []
-    for i, tc in enumerate(tempo_changes):
-        if tc["start_time"] > until:
-            break
-        seg_end = tempo_changes[i + 1]["start_time"] if i + 1 < len(tempo_changes) else until
-        seg_end = min(seg_end, until)
-        interval = 60.0 / tc["bpm"]
-        t = tc["start_time"]
-        pos = tc["bar_position"]
-        # Half-interval epsilon: don't double-count the next segment's start beat
-        while t < seg_end + interval / 2:
-            if pos == 1:
-                downbeats.append(t)
-            t += interval
-            pos = (pos % tc["time_signature_num"]) + 1
-    return downbeats
+    return calculate_beats_from_tempo_changes(tempo_changes, until)[1]
 
 
 def first_downbeat_time(tempo_changes: list[dict]) -> float:
