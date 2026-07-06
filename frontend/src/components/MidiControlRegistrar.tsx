@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDeck, useDeckReady } from '../hooks/useDeck';
+import { useGridEditActions } from '../hooks/useGridEditActions';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { useMatchAction } from '../hooks/useMatchAction';
 import { useMixer } from '../hooks/useMixer';
@@ -31,6 +32,9 @@ function DeckControlsRegistrar() {
   const ready = useDeckReady();
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
   const matchAction = useMatchAction();
+  // Grid-edit pad ops (midi-performance-ops 05): the same mutations and
+  // commit chain the on-screen grid/BPM controls use.
+  const gridEdit = useGridEditActions();
 
   // One jog state machine per deck over the engine's bend/seek primitives
   // (midi/jog.ts is the tested seam). Disposed on engine change so a held
@@ -55,6 +59,7 @@ function DeckControlsRegistrar() {
     setBeatjumpBeats,
     matchAction,
     jog,
+    gridEdit,
   });
   useEffect(() => {
     latest.current = {
@@ -65,6 +70,7 @@ function DeckControlsRegistrar() {
       setBeatjumpBeats,
       matchAction,
       jog,
+      gridEdit,
     };
   });
 
@@ -109,6 +115,13 @@ function DeckControlsRegistrar() {
           if (!r) return;
           j.onSeekTicks(ticks);
         },
+        // Grid-edit pads (midi-performance-ops 05): registry-direct stored-
+        // data ops; gridless-Track gating lives in useGridEditActions.
+        gridNudgeStep: (direction) => latest.current.gridEdit.nudgeStep(direction),
+        gridSetDownbeat: () => latest.current.gridEdit.setDownbeatAtPlayhead(),
+        gridBpm: (change) => latest.current.gridEdit.bpm(change),
+        gridNudgeLocal: (offsetMs) => latest.current.gridEdit.nudgeLocal(offsetMs),
+        gridNudgeCommit: (offsetMs) => latest.current.gridEdit.nudgeCommit(offsetMs),
         // LOAD deliberately absent (editor-midi 03): load policy is
         // view-owned and rides the browse-surface registration in Library.
       }),

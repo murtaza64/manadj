@@ -8,8 +8,8 @@ import {
   createBpmCommitter,
   dominantBpm,
   formatBpm,
+  growShrinkBpm,
   isBpmConflict,
-  nudgeBpm,
   projectBpm,
 } from './bpmCommit';
 import type { TempoChange } from '../../types';
@@ -62,15 +62,15 @@ describe('dominantBpm', () => {
   });
 });
 
-describe('nudgeBpm', () => {
-  it('steps by ±0.03', () => {
-    expect(nudgeBpm(128, 1)).toBe(128.03);
-    expect(nudgeBpm(128.03, -1)).toBe(128);
+describe('growShrinkBpm', () => {
+  it('shrink tightens spacing (+0.03), grow widens it (−0.03)', () => {
+    expect(growShrinkBpm(128, 'shrink')).toBe(128.03);
+    expect(growShrinkBpm(128.03, 'grow')).toBe(128);
   });
 
   it('snaps to the integer at x.99 / x.01', () => {
-    expect(nudgeBpm(127.98, 1)).toBe(128); // 128.01 → snap
-    expect(nudgeBpm(128.02, -1)).toBe(128); // 127.99 → snap
+    expect(growShrinkBpm(127.98, 'shrink')).toBe(128); // 128.01 → snap
+    expect(growShrinkBpm(128.02, 'grow')).toBe(128); // 127.99 → snap
   });
 });
 

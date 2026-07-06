@@ -1,12 +1,13 @@
 /**
- * BPM step icons (deck-controls PRD, "Icon language"): ADR 0016 made
- * visible — a BPM step is a grid operation, so the step buttons show the
- * grid compressing (beats closer together = BPM up) or spreading (beats
- * further apart = BPM down) instead of generic ± steppers.
+ * Grow/Shrink icons (deck-controls PRD, "Icon language"; glossary:
+ * Grow/Shrink): ADR 0016 made visible — a BPM step is a grid operation, so
+ * the step buttons show the grid shrinking (beats closer together = BPM
+ * up) or growing (beats further apart = BPM down) instead of generic ±
+ * steppers.
  */
 
-/** Grid compress — arrows pointing inward at a beat line: BPM up. */
-export function BpmCompressIcon() {
+/** Shrink — arrows pointing inward at a beat line: tighter spacing, BPM up. */
+export function BpmShrinkIcon() {
   return (
     <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
       <line x1="8" y1="2.5" x2="8" y2="13.5" stroke="currentColor" strokeWidth="1.3" />
@@ -16,8 +17,8 @@ export function BpmCompressIcon() {
   );
 }
 
-/** Grid spread — arrows pointing outward from a beat line: BPM down. */
-export function BpmSpreadIcon() {
+/** Grow — arrows pointing outward from a beat line: wider spacing, BPM down. */
+export function BpmGrowIcon() {
   return (
     <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
       <line x1="8" y1="2.5" x2="8" y2="13.5" stroke="currentColor" strokeWidth="1.3" />
