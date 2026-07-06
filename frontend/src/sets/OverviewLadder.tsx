@@ -589,9 +589,10 @@ function ClipTitle({
  * same source of truth the player minimaps render from — re-drawn live on
  * any styles-mode tweak. Bars grow from the center line ('up' anchors the
  * baseline at the bottom edge, 'down' hangs them from the top — the
- * mirrored-lane layout wins over the style's own anchor); hot cues draw a
- * faint full-height line plus a triangle on the OUTER (title-side) edge,
- * keeping the center line clean. */
+ * mirrored-lane layout wins over the style's own anchor); hot cues use the
+ * deck minimaps' zoned mark — a 2px full-height pole flying a 5×5 square
+ * flag — with the flag on the OUTER (title-side) edge, keeping the center
+ * line clean. */
 function LadderWave({
   wave,
   height,
@@ -641,29 +642,13 @@ function LadderWave({
 
     for (const c of cues) {
       const x = xAt(c.t);
-      if (x < -4 || x > w + 4) continue;
-      ctx.strokeStyle = c.color;
-      ctx.globalAlpha = 0.45;
-      ctx.beginPath();
-      ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, h);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      if (x < -6 || x > w + 6) continue;
+      // The minimap's zoned cue mark (WaveformRendererV2.pushHotCues,
+      // minimap branch): 2px full-height pole + 5×5 square flag off its
+      // right, flag on the title side: top for 'up', bottom for 'down'.
       ctx.fillStyle = c.color;
-      ctx.beginPath();
-      // Triangle on the title side: top edge for 'up' (title above), bottom
-      // edge for 'down' (title below).
-      if (dir === 'up') {
-        ctx.moveTo(x - 4, 0);
-        ctx.lineTo(x + 4, 0);
-        ctx.lineTo(x, 6);
-      } else {
-        ctx.moveTo(x - 4, h);
-        ctx.lineTo(x + 4, h);
-        ctx.lineTo(x, h - 6);
-      }
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(x - 1, 0, 2, h);
+      ctx.fillRect(x + 1, dir === 'up' ? 0 : h - 5, 5, 5);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wave, height, dir, range[0], range[1], cueKey, redrawKey, slot]);
