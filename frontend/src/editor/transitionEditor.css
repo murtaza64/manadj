@@ -65,14 +65,18 @@
   white-space: nowrap;
 }
 
+/* Edge-to-edge, zero vertical scroll (mix-editor 32): the editor column
+   is a flex height budget — timeline flexes, infobar takes its natural
+   height, nothing scrolls. */
 .editor-arranger {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 6px 12px;
-  overflow-y: auto;
+  padding: 0;
+  overflow: hidden;
   min-width: 0;
+  min-height: 0;
 }
 
 .editor-decklabel {
@@ -95,18 +99,78 @@
 
 .editor-timeline-wrap {
   position: relative;
+  /* The flexible slice of the editor's height budget (mix-editor 32):
+     timeline + minimap share it; the infobar below keeps its natural
+     height. No fixed vh math — the column always fits its viewport. */
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Lane toggle gutter + time area, side by side. */
+.editor-timeline {
+  border: 1px solid var(--surface0, #313244);
+  background: #0b0b12;
+  /* Flexible stack height: adding/removing lanes redistributes THIS space
+     (strips flex below) instead of growing the timeline vertically. */
+  flex: 1 1 0;
+  min-height: 120px;
+  display: flex;
+  overflow: hidden;
 }
 
 /* No native scrolling and no scrollbar: horizontal motion is applied as a
    transform from a single rAF (wheel + minimap viewport are the pan inputs),
    keeping the JS-painted waveforms and the DOM layers in the same frame. */
-.editor-timeline {
+.editor-timeline-viewport {
+  position: relative;
   overflow: hidden;
-  border: 1px solid var(--surface0, #313244);
-  background: #0b0b12;
-  /* Fixed stack height: adding/removing lanes redistributes THIS space
-     (strips flex below) instead of growing the timeline vertically. */
-  height: max(280px, 34vh);
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Lane toggle gutter (mix-editor 32): five chips per deck at the left
+   edge of each deck's lane region — A top, B bottom. Engaged = inverted
+   fill in the lane color (inline styles carry the per-lane colors). ── */
+.editor-lanegutter {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 3px;
+  border-right: 1px solid var(--surface0, #313244);
+}
+
+.editor-lanetoggles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.editor-lanetoggle {
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: bold;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid;
+  padding: 2px 4px;
+  cursor: pointer;
+  text-align: center;
+  /* Off chips read dimmer than engaged fills; hover restores full punch. */
+  opacity: 0.75;
+}
+
+.editor-lanetoggle:hover {
+  opacity: 1;
+}
+
+.editor-lanetoggle.on {
+  /* Inverted fill (unified engaged vocabulary); bg/border come inline. */
+  color: #0b0b12;
+  opacity: 1;
 }
 
 .editor-timeline-content {
@@ -293,16 +357,17 @@
   touch-action: none;
 }
 
-/* Deck-tinted strip backgrounds + accent edge: A lanes read as A's, B as B's. */
+/* Flat strips (mix-editor 32) + deck accent edge: A lanes read as A's, B
+   as B's via the 3px inset edge alone — no gradient wash. */
 /* Deck accent via inset shadow, NOT border-left: a border would shift the
    absolutely-positioned lane windows off the shared time axis. */
 .editor-lanestrip.a {
-  background: linear-gradient(rgba(var(--deck-a-rgb), 0.06), rgba(var(--deck-a-rgb), 0.02)), #0e0e16;
+  background: #0e0e16;
   box-shadow: inset 3px 0 0 rgba(var(--deck-a-rgb), 0.6);
 }
 
 .editor-lanestrip.b {
-  background: linear-gradient(rgba(var(--deck-b-rgb), 0.06), rgba(var(--deck-b-rgb), 0.02)), #0e0e16;
+  background: #0e0e16;
   box-shadow: inset 3px 0 0 rgba(var(--deck-b-rgb), 0.6);
 }
 
@@ -881,13 +946,38 @@
   width: 56px;
 }
 
-.editor-center-row input[type='checkbox'] {
-  accent-color: var(--sapphire, #74c7ec);
+/* TEMPO/SNAP button toggles (mix-editor 32): player-button chrome;
+   engaged = inverted green fill — the app-wide active-state color (the
+   top-bar quantize toggle is the model). */
+.editor-toggle {
+  height: 22px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid var(--surface1, #45475a);
+  color: var(--text, #cdd6f4);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+  padding: 0 8px;
+}
+
+.editor-toggle:hover {
+  background: var(--surface0, #313244);
+  border-color: var(--green, #a6e3a1);
+  color: var(--green, #a6e3a1);
+}
+
+.editor-toggle.on,
+.editor-toggle.on:hover {
+  background: var(--green, #a6e3a1);
+  border-color: var(--green, #a6e3a1);
+  color: var(--base, #1e1e2e);
 }
 
 .editor-globalminimap {
   width: 100%;
   height: 26px;
+  flex: 0 0 auto;
   display: block;
   border: 1px solid var(--surface0, #313244);
 
@@ -924,22 +1014,6 @@
   color: var(--base, #1e1e2e);
 }
 
-.editor-laneclear {
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.editor-laneclear:hover {
-  background: var(--surface0, #313244);
-}
-
-.editor-laneclear:active {
-  background: var(--surface1, #45475a);
-}
-
 /* ── Transition templates (issue 03) ─────────────────────────────────── */
 
 .editor-templates {
@@ -968,11 +1042,12 @@
   background: var(--surface1, #45475a);
 }
 
-/* Open = engaged: inverted sapphire fill */
+/* Open = engaged: inverted green fill (mix-editor 32 — sapphire retired
+   from editor engaged-states; green is the app-wide active color). */
 .editor-templates-trigger[aria-expanded='true'],
 .editor-templates-trigger[aria-expanded='true']:hover {
-  background: var(--sapphire, #74c7ec);
-  border-color: var(--sapphire, #74c7ec);
+  background: var(--green, #a6e3a1);
+  border-color: var(--green, #a6e3a1);
   color: var(--base, #1e1e2e);
 }
 

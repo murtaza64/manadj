@@ -145,16 +145,18 @@ export function DeckCard({
       >
         {/* Alignment nudge (accented — realigns the pair): plain ◀/▶ +
             accent, per the PRD icon language. The grid cluster lives with
-            BPM above (one domain — ADR 0016). */}
+            BPM above (one domain — ADR 0016). Apparent-motion polarity
+            (mix-editor 32): arrows follow the incoming block's on-screen
+            motion, so both cards' ▶ mean "block right". */}
         <span
           className="editor-pair editor-alignment"
-          title={`Alignment nudge: move ${deck} ±10ms relative to the other track (edits the sketch, not the grid)`}
+          title="Alignment nudge: realign the pair ±10ms — arrows move the incoming track's block on screen (edits the sketch, not the grid)"
         >
           <span className="editor-pair-label">align</span>
-          <button title={`Nudge ${deck} 10ms earlier`} onClick={() => onAlignmentNudge(-0.01)}>
+          <button title="Nudge the incoming block 10ms left" onClick={() => onAlignmentNudge(-0.01)}>
             ◀
           </button>
-          <button title={`Nudge ${deck} 10ms later`} onClick={() => onAlignmentNudge(0.01)}>
+          <button title="Nudge the incoming block 10ms right" onClick={() => onAlignmentNudge(0.01)}>
             ▶
           </button>
         </span>
@@ -164,7 +166,7 @@ export function DeckCard({
               className="editor-pair"
               title={
                 gestures.kind === 'slide'
-                  ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put'
+                  ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put — arrows move its block on screen'
                   : 'Transport: moves the playhead — both decks follow, alignment untouched'
               }
             >
@@ -173,7 +175,7 @@ export function DeckCard({
                 disabled={!gestures.enabled}
                 title={
                   gestures.kind === 'slide'
-                    ? `Slide ${deck} ${gestureBeats} of its beats earlier`
+                    ? `Slide ${deck}'s block ${gestureBeats} of its beats left`
                     : `Jump the playhead ${gestureBeats} of ${deck}'s beats back`
                 }
                 onClick={() => gestures.beats(-gestureBeats)}
@@ -196,7 +198,7 @@ export function DeckCard({
                 disabled={!gestures.enabled}
                 title={
                   gestures.kind === 'slide'
-                    ? `Slide ${deck} ${gestureBeats} of its beats later`
+                    ? `Slide ${deck}'s block ${gestureBeats} of its beats right`
                     : `Jump the playhead ${gestureBeats} of ${deck}'s beats forward`
                 }
                 onClick={() => gestures.beats(gestureBeats)}

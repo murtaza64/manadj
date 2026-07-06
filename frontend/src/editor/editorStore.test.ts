@@ -371,6 +371,24 @@ describe('startBlankSketch (sets 09)', () => {
   });
 });
 
+describe('alignmentNudge (apparent-motion polarity, mix-editor 32)', () => {
+  it('+δ moves startSec (and thus B\'s drawn block) right, −δ left', () => {
+    const store = new EditorStore(fakePersistence());
+    const start = store.getSnapshot().mix.transition.startSec;
+    store.alignmentNudge(0.01);
+    expect(store.getSnapshot().mix.transition.startSec).toBeCloseTo(start + 0.01);
+    store.alignmentNudge(-0.01);
+    expect(store.getSnapshot().mix.transition.startSec).toBeCloseTo(start);
+  });
+
+  it('clamps at 0 (a transition cannot begin before A exists)', () => {
+    const store = new EditorStore(fakePersistence());
+    store.updateMix((m) => ({ ...m, transition: { ...m.transition, startSec: 0 } }));
+    store.alignmentNudge(-0.01);
+    expect(store.getSnapshot().mix.transition.startSec).toBe(0);
+  });
+});
+
 describe('view toggles', () => {
   it('snap/lock changes never arm a save', () => {
     const p = fakePersistence();
@@ -382,7 +400,8 @@ describe('view toggles', () => {
     store.dispose();
     expect(p.saves).toEqual([]);
     expect(store.getSnapshot().snap).toBe(false);
-    expect(store.getSnapshot().lockedWindow).toBe(true);
+    // Lock defaults ON (mix-editor 32); one toggle turns it off.
+    expect(store.getSnapshot().lockedWindow).toBe(false);
   });
 });
 
