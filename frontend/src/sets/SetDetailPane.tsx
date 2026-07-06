@@ -13,9 +13,9 @@
  * badges. Auto-fill (per-adjacency and set-wide) proposes Transitions
  * only; the manual pin picker also lists the pair's Takes (ADR 0023).
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type SetRowWire } from '../api/client';
+import { api, type SetRowWire, type TakeRowWire } from '../api/client';
 import { useDecks, type DeckContextValue } from '../hooks/useDeck';
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import { useMixer } from '../hooks/useMixer';
@@ -52,6 +52,7 @@ import {
   initTransitionStore,
   snapshotPairStore,
   subscribePairStore,
+  type PairStore,
 } from '../editor/pairStore';
 import { requestPairEdit } from '../editor/openPair';
 import { requestTakeReview } from '../capture/takeReview';
@@ -150,6 +151,32 @@ import SetSuggestions, { type SuggestTarget } from './SetSuggestions';
 import { ArchivedTrackFlag, ArchivedTrackRowMark } from './archivedFlag';
 import './SetDetailPane.css';
 
+const EMPTY_EVIDENCE: { transitions: TransitionEvidence[]; takes: TakeEvidence[] } = {
+  transitions: [],
+  takes: [],
+};
+
+/** Evidence for one ordered pair (sets 02): the pair store's Transitions
+ * + the Take history's rows. Pure — the pane memoizes a per-adjacency
+ * list from it (issue 42), and the stable event handlers call it against
+ * imperative snapshots. */
+function buildPairEvidence(
+  pairStore: PairStore,
+  takes: TakeRowWire[],
+  a: number,
+  b: number
+): { transitions: TransitionEvidence[]; takes: TakeEvidence[] } {
+  const transitions: TransitionEvidence[] = (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
+    uuid: it.uuid,
+    name: it.name,
+    favorite: it.favorite ?? false,
+  }));
+  const pairTakes: TakeEvidence[] = takes
+    .filter((t) => t.a_track_id === a && t.b_track_id === b)
+    .map((t) => ({ uuid: t.uuid, detectedAt: t.detected_at }));
+  return { transitions, takes: pairTakes };
+}
+
 interface SetDetailPaneProps {
   setId: number;
   /** The embedding view's load policy (editor-midi 03): Library passes
@@ -161,6 +188,10 @@ interface SetDetailPaneProps {
 export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProps) {
   const showToast = useToast();
   const entries = useSetEntries(setId);
+  // Live entries for the identity-stable handlers (issue 42; the
+  // useTrackSelection ref pattern — handlers feed memoized rows).
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
   useEffect(() => {
     void ensureSetEntriesLoaded(setId);
   }, [setId]);
@@ -180,17 +211,10 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // per ordered pair; matching adjacencies grow a "new take — pin?" chip.
   const freshTakes = useSyncExternalStore(subscribeFreshTakes, snapshotFreshTakes);
 
-  const pairEvidence = (a: number, b: number) => {
-    const transitions: TransitionEvidence[] = (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
-      uuid: it.uuid,
-      name: it.name,
-      favorite: it.favorite ?? false,
-    }));
-    const pairTakes: TakeEvidence[] = takes
-      .filter((t) => t.a_track_id === a && t.b_track_id === b)
-      .map((t) => ({ uuid: t.uuid, detectedAt: t.detected_at }));
-    return { transitions, takes: pairTakes };
-  };
+  // Latest takes for event-time reads by the identity-stable handlers
+  // (the useTrackSelection ref pattern — issue 42).
+  const takesRef = useRef(takes);
+  takesRef.current = takes;
 
   // Adjacency click-through (sets 09): route by RESOLVED pin kind — a
   // Transition pin opens the editor with that Transition selected, a Take
@@ -198,35 +222,48 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // dangling pins) opens a blank sketch for the pair. The request rides a
   // window event; App flips the mode; the mounted editor consumes it —
   // this pane's state (set store) survives the switch untouched.
-  const openAdjacencyEditor = (
-    aTrackId: number,
-    bTrackId: number,
-    pin: AdjacencyPin | null
-  ) => {
-    const { transitions, takes: pairTakes } = pairEvidence(aTrackId, bTrackId);
-    const view = adjacencyView(pin, transitions, pairTakes);
-    if (view.status === 'take') {
-      requestTakeReview(view.take!.uuid);
-      return;
-    }
-    requestPairEdit({
-      aTrackId,
-      bTrackId,
-      transitionUuid: view.status === 'transition' ? view.transition!.uuid : null,
-    });
-  };
+  // Identity-stable (issue 42): a prop on ~87 memoized adjacency rows.
+  const openAdjacencyEditor = useCallback(
+    (aTrackId: number, bTrackId: number, pin: AdjacencyPin | null) => {
+      const { transitions, takes: pairTakes } = buildPairEvidence(
+        snapshotPairStore(),
+        takesRef.current,
+        aTrackId,
+        bTrackId
+      );
+      const view = adjacencyView(pin, transitions, pairTakes);
+      if (view.status === 'take') {
+        requestTakeReview(view.take!.uuid);
+        return;
+      }
+      requestPairEdit({
+        aTrackId,
+        bTrackId,
+        transitionUuid: view.status === 'transition' ? view.transition!.uuid : null,
+      });
+    },
+    []
+  );
 
   // Set-wide auto-fill: one click accepts every proposal on a pin-less
   // adjacency. Existing pins (even dangling ones) are never overwritten.
-  const autoFillable = new Map<number, AdjacencyPin>();
-  if (entries) {
-    for (let i = 0; i < entries.length - 1; i++) {
-      if (entries[i].pin !== null) continue;
-      const { transitions } = pairEvidence(entries[i].trackId, entries[i + 1].trackId);
-      const proposal = autoFillProposal(transitions);
-      if (proposal) autoFillable.set(entries[i].trackId, { kind: 'transition', uuid: proposal.uuid });
+  const autoFillable = useMemo(() => {
+    const fillable = new Map<number, AdjacencyPin>();
+    if (entries) {
+      for (let i = 0; i < entries.length - 1; i++) {
+        if (entries[i].pin !== null) continue;
+        const { transitions } = buildPairEvidence(
+          pairStore,
+          takes,
+          entries[i].trackId,
+          entries[i + 1].trackId
+        );
+        const proposal = autoFillProposal(transitions);
+        if (proposal) fillable.set(entries[i].trackId, { kind: 'transition', uuid: proposal.uuid });
+      }
     }
-  }
+    return fillable;
+  }, [entries, pairStore, takes]);
 
   // Track metadata for the entry rows (batch-by-Promise.all pattern, as in
   // TakeHistoryView's labels query). Keyed under the ['tracks'] prefix so
@@ -299,32 +336,66 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // can happen during an HTML5 drag.
   const displayEntries = previewState?.entries ?? entries;
   const displayPlan = previewState ? previewPlan : plan;
+  // Displayed order for the stable suggest-insert handler (issue 42).
+  const displayEntriesRef = useRef(displayEntries);
+  displayEntriesRef.current = displayEntries;
+
+  // Per-adjacency derived props, memoized (issue 42): fresh objects and
+  // filtered arrays per render would defeat the adjacency-row memo —
+  // these recompute only when their real inputs change.
+  const evidenceList = useMemo(() => {
+    if (!displayEntries) return undefined;
+    return displayEntries.map((e, i) => {
+      const next = displayEntries[i + 1];
+      return next
+        ? buildPairEvidence(pairStore, takes, e.trackId, next.trackId)
+        : { transitions: [], takes: [] };
+    });
+  }, [displayEntries, pairStore, takes]);
+  const warningsByAdj = useMemo(() => {
+    if (!displayPlan) return undefined;
+    return displayPlan.adjacencies.map((_, i) =>
+      displayPlan.warnings.filter((w) => w.adjacencyIndex === i)
+    );
+  }, [displayPlan]);
+  const decksByAdj = useMemo(() => {
+    if (!displayPlan) return undefined;
+    return displayPlan.adjacencies.map((_, i) => {
+      const outgoing = displayPlan.entries[i];
+      const incoming = displayPlan.entries[i + 1];
+      return outgoing && incoming
+        ? { outgoing: outgoing.deck, incoming: incoming.deck }
+        : undefined;
+    });
+  }, [displayPlan]);
 
   // BPM delta reference (sets 31): under Fixed every row measures against
   // the Set tempo (the planner's own fallback when unset: the first
   // track's effective BPM); under Riding each row measures against its
-  // predecessor — resolved per-row at render, against the DISPLAYED
-  // order, so a live drag preview colors the hypothetical neighbors.
-  const effectiveBpmOf = (trackId: number): number | null => {
-    const t = trackMap?.get(trackId);
-    return t ? trackEffectiveBpm(t) : null;
-  };
-  const fixedTempoRef: BpmDeltaRef | null = (() => {
-    if (set?.tempo_policy !== 'fixed') return null;
-    const bpm =
-      set.set_tempo_bpm ??
-      (displayEntries && displayEntries.length > 0
-        ? effectiveBpmOf(displayEntries[0].trackId)
-        : null);
-    return bpm ? { kind: 'set-tempo', bpm } : null;
-  })();
-  const bpmRefFor = (i: number): BpmDeltaRef | null => {
-    if (set?.tempo_policy === 'fixed') return fixedTempoRef;
-    const prev = displayEntries?.[i - 1];
-    if (!prev) return null; // first row under Riding: no reference
-    const bpm = effectiveBpmOf(prev.trackId);
-    return bpm ? { kind: 'predecessor', bpm } : null;
-  };
+  // predecessor — resolved against the DISPLAYED order, so a live drag
+  // preview colors the hypothetical neighbors. Memoized per-row objects
+  // (issue 42): fresh {kind, bpm} literals per render would defeat the
+  // row memo.
+  const bpmRefs = useMemo<(BpmDeltaRef | null)[] | undefined>(() => {
+    if (!displayEntries) return undefined;
+    const effectiveBpmOf = (trackId: number): number | null => {
+      const t = trackMap?.get(trackId);
+      return t ? trackEffectiveBpm(t) : null;
+    };
+    if (set?.tempo_policy === 'fixed') {
+      const bpm =
+        set.set_tempo_bpm ??
+        (displayEntries.length > 0 ? effectiveBpmOf(displayEntries[0].trackId) : null);
+      const fixedRef: BpmDeltaRef | null = bpm ? { kind: 'set-tempo', bpm } : null;
+      return displayEntries.map(() => fixedRef);
+    }
+    return displayEntries.map((_, i) => {
+      const prev = displayEntries[i - 1];
+      if (!prev) return null; // first row under Riding: no reference
+      const bpm = effectiveBpmOf(prev.trackId);
+      return bpm ? { kind: 'predecessor', bpm } : null;
+    });
+  }, [displayEntries, trackMap, set?.tempo_policy, set?.set_tempo_bpm]);
 
   // Real hot cues for the ladder clips (same cache keys as useHotCues).
   const hotCueQueries = useQueries({
@@ -354,31 +425,54 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   useEffect(() => {
     trackMapRef.current = trackMap;
   });
-  const conductorAudio = () => ({ mixer, engines: { A: decks.A.engine, B: decks.B.engine } });
-  const loadTrackOnDeck = (deck: 'A' | 'B', trackId: number) => {
+  // Everything below reads the live values through refs so the handlers
+  // stay identity-stable — they land as props on ~175 memoized rows
+  // (issue 42; the useTrackSelection ref pattern).
+  const planRef = useRef(plan);
+  planRef.current = plan;
+  const mixerRef = useRef(mixer);
+  mixerRef.current = mixer;
+  const decksRef = useRef(decks);
+  decksRef.current = decks;
+  const conductorAudio = useCallback(
+    () => ({
+      mixer: mixerRef.current,
+      engines: { A: decksRef.current.A.engine, B: decksRef.current.B.engine },
+    }),
+    []
+  );
+  const loadTrackOnDeck = useCallback((deck: 'A' | 'B', trackId: number) => {
     // The deck provider's one Load path (ADR 0022); the pane's track
     // map usually already holds the row.
     const known = trackMapRef.current?.get(trackId);
-    if (known) decks[deck].loadTrack(known);
-    else void api.tracks.getById(trackId).then((t) => decks[deck].loadTrack(t));
-  };
+    if (known) decksRef.current[deck].loadTrack(known);
+    else void api.tracks.getById(trackId).then((t) => decksRef.current[deck].loadTrack(t));
+  }, []);
   // Prefetch one entry ahead (sets 14): warm the decode cache so the
   // handover's deck load is a near-instant cache hit.
-  const prefetchTrack = (trackId: number) => {
-    void prefetchTrackBuffer(mixer, trackId).catch((err) =>
+  const prefetchTrack = useCallback((trackId: number) => {
+    void prefetchTrackBuffer(mixerRef.current, trackId).catch((err) =>
       console.error(`set prefetch failed for track ${trackId}`, err)
     );
-  };
-  const playFromEntry = (index: number) => {
-    if (!plan) return;
-    startSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, index, prefetchTrack);
-  };
+  }, []);
+  const playFromEntry = useCallback(
+    (index: number) => {
+      const livePlan = planRef.current;
+      if (!livePlan) return;
+      startSetPlayback(setId, livePlan, conductorAudio(), loadTrackOnDeck, index, prefetchTrack);
+    },
+    [setId, conductorAudio, loadTrackOnDeck, prefetchTrack]
+  );
   // Ladder click (sets 05): seek — conducting already seeks in place
   // (preserving play/pause); idle starts playing from that instant.
-  const seekToMixTime = (mixTime: number) => {
-    if (!plan) return;
-    seekSetPlayback(setId, plan, conductorAudio(), loadTrackOnDeck, mixTime, prefetchTrack);
-  };
+  const seekToMixTime = useCallback(
+    (mixTime: number) => {
+      const livePlan = planRef.current;
+      if (!livePlan) return;
+      seekSetPlayback(setId, livePlan, conductorAudio(), loadTrackOnDeck, mixTime, prefetchTrack);
+    },
+    [setId, conductorAudio, loadTrackOnDeck, prefetchTrack]
+  );
 
   // ── Pickup (sets 16): resume the set from the live deck state ────────
   // The button is lit exactly when the state maps cleanly onto the plan
@@ -439,10 +533,10 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     },
     []
   );
-  const cueDeckAt = (deck: 'A' | 'B', trackId: number, seconds: number) => {
+  const cueDeckAt = useCallback((deck: 'A' | 'B', trackId: number, seconds: number) => {
     pendingCues.current[deck]?.(); // cancel a superseded pending cue
     pendingCues.current[deck] = null;
-    const engine = decks[deck].engine;
+    const engine = decksRef.current[deck].engine;
     const snap = engine.getSnapshot();
     if (snap.trackId === trackId && snap.loadState === 'ready') {
       // The rehearsal reset: park (pause) and re-cue in place.
@@ -464,7 +558,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       }
     });
     pendingCues.current[deck] = unsub;
-  };
+  }, [loadTrackOnDeck]);
 
   // The second adjacency verb (issue 09 sketches it; this mixes it live):
   // outgoing→A, incoming→B, cued by the plan when the adjacency is pinned,
@@ -472,28 +566,38 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // start — the plan's hard-cut entry, sets 19). Stays in this view;
   // the shared surface keeps audibility, so capture stays armed — mixing
   // the pair by hand is exactly what produces the Take.
-  const practiceAdjacency = (i: number) => {
-    if (!entries) return;
-    const outgoing = entries[i];
-    const incoming = entries[i + 1];
-    const outTrack = trackMap?.get(outgoing.trackId);
-    const inTrack = incoming ? trackMap?.get(incoming.trackId) : undefined;
-    if (!incoming || !outTrack || !inTrack) return;
-    // Practicing takes the decks by hand — a running Conductor stands down.
-    stopSetPlayback();
-    const positions = practiceCuePositions({
-      adjacency: plan?.adjacencies[i],
-      outgoingEntry: plan?.entries[i],
-      incomingEntry: plan?.entries[i + 1],
-      outgoingDurationSec: outTrack.duration_secs ?? 0,
-      outgoingHotCueSecs: (hotCuesByTrack.get(outgoing.trackId) ?? []).map(
-        (c) => c.time_seconds
-      ),
-      incomingHotCue1Sec: hotCue1Sec(hotCuesByTrack.get(incoming.trackId)),
-    });
-    cueDeckAt('A', outgoing.trackId, positions.outgoingSec);
-    cueDeckAt('B', incoming.trackId, positions.incomingSec);
-  };
+  // Identity-stable via refs (issue 42) — a prop on the memoized rows.
+  const hotCuesByTrackRef = useRef(hotCuesByTrack);
+  hotCuesByTrackRef.current = hotCuesByTrack;
+  const practiceAdjacency = useCallback(
+    (i: number) => {
+      const liveEntries = entriesRef.current;
+      const liveTrackMap = trackMapRef.current;
+      const livePlan = planRef.current;
+      const liveHotCues = hotCuesByTrackRef.current;
+      if (!liveEntries) return;
+      const outgoing = liveEntries[i];
+      const incoming = liveEntries[i + 1];
+      const outTrack = liveTrackMap?.get(outgoing.trackId);
+      const inTrack = incoming ? liveTrackMap?.get(incoming.trackId) : undefined;
+      if (!incoming || !outTrack || !inTrack) return;
+      // Practicing takes the decks by hand — a running Conductor stands down.
+      stopSetPlayback();
+      const positions = practiceCuePositions({
+        adjacency: livePlan?.adjacencies[i],
+        outgoingEntry: livePlan?.entries[i],
+        incomingEntry: livePlan?.entries[i + 1],
+        outgoingDurationSec: outTrack.duration_secs ?? 0,
+        outgoingHotCueSecs: (liveHotCues.get(outgoing.trackId) ?? []).map(
+          (c) => c.time_seconds
+        ),
+        incomingHotCue1Sec: hotCue1Sec(liveHotCues.get(incoming.trackId)),
+      });
+      cueDeckAt('A', outgoing.trackId, positions.outgoingSec);
+      cueDeckAt('B', incoming.trackId, positions.incomingSec);
+    },
+    [cueDeckAt]
+  );
 
   // ── Transport centering (22 follow-up): the header centers its
   // transport within its OWN width, but the pane sits right of the
@@ -562,11 +666,20 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // and drag handlers). Entry mutations prune it store-side.
   const selection = useSetSelection(setId);
   const selectedIds = useMemo(() => new Set(selection.ids), [selection.ids]);
-  const handleRowSelect = (trackId: number, mods: SelectMods) => {
-    if (!entries) return;
-    const sel = getSetSelection(setId);
-    setSetSelection(setId, selectGesture(sel, trackId, mods, entries.map((e) => e.trackId)));
-  };
+  // Identity-stable (issue 42): props on ~88 memoized track rows; live
+  // state comes through refs / imperative store reads.
+  const handleRowSelect = useCallback(
+    (trackId: number, mods: SelectMods) => {
+      const liveEntries = entriesRef.current;
+      if (!liveEntries) return;
+      const sel = getSetSelection(setId);
+      setSetSelection(
+        setId,
+        selectGesture(sel, trackId, mods, liveEntries.map((e) => e.trackId))
+      );
+    },
+    [setId]
+  );
   // Keyboard: Esc clears; Delete/Backspace removes the selection with
   // standard pin handling (one reconcile pass — identical semantics to
   // the single-row ✕). Bubble-phase on purpose: an open ContextMenu
@@ -599,15 +712,67 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
    * unselected row SELECTS-and-drags just itself (the name says the
    * write: this deliberately diverges from the Library's pure
    * getDragIds, per the issue's Decisions). */
-  const selectAndGetDragIds = (trackId: number): number[] => {
-    const sel = getSetSelection(setId);
-    if (sel.ids.includes(trackId) && entries) {
-      const member = new Set(sel.ids);
-      return entries.filter((e) => member.has(e.trackId)).map((e) => e.trackId);
-    }
-    setSetSelection(setId, click(sel, trackId));
-    return [trackId];
-  };
+  const selectAndGetDragIds = useCallback(
+    (trackId: number): number[] => {
+      const sel = getSetSelection(setId);
+      const liveEntries = entriesRef.current;
+      if (sel.ids.includes(trackId) && liveEntries) {
+        const member = new Set(sel.ids);
+        return liveEntries.filter((e) => member.has(e.trackId)).map((e) => e.trackId);
+      }
+      setSetSelection(setId, click(sel, trackId));
+      return [trackId];
+    },
+    [setId]
+  );
+
+  // Row drag lifecycle (sets 07/23), row remove, context menu, and the
+  // adjacency verbs — all identity-stable for the row memo (issue 42).
+  const handleRowDragStart = useCallback(
+    (e: React.DragEvent, trackId: number) => {
+      // Group drag (sets 18): the whole selection when the row is in it,
+      // in set order.
+      const ids = selectAndGetDragIds(trackId);
+      setTrackDragPayload(e.dataTransfer, ids, 'set-pane');
+      dragIdsRef.current = ids;
+      setDragIds(ids);
+    },
+    [selectAndGetDragIds]
+  );
+  const handleRowDragEnd = useCallback(() => {
+    // Fires after drop AND on cancel (Esc / drop outside): either way
+    // the hypothesis is over.
+    dragIdsRef.current = null;
+    setDragIds(null);
+    setPreviewOrder(null);
+  }, []);
+  const handleRemoveRow = useCallback(
+    (trackId: number) => removeTracksFromSet(setId, [trackId]),
+    [setId]
+  );
+  const handlePin = useCallback(
+    (aTrackId: number, pin: AdjacencyPin | null) => setAdjacencyPin(setId, aTrackId, pin),
+    [setId]
+  );
+  const handlePinFreshTake = useCallback(
+    (aTrackId: number, bTrackId: number, uuid: string) => {
+      setAdjacencyPin(setId, aTrackId, { kind: 'take', uuid });
+      clearFreshTake(aTrackId, bTrackId);
+    },
+    [setId]
+  );
+  // Open insert suggestions for the adjacency above displayed index
+  // `insertIndex` (sets 10) — resolved against the DISPLAYED order.
+  const handleSuggestInsert = useCallback((insertIndex: number, x: number, y: number) => {
+    const list = displayEntriesRef.current;
+    const liveTrackMap = trackMapRef.current;
+    const pred = list?.[insertIndex - 1];
+    const succ = list?.[insertIndex];
+    const predecessor = pred ? liveTrackMap?.get(pred.trackId) : undefined;
+    const successor = succ ? liveTrackMap?.get(succ.trackId) : undefined;
+    if (!predecessor || !successor) return;
+    setSuggest({ x, y, target: { kind: 'insert', predecessor, successor, insertIndex } });
+  }, []);
 
   // ── Controller browse target (sets 33): the Set pane implements the
   // library's browse-surface contract (midi-controller 05) instead of
@@ -622,10 +787,6 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // encoder walks tracks only (adjacency rows have no selection —
   // pointer/keyboard territory). Handlers read live state through refs;
   // registration is mount-scoped per set.
-  const entriesRef = useRef(entries);
-  useEffect(() => {
-    entriesRef.current = entries;
-  });
   const onLoadToDeckRef = useRef(onLoadToDeck);
   useEffect(() => {
     onLoadToDeckRef.current = onLoadToDeck;
@@ -668,6 +829,21 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // the row, so menu and highlight always agree).
   const { menu: rowMenu, openMenu: openRowMenu, closeMenu: closeRowMenu } =
     useContextMenuState<Track>();
+  // Identity-stable (issue 42): openMenu is stable by contract; selection
+  // is read imperatively.
+  const handleRowContextMenu = useCallback(
+    (e: React.MouseEvent, track: Track) => {
+      e.preventDefault();
+      // Standard: right-click outside the selection selects the row
+      // (sets 18) — the menu then targets exactly the highlighted rows.
+      const sel = getSetSelection(setId);
+      if (!sel.ids.includes(track.id)) {
+        setSetSelection(setId, click(sel, track.id));
+      }
+      openRowMenu(e.clientX, e.clientY, track);
+    },
+    [setId, openRowMenu]
+  );
   const rowMenuTargets: Track[] = rowMenu
     ? menuTargets(selection, rowMenu.context, (id) => trackMap?.get(id))
     : [];
@@ -988,95 +1164,49 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           displayEntries.map((entry, i) => {
             const track = trackMap?.get(entry.trackId);
             const next = displayEntries[i + 1];
-            const planned = displayPlan?.entries[i];
+            // Both tracks' metadata present — gates the affordances that
+            // need the pair (practice, suggest-insert), as before.
+            const pairReady = !!(track && next && trackMap?.has(next.trackId));
             return (
               <div key={entry.trackId}>
                 <SetTrackRow
                   index={i}
                   trackId={entry.trackId}
                   track={track}
-                  planned={planned}
-                  bpmRef={bpmRefFor(i)}
-                  loadedOn={loadedDecks(entry.trackId, occupancy)}
-                  playing={isRowPlaying(entry.trackId, occupancy)}
+                  planned={displayPlan?.entries[i]}
+                  bpmRef={bpmRefs?.[i] ?? null}
+                  occupancy={occupancy}
                   selected={selectedIds.has(entry.trackId)}
                   dragging={dragIds?.includes(entry.trackId) ?? false}
-                  onSelect={(mods) => handleRowSelect(entry.trackId, mods)}
-                  onDragStart={(e) => {
-                    // Group drag (sets 18): the whole selection when the
-                    // row is in it, in set order.
-                    const ids = selectAndGetDragIds(entry.trackId);
-                    setTrackDragPayload(e.dataTransfer, ids, 'set-pane');
-                    dragIdsRef.current = ids;
-                    setDragIds(ids);
-                  }}
-                  onDragEnd={() => {
-                    // Fires after drop AND on cancel (Esc / drop outside):
-                    // either way the hypothesis is over.
-                    dragIdsRef.current = null;
-                    setDragIds(null);
-                    setPreviewOrder(null);
-                  }}
-                  onPlayFrom={plan ? () => playFromEntry(i) : undefined}
-                  onRemove={() => removeTracksFromSet(setId, [entry.trackId])}
-                  onContextMenu={
-                    track
-                      ? (e) => {
-                          e.preventDefault();
-                          // Standard: right-click outside the selection
-                          // selects the row (sets 18) — the menu then
-                          // targets exactly the highlighted rows.
-                          const sel = getSetSelection(setId);
-                          if (!sel.ids.includes(track.id)) {
-                            setSetSelection(setId, click(sel, track.id));
-                          }
-                          openRowMenu(e.clientX, e.clientY, track);
-                        }
-                      : undefined
-                  }
+                  onSelect={handleRowSelect}
+                  onDragStart={handleRowDragStart}
+                  onDragEnd={handleRowDragEnd}
+                  onPlayFrom={plan ? playFromEntry : undefined}
+                  onRemove={handleRemoveRow}
+                  onContextMenu={track ? handleRowContextMenu : undefined}
                 />
                 {next && (
                   <AdjacencyRow
+                    aTrackId={entry.trackId}
+                    bTrackId={next.trackId}
+                    index={i}
                     pin={entry.pin}
                     planned={displayPlan?.adjacencies[i]}
                     future={previewOrder ? (previewFutures?.[i] ?? null) : null}
-                    decks={
-                      planned && displayPlan?.entries[i + 1]
-                        ? { outgoing: planned.deck, incoming: displayPlan.entries[i + 1].deck }
-                        : undefined
-                    }
-                    evidence={pairEvidence(entry.trackId, next.trackId)}
-                    warnings={displayPlan?.warnings.filter((w) => w.adjacencyIndex === i)}
-                    onPin={(pin) => setAdjacencyPin(setId, entry.trackId, pin)}
-                    onOpenEditor={() =>
-                      openAdjacencyEditor(entry.trackId, next.trackId, entry.pin)
-                    }
-                    onPractice={
-                      trackMap?.has(entry.trackId) && trackMap?.has(next.trackId)
-                        ? () => practiceAdjacency(i)
-                        : undefined
-                    }
+                    decks={decksByAdj?.[i]}
+                    evidence={evidenceList?.[i] ?? EMPTY_EVIDENCE}
+                    warnings={warningsByAdj?.[i]}
+                    onPin={handlePin}
+                    onOpenEditor={openAdjacencyEditor}
+                    onPractice={pairReady ? practiceAdjacency : undefined}
                     freshTake={freshTakeChip(
                       freshTakes,
                       entry.trackId,
                       next.trackId,
                       entry.pin?.uuid ?? null
                     )}
-                    onPinFreshTake={(uuid) => {
-                      setAdjacencyPin(setId, entry.trackId, { kind: 'take', uuid });
-                      clearFreshTake(entry.trackId, next.trackId);
-                    }}
-                    onSuggestInsert={(() => {
-                      const predecessor = trackMap?.get(entry.trackId);
-                      const successor = trackMap?.get(next.trackId);
-                      if (!predecessor || !successor) return undefined;
-                      return (x: number, y: number) =>
-                        setSuggest({
-                          x,
-                          y,
-                          target: { kind: 'insert', predecessor, successor, insertIndex: i + 1 },
-                        });
-                    })()}
+                    onPinFreshTake={handlePinFreshTake}
+                    onSuggestInsert={pairReady ? handleSuggestInsert : undefined}
                   />
                 )}
               </div>
@@ -1214,7 +1344,14 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'entry-after-exit': 'never audible',
 };
 
-function AdjacencyRow({
+/** Memoized (issue 42): ~87 of these sit in a big set, and a selection
+ * click must not re-render them all. Callbacks are identity-stable and
+ * parameterized by the pair (aTrackId/bTrackId/index); object props come
+ * from parent-memoized per-adjacency lists. */
+const AdjacencyRow = memo(function AdjacencyRow({
+  aTrackId,
+  bTrackId,
+  index,
   pin,
   planned,
   future,
@@ -1228,6 +1365,11 @@ function AdjacencyRow({
   onPinFreshTake,
   onSuggestInsert,
 }: {
+  /** The ordered pair either side of this handover. */
+  aTrackId: number;
+  bTrackId: number;
+  /** This adjacency's index in the displayed order. */
+  index: number;
   pin: AdjacencyPin | null;
   /** This handover's slice of the playback plan (sets 32): the overlap
    * cell renders its window span. Absent while the plan is loading. */
@@ -1245,20 +1387,20 @@ function AdjacencyRow({
   evidence: { transitions: TransitionEvidence[]; takes: TakeEvidence[] };
   /** This adjacency's plan degeneracies (sets 06), if any. */
   warnings?: PlanWarning[];
-  onPin: (pin: AdjacencyPin | null) => void;
+  onPin: (aTrackId: number, pin: AdjacencyPin | null) => void;
   /** Click-through (sets 09): open this adjacency in the Transition
    * editor (pin-kind routing lives with the caller). */
-  onOpenEditor: () => void;
+  onOpenEditor: (aTrackId: number, bTrackId: number, pin: AdjacencyPin | null) => void;
   /** Practice (sets 13): cue the pair on the decks — re-press re-cues.
    * Absent while the pair's track metadata is still loading. */
-  onPractice?: () => void;
+  onPractice?: (index: number) => void;
   /** A just-captured Take for this ordered pair (sets 13) — the transient
    * "new take — pin?" offer; null when none (or it's already the pin). */
   freshTake: FreshTake | null;
-  onPinFreshTake: (uuid: string) => void;
+  onPinFreshTake: (aTrackId: number, bTrackId: number, uuid: string) => void;
   /** Open insert suggestions for this adjacency (sets 10); absent while
    * the pair's track metadata is still loading. */
-  onSuggestInsert?: (x: number, y: number) => void;
+  onSuggestInsert?: (insertIndex: number, x: number, y: number) => void;
 }) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const view = adjacencyView(pin, evidence.transitions, evidence.takes);
@@ -1270,12 +1412,12 @@ function AdjacencyRow({
   const pickerItems: MenuItem[] = [
     ...evidence.transitions.map((t) => ({
       label: `${t.favorite ? '★ ' : ''}${t.name}${pin?.uuid === t.uuid ? ' ✓' : ''}`,
-      onSelect: () => onPin({ kind: 'transition', uuid: t.uuid }),
+      onSelect: () => onPin(aTrackId, { kind: 'transition', uuid: t.uuid }),
     })),
     ...evidence.takes.map((t, i) => ({
       label: `Take · ${new Date(t.detectedAt).toLocaleString()}${pin?.uuid === t.uuid ? ' ✓' : ''}`,
       separatorBefore: i === 0 && evidence.transitions.length > 0,
-      onSelect: () => onPin({ kind: 'take', uuid: t.uuid }),
+      onSelect: () => onPin(aTrackId, { kind: 'take', uuid: t.uuid }),
     })),
     ...(evidence.transitions.length === 0 && evidence.takes.length === 0
       ? [{ label: 'No transitions or takes for this pair', disabled: true }]
@@ -1286,7 +1428,7 @@ function AdjacencyRow({
             label: 'Unpin (hard cut)',
             danger: true,
             separatorBefore: true,
-            onSelect: () => onPin(null),
+            onSelect: () => onPin(aTrackId, null),
           },
         ]
       : []),
@@ -1308,7 +1450,7 @@ function AdjacencyRow({
       <div
         data-set-adjacency-row
         className="set-adjacency-row"
-        onClick={onOpenEditor}
+        onClick={() => onOpenEditor(aTrackId, bTrackId, pin)}
         title="Open this handover in the Transition editor"
         style={{
           // Geometry from the shared column grid (sets 31, rowColumns.ts)
@@ -1326,7 +1468,7 @@ function AdjacencyRow({
               className="set-glyph-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                onSuggestInsert(e.clientX, e.clientY);
+                onSuggestInsert(index + 1, e.clientX, e.clientY);
               }}
               title="Suggest a track to insert here, ranked by the weaker of the two edges"
               style={{
@@ -1385,7 +1527,7 @@ function AdjacencyRow({
           className="set-chip-btn set-icon-btn"
           onClick={(e) => {
             e.stopPropagation();
-            onOpenEditor();
+            onOpenEditor(aTrackId, bTrackId, pin);
           }}
           title="Open this handover in the Transition editor"
         >
@@ -1400,7 +1542,7 @@ function AdjacencyRow({
             className="set-chip-btn set-icon-btn"
             onClick={(e) => {
               e.stopPropagation();
-              onPractice();
+              onPractice(index);
             }}
             title="Practice this handover: cue outgoing on deck A (with a runway), incoming on deck B — press again to re-cue"
           >
@@ -1414,7 +1556,7 @@ function AdjacencyRow({
             className="set-chip-btn"
             onClick={(e) => {
               e.stopPropagation();
-              onPin({ kind: 'transition', uuid: proposal.uuid });
+              onPin(aTrackId, { kind: 'transition', uuid: proposal.uuid });
             }}
             title="Pin the proposed Transition"
             style={{ borderColor: 'var(--green)', color: 'var(--green)' }}
@@ -1430,7 +1572,7 @@ function AdjacencyRow({
             className="set-chip-btn"
             onClick={(e) => {
               e.stopPropagation();
-              onPinFreshTake(freshTake.uuid);
+              onPinFreshTake(aTrackId, bTrackId, freshTake.uuid);
             }}
             title="A Take was just captured for this handover — pin it"
             style={{ borderColor: 'var(--mauve)', color: 'var(--mauve)', fontWeight: 600 }}
@@ -1490,16 +1632,20 @@ function AdjacencyRow({
       )}
     </>
   );
-}
+});
 
-function SetTrackRow({
+/** Memoized (issue 42): ~88 of these sit in a big set, and a selection
+ * click paid one full row-stack render (~80 ms) before the memo. The
+ * TrackRow contract: identity-stable callbacks (parameterized by
+ * trackId/index), stable object props (trackMap/plan slices, the
+ * memoized occupancy map). */
+const SetTrackRow = memo(function SetTrackRow({
   index,
   trackId,
   track,
   planned,
   bpmRef,
-  loadedOn,
-  playing,
+  occupancy,
   selected,
   dragging,
   onSelect,
@@ -1518,13 +1664,10 @@ function SetTrackRow({
    * tempo under Fixed, the predecessor's BPM under Riding; null when
    * there is no reference (first row under Riding, missing BPMs). */
   bpmRef: BpmDeltaRef | null;
-  /** The Decks currently holding this track (sets 35: LIVE occupancy,
-   * not plan parity) — the row wears the holding deck's identity wash;
-   * both at once when both decks hold Set tracks. */
-  loadedOn: ChannelId[];
-  /** A deck holding this track is playing (sets 35): the deck-neutral
-   * animated EQ-bars STATE mark. Paused-but-loaded keeps the wash only. */
-  playing: boolean;
+  /** LIVE deck occupancy (sets 35) — the row derives its identity wash
+   * (loaded decks) and the playing STATE mark from it. Memoized on the
+   * engine slices, so its identity moves only on load/play/pause. */
+  occupancy: DeckOccupancyMap;
   /** In the pane's row selection (sets 18): blue wash + inset blue ring.
    * Coexists with the loaded wash — when both, the identity wash keeps
    * the background and the ring marks the selection. */
@@ -1534,17 +1677,17 @@ function SetTrackRow({
    * its committed one when the pointer is back over it). */
   dragging: boolean;
   /** Selection gestures (sets 18): plain / shift-range / cmd-toggle. */
-  onSelect: (mods: { shift: boolean; toggle: boolean }) => void;
+  onSelect: (trackId: number, mods: { shift: boolean; toggle: boolean }) => void;
   /** Row drag lifecycle (sets 07): the pane sets the drag payload and
    * tracks the dragged ids for the ladder's live preview. */
-  onDragStart: (e: React.DragEvent) => void;
+  onDragStart: (e: React.DragEvent, trackId: number) => void;
   onDragEnd: () => void;
-  /** Row play button: start Set playback at this track's planned entry. */
-  onPlayFrom: (() => void) | undefined;
-  onRemove: () => void;
+  /** Row play button: start Set playback at this row's planned entry. */
+  onPlayFrom: ((index: number) => void) | undefined;
+  onRemove: (trackId: number) => void;
   /** Right-click: the universal track menu (sets 17); absent while the
    * row's track metadata is still loading. */
-  onContextMenu?: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent, track: Track) => void;
 }) {
   // Selection and the loaded wash coexist, distinct (sets 18/35): deck
   // identity wash = where the track is loaded, blue = selection; a
@@ -1558,6 +1701,8 @@ function SetTrackRow({
   // identity-colored (Camelot hue — the app's key convention), BPM is
   // delta-colored against `bpmRef` with the absolute value as text. The
   // tempo authority is the effective BPM (ADR 0016) — same as the plan.
+  const loadedOn = loadedDecks(trackId, occupancy);
+  const playing = isRowPlaying(trackId, occupancy);
   const bpm = track ? trackEffectiveBpm(track) : null;
   const deltaColor = bpmDeltaColor(bpmDeltaPercent(bpm, bpmRef));
   const keyText = formatKeyDisplay(track?.key ?? null);
@@ -1569,10 +1714,12 @@ function SetTrackRow({
       data-set-track-row={trackId}
       draggable
       className={`set-track-row${selected ? ' selected' : ''}`}
-      onClick={(e) => onSelect({ shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
-      onDragStart={onDragStart}
+      onClick={(e) => onSelect(trackId, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
+      onDragStart={(e) => onDragStart(e, trackId)}
       onDragEnd={onDragEnd}
-      onContextMenu={onContextMenu}
+      onContextMenu={
+        track && onContextMenu ? (e) => onContextMenu(e, track) : undefined
+      }
       style={{
         // The grid's gap/padding come from the shared constants — the
         // CSS carries the non-geometric treatments only (sets 31).
@@ -1606,7 +1753,7 @@ function SetTrackRow({
           className="set-glyph-btn set-row-reveal"
           onClick={(e) => {
             e.stopPropagation(); // never doubles as a selection click
-            onPlayFrom?.();
+            onPlayFrom?.(index);
           }}
           disabled={!onPlayFrom}
           title="Play the set from this track's planned entry"
@@ -1695,7 +1842,7 @@ function SetTrackRow({
         className="set-glyph-btn set-row-reveal"
         onClick={(e) => {
           e.stopPropagation(); // never doubles as a selection click
-          onRemove();
+          onRemove(trackId);
         }}
         title="Remove from set"
         style={{ width: `${REMOVE_COL_W}px`, flexShrink: 0, padding: '2px 0', color: 'var(--red)' }}
@@ -1704,7 +1851,7 @@ function SetTrackRow({
       </button>
     </div>
   );
-}
+});
 
 /**
  * Tempo policy chip (sets 06): shows the Set's policy (and Set tempo when
