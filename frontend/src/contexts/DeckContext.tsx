@@ -11,6 +11,7 @@ import { deckControlsFor } from '../midi/controlRegistry';
 import { BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
 import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
+import { useDeckBeatgridSync } from '../hooks/useDeckBeatgridSync';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
 import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
@@ -156,6 +157,13 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     },
     [engines, queryClient]
   );
+
+  // Keep each Deck's Quantize grid live (cue-quantize-bpm 01): the engine
+  // snapshots beat times at Load, but a BPM re-tempo / nudge / downbeat
+  // mark re-spaces the grid server-side (ADR 0016) — these observers
+  // refetch on invalidation and push the fresh beats into the engines.
+  useDeckBeatgridSync(engines.A, loadedTracks.A?.id ?? null);
+  useDeckBeatgridSync(engines.B, loadedTracks.B?.id ?? null);
 
   // ── Loaded-pair persistence ────────────────────────────────────────────
   // The shared decks ARE "what's loaded on A/B" across every mode — the

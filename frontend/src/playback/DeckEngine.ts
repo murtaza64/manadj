@@ -358,6 +358,19 @@ export class DeckEngine {
     this.emit();
   }
 
+  /** The loaded Track's Beatgrid changed (BPM re-tempo, nudge, downbeat
+   * mark — ADR 0016: BPM edits ARE grid operations): refresh the Quantize
+   * grid without a re-Load. The load-time snapshot used to serve stale
+   * beats to every transport placement gesture (cue-quantize-bpm 01).
+   * Addressed by trackId so a late push for a previous track is ignored;
+   * an empty grid means gridless. The Main cue is NOT re-resolved — cue
+   * defaults are a load-time decision. */
+  setBeatTimes(trackId: number, beatTimes: number[] | null): void {
+    if (this.trackInfo?.trackId !== trackId) return;
+    this.beatTimes = beatTimes && beatTimes.length > 0 ? beatTimes : null;
+    this.emit(); // hasBeatgrid may have flipped
+  }
+
   cueDown(): void {
     this.dispatch({ type: 'cue-down' });
   }
