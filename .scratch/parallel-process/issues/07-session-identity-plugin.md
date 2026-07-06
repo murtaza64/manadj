@@ -1,6 +1,6 @@
 # Session-identity plugin
 
-Status: ready-for-agent
+Status: done (2026-07-06, workflow session; end-to-end check pending next server restart — plugin loads at startup)
 
 ## Parent
 

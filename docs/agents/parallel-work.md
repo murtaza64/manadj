@@ -303,3 +303,8 @@ report instead. Each lane records a port offset in its `.lanes/` file (e.g.
 ## jj ergonomics
 
 Run `uv run scripts/agent/configure_jj.py` once after clone (idempotent, repo-scoped config shared by all workspaces): `jj sit` = the canonical orientation picture (@, main, mutable heads minus probes) — use it instead of ad-hoc `jj log`; `ui.quiet` and conflict hints off (revert per script docstring if missed).
+
+The session-identity plugin (`.opencode/plugins/session-identity.js`) sets
+`$OPENCODE_SESSION_ID` in every bash execution — use it for registry
+`owner:` stamping; guard.py/land.py read it automatically. Loads on server
+restart; tools degrade gracefully where it's absent.
