@@ -43,6 +43,13 @@ export interface DeckLedInput {
    */
   pfl: boolean;
   /**
+   * The loaded Track has a Beatgrid (midi-performance-ops 05) — from the
+   * same beatgrid query the on-screen grid controls read, so lamp and
+   * behavior cannot drift. Empty deck or gridless Track = false = grid
+   * pads dark (and presses no-op).
+   */
+  hasBeatgrid: boolean;
+  /**
    * The app-wide Quantize toggle (midi-performance-ops 07) — the second
    * non-deck input; both decks receive the same value, so the two Q lamps
    * mirror the one switch.
@@ -61,6 +68,10 @@ export interface DeckLedStates {
   pfl: boolean;
   /** Pads 1..8 by index (index 0 = pad 1), HOTCUE base layer only. */
   pads: readonly boolean[];
+  /** Grid-edit (SAMPLER) pads 1..8 by index (midi-performance-ops 05):
+   * mapped pads lit steadily iff the Track has a Beatgrid; pad 3 (the one
+   * unbound pad) dark always. */
+  gridPads: readonly boolean[];
   /** Q button light — mirrors app-wide Quantize (midi-performance-ops 07). */
   quantize: boolean;
   /** SHIFT-layer Q light (the Key Lock lamp probe) — the Deck's Key Lock. */
@@ -113,10 +124,23 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
         (input.atCuePoint || phases.cueFlash)),
     pfl: input.pfl,
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
+    gridPads: GRID_PAD_MAPPED.map((mapped) => mapped && input.hasBeatgrid),
     quantize: input.quantize,
     keyLock: input.keyLock,
   };
 }
+
+/** Which grid-edit pads are bound (pad 3 is deliberately silent/dark). */
+const GRID_PAD_MAPPED: readonly boolean[] = [
+  true, // 1: grid-nudge earlier
+  true, // 2: anchor
+  false, // 3: unbound
+  true, // 4: grid-nudge later
+  true, // 5: shrink
+  true, // 6: grow
+  true, // 7: BPM halve
+  true, // 8: BPM double
+];
 
 /**
  * Audibility-aware transport lights (editor-midi 05, ADR 0019): while a
@@ -154,6 +178,7 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     deck.pfl,
     ...deck.hotCuePads,
     ...deck.hotCuePadsShifted,
+    ...deck.gridPads,
     deck.quantize,
     ...(deck.keyLockShifted ? [deck.keyLockShifted] : []),
   ];
@@ -176,6 +201,8 @@ export function encodeDeckLeds(
     ...addresses.hotCuePadsShifted.map((address, i) =>
       encodeLed(address, states.pads[i] ?? false)
     ),
+    // Grid-edit (SAMPLER) layer (midi-performance-ops 05).
+    ...addresses.gridPads.map((address, i) => encodeLed(address, states.gridPads[i] ?? false)),
     encodeLed(addresses.quantize, states.quantize),
     // The Key Lock lamp probe (midi-performance-ops 07): written only when
     // the mapping carries the shifted-Q address; absent = probe failed and

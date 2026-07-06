@@ -1,6 +1,6 @@
 # 40 — TopBar audio-ownership chip
 
-Status: ready-for-human (implemented 2026-07-06, change `pzvknwol`, lane topbar — awaiting review)
+Status: done (human-approved 2026-07-06; landed via merge `xpsonons`, lane topbar)
 
 ## Parent
 

@@ -25,7 +25,7 @@ import {
   registerFollowMacro,
   registerMixerControls,
 } from './controlRegistry';
-import { dispatchMidiAction } from './dispatch';
+import { _resetGridChordForTests, dispatchMidiAction } from './dispatch';
 
 const button = (
   control: 'transport' | 'cue',
@@ -47,6 +47,12 @@ function registerFakeDeckControls(deck: ChannelId): void {
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
     jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
     jogSeekTicks: (ticks) => calls.push(`${deck}:jogSeek:${ticks}`),
+    gridNudgeStep: (direction) => calls.push(`${deck}:gridNudge:${direction}`),
+    gridSetDownbeat: () => calls.push(`${deck}:gridAnchor`),
+    gridBpm: (change) => calls.push(`${deck}:gridBpm:${change}`),
+    gridNudgeLocal: (offsetMs) => calls.push(`${deck}:gridLocal:${offsetMs}`),
+    gridNudgeCommit: (offsetMs) => calls.push(`${deck}:gridCommit:${offsetMs}`),
+    gridBpmAdjust: (deltaBpm) => calls.push(`${deck}:gridBpmAdjust:${deltaBpm}`),
     toggleKeyLock: () => calls.push(`${deck}:toggleKeyLock`),
   });
 }
@@ -102,6 +108,7 @@ beforeEach(() => {
 afterEach(() => {
   _resetAudibleSurfacesForTests();
   _resetMidiControlsForTests();
+  _resetGridChordForTests();
 });
 
 describe('routing', () => {
@@ -376,6 +383,194 @@ describe('jog routes per audible surface (editor-midi 04)', () => {
     releaseAudible('editor');
     dispatchMidiAction(tick('jog', 'B', -3));
     expect(calls).toEqual(['B:jog:-3']);
+  });
+});
+
+describe('grid-edit pads are registry-direct (midi-performance-ops 05, ADR 0019)', () => {
+  const nudge = (deck: ChannelId, direction: 'earlier' | 'later', edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'grid-nudge', deck, direction },
+  });
+  const anchor = (deck: ChannelId, edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'grid-anchor', deck },
+  });
+  /** A full press: grow/shrink are chorded (the tap fires on the zero-tick
+   * release); halve/double fire on the down edge and ignore the up. */
+  const gridBpm = (deck: ChannelId, change: 'grow' | 'shrink' | 'halve' | 'double') => {
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'grid-bpm', deck, change } });
+    dispatchMidiAction({ kind: 'button', edge: 'up', target: { control: 'grid-bpm', deck, change } });
+  };
+
+  /** A tap: press and release with no jog ticks in between (issue 06 made
+   * grid-nudge chorded — the step fires on the zero-tick release). */
+  const tap = (deck: ChannelId, direction: 'earlier' | 'later') => {
+    dispatchMidiAction(nudge(deck, direction, 'down'));
+    dispatchMidiAction(nudge(deck, direction, 'up'));
+  };
+
+  it('nudge taps and anchor/bpm presses route to the deck controls', () => {
+    registerFakeDeckControls('A');
+    tap('A', 'earlier');
+    tap('A', 'later');
+    dispatchMidiAction(anchor('A', 'down'));
+    dispatchMidiAction(anchor('A', 'up'));
+    gridBpm('A', 'grow');
+    gridBpm('A', 'shrink');
+    gridBpm('A', 'halve');
+    gridBpm('A', 'double');
+    expect(calls).toEqual([
+      'A:gridNudge:earlier',
+      'A:gridNudge:later',
+      'A:gridAnchor',
+      'A:gridBpm:grow',
+      'A:gridBpm:shrink',
+      'A:gridBpm:halve',
+      'A:gridBpm:double',
+    ]);
+  });
+
+  it('grid targets act identically while the editor holds audibility (stored data, not gestures)', () => {
+    registerFakeDeckControls('B');
+    claimAudible('editor');
+    tap('B', 'later');
+    dispatchMidiAction(anchor('B', 'down'));
+    gridBpm('B', 'double');
+    expect(calls).toEqual(['B:gridNudge:later', 'B:gridAnchor', 'B:gridBpm:double']);
+  });
+
+  it('grid targets only reach their own deck', () => {
+    registerFakeDeckControls('A');
+    tap('B', 'earlier');
+    dispatchMidiAction(anchor('B', 'down'));
+    expect(calls).toEqual([]);
+  });
+
+  it('no registered deck controls: grid actions drop silently', () => {
+    tap('A', 'earlier');
+    dispatchMidiAction(anchor('A', 'down'));
+    gridBpm('A', 'grow');
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('spin-to-nudge chord (midi-performance-ops 06)', () => {
+  const nudge = (deck: ChannelId, direction: 'earlier' | 'later', edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'grid-nudge', deck, direction },
+  });
+  const tick = (
+    control: 'jog' | 'jog-touch' | 'jog-seek',
+    deck: ChannelId,
+    ticks: number
+  ): MidiAction => ({ kind: 'relative', target: { control, deck }, ticks });
+
+  it('hold-and-spin: ticks apply locally, release commits the net — no jog meanings fire', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction(nudge('A', 'later', 'down'));
+    dispatchMidiAction(tick('jog', 'A', 3));
+    dispatchMidiAction(tick('jog-touch', 'A', -1));
+    dispatchMidiAction(nudge('A', 'later', 'up'));
+    expect(calls).toEqual(['A:gridLocal:3', 'A:gridLocal:-1', 'A:gridCommit:2']);
+  });
+
+  it('a tap (zero ticks) still fires the discrete step', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction(nudge('A', 'earlier', 'down'));
+    dispatchMidiAction(nudge('A', 'earlier', 'up'));
+    expect(calls).toEqual(['A:gridNudge:earlier']);
+  });
+
+  it('release restores plain jog instantly', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction(nudge('A', 'later', 'down'));
+    dispatchMidiAction(tick('jog', 'A', 1));
+    dispatchMidiAction(nudge('A', 'later', 'up'));
+    dispatchMidiAction(tick('jog', 'A', 2));
+    dispatchMidiAction(tick('jog-touch', 'A', -2));
+    expect(calls).toEqual(['A:gridLocal:1', 'A:gridCommit:1', 'A:jog:2', 'A:jogTouch:-2']);
+  });
+
+  it('the unarmed deck\u2019s jog is untouched mid-gesture (per-deck isolation)', () => {
+    registerFakeDeckControls('A');
+    registerFakeDeckControls('B');
+    dispatchMidiAction(nudge('A', 'later', 'down'));
+    dispatchMidiAction(tick('jog', 'B', 2));
+    dispatchMidiAction(nudge('A', 'later', 'up'));
+    // B's ticks pass through; A received zero ticks, so its release is a tap.
+    expect(calls).toEqual(['B:jog:2', 'A:gridNudge:later']);
+  });
+
+  it('the interception happens BEFORE surface routing: an armed deck\u2019s ticks never reach the editor either', () => {
+    registerFakeDeckControls('A');
+    registerSurface('editor', {
+      transport: { togglePlay: () => calls.push('editor:toggle') },
+      jog: {
+        rimTicks: (deck, ticks) => calls.push(`editor:rim:${deck}:${ticks}`),
+        touchTicks: (deck, ticks) => calls.push(`editor:touch:${deck}:${ticks}`),
+        shiftRimTicks: (deck, ticks) => calls.push(`editor:shiftRim:${deck}:${ticks}`),
+      },
+      silence: () => undefined,
+    });
+    claimAudible('editor');
+    dispatchMidiAction(nudge('A', 'later', 'down'));
+    dispatchMidiAction(tick('jog', 'A', 2));
+    dispatchMidiAction(nudge('A', 'later', 'up'));
+    dispatchMidiAction(tick('jog', 'A', 1));
+    expect(calls).toEqual(['A:gridLocal:2', 'A:gridCommit:2', 'editor:rim:A:1']);
+  });
+
+  it('hold grow/shrink + spin: fine BPM adjust, one commit on release, jog suppressed', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'grid-bpm', deck: 'A', change: 'shrink' },
+    });
+    dispatchMidiAction(tick('jog', 'A', 3));
+    dispatchMidiAction(tick('jog-touch', 'A', -1));
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'grid-bpm', deck: 'A', change: 'shrink' },
+    });
+    dispatchMidiAction(tick('jog', 'A', 1)); // released: plain jog again
+    // 2 net ticks × 0.01 BPM — the reducer accumulates integer ticks and
+    // converts once at release, so the delta is exactly 2 × the rate.
+    expect(calls).toEqual([`A:gridBpmAdjust:${2 * 0.01}`, 'A:jog:1']);
+  });
+
+  it('grow/shrink taps still fire the discrete step; halve/double stay plain taps', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'grid-bpm', deck: 'A', change: 'grow' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'grid-bpm', deck: 'A', change: 'grow' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'grid-bpm', deck: 'A', change: 'halve' },
+    });
+    expect(calls).toEqual(['A:gridBpm:grow', 'A:gridBpm:halve']);
+  });
+
+  it('the shifted jog-seek stream stays surface-routed while armed (SHIFT is its own gesture)', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction(nudge('A', 'later', 'down'));
+    dispatchMidiAction(tick('jog-seek', 'A', 3));
+    dispatchMidiAction(nudge('A', 'later', 'up'));
+    // jog-seek is not a chord tick: it routes normally, and the release
+    // (zero chord ticks received) is a tap.
+    expect(calls).toEqual(['A:jogSeek:3', 'A:gridNudge:later']);
   });
 });
 

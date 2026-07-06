@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MidiAction } from './actions';
 import type { Mapping } from './mapping';
+import { INPULSE_300_MK2 } from './mappings/inpulse300mk2';
 import { initialDecoderState, translateMidiMessage } from './translator';
 
 /**
@@ -112,15 +113,19 @@ const mapping: Mapping = {
 };
 
 /** Fold a message array through the translator, as the adapter does per port. */
-function translate(messages: number[][]): MidiAction[] {
+function translateWith(m: Mapping, messages: number[][]): MidiAction[] {
   let state = initialDecoderState();
   const actions: MidiAction[] = [];
   for (const message of messages) {
-    const result = translateMidiMessage(message, state, mapping);
+    const result = translateMidiMessage(message, state, m);
     state = result.state;
     actions.push(...result.actions);
   }
   return actions;
+}
+
+function translate(messages: number[][]): MidiAction[] {
+  return translateWith(mapping, messages);
 }
 
 describe('button edge derivation', () => {
@@ -343,6 +348,42 @@ describe('relative decoding (midi-controller 03)', () => {
 
   it('note messages on relative-bound numbers stay silent', () => {
     expect(translate([[0x90, 0x18, 0x7f]])).toEqual([]);
+  });
+});
+
+describe('grid-edit pad bindings on the Inpulse mapping (midi-performance-ops 05)', () => {
+  const press = (channel: number, note: number): number[][] => [
+    [0x90 | channel, note, 0x7f],
+    [0x80 | channel, note, 0x00],
+  ];
+  const down = (target: MidiAction['target']): MidiAction => ({
+    kind: 'button',
+    target: target as never,
+    edge: 'down',
+  });
+
+  it('maps the SAMPLER-layer notes 0x30-0x37 to the grid-edit ops per deck', () => {
+    const cases: [number, number, MidiAction['target']][] = [
+      [6, 0x30, { control: 'grid-nudge', deck: 'A', direction: 'earlier' }],
+      [6, 0x31, { control: 'grid-anchor', deck: 'A' }],
+      [6, 0x33, { control: 'grid-nudge', deck: 'A', direction: 'later' }],
+      [6, 0x34, { control: 'grid-bpm', deck: 'A', change: 'shrink' }],
+      [6, 0x35, { control: 'grid-bpm', deck: 'A', change: 'grow' }],
+      [6, 0x36, { control: 'grid-bpm', deck: 'A', change: 'halve' }],
+      [6, 0x37, { control: 'grid-bpm', deck: 'A', change: 'double' }],
+      [7, 0x30, { control: 'grid-nudge', deck: 'B', direction: 'earlier' }],
+      [7, 0x37, { control: 'grid-bpm', deck: 'B', change: 'double' }],
+    ];
+    for (const [channel, note, target] of cases) {
+      const actions = translateWith(INPULSE_300_MK2, press(channel, note));
+      expect(actions[0]).toEqual(down(target));
+      expect(actions[1]).toEqual({ ...down(target), edge: 'up' });
+    }
+  });
+
+  it('pad 3 (0x32) is unbound: silent by construction', () => {
+    expect(translateWith(INPULSE_300_MK2, press(6, 0x32))).toEqual([]);
+    expect(translateWith(INPULSE_300_MK2, press(7, 0x32))).toEqual([]);
   });
 });
 

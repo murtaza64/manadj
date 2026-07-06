@@ -28,6 +28,7 @@ const idle = {
   atCuePoint: false,
   assignedPads: new Set<number>(),
   pfl: false,
+  hasBeatgrid: false,
   quantize: false,
   keyLock: false,
 };
@@ -105,6 +106,28 @@ describe('ledStates', () => {
     expect(ledStates({ ...idle, playing: true, pfl: false }).pfl).toBe(false);
   });
 
+  it('grid pads light steadily iff the Track has a Beatgrid, pad 3 dark always (midi-performance-ops 05)', () => {
+    expect(ledStates({ ...idle, hasBeatgrid: true }).gridPads).toEqual([
+      true, // 1: nudge earlier
+      true, // 2: anchor
+      false, // 3: unbound — dark always
+      true, // 4: nudge later
+      true, // 5: shrink
+      true, // 6: grow
+      true, // 7: halve
+      true, // 8: double
+    ]);
+    expect(ledStates({ ...idle, hasBeatgrid: false }).gridPads).toEqual(
+      new Array(8).fill(false)
+    );
+  });
+
+  it('grid pads are steady — independent of transport state and phases', () => {
+    const gridded = { ...idle, hasBeatgrid: true, playing: true, pendingPlay: true };
+    expect(ledStates(gridded, lit).gridPads[0]).toBe(true);
+    expect(ledStates(gridded, dim).gridPads[0]).toBe(true);
+  });
+
   it('Q mirrors the app-wide Quantize state, any phase (midi-performance-ops 07)', () => {
     expect(ledStates({ ...idle, quantize: true }, lit).quantize).toBe(true);
     expect(ledStates({ ...idle, quantize: true }, dim).quantize).toBe(true);
@@ -138,6 +161,7 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     atCuePoint: true,
     assignedPads: new Set([1, 4]),
     pfl: true,
+    hasBeatgrid: true,
     quantize: true,
     keyLock: true,
   };
@@ -163,6 +187,10 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     expect(states.pads[3]).toBe(true);
     expect(states.pads[1]).toBe(false);
     expect(states.pfl).toBe(true);
+  });
+
+  it('grid pads pass through untouched (stored-data lamps ignore audibility)', () => {
+    expect(ledStates(audibleTransportOverride(busy, false)).gridPads[0]).toBe(true);
   });
 
   it('Quantize and Key Lock pass through untouched (sticky state, not transport)', () => {
@@ -212,6 +240,20 @@ describe('encodeDeckLeds', () => {
     expect(messagesA).toContainEqual([0x96, 0x0b, 0x00]); // shifted pad 4 dark
     const messagesB = encodeDeckLeds(feedback, 'B', states);
     expect(messagesB).toContainEqual([0x97, 0x08, 0x7e]); // deck B shifted layer
+  });
+
+  it('encodes grid pads on the SAMPLER-layer addresses (midi-performance-ops 05)', () => {
+    const gridded = ledStates({ ...idle, hasBeatgrid: true });
+    const messagesA = encodeDeckLeds(feedback, 'A', gridded);
+    expect(messagesA).toContainEqual([0x96, 0x30, 0x7e]); // pad 1 lit
+    expect(messagesA).toContainEqual([0x96, 0x32, 0x00]); // pad 3 dark always
+    expect(messagesA).toContainEqual([0x96, 0x37, 0x7e]); // pad 8 lit
+    const messagesB = encodeDeckLeds(feedback, 'B', gridded);
+    expect(messagesB).toContainEqual([0x97, 0x30, 0x7e]); // deck B channel
+
+    const gridless = encodeDeckLeds(feedback, 'A', ledStates(idle));
+    expect(gridless).toContainEqual([0x96, 0x30, 0x00]);
+    expect(gridless).toContainEqual([0x96, 0x37, 0x00]);
   });
 
   it('encodes PFL at its button note per deck (headphone-cue 05)', () => {
@@ -264,7 +306,8 @@ describe('encodeDeckLeds', () => {
     const messages = encodeDeckLeds(feedback, 'A', dark);
     const addresses = messages.map(([status, number]) => `${status}:${number}`);
     expect(new Set(addresses).size).toBe(addresses.length);
-    expect(addresses.length).toBeGreaterThanOrEqual(21); // PLAY+CUE+PFL+2×8 pads+Q+probe
+    // PLAY + CUE + PFL + 2×8 hot-cue pads + 8 grid pads + Q + probe
+    expect(addresses.length).toBeGreaterThanOrEqual(29);
   });
 });
 
@@ -335,6 +378,9 @@ describe('allOffMessages', () => {
     expect(messages).toContainEqual([0x97, 0x02, 0x00]);
     expect(messages).toContainEqual([0x96, 0x0d, 0x00]);
     expect(messages).toContainEqual([0x97, 0x0a, 0x00]);
+    // Grid-edit (SAMPLER) pad lamps are covered too.
+    expect(messages).toContainEqual([0x96, 0x30, 0x00]);
+    expect(messages).toContainEqual([0x97, 0x37, 0x00]);
     // Q lamps and the shifted-Q Key Lock probe darken too.
     expect(messages).toContainEqual([0x91, 0x02, 0x00]);
     expect(messages).toContainEqual([0x92, 0x02, 0x00]);

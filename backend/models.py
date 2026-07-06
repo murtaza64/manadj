@@ -469,8 +469,8 @@ class SetEntry(Base):
     set_id = Column(Integer, ForeignKey("sets.id", ondelete="CASCADE"), nullable=False)
     track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False)
     position = Column(Integer, nullable=False)
-    pin_kind = Column(String, nullable=True)  # "transition" | "take" | NULL
-    pin_uuid = Column(String, nullable=True)
+    pin_kind = Column(String, nullable=True)  # "transition" | "take" | "hardcut" | NULL
+    pin_uuid = Column(String, nullable=True)  # NULL for hardcut (references nothing)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -506,8 +506,8 @@ class SetDormantPin(Base):
     set_id = Column(Integer, ForeignKey("sets.id", ondelete="CASCADE"), nullable=False)
     a_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
     b_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
-    pin_kind = Column(String, nullable=False)  # "transition" | "take"
-    pin_uuid = Column(String, nullable=False)
+    pin_kind = Column(String, nullable=False)  # "transition" | "take" | "hardcut"
+    pin_uuid = Column(String, nullable=True)  # NULL for hardcut (sets 26)
     created_at = Column(DateTime, default=func.now())
 
     set = relationship("Set", back_populates="dormant_pins")

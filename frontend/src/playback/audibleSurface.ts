@@ -173,6 +173,15 @@ export function audibleTransport(): SurfaceTransport | null {
   return surfaces.get(holder)?.transport ?? null;
 }
 
+/** The shared (default) surface's transport, whoever holds audibility —
+ * for a holder that passes deck-class transport straight through to the
+ * decks (sets 34: controller transport always means the Decks, so the
+ * Conductor registers a pass-through; the shared guards ride along and
+ * the engine emit reads as a manual gesture → takeover). */
+export function sharedTransport(): SurfaceTransport | null {
+  return surfaces.get('shared')?.transport ?? null;
+}
+
 /** The audible surface's pads section — null when the holder never
  * registered one (the class drops, ADR 0019). */
 export function audiblePads(): SurfacePads | null {

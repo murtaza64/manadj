@@ -542,6 +542,23 @@
   will-change: transform;
 }
 
+/* Live Conductor playhead (sets 38): the ongoing SET's position inside
+   the loaded transition's window. Saturated orange — distinct from the
+   pink mix playhead, cyan jumps, and green cue guides; below the mix
+   playhead (100), above jumps (60). */
+.editor-conductor-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0; /* driven per frame via transform: translateX */
+  width: 1.5px;
+  background: #ff9500;
+  box-shadow: 0 0 4px #ff950088;
+  pointer-events: none;
+  z-index: 90;
+  will-change: transform;
+}
+
 /* ── Info bar: deck A | transition center | deck B ── */
 
 .editor-infobar {
@@ -1186,4 +1203,23 @@
   font-size: 12px;
   color: var(--sapphire, #74c7ec);
   line-height: 1.4;
+}
+
+/* Audition arm (sets 37): play pressed on a deferred-open pair — deck
+   loads in flight, sound starts the moment both decks are ready. Press
+   again (or any transport gesture) to cancel. */
+.editor-center .player-button-arming {
+  background: transparent;
+  color: #ffd400;
+  border-color: #ffd400;
+  animation: editor-arm-pulse 0.7s ease-in-out infinite alternate;
+}
+
+@keyframes editor-arm-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.35;
+  }
 }
