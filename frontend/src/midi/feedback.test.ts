@@ -9,8 +9,10 @@ import {
   BLINK_INTERVAL_MS,
   CUE_FLASH_INTERVAL_MS,
   allOffMessages,
+  assistantLedLit,
   audibleTransportOverride,
   blinkPhase,
+  encodeAssistantLed,
   encodeDeckLeds,
   ledStates,
 } from './feedback';
@@ -27,6 +29,8 @@ const idle = {
   assignedPads: new Set<number>(),
   pfl: false,
   hasBeatgrid: false,
+  quantize: false,
+  keyLock: false,
   loopBeats: null,
 };
 
@@ -129,6 +133,29 @@ describe('ledStates', () => {
     expect(ledStates(gridded, lit).gridPads[0]).toBe(true);
     expect(ledStates(gridded, dim).gridPads[0]).toBe(true);
   });
+
+  it('Q mirrors the app-wide Quantize state, any phase (midi-performance-ops 07)', () => {
+    expect(ledStates({ ...idle, quantize: true }, lit).quantize).toBe(true);
+    expect(ledStates({ ...idle, quantize: true }, dim).quantize).toBe(true);
+    expect(ledStates(idle).quantize).toBe(false);
+  });
+
+  it('Q is independent of transport state', () => {
+    expect(ledStates({ ...idle, playing: true, quantize: true }).quantize).toBe(true);
+    expect(ledStates({ ...idle, playing: true, quantize: false }).quantize).toBe(false);
+  });
+
+  it('Key Lock mirrors the deck flag, any phase (the shifted-Q probe light)', () => {
+    expect(ledStates({ ...idle, keyLock: true }, lit).keyLock).toBe(true);
+    expect(ledStates({ ...idle, keyLock: true }, dim).keyLock).toBe(true);
+    expect(ledStates(idle).keyLock).toBe(false);
+  });
+
+  it('Quantize and Key Lock never share a light state (one lamp, one truth)', () => {
+    const states = ledStates({ ...idle, quantize: true, keyLock: false });
+    expect(states.quantize).toBe(true);
+    expect(states.keyLock).toBe(false);
+  });
 });
 
 describe('audibleTransportOverride (editor-midi 05)', () => {
@@ -141,6 +168,8 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     assignedPads: new Set([1, 4]),
     pfl: true,
     hasBeatgrid: true,
+    quantize: true,
+    keyLock: true,
     loopBeats: 4,
   };
 
@@ -169,6 +198,12 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
 
   it('grid pads pass through untouched (stored-data lamps ignore audibility)', () => {
     expect(ledStates(audibleTransportOverride(busy, false)).gridPads[0]).toBe(true);
+  });
+
+  it('Quantize and Key Lock pass through untouched (sticky state, not transport)', () => {
+    const states = ledStates(audibleTransportOverride(busy, true));
+    expect(states.quantize).toBe(true);
+    expect(states.keyLock).toBe(true);
   });
 
   it('loop pad state passes through like the hot cue pads', () => {
@@ -241,6 +276,43 @@ describe('encodeDeckLeds', () => {
     ]);
   });
 
+  it('encodes Q at its button note per deck (midi-performance-ops 07)', () => {
+    expect(encodeDeckLeds(feedback, 'A', { ...dark, quantize: true })).toContainEqual([
+      0x91, 0x02, 0x7f,
+    ]);
+    expect(encodeDeckLeds(feedback, 'B', { ...dark, quantize: false })).toContainEqual([
+      0x92, 0x02, 0x00,
+    ]);
+  });
+
+  it('both decks encode the same quantize state at their own address (mirrored lamps)', () => {
+    const on = { ...dark, quantize: true };
+    expect(encodeDeckLeds(feedback, 'A', on)).toContainEqual([0x91, 0x02, 0x7f]);
+    expect(encodeDeckLeds(feedback, 'B', on)).toContainEqual([0x92, 0x02, 0x7f]);
+  });
+
+  it('encodes the Key Lock probe at the shifted-Q address (ch+3, same note)', () => {
+    expect(encodeDeckLeds(feedback, 'A', { ...dark, keyLock: true })).toContainEqual([
+      0x94, 0x02, 0x7f,
+    ]);
+    expect(encodeDeckLeds(feedback, 'B', { ...dark, keyLock: false })).toContainEqual([
+      0x95, 0x02, 0x00,
+    ]);
+  });
+
+  it('skips the Key Lock probe when the mapping omits the shifted-Q address', () => {
+    const withoutProbe = {
+      decks: {
+        A: { ...feedback.decks.A, keyLockShifted: undefined },
+        B: { ...feedback.decks.B, keyLockShifted: undefined },
+      },
+    };
+    const messages = encodeDeckLeds(withoutProbe, 'A', { ...dark, keyLock: true });
+    expect(messages.some(([status, number]) => status === 0x94 && number === 0x02)).toBe(false);
+    // The base Q lamp stays quantize-only — key lock never leaks onto it.
+    expect(messages).toContainEqual([0x91, 0x02, 0x00]);
+  });
+
   it('lights exactly the LOOP pad whose preset equals the active length, per page', () => {
     // 8 beats: base page pad 4 (note 0x13) lit, everything else dark.
     const states = ledStates({ ...idle, loopBeats: 8 });
@@ -284,8 +356,9 @@ describe('encodeDeckLeds', () => {
     const messages = encodeDeckLeds(feedback, 'A', dark);
     const addresses = messages.map(([status, number]) => `${status}:${number}`);
     expect(new Set(addresses).size).toBe(addresses.length);
-    // PLAY + CUE + PFL + 2×8 hot-cue pads + 8 grid pads + 8 + 4 LOOP pads
-    expect(addresses.length).toBeGreaterThanOrEqual(39);
+    // PLAY + CUE + PFL + 2×8 hot-cue pads + 8 grid pads + Q + probe
+    // + 8 + 4 LOOP pads
+    expect(addresses.length).toBeGreaterThanOrEqual(41);
   });
 });
 
@@ -313,6 +386,30 @@ describe('blinkPhase', () => {
   });
 });
 
+describe('assistant lamp (midi-performance-ops 08)', () => {
+  it('is lit iff any Deck follows (mirrors the FilterBar)', () => {
+    expect(assistantLedLit({ A: false, B: false })).toBe(false);
+    expect(assistantLedLit({ A: true, B: false })).toBe(true);
+    expect(assistantLedLit({ A: false, B: true })).toBe(true);
+    expect(assistantLedLit({ A: true, B: true })).toBe(true);
+  });
+
+  it('encodes at the mapping\u2019s assistant address (hardware-learned note 0x03 ch 0)', () => {
+    expect(encodeAssistantLed(feedback, true)).toEqual([[0x90, 0x03, 0x7f]]);
+    expect(encodeAssistantLed(feedback, false)).toEqual([[0x90, 0x03, 0x00]]);
+  });
+
+  it('emits nothing when a mapping has no assistant address', () => {
+    const withoutAssistant = { decks: feedback.decks };
+    expect(encodeAssistantLed(withoutAssistant, true)).toEqual([]);
+    expect(encodeAssistantLed(withoutAssistant, false)).toEqual([]);
+  });
+
+  it('allOffMessages darkens the assistant lamp too', () => {
+    expect(allOffMessages(feedback)).toContainEqual([0x90, 0x03, 0x00]);
+  });
+});
+
 describe('allOffMessages', () => {
   it('darkens every mapped light on both decks', () => {
     const messages = allOffMessages(feedback);
@@ -335,6 +432,11 @@ describe('allOffMessages', () => {
     // Grid-edit (SAMPLER) pad lamps are covered too.
     expect(messages).toContainEqual([0x96, 0x30, 0x00]);
     expect(messages).toContainEqual([0x97, 0x37, 0x00]);
+    // Q lamps and the shifted-Q Key Lock probe darken too.
+    expect(messages).toContainEqual([0x91, 0x02, 0x00]);
+    expect(messages).toContainEqual([0x92, 0x02, 0x00]);
+    expect(messages).toContainEqual([0x94, 0x02, 0x00]);
+    expect(messages).toContainEqual([0x95, 0x02, 0x00]);
     // LOOP pads (both pages) are covered on both decks.
     expect(messages).toContainEqual([0x96, 0x10, 0x00]);
     expect(messages).toContainEqual([0x96, 0x1c, 0x00]);

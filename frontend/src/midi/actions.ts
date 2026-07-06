@@ -42,6 +42,17 @@ export type ButtonTarget =
   /** Grid tempo ops: Grow/Shrink micro-adjust (glossary) and BPM
    * halve/double, all through the one BPM write path. */
   | { control: 'grid-bpm'; deck: ChannelId; change: 'grow' | 'shrink' | 'halve' | 'double' }
+  /** App-wide Quantize toggle (midi-performance-ops 07) — registry-direct
+   * sticky state (ADR 0019), deck-less on purpose: both hardware Q buttons
+   * are two handles on the one switch. */
+  | { control: 'quantize' }
+  /** SHIFT+Q: that Deck's Key Lock toggle (midi-performance-ops 07) —
+   * registry-direct sticky Deck state, never surface-routed. */
+  | { control: 'key-lock'; deck: ChannelId }
+  /** The assistant button (midi-performance-ops 08): a macro over the
+   * per-Deck Follow model — all on (playing Decks, or both when nothing
+   * plays) or all off. Registry-direct, browse-adjacent. */
+  | { control: 'follow-macro' }
   /** LOOP pad mode (midi-performance-ops 02) — loops gesture class. The
    * target carries the pad's preset size in beats: no loop → engage at
    * the playhead; same size → release; different size → resize in place. */

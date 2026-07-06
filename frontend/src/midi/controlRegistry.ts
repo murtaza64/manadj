@@ -59,6 +59,9 @@ export interface MidiDeckControls {
   /** Hold-to-jog grow/shrink release: apply the gesture's net BPM delta
    * in one serialized commit. Gridless or variable grid: no-op. */
   gridBpmAdjust(deltaBpm: number): void;
+  /** Toggle the Deck's Key Lock (midi-performance-ops 07) — same dual
+   * write as the on-screen toggle (engine live state + persisted flag). */
+  toggleKeyLock(): void;
 }
 
 /**
@@ -107,6 +110,11 @@ let mixerControls: MidiMixerControls | null = null;
 // A stack, not a slot: views mount/unmount overlapping during switches;
 // the most recently mounted surface wins and unregistration is orderless.
 const browseSurfaces: MidiBrowseSurface[] = [];
+// The assistant button's Follow macro (midi-performance-ops 08): one
+// app-wide handler — the decision is cross-deck, so it registers whole,
+// not per deck. React glue registers it (playing/loaded are React-owned);
+// the decision function is the tested seam (follow/model.ts).
+let followMacro: (() => void) | null = null;
 
 /** Register a deck's controls; returns an unregister function. */
 export function registerDeckControls(deck: ChannelId, controls: MidiDeckControls): () => void {
@@ -145,8 +153,21 @@ export function browseSurface(): MidiBrowseSurface | null {
   return browseSurfaces[browseSurfaces.length - 1] ?? null;
 }
 
+/** Register the assistant Follow macro; returns an unregister function. */
+export function registerFollowMacro(run: () => void): () => void {
+  followMacro = run;
+  return () => {
+    if (followMacro === run) followMacro = null;
+  };
+}
+
+export function midiFollowMacro(): (() => void) | null {
+  return followMacro;
+}
+
 export function _resetMidiControlsForTests(): void {
   deckControls.clear();
   mixerControls = null;
   browseSurfaces.length = 0;
+  followMacro = null;
 }

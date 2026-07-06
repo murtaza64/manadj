@@ -8,6 +8,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { DECK_COLORS, hexToRgbTriplet } from '../theme/deckColors';
+import { cueCssColor } from '../waveform/WaveformRendererV2';
 import { bContentSegments, bEndMixTime, bTrackTimeAt, laneValuesAt } from './mixModel';
 import { MixPlayer } from './MixPlayer';
 import type { EditorMix } from './mixModel';
@@ -126,26 +127,22 @@ export function GlobalMinimap({
       ctx.fillStyle = `rgba(${hexToRgbTriplet(DECK_COLORS.B)}, 0.14)`;
       ctx.fillRect(fx, 0, fw, h);
 
-      // Hot cue triangles (issue 14): A's along the top edge, B's along the
-      // bottom — same convention as the main rows' baseline triangles.
-      const cueTri = (x: number, edge: 'top' | 'bottom', color: string) => {
+      // Hot cue marks: the global zoned-mark idiom (mix-editor 32,
+      // hotcue-colors 01) — pole + 5×5 square flag, matching the
+      // performance minimap. A's flags fly along the top edge, B's along
+      // the bottom (the deck zones), stored-color-wins via cueCssColor.
+      const cueFlag = (x: number, edge: 'top' | 'bottom', color: string) => {
         ctx.fillStyle = color;
-        ctx.beginPath();
-        if (edge === 'top') {
-          ctx.moveTo(x - 4, 0);
-          ctx.lineTo(x + 4, 0);
-          ctx.lineTo(x, 5);
-        } else {
-          ctx.moveTo(x - 4, h);
-          ctx.lineTo(x + 4, h);
-          ctx.lineTo(x, h - 5);
-        }
-        ctx.closePath();
-        ctx.fill();
+        ctx.fillRect(x - 1, 0, 2, h);
+        ctx.fillRect(x + 1, edge === 'top' ? 0 : h - 5, 5, 5);
       };
       for (const c of hotCuesA) {
         if (c.time_seconds >= 0 && c.time_seconds <= contentEnd) {
-          cueTri((c.time_seconds / contentEnd) * w, 'top', c.color || '#39ff14');
+          cueFlag(
+            (c.time_seconds / contentEnd) * w,
+            'top',
+            cueCssColor(c.slot_number, c.color)
+          );
         }
       }
       // B cues map through the spliced segments (transition-takes 06) —
@@ -155,7 +152,7 @@ export function GlobalMinimap({
           if (c.time_seconds < g.bStartSec) continue;
           const mixT = g.mixStartSec + (c.time_seconds - g.bStartSec) / rateB;
           if (mixT >= g.mixEndSec || mixT < 0 || mixT > contentEnd) continue;
-          cueTri((mixT / contentEnd) * w, 'bottom', c.color || '#39ff14');
+          cueFlag((mixT / contentEnd) * w, 'bottom', cueCssColor(c.slot_number, c.color));
         }
       }
     }, 100);

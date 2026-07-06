@@ -14,6 +14,7 @@ import {
   releaseAudible,
 } from '../playback/audibleSurface';
 import type { ChannelId } from '../playback/mixer';
+import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import type { MidiAction } from './actions';
 import type { Track } from '../types';
 import {
@@ -21,6 +22,7 @@ import {
   deckControlsFor,
   registerBrowseSurface,
   registerDeckControls,
+  registerFollowMacro,
   registerMixerControls,
 } from './controlRegistry';
 import { _resetGridChordForTests, dispatchMidiAction } from './dispatch';
@@ -54,6 +56,7 @@ function registerFakeDeckControls(deck: ChannelId): void {
     gridNudgeLocal: (offsetMs) => calls.push(`${deck}:gridLocal:${offsetMs}`),
     gridNudgeCommit: (offsetMs) => calls.push(`${deck}:gridCommit:${offsetMs}`),
     gridBpmAdjust: (deltaBpm) => calls.push(`${deck}:gridBpmAdjust:${deltaBpm}`),
+    toggleKeyLock: () => calls.push(`${deck}:toggleKeyLock`),
   });
 }
 
@@ -886,5 +889,95 @@ describe('browser (midi-controller 05)', () => {
     unregister();
     dispatchMidiAction({ kind: 'relative', target: { control: 'selection-move' }, ticks: 1 });
     expect(moves).toEqual(['second', 'first']);
+  });
+});
+
+describe('quantize and key lock (midi-performance-ops 07)', () => {
+  const quantize = (edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'quantize' },
+  });
+
+  // The store is module-level: restore it even when an assertion fails
+  // mid-test, so a red test can't cascade into unrelated ones.
+  const initialQuantize = isQuantizeOn();
+  afterEach(() => setQuantize(initialQuantize));
+
+  it('Q flips the app-wide quantize store on the down edge only', () => {
+    const before = isQuantizeOn();
+    dispatchMidiAction(quantize('down'));
+    expect(isQuantizeOn()).toBe(!before);
+    dispatchMidiAction(quantize('up'));
+    expect(isQuantizeOn()).toBe(!before);
+  });
+
+  it('quantize is deck-less: repeated presses from either hardware button flip the one state', () => {
+    const before = isQuantizeOn();
+    dispatchMidiAction(quantize('down'));
+    dispatchMidiAction(quantize('down'));
+    expect(isQuantizeOn()).toBe(before);
+  });
+
+  it('quantize bypasses the audible-surface arbiter (sticky state, ADR 0019)', () => {
+    claimAudible('editor');
+    const before = isQuantizeOn();
+    dispatchMidiAction(quantize('down'));
+    expect(isQuantizeOn()).toBe(!before);
+  });
+
+  it('SHIFT+Q toggles key lock on the addressed deck only, down edge only', () => {
+    registerFakeDeckControls('A');
+    registerFakeDeckControls('B');
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'key-lock', deck: 'A' } });
+    dispatchMidiAction({ kind: 'button', edge: 'up', target: { control: 'key-lock', deck: 'A' } });
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'key-lock', deck: 'B' } });
+    expect(calls).toEqual(['A:toggleKeyLock', 'B:toggleKeyLock']);
+  });
+
+  it('key lock stays registry-direct while the editor is audible', () => {
+    registerFakeDeckControls('A');
+    claimAudible('editor');
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'key-lock', deck: 'A' } });
+    expect(calls).toEqual(['A:toggleKeyLock']);
+  });
+
+  it('no registered deck controls: key lock drops silently', () => {
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'key-lock', deck: 'A' } });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('assistant follow macro (midi-performance-ops 08)', () => {
+  const press = (edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'follow-macro' },
+  });
+
+  it('routes to the registered macro on the down edge only', () => {
+    registerFollowMacro(() => calls.push('followMacro'));
+    dispatchMidiAction(press('down'));
+    dispatchMidiAction(press('up'));
+    expect(calls).toEqual(['followMacro']);
+  });
+
+  it('bypasses the audible-surface arbiter (Follow means the same thing everywhere)', () => {
+    registerFollowMacro(() => calls.push('followMacro'));
+    claimAudible('editor');
+    dispatchMidiAction(press('down'));
+    expect(calls).toEqual(['followMacro']);
+  });
+
+  it('no registered macro: drops silently', () => {
+    dispatchMidiAction(press('down'));
+    expect(calls).toEqual([]);
+  });
+
+  it('unregister restores silence', () => {
+    const unregister = registerFollowMacro(() => calls.push('followMacro'));
+    unregister();
+    dispatchMidiAction(press('down'));
+    expect(calls).toEqual([]);
   });
 });

@@ -496,6 +496,47 @@ export const INPULSE_300_MK2: Mapping = {
     ...gridEditPads('A', 6),
     ...gridEditPads('B', 7),
 
+    // Q buttons (midi-performance-ops 07): either deck's Q toggles the ONE
+    // app-wide Quantize — the hardware's per-deck placement is two handles
+    // on one switch, so both bind to the same deck-less target. Mixxx's
+    // Inpulse 300 file puts Q at note 0x02 on the deck transport channels.
+    {
+      // From Mixxx's Inpulse 300 XML (Q = note 0x02); hardware-verified 2026-07-06.
+      match: { message: 'note', channel: 1, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'quantize' },
+    },
+    {
+      // From Mixxx's Inpulse 300 XML (Q = note 0x02); hardware-verified 2026-07-06.
+      match: { message: 'note', channel: 2, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'quantize' },
+    },
+    // SHIFT+Q = that deck's Key Lock (time guard unshifted, pitch guard
+    // shifted — one physical home). Shifted controls emit on channel+3.
+    {
+      // Inferred from the ch+3 shift pattern; hardware-verified 2026-07-06.
+      match: { message: 'note', channel: 4, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'key-lock', deck: 'A' },
+    },
+    {
+      // Inferred from the ch+3 shift pattern; hardware-verified 2026-07-06.
+      match: { message: 'note', channel: 5, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'key-lock', deck: 'B' },
+    },
+
+    // Assistant button (midi-performance-ops 08): the Follow macro — all
+    // on (playing Decks, or both when nothing plays) / all off.
+    // Hardware-learned 2026-07-06 via the inspector: note 0x03 on the
+    // browse channel (0). SHIFT+assistant not captured; unbound.
+    {
+      match: { message: 'note', channel: 0, number: 0x03 },
+      controlType: 'button',
+      target: { control: 'follow-macro' },
+    },
+
     // LOOP pad mode (midi-performance-ops 02): size presets, engage/
     // release/resize semantics live behind the loop-preset target. Pad
     // modes are note-isolated on this device; per Mixxx's Inpulse 300 file
@@ -546,6 +587,22 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x30 + i,
           onVelocity: 0x7e,
         })),
+        // Q lamp mirrors app-wide Quantize; Mixxx drives it at the button's
+        // own note (0x02) on the transport channel.
+        // TODO(hardware-verify): smoke-test with the Q bindings.
+        quantize: { channel: 1, number: 0x02, onVelocity: 0x7f },
+        // Key Lock lamp PROBE (midi-performance-ops 07): Mixxx drives NO
+        // output at the shifted-Q address (ch+3, same note) but DOES drive
+        // other shifted-layer lamps, so it is plausibly real. Wired
+        // optimistically: if the address is real, the Q lamp shows Key
+        // Lock while SHIFT is held; if it is not, these writes are inert,
+        // Key Lock stays screen-only, and the Q lamp remains
+        // quantize-only (one lamp never tells two truths). Record the
+        // probe outcome here at the smoke test: keep this address if the
+        // lamp responds, DELETE it if not (the encoder skips absent
+        // addresses).
+        // TODO(hardware-verify): shifted-Q lamp probe.
+        keyLockShifted: { channel: 4, number: 0x02, onVelocity: 0x7f },
         loopPads: loopPadLamps(6, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),
         loopPadsShifted: loopPadLamps(6, LOOP_PADS_SHIFTED_FIRST_NOTE, LOOP_LADDER_SHIFTED),
       },
@@ -569,9 +626,19 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x30 + i,
           onVelocity: 0x7e,
         })),
+        // TODO(hardware-verify): smoke-test with the Q bindings.
+        quantize: { channel: 2, number: 0x02, onVelocity: 0x7f },
+        // Same probe as deck A (see the comment there).
+        // TODO(hardware-verify): shifted-Q lamp probe.
+        keyLockShifted: { channel: 5, number: 0x02, onVelocity: 0x7f },
         loopPads: loopPadLamps(7, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),
         loopPadsShifted: loopPadLamps(7, LOOP_PADS_SHIFTED_FIRST_NOTE, LOOP_LADDER_SHIFTED),
       },
     },
+    // Assistant lamp (midi-performance-ops 08): lit iff any Deck follows.
+    // The button's own address — lamps on this device echo their button's
+    // note (PLAY/CUE/PFL all do). Hardware-verified 2026-07-06 (macro and
+    // lamp both confirmed on device).
+    assistant: { channel: 0, number: 0x03, onVelocity: 0x7f },
   },
 };

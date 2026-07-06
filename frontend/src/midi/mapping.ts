@@ -83,6 +83,21 @@ export interface DeckFeedback {
    */
   gridPads: readonly LedAddress[];
   /**
+   * The deck's Q button light (midi-performance-ops 07) — mirrors the ONE
+   * app-wide Quantize state: both decks' Q lamps and the TopBar toggle
+   * always agree.
+   */
+  quantize: LedAddress;
+  /**
+   * The SHIFT-layer Q address (channel+3, same note) — a PROBE
+   * (midi-performance-ops 07): if the hardware drives a lamp there, it
+   * shows the Deck's KEY LOCK while SHIFT is held; if not, the writes are
+   * inert, Key Lock stays screen-only, and the base Q lamp remains
+   * quantize-only (one lamp never tells two truths). Optional so a failed
+   * probe is recorded by deleting the address.
+   */
+  keyLockShifted?: LedAddress;
+  /**
    * LOOP pad mode, base page (midi-performance-ops 02): each pad's light
    * plus the preset size it stands for — lit iff the active loop's length
    * equals `beats`, so off-ladder lengths (and no loop) show all dark.
@@ -101,6 +116,12 @@ export type LoopPadLamp = LedAddress & { beats: number };
 /** Device knowledge for Feedback: every light the app writes, per deck. */
 export interface MappingFeedback {
   decks: Record<'A' | 'B', DeckFeedback>;
+  /**
+   * The assistant button's light (midi-performance-ops 08) — lit iff any
+   * Deck follows (mirrors the FilterBar). One button, so it lives beside
+   * the decks. Optional: absent until the address is hardware-learned.
+   */
+  assistant?: LedAddress;
 }
 
 export interface Mapping {

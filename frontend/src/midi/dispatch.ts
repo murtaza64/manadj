@@ -7,8 +7,14 @@ import {
   audibleTransport,
 } from '../playback/audibleSurface';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
+import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import type { MidiAction } from './actions';
-import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
+import {
+  browseSurface,
+  deckControlsFor,
+  midiFollowMacro,
+  midiMixerControls,
+} from './controlRegistry';
 import { initialGridChordState, reduceGridChord } from './gridChord';
 import type { GridChordCommand, GridChordEvent } from './gridChord';
 
@@ -233,6 +239,33 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       }
       if (edge !== 'down') return;
       deckControlsFor(target.deck)?.gridBpm(target.change);
+      return;
+    }
+    case 'quantize': {
+      // Registry-direct sticky state (midi-performance-ops 07, ADR 0019).
+      // The registry exists for React-owned capabilities; Quantize lives
+      // in a module-level store, so dispatch writes it the same way the
+      // TopBar Q button does — no indirection to drift through.
+      if (edge !== 'down') return;
+      setQuantize(!isQuantizeOn());
+      return;
+    }
+    case 'key-lock': {
+      // SHIFT+Q (midi-performance-ops 07): the Deck's Key Lock. The live
+      // state is engine-owned (React), so this goes through the registry
+      // like beatjump-size — registry-direct, never surface-routed.
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.toggleKeyLock();
+      return;
+    }
+    case 'follow-macro': {
+      // Assistant button (midi-performance-ops 08): registry-direct like
+      // the other sticky/browse-adjacent state — Follow means the same
+      // thing regardless of the audible surface. The registered handler
+      // owns reading playing/loaded (React-owned) and runs the pure
+      // decision (follow/model.ts: followMacroToggles).
+      if (edge !== 'down') return;
+      midiFollowMacro()?.();
       return;
     }
     default:

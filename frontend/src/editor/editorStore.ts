@@ -65,7 +65,9 @@ export class EditorStore {
     session: { items: [freshTransition([])], active: 0 },
     pairKey: null,
     snap: true,
-    lockedWindow: false,
+    // Lock defaults ON (mix-editor 32): named tension accepted — the
+    // signature double-drop flow now starts with a lock-off press.
+    lockedWindow: true,
     takeDraft: null,
   };
 
@@ -356,14 +358,15 @@ export class EditorStore {
     this.updateMix((m) => ({ ...m, transition: { ...m.transition, ...mut } }));
   }
 
-  /** Alignment nudge (glossary; issue 09): realign the pair by a fixed
-   * time step. B moves with the frame; A anchors the mix axis, so nudging
-   * A shifts frame+B the opposite way. */
-  alignmentNudge(deck: 'A' | 'B', deltaSec: number): void {
-    const shift = deck === 'B' ? deltaSec : -deltaSec;
+  /** Alignment nudge (glossary; issue 09; polarity re-decided in 32):
+   * realign the pair by a fixed time step in APPARENT MOTION — +δ moves
+   * B's drawn block right (window and B ride startSec together; A anchors
+   * the mix axis and never moves on screen). Deck-agnostic by
+   * construction: both cards' ▶ mean "block right". */
+  alignmentNudge(deltaSec: number): void {
     this.updateMix((m) => ({
       ...m,
-      transition: { ...m.transition, startSec: Math.max(0, m.transition.startSec + shift) },
+      transition: { ...m.transition, startSec: Math.max(0, m.transition.startSec + deltaSec) },
     }));
   }
 

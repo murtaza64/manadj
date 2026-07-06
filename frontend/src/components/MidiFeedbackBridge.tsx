@@ -5,11 +5,14 @@ import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
 import { useHotCues } from '../hooks/useHotCues';
 import { useMixerValue } from '../hooks/useMixer';
+import { useFollowFlags } from '../follow/followStore';
 import {
   BLINK_INTERVAL_MS,
   CUE_FLASH_INTERVAL_MS,
+  assistantLedLit,
   audibleTransportOverride,
   blinkPhase,
+  encodeAssistantLed,
   encodeDeckLeds,
   ledStates,
 } from '../midi/feedback';
@@ -20,6 +23,7 @@ import {
   audibleTransportState,
   subscribeAudible,
 } from '../playback/audibleSurface';
+import { isQuantizeOn, subscribeQuantize } from '../playback/quantizeStore';
 
 /**
  * Headless Feedback glue (midi-pad-leds 01/02/03): per deck, subscribes to
@@ -63,6 +67,13 @@ function DeckFeedbackPublisher({
   // the same change subscription as the on-screen PFL button, so hardware
   // toggles, screen clicks and this light can never disagree.
   const pfl = useMixerValue((m) => m.getChannelState(deck).pfl);
+  // Q lamp (midi-performance-ops 07): the app-wide Quantize store — the
+  // same subscription the TopBar Q toggle renders from, so both hardware
+  // lamps and the screen always agree.
+  const quantize = useSyncExternalStore(subscribeQuantize, isQuantizeOn);
+  // Key Lock lives in the engine snapshot (like the on-screen toggle) —
+  // feeds the SHIFT-layer Q lamp probe only.
+  const keyLock = useDeckSnapshot((s) => s.keyLock);
   // Keyed by the loaded Track: a Load re-keys the query, an empty deck
   // disables it (placeholder []) — both resolve to all pads dark until
   // real assignments arrive.
@@ -123,6 +134,8 @@ function DeckFeedbackPublisher({
       assignedPads,
       pfl,
       hasBeatgrid,
+      quantize,
+      keyLock,
       loopBeats,
     };
     const states = ledStates(
@@ -145,6 +158,8 @@ function DeckFeedbackPublisher({
     assignedPads,
     pfl,
     hasBeatgrid,
+    quantize,
+    keyLock,
     loopBeats,
     holderPlaying,
     pendingPhase,
@@ -152,6 +167,30 @@ function DeckFeedbackPublisher({
     outputs,
   ]);
 
+  return null;
+}
+
+/**
+ * The assistant lamp (midi-performance-ops 08): lit iff any Deck follows.
+ * Not deck-scoped — one button over both Decks — so it publishes beside
+ * the per-deck publishers. Subscribes to the follow store (every change
+ * source funnels through it: the hardware macro, the FilterBar toggles,
+ * playback spread/revoke), and resends on output-set changes, which is the
+ * full sync a connect/replug needs.
+ */
+function AssistantFeedbackPublisher() {
+  const follows = useFollowFlags();
+  const outputs = useSyncExternalStore(subscribeOutputs, connectedOutputs);
+  useEffect(() => {
+    if (outputs.length === 0) return;
+    const lit = assistantLedLit(follows);
+    for (const output of outputs) {
+      if (!output.mapping.feedback) continue;
+      for (const message of encodeAssistantLed(output.mapping.feedback, lit)) {
+        output.send(message);
+      }
+    }
+  }, [follows, outputs]);
   return null;
 }
 
@@ -198,6 +237,7 @@ export function MidiFeedbackBridge() {
       <DeckScope deck="B">
         <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsB} />
       </DeckScope>
+      <AssistantFeedbackPublisher />
     </>
   );
 }
