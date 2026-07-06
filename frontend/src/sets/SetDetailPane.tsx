@@ -900,22 +900,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           >
             Auto-fill {autoFillable.size > 0 ? `(${autoFillable.size})` : ''}
           </button>
-          {/* Suggest (sets 10): ranked candidates to append after the last track */}
-          <button
-            className="btn btn-primary"
-            onClick={(e) =>
-              lastTrack &&
-              setSuggest({ x: e.clientX, y: e.clientY, target: { kind: 'append', last: lastTrack } })
-            }
-            disabled={!lastTrack}
-            title={
-              lastTrack
-                ? 'Suggest tracks to append, ranked by follow tiering out of the last track'
-                : 'Add a track first — suggestions rank out of the last track'
-            }
-          >
-            Suggest
-          </button>
+          {/* The header Suggest button moved into the list as the
+              trailing suggest row (sets 36): append is an insert at the
+              terminal gap, so it gets the gap affordance. */}
         </span>
       </div>
 
@@ -1086,6 +1073,52 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
               </div>
             );
           })
+        )}
+
+        {/* Trailing suggest row (sets 36): the terminal gap's affordance
+            — the header Suggest button unified into the + insert family
+            (append IS an insert at the terminal gap). Permanently
+            visible, not hover-revealed: the primary set-building
+            affordance. Empty set: disabled, teaching copy inline. */}
+        {displayEntries !== undefined && (
+          <button
+            data-set-suggest-row
+            className="set-suggest-row"
+            disabled={!lastTrack}
+            onClick={(e) => {
+              if (!lastTrack) return;
+              setSuggest({
+                x: e.clientX,
+                y: e.clientY,
+                target: { kind: 'append', last: lastTrack },
+              });
+            }}
+            title={
+              lastTrack
+                ? 'Suggest tracks to append, ranked by follow tiering out of the last track'
+                : undefined
+            }
+            style={{ gap: `${ADJ_ROW_GAP}px`, padding: `4px ${ROW_PAD_X}px 4px ${ADJ_PAD_LEFT}px` }}
+          >
+            {/* + in the insert affordances' gutter column, label beside
+                it at the shared title x (rowColumns.ts geometry). */}
+            <span
+              aria-hidden
+              style={{
+                width: `${ADJ_GUTTER_W}px`,
+                flexShrink: 0,
+                display: 'flex',
+                justifyContent: 'flex-start',
+              }}
+            >
+              <span style={{ width: '18px', fontSize: '13px', fontWeight: 700 }}>+</span>
+            </span>
+            <span>
+              {displayEntries.length === 0
+                ? 'Add a track first — suggestions rank out of the last track'
+                : 'suggest a track'}
+            </span>
+          </button>
         )}
       </div>
 
