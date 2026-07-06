@@ -64,8 +64,9 @@ export interface DeckFeedback {
   pfl: LedAddress;
   /**
    * Pads 1..8 by index, HOTCUE base-layer addresses ONLY — pad modes are
-   * note-isolated on this class of device; other modes' lights are never
-   * written.
+   * note-isolated on this class of device, and Feedback writes only the
+   * modes the app maps (HOTCUE here, the grid-edit SAMPLER layer below);
+   * unmapped modes' lights are never written.
    */
   hotCuePads: readonly LedAddress[];
   /**
@@ -76,6 +77,12 @@ export interface DeckFeedback {
    */
   hotCuePadsShifted: readonly LedAddress[];
   /**
+   * Pads 1..8 by index, grid-edit (SAMPLER) base-layer addresses
+   * (midi-performance-ops 05). Mapped pads light steadily iff the deck's
+   * Track has a Beatgrid; pad 3 and unbound pads stay dark always.
+   */
+  gridPads: readonly LedAddress[];
+  /**
    * LOOP pad mode, base page (midi-performance-ops 02): each pad's light
    * plus the preset size it stands for — lit iff the active loop's length
    * equals `beats`, so off-ladder lengths (and no loop) show all dark.
@@ -83,7 +90,7 @@ export interface DeckFeedback {
   loopPads: readonly LoopPadLamp[];
   /**
    * LOOP pad mode, shifted page. Only the BOUND pads appear (the Inpulse
-   * binds 1..4); unbound pads are never written and stay dark.
+   * binds 1-3 and 5); unbound pads are never written and stay dark.
    */
   loopPadsShifted: readonly LoopPadLamp[];
 }

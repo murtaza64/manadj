@@ -1,3 +1,4 @@
+import type { ButtonTarget } from '../actions';
 import type { Binding, LoopPadLamp, Mapping } from '../mapping';
 
 /** The shifted pad layer of a deck's HOTCUE mode: notes 0x08-0x0F. */
@@ -7,6 +8,41 @@ function shiftedPadClears(deck: 'A' | 'B', channel: number): Binding[] {
     controlType: 'button' as const,
     target: { control: 'hot-cue-clear' as const, deck, pad: i + 1 },
   }));
+}
+
+/**
+ * The SAMPLER pad mode, repurposed as grid editing (midi-performance-ops
+ * 05; PRD: the label lies deliberately — manadj will never have a sampler,
+ * and a mode never pressed mid-performance protects stored data). Base
+ * notes 0x30-0x37 on the deck's pad channel per Mixxx's
+ * Hercules_DJControl_Inpulse_300.midi.xml (hardware-verified 2026-07-06).
+ *
+ * Layout: top row mirrors the on-screen grid-edit triple (nudge left /
+ * anchor / — / nudge right), bottom row the BPM cluster (shrink / grow /
+ * halve / double). Pad 3 (0x32) deliberately unbound: silent and dark.
+ */
+function gridEditPads(deck: 'A' | 'B', channel: number): Binding[] {
+  const targets: (ButtonTarget | null)[] = [
+    { control: 'grid-nudge', deck, direction: 'earlier' }, // pad 1
+    { control: 'grid-anchor', deck }, // pad 2
+    null, // pad 3: silent
+    { control: 'grid-nudge', deck, direction: 'later' }, // pad 4
+    { control: 'grid-bpm', deck, change: 'shrink' }, // pad 5
+    { control: 'grid-bpm', deck, change: 'grow' }, // pad 6
+    { control: 'grid-bpm', deck, change: 'halve' }, // pad 7
+    { control: 'grid-bpm', deck, change: 'double' }, // pad 8
+  ];
+  return targets.flatMap((target, i) =>
+    target === null
+      ? []
+      : [
+          {
+            match: { message: 'note' as const, channel, number: 0x30 + i },
+            controlType: 'button' as const,
+            target,
+          },
+        ]
+  );
 }
 
 /**
@@ -454,6 +490,12 @@ export const INPULSE_300_MK2: Mapping = {
     ...shiftedPadClears('A', 6),
     ...shiftedPadClears('B', 7),
 
+    // Grid editing on the SAMPLER pad mode (midi-performance-ops 05):
+    // notes 0x30-0x37 on the pad channels, per Mixxx (hardware-verified
+    // 2026-07-06).
+    ...gridEditPads('A', 6),
+    ...gridEditPads('B', 7),
+
     // LOOP pad mode (midi-performance-ops 02): size presets, engage/
     // release/resize semantics live behind the loop-preset target. Pad
     // modes are note-isolated on this device; per Mixxx's Inpulse 300 file
@@ -496,6 +538,14 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x08 + i,
           onVelocity: 0x7e,
         })),
+        // Grid-edit (SAMPLER) pad lamps echo their button notes 0x30-0x37
+        // on the pad channel, like every other pad lamp on this device
+        // (hardware-verified 2026-07-06).
+        gridPads: Array.from({ length: 8 }, (_, i) => ({
+          channel: 6,
+          number: 0x30 + i,
+          onVelocity: 0x7e,
+        })),
         loopPads: loopPadLamps(6, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),
         loopPadsShifted: loopPadLamps(6, LOOP_PADS_SHIFTED_FIRST_NOTE, LOOP_LADDER_SHIFTED),
       },
@@ -511,6 +561,12 @@ export const INPULSE_300_MK2: Mapping = {
         hotCuePadsShifted: Array.from({ length: 8 }, (_, i) => ({
           channel: 7,
           number: 0x08 + i,
+          onVelocity: 0x7e,
+        })),
+        // Hardware-verified 2026-07-06.
+        gridPads: Array.from({ length: 8 }, (_, i) => ({
+          channel: 7,
+          number: 0x30 + i,
           onVelocity: 0x7e,
         })),
         loopPads: loopPadLamps(7, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),

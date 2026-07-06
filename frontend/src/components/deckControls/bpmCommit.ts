@@ -74,12 +74,18 @@ export function formatBpm(bpm: number): string {
   return (Math.round(bpm * 100) / 100).toFixed(2).replace(/\.?0+$/, '');
 }
 
+/** The Grow/Shrink pair (glossary): grid spacing wider ↔ tighter. */
+export type GrowShrink = 'grow' | 'shrink';
+
 /**
- * ±0.03 micro-nudge (library keyboard parity), snapping to the integer at
- * x.99 / x.01 so repeated nudges re-find round tempos.
+ * ±0.03 Grow/Shrink micro-adjust (glossary; library keyboard parity):
+ * grow widens beat spacing (BPM down a hair), shrink tightens it (BPM up).
+ * Snaps to the integer at x.99 / x.01 so repeated steps re-find round
+ * tempos. (Formerly "BPM nudge" — renamed to end the collision with the
+ * performance Nudge and the grid nudge.)
  */
-export function nudgeBpm(current: number, direction: 1 | -1): number {
-  let next = current + direction * 0.03;
+export function growShrinkBpm(current: number, op: GrowShrink): number {
+  let next = current + (op === 'shrink' ? 0.03 : -0.03);
   const decimal = Math.abs(next % 1);
   if (decimal >= 0.99 || decimal <= 0.01) next = Math.round(next);
   return Math.round(next * 100) / 100;

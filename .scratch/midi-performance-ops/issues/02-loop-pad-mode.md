@@ -1,6 +1,6 @@
 # LOOP pad mode: size-ladder pads with engage/release/resize and lamps
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -28,3 +28,9 @@ Bind the Inpulse 300 MK2's LOOP pad mode to Active loop presets, end to end (voc
 ## Blocked by
 
 - `01-dyadic-loop-domain.md` (64/128 and 3/4 must be legal; set-length resize)
+
+## Comments
+
+- 2026-07-06 (midiops lane, change `xvxqxxoz`): implemented end to end. New `loop-preset` vocabulary target (carries the pad's beats) → LOOP pad bindings ch 6/7 notes 0x10-0x17 base / 0x18-0x1B shifted, pads 5-8 shifted unbound (TODO(hardware-verify), per Mixxx) → loops gesture class (`SurfaceLoops.loopPreset`, dropped where unregistered) → `loop-preset` transport-reducer case (engage-at-playhead + pending update / same-size release / set-length resize) → lamps (`loopPads`/`loopPadsShifted` with per-pad `beats` in the mapping feedback; lit iff active length equals the pad's preset, else dark; bridge feeds `loop?.lengthBeats`; full-sync + all-off cover them). Verified: translator/mapping, dispatch, reducer, engine, LED derivation tests; full suite green.
+- Verification walkthrough (lane app running): open http://localhost:5383 (or `npm --prefix /Users/murtaza/manadj/desktop start -- --port 5383`). 1) Load a gridded track onto deck A, play it. 2) On-screen LOOP row: press LOOP, then ×2 repeatedly — the loop now doubles past 32 up to 128 and stops (label shows 64, 128). 3) ½ down to 1/8 and no further; with the loop released, set pending to 3/4 via a MIDI LOOP pad (shifted pad 4) or check the row label after — 3/4 halves to 3/8, doubles to 3/2. 4) With the Inpulse attached: LOOP pad mode — pad presses engage/release/resize per the semantics, the matching pad lights per page, row and hardware agree. No device present: the translator/LED tests stand in for hardware; addresses remain TODO(hardware-verify).
+- 2026-07-06 (review nit, applied in change `xvxqxxoz`): shifted page reordered — fractions ascend across the top row (pads 1-3 = 1/8, 1/4, 1/2, notes 0x18-0x1A); the dotted 3/4 sits alone on the bottom row (pad 5, note 0x1C); pads 4 and 6-8 unbound. Supersedes the issue text's "pads 1-4 = 1/2, 1/4, 1/8, 3/4". Bindings, lamps, and tests updated; full suite green.

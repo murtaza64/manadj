@@ -43,6 +43,13 @@ export interface DeckLedInput {
    */
   pfl: boolean;
   /**
+   * The loaded Track has a Beatgrid (midi-performance-ops 05) — from the
+   * same beatgrid query the on-screen grid controls read, so lamp and
+   * behavior cannot drift. Empty deck or gridless Track = false = grid
+   * pads dark (and presses no-op).
+   */
+  hasBeatgrid: boolean;
+  /**
    * The active loop's length in beats, or null when no loop runs
    * (midi-performance-ops 02) — drives the LOOP-mode pad lamps: the pad
    * whose preset equals this lights, per page; off-ladder lengths match
@@ -59,6 +66,10 @@ export interface DeckLedStates {
   pfl: boolean;
   /** Pads 1..8 by index (index 0 = pad 1), HOTCUE base layer only. */
   pads: readonly boolean[];
+  /** Grid-edit (SAMPLER) pads 1..8 by index (midi-performance-ops 05):
+   * mapped pads lit steadily iff the Track has a Beatgrid; pad 3 (the one
+   * unbound pad) dark always. */
+  gridPads: readonly boolean[];
   /** Active loop length in beats or null — encodeDeckLeds lights the
    * LOOP-mode pad whose mapped preset equals it (exact dyadic equality;
    * lengths and presets are both exact binary fractions). */
@@ -111,9 +122,22 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
         (input.atCuePoint || phases.cueFlash)),
     pfl: input.pfl,
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
+    gridPads: GRID_PAD_MAPPED.map((mapped) => mapped && input.hasBeatgrid),
     loopBeats: input.loopBeats,
   };
 }
+
+/** Which grid-edit pads are bound (pad 3 is deliberately silent/dark). */
+const GRID_PAD_MAPPED: readonly boolean[] = [
+  true, // 1: grid-nudge earlier
+  true, // 2: anchor
+  false, // 3: unbound
+  true, // 4: grid-nudge later
+  true, // 5: shrink
+  true, // 6: grow
+  true, // 7: BPM halve
+  true, // 8: BPM double
+];
 
 /**
  * Audibility-aware transport lights (editor-midi 05, ADR 0019): while a
@@ -151,6 +175,7 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     deck.pfl,
     ...deck.hotCuePads,
     ...deck.hotCuePadsShifted,
+    ...deck.gridPads,
     ...deck.loopPads,
     ...deck.loopPadsShifted,
   ];
@@ -173,6 +198,8 @@ export function encodeDeckLeds(
     ...addresses.hotCuePadsShifted.map((address, i) =>
       encodeLed(address, states.pads[i] ?? false)
     ),
+    // Grid-edit (SAMPLER) layer (midi-performance-ops 05).
+    ...addresses.gridPads.map((address, i) => encodeLed(address, states.gridPads[i] ?? false)),
     // LOOP-mode pads (midi-performance-ops 02), both pages: lit iff the
     // active loop's length equals the pad's preset — no loop or an
     // off-ladder length lights nothing. Unbound shifted pads aren't in

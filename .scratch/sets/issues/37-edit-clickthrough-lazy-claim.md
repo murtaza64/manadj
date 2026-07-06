@@ -1,6 +1,6 @@
 # 37 — Edit click-through must not silence a conducting set (extend 21's lazy claim)
 
-Status: ready-for-agent (grilled 2026-07-06 — decisions below settle the triage questions)
+Status: done (approved + landed 2026-07-06, change `yknqookw`, landing merge `mwwqrnpw`, lane editclaim)
 
 ## Parent
 
@@ -72,3 +72,21 @@ whatever the decks hold.
 - Coordinate with lane conductor (claims on Conductor.ts + editor playhead overlay, 34/38 parked)
 
 **2026-07-06 datapoint (lane conductor, during 38's review):** human confirmed the behavior live — entering the editor via an adjacency click stops Set playback (the openPair deck commandeer), while the new 38 conductor playhead works as expected once playback is re-established. The friction is real in the live-editing loop; raises the value of fixing this.
+
+## Comments
+
+**Implemented (2026-07-06, jj change `yknqookw`, lane editclaim — parked for review):**
+
+- `openPair`/`openTake` are SESSION-ONLY: no claim, no shared-deck loads — track state, store pair/selection, and the player's track targets only. Whatever sounds keeps sounding. Both warm the pair via `prefetchTrackBuffer` at open (tracks a deck already holds are skipped).
+- One-press audition arm — new pure module `frontend/src/editor/auditionArm.ts`: play claims first (`ensureEditorAudible`, claim-before-load always — by load time the holder is the editor, so the loads are never foreign during conduction; composes with 28), issues only the missing deck loads (a matching in-flight load is not re-requested), and starts the moment both decks hold the pair ready. Free case (sounding adjacency): fulfils synchronously — claim, no loads, immediate play.
+- Pending-play cancellation, per the Decisions: re-press (⏯/Space/hardware PLAY), any other transport gesture (every editor seek path — timeline scrub, minimap, jog, cue/beat jumps — taps `MixPlayer.subscribeSeek`), displacement (`subscribeAudible` holder change), pair supersession (`assignSession`), and unmount. Cancelling never revokes loads already issued. Precedent followed: SetDetailPane `pendingCues`.
+- `MixPlayer` grew session track targets (`setTrack`): `ready()` is now TRACK-AWARE (a foreign-ready deck is not ready; `play()` refuses it) and model durations fall back to track-data durations while a deck holds a foreign track — scrubs/parks/strip clocks describe the OPENED pair under a deferred open.
+- Waveform strips: verified already decoupled by construction — `DawTimeline`/`GlobalMinimap` render from waveform blobs keyed by the session track ids, with engine reads guarded by trackId match (mix-editor 28 guard). No strip fallback needed; no decoupling issue to file. `DeckCard` load-state text is now track-aware (shows `deferred` while the engine holds a foreign track).
+- Adopt-on-entry and swap-decks are session-only too (the last-pair fallback no longer loads empty decks on mount — pre-37 that was a latent sets-28 takeover trigger); the embedded library's explicit deck-load affordances (buttons, arrow keys) keep loading immediately (a load onto a conducted deck is a takeover, sets 28).
+- ⏯ enables whenever a pair is open (it arms), pulses `player-button-arming` while loads are in flight.
+
+**Editor files touched (laneux fence note):** `TransitionEditor.tsx` (open/claim/audition plumbing + DeckCard/center-panel props only — no lane-timeline UI), `MixPlayer.ts`, `auditionArm.ts` (new) + tests, `transitionEditor.css` (additive append at EOF: `.player-button-arming` + `editor-arm-pulse` keyframes). No changes to `DawTimeline.tsx`, `LaneCanvas.tsx`, `GlobalMinimap.tsx`, `DeckCard.tsx`, `laneColors.ts`, `editorStore.ts`.
+
+**Verification (agent, 2026-07-06):** gate green — `npx vitest run` 1210 passed (incl. 8 new auditionArm tests, 7 new MixPlayer track-aware/seek-tap tests); `uv run -m pytest` 671 passed; frontend build clean; eslint clean on touched files; `alembic heads` → one (`0022`, no migration). Re-verified on the catch-up merge with setrows' landed 0023 (vitest 1225) and on the landing merge with midi-ops grid 04-06 (vitest 1258, build clean, single head `0023`).
+
+**Approved + landed (2026-07-06, human review in session):** landing merge `mwwqrnpw` (two retry merges — main moved twice during verification; retry invariant held, no rewrites). Lane note: during the review park, a jj working-copy switch under the auto-reloading lane backend stamped the sandbox DB with trunk's `0023` while the parked tree predated it → backend crash-loop ("no db" symptom); resolved by the catch-up merge `oyqvuxut`. Lanes beware: land docs flips from a working copy already caught up with trunk, or stop the lane app around `@` moves that cross a migration boundary.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { DeckScope } from '../contexts/DeckContext';
 import { useAtCuePoint } from '../hooks/useAtCuePoint';
+import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
 import { useHotCues } from '../hooks/useHotCues';
 import { useMixerValue } from '../hooks/useMixer';
@@ -66,6 +67,11 @@ function DeckFeedbackPublisher({
   // disables it (placeholder []) — both resolve to all pads dark until
   // real assignments arrive.
   const { data: hotCues } = useHotCues(loadedTrack?.id ?? null);
+  // Grid-pad lamps (midi-performance-ops 05): lit iff the Track has a
+  // Beatgrid — the same query the on-screen grid controls and the pad
+  // handlers (useGridEditActions) read, so lamp and behavior cannot drift.
+  const { data: beatgrid, error: beatgridError } = useBeatgridData(loadedTrack?.id ?? null);
+  const hasBeatgrid = loadedTrack != null && !beatgridError && beatgrid != null;
   const outputs = useSyncExternalStore(subscribeOutputs, connectedOutputs);
 
   const assignedPads = useMemo(
@@ -116,6 +122,7 @@ function DeckFeedbackPublisher({
       atCuePoint,
       assignedPads,
       pfl,
+      hasBeatgrid,
       loopBeats,
     };
     const states = ledStates(
@@ -137,6 +144,7 @@ function DeckFeedbackPublisher({
     atCuePoint,
     assignedPads,
     pfl,
+    hasBeatgrid,
     loopBeats,
     holderPlaying,
     pendingPhase,

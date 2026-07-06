@@ -1,6 +1,6 @@
 # 42 — Set view: O(n) main-thread cost on every interaction (big sets crawl)
 
-Status: ready-for-agent
+Status: done — fixed and verified (lane setperf, 2026-07-06); root cause in Comments
 
 ## Parent
 
@@ -67,3 +67,41 @@ Playwright harness at `/var/folders/30/r992kzw55nggl3vt8yqkt5780000gn/T/opencode
   stack — per the diagnosing-bugs skill).
 
 ## Comments
+
+- 2026-07-06 lane setperf (ses_0ca73506dffenNsGwWeNDPGGEJ): taking this issue.
+  Fresh lane off main (post-mkkxptqx), own app on vite 5303, sandbox DB clone.
+  Plan: Phase 2 re-run of interact.js against pure main, then profile.js for
+  attribution if still red. Will touch SetDetailPane rows / OverviewLadder /
+  ladderWaveStyle as needed (setui/setsugg registries read: both idle/landed).
+
+- 2026-07-06 lane setperf: FIXED. Diagnosis trail:
+  - Phase 2 re-check: still red on pure main post-`mkkxptqx` (76-81 ms
+    longtask per click on 88 rows; 0 ms on 18) — that fix addressed ladder
+    canvas draws, not this.
+  - Attribution: `profile.js` showed the cost spread across React element
+    creation (jsxDEV 130 ms over two clicks), no single hot function.
+    Render-count probes settled it: **hypothesis 1 was the cause** — every
+    row click re-rendered the FULL row stack (176 SetTrackRow + 174
+    AdjacencyRow invocations per click; planSet recomputes: 0, killing
+    hypothesis 3; OverviewLadder re-rendered 2-4x, minor).
+  - Why: `SetTrackRow`/`AdjacencyRow` were plain function components with
+    fresh closure props per pane render; a selection click re-rendered the
+    pane (selection store) and with it all ~175 rows.
+  - Fix: the library-table TrackRow contract applied to the set pane —
+    `memo()` on both row components; identity-stable ref-backed handlers
+    parameterized by trackId/index (the useTrackSelection pattern);
+    per-row derived objects memoized in the parent (bpmRefs, evidenceList,
+    warningsByAdj, decksByAdj); rows derive loaded/playing washes from the
+    memoized occupancy map.
+  - Verified: `interact.js` green — 88-row clicks now 0 ms longtasks,
+    within noise of the 18-row set (rows re-rendered per click: 176 → 2-4,
+    just deselected+selected). `measure.js` idle/scroll/wheel loops green;
+    vitest 1159 passed; frontend build green; alembic single head.
+  - Regression test: no unit seam — the repo has no component-render test
+    infra (no @testing-library; sets tests are pure-logic), and mocking
+    react-query + deck engines + mixer + stores to mount the pane would be
+    a false-confidence seam. The honest lock is the Playwright loop
+    (`interact.js` in the perfloop harness, see Repro loop above): big-set
+    clicks within noise of small-set clicks. Re-run it if the row stack
+    grows new per-row closure/object props — that is exactly the pattern
+    that regresses this.
