@@ -1,0 +1,20 @@
+/* Suggestion popover rows (sets 22) — unified interaction vocabulary
+   (perf-layout 08): row hover = tint (rows are borderless, like the
+   sidebar rows); press falls together with click-to-accept. */
+
+.set-suggestion-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--surface0);
+  cursor: pointer;
+}
+
+.set-suggestion-row:hover {
+  background: var(--surface0);
+}
+
+.set-suggestion-row:active {
+  background: var(--surface1);
+}
