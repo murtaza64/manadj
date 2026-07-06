@@ -79,8 +79,8 @@ def serves_this_repo(port: int) -> bool:
         health = api(port, "GET", "/global/health")
         if not (isinstance(health, dict) and health.get("healthy")):
             return False
-        proj = api(port, "GET", f"/project/current?directory={REPO_ROOT}")
-        return isinstance(proj, dict) and proj.get("worktree") == str(REPO_ROOT)
+        proj = api(port, "GET", f"/project/current?directory={PROJECT_DIR}")
+        return isinstance(proj, dict) and proj.get("worktree") == str(PROJECT_DIR)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return False
 

@@ -80,7 +80,7 @@ def main() -> None:
               "ownership check skipped")
 
     jj("bookmark", "move", "main", "--to", args.change)
-    jj("new")  # fresh placeholder; old @ may now be immutable
+    jj("new", "main")  # placeholder on the NEW trunk (bare `jj new` would stack on stale @)
     landed = template("main", 'change_id.short() ++ " " ++ description.first_line()')
     print(f"landed: {landed}")
 
