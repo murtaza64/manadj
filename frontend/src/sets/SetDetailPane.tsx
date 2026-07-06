@@ -495,6 +495,34 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     cueDeckAt('B', incoming.trackId, positions.incomingSec);
   };
 
+  // ── Transport centering (22 follow-up): the header centers its
+  // transport within its OWN width, but the pane sits right of the
+  // sidebar — so "centered in the bar" is off-center on screen. CSS
+  // can't know the header's viewport offset; measure it and hand the
+  // correction to the CSS as a custom property (paint-only transform —
+  // see the .set-header-transport rule for the narrow-width tradeoff).
+  const headerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const recenter = () => {
+      const rect = header.getBoundingClientRect();
+      const shift = window.innerWidth / 2 - (rect.left + rect.width / 2);
+      header.style.setProperty('--transport-viewport-shift', `${shift}px`);
+    };
+    recenter();
+    // The observer catches sidebar resizes and window resizes alike
+    // (both change the header's box); a plain resize listener backstops
+    // pure offset changes.
+    const observer = new ResizeObserver(recenter);
+    observer.observe(header);
+    window.addEventListener('resize', recenter);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', recenter);
+    };
+  }, []);
+
   // ── Scroll persistence (set store — survives mode switches) ──────────
   const paneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -756,7 +784,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           convention, the view's primary action), secondary actions
           right. The transport never shrinks or moves at narrow widths;
           the side zones wrap first. */}
-      <div className="set-header">
+      <div className="set-header" ref={headerRef}>
         <span className="set-header-left">
           {set?.color && (
             <span

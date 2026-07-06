@@ -44,6 +44,14 @@
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  /* Center on the VIEWPORT, not the header (22 follow-up): the pane
+     sits right of the sidebar, so the grid's own centering reads
+     off-center on screen. The shift is measured by the pane (the
+     header's viewport offset) and applied paint-only — at extreme
+     narrow widths the transport may visually overlap the left zone
+     rather than reflow; the grid's no-shrink guarantee still governs
+     layout. */
+  transform: translateX(var(--transport-viewport-shift, 0px));
 }
 
 .set-header-actions {
