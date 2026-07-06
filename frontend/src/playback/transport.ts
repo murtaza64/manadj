@@ -12,8 +12,8 @@
  */
 
 import { addBeats, phasePreservingJumpTarget, snapToNearestBeat } from './quantize';
-import { clampLoopBeats, LOOP_DEFAULT_BEATS } from './loop';
-import type { LoopRegion } from './loop';
+import { LOOP_DEFAULT_BEATS, resizeLoopBeats } from './loop';
+import type { LoopRegion, LoopResize } from './loop';
 
 export interface TransportState {
   /** Deck play state ("the deck is running"), distinct from audio audibly playing. */
@@ -50,9 +50,10 @@ export type TransportEvent =
   | { type: 'hot-cue-up'; slot: number; time: number | null }
   /** Auto-loop engage/release (looping 03). Inert on gridless Tracks. */
   | { type: 'loop-toggle' }
-  /** Halve/double (looping 04): pending size when idle, live region resize
-   * when looping — start-edge anchored, phase-mod re-entry on shrink. */
-  | { type: 'loop-resize'; change: 'halve' | 'double' }
+  /** Resize (looping 04, midi-performance-ops 01): halve/double or an
+   * absolute set-length. Pending size when idle, live region resize when
+   * looping — start-edge anchored, phase-mod re-entry on shrink. */
+  | { type: 'loop-resize'; change: LoopResize }
   /** Audio reached the end of the buffer on its own. */
   | { type: 'ended' };
 
@@ -241,17 +242,16 @@ export function reduceTransport(
     }
 
     case 'loop-resize': {
-      const factor = e.change === 'halve' ? 0.5 : 2;
-      // Idle: halve/double adjust the per-Deck pending size.
+      // Idle: resize adjusts the per-Deck pending size.
       if (!s.loop) {
-        const pending = clampLoopBeats(s.pendingLoopBeats * factor);
+        const pending = resizeLoopBeats(s.pendingLoopBeats, e.change);
         if (pending === s.pendingLoopBeats) return [s, []];
         return [{ ...s, pendingLoopBeats: pending }, []];
       }
       // Looping: resize the active region live, anchored at the START edge
       // (never the playhead). The pending size tracks it, so the next
       // engagement remembers.
-      const lengthBeats = clampLoopBeats(s.loop.lengthBeats * factor);
+      const lengthBeats = resizeLoopBeats(s.loop.lengthBeats, e.change);
       if (lengthBeats === s.loop.lengthBeats) return [s, []];
       const grid = ctx.beatTimes;
       const end =

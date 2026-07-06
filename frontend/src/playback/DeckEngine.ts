@@ -21,7 +21,7 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
 import { foldLoopPlayhead } from './loop';
-import type { LoopRegion } from './loop';
+import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, putCachedBuffer } from './bufferCache';
@@ -407,10 +407,11 @@ export class DeckEngine {
     this.dispatch({ type: 'loop-toggle' });
   }
 
-  /** Halve/double (looping 04): pending size when idle, live resize while
+  /** Resize — halve/double or absolute set-length (looping 04,
+   * midi-performance-ops 01): pending size when idle, live resize while
    * looping. Works without a loaded Track — the pending size is a Deck
    * preference, like the beatjump size. */
-  resizeLoop(change: 'halve' | 'double'): void {
+  resizeLoop(change: LoopResize): void {
     if (!this.buffer) {
       const [next] = reduceTransport(
         this.transport,

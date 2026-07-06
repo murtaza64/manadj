@@ -1,11 +1,13 @@
 /**
- * Active-loop vocabulary and pure math (looping 03, CONTEXT.md).
+ * Active-loop vocabulary and pure math (looping 03, midi-performance-ops 01,
+ * CONTEXT.md).
  *
  * The loop is Deck transport state: a beat-domain region the playhead wraps
- * in. Lengths are powers of two, 1/8–32 beats; seconds are a projection
- * through the Beatgrid at gesture time (transport.ts owns the state, the
- * worklet kernel owns the sample-accurate wrap, this module owns the shared
- * constants and clock math).
+ * in. Lengths are dyadic beat counts within 1/8–128; preset ladders (the
+ * on-screen row, Controller pads) are entry points over the domain, not the
+ * domain. Seconds are a projection through the Beatgrid at gesture time
+ * (transport.ts owns the state, the worklet kernel owns the sample-accurate
+ * wrap, this module owns the shared constants and clock math).
  */
 
 /** The Active loop region: seconds projected at gesture time, plus the
@@ -16,23 +18,38 @@ export interface LoopRegion {
   start: number;
   /** Region end in seconds. */
   end: number;
-  /** Region length in beats (power of two, LOOP_MIN..LOOP_MAX). */
+  /** Region length in beats (dyadic, LOOP_MIN..LOOP_MAX). */
   lengthBeats: number;
 }
 
 export const LOOP_MIN_BEATS = 0.125;
-export const LOOP_MAX_BEATS = 32;
+export const LOOP_MAX_BEATS = 128;
 export const LOOP_DEFAULT_BEATS = 4;
 
-/** Loop-size label: sub-beat sizes read as fractions (1/8, 1/4, 1/2). */
+/** Loop-size label: whole sizes plain, dyadic sub-multiples as reduced
+ * fractions over a power-of-two denominator (1/8, 1/2, 3/4, 3/2). */
 export function formatLoopBeats(beats: number): string {
-  return beats < 1 ? `1/${Math.round(1 / beats)}` : String(beats);
+  if (Number.isInteger(beats)) return String(beats);
+  let den = 2;
+  while (!Number.isInteger(beats * den) && den < 64) den *= 2;
+  return `${beats * den}/${den}`;
 }
 
-/** Clamp a loop size to the legal range (powers of two stay powers of two:
- * halve/double from an in-range power of two can only hit the bounds). */
+/** Clamp a loop size to the legal range (dyadic lengths stay dyadic:
+ * ×2/÷2 from an in-range dyadic can only hit the bounds). */
 export function clampLoopBeats(beats: number): number {
   return Math.max(LOOP_MIN_BEATS, Math.min(LOOP_MAX_BEATS, beats));
+}
+
+/** A loop-size change: ×2/÷2 ladder steps, or an absolute target length
+ * (midi-performance-ops 01 — one code path serving pads and halve/double). */
+export type LoopResize = 'halve' | 'double' | { beats: number };
+
+/** The length a resize lands on, clamped to the dyadic domain. */
+export function resizeLoopBeats(current: number, change: LoopResize): number {
+  if (change === 'halve') return clampLoopBeats(current / 2);
+  if (change === 'double') return clampLoopBeats(current * 2);
+  return clampLoopBeats(change.beats);
 }
 
 /**
