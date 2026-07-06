@@ -395,7 +395,16 @@ function MixZone({ track }: { track: Track | null }) {
   }, []);
 
   const other = decks[deck === 'A' ? 'B' : 'A'];
-  const otherBpm = other.loadedTrack?.bpm ?? null;
+  // MATCH enable gate reads the other deck's tempo through the track cache
+  // (ADR 0027 §7, the useMatchAction pattern): loadedTrack is a load-time
+  // snapshot — after a re-tempo the gate must see the fresh value.
+  const queryClient = useQueryClient();
+  const otherLoaded = other.loadedTrack;
+  const otherBpm = otherLoaded
+    ? (queryClient.getQueryData<Track>(['track', otherLoaded.id])?.bpm ??
+      otherLoaded.bpm ??
+      null)
+    : null;
 
   // Shared with the hardware SYNC button (useMatchAction applies the pitch);
   // only the out-of-reach hint is on-screen-specific.
