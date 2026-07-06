@@ -1,6 +1,6 @@
 # land.py: the mechanical land
 
-Status: ready-for-agent
+Status: done (2026-07-06, workflow session)
 
 ## Parent
 

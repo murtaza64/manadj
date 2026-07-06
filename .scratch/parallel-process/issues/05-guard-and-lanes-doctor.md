@@ -1,6 +1,6 @@
 # guard.py preflight + lanes_doctor.py
 
-Status: ready-for-agent
+Status: done (2026-07-06, workflow session)
 
 ## Parent
 
