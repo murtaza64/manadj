@@ -109,6 +109,14 @@ class FakeEngine {
     this.emit();
   }
 
+  /** A user Load landing on this deck (browse ▶, editor arrow keys, …):
+   * trackId moves and the engine emits — OUTSIDE any conductor call,
+   * exactly like the real async load flow. */
+  loadForeign(trackId: number): void {
+    this.trackId = trackId;
+    this.emit();
+  }
+
   /** The worklet ran off the end of the buffer (DeckEngine.handleEnded):
    * the engine parks itself at the decoded duration and emits — OUTSIDE
    * any conductor call. */
@@ -214,22 +222,31 @@ function tickAt(t: number): void {
   frame?.();
 }
 
-function makeConductor(latencyOf: (postTime: number) => number, plan: SetPlan = overlapPlan()) {
+function makeConductor(
+  latencyOf: (postTime: number) => number,
+  plan: SetPlan = overlapPlan(),
+  opts: { emittingLoads?: boolean } = {}
+) {
   const clock = () => now;
   const engines = { A: new FakeEngine(clock, latencyOf), B: new FakeEngine(clock, latencyOf) };
   const stopped: string[] = [];
   const lanes: LaneCapture = { A: null, B: null };
+  const loads: Array<{ deck: ChannelId; trackId: number }> = [];
   const conductor = new Conductor(
     plan,
     { mixer: fakeMixer(clock, lanes), engines: engines as unknown as Record<ChannelId, DeckEngine> },
     {
       loadTrack: (deck, trackId) => {
-        engines[deck].trackId = trackId;
+        loads.push({ deck, trackId });
+        // emittingLoads models the real async flow: the engine emits its
+        // trackId change outside any conductor call (self-guard blind).
+        if (opts.emittingLoads) engines[deck].loadForeign(trackId);
+        else engines[deck].trackId = trackId;
       },
       onStopped: (reason) => stopped.push(reason),
     }
   );
-  return { conductor, engines, plan, stopped, lanes };
+  return { conductor, engines, plan, stopped, lanes, loads };
 }
 
 /** Per-deck actual-audio offset from its plan position at mix time t. */
@@ -317,6 +334,68 @@ describe('natural end-of-track at a hard cut (the "conductor stops instead of cu
     now = 60;
     engines.A.pause(); // user hits pause far from the track end
     expect(stopped).toEqual(['takeover']);
+  });
+});
+
+describe('foreign loads during conduction (sets 28: a Load is a takeover)', () => {
+  // A user-initiated Load onto a conducted deck — browse ▶, the editor's
+  // embedded library, arrow keys, swap decks — is a manual deck gesture
+  // in spirit (the sets 21 openPair rationale, app-wide). The Conductor
+  // stops, the decks keep playing as they are, and the load proceeds as
+  // any manual load. Before: neither takeover nor blocked — a reload war.
+  const latency = () => 0.002;
+
+  it('a foreign load onto a conducted deck stops the Conductor as a takeover', () => {
+    const { conductor, engines, stopped } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0); // load-freeze tick
+    tickAt(0.01); // A starts
+    tickAt(30);
+    engines.B.loadForeign(99); // user loads track 99 onto the idle deck
+    expect(stopped).toEqual(['takeover']);
+    expect(conductor.isPlaying()).toBe(false);
+    // The playing deck keeps playing as it is — the user is live.
+    expect(engines.A.getSnapshot().playing).toBe(true);
+  });
+
+  it('never re-requests its own track over the foreign one (no reload war)', () => {
+    const { conductor, engines, loads } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30);
+    const loadsBefore = loads.length;
+    engines.A.loadForeign(99); // user commandeers the SOUNDING deck
+    tickAt(30.05); // any pending frame — must not fight the user's load
+    expect(loads.length).toBe(loadsBefore);
+    expect(engines.A.trackId).toBe(99);
+  });
+
+  it("the Conductor's own async load completion is load-flow, not a takeover", () => {
+    const { conductor, engines, stopped } = makeConductor(latency, overlapPlan(), {
+      emittingLoads: true,
+    });
+    conductor.playFromEntry(0); // both loads emit trackId changes
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(65); // mid-window: both decks conducted
+    expect(stopped).toEqual([]);
+    expect(conductor.isPlaying()).toBe(true);
+    expect(engines.A.getSnapshot().playing).toBe(true);
+    expect(engines.B.getSnapshot().playing).toBe(true);
+    conductor.stop();
+  });
+
+  it('a foreign load while paused is still a takeover', () => {
+    const { conductor, engines, stopped } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30);
+    conductor.pause();
+    engines.B.loadForeign(99);
+    expect(stopped).toEqual(['takeover']);
+    expect(conductor.isActive()).toBe(false);
   });
 });
 
