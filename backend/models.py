@@ -1,5 +1,7 @@
 """SQLAlchemy models for music library database."""
 
+import json
+
 from sqlalchemy import Boolean, CheckConstraint, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref, deferred, relationship, DeclarativeBase
@@ -46,6 +48,23 @@ class Track(Base):
 
     # Relationships
     track_tags = relationship("TrackTag", back_populates="track", cascade="all, delete-orphan")
+
+    @property
+    def bpm_effective(self) -> float | None:
+        """Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a
+        grid exists, else the bpm column projected to float BPM. THE tempo
+        value tempo consumers must read — the bpm column is only the grid's
+        cached projection and can be stale (the Kambi→Raskal 2× incident)."""
+        # Lazy imports: track_metadata.manager imports this module.
+        from .beatgrid_utils import dominant_bpm
+        from .track_metadata.units import centibpm_to_bpm
+
+        grid = self.beatgrid
+        if grid is not None:
+            tempo_changes = json.loads(grid.tempo_changes_json)
+            if tempo_changes:
+                return dominant_bpm(tempo_changes, self.duration_secs)
+        return centibpm_to_bpm(self.bpm)
 
 
 class Waveform(Base):

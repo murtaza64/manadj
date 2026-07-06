@@ -29,7 +29,9 @@ def get_tracks(
     sort_direction: str = "desc"
 ):
     query = db.query(models.Track).options(
-        joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category)
+        joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category),
+        # bpm_effective reads the grid (ADR 0016) — eager, not N+1 lazy loads.
+        joinedload(models.Track.beatgrid),
     )
 
     # Archived (CONTEXT.md): out of the active Library. Default listings
@@ -210,7 +212,8 @@ def unarchive_track(db: Session, track_id: int):
 
 def get_track(db: Session, track_id: int):
     track = db.query(models.Track).options(
-        joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category)
+        joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category),
+        joinedload(models.Track.beatgrid),
     ).filter(models.Track.id == track_id).first()
 
     if track:
