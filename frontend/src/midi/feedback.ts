@@ -42,6 +42,13 @@ export interface DeckLedInput {
    * subscription like the on-screen PFL button.
    */
   pfl: boolean;
+  /**
+   * The loaded Track has a Beatgrid (midi-performance-ops 05) — from the
+   * same beatgrid query the on-screen grid controls read, so lamp and
+   * behavior cannot drift. Empty deck or gridless Track = false = grid
+   * pads dark (and presses no-op).
+   */
+  hasBeatgrid: boolean;
 }
 
 /** Desired on/off per light of one deck. */
@@ -52,6 +59,10 @@ export interface DeckLedStates {
   pfl: boolean;
   /** Pads 1..8 by index (index 0 = pad 1), HOTCUE base layer only. */
   pads: readonly boolean[];
+  /** Grid-edit (SAMPLER) pads 1..8 by index (midi-performance-ops 05):
+   * mapped pads lit steadily iff the Track has a Beatgrid; pad 3 (the one
+   * unbound pad) dark always. */
+  gridPads: readonly boolean[];
 }
 
 /** [status, data1, data2] — ready for MIDIOutput.send. */
@@ -100,8 +111,21 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
         (input.atCuePoint || phases.cueFlash)),
     pfl: input.pfl,
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
+    gridPads: GRID_PAD_MAPPED.map((mapped) => mapped && input.hasBeatgrid),
   };
 }
+
+/** Which grid-edit pads are bound (pad 3 is deliberately silent/dark). */
+const GRID_PAD_MAPPED: readonly boolean[] = [
+  true, // 1: grid-nudge earlier
+  true, // 2: anchor
+  false, // 3: unbound
+  true, // 4: grid-nudge later
+  true, // 5: shrink
+  true, // 6: grow
+  true, // 7: BPM halve
+  true, // 8: BPM double
+];
 
 /**
  * Audibility-aware transport lights (editor-midi 05, ADR 0019): while a
@@ -133,7 +157,14 @@ function encodeLed(address: LedAddress, lit: boolean): MidiMessage {
 }
 
 function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
-  return [deck.play, deck.cue, deck.pfl, ...deck.hotCuePads, ...deck.hotCuePadsShifted];
+  return [
+    deck.play,
+    deck.cue,
+    deck.pfl,
+    ...deck.hotCuePads,
+    ...deck.hotCuePadsShifted,
+    ...deck.gridPads,
+  ];
 }
 
 /** Desired light states for one deck → the full message set to send. */
@@ -153,6 +184,8 @@ export function encodeDeckLeds(
     ...addresses.hotCuePadsShifted.map((address, i) =>
       encodeLed(address, states.pads[i] ?? false)
     ),
+    // Grid-edit (SAMPLER) layer (midi-performance-ops 05).
+    ...addresses.gridPads.map((address, i) => encodeLed(address, states.gridPads[i] ?? false)),
   ];
 }
 

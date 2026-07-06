@@ -130,6 +130,24 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       surface.load(target.deck, track);
       return;
     }
+    case 'grid-nudge': {
+      // Grid edits are stored-data operations, not playback gestures —
+      // registry-direct regardless of the audible surface (ADR 0019,
+      // midi-performance-ops 05).
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.gridNudgeStep(target.direction);
+      return;
+    }
+    case 'grid-anchor': {
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.gridSetDownbeat();
+      return;
+    }
+    case 'grid-bpm': {
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.gridBpm(target.change);
+      return;
+    }
     default:
       return;
   }

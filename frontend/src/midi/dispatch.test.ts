@@ -45,6 +45,9 @@ function registerFakeDeckControls(deck: ChannelId): void {
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
     jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
     jogSeekTicks: (ticks) => calls.push(`${deck}:jogSeek:${ticks}`),
+    gridNudgeStep: (direction) => calls.push(`${deck}:gridNudge:${direction}`),
+    gridSetDownbeat: () => calls.push(`${deck}:gridAnchor`),
+    gridBpm: (change) => calls.push(`${deck}:gridBpm:${change}`),
   });
 }
 
@@ -373,6 +376,68 @@ describe('jog routes per audible surface (editor-midi 04)', () => {
     releaseAudible('editor');
     dispatchMidiAction(tick('jog', 'B', -3));
     expect(calls).toEqual(['B:jog:-3']);
+  });
+});
+
+describe('grid-edit pads are registry-direct (midi-performance-ops 05, ADR 0019)', () => {
+  const nudge = (deck: ChannelId, direction: 'earlier' | 'later', edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'grid-nudge', deck, direction },
+  });
+  const anchor = (deck: ChannelId, edge: 'down' | 'up'): MidiAction => ({
+    kind: 'button',
+    edge,
+    target: { control: 'grid-anchor', deck },
+  });
+  const gridBpm = (
+    deck: ChannelId,
+    change: 'grow' | 'shrink' | 'halve' | 'double'
+  ): MidiAction => ({ kind: 'button', edge: 'down', target: { control: 'grid-bpm', deck, change } });
+
+  it('nudge/anchor/bpm route to the deck controls on the down edge only', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction(nudge('A', 'earlier', 'down'));
+    dispatchMidiAction(nudge('A', 'earlier', 'up'));
+    dispatchMidiAction(nudge('A', 'later', 'down'));
+    dispatchMidiAction(anchor('A', 'down'));
+    dispatchMidiAction(anchor('A', 'up'));
+    dispatchMidiAction(gridBpm('A', 'grow'));
+    dispatchMidiAction(gridBpm('A', 'shrink'));
+    dispatchMidiAction(gridBpm('A', 'halve'));
+    dispatchMidiAction(gridBpm('A', 'double'));
+    expect(calls).toEqual([
+      'A:gridNudge:earlier',
+      'A:gridNudge:later',
+      'A:gridAnchor',
+      'A:gridBpm:grow',
+      'A:gridBpm:shrink',
+      'A:gridBpm:halve',
+      'A:gridBpm:double',
+    ]);
+  });
+
+  it('grid targets act identically while the editor holds audibility (stored data, not gestures)', () => {
+    registerFakeDeckControls('B');
+    claimAudible('editor');
+    dispatchMidiAction(nudge('B', 'later', 'down'));
+    dispatchMidiAction(anchor('B', 'down'));
+    dispatchMidiAction(gridBpm('B', 'double'));
+    expect(calls).toEqual(['B:gridNudge:later', 'B:gridAnchor', 'B:gridBpm:double']);
+  });
+
+  it('grid targets only reach their own deck', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction(nudge('B', 'earlier', 'down'));
+    dispatchMidiAction(anchor('B', 'down'));
+    expect(calls).toEqual([]);
+  });
+
+  it('no registered deck controls: grid actions drop silently', () => {
+    dispatchMidiAction(nudge('A', 'earlier', 'down'));
+    dispatchMidiAction(anchor('A', 'down'));
+    dispatchMidiAction(gridBpm('A', 'grow'));
+    expect(calls).toEqual([]);
   });
 });
 

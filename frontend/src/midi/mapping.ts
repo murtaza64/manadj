@@ -64,8 +64,9 @@ export interface DeckFeedback {
   pfl: LedAddress;
   /**
    * Pads 1..8 by index, HOTCUE base-layer addresses ONLY — pad modes are
-   * note-isolated on this class of device; other modes' lights are never
-   * written.
+   * note-isolated on this class of device, and Feedback writes only the
+   * modes the app maps (HOTCUE here, the grid-edit SAMPLER layer below);
+   * unmapped modes' lights are never written.
    */
   hotCuePads: readonly LedAddress[];
   /**
@@ -75,6 +76,12 @@ export interface DeckFeedback {
    * while SHIFT is held (e.g. showing which slots SHIFT+pad can clear).
    */
   hotCuePadsShifted: readonly LedAddress[];
+  /**
+   * Pads 1..8 by index, grid-edit (SAMPLER) base-layer addresses
+   * (midi-performance-ops 05). Mapped pads light steadily iff the deck's
+   * Track has a Beatgrid; pad 3 and unbound pads stay dark always.
+   */
+  gridPads: readonly LedAddress[];
 }
 
 /** Device knowledge for Feedback: every light the app writes, per deck. */
