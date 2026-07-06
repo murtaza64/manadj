@@ -1,6 +1,6 @@
 # 22 — Conductor transport UI polish
 
-Status: ready-for-agent
+Status: done (approved in-session 2026-07-05; landed nqqzvquv — change urkklprm, lane setui)
 
 ## Parent
 
@@ -84,3 +84,62 @@ Additional acceptance criteria:
 - [ ] Row/affordance hover-press-on states follow the 08 vocabulary throughout the Set view
 - [ ] Selection + conducting highlights unchanged in meaning, visually coexistent with the new hover treatment
 - [ ] Sets sidebar section uses the shared button idiom
+
+## Comments
+
+- Implemented (2026-07-05, change urkklprm, lane setui) — parked
+  ready-for-human. Styling only; zero behavior changes. What landed in
+  the change:
+  - **Vocabulary correction**: this issue's "hover = border glow via
+    currentColor" phrasing predates 08's landed no-glow revision; the
+    implementation follows the landed vocabulary (hover = `--text`
+    border + `--surface0` tint, press = `--surface1` fill, engaged =
+    solid inverted accent fill, no glows anywhere).
+  - `.btn` family in `styles/utilities.css` rewritten to the 08
+    vocabulary (accent variants rest as outlines; solid fill reserved
+    for engaged states). Safe: the family had **zero consumers** — it
+    was dead code in the pre-08 idiom. The Set view is its first user.
+  - Three-zone header (`.set-header`, grid `1fr auto 1fr`): name/chips
+    left, transport center (never shrinks — side zones wrap first),
+    Auto-fill/Suggest right (compact, unbolded). Transport buttons are
+    larger/bold (`.set-transport-btn`). Play rests as green outline,
+    engages solid mauve while conducting (the Conductor's accent);
+    Stop = red outline; Pick up lit = solid peach on-state, unlit =
+    disabled quiet with the sets-16 teaching tooltip intact.
+  - **Incidental fix**: `--peach` was never defined outside
+    Waveform.css's scope — the lit Pick up background and Fixed-chip
+    color silently resolved to nothing since sets 16/06. Now defined
+    scoped to `.set-header` (a `:root` definition would switch on two
+    dormant pre-08 glows in TagEditor/TagPopover — left alone, noted
+    here for a future cleanup issue).
+  - Rows moved off JS-hover inline styles onto CSS classes
+    (`SetDetailPane.css`): row hover = tint; selection (blue wash +
+    ring) and conducting (mauve wash) are states above hover, meanings
+    unchanged. Adjacency affordances (✎ edit, ⏵ practice, pin chips,
+    proposal/fresh-take CTAs) = quiet-border chips with accent
+    text/outlines; "● new take — pin?" demoted from solid fill to mauve
+    outline (solid = engaged only); red hard-cut chip keeps its status
+    fill, pinned across hover/press. Borderless glyphs (▶ ✕ [+]) hover
+    one fill step up (surface1/surface2) — vocabulary gap for controls
+    nested in tinted rows, flagged as a comment on perf-layout 08.
+  - `SetsSidebarSection.tsx` migrated (mirrors PlaylistSidebar.css);
+    suggestion-popover rows migrated off bespoke mouseenter hover.
+  - TempoPolicyChip aligned: chip + popover options quiet at rest,
+    active policy = solid accent fill pinned inline.
+  - Gate: pytest 666 passed; frontend build clean; vitest 1072 passed;
+    eslint clean on touched files (one pre-existing warning); alembic
+    heads = 1 (no migration).
+  - Verification walkthrough for the human reviewer: lane app on
+    http://localhost:5313 (or `npm --prefix desktop start -- --port
+    5313`). (1) Sidebar: hover Sets rows (tint), select one (surface0),
+    drag a track over a row (brighter), "+ New Set" hover. (2) Set pane
+    header: three zones — transport centered and visibly dominant;
+    narrow the window: transport stays centered, right cluster wraps.
+    (3) Hover/press Play (green outline → tint; press fills); click
+    Play: engages solid mauve "⏸ Playing", Stop appears as red outline.
+    (4) Pick up: unlit = dimmed with reason tooltip; lit = solid peach.
+    (5) Rows: hover wash; click-select (blue wash + ring) while
+    conducting row shows mauve — both legible at once; hover a row and
+    press the ▶ / ✕ glyphs and the adjacency chips (border brightens,
+    press fills). (6) Tempo chip popover: active policy solid, other
+    quiet. (7) Suggest popover rows: hover tint.
