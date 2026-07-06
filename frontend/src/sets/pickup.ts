@@ -23,6 +23,7 @@
  */
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import { bContentSegments, bTrackTimeAt } from '../editor/mixModel';
+import { audibleHolder, type AudibleSurfaceId } from '../playback/audibleSurface';
 import type { ChannelId } from '../playback/mixer';
 import { channelFaderToGain, crossfaderGains, trimToGain } from '../playback/mixerMath';
 import type { PlanAutomation, PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
@@ -64,6 +65,10 @@ export interface PickupSnapshot {
   channels: Record<ChannelId, PickupChannelSnapshot>;
   crossfader: number;
   crossfaderEnabled: boolean;
+  /** The audible-surface holder at the read (sets 25): pickup adopts a
+   * LIVE PERFORMANCE, so any non-`'shared'` holder refuses — an editor
+   * audition's deck state is mix-timeline semantics, not a performance. */
+  holder: AudibleSurfaceId;
 }
 
 export interface PickupParams {
@@ -72,6 +77,7 @@ export interface PickupParams {
 }
 
 export type PickupUnlitReason =
+  | 'not-performance'
   | 'no-audible-deck'
   | 'not-in-set'
   | 'outside-span'
@@ -113,7 +119,10 @@ export interface PickupDeckReads {
   getPlayhead(): number;
 }
 
-/** One coherent read of the live state the predicate anchors on. */
+/** One coherent read of the live state the predicate anchors on. (The
+ * audible-surface holder is module-global — the arbiter is a singleton —
+ * so it is read directly rather than injected; the predicate itself stays
+ * pure, consuming it as snapshot data.) */
 export function readPickupSnapshot(
   mixer: PickupMixerReads,
   engines: Record<ChannelId, PickupDeckReads>
@@ -136,6 +145,7 @@ export function readPickupSnapshot(
     channels: { A: channelOf('A'), B: channelOf('B') },
     crossfader: mixer.getCrossfader(),
     crossfaderEnabled: mixer.getCrossfaderEnabled(),
+    holder: audibleHolder(),
   };
 }
 
@@ -245,6 +255,24 @@ export function evaluatePickup(
   snap: PickupSnapshot,
   params: PickupParams = {}
 ): PickupDecision {
+  // Pickup adopts a live PERFORMANCE (sets 25): while another surface
+  // holds audibility, the sounding deck state is that surface's own
+  // semantics (an editor audition drives the decks off its mix timeline)
+  // — there is nothing performance-shaped to pick up from. Refusing here
+  // also keeps the arbiter's invariant: the Conductor's pickup claim
+  // skips silence() (silencePrevious: false), so a non-shared holder
+  // would keep conducting — two drivers on the shared decks (issue 25's
+  // audible B-wobble).
+  if (snap.holder !== 'shared') {
+    return {
+      lit: false,
+      reason: 'not-performance',
+      message:
+        snap.holder === 'editor'
+          ? 'The editor is auditioning — stop the audition and the button lights'
+          : 'Set playback already owns the decks',
+    };
+  }
   if (plan.entries.length === 0) {
     return { lit: false, reason: 'not-in-set', message: 'The set is empty' };
   }

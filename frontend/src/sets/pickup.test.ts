@@ -67,6 +67,7 @@ function snap(over: Partial<PickupSnapshot> = {}): PickupSnapshot {
     channels: { A: flatChannel(), B: flatChannel() },
     crossfader: 0,
     crossfaderEnabled: false,
+    holder: 'shared',
     ...over,
   };
 }
@@ -95,6 +96,25 @@ function expectRoundTrip(plan: SetPlan, s: PickupSnapshot, ch: ChannelId): void 
   expect(state.decks[ch].playing).toBe(true);
   expect(state.decks[ch].trackTime).toBeCloseTo(s.decks[ch].playheadSec, 2);
 }
+
+describe('non-performance holder (sets 25: the dual-driver bug)', () => {
+  it('an editor audition refuses — even when the deck state would map', () => {
+    const plan = windowedPlan();
+    // Deck state that WOULD light under the shared holder (see the
+    // paused-anchor case below) — the holder alone must refuse it.
+    const s = snap({ decks: { A: deck(1, 30), B: { ...silentDeck } }, holder: 'editor' });
+    const d = unlit(evaluatePickup(plan, s));
+    expect(d.reason).toBe('not-performance');
+    expect(d.message).toContain('auditioning');
+    expect(lit(evaluatePickup(plan, { ...s, holder: 'shared' })).mixTime).toBeCloseTo(30);
+  });
+
+  it('any other non-shared holder refuses too', () => {
+    const plan = windowedPlan();
+    const s = snap({ decks: { A: deck(1, 30), B: { ...silentDeck } }, holder: 'conductor' });
+    expect(unlit(evaluatePickup(plan, s)).reason).toBe('not-performance');
+  });
+});
 
 describe('audibility anchoring (Master-bus model, paused counts)', () => {
   it('no audible deck → unlit with no-audible-deck', () => {

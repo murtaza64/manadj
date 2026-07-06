@@ -24,6 +24,7 @@ import {
   isAudible,
   registerSurface,
   releaseAudible,
+  subscribeAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
 import { useMixer } from '../hooks/useMixer';
@@ -345,6 +346,10 @@ function TransitionEditorInner() {
   // leak into the ±8% Performance fader; transport positions deliberately
   // DO persist — transition editing is not a mid-set activity).
   const pitchCheckpointRef = useRef<{ A: number; B: number } | null>(null);
+  /** This session's overlay owner token (sets 25): disengage is
+   * owner-only, so a displaced prior session's teardown cannot yank the
+   * overlay from under a live audition. */
+  const automationTokenRef = useRef<symbol | null>(null);
   const ensureEditorAudible = useCallback(() => {
     if (isAudible('editor')) return;
     claimAudible('editor'); // pauses the displaced holder's playback
@@ -353,7 +358,7 @@ function TransitionEditorInner() {
       A: player.engineA.getSnapshot().pitchPercent,
       B: player.engineB.getSnapshot().pitchPercent,
     };
-    mixer.engageAutomation();
+    automationTokenRef.current = mixer.engageAutomation();
   }, [player, mixer]);
 
   // The audition gesture (sets 21): starting the mix transport claims
@@ -408,7 +413,18 @@ function TransitionEditorInner() {
       },
       silence: () => player.pause(),
     });
+    // Displacement stand-down (sets 25), mirror of the Conductor's own
+    // subscribeAudible hook: when another surface takes the holder, this
+    // audition stops conducting. silence() above only covers claims that
+    // silence the displaced holder — a claim with silencePrevious: false
+    // (pickup adopts the live state) skips it, and a still-running
+    // MixPlayer would fight the new holder for the shared decks (issue
+    // 25's audible B-wobble). pause() is a no-op when not playing.
+    const unsubDisplaced = subscribeAudible((holder) => {
+      if (holder !== 'editor') player.pause();
+    });
     return () => {
+      unsubDisplaced();
       // Unwind the borrow only if the editor still holds it (sets 21): a
       // never-auditioned editor took nothing; a DISPLACED editor's decks/
       // overlay already belong to the new holder (mirror of the
@@ -417,13 +433,15 @@ function TransitionEditorInner() {
       if (held) releaseAudible('editor'); // pauses the audition (editor.silence)
       unregisterSurface('editor');
       if (held) {
-        mixer.disengageAutomation(); // Mixer reapplies base state
+        const token = automationTokenRef.current;
+        if (token) mixer.disengageAutomation(token); // Mixer reapplies base state
         const pitches = pitchCheckpointRef.current;
         if (pitches) {
           player.engineA.setPitch(pitches.A);
           player.engineB.setPitch(pitches.B);
         }
       }
+      automationTokenRef.current = null;
       pitchCheckpointRef.current = null;
     };
   }, [player, mixer, midiJogA, midiJogB, auditionTogglePlay]);

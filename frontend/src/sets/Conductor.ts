@@ -128,6 +128,9 @@ export class Conductor {
   } | null = null;
 
   private unsubs: (() => void)[] = [];
+  /** This session's overlay owner token (sets 25); teardown passes it to
+   * disengageAutomation, which ignores non-owners. */
+  private automationToken: symbol | null = null;
   private listeners = new Set<() => void>();
   /** Last evaluated activeEntryIndex (UI row highlight). */
   private activeEntryIndex = 0;
@@ -309,7 +312,7 @@ export class Conductor {
     }
     this.active = true;
     this.stoppedFired = false;
-    this.mixer.engageAutomation();
+    this.automationToken = this.mixer.engageAutomation();
     this.unsubs.push(
       this.watchMixer(),
       this.watchEngine('A'),
@@ -333,7 +336,13 @@ export class Conductor {
   private teardown(opts: { release: boolean; disengage: boolean }): void {
     for (const u of this.unsubs) u();
     this.unsubs = [];
-    if (opts.disengage) this.mixer.disengageAutomation();
+    // Owner-tokened (sets 25): if another session engaged over this one,
+    // the Mixer ignores this disengage anyway — belt to the token's
+    // suspenders; `disengage: false` paths stay deliberate.
+    if (opts.disengage && this.automationToken !== null) {
+      this.mixer.disengageAutomation(this.automationToken);
+    }
+    this.automationToken = null;
     if (opts.release && isAudible('conductor')) releaseAudible('conductor');
     unregisterSurface('conductor');
     this.active = false;

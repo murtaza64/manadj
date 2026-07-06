@@ -2,7 +2,7 @@
 
 (Renumbered from 24, 2026-07-05 — parallel filing collided with 24-live-replan.)
 
-Status: ready-for-agent
+Status: done (implemented + auto-landed 2026-07-05, change `kqsnsvxs`, lane setlist; bugfix policy)
 
 ## Parent
 
@@ -57,14 +57,15 @@ Two fixes — the semantic one and the invariant one; do both:
 
 ## Acceptance criteria
 
-- [ ] Pickup control unlit during editor auditions, with a displayed reason
-- [ ] A displaced editor's MixPlayer pauses (no rAF driving after holder change)
-- [ ] Regression test at the arbiter seam: editor claims + plays, conductor
+- [x] Pickup control unlit during editor auditions, with a displayed reason
+- [x] A displaced editor's MixPlayer pauses (no rAF driving after holder change)
+- [x] Regression test at the arbiter seam: editor claims + plays, conductor
       pickup attempted → either refused or editor demonstrably stops
       conducting; the fake decks receive commands from at most one driver
       (harness prior art: `mixPlayerSteadyState.investigation.test.ts` on
       the chopb lane, change syonswzu — fake engines with action logs)
-- [ ] Ear check on the repro recipe above: no B wobble
+- [ ] Ear check on the repro recipe above: no B wobble (residual — human;
+      structurally covered by the seam repro test, see Done comment)
 
 ## Notes
 
@@ -99,5 +100,55 @@ the editor remounts. Add a third fix to the two above:
    protects every current and future engager pair.
 
 Acceptance addition:
-- [ ] With the editor auditioning, a Conductor stop/end/takeover never
+- [x] With the editor auditioning, a Conductor stop/end/takeover never
       disengages the editor's overlay (envelopes keep applying)
+
+**Implemented (2026-07-05, jj change `kqsnsvxs`, lane setlist — built on 21's lazy-claim lifecycle `xlmtsrpk`):**
+
+All three fixes:
+
+1. **Pickup refuses non-performance holders.** `PickupSnapshot` gained
+   `holder` (read from `audibleHolder()` in `readPickupSnapshot` — the
+   predicate stays pure, consuming it as snapshot data). `evaluatePickup`
+   refuses any non-`'shared'` holder first, with reason
+   `'not-performance'` and a teaching message ("The editor is
+   auditioning — stop the audition and the button lights"). The Set
+   pane's poll and the executor's fresh re-read both flow through it —
+   the button is unlit with the tooltip reason, and a stale click is a
+   pure no-op (no Conductor, no engine writes, no claim). CONTEXT.md's
+   Pickup entry updated.
+2. **The editor stands down on displacement.** TransitionEditor's
+   registration effect adds a `subscribeAudible` hook (mirror of the
+   Conductor's): holder moves off `'editor'` → `player.pause()`. Belt
+   and suspenders: MixPlayer's tick pauses itself when `audible()` goes
+   false — the rAF loop is the driver, so the at-most-one-driver
+   invariant is enforced at the loop for any future claim path that
+   skips silence().
+3. **Overlay ownership token.** `Mixer.engageAutomation()` returns an
+   owner token; the LAST engager owns (an engage over a live overlay
+   adopts it — mirroring the arbiter's last-claim-wins).
+   `disengageAutomation(owner)` is a warned no-op for non-owners.
+   Conductor and TransitionEditor thread their tokens through teardown.
+
+Interaction matrix (21 × 25), verified at the seams: Conductor playing →
+enter editor (keeps playing, 21) → editor play (Conductor stands down;
+editor's engage adopts the overlay) → Pick up in the Set pane: UNLIT,
+reason shown (fix 1) → stop audition → Pick up lights when the deck
+state maps (companion regression test).
+
+**Verification (agent, 2026-07-05):** `npx vitest run` 1065 passed —
+incl. new: pickup.test.ts non-performance-holder describe;
+pickupDualDriver.test.ts (arbiter-seam repro: editor claims + plays,
+pickup attempted → refused, no Conductor, action-log fake decks receive
+zero commands from the attempt, audition keeps playing; companion: same
+deck state lights and executes once the editor releases);
+MixPlayer.test.ts displacement backstop + steady-state
+zero-corrective-actions (chopb's assertion folded in per Notes);
+mixer.test.ts owner-token describe (incl. the issue-25 interleave:
+editor overlay survives a stale Conductor teardown, envelopes keep
+applying). `uv run -m pytest` 666 passed; frontend build clean;
+`alembic heads` → one (0022); eslint clean on touched files. Ear check:
+not performable by the agent — replaced structurally (the repro's
+button is unlit/disabled and its executor refuses; the wobble requires
+two drivers, and the regression test pins at most one) — flagged as the
+one residual human check.

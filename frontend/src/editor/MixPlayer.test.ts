@@ -152,6 +152,53 @@ describe('once the claim lands', () => {
   });
 });
 
+describe('losing the claim mid-audition (sets 25: displacement backstop)', () => {
+  it('the next tick stands down — pause, decks stopped, no further writes', () => {
+    const frames: (() => void)[] = [];
+    vi.stubGlobal('requestAnimationFrame', (fn: () => void) => {
+      frames.push(fn);
+      return 1;
+    });
+    let audible = true;
+    const { player, engineA, engineB, automationWrites } = makePlayer(() => audible);
+    player.play();
+    expect(player.isPlaying()).toBe(true);
+
+    // Displaced WITHOUT a silence() (the silencePrevious: false claim
+    // shape — pickup's) — the rAF loop itself must stop conducting.
+    audible = false;
+    const writesBefore = automationWrites.length;
+    const beforeA = engineA.calls.length;
+    const frame = frames.at(-1);
+    if (!frame) throw new Error('no frame scheduled');
+    frame();
+
+    expect(player.isPlaying()).toBe(false);
+    expect(engineA.calls.slice(beforeA)).toEqual(['pause']);
+    expect(engineB.calls.at(-1)).toBe('pause');
+    expect(automationWrites.length).toBe(writesBefore); // no lane writes on the way out
+  });
+});
+
+describe('steady state (chopb diagnosis, folded in per issue 25 notes)', () => {
+  it('zero-drift ticks issue no corrective engine commands', () => {
+    const frames: (() => void)[] = [];
+    vi.stubGlobal('requestAnimationFrame', (fn: () => void) => {
+      frames.push(fn);
+      return 1;
+    });
+    const { player, engineA, engineB } = makePlayer(() => true);
+    player.play();
+    const after = { A: engineA.calls.length, B: engineB.calls.length };
+    // Frozen clock (fake mixer now() = 0) → the decks sit exactly on the
+    // arrangement: ten ticks must not seek, play, or pause anything.
+    for (let i = 0; i < 10; i++) frames.at(-1)?.();
+    expect(engineA.calls.length).toBe(after.A);
+    expect(engineB.calls.length).toBe(after.B);
+    expect(player.isPlaying()).toBe(true);
+  });
+});
+
 describe('default gate', () => {
   it('omitted audible = standalone player, always audible', () => {
     const { player, engineA } = makePlayer();
