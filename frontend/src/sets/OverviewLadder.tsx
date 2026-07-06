@@ -572,7 +572,9 @@ function ClipTitle({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         pointerEvents: 'none',
-        color,
+        // Deck identity, but eased off the full-saturation cyan/magenta —
+        // 9px bold in pure deck color vibrates against the dark clip.
+        color: `color-mix(in srgb, ${color} 62%, #6a6a74 38%)`,
       }}
     >
       {/* Set-position number, dimmed so the title stays the headline. */}
