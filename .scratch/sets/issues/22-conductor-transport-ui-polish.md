@@ -1,6 +1,6 @@
 # 22 — Conductor transport UI polish
 
-Status: ready-for-human (parked 2026-07-05, change urkklprm, lane setui — awaiting visual review)
+Status: done (approved in-session 2026-07-05; landed nqqzvquv — change urkklprm, lane setui)
 
 ## Parent
 
