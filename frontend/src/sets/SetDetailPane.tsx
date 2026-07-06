@@ -111,6 +111,7 @@ import {
 } from './setStore';
 import SetSuggestions, { type SuggestTarget } from './SetSuggestions';
 import { ArchivedTrackFlag, ArchivedTrackRowMark } from './archivedFlag';
+import './SetDetailPane.css';
 
 interface SetDetailPaneProps {
   setId: number;
@@ -637,31 +638,26 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Set header strip (mirrors the playlist header) */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '4px 12px',
-          borderBottom: '1px solid var(--surface0)',
-          background: 'var(--crust)',
-        }}
-      >
-        <span style={{ fontSize: '13px', color: 'var(--text)' }}>
+      {/* Set header strip (sets 22): three zones — name + status chips
+          left, the Conductor transport centered (media-player
+          convention, the view's primary action), secondary actions
+          right. The transport never shrinks or moves at narrow widths;
+          the side zones wrap first. */}
+      <div className="set-header">
+        <span className="set-header-left">
           {set?.color && (
             <span
               style={{
                 display: 'inline-block',
                 width: '8px',
                 height: '8px',
+                flexShrink: 0,
                 background: set.color,
-                marginRight: '8px',
               }}
             />
           )}
-          {set?.name ?? 'Set'}
-          <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>
+          <span>{set?.name ?? 'Set'}</span>
+          <span style={{ color: 'var(--subtext0)' }}>
             {entries?.length ?? 0} tracks
             {plan && ` · ${fmtSec(plan.totalSec)}`}
           </span>
@@ -673,8 +669,6 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
               })}
             />
           )}
-        </span>
-        <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           {/* Tempo policy chip (sets 06): Riding / Fixed · Set tempo */}
           {set && (
             <TempoPolicyChip
@@ -698,11 +692,14 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
               label={`⚠ ${plan.warnings.length}`}
             />
           )}
-          {/* Conductor transport (sets 04) — play/pause/stop are Conductor
-              controls, never takeover triggers. */}
+        </span>
+        {/* Conductor transport (sets 04) — play/pause/stop are Conductor
+            controls, never takeover triggers. */}
+        <span className="set-header-transport">
           {plan && plan.entries.length > 0 && (
             <>
               <button
+                className={`btn btn-success set-transport-btn set-play${conductingThis ? ' on' : ''}`}
                 onClick={() => (conductingThis ? conductorTogglePlay() : playFromEntry(0))}
                 title={
                   conductingThis
@@ -711,98 +708,64 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                       : 'Resume set playback'
                     : 'Play the set through the decks'
                 }
-                style={{
-                  padding: '2px 10px',
-                  background: conductingThis ? 'var(--mauve)' : 'var(--surface0)',
-                  color: conductingThis ? 'var(--base)' : 'var(--text)',
-                  border: '1px solid var(--surface1)',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                }}
               >
                 {conductingThis && conductorState.status === 'playing' ? '⏸ Playing' : '▶ Play set'}
               </button>
               {conductingThis && (
                 <button
+                  className="btn btn-danger set-transport-btn"
                   onClick={stopSetPlayback}
                   title="Stop the Conductor (decks pause)"
-                  style={{
-                    padding: '2px 10px',
-                    background: 'var(--surface0)',
-                    color: 'var(--red)',
-                    border: '1px solid var(--surface1)',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                  }}
                 >
                   ⏹
                 </button>
               )}
               {/* Pickup (sets 16): the inverse of takeover. Lit exactly
-                  when the live deck state maps cleanly onto the plan;
-                  unlit teaches the fix via the tooltip. */}
+                  when the live deck state maps cleanly onto the plan
+                  (lit = color on-state); unlit teaches the fix via the
+                  tooltip. */}
               {canPickup && pickupState && (
                 <button
+                  className={`btn set-transport-btn set-pickup${pickupState.lit ? ' lit' : ''}`}
                   onClick={pickUp}
                   disabled={!pickupState.lit}
                   title={pickupState.message}
-                  style={{
-                    padding: '2px 10px',
-                    background: pickupState.lit ? 'var(--peach)' : 'var(--surface0)',
-                    color: pickupState.lit ? 'var(--base)' : 'var(--subtext0)',
-                    border: '1px solid var(--surface1)',
-                    cursor: pickupState.lit ? 'pointer' : 'default',
-                    fontSize: '12px',
-                  }}
                 >
                   ⤴ Pick up
                 </button>
               )}
             </>
           )}
-        <button
-          onClick={() => setAdjacencyPins(setId, autoFillable)}
-          disabled={autoFillable.size === 0}
-          title={
-            autoFillable.size === 0
-              ? 'No unresolved adjacency has an unambiguous Transition'
-              : 'Pin the proposed Transition on every unresolved adjacency'
-          }
-          style={{
-            padding: '2px 10px',
-            background: autoFillable.size > 0 ? 'var(--green)' : 'var(--surface0)',
-            color: autoFillable.size > 0 ? 'var(--base)' : 'var(--subtext0)',
-            border: '1px solid var(--surface1)',
-            cursor: autoFillable.size > 0 ? 'pointer' : 'default',
-            fontSize: '12px',
-          }}
-        >
-          Auto-fill {autoFillable.size > 0 ? `(${autoFillable.size})` : ''}
-        </button>
-        {/* Suggest (sets 10): ranked candidates to append after the last track */}
-        <button
-          onClick={(e) =>
-            lastTrack &&
-            setSuggest({ x: e.clientX, y: e.clientY, target: { kind: 'append', last: lastTrack } })
-          }
-          disabled={!lastTrack}
-          title={
-            lastTrack
-              ? 'Suggest tracks to append, ranked by follow tiering out of the last track'
-              : 'Add a track first — suggestions rank out of the last track'
-          }
-          style={{
-            marginLeft: '8px',
-            padding: '2px 10px',
-            background: lastTrack ? 'var(--blue)' : 'var(--surface0)',
-            color: lastTrack ? 'var(--base)' : 'var(--subtext0)',
-            border: '1px solid var(--surface1)',
-            cursor: lastTrack ? 'pointer' : 'default',
-            fontSize: '12px',
-          }}
-        >
-          Suggest
-        </button>
+        </span>
+        <span className="set-header-actions">
+          <button
+            className="btn btn-success"
+            onClick={() => setAdjacencyPins(setId, autoFillable)}
+            disabled={autoFillable.size === 0}
+            title={
+              autoFillable.size === 0
+                ? 'No unresolved adjacency has an unambiguous Transition'
+                : 'Pin the proposed Transition on every unresolved adjacency'
+            }
+          >
+            Auto-fill {autoFillable.size > 0 ? `(${autoFillable.size})` : ''}
+          </button>
+          {/* Suggest (sets 10): ranked candidates to append after the last track */}
+          <button
+            className="btn btn-primary"
+            onClick={(e) =>
+              lastTrack &&
+              setSuggest({ x: e.clientX, y: e.clientY, target: { kind: 'append', last: lastTrack } })
+            }
+            disabled={!lastTrack}
+            title={
+              lastTrack
+                ? 'Suggest tracks to append, ranked by follow tiering out of the last track'
+                : 'Add a track first — suggestions rank out of the last track'
+            }
+          >
+            Suggest
+          </button>
         </span>
       </div>
 
@@ -1003,19 +966,19 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
 /** Pin-chip look per resolved status (sets 20): an UNRESOLVED
  * adjacency's "✕ hard cut" chip itself turns red — there is no separate
  * UNRESOLVED badge. Red keys off pin state, never the name: a pinned
- * Transition NAMED "hard cut" keeps the normal green chip. */
+ * Transition NAMED "hard cut" keeps the normal green chip. The style
+ * rides inline on a .set-chip-btn (perf-layout 08): accent text for
+ * resolved chips; the red status fill pins across hover/press. */
 function pinChip(view: ReturnType<typeof adjacencyView>): {
   text: string;
-  color: string;
-  background: string;
+  style: React.CSSProperties;
   title: string;
 } {
   if (view.status === 'transition') {
     const star = view.transition!.favorite ? '★ ' : '';
     return {
       text: `◆ ${star}${view.transition!.name}`,
-      color: 'var(--green)',
-      background: 'var(--surface0)',
+      style: { color: 'var(--green)' },
       title: 'Pin a transition or take for this handover',
     };
   }
@@ -1023,15 +986,17 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
     const date = new Date(view.take!.detectedAt).toLocaleDateString();
     return {
       text: `● take · ${date} (unpromoted)`,
-      color: 'var(--mauve)',
-      background: 'var(--surface0)',
+      style: { color: 'var(--mauve)' },
       title: 'Pin a transition or take for this handover',
     };
   }
   return {
     text: '✕ hard cut',
-    color: 'var(--base)',
-    background: 'var(--red)',
+    style: {
+      background: 'var(--red)',
+      borderColor: 'var(--red)',
+      color: 'var(--base)',
+    },
     title: 'Unresolved — will hard-cut. Pin a transition or take for this handover',
   };
 }
@@ -1119,7 +1084,6 @@ function AdjacencyRow({
   onSuggestInsert?: (x: number, y: number) => void;
 }) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const [hovered, setHovered] = useState(false);
   const view = adjacencyView(pin, evidence.transitions, evidence.takes);
   const proposal = pin === null ? autoFillProposal(evidence.transitions) : null;
   const chip = pinChip(view);
@@ -1158,29 +1122,20 @@ function AdjacencyRow({
   const GUTTER_WIDTH = 58;
   // The two-deck gradient bar (sets 20): outgoing deck's color on top,
   // incoming below — the handover visually ties to its tracks. Painted
-  // as a background layer so the hover wash composes beneath it.
-  const barLayer = decks
-    ? `linear-gradient(180deg, ${DECK_COLORS[decks.outgoing]}, ${DECK_COLORS[decks.incoming]}) left / 3px 100% no-repeat, `
-    : '';
+  // as a background-image layer (geometry in the CSS) so the CSS hover
+  // wash composes beneath it.
+  const barImage = decks
+    ? `linear-gradient(180deg, ${DECK_COLORS[decks.outgoing]}, ${DECK_COLORS[decks.incoming]})`
+    : undefined;
 
   return (
     <>
       <div
         data-set-adjacency-row
+        className="set-adjacency-row"
         onClick={onOpenEditor}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
         title="Open this handover in the Transition editor"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '2px 12px 2px 15px',
-          background: `${barLayer}${hovered ? 'var(--surface0)' : 'var(--crust)'}`,
-          borderBottom: '1px solid var(--surface0)',
-          fontSize: '12px',
-          cursor: 'pointer',
-        }}
+        style={{ backgroundImage: barImage }}
       >
         {/* Left gutter: the insert affordance as a small + (sets 20 —
             the old labeled button's verb rides the tooltip), sitting
@@ -1188,18 +1143,15 @@ function AdjacencyRow({
         <span style={{ width: `${GUTTER_WIDTH}px`, flexShrink: 0, display: 'flex' }}>
           {onSuggestInsert && (
             <button
+              className="set-glyph-btn"
               onClick={(e) => {
                 e.stopPropagation();
                 onSuggestInsert(e.clientX, e.clientY);
               }}
               title="Suggest a track to insert here, ranked by the weaker of the two edges"
               style={{
-                padding: 0,
                 width: '18px',
-                background: 'transparent',
-                border: 'none',
                 color: 'var(--blue)',
-                cursor: 'pointer',
                 fontSize: '13px',
                 fontWeight: 700,
               }}
@@ -1210,20 +1162,17 @@ function AdjacencyRow({
         </span>
 
         {/* Pin chip — click opens the manual pin picker. Unresolved
-            turns the chip itself red (sets 20): the one hard-cut signal. */}
+            turns the chip itself red (sets 20): the one hard-cut signal
+            (a solid status fill, pinned inline across hover/press). */}
         <button
+          className="set-chip-btn"
           onClick={(e) => {
             e.stopPropagation();
             setMenuPos({ x: e.clientX, y: e.clientY });
           }}
           title={chip.title}
           style={{
-            padding: '1px 8px',
-            background: chip.background,
-            border: '1px solid var(--surface1)',
-            color: chip.color,
-            cursor: 'pointer',
-            fontSize: '12px',
+            ...chip.style,
             fontWeight: view.status === 'unresolved' ? 600 : undefined,
           }}
         >
@@ -1251,19 +1200,13 @@ function AdjacencyRow({
         {/* Edit (sets 20): the sketch-it verb made visible — delegates
             to the row click-through (sets 09). Practice = mix it live. */}
         <button
+          className="set-chip-btn"
           onClick={(e) => {
             e.stopPropagation();
             onOpenEditor();
           }}
           title="Open this handover in the Transition editor"
-          style={{
-            padding: '1px 8px',
-            background: 'var(--surface0)',
-            border: '1px solid var(--surface1)',
-            color: 'var(--sapphire)',
-            cursor: 'pointer',
-            fontSize: '12px',
-          }}
+          style={{ color: 'var(--sapphire)' }}
         >
           ✎ edit
         </button>
@@ -1273,19 +1216,13 @@ function AdjacencyRow({
             quiet button like its neighbors (sets 20). */}
         {onPractice && (
           <button
+            className="set-chip-btn"
             onClick={(e) => {
               e.stopPropagation();
               onPractice();
             }}
             title="Practice this handover: cue outgoing on deck A (with a runway), incoming on deck B — press again to re-cue"
-            style={{
-              padding: '1px 8px',
-              background: 'var(--surface0)',
-              border: '1px solid var(--surface1)',
-              color: 'var(--yellow)',
-              cursor: 'pointer',
-              fontSize: '12px',
-            }}
+            style={{ color: 'var(--yellow)' }}
           >
             ⏵ practice
           </button>
@@ -1294,19 +1231,13 @@ function AdjacencyRow({
         {/* One-click auto-fill accept (Transitions only, favorite first) */}
         {proposal && view.status === 'unresolved' && (
           <button
+            className="set-chip-btn"
             onClick={(e) => {
               e.stopPropagation();
               onPin({ kind: 'transition', uuid: proposal.uuid });
             }}
             title="Pin the proposed Transition"
-            style={{
-              padding: '1px 8px',
-              background: 'transparent',
-              border: '1px solid var(--green)',
-              color: 'var(--green)',
-              cursor: 'pointer',
-              fontSize: '12px',
-            }}
+            style={{ borderColor: 'var(--green)', color: 'var(--green)' }}
           >
             ↳ pin {proposal.favorite ? '★ ' : ''}{proposal.name}
           </button>
@@ -1316,20 +1247,13 @@ function AdjacencyRow({
             this pair — one click pins it (never auto-pinned). */}
         {freshTake && (
           <button
+            className="set-chip-btn"
             onClick={(e) => {
               e.stopPropagation();
               onPinFreshTake(freshTake.uuid);
             }}
             title="A Take was just captured for this handover — pin it"
-            style={{
-              padding: '1px 8px',
-              background: 'var(--mauve)',
-              border: '1px solid var(--mauve)',
-              color: 'var(--base)',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 600,
-            }}
+            style={{ borderColor: 'var(--mauve)', color: 'var(--mauve)', fontWeight: 600 }}
           >
             ● new take — pin?
           </button>
@@ -1422,42 +1346,28 @@ function SetTrackRow({
    * row's track metadata is still loading. */
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-  const [hovered, setHovered] = useState(false);
+  // Selection and conducting coexist, distinct (sets 18): mauve wash =
+  // Conductor position, blue = selection; a selected conducting row
+  // keeps the mauve wash and wears the blue ring. Both are STATES —
+  // the CSS keeps them above the hover wash (perf-layout 08).
   return (
     <div
       data-set-track-row
       draggable
+      className={`set-track-row${conducting ? ' conducting' : ''}${selected ? ' selected' : ''}`}
       onClick={(e) => onSelect({ shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onContextMenu={onContextMenu}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '8px 12px',
-        borderBottom: '1px solid var(--surface0)',
         borderLeft: planned
           ? `3px solid ${DECK_COLORS[planned.deck]}`
           : '3px solid transparent',
-        // Selection and conducting coexist, distinct (sets 18): mauve
-        // wash = Conductor position, blue = selection; a selected
-        // conducting row keeps the mauve wash and wears the blue ring.
-        background: conducting
-          ? 'color-mix(in srgb, var(--mauve) 18%, transparent)'
-          : selected
-            ? 'color-mix(in srgb, var(--blue) 22%, transparent)'
-            : hovered
-              ? 'var(--surface0)'
-              : 'transparent',
-        boxShadow: selected ? 'inset 0 0 0 2px var(--blue)' : undefined,
         opacity: dragging ? 0.45 : 1,
-        cursor: 'grab',
       }}
     >
       <button
+        className="set-glyph-btn set-row-reveal"
         onClick={(e) => {
           e.stopPropagation(); // never doubles as a selection click
           onPlayFrom?.();
@@ -1465,14 +1375,10 @@ function SetTrackRow({
         disabled={!onPlayFrom}
         title="Play the set from this track's planned entry"
         style={{
-          visibility: hovered && onPlayFrom ? 'visible' : 'hidden',
-          padding: 0,
           width: '18px',
-          background: 'transparent',
-          border: 'none',
           color: 'var(--mauve)',
-          cursor: 'pointer',
-          fontSize: '12px',
+          // Inline wins over the row-hover reveal while there is no plan
+          ...(onPlayFrom ? undefined : { visibility: 'hidden' as const }),
         }}
       >
         ▶
@@ -1502,19 +1408,13 @@ function SetTrackRow({
         {track?.bpm ? `${track.bpm.toFixed(1)} BPM` : '—'}
       </span>
       <button
+        className="set-glyph-btn set-row-reveal"
         onClick={(e) => {
           e.stopPropagation(); // never doubles as a selection click
           onRemove();
         }}
         title="Remove from set"
-        style={{
-          visibility: hovered ? 'visible' : 'hidden',
-          padding: '2px 8px',
-          background: 'transparent',
-          border: 'none',
-          color: 'var(--red)',
-          cursor: 'pointer',
-        }}
+        style={{ padding: '2px 8px', color: 'var(--red)' }}
       >
         ✕
       </button>
@@ -1560,16 +1460,10 @@ function TempoPolicyChip({
   return (
     <span style={{ position: 'relative' }}>
       <button
+        className="set-chip-btn set-header-chip"
         onClick={() => setOpen((o) => !o)}
         title="Tempo policy: Riding eases each track back to its native tempo; Fixed pitches the whole set to one BPM"
-        style={{
-          padding: '2px 10px',
-          background: 'var(--surface0)',
-          color: fixed ? 'var(--peach)' : 'var(--sapphire)',
-          border: '1px solid var(--surface1)',
-          cursor: 'pointer',
-          fontSize: '12px',
-        }}
+        style={{ color: fixed ? 'var(--peach)' : 'var(--sapphire)' }}
       >
         {fixed ? `Fixed · ${effectiveBpm ? `${effectiveBpm.toFixed(1)} BPM` : 'no BPM'}` : 'Riding'}
       </button>
@@ -1590,36 +1484,42 @@ function TempoPolicyChip({
             fontSize: '12px',
           }}
         >
+          {/* The active policy = engaged: solid accent fill pinned
+              inline across hover/press (perf-layout 08). */}
           <button
+            className="set-tempo-option"
             onClick={() => {
               if (fixed) patch({ tempo_policy: 'riding' });
               setOpen(false);
             }}
-            style={{
-              padding: '3px 8px',
-              textAlign: 'left',
-              background: !fixed ? 'var(--sapphire)' : 'var(--surface0)',
-              color: !fixed ? 'var(--base)' : 'var(--text)',
-              border: '1px solid var(--surface1)',
-              cursor: 'pointer',
-            }}
+            style={
+              !fixed
+                ? {
+                    background: 'var(--sapphire)',
+                    borderColor: 'var(--sapphire)',
+                    color: 'var(--base)',
+                  }
+                : undefined
+            }
           >
             Riding — tracks return to native tempo between handovers
           </button>
           <button
+            className="set-tempo-option"
             onClick={() => {
               if (!fixed) {
                 patch({ tempo_policy: 'fixed', set_tempo_bpm: set.set_tempo_bpm ?? defaultBpm });
               }
             }}
-            style={{
-              padding: '3px 8px',
-              textAlign: 'left',
-              background: fixed ? 'var(--peach)' : 'var(--surface0)',
-              color: fixed ? 'var(--base)' : 'var(--text)',
-              border: '1px solid var(--surface1)',
-              cursor: 'pointer',
-            }}
+            style={
+              fixed
+                ? {
+                    background: 'var(--peach)',
+                    borderColor: 'var(--peach)',
+                    color: 'var(--base)',
+                  }
+                : undefined
+            }
           >
             Fixed — the whole set holds one tempo
           </button>
@@ -1649,15 +1549,9 @@ function TempoPolicyChip({
             </label>
           )}
           <button
+            className="set-glyph-btn"
             onClick={() => setOpen(false)}
-            style={{
-              padding: '2px 8px',
-              background: 'transparent',
-              color: 'var(--subtext0)',
-              border: 'none',
-              cursor: 'pointer',
-              alignSelf: 'flex-end',
-            }}
+            style={{ padding: '2px 8px', color: 'var(--subtext0)', alignSelf: 'flex-end' }}
           >
             close
           </button>

@@ -50,49 +50,71 @@
 
 .text-left { text-align: left; }
 
-/* Button utilities */
+/* Button utilities. Unified interaction vocabulary (perf-layout 08):
+   rest = quiet grey border (--surface1) — accent variants rest as
+   OUTLINES in their accent (solid fill is reserved for engaged states,
+   which components pin via an .on-style class or inline styles, both of
+   which win over these rules); hover = white border + surface0 tint
+   (accent borders hold — the tint carries the feedback); press =
+   surface1 fill. No glows, scale effects, or hue-shifts. */
 .btn {
   padding: var(--space-sm) var(--space-md);
-  border: none;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
   cursor: pointer;
   font-size: var(--font-xs);
   font-family: inherit;
-  transition: background var(--transition-normal);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.btn:active:not(:disabled) {
+  background: var(--surface1);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .btn-primary {
-  background: var(--blue);
-  color: var(--base);
+  border-color: var(--blue);
+  color: var(--blue);
   font-weight: bold;
 }
 
-.btn-primary:hover {
-  background: var(--sapphire);
+.btn-primary:hover:not(:disabled) {
+  border-color: var(--blue);
 }
 
 .btn-success {
-  background: var(--green);
-  color: var(--base);
+  border-color: var(--green);
+  color: var(--green);
   font-weight: bold;
 }
 
-.btn-success:hover {
-  background: var(--teal);
+.btn-success:hover:not(:disabled) {
+  border-color: var(--green);
 }
 
 .btn-danger {
-  background: var(--red);
-  color: var(--base);
+  border-color: var(--red);
+  color: var(--red);
   font-weight: bold;
 }
 
-.btn-secondary {
-  background: var(--surface1);
-  color: var(--text);
+.btn-danger:hover:not(:disabled) {
+  border-color: var(--red);
 }
 
-.btn-secondary:hover {
-  background: var(--surface2);
+/* The quiet base .btn IS the secondary look; the class carries intent. */
+.btn-secondary {
+  border-color: var(--surface1);
+  color: var(--text);
 }
 
 /* Input utilities */
