@@ -85,6 +85,30 @@ const CUE_COLOR_RE = /^#[0-9a-f]{6}$/i;
  * color wins when it's a trustworthy hex; otherwise the slot palette.
  * Shared by every 2D canvas/DOM render site (editor lane guides, editor
  * minimap) so no surface grows its own fallback. */
+/**
+ * Which beat indices are downbeats — epsilon matching, not exact floats
+ * (ADR 0027 §8). Both arrays are sorted; a two-pointer sweep. The backend
+ * appends the same accumulated float to both arrays today, but if either
+ * side ever derived independently, exact `Set.has` matching would silently
+ * drop EVERY beat line at zoomed-out levels. ε = 1μs: float-noise scale,
+ * orders of magnitude below any beat interval.
+ */
+export function matchDownbeatIndices(
+  beatTimes: readonly number[],
+  downbeatTimes: readonly number[]
+): Set<number> {
+  const EPS = 1e-6;
+  const indices = new Set<number>();
+  let j = 0;
+  for (let i = 0; i < beatTimes.length; i++) {
+    while (j < downbeatTimes.length && downbeatTimes[j] < beatTimes[i] - EPS) j++;
+    if (j < downbeatTimes.length && Math.abs(downbeatTimes[j] - beatTimes[i]) <= EPS) {
+      indices.add(i);
+    }
+  }
+  return indices;
+}
+
 export function cueCssColor(slot: number, stored?: string): string {
   return stored && CUE_COLOR_RE.test(stored) ? stored : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');
 }
@@ -492,11 +516,7 @@ export class WaveformRendererV2 {
     // New data must invalidate the vertex cache explicitly (a nudged grid
     // otherwise keeps drawing stale lines — off-by-a-nudge).
     this.beatgridCache = null;
-    this.downbeatIndices = new Set();
-    const downbeatSet = new Set(downbeatTimes);
-    for (let i = 0; i < beatTimes.length; i++) {
-      if (downbeatSet.has(beatTimes[i])) this.downbeatIndices.add(i);
-    }
+    this.downbeatIndices = matchDownbeatIndices(beatTimes, downbeatTimes);
   }
 
   /** Per-column automation modulation (editor rows); null clears. */

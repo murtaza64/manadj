@@ -21,6 +21,7 @@
  * alignment would be silently broken).
  */
 import type { BeatgridData } from '../types';
+import { dominantBpm } from '../components/deckControls/bpmCommit';
 import { defaultLanePoints } from './mixModel';
 import type { LaneId, LanePoint, Lanes, Transition } from './mixModel';
 import { freshTransition, isPristine } from './pairStore';
@@ -68,10 +69,16 @@ export interface TrackSideInfo {
 
 // ── Beat math ───────────────────────────────────────────────────────────
 
-/** Seconds per beat from the grid's first tempo change (constant BPM —
- * the same simplification the backend expansion makes today). */
+/** Seconds per beat of the grid's DOMINANT tempo (ADR 0027 §4 doctrine:
+ * tempo-domain features treat a variable track as its dominant tempo —
+ * shared helper, not the first segment). The grid's last beat time stands
+ * in for the duration weighting; without beats the first tempo change is
+ * the fallback (dominantBpm's own degradation). */
 export function beatPeriodSec(grid: BeatgridData): number {
-  return 60 / grid.tempo_changes[0].bpm;
+  const duration = grid.beat_times.length
+    ? grid.beat_times[grid.beat_times.length - 1]
+    : null;
+  return 60 / dominantBpm(grid.tempo_changes, duration);
 }
 
 /**
@@ -86,7 +93,9 @@ export function beatPeriodSec(grid: BeatgridData): number {
  */
 export function gridOriginSec(grid: BeatgridData): number {
   const tc = grid.tempo_changes[0];
-  const period = beatPeriodSec(grid);
+  // The FIRST segment's own period: the origin extends the first segment
+  // backward — the dominant tempo (beatPeriodSec) may belong to a later one.
+  const period = 60 / tc.bpm;
   const sig = tc.time_signature_num;
   const eps = Math.min(0.05, period / 4);
   // How many whole beats fit backward from the first mark.
