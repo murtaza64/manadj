@@ -240,6 +240,10 @@ _Avoid_: headphone cue (as the toggle's name), solo
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid. When a Beatgrid exists it is the authority on tempo: the Track's BPM is its projection (the grid's dominant tempo), not an independent field, and editing BPM is a grid operation (ADR 0016). A grid may carry an *anchor* — the downbeat the user explicitly marked — which re-tempo operations never move.
 
+**Grow / Shrink**:
+The fine re-tempo pair on a Track's Beatgrid: growing widens beat spacing (BPM down a hair), shrinking tightens it (BPM up). A grid operation like any BPM edit, honoring the grid's anchor. Distinct from a grid nudge, which translates the grid without changing its tempo.
+_Avoid_: BPM nudge (collides with both the performance Nudge and the grid nudge)
+
 **Quantized track**:
 A Track produced against a fixed tempo grid, so a constant-tempo Beatgrid (BPM + phase) is its correct description — nearly all of the library. Native grid Analysis assumes quantization: it fits a constant grid to detected beats, and bails (no grid, flagged for attention) rather than emit a wobbly variable grid when the fit is poor. Raw beat-tracker ticks are evidence for the fit, never the grid itself.
 
