@@ -16,7 +16,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type SetRowWire } from '../api/client';
-import { useDecks } from '../hooks/useDeck';
+import { useDecks, type DeckContextValue } from '../hooks/useDeck';
+import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import { useMixer } from '../hooks/useMixer';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
@@ -118,6 +119,12 @@ import {
   ROW_PAD_X,
   type BpmDeltaRef,
 } from './rowColumns';
+import {
+  isRowPlaying,
+  loadedDecks,
+  loadedWash,
+  type DeckOccupancyMap,
+} from './rowMarks';
 import { prefetchTrackBuffer } from './prefetch';
 import { hotCue1Sec, useSetPlan } from './useSetPlan';
 import { useSetSettings } from './setSettings';
@@ -336,13 +343,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const decks = useDecks();
   const conductorState = useConductorState();
   const conductingThis = conductorState.setId === setId && conductorState.status !== 'idle';
-  // The conducting highlight follows the TRACK, not the index — mid-drag
-  // the rows display the hypothetical order (sets 23), where the
-  // committed plan's entry index points at the wrong row.
-  const conductingTrackId =
-    conductingThis && conductorState.activeEntryIndex !== null
-      ? (entries?.[conductorState.activeEntryIndex]?.trackId ?? null)
-      : null;
+  // Row marks (sets 35): LIVE deck occupancy + transport, straight off
+  // the shared engines — conducting, after takeover, or plain manual
+  // deck use all mirror reality. Replaces the single conducting "active
+  // row" highlight (a conducting row is a loaded+playing row now).
+  const occupancy = useDeckOccupancy(decks);
   const trackMapRef = useRef(trackMap);
   useEffect(() => {
     trackMapRef.current = trackMap;
@@ -910,7 +915,8 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   track={track}
                   planned={planned}
                   bpmRef={bpmRefFor(i)}
-                  conducting={conductingThis && conductingTrackId === entry.trackId}
+                  loadedOn={loadedDecks(entry.trackId, occupancy)}
+                  playing={isRowPlaying(entry.trackId, occupancy)}
                   selected={selectedIds.has(entry.trackId)}
                   dragging={dragIds?.includes(entry.trackId) ?? false}
                   onSelect={(mods) => handleRowSelect(entry.trackId, mods)}
@@ -1021,6 +1027,33 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
     </div>
+  );
+}
+
+/**
+ * Both decks' live occupancy slices (sets 35), off the shared engines.
+ * Primitive selectors per useSyncExternalStore rules (a fresh object
+ * every read would loop); the map itself is memoized on the slices, so
+ * the pane re-renders only on load / play / pause — not per tick.
+ */
+function useEngineSlice<T>(engine: DeckEngine, selector: (s: DeckSnapshot) => T): T {
+  return useSyncExternalStore(
+    (cb) => engine.subscribe(cb),
+    () => selector(engine.getSnapshot())
+  );
+}
+
+function useDeckOccupancy(decks: Record<ChannelId, DeckContextValue>): DeckOccupancyMap {
+  const aTrackId = useEngineSlice(decks.A.engine, (s) => s.trackId);
+  const aPlaying = useEngineSlice(decks.A.engine, (s) => s.playing);
+  const bTrackId = useEngineSlice(decks.B.engine, (s) => s.trackId);
+  const bPlaying = useEngineSlice(decks.B.engine, (s) => s.playing);
+  return useMemo(
+    () => ({
+      A: { trackId: aTrackId, playing: aPlaying },
+      B: { trackId: bTrackId, playing: bPlaying },
+    }),
+    [aTrackId, aPlaying, bTrackId, bPlaying]
   );
 }
 
@@ -1383,7 +1416,8 @@ function SetTrackRow({
   track,
   planned,
   bpmRef,
-  conducting,
+  loadedOn,
+  playing,
   selected,
   dragging,
   onSelect,
@@ -1402,11 +1436,16 @@ function SetTrackRow({
    * tempo under Fixed, the predecessor's BPM under Riding; null when
    * there is no reference (first row under Riding, missing BPMs). */
   bpmRef: BpmDeltaRef | null;
-  /** The Conductor's playhead is inside this entry (sets 04). */
-  conducting: boolean;
+  /** The Decks currently holding this track (sets 35: LIVE occupancy,
+   * not plan parity) — the row wears the holding deck's identity wash;
+   * both at once when both decks hold Set tracks. */
+  loadedOn: ChannelId[];
+  /** A deck holding this track is playing (sets 35): the deck-neutral
+   * animated EQ-bars STATE mark. Paused-but-loaded keeps the wash only. */
+  playing: boolean;
   /** In the pane's row selection (sets 18): blue wash + inset blue ring.
-   * Coexists with the conducting highlight — when both, the mauve wash
-   * keeps the background and the ring marks the selection. */
+   * Coexists with the loaded wash — when both, the identity wash keeps
+   * the background and the ring marks the selection. */
   selected: boolean;
   /** This row is the drag source (sets 23) — dimmed, sortable-style,
    * wherever it currently displays (its hypothetical slot mid-preview,
@@ -1425,10 +1464,11 @@ function SetTrackRow({
    * row's track metadata is still loading. */
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-  // Selection and conducting coexist, distinct (sets 18): mauve wash =
-  // Conductor position, blue = selection; a selected conducting row
-  // keeps the mauve wash and wears the blue ring. Both are STATES —
-  // the CSS keeps them above the hover wash (perf-layout 08).
+  // Selection and the loaded wash coexist, distinct (sets 18/35): deck
+  // identity wash = where the track is loaded, blue = selection; a
+  // selected loaded row keeps the identity wash and wears the blue
+  // ring. Both are STATES — they sit above the hover wash (perf-layout
+  // 08; the wash rides inline, which wins over the CSS hover rule).
   //
   // Column grid (sets 31, geometry in rowColumns.ts):
   //   ▶ · # · in · key · BPM · energy · title/artist · … · play · ✕
@@ -1443,7 +1483,7 @@ function SetTrackRow({
     <div
       data-set-track-row
       draggable
-      className={`set-track-row${conducting ? ' conducting' : ''}${selected ? ' selected' : ''}`}
+      className={`set-track-row${selected ? ' selected' : ''}`}
       onClick={(e) => onSelect({ shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -1456,26 +1496,56 @@ function SetTrackRow({
         borderLeft: planned
           ? `${ROW_ACCENT_W}px solid ${DECK_COLORS[planned.deck]}`
           : `${ROW_ACCENT_W}px solid transparent`,
+        // Loaded = identity wash (sets 35). Inline wins over the CSS
+        // hover wash AND the .selected background — the blue ring still
+        // marks selection (the conducting-wash precedent, sets 18).
+        background: loadedWash(loadedOn),
         opacity: dragging ? 0.45 : 1,
       }}
     >
-      <button
-        className="set-glyph-btn set-row-reveal"
-        onClick={(e) => {
-          e.stopPropagation(); // never doubles as a selection click
-          onPlayFrom?.();
-        }}
-        disabled={!onPlayFrom}
-        title="Play the set from this track's planned entry"
+      {/* Play column: ▶ play-from reveals on hover (sets 20); at rest a
+          PLAYING row shows the deck-neutral EQ bars here instead — the
+          hover swaps state mark → affordance (the Spotify idiom;
+          flagged on perf-layout 08 rather than forked silently). The
+          mark only yields when the ▶ actually appears — a plan-less
+          row keeps its playing mark under the pointer. */}
+      <span
         style={{
+          position: 'relative',
           width: `${PLAY_COL_W}px`,
-          color: 'var(--mauve)',
-          // Inline wins over the row-hover reveal while there is no plan
-          ...(onPlayFrom ? undefined : { visibility: 'hidden' as const }),
+          flexShrink: 0,
+          display: 'flex',
         }}
       >
-        ▶
-      </button>
+        <button
+          className="set-glyph-btn set-row-reveal"
+          onClick={(e) => {
+            e.stopPropagation(); // never doubles as a selection click
+            onPlayFrom?.();
+          }}
+          disabled={!onPlayFrom}
+          title="Play the set from this track's planned entry"
+          style={{
+            width: `${PLAY_COL_W}px`,
+            color: 'var(--mauve)',
+            // Inline wins over the row-hover reveal while there is no plan
+            ...(onPlayFrom ? undefined : { visibility: 'hidden' as const }),
+          }}
+        >
+          ▶
+        </button>
+        {playing && (
+          <span
+            className={`set-playing-mark${onPlayFrom ? ' set-mark-yields-to-hover' : ''}`}
+            title="Playing"
+            aria-label="playing"
+          >
+            <span />
+            <span />
+            <span />
+          </span>
+        )}
+      </span>
       <span style={{ ...cellStyle(INDEX_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}>
         {index + 1}
       </span>
