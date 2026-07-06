@@ -17,14 +17,15 @@
  * pan disengages follow; zoom never does.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useMemo } from 'react';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
-import { toThreeBands, type ThreeBandWaveform } from '../waveform/blob';
+import type { DecodedWaveform } from '../waveform/blob';
+import { useStyleSlot } from '../waveform/styleSlots';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { HOT_CUE_CSS_COLORS } from '../waveform/WaveformRendererV2';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
+import { drawStyledWave } from './ladderWaveStyle';
 import type { PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
 import { getLadderView, setLadderView } from './setStore';
 
@@ -509,7 +510,6 @@ function LadderClip({
   redrawKey: number;
 }) {
   const { data } = useWaveformBlob(entry.trackId);
-  const wave = useMemo(() => (data ? toThreeBands(data) : null), [data]);
   const isA = entry.deck === 'A';
   const title = track ? (track.title ?? track.filename) : `Track ${entry.trackId}`;
   const cues = hotCues.map((c) => ({
@@ -534,7 +534,7 @@ function LadderClip({
     >
       {isA && <ClipTitle title={title} color={DECK_COLORS.A} />}
       <LadderWave
-        wave={wave}
+        wave={data ?? null}
         height={LANE_H - TITLE_H - 2}
         range={[entry.entrySec, entry.exitSec]}
         cues={cues}
@@ -568,10 +568,14 @@ function ClipTitle({ title, color }: { title: string; color: string }) {
   );
 }
 
-/** Static 2D-canvas three-band waveform for one clip. Bars grow from the
- * center line ('up' anchors the baseline at the bottom edge, 'down' hangs
- * them from the top); hot cues draw a faint full-height line plus a
- * triangle on the OUTER (title-side) edge, keeping the center line clean. */
+/** Static 2D-canvas styled waveform for one clip (sets 30): a CPU
+ * interpretation of the global Waveform style — the 'minimap' slot, the
+ * same source of truth the player minimaps render from — re-drawn live on
+ * any styles-mode tweak. Bars grow from the center line ('up' anchors the
+ * baseline at the bottom edge, 'down' hangs them from the top — the
+ * mirrored-lane layout wins over the style's own anchor); hot cues draw a
+ * faint full-height line plus a triangle on the OUTER (title-side) edge,
+ * keeping the center line clean. */
 function LadderWave({
   wave,
   height,
@@ -580,7 +584,7 @@ function LadderWave({
   dir,
   redrawKey,
 }: {
-  wave: ThreeBandWaveform | null;
+  wave: DecodedWaveform | null;
   height: number;
   /** Track-time span this clip plays. */
   range: [number, number];
@@ -590,6 +594,7 @@ function LadderWave({
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const cueKey = cues.map((c) => `${c.t}:${c.color}`).join('|');
+  const slot = useStyleSlot('minimap');
 
   useEffect(() => {
     const canvas = ref.current;
@@ -610,23 +615,12 @@ function LadderWave({
     const span = Math.max(t1 - t0, 0.001);
     const xAt = (t: number) => ((t - t0) / span) * w;
 
-    const bands = [
-      { data: wave.low, color: '242,97,97' },
-      { data: wave.mid, color: '0,230,0' },
-      { data: wave.high, color: '135,222,237' },
-    ];
-    const frames = wave.low.length;
-    for (let x = 0; x < w; x++) {
-      const t = t0 + (x / w) * span;
-      if (t < 0 || t > wave.duration) continue;
-      const idx = Math.max(0, Math.min(frames - 1, Math.floor((t / wave.duration) * frames)));
-      for (const band of bands) {
-        const amp = band.data[idx] * h * 0.95;
-        if (amp <= 0.5) continue;
-        ctx.fillStyle = `rgba(${band.color},0.85)`;
-        ctx.fillRect(x, dir === 'up' ? h - amp : 0, 1, amp);
-      }
-    }
+    drawStyledWave(ctx, wave, slot.styleId, slot.params, {
+      width: w,
+      height: h,
+      dir,
+      range,
+    });
 
     for (const c of cues) {
       const x = xAt(c.t);
@@ -655,7 +649,7 @@ function LadderWave({
       ctx.fill();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wave, height, dir, range[0], range[1], cueKey, redrawKey]);
+  }, [wave, height, dir, range[0], range[1], cueKey, redrawKey, slot]);
 
   return <canvas ref={ref} style={{ width: '100%', height, display: 'block', flex: 'none' }} />;
 }
