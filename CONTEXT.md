@@ -175,7 +175,21 @@ A per-Deck toggle that keeps the browse list continuously filtered to candidate 
 ### Performance data
 
 **Analysis**:
-Automatically determining a property of a Track from its audio — key, BPM, beatgrid, waveform. Manual edits to those properties are orthogonal to Analysis.
+Automatically determining a property of a Track from its audio — key, BPM, beatgrid, waveform, Structure, Energy estimate. Manual edits to those properties are orthogonal to Analysis.
+
+**Section**:
+An Analysis-produced labeled span of a Track: intro, buildup, drop, breakdown, outro, or other. Boundaries land on the Beatgrid's downbeat lattice (unsnapped on gridless Tracks). Buildup is relational — it ends where a drop begins; one without a following drop is a detector error by definition. Never hand-edited: the correction surface is the cue ladder, and consumers read Hot Cue slot 4 over the detected drop wherever both speak (the two-rung read).
+_Avoid_: phrase (the 16/32-bar metric unit, and Rekordbox's feature name), segment (MIR jargon)
+
+**Structure**:
+A Track's full partition into Sections — the analysis fact of where its drops, buildups, and breakdowns are. Re-runnable opinion, replaced wholesale on re-analysis; detector-label mappings and thresholds are tunable heuristics, not part of the definition. Internal to manadj — never transferred by Sync, like Waveform data.
+
+**Energy estimate**:
+The analysis opinion of a Track's Energy (1–5): drop-centric — keyed on drop-Section intensity, whole-track when gridless — and calibrated against the library's hand-rated Tracks. Never exported; read only where curated Energy is unset, and always displayed as an estimate, never as the verdict.
+
+**Ladder stamp**:
+The explicit act (single Track or bulk) of writing a cue ladder from a Track's Structure per the Cue-slot convention: slot 4 on the first drop, earlier rungs walked back, filling empty slots only. Stamped cues become ordinary Hot Cues with no memory of their origin. Analysis never writes cue slots itself — the stamp gesture is the consent.
+_Avoid_: auto-cue (implies analysis writes cues unasked), bare "stamp" (a Transition template also stamps)
 
 **Ground truth corpus**:
 The set of Tracks whose key/BPM/Beatgrid values are externally verified, used as the measuring stick for Analysis accuracy: candidate analyzers are scored by agreement with it, not by vibe. Tiered by agreement: *gold* where Engine DJ and Rekordbox concur (headline scoring), *disputed* where they disagree — excluded from scoring until hand verification promotes them. Grid phase is Engine-only (no Rekordbox performance data).
