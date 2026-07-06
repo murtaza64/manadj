@@ -20,6 +20,7 @@ import {
   type SetPlan,
 } from './planner';
 import {
+  authoredPlayheadAt,
   evaluateReplan,
   graftSoundingWindow,
   GRAFT_PIN_UUID,
@@ -323,5 +324,146 @@ describe('the sounding-window graft (geometry deferred, lanes live)', () => {
     const plan2 = planSet(graftSoundingWindow(edit2, sounding2)!);
     expect(plan2.adjacencies[0].transition!.startSec).toBe(60);
     expect(plan2.adjacencies[0].transition!.lanes).toEqual({ faderA: [{ x: 0, y: 0.1 }] });
+  });
+});
+
+describe('authoredPlayheadAt (sets 38: the editor marker mapping)', () => {
+  // The marker lives on the AUTHORED window axis (= the outgoing track's
+  // own time, the Sketch origin invariant): inside the window, authored =
+  // transition.startSec + (mix − adj.mixStartSec) · adj.rateOutgoing,
+  // computed from the EXECUTED adjacency's geometry — during a deferred
+  // geometry edit (the graft) the editor draws the NEW window while the
+  // Conductor executes the OLD; the executed mapping is the truthful one.
+  // OUTSIDE the window (review feedback on the park) the marker follows
+  // the pair across the whole editor timeline: the outgoing's audible
+  // span maps directly (A time = authored time), the incoming's tail maps
+  // through the window's B alignment.
+
+  it('maps a mid-window instant onto the authored axis (Riding: rate 1)', () => {
+    const plan = planSet(threeTrackInput());
+    // w1 spans mix 60..80 (startSec 60, duration 20, rate 1).
+    expect(authoredPlayheadAt(plan, 65, 'w1')).toBeCloseTo(65, 6);
+    expect(authoredPlayheadAt(plan, 79.9, 'w1')).toBeCloseTo(79.9, 6);
+  });
+
+  it('follows the executed rate under Fixed tempo (rateOutgoing ≠ 1)', () => {
+    // 120 BPM tracks under Set tempo 126: rate 1.05 — the window's mix
+    // span compresses; the authored axis still covers startSec..+duration.
+    const plan = planSet(
+      threeTrackInput({ tempo: { policy: 'fixed', setTempoBpm: 126 } })
+    );
+    const adj = plan.adjacencies[0];
+    expect(adj.rateOutgoing).toBeCloseTo(1.05, 6);
+    const midMix = (adj.mixStartSec + adj.mixEndSec) / 2;
+    expect(authoredPlayheadAt(plan, midMix, 'w1')).toBeCloseTo(70, 6);
+  });
+
+  it("tracks the OUTGOING's solo before the window (A time = authored time)", () => {
+    const plan = planSet(threeTrackInput());
+    expect(authoredPlayheadAt(plan, 30, 'w1')).toBeCloseTo(30, 6);
+    // Even while track 2 (w2's outgoing) enters as w1's incoming: the w2
+    // editor already shows where its outgoing is — the lead-up.
+    expect(authoredPlayheadAt(plan, 65, 'w2')).toBeCloseTo(13, 6); // τ₂ = 8 + 5
+  });
+
+  it("tracks the INCOMING's tail after the window (through the B alignment)", () => {
+    const plan = planSet(threeTrackInput());
+    // Window over at mix 80 (τ₂ = 28); at mix 85 τ₂ = 33 → authored =
+    // 60 + (33 − 8)/1 = 85: the marker continues across the B tail.
+    expect(authoredPlayheadAt(plan, 85, 'w1')).toBeCloseTo(85, 6);
+  });
+
+  it('matches Take pins by the TAKE uuid (take review shows the same idealized window)', () => {
+    // Minimal raw slice (planner.test.ts's takeSource): vectorizes to
+    // startSec 60 / durationSec 20 / bInSec 8 — window mix 60..80.
+    const takeSource = {
+      events: [
+        {
+          t: 100,
+          kind: 'init',
+          outgoingChannel: 'A',
+          decks: {
+            A: { trackId: 1, playing: true, fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pitch: 0 },
+            B: { trackId: 2, playing: true, fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pitch: 0 },
+          },
+          crossfader: 0,
+          crossfaderEnabled: true,
+        },
+        { t: 100, kind: 'tick', playheads: { A: 60, B: 8 } },
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    } as PlanInput['takesByUuid'][string];
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'take', uuid: 'tk1' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100) },
+        takesByUuid: { tk1: takeSource },
+      })
+    );
+    expect(plan.adjacencies[0].kind).toBe('take');
+    expect(authoredPlayheadAt(plan, 65, 'tk1')).toBeCloseTo(65, 6); // in-window
+    expect(authoredPlayheadAt(plan, 30, 'tk1')).toBeCloseTo(30, 6); // outgoing solo
+  });
+
+  it('null when nothing of the pair sounds, for unknown pins, and for hard cuts', () => {
+    const plan = planSet(threeTrackInput());
+    expect(authoredPlayheadAt(plan, 30, 'w2')).toBeNull(); // track 2 not yet audible
+    expect(authoredPlayheadAt(plan, 30, 'nope')).toBeNull(); // no such pin
+    const hardCuts = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90), 2: facts(240) },
+      })
+    );
+    expect(authoredPlayheadAt(hardCuts, 45, 'w1')).toBeNull();
+  });
+
+  it('keeps mapping through the EXECUTED geometry during a deferred edit, and by the preserved pin uuid', () => {
+    const oldPlan = planSet(threeTrackInput());
+    const sounding = soundingWindowAt(oldPlan, 65)!;
+    // Mid-window geometry drag: editor draws startSec 40/duration 5, the
+    // graft keeps the sounding window executing 60..80.
+    const edited = threeTrackInput({
+      transitionsByUuid: {
+        w1: tr({ startSec: 40, durationSec: 5 }),
+        w2: tr({ startSec: 120, durationSec: 10, bInSec: 0 }),
+      },
+    });
+    const grafted = planSet(graftSoundingWindow(edited, sounding)!);
+    // The graft preserves pinUuid on the lanes-live path: the marker
+    // survives the edit and stays truthful to the executed window.
+    expect(authoredPlayheadAt(grafted, 65, 'w1')).toBeCloseTo(65, 6);
+    // Truthful to the OLD span: mix 42.5 (inside the NEW 40..45 window's
+    // would-be span) is still track 1's SOLO in the executed plan — the
+    // marker rides the A axis there, not the new window mapping.
+    expect(authoredPlayheadAt(grafted, 42.5, 'w1')).toBeCloseTo(42.5, 6);
+  });
+
+  it('a re-pin mid-window grafts under GRAFT_PIN_UUID — the marker correctly disappears', () => {
+    const oldPlan = planSet(threeTrackInput());
+    const sounding = soundingWindowAt(oldPlan, 65)!;
+    const repinned = threeTrackInput({
+      entries: [
+        { trackId: 1, pin: { kind: 'transition', uuid: 'w1b' } },
+        { trackId: 2, pin: { kind: 'transition', uuid: 'w2' } },
+        { trackId: 3, pin: null },
+      ],
+      transitionsByUuid: {
+        w1b: tr({ startSec: 50, durationSec: 8 }),
+        w2: tr({ startSec: 120, durationSec: 10, bInSec: 0 }),
+      },
+    });
+    const grafted = planSet(graftSoundingWindow(repinned, sounding)!);
+    // The sounding window no longer executes the loaded transition:
+    // neither the old uuid nor the newly pinned one may claim the marker.
+    expect(authoredPlayheadAt(grafted, 65, 'w1')).toBeNull();
+    expect(authoredPlayheadAt(grafted, 65, 'w1b')).toBeNull();
   });
 });

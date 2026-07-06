@@ -28,6 +28,7 @@ def _row(t: models.Transition) -> schemas.TransitionRow:
         name=t.name,
         favorite=t.favorite,
         data=json.loads(t.data_json),
+        updated_at=t.updated_at,
     )
 
 

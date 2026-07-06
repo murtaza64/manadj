@@ -671,6 +671,8 @@ export const api = {
         name: string;
         favorite: boolean;
         data: Record<string, unknown>;
+        /** Naive-UTC ISO string (sets 26: resolution recency). */
+        updated_at: string | null;
       }[]
     > => {
       const res = await fetch(`${API_BASE}/transitions`);
@@ -1036,15 +1038,16 @@ export interface SetRowWire {
 
 export interface SetEntryItemWire {
   track_id: number;
-  /** Adjacency pin (sets 02): kind and uuid travel together (both or neither). */
-  pin_kind?: 'transition' | 'take' | null;
+  /** Adjacency pin (sets 02): kind and uuid travel together for
+   * transition/take; a Hard-cut pin (sets 26) carries no uuid. */
+  pin_kind?: 'transition' | 'take' | 'hardcut' | null;
   pin_uuid?: string | null;
 }
 
 export interface SetEntryRowWire {
   track_id: number;
   position: number;
-  pin_kind: 'transition' | 'take' | null;
+  pin_kind: 'transition' | 'take' | 'hardcut' | null;
   pin_uuid: string | null;
 }
 
@@ -1053,8 +1056,8 @@ export interface SetEntryRowWire {
 export interface SetDormantPinWire {
   a_track_id: number;
   b_track_id: number;
-  pin_kind: 'transition' | 'take';
-  pin_uuid: string;
+  pin_kind: 'transition' | 'take' | 'hardcut';
+  pin_uuid: string | null;
 }
 
 export interface SetWithEntriesWire extends SetRowWire {

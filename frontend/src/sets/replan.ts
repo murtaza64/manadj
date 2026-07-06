@@ -209,6 +209,57 @@ export function soundingWindowAt(execPlan: SetPlan, mixTime: number): SoundingWi
   return found;
 }
 
+/**
+ * The editor's live Conductor playhead (sets 38): where the ongoing run
+ * sits on the AUTHORED axis of the editor timeline whose loaded
+ * transition is `transitionUuid` (the outgoing track's own time — the
+ * Sketch origin invariant), or null when the marker must hide (the plan
+ * doesn't execute this pin, nothing of the pair sounds, a re-pin
+ * mid-window — the graft plans the frozen window under GRAFT_PIN_UUID,
+ * matching nothing).
+ *
+ * Inside the window the mapping is the planner's authoredLocalAt,
+ * computed from the EXECUTED adjacency's geometry: during a deferred
+ * geometry edit (the graft) the editor draws the NEW window while the
+ * Conductor executes the OLD — the executed mapping is the truthful one.
+ * Outside the window (park-review feedback) the marker follows the pair
+ * across the whole timeline: the outgoing's audible span maps directly
+ * (deck track-time = authored time), and the incoming's tail maps back
+ * through the window's B alignment (bInSec / rateIncoming) onto where
+ * that B content is drawn.
+ */
+export function authoredPlayheadAt(
+  execPlan: SetPlan,
+  mixTime: number,
+  transitionUuid: string
+): number | null {
+  const i = execPlan.adjacencies.findIndex(
+    (a) => a.kind !== 'hardcut' && a.pinUuid === transitionUuid
+  );
+  if (i < 0) return null;
+  const adj = execPlan.adjacencies[i];
+  if (adj.kind === 'hardcut') return null; // unreachable; narrows the type
+  if (mixTime >= adj.mixStartSec && mixTime < adj.mixEndSec) {
+    const authored =
+      adj.transition.startSec + (mixTime - adj.mixStartSec) * adj.rateOutgoing;
+    const f = (authored - adj.transition.startSec) / adj.transition.durationSec;
+    return f >= 0 && f < 1 ? authored : null;
+  }
+  // Outside the window: the pair's deck must actually be sounding at the
+  // pair's entry (ping-pong reuses decks — a later entry on the same deck
+  // must not claim the marker).
+  const state = planStateAt(execPlan, mixTime);
+  const side = mixTime < adj.mixStartSec ? i : i + 1;
+  const entry = execPlan.entries[side];
+  const deck = state.decks[entry.deck];
+  if (!deck.playing || deck.entryIndex !== side || deck.trackId !== entry.trackId) {
+    return null;
+  }
+  return side === i
+    ? deck.trackTime // the outgoing IS the authored axis
+    : adj.transition.startSec + (deck.trackTime - adj.transition.bInSec) / adj.rateIncoming;
+}
+
 const jumpsEqual = (a: Transition['jumps'], b: Transition['jumps']): boolean =>
   JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
 

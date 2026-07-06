@@ -42,6 +42,12 @@ export interface SavedTransition {
   /** Glossary: Favorite — asserts the pair goes well together AND this
    * specific Transition is good. Write-independent of Linked. */
   favorite?: boolean;
+  /** Last edit instant (epoch ms): the server's updated_at on load,
+   * stamped locally on real edits (sets 26 — "most recently edited" is
+   * the unresolved-adjacency resolution tiebreaker, so it must be live
+   * within a session, not only after a reload). Absent = never edited
+   * since the column landed = oldest. */
+  updatedAtMs?: number;
 }
 
 export interface PairEntry {
@@ -115,12 +121,34 @@ export function snapshotPairStore(): PairStore {
  */
 export function savePairEntry(pairKey: string, entry: PairEntry | null): void {
   const next = { ...snapshot };
-  if (entry) next[pairKey] = entry;
+  if (entry) next[pairKey] = { ...entry, items: stampEdits(snapshot[pairKey]?.items, entry.items) };
   else delete next[pairKey];
   snapshot = next;
   writeActive(pairKey, entry?.active ?? null);
   notify();
   void pushPair(pairKey, entry?.items ?? []);
+}
+
+/** Carry edit stamps across a pair write (sets 26): an item that is new,
+ * or differs from its stored self (name, favorite, or shape), is stamped
+ * "edited now"; an untouched item keeps its stored stamp. Value-based on
+ * purpose, mirroring the server (SQLAlchemy onupdate fires only for
+ * actually-dirty rows). */
+function stampEdits(
+  prev: readonly SavedTransition[] | undefined,
+  items: readonly SavedTransition[]
+): SavedTransition[] {
+  const before = new Map((prev ?? []).map((it) => [it.uuid, it]));
+  const now = Date.now();
+  return items.map((it) => {
+    const old = before.get(it.uuid);
+    const untouched =
+      old !== undefined &&
+      old.name === it.name &&
+      (old.favorite ?? false) === (it.favorite ?? false) &&
+      JSON.stringify(old.transition) === JSON.stringify(it.transition);
+    return { ...it, updatedAtMs: untouched ? old.updatedAtMs : now };
+  });
 }
 
 async function pushPair(pairKey: string, items: SavedTransition[]): Promise<boolean> {
@@ -143,6 +171,16 @@ async function pushPair(pairKey: string, items: SavedTransition[]): Promise<bool
   }
 }
 
+/** Server datetimes are naive UTC (SQLite func.now()); JS would parse
+ * a bare "YYYY-MM-DDTHH:mm:ss" as LOCAL time, skewing recency against
+ * client-side stamps by the timezone offset — pin the zone instead. */
+function parseServerInstant(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const pinned = /[zZ]$|[+-]\d\d:?\d\d$/.test(value) ? value : `${value}Z`;
+  const ms = Date.parse(pinned);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
 function storeFromRows(rows: Awaited<ReturnType<typeof api.transitions.list>>): PairStore {
   const store: PairStore = {};
   const activeMap = readActiveMap();
@@ -153,6 +191,7 @@ function storeFromRows(rows: Awaited<ReturnType<typeof api.transitions.list>>): 
       name: row.name,
       favorite: row.favorite || undefined,
       transition: row.data as unknown as EditorMix['transition'],
+      updatedAtMs: parseServerInstant(row.updated_at),
     });
   }
   for (const [key, entry] of Object.entries(store)) {

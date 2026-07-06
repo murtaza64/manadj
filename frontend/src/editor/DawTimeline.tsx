@@ -12,6 +12,7 @@ import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { toThreeBands } from '../waveform/blob';
 import { useHotCues } from '../hooks/useHotCues';
 import { MixPlayer } from './MixPlayer';
+import { ConductorLanePlayhead } from './ConductorLanePlayhead';
 import { GlobalMinimap } from './GlobalMinimap';
 import { LaneCanvas } from './LaneCanvas';
 import { LANE_COLORS } from './laneColors';
@@ -1170,6 +1171,11 @@ export function DawTimeline({
 
           {/* Mix playhead */}
           <div ref={playheadRef} className="editor-playhead" />
+
+          {/* Live Conductor playhead (sets 38): where the ongoing set is
+              on THIS pair's timeline — the outgoing's solo, the window,
+              and the incoming's tail. */}
+          <ConductorLanePlayhead store={store} pxPerSec={pxPerSec} />
         </div>
       </div>
 
