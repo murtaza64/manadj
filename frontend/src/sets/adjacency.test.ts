@@ -1,11 +1,11 @@
 /**
- * Adjacency model (sets 02): pin resolution, auto-fill, badges, evidence.
- * Expected values are independent literals — never recomputed through the
- * code under test.
+ * Adjacency model (sets 02, revised by sets 26): plan-time resolution,
+ * Hard-cut pins, badges, evidence. Expected values are independent
+ * literals — never recomputed through the code under test.
  */
 import { describe, expect, it } from 'vitest';
-import { adjacencyView, autoFillProposal } from './adjacency';
-import type { TakeEvidence, TransitionEvidence } from './adjacency';
+import { adjacencyView, resolvePlanPins, resolveTransition } from './adjacency';
+import type { AdjacencyPin, TakeEvidence, TransitionEvidence } from './adjacency';
 
 function tr(uuid: string, over: Partial<TransitionEvidence> = {}): TransitionEvidence {
   return { uuid, name: `Transition ${uuid}`, favorite: false, ...over };
@@ -15,24 +15,144 @@ function tk(uuid: string): TakeEvidence {
   return { uuid, detectedAt: '2026-07-05T12:00:00' };
 }
 
-describe('autoFillProposal', () => {
-  it('proposes the first favorite when any exist', () => {
-    const proposal = autoFillProposal([tr('a'), tr('b', { favorite: true }), tr('c', { favorite: true })]);
-    expect(proposal?.uuid).toBe('b');
+describe('resolveTransition (sets 26: favorite first, else most recently edited)', () => {
+  it('picks the favorite when one exists', () => {
+    const picked = resolveTransition([tr('a'), tr('b', { favorite: true })]);
+    expect(picked?.uuid).toBe('b');
   });
 
-  it('proposes the sole Transition when there is exactly one', () => {
-    expect(autoFillProposal([tr('only')])?.uuid).toBe('only');
+  it('picks the most recently edited favorite among several', () => {
+    const picked = resolveTransition([
+      tr('a', { favorite: true, updatedAtMs: 1000 }),
+      tr('b', { favorite: true, updatedAtMs: 3000 }),
+      tr('c', { updatedAtMs: 9000 }),
+    ]);
+    expect(picked?.uuid).toBe('b');
   });
 
-  it('proposes nothing for multiple unfavorited Transitions (ambiguous)', () => {
-    expect(autoFillProposal([tr('a'), tr('b')])).toBeNull();
+  it('picks the most recently edited when no favorite exists', () => {
+    const picked = resolveTransition([
+      tr('a', { updatedAtMs: 2000 }),
+      tr('b', { updatedAtMs: 5000 }),
+      tr('c', { updatedAtMs: 1000 }),
+    ]);
+    expect(picked?.uuid).toBe('b');
   });
 
-  it('proposes nothing when the pair has no Transitions', () => {
-    // Takes are never auto-filled — the function does not even see them
-    // (pinning a Take is always a manual act, PRD).
-    expect(autoFillProposal([])).toBeNull();
+  it('resolves the sole Transition (no longer ambiguous-averse: several unfavorited siblings still resolve)', () => {
+    expect(resolveTransition([tr('only')])?.uuid).toBe('only');
+    // Two unfavorited siblings: most recently edited wins — the sets 02
+    // "ambiguous → nothing" rule is retired by 26.
+    const picked = resolveTransition([tr('a', { updatedAtMs: 1 }), tr('b', { updatedAtMs: 2 })]);
+    expect(picked?.uuid).toBe('b');
+  });
+
+  it('breaks recency ties toward the later sibling (append order = creation order)', () => {
+    expect(resolveTransition([tr('a'), tr('b')])?.uuid).toBe('b');
+    expect(resolveTransition([tr('a', { updatedAtMs: 7 }), tr('b', { updatedAtMs: 7 })])?.uuid).toBe('b');
+  });
+
+  it('treats a missing edit stamp as oldest', () => {
+    const picked = resolveTransition([tr('a', { updatedAtMs: 5 }), tr('unstamped')]);
+    expect(picked?.uuid).toBe('a');
+  });
+
+  it('resolves nothing when the pair has no Transitions (the only remaining cut-by-default)', () => {
+    expect(resolveTransition([])).toBeNull();
+  });
+});
+
+describe('resolvePlanPins (sets 26: the plan-input resolution seam)', () => {
+  const evidence: Record<string, TransitionEvidence[]> = {
+    '1:2': [tr('x', { updatedAtMs: 1 }), tr('y', { updatedAtMs: 2 })],
+    '2:3': [],
+  };
+  const evidenceFor = (a: number, b: number) => evidence[`${a}:${b}`] ?? [];
+
+  it('resolves an unpinned adjacency to the pair’s best Transition', () => {
+    const out = resolvePlanPins(
+      [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+      ],
+      evidenceFor
+    );
+    expect(out[0].pin).toEqual({ kind: 'transition', uuid: 'y' });
+  });
+
+  it('leaves an unpinned adjacency null when the pair has no Transitions (hard cut)', () => {
+    const out = resolvePlanPins(
+      [
+        { trackId: 2, pin: null },
+        { trackId: 3, pin: null },
+      ],
+      evidenceFor
+    );
+    expect(out[0].pin).toBeNull();
+  });
+
+  it('never overrides a Transition pin — resolution respects the freeze', () => {
+    const pin: AdjacencyPin = { kind: 'transition', uuid: 'x' };
+    const out = resolvePlanPins(
+      [
+        { trackId: 1, pin },
+        { trackId: 2, pin: null },
+      ],
+      evidenceFor
+    );
+    expect(out[0].pin).toEqual({ kind: 'transition', uuid: 'x' });
+  });
+
+  it('never overrides a Take pin (Takes never auto-resolve)', () => {
+    const pin: AdjacencyPin = { kind: 'take', uuid: 't1' };
+    const out = resolvePlanPins(
+      [
+        { trackId: 1, pin },
+        { trackId: 2, pin: null },
+      ],
+      evidenceFor
+    );
+    expect(out[0].pin).toEqual({ kind: 'take', uuid: 't1' });
+  });
+
+  it('passes an explicit Hard-cut pin through untouched (forces the cut past available Transitions)', () => {
+    const pin: AdjacencyPin = { kind: 'hardcut' };
+    const out = resolvePlanPins(
+      [
+        { trackId: 1, pin },
+        { trackId: 2, pin: null },
+      ],
+      evidenceFor
+    );
+    expect(out[0].pin).toEqual({ kind: 'hardcut' });
+  });
+
+  it('re-resolves a dangling Transition pin like an unpinned adjacency', () => {
+    const pin: AdjacencyPin = { kind: 'transition', uuid: 'deleted' };
+    const out = resolvePlanPins(
+      [
+        { trackId: 1, pin },
+        { trackId: 2, pin: null },
+      ],
+      evidenceFor
+    );
+    expect(out[0].pin).toEqual({ kind: 'transition', uuid: 'y' });
+  });
+
+  it('leaves the last entry’s pin alone (it heads no adjacency)', () => {
+    const out = resolvePlanPins([{ trackId: 1, pin: null }], evidenceFor);
+    expect(out[0].pin).toBeNull();
+  });
+
+  it('preserves extra entry fields (generic over the entry shape)', () => {
+    const out = resolvePlanPins(
+      [
+        { trackId: 1, pin: null, extra: 7 },
+        { trackId: 2, pin: null, extra: 8 },
+      ],
+      evidenceFor
+    );
+    expect(out[0]).toEqual({ trackId: 1, pin: { kind: 'transition', uuid: 'y' }, extra: 7 });
   });
 });
 
@@ -44,16 +164,17 @@ describe('adjacencyView', () => {
     expect(v.counts).toEqual({ transitions: 0, takes: 0 });
   });
 
-  it('unresolved and unpracticed are orthogonal: evidence without a pin', () => {
-    const v = adjacencyView(null, [tr('a')], [tk('t1')]);
-    expect(v.status).toBe('unresolved');
-    expect(v.unpracticed).toBe(false);
-    expect(v.counts).toEqual({ transitions: 1, takes: 1 });
+  it('auto-resolves an unpinned adjacency to the pair’s best Transition (sets 26)', () => {
+    const v = adjacencyView(null, [tr('a', { updatedAtMs: 1 }), tr('b', { updatedAtMs: 2 })], []);
+    expect(v.status).toBe('transition');
+    expect(v.auto).toBe(true);
+    expect(v.transition?.uuid).toBe('b');
   });
 
-  it('resolves a Transition pin to its evidence row', () => {
+  it('resolves a Transition pin to its evidence row, marked pinned (not auto)', () => {
     const v = adjacencyView({ kind: 'transition', uuid: 'b' }, [tr('a'), tr('b', { favorite: true })], []);
     expect(v.status).toBe('transition');
+    expect(v.auto).toBe(false);
     expect(v.transition?.uuid).toBe('b');
     expect(v.transition?.favorite).toBe(true);
     expect(v.unpracticed).toBe(false);
@@ -67,14 +188,28 @@ describe('adjacencyView', () => {
     expect(v.unpracticed).toBe(false);
   });
 
-  it('a dangling Transition pin degrades to unresolved (never breaks)', () => {
+  it('an explicit Hard-cut pin cuts despite available Transitions', () => {
+    const v = adjacencyView({ kind: 'hardcut' }, [tr('a')], [tk('t1')]);
+    expect(v.status).toBe('hardcut');
+    expect(v.transition).toBeUndefined();
+    expect(v.unpracticed).toBe(false);
+  });
+
+  it('a dangling Transition pin re-resolves against the remaining evidence', () => {
     const v = adjacencyView({ kind: 'transition', uuid: 'deleted' }, [tr('other')], []);
+    expect(v.status).toBe('transition');
+    expect(v.auto).toBe(true);
+    expect(v.transition?.uuid).toBe('other');
+  });
+
+  it('a dangling Transition pin with no evidence degrades to unresolved', () => {
+    const v = adjacencyView({ kind: 'transition', uuid: 'deleted' }, [], []);
     expect(v.status).toBe('unresolved');
     expect(v.transition).toBeUndefined();
   });
 
-  it('a dangling Take pin degrades to unresolved', () => {
-    const v = adjacencyView({ kind: 'take', uuid: 'deleted' }, [], [tk('t1')]);
+  it('a dangling Take pin degrades to unresolved (the planner cuts — never auto-swap a manual act)', () => {
+    const v = adjacencyView({ kind: 'take', uuid: 'deleted' }, [tr('a')], [tk('t1')]);
     expect(v.status).toBe('unresolved');
   });
 

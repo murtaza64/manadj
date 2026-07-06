@@ -1,6 +1,6 @@
 # Q and SHIFT+Q: Quantize toggle and per-Deck Key Lock
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -25,3 +25,23 @@ The hardware Q buttons drive the two "keep it musical" guards, registry-direct:
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+- 2026-07-06 (miditog lane): implemented in jj change `tlzzslxy`. New closed-vocabulary
+  targets `quantize` (deck-less — both Q buttons are two handles on one switch) and
+  `key-lock` (per deck), both registry-direct per ADR 0019: dispatch writes the
+  quantize store directly (same writer path as the TopBar Q), key lock goes through a
+  new `toggleKeyLock` deck-controls handler making the exact dual write the on-screen
+  toggle makes (engine live state + persisted flag). Bindings at note 0x02 on the
+  transport channels (1/2) and the ch+3 shifted layer (4/5), all TODO(hardware-verify)
+  per Mixxx's Inpulse 300 XML. Feedback: `DeckFeedback.quantize` lamp mirrors the one
+  app-wide state on both decks; the shifted-Q Key Lock lamp probe is wired
+  optimistically behind an optional `keyLockShifted` address with a comment in the
+  mapping explaining both outcomes (keep if real, delete if not — encoder skips absent
+  addresses; one lamp never tells two truths). Full-sync-on-connect rides the existing
+  outputs-dep resend. Covered at the translator, dispatch, and LED-derivation seams;
+  full vitest (1194) + tsc build green. Status → ready-for-human: review at
+  http://localhost:5393 (lane app running, lane miditog); walkthrough in the review
+  request. Hardware smoke test (Q messages, shifted-Q lamp probe) still pending —
+  addresses carry TODO(hardware-verify).

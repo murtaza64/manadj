@@ -45,6 +45,9 @@ def test_insert_and_get(client, make_track):
     assert listed[0]["a_track_id"] == a.id
     assert listed[0]["b_track_id"] == b.id
     assert listed[0]["data"]["bInSec"] == 31.2
+    # Last-edit instant rides the row (sets 26: unresolved-adjacency
+    # resolution ranks by "most recently edited").
+    assert listed[0]["updated_at"] is not None
 
 
 def test_re_put_is_idempotent_and_keeps_row_ids(client, make_track, db_session):

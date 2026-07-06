@@ -299,6 +299,9 @@ class TransitionRow(BaseModel):
     name: str
     favorite: bool
     data: dict
+    # Last edit instant (sets 26: unresolved-adjacency resolution ranks by
+    # "most recently edited"). Naive UTC, like every updated_at here.
+    updated_at: datetime | None = None
 
 
 # Track-link Schemas (linked-pairs PRD — symmetric Linked pairs)
@@ -444,17 +447,22 @@ class SetEntryItem(BaseModel):
     track_id is the entry identity (a Track at most once per Set).
 
     The pin (sets 02) describes the adjacency this entry heads: a
-    Transition uuid, a Take uuid, or nothing (Unresolved). Kind and uuid
-    travel together; the uuid is stored as asserted (never validated
-    against the transitions/takes tables — dangling degrades client-side).
+    Transition uuid, a Take uuid, an explicit Hard-cut (sets 26 — no
+    uuid: it references nothing), or nothing (Unresolved). Kind and uuid
+    travel together for transition/take; the uuid is stored as asserted
+    (never validated against the transitions/takes tables — dangling
+    degrades client-side).
     """
     track_id: int
-    pin_kind: str | None = Field(default=None, pattern=r"^(transition|take)$")
+    pin_kind: str | None = Field(default=None, pattern=r"^(transition|take|hardcut)$")
     pin_uuid: str | None = None
 
     @model_validator(mode="after")
     def _pin_fields_travel_together(self) -> "SetEntryItem":
-        if (self.pin_kind is None) != (self.pin_uuid is None):
+        if self.pin_kind == "hardcut":
+            if self.pin_uuid is not None:
+                raise ValueError("a hardcut pin carries no pin_uuid")
+        elif (self.pin_kind is None) != (self.pin_uuid is None):
             raise ValueError("pin_kind and pin_uuid must both be set or both be null")
         return self
 
@@ -462,13 +470,23 @@ class SetEntryItem(BaseModel):
 class SetDormantPinItem(BaseModel):
     """One Dormant pin (sets 07): a broken pin remembered per ORDERED
     track pair, per Set. Unlike an entry pin it always carries a pin —
-    a memory of nothing is nothing. The uuid is stored as asserted
-    (dangling memories are DROPPED by the deletion paths, degrade_pins).
+    a memory of nothing is nothing (a Hard-cut pin IS a pin: dormancy
+    round-trips it, sets 26). The uuid is stored as asserted (dangling
+    memories are DROPPED by the deletion paths, degrade_pins).
     """
     a_track_id: int
     b_track_id: int
-    pin_kind: str = Field(pattern=r"^(transition|take)$")
-    pin_uuid: str
+    pin_kind: str = Field(pattern=r"^(transition|take|hardcut)$")
+    pin_uuid: str | None = None
+
+    @model_validator(mode="after")
+    def _uuid_matches_kind(self) -> "SetDormantPinItem":
+        if self.pin_kind == "hardcut":
+            if self.pin_uuid is not None:
+                raise ValueError("a hardcut pin carries no pin_uuid")
+        elif self.pin_uuid is None:
+            raise ValueError("a transition/take pin requires a pin_uuid")
+        return self
 
 
 class SetEntriesReplace(BaseModel):
@@ -494,7 +512,7 @@ class SetDormantPinRow(BaseModel):
     a_track_id: int
     b_track_id: int
     pin_kind: str
-    pin_uuid: str
+    pin_uuid: str | None
 
     model_config = ConfigDict(from_attributes=True)
 

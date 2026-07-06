@@ -15,8 +15,9 @@
  *
  * `previewAdjacencyFutures` classifies a HYPOTHETICAL order's affected
  * adjacencies for the live drag preview: will-restore (a Dormant pin
- * waits) / auto-fillable (a library Transition exists for the pair) /
- * unresolved; unaffected adjacencies are null.
+ * waits) / auto-resolves (a library Transition exists for the pair —
+ * plan-time resolution will play it, sets 26) / unresolved (will cut);
+ * unaffected adjacencies are null.
  */
 import type { AdjacencyPin } from './adjacency';
 
@@ -92,7 +93,7 @@ export function reconcileOrderChange(
 
 /** One hypothetical adjacency's future under a drag preview; null =
  * unaffected (the ordered pair is adjacent in the committed order too). */
-export type AdjacencyFuture = 'will-restore' | 'auto-fillable' | 'unresolved';
+export type AdjacencyFuture = 'will-restore' | 'auto-resolves' | 'unresolved';
 
 /** The will-restore preview color (ladder frames and list markers share
  * it). Violet is unclaimed on purpose: cyan/magenta are Deck identity,
@@ -107,7 +108,7 @@ export function previewAdjacencyFutures(
   oldEntries: readonly OrderedEntry[],
   oldDormant: readonly DormantPin[],
   newTrackIds: readonly number[],
-  /** A library Transition exists for the ordered pair (auto-fillable). */
+  /** A library Transition exists for the ordered pair (auto-resolves). */
   hasLibraryTransition: (aTrackId: number, bTrackId: number) => boolean
 ): (AdjacencyFuture | null)[] {
   const oldAdjacent = new Set<string>();
@@ -125,7 +126,7 @@ export function previewAdjacencyFutures(
     } else if (dormantPairs.has(key(a, b))) {
       futures.push('will-restore');
     } else {
-      futures.push(hasLibraryTransition(a, b) ? 'auto-fillable' : 'unresolved');
+      futures.push(hasLibraryTransition(a, b) ? 'auto-resolves' : 'unresolved');
     }
   }
   return futures;
