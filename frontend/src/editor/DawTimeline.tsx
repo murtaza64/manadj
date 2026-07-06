@@ -31,6 +31,8 @@ import {
   visibleLaneIds,
 } from './mixModel';
 import type { JumpEvent, LaneId, LanePoint, Lanes, EditorMix } from './mixModel';
+import { deleteSelected } from './laneSelection';
+import { isTypingTarget } from '../components/performance/performanceKeys';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { jumpDeltaLabel } from './beatReadout';
 import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
@@ -44,6 +46,10 @@ const MAX_PX_PER_SEC = 240;
 
 /** Envelope-preview LUT resolution (samples across the window). */
 const MOD_LUT_N = 2048;
+
+/** Stable empty selection: LaneCanvas draw effects key on the `selected`
+ * identity — a fresh [] per render would redraw every lane every render. */
+const NO_SELECTION: number[] = [];
 
 /** First index with arr[i] >= v (arr ascending). */
 function lowerBound(arr: number[], v: number): number {
@@ -105,6 +111,16 @@ export function DawTimeline({
   );
   /** Remove the lane from the editor (envelope kept; re-add restores). */
   const onLaneHide = useCallback((id: LaneId) => store.hideLane(id), [store]);
+
+  // ── Lane node group selection (mix-editor 16) ──
+  // One selection at a time, KEYED BY LANE ID (v1 is per-lane; v2's
+  // cross-lane time-shift would widen this to a map without a reshape).
+  // View state, never persisted.
+  const [laneSel, setLaneSel] = useState<{ lane: LaneId; indices: number[] } | null>(null);
+  // A different Transition's points invalidate indices wholesale.
+  const activeItem = useEditorSelector(store, (s) => s.session.active);
+  const pairKey = useEditorSelector(store, (s) => s.pairKey);
+  useEffect(() => setLaneSel(null), [activeItem, pairKey]);
   const [pxPerSec, setPxPerSec] = useState(4);
   /** Horizontal offset in px — the single owner of all horizontal motion.
    * No native scrollbar: wheel and the minimap viewport drive it, and the
@@ -178,6 +194,30 @@ export function DawTimeline({
     waveDursRef.current = { a: waveA?.duration ?? 0, b: waveB?.duration ?? 0 };
   });
   const tr = mix.transition;
+
+  // Selection keyboard: Esc deselects; Delete/Backspace removes the
+  // selected nodes (deleteSelected keeps the lane's ≥1-point invariant).
+  useEffect(() => {
+    if (!laneSel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e)) return;
+      if (e.key === 'Escape') {
+        setLaneSel(null);
+        return;
+      }
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      e.preventDefault();
+      const lane = laneSel.lane;
+      const pts = tr.lanes[lane]?.length
+        ? tr.lanes[lane]
+        : defaultLanePoints(lane, tr.durationSec);
+      onLaneChange(lane, deleteSelected(pts, laneSel.indices));
+      setLaneSel(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [laneSel, tr.lanes, tr.durationSec, onLaneChange]);
+
   const aEnd = durA > 0 ? Math.min(tr.startSec + tr.durationSec, durA) : tr.startSec + tr.durationSec;
   // B is time-stretched on the mix axis by its playback rate. The block
   // starts at B's TRUE audio start: a negative entry anchor (bInSec < 0)
@@ -925,6 +965,10 @@ export function DawTimeline({
           windowLeftPx={tr.startSec * pxPerSec}
           registerScrollDraw={registerScrollDraw}
           onChange={(pts) => onLaneChange(id, pts)}
+          selected={laneSel?.lane === id ? laneSel.indices : NO_SELECTION}
+          onSelectedChange={(indices) =>
+            setLaneSel(indices.length > 0 ? { lane: id, indices } : null)
+          }
         />
       </div>
     </div>

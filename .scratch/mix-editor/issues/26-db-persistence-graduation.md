@@ -1,9 +1,6 @@
 # 26 — DB persistence graduation: Transitions move to the app database
 
-Status: ready-for-human (implemented, change rowxlzpw — verify in the
-browser: open the editor once (this runs the one-shot migration of your
-real localStorage store; check the pairs/names/stars survive), then wipe
-site data and reload to confirm everything comes back from the DB)
+Status: closed (implemented change rowxlzpw; user-verified 2026-07-05)
 
 ## Parent
 
@@ -47,15 +44,14 @@ Saved Transitions persist in the app DB instead of localStorage. Per ADR
 
 ## Acceptance criteria
 
-- [ ] Transitions survive a full browser-storage wipe (edit → wipe
+- [x] Transitions survive a full browser-storage wipe (edit → wipe
       localStorage → reload → pair, names, favorites, lanes intact)
-      — BY EYE (store tests cover the logic; the wipe run is the human
-      check)
+      — BY EYE (user-verified 2026-07-05)
 - [x] Existing localStorage store migrates once: uuids assigned, backup
       key left behind, second reload does not re-import (tested incl.
       failed-push retry and PROTOTYPE-era keys)
-- [ ] Editor behavior is indistinguishable — BY EYE (drag autosave,
-      switcher, stars, Library marks)
+- [x] Editor behavior is indistinguishable — BY EYE (user-verified
+      2026-07-05: drag autosave, switcher, stars, Library marks)
 - [x] Reconcile semantics: rename/favorite update in place (row id
       stable); delete removes only the absent uuid; delete-last removes
       the pair's rows (router-seam tests)

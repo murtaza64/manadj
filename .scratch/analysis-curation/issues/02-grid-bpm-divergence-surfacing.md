@@ -27,3 +27,19 @@ Surface the divergence for hand verification and make resolution one gesture eac
 ## Blocked by
 
 - Triage/grill (needs the human: where it surfaces, what the guard is)
+
+## Comments
+
+**2026-07-05 — scope shrinks under ADR 0027 (bpm-grid-authority grill):**
+the audit found the writers that rotted the invariant
+(`refresh_from_files` and `sync_to_db` bypass `write_bpm` —
+`track_metadata/manager.py:116,217`); bpm-grid-authority 02 guards them
+and 01 backfills the column from grids, so **column↔grid divergence
+becomes unrepresentable** — the "projection-maintenance guard" ask is
+covered, and the re-project resolution happens wholesale via the
+backfill. What REMAINS for this issue: the *wrong-grid* half (Say
+Nothing-class rows, where the grid itself lies and the file/field was
+right) — the backfill would overwrite a correct field with a wrong
+grid's tempo for those. Recommend: run this issue's repro query and
+hand-verify the ~12 rows BEFORE the 01 backfill lands; keep this issue
+scoped to "flag grid for re-analysis / hand grid edit" surfacing.

@@ -1,6 +1,6 @@
 # 01 — Cue quantization ignores BPM re-tempo (stale beatgrid)
 
-Status: ready-for-agent
+Status: done (verified — see 2026-07-05 fix comment)
 Type: task
 
 ## Symptom (reported 2026-07-05)
@@ -66,3 +66,37 @@ the lead: the server's BPM write path likely isn't regenerating
 `GET /api/beatgrids/{id}` before/after a re-tempo; if `beat_times` spacing
 is unchanged, it's a backend bug and the frontend cache machinery is
 innocent. Flipped needs-triage → ready-for-agent.
+
+**2026-07-05 — fixed (lane looping, change wpvluvzv):** Hypothesis 1
+disproven on trunk — the backend re-tempo is correct (API repro: PATCH
+174→87→174 re-spaces `beat_times` 0.3448s→0.6897s→0.3448s, anchor
+preserved; covered by `tests/test_beatgrids_router.py`). The bug moved
+with looping 01's client-side snap: **transport-class placement gestures
+(Main-cue set, loop engage, quantized hot-cue jumps) snapped against
+`DeckEngine.beatTimes` — a load-time snapshot never refreshed after a
+grid mutation** (`DeckEngine.ts` load / `transportContext()`). Hot-cue
+placement (`useHotCueActions`) reads the live query and was already
+fresh; the waveform drew the NEW grid while transport snapped to the OLD
+one.
+
+Fix: `DeckEngine.setBeatTimes(trackId, beatTimes)` (trackId-addressed, a
+late push for a previous Load is ignored) + `useDeckBeatgridSync` — one
+active `['beatgrid', id]` observer per loaded Deck in `DeckProvider`,
+so ANY grid mutation (BPM re-tempo, nudge, downbeat mark — they all
+invalidate that key) refetches and pushes re-spaced beats into the
+engine, whatever surface made the edit. Regression tests at the engine
+seam (`DeckEngine.test.ts`) and the sync-hook seam
+(`useDeckBeatgridSync.test.tsx`). Manual repro (headless browser, real
+Performance-view BpmControl, 87→174): cue-down at 10.7332s snapped to
+11.0280 (stale 87 grid) before the fix, 10.6832 (174 grid) after.
+
+The "persists across reload" leg did not reproduce on current trunk
+(`fetchQuery` refetches invalidated keys; likely a pre-looping-01
+observation). Backend `quantize_to_nearest_beat` removal: already landed
+with looping 01 — nothing pending, nothing smuggled in here.
+
+History note: trunk change `oozvmqrn` is mislabeled — it carries this
+issue's description but contains the sets issue-33 docs file (a
+workspace race: a docs fast-path `bookmark move main --to @` landed the
+wrong `@`). The actual fix is the change named
+`cue-quantize-bpm: 01-quantize-ignores-bpm-retempo (fix)`.

@@ -167,6 +167,28 @@ export function UnifiedTracksSync() {
   const [bulkPanel, setBulkPanel] = useState<BulkPendingItem[] | null>(null);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sync-status'] });
+  // Imports rewrite Track rows / beatgrids / hot cues that the rest of the
+  // app caches aggressively (['beatgrid', id] is staleTime: Infinity, and a
+  // loaded Deck's Quantize grid + jump tempo follow those queries) — every
+  // import path must invalidate what it touched, or waveform beat lines,
+  // BPM readouts and deck snapping serve pre-import data until a reload
+  // (cue-quantize-bpm 02). No trackId = a bulk import: invalidate by prefix.
+  const invalidateTrackCaches = (trackId?: number) => {
+    void queryClient.invalidateQueries({
+      queryKey: trackId != null ? ['track', trackId] : ['track'],
+    });
+    void queryClient.invalidateQueries({ queryKey: ['tracks'] });
+    void queryClient.invalidateQueries({ queryKey: ['playlist'] });
+  };
+  const invalidatePerfCaches = (trackId?: number) => {
+    void queryClient.invalidateQueries({
+      queryKey: trackId != null ? ['beatgrid', trackId] : ['beatgrid'],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: trackId != null ? ['hotcues', trackId] : ['hotcues'],
+    });
+    invalidateTrackCaches(trackId);
+  };
   const done = (msg: string) => {
     setNotice(msg);
     setPending(null);
@@ -195,13 +217,18 @@ export function UnifiedTracksSync() {
         skip_import: direction === 'export',
         skip_export: direction === 'import',
       }),
-    onSuccess: (_r, direction) =>
-      done(direction === 'export' ? 'Exported to Rekordbox' : 'Imported from Rekordbox'),
+    onSuccess: (_r, direction) => {
+      if (direction === 'import') invalidateTrackCaches();
+      done(direction === 'export' ? 'Exported to Rekordbox' : 'Imported from Rekordbox');
+    },
     onError: failed,
   });
   const importFiles = useMutation({
     mutationFn: (filepaths: string[]) => api.libraryImport.import({ candidate_filepaths: filepaths }),
-    onSuccess: (r) => done(`Imported ${r.imported} files into the Library`),
+    onSuccess: (r) => {
+      invalidateTrackCaches();
+      done(`Imported ${r.imported} files into the Library`);
+    },
     onError: failed,
   });
   const importField = useMutation({
@@ -215,7 +242,10 @@ export function UnifiedTracksSync() {
         dry_run: false,
       });
     },
-    onSuccess: () => done('Field imported'),
+    onSuccess: (_r, vars) => {
+      invalidateTrackCaches(vars.row.track_id!);
+      done('Field imported');
+    },
     onError: failed,
   });
   const importPerf = useMutation({
@@ -236,7 +266,10 @@ export function UnifiedTracksSync() {
           ? `${field === 'beatgrid' ? 'Beatgrid' : 'Main cue'} imported from Engine`
           : `Not imported: ${r.reason}`);
     },
-    onSuccess: (msg) => done(msg),
+    onSuccess: (msg, vars) => {
+      invalidatePerfCaches(vars.trackId);
+      done(msg);
+    },
     onError: failed,
   });
   const bulkImportPerf = useMutation({
@@ -246,6 +279,9 @@ export function UnifiedTracksSync() {
     }) => api.syncPerformance.bulkImport(body),
     onSuccess: (r, vars) => {
       const total = r.applied.hotcues + r.applied.beatgrid + r.applied.maincue + r.applied.key;
+      // Even the pending-confirmation branch already applied the automatic
+      // tier server-side — invalidate in both branches.
+      invalidatePerfCaches();
       const wasConfirmStep = (vars.overwrites?.length ?? 0) > 0;
       if (r.pending.length > 0 && !wasConfirmStep) {
         // automatic tier done; saved info needs per-item confirmation

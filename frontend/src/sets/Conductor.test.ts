@@ -22,7 +22,7 @@ import type { DeckEngine } from '../playback/DeckEngine';
 import type { ChannelId, Mixer } from '../playback/mixer';
 import type { Transition } from '../editor/mixModel';
 import { Conductor } from './Conductor';
-import { planSet, planStateAt, type SetPlan } from './planner';
+import { planSet, planStateAt, type PlanAutomation, type SetPlan } from './planner';
 
 // ── Fakes ──────────────────────────────────────────────────────────────
 
@@ -31,6 +31,10 @@ import { planSet, planStateAt, type SetPlan } from './planner';
 class FakeEngine {
   trackId: number | null = null;
   seeks = 0;
+  /** Last pitch commanded, and the full command log (re-plan ramp
+   * shape assertions — sets 24). Playhead advance ignores pitch. */
+  pitchPercent = 0;
+  pitches: number[] = [];
   /** Decoded-buffer duration the snapshot reports (may differ from the
    * plan's metadata duration — the mp3-estimate mismatch). */
   durationSec = 120;
@@ -57,7 +61,7 @@ class FakeEngine {
       loadState: this.trackId === null ? 'empty' : 'ready',
       playing: this.playingFlag,
       duration: this.durationSec,
-      pitchPercent: 0,
+      pitchPercent: this.pitchPercent,
       bendPercent: 0,
       previewing: false,
       hotCuePreviewSlot: null,
@@ -105,6 +109,14 @@ class FakeEngine {
     this.emit();
   }
 
+  /** A user Load landing on this deck (browse ▶, editor arrow keys, …):
+   * trackId moves and the engine emits — OUTSIDE any conductor call,
+   * exactly like the real async load flow. */
+  loadForeign(trackId: number): void {
+    this.trackId = trackId;
+    this.emit();
+  }
+
   /** The worklet ran off the end of the buffer (DeckEngine.handleEnded):
    * the engine parks itself at the decoded duration and emits — OUTSIDE
    * any conductor call. */
@@ -115,7 +127,10 @@ class FakeEngine {
     this.emit();
   }
 
-  setPitch(): void {}
+  setPitch(p: number): void {
+    this.pitchPercent = p;
+    this.pitches.push(p);
+  }
   setBend(): void {}
   subscribe(fn: () => void): () => void {
     this.subs.add(fn);
@@ -130,13 +145,17 @@ class FakeEngine {
   }
 }
 
-function fakeMixer(clock: () => number): Mixer {
+type LaneCapture = { A: PlanAutomation | null; B: PlanAutomation | null };
+
+function fakeMixer(clock: () => number, capture?: LaneCapture): Mixer {
   const channel = { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pfl: false };
   return {
     now: clock,
     engageAutomation: () => {},
     disengageAutomation: () => {},
-    setAutomation: () => {},
+    setAutomation: (ch: 'A' | 'B', v: PlanAutomation) => {
+      if (capture) capture[ch] = v;
+    },
     subscribe: () => () => {},
     getChannelState: () => channel,
     getCrossfader: () => 0,
@@ -203,21 +222,31 @@ function tickAt(t: number): void {
   frame?.();
 }
 
-function makeConductor(latencyOf: (postTime: number) => number, plan: SetPlan = overlapPlan()) {
+function makeConductor(
+  latencyOf: (postTime: number) => number,
+  plan: SetPlan = overlapPlan(),
+  opts: { emittingLoads?: boolean } = {}
+) {
   const clock = () => now;
   const engines = { A: new FakeEngine(clock, latencyOf), B: new FakeEngine(clock, latencyOf) };
   const stopped: string[] = [];
+  const lanes: LaneCapture = { A: null, B: null };
+  const loads: Array<{ deck: ChannelId; trackId: number }> = [];
   const conductor = new Conductor(
     plan,
-    { mixer: fakeMixer(clock), engines: engines as unknown as Record<ChannelId, DeckEngine> },
+    { mixer: fakeMixer(clock, lanes), engines: engines as unknown as Record<ChannelId, DeckEngine> },
     {
       loadTrack: (deck, trackId) => {
-        engines[deck].trackId = trackId;
+        loads.push({ deck, trackId });
+        // emittingLoads models the real async flow: the engine emits its
+        // trackId change outside any conductor call (self-guard blind).
+        if (opts.emittingLoads) engines[deck].loadForeign(trackId);
+        else engines[deck].trackId = trackId;
       },
       onStopped: (reason) => stopped.push(reason),
     }
   );
-  return { conductor, engines, plan, stopped };
+  return { conductor, engines, plan, stopped, lanes, loads };
 }
 
 /** Per-deck actual-audio offset from its plan position at mix time t. */
@@ -308,6 +337,68 @@ describe('natural end-of-track at a hard cut (the "conductor stops instead of cu
   });
 });
 
+describe('foreign loads during conduction (sets 28: a Load is a takeover)', () => {
+  // A user-initiated Load onto a conducted deck — browse ▶, the editor's
+  // embedded library, arrow keys, swap decks — is a manual deck gesture
+  // in spirit (the sets 21 openPair rationale, app-wide). The Conductor
+  // stops, the decks keep playing as they are, and the load proceeds as
+  // any manual load. Before: neither takeover nor blocked — a reload war.
+  const latency = () => 0.002;
+
+  it('a foreign load onto a conducted deck stops the Conductor as a takeover', () => {
+    const { conductor, engines, stopped } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0); // load-freeze tick
+    tickAt(0.01); // A starts
+    tickAt(30);
+    engines.B.loadForeign(99); // user loads track 99 onto the idle deck
+    expect(stopped).toEqual(['takeover']);
+    expect(conductor.isPlaying()).toBe(false);
+    // The playing deck keeps playing as it is — the user is live.
+    expect(engines.A.getSnapshot().playing).toBe(true);
+  });
+
+  it('never re-requests its own track over the foreign one (no reload war)', () => {
+    const { conductor, engines, loads } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30);
+    const loadsBefore = loads.length;
+    engines.A.loadForeign(99); // user commandeers the SOUNDING deck
+    tickAt(30.05); // any pending frame — must not fight the user's load
+    expect(loads.length).toBe(loadsBefore);
+    expect(engines.A.trackId).toBe(99);
+  });
+
+  it("the Conductor's own async load completion is load-flow, not a takeover", () => {
+    const { conductor, engines, stopped } = makeConductor(latency, overlapPlan(), {
+      emittingLoads: true,
+    });
+    conductor.playFromEntry(0); // both loads emit trackId changes
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(65); // mid-window: both decks conducted
+    expect(stopped).toEqual([]);
+    expect(conductor.isPlaying()).toBe(true);
+    expect(engines.A.getSnapshot().playing).toBe(true);
+    expect(engines.B.getSnapshot().playing).toBe(true);
+    conductor.stop();
+  });
+
+  it('a foreign load while paused is still a takeover', () => {
+    const { conductor, engines, stopped } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30);
+    conductor.pause();
+    engines.B.loadForeign(99);
+    expect(stopped).toEqual(['takeover']);
+    expect(conductor.isActive()).toBe(false);
+  });
+});
+
 describe('deck-join alignment (the set-playback clash bug)', () => {
   // Start latency: 2ms for everything posted at mix start, 20ms for the
   // task where B joins — different tasks, different quantum boundaries.
@@ -352,6 +443,106 @@ describe('deck-join alignment (the set-playback clash bug)', () => {
     // position for that instant — the restart is a re-anchor, not a jump.
     const state = planStateAt(plan, 60.2);
     expect(engines.A.getPlayhead()).toBeCloseTo(state.decks.A.trackTime, 6);
+    conductor.stop();
+  });
+});
+
+describe('live re-plan (sets 24: replacePlan)', () => {
+  const latency = () => 0.002;
+
+  /** overlapPlan variants: window at `windowStart` (default 60), 10s,
+   * B in at 0; both tracks 120 BPM (Riding default keeps rates at 1). */
+  function planWith(
+    opts: {
+      windowStart?: number;
+      lanes?: Transition['lanes'];
+      pinned?: boolean;
+      fixedTempoBpm?: number;
+    } = {}
+  ): SetPlan {
+    const transition: Transition = {
+      startSec: opts.windowStart ?? 60,
+      durationSec: 10,
+      bInSec: 0,
+      tempoMatch: false,
+      lanes: opts.lanes ?? {},
+    };
+    return planSet({
+      entries: [
+        { trackId: 1, pin: (opts.pinned ?? true) ? { kind: 'transition', uuid: 't1' } : null },
+        { trackId: 2, pin: null },
+      ],
+      tracks: {
+        1: { durationSec: 120, bpm: 120, hotCue1Sec: null },
+        2: { durationSec: 120, bpm: 120, hotCue1Sec: null },
+      },
+      transitionsByUuid: { t1: transition },
+      takesByUuid: {},
+      tempo: opts.fixedTempoBpm
+        ? { policy: 'fixed', setTempoBpm: opts.fixedTempoBpm }
+        : undefined,
+    });
+  }
+
+  it('swaps the plan mid-solo without touching the anchor deck; the handover follows the new geometry', () => {
+    const { conductor, engines } = makeConductor(latency, planWith());
+    conductor.playFromEntry(0);
+    tickAt(0); // load-freeze tick
+    tickAt(0.01); // A starts
+    tickAt(30);
+    const seeks = engines.A.seeks;
+    conductor.replacePlan(planWith({ windowStart: 65 }), 30, { rampSec: 1.5 });
+    tickAt(30.05);
+    tickAt(62); // the OLD window (60..70) would already have B sounding
+    expect(engines.B.getSnapshot().playing).toBe(false);
+    expect(engines.A.seeks).toBe(seeks); // the anchor was never re-seeked
+    expect(engines.A.getSnapshot().playing).toBe(true);
+    tickAt(66); // the NEW window (65..75): B joins
+    tickAt(66.05);
+    expect(engines.B.getSnapshot().playing).toBe(true);
+    expect(conductor.isPlaying()).toBe(true);
+    conductor.stop();
+  });
+
+  it("a tempo re-plan eases the playing deck's pitch instead of snapping", () => {
+    const { conductor, engines } = makeConductor(latency, planWith());
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30);
+    expect(engines.A.pitchPercent).toBe(0);
+    // Fixed Set tempo 126 over 120 BPM tracks: +5% everywhere. The
+    // remapped instant keeps the anchor's track-time: mix 30/1.05.
+    conductor.replacePlan(planWith({ fixedTempoBpm: 126 }), 30 / 1.05, { rampSec: 2 });
+    const seeks = engines.A.seeks;
+    tickAt(31); // mid-ramp (startAudio 30, duration 2)
+    expect(engines.A.pitchPercent).toBeGreaterThan(0);
+    expect(engines.A.pitchPercent).toBeLessThan(5);
+    tickAt(32.05); // ramp complete
+    expect(engines.A.pitchPercent).toBeCloseTo(5, 6);
+    // Never re-seeked while converging (the pickup no-touch rule).
+    expect(engines.A.seeks).toBe(seeks);
+    conductor.stop();
+  });
+
+  it('lane edits inside the sounding window apply immediately; a collapsing window converges by ramp', () => {
+    const { conductor, lanes } = makeConductor(latency, planWith());
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(65); // mid-window (60..70): both decks sounding
+    const edited = planWith({ lanes: { faderA: [{ x: 0, y: 0.25 }] } });
+    conductor.replacePlan(edited, 65, { rampSec: 1.5 });
+    tickAt(65.05);
+    // Same window keeps sounding: the new value lands EXACTLY (no lerp).
+    expect(lanes.A!.fader).toBeCloseTo(0.25, 6);
+    // Unpin: the window collapses at the playhead (hard cut at 120) —
+    // the anchor solos in the new plan and its fader converges, never
+    // snaps, from the sounding 0.25 toward solo 1.
+    conductor.replacePlan(planWith({ pinned: false }), 65.1, { rampSec: 1.5 });
+    tickAt(65.2);
+    expect(lanes.A!.fader).toBeGreaterThan(0.25);
+    expect(lanes.A!.fader).toBeLessThan(0.99);
     conductor.stop();
   });
 });

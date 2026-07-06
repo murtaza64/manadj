@@ -91,6 +91,9 @@ A Set adjacency whose ordered pair has no saved Transition and no Take — these
 **Pickup**:
 The Conductor's inverse of takeover: adopting the current Deck state as a mix instant and resuming Set playback from it. Always an explicit gesture with automatic mapping — the control is lit exactly when the state maps cleanly onto the plan, anchored on the audibly dominant Deck (Master-bus audibility, as in Handover detection): one audible Deck within its planned span, or two audible Decks aligned with their pinned Transition within tolerance. Unlit otherwise, showing the reason (track not in the Set; outside its planned span; misaligned blend — fade the stray Deck out and it lights; another surface holds audibility — an editor audition is mix-timeline semantics, not a performance to pick up from; stop it and it lights). Never audibly destructive: the anchor Deck is untouched; only silent Decks are reconciled; mixer and pitch converge to the plan via short ramps (the pitch ramp is a Tempo return). Picking up mid-Handover abandons the in-flight capture engagement — finishing a mix by machine forfeits the Take.
 
+**Live re-plan**:
+The Conductor's plan is live, not a snapshot: any plan-input change during Set playback (a Transition edit, a re-pin or auto-fill, a Dormant restore, a tempo change, a reorder) recomputes the plan and the ongoing run continues seamlessly in the new one — an automatic Pickup into the new plan (same anchor mapping, same never-audibly-destructive invariants, no button). The sounding window's rule: its GEOMETRY (start, duration, B-entry alignment, jumps, tempo-match) is deferred — the active window completes as it was, the new geometry applies downstream and on any later replay — while its lane VALUES apply live (swapping automation under the playhead is riding the mix, the editor's idiom). If a reorder removes the anchor's Track from the Set, the Conductor stands down takeover-style: the Decks keep sounding and the Pickup control surfaces the unresolvable state.
+
 **Tempo policy**:
 A per-Set choice governing tempo during Set playback. **Riding**: each incoming Track eases back to its native tempo between Transitions (see Tempo return). **Fixed**: the entire Set plays at the Set tempo — every Track pitched to it, Transitions rate-scaled as a whole; a pinned Transition's tempo-match flag is moot. One policy per Set; per-section tempo progression is deferred.
 
@@ -239,6 +242,10 @@ _Avoid_: headphone cue (as the toggle's name), solo
 
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid. When a Beatgrid exists it is the authority on tempo: the Track's BPM is its projection (the grid's dominant tempo), not an independent field, and editing BPM is a grid operation (ADR 0016). A grid may carry an *anchor* — the downbeat the user explicitly marked — which re-tempo operations never move.
+
+**Grow / Shrink**:
+The fine re-tempo pair on a Track's Beatgrid: growing widens beat spacing (BPM down a hair), shrinking tightens it (BPM up). A grid operation like any BPM edit, honoring the grid's anchor. Distinct from a grid nudge, which translates the grid without changing its tempo.
+_Avoid_: BPM nudge (collides with both the performance Nudge and the grid nudge)
 
 **Quantized track**:
 A Track produced against a fixed tempo grid, so a constant-tempo Beatgrid (BPM + phase) is its correct description — nearly all of the library. Native grid Analysis assumes quantization: it fits a constant grid to detected beats, and bails (no grid, flagged for attention) rather than emit a wobbly variable grid when the fit is poor. Raw beat-tracker ticks are evidence for the fit, never the grid itself.

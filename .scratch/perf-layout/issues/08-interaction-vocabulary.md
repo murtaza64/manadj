@@ -68,3 +68,18 @@ vitest as regression floor. Review-gated.
 - SetsSidebarSection.tsx unmigrated flag above is resolved: sets 22
   migrated it (SetsSidebarSection.css mirrors the PlaylistSidebar
   patterns, as prescribed).
+- Vocabulary edge found during sets 35 (loaded/playing row marks, lane
+  setui): a STATE mark occupying the same column as a hover-revealed
+  affordance. The Set rows' play column shows the animated playing mark
+  (green EQ bars) at rest; row hover reveals the ▶ play-from affordance
+  in that slot, so the mark yields to it (`.set-mark-yields-to-hover`,
+  SetDetailPane.css) — the Spotify number→play idiom. Strictly read,
+  "states outrank hovers" says the mark should stay; but the state is
+  still carried under hover by the row's deck-identity wash, and the
+  mark only yields when the affordance actually appears (a plan-less
+  playing row keeps its bars). Also: the mark animates `transform:
+  scaleY` — reading the "no scale effects" rule as governing
+  interaction feedback (hover/press), not state animations; a
+  `prefers-reduced-motion` fallback renders it static. Flagging both
+  for adoption into the vocabulary (or correction) rather than forking
+  silently.

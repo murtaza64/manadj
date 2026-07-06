@@ -9,7 +9,8 @@
  * "Overview ladder"): pan = native horizontal scroll; zoom = vertical
  * wheel (waveform convention), anchored at the cursor's mix-time — at
  * the playhead while follow is engaged. Default framing fits the whole
- * set; the viewport persists per Set in the set store. The ladder and
+ * set up to ~10 minutes of mix (longer sets open on a 10-minute window);
+ * the viewport persists per Set in the set store. The ladder and
  * the track list are independent surfaces converging on EVENTS only:
  * clicking the ladder SEEKS (Conductor), and under follow-playback the
  * ladder auto-scrolls DAW-style (paged — pan when the playhead crosses
@@ -34,6 +35,10 @@ const TITLE_H = 13;
 export const LADDER_H = LANE_H * 2 + 4;
 /** Max zoom: ~8s of mix per 100px. */
 const MAX_PX_PER_SEC = 12.5;
+/** Default framing shows at most this much mix — a whole hour-long set
+ * squeezed into one viewport reads as noise, so long sets open zoomed to
+ * a ~10-minute window instead (zoom 1 still means "whole set fits"). */
+const DEFAULT_MAX_VISIBLE_S = 600;
 /** Follow paging: pan when the playhead passes this viewport fraction,
  * landing it at the re-entry fraction. */
 const PAGE_TRIGGER = 0.78;
@@ -75,7 +80,9 @@ export function OverviewLadder({
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(() => getLadderView(setId).zoom);
+  const [zoom, setZoom] = useState(
+    () => getLadderView(setId)?.zoom ?? Math.max(1, plan.totalSec / DEFAULT_MAX_VISIBLE_S),
+  );
   /** Cursor anchor for the pending zoom render: keep this mix-time under
    * this viewport x through the width change. */
   const zoomAnchor = useRef<{ mixTime: number; viewportX: number } | null>(null);
@@ -84,10 +91,11 @@ export function OverviewLadder({
   const total = Math.max(plan.totalSec, 0.001);
 
   // Canvases redraw at the SETTLED zoom (crisp after the gesture, cheap
-  // during it — CSS scaling covers the in-between frames).
+  // during it — CSS scaling covers the in-between frames; the backing
+  // stores are horizontally supersampled so that scaling blurs less).
   const [settledZoom, setSettledZoom] = useState(zoom);
   useEffect(() => {
-    const id = window.setTimeout(() => setSettledZoom(zoom), 150);
+    const id = window.setTimeout(() => setSettledZoom(zoom), 80);
     return () => window.clearTimeout(id);
   }, [zoom]);
 
@@ -96,7 +104,7 @@ export function OverviewLadder({
   // component by setId, so a Set switch remounts with its own viewport.
   useLayoutEffect(() => {
     const outer = outerRef.current;
-    if (outer) outer.scrollLeft = getLadderView(setId).scrollLeft;
+    if (outer) outer.scrollLeft = getLadderView(setId)?.scrollLeft ?? 0;
     lastMixTime.current = null;
   }, [setId]);
 
@@ -589,9 +597,10 @@ function ClipTitle({
  * same source of truth the player minimaps render from — re-drawn live on
  * any styles-mode tweak. Bars grow from the center line ('up' anchors the
  * baseline at the bottom edge, 'down' hangs them from the top — the
- * mirrored-lane layout wins over the style's own anchor); hot cues draw a
- * faint full-height line plus a triangle on the OUTER (title-side) edge,
- * keeping the center line clean. */
+ * mirrored-lane layout wins over the style's own anchor); hot cues use the
+ * deck minimaps' zoned mark — a 2px full-height pole flying a 5×5 square
+ * flag — with the flag on the OUTER (title-side) edge, keeping the center
+ * line clean. */
 function LadderWave({
   wave,
   height,
@@ -619,20 +628,27 @@ function LadderWave({
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     if (w === 0 || h === 0) return;
-    canvas.width = w * dpr;
+    // Horizontal supersampling: up to 2x the display resolution, so the
+    // CSS stretch while a zoom-in gesture is in flight has real detail to
+    // stretch into (half the blur until the settle redraw lands). Tapers
+    // to 1x as clips get wide (high zoom) to bound backing-store memory
+    // and settle-redraw cost.
+    const os = Math.max(1, Math.min(2, 8192 / (w * dpr)));
+    const wDraw = Math.round(w * os);
+    canvas.width = wDraw * dpr;
     canvas.height = h * dpr;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+    ctx.clearRect(0, 0, wDraw, h);
     if (!wave) return;
 
     const [t0, t1] = range;
     const span = Math.max(t1 - t0, 0.001);
-    const xAt = (t: number) => ((t - t0) / span) * w;
+    const xAt = (t: number) => ((t - t0) / span) * wDraw;
 
     drawStyledWave(ctx, wave, slot.styleId, slot.params, {
-      width: w,
+      width: wDraw,
       height: h,
       dir,
       range,
@@ -641,29 +657,14 @@ function LadderWave({
 
     for (const c of cues) {
       const x = xAt(c.t);
-      if (x < -4 || x > w + 4) continue;
-      ctx.strokeStyle = c.color;
-      ctx.globalAlpha = 0.45;
-      ctx.beginPath();
-      ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, h);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      if (x < -6 * os || x > wDraw + 6 * os) continue;
+      // The minimap's zoned cue mark (WaveformRendererV2.pushHotCues,
+      // minimap branch): 2px full-height pole + 5×5 square flag off its
+      // right, flag on the title side: top for 'up', bottom for 'down'.
+      // Horizontal sizes scale by os so they DISPLAY at minimap size.
       ctx.fillStyle = c.color;
-      ctx.beginPath();
-      // Triangle on the title side: top edge for 'up' (title above), bottom
-      // edge for 'down' (title below).
-      if (dir === 'up') {
-        ctx.moveTo(x - 4, 0);
-        ctx.lineTo(x + 4, 0);
-        ctx.lineTo(x, 6);
-      } else {
-        ctx.moveTo(x - 4, h);
-        ctx.lineTo(x + 4, h);
-        ctx.lineTo(x, h - 6);
-      }
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(x - os, 0, 2 * os, h);
+      ctx.fillRect(x + os, dir === 'up' ? 0 : h - 5, 5 * os, 5);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wave, height, dir, range[0], range[1], cueKey, redrawKey, slot]);

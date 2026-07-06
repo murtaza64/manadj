@@ -334,7 +334,9 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
               // learns bpm at Load; TagEditor edits the loaded track —
               // issue 23).
               onCommitted={(bpm) => {
-                if (loadedTrack?.id === track?.id) engine.setTrackBpm(bpm);
+                if (track && loadedTrack?.id === track.id) {
+                  engine.setTrackBpm(track.id, bpm);
+                }
               }}
               grid={{
                 getPlayhead: () => engine.getPlayhead(),
