@@ -76,3 +76,26 @@ Two fixes — the semantic one and the invariant one; do both:
 ## Blocked by
 
 - Coordination only: lane setlist's in-flight 21/22 (same files)
+
+## Comments
+
+**2026-07-05 — second symptom traced to the same root.** "Occasional
+failure to apply envelopes during transition audition" is this bug twice
+over: (a) during the dual-driver fight, the Conductor's tick writes plan
+lanes (fader open, EQ flat between windows) through `setAutomation` every
+frame — last-writer-wins buries the editor's drawn envelopes; (b) when
+the dual-driver Conductor exits by any path with `disengage: true`
+(stop, 'ended', takeover), it disengages the automation overlay out from
+under the live editor session — the overlay engage/disengage is a bare
+boolean, so MixPlayer's per-tick `setAutomation` writes go nowhere until
+the editor remounts. Add a third fix to the two above:
+
+3. **Overlay ownership token**: `engageAutomation()` returns/records an
+   owner; `disengageAutomation()` is a no-op for non-owners (or asserts).
+   A session that no-opped its engage (already engaged) must not be able
+   to lose the overlay to the prior owner's teardown. Cheap invariant,
+   protects every current and future engager pair.
+
+Acceptance addition:
+- [ ] With the editor auditioning, a Conductor stop/end/takeover never
+      disengages the editor's overlay (envelopes keep applying)
