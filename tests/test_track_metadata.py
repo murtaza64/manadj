@@ -301,6 +301,117 @@ class TestWriteToFiles:
         assert read_file_metadata(path).title is None
 
 
+def _grid(db, track_id: int, bpm: float, origin: str = "edited"):
+    import json
+
+    from backend.beatgrid_utils import constant_tempo_changes
+    from backend.models import Beatgrid
+
+    grid = Beatgrid(
+        track_id=track_id,
+        tempo_changes_json=json.dumps(constant_tempo_changes(bpm)),
+        origin=origin,
+    )
+    db.add(grid)
+    db.commit()
+    return grid
+
+
+class TestFileToDbBpmGuards:
+    """File→DB BPM never overwrites a gridded track (ADR 0027 §1)."""
+
+    def test_refresh_skips_bpm_on_gridded_track(self, db, make_track, audio_file):
+        path = audio_file("mp3")
+        write_file_metadata(path, title="FromFile", artist="FileArtist", key=5, bpm=87.0)
+        track = make_track(filename=str(path), bpm=17400)
+        grid = _grid(db, track.id, 174.0)
+        before_json = grid.tempo_changes_json
+
+        refresh_from_files(db, track_id=track.id)
+        db.refresh(track)
+        db.refresh(grid)
+        # grid and column untouched; other fields still update
+        assert grid.tempo_changes_json == before_json
+        assert grid.origin == "edited"
+        assert track.bpm == 17400
+        assert (track.title, track.artist, track.key) == ("FromFile", "FileArtist", 5)
+
+    def test_refresh_regenerates_placeholder_via_write_bpm(self, db, make_track, audio_file):
+        import json
+
+        path = audio_file("mp3")
+        write_file_metadata(path, bpm=140.0)
+        track = make_track(filename=str(path), bpm=12800)
+        grid = _grid(db, track.id, 128.0, origin="generated")
+
+        refresh_from_files(db, track_id=track.id)
+        db.refresh(track)
+        db.refresh(grid)
+        assert track.bpm == 14000
+        assert grid.origin == "generated"  # still a placeholder, regenerated
+        assert json.loads(grid.tempo_changes_json)[0]["bpm"] == 140.0
+
+    def test_sync_to_db_skips_bpm_on_gridded_track(self, db, make_track):
+        track = make_track(bpm=17400)
+        grid = _grid(db, track.id, 174.0)
+        before_json = grid.tempo_changes_json
+
+        sync_to_db(
+            db,
+            MetadataSyncRequest(
+                updates=[TrackMetadataUpdate(track_id=track.id, fields={"bpm": 87.0})],
+                dry_run=False,
+            ),
+        )
+        db.refresh(track)
+        db.refresh(grid)
+        assert track.bpm == 17400
+        assert grid.tempo_changes_json == before_json
+
+    def test_sync_to_db_routes_placeholder_bpm_through_write_bpm(self, db, make_track):
+        import json
+
+        track = make_track(bpm=12800)
+        grid = _grid(db, track.id, 128.0, origin="generated")
+
+        sync_to_db(
+            db,
+            MetadataSyncRequest(
+                updates=[TrackMetadataUpdate(track_id=track.id, fields={"bpm": 140.0})],
+                dry_run=False,
+            ),
+        )
+        db.refresh(track)
+        db.refresh(grid)
+        assert track.bpm == 14000
+        assert json.loads(grid.tempo_changes_json)[0]["bpm"] == 140.0
+
+    def test_compare_diffs_file_bpm_against_grid_first_projection(
+        self, db, make_track, audio_file
+    ):
+        """A gridded track whose file matches the GRID shows no BPM
+        divergence even when the internal column is stale — kills the
+        perpetual phantom "fix the DB" proposal."""
+        path = audio_file("flac")
+        write_file_metadata(path, bpm=174.0)
+        track = make_track(filename=str(path), bpm=8700, title=None, artist=None)
+        _grid(db, track.id, 174.0)
+
+        result = compare_with_files(db)
+        assert result.comparisons == []
+
+    def test_compare_reports_real_grid_divergence(self, db, make_track, audio_file):
+        path = audio_file("flac")
+        write_file_metadata(path, bpm=87.0)
+        track = make_track(filename=str(path), bpm=17400, title=None, artist=None)
+        _grid(db, track.id, 174.0)
+
+        comp = compare_with_files(db).comparisons[0]
+        assert comp.current.bpm == 174.0  # the projection, not the raw column
+        assert comp.file.bpm == 87.0
+        assert "bpm" in comp.differences
+
+
 class TestRefreshFromFiles:
     def test_refresh_single_track(self, db, make_track, audio_file):
         path = audio_file("m4a")

@@ -24,7 +24,7 @@ from .models import (
     MetadataValues,
     TrackChanges,
 )
-from .units import bpm_to_centibpm, centibpm_to_bpm
+from .units import bpm_to_centibpm
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +113,33 @@ def refresh_from_files(db: Session, track_id: int | None = None) -> int:
         track.title = meta.title
         track.artist = meta.artist
         track.key = meta.key
-        track.bpm = bpm_to_centibpm(meta.bpm)
+        _write_file_bpm(db, track, meta.bpm)
         refreshed += 1
 
     db.commit()
     return refreshed
+
+
+def _write_file_bpm(db: Session, track: models.Track, file_bpm: float | None) -> None:
+    """File→DB BPM per ADR 0027 §1: never overwrite a gridded track's tempo.
+
+    A real (non-generated) grid is the tempo authority — file BPM is the
+    least trustworthy tempo source in the system (integer-rounded,
+    half/double-time); skip silently, other fields are the caller's
+    business. Placeholder-only or gridless: route through write_bpm so
+    placeholders regenerate (plain metadata seeding, ADR 0016).
+    """
+    grid = track.beatgrid
+    if grid is not None and grid.origin != "generated":
+        return
+    if file_bpm is None:
+        # Nothing to seed a placeholder from; plain metadata clear.
+        track.bpm = None
+        return
+    # Lazy import: beatgrid_ops imports this package for units.
+    from backend.beatgrid_ops import write_bpm
+
+    write_bpm(db, track, file_bpm)
 
 
 def compare_with_files(db: Session) -> MetadataComparisonResult:
@@ -146,7 +168,10 @@ def compare_with_files(db: Session) -> MetadataComparisonResult:
         current = MetadataValues(
             title=track.title,
             artist=track.artist,
-            bpm=centibpm_to_bpm(track.bpm),
+            # Grid-first projection (ADR 0027 §1): a gridded track whose
+            # file matches the GRID shows no BPM divergence even when the
+            # internal column is stale.
+            bpm=track.bpm_projected,
             key=_musical(track.key),
         )
         file_values = MetadataValues(
@@ -211,10 +236,15 @@ def sync_to_db(db: Session, request: MetadataSyncRequest) -> MetadataSyncResult:
             if value is None:
                 continue
             if field == "bpm":
+                grid = track.beatgrid
+                if grid is not None and grid.origin != "generated":
+                    # ADR 0027 §1: the grid is the tempo authority; file
+                    # BPM never overwrites a gridded track.
+                    continue
                 centibpm = bpm_to_centibpm(float(value))
                 if track.bpm != centibpm:
                     if not request.dry_run:
-                        track.bpm = centibpm
+                        _write_file_bpm(db, track, float(value))
                     updated = True
             elif field == "key":
                 key = Key.from_musical(str(value))
