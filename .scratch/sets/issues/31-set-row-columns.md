@@ -1,0 +1,63 @@
+# 31 — Columnar Set track rows (BPM/key left, color-coded; time columns)
+
+Status: needs-triage
+
+## Parent
+
+.scratch/sets/PRD.md (refinement batch 2026-07-06, from live use after the
+20-set-row-polish landing)
+
+## What to build
+
+Restructure the Set track row into an explicit column grid — columnar
+design is the direction for these rows going forward (shared column
+constants, not per-row flex guesswork; today's 81px chip alignment in
+the adjacency rows is derived by hand from the track row's flex metrics
+and silently breaks if either side changes).
+
+1. **BPM and key move LEFT, right after the play-order index** — fixed-
+   width columns so values align down the list (they sit right-side
+   today, `SetDetailPane.tsx` SetTrackRow: key 40px, BPM 64px after the
+   plays-span).
+2. **Color-code BPM and key.** Open decisions for triage:
+   - Key: color by key identity (e.g. Camelot-wheel hue) vs. by
+     compatibility with the neighboring tracks?
+   - BPM: absolute value bands vs. delta against the Set tempo /
+     neighbors? (Fixed policy makes "delta vs Set tempo" natural;
+     Riding has no single reference.)
+   - Bright, saturated colors per repo convention; cyan/magenta stay
+     Deck identity (CONTEXT.md "Deck color") — pick outside that pair.
+3. **Time columns replace the single "plays m:ss of m:ss" span**:
+   - **in time** — the mix-clock time this track enters
+     (`PlannedEntry.entryMixSec`);
+   - **play time** — the audible span, rendered as `play/total`
+     (today's `exitSec − entrySec` over `duration_secs`).
+   - NEVER AUDIBLE (sets 19) keeps its badge behavior in this area.
+4. **Shared column geometry**: extract the column widths/offsets to
+   module-level constants consumed by both SetTrackRow and AdjacencyRow
+   (replaces AdjacencyRow's hand-derived `GUTTER_WIDTH = 58` math from
+   sets 20; issue 32's overlap-time column aligns to the same grid).
+
+## Acceptance criteria
+
+- [ ] Row reads: ▶ · # · key · BPM · title/artist · … · time columns · ✕
+      — key/BPM and the time columns align as columns across all rows
+- [ ] Key and BPM render color-coded per the triaged scheme
+- [ ] "in time" shows the plan's entry mix time; "play time" shows
+      play/total; NEVER AUDIBLE unchanged
+- [ ] Adjacency-row chip alignment (sets 20) survives, now driven by the
+      shared column constants
+- [ ] No behavioral changes — layout, color, and formatting only
+
+## Notes
+
+- `frontend/src/sets/SetDetailPane.tsx` rows; plan fields already carry
+  everything needed (`useSetPlan` → `PlannedEntry`).
+- Selection ring / conducting wash / drag dimming (sets 18/23) must
+  still read clearly over the new columns.
+
+## Blocked by
+
+- (none — lands on top of 20's row DOM)
+
+(Renumbered from 30, 2026-07-06 — parallel filing collided with 30-ladder-waveforms-follow-styles.)

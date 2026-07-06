@@ -1,0 +1,35 @@
+# 32 — Adjacency rows show the transition (overlap) time
+
+Status: needs-triage
+
+## Parent
+
+.scratch/sets/PRD.md (refinement batch 2026-07-06, same pass as issue 31)
+
+## What to build
+
+The adjacency (transition) row shows how long the handover overlaps: the
+planned window span on the mix axis — `PlannedAdjacency.mixEndSec −
+mixStartSec` (`frontend/src/sets/planner.ts`; hard cuts have
+`mixStart === mixEnd`, i.e. 0:00 — render nothing or an explicit 0:00,
+decide at triage alongside the red hard-cut chip from sets 20).
+
+Placement follows issue 31's column grid: the overlap time sits in the
+same time-column band as the track rows' in/play times, so the whole
+list reads as one table.
+
+## Acceptance criteria
+
+- [ ] Pinned adjacencies show the planned overlap duration (`fmtSec`),
+      aligned to the time columns of the neighboring track rows
+- [ ] Hard cuts render per the triaged decision (blank vs 0:00), never a
+      misleading nonzero span
+- [ ] Live drag preview (sets 23) shows the hypothetical order's overlap
+      times (same `displayPlan` source as the rest of the row)
+- [ ] No behavioral changes — display only
+
+## Blocked by
+
+- 31-set-row-columns (soft: shares the column grid; can land together)
+
+(Renumbered from 31, 2026-07-06 — cascade of the 30 collision.)
