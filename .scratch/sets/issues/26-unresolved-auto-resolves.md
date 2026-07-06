@@ -88,3 +88,14 @@ Where things landed:
    the plan recomputes live (ladder window appears mid-playback, sets 24).
 5. Header Auto-fill now reads as "freeze" (count = auto-resolved rows);
    clicking it pins every `◇` chip solid.
+
+**2026-07-06 — review follow-up (amended into `lmmppypt`).** Take-available
+indicator: an adjacency that will CUT while the pair has recorded Takes now
+grows a mauve `● take available — pin?` chip (Takes never auto-resolve, so
+this was the one invisible manual option) — click opens the pin picker.
+Shown only on unresolved cuts: suppressed when a Transition plays (the
+counts cell already shows `· N tk`), on explicit Hard-cut pins (a
+deliberate cut is not nagged), and while the fresh-take offer is showing
+(one mauve chip at a time). Walkthrough addition: find an adjacency whose
+pair has Takes but no Transitions — the red cut chip sits beside the mauve
+offer; click it and pin the Take from the picker.
