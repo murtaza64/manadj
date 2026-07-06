@@ -967,8 +967,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
  * adjacency's "✕ hard cut" chip itself turns red — there is no separate
  * UNRESOLVED badge. Red keys off pin state, never the name: a pinned
  * Transition NAMED "hard cut" keeps the normal green chip. The style
- * rides inline on a .set-chip-btn (perf-layout 08): accent text for
- * resolved chips; the red status fill pins across hover/press. */
+ * rides inline on a .set-chip-btn (perf-layout 08): accent text
+ * throughout — red text (bold), not a red fill, for unresolved (22
+ * follow-up: a fill per hard cut is too loud on a fresh set). */
 function pinChip(view: ReturnType<typeof adjacencyView>): {
   text: string;
   style: React.CSSProperties;
@@ -992,11 +993,7 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
   }
   return {
     text: '✕ hard cut',
-    style: {
-      background: 'var(--red)',
-      borderColor: 'var(--red)',
-      color: 'var(--base)',
-    },
+    style: { color: 'var(--red)' },
     title: 'Unresolved — will hard-cut. Pin a transition or take for this handover',
   };
 }
@@ -1162,8 +1159,8 @@ function AdjacencyRow({
         </span>
 
         {/* Pin chip — click opens the manual pin picker. Unresolved
-            turns the chip itself red (sets 20): the one hard-cut signal
-            (a solid status fill, pinned inline across hover/press). */}
+            turns the chip's text red + bold (sets 20, softened in the
+            22 follow-up): the one hard-cut signal. */}
         <button
           className="set-chip-btn"
           onClick={(e) => {

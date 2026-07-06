@@ -143,3 +143,9 @@ Additional acceptance criteria:
     press the ▶ / ✕ glyphs and the adjacency chips (border brightens,
     press fills). (6) Tempo chip popover: active policy solid, other
     quiet. (7) Suggest popover rows: hover tint.
+- Follow-up (2026-07-05, approved in-session during review): the
+  unresolved "✕ hard cut" chip's solid red fill was too aggressive on
+  fresh sets (every adjacency starts unresolved — a wall of red).
+  Softened to red bold text on the standard quiet chip, matching the
+  transition (green) / take (mauve) chips. Red still keys off pin
+  state, never the name (sets 20 invariant).
