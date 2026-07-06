@@ -1,6 +1,6 @@
 # 32 — Lane UI/UX pass: toggles, deck-family colors, control idiom, polarity
 
-Status: ready-for-human (implemented 2026-07-06, lane laneux, change xsouwpxm — verification walkthrough in Comments)
+Status: done (landed 2026-07-06, merge ukymqmzk — changes xsouwpxm + review nits vozoowkl; approved in session)
 
 ## Parent
 
