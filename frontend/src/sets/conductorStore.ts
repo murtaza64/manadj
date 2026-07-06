@@ -6,8 +6,13 @@
  * followStore/setStore: module snapshot + useSyncExternalStore.
  *
  * One Conductor at a time; starting a Set (or starting the same Set from
- * another row) replaces the previous run. The plan is snapshotted at
- * start — re-pinning during playback takes effect on the next start.
+ * another row) replaces the previous run. The plan is LIVE (sets 24):
+ * any plan-input change re-plans the ongoing run in place — the
+ * ConductorPlanFeed pushes each freshly assembled PlanInput through
+ * replanSetPlayback, which remaps the position (replan.ts: an automatic
+ * Pickup into the new plan) and swaps the plan under the run. The
+ * sounding window's geometry is deferred (grafted) until it completes;
+ * a poll on the mix clock lands the deferred geometry then.
  */
 import { useSyncExternalStore } from 'react';
 import { Conductor, type ConductorAudio, type ConductorHooks } from './Conductor';
@@ -18,7 +23,14 @@ import {
   readPickupSnapshot,
   type PickupDecision,
 } from './pickup';
-import type { SetPlan } from './planner';
+import { planSet, type PlanInput, type SetPlan } from './planner';
+import {
+  evaluateReplan,
+  graftSoundingWindow,
+  soundingWindowAt,
+  soundingWindowKey,
+} from './replan';
+import { getSetSettings } from './setSettings';
 
 export interface ConductorState {
   setId: number | null;
@@ -34,13 +46,16 @@ const IDLE: ConductorState = { setId: null, status: 'idle', activeEntryIndex: nu
 
 let conductor: Conductor | null = null;
 let conductorSetId: number | null = null;
-/** The plan as the VIEW built it — the identity the same-set checks
- * compare. A pickup may execute a deck-mirrored copy (sets 16), so
- * `conductor.plan` is not always this object. */
-let conductorSourcePlan: SetPlan | null = null;
 let conductorUnsub: (() => void) | null = null;
 let follow = false;
 let snapshot: ConductorState = IDLE;
+/** The latest plan input the feed delivered (sets 24) — re-planned from
+ * on graft expiry. */
+let lastPlanInput: PlanInput | null = null;
+/** The sounding window whose geometry is currently deferred (grafted),
+ * as "out:in" — the expiry poll re-plans when the playhead leaves it. */
+let graftPair: string | null = null;
+let graftPoll: ReturnType<typeof setInterval> | null = null;
 
 const listeners = new Set<() => void>();
 
@@ -69,12 +84,21 @@ function refreshSnapshot(): void {
   }
 }
 
+function stopGraftPoll(): void {
+  if (graftPoll !== null) {
+    clearInterval(graftPoll);
+    graftPoll = null;
+  }
+  graftPair = null;
+}
+
 function clearInstance(): void {
   conductorUnsub?.();
   conductorUnsub = null;
   conductor = null;
   conductorSetId = null;
-  conductorSourcePlan = null;
+  lastPlanInput = null;
+  stopGraftPoll();
   follow = false;
   refreshSnapshot();
 }
@@ -82,7 +106,6 @@ function clearInstance(): void {
 /** Install a fresh Conductor as the one running instance. */
 function installInstance(
   setId: number,
-  sourcePlan: SetPlan,
   execPlan: SetPlan,
   audio: ConductorAudio,
   loadTrack: ConductorHooks['loadTrack'],
@@ -100,7 +123,6 @@ function installInstance(
   });
   conductor = instance;
   conductorSetId = setId;
-  conductorSourcePlan = sourcePlan;
   conductorUnsub = instance.subscribe(refreshSnapshot);
   follow = true; // on at playback start (sets 05)
   return instance;
@@ -118,15 +140,17 @@ export function startSetPlayback(
   fromEntryIndex = 0,
   prefetch?: ConductorHooks['prefetch']
 ): void {
-  // Same Set, same plan, still conducting: just re-seek (row play button)
-  // instead of bouncing the claim/overlay through a stop-start.
-  if (conductor?.isActive() && conductorSetId === setId && conductorSourcePlan === plan) {
+  // Same Set, still conducting: just re-seek (row play button) instead
+  // of bouncing the claim/overlay through a stop-start. The running plan
+  // is current by construction (live re-plan keeps it fresh — sets 24),
+  // so no plan-identity check.
+  if (conductor?.isActive() && conductorSetId === setId) {
     follow = true; // seeking re-engages follow (sets 05)
     conductor.playFromEntry(fromEntryIndex);
     refreshSnapshot();
     return;
   }
-  const instance = installInstance(setId, plan, plan, audio, loadTrack, prefetch);
+  const instance = installInstance(setId, plan, audio, loadTrack, prefetch);
   instance.playFromEntry(fromEntryIndex);
   refreshSnapshot();
 }
@@ -145,13 +169,13 @@ export function seekSetPlayback(
   mixTime: number,
   prefetch?: ConductorHooks['prefetch']
 ): void {
-  if (conductor?.isActive() && conductorSetId === setId && conductorSourcePlan === plan) {
+  if (conductor?.isActive() && conductorSetId === setId) {
     follow = true;
     conductor.seek(mixTime);
     refreshSnapshot();
     return;
   }
-  const instance = installInstance(setId, plan, plan, audio, loadTrack, prefetch);
+  const instance = installInstance(setId, plan, audio, loadTrack, prefetch);
   instance.seek(mixTime);
   instance.play();
   refreshSnapshot();
@@ -179,7 +203,7 @@ export function pickupSetPlayback(
   const decision = evaluatePickup(plan, snap, { toleranceSec: opts.toleranceSec });
   if (!decision.lit) return decision;
   const execPlan = decision.flip ? flipPlanDecks(plan) : plan;
-  const instance = installInstance(setId, plan, execPlan, audio, loadTrack, prefetch);
+  const instance = installInstance(setId, execPlan, audio, loadTrack, prefetch);
   instance.pickup(decision.mixTime, {
     rampSec: opts.rampSec,
     rampDecks: decision.anchors,
@@ -187,6 +211,73 @@ export function pickupSetPlayback(
   });
   refreshSnapshot();
   return decision;
+}
+
+/**
+ * Live re-plan (sets 24): a plan-input change while this Set is
+ * conducting. Recomputes the plan (with the sounding window's geometry
+ * deferred — the graft), remaps the position on the audibly dominant
+ * deck (an automatic Pickup into the new plan, run internally — never
+ * the user-facing predicate: the holder here is the Conductor itself),
+ * and swaps the plan under the ongoing run. When the anchor's track has
+ * left the Set the Conductor stands down takeover-style: the decks keep
+ * sounding and the Pickup button surfaces the unresolvable state.
+ *
+ * Callers: the ConductorPlanFeed effect (one call per recomputed input;
+ * editor drags are already coalesced by the autosave debounce).
+ */
+export function replanSetPlayback(setId: number, input: PlanInput): void {
+  if (!conductor?.isActive() || conductorSetId !== setId) return;
+  lastPlanInput = input;
+  applyReplan();
+}
+
+function applyReplan(): void {
+  const instance = conductor;
+  const input = lastPlanInput;
+  if (!instance?.isActive() || !input) return;
+  const t = instance.getMixTime();
+  // Defer the sounding window's geometry (lanes ride live): re-plan from
+  // an input whose active adjacency keeps the executed geometry. The
+  // exec plan carries any earlier graft, so deferral propagates until
+  // the window completes.
+  const sounding = soundingWindowAt(instance.plan, t);
+  const grafted = sounding ? graftSoundingWindow(input, sounding) : null;
+  const newPlan = planSet(grafted ?? input);
+  const decision = evaluateReplan(instance.plan, t, newPlan);
+  if (!decision.ok) {
+    // The plan no longer accounts for what is sounding (anchor's track
+    // left the Set / set emptied): keep the audio, stop conducting.
+    stopGraftPoll();
+    instance.standDown();
+    return;
+  }
+  const execPlan = decision.flip ? flipPlanDecks(newPlan) : newPlan;
+  instance.replacePlan(execPlan, decision.mixTime, {
+    rampSec: getSetSettings().pickupRampSec,
+  });
+  graftPair = grafted ? soundingWindowKey(sounding) : null;
+  if (graftPair !== null) startGraftPoll();
+  else stopGraftPoll();
+  refreshSnapshot();
+}
+
+/** While a graft is pending, watch the mix clock: when the playhead
+ * leaves the deferred window (completion, or a seek out of it), re-plan
+ * from the last input — the deferred geometry lands, and any later
+ * replay of that window plays the NEW geometry. */
+function startGraftPoll(): void {
+  if (graftPoll !== null) return;
+  graftPoll = setInterval(() => {
+    const instance = conductor;
+    if (!instance?.isActive() || lastPlanInput === null) {
+      stopGraftPoll();
+      return;
+    }
+    const pair = soundingWindowKey(soundingWindowAt(instance.plan, instance.getMixTime()));
+    if (pair === graftPair) return; // still inside the deferred window
+    applyReplan();
+  }, 250);
 }
 
 /** Follow-playback toggle/disengage (sets 05). */

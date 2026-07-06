@@ -50,8 +50,10 @@ down without releasing). `conductorStore` owns the one running instance
 toolbar transport, per-row hover ▶ (planned-entry start), and the active-row
 highlight. ADR 0024 written. Known edges (documented): MIDI pitch moves are
 DROPPED (not takeover) while a non-shared surface holds audibility (existing
-dispatch rule); plan is snapshotted at start (re-pin → next start); planner
-`warnings` are computed but not yet surfaced (issue 06 will want them).
+dispatch rule); plan is snapshotted at start (re-pin → next start) — edge
+RETIRED by issue 24 (live re-plan: plan-input edits re-plan the ongoing run
+in place); planner `warnings` are computed but not yet surfaced (issue 06
+will want them).
 
 **2026-07-05 — Review walkthrough (ready-for-human).** Lane app at
 **http://localhost:5253** (backend 8080, sandbox DB; "test set" = 8 tracks,
