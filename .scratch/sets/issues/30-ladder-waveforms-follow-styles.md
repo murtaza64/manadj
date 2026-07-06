@@ -1,6 +1,6 @@
 # 30 — Ladder waveforms follow the global Waveform styles
 
-Status: ready-for-human
+Status: done (approved in-session 2026-07-05; landed tvupqppn — change zrxsrozm, lane setsugg)
 
 ## Parent
 
