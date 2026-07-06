@@ -162,6 +162,9 @@ A library convention (not a code concept) giving hot cue slots stable musical me
 **Key**:
 One of 24 key centers (12 tonics × major/minor) assigned to a Track. OpenKey is the preferred notation for display and discussion; Camelot, musical, and external libraries' notations are conversions from the same canonical value.
 
+**Key provenance**:
+Where a Track's Key came from: `analyzed` (native key Analysis), `imported` (External Import), or `manual` (direct user edit); unknown (e.g. seeded from file tags) ranks below everything. With Beatgrid origin, one half of the overwrite ladder (ADR 0024): bulk/automatic Analysis never overwrites a value that outranks `analyzed`; manual single-track re-analysis overwrites freely.
+
 **Harmonically compatible**:
 The relation between two Keys that mix well together. The basis of harmonic-mixing features (Circle of Fifths, finding tracks to mix into).
 _Avoid_: related (too vague — could mean same artist, genre, etc.)
@@ -190,6 +193,9 @@ The analysis opinion of a Track's Energy (1–5): drop-centric — keyed on drop
 **Ladder stamp**:
 The explicit act (single Track or bulk) of writing a cue ladder from a Track's Structure per the Cue-slot convention: slot 4 on the first drop, earlier rungs walked back, filling empty slots only. Stamped cues become ordinary Hot Cues with no memory of their origin. Analysis never writes cue slots itself — the stamp gesture is the consent.
 _Avoid_: auto-cue (implies analysis writes cues unasked), bare "stamp" (a Transition template also stamps)
+
+**Needs-attention worklist**:
+The library view of Tracks whose grid Analysis bailed and that still have no saved grid — derived, never stored: the flag clears the moment the Track gains a grid from any saved origin (hand edit, External Import, or a successful re-analysis). A generated placeholder does not clear it. The curation surface for unquantized tracks (ADR 0024: the analyzer refuses to guess at them).
 
 **Ground truth corpus**:
 The set of Tracks whose key/BPM/Beatgrid values are externally verified, used as the measuring stick for Analysis accuracy: candidate analyzers are scored by agreement with it, not by vibe. Tiered by agreement: *gold* where Engine DJ and Rekordbox concur (headline scoring), *disputed* where they disagree — excluded from scoring until hand verification promotes them. Grid phase is Engine-only (no Rekordbox performance data).

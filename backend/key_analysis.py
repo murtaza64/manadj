@@ -39,5 +39,7 @@ def analyze_track_key(
     if detected is not None:
         track.key = detected.engine_id
         track.key_provenance = "analyzed"
+        # Currency marker (issue 11): which backend produced this key.
+        track.key_analysis_candidate = candidate.name
         db.commit()
     return detected, confidence

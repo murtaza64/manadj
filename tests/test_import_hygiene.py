@@ -15,6 +15,7 @@ HEAVY_MODULES = [
 
 def test_no_heavy_audio_deps_in_import_chain():
     # Import everything the suite legitimately touches.
+    import backend.analysis_backfill  # noqa: F401
     import backend.analysis_tasks  # noqa: F401
     import backend.beatgrid_utils  # noqa: F401
     import backend.bulk_analysis  # noqa: F401

@@ -27,6 +27,10 @@ class Track(Base):
     # unknown (e.g. seeded from file tags) — ranks below everything on the
     # overwrite ladder, freely overwritable by bulk runs.
     key_provenance = Column(String, nullable=True)
+    # Which backend produced the current `analyzed` key (currency marker for
+    # the backfill, issue 11). NULL = not from the current native path.
+    # Only meaningful while key_provenance == "analyzed".
+    key_analysis_candidate = Column(String, nullable=True)
     bpm = Column(Integer, nullable=True)  # Beats per minute
     duration_secs = Column(Float, nullable=True)  # audio duration, read from the file
     # Main cue (seconds) — performance data, lives with the Track (moved off
