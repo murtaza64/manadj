@@ -56,6 +56,9 @@ export interface MidiDeckControls {
   /** Spin-to-nudge release: persist the gesture's accumulated net offset
    * in one backend call. Gridless: no-op. */
   gridNudgeCommit(offsetMs: number): void;
+  /** Hold-to-jog grow/shrink release: apply the gesture's net BPM delta
+   * in one serialized commit. Gridless or variable grid: no-op. */
+  gridBpmAdjust(deltaBpm: number): void;
 }
 
 /**

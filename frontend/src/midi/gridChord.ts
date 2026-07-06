@@ -8,35 +8,58 @@ import type { BeatgridResponse } from '../types';
  * jog ticks in, grid-edit commands out. This is the feature's one new
  * stateful seam; dispatch itself stays view-blind and otherwise stateless.
  *
- * Semantics (PRD decision):
- * - Holding either grid-nudge pad ARMS grid-nudge on that deck. While
- *   armed, jog ticks (rim and touch streams both) mean fine grid nudge —
- *   GRID_SPIN_NUDGE_MS_PER_TICK per tick, sign from the spin direction —
- *   and never reach their normal surface-routed meanings (Nudge, seek;
- *   the deliberate ADR 0019 carve-out). Release restores plain jog.
- * - Ticks emit optimistic local nudges (live against playing audio); the
+ * Semantics (PRD decision; grow/shrink chord added in-session 2026-07-06):
+ * - Holding a grid-nudge pad ARMS grid-nudge on that deck; holding a
+ *   grow/shrink pad ARMS fine BPM adjust. While armed, jog ticks (rim and
+ *   touch streams both) mean the chord's fine adjustment — sign from the
+ *   spin direction — and never reach their normal surface-routed meanings
+ *   (Nudge, seek; the deliberate ADR 0019 carve-out). Release restores
+ *   plain jog.
+ * - Nudge chord: ticks emit optimistic local nudges at
+ *   GRID_SPIN_NUDGE_MS_PER_TICK (live against playing audio); the
  *   accumulated net offset persists in ONE commit on pad release.
- * - Tap = release with ZERO ticks received → the discrete ±10ms step
- *   (issue 05's behavior). No timers, no thresholds: any tick received
- *   while held — even if the net cancels to zero — makes the gesture a
- *   hold (a zero-net hold commits nothing: the grid is where it started).
+ * - BPM chord: ticks accumulate GRID_SPIN_BPM_PER_TICK each (clockwise =
+ *   BPM up = shrink direction); ONE commit on release carries the net
+ *   delta. No per-tick command — re-tempo math is server-side, so there
+ *   is no client-side optimistic apply (the readout updates on commit).
+ * - Tap = release with ZERO ticks received → the pad's discrete step
+ *   (issue 05's behavior: ±10ms nudge, ±0.03 grow/shrink). No timers, no
+ *   thresholds: any tick received while held — even if the net cancels to
+ *   zero — makes the gesture a hold (a zero-net hold commits nothing).
  * - Per-deck isolation: each deck chords independently; an unarmed deck's
  *   jog passes through untouched.
- * - While armed, the OTHER nudge pad is ignored (the arming pad owns the
- *   gesture); its stray release is swallowed.
+ * - One chord per deck: while armed, every other chordable pad on that
+ *   deck is ignored (the arming pad owns the gesture); their stray
+ *   releases are swallowed.
  */
 
-/** Fine grid nudge per jog tick while armed (~1ms, PRD decision). */
+/** Fine grid nudge per jog tick while nudge-armed (~1ms, PRD decision). */
 export const GRID_SPIN_NUDGE_MS_PER_TICK = 1;
 
-interface DeckChord {
-  /** The arming pad — decides the sign of a tap's discrete step. */
-  direction: 'earlier' | 'later';
-  /** Net accumulated offset in ms, signed by spin direction. */
-  offsetMs: number;
-  /** Any tick arrived (tap-vs-hold discriminator; zero-tick = tap). */
-  moved: boolean;
-}
+/** Fine BPM change per jog tick while grow/shrink-armed — a third of the
+ * discrete ±0.03 step, so the jog is the finer instrument. */
+export const GRID_SPIN_BPM_PER_TICK = 0.01;
+
+type DeckChord =
+  | {
+      kind: 'nudge';
+      /** The arming pad — decides the sign of a tap's discrete step. */
+      direction: 'earlier' | 'later';
+      /** Net accumulated offset in ms, signed by spin direction. */
+      offsetMs: number;
+      /** Any tick arrived (tap-vs-hold discriminator; zero-tick = tap). */
+      moved: boolean;
+    }
+  | {
+      kind: 'bpm';
+      /** The arming pad — decides the sign of a tap's discrete step. */
+      op: 'grow' | 'shrink';
+      /** Net accumulated ticks, signed by spin direction (CW = BPM up).
+       * Integer arithmetic — the ms/BPM conversion happens once at
+       * release, so accumulation never drifts in floating point. */
+      netTicks: number;
+      moved: boolean;
+    };
 
 export interface GridChordState {
   A: DeckChord | null;
@@ -50,17 +73,23 @@ export type JogStream = 'rim' | 'touch';
 export type GridChordEvent =
   | { type: 'pad-down'; deck: ChannelId; direction: 'earlier' | 'later' }
   | { type: 'pad-up'; deck: ChannelId; direction: 'earlier' | 'later' }
+  | { type: 'bpm-pad-down'; deck: ChannelId; op: 'grow' | 'shrink' }
+  | { type: 'bpm-pad-up'; deck: ChannelId; op: 'grow' | 'shrink' }
   | { type: 'jog-ticks'; deck: ChannelId; stream: JogStream; ticks: number };
 
 export type GridChordCommand =
   /** Not armed: the tick keeps its normal surface-routed jog meaning. */
   | { type: 'pass-jog'; deck: ChannelId; stream: JogStream; ticks: number }
-  /** Armed: apply this tick batch to the local grid, optimistically. */
+  /** Nudge-armed: apply this tick batch to the local grid, optimistically. */
   | { type: 'local-nudge'; deck: ChannelId; offsetMs: number }
-  /** Zero-tick release: the discrete ±10ms step (issue 05's tap). */
+  /** Zero-tick nudge release: the discrete ±10ms step (issue 05's tap). */
   | { type: 'tap-step'; deck: ChannelId; direction: 'earlier' | 'later' }
-  /** Hold release: persist the accumulated net offset in one call. */
-  | { type: 'commit'; deck: ChannelId; offsetMs: number };
+  /** Nudge hold release: persist the accumulated net offset in one call. */
+  | { type: 'commit'; deck: ChannelId; offsetMs: number }
+  /** Zero-tick grow/shrink release: the discrete ±0.03 step. */
+  | { type: 'bpm-tap'; deck: ChannelId; op: 'grow' | 'shrink' }
+  /** Grow/shrink hold release: apply the net BPM delta in one commit. */
+  | { type: 'bpm-commit'; deck: ChannelId; deltaBpm: number };
 
 export function initialGridChordState(): GridChordState {
   return { A: null, B: null };
@@ -73,25 +102,40 @@ export function reduceGridChord(
   const chord = s[e.deck];
   switch (e.type) {
     case 'pad-down': {
-      // The arming pad owns the gesture; a second nudge pad is ignored.
+      // The arming pad owns the gesture; any other chordable pad is ignored.
       if (chord) return [s, []];
-      return [{ ...s, [e.deck]: { direction: e.direction, offsetMs: 0, moved: false } }, []];
+      return [
+        { ...s, [e.deck]: { kind: 'nudge', direction: e.direction, offsetMs: 0, moved: false } },
+        [],
+      ];
+    }
+
+    case 'bpm-pad-down': {
+      if (chord) return [s, []];
+      return [{ ...s, [e.deck]: { kind: 'bpm', op: e.op, netTicks: 0, moved: false } }, []];
     }
 
     case 'jog-ticks': {
       if (!chord) {
         return [s, [{ type: 'pass-jog', deck: e.deck, stream: e.stream, ticks: e.ticks }]];
       }
-      const offsetMs = e.ticks * GRID_SPIN_NUDGE_MS_PER_TICK;
+      if (chord.kind === 'nudge') {
+        const offsetMs = e.ticks * GRID_SPIN_NUDGE_MS_PER_TICK;
+        return [
+          { ...s, [e.deck]: { ...chord, offsetMs: chord.offsetMs + offsetMs, moved: true } },
+          [{ type: 'local-nudge', deck: e.deck, offsetMs }],
+        ];
+      }
+      // BPM chord: accumulate only — no client-side re-tempo to apply.
       return [
-        { ...s, [e.deck]: { ...chord, offsetMs: chord.offsetMs + offsetMs, moved: true } },
-        [{ type: 'local-nudge', deck: e.deck, offsetMs }],
+        { ...s, [e.deck]: { ...chord, netTicks: chord.netTicks + e.ticks, moved: true } },
+        [],
       ];
     }
 
     case 'pad-up': {
-      // Stray release: unarmed, or the ignored second pad letting go.
-      if (!chord || chord.direction !== e.direction) return [s, []];
+      // Stray release: unarmed, or a pad that didn't own the gesture.
+      if (!chord || chord.kind !== 'nudge' || chord.direction !== e.direction) return [s, []];
       const next = { ...s, [e.deck]: null };
       if (!chord.moved) {
         return [next, [{ type: 'tap-step', deck: e.deck, direction: e.direction }]];
@@ -100,6 +144,17 @@ export function reduceGridChord(
       // exactly where the stored grid is.
       if (chord.offsetMs === 0) return [next, []];
       return [next, [{ type: 'commit', deck: e.deck, offsetMs: chord.offsetMs }]];
+    }
+
+    case 'bpm-pad-up': {
+      if (!chord || chord.kind !== 'bpm' || chord.op !== e.op) return [s, []];
+      const next = { ...s, [e.deck]: null };
+      if (!chord.moved) return [next, [{ type: 'bpm-tap', deck: e.deck, op: e.op }]];
+      if (chord.netTicks === 0) return [next, []];
+      return [
+        next,
+        [{ type: 'bpm-commit', deck: e.deck, deltaBpm: chord.netTicks * GRID_SPIN_BPM_PER_TICK }],
+      ];
     }
   }
 }

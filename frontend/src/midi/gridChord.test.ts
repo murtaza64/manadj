@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  GRID_SPIN_BPM_PER_TICK,
   GRID_SPIN_NUDGE_MS_PER_TICK,
   initialGridChordState,
   reduceGridChord,
@@ -30,6 +31,16 @@ const ticks = (deck: 'A' | 'B', n: number, stream: 'rim' | 'touch' = 'rim'): Gri
   deck,
   stream,
   ticks: n,
+});
+const bpmDown = (deck: 'A' | 'B', op: 'grow' | 'shrink'): GridChordEvent => ({
+  type: 'bpm-pad-down',
+  deck,
+  op,
+});
+const bpmUp = (deck: 'A' | 'B', op: 'grow' | 'shrink'): GridChordEvent => ({
+  type: 'bpm-pad-up',
+  deck,
+  op,
 });
 
 /** Fold an event sequence, as dispatch does; returns every emitted command. */
@@ -157,6 +168,102 @@ describe('per-deck isolation', () => {
     expect(commands.filter((c) => c.type === 'commit')).toEqual([
       { type: 'commit', deck: 'A', offsetMs: 2 },
       { type: 'commit', deck: 'B', offsetMs: -3 },
+    ]);
+  });
+});
+
+describe('grow/shrink bpm chord (hold-to-jog, in-session 2026-07-06)', () => {
+  it('a tap fires the discrete grow/shrink step, pad op preserved', () => {
+    const [, commands] = run([bpmDown('A', 'grow'), bpmUp('A', 'grow')]);
+    expect(commands).toEqual([{ type: 'bpm-tap', deck: 'A', op: 'grow' }]);
+    const [, shrink] = run([bpmDown('B', 'shrink'), bpmUp('B', 'shrink')]);
+    expect(shrink).toEqual([{ type: 'bpm-tap', deck: 'B', op: 'shrink' }]);
+  });
+
+  it('ticks accumulate silently (no client-side re-tempo) and commit once on release', () => {
+    const [, commands] = run([
+      bpmDown('A', 'shrink'),
+      ticks('A', 3),
+      ticks('A', -1, 'touch'),
+      bpmUp('A', 'shrink'),
+    ]);
+    expect(commands).toEqual([
+      { type: 'bpm-commit', deck: 'A', deltaBpm: 2 * GRID_SPIN_BPM_PER_TICK },
+    ]);
+  });
+
+  it('sign follows the spin (clockwise = BPM up), not the held pad', () => {
+    // Holding GROW (BPM down) but spinning clockwise still raises BPM.
+    const [, commands] = run([bpmDown('A', 'grow'), ticks('A', 5), bpmUp('A', 'grow')]);
+    expect(commands).toEqual([
+      { type: 'bpm-commit', deck: 'A', deltaBpm: 5 * GRID_SPIN_BPM_PER_TICK },
+    ]);
+    const [, ccw] = run([bpmDown('A', 'shrink'), ticks('A', -4), bpmUp('A', 'shrink')]);
+    expect(ccw).toEqual([
+      { type: 'bpm-commit', deck: 'A', deltaBpm: -4 * GRID_SPIN_BPM_PER_TICK },
+    ]);
+  });
+
+  it('any tick makes it a hold: a zero-net spin is no tap and no commit', () => {
+    const [, commands] = run([
+      bpmDown('A', 'grow'),
+      ticks('A', 2),
+      ticks('A', -2),
+      bpmUp('A', 'grow'),
+    ]);
+    expect(commands).toEqual([]);
+  });
+
+  it('suppresses normal jog meanings while armed; release restores them', () => {
+    const [, commands] = run([
+      bpmDown('A', 'shrink'),
+      ticks('A', 1),
+      bpmUp('A', 'shrink'),
+      ticks('A', 1),
+    ]);
+    expect(commands).toEqual([
+      { type: 'bpm-commit', deck: 'A', deltaBpm: GRID_SPIN_BPM_PER_TICK },
+      { type: 'pass-jog', deck: 'A', stream: 'rim', ticks: 1 },
+    ]);
+  });
+
+  it('one chord per deck: a nudge pad is ignored while bpm-armed and vice versa', () => {
+    const [, commands] = run([
+      bpmDown('A', 'grow'),
+      down('A', 'later'), // ignored — bpm chord owns the gesture
+      ticks('A', 2),
+      up('A', 'later'), // stray release of the ignored pad: swallowed
+      bpmUp('A', 'grow'),
+    ]);
+    expect(commands).toEqual([
+      { type: 'bpm-commit', deck: 'A', deltaBpm: 2 * GRID_SPIN_BPM_PER_TICK },
+    ]);
+    const [, reverse] = run([
+      down('A', 'later'),
+      bpmDown('A', 'grow'), // ignored — nudge chord owns the gesture
+      ticks('A', 3),
+      bpmUp('A', 'grow'), // swallowed
+      up('A', 'later'),
+    ]);
+    expect(reverse).toEqual([
+      { type: 'local-nudge', deck: 'A', offsetMs: 3 },
+      { type: 'commit', deck: 'A', offsetMs: 3 },
+    ]);
+  });
+
+  it('decks chord independently across kinds', () => {
+    const [, commands] = run([
+      down('A', 'later'),
+      bpmDown('B', 'shrink'),
+      ticks('A', 2),
+      ticks('B', 4),
+      up('A', 'later'),
+      bpmUp('B', 'shrink'),
+    ]);
+    expect(commands).toEqual([
+      { type: 'local-nudge', deck: 'A', offsetMs: 2 },
+      { type: 'commit', deck: 'A', offsetMs: 2 },
+      { type: 'bpm-commit', deck: 'B', deltaBpm: 4 * GRID_SPIN_BPM_PER_TICK },
     ]);
   });
 });

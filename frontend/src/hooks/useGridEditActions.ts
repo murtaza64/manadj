@@ -51,6 +51,9 @@ export interface GridEditActions {
   /** Spin-to-nudge release: persist the accumulated net offset in one
    * call, through the same serialized chain as the discrete steps. */
   nudgeCommit(offsetMs: number): void;
+  /** Hold-to-jog grow/shrink release: one commit of base + net delta
+   * through the serialized BPM committer. */
+  bpmAdjust(deltaBpm: number): void;
 }
 
 export function useGridEditActions(): GridEditActions {
@@ -150,6 +153,16 @@ export function useGridEditActions(): GridEditActions {
           : // Screen-identical octave semantics (BpmControl's ×1/2 and ×2
             // dropdown options round to whole BPM).
             Math.round(change === 'halve' ? base / 2 : base * 2);
+      if (!isFinite(next) || next <= 0) return;
+      optimistic.current = { trackId, bpm: next };
+      void getCommitter().commit(next);
+    },
+    bpmAdjust: (deltaBpm) => {
+      if (!hasBeatgrid || trackId === null) return;
+      if (projection.kind !== 'grid') return; // same rule as the steps
+      const base =
+        optimistic.current?.trackId === trackId ? optimistic.current.bpm : projection.bpm;
+      const next = Math.round((base + deltaBpm) * 100) / 100;
       if (!isFinite(next) || next <= 0) return;
       optimistic.current = { trackId, bpm: next };
       void getCommitter().commit(next);

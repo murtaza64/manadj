@@ -122,6 +122,7 @@ function DeckControlsRegistrar() {
         gridBpm: (change) => latest.current.gridEdit.bpm(change),
         gridNudgeLocal: (offsetMs) => latest.current.gridEdit.nudgeLocal(offsetMs),
         gridNudgeCommit: (offsetMs) => latest.current.gridEdit.nudgeCommit(offsetMs),
+        gridBpmAdjust: (deltaBpm) => latest.current.gridEdit.bpmAdjust(deltaBpm),
         // LOAD deliberately absent (editor-midi 03): load policy is
         // view-owned and rides the browse-surface registration in Library.
       }),
