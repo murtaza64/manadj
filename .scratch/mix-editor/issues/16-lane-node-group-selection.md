@@ -1,6 +1,10 @@
 # 16 — Lane editor: node group selection and dragging
 
-Status: ready-for-agent
+Status: ready-for-human (implemented, change rlrspylz on lane lanesel —
+eye-verify: cmd/ctrl+drag rubber-band, cmd/ctrl+click toggle, group drag
+clamping at neighbors/bounds, Esc/click-away deselect, Delete/Backspace,
+and that click-add / single drag / dblclick remove / shift chop still feel
+unchanged)
 
 ## Parent
 
@@ -39,3 +43,19 @@ Multi-select and group-move for breakpoints within a single automation lane:
 
 None - can start immediately. Coordinate with issue 04 (chop stamp) and
 issue 05 (endpoint rendering) if in flight — same LaneCanvas code.
+
+## Comments
+
+- 2026-07-06 (lane lanesel, change rlrspylz): implemented. Pure logic in
+  `frontend/src/editor/laneSelection.ts` (indicesInRect / toggleIndex /
+  moveGroup / deleteSelected) under vitest (18 tests); gestures wired in
+  LaneCanvas; selection state lives in DawTimeline keyed by lane id
+  (`{ lane, indices }` — v2 cross-lane widens it to a map), cleared on
+  transition switch and on structural point changes (chop stamp, dblclick
+  remove, out-of-range guard). Behavior decisions: plain click on empty
+  space with an active selection deselects INSTEAD of adding (click again
+  to add); group drag anchors the grabbed node (beat magnet applies to the
+  pointer, one shared delta moves the group — never per-node re-snapping);
+  Delete keeps the lane's ≥1-point invariant (all-selected keeps the first
+  node). NOTES.md is an archive post-graduation — no entry (this comment is
+  the iteration record). tsc, eslint, vitest 1131, build all green.
