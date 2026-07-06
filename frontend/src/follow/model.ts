@@ -275,14 +275,22 @@ export function unionIds(resultSets: Track[][]): Set<number> {
  */
 /** The followed references: followed Decks that actually hold a Track,
  * in deck order. One home for the derivation the FilterBar (summary
- * chips, modal context) and the Library (queries, tiering) share. */
+ * chips, modal context) and the Library (queries, tiering) share.
+ *
+ * `fresh` is the ['track', id] cache lookup (ADR 0027 §7: identity in
+ * context, facts in cache) — a reference's tempo/key/energy facts come
+ * from the fresh row when one exists, so an edit (re-tempo 87→174)
+ * re-centers the follow query without a re-Load. The loaded snapshot is
+ * the fallback. */
 export function followedReferences(
   flags: FollowFlags,
-  loaded: Record<ChannelId, Track | null>
+  loaded: Record<ChannelId, Track | null>,
+  fresh?: (id: number) => Track | null | undefined
 ): Array<{ deck: ChannelId; reference: Track }> {
   return DECKS.flatMap((deck) => {
-    const reference = loaded[deck];
-    return flags[deck] && reference ? [{ deck, reference }] : [];
+    const snapshot = loaded[deck];
+    if (!flags[deck] || !snapshot) return [];
+    return [{ deck, reference: fresh?.(snapshot.id) ?? snapshot }];
   });
 }
 

@@ -504,6 +504,40 @@ describe('loop-resize', () => {
     expect(clamped.loop).toBe(s.loop);
   });
 
+  it('resizes in pure seconds after a re-tempo (no grid re-derivation)', () => {
+    // ADR 0027 §6: loops are seconds-identity. Engaged 4 beats on a 0.5s
+    // grid → [10, 12). The track re-tempos to 0.25s beats; the first halve
+    // must exactly halve the AUDIBLE region (end 11), not re-derive 2 beats
+    // from the new grid (which would say 10.5).
+    const retempoed = Array.from({ length: 120 }, (_, i) => i * 0.25);
+    const s = state({ playing: true, playhead: 10.3, loop: active });
+    const [next, effects] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'halve' },
+      { quantize: true, beatTimes: retempoed }
+    );
+    expect(next.loop!.start).toBe(10);
+    expect(next.loop!.end).toBeCloseTo(11, 10);
+    expect(next.loop!.lengthBeats).toBe(2);
+    // Playhead inside the halved region: untouched, no splice.
+    expect(next.playhead).toBe(10.3);
+    expect(effects).toEqual([]);
+  });
+
+  it('folds a stranded playhead by the new seconds length after a re-tempo', () => {
+    const retempoed = Array.from({ length: 120 }, (_, i) => i * 0.25);
+    const s = state({ playing: true, playhead: 11.5, loop: active });
+    const [next, effects] = reduceTransport(
+      s,
+      { type: 'loop-resize', change: 'halve' },
+      { quantize: true, beatTimes: retempoed }
+    );
+    // New seconds length 1.0; offset 1.5 mod 1.0 → 0.5 → playhead 10.5.
+    expect(next.loop!.end).toBeCloseTo(11, 10);
+    expect(next.playhead).toBeCloseTo(10.5, 10);
+    expect(effects).toHaveLength(1);
+  });
+
   it('set-length resizes the active region keeping the start edge', () => {
     const s = state({ playing: true, playhead: 10.3, loop: active });
     const [next, effects] = reduceTransport(

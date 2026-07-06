@@ -67,6 +67,18 @@ export function projectBpm(
   return { kind: 'none' };
 }
 
+/** The grid-first tempo scalar (ADR 0027): the grid's dominant tempo when
+ * a grid exists, else track bpm, else null — projectBpm flattened for
+ * callers that only want the number (editor tempo-match). */
+export function gridFirstBpm(
+  grid: BeatgridData | null | undefined,
+  trackBpm: number | null | undefined,
+  durationSecs?: number | null
+): number | null {
+  const projection = projectBpm(grid, trackBpm, durationSecs);
+  return projection.kind === 'none' ? null : projection.bpm;
+}
+
 // ── Display / step math ──────────────────────────────────────────────────
 
 /** Up to 2 decimals, trailing zeros trimmed (128, 128.5, 128.03). */

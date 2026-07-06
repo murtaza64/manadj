@@ -20,7 +20,8 @@
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
-import { foldLoopPlayhead } from './loop';
+import { addBeats } from './quantize';
+import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
@@ -83,6 +84,10 @@ export interface DeckSnapshot {
   keyLock: boolean;
   /** Active loop (looping 03): the region the playhead wraps in, or null. */
   loop: LoopRegion | null;
+  /** The active loop's displayed size (ADR 0027 §6): the seconds region
+   * projected through the LIVE grid — `~N.N` after a re-tempo. Null when
+   * no loop is active. */
+  loopBeatsLabel: string | null;
   /** Pending auto-loop size in beats (survives Loads). */
   pendingLoopBeats: number;
   /** The loaded Track has a usable Beatgrid (auto-loop is inert without). */
@@ -339,10 +344,22 @@ export class DeckEngine {
 
   jumpBeats(beats: number): void {
     if (!this.buffer) return;
-    // BPM-less tracks assume 120 (library-player parity): a usable jump beats
-    // a silently dead control.
-    const bpm = this.trackInfo?.bpm ?? 120;
-    const target = this.clampTime(this.getPlayhead() + beats * (60 / bpm));
+    const playhead = this.getPlayhead();
+    let raw: number;
+    if (this.beatTimes && this.beatTimes.length >= 2) {
+      // Beat jump is beat-domain (ADR 0027 §5): displace via the live grid
+      // — phase-preserving fractional beat coordinates, exact on variable
+      // grids, immune to a stale bpm scalar. Same ≥2-beat guard as
+      // auto-loop.
+      raw = addBeats(playhead, beats, this.beatTimes);
+    } else {
+      // Gridless fallback: the bpm scalar. BPM-less tracks assume 120
+      // (library-player parity): a usable jump beats a silently dead
+      // control.
+      const bpm = this.trackInfo?.bpm ?? 120;
+      raw = playhead + beats * (60 / bpm);
+    }
+    const target = this.clampTime(raw);
     this.fireTransportEvent({ action: 'jumpBeats', playhead: target, detail: beats });
     // Relative displacement, not a seek: an active loop translates with
     // the playhead (looping 04).
@@ -796,6 +813,9 @@ export class DeckEngine {
       bendPercent: this.bendPercent,
       keyLock: this.keyLock,
       loop: this.transport.loop,
+      loopBeatsLabel: this.transport.loop
+        ? projectLoopBeats(this.transport.loop, this.beatTimes)
+        : null,
       pendingLoopBeats: this.transport.pendingLoopBeats,
       hasBeatgrid: (this.beatTimes?.length ?? 0) >= 2,
     };

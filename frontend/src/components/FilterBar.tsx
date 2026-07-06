@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Tag, Track } from '../types';
 import { getTagColor } from '../utils/colorUtils';
@@ -89,9 +89,14 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
 
   const followFlags = useFollowFlags();
   const followParams = useFollowParams();
+  const queryClient = useQueryClient();
   const loadedByDeck = { A: loadedA, B: loadedB } as const;
-  /** Followed references, for the summary chips and the modal context. */
-  const followedRefs = followedReferences(followFlags, loadedByDeck);
+  /** Followed references, for the summary chips and the modal context —
+   * facts through the track cache (ADR 0027 §7), so the modal shows the
+   * edited BPM, not the load-time snapshot. */
+  const followedRefs = followedReferences(followFlags, loadedByDeck, (id) =>
+    queryClient.getQueryData<Track>(['track', id])
+  );
 
   const openParamsModal = (e: React.MouseEvent<HTMLButtonElement>) => {
     setParamsModalPosition({ x: e.clientX, y: e.clientY });

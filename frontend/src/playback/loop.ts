@@ -10,6 +10,8 @@
  * wrap, this module owns the shared constants and clock math).
  */
 
+import { beatsBetween } from './quantize';
+
 /** The Active loop region: seconds projected at gesture time, plus the
  * beat-domain length the seconds were derived from (drives the button
  * label and resize math). */
@@ -39,6 +41,24 @@ export function formatLoopBeats(beats: number): string {
  * ×2/÷2 from an in-range dyadic can only hit the bounds). */
 export function clampLoopBeats(beats: number): number {
   return Math.max(LOOP_MIN_BEATS, Math.min(LOOP_MAX_BEATS, beats));
+}
+
+/**
+ * The loop's displayed beat count (ADR 0027 §6): lengthBeats is the nominal
+ * ladder position, not stored truth — the display projects the audible
+ * seconds region through the LIVE grid, shown `~N.N` when non-integral
+ * (i.e. after a re-tempo). Without a usable grid the nominal length shows.
+ */
+export function projectLoopBeats(
+  loop: LoopRegion,
+  beatTimes: readonly number[] | null | undefined
+): string {
+  if (!beatTimes || beatTimes.length < 2) return formatLoopBeats(loop.lengthBeats);
+  const beats = beatsBetween(loop.start, loop.end, beatTimes);
+  // Snap to the dyadic ladder when the projection is (float-)exactly on it.
+  const dyadic = Math.round(beats * 8) / 8;
+  if (dyadic > 0 && Math.abs(beats - dyadic) < 1e-6) return formatLoopBeats(dyadic);
+  return `~${beats.toFixed(1)}`;
 }
 
 /** A loop-size change: ×2/÷2 ladder steps, or an absolute target length

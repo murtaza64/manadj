@@ -24,8 +24,8 @@ def manadj_track_to_rekordbox_xml_fields(track: ManAdjTrack) -> dict:
     """
     file_path = Path(track.filename)
 
-    # Convert BPM from centiBPM to float
-    average_bpm = track.bpm / 100.0 if track.bpm else None
+    # One served BPM (ADR 0027): exports read the grid-first projection
+    average_bpm = track.bpm_projected
 
     # Convert key from Engine DJ ID to Rekordbox musical notation
     tonality = None

@@ -14,6 +14,7 @@ import {
   candidateIdSet,
   DEFAULT_FOLLOW_PARAMS,
   deriveFollowQuery,
+  followedReferences,
   followMacroToggles,
   followSummary,
   followTier,
@@ -35,6 +36,32 @@ function track(fields: Partial<Track> = {}): Track {
     ...fields,
   } as unknown as Track;
 }
+
+describe('followedReferences — facts read through the track cache (ADR 0027 §7)', () => {
+  // loadedTrack is a load-time snapshot (identity + display); tempo FACTS
+  // come from the ['track', id] cache row when one exists. After a re-tempo
+  // 87→174 the follow query must center on 174 without a re-Load.
+  const flags: FollowFlags = { A: true, B: false };
+  const stale = track({ id: 7, bpm: 87 });
+
+  it('builds the reference from the fresh cache row when available', () => {
+    const fresh = track({ id: 7, bpm: 174 });
+    const refs = followedReferences(flags, { A: stale, B: null }, () => fresh);
+    expect(refs).toEqual([{ deck: 'A', reference: fresh }]);
+    const q = deriveFollowQuery(refs[0].reference, DEFAULT_FOLLOW_PARAMS);
+    expect(q.bpmCenter).toBe(174);
+  });
+
+  it('falls back to the loaded snapshot when the cache has no row', () => {
+    const refs = followedReferences(flags, { A: stale, B: null }, () => undefined);
+    expect(refs).toEqual([{ deck: 'A', reference: stale }]);
+  });
+
+  it('keeps working without a lookup (identity-only callers)', () => {
+    const refs = followedReferences(flags, { A: stale, B: null });
+    expect(refs).toEqual([{ deck: 'A', reference: stale }]);
+  });
+});
 
 describe('deriveFollowQuery — harmonic keys', () => {
   it('derives same key, adjacents (same mode), and relative for 10m (Cm)', () => {

@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client';
 import { useBeatgridData } from '../hooks/useBeatgridData';
+import { gridFirstBpm } from '../components/deckControls/bpmCommit';
 import { useHotCueSlots } from '../hooks/useHotCueActions';
 import { useHotCues } from '../hooks/useHotCues';
 import { JogController } from '../midi/jog';
@@ -154,9 +155,11 @@ function TransitionEditorInner() {
   );
 
   // Grid tempo is the BPM source of truth when a grid exists; track BPM is
-  // the fallback (performance-data-sync issue 02).
-  const bpmA = beatgridA?.data.tempo_changes[0]?.bpm ?? trackA?.bpm ?? null;
-  const bpmB = beatgridB?.data.tempo_changes[0]?.bpm ?? trackB?.bpm ?? null;
+  // the fallback (performance-data-sync issue 02). Variable grids count as
+  // their DOMINANT tempo (ADR 0027 §4 doctrine, shared helper) — not the
+  // first segment.
+  const bpmA = gridFirstBpm(beatgridA?.data, trackA?.bpm, trackA?.duration_secs);
+  const bpmB = gridFirstBpm(beatgridB?.data, trackB?.bpm, trackB?.duration_secs);
 
   // B's playback rate under tempo match (same math as the player's).
   const tempoMatch = useEditorSelector(store, (s) => s.mix.transition.tempoMatch);

@@ -958,10 +958,12 @@ describe('BPM authority (bpm-authority bugfix, ADR 0016)', () => {
     tags: [],
     ...over,
   });
-  const kambi = mkTrack(511, { bpm: 172, bpm_effective: 172, duration_secs: 300 });
-  const raskal = mkTrack(512, { bpm: 87, bpm_effective: 174, duration_secs: 300 });
+  // Served bpm IS the grid-first projection now (ADR 0027): Raskal's row
+  // arrives as 174 even though its internal column is stale half-time.
+  const kambi = mkTrack(511, { bpm: 172, duration_secs: 300 });
+  const raskal = mkTrack(512, { bpm: 174, duration_secs: 300 });
 
-  it('trackEffectiveBpm prefers the grid projection over the bpm column', () => {
+  it('trackEffectiveBpm reads the one served BPM', () => {
     expect(trackEffectiveBpm(raskal)).toBe(174);
     expect(trackEffectiveBpm(kambi)).toBe(172);
     expect(trackEffectiveBpm(mkTrack(1, { bpm: 128 }))).toBe(128); // no grid

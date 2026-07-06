@@ -48,14 +48,19 @@ export function LoopRow({
   const { engine } = useDeck();
   const ready = useDeckReady();
   const loop = useDeckSnapshot((s) => s.loop);
+  const loopBeatsLabel = useDeckSnapshot((s) => s.loopBeatsLabel);
   const pendingBeats = useDeckSnapshot((s) => s.pendingLoopBeats);
   const hasBeatgrid = useDeckSnapshot((s) => s.hasBeatgrid);
 
-  const beats = loop?.lengthBeats ?? pendingBeats;
+  // Active loop: the displayed size projects the audible region through the
+  // LIVE grid (ADR 0027 §6) — `~N.N` after a re-tempo. Idle: pending size.
+  const label = loop
+    ? (loopBeatsLabel ?? formatLoopBeats(loop.lengthBeats))
+    : formatLoopBeats(pendingBeats);
   const title = loop
     ? `Release the loop${titleSuffix}`
     : hasBeatgrid
-      ? `Loop ${formatLoopBeats(beats)} beats from here${titleSuffix}`
+      ? `Loop ${label} beats from here${titleSuffix}`
       : 'Auto-loop needs a beatgrid';
 
   return (
@@ -72,10 +77,10 @@ export function LoopRow({
         disabled={!ready || !hasBeatgrid}
         onClick={() => engine.toggleLoop()}
         title={title}
-        aria-label={`Loop ${formatLoopBeats(beats)}`}
+        aria-label={`Loop ${label}`}
       >
         <LoopIcon />
-        {formatLoopBeats(beats)}
+        {label}
         {kbd}
       </button>
       <button

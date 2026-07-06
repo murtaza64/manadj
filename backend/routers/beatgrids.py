@@ -9,10 +9,11 @@ from ..database import get_db
 from ..beatgrid_utils import (
     calculate_beats_from_tempo_changes,
     constant_tempo_changes,
+    dominant_bpm,
     re_anchor_tempo_changes,
     set_downbeat_at_time,
 )
-from ..track_metadata.units import centibpm_to_bpm
+from ..track_metadata.units import bpm_to_centibpm, centibpm_to_bpm
 
 router = APIRouter()
 
@@ -30,22 +31,35 @@ def get_beatgrid(track_id: int, db: Session = Depends(get_db)):
     """
     Get beatgrid data for a track.
 
-    If beatgrid doesn't exist, generates it from track BPM.
-    Requires waveform to exist (for duration).
+    Gridless tracks get a computed placeholder (ADR 0027 §3): a grid-shaped
+    view of the bpm column, origin "generated", never persisted — grid rows
+    come into existence only via deliberate gestures (grid edit, import,
+    re-tempo). Requires waveform to exist (for duration).
     """
-    # Check if beatgrid exists
+    if not crud.get_track(db, track_id):
+        raise HTTPException(status_code=404, detail="Track not found")
+
     beatgrid = crud.get_beatgrid(db, track_id)
-
-    if not beatgrid:
-        # Generate from track BPM
+    if beatgrid:
         try:
-            beatgrid = crud.create_beatgrid_from_track_bpm(db, track_id)
+            return _format_beatgrid_response(beatgrid, db)
         except ValueError as e:
+            # Grid exists but its waveform is gone: a clean 4xx, not a 500.
             raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to generate beatgrid: {str(e)}")
 
-    return _format_beatgrid_response(beatgrid, db)
+    try:
+        data = crud.compute_placeholder_beatgrid_data(db, track_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "id": None,
+        "track_id": track_id,
+        "data": data,
+        "origin": "generated",
+        "anchor_time": None,
+        "created_at": None,
+        "updated_at": None,
+    }
 
 
 def _format_beatgrid_response(beatgrid, db: Session):
@@ -181,9 +195,21 @@ def nudge_beatgrid_endpoint(
 
 @router.delete("/{track_id}")
 def delete_beatgrid(track_id: int, db: Session = Depends(get_db)):
-    """Delete beatgrid to force regeneration on next GET."""
+    """Delete the beatgrid; the next GET serves a computed placeholder.
+
+    Projects first (ADR 0027 §8): a real grid's dominant tempo is written
+    into the bpm column before deletion, so the served bpm is continuous
+    across it. Generated rows are never an authority — no projection.
+    """
     beatgrid = crud.get_beatgrid(db, track_id)
     if beatgrid:
+        if beatgrid.origin != "generated":
+            tempo_changes = json.loads(beatgrid.tempo_changes_json)
+            track = crud.get_track(db, track_id)
+            if track is not None and tempo_changes:
+                waveform = crud.get_waveform(db, track_id)
+                duration = waveform.duration if waveform else track.duration_secs
+                track.bpm = bpm_to_centibpm(dominant_bpm(tempo_changes, duration))
         db.delete(beatgrid)
         db.commit()
     return {"message": "Beatgrid deleted"}

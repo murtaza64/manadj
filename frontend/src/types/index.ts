@@ -40,11 +40,10 @@ export interface Track {
   key_provenance?: string | null;
   /** Worklist flag (ADR 0024): grid analysis bailed and no saved grid yet */
   needs_attention?: boolean;
+  /** One served BPM (ADR 0027): the grid-first projection — the
+   * Beatgrid's dominant tempo when a real grid exists, else the stored
+   * value. Float BPM; there is no second field to prefer. */
   bpm?: number;
-  /** Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a grid
-   * exists, else bpm. Tempo consumers (Set planner) read this, never bpm —
-   * the bpm column can be a stale projection. */
-  bpm_effective?: number | null;
   duration_secs?: number | null;
   cue_point_time?: number | null;  // Main cue (seconds), performance data
   codec?: string | null;
@@ -113,12 +112,14 @@ export interface BeatgridData {
   downbeat_times: number[];
 }
 
+/** A computed placeholder (ADR 0027 §3 — gridless tracks project the bpm
+ * column on the fly, no row) has id/created_at/updated_at = null. */
 export interface BeatgridResponse {
-  id: number;
+  id: number | null;
   track_id: number;
   data: BeatgridData;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface TrackEntry {

@@ -141,10 +141,13 @@ export default function Library({
   // playback rules 02; tiered ordering 04; own parameters modal 05.)
   const followFlags = useFollowFlags();
   const followParams = useFollowParams();
-  const followRefs = followedReferences(followFlags, {
-    A: decks.A.loadedTrack,
-    B: decks.B.loadedTrack,
-  });
+  const followRefs = followedReferences(
+    followFlags,
+    { A: decks.A.loadedTrack, B: decks.B.loadedTrack },
+    // Facts read through the track cache (ADR 0027 §7): an edited BPM
+    // re-centers the candidate query without a re-Load.
+    (id) => queryClient.getQueryData<Track>(['track', id])
+  );
   const followQueries = useQueries({
     queries: followRefs.map(({ deck, reference }) => {
       const q = deriveFollowQuery(reference, followParams);

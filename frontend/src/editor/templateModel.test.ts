@@ -444,8 +444,51 @@ describe('defaultAnchorBaseB (mix-in default)', () => {
 });
 
 describe('beatPeriodSec', () => {
-  it('reads the first tempo change', () => {
+  it('reads a constant grid plainly', () => {
     expect(beatPeriodSec(makeGrid(120))).toBeCloseTo(0.5);
+  });
+
+  it('uses the DOMINANT tempo on a variable grid (ADR 0027 §4/§8)', () => {
+    // 100 BPM for 10s, then 140 for 90s of a 100s grid: dominant is 140.
+    const grid: BeatgridData = {
+      tempo_changes: [
+        { start_time: 0, bpm: 100, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+        { start_time: 10, bpm: 140, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+      ],
+      beat_times: [0, 0.6, /* … */ 100], // last beat stands in for duration
+      downbeat_times: [],
+    };
+    expect(beatPeriodSec(grid)).toBeCloseTo(60 / 140);
+  });
+
+  it('falls back to the first segment when the grid has no beat times', () => {
+    const grid: BeatgridData = {
+      tempo_changes: [
+        { start_time: 0, bpm: 100, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+        { start_time: 10, bpm: 140, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+      ],
+      beat_times: [],
+      downbeat_times: [],
+    };
+    expect(beatPeriodSec(grid)).toBeCloseTo(0.6);
+  });
+});
+
+describe('gridOriginSec on a variable grid', () => {
+  it('extends the FIRST segment backward at its own period, not the dominant', () => {
+    // First segment 100 BPM (0.6s beats) with its first mark (a downbeat)
+    // one whole bar in at 2.4: the true origin extrapolates back to 0 at
+    // 0.6s steps. Using the dominant period (140 → ~0.43s) would land at
+    // ~0.69 instead.
+    const grid: BeatgridData = {
+      tempo_changes: [
+        { start_time: 2.4, bpm: 100, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+        { start_time: 10, bpm: 140, time_signature_num: 4, time_signature_den: 4, bar_position: 1 },
+      ],
+      beat_times: [2.4, 3.0, /* … */ 100],
+      downbeat_times: [],
+    };
+    expect(gridOriginSec(grid)).toBeCloseTo(0, 6);
   });
 });
 

@@ -1,9 +1,7 @@
 """Pydantic schemas for API validation."""
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from datetime import datetime
-
-from backend.track_metadata.units import centibpm_to_bpm
 
 
 # Tag Category Schemas
@@ -85,16 +83,14 @@ class Track(TrackBase):
     needs_attention: bool = False
     tags: list[Tag] = []
     provenance: TrackProvenance | None = None
-    # Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a grid
-    # exists, else bpm. Float BPM (models.Track.bpm_effective). Tempo
-    # consumers (Set planner) read this, never bpm.
-    bpm_effective: float | None = None
+    # One served BPM (ADR 0027): the grid-first projection
+    # (models.Track.bpm_projected — float BPM), not the centibpm column.
+    # The alias reads the model property when validating from ORM objects;
+    # plain-dict construction still accepts "bpm".
+    bpm: float | None = Field(
+        default=None, validation_alias=AliasChoices("bpm_projected", "bpm")
+    )
     model_config = ConfigDict(from_attributes=True)
-
-    @field_serializer('bpm')
-    def serialize_bpm(self, bpm: int | None, _info) -> float | None:
-        """Convert stored centiBPM back to float BPM for API responses."""
-        return centibpm_to_bpm(bpm)
 
 
 class TrackArchiveResult(BaseModel):
@@ -191,15 +187,19 @@ class BeatgridData(BaseModel):
 
 
 class BeatgridResponse(BaseModel):
-    """Full beatgrid API response."""
-    id: int
+    """Full beatgrid API response.
+
+    A computed placeholder (ADR 0027 §3: gridless tracks project the bpm
+    column on the fly, no row) has id/created_at/updated_at = None.
+    """
+    id: int | None = None
     track_id: int
     data: BeatgridData
     origin: str  # "generated" (placeholder), "edited", or "imported"
     # User-marked downbeat (seconds, ADR 0016); None = no mark
     anchor_time: float | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

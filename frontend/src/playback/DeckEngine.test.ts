@@ -234,12 +234,99 @@ describe('DeckEngine active loop (looping 03)', () => {
     expect(s.loop).toBeNull();
   });
 
+  it('displays the loop size as a live-grid projection after a re-tempo (ADR 0027 §6)', async () => {
+    const engine = await loadedEngine(29);
+    engine.seek(10);
+    engine.toggleLoop(); // [10, 12) = 4 beats on the 0.5s grid
+    expect(engine.getSnapshot().loopBeatsLabel).toBe('4');
+    // Re-tempo to 174: the audible region is untouched, but the displayed
+    // beat count projects the new grid — 2.0s spans ~5.8 beats.
+    const grid174 = Array.from({ length: 600 }, (_, i) => i * (60 / 174));
+    engine.setBeatTimes(29, grid174);
+    const s = engine.getSnapshot();
+    expect(s.loop!.start).toBeCloseTo(10, 10);
+    expect(s.loop!.end).toBeCloseTo(12, 10);
+    expect(s.loopBeatsLabel).toBe('~5.8');
+  });
+
   it('loop state survives a pause (Deck state, not playback state)', async () => {
     const engine = await loadedEngine(25);
     engine.seek(10);
     engine.toggleLoop();
     engine.pause(); // already paused: still must not clear the loop
     expect(engine.getSnapshot().loop).not.toBeNull();
+  });
+});
+
+describe('jumpBeats displaces via the live grid (ADR 0027 §5)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** A 120 BPM grid from 0s: beats every 0.5s across the whole track. */
+  const grid120 = Array.from({ length: 360 }, (_, i) => i * 0.5);
+  /** Variable grid: 120 BPM until t=60 (beats 0..120), then 150 BPM
+   * (0.4s beats). */
+  const gridVar = [
+    ...Array.from({ length: 120 }, (_, i) => i * 0.5),
+    ...Array.from({ length: 150 }, (_, i) => 60 + i * 0.4),
+  ];
+
+  async function loadedEngine(trackId: number, grid: number[] | null) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+    });
+    return engine;
+  }
+
+  it('preserves intra-beat phase exactly (off-phase regression)', async () => {
+    const engine = await loadedEngine(40, grid120);
+    engine.seek(10.125); // beat coordinate 20.25
+    engine.jumpBeats(4);
+    expect(engine.getPlayhead()).toBe(12.125); // (20+4)+0.25 exactly
+    engine.jumpBeats(-4);
+    expect(engine.getPlayhead()).toBe(10.125);
+  });
+
+  it('equals the old scalar math on a constant grid', async () => {
+    const engine = await loadedEngine(41, grid120);
+    engine.seek(10);
+    engine.jumpBeats(4); // 4 beats at 120 = 2s, same as beats*(60/bpm)
+    expect(engine.getPlayhead()).toBeCloseTo(12, 10);
+  });
+
+  it('jumps across a tempo boundary by beat count, not first-segment seconds', async () => {
+    const engine = await loadedEngine(42, gridVar);
+    engine.seek(59); // beat 118: 2 beats at 0.5s remain before the boundary
+    engine.jumpBeats(8);
+    // beats 118→120 cover 1.0s; 6 more at 0.4s cover 2.4s → 62.4.
+    // The scalar math said 59 + 8×0.5 = 63.
+    expect(engine.getPlayhead()).toBeCloseTo(62.4, 10);
+  });
+
+  it('a stale engine bpm scalar cannot skew a gridded jump', async () => {
+    const engine = await loadedEngine(43, grid120);
+    engine.setTrackBpm(43, 87); // half-time-ish scalar; the grid says 120
+    engine.seek(10);
+    engine.jumpBeats(4);
+    expect(engine.getPlayhead()).toBeCloseTo(12, 10); // grid wins
+  });
+
+  it('falls back to the bpm scalar without a grid', async () => {
+    const engine = await loadedEngine(44, null);
+    engine.seek(10);
+    engine.jumpBeats(4); // 4 beats at 120 = 2s
+    expect(engine.getPlayhead()).toBeCloseTo(12, 10);
   });
 });
 

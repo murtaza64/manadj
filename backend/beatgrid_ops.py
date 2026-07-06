@@ -73,3 +73,63 @@ def write_bpm(db: Session, track: models.Track, new_bpm: float) -> None:
 
     # tracks.bpm stays a write-through cache of the grid's tempo.
     track.bpm = bpm_to_centibpm(new_bpm)
+
+
+def cleanup_placeholder_rows(db: Session) -> tuple[int, list[int]]:
+    """Delete persisted `generated` grid rows that are pure derivations of
+    the bpm column (ADR 0027 §3: placeholders are computed, not rows).
+
+    A row whose tempo equals the column carries zero information — delete.
+    A diverged one (the frozen-placeholder failure mode) is kept and its
+    track id reported: reconcile the column by hand first, then re-run.
+    Returns (deleted_count, kept_diverged_track_ids). Mutates ORM state
+    only; the caller owns commit.
+    """
+    deleted = 0
+    kept: list[int] = []
+    rows = (
+        db.query(models.Beatgrid)
+        .filter(models.Beatgrid.origin == "generated")
+        .all()
+    )
+    for grid in rows:
+        tempo_changes = json.loads(grid.tempo_changes_json)
+        track = db.get(models.Track, grid.track_id)
+        column_bpm = track.bpm if track is not None else None
+        is_pure_derivation = (
+            len(tempo_changes) == 1
+            and column_bpm is not None
+            and bpm_to_centibpm(tempo_changes[0]["bpm"]) == column_bpm
+        )
+        if is_pure_derivation:
+            db.delete(grid)
+            deleted += 1
+        else:
+            kept.append(grid.track_id)
+    return deleted, kept
+
+
+def backfill_bpm_from_grids(db: Session) -> int:
+    """One-time reconcile of the internal centibpm column (ADR 0027 §2).
+
+    For every track with a real (non-generated) grid: column := the grid's
+    dominant tempo (the served projection). Gridless and placeholder-only
+    tracks are untouched. Returns the number of rows changed. Mutates ORM
+    state only; the caller owns commit.
+    """
+    changed = 0
+    tracks = (
+        db.query(models.Track)
+        .join(models.Beatgrid, models.Beatgrid.track_id == models.Track.id)
+        .filter(models.Beatgrid.origin != "generated")
+        .all()
+    )
+    for track in tracks:
+        projected = track.bpm_projected
+        if projected is None:
+            continue
+        new_centibpm = bpm_to_centibpm(projected)
+        if track.bpm != new_centibpm:
+            track.bpm = new_centibpm
+            changed += 1
+    return changed
