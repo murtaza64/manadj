@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend import models
 from backend.sync_common.matching import TrackIndex
-from backend.track_metadata.units import centibpm_to_bpm
 
 from .compare import (
     CUE_TIME_TOLERANCE,
@@ -101,7 +100,9 @@ def _library_fields(track: models.Track, maincue: float | None) -> TrackFields:
         title=track.title,
         artist=track.artist,
         key=track.key,
-        bpm=centibpm_to_bpm(track.bpm),
+        # One served BPM (ADR 0027): the sync BPM cell reads the grid-first
+        # projection, not the internal column (ADR 0016 line-61 follow-up).
+        bpm=track.bpm_projected,
         energy=track.energy,
         tags=sorted(tt.tag.name for tt in track.track_tags),
         hotcues=hotcue_values_from_rows(track.hotcues),

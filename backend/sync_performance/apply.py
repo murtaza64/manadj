@@ -99,8 +99,10 @@ def import_beatgrid(
     # grid's dominant tempo through to the tracks.bpm cache
     track = crud.get_track(db, track_id)
     if track is not None and tempo_changes:
+        # Waveform duration, duration_secs fallback (ADR 0027: a None
+        # duration on a variable grid silently yields the first segment).
         waveform = crud.get_waveform(db, track_id)
-        duration = waveform.duration if waveform else None
+        duration = waveform.duration if waveform else track.duration_secs
         track.bpm = bpm_to_centibpm(dominant_bpm(tempo_changes, duration))
         db.commit()
 

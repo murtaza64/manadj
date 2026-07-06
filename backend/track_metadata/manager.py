@@ -262,7 +262,12 @@ def write_to_files(db: Session, request: MetadataSyncRequest) -> MetadataSyncRes
             if field in ("title", "artist"):
                 write_kwargs[field] = str(value)
             elif field == "bpm":
-                write_kwargs["bpm"] = float(value)
+                # One served BPM (ADR 0027): ID3 write-back writes the
+                # grid-first projection, not the payload's echo of a
+                # possibly stale column.
+                projected = track.bpm_projected
+                if projected is not None:
+                    write_kwargs["bpm"] = projected
             elif field == "key":
                 key = Key.from_musical(str(value))
                 if key is None:

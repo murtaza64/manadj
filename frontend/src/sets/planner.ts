@@ -52,14 +52,11 @@ export interface PlannerTrackFacts {
   hotCue1Sec: number | null;
 }
 
-/** A Track's effective tempo: the backend's grid-first projection
- * (bpm_effective — the Beatgrid's dominant BPM when a grid exists), else
- * the bpm column. The same authority chain as the Transition editor
- * (`beatgrid.tempo_changes[0].bpm ?? track.bpm`, ADR 0016) — every plan
- * tempo input must come through here, or ladder/Conductor geometry
- * disagrees with the editor (the Kambi→Raskal 2× incident). */
+/** A Track's effective tempo. Served `bpm` IS the grid-first projection
+ * now (ADR 0027 — one served BPM); this seam remains so every plan tempo
+ * input flows through one place (the Kambi→Raskal 2× incident). */
 export function trackEffectiveBpm(t: Track): number | null {
-  return t.bpm_effective ?? t.bpm ?? null;
+  return t.bpm ?? null;
 }
 
 /** Assemble one entry's planner facts from its Track row (+ Hot Cue 1) —

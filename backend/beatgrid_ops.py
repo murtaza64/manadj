@@ -73,3 +73,29 @@ def write_bpm(db: Session, track: models.Track, new_bpm: float) -> None:
 
     # tracks.bpm stays a write-through cache of the grid's tempo.
     track.bpm = bpm_to_centibpm(new_bpm)
+
+
+def backfill_bpm_from_grids(db: Session) -> int:
+    """One-time reconcile of the internal centibpm column (ADR 0027 §2).
+
+    For every track with a real (non-generated) grid: column := the grid's
+    dominant tempo (the served projection). Gridless and placeholder-only
+    tracks are untouched. Returns the number of rows changed. Mutates ORM
+    state only; the caller owns commit.
+    """
+    changed = 0
+    tracks = (
+        db.query(models.Track)
+        .join(models.Beatgrid, models.Beatgrid.track_id == models.Track.id)
+        .filter(models.Beatgrid.origin != "generated")
+        .all()
+    )
+    for track in tracks:
+        projected = track.bpm_projected
+        if projected is None:
+            continue
+        new_centibpm = bpm_to_centibpm(projected)
+        if track.bpm != new_centibpm:
+            track.bpm = new_centibpm
+            changed += 1
+    return changed

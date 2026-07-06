@@ -30,7 +30,7 @@ def get_tracks(
 ):
     query = db.query(models.Track).options(
         joinedload(models.Track.track_tags).joinedload(models.TrackTag.tag).joinedload(models.Tag.category),
-        # bpm_effective reads the grid (ADR 0016) — eager, not N+1 lazy loads.
+        # served bpm reads the grid (ADR 0027) — eager, not N+1 lazy loads.
         joinedload(models.Track.beatgrid),
     )
 
@@ -100,7 +100,9 @@ def get_tracks(
         bpm_min_centi = int(bpm_min * 100)
         bpm_max_centi = int(bpm_max * 100)
 
-        # Filter tracks within range (exclude NULL bpm)
+        # Filter tracks within range (exclude NULL bpm). The centibpm
+        # column is internal-only (ADR 0027): it exists so SQL sort/filter
+        # work without parsing grid JSON, kept honest by compliant writers.
         query = query.filter(
             models.Track.bpm >= bpm_min_centi,
             models.Track.bpm <= bpm_max_centi,

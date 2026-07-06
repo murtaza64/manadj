@@ -50,20 +50,30 @@ class Track(Base):
     track_tags = relationship("TrackTag", back_populates="track", cascade="all, delete-orphan")
 
     @property
-    def bpm_effective(self) -> float | None:
-        """Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a
-        grid exists, else the bpm column projected to float BPM. THE tempo
-        value tempo consumers must read — the bpm column is only the grid's
-        cached projection and can be stale (the Kambi→Raskal 2× incident)."""
+    def bpm_projected(self) -> float | None:
+        """Grid-first BPM (ADR 0027): the Beatgrid's dominant tempo when a
+        real (non-generated) grid exists, else the bpm column projected to
+        float BPM. THE served tempo — schemas.Track.bpm reads this; the bpm
+        column is internal (SQL sort/filter, exports' cache) and can be
+        stale (the Kambi→Raskal 2× incident). Dominant-tempo duration is
+        the waveform's duration, duration_secs fallback (a NULL duration on
+        a variable grid would silently yield the first segment's tempo)."""
         # Lazy imports: track_metadata.manager imports this module.
         from .beatgrid_utils import dominant_bpm
         from .track_metadata.units import centibpm_to_bpm
 
         grid = self.beatgrid
-        if grid is not None:
+        if grid is not None and grid.origin != "generated":
             tempo_changes = json.loads(grid.tempo_changes_json)
             if tempo_changes:
-                return dominant_bpm(tempo_changes, self.duration_secs)
+                duration = self.duration_secs
+                if len(tempo_changes) > 1:
+                    # Only variable grids weight by duration — skip the
+                    # waveform load for the constant-grid common case.
+                    waveform = self.waveform
+                    if waveform is not None:
+                        duration = waveform.duration
+                return dominant_bpm(tempo_changes, duration)
         return centibpm_to_bpm(self.bpm)
 
 

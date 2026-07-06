@@ -36,11 +36,10 @@ export interface Track {
   title?: string;
   artist?: string;
   key?: number;  // Engine DJ key ID (0-23)
+  /** One served BPM (ADR 0027): the grid-first projection — the
+   * Beatgrid's dominant tempo when a real grid exists, else the stored
+   * value. Float BPM; there is no second field to prefer. */
   bpm?: number;
-  /** Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a grid
-   * exists, else bpm. Tempo consumers (Set planner) read this, never bpm —
-   * the bpm column can be a stale projection. */
-  bpm_effective?: number | null;
   duration_secs?: number | null;
   cue_point_time?: number | null;  // Main cue (seconds), performance data
   codec?: string | null;
