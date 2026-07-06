@@ -17,6 +17,7 @@ import { MidiControlRegistrar } from './components/MidiControlRegistrar';
 import { MidiFeedbackBridge } from './components/MidiFeedbackBridge';
 import { AudioRoutingBridge } from './components/AudioRoutingBridge';
 import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
+import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
@@ -91,6 +92,9 @@ function App() {
             conducting Set — above the view switch, like the Conductor
             it feeds. */}
         <ConductorPlanFeed />
+        {/* Space → Conductor context (sets 34): plan assembly for the
+            SELECTED Set — above the view switch, like the selection. */}
+        <SetSpaceTransport />
         <FilterProvider>
           <div className="app-shell">
             <TopBar mode={view} onModeChange={setView} />
