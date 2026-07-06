@@ -1,6 +1,6 @@
 # 36 — Trailing suggest row replaces the header Suggest button
 
-Status: ready-for-human
+Status: done (approved in-session + landed 2026-07-06, merge `smvlqprr`, lane setrows)
 
 ## Parent
 

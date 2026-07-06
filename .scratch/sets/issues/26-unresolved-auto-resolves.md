@@ -1,6 +1,6 @@
 # 26 — Unresolved adjacencies auto-resolve; explicit Hard-cut pin
 
-Status: ready-for-human
+Status: done (approved in-session + landed 2026-07-06, merge `smvlqprr`, lane setrows; includes the take-available indicator follow-up)
 
 ## Parent
 
