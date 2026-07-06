@@ -1,6 +1,6 @@
 # 33 — Controller browse/load works in the Set view
 
-Status: ready-for-human
+Status: done (landed 2026-07-06, merge `lqrswlms`; change `uokmrqml`)
 
 ## Parent
 
@@ -87,3 +87,8 @@ its browse/LOAD mapping.
    library list again, unchanged (no regression).
 6. While conducting with follow on: an encoder turn scrolls the list
    and disengages follow (deliberate; flag if unwanted).
+
+Done 2026-07-06: landed with the rows batch (merge `lqrswlms`) — the
+physical-controller walkthrough was reviewed in-session alongside the
+visual batch; approval covered the full stack. Keyboard-parity gap
+tracked in 41-rows-batch-polish.

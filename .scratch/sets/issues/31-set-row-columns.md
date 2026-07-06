@@ -1,6 +1,6 @@
 # 31 — Columnar Set track rows (BPM/key left, color-coded; time columns)
 
-Status: ready-for-human
+Status: done (landed 2026-07-06, merge `lqrswlms`; change `zqqlwplx`)
 
 ## Parent
 
