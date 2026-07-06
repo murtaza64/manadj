@@ -1,6 +1,6 @@
 # Widen the Active loop domain to dyadic 1/8–128 with set-length resize
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -27,3 +27,7 @@ Demoable from the existing on-screen loop row: double a loop past 32.
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+- 2026-07-06 (midiops lane, change `lplwwoxk`): implemented. `LOOP_MAX_BEATS` 32→128; resize generalized to `LoopResize` (`'halve' | 'double' | { beats }`) via `resizeLoopBeats` in `frontend/src/playback/loop.ts`, one code path in the `loop-resize` reducer case; `formatLoopBeats` renders any dyadic as a reduced fraction (3/4, 3/8, 3/2). Verified: loop math + transport reducer tests (clamp bounds, set-length, 3/4 ladder), full `npx vitest run` (1252) green, tsc + build green. Awaiting human review — walkthrough on issue 02.
