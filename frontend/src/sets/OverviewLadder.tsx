@@ -297,6 +297,7 @@ export function OverviewLadder({
             <LadderClip
               key={`${entry.trackId}-${i}`}
               entry={entry}
+              position={i + 1}
               track={tracks.get(entry.trackId)}
               hotCues={hotCuesByTrack.get(entry.trackId) ?? []}
               total={total}
@@ -497,12 +498,15 @@ function AdjacencyBand({
 
 function LadderClip({
   entry,
+  position,
   track,
   hotCues,
   total,
   redrawKey,
 }: {
   entry: PlannedEntry;
+  /** 1-based position in the set — matches the track list's numbering. */
+  position: number;
   track: Track | undefined;
   hotCues: HotCue[];
   total: number;
@@ -532,7 +536,7 @@ function LadderClip({
         zIndex: 2,
       }}
     >
-      {isA && <ClipTitle title={title} color={DECK_COLORS.A} />}
+      {isA && <ClipTitle position={position} title={title} color={DECK_COLORS.A} />}
       <LadderWave
         wave={data ?? null}
         height={LANE_H - TITLE_H - 2}
@@ -541,12 +545,20 @@ function LadderClip({
         dir={isA ? 'up' : 'down'}
         redrawKey={redrawKey}
       />
-      {!isA && <ClipTitle title={title} color={DECK_COLORS.B} />}
+      {!isA && <ClipTitle position={position} title={title} color={DECK_COLORS.B} />}
     </div>
   );
 }
 
-function ClipTitle({ title, color }: { title: string; color: string }) {
+function ClipTitle({
+  position,
+  title,
+  color,
+}: {
+  position: number;
+  title: string;
+  color: string;
+}) {
   return (
     <div
       style={{
@@ -560,9 +572,13 @@ function ClipTitle({ title, color }: { title: string; color: string }) {
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         pointerEvents: 'none',
-        color,
+        // Deck identity, but eased off the full-saturation cyan/magenta —
+        // 9px bold in pure deck color vibrates against the dark clip.
+        color: `color-mix(in srgb, ${color} 62%, #6a6a74 38%)`,
       }}
     >
+      {/* Set-position number, dimmed so the title stays the headline. */}
+      <span style={{ opacity: 0.55, fontWeight: 400 }}>{position} </span>
       {title}
     </div>
   );

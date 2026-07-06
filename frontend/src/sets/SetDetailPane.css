@@ -56,11 +56,25 @@
 }
 
 /* The transport is the view's primary action: bigger and bolder than the
-   secondary cluster, which stays compact and unbolded. */
+   secondary cluster, which stays compact and unbolded. Fixed height +
+   flex centering (22 follow-up): the glyphs (▶ ⏸ ⏹ ⤴) have uneven font
+   metrics, and without a locked box the tallest one grows its button and
+   shifts the whole header row. */
 .btn.set-transport-btn {
-  padding: 6px 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 16px;
   font-size: 14px;
   font-weight: bold;
+  line-height: 1;
+}
+
+/* Play's label swaps between "▶ Play set" and "⏸ Playing" — reserve the
+   wider label's width so toggling never re-centers the transport. */
+.set-play {
+  min-width: 116px;
 }
 
 .set-header-actions .btn {
@@ -215,6 +229,20 @@
 
 .set-chip-btn:active {
   background: var(--surface1);
+}
+
+/* Icon-only chips (⋈ edit, ◉ practice — 22 follow-up): the glyphs'
+   font metrics differ (math operator vs geometric shape), so baseline
+   layout leaves them visually off-center at different heights.
+   Flex-center them in one fixed box instead. */
+.set-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 18px;
+  padding: 0 8px;
+  line-height: 1;
 }
 
 /* Header-sized chip (tempo policy) */

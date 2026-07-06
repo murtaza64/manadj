@@ -760,7 +760,12 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                     : 'Play the set through the decks'
                 }
               >
-                {conductingThis && conductorState.status === 'playing' ? '⏸ Playing' : '▶ Play set'}
+                {/* \uFE0E forces text presentation — Apple renders these
+                    glyphs as emoji by default, at emoji metrics (the ⤴
+                    button visibly outgrew its siblings). */}
+                {conductingThis && conductorState.status === 'playing'
+                  ? '⏸\uFE0E Playing'
+                  : '▶\uFE0E Play set'}
               </button>
               {conductingThis && (
                 <button
@@ -768,7 +773,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   onClick={stopSetPlayback}
                   title="Stop the Conductor (decks pause)"
                 >
-                  ⏹
+                  {'⏹\uFE0E'}
                 </button>
               )}
               {/* Pickup (sets 16): the inverse of takeover. Lit exactly
@@ -782,7 +787,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   disabled={!pickupState.lit}
                   title={pickupState.message}
                 >
-                  ⤴ Pick up
+                  {'⤴\uFE0E Pick up'}
                 </button>
               )}
             </>
@@ -1250,33 +1255,33 @@ function AdjacencyRow({
         )}
 
         {/* Edit (sets 20): the sketch-it verb made visible — delegates
-            to the row click-through (sets 09). Practice = mix it live. */}
+            to the row click-through (sets 09). Practice = mix it live.
+            Icon-only, uncolored (22 follow-up): ⋈ is the Transition
+            editor's own icon (TopBar); the verbs ride the tooltips. */}
         <button
-          className="set-chip-btn"
+          className="set-chip-btn set-icon-btn"
           onClick={(e) => {
             e.stopPropagation();
             onOpenEditor();
           }}
           title="Open this handover in the Transition editor"
-          style={{ color: 'var(--sapphire)' }}
         >
-          ✎ edit
+          ⋈
         </button>
 
         {/* Practice (sets 13): the mix-it-live verb — outgoing cued on A
-            with a runway, incoming on B; press again to re-cue. Plain
-            quiet button like its neighbors (sets 20). */}
+            with a runway, incoming on B; press again to re-cue. Icon-only
+            vinyl glyph, uncolored (22 follow-up). */}
         {onPractice && (
           <button
-            className="set-chip-btn"
+            className="set-chip-btn set-icon-btn"
             onClick={(e) => {
               e.stopPropagation();
               onPractice();
             }}
             title="Practice this handover: cue outgoing on deck A (with a runway), incoming on deck B — press again to re-cue"
-            style={{ color: 'var(--yellow)' }}
           >
-            ⏵ practice
+            ◉
           </button>
         )}
 
