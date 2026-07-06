@@ -80,14 +80,22 @@
   border-color: var(--green);
 }
 
-/* Engaged = inverted fill; hover/press keep it (state, not feedback) */
+/* Engaged = inverted fill; hover/press keep it (state, not feedback).
+   min-width lives on the BASE selector only: grouped onto the
+   :hover/:active selectors it outranked the Performance view's
+   `.perf-transport-col .player-button { min-width: 0 }` override on
+   those states alone — the play button grew 56→60px on hover while
+   playing (the paused rules never carried min-width there). */
+.player-button-playing {
+  min-width: 60px;
+}
+
 .player-button-playing,
 .player-button-playing:hover:not(:disabled),
 .player-button-playing:active:not(:disabled) {
   background: var(--green);
   color: var(--base);
   border-color: var(--green);
-  min-width: 60px;
 }
 
 .player-button-cue {
