@@ -47,13 +47,20 @@ export interface SurfaceJumps {
   beatjump(deck: ChannelId, direction: 'back' | 'forward'): void;
 }
 
-/** Loop gesture class (ADR 0019, looping 03): auto-loop engage/release.
+/** Loop gesture class (ADR 0019, looping 03, midi-performance-ops 02/03):
+ * auto-loop engage/release, LOOP-pad presets, and running-loop resize.
  * Registered by the shared surface (Performance and library views); the
  * editor does not register it — loop gestures there are dropped like any
- * unregistered class. Hardware mapping is follow-up MIDI work; the class
- * exists so routing is ready. */
+ * unregistered class. */
 export interface SurfaceLoops {
   toggleLoop(deck: ChannelId): void;
+  /** LOOP pad press carrying the pad's preset size in beats: no loop →
+   * engage at the playhead; same size → release; different → resize. */
+  loopPreset(deck: ChannelId, beats: number): void;
+  /** Resize the RUNNING loop; returns false (nothing consumed) when no
+   * loop is active, letting the SHIFT+IN/OUT overload fall back to its
+   * idle beatjump-size meaning (midi-performance-ops 03). */
+  resizeActiveLoop(deck: ChannelId, change: 'halve' | 'double'): boolean;
 }
 
 /** Jog gesture class (ADR 0019): the wheel's three tick streams. The

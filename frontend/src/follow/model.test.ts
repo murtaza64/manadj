@@ -14,6 +14,7 @@ import {
   candidateIdSet,
   DEFAULT_FOLLOW_PARAMS,
   deriveFollowQuery,
+  followMacroToggles,
   followSummary,
   followTier,
   orderByTier,
@@ -409,5 +410,66 @@ describe('reduceFollow — the Follow state machine', () => {
     expect(flags).toEqual({ A: true, B: true });
     flags = reduceFollow(flags, pause('A', { A: false, B: true }));
     expect(flags).toEqual({ A: false, B: true });
+  });
+});
+
+describe('followMacroToggles — the assistant button (midi-performance-ops 08)', () => {
+  const OFF: FollowFlags = { A: false, B: false };
+
+  describe('no Deck follows: enable on the playing Decks', () => {
+    it('one playing Deck → toggle that Deck only', () => {
+      expect(followMacroToggles(OFF, { A: true, B: false })).toEqual(['A']);
+      expect(followMacroToggles(OFF, { A: false, B: true })).toEqual(['B']);
+    });
+
+    it('both playing → toggle both', () => {
+      expect(followMacroToggles(OFF, { A: true, B: true })).toEqual(['A', 'B']);
+    });
+
+    it('nothing plays → toggle both Decks (paused Decks may follow while nothing plays)', () => {
+      expect(followMacroToggles(OFF, { A: false, B: false })).toEqual(['A', 'B']);
+    });
+  });
+
+  describe('any Deck follows: all Follow off', () => {
+    it('one following Deck → toggle exactly that Deck off, whatever plays', () => {
+      expect(followMacroToggles({ A: true, B: false }, { A: false, B: true })).toEqual(['A']);
+      expect(followMacroToggles({ A: false, B: true }, { A: true, B: true })).toEqual(['B']);
+    });
+
+    it('both following → toggle both off', () => {
+      expect(followMacroToggles({ A: true, B: true }, { A: true, B: true })).toEqual(['A', 'B']);
+    });
+
+    it('a paused following Deck is still turned off — never "add the other" (asymmetric on purpose)', () => {
+      // B follows while paused (sole-playing sticky); A plays. The press
+      // dismisses assistance, it does not spread it to A.
+      expect(followMacroToggles({ A: false, B: true }, { A: true, B: false })).toEqual(['B']);
+    });
+  });
+
+  it('composes with the reducer: enable-from-nothing then dismiss round-trips to OFF', () => {
+    // Press 1 with A playing (both loaded): enable on A.
+    let flags = OFF;
+    for (const deck of followMacroToggles(flags, { A: true, B: false })) {
+      flags = reduceFollow(flags, { type: 'toggle', deck, loaded: true });
+    }
+    expect(flags).toEqual({ A: true, B: false });
+    // Press 2: any Deck follows → all off.
+    for (const deck of followMacroToggles(flags, { A: true, B: false })) {
+      flags = reduceFollow(flags, { type: 'toggle', deck, loaded: true });
+    }
+    expect(flags).toEqual(OFF);
+  });
+
+  it('the reducer\u2019s loaded gate still applies: an empty Deck\u2019s enable no-ops', () => {
+    // Nothing plays, only A is loaded: the macro proposes both, the
+    // reducer enables A only — the button is a shortcut, not a new model.
+    let flags = OFF;
+    const loaded = { A: true, B: false };
+    for (const deck of followMacroToggles(flags, { A: false, B: false })) {
+      flags = reduceFollow(flags, { type: 'toggle', deck, loaded: loaded[deck] });
+    }
+    expect(flags).toEqual({ A: true, B: false });
   });
 });

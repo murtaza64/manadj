@@ -320,6 +320,15 @@ export function DeckProvider({ children }: { children: ReactNode }) {
           const d = registryRef.current[deck];
           if (deckReadyNow(d)) d.engine.toggleLoop();
         },
+        loopPreset: (deck, beats) => {
+          const d = registryRef.current[deck];
+          if (deckReadyNow(d)) d.engine.loopPreset(beats);
+        },
+        resizeActiveLoop: (deck, change) => {
+          const d = registryRef.current[deck];
+          if (!deckReadyNow(d)) return false;
+          return d.engine.resizeActiveLoop(change);
+        },
       },
       jog: {
         rimTicks: (deck, ticks) => deckControlsFor(deck)?.jogTicks(ticks),

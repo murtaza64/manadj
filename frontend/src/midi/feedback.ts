@@ -49,6 +49,22 @@ export interface DeckLedInput {
    * pads dark (and presses no-op).
    */
   hasBeatgrid: boolean;
+  /**
+   * The app-wide Quantize toggle (midi-performance-ops 07) — the second
+   * non-deck input; both decks receive the same value, so the two Q lamps
+   * mirror the one switch.
+   */
+  quantize: boolean;
+  /** The Deck's Key Lock (engine snapshot state, midi-performance-ops 07)
+   * — drives the SHIFT-layer Q lamp probe only. */
+  keyLock: boolean;
+  /**
+   * The active loop's length in beats, or null when no loop runs
+   * (midi-performance-ops 02) — drives the LOOP-mode pad lamps: the pad
+   * whose preset equals this lights, per page; off-ladder lengths match
+   * no pad and show all dark (the screen stays the truth).
+   */
+  loopBeats: number | null;
 }
 
 /** Desired on/off per light of one deck. */
@@ -63,6 +79,14 @@ export interface DeckLedStates {
    * mapped pads lit steadily iff the Track has a Beatgrid; pad 3 (the one
    * unbound pad) dark always. */
   gridPads: readonly boolean[];
+  /** Q button light — mirrors app-wide Quantize (midi-performance-ops 07). */
+  quantize: boolean;
+  /** SHIFT-layer Q light (the Key Lock lamp probe) — the Deck's Key Lock. */
+  keyLock: boolean;
+  /** Active loop length in beats or null — encodeDeckLeds lights the
+   * LOOP-mode pad whose mapped preset equals it (exact dyadic equality;
+   * lengths and presets are both exact binary fractions). */
+  loopBeats: number | null;
 }
 
 /** [status, data1, data2] — ready for MIDIOutput.send. */
@@ -112,6 +136,9 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
     pfl: input.pfl,
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
     gridPads: GRID_PAD_MAPPED.map((mapped) => mapped && input.hasBeatgrid),
+    quantize: input.quantize,
+    keyLock: input.keyLock,
+    loopBeats: input.loopBeats,
   };
 }
 
@@ -164,6 +191,10 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     ...deck.hotCuePads,
     ...deck.hotCuePadsShifted,
     ...deck.gridPads,
+    deck.quantize,
+    ...(deck.keyLockShifted ? [deck.keyLockShifted] : []),
+    ...deck.loopPads,
+    ...deck.loopPadsShifted,
   ];
 }
 
@@ -186,7 +217,39 @@ export function encodeDeckLeds(
     ),
     // Grid-edit (SAMPLER) layer (midi-performance-ops 05).
     ...addresses.gridPads.map((address, i) => encodeLed(address, states.gridPads[i] ?? false)),
+    encodeLed(addresses.quantize, states.quantize),
+    // The Key Lock lamp probe (midi-performance-ops 07): written only when
+    // the mapping carries the shifted-Q address; absent = probe failed and
+    // Key Lock is screen-only.
+    ...(addresses.keyLockShifted ? [encodeLed(addresses.keyLockShifted, states.keyLock)] : []),
+    // LOOP-mode pads (midi-performance-ops 02), both pages: lit iff the
+    // active loop's length equals the pad's preset — no loop or an
+    // off-ladder length lights nothing. Unbound shifted pads aren't in
+    // the mapping and are never written.
+    ...[...addresses.loopPads, ...addresses.loopPadsShifted].map((pad) =>
+      encodeLed(pad, states.loopBeats === pad.beats)
+    ),
   ];
+}
+
+/**
+ * The assistant lamp's state (midi-performance-ops 08): lit iff any Deck
+ * follows — mirrors the FilterBar, whatever caused the change (button
+ * macro, screen toggles, playback spread/revoke).
+ */
+export function assistantLedLit(follows: Record<'A' | 'B', boolean>): boolean {
+  return follows.A || follows.B;
+}
+
+/**
+ * Assistant lamp state → messages. Empty when the mapping has no learned
+ * assistant address (TODO(hardware-verify) in the mapping file).
+ */
+export function encodeAssistantLed(
+  feedback: MappingFeedback,
+  lit: boolean
+): readonly MidiMessage[] {
+  return feedback.assistant ? [encodeLed(feedback.assistant, lit)] : [];
 }
 
 /**
@@ -194,7 +257,10 @@ export function encodeDeckLeds(
  * never lingers on the hardware.
  */
 export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[] {
-  return (['A', 'B'] as const).flatMap((deck) =>
-    deckAddresses(feedback.decks[deck]).map((address) => encodeLed(address, false))
-  );
+  return [
+    ...(['A', 'B'] as const).flatMap((deck) =>
+      deckAddresses(feedback.decks[deck]).map((address) => encodeLed(address, false))
+    ),
+    ...encodeAssistantLed(feedback, false),
+  ];
 }

@@ -21,7 +21,7 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
 import { foldLoopPlayhead } from './loop';
-import type { LoopRegion } from './loop';
+import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
 import { getCachedBuffer, putCachedBuffer } from './bufferCache';
@@ -407,10 +407,11 @@ export class DeckEngine {
     this.dispatch({ type: 'loop-toggle' });
   }
 
-  /** Halve/double (looping 04): pending size when idle, live resize while
+  /** Resize — halve/double or absolute set-length (looping 04,
+   * midi-performance-ops 01): pending size when idle, live resize while
    * looping. Works without a loaded Track — the pending size is a Deck
    * preference, like the beatjump size. */
-  resizeLoop(change: 'halve' | 'double'): void {
+  resizeLoop(change: LoopResize): void {
     if (!this.buffer) {
       const [next] = reduceTransport(
         this.transport,
@@ -423,6 +424,35 @@ export class DeckEngine {
       return;
     }
     this.dispatch({ type: 'loop-resize', change });
+  }
+
+  /** Resize the RUNNING loop only (midi-performance-ops 03): returns
+   * false — touching nothing, not even the pending size — when no loop is
+   * active, so the SHIFT+IN/OUT overload can fall back to its idle
+   * beatjump-size meaning. */
+  resizeActiveLoop(change: 'halve' | 'double'): boolean {
+    if (!this.transport.loop) return false;
+    this.resizeLoop(change);
+    return true;
+  }
+
+  /** LOOP pad preset (midi-performance-ops 02): no loop → engage at the
+   * playhead at `beats` (remembered as the pending size); same size →
+   * release; different size → set-length resize in place. Works without a
+   * loaded Track — the pending size is a Deck preference, like resize. */
+  loopPreset(beats: number): void {
+    if (!this.buffer) {
+      const [next] = reduceTransport(
+        this.transport,
+        { type: 'loop-preset', beats },
+        this.transportContext()
+      );
+      if (next === this.transport) return;
+      this.transport = next;
+      this.emit();
+      return;
+    }
+    this.dispatch({ type: 'loop-preset', beats });
   }
 
   // ── Sound controls ─────────────────────────────────────────────────────

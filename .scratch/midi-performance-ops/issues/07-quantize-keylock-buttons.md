@@ -1,6 +1,6 @@
 # Q and SHIFT+Q: Quantize toggle and per-Deck Key Lock
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -45,3 +45,14 @@ None - can start immediately
   http://localhost:5393 (lane app running, lane miditog); walkthrough in the review
   request. Hardware smoke test (Q messages, shifted-Q lamp probe) still pending —
   addresses carry TODO(hardware-verify).
+- 2026-07-06 (miditog lane): hardware smoke test by the user — Q toggles Quantize and
+  SHIFT+Q toggles the deck's Key Lock on device; input bindings flipped to
+  hardware-verified. Landed on main (merge `llmzovqv`, union-merged with the grid
+  track's hotspot appends). OPEN REMAINDER: the shifted-Q lamp probe outcome was not
+  explicitly reported (nor the Q-lamp mirror observed) — both keep their
+  TODO(hardware-verify) in the mapping; delete `keyLockShifted` if the probe turns out
+  inert. Closed.
+- 2026-07-06 (miditog lane): lamps confirmed by the user — Q lamps mirror Quantize,
+  and the shifted-Q probe is REAL: the Q lamp shows Key Lock while SHIFT is held.
+  Probe outcome recorded in the mapping; all issue-07 addresses now
+  hardware-verified, no remainders.

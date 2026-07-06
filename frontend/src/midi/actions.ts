@@ -41,7 +41,28 @@ export type ButtonTarget =
   | { control: 'grid-anchor'; deck: ChannelId }
   /** Grid tempo ops: Grow/Shrink micro-adjust (glossary) and BPM
    * halve/double, all through the one BPM write path. */
-  | { control: 'grid-bpm'; deck: ChannelId; change: 'grow' | 'shrink' | 'halve' | 'double' };
+  | { control: 'grid-bpm'; deck: ChannelId; change: 'grow' | 'shrink' | 'halve' | 'double' }
+  /** App-wide Quantize toggle (midi-performance-ops 07) — registry-direct
+   * sticky state (ADR 0019), deck-less on purpose: both hardware Q buttons
+   * are two handles on the one switch. */
+  | { control: 'quantize' }
+  /** SHIFT+Q: that Deck's Key Lock toggle (midi-performance-ops 07) —
+   * registry-direct sticky Deck state, never surface-routed. */
+  | { control: 'key-lock'; deck: ChannelId }
+  /** The assistant button (midi-performance-ops 08): a macro over the
+   * per-Deck Follow model — all on (playing Decks, or both when nothing
+   * plays) or all off. Registry-direct, browse-adjacent. */
+  | { control: 'follow-macro' }
+  /** LOOP pad mode (midi-performance-ops 02) — loops gesture class. The
+   * target carries the pad's preset size in beats: no loop → engage at
+   * the playhead; same size → release; different size → resize in place. */
+  | { control: 'loop-preset'; deck: ChannelId; beats: number }
+  /** SHIFT+IN/OUT (midi-performance-ops 03): state-disambiguated overload.
+   * While the deck has an active loop it resizes the loop (loops gesture
+   * class); idle it changes the beatjump size, exactly like the dedicated
+   * `beatjump-size` target (which stays in the vocabulary for devices
+   * without the overload). */
+  | { control: 'loop-or-jump-size'; deck: ChannelId; change: 'halve' | 'double' };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }

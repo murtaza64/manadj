@@ -1,6 +1,6 @@
 # Assistant button: Follow-mode macro with lamp
 
-Status: ready-for-human
+Status: done
 
 ## Parent
 
@@ -46,3 +46,8 @@ None - can start immediately
   inert on this button until learned. Covered at the macro, translator, dispatch, and
   LED seams; full vitest (1194) + tsc build green. Status → ready-for-human: review at
   http://localhost:5393 (lane miditog); walkthrough in the review request.
+- 2026-07-06 (miditog lane): assistant button hardware-learned via the inspector
+  (note 0x03, channel 0 — the browse channel) and bound; lamp wired at the button's
+  own address. Macro and lamp both verified on device by the user
+  (hardware-verified comments in the mapping). SHIFT+assistant not captured; unbound.
+  Landed on main (merge `llmzovqv`). Closed.

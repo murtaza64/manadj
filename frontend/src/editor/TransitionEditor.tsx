@@ -16,7 +16,6 @@ import { JogController } from '../midi/jog';
 import Library from '../components/Library';
 import type { LibraryBrowseHandle } from '../components/Library';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
-import { AutoBlurSelect } from '../components/AutoBlurSelect';
 import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import {
@@ -38,7 +37,7 @@ import { TemplatesDropdown } from './TemplatesDropdown';
 import { SaveTemplateModal } from './SaveTemplateModal';
 import type { SaveTemplateResult } from './SaveTemplateModal';
 import { barBeatLabel, bEntryLabel, lengthBeatsLabel } from './beatReadout';
-import { beatsToSeconds } from './gestureMath';
+import { beatsToSeconds, slideBeatsToSeconds } from './gestureMath';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
@@ -54,14 +53,8 @@ import {
   snapshotTemplates,
   subscribeTemplates,
 } from './templateStore';
-import {
-  EDITOR_PITCH_RANGE_PERCENT,
-  LANE_IDS,
-  defaultMix,
-  tempoMatchPitch,
-  visibleLaneIds,
-} from './mixModel';
-import type { LaneId, Transition } from './mixModel';
+import { EDITOR_PITCH_RANGE_PERCENT, defaultMix, tempoMatchPitch } from './mixModel';
+import type { Transition } from './mixModel';
 import { LinkToggle } from '../links/LinkToggle';
 import { repointTakePinsLocal } from '../sets/setStore';
 import type { Track } from '../types';
@@ -494,7 +487,7 @@ function TransitionEditorInner() {
         hotCueDown: (deck, pad) => midiCues.current[deck].down(pad),
         hotCueClear: (deck, pad) => midiCues.current[deck].remove(pad),
       },
-      jumps: {
+        jumps: {
         beatjump: (deck, direction) => {
           const { bpmA: a, bpmB: b, slideDeckB: slide } = midiGestures.current;
           const bpm = deck === 'A' ? a : b;
@@ -502,7 +495,9 @@ function TransitionEditorInner() {
           const beats = sharedDecksRef.current[deck].beatjumpBeats;
           const n = direction === 'back' ? -beats : beats;
           if (deck === 'A') player.seek(player.getMixTime() + beatsToSeconds(n, bpm));
-          else slide('beats', beatsToSeconds(n, bpm));
+          // Apparent-motion polarity (mix-editor 32): ▶ slides B's drawn
+          // block right — same flip as the on-screen cluster.
+          else slide('beats', slideBeatsToSeconds(n, bpm));
         },
       },
       jog: {
@@ -703,8 +698,8 @@ function TransitionEditorInner() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isGuardedKeyEvent(e)) return;
-      // The editor's selects (saved-Transition dropdown, add-lane) keep
-      // their native arrow/space behavior.
+      // The editor's selects (saved-Transition dropdown) keep their
+      // native arrow/space behavior.
       if ((e.target as HTMLElement | null)?.tagName === 'SELECT') return;
       switch (e.key) {
         case ' ':
@@ -773,7 +768,7 @@ function TransitionEditorInner() {
               effectiveBpm={bpmA}
               pitchPercent={0}
               onBpmSaved={(bpm) => setTrackA((t) => (t ? { ...t, bpm } : t))}
-              onAlignmentNudge={(d) => store.alignmentNudge('A', d)}
+              onAlignmentNudge={(d) => store.alignmentNudge(d)}
               gestures={{
                 // A ≡ mix axis (sketch origin): its controls are plain
                 // transport, not slides (re-decided 2026-07-03 — mirror-A
@@ -812,12 +807,13 @@ function TransitionEditorInner() {
               effectiveBpm={bpmB !== null ? bpmB * rateB : null}
               pitchPercent={(rateB - 1) * 100}
               onBpmSaved={(bpm) => setTrackB((t) => (t ? { ...t, bpm } : t))}
-              onAlignmentNudge={(d) => store.alignmentNudge('B', d)}
+              onAlignmentNudge={(d) => store.alignmentNudge(d)}
               gestures={{
                 kind: 'slide',
                 toCue: (cueSec) => slideDeckB('cue', cueSec),
-                // n of B's OWN beats → B-track seconds via base BPM.
-                beats: (n) => bpmB && slideDeckB('beats', beatsToSeconds(n, bpmB)),
+                // n of B's OWN beats → B-track seconds via base BPM;
+                // apparent-motion polarity (32): +n = block right.
+                beats: (n) => bpmB && slideDeckB('beats', slideBeatsToSeconds(n, bpmB)),
                 enabled: bpmB !== null && bpmB > 0,
               }}
               lock={{ on: lockedWindow, toggle: () => store.toggleLockedWindow() }}
@@ -933,8 +929,6 @@ function EditorCenterPanel({
       .catch((err) => console.error('take review: promoted-reference write failed', err));
   }, [store]);
   const tr = mix.transition;
-  const visibleLanes = useMemo(() => visibleLaneIds(tr), [tr]);
-  const addableLanes = LANE_IDS.filter((id) => !visibleLanes.includes(id));
 
   const setTransitionField = (patch: Partial<Transition>) =>
     store.updateMix((m) => ({ ...m, transition: { ...m.transition, ...patch } }));
@@ -1086,39 +1080,34 @@ function EditorCenterPanel({
           seconds={tr.bInSec}
         />
       </div>
+      {/* TEMPO/SNAP button toggles (mix-editor 32): engaged = inverted
+          green fill (the app-wide active-state color — the top-bar
+          quantize toggle is the model). Blur after click so neither
+          steals keyboard focus (keyboard-focus 01). Semantics unchanged:
+          tempoMatch = persisted model state, snap = view state. */}
       <div className="editor-center-row">
-        <label>
-          <input
-            type="checkbox"
-            checked={tr.tempoMatch}
-            onChange={(e) => setTransitionField({ tempoMatch: e.target.checked })}
-          />
-          tempo match
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={snap}
-            onChange={(e) => store.setSnap(e.target.checked)}
-          />
-          snap
-        </label>
-        {addableLanes.length > 0 && (
-          <AutoBlurSelect
-            value=""
-            onChange={(e) => {
-              const id = e.target.value as LaneId;
-              if (id) store.addLane(id);
-            }}
-          >
-            <option value="">add lane…</option>
-            {addableLanes.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </AutoBlurSelect>
-        )}
+        <button
+          className={`editor-toggle${tr.tempoMatch ? ' on' : ''}`}
+          aria-pressed={tr.tempoMatch}
+          title="Tempo match: BPM-match the incoming track to the outgoing for the whole mix"
+          onClick={(e) => {
+            setTransitionField({ tempoMatch: !tr.tempoMatch });
+            e.currentTarget.blur();
+          }}
+        >
+          TEMPO
+        </button>
+        <button
+          className={`editor-toggle${snap ? ' on' : ''}`}
+          aria-pressed={snap}
+          title="Snap: gestures land on beat guides (shift suspends)"
+          onClick={(e) => {
+            store.setSnap(!snap);
+            e.currentTarget.blur();
+          }}
+        >
+          SNAP
+        </button>
       </div>
       {takeDraft && (
         <div className="editor-center-row editor-take-banner">
