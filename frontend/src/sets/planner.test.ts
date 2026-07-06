@@ -128,6 +128,24 @@ describe('hard cuts (unresolved adjacencies)', () => {
     expect(plan.totalSec).toBeCloseTo(90 + 100);
   });
 
+  it('an explicit Hard-cut pin cuts even when the Transition exists in the input (sets 26)', () => {
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'hardcut' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100, 25) },
+        transitionsByUuid: { u1: tr() },
+      })
+    );
+    const [adj] = plan.adjacencies;
+    expect(adj.kind).toBe('hardcut');
+    expect(adj.mixStartSec).toBeCloseTo(90);
+    expect(adj.mixEndSec).toBeCloseTo(90);
+    expect(plan.entries[1].entrySec).toBe(25);
+  });
+
   it('hard-cuts every unresolved adjacency in a chain without stalling', () => {
     const plan = planSet(
       input({
