@@ -21,7 +21,7 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
 import { addBeats } from './quantize';
-import { foldLoopPlayhead } from './loop';
+import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
@@ -84,6 +84,10 @@ export interface DeckSnapshot {
   keyLock: boolean;
   /** Active loop (looping 03): the region the playhead wraps in, or null. */
   loop: LoopRegion | null;
+  /** The active loop's displayed size (ADR 0027 §6): the seconds region
+   * projected through the LIVE grid — `~N.N` after a re-tempo. Null when
+   * no loop is active. */
+  loopBeatsLabel: string | null;
   /** Pending auto-loop size in beats (survives Loads). */
   pendingLoopBeats: number;
   /** The loaded Track has a usable Beatgrid (auto-loop is inert without). */
@@ -809,6 +813,9 @@ export class DeckEngine {
       bendPercent: this.bendPercent,
       keyLock: this.keyLock,
       loop: this.transport.loop,
+      loopBeatsLabel: this.transport.loop
+        ? projectLoopBeats(this.transport.loop, this.beatTimes)
+        : null,
       pendingLoopBeats: this.transport.pendingLoopBeats,
       hasBeatgrid: (this.beatTimes?.length ?? 0) >= 2,
     };

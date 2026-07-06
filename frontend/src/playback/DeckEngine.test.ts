@@ -234,6 +234,21 @@ describe('DeckEngine active loop (looping 03)', () => {
     expect(s.loop).toBeNull();
   });
 
+  it('displays the loop size as a live-grid projection after a re-tempo (ADR 0027 §6)', async () => {
+    const engine = await loadedEngine(29);
+    engine.seek(10);
+    engine.toggleLoop(); // [10, 12) = 4 beats on the 0.5s grid
+    expect(engine.getSnapshot().loopBeatsLabel).toBe('4');
+    // Re-tempo to 174: the audible region is untouched, but the displayed
+    // beat count projects the new grid — 2.0s spans ~5.8 beats.
+    const grid174 = Array.from({ length: 600 }, (_, i) => i * (60 / 174));
+    engine.setBeatTimes(29, grid174);
+    const s = engine.getSnapshot();
+    expect(s.loop!.start).toBeCloseTo(10, 10);
+    expect(s.loop!.end).toBeCloseTo(12, 10);
+    expect(s.loopBeatsLabel).toBe('~5.8');
+  });
+
   it('loop state survives a pause (Deck state, not playback state)', async () => {
     const engine = await loadedEngine(25);
     engine.seek(10);

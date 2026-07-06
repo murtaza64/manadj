@@ -66,6 +66,28 @@ export function addBeats(
 }
 
 /**
+ * Beat span between two positions, projected through the grid — the inverse
+ * of addBeats (ADR 0027 §6: a loop's displayed beat count is a projection
+ * of its seconds region through the LIVE grid). Positions beyond the grid
+ * extrapolate linearly at the edge interval's beat length.
+ *
+ * Callers must ensure the grid has at least two beats.
+ */
+export function beatsBetween(
+  start: number,
+  end: number,
+  beatTimes: readonly number[]
+): number {
+  const n = beatTimes.length;
+  const clampInterval = (i: number) => Math.max(0, Math.min(i, n - 2));
+  const coord = (position: number) => {
+    const at = clampInterval(lowerBound(position, beatTimes) - 1);
+    return at + (position - beatTimes[at]) / (beatTimes[at + 1] - beatTimes[at]);
+  };
+  return coord(end) - coord(start);
+}
+
+/**
  * Quantized trigger landing (looping 02): a phase-preserving jump. Executes
  * immediately; the landing is the cue's beat (nearest gridline — placement
  * usually put it there) plus the playhead's intra-beat phase, so the jump is

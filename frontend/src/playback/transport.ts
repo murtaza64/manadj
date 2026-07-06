@@ -257,12 +257,13 @@ export function reduceTransport(
       // engagement remembers.
       const lengthBeats = resizeLoopBeats(s.loop.lengthBeats, e.change);
       if (lengthBeats === s.loop.lengthBeats) return [s, []];
-      const grid = ctx.beatTimes;
+      // Pure seconds (ADR 0027 §6): loops are seconds-identity — a resize
+      // scales the audible region, never re-derives it from the current
+      // grid (which may have re-tempo'd since engage and would
+      // discontinuously re-size it). lengthBeats is the nominal ladder
+      // position, not stored truth; the display projects the live grid.
       const end =
-        grid && grid.length >= 2
-          ? addBeats(s.loop.start, lengthBeats, grid)
-          : // Grid vanished mid-loop: scale the seconds proportionally.
-            s.loop.start + (s.loop.end - s.loop.start) * (lengthBeats / s.loop.lengthBeats);
+        s.loop.start + (s.loop.end - s.loop.start) * (lengthBeats / s.loop.lengthBeats);
       const loop = { start: s.loop.start, end, lengthBeats };
       // A shrink that strands the playhead pulls it back in at its phase
       // modulo the new length — rapid halve-halve-halve stays in the groove.

@@ -10,8 +10,38 @@ import {
   formatLoopBeats,
   LOOP_MAX_BEATS,
   LOOP_MIN_BEATS,
+  projectLoopBeats,
   resizeLoopBeats,
 } from './loop';
+
+describe('projectLoopBeats (ADR 0027 §6: display projects the live grid)', () => {
+  /** 174 BPM grid: beats every 60/174 s. */
+  const grid174 = Array.from({ length: 600 }, (_, i) => i * (60 / 174));
+  /** 120 BPM grid: beats every 0.5s. */
+  const grid120 = Array.from({ length: 360 }, (_, i) => i * 0.5);
+
+  it('renders a whole beat count plainly when the region fits the grid', () => {
+    // [10, 12) on a 0.5s grid = exactly 4 beats.
+    expect(projectLoopBeats({ start: 10, end: 12, lengthBeats: 4 }, grid120)).toBe('4');
+  });
+
+  it('renders ~N.N when the region is non-integral against the grid', () => {
+    // A 2.0s region against a 174 grid spans 5.8 beats.
+    expect(projectLoopBeats({ start: 10, end: 12, lengthBeats: 4 }, grid174)).toBe('~5.8');
+  });
+
+  it('renders dyadic sub-multiples as fractions', () => {
+    // [10, 10.25) on a 0.5s grid = exactly half a beat.
+    expect(
+      projectLoopBeats({ start: 10, end: 10.25, lengthBeats: 0.5 }, grid120)
+    ).toBe('1/2');
+  });
+
+  it('falls back to the nominal length without a usable grid', () => {
+    expect(projectLoopBeats({ start: 10, end: 12, lengthBeats: 4 }, null)).toBe('4');
+    expect(projectLoopBeats({ start: 10, end: 12, lengthBeats: 4 }, [])).toBe('4');
+  });
+});
 
 describe('foldLoopPlayhead', () => {
   // Region [10, 12), anchored inside.
