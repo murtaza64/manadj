@@ -251,6 +251,38 @@
   background: var(--surface2);
 }
 
+/* Trailing suggest row (sets 36): the terminal gap's + insert
+   affordance as a permanently visible full-width row at the end of the
+   list — same blue + and hover-fill vocabulary as .set-glyph-btn, row
+   framing from .set-adjacency-row. Disabled (empty set) it reads as
+   teaching copy, not a control. */
+.set-suggest-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--surface0);
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+}
+
+.set-suggest-row:hover:not(:disabled) {
+  background: var(--surface0);
+}
+
+.set-suggest-row:active:not(:disabled) {
+  background: var(--surface1);
+}
+
+.set-suggest-row:disabled {
+  color: var(--subtext0);
+  cursor: default;
+}
+
 /* Hover-revealed row actions: visibility (not display) keeps the
    left-gutter geometry that aligns titles and chips at TITLE_X
    (rowColumns.ts, sets 31). */

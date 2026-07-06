@@ -325,6 +325,77 @@ def test_pin_kind_vocabulary(client, make_track):
     assert resp.status_code == 422
 
 
+# ── Hard-cut pins (sets 26) ─────────────────────────────────────────────
+# An explicit "cut here, play no Transition" pin kind: carries no uuid
+# (it references nothing), stored and round-tripped like any pin.
+
+
+def test_hardcut_pin_round_trips_without_uuid(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [
+            {"track_id": t1.id, "pin_kind": "hardcut"},
+            {"track_id": t2.id},
+        ]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["entries"][0]["pin_kind"], resp.json()["entries"][0]["pin_uuid"]) == (
+        "hardcut",
+        None,
+    )
+    detail = client.get(f"/api/sets/{s['id']}").json()
+    assert (detail["entries"][0]["pin_kind"], detail["entries"][0]["pin_uuid"]) == (
+        "hardcut",
+        None,
+    )
+
+
+def test_hardcut_pin_rejects_a_uuid(client, make_track):
+    t1 = make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [{"track_id": t1.id, "pin_kind": "hardcut", "pin_uuid": "x"}]},
+    )
+    assert resp.status_code == 422
+
+
+def test_hardcut_dormant_pin_round_trips(client, make_track):
+    # Dormancy treats a Hard-cut pin like any pin (sets 26): the memory
+    # survives with a NULL uuid.
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={
+            "items": [{"track_id": t1.id}],
+            "dormant": [
+                {"a_track_id": t1.id, "b_track_id": t2.id, "pin_kind": "hardcut", "pin_uuid": None}
+            ],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    dormant = client.get(f"/api/sets/{s['id']}").json()["dormant"]
+    assert [(d["pin_kind"], d["pin_uuid"]) for d in dormant] == [("hardcut", None)]
+
+
+def test_dormant_transition_pin_still_requires_uuid(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={
+            "items": [{"track_id": t1.id}],
+            "dormant": [
+                {"a_track_id": t1.id, "b_track_id": t2.id, "pin_kind": "transition", "pin_uuid": None}
+            ],
+        },
+    )
+    assert resp.status_code == 422
+
+
 # ── Dormant pins (sets 07) ──────────────────────────────────────────────
 # A Dormant pin is the Set's memory of a pin whose adjacency was broken
 # by reorder/removal — per ORDERED pair, per Set, replaced wholesale with

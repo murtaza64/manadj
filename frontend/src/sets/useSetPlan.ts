@@ -27,6 +27,7 @@ import {
   subscribePairStore,
 } from '../editor/pairStore';
 import type { HotCue, Track } from '../types';
+import { resolvePlanPins } from './adjacency';
 
 /** Hot Cue 1 in track seconds, null when slot 1 is unset — THE home of
  * the cue-slot convention's "slot 1 = first buildup" lookup (the plan's
@@ -58,8 +59,11 @@ export function useSetPlan(
  * The plan AND the input it was planned from (sets 24): live re-plan
  * feeds the raw PlanInput to the Conductor store, which re-plans it
  * with the sounding window's geometry grafted. THE plan-input
- * subscription seam — every future plan input (issue 26's auto-resolves
- * included) plugs in here and reaches both the view and the live run.
+ * subscription seam — every plan input plugs in here and reaches both
+ * the view and the live run; sets 26's plan-time resolution runs here
+ * too, so saving/favoriting a Transition upgrades unresolved
+ * adjacencies live (the pair store subscription recomputes the input,
+ * and ConductorPlanFeed pushes it into an ongoing run).
  */
 export function useSetPlanParts(
   entries: SetEntryLocal[] | undefined,
@@ -83,9 +87,9 @@ export function useSetPlanParts(
     };
   }, []);
 
-  const takeUuids = (entries ?? [])
-    .filter((e) => e.pin?.kind === 'take')
-    .map((e) => e.pin!.uuid);
+  const takeUuids = (entries ?? []).flatMap((e) =>
+    e.pin?.kind === 'take' ? [e.pin.uuid] : []
+  );
   const takeUuidsKey = takeUuids.join(',');
   const takeQueries = useQueries({
     queries: takeUuids.map((uuid) => ({
@@ -130,6 +134,21 @@ export function useSetPlanParts(
       tracks[e.trackId] = plannerTrackFacts(t, hotCue1ByTrack.get(e.trackId) ?? null);
     }
 
+    // Plan-time resolution (sets 26): unresolved adjacencies take the
+    // pair's best Transition — favorite first, else most recently edited
+    // — before the entries reach the planner, so the ladder, Conductor
+    // (via ConductorPlanFeed), and practice all play the same choice the
+    // badges show. Pins pass through untouched; PlanInput's shape is
+    // unchanged (replan grafting keeps matching pins by uuid).
+    const resolved = resolvePlanPins(entries, (a, b) =>
+      (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
+        uuid: it.uuid,
+        name: it.name,
+        favorite: it.favorite,
+        updatedAtMs: it.updatedAtMs,
+      }))
+    );
+
     // Full Transition payloads for each adjacency's ordered pair, keyed by
     // uuid (dangling pin uuids simply stay absent → hard cut).
     const transitionsByUuid: Record<string, Transition> = {};
@@ -157,7 +176,7 @@ export function useSetPlanParts(
         : { policy: 'riding', returnSecPerPercent: tempoReturnSecPerPercent };
 
     return {
-      entries,
+      entries: resolved,
       tracks,
       transitionsByUuid,
       takesByUuid,

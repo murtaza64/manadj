@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Track } from '../types';
 import { isTypingTarget } from '../components/performance/performanceKeys';
+import { dispatchSetSpace } from '../sets/spaceTransport';
 import { GRID_NUDGE_MS } from './useBeatgridData';
 import { useDeck, useDeckReady, useDeckSnapshot } from './useDeck';
 import { useScrubLoop } from './useScrubLoop';
@@ -129,6 +130,11 @@ export function useKeyboardShortcuts({
         // Claim the key even when the deck can't act yet — Space must
         // never scroll or re-activate a control (keyboard-focus 01).
         event.preventDefault();
+
+        // Space with a Set selected in the browse view drives the
+        // CONDUCTOR's mix-level transport (sets 34): the set wins over
+        // the focused deck. Per-deck keys below keep their deck verbs.
+        if (key === ' ' && dispatchSetSpace()) return;
 
         // Space latches play intent during a load; the rest need audio.
         if (key === ' ' ? !deckCanPlay : !deckReady) return;

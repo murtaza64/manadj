@@ -8,6 +8,7 @@ import { useSyncExternalStore } from 'react';
 import { connectedControllers, subscribeControllers } from '../midi/connectionStore';
 import { isQuantizeOn, setQuantize, subscribeQuantize } from '../playback/quantizeStore';
 import { AudioRoutingPicker } from './AudioRoutingPicker';
+import { AudioOwnershipChip } from './AudioOwnershipChip';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles';
@@ -72,6 +73,10 @@ export function TopBar({
         ))}
       </nav>
       <h1 className="topbar-title">{MODES.find((m) => m.id === mode)?.title}</h1>
+      {/* Audio-ownership chip (sets 40): leads the right cluster (it
+          carries the margin-left:auto formerly on the MIDI badge) so its
+          width changes eat free space instead of shifting neighbors. */}
+      <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />
       <MidiBadge />
       <QuantizeToggle />
       <AudioRoutingPicker />
