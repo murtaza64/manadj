@@ -1,4 +1,6 @@
-# 26 — Foreign deck loads during conduction: reload war, no takeover
+# 28 — Foreign deck loads during conduction: reload war, no takeover
+
+(Renumbered from 26, 2026-07-05 — parallel filing collided with 26-unresolved-auto-resolves.)
 
 (Renumbered from 24, 2026-07-05 — parallel filing collided with 24-live-replan.)
 

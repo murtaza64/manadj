@@ -1,6 +1,6 @@
 # 19 — Hard-cut entry: Hot Cue 1 → track start, and plan reactivity to cue edits
 
-Status: ready-for-human
+Status: done (approved + landed 2026-07-05, change nkovwloo)
 
 ## Parent
 
