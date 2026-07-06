@@ -918,6 +918,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   <AdjacencyRow
                     pin={entry.pin}
                     future={previewOrder ? (previewFutures?.[i] ?? null) : null}
+                    decks={
+                      planned && displayPlan?.entries[i + 1]
+                        ? { outgoing: planned.deck, incoming: displayPlan.entries[i + 1].deck }
+                        : undefined
+                    }
                     evidence={pairEvidence(entry.trackId, next.trackId)}
                     warnings={displayPlan?.warnings.filter((w) => w.adjacencyIndex === i)}
                     onPin={(pin) => setAdjacencyPin(setId, entry.trackId, pin)}
@@ -985,17 +990,40 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   );
 }
 
-/** Pin-chip text per resolved status. */
-function pinChip(view: ReturnType<typeof adjacencyView>): { text: string; color: string } {
+/** Pin-chip look per resolved status (sets 20): an UNRESOLVED
+ * adjacency's "✕ hard cut" chip itself turns red — there is no separate
+ * UNRESOLVED badge. Red keys off pin state, never the name: a pinned
+ * Transition NAMED "hard cut" keeps the normal green chip. */
+function pinChip(view: ReturnType<typeof adjacencyView>): {
+  text: string;
+  color: string;
+  background: string;
+  title: string;
+} {
   if (view.status === 'transition') {
     const star = view.transition!.favorite ? '★ ' : '';
-    return { text: `◆ ${star}${view.transition!.name}`, color: 'var(--green)' };
+    return {
+      text: `◆ ${star}${view.transition!.name}`,
+      color: 'var(--green)',
+      background: 'var(--surface0)',
+      title: 'Pin a transition or take for this handover',
+    };
   }
   if (view.status === 'take') {
     const date = new Date(view.take!.detectedAt).toLocaleDateString();
-    return { text: `● take · ${date} (unpromoted)`, color: 'var(--mauve)' };
+    return {
+      text: `● take · ${date} (unpromoted)`,
+      color: 'var(--mauve)',
+      background: 'var(--surface0)',
+      title: 'Pin a transition or take for this handover',
+    };
   }
-  return { text: '✕ hard cut', color: 'var(--subtext0)' };
+  return {
+    text: '✕ hard cut',
+    color: 'var(--base)',
+    background: 'var(--red)',
+    title: 'Unresolved — will hard-cut. Pin a transition or take for this handover',
+  };
 }
 
 /** Plan-degeneracy chip (sets 06): errors red, warnings yellow; the full
@@ -1041,6 +1069,7 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
 function AdjacencyRow({
   pin,
   future,
+  decks,
   evidence,
   warnings,
   onPin,
@@ -1054,9 +1083,13 @@ function AdjacencyRow({
   /** This adjacency's future under a live drag preview (sets 23):
    * 'will-restore' grows the violet ↺ marker beside the (already
    * restored) pin chip; auto-fillable/unresolved render through the
-   * ordinary machinery (proposal button, hard-cut badge); null when
+   * ordinary machinery (proposal button, red hard-cut chip); null when
    * unaffected or not previewing. */
   future?: AdjacencyFuture | null;
+  /** The planned decks either side of the handover (sets 20): the left
+   * accent bar renders their gradient, outgoing on top — direction
+   * follows the actual deck parity. Absent while the plan is loading. */
+  decks?: { outgoing: ChannelId; incoming: ChannelId };
   evidence: { transitions: TransitionEvidence[]; takes: TakeEvidence[] };
   /** This adjacency's plan degeneracies (sets 06), if any. */
   warnings?: PlanWarning[];
@@ -1108,6 +1141,18 @@ function AdjacencyRow({
       : []),
   ];
 
+  // Left-gutter geometry (sets 20): the chips start at the same x as the
+  // track-row titles. Track rows: 3px accent + 12px padding + 18px play
+  // + 12px gap + 24px index + 12px gap = 81px. Here: 15px padding (the
+  // 3px bar is a background layer) + 58px gutter + 8px row gap = 81px.
+  const GUTTER_WIDTH = 58;
+  // The two-deck gradient bar (sets 20): outgoing deck's color on top,
+  // incoming below — the handover visually ties to its tracks. Painted
+  // as a background layer so the hover wash composes beneath it.
+  const barLayer = decks
+    ? `linear-gradient(180deg, ${DECK_COLORS[decks.outgoing]}, ${DECK_COLORS[decks.incoming]}) left / 3px 100% no-repeat, `
+    : '';
+
   return (
     <>
       <div
@@ -1120,27 +1165,56 @@ function AdjacencyRow({
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
-          padding: '2px 12px 2px 48px',
-          background: hovered ? 'var(--surface0)' : 'var(--crust)',
+          padding: '2px 12px 2px 15px',
+          background: `${barLayer}${hovered ? 'var(--surface0)' : 'var(--crust)'}`,
           borderBottom: '1px solid var(--surface0)',
           fontSize: '12px',
           cursor: 'pointer',
         }}
       >
-        {/* Pin chip — click opens the manual pin picker */}
+        {/* Left gutter: the insert affordance as a small + (sets 20 —
+            the old labeled button's verb rides the tooltip), sitting
+            under the track rows' play-button column. */}
+        <span style={{ width: `${GUTTER_WIDTH}px`, flexShrink: 0, display: 'flex' }}>
+          {onSuggestInsert && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSuggestInsert(e.clientX, e.clientY);
+              }}
+              title="Suggest a track to insert here, ranked by the weaker of the two edges"
+              style={{
+                padding: 0,
+                width: '18px',
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--blue)',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 700,
+              }}
+            >
+              +
+            </button>
+          )}
+        </span>
+
+        {/* Pin chip — click opens the manual pin picker. Unresolved
+            turns the chip itself red (sets 20): the one hard-cut signal. */}
         <button
           onClick={(e) => {
             e.stopPropagation();
             setMenuPos({ x: e.clientX, y: e.clientY });
           }}
-          title="Pin a transition or take for this handover"
+          title={chip.title}
           style={{
             padding: '1px 8px',
-            background: 'var(--surface0)',
+            background: chip.background,
             border: '1px solid var(--surface1)',
             color: chip.color,
             cursor: 'pointer',
             fontSize: '12px',
+            fontWeight: view.status === 'unresolved' ? 600 : undefined,
           }}
         >
           {chip.text}
@@ -1154,7 +1228,7 @@ function AdjacencyRow({
             title="Dropping here restores this pair's Dormant pin"
             style={{
               padding: '1px 6px',
-              border: `1px dashed ${WILL_RESTORE_COLOR}`,
+              border: `1px solid ${WILL_RESTORE_COLOR}`,
               color: WILL_RESTORE_COLOR,
               fontSize: '11px',
               fontWeight: 700,
@@ -1162,6 +1236,49 @@ function AdjacencyRow({
           >
             ↺ will restore
           </span>
+        )}
+
+        {/* Edit (sets 20): the sketch-it verb made visible — delegates
+            to the row click-through (sets 09). Practice = mix it live. */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenEditor();
+          }}
+          title="Open this handover in the Transition editor"
+          style={{
+            padding: '1px 8px',
+            background: 'var(--surface0)',
+            border: '1px solid var(--surface1)',
+            color: 'var(--sapphire)',
+            cursor: 'pointer',
+            fontSize: '12px',
+          }}
+        >
+          ✎ edit
+        </button>
+
+        {/* Practice (sets 13): the mix-it-live verb — outgoing cued on A
+            with a runway, incoming on B; press again to re-cue. Plain
+            quiet button like its neighbors (sets 20). */}
+        {onPractice && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onPractice();
+            }}
+            title="Practice this handover: cue outgoing on deck A (with a runway), incoming on deck B — press again to re-cue"
+            style={{
+              padding: '1px 8px',
+              background: 'var(--surface0)',
+              border: '1px solid var(--surface1)',
+              color: 'var(--yellow)',
+              cursor: 'pointer',
+              fontSize: '12px',
+            }}
+          >
+            ⏵ practice
+          </button>
         )}
 
         {/* One-click auto-fill accept (Transitions only, favorite first) */}
@@ -1175,35 +1292,13 @@ function AdjacencyRow({
             style={{
               padding: '1px 8px',
               background: 'transparent',
-              border: '1px dashed var(--green)',
+              border: '1px solid var(--green)',
               color: 'var(--green)',
               cursor: 'pointer',
               fontSize: '12px',
             }}
           >
             ↳ pin {proposal.favorite ? '★ ' : ''}{proposal.name}
-          </button>
-        )}
-
-        {/* Practice (sets 13): the mix-it-live verb — outgoing cued on A
-            with a runway, incoming on B; press again to re-cue. */}
-        {onPractice && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onPractice();
-            }}
-            title="Practice this handover: cue outgoing on deck A (with a runway), incoming on deck B — press again to re-cue"
-            style={{
-              padding: '1px 8px',
-              background: 'transparent',
-              border: '1px dashed var(--yellow)',
-              color: 'var(--yellow)',
-              cursor: 'pointer',
-              fontSize: '12px',
-            }}
-          >
-            ⏵ practice
           </button>
         )}
 
@@ -1230,20 +1325,8 @@ function AdjacencyRow({
           </button>
         )}
 
-        {/* Orthogonal badges: Unresolved (will hard-cut) · Unpracticed */}
-        {view.status === 'unresolved' && (
-          <span
-            style={{
-              padding: '1px 6px',
-              background: 'var(--red)',
-              color: 'var(--base)',
-              fontSize: '11px',
-              fontWeight: 600,
-            }}
-          >
-            UNRESOLVED — will hard-cut
-          </span>
-        )}
+        {/* The Unpracticed badge (orthogonal to resolution; the old
+            UNRESOLVED badge merged into the red hard-cut chip, sets 20) */}
         {view.unpracticed && (
           <span
             style={{
@@ -1273,27 +1356,6 @@ function AdjacencyRow({
         <span style={{ marginLeft: 'auto', color: 'var(--subtext0)' }}>
           {view.counts.transitions} tr · {view.counts.takes} tk
         </span>
-
-        {/* Insert suggestions (sets 10): ranked by the weaker edge */}
-        {onSuggestInsert && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onSuggestInsert(e.clientX, e.clientY);
-            }}
-            title="Suggest a track to insert here, ranked by the weaker of the two edges"
-            style={{
-              padding: '1px 8px',
-              background: 'transparent',
-              border: '1px dashed var(--blue)',
-              color: 'var(--blue)',
-              cursor: 'pointer',
-              fontSize: '12px',
-            }}
-          >
-            + insert
-          </button>
-        )}
       </div>
       {menuPos && (
         <ContextMenu
