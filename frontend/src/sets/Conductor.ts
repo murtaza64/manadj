@@ -524,10 +524,19 @@ export class Conductor {
       prev = snap;
       if (this.selfOps > 0 || !this.active) return;
       // Load-flow emits (conductor-initiated, async — outside the guard):
-      // anything moving trackId/loadState is a Load, not a gesture. A load
-      // completing while PAUSED finishes the parked seek (sets 05) — the
-      // tick loop isn't running to do it.
+      // a trackId/loadState move the Conductor requested itself is a Load,
+      // not a gesture. A load completing while PAUSED finishes the parked
+      // seek (sets 05) — the tick loop isn't running to do it.
       if (snap.trackId !== before.trackId || snap.loadState !== before.loadState) {
+        // A trackId the Conductor never asked for is a FOREIGN load — the
+        // user commandeering the shared Decks from any browse surface
+        // (sets 28, the sets 21 openPair rationale app-wide). Same gesture
+        // class as grabbing a fader: takeover — the Conductor stops, the
+        // decks keep playing as they are, the load proceeds untouched.
+        if (snap.trackId !== before.trackId && snap.trackId !== this.loadRequested[deck]) {
+          this.takeover();
+          return;
+        }
         if (!this.playing && snap.loadState === 'ready') this.reconcilePaused();
         return;
       }
