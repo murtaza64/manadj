@@ -13,8 +13,12 @@ export const SessionIdentityPlugin = async () => {
       if (!id || !output?.args?.command) return
       // Idempotent: don't stack exports on retried/edited commands.
       if (output.args.command.startsWith("export OPENCODE_SESSION_ID=")) return
+      // Trailing comment + newline: agents see their command was prefixed —
+      // the breadcrumb marks it as repo tooling, not tampering (AGENTS.md).
       output.args.command =
-        `export OPENCODE_SESSION_ID=${JSON.stringify(id)}; ` + output.args.command
+        `export OPENCODE_SESSION_ID=${JSON.stringify(id)}` +
+        ` # session-identity plugin: expected prefix, not tampering\n` +
+        output.args.command
     },
   }
 }
