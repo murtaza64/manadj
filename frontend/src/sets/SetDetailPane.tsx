@@ -88,6 +88,7 @@ import { evaluatePickup, readPickupSnapshot } from './pickup';
 import {
   fmtSec,
   trackEffectiveBpm,
+  type PlannedAdjacency,
   type PlannedEntry,
   type PlanWarning,
 } from './planner';
@@ -96,6 +97,7 @@ import {
   ADJ_GUTTER_W,
   ADJ_PAD_LEFT,
   ADJ_ROW_GAP,
+  ADJ_TIME_SPACER_W,
   BPM_COL_W,
   bpmDeltaColor,
   bpmDeltaPercent,
@@ -103,6 +105,7 @@ import {
   cellStyle,
   ENERGY_COL_W,
   fmtInTime,
+  fmtOverlapTime,
   fmtPlayTime,
   IN_TIME_COL_W,
   INDEX_COL_W,
@@ -947,6 +950,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 {next && (
                   <AdjacencyRow
                     pin={entry.pin}
+                    planned={displayPlan?.adjacencies[i]}
                     future={previewOrder ? (previewFutures?.[i] ?? null) : null}
                     decks={
                       planned && displayPlan?.entries[i + 1]
@@ -1097,6 +1101,7 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
 
 function AdjacencyRow({
   pin,
+  planned,
   future,
   decks,
   evidence,
@@ -1109,6 +1114,9 @@ function AdjacencyRow({
   onSuggestInsert,
 }: {
   pin: AdjacencyPin | null;
+  /** This handover's slice of the playback plan (sets 32): the overlap
+   * cell renders its window span. Absent while the plan is loading. */
+  planned?: PlannedAdjacency;
   /** This adjacency's future under a live drag preview (sets 23):
    * 'will-restore' grows the violet ↺ marker beside the (already
    * restored) pin chip; auto-fillable/unresolved render through the
@@ -1344,6 +1352,18 @@ function AdjacencyRow({
         <span style={{ marginLeft: 'auto', color: 'var(--subtext0)' }}>
           {view.counts.transitions} tr · {view.counts.takes} tk
         </span>
+
+        {/* Overlap time (sets 32): the planned window's span, sitting in
+            the track rows' time-column band (the play-time column) so
+            the list reads as one table. Hard cuts render blank — the
+            red hard-cut chip carries that message. */}
+        <span
+          title="How long this handover overlaps (the planned window on the mix clock)"
+          style={{ ...cellStyle(PLAY_TIME_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}
+        >
+          {fmtOverlapTime(planned)}
+        </span>
+        <span style={{ width: `${ADJ_TIME_SPACER_W}px`, flexShrink: 0 }} />
       </div>
       {menuPos && (
         <ContextMenu

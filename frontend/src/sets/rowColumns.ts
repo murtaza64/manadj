@@ -24,7 +24,12 @@
  *   the delta scale is green→yellow→orange→red, no deck hues.
  */
 import type { CSSProperties } from 'react';
-import { fmtSec, isNeverAudible, type PlannedEntry } from './planner';
+import {
+  fmtSec,
+  isNeverAudible,
+  type PlannedAdjacency,
+  type PlannedEntry,
+} from './planner';
 
 // ── Track-row geometry ───────────────────────────────────────────────────
 
@@ -87,6 +92,12 @@ export const ADJ_ROW_GAP = 8;
 /** The adjacency rows' left gutter (holds the [+] insert affordance):
  * sized so the first chip lands exactly at TITLE_X. */
 export const ADJ_GUTTER_W = TITLE_X - ADJ_PAD_LEFT - ADJ_ROW_GAP;
+
+/** Right-band spacer (sets 32): sits where the track rows' ✕ column
+ * does, so an adjacency's overlap-time cell (PLAY_TIME_COL_W, right-
+ * aligned) lands exactly under the track rows' play-time column —
+ * compensating for the adjacency row's tighter gap. */
+export const ADJ_TIME_SPACER_W = REMOVE_COL_W + ROW_GAP - ADJ_ROW_GAP;
 
 // ── BPM delta (triage: delta semantics, absolute text) ──────────────────
 
@@ -166,4 +177,15 @@ export function fmtPlayTime(
 ): string {
   if (!planned || !durationSec || isNeverAudible(planned)) return '';
   return `${fmtSec(Math.max(planned.exitSec - planned.entrySec, 0))}/${fmtSec(durationSec)}`;
+}
+
+/** Overlap cell (sets 32): how long the handover overlaps — the planned
+ * window's span on the mix axis. Hard cuts render BLANK (triage: the
+ * red hard-cut chip carries the message; 0:00 is noise); blank too
+ * while the plan is loading. */
+export function fmtOverlapTime(
+  adjacency: Pick<PlannedAdjacency, 'kind' | 'mixStartSec' | 'mixEndSec'> | undefined
+): string {
+  if (!adjacency || adjacency.kind === 'hardcut') return '';
+  return fmtSec(Math.max(adjacency.mixEndSec - adjacency.mixStartSec, 0));
 }

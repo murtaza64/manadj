@@ -7,11 +7,15 @@ import {
   ADJ_GUTTER_W,
   ADJ_PAD_LEFT,
   ADJ_ROW_GAP,
+  ADJ_TIME_SPACER_W,
   bpmDeltaColor,
   bpmDeltaPercent,
   bpmDeltaTitle,
   fmtInTime,
+  fmtOverlapTime,
   fmtPlayTime,
+  REMOVE_COL_W,
+  ROW_GAP,
   TITLE_X,
 } from './rowColumns';
 
@@ -38,6 +42,12 @@ describe('column geometry', () => {
     // column moves.
     expect(TITLE_X).toBe(231);
     expect(ADJ_GUTTER_W).toBe(208);
+  });
+
+  it('adjacency right band lands the overlap cell under the play-time column (sets 32)', () => {
+    // Track row from the right edge: pad + ✕ + gap; adjacency row:
+    // pad + spacer + gap — same distance to the cell's right edge.
+    expect(ADJ_ROW_GAP + ADJ_TIME_SPACER_W).toBe(ROW_GAP + REMOVE_COL_W);
   });
 });
 
@@ -117,5 +127,26 @@ describe('time columns', () => {
     const dead = entry({ entrySec: 200, exitSec: 180, entryMixSec: 400 });
     expect(fmtInTime(dead)).toBe('');
     expect(fmtPlayTime(dead, 310)).toBe('');
+  });
+});
+
+describe('fmtOverlapTime (sets 32)', () => {
+  it('renders the planned window span on the mix axis', () => {
+    expect(
+      fmtOverlapTime({ kind: 'transition', mixStartSec: 100, mixEndSec: 132 })
+    ).toBe('0:32');
+    expect(fmtOverlapTime({ kind: 'take', mixStartSec: 60, mixEndSec: 150 })).toBe('1:30');
+  });
+
+  it('hard cuts render BLANK (triage: the red chip carries the message)', () => {
+    expect(fmtOverlapTime({ kind: 'hardcut', mixStartSec: 90, mixEndSec: 90 })).toBe('');
+  });
+
+  it('blank while the plan is loading; never a misleading nonzero span', () => {
+    expect(fmtOverlapTime(undefined)).toBe('');
+    // Degenerate windowed span clamps at 0:00 rather than going negative.
+    expect(
+      fmtOverlapTime({ kind: 'transition', mixStartSec: 100, mixEndSec: 99 })
+    ).toBe('0:00');
   });
 });
