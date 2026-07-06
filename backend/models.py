@@ -2,7 +2,7 @@
 
 import json
 
-from sqlalchemy import Boolean, CheckConstraint, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index
+from sqlalchemy import Boolean, CheckConstraint, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index, and_, select
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref, deferred, relationship, DeclarativeBase
 from sqlalchemy.sql import func
@@ -48,6 +48,32 @@ class Track(Base):
 
     # Relationships
     track_tags = relationship("TrackTag", back_populates="track", cascade="all, delete-orphan")
+
+    @hybrid_property
+    def needs_attention(self) -> bool:
+        """The analysis worklist predicate (ADR 0024): native grid Analysis
+        bailed and the Track still has no saved grid. A generated placeholder
+        is not saved info; a grid gained from ANY saved origin (edited,
+        imported, or a later successful analysis) clears the flag."""
+        diag = self.grid_analysis
+        if diag is None or not diag.bailed:
+            return False
+        grid = self.beatgrid
+        return grid is None or grid.origin == "generated"
+
+    @needs_attention.expression
+    def needs_attention(cls):
+        bailed = (
+            select(GridAnalysis.id)
+            .where(GridAnalysis.track_id == cls.id, GridAnalysis.bailed.is_(True))
+            .exists()
+        )
+        saved_grid = (
+            select(Beatgrid.id)
+            .where(Beatgrid.track_id == cls.id, Beatgrid.origin != "generated")
+            .exists()
+        )
+        return and_(bailed, ~saved_grid)
 
     @property
     def bpm_effective(self) -> float | None:
@@ -179,7 +205,8 @@ class Beatgrid(Base):
     track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
     tempo_changes_json = Column(Text, nullable=False)  # JSON array of tempo changes
     # Where the grid came from: "generated" (placeholder from track BPM, not
-    # saved info), "edited" (user-touched), or "imported" (External Import).
+    # saved info), "analyzed" (native grid Analysis, ADR 0024), "edited"
+    # (user-touched), or "imported" (External Import).
     origin = Column(String, nullable=False, default="edited", server_default="edited")
     # The downbeat the user explicitly marked (track-time seconds, ADR 0016).
     # Anchor-preserving re-tempo respaces beats around it; nudges shift it
@@ -192,20 +219,28 @@ class Beatgrid(Base):
     track = relationship("Track", backref=backref("beatgrid", uselist=False))
 
 
-class BPMAnalysis(Base):
-    __tablename__ = "bpm_analyses"
+class GridAnalysis(Base):
+    """Native grid Analysis diagnostics (ADR 0024): the fit's verdict and
+    evidence, one row per Track, overwritten on every run (no versioning —
+    supersedes the old BPMAnalysis estimate rows). The grid itself lives on
+    Beatgrid (origin "analyzed"); a bailed row with no saved grid puts the
+    Track on the needs-attention worklist."""
+
+    __tablename__ = "grid_analyses"
 
     id = Column(Integer, primary_key=True, index=True)
     track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
-    estimates_json = Column(Text, nullable=False)  # JSON array of {method, bpm, confidence}
-    recommended_bpms_json = Column(Text, nullable=False)  # JSON array of deduplicated BPMs
-    recommended_bpm = Column(Integer, nullable=False)  # Most accurate BPM
-    duration = Column(Float, nullable=False)  # Track duration in seconds
+    candidate = Column(String, nullable=False)  # analyzer name (e.g. "madmom_dbn")
+    bailed = Column(Boolean, nullable=False)
+    bpm = Column(Float, nullable=True)  # NULL when bailed
+    phase = Column(Float, nullable=True)  # first-beat time mod period (seconds)
+    residual_ms = Column(Float, nullable=True)  # RMS tick deviation from the grid
+    evidence_json = Column(Text, nullable=False)  # fit evidence / bail reason
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-    # Relationship
-    track = relationship("Track", backref="bpm_analysis", uselist=False)
+    # Relationship (one-to-one: track_id is unique)
+    track = relationship("Track", backref=backref("grid_analysis", uselist=False))
 
 
 class KeyAnalysis(Base):

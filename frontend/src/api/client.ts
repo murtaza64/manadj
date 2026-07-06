@@ -390,12 +390,14 @@ export const api = {
   },
 
   analyze: {
-    bpm: async (trackId: number) => {
-      const response = await fetch(`${API_BASE}/analyze/bpm/${trackId}`, {
+    // Server-side write (ADR 0024): success stores the analyzed Beatgrid
+    // and its BPM projection; the response is diagnostics (bail included).
+    grid: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/analyze/grid/${trackId}`, {
         method: 'POST',
       });
       if (!response.ok) {
-        throw new Error(`Failed to analyze BPM: ${response.statusText}`);
+        throw new Error(`Failed to analyze grid: ${response.statusText}`);
       }
       return response.json();
     },
@@ -410,10 +412,10 @@ export const api = {
       return response.json();
     },
 
-    getBpm: async (trackId: number) => {
-      const response = await fetch(`${API_BASE}/analyze/bpm/${trackId}`);
+    getGrid: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/analyze/grid/${trackId}`);
       if (!response.ok) {
-        throw new Error(`Failed to fetch BPM analysis: ${response.statusText}`);
+        throw new Error(`Failed to fetch grid analysis: ${response.statusText}`);
       }
       return response.json();
     },

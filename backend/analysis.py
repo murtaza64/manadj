@@ -1,12 +1,12 @@
-"""Audio analysis module for BPM and key detection using Essentia.
+"""Key detection using Essentia / keyfinder-cli.
 
-This module provides functions for analyzing audio files to detect BPM (beats per minute)
-and musical key using multiple strategies.
+Legacy BPM estimation was superseded by native grid Analysis (ADR 0024,
+backend/grid_analysis.py); issue 08 replaces this key path with the
+shootout-winning backend. Heavy import (essentia) at module scope — import
+this module lazily, never from the app import chain.
 """
 
 from datetime import datetime
-from collections import Counter
-import numpy as np
 import essentia.standard as es
 import subprocess
 import shutil
@@ -16,31 +16,9 @@ from .key import Key
 from .config import get_config
 
 
-# BPM estimate ordering by profiling accuracy (most accurate first)
-# Update this list based on profiling results to change the order of estimates
-BPM_ESTIMATE_ORDER = [
-    'chunks_mode_mean_snap',        # Most accurate (from latest profiling)
-    'trimmed_mean_snap',             # Second most accurate
-    'chunks_median_detected_snap',
-    'chunks_median_mean_snap',
-    'chunks_mode_detected_snap',
-    'trimmed_detected_snap',
-    'full_detected_snap',
-    'full_mean_snap',                # Least accurate
-]
-
-
-def _load_audio(audio_path: str, trim_seconds: float = 0) -> tuple[np.ndarray, int]:
-    """
-    Load audio file using Essentia's MonoLoader.
-
-    Args:
-        audio_path: Path to audio file
-        trim_seconds: Seconds to trim from start and end (0 = no trim)
-
-    Returns:
-        Tuple of (audio, sample_rate)
-    """
+def _load_audio(audio_path: str, trim_seconds: float = 0) -> tuple:
+    """Load audio via Essentia's MonoLoader (44.1k mono), optionally
+    trimming the first/last trim_seconds."""
     loader = es.MonoLoader(filename=audio_path, sampleRate=44100)
     audio = loader()
     sample_rate = 44100
@@ -54,219 +32,6 @@ def _load_audio(audio_path: str, trim_seconds: float = 0) -> tuple[np.ndarray, i
             audio = audio[trim_samples:-trim_samples]
 
     return audio, sample_rate
-
-
-def _detect_bpm_full(audio_path: str) -> dict:
-    """
-    Detect BPM using full track.
-
-    Returns:
-        dict: BPM and analysis results
-    """
-    audio, sample_rate = _load_audio(audio_path, trim_seconds=0)
-
-    rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
-    bpm, beats, beats_confidence, estimates, bpm_intervals = rhythm_extractor(audio)
-
-    # Calculate statistics from beat intervals
-    if len(bpm_intervals) > 0:
-        interval_bpms = 60.0 / bpm_intervals
-        mean_bpm = float(np.mean(interval_bpms))
-    else:
-        mean_bpm = float(bpm)
-
-    return {
-        'bpm': float(bpm),
-        'bpm_snapped': round(float(bpm)),
-        'mean_bpm': mean_bpm,
-        'confidence': float(beats_confidence),
-        'total_beats': len(beats),
-        'duration': len(audio) / sample_rate,
-    }
-
-
-def _detect_bpm_trimmed(audio_path: str, trim_seconds: float = 15.0) -> dict:
-    """
-    Detect BPM with intro/outro trimmed.
-
-    Args:
-        audio_path: Path to audio file
-        trim_seconds: Seconds to trim from start and end
-
-    Returns:
-        dict: BPM and analysis results
-    """
-    audio, sample_rate = _load_audio(audio_path, trim_seconds=trim_seconds)
-
-    rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
-    bpm, beats, beats_confidence, estimates, bpm_intervals = rhythm_extractor(audio)
-
-    # Calculate statistics from beat intervals
-    if len(bpm_intervals) > 0:
-        interval_bpms = 60.0 / bpm_intervals
-        mean_bpm = float(np.mean(interval_bpms))
-    else:
-        mean_bpm = float(bpm)
-
-    return {
-        'bpm': float(bpm),
-        'bpm_snapped': round(float(bpm)),
-        'mean_bpm': mean_bpm,
-        'confidence': float(beats_confidence),
-        'total_beats': len(beats),
-        'duration': len(audio) / sample_rate,
-    }
-
-
-def _detect_bpm_chunks(audio_path: str, chunk_duration: float = 30.0) -> list[dict]:
-    """
-    Detect BPM for every chunk of the track.
-
-    Args:
-        audio_path: Path to audio file
-        chunk_duration: Duration of each chunk in seconds
-
-    Returns:
-        list: List of dicts with BPM for each chunk
-    """
-    audio, sample_rate = _load_audio(audio_path, trim_seconds=0)
-
-    rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
-
-    chunks = []
-    chunk_samples = int(chunk_duration * sample_rate)
-
-    for start_sample in range(0, len(audio), chunk_samples):
-        end_sample = min(start_sample + chunk_samples, len(audio))
-        chunk_audio = audio[start_sample:end_sample]
-
-        # Skip very short chunks
-        if len(chunk_audio) < sample_rate * 5:  # At least 5 seconds
-            continue
-
-        try:
-            bpm, beats, beats_confidence, estimates, bpm_intervals = rhythm_extractor(chunk_audio)
-
-            # Calculate mean from intervals
-            if len(bpm_intervals) > 0:
-                interval_bpms = 60.0 / bpm_intervals
-                mean_bpm = float(np.mean(interval_bpms))
-            else:
-                mean_bpm = float(bpm)
-
-            chunks.append({
-                'bpm': float(bpm),
-                'bpm_snapped': round(float(bpm)),
-                'mean_bpm': mean_bpm,
-                'mean_bpm_snapped': round(mean_bpm),
-                'confidence': float(beats_confidence),
-            })
-        except Exception:
-            # If analysis fails for a chunk, skip it
-            continue
-
-    return chunks
-
-
-def analyze_bpm(audio_path: str) -> dict:
-    """
-    Analyze BPM using multiple strategies including chunk-based analysis.
-
-    Args:
-        audio_path: Path to audio file
-
-    Returns:
-        dict with:
-            - estimates: list of {method, bpm, confidence}
-            - recommended_bpms: list of unique BPMs in order of accuracy
-            - recommended_bpm: int (most reliable estimate)
-            - metadata: {duration, analyzed_at}
-    """
-    # Run detection strategies
-    full = _detect_bpm_full(audio_path)
-    trimmed = _detect_bpm_trimmed(audio_path, trim_seconds=15.0)
-
-    # Calculate chunk-based estimates (always included for best accuracy)
-    chunks = _detect_bpm_chunks(audio_path, chunk_duration=30.0)
-
-    chunk_estimates = {}
-    if len(chunks) > 0:
-        chunk_detected_snapped = [c['bpm_snapped'] for c in chunks]
-        chunk_mean_snapped = [c['mean_bpm_snapped'] for c in chunks]
-
-        # Calculate average confidence from chunks
-        avg_confidence = float(np.mean([c['confidence'] for c in chunks]))
-
-        chunk_estimates = {
-            'chunks_mode_mean_snap': {
-                'bpm': Counter(chunk_mean_snapped).most_common(1)[0][0],
-                'confidence': avg_confidence
-            },
-            'chunks_median_detected_snap': {
-                'bpm': int(round(np.median(chunk_detected_snapped))),
-                'confidence': avg_confidence
-            },
-            'chunks_median_mean_snap': {
-                'bpm': int(round(np.median(chunk_mean_snapped))),
-                'confidence': avg_confidence
-            },
-            'chunks_mode_detected_snap': {
-                'bpm': Counter(chunk_detected_snapped).most_common(1)[0][0],
-                'confidence': avg_confidence
-            },
-        }
-
-    # Build all available estimates in a dictionary for easy lookup
-    all_estimates = {
-        'trimmed_mean_snap': {
-            'bpm': round(trimmed['mean_bpm']),
-            'confidence': trimmed['confidence']
-        },
-        'trimmed_detected_snap': {
-            'bpm': trimmed['bpm_snapped'],
-            'confidence': trimmed['confidence']
-        },
-        'full_detected_snap': {
-            'bpm': full['bpm_snapped'],
-            'confidence': full['confidence']
-        },
-        'full_mean_snap': {
-            'bpm': round(full['mean_bpm']),
-            'confidence': full['confidence']
-        },
-    }
-
-    # Add chunk estimates if available
-    if chunk_estimates:
-        all_estimates.update(chunk_estimates)
-
-    # Build ordered estimates list using BPM_ESTIMATE_ORDER constant
-    estimates = []
-    for method in BPM_ESTIMATE_ORDER:
-        if method in all_estimates:
-            estimates.append({
-                'method': method,
-                'bpm': all_estimates[method]['bpm'],
-                'confidence': all_estimates[method]['confidence']
-            })
-
-    # Build deduplicated list of BPMs (keep first occurrence only)
-    seen_bpms = set()
-    recommended_bpms = []
-    for estimate in estimates:
-        if estimate['bpm'] not in seen_bpms:
-            seen_bpms.add(estimate['bpm'])
-            recommended_bpms.append(estimate['bpm'])
-
-    return {
-        'estimates': estimates,  # All estimates with duplicates
-        'recommended_bpms': recommended_bpms,  # Deduplicated list in order of accuracy
-        'recommended_bpm': recommended_bpms[0],  # Most accurate BPM
-        'metadata': {
-            'duration': full['duration'],
-            'analyzed_at': datetime.utcnow().isoformat() + 'Z'
-        }
-    }
 
 
 def _detect_key_essentia(audio_path: str) -> dict:

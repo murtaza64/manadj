@@ -47,10 +47,12 @@ def constant_tempo_changes(
     bpm: float,
     time_signature_num: int = 4,
     time_signature_den: int = 4,
+    start_time: float = 0.0,
 ) -> list[dict]:
-    """Single-tempo grid starting at t=0 with a downbeat on the first beat."""
+    """Single-tempo grid with a downbeat on the first beat, at start_time
+    (default t=0; native Analysis passes the fitted phase)."""
     return [{
-        "start_time": 0.0,
+        "start_time": start_time,
         "bpm": bpm,
         "time_signature_num": time_signature_num,
         "time_signature_den": time_signature_den,

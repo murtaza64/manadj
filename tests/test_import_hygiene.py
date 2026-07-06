@@ -17,15 +17,21 @@ def test_no_heavy_audio_deps_in_import_chain():
     # Import everything the suite legitimately touches.
     import backend.beatgrid_utils  # noqa: F401
     import backend.crud  # noqa: F401
+    import backend.grid_analysis  # noqa: F401
     import backend.key  # noqa: F401
     import backend.library.import_manager  # noqa: F401
+    import backend.routers.analyze  # noqa: F401
     import backend.routers.tracks  # noqa: F401
     import backend.schemas  # noqa: F401
     import backend.track_metadata  # noqa: F401
 
-    # Harness pure modules (fit/scoring/corpus) must stay light too.
+    # Harness pure modules (fit/scoring/corpus) must stay light too, and
+    # the candidate/analyzer seam the app now consumes (ADR 0024) keeps
+    # heavy deps inside candidate methods.
+    import harness.analyzer  # noqa: F401
     import harness.corpus  # noqa: F401
     import harness.fit  # noqa: F401
+    import harness.grid_candidates  # noqa: F401
     import harness.grid_scoring  # noqa: F401
     import harness.key_scoring  # noqa: F401
 

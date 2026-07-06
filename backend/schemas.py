@@ -202,28 +202,6 @@ class BeatgridResponse(BaseModel):
 
 # Analysis Schemas
 
-class BPMEstimate(BaseModel):
-    """Single BPM estimate from a detection method."""
-    method: str
-    bpm: int
-    confidence: float | None = None
-
-
-class BPMAnalysisMetadata(BaseModel):
-    """Metadata about BPM analysis."""
-    duration: float
-    analyzed_at: str
-
-
-class BPMAnalysisResponse(BaseModel):
-    """BPM analysis response with multiple estimates."""
-    track_id: int
-    estimates: list[BPMEstimate]
-    recommended_bpms: list[int]
-    recommended_bpm: int
-    metadata: BPMAnalysisMetadata
-
-
 class KeyFormats(BaseModel):
     """Musical key in different notation formats."""
     musical: str

@@ -1,76 +1,77 @@
-"""API router for audio analysis endpoints (BPM and key detection)."""
+"""API router for audio analysis endpoints (grid and key detection).
+
+Grid analysis (ADR 0024) writes its artifact server-side — an analyzed
+Beatgrid plus the BPM projection — and returns diagnostics; a bail is a
+result (200), not an error. Heavy analysis deps are kept out of module
+scope: the grid analyzer's candidate imports madmom inside ticks(), and
+the key path is imported lazily inside its endpoints.
+"""
 
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pathlib import Path
 
-from .. import crud
+from .. import crud, models
 from ..database import get_db
-from ..analysis import analyze_bpm, analyze_key
+from ..grid_analysis import analyze_track_grid, default_grid_analyzer, get_grid_analysis
 
 router = APIRouter()
 
 
-@router.get("/bpm/{track_id}")
-def get_track_bpm_analysis(
-    track_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    Get saved BPM analysis for a track.
+def get_grid_analyzer():
+    """Dependency seam: tests override this with a stub-candidate analyzer."""
+    return default_grid_analyzer()
 
-    Args:
-        track_id: Database ID of the track
 
-    Returns:
-        BPMAnalysisResponse with estimates, recommended BPMs, and metadata
-    """
-    # Get track from database
-    track = crud.get_track(db, track_id)
-    if not track:
-        raise HTTPException(status_code=404, detail="Track not found")
-
-    # Get saved analysis
-    analysis = crud.get_bpm_analysis(db, track_id)
-    if not analysis:
-        raise HTTPException(status_code=404, detail="No BPM analysis found for this track")
-
+def _grid_analysis_response(diagnostics: models.GridAnalysis) -> dict:
     return {
-        "track_id": track_id,
-        "estimates": json.loads(analysis.estimates_json),
-        "recommended_bpms": json.loads(analysis.recommended_bpms_json),
-        "recommended_bpm": analysis.recommended_bpm,
-        "metadata": {
-            "duration": analysis.duration,
-            "analyzed_at": analysis.created_at.isoformat() + 'Z'
-        }
+        "track_id": diagnostics.track_id,
+        "candidate": diagnostics.candidate,
+        "bailed": diagnostics.bailed,
+        "bpm": diagnostics.bpm,
+        "phase": diagnostics.phase,
+        "residual_ms": diagnostics.residual_ms,
+        "evidence": json.loads(diagnostics.evidence_json),
+        "analyzed_at": diagnostics.updated_at.isoformat() + "Z",
     }
 
 
-@router.post("/bpm/{track_id}")
-def analyze_track_bpm(
+@router.get("/grid/{track_id}")
+def get_track_grid_analysis(
     track_id: int,
     db: Session = Depends(get_db)
 ):
-    """
-    Analyze BPM for a track using multiple detection strategies and save results.
-
-    Returns multiple BPM estimates with confidence scores ordered by profiling accuracy.
-    Chunk-based analysis is always included for best accuracy.
-
-    Args:
-        track_id: Database ID of the track
-
-    Returns:
-        BPMAnalysisResponse with estimates, recommended BPMs, and metadata
-    """
-    # Get track from database
+    """Diagnostics of the track's last native grid analysis, if any."""
     track = crud.get_track(db, track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    # Validate audio file exists
+    diagnostics = get_grid_analysis(db, track_id)
+    if not diagnostics:
+        raise HTTPException(status_code=404, detail="No grid analysis found for this track")
+
+    return _grid_analysis_response(diagnostics)
+
+
+@router.post("/grid/{track_id}")
+def analyze_track_grid_endpoint(
+    track_id: int,
+    db: Session = Depends(get_db),
+    analyzer=Depends(get_grid_analyzer),
+):
+    """Manually analyze a track's grid (ADR 0024).
+
+    Success writes the analyzed Beatgrid and its BPM projection server-side;
+    the client only refetches. Bail writes diagnostics only and returns them
+    with bailed=true — the track joins the needs-attention worklist.
+    Manual analysis overwrites any existing grid regardless of origin
+    (explicit intent; the overwrite ladder binds bulk runs only).
+    """
+    track = crud.get_track(db, track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+
     audio_path = Path(track.filename)
     if not audio_path.exists():
         raise HTTPException(
@@ -78,27 +79,15 @@ def analyze_track_bpm(
             detail=f"Audio file not found at path: {track.filename}"
         )
 
-    # Run analysis (always includes chunks for best accuracy)
     try:
-        result = analyze_bpm(str(audio_path))
-
-        # Save analysis to database
-        crud.create_or_update_bpm_analysis(
-            db=db,
-            track_id=track_id,
-            estimates=result['estimates'],
-            recommended_bpms=result['recommended_bpms'],
-            recommended_bpm=result['recommended_bpm'],
-            duration=result['metadata']['duration']
-        )
-
-        result["track_id"] = track_id
-        return result
+        diagnostics = analyze_track_grid(db, track, analyzer)
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Analysis failed: {str(e)}"
         )
+
+    return _grid_analysis_response(diagnostics)
 
 
 @router.get("/key/{track_id}")
@@ -162,6 +151,10 @@ def analyze_track_key(
     Returns:
         KeyAnalysisResponse with key in multiple formats, confidence, and metadata
     """
+    # Heavy import (essentia at module scope in backend.analysis) stays out
+    # of this module's import chain; issue 08 replaces the backend anyway.
+    from ..analysis import analyze_key
+
     # Get track from database
     track = crud.get_track(db, track_id)
     if not track:

@@ -699,46 +699,6 @@ def update_beatgrid_tempo_changes(
     return beatgrid
 
 
-# BPM Analysis CRUD operations
-
-def get_bpm_analysis(db: Session, track_id: int):
-    """Get BPM analysis for a track."""
-    return db.query(models.BPMAnalysis).filter(models.BPMAnalysis.track_id == track_id).first()
-
-
-def create_or_update_bpm_analysis(
-    db: Session,
-    track_id: int,
-    estimates: list[dict],
-    recommended_bpms: list[int],
-    recommended_bpm: int,
-    duration: float
-):
-    """Create or update BPM analysis for a track."""
-    analysis = db.query(models.BPMAnalysis).filter(models.BPMAnalysis.track_id == track_id).first()
-
-    if analysis:
-        # Update existing
-        analysis.estimates_json = json.dumps(estimates)
-        analysis.recommended_bpms_json = json.dumps(recommended_bpms)
-        analysis.recommended_bpm = recommended_bpm
-        analysis.duration = duration
-    else:
-        # Create new
-        analysis = models.BPMAnalysis(
-            track_id=track_id,
-            estimates_json=json.dumps(estimates),
-            recommended_bpms_json=json.dumps(recommended_bpms),
-            recommended_bpm=recommended_bpm,
-            duration=duration
-        )
-        db.add(analysis)
-
-    db.commit()
-    db.refresh(analysis)
-    return analysis
-
-
 # Key Analysis CRUD operations
 
 def get_key_analysis(db: Session, track_id: int):

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Track, Tag, BPMAnalysisResponse, KeyAnalysisResponse } from '../types';
+import type { Track, Tag, GridAnalysisResponse, KeyAnalysisResponse } from '../types';
 import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
@@ -67,7 +67,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResults, setAnalysisResults] = useState<{
-    bpm?: BPMAnalysisResponse;
+    grid?: GridAnalysisResponse;
     key?: KeyAnalysisResponse;
   } | null>(null);
   // Sync internal state when track prop changes
@@ -76,11 +76,11 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
     setEnergy(track?.energy);
     setAnalysisResults(null);
 
-    // Try to load existing BPM analysis for the track
+    // Try to load existing grid-analysis diagnostics (shows a past bail)
     if (track?.id) {
-      api.analyze.getBpm(track.id)
-        .then(bpmResult => {
-          setAnalysisResults(prev => ({ ...prev, bpm: bpmResult }));
+      api.analyze.getGrid(track.id)
+        .then(gridResult => {
+          setAnalysisResults(prev => ({ ...prev, grid: gridResult }));
         })
         .catch(() => {
           // No analysis exists yet, that's ok
@@ -153,23 +153,22 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
     setIsAnalyzing(true);
     try {
       // Run both analyses in parallel
-      const [bpmResult, keyResult] = await Promise.all([
-        api.analyze.bpm(track.id),
+      const [gridResult, keyResult] = await Promise.all([
+        api.analyze.grid(track.id),
         api.analyze.key(track.id)
       ]);
 
-      setAnalysisResults({ bpm: bpmResult, key: keyResult });
+      setAnalysisResults({ grid: gridResult, key: keyResult });
 
-      // Update track with analysis results. The backend's BPM write path
-      // updates the beatgrid itself (regen for placeholders, anchor-
-      // preserving re-tempo for edited grids — ADR 0016); the client only
-      // invalidates. The old delete+re-get ritual here would have
-      // destroyed the server's re-tempoed grid.
+      // Grid analysis writes server-side (analyzed Beatgrid + BPM
+      // projection, ADR 0024) — or bails and writes nothing; the client
+      // only refetches. Key still rides the PATCH until issue 08 gives
+      // the key path its own server-side write.
       await onSave({
-        bpm: bpmResult.recommended_bpm,
         key: keyResult.formats.engine_id ?? undefined
       });
       queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
+      queryClient.invalidateQueries({ queryKey: ['tracks'] });
 
     } catch (error) {
       console.error('Analysis failed:', error);
@@ -327,7 +326,6 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             <SpeedIcon />
             <BpmControl
               track={track}
-              recommendedBpms={analysisResults?.bpm?.recommended_bpms}
               disabled={isDisabled}
               onSave={(bpm) => onSave({ bpm })}
               // Keep the loaded deck's beat-jump math honest (the engine
@@ -367,10 +365,18 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 height: '24px',
                 marginLeft: '4px',
               }}
-              title="Analyze BPM and key"
+              title="Analyze grid and key"
             >
               {isAnalyzing ? '...' : 'A'}
             </button>
+            {analysisResults?.grid?.bailed && (
+              <span
+                style={{ color: 'var(--red)', fontSize: '12px', fontWeight: 700 }}
+                title={`Grid analysis bailed: ${String(analysisResults.grid.evidence?.reason ?? 'unknown')} — no grid or BPM written; needs attention`}
+              >
+                !
+              </span>
+            )}
             <NeedleIcon />
             <div style={{ flex: 1, minWidth: 0 }}>
               {/* Minimap follows the Deck (loaded Track), not the selection */}

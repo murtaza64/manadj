@@ -303,21 +303,15 @@ export interface LibraryImportExecutionResult {
   error_messages: string[];
 }
 
-export interface BPMEstimate {
-  method: string;
-  bpm: number;
-  confidence: number | null;
-}
-
-export interface BPMAnalysisResponse {
+export interface GridAnalysisResponse {
   track_id: number;
-  estimates: BPMEstimate[];
-  recommended_bpms: number[];
-  recommended_bpm: number;
-  metadata: {
-    duration: number;
-    analyzed_at: string;
-  };
+  candidate: string;
+  bailed: boolean;
+  bpm: number | null;
+  phase: number | null;
+  residual_ms: number | null;
+  evidence: Record<string, unknown>;
+  analyzed_at: string;
 }
 
 export interface KeyAnalysisResponse {
