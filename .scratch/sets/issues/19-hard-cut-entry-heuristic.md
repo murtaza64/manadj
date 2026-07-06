@@ -69,3 +69,9 @@ Verification walkthrough — open http://localhost:5293 (or
    Slow Motion), press practice — deck B parks at Slow Motion's Hot Cue 1
    (0:23), not the Main cue (2:35). Delete slot 1 → practice parks B at
    the track start.
+
+**2026-07-05 — approved and landed** (`nkovwloo`, re-gated after the
+conductor natural-end bugfix `kswqxylk` and issue 21 landed under it:
+pytest 666, vitest 1056, single alembic head 0022). Related bugfix
+landed separately the same session: a hard-cut outgoing's natural
+end-of-track no longer reads as a takeover ("hard cuts never happen").
