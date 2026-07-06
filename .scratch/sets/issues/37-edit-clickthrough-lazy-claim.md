@@ -70,3 +70,5 @@ whatever the decks hold.
 - 24-live-replan (LANDED 2026-07-06) — unblocked
 - 28-foreign-loads-during-conduction (LANDED 2026-07-06) — composes, see Decisions
 - Coordinate with lane conductor (claims on Conductor.ts + editor playhead overlay, 34/38 parked)
+
+**2026-07-06 datapoint (lane conductor, during 38's review):** human confirmed the behavior live — entering the editor via an adjacency click stops Set playback (the openPair deck commandeer), while the new 38 conductor playhead works as expected once playback is re-established. The friction is real in the live-editing loop; raises the value of fixing this.
