@@ -1,6 +1,6 @@
 # spawn_session.py v2: identity, handover stamping, sneak spawns, prompt trim
 
-Status: ready-for-agent
+Status: done (2026-07-06, workflow session)
 
 ## Parent
 

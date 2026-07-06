@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -100,29 +101,51 @@ def discover_port(explicit: int | None) -> int:
     )
 
 
-def build_prompt(handoff: str, task: str, workspace: str | None) -> str:
-    workspace_line = (
-        f"Work in the existing workspace at {workspace} — it has been handed "
-        "over to you and no other agent is using it."
-        if workspace
-        else FRESH_LANE_INSTRUCTIONS
-    )
-    return (
-        f"Read {handoff} for context on the work so far, including its "
-        f"suggested skills.\n\n{workspace_line}\n\n"
-        "Landing policy: feature work and tracked refactors never advance "
-        "main without human review — request it per docs/agents/"
-        "parallel-work.md (Requesting review). Bugfixes and incidental "
-        f"maintenance may auto-land after your own verification.\n\nThen: {task}"
-    )
+def build_prompt(handoff: str | None, task: str, workspace: str | None,
+                 session_id: str, sneak: bool) -> str:
+    parts = [f"You are session {session_id} — use this as your registry owner ID."]
+    if handoff:
+        parts.append(f"Read {handoff} for context on the work so far, "
+                     "including its suggested skills.")
+    if sneak:
+        parts.append(
+            "This is a Sneak fix: work in an ephemeral sneak-<slug> lane, "
+            "auto-land after your own verification, then close the lane "
+            "(close protocol, docs/agents/parallel-work.md)."
+        )
+    elif workspace:
+        parts.append(
+            f"Work in the existing workspace at {workspace} — it has been "
+            "handed over to you (registry owner already updated)."
+        )
+    else:
+        parts.append(FRESH_LANE_INSTRUCTIONS)
+    parts.append(f"Then: {task}")
+    return "\n\n".join(parts)
+
+
+def stamp_owner(workspace: str, session_id: str) -> None:
+    """Handover: transfer registry ownership atomically with the spawn."""
+    lane = Path(workspace).name
+    lane_file = PROJECT_DIR / ".lanes" / f"{lane}.md"
+    if not lane_file.exists():
+        print(f"warning: no registry file {lane_file} — owner not stamped")
+        return
+    text, n = re.subn(r"(?m)^(- owner:).*$", rf"\1 {session_id} (handover)",
+                      lane_file.read_text())
+    lane_file.write_text(text if n else
+                         lane_file.read_text() + f"\n- owner: {session_id} (handover)\n")
+    print(f"registry owner -> {session_id} ({lane_file})")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--title", required=True, help="session title (house style: <feature-slug>: <focus>)")
-    ap.add_argument("--handoff", required=True, help="path to the handoff doc (repo-relative)")
+    ap.add_argument("--handoff", help="handoff doc path (omit for self-contained tasks)")
     ap.add_argument("--task", required=True, help="one-line task for the new session")
     ap.add_argument("--workspace", help="existing lane to hand over (default: instruct fresh lane)")
+    ap.add_argument("--sneak", action="store_true",
+                    help="sneak-fix delegation: no handoff, ephemeral lane, auto-land")
     ap.add_argument("--agent", default="yolo",
                     help="agent/mode for the new session (default: yolo)")
     ap.add_argument("--model", help="provider/model override (default: server default)")
@@ -130,9 +153,12 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="print the calls without making them")
     args = ap.parse_args()
 
-    handoff = Path(args.handoff)
-    if not (REPO_ROOT / handoff).exists() and not handoff.exists():
-        sys.exit(f"error: handoff doc not found: {args.handoff}")
+    if args.sneak and (args.handoff or args.workspace):
+        sys.exit("error: --sneak takes no --handoff/--workspace")
+    if args.handoff:
+        handoff = Path(args.handoff)
+        if not (REPO_ROOT / handoff).exists() and not handoff.exists():
+            sys.exit(f"error: handoff doc not found: {args.handoff}")
 
     create_body: dict = {"title": args.title}
     if args.agent:
@@ -143,10 +169,11 @@ def main() -> None:
             sys.exit("error: --model must be provider/model")
         create_body["model"] = {"providerID": provider_id, "id": model_id}
 
-    prompt = build_prompt(args.handoff, args.task, args.workspace)
     directory = f"directory={PROJECT_DIR}"
 
     if args.dry_run:
+        prompt = build_prompt(args.handoff, args.task, args.workspace,
+                              "ses_DRYRUN", args.sneak)
         print(f"would POST /session?{directory}  {json.dumps(create_body)}")
         print(f"would POST /session/<id>/prompt_async?{directory}  agent={args.agent}")
         print(f"--- prompt ---\n{prompt}\n--- end prompt ---")
@@ -157,6 +184,10 @@ def main() -> None:
     session = api(port, "POST", f"/session?{directory}", create_body)
     assert isinstance(session, dict)
     session_id = session["id"]
+    if args.workspace:
+        stamp_owner(args.workspace, session_id)
+    prompt = build_prompt(args.handoff, args.task, args.workspace,
+                          session_id, args.sneak)
 
     prompt_body: dict = {"parts": [{"type": "text", "text": prompt}]}
     if args.agent:

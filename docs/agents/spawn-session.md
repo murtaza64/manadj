@@ -28,3 +28,9 @@ Hand work to a fresh opencode session via the server API instead of a copy-paste
 - **Agent/mode**: defaults to the user's `yolo` mode — an unattended session that stalls on a permission prompt defeats the point. `--agent` overrides (e.g. `--agent normal`); `--model provider/model` overrides the model.
 - **Kickoff**: plain async prompt ("read handoff → workspace rule → task"); the child picks its own skills from the handoff's suggested-skills section.
 - `--dry-run` prints the calls and composed prompt without touching the server.
+
+## v2 (2026-07-06)
+
+- Kickoff prompt tells the child its session ID (registry owner ID); landing policy no longer restated (AGENTS.md carries it).
+- `--workspace` Handover stamps the lane's registry `owner:` at spawn time.
+- `--handoff` optional; `--sneak` = sneak-fix delegation (self-contained `--task`, ephemeral lane, auto-land, close).
