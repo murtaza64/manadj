@@ -90,14 +90,21 @@ Implemented 2026-07-06 (setui lane, jj change `zqqlwplx` — `sets: 31-set-row-c
   reading it off the plan — the planner doesn't export its resolved tempo,
   and planner.ts is contested (setlist lane, 24) so it wasn't touched.
 
-Review iteration 2026-07-06 (amended into `zqqlwplx`; descendants rebased
-clean): (1) key column narrowed 36→28px ("12m" is the widest value);
-(2) "in" moved LEFT beside the play-order index — # · in read together
-as the running order against the mix clock; (3) energy column added
-(the library's EnergySquare, key→BPM→energy order as in the track
-table; blank when unrated). Row now reads
-▶ · # · in · key · BPM · energy · title/artist · … · play · ✕.
-TITLE_X 189→283; adjacency chips follow via the shared constants.
+Review iterations 2026-07-06 (amended into `zqqlwplx`; descendants
+rebased clean each round):
+
+1. "in" moved LEFT beside the play-order index — # · in read together
+   as the running order against the mix clock; energy column added
+   (key→BPM→energy order as in the track table; blank when unrated).
+   Row now reads ▶ · # · in · key · BPM · energy · title/artist · … ·
+   play · ✕.
+2. Energy renders as the library's 20px circle (one `--energy-color`
+   rule in SetDetailPane.css rather than TrackRow.css's five per-level
+   copies). Gaps tightened (ROW_GAP 12→8) and columns sized to their
+   widest monospace value (in 40 · key 24 · BPM 40 · energy 22 ·
+   play 76); row text bumped to the library's 13px scale. TITLE_X is
+   now 231; adjacency chips and 32's overlap column follow via the
+   shared constants.
 
 ## Verification walkthrough (ready-for-human)
 
