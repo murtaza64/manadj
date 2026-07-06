@@ -9,6 +9,8 @@ import {
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { MidiAction } from './actions';
 import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
+import { initialGridChordState, reduceGridChord } from './gridChord';
+import type { GridChordCommand, GridChordEvent } from './gridChord';
 
 /** Encoder detents per action are tiny; cap steps so a burst can't warp the
  * selection across the whole library in one message. */
@@ -38,6 +40,48 @@ export function dispatchMidiAction(action: MidiAction): void {
   return dispatchRelative(action.target, action.ticks);
 }
 
+/**
+ * The one piece of dispatch-held state: the spin-to-nudge chord
+ * (midi-performance-ops 06), folded through the pure reducer
+ * (gridChord.ts — the tested seam). While a grid-nudge pad is held, that
+ * deck's rim and touch ticks are consumed here BEFORE surface routing —
+ * the deliberate ADR 0019 carve-out (see the amendment note there); the
+ * shifted jog-seek stream stays surface-routed (SHIFT is its own
+ * deliberate gesture).
+ */
+let gridChordState = initialGridChordState();
+
+export function _resetGridChordForTests(): void {
+  gridChordState = initialGridChordState();
+}
+
+function runGridChord(event: GridChordEvent): void {
+  const [next, commands] = reduceGridChord(gridChordState, event);
+  gridChordState = next;
+  for (const command of commands) executeGridChordCommand(command);
+}
+
+function executeGridChordCommand(command: GridChordCommand): void {
+  switch (command.type) {
+    case 'pass-jog': {
+      // Not armed: the tick keeps its normal surface-routed meaning.
+      const jog = audibleJog();
+      if (command.stream === 'rim') jog?.rimTicks(command.deck, command.ticks);
+      else jog?.touchTicks(command.deck, command.ticks);
+      return;
+    }
+    case 'local-nudge':
+      deckControlsFor(command.deck)?.gridNudgeLocal(command.offsetMs);
+      return;
+    case 'tap-step':
+      deckControlsFor(command.deck)?.gridNudgeStep(command.direction);
+      return;
+    case 'commit':
+      deckControlsFor(command.deck)?.gridNudgeCommit(command.offsetMs);
+      return;
+  }
+}
+
 type ButtonAction = Extract<MidiAction, { kind: 'button' }>;
 type AbsoluteAction = Extract<MidiAction, { kind: 'absolute' }>;
 type RelativeAction = Extract<MidiAction, { kind: 'relative' }>;
@@ -45,10 +89,13 @@ type RelativeAction = Extract<MidiAction, { kind: 'relative' }>;
 function dispatchRelative(target: RelativeAction['target'], ticks: number): void {
   switch (target.control) {
     case 'jog':
-      audibleJog()?.rimTicks(target.deck, ticks);
+      // Rim and touch flow through the chord fold first (midi-performance-
+      // ops 06): armed decks nudge the grid, unarmed decks pass through to
+      // the audible surface unchanged.
+      runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'rim', ticks });
       return;
     case 'jog-touch':
-      audibleJog()?.touchTicks(target.deck, ticks);
+      runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'touch', ticks });
       return;
     case 'jog-seek':
       audibleJog()?.shiftRimTicks(target.deck, ticks);
@@ -133,9 +180,15 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
     case 'grid-nudge': {
       // Grid edits are stored-data operations, not playback gestures —
       // registry-direct regardless of the audible surface (ADR 0019,
-      // midi-performance-ops 05).
-      if (edge !== 'down') return;
-      deckControlsFor(target.deck)?.gridNudgeStep(target.direction);
+      // midi-performance-ops 05). Chorded since issue 06: the down edge
+      // ARMS spin-to-nudge; the release decides tap (±10ms step) vs
+      // commit (accumulated net offset). No timers — the reducer's
+      // zero-tick discriminator does all the work.
+      runGridChord({
+        type: edge === 'down' ? 'pad-down' : 'pad-up',
+        deck: target.deck,
+        direction: target.direction,
+      });
       return;
     }
     case 'grid-anchor': {

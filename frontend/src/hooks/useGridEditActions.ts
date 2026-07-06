@@ -13,7 +13,9 @@ import {
   useNudgeBeatgrid,
   useSetBeatgridDownbeat,
 } from './useBeatgridData';
+import { shiftBeatgrid } from '../midi/gridChord';
 import { useDeck, useDeckReady } from './useDeck';
+import type { BeatgridResponse } from '../types';
 
 /**
  * The deck's grid-edit operations for hardware pads (midi-performance-ops
@@ -42,6 +44,13 @@ export interface GridEditActions {
   setDownbeatAtPlayhead(): void;
   /** Grow/Shrink micro-adjust; BPM halve/double (screen-identical rounding). */
   bpm(change: 'grow' | 'shrink' | 'halve' | 'double'): void;
+  /** Spin-to-nudge tick apply (midi-performance-ops 06): shift the CACHED
+   * grid only — the engine and waveform follow the query cache live; no
+   * persistence until the gesture's commit. */
+  nudgeLocal(offsetMs: number): void;
+  /** Spin-to-nudge release: persist the accumulated net offset in one
+   * call, through the same serialized chain as the discrete steps. */
+  nudgeCommit(offsetMs: number): void;
 }
 
 export function useGridEditActions(): GridEditActions {
@@ -144,6 +153,22 @@ export function useGridEditActions(): GridEditActions {
       if (!isFinite(next) || next <= 0) return;
       optimistic.current = { trackId, bpm: next };
       void getCommitter().commit(next);
+    },
+    nudgeLocal: (offsetMs) => {
+      if (!hasBeatgrid || trackId === null) return;
+      // Optimistic apply: shift the cached grid; useDeckBeatgridSync and
+      // the waveform read this cache, so the tick is audible/visible live.
+      queryClient.setQueryData<BeatgridResponse>(['beatgrid', trackId], (old) =>
+        old === undefined ? old : shiftBeatgrid(old, offsetMs)
+      );
+    },
+    nudgeCommit: (offsetMs) => {
+      if (!hasBeatgrid || trackId === null) return;
+      nudgeChain.current = nudgeChain.current.then(() =>
+        nudgeGrid
+          .mutateAsync({ trackId, offsetMs })
+          .catch((error) => console.error('grid nudge commit failed:', error))
+      );
     },
   };
 }

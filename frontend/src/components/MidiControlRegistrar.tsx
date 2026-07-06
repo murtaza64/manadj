@@ -120,6 +120,8 @@ function DeckControlsRegistrar() {
         gridNudgeStep: (direction) => latest.current.gridEdit.nudgeStep(direction),
         gridSetDownbeat: () => latest.current.gridEdit.setDownbeatAtPlayhead(),
         gridBpm: (change) => latest.current.gridEdit.bpm(change),
+        gridNudgeLocal: (offsetMs) => latest.current.gridEdit.nudgeLocal(offsetMs),
+        gridNudgeCommit: (offsetMs) => latest.current.gridEdit.nudgeCommit(offsetMs),
         // LOAD deliberately absent (editor-midi 03): load policy is
         // view-owned and rides the browse-surface registration in Library.
       }),
