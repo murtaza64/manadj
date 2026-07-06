@@ -24,6 +24,21 @@ Trunk-based: `main` is trunk; landed history is immutable. Landing policy: bugfi
 
 Hand work to a fresh opencode session via the server API instead of a pasted handoff: write the handoff to `.scratch/<feature>/handoffs/`, then run `uv run scripts/agent/spawn_session.py`. See `docs/agents/spawn-session.md`.
 
+### Process language
+
+Use these terms bare; never restate their mechanics (a handoff/issue that re-explains AGENTS.md or `docs/agents/` content is a bug). Full mechanics: `docs/agents/parallel-work.md`.
+
+- **Park**: complete review-gated work without landing — flip to `ready-for-human` with a Walkthrough, start the lane app, toast, keep building on top.
+- **Walkthrough**: the verification guide for parked work — URL/desktop command, the 3-5 clicks, what correct looks like. Printed in-session; durable copy in the issue.
+- **Handover**: transfer of lane ownership to another session; registry `owner:` updates atomically with it.
+- **Track**: an ordered subset of one feature's issues worked by one lane, parallel to sibling tracks.
+- **Quiescent**: a lane with no live owner session and nothing unlanded — safe to hand over or close.
+- **Orchestrator**: a session that coordinates (spawns tracks, relays Walkthroughs, runs the doctor, sweeps) and never owns a feature lane or lands feature code.
+- **Sneak fix**: an auto-land-eligible fix with no tracker artifact; the change description is the whole record; ephemeral `sneak-<slug>` lane.
+- Bare-use (defined in parallel-work.md): Lane, Land, fast-path, additive-append, Probe, Sandbox DB, Claim, review-gated, auto-land, idle placeholder.
+
+Rules: run `guard.py` on session resume and before landing (stale-ownership check). Never dump full `--git` diffs into a session — `--stat` first, then targeted reads.
+
 ### Database migrations
 
 Alembic (see `docs/adr/0005-alembic-migrations.md`). Generate revisions with `uv run alembic revision [--autogenerate] --rev-id <NNNN>_<jj-short-id> -m "<slug>"` — sequential number, suffixed with the jj change short ID of the change the migration belongs to. Parallel duplicates of a number are fine: alembic flags multiple heads; re-parent one. Startup auto-migrates (`upgrade head`). Never use `Base.metadata.create_all` for the app DB.

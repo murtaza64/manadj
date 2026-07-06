@@ -28,3 +28,18 @@ Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
 - **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
 - **Claim**: set `Status: claimed` and save before any work.
 - **Resolve**: append the answer under an `## Answer` heading, set `Status: resolved`, then append a context pointer (gist + link) to the map's Decisions-so-far in `map.md`.
+
+## Maturity ladder (added 2026-07-06)
+
+File like Takes, promote like Transitions: filing is cheap capture, `ready-for-agent` is deliberate promotion.
+
+- File early, label honestly — an issue after loose discussion is correct *if* labeled `needs-triage` (or a `grilling`-typed ticket). Filing ≠ authorization; the Status line authorizes.
+- File the question, not the decomposition: one "grill X" issue, never speculative sub-issues — slicing is a grilling output.
+- `ready-for-agent` bar: an agent can start without asking anything. Litmus: if you can't write acceptance criteria yet, it isn't ready; if writing them takes a design decision, grill first.
+- Issue size: one landable-or-parkable unit = one Walkthrough. No single walkthrough describes it → too big; sneak-fix-sized diff → too small to file.
+- PRD threshold: decomposition exceeds ~2 issues or decisions cut across slices. A PRD is the grill's residue, not ceremony.
+- An issue gated on human timing is labeled `ready-for-agent` with a `Blocked by: <condition> (human calls it)` line — the blocked line, not the label, carries the gate.
+
+## PRD user stories: default actor
+
+The actor defaults to the DJ and is omitted ("Loop N beats from where I am, so I can hold a section"); name the actor only when it differs ("As the developer tuning detection…"). Benefit clauses stay — they carry spec weight.

@@ -138,6 +138,51 @@ for all workspaces). The `.lanes/` registry lives at the umbrella root,
 outside any working copy. Lane creation, from `default/`:
 `jj workspace add --name <lane> -r main ../<lane>`.
 
+## Placeholder and closure hygiene (added 2026-07-06)
+
+- **Never describe an empty placeholder.** A described empty defeats jj's
+  auto-abandon *and* breaks idle-placeholder detection (the hot-reload gate's
+  definition of idle is "empty + undescribed"). Lane identity is already
+  visible via the workspace marker in `jj log`; status lives in `.lanes/`.
+- **Closing a lane, in order**: `lane_app.py stop` (orphaned dev servers hold
+  the directory) → `jj workspace forget <lane>` → `jj abandon` the leftover
+  empty `@` if it didn't auto-vanish → `rm -rf` the directory → delete
+  `.lanes/<lane>.md`.
+- **A conflicted landing merge is abandoned immediately** — never left as
+  `@`. Merge retries are cheap: abandon, resolve in-lane, re-merge.
+- `lanes_doctor.py` reports litter (described empties, conflicted heads,
+  dead-owner lanes); sweeping is a deliberate act using the close protocol.
+
+## Orchestrator
+
+A session that coordinates work and implements nothing: spawns and hands
+over track lanes, watches for parked work and relays Walkthroughs to the
+human, runs `lanes_doctor.py` and sweeps, broadcasts policy nudges, rescues
+orphaned lanes. One per multi-track effort or one global — optional, at the
+human's discretion. **Never owns a feature lane, never lands feature code**;
+its writes are docs/registry only (via a docs lane). `owner:` fields are
+always session IDs, never role names — roles don't own workspaces, sessions
+do.
+
+## Sneak fixes
+
+A bugfix or incidental-maintenance change with no tracker artifact — skips
+ceremony, not visibility. Eligibility is the auto-land category, verbatim;
+unsure → file an issue instead. The change description is the entire record:
+`<area>: <symptom> → <fix> (sneak)`. Mechanics: ephemeral `sneak-<slug>`
+lane, verify per your own judgment, auto-land via merge protocol, close the
+lane. Growth valve: the moment it needs a second change or raises a design
+question, file the issue and continue tracked.
+
+## Enforcement posture
+
+Coordination stays advisory (registry + conventions) with mechanized
+consultation at choke points (`guard.py`, `land.py`, `tracker.py` refuse on
+rule violations). **Escalation trigger, recorded 2026-07-06**: if
+read-only-default violations recur after the guard/land tooling exists,
+build the opencode write-interceptor plugin (blocks tracked-file writes in
+the default workspace). A landing mutex stays rejected (ADR 0026).
+
 ## Lane registry: `.lanes/`
 
 Advisory claims, not locks — the prime rules prevent damage; the registry makes

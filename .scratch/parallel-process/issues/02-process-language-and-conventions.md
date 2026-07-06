@@ -1,6 +1,6 @@
 # Process language and conventions (docs)
 
-Status: ready-for-agent
+Status: done (2026-07-06, workflow session; maturity ladder added to scope per retro)
 
 ## Parent
 
