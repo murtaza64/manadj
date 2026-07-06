@@ -52,3 +52,7 @@ None - can start immediately
   explicitly reported (nor the Q-lamp mirror observed) — both keep their
   TODO(hardware-verify) in the mapping; delete `keyLockShifted` if the probe turns out
   inert. Closed.
+- 2026-07-06 (miditog lane): lamps confirmed by the user — Q lamps mirror Quantize,
+  and the shifted-Q probe is REAL: the Q lamp shows Key Lock while SHIFT is held.
+  Probe outcome recorded in the mapping; all issue-07 addresses now
+  hardware-verified, no remainders.

@@ -587,21 +587,15 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x30 + i,
           onVelocity: 0x7e,
         })),
-        // Q lamp mirrors app-wide Quantize; Mixxx drives it at the button's
-        // own note (0x02) on the transport channel.
-        // TODO(hardware-verify): smoke-test with the Q bindings.
+        // Q lamp mirrors app-wide Quantize; the button's own note (0x02)
+        // on the transport channel. Hardware-verified 2026-07-06.
         quantize: { channel: 1, number: 0x02, onVelocity: 0x7f },
-        // Key Lock lamp PROBE (midi-performance-ops 07): Mixxx drives NO
-        // output at the shifted-Q address (ch+3, same note) but DOES drive
-        // other shifted-layer lamps, so it is plausibly real. Wired
-        // optimistically: if the address is real, the Q lamp shows Key
-        // Lock while SHIFT is held; if it is not, these writes are inert,
-        // Key Lock stays screen-only, and the Q lamp remains
-        // quantize-only (one lamp never tells two truths). Record the
-        // probe outcome here at the smoke test: keep this address if the
-        // lamp responds, DELETE it if not (the encoder skips absent
-        // addresses).
-        // TODO(hardware-verify): shifted-Q lamp probe.
+        // Key Lock lamp (midi-performance-ops 07): the shifted-Q address
+        // (ch+3, same note). Probe outcome: REAL — hardware-verified
+        // 2026-07-06. Mixxx drives no output here, but the device does
+        // light it: the Q lamp shows the deck's Key Lock while SHIFT is
+        // held, Quantize unshifted (one lamp never tells two truths —
+        // the layers are separate lights).
         keyLockShifted: { channel: 4, number: 0x02, onVelocity: 0x7f },
         loopPads: loopPadLamps(6, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),
         loopPadsShifted: loopPadLamps(6, LOOP_PADS_SHIFTED_FIRST_NOTE, LOOP_LADDER_SHIFTED),
@@ -626,10 +620,9 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x30 + i,
           onVelocity: 0x7e,
         })),
-        // TODO(hardware-verify): smoke-test with the Q bindings.
+        // Hardware-verified 2026-07-06.
         quantize: { channel: 2, number: 0x02, onVelocity: 0x7f },
-        // Same probe as deck A (see the comment there).
-        // TODO(hardware-verify): shifted-Q lamp probe.
+        // Same as deck A: probe REAL, hardware-verified 2026-07-06.
         keyLockShifted: { channel: 5, number: 0x02, onVelocity: 0x7f },
         loopPads: loopPadLamps(7, LOOP_PADS_BASE_FIRST_NOTE, LOOP_LADDER_BASE),
         loopPadsShifted: loopPadLamps(7, LOOP_PADS_SHIFTED_FIRST_NOTE, LOOP_LADDER_SHIFTED),
