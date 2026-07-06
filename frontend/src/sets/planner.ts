@@ -41,6 +41,7 @@ import {
   tempoMatchPitch,
 } from '../editor/mixModel';
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
+import type { Track } from '../types';
 import type { AdjacencyPin } from './adjacency';
 
 export interface PlannerTrackFacts {
@@ -49,6 +50,26 @@ export interface PlannerTrackFacts {
   /** Hot Cue 1 in track seconds (the stable entry anchor — cue-slot
    * convention: slot 1 = first buildup), null when slot 1 is unset. */
   hotCue1Sec: number | null;
+}
+
+/** A Track's effective tempo: the backend's grid-first projection
+ * (bpm_effective — the Beatgrid's dominant BPM when a grid exists), else
+ * the bpm column. The same authority chain as the Transition editor
+ * (`beatgrid.tempo_changes[0].bpm ?? track.bpm`, ADR 0016) — every plan
+ * tempo input must come through here, or ladder/Conductor geometry
+ * disagrees with the editor (the Kambi→Raskal 2× incident). */
+export function trackEffectiveBpm(t: Track): number | null {
+  return t.bpm_effective ?? t.bpm ?? null;
+}
+
+/** Assemble one entry's planner facts from its Track row (+ Hot Cue 1) —
+ * THE seam where Track rows become plan tempo inputs. */
+export function plannerTrackFacts(t: Track, hotCue1Sec: number | null): PlannerTrackFacts {
+  return {
+    durationSec: t.duration_secs ?? 0,
+    bpm: trackEffectiveBpm(t),
+    hotCue1Sec,
+  };
 }
 
 /** The Set's Tempo policy (sets 06). Riding's ramp speed is a tunable

@@ -83,7 +83,13 @@ import {
 import { NeverAudibleBadge } from './NeverAudibleBadge';
 import { OverviewLadder } from './OverviewLadder';
 import { evaluatePickup, readPickupSnapshot } from './pickup';
-import { fmtSec, isNeverAudible, type PlannedEntry, type PlanWarning } from './planner';
+import {
+  fmtSec,
+  isNeverAudible,
+  trackEffectiveBpm,
+  type PlannedEntry,
+  type PlanWarning,
+} from './planner';
 import { prefetchTrackBuffer } from './prefetch';
 import { hotCue1Sec, useSetPlan } from './useSetPlan';
 import { useSetSettings } from './setSettings';
@@ -673,11 +679,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           {set && (
             <TempoPolicyChip
               set={set}
-              defaultBpm={
-                (entries && entries.length > 0
-                  ? trackMap?.get(entries[0].trackId)?.bpm
-                  : null) ?? null
-              }
+              // Grid-first (ADR 0016) — must agree with the planner's own
+              // Fixed-policy fallback (first track's effective BPM).
+              defaultBpm={(() => {
+                const t =
+                  entries && entries.length > 0
+                    ? trackMap?.get(entries[0].trackId)
+                    : undefined;
+                return t ? trackEffectiveBpm(t) : null;
+              })()}
             />
           )}
           {/* Plan degeneracies (sets 06): runway clamps, window overlaps… */}

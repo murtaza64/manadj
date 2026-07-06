@@ -81,6 +81,10 @@ class Track(TrackBase):
     archived_at: datetime | None = None  # Archived verdict; NULL = active
     tags: list[Tag] = []
     provenance: TrackProvenance | None = None
+    # Grid-first BPM (ADR 0016): the Beatgrid's dominant tempo when a grid
+    # exists, else bpm. Float BPM (models.Track.bpm_effective). Tempo
+    # consumers (Set planner) read this, never bpm.
+    bpm_effective: float | None = None
     model_config = ConfigDict(from_attributes=True)
 
     @field_serializer('bpm')

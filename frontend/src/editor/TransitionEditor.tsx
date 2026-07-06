@@ -41,6 +41,7 @@ import { EditorStore, useEditorSelector } from './editorStore';
 import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
 import { vectorizeTake } from '../capture/vectorize';
+import { trackEffectiveBpm } from '../sets/planner';
 import { OPEN_TAKE_EVENT, consumeTakeReview } from '../capture/takeReview';
 import { OPEN_PAIR_EVENT, consumePairEdit, type PairEditRequest } from './openPair';
 import type { TrackSideInfo, TransitionTemplate } from './templateModel';
@@ -498,7 +499,9 @@ function TransitionEditorInner() {
             windowStartS: detail.window_start_s,
             windowEndS: detail.window_end_s,
           },
-          { bpmA: a.bpm ?? null, bpmB: b.bpm ?? null }
+          // Grid-first (ADR 0016): same authority the plan-time
+          // vectorization uses — the bpm column can be a stale projection.
+          { bpmA: trackEffectiveBpm(a), bpmB: trackEffectiveBpm(b) }
         );
         if (draft) store.stampTakeDraft(uuid, draft.transition);
         else console.error('take review: slice has no init head — cannot vectorize', uuid);

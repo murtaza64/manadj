@@ -54,3 +54,17 @@ vitest as regression floor. Review-gated.
   text (inverted fill overweights a table header); row selection =
   surface0 (not a button engaged state); .editor-fit keeps its crust
   backdrop (floats over the timeline).
+- Vocabulary gap found during sets 22 (Set view migration, lane setui):
+  borderless glyph controls NESTED IN hover-tinted rows (the Set rows'
+  ▶ play-from / ✕ remove / [+] insert). The FilterBar ×-button idiom
+  (hover = surface0, press = surface1) is invisible there — the row
+  under the pointer is already surface0. Sets 22 shifts them one fill
+  step up (hover = surface1, press = surface2, `.set-glyph-btn` in
+  SetDetailPane.css), leaning on this issue's own load-button precedent
+  ("press = one fill step up … load buttons --surface2"). Bordered
+  controls in the same rows stay on the standard steps — the border
+  brightening carries their feedback. Flagging for adoption into the
+  vocabulary (or correction) rather than forking silently.
+- SetsSidebarSection.tsx unmigrated flag above is resolved: sets 22
+  migrated it (SetsSidebarSection.css mirrors the PlaylistSidebar
+  patterns, as prescribed).
