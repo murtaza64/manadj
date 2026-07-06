@@ -675,19 +675,26 @@ export default function Library({
   // selection, LOAD A/B reads it and loads with the view's policy
   // (editor-midi 03). Registration is mount-scoped; handlers read the live
   // selection and policy through refs.
+  //
+  // While a Set is the visible browse list, the LIBRARY YIELDS (sets 33):
+  // the SetDetailPane registers its own surface, and gating here (rather
+  // than trusting stack order) keeps that true on fresh mounts too —
+  // child effects run before parent effects, so on a mode switch with a
+  // Set open the pane registers FIRST; an ungated Library registration
+  // would land on top and hand the encoder the hidden, stale track list.
   const mainSelRef = useRef(mainSel);
   useEffect(() => {
     mainSelRef.current = mainSel;
   });
-  useEffect(
-    () =>
-      registerBrowseSurface({
-        navigate: (delta) => mainSelRef.current.handleNavigate(delta),
-        getSelectedTrack: () => mainSelRef.current.selectedTrack,
-        load: (deck, track) => loadWithViewPolicyRef.current(deck, track),
-      }),
-    []
-  );
+  const viewingSet = selectedView === 'set' && selectedSetId !== null;
+  useEffect(() => {
+    if (viewingSet) return; // the Set pane owns the browse surface
+    return registerBrowseSurface({
+      navigate: (delta) => mainSelRef.current.handleNavigate(delta),
+      getSelectedTrack: () => mainSelRef.current.selectedTrack,
+      load: (deck, track) => loadWithViewPolicyRef.current(deck, track),
+    });
+  }, [viewingSet]);
 
   return (
     <>

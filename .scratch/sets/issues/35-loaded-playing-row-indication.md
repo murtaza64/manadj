@@ -1,6 +1,6 @@
 # 35 — Set rows: per-deck loaded highlight + animated playing indicator
 
-Status: ready-for-human
+Status: done (landed 2026-07-06, merge `lqrswlms`; change `lmutuszo`)
 
 ## Parent
 

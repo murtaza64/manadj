@@ -1,6 +1,6 @@
 # 32 — Adjacency rows show the transition (overlap) time
 
-Status: ready-for-human
+Status: done (landed 2026-07-06, merge `lqrswlms`; change `qskormqx`)
 
 ## Parent
 

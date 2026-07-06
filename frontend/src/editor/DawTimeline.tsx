@@ -32,6 +32,8 @@ import {
   visibleLaneIds,
 } from './mixModel';
 import type { JumpEvent, LaneId, LanePoint, Lanes, EditorMix } from './mixModel';
+import { deleteSelected } from './laneSelection';
+import { isTypingTarget } from '../components/performance/performanceKeys';
 import { EditorStore, useEditorSelector } from './editorStore';
 import { jumpDeltaLabel } from './beatReadout';
 import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
@@ -45,6 +47,10 @@ const MAX_PX_PER_SEC = 240;
 
 /** Envelope-preview LUT resolution (samples across the window). */
 const MOD_LUT_N = 2048;
+
+/** Stable empty selection: LaneCanvas draw effects key on the `selected`
+ * identity — a fresh [] per render would redraw every lane every render. */
+const NO_SELECTION: number[] = [];
 
 /** First index with arr[i] >= v (arr ascending). */
 function lowerBound(arr: number[], v: number): number {
@@ -106,6 +112,16 @@ export function DawTimeline({
   );
   /** Remove the lane from the editor (envelope kept; re-add restores). */
   const onLaneHide = useCallback((id: LaneId) => store.hideLane(id), [store]);
+
+  // ── Lane node group selection (mix-editor 16) ──
+  // One selection at a time, KEYED BY LANE ID (v1 is per-lane; v2's
+  // cross-lane time-shift would widen this to a map without a reshape).
+  // View state, never persisted.
+  const [laneSel, setLaneSel] = useState<{ lane: LaneId; indices: number[] } | null>(null);
+  // A different Transition's points invalidate indices wholesale.
+  const activeItem = useEditorSelector(store, (s) => s.session.active);
+  const pairKey = useEditorSelector(store, (s) => s.pairKey);
+  useEffect(() => setLaneSel(null), [activeItem, pairKey]);
   const [pxPerSec, setPxPerSec] = useState(4);
   /** Horizontal offset in px — the single owner of all horizontal motion.
    * No native scrollbar: wheel and the minimap viewport drive it, and the
@@ -172,13 +188,50 @@ export function DawTimeline({
   // drawing use it as a fallback so waveforms + envelopes render
   // immediately. Audio readiness still gates transport (play button,
   // park-after-ready), never drawing.
-  const durA = player.engineA.getSnapshot().duration || (waveA?.duration ?? 0);
-  const durB = player.engineB.getSnapshot().duration || (waveB?.duration ?? 0);
+  //
+  // The engine read is trusted ONLY while the engine holds this side's
+  // track: the editor plays through the SHARED decks (ADR 0022), and a
+  // mounted-but-silent editor over a conducting Set (the normal case
+  // since sets 21) sees the Conductor ping-pong OTHER tracks through
+  // them — unguarded, the timeline's block math re-warped at every
+  // handover ("misaligned depending on the set's play position").
+  const engineDur = (snap: { trackId: number | null; duration: number }, trackId: number | null) =>
+    trackId !== null && snap.trackId === trackId ? snap.duration : 0;
+  const durA = engineDur(player.engineA.getSnapshot(), trackAId) || (waveA?.duration ?? 0);
+  const durB = engineDur(player.engineB.getSnapshot(), trackBId) || (waveB?.duration ?? 0);
   const waveDursRef = useRef({ a: 0, b: 0 });
   useEffect(() => {
     waveDursRef.current = { a: waveA?.duration ?? 0, b: waveB?.duration ?? 0 };
   });
+  const trackIdsRef = useRef({ a: trackAId, b: trackBId });
+  useEffect(() => {
+    trackIdsRef.current = { a: trackAId, b: trackBId };
+  });
   const tr = mix.transition;
+
+  // Selection keyboard: Esc deselects; Delete/Backspace removes the
+  // selected nodes (deleteSelected keeps the lane's ≥1-point invariant).
+  useEffect(() => {
+    if (!laneSel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e)) return;
+      if (e.key === 'Escape') {
+        setLaneSel(null);
+        return;
+      }
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      e.preventDefault();
+      const lane = laneSel.lane;
+      const pts = tr.lanes[lane]?.length
+        ? tr.lanes[lane]
+        : defaultLanePoints(lane, tr.durationSec);
+      onLaneChange(lane, deleteSelected(pts, laneSel.indices));
+      setLaneSel(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [laneSel, tr.lanes, tr.durationSec, onLaneChange]);
+
   const aEnd = durA > 0 ? Math.min(tr.startSec + tr.durationSec, durA) : tr.startSec + tr.durationSec;
   // B is time-stretched on the mix axis by its playback rate. The block
   // starts at B's TRUE audio start: a negative entry anchor (bInSec < 0)
@@ -398,9 +451,16 @@ export function DawTimeline({
       const scrollPx = scrollPxRef.current;
       // Dirty check: skip every write/draw below when nothing that feeds
       // them changed since the last frame (idle editor = idle GPU).
-      // Same pre-decode duration fallback as the render path (issue 28).
-      const dA = player.engineA.getSnapshot().duration || waveDursRef.current.a;
-      const dB = player.engineB.getSnapshot().duration || waveDursRef.current.b;
+      // Same pre-decode duration fallback — and the same own-track gate —
+      // as the render path (issue 28; conductor-load misalignment fix).
+      const snapA = player.engineA.getSnapshot();
+      const snapB = player.engineB.getSnapshot();
+      const dA =
+        (snapA.trackId === trackIdsRef.current.a ? snapA.duration : 0) ||
+        waveDursRef.current.a;
+      const dB =
+        (snapB.trackId === trackIdsRef.current.b ? snapB.duration : 0) ||
+        waveDursRef.current.b;
       const drawKey =
         `${scrollPx}:${px}:${player.getMixTime()}:${viewport.clientWidth}:` +
         `${dA}:${dB}:${modelVersionRef.current}`;
@@ -926,6 +986,10 @@ export function DawTimeline({
           windowLeftPx={tr.startSec * pxPerSec}
           registerScrollDraw={registerScrollDraw}
           onChange={(pts) => onLaneChange(id, pts)}
+          selected={laneSel?.lane === id ? laneSel.indices : NO_SELECTION}
+          onSelectedChange={(indices) =>
+            setLaneSel(indices.length > 0 ? { lane: id, indices } : null)
+          }
         />
       </div>
     </div>

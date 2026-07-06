@@ -1,6 +1,6 @@
 # 36 — Trailing suggest row replaces the header Suggest button
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -45,3 +45,27 @@ row** at the end of the Set list:
 human: append is an insert at the terminal gap, so it gets the same gap
 affordance as every other gap. Decisions recorded above (permanent
 visibility, empty-set hint, button removal).
+
+**2026-07-06 — implemented (lane setrows, change `ttpsnrqv`, stacked on
+26's `lmmppypt`); ready-for-human.** Trailing `+ suggest a track` row
+(`.set-suggest-row`, `.set-glyph-btn`/adjacency-row family: blue +,
+hover fill, always visible) after the last row inside the scroll pane;
+click opens the existing append popover anchored at the click; empty set
+renders it disabled with the hint copy inline. Header Suggest button
+removed — transport and Auto-fill untouched (issue 39 deferred, header
+left as is). `follow/suggest.ts` and `SetSuggestions` unchanged. Gate:
+build ✓, vitest 1174 ✓.
+
+**Verification walkthrough** (lane app running: http://localhost:5363):
+
+1. Open any Set with tracks: the header's right side now shows only
+   Auto-fill; at the very bottom of the track list sits a permanently
+   visible blue `+ suggest a track` row.
+2. Click it → the familiar append suggestion popover opens at the row;
+   accept a candidate → it appends, and the new adjacency gets the usual
+   treatment (auto chip or red cut per 26).
+3. Per-adjacency `+` (left gutter of every handover row) still opens
+   insert suggestions, unchanged.
+4. Create a new empty Set: the row reads "Add a track first —
+   suggestions rank out of the last track", disabled (no popover on
+   click).

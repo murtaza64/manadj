@@ -3,8 +3,8 @@
    tint (accent borders/colors ride inline styles, which win over these
    rules and so hold on hover), press = surface1 fill, engaged/on = solid
    inverted accent fill pinned across hover/press. No glows, scale
-   effects, or hue-shifts. Selection and conducting-row highlights are
-   STATES (sets 18), not hovers — they outrank the hover wash. */
+   effects, or hue-shifts. Selection and the loaded/playing row marks are
+   STATES (sets 18/35), not hovers — they outrank the hover wash. */
 
 /* --peach: sets 16 picked peach for the lit Pick up (and sets 06 for the
    Fixed tempo chip) before the token existed outside Waveform.css's
@@ -44,6 +44,14 @@
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  /* Center on the VIEWPORT, not the header (22 follow-up): the pane
+     sits right of the sidebar, so the grid's own centering reads
+     off-center on screen. The shift is measured by the pane (the
+     header's viewport offset) and applied paint-only — at extreme
+     narrow widths the transport may visually overlap the left zone
+     rather than reflow; the grid's no-shrink guarantee still governs
+     layout. */
+  transform: translateX(var(--transport-viewport-shift, 0px));
 }
 
 .set-header-actions {
@@ -104,16 +112,34 @@
 }
 
 /* Track rows: hover = tint. Selection (blue wash + inset blue ring,
-   sets 18) and conducting (mauve wash) are states — they keep the
-   background under the pointer; a selected conducting row keeps the
-   mauve wash and wears the blue ring. */
+   sets 18) and the loaded identity wash (sets 35, inline) are states —
+   they keep the background under the pointer; a selected loaded row
+   keeps the wash and wears the blue ring.
+   Gap/padding ride inline from the shared column grid (sets 31,
+   rowColumns.ts) — this rule carries the non-geometric treatments. */
 .set-track-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
   border-bottom: 1px solid var(--surface0);
   cursor: grab;
+  /* The library track table's text scale (TrackRow.css .track-cell-text);
+     the fixed-width cells match via rowColumns.cellStyle. */
+  font-size: 13px;
+}
+
+/* Energy circle (review iteration): the library track table's energy
+   idiom (TrackRow.css .track-energy-cell overrides) — 20px circle,
+   level-tinted fill, colored number. One rule here instead of five:
+   EnergySquare.css already exposes --energy-color per level (TrackRow's
+   per-level copies predate that property). */
+.set-energy-cell .energy-square {
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: color-mix(in srgb, var(--energy-color) 30%, var(--base));
+  color: var(--energy-color);
 }
 
 .set-track-row:hover {
@@ -126,24 +152,71 @@
   box-shadow: inset 0 0 0 2px var(--blue);
 }
 
-.set-track-row.conducting,
-.set-track-row.conducting:hover {
-  background: color-mix(in srgb, var(--mauve) 18%, transparent);
+/* Loaded rows (sets 35; replaces the conducting mauve wash): the deck
+   identity wash rides INLINE (rowMarks.loadedWash) so it wins over the
+   hover rule and the .selected background — a selected loaded row keeps
+   the wash and wears the ring, the conducting-wash precedent. */
+
+/* Playing state mark (sets 35): deck-neutral animated EQ bars in the
+   play column — green = active (state, never a deck). The row hover
+   swaps the mark for the ▶ affordance (.set-row-reveal). */
+.set-playing-mark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
 }
 
-.set-track-row.conducting.selected,
-.set-track-row.conducting.selected:hover {
-  background: color-mix(in srgb, var(--mauve) 18%, transparent);
-  box-shadow: inset 0 0 0 2px var(--blue);
+.set-playing-mark span {
+  width: 3px;
+  height: 11px;
+  background: var(--green);
+  transform-origin: bottom;
+  animation: set-eq-bounce 0.9s ease-in-out infinite;
+}
+
+.set-playing-mark span:nth-child(2) {
+  animation-delay: -0.3s;
+}
+
+.set-playing-mark span:nth-child(3) {
+  animation-delay: -0.6s;
+}
+
+@keyframes set-eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* The mark yields to the ▶ affordance on hover ONLY when the button
+   actually appears (the class rides with onPlayFrom) — a plan-less
+   playing row keeps its mark under the pointer. */
+.set-track-row:hover .set-mark-yields-to-hover {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .set-playing-mark span {
+    animation: none;
+    transform: scaleY(0.6);
+  }
 }
 
 /* Adjacency rows: hover = tint. The deck-gradient left bar rides
-   background-image inline (sets 20), composing over this color. */
+   background-image inline (sets 20), composing over this color.
+   Gap/padding ride inline from the shared column grid (sets 31,
+   rowColumns.ts) — this rule carries the non-geometric treatments. */
 .set-adjacency-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 12px 2px 15px;
   background-color: var(--crust);
   background-position: left;
   background-size: 3px 100%;
@@ -179,7 +252,8 @@
 }
 
 /* Hover-revealed row actions: visibility (not display) keeps the
-   left-gutter geometry that aligns titles and chips at x=81 (sets 20). */
+   left-gutter geometry that aligns titles and chips at TITLE_X
+   (rowColumns.ts, sets 31). */
 .set-row-reveal {
   visibility: hidden;
 }

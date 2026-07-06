@@ -1,8 +1,6 @@
 # 28 — Template anchor rework: align-and-window
 
-Status: ready-for-human (implemented, change ppxknkuk — eye-verify: save
-modal's recipe sentence + defaults, apply of a converted vs fresh
-template, zero-length "cut" template, scalable stepper proportional feel)
+Status: closed (implemented change ppxknkuk; user-verified 2026-07-05)
 Blocked by: nothing (03 landed, change qnxmltss).
 
 ## Parent

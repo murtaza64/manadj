@@ -1,10 +1,11 @@
 /**
  * The Set detail pane (sets 01+02): replaces the track table on the
- * browse surface when a Set is selected. Ordered track rows (title/
- * artist, key, BPM) with drag-reorder and remove; adds arrive by dropping
- * tracks onto the Set's sidebar row or the pane itself. Scroll position
- * and selection live in the set store — the pane survives mode switches
- * unmoved.
+ * browse surface when a Set is selected. Ordered track rows on a shared
+ * column grid (sets 31, rowColumns.ts: ▶ · # · in · key · BPM · energy ·
+ * title/artist · play · ✕) with drag-reorder and remove; adds arrive by
+ * dropping tracks onto the Set's sidebar row or the pane itself. Scroll
+ * position and selection live in the set store — the pane survives mode
+ * switches unmoved.
  *
  * Between track rows sit adjacency rows (sets 02): pin chip, evidence
  * counts (N tr · M tk against the Transition library / Take history),
@@ -15,7 +16,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type SetRowWire } from '../api/client';
-import { useDecks } from '../hooks/useDeck';
+import { useDecks, type DeckContextValue } from '../hooks/useDeck';
+import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import { useMixer } from '../hooks/useMixer';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
@@ -36,11 +38,14 @@ import {
   EMPTY_SELECTION,
   click,
   menuTargets,
+  navigate as navigateSelection,
   selectGesture,
 } from '../selection/selectionModel';
+import { registerBrowseSurface } from '../midi/controlRegistry';
 import type { SelectMods } from '../components/TrackRow';
 import { useToast } from '../components/Toast';
 import ContextMenu, { useContextMenuState, type MenuItem } from '../components/ContextMenu';
+import EnergySquare from '../components/EnergySquare';
 import { useTrackMenuItems } from '../components/useTrackMenuItems';
 import type { ChannelId } from '../playback/mixer';
 import {
@@ -85,11 +90,43 @@ import { OverviewLadder } from './OverviewLadder';
 import { evaluatePickup, readPickupSnapshot } from './pickup';
 import {
   fmtSec,
-  isNeverAudible,
   trackEffectiveBpm,
+  type PlannedAdjacency,
   type PlannedEntry,
   type PlanWarning,
 } from './planner';
+import { getKeyColor } from '../utils/displayColors';
+import {
+  ADJ_GUTTER_W,
+  ADJ_PAD_LEFT,
+  ADJ_ROW_GAP,
+  ADJ_TIME_SPACER_W,
+  BPM_COL_W,
+  bpmDeltaColor,
+  bpmDeltaPercent,
+  bpmDeltaTitle,
+  cellStyle,
+  ENERGY_COL_W,
+  fmtInTime,
+  fmtOverlapTime,
+  fmtPlayTime,
+  IN_TIME_COL_W,
+  INDEX_COL_W,
+  KEY_COL_W,
+  PLAY_COL_W,
+  PLAY_TIME_COL_W,
+  REMOVE_COL_W,
+  ROW_ACCENT_W,
+  ROW_GAP,
+  ROW_PAD_X,
+  type BpmDeltaRef,
+} from './rowColumns';
+import {
+  isRowPlaying,
+  loadedDecks,
+  loadedWash,
+  type DeckOccupancyMap,
+} from './rowMarks';
 import { prefetchTrackBuffer } from './prefetch';
 import { hotCue1Sec, useSetPlan } from './useSetPlan';
 import { useSetSettings } from './setSettings';
@@ -263,6 +300,32 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const displayEntries = previewState?.entries ?? entries;
   const displayPlan = previewState ? previewPlan : plan;
 
+  // BPM delta reference (sets 31): under Fixed every row measures against
+  // the Set tempo (the planner's own fallback when unset: the first
+  // track's effective BPM); under Riding each row measures against its
+  // predecessor — resolved per-row at render, against the DISPLAYED
+  // order, so a live drag preview colors the hypothetical neighbors.
+  const effectiveBpmOf = (trackId: number): number | null => {
+    const t = trackMap?.get(trackId);
+    return t ? trackEffectiveBpm(t) : null;
+  };
+  const fixedTempoRef: BpmDeltaRef | null = (() => {
+    if (set?.tempo_policy !== 'fixed') return null;
+    const bpm =
+      set.set_tempo_bpm ??
+      (displayEntries && displayEntries.length > 0
+        ? effectiveBpmOf(displayEntries[0].trackId)
+        : null);
+    return bpm ? { kind: 'set-tempo', bpm } : null;
+  })();
+  const bpmRefFor = (i: number): BpmDeltaRef | null => {
+    if (set?.tempo_policy === 'fixed') return fixedTempoRef;
+    const prev = displayEntries?.[i - 1];
+    if (!prev) return null; // first row under Riding: no reference
+    const bpm = effectiveBpmOf(prev.trackId);
+    return bpm ? { kind: 'predecessor', bpm } : null;
+  };
+
   // Real hot cues for the ladder clips (same cache keys as useHotCues).
   const hotCueQueries = useQueries({
     queries: trackIds.map((id) => ({
@@ -282,13 +345,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const decks = useDecks();
   const conductorState = useConductorState();
   const conductingThis = conductorState.setId === setId && conductorState.status !== 'idle';
-  // The conducting highlight follows the TRACK, not the index — mid-drag
-  // the rows display the hypothetical order (sets 23), where the
-  // committed plan's entry index points at the wrong row.
-  const conductingTrackId =
-    conductingThis && conductorState.activeEntryIndex !== null
-      ? (entries?.[conductorState.activeEntryIndex]?.trackId ?? null)
-      : null;
+  // Row marks (sets 35): LIVE deck occupancy + transport, straight off
+  // the shared engines — conducting, after takeover, or plain manual
+  // deck use all mirror reality. Replaces the single conducting "active
+  // row" highlight (a conducting row is a loaded+playing row now).
+  const occupancy = useDeckOccupancy(decks);
   const trackMapRef = useRef(trackMap);
   useEffect(() => {
     trackMapRef.current = trackMap;
@@ -434,6 +495,34 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     cueDeckAt('B', incoming.trackId, positions.incomingSec);
   };
 
+  // ── Transport centering (22 follow-up): the header centers its
+  // transport within its OWN width, but the pane sits right of the
+  // sidebar — so "centered in the bar" is off-center on screen. CSS
+  // can't know the header's viewport offset; measure it and hand the
+  // correction to the CSS as a custom property (paint-only transform —
+  // see the .set-header-transport rule for the narrow-width tradeoff).
+  const headerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const recenter = () => {
+      const rect = header.getBoundingClientRect();
+      const shift = window.innerWidth / 2 - (rect.left + rect.width / 2);
+      header.style.setProperty('--transport-viewport-shift', `${shift}px`);
+    };
+    recenter();
+    // The observer catches sidebar resizes and window resizes alike
+    // (both change the header's box); a plain resize listener backstops
+    // pure offset changes.
+    const observer = new ResizeObserver(recenter);
+    observer.observe(header);
+    window.addEventListener('resize', recenter);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', recenter);
+    };
+  }, []);
+
   // ── Scroll persistence (set store — survives mode switches) ──────────
   const paneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -519,6 +608,58 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     setSetSelection(setId, click(sel, trackId));
     return [trackId];
   };
+
+  // ── Controller browse target (sets 33): the Set pane implements the
+  // library's browse-surface contract (midi-controller 05) instead of
+  // inventing a parallel one. The embedding Library YIELDS its own
+  // registration while a Set is the visible browse list (stack order
+  // alone can't be trusted: child effects run before parent effects),
+  // so the encoder walks THIS list and LOAD A/B load THIS selection —
+  // through the same view policy as the on-screen paths (the
+  // onLoadToDeck prop IS Library's loadWithViewPolicy). Encoder select
+  // ≡ click select: one selection
+  // model (the set store) that 17's menu and 18's ops already read; the
+  // encoder walks tracks only (adjacency rows have no selection —
+  // pointer/keyboard territory). Handlers read live state through refs;
+  // registration is mount-scoped per set.
+  const entriesRef = useRef(entries);
+  useEffect(() => {
+    entriesRef.current = entries;
+  });
+  const onLoadToDeckRef = useRef(onLoadToDeck);
+  useEffect(() => {
+    onLoadToDeckRef.current = onLoadToDeck;
+  });
+  useEffect(
+    () =>
+      registerBrowseSurface({
+        navigate: (delta) => {
+          const order = (entriesRef.current ?? []).map((e) => e.trackId);
+          if (order.length === 0) return;
+          const next = navigateSelection(getSetSelection(setId), delta, order);
+          setSetSelection(setId, next);
+          // Keep the encoder's selection visible (scoped to this pane).
+          // The pane's manual-scroll detection sees this as a user
+          // scroll and disengages Conductor follow — deliberate: encoder
+          // browsing IS browsing, same as a hand scroll (sets 05).
+          if (next.anchorId !== null) {
+            const row = paneRef.current?.querySelector(
+              `[data-set-track-row="${next.anchorId}"]`
+            );
+            (row as HTMLElement | null)?.scrollIntoView({
+              block: 'nearest',
+              behavior: 'smooth',
+            });
+          }
+        },
+        getSelectedTrack: () => {
+          const anchorId = getSetSelection(setId).anchorId;
+          return anchorId !== null ? (trackMapRef.current?.get(anchorId) ?? null) : null;
+        },
+        load: (deck, track) => onLoadToDeckRef.current(deck, track),
+      }),
+    [setId]
+  );
 
   // ── Track-row context menu (sets 17): the universal track menu plus
   // the surface's Remove from set. Targeting bakes in Library's rule —
@@ -643,7 +784,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           convention, the view's primary action), secondary actions
           right. The transport never shrinks or moves at narrow widths;
           the side zones wrap first. */}
-      <div className="set-header">
+      <div className="set-header" ref={headerRef}>
         <span className="set-header-left">
           {set?.color && (
             <span
@@ -855,7 +996,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   trackId={entry.trackId}
                   track={track}
                   planned={planned}
-                  conducting={conductingThis && conductingTrackId === entry.trackId}
+                  bpmRef={bpmRefFor(i)}
+                  loadedOn={loadedDecks(entry.trackId, occupancy)}
+                  playing={isRowPlaying(entry.trackId, occupancy)}
                   selected={selectedIds.has(entry.trackId)}
                   dragging={dragIds?.includes(entry.trackId) ?? false}
                   onSelect={(mods) => handleRowSelect(entry.trackId, mods)}
@@ -895,6 +1038,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 {next && (
                   <AdjacencyRow
                     pin={entry.pin}
+                    planned={displayPlan?.adjacencies[i]}
                     future={previewOrder ? (previewFutures?.[i] ?? null) : null}
                     decks={
                       planned && displayPlan?.entries[i + 1]
@@ -965,6 +1109,33 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
     </div>
+  );
+}
+
+/**
+ * Both decks' live occupancy slices (sets 35), off the shared engines.
+ * Primitive selectors per useSyncExternalStore rules (a fresh object
+ * every read would loop); the map itself is memoized on the slices, so
+ * the pane re-renders only on load / play / pause — not per tick.
+ */
+function useEngineSlice<T>(engine: DeckEngine, selector: (s: DeckSnapshot) => T): T {
+  return useSyncExternalStore(
+    (cb) => engine.subscribe(cb),
+    () => selector(engine.getSnapshot())
+  );
+}
+
+function useDeckOccupancy(decks: Record<ChannelId, DeckContextValue>): DeckOccupancyMap {
+  const aTrackId = useEngineSlice(decks.A.engine, (s) => s.trackId);
+  const aPlaying = useEngineSlice(decks.A.engine, (s) => s.playing);
+  const bTrackId = useEngineSlice(decks.B.engine, (s) => s.trackId);
+  const bPlaying = useEngineSlice(decks.B.engine, (s) => s.playing);
+  return useMemo(
+    () => ({
+      A: { trackId: aTrackId, playing: aPlaying },
+      B: { trackId: bTrackId, playing: bPlaying },
+    }),
+    [aTrackId, aPlaying, bTrackId, bPlaying]
   );
 }
 
@@ -1045,6 +1216,7 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
 
 function AdjacencyRow({
   pin,
+  planned,
   future,
   decks,
   evidence,
@@ -1057,6 +1229,9 @@ function AdjacencyRow({
   onSuggestInsert,
 }: {
   pin: AdjacencyPin | null;
+  /** This handover's slice of the playback plan (sets 32): the overlap
+   * cell renders its window span. Absent while the plan is loading. */
+  planned?: PlannedAdjacency;
   /** This adjacency's future under a live drag preview (sets 23):
    * 'will-restore' grows the violet ↺ marker beside the (already
    * restored) pin chip; auto-fillable/unresolved render through the
@@ -1117,11 +1292,9 @@ function AdjacencyRow({
       : []),
   ];
 
-  // Left-gutter geometry (sets 20): the chips start at the same x as the
-  // track-row titles. Track rows: 3px accent + 12px padding + 18px play
-  // + 12px gap + 24px index + 12px gap = 81px. Here: 15px padding (the
-  // 3px bar is a background layer) + 58px gutter + 8px row gap = 81px.
-  const GUTTER_WIDTH = 58;
+  // Left-gutter geometry: the chips start at the same x as the track-row
+  // titles — driven by the shared column grid (sets 31, rowColumns.ts;
+  // replaces sets 20's hand-derived 58px).
   // The two-deck gradient bar (sets 20): outgoing deck's color on top,
   // incoming below — the handover visually ties to its tracks. Painted
   // as a background-image layer (geometry in the CSS) so the CSS hover
@@ -1137,12 +1310,17 @@ function AdjacencyRow({
         className="set-adjacency-row"
         onClick={onOpenEditor}
         title="Open this handover in the Transition editor"
-        style={{ backgroundImage: barImage }}
+        style={{
+          // Geometry from the shared column grid (sets 31, rowColumns.ts)
+          gap: `${ADJ_ROW_GAP}px`,
+          padding: `2px ${ROW_PAD_X}px 2px ${ADJ_PAD_LEFT}px`,
+          backgroundImage: barImage,
+        }}
       >
         {/* Left gutter: the insert affordance as a small + (sets 20 —
             the old labeled button's verb rides the tooltip), sitting
             under the track rows' play-button column. */}
-        <span style={{ width: `${GUTTER_WIDTH}px`, flexShrink: 0, display: 'flex' }}>
+        <span style={{ width: `${ADJ_GUTTER_W}px`, flexShrink: 0, display: 'flex' }}>
           {onSuggestInsert && (
             <button
               className="set-glyph-btn"
@@ -1289,6 +1467,18 @@ function AdjacencyRow({
         <span style={{ marginLeft: 'auto', color: 'var(--subtext0)' }}>
           {view.counts.transitions} tr · {view.counts.takes} tk
         </span>
+
+        {/* Overlap time (sets 32): the planned window's span, sitting in
+            the track rows' time-column band (the play-time column) so
+            the list reads as one table. Hard cuts render blank — the
+            red hard-cut chip carries that message. */}
+        <span
+          title="How long this handover overlaps (the planned window on the mix clock)"
+          style={{ ...cellStyle(PLAY_TIME_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}
+        >
+          {fmtOverlapTime(planned)}
+        </span>
+        <span style={{ width: `${ADJ_TIME_SPACER_W}px`, flexShrink: 0 }} />
       </div>
       {menuPos && (
         <ContextMenu
@@ -1307,7 +1497,9 @@ function SetTrackRow({
   trackId,
   track,
   planned,
-  conducting,
+  bpmRef,
+  loadedOn,
+  playing,
   selected,
   dragging,
   onSelect,
@@ -1322,11 +1514,20 @@ function SetTrackRow({
   track: Track | undefined;
   /** This entry's slice of the playback plan (sets 03). */
   planned: PlannedEntry | undefined;
-  /** The Conductor's playhead is inside this entry (sets 04). */
-  conducting: boolean;
+  /** The BPM the delta color is measured against (sets 31): the Set
+   * tempo under Fixed, the predecessor's BPM under Riding; null when
+   * there is no reference (first row under Riding, missing BPMs). */
+  bpmRef: BpmDeltaRef | null;
+  /** The Decks currently holding this track (sets 35: LIVE occupancy,
+   * not plan parity) — the row wears the holding deck's identity wash;
+   * both at once when both decks hold Set tracks. */
+  loadedOn: ChannelId[];
+  /** A deck holding this track is playing (sets 35): the deck-neutral
+   * animated EQ-bars STATE mark. Paused-but-loaded keeps the wash only. */
+  playing: boolean;
   /** In the pane's row selection (sets 18): blue wash + inset blue ring.
-   * Coexists with the conducting highlight — when both, the mauve wash
-   * keeps the background and the ring marks the selection. */
+   * Coexists with the loaded wash — when both, the identity wash keeps
+   * the background and the ring marks the selection. */
   selected: boolean;
   /** This row is the drag source (sets 23) — dimmed, sortable-style,
    * wherever it currently displays (its hypothetical slot mid-preview,
@@ -1345,45 +1546,132 @@ function SetTrackRow({
    * row's track metadata is still loading. */
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-  // Selection and conducting coexist, distinct (sets 18): mauve wash =
-  // Conductor position, blue = selection; a selected conducting row
-  // keeps the mauve wash and wears the blue ring. Both are STATES —
-  // the CSS keeps them above the hover wash (perf-layout 08).
+  // Selection and the loaded wash coexist, distinct (sets 18/35): deck
+  // identity wash = where the track is loaded, blue = selection; a
+  // selected loaded row keeps the identity wash and wears the blue
+  // ring. Both are STATES — they sit above the hover wash (perf-layout
+  // 08; the wash rides inline, which wins over the CSS hover rule).
+  //
+  // Column grid (sets 31, geometry in rowColumns.ts):
+  //   ▶ · # · in · key · BPM · energy · title/artist · … · play · ✕
+  // Key/BPM sit LEFT (fixed widths, values align down the list); key is
+  // identity-colored (Camelot hue — the app's key convention), BPM is
+  // delta-colored against `bpmRef` with the absolute value as text. The
+  // tempo authority is the effective BPM (ADR 0016) — same as the plan.
+  const bpm = track ? trackEffectiveBpm(track) : null;
+  const deltaColor = bpmDeltaColor(bpmDeltaPercent(bpm, bpmRef));
+  const keyText = formatKeyDisplay(track?.key ?? null);
   return (
     <div
-      data-set-track-row
+      // Value = the track id (sets 33: the controller browse target
+      // scrolls the selected row into view by it); presence selectors
+      // ([data-set-track-row]) keep working for row rects / convergence.
+      data-set-track-row={trackId}
       draggable
-      className={`set-track-row${conducting ? ' conducting' : ''}${selected ? ' selected' : ''}`}
+      className={`set-track-row${selected ? ' selected' : ''}`}
       onClick={(e) => onSelect({ shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onContextMenu={onContextMenu}
       style={{
+        // The grid's gap/padding come from the shared constants — the
+        // CSS carries the non-geometric treatments only (sets 31).
+        gap: `${ROW_GAP}px`,
+        padding: `8px ${ROW_PAD_X}px`,
         borderLeft: planned
-          ? `3px solid ${DECK_COLORS[planned.deck]}`
-          : '3px solid transparent',
+          ? `${ROW_ACCENT_W}px solid ${DECK_COLORS[planned.deck]}`
+          : `${ROW_ACCENT_W}px solid transparent`,
+        // Loaded = identity wash (sets 35). Inline wins over the CSS
+        // hover wash AND the .selected background — the blue ring still
+        // marks selection (the conducting-wash precedent, sets 18).
+        background: loadedWash(loadedOn),
         opacity: dragging ? 0.45 : 1,
       }}
     >
-      <button
-        className="set-glyph-btn set-row-reveal"
-        onClick={(e) => {
-          e.stopPropagation(); // never doubles as a selection click
-          onPlayFrom?.();
-        }}
-        disabled={!onPlayFrom}
-        title="Play the set from this track's planned entry"
+      {/* Play column: ▶ play-from reveals on hover (sets 20); at rest a
+          PLAYING row shows the deck-neutral EQ bars here instead — the
+          hover swaps state mark → affordance (the Spotify idiom;
+          flagged on perf-layout 08 rather than forked silently). The
+          mark only yields when the ▶ actually appears — a plan-less
+          row keeps its playing mark under the pointer. */}
+      <span
         style={{
-          width: '18px',
-          color: 'var(--mauve)',
-          // Inline wins over the row-hover reveal while there is no plan
-          ...(onPlayFrom ? undefined : { visibility: 'hidden' as const }),
+          position: 'relative',
+          width: `${PLAY_COL_W}px`,
+          flexShrink: 0,
+          display: 'flex',
         }}
       >
-        ▶
-      </button>
-      <span style={{ width: '24px', textAlign: 'right', color: 'var(--subtext0)', fontSize: '12px' }}>
+        <button
+          className="set-glyph-btn set-row-reveal"
+          onClick={(e) => {
+            e.stopPropagation(); // never doubles as a selection click
+            onPlayFrom?.();
+          }}
+          disabled={!onPlayFrom}
+          title="Play the set from this track's planned entry"
+          style={{
+            width: `${PLAY_COL_W}px`,
+            color: 'var(--mauve)',
+            // Inline wins over the row-hover reveal while there is no plan
+            ...(onPlayFrom ? undefined : { visibility: 'hidden' as const }),
+          }}
+        >
+          ▶
+        </button>
+        {playing && (
+          <span
+            className={`set-playing-mark${onPlayFrom ? ' set-mark-yields-to-hover' : ''}`}
+            title="Playing"
+            aria-label="playing"
+          >
+            <span />
+            <span />
+            <span />
+          </span>
+        )}
+      </span>
+      <span style={{ ...cellStyle(INDEX_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}>
         {index + 1}
+      </span>
+      {/* "in" rides next to the play order (review iteration): # and in
+          together read as the running order against the mix clock. */}
+      <span
+        title="When this track enters the mix (mix clock)"
+        style={{ ...cellStyle(IN_TIME_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}
+      >
+        {fmtInTime(planned)}
+      </span>
+      {/* Right-aligned like its numeric neighbors: a left-aligned key
+          stacks its slack against the BPM's (right-aligned) slack and
+          the pair reads as a gulf. */}
+      <span
+        style={{
+          ...cellStyle(KEY_COL_W),
+          textAlign: 'right',
+          fontWeight: 500,
+          color: getKeyColor(keyText) ?? 'var(--subtext1)',
+        }}
+      >
+        {keyText}
+      </span>
+      <span
+        title={bpmDeltaTitle(bpm, bpmRef)}
+        style={{
+          ...cellStyle(BPM_COL_W),
+          textAlign: 'right',
+          color: deltaColor ?? 'var(--subtext1)',
+        }}
+      >
+        {bpm ? bpm.toFixed(1) : '—'}
+      </span>
+      {/* Energy (review iteration): the library's energy circle, same
+          key→BPM→energy order as the track table; blank when unrated. */}
+      <span
+        className="set-energy-cell"
+        style={{ ...cellStyle(ENERGY_COL_W), display: 'flex', justifyContent: 'center' }}
+      >
+        {track?.energy ? <EnergySquare level={track.energy} filled showNumber /> : null}
       </span>
       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         <span style={{ color: 'var(--text)' }}>{track?.title ?? `Track ${trackId}`}</span>
@@ -1392,19 +1680,16 @@ function SetTrackRow({
         )}
         {track?.archived_at != null && <ArchivedTrackRowMark />}
       </span>
-      {/* NEVER AUDIBLE (sets 19): replaces the innocuous "plays 0:00" */}
+      {/* NEVER AUDIBLE (sets 19): the badge carries the signal; both
+          time cells go blank (rowColumns blanks them). */}
       <NeverAudibleBadge planned={planned} />
-      {/* "plays m:ss of m:ss" — the plan's audible footprint (sets 03) */}
-      <span style={{ width: '110px', color: 'var(--subtext0)', fontSize: '12px', textAlign: 'right' }}>
-        {planned && track?.duration_secs && !isNeverAudible(planned)
-          ? `plays ${fmtSec(Math.max(planned.exitSec - planned.entrySec, 0))} of ${fmtSec(track.duration_secs)}`
-          : ''}
-      </span>
-      <span style={{ width: '40px', color: 'var(--sapphire)', fontSize: '12px' }}>
-        {formatKeyDisplay(track?.key ?? null)}
-      </span>
-      <span style={{ width: '64px', color: 'var(--subtext1)', fontSize: '12px', textAlign: 'right' }}>
-        {track?.bpm ? `${track.bpm.toFixed(1)} BPM` : '—'}
+      {/* Play-time column (sets 31): the audible span over the track
+          length ("in" sits left, beside the play order). */}
+      <span
+        title="How long this track is audible, over its full length"
+        style={{ ...cellStyle(PLAY_TIME_COL_W), textAlign: 'right', color: 'var(--subtext0)' }}
+      >
+        {fmtPlayTime(planned, track?.duration_secs)}
       </span>
       <button
         className="set-glyph-btn set-row-reveal"
@@ -1413,7 +1698,7 @@ function SetTrackRow({
           onRemove();
         }}
         title="Remove from set"
-        style={{ padding: '2px 8px', color: 'var(--red)' }}
+        style={{ width: `${REMOVE_COL_W}px`, flexShrink: 0, padding: '2px 0', color: 'var(--red)' }}
       >
         ✕
       </button>

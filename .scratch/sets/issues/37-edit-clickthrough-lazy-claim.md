@@ -1,6 +1,6 @@
 # 37 — Edit click-through must not silence a conducting set (extend 21's lazy claim)
 
-Status: needs-triage
+Status: ready-for-agent (grilled 2026-07-06 — decisions below settle the triage questions)
 
 ## Parent
 
@@ -43,7 +43,32 @@ whatever the decks hold.
   and both touch the same editor/conductor seams. Dispatch together to
   the Conductor-owning lane after 24 lands.
 
+## Decisions (grilled 2026-07-06)
+
+- **Deferred state loads the session only** (pairKey, selection, model);
+  no claim, no shared-deck loads while another surface holds audibility.
+- **Waveform strips render the OPENED pair from track data, decoupled
+  from the decks** — the strips must show what you're editing, not what
+  the decks hold (the ladder's buffer-free waveform machinery, issue 30,
+  is the likely source). Fallback if the strips prove deeply
+  deck-coupled: show the conducted decks as-is (the sets-40 ownership
+  chip explains why) and file the decoupling separately.
+- **Audition is a one-press arm**: play = claim → load the pair onto
+  both decks → start the moment both are ready. Pending-play cancels on
+  any other transport gesture or displacement. Precedent: the practice
+  flow's cue-on-ready plumbing (`pendingCues`, SetDetailPane).
+- **Claim before load, always** — the set stands down before its decks
+  are reloaded under it (the invariant today's eager path protects).
+  This also composes with 28 (landed): by the time the editor's loads
+  fire, the holder is the editor — they are never foreign loads during
+  conduction.
+- Warm the pair via the decode cache (`prefetchTrackBuffer`) at open so
+  the arm gap is usually near-zero.
+
 ## Blocked by
 
-- 24-live-replan (parked ready-for-human)
-- Coordinate with 28-foreign-loads-during-conduction (held for the same reason)
+- 24-live-replan (LANDED 2026-07-06) — unblocked
+- 28-foreign-loads-during-conduction (LANDED 2026-07-06) — composes, see Decisions
+- Coordinate with lane conductor (claims on Conductor.ts + editor playhead overlay, 34/38 parked)
+
+**2026-07-06 datapoint (lane conductor, during 38's review):** human confirmed the behavior live — entering the editor via an adjacency click stops Set playback (the openPair deck commandeer), while the new 38 conductor playhead works as expected once playback is re-established. The friction is real in the live-editing loop; raises the value of fixing this.

@@ -7,6 +7,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { insertChop, nearestTime } from './mixModel';
+import { indicesInRect, moveGroup, toggleIndex } from './laneSelection';
+import type { SelectRect } from './laneSelection';
 import { LANE_COLORS } from './laneColors';
 import type { LaneId, LanePoint } from './mixModel';
 /** One automation lane: breakpoint polyline editor (canvas only; the label
@@ -38,6 +40,9 @@ const LANE_SNAP_PX = 6;
  * circles at the extremes render complete, floating over the window borders.
  * Must match the canvas inset/size in transitionEditor.css. */
 const LANE_PAD = 7;
+/** Pointer travel (px) below which a cmd/ctrl gesture is a CLICK (toggle
+ * select) rather than a rubber-band drag. */
+const MARQUEE_CLICK_PX = 4;
 
 export function LaneCanvas({
   id,
@@ -48,6 +53,8 @@ export function LaneCanvas({
   windowLeftPx,
   registerScrollDraw,
   onChange,
+  selected,
+  onSelectedChange,
 }: {
   id: LaneId;
   /** Rendered width — a draw-effect dependency so zoom resizes redraw in
@@ -65,6 +72,10 @@ export function LaneCanvas({
    * canvas can reposition/redraw when the view leaves its drawn span. */
   registerScrollDraw: (id: LaneId, fn: ((viewL: number, viewR: number) => void) | null) => void;
   onChange: (points: LanePoint[]) => void;
+  /** Selected node indices in THIS lane (mix-editor 16). The owner keys
+   * selection state by lane id, so this is [] for every other lane. */
+  selected: number[];
+  onSelectedChange: (indices: number[]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointsRef = useRef(points);
@@ -97,6 +108,28 @@ export function LaneCanvas({
   /** In-flight chop stamp gesture (shift+drag on empty lane space). */
   const chopStart = useRef<number | null>(null);
   const [chopPreview, setChopPreview] = useState<{ x0: number; x1: number } | null>(null);
+
+  // ── Group selection (mix-editor 16) ──
+  const selectedRef = useRef(selected);
+  useEffect(() => {
+    selectedRef.current = selected;
+  });
+  /** In-flight rubber-band gesture (cmd/ctrl+drag): anchor in RAW lane
+   * coords (the band never beat-snaps) plus the client px origin for the
+   * click-vs-drag threshold. Stays a click until it travels. */
+  const marqueeStart = useRef<{ x: number; y: number; cx: number; cy: number; armed: boolean } | null>(
+    null
+  );
+  const [marquee, setMarquee] = useState<SelectRect | null>(null);
+  /** In-flight group drag: the points snapshot at pointer-down plus the
+   * grabbed node's original position. Every move applies ONE delta to the
+   * snapshot (shape preserved exactly — no per-node re-snapping). */
+  const groupDrag = useRef<{ orig: LanePoint[]; grab: LanePoint } | null>(null);
+  /** Structural changes from outside this component (crop remaps, template
+   * stamps, lane clear) can strand indices past the end — drop them. */
+  useEffect(() => {
+    if (selected.length > 0 && selected.some((i) => i >= points.length)) onSelectedChange([]);
+  });
 
   /** Beat guide positions (cue markers excluded), ascending. */
   const beatXs = useMemo(() => guides.filter((g) => !g.color).map((g) => g.x), [guides]);
@@ -233,6 +266,33 @@ export function LaneCanvas({
       ctx.fill();
     });
 
+    // Selected nodes: filled ring — a white halo around the lane-colored
+    // fill reads against both the lane fill and the waveforms.
+    for (const i of selected) {
+      const p = points[i];
+      if (!p) continue;
+      ctx.beginPath();
+      ctx.arc(lx(p.x), ly(p.y), LANE_POINT_R + 2.5, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Rubber-band rect (cmd/ctrl+drag in flight).
+    if (marquee) {
+      const mx0 = lx(Math.min(marquee.x0, marquee.x1));
+      const mx1 = lx(Math.max(marquee.x0, marquee.x1));
+      const my0 = ly(Math.max(marquee.y0, marquee.y1)); // ly inverts
+      const my1 = ly(Math.min(marquee.y0, marquee.y1));
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.fillRect(mx0, my0, mx1 - mx0, my1 - my0);
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(mx0, my0, mx1 - mx0, my1 - my0);
+      ctx.setLineDash([]);
+    }
+
     // Value readout: hovered breakpoint only.
     if (hoverIndex !== null && points[hoverIndex]) {
       const p = points[hoverIndex];
@@ -259,7 +319,7 @@ export function LaneCanvas({
   // React-triggered redraws (model/hover/zoom/height changes).
   useEffect(() => {
     drawRef.current();
-  }, [points, id, guides, widthPx, hoverIndex, chopPreview, resizeTick]);
+  }, [points, id, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
 
   // Scroll-triggered redraws: reposition only when the view leaves the
   // drawn span (or the zoom it was drawn at changed).
@@ -285,7 +345,8 @@ export function LaneCanvas({
     const lw = rect.width - LANE_PAD * 2;
     const ex = e.clientX - rect.left;
     const ey = e.clientY - rect.top;
-    let x = Math.max(0, Math.min(1, (ex - LANE_PAD) / lw));
+    const rawX = Math.max(0, Math.min(1, (ex - LANE_PAD) / lw));
+    let x = rawX;
     // Loose beat-line magnet: within a few px the point snaps onto the
     // guide; beyond that placement is free (fine control between beats).
     // Shift suspends it, like every other snap.
@@ -306,6 +367,8 @@ export function LaneCanvas({
     const vh = rect.height - LANE_VPAD * 2;
     return {
       x,
+      /** Unsnapped x — the rubber band never beat-snaps. */
+      rawX,
       y: Math.max(0, Math.min(1, 1 - (ey - LANE_VPAD) / vh)),
       nearestIndex: (() => {
         let best = -1;
@@ -341,7 +404,17 @@ export function LaneCanvas({
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
         const hit = pointAt(e);
-        if (hit.nearestIndex >= 0) {
+        if (e.metaKey || e.ctrlKey) {
+          // Selection gesture (mix-editor 16): stays a click (toggle the
+          // node under the pointer) until it travels — then rubber-band.
+          marqueeStart.current = { x: hit.rawX, y: hit.y, cx: e.clientX, cy: e.clientY, armed: false };
+        } else if (hit.nearestIndex >= 0 && selectedRef.current.includes(hit.nearestIndex)) {
+          // Group drag: any selected node tows the whole selection.
+          groupDrag.current = {
+            orig: pointsRef.current,
+            grab: pointsRef.current[hit.nearestIndex],
+          };
+        } else if (hit.nearestIndex >= 0) {
           // Grabbing a breakpoint wins over the chop gesture: shift+drag ON
           // a point stays the fine-drag (snap suspended) from issue 09.
           dragIndex.current = hit.nearestIndex;
@@ -349,6 +422,10 @@ export function LaneCanvas({
           // Chop stamp: shift+drag spans a cut, shift+click cuts one beat.
           chopStart.current = hit.x;
           setChopPreview({ x0: snapCutX(hit.x), x1: snapCutX(hit.x) });
+        } else if (selectedRef.current.length > 0) {
+          // Plain click on empty space while a selection is active:
+          // deselect instead of adding (click again to add as usual).
+          onSelectedChange([]);
         } else {
           const y = snapValue(hit.y, e);
           const pts = [...pointsRef.current, { x: hit.x, y }].sort((a, b) => a.x - b.x);
@@ -358,6 +435,23 @@ export function LaneCanvas({
       }}
       onPointerMove={(e) => {
         const hit = pointAt(e);
+        if (marqueeStart.current) {
+          const m = marqueeStart.current;
+          if (!m.armed && Math.hypot(e.clientX - m.cx, e.clientY - m.cy) >= MARQUEE_CLICK_PX) {
+            m.armed = true;
+          }
+          if (m.armed) {
+            const rect: SelectRect = { x0: m.x, y0: m.y, x1: hit.rawX, y1: hit.y };
+            setMarquee(rect);
+            onSelectedChange(indicesInRect(pointsRef.current, rect));
+          }
+          return;
+        }
+        if (groupDrag.current) {
+          const { orig, grab } = groupDrag.current;
+          onChange(moveGroup(orig, selectedRef.current, hit.x - grab.x, hit.y - grab.y));
+          return;
+        }
         if (chopStart.current !== null) {
           setChopPreview({ x0: snapCutX(chopStart.current), x1: snapCutX(hit.x) });
           return;
@@ -374,6 +468,24 @@ export function LaneCanvas({
         onChange(pts);
       }}
       onPointerUp={(e) => {
+        if (marqueeStart.current) {
+          const m = marqueeStart.current;
+          marqueeStart.current = null;
+          setMarquee(null);
+          if (!m.armed) {
+            // Cmd/ctrl+CLICK: toggle the node under the pointer in/out of
+            // the selection; on empty space it deselects.
+            const hit = pointAt(e);
+            onSelectedChange(
+              hit.nearestIndex >= 0 ? toggleIndex(selectedRef.current, hit.nearestIndex) : []
+            );
+          }
+          return;
+        }
+        if (groupDrag.current) {
+          groupDrag.current = null;
+          return;
+        }
         dragIndex.current = null;
         const x0 = chopStart.current;
         chopStart.current = null;
@@ -387,12 +499,20 @@ export function LaneCanvas({
         // A click (or a drag whose edges snap to the same beat) cuts the
         // single beat interval under the pointer.
         const span = dragPx < 4 || lo === hi ? beatIntervalAt(hit.x) : ([lo, hi] as const);
-        if (span) commit(insertChop(pointsRef.current, span[0], span[1], chopWall));
+        if (span) {
+          commit(insertChop(pointsRef.current, span[0], span[1], chopWall));
+          // The stamp restructures the array — stale indices would select
+          // the wrong nodes.
+          if (selectedRef.current.length > 0) onSelectedChange([]);
+        }
       }}
       onPointerCancel={() => {
         dragIndex.current = null;
         chopStart.current = null;
         setChopPreview(null);
+        marqueeStart.current = null;
+        setMarquee(null);
+        groupDrag.current = null;
       }}
       onPointerLeave={() => setHoverIndex(null)}
       onDoubleClick={(e) => {
@@ -401,6 +521,8 @@ export function LaneCanvas({
         if (hit.nearestIndex >= 0 && pointsRef.current.length > 1) {
           const pts = pointsRef.current.filter((_, i) => i !== hit.nearestIndex);
           commit(pts);
+          // Indices shift past the removed node — drop the selection.
+          if (selectedRef.current.length > 0) onSelectedChange([]);
         }
       }}
     >

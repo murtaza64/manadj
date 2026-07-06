@@ -23,6 +23,13 @@ Open questions for grilling:
 - Keyboard: `r`/`u` stay as the loop toggle either way?
 - MIDI `beatjump-size` targets currently hit the shared size — same overload?
 
+## Update (2026-07-05, MIDI grilling)
+
+The MIDI question is decided: SHIFT+IN/OUT overloads by state — loop active →
+loop resize halve/double; no loop → beatjump-size, as today. The on-screen
+overload (collapsing the two rows) remains open, but should match this
+state-disambiguated semantics if taken.
+
 ## Blocked by
 
 None (UI-only refactor over landed loop semantics)

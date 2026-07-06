@@ -1,6 +1,6 @@
 # 26 — Unresolved adjacencies auto-resolve; explicit Hard-cut pin
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -34,3 +34,57 @@ Model revision: an **Unresolved adjacency resolves at plan time** to the pair's 
 ## Blocked by
 
 - Soft: rows bundle (23/18/20) and 25 in flight
+
+## Comments
+
+**2026-07-06 — implemented (lane setrows, change `lmmppypt`); ready-for-human.**
+
+Where things landed:
+
+- Resolution is pure + tested at the shared seam: `resolveTransition`
+  (favorite first — most recently edited favorite among several — else
+  most recently edited, ties to the later sibling) and `resolvePlanPins`
+  in `frontend/src/sets/adjacency.ts`, covered by `adjacency.test.ts`.
+  `adjacencyView` applies the same rule for badges/click-through.
+- Plan input: `useSetPlanParts` resolves entries before `planSet`, so the
+  ladder, list rows, Conductor (via ConductorPlanFeed → live replan) and
+  practice all agree. **Seam note for lane conductor:** `PlanInput`'s
+  SHAPE is unchanged; entries now arrive with auto-resolved transition
+  pins already injected, and the `'hardcut'` pin kind may appear in
+  `PlanInput.entries[].pin` (the planner's `resolvePin` falls through to
+  a cut for it). `replan.ts`, `Conductor.ts`, conductorStore untouched.
+- "Most recently edited": `Transition.updated_at` now rides the GET wire
+  → pairStore (`SavedTransition.updatedAtMs`), stamped locally on
+  value-changed saves so recency is live within a session.
+- Hard-cut pin: `{ kind: 'hardcut' }` (no uuid) across store/wire/schema;
+  picker gained "✕ Hard cut — play no transition"; unpin relabeled
+  "Unpin (auto-resolve from the library)". Migration `0023_lmmppypt`
+  relaxes `set_dormant_pins.pin_uuid` to nullable (dormancy round-trips
+  hard-cut pins); single alembic head verified.
+- Badges: red `✕ hard cut` chip only when a cut actually plays (explicit
+  pin, or zero evidence); auto-resolved shows `◇ name · auto` (dimmer,
+  hollow diamond) vs the pinned `◆ name`; per-row `↳ pin` freezes the
+  choice; header Auto-fill = bulk freeze. Dangling Take pins degrade to
+  the cut chip (a broken manual act is never auto-swapped).
+- Gate: pytest 675 ✓, vitest 1174 ✓, build ✓, ruff (touched) ✓, one head ✓.
+
+**Verification walkthrough** (lane app running: http://localhost:5363):
+
+1. Open a Set with tracks whose pairs have saved Transitions. Any
+   unpinned adjacency with evidence now shows a dim green `◇ … · auto`
+   chip instead of red — the ladder shows a real window there, and the
+   overlap-time cell fills in. Red `✕ hard cut` remains only on pairs
+   with no Transitions.
+2. Click an auto chip → picker: pick "✕ Hard cut — play no transition".
+   The chip turns red+bold despite available Transitions; the ladder
+   shows the cut blade. Reorder the pair apart and back — the hard-cut
+   pin survives (dormancy round-trip).
+3. On an auto adjacency, click `↳ pin` — chip goes solid `◆` (frozen).
+   Then in the editor favorite a DIFFERENT sibling of that pair: the
+   pinned chip must NOT change; a neighboring auto chip for the same
+   pair (if any) re-resolves to the new favorite immediately.
+4. Live upgrade: play the set through an auto-resolved handover's pair,
+   then save/favorite a new Transition for an upcoming unpinned pair —
+   the plan recomputes live (ladder window appears mid-playback, sets 24).
+5. Header Auto-fill now reads as "freeze" (count = auto-resolved rows);
+   clicking it pins every `◇` chip solid.
