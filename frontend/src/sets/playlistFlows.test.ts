@@ -64,11 +64,16 @@ describe('createSetFromPlaylist — Play order into a new Set', () => {
       { trackId: 3, pin: null },
       { trackId: 9, pin: null },
     ]);
-    expect(mocked.sets.replaceEntries).toHaveBeenCalledWith(42, [
-      { track_id: 5, pin_kind: null, pin_uuid: null },
-      { track_id: 3, pin_kind: null, pin_uuid: null },
-      { track_id: 9, pin_kind: null, pin_uuid: null },
-    ]);
+    expect(mocked.sets.replaceEntries).toHaveBeenCalledWith(
+      42,
+      [
+        { track_id: 5, pin_kind: null, pin_uuid: null },
+        { track_id: 3, pin_kind: null, pin_uuid: null },
+        { track_id: 9, pin_kind: null, pin_uuid: null },
+      ],
+      // No Dormant pins (sets 07) on a fresh copy.
+      []
+    );
   });
 
   it('omits color when the playlist has none', async () => {

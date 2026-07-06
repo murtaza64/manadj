@@ -90,8 +90,10 @@ def set_promoted(
     Promotion also re-points Set pins (sets 08, ADR 0023): every
     set_entries pin referencing this Take is rewritten to the resulting
     Transition's uuid, right here at promotion time — a one-time
-    migration, never query-time indirection. Clearing (null) rewrites
-    nothing: already-migrated pins stay on the Transition.
+    migration, never query-time indirection. Dormant pins (sets 07)
+    referencing the Take are rewritten the same way — the memory
+    restores the Transition. Clearing (null) rewrites nothing:
+    already-migrated pins stay on the Transition.
     """
     t = db.query(models.Take).filter(models.Take.uuid == uuid).first()
     if t is None:
@@ -105,6 +107,16 @@ def set_promoted(
             {
                 models.SetEntry.pin_kind: "transition",
                 models.SetEntry.pin_uuid: payload.promoted_transition_uuid,
+            },
+            synchronize_session=False,
+        )
+        db.query(models.SetDormantPin).filter(
+            models.SetDormantPin.pin_kind == "take",
+            models.SetDormantPin.pin_uuid == uuid,
+        ).update(
+            {
+                models.SetDormantPin.pin_kind: "transition",
+                models.SetDormantPin.pin_uuid: payload.promoted_transition_uuid,
             },
             synchronize_session=False,
         )

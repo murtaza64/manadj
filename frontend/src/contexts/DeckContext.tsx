@@ -198,11 +198,16 @@ export function DeckProvider({ children }: { children: ReactNode }) {
 
   // Persist user-set cues (an engine fires this only for deliberate cue
   // sets, never for load defaults, and reports its own loaded trackId) and
-  // keep the loaded Track objects' cue in sync.
+  // keep the loaded Track objects' cue in sync. The persist invalidates
+  // the ['tracks'] prefix so every query serving Track rows (library
+  // views, the Set view's track facts) refetches without a reload
+  // (sets 19; the plan itself no longer reads the Main cue).
   useEffect(() => {
     for (const deck of DECK_IDS) {
       engines[deck].setCueSetHandler((trackId, timeSeconds) => {
-        void api.waveforms.updateCuePoint(trackId, timeSeconds);
+        void api.waveforms
+          .updateCuePoint(trackId, timeSeconds)
+          .then(() => queryClient.invalidateQueries({ queryKey: ['tracks'] }));
         setLoadedTracks((prev) => {
           const next = { ...prev };
           for (const d of DECK_IDS) {
@@ -216,7 +221,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     return () => {
       for (const deck of DECK_IDS) engines[deck].setCueSetHandler(null);
     };
-  }, [engines]);
+  }, [engines, queryClient]);
 
   // Per-deck loadTrack functions stay identity-stable across state changes
   // (memoized rows key their re-renders on them).

@@ -48,6 +48,10 @@ import {
 
 const DRIFT_TOLERANCE_S = 0.12;
 
+/** How close to the decoded duration a self-parked playhead must sit to
+ * count as the worklet running off the buffer (natural end). */
+const NATURAL_END_TOLERANCE_S = 0.05;
+
 const lerp = (a: number, b: number, p: number): number => a + (b - a) * p;
 
 const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAutomation => ({
@@ -424,6 +428,21 @@ export class Conductor {
         snap.hotCuePreviewSlot !== before.hotCuePreviewSlot ||
         snap.keyLock !== before.keyLock
       ) {
+        // Natural end-of-track is the deck's OWN doing, not a gesture:
+        // the worklet ran off the buffer and the engine parked itself at
+        // the decoded duration (handleEnded). A hard-cut outgoing always
+        // reaches this at its cut instant — and earlier, when the track's
+        // metadata duration overstates the decoded audio — so treating it
+        // as a takeover stopped the set instead of cutting to the
+        // incoming (the "hard cuts never happen" bug).
+        const naturalEnd =
+          before.playing &&
+          !snap.playing &&
+          snap.pitchPercent === before.pitchPercent &&
+          snap.bendPercent === before.bendPercent &&
+          snap.keyLock === before.keyLock &&
+          engine.getPlayhead() >= snap.duration - NATURAL_END_TOLERANCE_S;
+        if (naturalEnd) return;
         this.takeover();
       }
     });
@@ -516,8 +535,14 @@ export class Conductor {
     // start latency (the set-playback clash bug; pausing and resuming
     // "fixed" it by doing exactly this restart-together).
     const joining =
-      (readyA && state.decks.A.playing && !this.engines.A.getSnapshot().playing) ||
-      (readyB && state.decks.B.playing && !this.engines.B.getSnapshot().playing);
+      (readyA &&
+        state.decks.A.playing &&
+        !this.engines.A.getSnapshot().playing &&
+        !this.audioExhausted('A', state.decks.A.trackTime)) ||
+      (readyB &&
+        state.decks.B.playing &&
+        !this.engines.B.getSnapshot().playing &&
+        !this.audioExhausted('B', state.decks.B.trackTime));
     const hard =
       this.pendingHardSync || joining || jumpCrossed(this.plan, this.lastTickT, t);
     this.pendingHardSync = false;
@@ -611,6 +636,21 @@ export class Conductor {
     return snap.loadState === 'ready';
   }
 
+  /** The plan wants this deck playing at/past its decoded buffer end but
+   * the audio has already run out (self-parked at the end): nothing left
+   * to play. True only in that dead zone — a target back inside the
+   * buffer (a seek) still restarts normally. */
+  private audioExhausted(deck: ChannelId, targetTrackTime: number): boolean {
+    const snap = this.engines[deck].getSnapshot();
+    return (
+      !snap.playing &&
+      snap.loadState === 'ready' &&
+      snap.duration > 0 &&
+      targetTrackTime >= snap.duration - NATURAL_END_TOLERANCE_S &&
+      this.engines[deck].getPlayhead() >= snap.duration - NATURAL_END_TOLERANCE_S
+    );
+  }
+
   /** Pickup ramp progress ∈ [0,1] on the audio clock; clears the ramp
    * when it completes. 1 when no ramp is running. */
   private rampProgress(): number {
@@ -645,6 +685,11 @@ export class Conductor {
       }
       return;
     }
+    // The plan can outrun the decoded audio (a metadata duration that ran
+    // long): the deck already ended and self-parked at its buffer end —
+    // hold the park (silence, as planned-ish) instead of restarting it
+    // into an instant re-'ended' every tick.
+    if (this.audioExhausted(deck, target.trackTime)) return;
     engine.setPitch(ramping ? lerp(startPitch, target.pitchPercent, rampP) : target.pitchPercent);
     if (!snap.playing) {
       engine.seek(target.trackTime);

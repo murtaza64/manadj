@@ -10,7 +10,9 @@
  *   native-rate anchor), B at its planned entry.
  * - Unresolved (hard cut, dangling pin, or no plan yet): A at its LAST
  *   hot cue — the cue-slot convention puts it near the mix-out region —
- *   else a runway before its end; B at its Main cue.
+ *   else a runway before its end; B at its Hot Cue 1, else the track
+ *   start — exactly where the plan's hard-cut rule would enter it
+ *   (sets 19; the Main cue is never consulted).
  */
 
 /** Rehearsal runway before the moment of interest (tunable heuristic). */
@@ -25,8 +27,8 @@ export interface PracticeCueInput {
   outgoingDurationSec: number;
   /** The outgoing track's hot cue times (any order). */
   outgoingHotCueSecs: number[];
-  /** The incoming track's Main cue (Track.cue_point_time, 0 when unset). */
-  incomingMainCueSec: number;
+  /** The incoming track's Hot Cue 1 (null when slot 1 is unset). */
+  incomingHotCue1Sec: number | null;
   runwaySec?: number;
 }
 
@@ -55,6 +57,6 @@ export function practiceCuePositions(input: PracticeCueInput): PracticeCuePositi
     input.outgoingHotCueSecs.length > 0 ? Math.max(...input.outgoingHotCueSecs) : null;
   return {
     outgoingSec: lastHotCue ?? Math.max(0, input.outgoingDurationSec - runway),
-    incomingSec: input.incomingMainCueSec,
+    incomingSec: input.incomingHotCue1Sec ?? 0,
   };
 }

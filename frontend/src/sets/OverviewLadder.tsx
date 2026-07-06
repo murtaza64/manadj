@@ -24,6 +24,7 @@ import { toThreeBands, type ThreeBandWaveform } from '../waveform/blob';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { HOT_CUE_CSS_COLORS } from '../waveform/WaveformRendererV2';
 import { getConductor, setFollowPlayback } from './conductorStore';
+import type { AdjacencyFuture } from './dormancy';
 import type { PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
 import { getLadderView, setLadderView } from './setStore';
 
@@ -53,6 +54,11 @@ interface OverviewLadderProps {
   follow: boolean;
   /** Ladder click: seek Set playback to a mix-time instant. */
   onSeek: (mixTimeSec: number) => void;
+  /** Live drag preview (sets 07): the plan is HYPOTHETICAL and each
+   * affected adjacency's future is marked — will-restore (a Dormant pin
+   * waits), auto-fillable (a library Transition exists), unresolved.
+   * Index-aligned with plan.adjacencies; null = unaffected. */
+  previewFutures?: (AdjacencyFuture | null)[];
 }
 
 export function OverviewLadder({
@@ -63,6 +69,7 @@ export function OverviewLadder({
   conducting,
   follow,
   onSeek,
+  previewFutures,
 }: OverviewLadderProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
@@ -227,7 +234,12 @@ export function OverviewLadder({
         >
           {/* Transition/Take window bands + hard-cut blades */}
           {plan.adjacencies.map((adj, i) => (
-            <AdjacencyBand key={`adj-${i}`} adj={adj} total={total} />
+            <AdjacencyBand
+              key={`adj-${i}`}
+              adj={adj}
+              total={total}
+              future={previewFutures?.[i] ?? null}
+            />
           ))}
           {/* Tempo return ramps (sets 06): the incoming eases back to its
               native tempo after the window — drawn on its lane, fading out
@@ -390,9 +402,22 @@ export function OverviewLadder({
   );
 }
 
-function AdjacencyBand({ adj, total }: { adj: PlannedAdjacency; total: number }) {
+function AdjacencyBand({
+  adj,
+  total,
+  future,
+}: {
+  adj: PlannedAdjacency;
+  total: number;
+  /** Drag-preview future (sets 07); null = not previewing / unaffected. */
+  future: AdjacencyFuture | null;
+}) {
   if (adj.kind === 'hardcut') {
-    // Unmissable: dashed red blade + ✕ at the center line.
+    // AUTO-FILLABLE preview: this hypothetical pair has a library
+    // Transition on offer — a dashed yellow blade + ◆ instead of the
+    // unresolved red ✕ (which UNRESOLVED futures keep).
+    const color = future === 'auto-fillable' ? '#ffe000' : '#ff0040';
+    // Unmissable: dashed blade + glyph at the center line.
     return (
       <div
         style={{
@@ -402,7 +427,7 @@ function AdjacencyBand({ adj, total }: { adj: PlannedAdjacency; total: number })
           left: `${(adj.mixStartSec / total) * 100}%`,
           width: 4,
           marginLeft: -2,
-          background: 'repeating-linear-gradient(180deg, #ff0040 0 6px, transparent 6px 12px)',
+          background: `repeating-linear-gradient(180deg, ${color} 0 6px, transparent 6px 12px)`,
           zIndex: 3,
           pointerEvents: 'none',
         }}
@@ -413,19 +438,25 @@ function AdjacencyBand({ adj, total }: { adj: PlannedAdjacency; total: number })
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
-            color: '#ff0040',
+            color,
             fontSize: 13,
             fontWeight: 700,
             textShadow: '0 0 4px #000, 0 0 4px #000',
+            whiteSpace: 'nowrap',
           }}
         >
-          ✕
+          {future === 'auto-fillable' ? '◆' : '✕'}
         </span>
       </div>
     );
   }
   const color = adj.kind === 'transition' ? '#00ff00' : '#ff9900';
   const bg = adj.kind === 'transition' ? 'rgba(0,255,0,0.10)' : 'rgba(255,153,0,0.12)';
+  // WILL-RESTORE preview: a Dormant pin wakes if the drop commits — the
+  // band renders in its pin-kind color inside a dashed violet frame + ↺
+  // (violet is unclaimed: cyan/magenta are Deck identity, never state —
+  // CONTEXT.md "Deck color").
+  const willRestore = future === 'will-restore';
   return (
     <div
       style={{
@@ -437,10 +468,29 @@ function AdjacencyBand({ adj, total }: { adj: PlannedAdjacency; total: number })
         background: bg,
         borderLeft: `1px solid ${color}`,
         borderRight: `1px solid ${color}`,
+        outline: willRestore ? '2px dashed #b400ff' : undefined,
+        outlineOffset: willRestore ? -1 : undefined,
         zIndex: 1,
         pointerEvents: 'none',
       }}
-    />
+    >
+      {willRestore && (
+        <span
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            color: '#b400ff',
+            fontSize: 13,
+            fontWeight: 700,
+            textShadow: '0 0 4px #000, 0 0 4px #000',
+          }}
+        >
+          ↺
+        </span>
+      )}
+    </div>
   );
 }
 

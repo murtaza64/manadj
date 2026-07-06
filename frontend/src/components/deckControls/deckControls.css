@@ -31,7 +31,7 @@
 }
 
 .deck-jumprow:hover {
-  border-color: var(--subtext1, #bac2de);
+  border-color: var(--text);
 }
 
 .deck-jumprow .player-button:hover:not(:disabled) {
@@ -81,7 +81,7 @@
 }
 
 .deck-looprow:hover {
-  border-color: var(--subtext1, #bac2de);
+  border-color: var(--text);
 }
 
 .deck-looprow .player-button:hover:not(:disabled) {
@@ -106,12 +106,9 @@
   color: var(--green);
 }
 
-.deck-looprow .deck-loop-toggle.active {
-  background: var(--green);
-  color: var(--base);
-}
-
-.deck-looprow .deck-loop-toggle.active:hover:not(:disabled) {
+.deck-looprow .deck-loop-toggle.active,
+.deck-looprow .deck-loop-toggle.active:hover:not(:disabled),
+.deck-looprow .deck-loop-toggle.active:active:not(:disabled) {
   background: var(--green);
   color: var(--base);
 }
@@ -122,7 +119,7 @@
    player-buttons can't show); the cluster's shared border brightens on
    hover so the unit highlights as one control. */
 .deck-bpm:hover {
-  border-color: var(--subtext1, #bac2de);
+  border-color: var(--text);
 }
 
 .deck-bpm .player-button:hover:not(:disabled),
@@ -161,10 +158,11 @@
 }
 
 .deck-bpm-input {
-  /* 3 digits (decimals scroll while editing; committed values are shown
-     rounded to fit) — 56px wasted space at every call site. */
-  width: 4.5ch;
-  min-width: 34px;
+  /* Sized for decimal edits ("174.05" = 6ch + padding) — the earlier
+     4.5ch "3 digits" shrink forgot decimals and clipped them while
+     editing. */
+  width: 6.5ch;
+  min-width: 46px;
   background: transparent;
   border: none;
   color: var(--yellow);

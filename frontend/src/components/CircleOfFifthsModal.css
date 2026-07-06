@@ -91,7 +91,7 @@
 
 .cof-clear-btn {
   padding: 6px 12px;
-  background: var(--surface0);
+  background: transparent;
   color: var(--text);
   border: 1px solid var(--surface1);
   cursor: pointer;
@@ -99,5 +99,10 @@
 }
 
 .cof-clear-btn:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.cof-clear-btn:active {
   background: var(--surface1);
 }

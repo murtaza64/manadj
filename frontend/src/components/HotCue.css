@@ -1,3 +1,10 @@
+/* Hot cue pads. Unified interaction vocabulary (perf-layout 08):
+   hover = brighten fill + colored border, press/previewing = solid
+   inverted fill, no glows, no scaling.
+
+   Every state derives from --cue-color: the per-slot theme palette
+   (--hc-N) by default, overridden inline in HotCue.tsx when the cue has a
+   stored color (e.g. imported from Engine). */
 .hot-cue {
   width: 32px;
   padding: 4px 8px;
@@ -13,11 +20,23 @@
   transition: all 0.1s ease;
 }
 
+.hot-cue.cue-1 { --cue-color: var(--hc-1); }
+.hot-cue.cue-2 { --cue-color: var(--hc-2); }
+.hot-cue.cue-3 { --cue-color: var(--hc-3); }
+.hot-cue.cue-4 { --cue-color: var(--hc-4); }
+.hot-cue.cue-5 { --cue-color: var(--hc-5); }
+.hot-cue.cue-6 { --cue-color: var(--hc-6); }
+.hot-cue.cue-7 { --cue-color: var(--hc-7); }
+.hot-cue.cue-8 { --cue-color: var(--hc-8); }
+
 .hot-cue.set {
-  color: var(--text);
+  border: 1px solid var(--cue-color);
+  background: color-mix(in srgb, var(--cue-color) 12%, transparent);
+  color: var(--cue-color);
 }
 
 .hot-cue.unset {
+  border: 1px solid var(--surface0);
   color: var(--overlay0);
 }
 
@@ -25,72 +44,27 @@
   cursor: pointer;
 }
 
-.hot-cue:not(.disabled):hover {
-  border-color: var(--text);
-  transform: scale(1.05);
+/* Hover: set pads brighten their tint (identity border stays); unset pads
+   tint neutrally and preview the slot color on the border. */
+.hot-cue.set:not(.disabled):hover {
+  background: color-mix(in srgb, var(--cue-color) 25%, transparent);
 }
 
-.hot-cue.previewing {
-  box-shadow: 0 0 8px currentColor;
-  transform: scale(1.1);
+.hot-cue.unset:not(.disabled):hover {
+  background: var(--surface0);
+  border-color: var(--cue-color);
+}
+
+/* Press/previewing = solid inverted fill (the engaged-PLAY idiom) */
+.hot-cue.previewing,
+.hot-cue.previewing:not(.disabled):hover {
+  background: var(--cue-color);
+  border-color: var(--cue-color);
+  color: var(--base);
 }
 
 .hot-cue.disabled {
   opacity: 0.4;
   pointer-events: none;
   cursor: not-allowed;
-}
-
-/* Hot cue colors when set: the saturated slot palette (--hc-N,
-   variables.css) — stored per-cue colors override inline in HotCue.tsx. */
-.hot-cue.cue-1.set {
-  border: 1px solid var(--hc-1);
-  background: color-mix(in srgb, var(--hc-1) 12%, transparent);
-  color: var(--hc-1);
-}
-
-.hot-cue.cue-2.set {
-  border: 1px solid var(--hc-2);
-  background: color-mix(in srgb, var(--hc-2) 12%, transparent);
-  color: var(--hc-2);
-}
-
-.hot-cue.cue-3.set {
-  border: 1px solid var(--hc-3);
-  background: color-mix(in srgb, var(--hc-3) 12%, transparent);
-  color: var(--hc-3);
-}
-
-.hot-cue.cue-4.set {
-  border: 1px solid var(--hc-4);
-  background: color-mix(in srgb, var(--hc-4) 12%, transparent);
-  color: var(--hc-4);
-}
-
-.hot-cue.cue-5.set {
-  border: 1px solid var(--hc-5);
-  background: color-mix(in srgb, var(--hc-5) 12%, transparent);
-  color: var(--hc-5);
-}
-
-.hot-cue.cue-6.set {
-  border: 1px solid var(--hc-6);
-  background: color-mix(in srgb, var(--hc-6) 12%, transparent);
-  color: var(--hc-6);
-}
-
-.hot-cue.cue-7.set {
-  border: 1px solid var(--hc-7);
-  background: color-mix(in srgb, var(--hc-7) 12%, transparent);
-  color: var(--hc-7);
-}
-
-.hot-cue.cue-8.set {
-  border: 1px solid var(--hc-8);
-  background: color-mix(in srgb, var(--hc-8) 12%, transparent);
-  color: var(--hc-8);
-}
-
-.hot-cue.unset {
-  border: 1px solid var(--surface0);
 }

@@ -11,10 +11,16 @@
  * snapshot synchronously (optimistic) and replace the whole list on the
  * server in a background PUT, reconciled by track_id (a Track at most
  * once per Set — entry identity). Write failures log only.
+ *
+ * Dormant pins (sets 07) are Set state under the same contract: every
+ * order-changing mutation routes through the pure reconcile rule
+ * (dormancy.ts) — broken pins go Dormant, newly-adjacent pairs restore
+ * their memory — and the whole dormant list rides the same wholesale PUT.
  */
 import { useSyncExternalStore } from 'react';
 import { api } from '../api/client';
 import type { AdjacencyPin } from './adjacency';
+import { reconcileOrderChange, type DormantPin } from './dormancy';
 
 export interface SetEntryLocal {
   trackId: number;
@@ -29,9 +35,12 @@ interface SetStoreSnapshot {
   selectedSetId: number | null;
   /** Ordered entries per Set id; absent = not loaded yet. */
   entriesBySet: Record<number, SetEntryLocal[]>;
+  /** Dormant pins per Set id (sets 07): broken-pin memories, strictly
+   * per-Set, keyed by ordered track pair. Loaded with the entries. */
+  dormantBySet: Record<number, DormantPin[]>;
 }
 
-let snapshot: SetStoreSnapshot = { selectedSetId: null, entriesBySet: {} };
+let snapshot: SetStoreSnapshot = { selectedSetId: null, entriesBySet: {}, dormantBySet: {} };
 
 /** Scroll position of the Set detail pane, per Set (session state — read
  * imperatively on mount, written on scroll; not reactive). */
@@ -120,38 +129,66 @@ async function doLoad(setId: number): Promise<void> {
   try {
     const detail = await api.sets.get(setId);
     if (snapshot.entriesBySet[setId]) return; // a local write beat the load
-    setEntriesLocal(
-      setId,
-      detail.entries.map((e) => ({
-        trackId: e.track_id,
-        pin:
-          e.pin_kind === 'transition' || e.pin_kind === 'take'
-            ? { kind: e.pin_kind, uuid: e.pin_uuid! }
-            : null,
-      }))
+    const entries: SetEntryLocal[] = detail.entries.map((e) => ({
+      trackId: e.track_id,
+      pin:
+        e.pin_kind === 'transition' || e.pin_kind === 'take'
+          ? { kind: e.pin_kind, uuid: e.pin_uuid! }
+          : null,
+    }));
+    const dormant: DormantPin[] = (detail.dormant ?? []).map((d) => ({
+      aTrackId: d.a_track_id,
+      bTrackId: d.b_track_id,
+      pin: { kind: d.pin_kind, uuid: d.pin_uuid },
+    }));
+    // Normalize through the reconcile rule (sets 07): server state where
+    // a Dormant memory covers a currently-adjacent pair (writable via
+    // the API) restores/retires on read — the invariant "a pair never
+    // carries two pins, and an adjacent pair's memory is awake" holds
+    // from the first render. Consistent state passes through unchanged;
+    // local-only (the next mutation pushes wholesale anyway).
+    const normalized = reconcileOrderChange(
+      entries,
+      dormant,
+      entries.map((e) => e.trackId)
     );
+    setSetStateLocal(setId, normalized.entries, normalized.dormant);
   } catch (err) {
     console.error(`set store: entries load failed for set ${setId}`, err);
-    if (!snapshot.entriesBySet[setId]) setEntriesLocal(setId, []);
+    if (!snapshot.entriesBySet[setId]) setSetStateLocal(setId, [], []);
   }
 }
 
-function setEntriesLocal(setId: number, entries: SetEntryLocal[]): void {
+function setSetStateLocal(setId: number, entries: SetEntryLocal[], dormant: DormantPin[]): void {
   snapshot = {
     ...snapshot,
     entriesBySet: { ...snapshot.entriesBySet, [setId]: entries },
+    dormantBySet: { ...snapshot.dormantBySet, [setId]: dormant },
   };
   notify();
 }
 
-/** Replace a Set's entries: snapshot updates synchronously (optimistic),
- * the wholesale PUT runs in the background (ADR 0011: no retry queue). */
-export function replaceSetEntries(setId: number, entries: SetEntryLocal[]): void {
-  setEntriesLocal(setId, entries);
-  void pushEntries(setId, entries);
+function currentDormant(setId: number): DormantPin[] {
+  return snapshot.dormantBySet[setId] ?? [];
 }
 
-async function pushEntries(setId: number, entries: SetEntryLocal[]): Promise<void> {
+/** Replace a Set's entries (and, optionally, its Dormant pins): the
+ * snapshot updates synchronously (optimistic), the wholesale PUT runs in
+ * the background (ADR 0011: no retry queue). */
+export function replaceSetEntries(
+  setId: number,
+  entries: SetEntryLocal[],
+  dormant: DormantPin[] = currentDormant(setId)
+): void {
+  setSetStateLocal(setId, entries, dormant);
+  void pushSetState(setId, entries, dormant);
+}
+
+async function pushSetState(
+  setId: number,
+  entries: SetEntryLocal[],
+  dormant: DormantPin[]
+): Promise<void> {
   try {
     await api.sets.replaceEntries(
       setId,
@@ -159,6 +196,12 @@ async function pushEntries(setId: number, entries: SetEntryLocal[]): Promise<voi
         track_id: e.trackId,
         pin_kind: e.pin?.kind ?? null,
         pin_uuid: e.pin?.uuid ?? null,
+      })),
+      dormant.map((d) => ({
+        a_track_id: d.aTrackId,
+        b_track_id: d.bTrackId,
+        pin_kind: d.pin.kind,
+        pin_uuid: d.pin.uuid,
       }))
     );
   } catch (err) {
@@ -166,20 +209,48 @@ async function pushEntries(setId: number, entries: SetEntryLocal[]): Promise<voi
   }
 }
 
+/** The Set's Dormant pins (sets 07), or undefined while unloaded. */
+export function useSetDormantPins(setId: number): DormantPin[] | undefined {
+  return useSyncExternalStore(subscribeSetStore, () => snapshot.dormantBySet[setId]);
+}
+
+export function getSetDormantPins(setId: number): DormantPin[] | undefined {
+  return snapshot.dormantBySet[setId];
+}
+
+/** Route a track-order change through the dormancy reconcile rule
+ * (sets 07): pins whose pair stays adjacent ride along, broken pins go
+ * Dormant, newly-adjacent pairs restore their memory. */
+function applyOrderChange(setId: number, newTrackIds: number[]): void {
+  const entries = snapshot.entriesBySet[setId];
+  if (!entries) return;
+  const { entries: next, dormant } = reconcileOrderChange(
+    entries,
+    currentDormant(setId),
+    newTrackIds
+  );
+  replaceSetEntries(setId, next, dormant);
+}
+
 /** Append the given tracks (skipping ones already in the Set — a Track
- * appears at most once). Loads first if needed. Returns the skip count. */
+ * appears at most once). Loads first if needed. Returns the skip count.
+ * A re-added track may restore Dormant pins (sets 07): its old pair's
+ * memory wakes when the append makes them adjacent again. */
 export async function addTracksToSet(setId: number, trackIds: number[]): Promise<number> {
   await ensureSetEntriesLoaded(setId);
   const entries = snapshot.entriesBySet[setId] ?? [];
   const present = new Set(entries.map((e) => e.trackId));
   const fresh = trackIds.filter((id) => !present.has(id));
   if (fresh.length > 0) {
-    replaceSetEntries(setId, [...entries, ...fresh.map((trackId) => ({ trackId, pin: null }))]);
+    applyOrderChange(setId, [...entries.map((e) => e.trackId), ...fresh]);
   }
   return trackIds.length - fresh.length;
 }
 
-/** Pin (or unpin, with null) the adjacency headed by the given track. */
+/** Pin (or unpin, with null) the adjacency headed by the given track.
+ * An explicit pin retires any Dormant memory for the same ordered pair
+ * (a pair never carries two pins); an explicit unpin destroys — only
+ * reorder/removal breakage goes Dormant (sets 07). */
 export function setAdjacencyPin(
   setId: number,
   headTrackId: number,
@@ -187,67 +258,88 @@ export function setAdjacencyPin(
 ): void {
   const entries = snapshot.entriesBySet[setId];
   if (!entries) return;
-  replaceSetEntries(
-    setId,
-    entries.map((e) => (e.trackId === headTrackId ? { ...e, pin } : e))
-  );
+  const next = entries.map((e) => (e.trackId === headTrackId ? { ...e, pin } : e));
+  const headIndex = entries.findIndex((e) => e.trackId === headTrackId);
+  const nextTrackId = headIndex >= 0 ? entries[headIndex + 1]?.trackId : undefined;
+  const dormant =
+    pin !== null && nextTrackId !== undefined
+      ? currentDormant(setId).filter(
+          (d) => !(d.aTrackId === headTrackId && d.bTrackId === nextTrackId)
+        )
+      : currentDormant(setId);
+  replaceSetEntries(setId, next, dormant);
 }
 
 /** Apply several pins at once (set-wide auto-fill accept), keyed by head
- * track id. Entries not in the map keep their pin. */
+ * track id. Entries not in the map keep their pin. Like setAdjacencyPin,
+ * each explicit pin retires any Dormant memory for its ordered pair. */
 export function setAdjacencyPins(
   setId: number,
   pinsByHeadTrackId: ReadonlyMap<number, AdjacencyPin>
 ): void {
   const entries = snapshot.entriesBySet[setId];
   if (!entries) return;
+  const pinnedPairs = new Set<string>();
+  entries.forEach((e, i) => {
+    const next = entries[i + 1];
+    if (next && pinsByHeadTrackId.has(e.trackId)) {
+      pinnedPairs.add(`${e.trackId}|${next.trackId}`);
+    }
+  });
   replaceSetEntries(
     setId,
     entries.map((e) => {
       const pin = pinsByHeadTrackId.get(e.trackId);
       return pin ? { ...e, pin } : e;
-    })
+    }),
+    currentDormant(setId).filter((d) => !pinnedPairs.has(`${d.aTrackId}|${d.bTrackId}`))
   );
 }
 
+/** Remove a Track. Both broken adjacencies' pins go Dormant, and the
+ * newly-touching neighbors may restore their own memory (sets 07). */
 export function removeTrackFromSet(setId: number, trackId: number): void {
   const entries = snapshot.entriesBySet[setId];
   if (!entries) return;
-  replaceSetEntries(setId, entries.filter((e) => e.trackId !== trackId));
+  applyOrderChange(
+    setId,
+    entries.filter((e) => e.trackId !== trackId).map((e) => e.trackId)
+  );
 }
 
-/** Reorder to the given track-id order (must be a permutation; entries
- * whose ids are missing from the order are dropped defensively). */
+/** Reorder to the given track-id order (must be a permutation; ids
+ * missing from the Set are dropped defensively). Non-destructive
+ * (sets 07): broken pins go Dormant, re-formed pairs restore. */
 export function reorderSetEntries(setId: number, orderedTrackIds: number[]): void {
   const entries = snapshot.entriesBySet[setId];
   if (!entries) return;
-  const byId = new Map(entries.map((e) => [e.trackId, e]));
-  const next = orderedTrackIds
-    .map((id) => byId.get(id))
-    .filter((e): e is SetEntryLocal => e !== undefined);
-  replaceSetEntries(setId, next);
+  const present = new Set(entries.map((e) => e.trackId));
+  applyOrderChange(
+    setId,
+    orderedTrackIds.filter((id) => present.has(id))
+  );
 }
 
 /** Insert a Track at the given entry index (sets 10: accepted insert
  * suggestion). No-op when the Track is already in the Set (a Track
- * appears at most once) or the Set is unloaded. The predecessor entry's
- * pin rides along untouched (the reorder policy): it degrades to an
- * unresolved display for the new pair, never gets destroyed. */
+ * appears at most once) or the Set is unloaded. The predecessor's pin
+ * goes Dormant for its original ordered pair (sets 07) — it never
+ * squats on the new adjacency, and returns if the insert is undone. */
 export function insertTrackIntoSet(setId: number, trackId: number, index: number): void {
   const entries = snapshot.entriesBySet[setId];
   if (!entries) return;
   if (entries.some((e) => e.trackId === trackId)) return;
-  const next = [...entries];
-  next.splice(Math.max(0, Math.min(index, next.length)), 0, { trackId, pin: null });
-  replaceSetEntries(setId, next);
+  const ids = entries.map((e) => e.trackId);
+  ids.splice(Math.max(0, Math.min(index, ids.length)), 0, trackId);
+  applyOrderChange(setId, ids);
 }
 
 /** Mirror the server's promotion re-pointing (sets 08, ADR 0023) in
  * every loaded Set: each Take pin with this uuid becomes a Transition
- * pin with the promoted uuid. Local-only — the promotion PATCH already
- * rewrote the rows server-side; without this mirror a later wholesale
- * PUT from a loaded Set would clobber the migration with the stale
- * Take pin. */
+ * pin with the promoted uuid — Dormant memories included (sets 07).
+ * Local-only — the promotion PATCH already rewrote the rows server-side;
+ * without this mirror a later wholesale PUT from a loaded Set would
+ * clobber the migration with the stale Take pin. */
 export function repointTakePinsLocal(takeUuid: string, transitionUuid: string): void {
   let changed = false;
   const entriesBySet = { ...snapshot.entriesBySet };
@@ -260,16 +352,28 @@ export function repointTakePinsLocal(takeUuid: string, transitionUuid: string): 
         : e
     );
   }
+  const dormantBySet = { ...snapshot.dormantBySet };
+  for (const [setId, dormant] of Object.entries(dormantBySet)) {
+    if (!dormant.some((d) => d.pin.kind === 'take' && d.pin.uuid === takeUuid)) continue;
+    changed = true;
+    dormantBySet[Number(setId)] = dormant.map((d) =>
+      d.pin.kind === 'take' && d.pin.uuid === takeUuid
+        ? { ...d, pin: { kind: 'transition', uuid: transitionUuid } }
+        : d
+    );
+  }
   if (!changed) return;
-  snapshot = { ...snapshot, entriesBySet };
+  snapshot = { ...snapshot, entriesBySet, dormantBySet };
   notify();
 }
 
 /** Mirror the server's dangling-pin degradation (sets 12) in every
  * loaded Set: pins of the given kind referencing a deleted artifact go
- * Unresolved (null). Local-only — the deletion endpoint already nulled
- * the rows server-side; without this mirror a later wholesale PUT from
- * a loaded Set would write the dangling reference back. */
+ * Unresolved (null); Dormant memories of it are dropped outright
+ * (sets 07 — a memory of a deleted artifact restores nothing).
+ * Local-only — the deletion endpoint already handled its rows
+ * server-side; without this mirror a later wholesale PUT from a loaded
+ * Set would write the dangling reference back. */
 export function degradeDeletedPinsLocal(kind: 'transition' | 'take', uuid: string): void {
   let changed = false;
   const entriesBySet = { ...snapshot.entriesBySet };
@@ -280,8 +384,16 @@ export function degradeDeletedPinsLocal(kind: 'transition' | 'take', uuid: strin
       e.pin?.kind === kind && e.pin.uuid === uuid ? { ...e, pin: null } : e
     );
   }
+  const dormantBySet = { ...snapshot.dormantBySet };
+  for (const [setId, dormant] of Object.entries(dormantBySet)) {
+    if (!dormant.some((d) => d.pin.kind === kind && d.pin.uuid === uuid)) continue;
+    changed = true;
+    dormantBySet[Number(setId)] = dormant.filter(
+      (d) => !(d.pin.kind === kind && d.pin.uuid === uuid)
+    );
+  }
   if (!changed) return;
-  snapshot = { ...snapshot, entriesBySet };
+  snapshot = { ...snapshot, entriesBySet, dormantBySet };
   notify();
 }
 
@@ -293,17 +405,19 @@ export function dropSetLocalState(setId: number): void {
   if (snapshot.selectedSetId === setId) {
     snapshot = { ...snapshot, selectedSetId: null };
   }
-  if (snapshot.entriesBySet[setId]) {
+  if (snapshot.entriesBySet[setId] || snapshot.dormantBySet[setId]) {
     const entriesBySet = { ...snapshot.entriesBySet };
+    const dormantBySet = { ...snapshot.dormantBySet };
     delete entriesBySet[setId];
-    snapshot = { ...snapshot, entriesBySet };
+    delete dormantBySet[setId];
+    snapshot = { ...snapshot, entriesBySet, dormantBySet };
   }
   notify();
 }
 
 /** Reset module state (tests only). */
 export function _resetSetStoreForTests(): void {
-  snapshot = { selectedSetId: null, entriesBySet: {} };
+  snapshot = { selectedSetId: null, entriesBySet: {}, dormantBySet: {} };
   scrollTopBySet.clear();
   ladderViewBySet.clear();
   loadPromises.clear();

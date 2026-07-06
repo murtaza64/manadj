@@ -274,9 +274,15 @@ a.provenance-chip:hover {
   padding: 0;
 }
 
+/* Unified vocabulary (perf-layout 08): hover = bg step + border in the
+   button's own accent (deck color), press = another fill step. */
 .track-load-button:hover {
   background: var(--surface1);
-  border-color: var(--text);
+  border-color: currentColor;
+}
+
+.track-load-button:active {
+  background: var(--surface2);
 }
 
 /* Deck colors (CONTEXT.md: Deck color): the per-deck load buttons carry
@@ -287,14 +293,6 @@ a.provenance-chip:hover {
 
 .track-load-button-B {
   color: var(--deck-b);
-}
-
-.track-load-button-A:hover {
-  border-color: var(--deck-a);
-}
-
-.track-load-button-B:hover {
-  border-color: var(--deck-b);
 }
 
 /* Play order (#) cell — playlist tables only (playlist-editing 04) */

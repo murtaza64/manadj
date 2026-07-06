@@ -1,6 +1,6 @@
 # 19 — Hard-cut entry: Hot Cue 1 → track start, and plan reactivity to cue edits
 
-Status: ready-for-agent
+Status: done (approved + landed 2026-07-05, change nkovwloo)
 
 ## Parent
 
@@ -35,3 +35,43 @@ Two related findings from debugging a real set (Slow Motion → RUN, "plays 0:00
 ## Blocked by
 
 - Soft: 16-conductor-pickup in flight on the planner-owning lane (avoid parallel planner edits)
+
+## Comments
+
+**2026-07-05 — parked ready-for-human** (change `nkovwloo`, lane setpins).
+All four parts implemented: hard-cut entry = Hot Cue 1 → track start (Main
+cue out of planning entirely — `PlannerTrackFacts.mainCueSec` is gone);
+practice B-deck positioning aligned; plan reactivity (useSetPlan consumes
+the `['hotcues', id]` queries the mutations already invalidate; the
+Main-cue persist in DeckContext now invalidates `['tracks']`); new
+`entry-after-exit` error warning with real numbers + NEVER AUDIBLE row
+badge replacing "plays 0:00" (own module, one-line mount). Gate: pytest
+666, vitest 1046 (planner suite: entry rule, fallback, both entry-after-
+exit classifications, negative case), build clean, single alembic head
+0022, lint clean on touched files (two pre-existing warnings excepted).
+
+Verification walkthrough — open http://localhost:5293 (or
+`npm --prefix desktop start -- --port 5293`):
+
+1. Sets mode → "FUCKBOY SUMMER VOL 1" → scroll to row 64, Slow Motion Ft
+   Mila Falls (entry via hard cut; its own exit is the pinned mix-out to
+   RUN at 1:51). Before: "plays 0:00" (Main-cue entry 2:35). Now: the row
+   reads **plays 1:28 of 3:30** — entry from Hot Cue 1 (0:23).
+2. NEVER AUDIBLE + reactivity in one move: load Slow Motion on a deck
+   (library/performance view), move its Hot Cue 1 past 1:51 (e.g. set
+   slot 1 near 2:00), return to the Set — no reload: the row now shows a
+   red **NEVER AUDIBLE** badge (no "plays 0:00"), and the toolbar ⚠
+   error reads "planned entry 2:00 is after the pinned mix-out 1:51".
+   Move Hot Cue 1 back to ~0:23 → row returns to plays 1:28.
+3. Main cue is out of planning: set/move the MAIN cue anywhere on Slow
+   Motion — the plan (row durations, ladder) does not change.
+4. Practice alignment: on an unresolved adjacency (e.g. row 63 Baddadan →
+   Slow Motion), press practice — deck B parks at Slow Motion's Hot Cue 1
+   (0:23), not the Main cue (2:35). Delete slot 1 → practice parks B at
+   the track start.
+
+**2026-07-05 — approved and landed** (`nkovwloo`, re-gated after the
+conductor natural-end bugfix `kswqxylk` and issue 21 landed under it:
+pytest 666, vitest 1056, single alembic head 0022). Related bugfix
+landed separately the same session: a hard-cut outgoing's natural
+end-of-track no longer reads as a takeover ("hard cuts never happen").

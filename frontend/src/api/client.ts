@@ -967,15 +967,17 @@ export const api = {
     },
 
     /** Client-authoritative wholesale replace of the ordered entry list
-     * (ADR 0011 pattern): the server reconciles by track_id. */
+     * (ADR 0011 pattern): the server reconciles by track_id. Dormant
+     * pins (sets 07) are Set state and ride the same PUT wholesale. */
     replaceEntries: async (
       id: number,
-      items: SetEntryItemWire[]
+      items: SetEntryItemWire[],
+      dormant: SetDormantPinWire[] = []
     ): Promise<SetWithEntriesWire> => {
       const res = await fetch(`${API_BASE}/sets/${id}/entries`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items }),
+        body: JSON.stringify({ items, dormant }),
       });
       if (!res.ok) throw new Error(`Failed to save set entries (${res.status})`);
       return res.json();
@@ -1046,6 +1048,16 @@ export interface SetEntryRowWire {
   pin_uuid: string | null;
 }
 
+/** A Dormant pin (sets 07): a broken pin remembered per ORDERED track
+ * pair, per Set — same shape on PUT and GET. */
+export interface SetDormantPinWire {
+  a_track_id: number;
+  b_track_id: number;
+  pin_kind: 'transition' | 'take';
+  pin_uuid: string;
+}
+
 export interface SetWithEntriesWire extends SetRowWire {
   entries: SetEntryRowWire[];
+  dormant: SetDormantPinWire[];
 }

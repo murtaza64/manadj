@@ -1,6 +1,6 @@
 """Pydantic schemas for API validation."""
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serializer, model_validator
 from datetime import datetime
 
 from backend.track_metadata.units import centibpm_to_bpm
@@ -455,9 +455,24 @@ class SetEntryItem(BaseModel):
         return self
 
 
+class SetDormantPinItem(BaseModel):
+    """One Dormant pin (sets 07): a broken pin remembered per ORDERED
+    track pair, per Set. Unlike an entry pin it always carries a pin —
+    a memory of nothing is nothing. The uuid is stored as asserted
+    (dangling memories are DROPPED by the deletion paths, degrade_pins).
+    """
+    a_track_id: int
+    b_track_id: int
+    pin_kind: str = Field(pattern=r"^(transition|take)$")
+    pin_uuid: str
+
+
 class SetEntriesReplace(BaseModel):
-    """Full replacement of a Set's ordered entry list (ADR 0011 pattern)."""
+    """Full replacement of a Set's ordered entry list (ADR 0011 pattern),
+    plus its Dormant pins (sets 07) — both client-authoritative, both
+    replaced wholesale in the same PUT (dormancy is Set state)."""
     items: list[SetEntryItem]
+    dormant: list[SetDormantPinItem] = []
 
 
 class SetEntryRow(BaseModel):
@@ -470,9 +485,23 @@ class SetEntryRow(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SetDormantPinRow(BaseModel):
+    """A persisted Dormant pin (GET response)."""
+    a_track_id: int
+    b_track_id: int
+    pin_kind: str
+    pin_uuid: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SetWithEntries(SetRow):
-    """A Set with its ordered entries."""
+    """A Set with its ordered entries and Dormant pins (sets 07)."""
     entries: list[SetEntryRow] = []
+    # The ORM relationship is named dormant_pins; the wire field is dormant.
+    dormant: list[SetDormantPinRow] = Field(
+        default=[], validation_alias=AliasChoices("dormant", "dormant_pins")
+    )
 
 
 class SetOrderItem(BaseModel):

@@ -128,3 +128,25 @@ def test_clearing_promotion_rewrites_nothing(client, make_track):
 
     # No promotion happened — the Take pin stays a Take pin.
     assert get_pins(client, s) == [("take", "tk-1"), (None, None)]
+
+
+def test_promotion_repoints_dormant_take_pins_too(client, make_track):
+    """Sets 07: a Dormant Take memory joins the one-time migration — when
+    its pair becomes adjacent again, it restores the Transition."""
+    a, b = make_track(), make_track()
+    client.post("/api/takes", json=take_payload("tk-1", a.id, b.id))
+    s = make_set(client)
+    resp = client.put(f"/api/sets/{s}/entries", json={
+        "items": [{"track_id": b.id}, {"track_id": a.id}],
+        "dormant": [
+            {"a_track_id": a.id, "b_track_id": b.id, "pin_kind": "take", "pin_uuid": "tk-1"},
+        ],
+    })
+    assert resp.status_code == 200, resp.text
+
+    client.patch("/api/takes/tk-1/promoted", json={"promoted_transition_uuid": "tr-9"})
+
+    detail = client.get(f"/api/sets/{s}").json()
+    assert [(d["pin_kind"], d["pin_uuid"]) for d in detail["dormant"]] == [
+        ("transition", "tr-9")
+    ]

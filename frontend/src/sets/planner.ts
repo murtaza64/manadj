@@ -12,11 +12,14 @@
  *   (Sketch origin invariant), so each solo stretch and every handover
  *   instant follow from the pins alone.
  * - Unresolved adjacency = hard cut: outgoing to its end, incoming from
- *   its Main cue. The FIRST track starts at its beginning (review verdict
- *   2026-07-05, revising the PRD's Main-cue start — a set opens with the
- *   whole opening track); playback stops after the last track. Dangling
- *   pins degrade to hard cuts here too (library cleanup never corrupts a
- *   Set).
+ *   its Hot Cue 1, else its start (revised 2026-07-05: the Main cue moves
+ *   freely during performance — CDJ memory-cue behavior — so no plan
+ *   anchors to it; cue slot 1 is the conventional "first buildup", the
+ *   stable entry anchor. The Main cue participates in Set planning
+ *   nowhere.) The FIRST track starts at its beginning (review verdict
+ *   2026-07-05 — a set opens with the whole opening track); playback
+ *   stops after the last track. Dangling pins degrade to hard cuts here
+ *   too (library cleanup never corrupts a Set).
  * - Take pins plan through the existing vectorizer at plan time — the
  *   idealized Transition promotion would produce, never snapshotted.
  * - Tempo policy (sets 06), one per Set. RIDING: the incoming tempo-
@@ -43,8 +46,9 @@ import type { AdjacencyPin } from './adjacency';
 export interface PlannerTrackFacts {
   durationSec: number;
   bpm: number | null;
-  /** Main cue in track seconds (Track.cue_point_time, 0 when unset). */
-  mainCueSec: number;
+  /** Hot Cue 1 in track seconds (the stable entry anchor — cue-slot
+   * convention: slot 1 = first buildup), null when slot 1 is unset. */
+  hotCue1Sec: number | null;
 }
 
 /** The Set's Tempo policy (sets 06). Riding's ramp speed is a tunable
@@ -153,7 +157,8 @@ export interface PlanWarning {
     | 'no-bpm'
     | 'pitch-clamped'
     | 'grace-fade'
-    | 'grace-floor';
+    | 'grace-floor'
+    | 'entry-after-exit';
   message: string;
   adjacencyIndex?: number;
   entryIndex?: number;
@@ -207,7 +212,7 @@ export function planSet(input: PlanInput): SetPlan {
 
   const tempo: TempoPolicyInput = input.tempo ?? { policy: 'riding' };
   const factsOf = (trackId: number): PlannerTrackFacts =>
-    input.tracks[trackId] ?? { durationSec: 0, bpm: null, mainCueSec: 0 };
+    input.tracks[trackId] ?? { durationSec: 0, bpm: null, hotCue1Sec: null };
 
   // Fixed policy: the Set tempo (explicit, else the first track's native
   // BPM) fixes every entry's deck rate up front, clamped to the decks'
@@ -259,8 +264,8 @@ export function planSet(input: PlanInput): SetPlan {
 
   // Walk the chain accumulating each track's mix anchor (time 0's mix
   // instant at its solo rate). The first track opens the set from its
-  // very beginning (its Main cue is a performance marker, not a set
-  // boundary): time 0 at mix 0.
+  // very beginning (cues are performance markers, not set boundaries):
+  // time 0 at mix 0.
   let mixOffset = 0;
   let entrySec = 0;
   let entryMixSec = 0;
@@ -294,7 +299,8 @@ export function planSet(input: PlanInput): SetPlan {
     const resolved = resolvedPins[i];
 
     if (!resolved) {
-      // Hard cut: outgoing to its end, incoming from its Main cue.
+      // Hard cut: outgoing to its end, incoming from its Hot Cue 1
+      // (track start when slot 1 is unset — never the Main cue).
       const cutMix = toMix(facts.durationSec);
       entries.push({
         trackId,
@@ -315,8 +321,9 @@ export function planSet(input: PlanInput): SetPlan {
         mixEndSec: cutMix,
         tempoReturnEndSec: cutMix,
       });
-      mixOffset = cutMix - nextFacts.mainCueSec / rateIn;
-      entrySec = nextFacts.mainCueSec;
+      const entryIn = nextFacts.hotCue1Sec ?? 0;
+      mixOffset = cutMix - entryIn / rateIn;
+      entrySec = entryIn;
       entryMixSec = cutMix;
       continue;
     }
@@ -438,9 +445,45 @@ export function planSet(input: PlanInput): SetPlan {
   }
 
   applyGraceFades(entries, adjacencies, warnings, input.grace);
+  flagEntriesAfterExit(entries, adjacencies, warnings);
 
   const last = entries[entries.length - 1];
   return { entries, adjacencies, totalSec: Math.max(0, last.exitMixSec), warnings };
+}
+
+/** True when a planned entry never becomes audible: it enters at/after
+ * its own exit. THE never-audible condition — the `entry-after-exit`
+ * warning and the Set view's NEVER AUDIBLE badge both read it. */
+export function isNeverAudible(e: Pick<PlannedEntry, 'entrySec' | 'exitSec'>): boolean {
+  return e.entrySec > 0 && e.exitSec <= e.entrySec;
+}
+
+/**
+ * Entry-after-exit (sets 19): an entry planned to enter at/after its own
+ * exit never becomes audible ("plays 0:00"). Distinct from window overlap
+ * — the classic case is a hard-cut entry (Hot Cue 1) sitting after the
+ * entry's own pinned mix-out. Named with the real numbers; the Set view
+ * additionally badges the row NEVER AUDIBLE.
+ */
+function flagEntriesAfterExit(
+  entries: PlannedEntry[],
+  adjacencies: PlannedAdjacency[],
+  warnings: PlanWarning[]
+): void {
+  entries.forEach((e, i) => {
+    if (!isNeverAudible(e)) return;
+    // The entry exits through adjacency i (windowed → its pinned mix-out;
+    // hard cut or last entry → its own track end).
+    const exitAdj = adjacencies[i];
+    const exitName =
+      exitAdj && exitAdj.kind !== 'hardcut' ? 'pinned mix-out' : 'track end';
+    warnings.push({
+      severity: 'error',
+      kind: 'entry-after-exit',
+      entryIndex: i,
+      message: `track ${i + 1} is never audible: planned entry ${fmtSec(e.entrySec)} is after the ${exitName} ${fmtSec(e.exitSec)}`,
+    });
+  });
 }
 
 /**

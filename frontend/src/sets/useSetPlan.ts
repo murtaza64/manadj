@@ -3,11 +3,18 @@
  * stores/queries and return the deterministic playback plan.
  *
  * Inputs: the Set's entries (set store), track facts (the caller's track
- * map), full Transition payloads (pair store), and — for Take pins — the
- * raw capture slices fetched per uuid (vectorized inside the planner at
- * plan time, per the PRD: idealized, never snapshotted). Returns
- * undefined while anything is still loading; a failed Take fetch degrades
- * that pin to a hard cut (dangling-reference rule).
+ * map plus per-track hot cues fetched here — Hot Cue 1 is the hard-cut
+ * entry anchor, sets 19), full Transition payloads (pair store), and —
+ * for Take pins — the raw capture slices fetched per uuid (vectorized
+ * inside the planner at plan time, per the PRD: idealized, never
+ * snapshotted). Returns undefined while anything is still loading; a
+ * failed Take fetch degrades that pin to a hard cut (dangling-reference
+ * rule).
+ *
+ * Reactivity: the hot-cue queries share the `['hotcues', id]` cache keys
+ * the hot-cue mutations invalidate, so moving a cue recomputes the plan
+ * (ladder, durations, warnings) with no reload — the plan is a derived
+ * projection, deliberately without a refresh button.
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useQueries } from '@tanstack/react-query';
@@ -19,7 +26,14 @@ import {
   snapshotPairStore,
   subscribePairStore,
 } from '../editor/pairStore';
-import type { Track } from '../types';
+import type { HotCue, Track } from '../types';
+
+/** Hot Cue 1 in track seconds, null when slot 1 is unset — THE home of
+ * the cue-slot convention's "slot 1 = first buildup" lookup (the plan's
+ * hard-cut entry anchor and the practice affordance both read it). */
+export function hotCue1Sec(cues: HotCue[] | undefined): number | null {
+  return cues?.find((c) => c.slot_number === 1)?.time_seconds ?? null;
+}
 import { planSet, type PlanInput, type SetPlan, type TempoPolicyInput } from './planner';
 import { useSetSettings } from './setSettings';
 import type { SetEntryLocal } from './setStore';
@@ -61,9 +75,29 @@ export function useSetPlan(
   });
   const takesLoading = takeQueries.some((q) => q.isLoading);
 
+  // Hot Cue 1 per track — the hard-cut entry anchor (sets 19). Same cache
+  // keys as useHotCues/SetDetailPane, so cue edits invalidate the plan.
+  const planTrackIds = [...new Set((entries ?? []).map((e) => e.trackId))];
+  const hotCueQueries = useQueries({
+    queries: planTrackIds.map((id) => ({
+      queryKey: ['hotcues', id],
+      queryFn: () => api.hotcues.get(id),
+      staleTime: 0,
+    })),
+  });
+  const hotCuesLoading = hotCueQueries.some((q) => q.isLoading);
+  const hotCue1ByTrack = new Map<number, number>();
+  planTrackIds.forEach((id, i) => {
+    const sec = hotCue1Sec(hotCueQueries[i]?.data as HotCue[] | undefined);
+    if (sec !== null) hotCue1ByTrack.set(id, sec);
+  });
+  const hotCue1Signature = planTrackIds
+    .map((id) => `${id}:${hotCue1ByTrack.get(id) ?? ''}`)
+    .join(',');
+
   return useMemo(() => {
     if (!entries || entries.length === 0) return undefined;
-    if (!transitionsReady || takesLoading) return undefined;
+    if (!transitionsReady || takesLoading || hotCuesLoading) return undefined;
     if (!trackMap || entries.some((e) => !trackMap.has(e.trackId))) return undefined;
 
     const tracks: PlanInput['tracks'] = {};
@@ -72,7 +106,7 @@ export function useSetPlan(
       tracks[e.trackId] = {
         durationSec: t.duration_secs ?? 0,
         bpm: t.bpm ?? null,
-        mainCueSec: t.cue_point_time ?? 0,
+        hotCue1Sec: hotCue1ByTrack.get(e.trackId) ?? null,
       };
     }
 
@@ -117,6 +151,8 @@ export function useSetPlan(
     pairStore,
     transitionsReady,
     takesLoading,
+    hotCuesLoading,
+    hotCue1Signature,
     takeUuids.join(','),
     tempo?.policy,
     tempo?.setTempoBpm,

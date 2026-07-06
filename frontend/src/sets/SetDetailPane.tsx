@@ -12,7 +12,7 @@
  * badges. Auto-fill (per-adjacency and set-wide) proposes Transitions
  * only; the manual pin picker also lists the pair's Takes (ADR 0023).
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type SetRowWire } from '../api/client';
 import { useDecks } from '../hooks/useDeck';
@@ -58,6 +58,7 @@ import {
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
+import { previewAdjacencyFutures, reconcileOrderChange } from './dormancy';
 import {
   conductorTogglePlay,
   pickupSetPlayback,
@@ -67,11 +68,12 @@ import {
   stopSetPlayback,
   useConductorState,
 } from './conductorStore';
+import { NeverAudibleBadge } from './NeverAudibleBadge';
 import { OverviewLadder } from './OverviewLadder';
 import { evaluatePickup, readPickupSnapshot } from './pickup';
-import { fmtSec, type PlannedEntry, type PlanWarning } from './planner';
+import { fmtSec, isNeverAudible, type PlannedEntry, type PlanWarning } from './planner';
 import { prefetchTrackBuffer } from './prefetch';
-import { useSetPlan } from './useSetPlan';
+import { hotCue1Sec, useSetPlan } from './useSetPlan';
 import { useSetSettings } from './setSettings';
 import {
   addTracksToSet,
@@ -83,6 +85,7 @@ import {
   setAdjacencyPin,
   setAdjacencyPins,
   setSetScroll,
+  useSetDormantPins,
   useSetEntries,
 } from './setStore';
 import SetSuggestions, { type SuggestTarget } from './SetSuggestions';
@@ -188,6 +191,40 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     entries,
     trackMap,
     set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
+  );
+
+  // ── Live drag preview (sets 07): during an in-pane row drag the ladder
+  // recomputes optimistically for the hypothetical order. The planner is
+  // a read-only dependency — the hypothetical entries come from the same
+  // pure reconcile rule the drop will commit through, so what the
+  // preview shows is exactly what a drop produces. Drop commits; cancel
+  // (dragend/leave without a drop) simply discards the hypothesis.
+  const dormant = useSetDormantPins(setId);
+  const dragIdsRef = useRef<number[] | null>(null);
+  const [previewOrder, setPreviewOrder] = useState<number[] | null>(null);
+  const previewState = useMemo(
+    () =>
+      previewOrder && entries
+        ? reconcileOrderChange(entries, dormant ?? [], previewOrder)
+        : null,
+    [previewOrder, entries, dormant]
+  );
+  const previewPlan = useSetPlan(
+    previewState?.entries,
+    trackMap,
+    set ? { policy: set.tempo_policy, setTempoBpm: set.set_tempo_bpm } : undefined
+  );
+  const previewFutures = useMemo(
+    () =>
+      previewOrder && entries
+        ? previewAdjacencyFutures(
+            entries,
+            dormant ?? [],
+            previewOrder,
+            (a, b) => (pairStore[`${a}:${b}`]?.items ?? []).length > 0
+          )
+        : undefined,
+    [previewOrder, entries, dormant, pairStore]
   );
 
   // Real hot cues for the ladder clips (same cache keys as useHotCues).
@@ -327,7 +364,8 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
 
   // The second adjacency verb (issue 09 sketches it; this mixes it live):
   // outgoing→A, incoming→B, cued by the plan when the adjacency is pinned,
-  // by the hot-cue/Main-cue fallbacks when unresolved. Stays in this view;
+  // by the hot-cue fallbacks when unresolved (B at its Hot Cue 1 → track
+  // start — the plan's hard-cut entry, sets 19). Stays in this view;
   // the shared surface keeps audibility, so capture stays armed — mixing
   // the pair by hand is exactly what produces the Take.
   const practiceAdjacency = (i: number) => {
@@ -347,7 +385,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       outgoingHotCueSecs: (hotCuesByTrack.get(outgoing.trackId) ?? []).map(
         (c) => c.time_seconds
       ),
-      incomingMainCueSec: inTrack.cue_point_time ?? 0,
+      incomingHotCue1Sec: hotCue1Sec(hotCuesByTrack.get(incoming.trackId)),
     });
     cueDeckAt('A', outgoing.trackId, positions.outgoingSec);
     cueDeckAt('B', incoming.trackId, positions.incomingSec);
@@ -428,11 +466,25 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
     const index = insertionIndexFromPointer(pointerY, rects);
     setDropIndicator({ index, y: indicatorY(index, rects) });
+
+    // In-pane reorder drags feed the ladder preview (sets 07). The drag
+    // payload is unreadable during dragover, so the dragged ids ride a
+    // ref set at the row's dragstart — foreign drags leave it null.
+    if (dragIdsRef.current && entries) {
+      const orderIds = entries.map((en) => en.trackId);
+      const hypothetical = applyReorder(orderIds, dragIdsRef.current, index);
+      setPreviewOrder((prev) => {
+        const next = hypothetical.join(',') === orderIds.join(',') ? null : hypothetical;
+        if (prev !== null && next !== null && prev.join(',') === next.join(',')) return prev;
+        return next;
+      });
+    }
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
     if (!paneRef.current?.contains(e.relatedTarget as Node)) {
       setDropIndicator(null);
+      setPreviewOrder(null); // cancelled hypothesis — the ladder snaps back
     }
   };
 
@@ -440,6 +492,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     e.preventDefault();
     const indicator = dropIndicator;
     setDropIndicator(null);
+    setPreviewOrder(null);
     if (!entries) return;
     const droppedIds = readTrackDragPayload(e.dataTransfer);
     if (droppedIds.length === 0) return;
@@ -630,12 +683,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       </div>
 
       {/* Overview ladder (sets 03; freed in 05): pan/zoom minimap with
-          click-to-seek, playhead, and follow-playback paging. */}
+          click-to-seek, playhead, and follow-playback paging. During an
+          in-pane row drag it shows the HYPOTHETICAL order's plan with
+          each affected adjacency's future marked (sets 07). */}
       {plan && trackMap && plan.entries.length > 0 && (
         <OverviewLadder
           key={setId}
           setId={setId}
-          plan={plan}
+          plan={previewOrder && previewPlan ? previewPlan : plan}
+          previewFutures={previewOrder && previewPlan ? previewFutures : undefined}
           tracks={trackMap}
           hotCuesByTrack={hotCuesByTrack}
           conducting={conductingThis}
@@ -697,6 +753,16 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   track={track}
                   planned={planned}
                   conducting={conductingThis && conductorState.activeEntryIndex === i}
+                  onDragStart={(e) => {
+                    setTrackDragPayload(e.dataTransfer, [entry.trackId], 'set-pane');
+                    dragIdsRef.current = [entry.trackId];
+                  }}
+                  onDragEnd={() => {
+                    // Fires after drop AND on cancel (Esc / drop outside):
+                    // either way the hypothesis is over.
+                    dragIdsRef.current = null;
+                    setPreviewOrder(null);
+                  }}
                   onPlayFrom={plan ? () => playFromEntry(i) : undefined}
                   onRemove={() => removeTrackFromSet(setId, entry.trackId)}
                   onContextMenu={
@@ -828,6 +894,7 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'pitch-clamped': 'pitch clamped',
   'grace-fade': 'overlap: previous track fades early',
   'grace-floor': 'overlap pileup',
+  'entry-after-exit': 'never audible',
 };
 
 function AdjacencyRow({
@@ -1079,6 +1146,8 @@ function SetTrackRow({
   track,
   planned,
   conducting,
+  onDragStart,
+  onDragEnd,
   onPlayFrom,
   onRemove,
   onContextMenu,
@@ -1090,6 +1159,10 @@ function SetTrackRow({
   planned: PlannedEntry | undefined;
   /** The Conductor's playhead is inside this entry (sets 04). */
   conducting: boolean;
+  /** Row drag lifecycle (sets 07): the pane sets the drag payload and
+   * tracks the dragged ids for the ladder's live preview. */
+  onDragStart: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
   /** Row play button: start Set playback at this track's planned entry. */
   onPlayFrom: (() => void) | undefined;
   onRemove: () => void;
@@ -1102,7 +1175,8 @@ function SetTrackRow({
     <div
       data-set-track-row
       draggable
-      onDragStart={(e) => setTrackDragPayload(e.dataTransfer, [trackId], 'set-pane')}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onContextMenu={onContextMenu}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -1150,9 +1224,11 @@ function SetTrackRow({
         )}
         {track?.archived_at != null && <ArchivedTrackRowMark />}
       </span>
+      {/* NEVER AUDIBLE (sets 19): replaces the innocuous "plays 0:00" */}
+      <NeverAudibleBadge planned={planned} />
       {/* "plays m:ss of m:ss" — the plan's audible footprint (sets 03) */}
       <span style={{ width: '110px', color: 'var(--subtext0)', fontSize: '12px', textAlign: 'right' }}>
-        {planned && track?.duration_secs
+        {planned && track?.duration_secs && !isNeverAudible(planned)
           ? `plays ${fmtSec(Math.max(planned.exitSec - planned.entrySec, 0))} of ${fmtSec(track.duration_secs)}`
           : ''}
       </span>

@@ -22,8 +22,11 @@
   cursor: pointer;
 }
 
+/* Unified vocabulary: hover = white border + bg tint (filled squares keep
+   their accent border via the later .level-N.filled rules) */
 .energy-square.clickable:not(.disabled):hover {
   border-color: var(--text);
+  background: var(--surface0);
 }
 
 .energy-square.disabled {
@@ -32,34 +35,27 @@
   cursor: not-allowed;
 }
 
-/* Energy level colors */
-.energy-square.level-1.filled {
-  border: 1px solid var(--energy-1);
-  background: color-mix(in srgb, var(--energy-1) 12%, transparent);
+/* Energy level colors — property-based (like HotCue's --cue-color) so the
+   hover rules below apply uniformly per level */
+.energy-square.level-1 { --energy-color: var(--energy-1); }
+.energy-square.level-2 { --energy-color: var(--energy-2); }
+.energy-square.level-3 { --energy-color: var(--energy-3); }
+.energy-square.level-4 { --energy-color: var(--energy-4); }
+.energy-square.level-5 { --energy-color: var(--energy-5); }
+
+.energy-square.filled {
+  border: 1px solid var(--energy-color);
+  background: color-mix(in srgb, var(--energy-color) 12%, transparent);
 }
 
-.energy-square.level-2.filled {
-  border: 1px solid var(--energy-2);
-  background: color-mix(in srgb, var(--energy-2) 12%, transparent);
-}
-
-.energy-square.level-3.filled {
-  border: 1px solid var(--energy-3);
-  background: color-mix(in srgb, var(--energy-3) 12%, transparent);
-}
-
-.energy-square.level-4.filled {
-  border: 1px solid var(--energy-4);
-  background: color-mix(in srgb, var(--energy-4) 12%, transparent);
-}
-
-.energy-square.level-5.filled {
-  border: 1px solid var(--energy-5);
-  background: color-mix(in srgb, var(--energy-5) 12%, transparent);
+/* Filled hover: accent border holds, tint brightens (12% → 25%) */
+.energy-square.clickable.filled:not(.disabled):hover {
+  border-color: var(--energy-color);
+  background: color-mix(in srgb, var(--energy-color) 25%, transparent);
 }
 
 .energy-square.unfilled {
-  border: 1px solid var(--surface0);
+  border: 1px solid var(--surface1);
 }
 
 .energy-square-empty {

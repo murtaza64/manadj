@@ -6,7 +6,12 @@
  * the shared Mixer's automation overlay — user-facing mixer state is
  * never touched. MixPlayer owns no audio; the borrow lifecycle (claim
  * audibility, engage the overlay, checkpoint deck pitches) belongs to
- * TransitionEditor's mount effects.
+ * TransitionEditor — since sets 21 it runs on the FIRST AUDITION GESTURE,
+ * not on mount. The injected `audible` gate mirrors that boundary here:
+ * while the editor is not the audible surface, this conductor is a pure
+ * model (mix time, arrangement math, UI reads) and never touches the
+ * engines or the Mixer — a mounted-but-silent editor must not yank Decks
+ * another surface (the set Conductor, live performance) is sounding.
  *
  * The mix timeline runs on the Mixer's AUDIO clock (issue 08): the decks'
  * playheads derive from the same ctx.currentTime, so mix time and deck time
@@ -32,6 +37,11 @@ export interface MixPlayerAudio {
   mixer: Mixer;
   engineA: DeckEngine;
   engineB: DeckEngine;
+  /** May this conductor touch the shared engines/mixer right now? The
+   * editor passes its audible-surface membership (sets 21); omitted =
+   * always (standalone/tests). Playback (`play`) requires it, and every
+   * engine/mixer write while paused is dropped without it. */
+  audible?: () => boolean;
 }
 
 export class MixPlayer {
@@ -40,6 +50,7 @@ export class MixPlayer {
   readonly mixer: Mixer;
   readonly engineA: DeckEngine;
   readonly engineB: DeckEngine;
+  private readonly audible: () => boolean;
 
   private mix: EditorMix;
   private bpm: { a: number | null; b: number | null } = { a: null, b: null };
@@ -69,6 +80,7 @@ export class MixPlayer {
     this.mixer = audio.mixer;
     this.engineA = audio.engineA;
     this.engineB = audio.engineB;
+    this.audible = audio.audible ?? (() => true);
   }
 
   // ── Deck state reads ─────────────────────────────────────────────────
@@ -149,7 +161,9 @@ export class MixPlayer {
   }
 
   play(): void {
-    if (!this.ready() || this.playing) return;
+    // Sounding requires the claim (sets 21): the editor claims audibility
+    // before its audition gestures reach here; anything else is refused.
+    if (!this.audible() || !this.ready() || this.playing) return;
     this.playing = true;
     this.anchorAudioTime = this.mixer.now();
     this.applyPitch();
@@ -162,6 +176,8 @@ export class MixPlayer {
     this.emit();
   }
 
+  // Deliberately NOT gated on audible(): this is the arbiter's silence
+  // path — a displaced editor must still be able to pause its own decks.
   pause(): void {
     if (!this.playing) return;
     this.mixTimeAtAnchor = this.getMixTime();
@@ -180,8 +196,10 @@ export class MixPlayer {
     this.applyLanes(t);
     if (this.playing) {
       this.syncDecks(t, true);
-    } else {
-      // Park deck playheads so the waveforms show the seek target.
+    } else if (this.audible()) {
+      // Park deck playheads so the waveforms show the seek target — only
+      // while the editor owns the Decks (sets 21): a silent editor's scrub
+      // must not yank Decks another surface is sounding.
       const arr = arrangementAt(this.mix, t, this.durations(), this.getRateB());
       if (arr.aActive) this.engineA.seek(arr.aTrackTime);
       if (arr.bActive || t >= this.mix.transition.startSec) this.engineB.seek(Math.max(0, arr.bTrackTime));
@@ -189,10 +207,8 @@ export class MixPlayer {
     this.emit();
   }
 
-  togglePlay(): void {
-    if (this.playing) this.pause();
-    else this.play();
-  }
+  // (togglePlay removed with sets 21: every play gesture routes through
+  // the editor's auditionTogglePlay, which claims audibility first.)
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -262,8 +278,12 @@ export class MixPlayer {
 
   /** Lane values go through the Mixer's automation overlay (ADR 0022):
    * base mixer state — what the user's knobs show — is never touched, and
-   * the overlay must be engaged by the editor session before play. */
+   * the overlay must be engaged by the editor session before play. Dropped
+   * while not audible (sets 21): the overlay may be engaged by ANOTHER
+   * holder (the set Conductor) — writing into it would corrupt the
+   * sounding mix. */
   private applyLanes(t: number): void {
+    if (!this.audible()) return;
     const v = laneValuesAt(this.mix.transition, t);
     this.mixer.setAutomation('A', {
       fader: this.muted.A ? 0 : v.faderA,
@@ -278,6 +298,9 @@ export class MixPlayer {
   }
 
   private applyPitch(): void {
+    // Not audible → not ours to pitch (sets 21). play() re-applies on the
+    // audition that claims, so the editor's tempo match is never stale.
+    if (!this.audible()) return;
     this.engineB.setPitch(
       this.mix.transition.tempoMatch ? tempoMatchPitch(this.bpm.a, this.bpm.b) : 0
     );

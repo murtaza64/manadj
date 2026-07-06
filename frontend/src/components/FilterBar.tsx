@@ -121,13 +121,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
         {/* Tag Toggle Icon with Red Dot Indicator */}
         <div
           onClick={() => setShowTagFilters(!showTagFilters)}
-          style={{
-            position: 'relative',
-            cursor: 'pointer',
-            width: '16px',
-            flexShrink: 0,
-            color: showTagFilters ? 'var(--blue)' : 'var(--text)'
-          }}
+          className={`filter-bar-tag-toggle${showTagFilters ? ' open' : ''}`}
         >
           <TagIcon />
           {filters.selectedTagIds.length > 0 && !showTagFilters && (
@@ -174,14 +168,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
               e.currentTarget.blur();
             }
           }}
-          style={{
-            flex: 1,
-            padding: '8px 12px',
-            background: 'var(--base)',
-            border: '1px solid var(--surface0)',
-            color: 'var(--text)',
-            fontSize: '14px'
-          }}
+          className="filter-bar-search"
         />
 
         {/* Energy Range Selector */}
@@ -270,13 +257,12 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
           }}
           className="filter-bar-key-btn"
           style={{
-            padding: '4px 12px',
-            border: `1px solid ${filters.selectedKeyCamelotIds.length > 0 ? getAverageKeyColor(filters.selectedKeyCamelotIds) || 'var(--mauve)' : 'var(--surface0)'}`,
-            cursor: 'pointer',
-            fontSize: '13px',
-            background: 'transparent',
-            color: 'var(--text)',
-            minWidth: '70px'
+            minWidth: '70px',
+            // Active filter = accent border (inline wins over the CSS
+            // hover, so the accent holds — unified vocabulary)
+            ...(filters.selectedKeyCamelotIds.length > 0
+              ? { borderColor: getAverageKeyColor(filters.selectedKeyCamelotIds) || 'var(--mauve)' }
+              : {}),
           }}
         >
           {filters.selectedKeyCamelotIds.length > 0 ? `Keys (${filters.selectedKeyCamelotIds.length})` : 'Keys'}
@@ -303,13 +289,10 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
           }}
           className="filter-bar-bpm-btn"
           style={{
-            padding: '4px 8px',
-            border: `1px solid ${filters.bpmCenter !== null ? getBpmColor(filters.bpmCenter) || 'var(--mauve)' : 'var(--surface0)'}`,
-            cursor: 'pointer',
-            fontSize: '13px',
-            background: 'transparent',
-            color: 'var(--text)',
-            minWidth: '60px'
+            minWidth: '60px',
+            ...(filters.bpmCenter !== null
+              ? { borderColor: getBpmColor(filters.bpmCenter) || 'var(--mauve)' }
+              : {}),
           }}
         >
           {filters.bpmCenter !== null
@@ -335,14 +318,14 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
             // (The reducer enforces the same rule; disabled is just UI.)
             const actionable = reference !== null || on;
             // Deck color when on (identity, CONTEXT.md: Deck color) —
-            // green would say "active" without saying which deck.
-            const deckColor = `var(--deck-${deck.toLowerCase()})`;
+            // green would say "active" without saying which deck. Applied
+            // via the on-a/on-b classes (FilterBar.css).
             return (
               <button
                 key={deck}
                 onClick={() => dispatchFollow({ type: 'toggle', deck, loaded: reference !== null })}
                 disabled={!actionable}
-                className="filter-bar-follow-btn"
+                className={`filter-bar-follow-btn${on ? ` on-${deck.toLowerCase()}` : ''}`}
                 aria-pressed={on}
                 title={
                   on && reference
@@ -351,16 +334,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
                       ? `Follow Deck ${deck}: keep the list matched to its loaded track`
                       : `Load Deck ${deck} first`
                 }
-                style={{
-                  padding: '4px 0',
-                  width: '28px',
-                  background: 'transparent',
-                  color: on ? deckColor : actionable ? 'var(--text)' : 'var(--overlay0)',
-                  border: `1px solid ${on ? deckColor : 'var(--surface0)'}`,
-                  cursor: actionable ? 'pointer' : 'not-allowed',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
-                }}
+                style={{ padding: '4px 0', width: '28px' }}
               >
                 {deck}
               </button>
@@ -372,10 +346,6 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
             title="Follow parameters"
             style={{
               padding: '4px 6px',
-              background: 'transparent',
-              border: '1px solid var(--surface0)',
-              borderLeft: 'none',
-              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
             }}
@@ -392,15 +362,6 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
           }}
           disabled={!hasActiveFilters}
           className="filter-bar-clear-all-btn"
-          style={{
-            padding: '4px 8px',
-            background: 'var(--surface0)',
-            color: hasActiveFilters ? 'var(--text)' : 'var(--overlay0)',
-            border: '1px solid var(--surface0)',
-            cursor: hasActiveFilters ? 'pointer' : 'not-allowed',
-            fontSize: '12px',
-            fontWeight: 'bold',
-          }}
         >
           Clear All
         </button>
@@ -421,59 +382,34 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
             onClick={toggleMatchMode}
-            style={{
-              padding: '4px 12px',
-              background: filters.tagMatchMode === 'ANY' ? 'var(--blue)' : 'var(--surface1)',
-              color: filters.tagMatchMode === 'ANY' ? 'var(--base)' : 'var(--text)',
-              border: '1px solid var(--surface0)',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 'bold'
-            }}
+            className={`filter-bar-match-mode-btn${filters.tagMatchMode === 'ANY' ? ' on' : ''}`}
           >
             ANY
           </button>
           <button
             onClick={toggleMatchMode}
-            style={{
-              padding: '4px 12px',
-              background: filters.tagMatchMode === 'ALL' ? 'var(--blue)' : 'var(--surface1)',
-              color: filters.tagMatchMode === 'ALL' ? 'var(--base)' : 'var(--text)',
-              border: '1px solid var(--surface0)',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 'bold'
-            }}
+            className={`filter-bar-match-mode-btn${filters.tagMatchMode === 'ALL' ? ' on' : ''}`}
           >
             ALL
           </button>
           {allTags?.map((tag: Tag) => {
             const isSelected = filters.selectedTagIds.includes(tag.id);
-            const borderColor = isSelected
-              ? getTagColor(tag)
-              : 'var(--surface0)';
             return (
               <button
                 key={tag.id}
                 onClick={() => toggleTag(tag.id)}
-                style={{
-                  padding: '4px 8px',
-                  border: `1px solid ${borderColor}`,
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  background: 'transparent',
-                  color: 'var(--text)'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isSelected) {
-                    e.currentTarget.style.borderColor = 'var(--text)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected) {
-                    e.currentTarget.style.borderColor = 'var(--surface0)';
-                  }
-                }}
+                className="filter-bar-tag-pill"
+                style={
+                  // Selected = inverted fill in the tag's color (inline
+                  // wins over the CSS hover, pinning the accent)
+                  isSelected
+                    ? {
+                        background: getTagColor(tag),
+                        borderColor: getTagColor(tag),
+                        color: 'var(--base)',
+                      }
+                    : undefined
+                }
               >
                 {tag.name}
               </button>

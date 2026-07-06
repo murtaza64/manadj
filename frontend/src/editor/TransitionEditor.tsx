@@ -21,6 +21,7 @@ import { DeckScope } from '../contexts/DeckContext';
 import { useDecks } from '../hooks/useDeck';
 import {
   claimAudible,
+  isAudible,
   registerSurface,
   releaseAudible,
   unregisterSurface,
@@ -92,8 +93,10 @@ function TransitionEditorInner() {
   // The conductor drives the SHARED Decks and Mixer (ADR 0022) — no
   // private machinery, so routing (master AND cue/PFL), Key Lock, and
   // every future mixer feature cover the editor by construction. The
-  // borrow lifecycle (claim/engage/checkpoint) lives in the surface
-  // effect below.
+  // borrow lifecycle (claim/engage/checkpoint) rides the FIRST AUDITION
+  // GESTURE (sets 21), not the mount — see ensureEditorAudible below; the
+  // `audible` gate keeps a silent editor's model edits off the shared
+  // engines/mixer.
   const mixer = useMixer();
   const sharedDecks = useDecks();
   const [player] = useState(
@@ -102,6 +105,7 @@ function TransitionEditorInner() {
         mixer,
         engineA: sharedDecks.A.engine,
         engineB: sharedDecks.B.engine,
+        audible: () => isAudible('editor'),
       })
   );
   useEffect(() => () => player.dispose(), [player]);
@@ -327,25 +331,54 @@ function TransitionEditorInner() {
     [midiJogA, midiJogB]
   );
 
-  // One audible surface at a time (ADR 0013, shrunk by ADR 0022): claim
-  // audibility while mounted. The arbiter pauses the shared surface's
-  // playback on claim (the one clock keeps running — the editor plays
-  // through it); hardware gestures route to the MixPlayer meanwhile
-  // (both PLAYs = the one mix transport, keyboard-parity with Space; CUE
-  // has no editor meaning and drops, like F). Pads carry the editor's
-  // gesture semantics (ADR 0019); release is absent — editor gestures are
-  // taps, so the up edge drops.
-  //
-  // The claim is also the BORROW BOUNDARY (ADR 0022): while the editor
-  // holds audibility, drawn automation owns the shared Mixer's lane
-  // params (engage/disengage — the Mixer reapplies base state itself),
-  // and deck pitches are checkpointed here and restored on release (the
-  // editor's tempo-match pitch must not leak into the ±8% Performance
-  // fader; transport positions deliberately DO persist — transition
-  // editing is not a mid-set activity).
+  // The BORROW BOUNDARY (ADR 0022), entered LAZILY (sets 21): the editor
+  // claims audibility on its first audition gesture, never on mount —
+  // entering the editor must not interrupt ongoing playback (a running
+  // set Conductor in particular keeps playing under a mounted, silent,
+  // fully-editable editor). At claim time the arbiter is unchanged: the
+  // displaced holder is silenced (the Conductor stands down). While the
+  // editor holds audibility, drawn automation owns the shared Mixer's
+  // lane params (engage/disengage — the Mixer reapplies base state
+  // itself), and deck pitches are checkpointed at the claim and restored
+  // when the editor releases (the editor's tempo-match pitch must not
+  // leak into the ±8% Performance fader; transport positions deliberately
+  // DO persist — transition editing is not a mid-set activity).
+  const pitchCheckpointRef = useRef<{ A: number; B: number } | null>(null);
+  const ensureEditorAudible = useCallback(() => {
+    if (isAudible('editor')) return;
+    claimAudible('editor'); // pauses the displaced holder's playback
+    if (!isAudible('editor')) return; // refused (registration raced)
+    pitchCheckpointRef.current = {
+      A: player.engineA.getSnapshot().pitchPercent,
+      B: player.engineB.getSnapshot().pitchPercent,
+    };
+    mixer.engageAutomation();
+  }, [player, mixer]);
+
+  // The audition gesture (sets 21): starting the mix transport claims
+  // first; pausing it never needs to. Claim only when sound will actually
+  // start — a play press on unloaded decks must not silence anything.
+  const auditionTogglePlay = useCallback(() => {
+    if (player.isPlaying()) {
+      player.pause();
+      return;
+    }
+    if (!player.ready()) return;
+    ensureEditorAudible();
+    player.play();
+  }, [player, ensureEditorAudible]);
+
+  // One audible surface at a time (ADR 0013, shrunk by ADR 0022):
+  // REGISTER while mounted — registering is not claiming; the claim rides
+  // the first audition gesture above. While some other surface is
+  // audible, hardware gestures route there, not here (ADR 0019); once the
+  // editor holds, both PLAYs = the one mix transport (keyboard-parity
+  // with Space; CUE has no editor meaning and drops, like F). Pads carry
+  // the editor's gesture semantics (ADR 0019); release is absent — editor
+  // gestures are taps, so the up edge drops.
   useEffect(() => {
     registerSurface('editor', {
-      transport: { togglePlay: () => player.togglePlay() },
+      transport: { togglePlay: auditionTogglePlay },
       pads: {
         hotCueDown: (deck, pad) => midiCues.current[deck].down(pad),
         hotCueClear: (deck, pad) => midiCues.current[deck].remove(pad),
@@ -374,26 +407,33 @@ function TransitionEditorInner() {
       },
       silence: () => player.pause(),
     });
-    claimAudible('editor'); // pauses the shared surface's playback
-    const pitches = {
-      A: player.engineA.getSnapshot().pitchPercent,
-      B: player.engineB.getSnapshot().pitchPercent,
-    };
-    mixer.engageAutomation();
     return () => {
-      releaseAudible('editor'); // pauses the audition (editor.silence)
+      // Unwind the borrow only if the editor still holds it (sets 21): a
+      // never-auditioned editor took nothing; a DISPLACED editor's decks/
+      // overlay already belong to the new holder (mirror of the
+      // Conductor's stand-down — it neither releases nor disengages).
+      const held = isAudible('editor');
+      if (held) releaseAudible('editor'); // pauses the audition (editor.silence)
       unregisterSurface('editor');
-      mixer.disengageAutomation(); // Mixer reapplies base state
-      player.engineA.setPitch(pitches.A);
-      player.engineB.setPitch(pitches.B);
+      if (held) {
+        mixer.disengageAutomation(); // Mixer reapplies base state
+        const pitches = pitchCheckpointRef.current;
+        if (pitches) {
+          player.engineA.setPitch(pitches.A);
+          player.engineB.setPitch(pitches.B);
+        }
+      }
+      pitchCheckpointRef.current = null;
     };
-  }, [player, mixer, midiJogA, midiJogB]);
+  }, [player, mixer, midiJogA, midiJogB, auditionTogglePlay]);
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh
   // straight into the editor — provider restore may still be in flight);
-  // otherwise the deck stays empty. (Silencing the shared surface is the
-  // arbiter's job now — the claim above pauses both shared decks.)
+  // otherwise the deck stays empty. Nothing is silenced here (sets 21):
+  // whatever plays keeps playing under the mounted editor until an
+  // audition claims. (Adopting a playing deck's track is a no-op load —
+  // the buffer is already hot; the fallback fires only on EMPTY decks.)
   useEffect(() => {
     const last = localStorage.getItem(LAST_PAIR_KEY);
     const lastIds = last ? last.split(':').map(Number) : null;
@@ -416,6 +456,9 @@ function TransitionEditorInner() {
   // selects its Transition.
   const openTake = useCallback(
     async (uuid: string) => {
+      // Loads the shared Decks — claim first, same rationale as openPair
+      // below (pre-sets-21 the mount claim covered this path).
+      ensureEditorAudible();
       try {
         const detail = await api.takes.get(uuid);
         const [a, b] = await Promise.all([
@@ -445,7 +488,7 @@ function TransitionEditorInner() {
         console.error('take review: open failed', err);
       }
     },
-    [assignTrack, store]
+    [assignTrack, store, ensureEditorAudible]
   );
   useEffect(() => {
     const consume = () => {
@@ -464,12 +507,12 @@ function TransitionEditorInner() {
   // arrives with null and lands on a blank sketch.
   const openPair = useCallback(
     async (req: PairEditRequest) => {
-      // The editor's mount already claimed audibility, but a Conductor
-      // started from the Set pane UNDER the mounted editor claims over it
-      // — re-claim so clicking an adjacency stops Set playback (the
-      // arbiter's claim-over-claim: the Conductor stands down; idempotent
-      // when the editor already holds).
-      claimAudible('editor');
+      // Opening an adjacency LOADS the shared Decks (ADR 0022) — claim
+      // first (sets 09, kept under sets 21's lazy claim): whatever sounds
+      // stands down before its Decks are re-loaded under it. This is a
+      // deliberate "edit this pair" gesture, not a mode switch — plain
+      // entry into the editor still interrupts nothing.
+      ensureEditorAudible();
       try {
         const [a, b] = await Promise.all([
           api.tracks.getById(req.aTrackId),
@@ -486,7 +529,7 @@ function TransitionEditorInner() {
         console.error('adjacency edit: open failed', err);
       }
     },
-    [assignTrack, store]
+    [assignTrack, store, ensureEditorAudible]
   );
   useEffect(() => {
     const consume = () => {
@@ -531,7 +574,7 @@ function TransitionEditorInner() {
         case ' ':
           e.preventDefault();
           e.stopPropagation();
-          player.togglePlay();
+          auditionTogglePlay(); // claims audibility on the first play (sets 21)
           break;
         case 'ArrowDown':
         case 'ArrowUp':
@@ -556,7 +599,7 @@ function TransitionEditorInner() {
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player]);
+  }, [player, auditionTogglePlay]);
 
   const snapA = player.engineA.getSnapshot();
   const snapB = player.engineB.getSnapshot();
@@ -604,6 +647,7 @@ function TransitionEditorInner() {
             <EditorCenterPanel
               store={store}
               player={player}
+              onTogglePlay={auditionTogglePlay}
               sideA={sideA}
               sideB={sideB}
               bpmA={bpmA}
@@ -680,6 +724,7 @@ function Readout({
 function EditorCenterPanel({
   store,
   player,
+  onTogglePlay,
   sideA,
   sideB,
   bpmA,
@@ -695,6 +740,8 @@ function EditorCenterPanel({
 }: {
   store: EditorStore;
   player: MixPlayer;
+  /** The audition gesture (sets 21): claims audibility before starting. */
+  onTogglePlay: () => void;
   sideA: TrackSideInfo;
   sideB: TrackSideInfo;
   bpmA: number | null;
@@ -819,7 +866,7 @@ function EditorCenterPanel({
             player.isPlaying() ? 'player-button-playing' : 'player-button-paused'
           }`}
           disabled={!player.ready()}
-          onClick={() => player.togglePlay()}
+          onClick={onTogglePlay}
         >
           ⏯
         </button>

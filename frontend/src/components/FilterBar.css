@@ -1,21 +1,43 @@
-.filter-bar-container {
-  padding: 12px;
-  background: var(--crust);
-  border-bottom: 1px solid var(--surface0);
-}
+/* Library filter bar. Unified interaction vocabulary (perf-layout 08):
+   rest = quiet grey border (--surface1), hover = white border + surface0
+   tint, press = surface1 fill, engaged = solid inverted accent fill.
+   Dynamic accents (key/bpm/tag colors) ride inline styles, which win over
+   these rules — that is how accent controls keep their accent on hover. */
 
 .filter-bar-label {
   font-size: 14px;
   color: var(--subtext1);
 }
 
+/* Tag-filter disclosure icon */
+.filter-bar-tag-toggle {
+  position: relative;
+  cursor: pointer;
+  width: 16px;
+  flex-shrink: 0;
+  color: var(--text);
+}
+
+.filter-bar-tag-toggle:hover {
+  background: var(--surface0);
+}
+
+.filter-bar-tag-toggle.open {
+  color: var(--blue);
+}
+
+/* Search field (text input: opaque bg is intentional) */
 .filter-bar-search {
   flex: 1;
-  padding: 6px 12px;
+  padding: 8px 12px;
   background: var(--base);
-  border: 1px solid var(--surface0);
+  border: 1px solid var(--surface1);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
+}
+
+.filter-bar-search:hover {
+  border-color: var(--text);
 }
 
 .filter-bar-search:focus {
@@ -36,9 +58,16 @@
 
 .filter-bar-energy-squares .energy-square:hover {
   border-color: var(--text);
-  opacity: 0.8;
+  background: var(--surface0);
 }
 
+/* Filled squares keep their accent on hover (tint brightens instead) */
+.filter-bar-energy-squares .energy-square.filled:hover {
+  border-color: var(--energy-color);
+  background: color-mix(in srgb, var(--energy-color) 25%, transparent);
+}
+
+/* Clear-× buttons (accent control: red text holds on hover) */
 .filter-bar-x-btn {
   background: transparent;
   border: none;
@@ -49,50 +78,171 @@
   line-height: 1;
 }
 
-.filter-bar-match-mode-btn {
+.filter-bar-x-btn:hover {
+  background: var(--surface0);
+}
+
+.filter-bar-x-btn:active {
+  background: var(--surface1);
+}
+
+/* Keys / BPM modal triggers (active filter paints an accent border
+   inline, which pins it on hover) */
+.filter-bar-key-btn,
+.filter-bar-bpm-btn {
   padding: 4px 12px;
-  border: none;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.filter-bar-bpm-btn {
+  padding: 4px 8px;
+}
+
+.filter-bar-key-btn:hover,
+.filter-bar-bpm-btn:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.filter-bar-key-btn:active,
+.filter-bar-bpm-btn:active {
+  background: var(--surface1);
+}
+
+/* Follow toggles (A/B) + gear — engaged = inverted deck-color fill */
+.filter-bar-follow-btn {
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
   cursor: pointer;
   font-size: 12px;
   font-weight: bold;
 }
 
-.filter-bar-tag-pill {
-  padding: 4px 10px;
+/* Adjacent buttons share one 1px edge (overlap instead of borderLeft:
+   none, so every button owns a full border for its hover/engaged states);
+   the engaged/hovered button wins the shared edge via z-index. */
+.filter-bar-follow-btn + .filter-bar-follow-btn {
+  margin-left: -1px;
+}
+
+.filter-bar-follow-btn.on-a,
+.filter-bar-follow-btn.on-b {
+  position: relative;
+  z-index: 1;
+}
+
+.filter-bar-follow-btn:hover:not(:disabled) {
+  background: var(--surface0);
+  border-color: var(--text);
+  position: relative;
+  z-index: 2;
+}
+
+.filter-bar-follow-btn:active:not(:disabled) {
+  background: var(--surface1);
+}
+
+.filter-bar-follow-btn:disabled {
+  color: var(--overlay0);
+  cursor: not-allowed;
+}
+
+.filter-bar-follow-btn.on-a,
+.filter-bar-follow-btn.on-a:hover:not(:disabled),
+.filter-bar-follow-btn.on-a:active:not(:disabled) {
+  background: var(--deck-a);
+  border-color: var(--deck-a);
+  color: var(--base);
+}
+
+.filter-bar-follow-btn.on-b,
+.filter-bar-follow-btn.on-b:hover:not(:disabled),
+.filter-bar-follow-btn.on-b:active:not(:disabled) {
+  background: var(--deck-b);
+  border-color: var(--deck-b);
+  color: var(--base);
+}
+
+/* Clear All */
+.filter-bar-clear-all-btn {
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 500;
-  color: var(--text);
+  font-weight: bold;
+}
+
+.filter-bar-clear-all-btn:hover:not(:disabled) {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.filter-bar-clear-all-btn:active:not(:disabled) {
+  background: var(--surface1);
+}
+
+.filter-bar-clear-all-btn:disabled {
+  color: var(--overlay0);
+  cursor: not-allowed;
+}
+
+/* ANY/ALL match mode — engaged = inverted blue fill */
+.filter-bar-match-mode-btn {
+  padding: 4px 12px;
   background: transparent;
-  border: none;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.filter-bar-match-mode-btn:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.filter-bar-match-mode-btn:active {
+  background: var(--surface1);
+}
+
+.filter-bar-match-mode-btn.on,
+.filter-bar-match-mode-btn.on:hover,
+.filter-bar-match-mode-btn.on:active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: var(--base);
+}
+
+/* Tag filter pills — selected = inverted fill in the tag's color
+   (inline, dynamic) */
+.filter-bar-tag-pill {
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
 }
 
 .filter-bar-tag-pill:hover {
-  opacity: 0.8;
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.filter-bar-tag-pill:active {
+  background: var(--surface1);
 }
 
 .filter-bar-counts {
   margin-top: 8px;
   font-size: 12px;
   color: var(--overlay0);
-}
-
-.filter-bar-clear-all-btn:hover:not(:disabled) {
-  background: var(--surface1) !important;
-}
-
-.filter-bar-clear-all-btn:disabled {
-  opacity: 0.5;
-}
-
-.filter-bar-follow-btn:hover:not(:disabled) {
-  background: var(--surface0) !important;
-}
-
-.filter-bar-key-btn:hover {
-  border-color: var(--text) !important;
-}
-
-.filter-bar-bpm-btn:hover {
-  border-color: var(--text) !important;
 }

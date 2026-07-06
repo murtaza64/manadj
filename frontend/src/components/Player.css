@@ -39,20 +39,29 @@
   gap: 4px;
 }
 
+/* Unified interaction vocabulary (perf-layout 08, no-glow revision):
+   rest = white text on a quiet grey border; hover = border brightens to
+   white + bg tint (the joined-panel idiom); press = one fill step up;
+   engaged/held = solid inverted fill in the control's accent. Accent
+   controls (CUE/PLAY/deck loads) keep their accent border on hover — the
+   tint carries the feedback. */
 .player-button {
   padding: 4px 12px;
   background: transparent;
   color: var(--text);
-  border: 1px solid var(--text);
+  border: 1px solid var(--surface1);
   cursor: pointer;
   font-size: 12px;
   font-weight: bold;
 }
 
 .player-button:hover:not(:disabled) {
-  background: transparent;
-  color: var(--subtext1);
-  border-color: var(--subtext1);
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.player-button:active:not(:disabled) {
+  background: var(--surface1);
 }
 
 .player-button:disabled {
@@ -68,22 +77,17 @@
 }
 
 .player-button-paused:hover:not(:disabled) {
-  background: transparent;
-  color: var(--subtext1);
-  border-color: var(--subtext1);
+  border-color: var(--green);
 }
 
-.player-button-playing {
+/* Engaged = inverted fill; hover/press keep it (state, not feedback) */
+.player-button-playing,
+.player-button-playing:hover:not(:disabled),
+.player-button-playing:active:not(:disabled) {
   background: var(--green);
   color: var(--base);
   border-color: var(--green);
   min-width: 60px;
-}
-
-.player-button-playing:hover:not(:disabled) {
-  border-color: var(--text);
-  background: var(--green);
-  color: var(--base);
 }
 
 .player-button-cue {
@@ -95,9 +99,7 @@
 }
 
 .player-button-cue:hover:not(:disabled) {
-  background: transparent;
-  color: var(--energy-2);
-  border-color: var(--energy-2);
+  border-color: var(--energy-3);
 }
 
 /* Flashing state - paused away from cue point */
@@ -122,16 +124,14 @@
   border-color: var(--energy-3);
 }
 
-/* Filled state - being held/previewing */
-.player-button-cue-held {
+/* Filled state - being held/previewing. Held IS the press, so pin the
+   inverted fill above the generic hover/:active rules. */
+.player-button-cue-held,
+.player-button-cue-held:hover:not(:disabled),
+.player-button-cue-held:active:not(:disabled) {
   background: var(--energy-3);
   color: var(--base);
   border-color: var(--energy-3);
-}
-
-.player-button-cue-held:hover:not(:disabled) {
-  background: var(--energy-2);
-  border-color: var(--energy-2);
 }
 
 .player-time {

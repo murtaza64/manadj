@@ -10,6 +10,7 @@ import {
 import { applyReorder, indicatorY, insertionIndexFromPointer, type RowRect } from '../selection/dropIndex';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import SetsSidebarSection from '../sets/SetsSidebarSection';
+import './PlaylistSidebar.css';
 import { createSetFromPlaylist } from '../sets/playlistFlows';
 import type { Playlist } from '../types';
 
@@ -236,13 +237,8 @@ export default function PlaylistSidebar({
       {/* "All tracks" special view (brand/sync/mode switch live in the TopBar) */}
       <div
         onClick={() => onSelectView('all')}
-        style={{
-          padding: '8px 12px',
-          cursor: 'pointer',
-          background: selectedView === 'all' ? 'var(--surface0)' : 'transparent',
-          color: 'var(--text)',
-          borderBottom: '1px solid var(--surface0)',
-        }}
+        className={`pl-sidebar-row${selectedView === 'all' ? ' selected' : ''}`}
+        style={{ borderBottom: '1px solid var(--surface0)' }}
       >
         All tracks
       </div>
@@ -250,13 +246,8 @@ export default function PlaylistSidebar({
       {/* "Unprocessed" special view */}
       <div
         onClick={() => onSelectView('unprocessed')}
-        style={{
-          padding: '8px 12px',
-          cursor: 'pointer',
-          background: selectedView === 'unprocessed' ? 'var(--surface0)' : 'transparent',
-          color: 'var(--text)',
-          borderBottom: '1px solid var(--surface0)',
-        }}
+        className={`pl-sidebar-row${selectedView === 'unprocessed' ? ' selected' : ''}`}
+        style={{ borderBottom: '1px solid var(--surface0)' }}
       >
         Unprocessed
       </div>
@@ -265,13 +256,8 @@ export default function PlaylistSidebar({
           Library; one click away, never mixed in) */}
       <div
         onClick={() => onSelectView('archived')}
-        style={{
-          padding: '8px 12px',
-          cursor: 'pointer',
-          background: selectedView === 'archived' ? 'var(--surface0)' : 'transparent',
-          color: 'var(--subtext0)',
-          borderBottom: '1px solid var(--surface0)',
-        }}
+        className={`pl-sidebar-row${selectedView === 'archived' ? ' selected' : ''}`}
+        style={{ color: 'var(--subtext0)', borderBottom: '1px solid var(--surface0)' }}
       >
         Archived
       </div>
@@ -315,20 +301,16 @@ export default function PlaylistSidebar({
               onDragOver={(e) => handleRowDragOver(e, playlist.id)}
               onDragLeave={() => setDragOverPlaylistId((cur) => (cur === playlist.id ? null : cur))}
               onDrop={(e) => handleRowDrop(e, playlist.id)}
+              className={`pl-sidebar-row${
+                selectedView === 'playlist' && selectedPlaylistId === playlist.id ? ' selected' : ''
+              }`}
               style={{
-                padding: '8px 12px',
-                cursor: 'pointer',
-                background:
-                  dragOverPlaylistId === playlist.id
-                    ? 'var(--surface1)'
-                    : selectedView === 'playlist' && selectedPlaylistId === playlist.id
-                      ? 'var(--surface0)'
-                      : 'transparent',
-                color: 'var(--text)',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 borderLeft: playlist.color ? `3px solid ${playlist.color}` : 'none',
+                // Drag-over highlight steps above the hover/selected tint
+                ...(dragOverPlaylistId === playlist.id ? { background: 'var(--surface1)' } : {}),
               }}
             >
               {renamingId === playlist.id ? (
@@ -382,16 +364,7 @@ export default function PlaylistSidebar({
                 color: 'var(--text)',
               }}
             />
-            <button
-              onClick={handleCreateClick}
-              style={{
-                padding: '4px 8px',
-                background: 'var(--green)',
-                color: 'var(--base)',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
+            <button onClick={handleCreateClick} className="pl-sidebar-ok">
               ✓
             </button>
             <button
@@ -399,29 +372,13 @@ export default function PlaylistSidebar({
                 setIsCreating(false);
                 setNewPlaylistName('');
               }}
-              style={{
-                padding: '4px 8px',
-                background: 'var(--red)',
-                color: 'var(--base)',
-                border: 'none',
-                cursor: 'pointer',
-              }}
+              className="pl-sidebar-cancel"
             >
               ✗
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setIsCreating(true)}
-            style={{
-              width: '100%',
-              padding: '6px',
-              background: 'var(--surface0)',
-              border: '1px solid var(--surface1)',
-              color: 'var(--text)',
-              cursor: 'pointer',
-            }}
-          >
+          <button onClick={() => setIsCreating(true)} className="pl-sidebar-new">
             + New Playlist
           </button>
         )}
