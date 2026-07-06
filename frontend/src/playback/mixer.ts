@@ -253,6 +253,12 @@ export class Mixer {
    * first write (nothing plays before the conductor applies its lanes).
    */
   private automation: Record<ChannelId, AutomationChannelValues | null> | null = null;
+  /** Overlay ownership (sets 25): the token the LAST engager holds. Only
+   * the owner's disengage tears the overlay down — a prior session's
+   * teardown must not yank the overlay from under the session that
+   * engaged after it (the engage/disengage pairs of two surfaces can
+   * interleave: editor audition ↔ set Conductor). */
+  private automationOwner: symbol | null = null;
   private master = 1; // 0..1
   /** Master bus output device (headphone-cue 01); null = system default. */
   private masterSinkId: string | null = null;
@@ -383,24 +389,41 @@ export class Mixer {
   /**
    * Engage the overlay: automation owns the lane-driven params from now
    * on, and the crossfader pins to neutral (the conductor mixes via fader
-   * lanes; a stale crossfader would silence a deck). Idempotent. Applies
-   * to a live graph only — never creates one; ensure() restores overlay
-   * ownership on creation/revival.
+   * lanes; a stale crossfader would silence a deck). Applies to a live
+   * graph only — never creates one; ensure() restores overlay ownership
+   * on creation/revival.
+   *
+   * Returns the OWNER TOKEN (sets 25): the last engager owns the overlay
+   * — mirroring the audible arbiter's last-claim-wins — even when the
+   * overlay was already up (a session engaging over a prior session's
+   * overlay adopts it; the prior owner's disengage becomes a no-op).
+   * Pass the token to disengageAutomation.
    */
-  engageAutomation(): void {
-    if (this.automation) return;
-    this.automation = { A: null, B: null };
-    if (this.liveGraph()) this.applyCrossfader(true);
+  engageAutomation(): symbol {
+    const owner = Symbol('automation-owner');
+    this.automationOwner = owner;
+    if (!this.automation) {
+      this.automation = { A: null, B: null };
+      if (this.liveGraph()) this.applyCrossfader(true);
+    }
+    return owner;
   }
 
   /**
    * Disengage: reapply base state to every param the overlay owned (the
    * reapply lives HERE so no consumer can forget it) and unpin the
-   * crossfader. Idempotent; safe with no live graph (the next ensure()
-   * builds from base state anyway).
+   * crossfader. OWNER-ONLY (sets 25): a non-owner's call is ignored — a
+   * displaced session's teardown must not tear the overlay from under
+   * the live one. Idempotent for the owner; safe with no live graph (the
+   * next ensure() builds from base state anyway).
    */
-  disengageAutomation(): void {
+  disengageAutomation(owner: symbol): void {
     if (!this.automation) return;
+    if (owner !== this.automationOwner) {
+      console.warn('[Mixer] disengageAutomation by non-owner ignored (sets 25)');
+      return;
+    }
+    this.automationOwner = null;
     this.automation = null;
     const live = this.liveGraph();
     if (!live) return;

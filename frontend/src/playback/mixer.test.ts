@@ -132,10 +132,10 @@ describe('automation overlay — no side-effectful context creation', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const mixer = new Mixer();
     expect(mixer.isAutomationEngaged()).toBe(false);
-    mixer.engageAutomation();
+    const token = mixer.engageAutomation();
     expect(mixer.isAutomationEngaged()).toBe(true);
     mixer.setAutomation('A', values(0.2, 0.8, -0.5));
-    mixer.disengageAutomation();
+    mixer.disengageAutomation(token);
     expect(mixer.isAutomationEngaged()).toBe(false);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
@@ -188,6 +188,56 @@ describe('automation overlay — no side-effectful context creation', () => {
   });
 });
 
+// ── Overlay ownership (sets 25) ─────────────────────────────────────────
+
+describe('automation overlay — owner token', () => {
+  it('a non-owner disengage is a warned no-op; the owner still tears down', () => {
+    forbidAudio();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const mixer = new Mixer();
+    const first = mixer.engageAutomation(); // e.g. a set Conductor session
+    const second = mixer.engageAutomation(); // an editor session engages over it
+    mixer.disengageAutomation(first); // the displaced session's teardown
+    expect(mixer.isAutomationEngaged()).toBe(true); // overlay survives
+    expect(warn).toHaveBeenCalledOnce();
+    mixer.disengageAutomation(second);
+    expect(mixer.isAutomationEngaged()).toBe(false);
+    warn.mockRestore();
+  });
+
+  it('an engage over a live overlay adopts it: values survive, ownership moves', () => {
+    forbidAudio();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const mixer = new Mixer();
+    mixer.engageAutomation();
+    const a = values(0.2, 0.8, -0.5);
+    mixer.setAutomation('A', a);
+    const adopting = mixer.engageAutomation(); // no re-init of the overlay
+    expect(mixer.getAutomation('A')).toEqual(a);
+    mixer.disengageAutomation(adopting);
+    expect(mixer.isAutomationEngaged()).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("the issue-25 interleave: the editor's overlay survives a stale Conductor teardown", () => {
+    forbidAudio();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const mixer = new Mixer();
+    const conductor = mixer.engageAutomation(); // set playback engages
+    const editor = mixer.engageAutomation(); // editor claims over; its engage adopts
+    mixer.setAutomation('A', values(0.3, 0.6, 0.1)); // the editor's drawn envelopes
+    mixer.disengageAutomation(conductor); // Conductor stop/end/takeover teardown
+    // The live editor session keeps writing — nothing is ignored.
+    expect(mixer.isAutomationEngaged()).toBe(true);
+    mixer.setAutomation('A', values(0.4, 0.5, 0));
+    expect(mixer.getAutomation('A')).toEqual(values(0.4, 0.5, 0));
+    mixer.disengageAutomation(editor); // the editor's own unwind still works
+    expect(mixer.isAutomationEngaged()).toBe(false);
+    warn.mockRestore();
+  });
+});
+
 // ── Read accessor for ghost indicators (sets 15) ────────────────────────
 
 describe('automation overlay — getAutomation read accessor', () => {
@@ -205,12 +255,12 @@ describe('automation overlay — getAutomation read accessor', () => {
   it('returns the written values per channel and null again after disengage', () => {
     forbidAudio();
     const mixer = new Mixer();
-    mixer.engageAutomation();
+    const token = mixer.engageAutomation();
     const a = values(0.2, 0.8, -0.5);
     mixer.setAutomation('A', a);
     expect(mixer.getAutomation('A')).toEqual(a);
     expect(mixer.getAutomation('B')).toBeNull(); // B never written
-    mixer.disengageAutomation();
+    mixer.disengageAutomation(token);
     expect(mixer.getAutomation('A')).toBeNull();
   });
 
@@ -246,12 +296,12 @@ describe('automation overlay — node ownership round trip', () => {
     const ctx = Fake.instances[0];
     const base = fingerprint(ctx);
 
-    mixer.engageAutomation();
+    const token = mixer.engageAutomation();
     mixer.setAutomation('A', values(1, 0.05, -0.9));
     mixer.setAutomation('B', values(0.01, 1, 0.9));
     expect(fingerprint(ctx)).not.toEqual(base); // automation audibly owns
 
-    mixer.disengageAutomation();
+    mixer.disengageAutomation(token);
     expect(fingerprint(ctx)).toEqual(base);
   });
 
@@ -260,12 +310,12 @@ describe('automation overlay — node ownership round trip', () => {
     const mixer = new Mixer();
     mixer.now(); // build graph
     const ctx = Fake.instances[0];
-    mixer.engageAutomation();
+    const token = mixer.engageAutomation();
     mixer.setAutomation('A', values(1, 0.5, 0));
     const during = fingerprint(ctx);
     mixer.setFader('A', 0.11); // base write while engaged: no node change
     expect(fingerprint(ctx)).toEqual(during);
-    mixer.disengageAutomation();
+    mixer.disengageAutomation(token);
     // The knob move is now audible: some param carries its gain.
     expect(fingerprint(ctx)).toContain(channelFaderToGain(0.11));
   });
@@ -274,14 +324,14 @@ describe('automation overlay — node ownership round trip', () => {
     const Fake = withFakeAudio();
     const pinned = new Mixer();
     pinned.setCrossfader(-1); // hard left, then engage
-    pinned.engageAutomation();
+    const token = pinned.engageAutomation();
     const centered = new Mixer();
     centered.now(); // default crossfader (0), no overlay
     // Same construction order → comparable fingerprints: the pinned
     // mixer's graph must look exactly like a centered one.
     expect(fingerprint(Fake.instances[0])).toEqual(fingerprint(Fake.instances[1]));
     expect(pinned.getCrossfader()).toBe(-1);
-    pinned.disengageAutomation();
+    pinned.disengageAutomation(token);
     expect(fingerprint(Fake.instances[0])).not.toEqual(fingerprint(Fake.instances[1]));
   });
 

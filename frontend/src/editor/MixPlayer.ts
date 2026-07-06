@@ -226,6 +226,15 @@ export class MixPlayer {
 
   private tick = () => {
     if (!this.playing) return;
+    // Displacement backstop (sets 25): losing the claim mid-audition must
+    // stop this conductor — the editor's subscribeAudible hook pauses on
+    // the holder change, but the rAF loop itself is the driver, so the
+    // invariant (at most one driver on the shared decks) is enforced here
+    // too, for any path where the holder flips without a pause.
+    if (!this.audible()) {
+      this.pause();
+      return;
+    }
     const t = this.getMixTime();
     if (t >= this.getMixDuration()) {
       this.pause();
