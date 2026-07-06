@@ -207,3 +207,71 @@ describe('default gate', () => {
     expect(engineA.calls).toContain('play');
   });
 });
+
+describe('track-aware readiness (sets 37: deferred open)', () => {
+  // Under a deferred open the shared decks may hold ANOTHER surface's
+  // tracks (the conducting set's) in loadState 'ready' — the editor's
+  // session pair is a target, not a fact. ready() must compare trackIds,
+  // and play() must refuse foreign-ready decks.
+
+  it('no targets set → legacy loadState-only readiness (standalone/tests)', () => {
+    const { player } = makePlayer(() => true);
+    expect(player.ready()).toBe(true); // FakeEngine: trackId 1, ready
+  });
+
+  it('targets matching the decks → ready', () => {
+    const { player } = makePlayer(() => true);
+    player.setTrack('A', { id: 1, durationSec: 120 });
+    player.setTrack('B', { id: 1, durationSec: 120 });
+    expect(player.ready()).toBe(true);
+  });
+
+  it('a foreign-ready deck is NOT ready, and play() is refused', () => {
+    const { player, engineA } = makePlayer(() => true);
+    player.setTrack('A', { id: 2, durationSec: 120 }); // deck holds track 1
+    player.setTrack('B', { id: 1, durationSec: 120 });
+    expect(player.ready()).toBe(false);
+    player.play();
+    expect(player.isPlaying()).toBe(false);
+    expect(engineA.calls).toEqual([]);
+  });
+
+  it('clearing a target restores loadState-only readiness', () => {
+    const { player } = makePlayer(() => true);
+    player.setTrack('A', { id: 2, durationSec: 120 });
+    player.setTrack('A', null);
+    expect(player.ready()).toBe(true);
+  });
+
+  it('model durations fall back to track data while a deck holds a foreign track', () => {
+    const { player } = makePlayer(() => true);
+    const engineOnly = player.getMixDuration(); // both decks: 120s
+    player.setTrack('A', { id: 1, durationSec: 500 }); // matches the deck → engine 120
+    player.setTrack('B', { id: 2, durationSec: 500 }); // deck holds 1 → track data 500
+    expect(player.getMixDuration()).toBeGreaterThan(engineOnly);
+  });
+
+  it('a matching target keeps the engine duration authoritative', () => {
+    const { player } = makePlayer(() => true);
+    const engineOnly = player.getMixDuration();
+    player.setTrack('A', { id: 1, durationSec: 500 });
+    player.setTrack('B', { id: 1, durationSec: 500 });
+    expect(player.getMixDuration()).toBe(engineOnly);
+  });
+});
+
+describe('seek taps (sets 37: transport gestures cancel a pending arm)', () => {
+  it('every external seek notifies; play/pause do not; unsubscribe stops it', () => {
+    const { player } = makePlayer(() => true);
+    const taps: number[] = [];
+    const unsub = player.subscribeSeek(() => taps.push(player.getMixTime()));
+    player.seek(10);
+    expect(taps).toEqual([10]);
+    player.play();
+    player.pause();
+    expect(taps).toEqual([10]);
+    unsub();
+    player.seek(20);
+    expect(taps).toEqual([10]);
+  });
+});

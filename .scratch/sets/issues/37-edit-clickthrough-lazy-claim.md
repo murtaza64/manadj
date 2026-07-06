@@ -1,6 +1,6 @@
 # 37 — Edit click-through must not silence a conducting set (extend 21's lazy claim)
 
-Status: ready-for-human (implemented 2026-07-06, lane editclaim, change `yknqookw` — parked for review; lane app on http://localhost:5413, backend 8240)
+Status: done (approved + landed 2026-07-06, change `yknqookw`, landing merge `mwwqrnpw`, lane editclaim)
 
 ## Parent
 
@@ -87,4 +87,6 @@ whatever the decks hold.
 
 **Editor files touched (laneux fence note):** `TransitionEditor.tsx` (open/claim/audition plumbing + DeckCard/center-panel props only — no lane-timeline UI), `MixPlayer.ts`, `auditionArm.ts` (new) + tests, `transitionEditor.css` (additive append at EOF: `.player-button-arming` + `editor-arm-pulse` keyframes). No changes to `DawTimeline.tsx`, `LaneCanvas.tsx`, `GlobalMinimap.tsx`, `DeckCard.tsx`, `laneColors.ts`, `editorStore.ts`.
 
-**Verification (agent, 2026-07-06):** gate green — `npx vitest run` 1210 passed (incl. 8 new auditionArm tests, 7 new MixPlayer track-aware/seek-tap tests); `uv run -m pytest` 671 passed; frontend build clean; eslint clean on touched files; `alembic heads` → one (`0022`, no migration).
+**Verification (agent, 2026-07-06):** gate green — `npx vitest run` 1210 passed (incl. 8 new auditionArm tests, 7 new MixPlayer track-aware/seek-tap tests); `uv run -m pytest` 671 passed; frontend build clean; eslint clean on touched files; `alembic heads` → one (`0022`, no migration). Re-verified on the catch-up merge with setrows' landed 0023 (vitest 1225) and on the landing merge with midi-ops grid 04-06 (vitest 1258, build clean, single head `0023`).
+
+**Approved + landed (2026-07-06, human review in session):** landing merge `mwwqrnpw` (two retry merges — main moved twice during verification; retry invariant held, no rewrites). Lane note: during the review park, a jj working-copy switch under the auto-reloading lane backend stamped the sandbox DB with trunk's `0023` while the parked tree predated it → backend crash-loop ("no db" symptom); resolved by the catch-up merge `oyqvuxut`. Lanes beware: land docs flips from a working copy already caught up with trunk, or stop the lane app around `@` moves that cross a migration boundary.
