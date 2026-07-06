@@ -14,6 +14,7 @@ import { useToast } from '../components/Toast';
 import { addTracksToSet, dropSetLocalState } from './setStore';
 import { createPlaylistFromSet } from './playlistFlows';
 import { ArchivedTrackFlag } from './archivedFlag';
+import './SetsSidebarSection.css';
 
 /** Same bright, fully saturated palette as playlists (repo preference). */
 const SET_COLORS: Array<{ label: string; value: string }> = [
@@ -176,18 +177,10 @@ export default function SetsSidebarSection({
             }}
             onDragLeave={() => setDragOverSetId((cur) => (cur === set.id ? null : cur))}
             onDrop={(e) => void handleRowDrop(e, set.id)}
-            style={{
-              padding: '8px 12px',
-              cursor: 'pointer',
-              background:
-                dragOverSetId === set.id
-                  ? 'var(--surface1)'
-                  : selectedSetId === set.id
-                    ? 'var(--surface0)'
-                    : 'transparent',
-              color: 'var(--text)',
-              borderLeft: set.color ? `3px solid ${set.color}` : 'none',
-            }}
+            className={`sets-sidebar-row${selectedSetId === set.id ? ' selected' : ''}${
+              dragOverSetId === set.id ? ' drag-over' : ''
+            }`}
+            style={{ borderLeft: set.color ? `3px solid ${set.color}` : 'none' }}
           >
             {renamingId === set.id ? (
               <input
@@ -244,31 +237,12 @@ export default function SetsSidebarSection({
                   color: 'var(--text)',
                 }}
               />
-              <button
-                onClick={commitCreate}
-                style={{
-                  padding: '4px 8px',
-                  background: 'var(--green)',
-                  color: 'var(--base)',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-              >
+              <button className="sets-sidebar-ok" onClick={commitCreate}>
                 ✓
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => setIsCreating(true)}
-              style={{
-                width: '100%',
-                padding: '6px',
-                background: 'var(--surface0)',
-                border: '1px solid var(--surface1)',
-                color: 'var(--text)',
-                cursor: 'pointer',
-              }}
-            >
+            <button className="sets-sidebar-new" onClick={() => setIsCreating(true)}>
               + New Set
             </button>
           )}

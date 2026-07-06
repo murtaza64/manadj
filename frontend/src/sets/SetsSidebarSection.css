@@ -1,0 +1,60 @@
+/* Sidebar Sets section (sets 22) — mirrors PlaylistSidebar.css, unified
+   interaction vocabulary (perf-layout 08): row hover = tint (rows are
+   borderless), selected = surface0 (row selection, not a button engaged
+   state), drag-over = one fill step past hover, accent CTAs rest as
+   outlines. Set colors ride inline border-left. */
+
+.sets-sidebar-row {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.sets-sidebar-row:hover {
+  background: var(--surface0);
+}
+
+.sets-sidebar-row.selected {
+  background: var(--surface0);
+}
+
+.sets-sidebar-row.drag-over,
+.sets-sidebar-row.drag-over:hover {
+  background: var(--surface1);
+}
+
+/* Accent confirm: outline at rest (solid fill is reserved for engaged
+   states), accent border holds on hover */
+.sets-sidebar-ok {
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--green);
+  color: var(--green);
+  cursor: pointer;
+}
+
+.sets-sidebar-ok:hover {
+  background: var(--surface0);
+}
+
+.sets-sidebar-ok:active {
+  background: var(--surface1);
+}
+
+.sets-sidebar-new {
+  width: 100%;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.sets-sidebar-new:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.sets-sidebar-new:active {
+  background: var(--surface1);
+}

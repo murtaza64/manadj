@@ -30,6 +30,7 @@ import {
   transitionsInto,
   useTransitionIndex,
 } from '../editor/transitionIndex';
+import './SetSuggestions.css';
 
 /** Tier 7 = "Other matches" — not worth suggesting from a whole-library
  * candidate pool (Follow mode's rest tier is post-filter; ours is not). */
@@ -187,21 +188,12 @@ export default function SetSuggestions({
           rows.map((row) => (
             <div
               key={row.track.id}
+              className="set-suggestion-row"
               onClick={() => {
                 onAccept(row.track.id);
                 onClose();
               }}
               title="Add to set (pins via the auto-fill offer)"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '5px 10px',
-                borderBottom: '1px solid var(--surface0)',
-                cursor: 'pointer',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface0)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
             >
               <span
                 style={{

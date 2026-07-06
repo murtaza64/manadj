@@ -1,0 +1,226 @@
+/* Set pane (sets 22). Unified interaction vocabulary (perf-layout 08):
+   rest = quiet grey border (--surface1), hover = white border + surface0
+   tint (accent borders/colors ride inline styles, which win over these
+   rules and so hold on hover), press = surface1 fill, engaged/on = solid
+   inverted accent fill pinned across hover/press. No glows, scale
+   effects, or hue-shifts. Selection and conducting-row highlights are
+   STATES (sets 18), not hovers — they outrank the hover wash. */
+
+/* --peach: sets 16 picked peach for the lit Pick up (and sets 06 for the
+   Fixed tempo chip) before the token existed outside Waveform.css's
+   scope — it silently resolved to nothing. Defined here, scoped, because
+   a :root definition would switch on two dormant pre-08 box-shadow glows
+   (TagEditor/TagPopover) that 08 removed. Bright, fully saturated. */
+.set-header {
+  --peach: #ff9500;
+}
+
+/* Three-zone header (sets 22): name/chips left, transport center,
+   secondary actions right. The 1fr side zones shrink and wrap; the auto
+   center column never does — the transport keeps center priority at any
+   width (the secondary cluster wraps first). */
+.set-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--surface0);
+  background: var(--crust);
+}
+
+.set-header-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.set-header-transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.set-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The transport is the view's primary action: bigger and bolder than the
+   secondary cluster, which stays compact and unbolded. */
+.btn.set-transport-btn {
+  padding: 6px 16px;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.set-header-actions .btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+/* Play while conducting = engaged: solid inverted fill in the
+   Conductor's mauve (state, not feedback — pinned across hover/press). */
+.set-play.on,
+.set-play.on:hover:not(:disabled),
+.set-play.on:active:not(:disabled) {
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--base);
+}
+
+/* Pick up lit = color on-state (sets 16 semantics survive: unlit is the
+   disabled .btn with the teaching tooltip riding `title`). */
+.set-pickup.lit,
+.set-pickup.lit:hover:not(:disabled),
+.set-pickup.lit:active:not(:disabled) {
+  background: var(--peach);
+  border-color: var(--peach);
+  color: var(--base);
+}
+
+/* Track rows: hover = tint. Selection (blue wash + inset blue ring,
+   sets 18) and conducting (mauve wash) are states — they keep the
+   background under the pointer; a selected conducting row keeps the
+   mauve wash and wears the blue ring. */
+.set-track-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--surface0);
+  cursor: grab;
+}
+
+.set-track-row:hover {
+  background: var(--surface0);
+}
+
+.set-track-row.selected,
+.set-track-row.selected:hover {
+  background: color-mix(in srgb, var(--blue) 22%, transparent);
+  box-shadow: inset 0 0 0 2px var(--blue);
+}
+
+.set-track-row.conducting,
+.set-track-row.conducting:hover {
+  background: color-mix(in srgb, var(--mauve) 18%, transparent);
+}
+
+.set-track-row.conducting.selected,
+.set-track-row.conducting.selected:hover {
+  background: color-mix(in srgb, var(--mauve) 18%, transparent);
+  box-shadow: inset 0 0 0 2px var(--blue);
+}
+
+/* Adjacency rows: hover = tint. The deck-gradient left bar rides
+   background-image inline (sets 20), composing over this color. */
+.set-adjacency-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 12px 2px 15px;
+  background-color: var(--crust);
+  background-position: left;
+  background-size: 3px 100%;
+  background-repeat: no-repeat;
+  border-bottom: 1px solid var(--surface0);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.set-adjacency-row:hover {
+  background-color: var(--surface0);
+}
+
+/* Borderless glyph affordances (▶ play-from, ✕ remove, [+] insert,
+   popover close): accent text holds on hover — the FilterBar ×-button
+   idiom, one fill step up from the row's own hover wash so the feedback
+   reads against the already-tinted row. */
+.set-glyph-btn {
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.set-glyph-btn:hover:not(:disabled) {
+  background: var(--surface1);
+}
+
+.set-glyph-btn:active:not(:disabled) {
+  background: var(--surface2);
+}
+
+/* Hover-revealed row actions: visibility (not display) keeps the
+   left-gutter geometry that aligns titles and chips at x=81 (sets 20). */
+.set-row-reveal {
+  visibility: hidden;
+}
+
+.set-track-row:hover .set-row-reveal {
+  visibility: visible;
+}
+
+/* Chip buttons (pin chip, ✎ edit, ⏵ practice, proposal/fresh-take CTAs,
+   tempo-policy chip): quiet border, accent text rides inline. On an
+   already-tinted row the border brightening carries the hover feedback.
+   Accent-outline CTAs and the solid red hard-cut chip pin their
+   border/background inline — inline wins over the hover rule. */
+.set-chip-btn {
+  padding: 1px 8px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.set-chip-btn:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.set-chip-btn:active {
+  background: var(--surface1);
+}
+
+/* Header-sized chip (tempo policy) */
+.set-header-chip {
+  padding: 2px 10px;
+}
+
+/* Tempo-policy popover options: quiet at rest; the active policy paints
+   its solid accent fill inline (engaged — pinned across hover/press). */
+.set-tempo-option {
+  padding: 3px 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.set-tempo-option:hover {
+  background: var(--surface0);
+  border-color: var(--text);
+}
+
+.set-tempo-option:active {
+  background: var(--surface1);
+}
