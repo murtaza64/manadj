@@ -27,6 +27,8 @@ import {
   unregisterSurface,
 } from '../playback/audibleSurface';
 import { useMixer } from '../hooks/useMixer';
+import { prefetchTrackBuffer } from '../sets/prefetch';
+import { armAudition } from './auditionArm';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
@@ -209,32 +211,90 @@ function TransitionEditorInner() {
     sharedDecksRef.current = sharedDecks;
   });
 
-  const assignTrack = useCallback(
+  // The session pair, readable from identity-stable callbacks (the
+  // audition arm below reads the CURRENT pair, not a closed-over one).
+  const trackRef = useRef<{ A: Track | null; B: Track | null }>({ A: null, B: null });
+  useEffect(() => {
+    trackRef.current = { A: trackA, B: trackB };
+  });
+
+  /** Pending audition arm (sets 37): play pressed, deck loads in flight.
+   * The stored function is the cancel — any other transport gesture,
+   * displacement, or pair supersession calls it; fulfilment nulls it. */
+  const pendingAuditionRef = useRef<(() => void) | null>(null);
+  const [auditionPending, setAuditionPending] = useState(false);
+  const cancelPendingAudition = useCallback(() => {
+    if (!pendingAuditionRef.current) return;
+    pendingAuditionRef.current();
+    pendingAuditionRef.current = null;
+    setAuditionPending(false);
+  }, []);
+
+  /** SESSION-ONLY track assignment (sets 37): editor state, store, and
+   * the player's track target — never the shared decks. Deck loads are
+   * deferred to the audition arm (or ride assignTrack's explicit load
+   * below). Changing a side supersedes any audition in flight: the
+   * sounding decks no longer match the session pair, so the audition and
+   * any pending arm stop (pausing our OWN audition never silences
+   * another surface). */
+  const assignSession = useCallback(
     (deck: 'A' | 'B', track: Track) => {
+      cancelPendingAudition();
+      if (player.isPlaying()) player.pause();
       if (deck === 'A') setTrackA(track);
       else setTrackB(track);
       store.setTrackId(deck, track.id);
+      player.setTrack(deck, { id: track.id, durationSec: track.duration_secs ?? null });
+    },
+    [store, player, cancelPendingAudition]
+  );
+
+  const assignTrack = useCallback(
+    (deck: 'A' | 'B', track: Track) => {
+      assignSession(deck, track);
       // The one load path (ADR 0022): assigning to the editor pair IS
       // Loading the shared Deck (Main-cue defaults, persistence and all).
       // Same track already loaded → nothing to do, buffer's already hot.
+      // This immediate load stays on the EXPLICIT deck-load affordances
+      // (embedded library buttons, arrow keys) — a load onto a conducted
+      // deck is a takeover (sets 28). Artifact opens defer instead
+      // (sets 37 — see openPair/openTake).
       const shared = sharedDecksRef.current[deck];
       if (shared.loadedTrack?.id !== track.id) shared.loadTrack(track);
     },
-    [store]
+    [assignSession]
+  );
+
+  /** Warm the decode cache for a deferred-open pair (sets 37) so the
+   * audition arm's loads are usually near-instant. Tracks a shared deck
+   * already holds are skipped — their buffers are hot and the arm's load
+   * will be a no-op (the free case: editing the sounding adjacency). */
+  const warmPair = useCallback(
+    (...tracks: Track[]) => {
+      const decks = sharedDecksRef.current;
+      for (const t of tracks) {
+        if (decks.A.loadedTrack?.id === t.id || decks.B.loadedTrack?.id === t.id) continue;
+        prefetchTrackBuffer(mixer, t.id).catch((err) =>
+          console.warn('editor open: decode-cache warm failed', t.id, err)
+        );
+      }
+    },
+    [mixer]
   );
 
   // Swap the loaded pair (issue 29): A's track to deck B and vice versa —
   // one gesture instead of two re-loads when the pair is backwards. The
   // pair key reverses, so the session re-seeds from the REVERSED pair's
   // saved Transitions via the normal loadPair rules (old direction flushes
-  // first; nothing is mirrored — direction is meaning).
+  // first; nothing is mirrored — direction is meaning). Session-only since
+  // sets 37: the double deck re-load defers to the next audition press.
   const swapDecks = useCallback(() => {
     const a = trackA;
     const b = trackB;
     if (!a || !b) return;
-    assignTrack('A', b);
-    assignTrack('B', a);
-  }, [trackA, trackB, assignTrack]);
+    assignSession('A', b);
+    assignSession('B', a);
+  }, [trackA, trackB, assignSession]);
 
   // Deck B slides (issue 11): hot cue / beat jump gestures realign the
   // pair. The store mutates (player follows synchronously); the audio-side
@@ -354,18 +414,63 @@ function TransitionEditorInner() {
     automationTokenRef.current = mixer.engageAutomation();
   }, [player, mixer]);
 
-  // The audition gesture (sets 21): starting the mix transport claims
-  // first; pausing it never needs to. Claim only when sound will actually
-  // start — a play press on unloaded decks must not silence anything.
+  // The audition gesture (sets 21, extended by sets 37's one-press arm):
+  // starting the mix transport claims first; pausing it never needs to.
+  // Under a deferred open the decks may not hold the session pair yet —
+  // play CLAIMS (the holder stands down), issues the missing deck loads,
+  // and starts the moment both decks are ready (armAudition). CLAIM
+  // BEFORE LOAD, always: by the time the arm's loads fire, the holder is
+  // the editor — they are never foreign loads during conduction (they
+  // compose with sets 28's takeover rule instead of tripping it). A press
+  // on an empty session claims nothing and silences nothing.
   const auditionTogglePlay = useCallback(() => {
+    // A pending arm is the play that hasn't sounded yet: the same press
+    // toggles it off (pendingCues' re-press rule).
+    if (pendingAuditionRef.current) {
+      cancelPendingAudition();
+      return;
+    }
     if (player.isPlaying()) {
       player.pause();
       return;
     }
-    if (!player.ready()) return;
+    const { A: a, B: b } = trackRef.current;
+    if (!a || !b) return;
     ensureEditorAudible();
-    player.play();
-  }, [player, ensureEditorAudible]);
+    if (!isAudible('editor')) return; // claim refused — arm nothing
+    const cancel = armAudition({
+      engines: { A: player.engineA, B: player.engineB },
+      targets: { A: a.id, B: b.id },
+      // Deck loads through the provider's one load path (ADR 0022) —
+      // issued only for decks that don't already hold their target.
+      load: (deck) => sharedDecksRef.current[deck].loadTrack(deck === 'A' ? a : b),
+      onReady: () => {
+        // Clear the arm BEFORE the park's seek below — the seek tap
+        // cancels pending arms (subscribeSeek), not this fulfilment.
+        pendingAuditionRef.current = null;
+        setAuditionPending(false);
+        // A transition selected while the pair wasn't ready parked
+        // nothing (onTransitionLoaded deferred it) — honor it now so the
+        // audition starts at the window, not at 0.
+        if (pendingParkRef.current !== null) {
+          player.seek(pendingParkRef.current);
+          pendingParkRef.current = null;
+        }
+        player.play();
+      },
+    });
+    if (cancel) {
+      pendingAuditionRef.current = cancel;
+      setAuditionPending(true);
+    }
+  }, [player, ensureEditorAudible, cancelPendingAudition]);
+
+  // Any other transport gesture cancels a pending arm (sets 37): every
+  // editor seek path — timeline scrub, minimap, jog, cue/beat jumps,
+  // slides' paused re-park — funnels through player.seek, which taps
+  // here. Displacement is covered beside the surface registration below;
+  // pair supersession in assignSession.
+  useEffect(() => player.subscribeSeek(cancelPendingAudition), [player, cancelPendingAudition]);
 
   // One audible surface at a time (ADR 0013, shrunk by ADR 0022):
   // REGISTER while mounted — registering is not claiming; the claim rides
@@ -416,10 +521,14 @@ function TransitionEditorInner() {
     // MixPlayer would fight the new holder for the shared decks (issue
     // 25's audible B-wobble). pause() is a no-op when not playing.
     const unsubDisplaced = subscribeAudible((holder) => {
-      if (holder !== 'editor') player.pause();
+      if (holder !== 'editor') {
+        cancelPendingAudition(); // a displaced arm must never fire (sets 37)
+        player.pause();
+      }
     });
     return () => {
       unsubDisplaced();
+      cancelPendingAudition();
       // Unwind the borrow only if the editor still holds it (sets 21): a
       // never-auditioned editor took nothing; a DISPLACED editor's decks/
       // overlay already belong to the new holder (mirror of the
@@ -439,15 +548,17 @@ function TransitionEditorInner() {
       automationTokenRef.current = null;
       pitchCheckpointRef.current = null;
     };
-  }, [player, mixer, midiJogA, midiJogB, auditionTogglePlay]);
+  }, [player, mixer, midiJogA, midiJogB, auditionTogglePlay, cancelPendingAudition]);
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh
   // straight into the editor — provider restore may still be in flight);
   // otherwise the deck stays empty. Nothing is silenced here (sets 21):
   // whatever plays keeps playing under the mounted editor until an
-  // audition claims. (Adopting a playing deck's track is a no-op load —
-  // the buffer is already hot; the fallback fires only on EMPTY decks.)
+  // audition claims. SESSION-ONLY since sets 37 — even the last-pair
+  // fallback issues no deck loads (pre-37 it loaded empty decks, which
+  // under sets 28 would be a takeover if a set were conducting); the
+  // first audition press loads whatever's missing.
   useEffect(() => {
     const last = localStorage.getItem(LAST_PAIR_KEY);
     const lastIds = last ? last.split(':').map(Number) : null;
@@ -455,9 +566,9 @@ function TransitionEditorInner() {
       const shared = sharedDecks[deck].loadedTrack;
       const fallbackId = lastIds?.[i];
       if (shared) {
-        assignTrack(deck, shared);
+        assignSession(deck, shared);
       } else if (fallbackId !== undefined && fallbackId !== null && !Number.isNaN(fallbackId)) {
-        api.tracks.getById(fallbackId).then((t: Track) => assignTrack(deck, t)).catch(() => undefined);
+        api.tracks.getById(fallbackId).then((t: Track) => assignSession(deck, t)).catch(() => undefined);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -470,17 +581,17 @@ function TransitionEditorInner() {
   // selects its Transition.
   const openTake = useCallback(
     async (uuid: string) => {
-      // Loads the shared Decks — claim first, same rationale as openPair
-      // below (pre-sets-21 the mount claim covered this path).
-      ensureEditorAudible();
+      // SESSION-ONLY open (sets 37, same contract as openPair below): no
+      // claim, no shared-deck loads — whatever sounds keeps sounding.
       try {
         const detail = await api.takes.get(uuid);
         const [a, b] = await Promise.all([
           api.tracks.getById(detail.a_track_id),
           api.tracks.getById(detail.b_track_id),
         ]);
-        assignTrack('A', a);
-        assignTrack('B', b);
+        assignSession('A', a);
+        assignSession('B', b);
+        warmPair(a, b);
         const pk = `${a.id}:${b.id}`;
         localStorage.setItem(LAST_PAIR_KEY, pk);
         store.loadPair(pk);
@@ -504,7 +615,7 @@ function TransitionEditorInner() {
         console.error('take review: open failed', err);
       }
     },
-    [assignTrack, store, ensureEditorAudible]
+    [assignSession, warmPair, store]
   );
   useEffect(() => {
     const consume = () => {
@@ -523,19 +634,23 @@ function TransitionEditorInner() {
   // arrives with null and lands on a blank sketch.
   const openPair = useCallback(
     async (req: PairEditRequest) => {
-      // Opening an adjacency LOADS the shared Decks (ADR 0022) — claim
-      // first (sets 09, kept under sets 21's lazy claim): whatever sounds
-      // stands down before its Decks are re-loaded under it. This is a
-      // deliberate "edit this pair" gesture, not a mode switch — plain
-      // entry into the editor still interrupts nothing.
-      ensureEditorAudible();
+      // SESSION-ONLY open (sets 37, superseding 21's eager claim here):
+      // opening an adjacency mid-set must not silence the conducting set.
+      // Only the session opens — pair, selection, model; the strips render
+      // the opened pair from track data. The deck CLAIM and LOADS defer to
+      // the first audition press (auditionTogglePlay's arm: claim → load
+      // both decks → play when ready); warmPair pre-decodes so that gap is
+      // usually near-zero. Editing the SOUNDING adjacency is the free
+      // case: the decks already hold the pair, so the arm is a no-op
+      // adopt and play is immediate.
       try {
         const [a, b] = await Promise.all([
           api.tracks.getById(req.aTrackId),
           api.tracks.getById(req.bTrackId),
         ]);
-        assignTrack('A', a);
-        assignTrack('B', b);
+        assignSession('A', a);
+        assignSession('B', b);
+        warmPair(a, b);
         const pk = `${a.id}:${b.id}`;
         localStorage.setItem(LAST_PAIR_KEY, pk);
         store.loadPair(pk);
@@ -545,7 +660,7 @@ function TransitionEditorInner() {
         console.error('adjacency edit: open failed', err);
       }
     },
-    [assignTrack, store, ensureEditorAudible]
+    [assignSession, warmPair, store]
   );
   useEffect(() => {
     const consume = () => {
@@ -619,6 +734,11 @@ function TransitionEditorInner() {
 
   const snapA = player.engineA.getSnapshot();
   const snapB = player.engineB.getSnapshot();
+  // Deck-card load state, track-aware (sets 37): under a deferred open the
+  // engines may hold ANOTHER surface's tracks — show the session side as
+  // 'deferred' (play loads it) instead of the foreign track's state.
+  const cardLoadState = (snap: typeof snapA, track: Track | null) =>
+    track && snap.trackId !== track.id ? 'deferred' : snap.loadState;
 
   return (
     <div className="editor-root">
@@ -644,7 +764,7 @@ function TransitionEditorInner() {
               deck="A"
               track={trackA}
               player={player}
-              loadState={snapA.loadState}
+              loadState={cardLoadState(snapA, trackA)}
               effectiveBpm={bpmA}
               pitchPercent={0}
               onBpmSaved={(bpm) => setTrackA((t) => (t ? { ...t, bpm } : t))}
@@ -664,6 +784,7 @@ function TransitionEditorInner() {
               store={store}
               player={player}
               onTogglePlay={auditionTogglePlay}
+              auditionPending={auditionPending}
               sideA={sideA}
               sideB={sideB}
               bpmA={bpmA}
@@ -682,7 +803,7 @@ function TransitionEditorInner() {
               deck="B"
               track={trackB}
               player={player}
-              loadState={snapB.loadState}
+              loadState={cardLoadState(snapB, trackB)}
               effectiveBpm={bpmB !== null ? bpmB * rateB : null}
               pitchPercent={(rateB - 1) * 100}
               onBpmSaved={(bpm) => setTrackB((t) => (t ? { ...t, bpm } : t))}
@@ -742,6 +863,7 @@ function EditorCenterPanel({
   store,
   player,
   onTogglePlay,
+  auditionPending,
   sideA,
   sideB,
   bpmA,
@@ -757,8 +879,12 @@ function EditorCenterPanel({
 }: {
   store: EditorStore;
   player: MixPlayer;
-  /** The audition gesture (sets 21): claims audibility before starting. */
+  /** The audition gesture (sets 21): claims audibility before starting;
+   * on a deferred-open pair it ARMS — claim, load, play when ready
+   * (sets 37). */
   onTogglePlay: () => void;
+  /** An arm is in flight (sets 37) — the ⏯ shows it; a press cancels. */
+  auditionPending: boolean;
   sideA: TrackSideInfo;
   sideB: TrackSideInfo;
   bpmA: number | null;
@@ -878,9 +1004,19 @@ function EditorCenterPanel({
       <div className="editor-center-row">
         <button
           className={`player-button ${
-            player.isPlaying() ? 'player-button-playing' : 'player-button-paused'
+            player.isPlaying()
+              ? 'player-button-playing'
+              : auditionPending
+                ? 'player-button-arming'
+                : 'player-button-paused'
           }`}
-          disabled={!player.ready()}
+          // Enabled whenever a pair is open (sets 37): the press ARMS if
+          // the decks don't hold the pair yet — one press, not "wait for
+          // ready then press".
+          disabled={trackAId === null || trackBId === null}
+          title={
+            auditionPending ? 'Arming — decks loading; press again to cancel' : undefined
+          }
           onClick={onTogglePlay}
         >
           ⏯

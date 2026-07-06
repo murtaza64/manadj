@@ -1,6 +1,7 @@
 # Spin-to-nudge: hold a grid-nudge pad and turn the jog for fine grid nudging
 
-Status: ready-for-agent
+Status: ready-for-human
+Review: parked on lane midigrid (grid track stack, review lands the prefix); walkthrough in .lanes/midigrid.md and the requesting session; lane app http://localhost:5423
 
 ## Parent
 
@@ -28,3 +29,7 @@ The chorded fine-nudge gesture, built on one new tested seam — a pure grid-edi
 
 - `04-nudge-offset-param.md` (the commit needs arbitrary offsets)
 - `05-grid-edit-pad-mode.md` (the pads and targets it chords onto)
+
+## Comments
+
+**2026-07-06 (lane midigrid)**: The new tested seam is `frontend/src/midi/gridChord.ts` — pure reducer (`reduceGridChord`: pad-down/up + jog-ticks in; pass-jog / local-nudge / tap-step / commit out; 1ms/tick; any-tick-received = hold, zero-net hold commits nothing; second pad ignored mid-gesture; per-deck state) + `shiftBeatgrid` (the rigid optimistic cache translate). Dispatch folds it as its one piece of state (`_resetGridChordForTests`); rim and touch ticks flow through the fold BEFORE surface routing, so armed ticks reach no surface's jog meanings (editor included); jog-seek (SHIFT) stays surface-routed. `grid-nudge` down now arms, release decides tap vs commit. Registry gained `gridNudgeLocal` (queryClient.setQueryData shift — engine + waveform follow the cache live via useDeckBeatgridSync) and `gridNudgeCommit` (one POST with the net offset through the serialized nudge chain; refetch settles local vs server). ADR 0019 carries the carve-out amendment. Tests: gridChord.test.ts (17, modeled on transport.test.ts) + spin-to-nudge describe in dispatch.test.ts. `npx vitest run` 1192 green, tsc clean.

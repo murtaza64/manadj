@@ -1279,3 +1279,22 @@
   color: var(--sapphire, #74c7ec);
   line-height: 1.4;
 }
+
+/* Audition arm (sets 37): play pressed on a deferred-open pair — deck
+   loads in flight, sound starts the moment both decks are ready. Press
+   again (or any transport gesture) to cancel. */
+.editor-center .player-button-arming {
+  background: transparent;
+  color: #ffd400;
+  border-color: #ffd400;
+  animation: editor-arm-pulse 0.7s ease-in-out infinite alternate;
+}
+
+@keyframes editor-arm-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.35;
+  }
+}

@@ -179,6 +179,12 @@ def test_set_downbeat_on_variable_grid_preserves_tempo_changes(
     assert grid["anchor_time"] == 10.0
 
 
+def nudge(client: TestClient, track_id: int, offset_ms: float) -> dict:
+    resp = client.post(f"/api/beatgrids/{track_id}/nudge", json={"offset_ms": offset_ms})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
 def test_nudge_moves_anchor_with_the_grid(client, make_track, make_waveform):
     track = make_track(bpm=12800)
     make_waveform(track.id)
@@ -204,6 +210,57 @@ def test_nudge_shifts_every_tempo_change_of_a_variable_grid(
     changes = resp.json()["data"]["tempo_changes"]
     assert changes[0]["start_time"] == pytest.approx(0.4)
     assert changes[1]["start_time"] == pytest.approx(60.4)
+
+
+def test_nudge_translates_by_an_arbitrary_signed_offset(
+    client, make_track, make_waveform, db_session
+):
+    """The endpoint is offset-parameterized: any signed ms amount, applied exactly
+    (midi-performance-ops 04 — one API for the ±10ms tap and spin-to-nudge commits)."""
+    track = make_track(bpm=12800)
+    make_waveform(track.id)
+    crud.update_beatgrid_tempo_changes(db_session, track.id, [tc(1.0, 128.0)])
+
+    grid = nudge(client, track.id, 37.0)
+    assert grid["data"]["tempo_changes"][0]["start_time"] == pytest.approx(1.037)
+
+    grid = nudge(client, track.id, -3.0)
+    assert grid["data"]["tempo_changes"][0]["start_time"] == pytest.approx(1.034)
+
+
+def test_nudges_accumulate_across_calls(client, make_track, make_waveform, db_session):
+    """Repeated offsets sum: the persisted grid carries the net translation."""
+    track = make_track(bpm=12800)
+    make_waveform(track.id)
+    crud.update_beatgrid_tempo_changes(db_session, track.id, [tc(1.0, 128.0)])
+    set_downbeat(client, track.id, 1.0)
+
+    # set-downbeat rebuilt the constant grid backward: first beat at 0.0625
+    assert get_grid(client, track.id)["data"]["tempo_changes"][0]["start_time"] == pytest.approx(
+        0.0625
+    )
+
+    for offset_ms in (10.0, 10.0, -25.0, 1.5):
+        grid = nudge(client, track.id, offset_ms)
+
+    # net offset = (10 + 10 - 25 + 1.5)ms = -3.5ms
+    assert grid["data"]["tempo_changes"][0]["start_time"] == pytest.approx(0.059)
+    assert grid["anchor_time"] == pytest.approx(0.9965)
+
+
+def test_nudge_clamps_at_track_start_and_moves_anchor_by_the_applied_offset(
+    client, make_track, make_waveform, db_session
+):
+    """A large negative offset clamps (first tempo change floors at -0.1s); the
+    anchor shifts by the applied — not requested — amount."""
+    track = make_track(bpm=12800)
+    make_waveform(track.id)
+    crud.update_beatgrid_tempo_changes(db_session, track.id, [tc(0.05, 128.0)])
+    set_downbeat(client, track.id, 0.05)
+
+    grid = nudge(client, track.id, -500.0)  # requested -0.5s, only -0.15s legal
+    assert grid["data"]["tempo_changes"][0]["start_time"] == pytest.approx(-0.1)
+    assert grid["anchor_time"] == pytest.approx(-0.1)
 
 
 def test_bpm_edit_without_grid_is_a_plain_metadata_write(client, make_track, db_session):

@@ -1,6 +1,6 @@
 # 32 — Lane UI/UX pass: toggles, deck-family colors, control idiom, polarity
 
-Status: ready-for-agent (grilled 2026-07-05; all items settled)
+Status: ready-for-human (implemented 2026-07-06, lane laneux, change xsouwpxm — verification walkthrough in Comments)
 
 ## Parent
 
@@ -44,3 +44,38 @@ Status: ready-for-agent (grilled 2026-07-05; all items settled)
 ## Blocked by
 
 None. Coordinate: same LaneCanvas/DawTimeline surface as 16 (ready-for-human, change rlrspylz) and 30 (ready-for-agent) — rebase over whichever lands first.
+
+## Comments
+
+- 2026-07-06 (lane laneux, change xsouwpxm): implemented, all ten items.
+  Touched: `laneColors.ts` (color table + `LANE_LABELS` + `DECK_LANE_ORDER`,
+  under vitest), `DawTimeline.tsx` (toggle gutter, terse labels, × gone,
+  cue-guide palette fallback), `TransitionEditor.tsx` (TEMPO/SNAP buttons,
+  dropdown gone, MIDI beatjump polarity, deck-agnostic nudges),
+  `editorStore.ts` (lock default true; `alignmentNudge(deltaSec)` apparent-
+  motion), `gestureMath.ts` (`slideBeatsToSeconds` — the gesture-layer
+  polarity flip, under vitest; `slideB`/mixModel untouched, jog B exempt),
+  `DeckCard.tsx` (tooltips reworded), `GlobalMinimap.tsx` +
+  `WaveformRendererV2.ts` (zoned cue marks: row pole+flag at the outer
+  edge, badge kept; minimap square flags; `cueCssColor` shared fallback —
+  no `#39ff14` left in the editor), `transitionEditor.css` (flat strips,
+  green engaged states, zero outer padding, flex height budget).
+  Gate: tsc, eslint (touched files), vitest 1191 green, build green.
+
+  **Verification walkthrough** — lane app running on laneux (+230):
+  open http://localhost:5403 (or `npm --prefix desktop start -- --port 5403`),
+  switch to the Transition editor, load a pair with hot cues:
+  1. Left gutter chips: A stack (cyan family) top, B (magenta) bottom.
+     Draw on a lane, chip off → strip gone; chip on → envelope restored.
+     No "add lane…" dropdown, no × on strip labels.
+  2. Chips/labels/curves agree per lane; labels read FADER LOW MID HIGH FILTER.
+  3. Cue marks in the rows: pole + square flag at the row's OUTER edge
+     (A up, B down) + numbered badge; editor minimap has square flags;
+     colorless cues take slot-palette colors (blue/yellow/orange/…), no green.
+  4. TEMPO/SNAP buttons light green when engaged; templates button green
+     while open; after clicking any of them, Space still toggles transport.
+  5. Lane strips flat; 3px deck edge intact.
+  6. Lock (B card padlock) is ON at editor mount; toggle off, reload → on.
+  7. B card slide ▶ moves B's block visibly RIGHT with lock on AND off;
+     align ▶ (either card) also moves the block right; tooltips match.
+  8. Editor top panel edge-to-edge, no vertical scrollbar at any sane size.

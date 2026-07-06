@@ -44,6 +44,17 @@ export interface MixPlayerAudio {
   audible?: () => boolean;
 }
 
+/** The session's opened track on one editor side (sets 37): under a
+ * deferred open the shared deck may hold ANOTHER surface's track — the
+ * session pair is a target the decks must reach before sound, not a fact
+ * read off the engines. */
+export interface TrackTarget {
+  id: number;
+  /** Track-data duration (seconds) — the model-math fallback while the
+   * deck holds a foreign track (null/unknown → 0). */
+  durationSec: number | null;
+}
+
 export class MixPlayer {
   /** Injected machinery (see header). Public: the editor's UI reads deck
    * snapshots and subscribes through these. */
@@ -54,6 +65,9 @@ export class MixPlayer {
 
   private mix: EditorMix;
   private bpm: { a: number | null; b: number | null } = { a: null, b: null };
+  /** Opened-pair targets (sets 37); null = no session claim on that side
+   * (legacy/standalone behavior: the engine is the truth). */
+  private targets: { A: TrackTarget | null; B: TrackTarget | null } = { A: null, B: null };
 
   /** Deck mutes override the drawn fader lanes (applyLanes runs per tick,
    * so a plain one-shot fader write would be overwritten next frame). */
@@ -67,6 +81,11 @@ export class MixPlayer {
   private anchorAudioTime = 0;
   private raf = 0;
   private listeners = new Set<() => void>();
+  /** Seek taps (sets 37): every external seek() is a transport gesture —
+   * timeline scrub, minimap, jog, cue/beat jumps — the editor shell uses
+   * this to cancel a pending audition arm. Internal deck syncs go through
+   * engine.seek directly and never tap. */
+  private seekListeners = new Set<() => void>();
 
   // Routing/surface registration lives in TransitionEditor's mount
   // effects, NOT here (headphone-cue 06 follow-up): StrictMode
@@ -88,18 +107,39 @@ export class MixPlayer {
   // shared Decks through the deck provider's one load path; the conductor
   // reads what it needs from the engines it drives.
 
+  /** Set (or clear) a side's session target (sets 37). Readiness and the
+   * model's durations become track-aware: while the deck holds a foreign
+   * track (deferred open over a conducting set), ready() is false and
+   * arrangement math runs on track-data durations, so the strips, scrubs
+   * and parks describe the OPENED pair — not whatever the decks hold. */
+  setTrack(deck: 'A' | 'B', target: TrackTarget | null): void {
+    this.targets[deck] = target;
+    this.emit();
+  }
+
+  private deckDuration(engine: DeckEngine, target: TrackTarget | null): number {
+    const snap = engine.getSnapshot();
+    if (target === null || snap.trackId === target.id) return snap.duration;
+    return target.durationSec ?? 0;
+  }
+
   private durations(): { a: number; b: number } {
     return {
-      a: this.engineA.getSnapshot().duration,
-      b: this.engineB.getSnapshot().duration,
+      a: this.deckDuration(this.engineA, this.targets.A),
+      b: this.deckDuration(this.engineB, this.targets.B),
     };
   }
 
+  private deckReady(engine: DeckEngine, target: TrackTarget | null): boolean {
+    const snap = engine.getSnapshot();
+    if (snap.loadState !== 'ready') return false;
+    return target === null || snap.trackId === target.id;
+  }
+
+  /** Both decks hold this session's pair, decoded — track-aware once
+   * targets are set (sets 37): a foreign-ready deck is not ready. */
   ready(): boolean {
-    return (
-      this.engineA.getSnapshot().loadState === 'ready' &&
-      this.engineB.getSnapshot().loadState === 'ready'
-    );
+    return this.deckReady(this.engineA, this.targets.A) && this.deckReady(this.engineB, this.targets.B);
   }
 
   /**
@@ -204,7 +244,14 @@ export class MixPlayer {
       if (arr.aActive) this.engineA.seek(arr.aTrackTime);
       if (arr.bActive || t >= this.mix.transition.startSec) this.engineB.seek(Math.max(0, arr.bTrackTime));
     }
+    for (const l of this.seekListeners) l();
     this.emit();
+  }
+
+  /** Subscribe to external seeks (sets 37 — see seekListeners). */
+  subscribeSeek(listener: () => void): () => void {
+    this.seekListeners.add(listener);
+    return () => this.seekListeners.delete(listener);
   }
 
   // (togglePlay removed with sets 21: every play gesture routes through
@@ -220,6 +267,7 @@ export class MixPlayer {
   dispose(): void {
     cancelAnimationFrame(this.raf);
     this.listeners.clear();
+    this.seekListeners.clear();
   }
 
   // ── Internals ────────────────────────────────────────────────────────

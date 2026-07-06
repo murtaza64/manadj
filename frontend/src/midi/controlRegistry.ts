@@ -40,6 +40,22 @@ export interface MidiDeckControls {
   jogTouchTicks(ticks: number): void;
   /** SHIFT+jog ticks (signed): deliberate fast seek, playing or paused. */
   jogSeekTicks(ticks: number): void;
+  /** One discrete grid-nudge step (±GRID_NUDGE_MS), persisting — the same
+   * op as the on-screen nudge buttons. Gridless Track: no-op
+   * (midi-performance-ops 05). */
+  gridNudgeStep(direction: 'earlier' | 'later'): void;
+  /** Set the grid's downbeat/anchor at the playhead (the existing
+   * set-downbeat path, ADR 0016). Gridless Track: no-op. */
+  gridSetDownbeat(): void;
+  /** Grid tempo ops: Grow/Shrink micro-adjust; BPM halve/double via the
+   * serialized BPM commit chain. Gridless or variable grid: no-op. */
+  gridBpm(change: 'grow' | 'shrink' | 'halve' | 'double'): void;
+  /** Spin-to-nudge (midi-performance-ops 06): apply one tick batch to the
+   * LOCAL grid only — optimistic, no persistence. Gridless: no-op. */
+  gridNudgeLocal(offsetMs: number): void;
+  /** Spin-to-nudge release: persist the gesture's accumulated net offset
+   * in one backend call. Gridless: no-op. */
+  gridNudgeCommit(offsetMs: number): void;
 }
 
 /**

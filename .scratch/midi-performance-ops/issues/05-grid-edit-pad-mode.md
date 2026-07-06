@@ -1,6 +1,7 @@
 # Grid-edit pad mode on the SAMPLER pads (tap layer) with lamps
 
-Status: ready-for-agent
+Status: ready-for-human
+Review: parked on lane midigrid (grid track stack, review lands the prefix); walkthrough in .lanes/midigrid.md and the requesting session; lane app http://localhost:5423
 
 ## Parent
 
@@ -29,3 +30,7 @@ Repurpose the SAMPLER pad mode as Beatgrid editing (the label lies deliberately:
 ## Blocked by
 
 - `04-nudge-offset-param.md` (taps call the offset-parameterized nudge)
+
+## Comments
+
+**2026-07-06 (lane midigrid)**: Implemented as two stacked changes — the grow/shrink rename (its own change: `nudgeBpm` → `growShrinkBpm` with a `'grow' | 'shrink'` vocabulary in bpmCommit.ts, `BpmCompressIcon`/`BpmSpreadIcon` → `BpmShrinkIcon`/`BpmGrowIcon`, BpmControl titles) and the pad mode. New button targets appended to actions.ts (`grid-nudge`/`grid-anchor`/`grid-bpm`), registry-direct dispatch cases, SAMPLER bindings 0x30–0x37 ch 6/7 in inpulse300mk2.ts (`gridEditPads` helper, TODO(hardware-verify), pad 3 unbound), `gridPads` lamp addresses + `DeckFeedback.gridPads` + `DeckLedInput.hasBeatgrid` + `DeckLedStates.gridPads` in the Feedback seam. Glue: new hooks/useGridEditActions.ts (same mutations/commit chain as the on-screen controls; nudge POSTs serialized; optimistic BPM base mirrors BpmControl; gridless → no-op; variable grid → grid ops yes, BPM ops no-op like the readout-only screen rule; halve/double use the screen's whole-BPM octave rounding), registered in MidiControlRegistrar; MidiFeedbackBridge feeds `hasBeatgrid` from the same beatgrid query the handlers read. Tests: real-mapping binding coverage in translator.test.ts, registry-direct routing in dispatch.test.ts, gridded/gridless lamp rule in feedback.test.ts. `npx vitest run` 1169 green, tsc clean.

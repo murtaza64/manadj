@@ -130,8 +130,10 @@ interface PlannedAdjacencyBase {
   tempoReturnEndSec: number;
 }
 
-/** hardcut covers no pin, dangling pins, failed Take vectorization; the
- * windowed variants carry the executed Transition (idealized for Takes). */
+/** hardcut covers no applicable Transition: nothing to resolve, an
+ * explicit Hard-cut pin (sets 26), dangling pins, failed Take
+ * vectorization; the windowed variants carry the executed Transition
+ * (idealized for Takes). */
 export type PlannedAdjacency =
   | (PlannedAdjacencyBase & { kind: 'hardcut'; transition?: undefined })
   | (PlannedAdjacencyBase & { kind: 'transition' | 'take'; transition: Transition });
@@ -207,7 +209,10 @@ export function fmtSec(s: number): string {
 }
 
 /** Resolve an adjacency's pin to the Transition it executes (idealizing
- * Take pins through the vectorizer), or null → hard cut. */
+ * Take pins through the vectorizer), or null → hard cut. Entries arrive
+ * already library-resolved (sets 26, `resolvePlanPins` upstream): a null
+ * pin here means a genuinely evidence-less adjacency, and an explicit
+ * Hard-cut pin falls through to null — both cut. */
 function resolvePin(
   pin: AdjacencyPin | null,
   input: PlanInput,

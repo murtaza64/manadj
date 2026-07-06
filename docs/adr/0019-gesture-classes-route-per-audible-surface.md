@@ -28,3 +28,14 @@ browse-surface registration instead: load policy is VIEW-owned, not
 audibility-owned (the editor's assign-to-pair, Performance's load lock, and
 the library's free replace differ per view). Amends ADR 0013; ADR 0002's
 testing discipline is unchanged (dispatch + surface fakes stay the seam).
+
+Amendment (midi-performance-ops 06 — the spin-to-nudge carve-out): while a
+grid-nudge pad is held, that deck's jog rim and touch ticks are consumed by
+the grid-edit chord reducer (`frontend/src/midi/gridChord.ts`) BEFORE
+surface routing — they mean fine grid nudge and reach no surface's jog
+meanings (no tempo Nudge, no seek). This deliberately bends "jog routes to
+the audible surface": the chord is a stored-data edit gesture, and letting
+its ticks also bend a playing Deck's tempo would be worse than the
+exception. Release restores plain surface-routed jog instantly; the other
+deck's jog is untouched (per-deck isolation); the shifted jog-seek stream
+stays surface-routed (SHIFT is its own deliberate gesture).

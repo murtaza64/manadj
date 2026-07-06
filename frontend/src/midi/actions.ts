@@ -32,7 +32,16 @@ export type ButtonTarget =
   | { control: 'match'; deck: ChannelId }
   | { control: 'load'; deck: ChannelId }
   /** PFL toggle (headphone-cue 02) — mixer-facing, hence `channel`. */
-  | { control: 'pfl'; channel: ChannelId };
+  | { control: 'pfl'; channel: ChannelId }
+  /** Grid editing (midi-performance-ops 05) — stored-data edits, hence
+   * registry-direct (ADR 0019): grid ops mean the same thing on every
+   * view. Nudge translates the Beatgrid by one discrete ±10ms step. */
+  | { control: 'grid-nudge'; deck: ChannelId; direction: 'earlier' | 'later' }
+  /** Set-downbeat at the playhead — records the grid's anchor (ADR 0016). */
+  | { control: 'grid-anchor'; deck: ChannelId }
+  /** Grid tempo ops: Grow/Shrink micro-adjust (glossary) and BPM
+   * halve/double, all through the one BPM write path. */
+  | { control: 'grid-bpm'; deck: ChannelId; change: 'grow' | 'shrink' | 'halve' | 'double' };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }
