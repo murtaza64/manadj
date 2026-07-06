@@ -49,6 +49,41 @@ const SEEK_JUMP_S = 2;
  * not the user's (smooth scrolling animates through many events). */
 const AUTO_SCROLL_WINDOW_MS = 700;
 
+// ── Clip-draw scheduler ────────────────────────────────────────────────
+// Opening a Set mounts 20-40 clip canvases whose effects all want to
+// rasterize in the same commit — at the 10-minute default framing (with
+// 2x supersampling) that's a 100-200ms main-thread burst that visibly
+// lags the pane. Instead, draws queue here and a rAF pump burns a fixed
+// budget per frame: the pane paints immediately and clips fill in over a
+// few frames. Zoom-settle and styles-mode redraws ride the same queue,
+// so their bursts de-spike too.
+const DRAW_BUDGET_MS = 6;
+type DrawJob = { fn: () => void; cancelled: boolean };
+const drawQueue: DrawJob[] = [];
+let drawPumping = false;
+function pumpDraws() {
+  const start = performance.now();
+  while (drawQueue.length > 0 && performance.now() - start < DRAW_BUDGET_MS) {
+    const job = drawQueue.shift()!;
+    if (!job.cancelled) job.fn();
+  }
+  if (drawQueue.length > 0) requestAnimationFrame(pumpDraws);
+  else drawPumping = false;
+}
+/** Queue a clip draw; returns a canceller (effect cleanup — a superseded
+ * draw must not run with stale props against a re-rendered canvas). */
+function scheduleClipDraw(fn: () => void): () => void {
+  const job: DrawJob = { fn, cancelled: false };
+  drawQueue.push(job);
+  if (!drawPumping) {
+    drawPumping = true;
+    requestAnimationFrame(pumpDraws);
+  }
+  return () => {
+    job.cancelled = true;
+  };
+}
+
 interface OverviewLadderProps {
   setId: number;
   plan: SetPlan;
@@ -622,50 +657,56 @@ function LadderWave({
   const slot = useStyleSlot('minimap');
 
   useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    if (w === 0 || h === 0) return;
-    // Horizontal supersampling: up to 2x the display resolution, so the
-    // CSS stretch while a zoom-in gesture is in flight has real detail to
-    // stretch into (half the blur until the settle redraw lands). Tapers
-    // to 1x as clips get wide (high zoom) to bound backing-store memory
-    // and settle-redraw cost.
-    const os = Math.max(1, Math.min(2, 8192 / (w * dpr)));
-    const wDraw = Math.round(w * os);
-    canvas.width = wDraw * dpr;
-    canvas.height = h * dpr;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, wDraw, h);
-    if (!wave) return;
+    // Rasterizing is the expensive part — it runs through the clip-draw
+    // scheduler (frame-budgeted), not synchronously in the effect, so a
+    // Set open / zoom settle / style tweak never blocks a paint on the
+    // whole ladder's worth of columns.
+    return scheduleClipDraw(() => {
+      const canvas = ref.current;
+      if (!canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (w === 0 || h === 0) return;
+      // Horizontal supersampling: up to 2x the display resolution, so the
+      // CSS stretch while a zoom-in gesture is in flight has real detail to
+      // stretch into (half the blur until the settle redraw lands). Tapers
+      // to 1x as clips get wide (high zoom) to bound backing-store memory
+      // and settle-redraw cost.
+      const os = Math.max(1, Math.min(2, 8192 / (w * dpr)));
+      const wDraw = Math.round(w * os);
+      canvas.width = wDraw * dpr;
+      canvas.height = h * dpr;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, wDraw, h);
+      if (!wave) return;
 
-    const [t0, t1] = range;
-    const span = Math.max(t1 - t0, 0.001);
-    const xAt = (t: number) => ((t - t0) / span) * wDraw;
+      const [t0, t1] = range;
+      const span = Math.max(t1 - t0, 0.001);
+      const xAt = (t: number) => ((t - t0) / span) * wDraw;
 
-    drawStyledWave(ctx, wave, slot.styleId, slot.params, {
-      width: wDraw,
-      height: h,
-      dir,
-      range,
-      brightness: MINIMAP_BRIGHTNESS,
+      drawStyledWave(ctx, wave, slot.styleId, slot.params, {
+        width: wDraw,
+        height: h,
+        dir,
+        range,
+        brightness: MINIMAP_BRIGHTNESS,
+      });
+
+      for (const c of cues) {
+        const x = xAt(c.t);
+        if (x < -6 * os || x > wDraw + 6 * os) continue;
+        // The minimap's zoned cue mark (WaveformRendererV2.pushHotCues,
+        // minimap branch): 2px full-height pole + 5×5 square flag off its
+        // right, flag on the title side: top for 'up', bottom for 'down'.
+        // Horizontal sizes scale by os so they DISPLAY at minimap size.
+        ctx.fillStyle = c.color;
+        ctx.fillRect(x - os, 0, 2 * os, h);
+        ctx.fillRect(x + os, dir === 'up' ? 0 : h - 5, 5 * os, 5);
+      }
     });
-
-    for (const c of cues) {
-      const x = xAt(c.t);
-      if (x < -6 * os || x > wDraw + 6 * os) continue;
-      // The minimap's zoned cue mark (WaveformRendererV2.pushHotCues,
-      // minimap branch): 2px full-height pole + 5×5 square flag off its
-      // right, flag on the title side: top for 'up', bottom for 'down'.
-      // Horizontal sizes scale by os so they DISPLAY at minimap size.
-      ctx.fillStyle = c.color;
-      ctx.fillRect(x - os, 0, 2 * os, h);
-      ctx.fillRect(x + os, dir === 'up' ? 0 : h - 5, 5 * os, 5);
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wave, height, dir, range[0], range[1], cueKey, redrawKey, slot]);
 

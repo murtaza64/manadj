@@ -85,9 +85,10 @@
   color: var(--text);
 }
 
-/* MIDI Controller badge: top right, lit while a mapped device is attached. */
+/* MIDI Controller badge: top right, lit while a mapped device is attached.
+   (Its former margin-left: auto moved to the always-mounted ownership
+   chip, which now leads the right cluster — sets 40.) */
 .topbar-midi {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -138,6 +139,66 @@
   background: var(--green);
   border-color: var(--green);
   color: var(--base);
+}
+
+/* Audio-ownership chip (sets 40): who owns the decks, always present in
+   the same slot. Muted while the shared decks hold; the muted→colored
+   flip is the takeover/stand-down signal. Fixed height/typography across
+   faces; it leads the right cluster (margin-left: auto), so width changes
+   (set names) grow into free space — no layout shift of its neighbors. */
+.topbar-ownership {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--overlay0);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+/* Muted DECKS: the shared default — glanceable, not clickable. */
+.topbar-ownership.decks {
+  cursor: default;
+}
+
+.topbar-ownership.set-playing {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--base);
+}
+
+/* Paused Conductor STILL holds the claim (ADR 0024) — never hide it.
+   Yellow: the one state people would otherwise misread as "free". */
+.topbar-ownership.set-paused {
+  background: var(--yellow);
+  border-color: var(--yellow);
+  color: var(--base);
+}
+
+.topbar-ownership.audition {
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--base);
+}
+
+.topbar-ownership-icon {
+  font-size: 10px;
+}
+
+.topbar-ownership-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 800;
 }
 
 /* Output routing (headphone-cue 04): MASTER/CUE device selects, inline. */

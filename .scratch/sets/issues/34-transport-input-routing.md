@@ -1,6 +1,6 @@
 # 34 — Transport input routing: controller = decks, spacebar = Conductor
 
-Status: ready-for-human (implemented 2026-07-06, change `vkwnvxvv`, lane conductor — awaiting review)
+Status: done (human-approved + landed 2026-07-06, merge `oksyuznn`, lane conductor)
 
 ## Parent
 

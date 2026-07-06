@@ -300,6 +300,12 @@ export function getConductor(): Conductor | null {
   return conductor;
 }
 
+/** Non-hook snapshot read (sets 34: the space dispatch resolves its
+ * transport verb outside React). */
+export function getConductorState(): ConductorState {
+  return snapshot;
+}
+
 export function useConductorState(): ConductorState {
   return useSyncExternalStore(
     (fn) => {

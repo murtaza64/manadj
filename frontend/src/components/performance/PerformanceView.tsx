@@ -29,6 +29,7 @@ import { MixerStrip } from './MixerStrip';
 import { LinkToggle } from '../../links/LinkToggle';
 import { DeckKeys } from './DeckKeys';
 import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
+import { dispatchSetSpace } from '../../sets/spaceTransport';
 import { isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
 import './PerformanceView.css';
@@ -115,10 +116,14 @@ export function PerformanceView() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isGuardedKeyEvent(event)) return;
 
-      // Space is deliberately unbound in this view (confirmed decision):
-      // claim it so it neither scrolls nor re-activates a focused control.
+      // Space (sets 34): with a Set selected in the embedded browse view,
+      // space drives the Conductor's mix-level transport — the set wins
+      // over the decks (d/k keep the per-deck toggles). With no Set
+      // selected it stays deliberately unbound (confirmed decision),
+      // claimed so it neither scrolls nor re-activates a focused control.
       if (event.key === ' ') {
         event.preventDefault();
+        dispatchSetSpace();
         return;
       }
 

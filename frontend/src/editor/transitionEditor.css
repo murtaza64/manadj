@@ -542,6 +542,23 @@
   will-change: transform;
 }
 
+/* Live Conductor playhead (sets 38): the ongoing SET's position inside
+   the loaded transition's window. Saturated orange — distinct from the
+   pink mix playhead, cyan jumps, and green cue guides; below the mix
+   playhead (100), above jumps (60). */
+.editor-conductor-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0; /* driven per frame via transform: translateX */
+  width: 1.5px;
+  background: #ff9500;
+  box-shadow: 0 0 4px #ff950088;
+  pointer-events: none;
+  z-index: 90;
+  will-change: transform;
+}
+
 /* ── Info bar: deck A | transition center | deck B ── */
 
 .editor-infobar {

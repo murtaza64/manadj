@@ -44,6 +44,7 @@ import { useToast } from './Toast';
 import { useAddTracksToPlaylist, useTrackMenuItems } from './useTrackMenuItems';
 import SetDetailPane from '../sets/SetDetailPane';
 import { getSelectedSetId, selectSet } from '../sets/setStore';
+import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
 import {
   PLAY_ORDER_SORT,
   isPlayOrderSort,
@@ -98,6 +99,19 @@ export default function Library({
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
+  // Cross-view set navigation (sets 40, TopBar ownership chip): the store
+  // already carries the selection; this nudges an ALREADY-mounted browse
+  // instance (whose view state is local, seeded on mount) to show it.
+  useEffect(() => {
+    const onNavigateSet = () => {
+      const id = getSelectedSetId();
+      if (id === null) return;
+      setSelectedView('set');
+      setSelectedSetId(id);
+    };
+    window.addEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
+    return () => window.removeEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
+  }, []);
   const queryClient = useQueryClient();
   const tagEditorRef = useRef<TagEditorHandle | null>(null);
   const { filters, setFilters } = useFilters();
