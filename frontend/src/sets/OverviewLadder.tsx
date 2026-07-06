@@ -97,7 +97,7 @@ interface OverviewLadderProps {
   onSeek: (mixTimeSec: number) => void;
   /** Live drag preview (sets 07): the plan is HYPOTHETICAL and each
    * affected adjacency's future is marked — will-restore (a Dormant pin
-   * waits), auto-fillable (a library Transition exists), unresolved.
+   * waits), auto-resolves (a library Transition exists), unresolved.
    * Index-aligned with plan.adjacencies; null = unaffected. */
   previewFutures?: (AdjacencyFuture | null)[];
 }
@@ -461,7 +461,7 @@ function AdjacencyBand({
     // AUTO-FILLABLE preview: this hypothetical pair has a library
     // Transition on offer — a dashed yellow blade + ◆ instead of the
     // unresolved red ✕ (which UNRESOLVED futures keep).
-    const color = future === 'auto-fillable' ? '#ffe000' : '#ff0040';
+    const color = future === 'auto-resolves' ? '#ffe000' : '#ff0040';
     // Unmissable: dashed blade + glyph at the center line.
     return (
       <div
@@ -490,7 +490,7 @@ function AdjacencyBand({
             whiteSpace: 'nowrap',
           }}
         >
-          {future === 'auto-fillable' ? '◆' : '✕'}
+          {future === 'auto-resolves' ? '◆' : '✕'}
         </span>
       </div>
     );

@@ -65,7 +65,7 @@ import {
 import { practiceCuePositions } from './practice';
 import {
   adjacencyView,
-  autoFillProposal,
+  resolveTransition,
   type AdjacencyPin,
   type TakeEvidence,
   type TransitionEvidence,
@@ -185,6 +185,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       uuid: it.uuid,
       name: it.name,
       favorite: it.favorite ?? false,
+      updatedAtMs: it.updatedAtMs,
     }));
     const pairTakes: TakeEvidence[] = takes
       .filter((t) => t.a_track_id === a && t.b_track_id === b)
@@ -193,11 +194,12 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   };
 
   // Adjacency click-through (sets 09): route by RESOLVED pin kind — a
-  // Transition pin opens the editor with that Transition selected, a Take
-  // pin opens the existing Take-review flow, unresolved (including
-  // dangling pins) opens a blank sketch for the pair. The request rides a
-  // window event; App flips the mode; the mounted editor consumes it —
-  // this pane's state (set store) survives the switch untouched.
+  // Transition (pinned or auto-resolved, sets 26) opens the editor with
+  // that Transition selected, a Take pin opens the existing Take-review
+  // flow, a cut (hard-cut pin, or no evidence) opens a blank sketch for
+  // the pair. The request rides a window event; App flips the mode; the
+  // mounted editor consumes it — this pane's state (set store) survives
+  // the switch untouched.
   const openAdjacencyEditor = (
     aTrackId: number,
     bTrackId: number,
@@ -216,15 +218,17 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     });
   };
 
-  // Set-wide auto-fill: one click accepts every proposal on a pin-less
-  // adjacency. Existing pins (even dangling ones) are never overwritten.
+  // Set-wide auto-fill (role shrunk by sets 26): one click FREEZES every
+  // auto-resolved choice as a pin — playback already plays these; pinning
+  // detaches them from the library's evolution. Existing pins are never
+  // overwritten.
   const autoFillable = new Map<number, AdjacencyPin>();
   if (entries) {
     for (let i = 0; i < entries.length - 1; i++) {
       if (entries[i].pin !== null) continue;
       const { transitions } = pairEvidence(entries[i].trackId, entries[i + 1].trackId);
-      const proposal = autoFillProposal(transitions);
-      if (proposal) autoFillable.set(entries[i].trackId, { kind: 'transition', uuid: proposal.uuid });
+      const resolved = resolveTransition(transitions);
+      if (resolved) autoFillable.set(entries[i].trackId, { kind: 'transition', uuid: resolved.uuid });
     }
   }
 
@@ -890,28 +894,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             disabled={autoFillable.size === 0}
             title={
               autoFillable.size === 0
-                ? 'No unresolved adjacency has an unambiguous Transition'
-                : 'Pin the proposed Transition on every unresolved adjacency'
+                ? 'No unpinned adjacency auto-resolves to a Transition'
+                : 'Freeze every auto-resolved choice as a pin (new saves and favorites will no longer change what plays)'
             }
           >
             Auto-fill {autoFillable.size > 0 ? `(${autoFillable.size})` : ''}
           </button>
-          {/* Suggest (sets 10): ranked candidates to append after the last track */}
-          <button
-            className="btn btn-primary"
-            onClick={(e) =>
-              lastTrack &&
-              setSuggest({ x: e.clientX, y: e.clientY, target: { kind: 'append', last: lastTrack } })
-            }
-            disabled={!lastTrack}
-            title={
-              lastTrack
-                ? 'Suggest tracks to append, ranked by follow tiering out of the last track'
-                : 'Add a track first — suggestions rank out of the last track'
-            }
-          >
-            Suggest
-          </button>
+          {/* The header Suggest button moved into the list as the
+              trailing suggest row (sets 36): append is an insert at the
+              terminal gap, so it gets the gap affordance. */}
         </span>
       </div>
 
@@ -1083,6 +1074,52 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             );
           })
         )}
+
+        {/* Trailing suggest row (sets 36): the terminal gap's affordance
+            — the header Suggest button unified into the + insert family
+            (append IS an insert at the terminal gap). Permanently
+            visible, not hover-revealed: the primary set-building
+            affordance. Empty set: disabled, teaching copy inline. */}
+        {displayEntries !== undefined && (
+          <button
+            data-set-suggest-row
+            className="set-suggest-row"
+            disabled={!lastTrack}
+            onClick={(e) => {
+              if (!lastTrack) return;
+              setSuggest({
+                x: e.clientX,
+                y: e.clientY,
+                target: { kind: 'append', last: lastTrack },
+              });
+            }}
+            title={
+              lastTrack
+                ? 'Suggest tracks to append, ranked by follow tiering out of the last track'
+                : undefined
+            }
+            style={{ gap: `${ADJ_ROW_GAP}px`, padding: `4px ${ROW_PAD_X}px 4px ${ADJ_PAD_LEFT}px` }}
+          >
+            {/* + in the insert affordances' gutter column, label beside
+                it at the shared title x (rowColumns.ts geometry). */}
+            <span
+              aria-hidden
+              style={{
+                width: `${ADJ_GUTTER_W}px`,
+                flexShrink: 0,
+                display: 'flex',
+                justifyContent: 'flex-start',
+              }}
+            >
+              <span style={{ width: '18px', fontSize: '13px', fontWeight: 700 }}>+</span>
+            </span>
+            <span>
+              {displayEntries.length === 0
+                ? 'Add a track first — suggestions rank out of the last track'
+                : 'suggest a track'}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Suggestion popover (sets 10) — accepting adds the Track; pins
@@ -1139,13 +1176,16 @@ function useDeckOccupancy(decks: Record<ChannelId, DeckContextValue>): DeckOccup
   );
 }
 
-/** Pin-chip look per resolved status (sets 20): an UNRESOLVED
- * adjacency's "✕ hard cut" chip itself turns red — there is no separate
- * UNRESOLVED badge. Red keys off pin state, never the name: a pinned
- * Transition NAMED "hard cut" keeps the normal green chip. The style
- * rides inline on a .set-chip-btn (perf-layout 08): accent text
- * throughout — red text (bold), not a red fill, for unresolved (22
- * follow-up: a fill per hard cut is too loud on a fresh set). */
+/** Pin-chip look per resolved status (sets 20, revised by 26): the red
+ * "✕ hard cut" chip appears exactly when a cut will actually PLAY — no
+ * evidence, or an explicit Hard-cut pin. An auto-resolved adjacency
+ * (unpinned, sets 26) shows the resolved Transition's chip with a
+ * subtle "auto" mark: hollow diamond, dimmer text — visibly not a pin.
+ * Red keys off pin state, never the name: a pinned Transition NAMED
+ * "hard cut" keeps the normal green chip. The style rides inline on a
+ * .set-chip-btn (perf-layout 08): accent text throughout — red text
+ * (bold), not a red fill, for cuts (22 follow-up: a fill per hard cut
+ * is too loud on a fresh set). */
 function pinChip(view: ReturnType<typeof adjacencyView>): {
   text: string;
   style: React.CSSProperties;
@@ -1153,6 +1193,16 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
 } {
   if (view.status === 'transition') {
     const star = view.transition!.favorite ? '★ ' : '';
+    if (view.auto) {
+      return {
+        text: `◇ ${star}${view.transition!.name} · auto`,
+        style: { color: 'var(--green)', opacity: 0.75 },
+        title:
+          'Auto-resolved at plan time (favorite first, else most recently edited) — library-live, ' +
+          'not a pin: saving or favoriting a transition for this pair may change what plays. ' +
+          'Click to pin a choice.',
+      };
+    }
     return {
       text: `◆ ${star}${view.transition!.name}`,
       style: { color: 'var(--green)' },
@@ -1167,10 +1217,17 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
       title: 'Pin a transition or take for this handover',
     };
   }
+  if (view.status === 'hardcut') {
+    return {
+      text: '✕ hard cut',
+      style: { color: 'var(--red)' },
+      title: 'Hard-cut pin — cut here, play no transition (even though some exist). Click to change',
+    };
+  }
   return {
     text: '✕ hard cut',
     style: { color: 'var(--red)' },
-    title: 'Unresolved — will hard-cut. Pin a transition or take for this handover',
+    title: 'No transitions for this pair — will hard-cut. Pin a transition or take for this handover',
   };
 }
 
@@ -1234,7 +1291,7 @@ function AdjacencyRow({
   planned?: PlannedAdjacency;
   /** This adjacency's future under a live drag preview (sets 23):
    * 'will-restore' grows the violet ↺ marker beside the (already
-   * restored) pin chip; auto-fillable/unresolved render through the
+   * restored) pin chip; auto-resolves/unresolved render through the
    * ordinary machinery (proposal button, red hard-cut chip); null when
    * unaffected or not previewing. */
   future?: AdjacencyFuture | null;
@@ -1262,11 +1319,12 @@ function AdjacencyRow({
 }) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const view = adjacencyView(pin, evidence.transitions, evidence.takes);
-  const proposal = pin === null ? autoFillProposal(evidence.transitions) : null;
   const chip = pinChip(view);
 
   // Manual pin picker: the pair's Transitions AND Takes (Takes are never
-  // auto-filled — pinning one is always this explicit act, ADR 0023).
+  // auto-filled — pinning one is always this explicit act, ADR 0023),
+  // plus the explicit Hard-cut pin (sets 26 — the way to keep a
+  // deliberate cut now that unresolved auto-resolves).
   const pickerItems: MenuItem[] = [
     ...evidence.transitions.map((t) => ({
       label: `${t.favorite ? '★ ' : ''}${t.name}${pin?.uuid === t.uuid ? ' ✓' : ''}`,
@@ -1280,12 +1338,16 @@ function AdjacencyRow({
     ...(evidence.transitions.length === 0 && evidence.takes.length === 0
       ? [{ label: 'No transitions or takes for this pair', disabled: true }]
       : []),
+    {
+      label: `✕ Hard cut — play no transition${pin?.kind === 'hardcut' ? ' ✓' : ''}`,
+      separatorBefore: true,
+      onSelect: () => onPin({ kind: 'hardcut' }),
+    },
     ...(pin !== null
       ? [
           {
-            label: 'Unpin (hard cut)',
+            label: 'Unpin (auto-resolve from the library)',
             danger: true,
-            separatorBefore: true,
             onSelect: () => onPin(null),
           },
         ]
@@ -1353,7 +1415,10 @@ function AdjacencyRow({
           title={chip.title}
           style={{
             ...chip.style,
-            fontWeight: view.status === 'unresolved' ? 600 : undefined,
+            // Bold exactly when a cut actually plays (sets 26): no
+            // evidence, or an explicit Hard-cut pin.
+            fontWeight:
+              view.status === 'unresolved' || view.status === 'hardcut' ? 600 : undefined,
           }}
         >
           {chip.text}
@@ -1408,18 +1473,45 @@ function AdjacencyRow({
           </button>
         )}
 
-        {/* One-click auto-fill accept (Transitions only, favorite first) */}
-        {proposal && view.status === 'unresolved' && (
+        {/* One-click freeze (sets 26): pin the auto-resolved choice —
+            playback already plays it; pinning detaches it from the
+            library's evolution. */}
+        {view.auto && view.transition && (
           <button
             className="set-chip-btn"
             onClick={(e) => {
               e.stopPropagation();
-              onPin({ kind: 'transition', uuid: proposal.uuid });
+              onPin({ kind: 'transition', uuid: view.transition!.uuid });
             }}
-            title="Pin the proposed Transition"
+            title="Pin this auto-resolved Transition (freeze it — new saves and favorites will no longer change what plays here)"
             style={{ borderColor: 'var(--green)', color: 'var(--green)' }}
           >
-            ↳ pin {proposal.favorite ? '★ ' : ''}{proposal.name}
+            ↳ pin
+          </button>
+        )}
+
+        {/* Take-available indicator (26 review follow-up): a cut is about
+            to play while the pair HAS recorded Takes — the one evidence
+            resolution deliberately ignores (Takes never auto-resolve,
+            ADR 0023), so surface the manual option. Click opens the pin
+            picker, where the Takes are listed. Quiet when a Transition
+            plays (the counts cell already says "· N tk"), and the fresh-
+            take offer below outranks it (one mauve chip at a time). */}
+        {view.status === 'unresolved' && view.counts.takes > 0 && !freshTake && (
+          <button
+            className="set-chip-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuPos({ x: e.clientX, y: e.clientY });
+            }}
+            title={`This pair has ${view.counts.takes} recorded Take${
+              view.counts.takes === 1 ? '' : 's'
+            } but no saved Transition — Takes never auto-resolve; pin one to play it here`}
+            style={{ borderColor: 'var(--mauve)', color: 'var(--mauve)' }}
+          >
+            {view.counts.takes === 1
+              ? '● take available — pin?'
+              : `● ${view.counts.takes} takes available — pin?`}
           </button>
         )}
 

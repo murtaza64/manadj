@@ -147,12 +147,15 @@ async function doLoad(setId: number): Promise<void> {
       pin:
         e.pin_kind === 'transition' || e.pin_kind === 'take'
           ? { kind: e.pin_kind, uuid: e.pin_uuid! }
-          : null,
+          : e.pin_kind === 'hardcut'
+            ? { kind: 'hardcut' }
+            : null,
     }));
     const dormant: DormantPin[] = (detail.dormant ?? []).map((d) => ({
       aTrackId: d.a_track_id,
       bTrackId: d.b_track_id,
-      pin: { kind: d.pin_kind, uuid: d.pin_uuid },
+      pin:
+        d.pin_kind === 'hardcut' ? { kind: 'hardcut' } : { kind: d.pin_kind, uuid: d.pin_uuid! },
     }));
     // Normalize through the reconcile rule (sets 07): server state where
     // a Dormant memory covers a currently-adjacent pair (writable via
@@ -244,7 +247,7 @@ async function pushSetState(
         a_track_id: d.aTrackId,
         b_track_id: d.bTrackId,
         pin_kind: d.pin.kind,
-        pin_uuid: d.pin.uuid,
+        pin_uuid: d.pin.uuid ?? null,
       }))
     );
   } catch (err) {

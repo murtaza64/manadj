@@ -17,7 +17,12 @@
  * deck in the same task.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { _resetAudibleSurfacesForTests } from '../playback/audibleSurface';
+import {
+  _resetAudibleSurfacesForTests,
+  audibleTransport,
+  audibleTransportState,
+  registerSurface,
+} from '../playback/audibleSurface';
 import type { DeckEngine } from '../playback/DeckEngine';
 import type { ChannelId, Mixer } from '../playback/mixer';
 import type { Transition } from '../editor/mixModel';
@@ -125,6 +130,11 @@ class FakeEngine {
     this.parkedAt = this.durationSec;
     this.playingFlag = false;
     this.emit();
+  }
+
+  togglePlay(): void {
+    if (this.playingFlag) this.pause();
+    else this.play();
   }
 
   setPitch(p: number): void {
@@ -396,6 +406,52 @@ describe('foreign loads during conduction (sets 28: a Load is a takeover)', () =
     engines.B.loadForeign(99);
     expect(stopped).toEqual(['takeover']);
     expect(conductor.isActive()).toBe(false);
+  });
+});
+
+describe('controller transport during conduction (sets 34: always the decks)', () => {
+  // Deck transport is a deck-class gesture (ADR 0013) and the Conductor
+  // is not an Audible surface (ADR 0024): the surface the Conductor
+  // registers passes transport through to the SHARED surface's handlers,
+  // so controller play/pause hits the deck and reads as a manual gesture
+  // → takeover — exactly like the on-screen deck buttons. No
+  // transportState is exposed: LED Feedback mirrors deck reality.
+  const latency = () => 0.002;
+
+  function registerFakeShared(engines: { A: FakeEngine; B: FakeEngine }) {
+    registerSurface('shared', {
+      transport: {
+        togglePlay: (deck) => engines[deck as 'A' | 'B'].togglePlay(),
+      },
+      silence: () => {
+        engines.A.pause();
+        engines.B.pause();
+      },
+    });
+  }
+
+  it('controller play/pause hits the DECK and takes over; the other deck keeps sounding', () => {
+    const { conductor, engines, stopped } = makeConductor(latency);
+    registerFakeShared(engines);
+    conductor.playFromEntry(0);
+    tickAt(0); // load-freeze tick
+    tickAt(0.01); // A starts
+    tickAt(65); // mid-window: both decks conducted and playing
+    audibleTransport()!.togglePlay('B'); // the hardware play button
+    expect(stopped).toEqual(['takeover']);
+    expect(conductor.isActive()).toBe(false);
+    expect(engines.B.getSnapshot().playing).toBe(false); // the gesture applied
+    expect(engines.A.getSnapshot().playing).toBe(true); // audio continues
+  });
+
+  it('exposes no transportState while conducting — LEDs mirror deck reality', () => {
+    const { conductor, engines } = makeConductor(latency);
+    registerFakeShared(engines);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    expect(audibleTransportState()).toBeNull();
+    conductor.stop();
   });
 });
 
