@@ -79,6 +79,29 @@ const mapping: Mapping = {
       controlType: 'relative',
       target: { control: 'jog', deck: 'A' },
     },
+    {
+      // Deck-less toggle (midi-performance-ops 07): both hardware Q
+      // buttons bind to the one app-wide quantize target.
+      match: { message: 'note', channel: 0, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'quantize' },
+    },
+    {
+      match: { message: 'note', channel: 1, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'quantize' },
+    },
+    {
+      // SHIFT layer (channel+3 on the Inpulse): per-deck key lock.
+      match: { message: 'note', channel: 3, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'key-lock', deck: 'A' },
+    },
+    {
+      match: { message: 'note', channel: 4, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'key-lock', deck: 'B' },
+    },
   ],
 };
 
@@ -144,6 +167,29 @@ describe('binding resolution', () => {
       { kind: 'button', target: { control: 'cue', deck: 'A' }, edge: 'down' },
       { kind: 'button', target: { control: 'transport', deck: 'B' }, edge: 'down' },
       { kind: 'button', target: { control: 'cue', deck: 'A' }, edge: 'up' },
+    ]);
+  });
+});
+
+describe('quantize and key-lock bindings (midi-performance-ops 07)', () => {
+  it('either Q button emits the same deck-less quantize action', () => {
+    expect(translate([[0x90, 0x02, 0x7f], [0x91, 0x02, 0x7f]])).toEqual([
+      { kind: 'button', target: { control: 'quantize' }, edge: 'down' },
+      { kind: 'button', target: { control: 'quantize' }, edge: 'down' },
+    ]);
+  });
+
+  it('shifted-layer Q resolves to the right deck by channel', () => {
+    expect(translate([[0x93, 0x02, 0x7f], [0x94, 0x02, 0x7f]])).toEqual([
+      { kind: 'button', target: { control: 'key-lock', deck: 'A' }, edge: 'down' },
+      { kind: 'button', target: { control: 'key-lock', deck: 'B' }, edge: 'down' },
+    ]);
+  });
+
+  it('a full press/release yields down then up edges', () => {
+    expect(translate([[0x93, 0x02, 0x7f], [0x83, 0x02, 0x00]])).toEqual([
+      { kind: 'button', target: { control: 'key-lock', deck: 'A' }, edge: 'down' },
+      { kind: 'button', target: { control: 'key-lock', deck: 'A' }, edge: 'up' },
     ]);
   });
 });

@@ -32,7 +32,14 @@ export type ButtonTarget =
   | { control: 'match'; deck: ChannelId }
   | { control: 'load'; deck: ChannelId }
   /** PFL toggle (headphone-cue 02) — mixer-facing, hence `channel`. */
-  | { control: 'pfl'; channel: ChannelId };
+  | { control: 'pfl'; channel: ChannelId }
+  /** App-wide Quantize toggle (midi-performance-ops 07) — registry-direct
+   * sticky state (ADR 0019), deck-less on purpose: both hardware Q buttons
+   * are two handles on the one switch. */
+  | { control: 'quantize' }
+  /** SHIFT+Q: that Deck's Key Lock toggle (midi-performance-ops 07) —
+   * registry-direct sticky Deck state, never surface-routed. */
+  | { control: 'key-lock'; deck: ChannelId };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }

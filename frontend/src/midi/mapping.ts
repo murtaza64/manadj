@@ -75,6 +75,21 @@ export interface DeckFeedback {
    * while SHIFT is held (e.g. showing which slots SHIFT+pad can clear).
    */
   hotCuePadsShifted: readonly LedAddress[];
+  /**
+   * The deck's Q button light (midi-performance-ops 07) — mirrors the ONE
+   * app-wide Quantize state: both decks' Q lamps and the TopBar toggle
+   * always agree.
+   */
+  quantize: LedAddress;
+  /**
+   * The SHIFT-layer Q address (channel+3, same note) — a PROBE
+   * (midi-performance-ops 07): if the hardware drives a lamp there, it
+   * shows the Deck's KEY LOCK while SHIFT is held; if not, the writes are
+   * inert, Key Lock stays screen-only, and the base Q lamp remains
+   * quantize-only (one lamp never tells two truths). Optional so a failed
+   * probe is recorded by deleting the address.
+   */
+  keyLockShifted?: LedAddress;
 }
 
 /** Device knowledge for Feedback: every light the app writes, per deck. */

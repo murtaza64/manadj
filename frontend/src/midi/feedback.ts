@@ -42,6 +42,15 @@ export interface DeckLedInput {
    * subscription like the on-screen PFL button.
    */
   pfl: boolean;
+  /**
+   * The app-wide Quantize toggle (midi-performance-ops 07) — the second
+   * non-deck input; both decks receive the same value, so the two Q lamps
+   * mirror the one switch.
+   */
+  quantize: boolean;
+  /** The Deck's Key Lock (engine snapshot state, midi-performance-ops 07)
+   * — drives the SHIFT-layer Q lamp probe only. */
+  keyLock: boolean;
 }
 
 /** Desired on/off per light of one deck. */
@@ -52,6 +61,10 @@ export interface DeckLedStates {
   pfl: boolean;
   /** Pads 1..8 by index (index 0 = pad 1), HOTCUE base layer only. */
   pads: readonly boolean[];
+  /** Q button light — mirrors app-wide Quantize (midi-performance-ops 07). */
+  quantize: boolean;
+  /** SHIFT-layer Q light (the Key Lock lamp probe) — the Deck's Key Lock. */
+  keyLock: boolean;
 }
 
 /** [status, data1, data2] — ready for MIDIOutput.send. */
@@ -100,6 +113,8 @@ export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): De
         (input.atCuePoint || phases.cueFlash)),
     pfl: input.pfl,
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
+    quantize: input.quantize,
+    keyLock: input.keyLock,
   };
 }
 
@@ -133,7 +148,15 @@ function encodeLed(address: LedAddress, lit: boolean): MidiMessage {
 }
 
 function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
-  return [deck.play, deck.cue, deck.pfl, ...deck.hotCuePads, ...deck.hotCuePadsShifted];
+  return [
+    deck.play,
+    deck.cue,
+    deck.pfl,
+    ...deck.hotCuePads,
+    ...deck.hotCuePadsShifted,
+    deck.quantize,
+    ...(deck.keyLockShifted ? [deck.keyLockShifted] : []),
+  ];
 }
 
 /** Desired light states for one deck → the full message set to send. */
@@ -153,6 +176,11 @@ export function encodeDeckLeds(
     ...addresses.hotCuePadsShifted.map((address, i) =>
       encodeLed(address, states.pads[i] ?? false)
     ),
+    encodeLed(addresses.quantize, states.quantize),
+    // The Key Lock lamp probe (midi-performance-ops 07): written only when
+    // the mapping carries the shifted-Q address; absent = probe failed and
+    // Key Lock is screen-only.
+    ...(addresses.keyLockShifted ? [encodeLed(addresses.keyLockShifted, states.keyLock)] : []),
   ];
 }
 

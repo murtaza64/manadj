@@ -7,6 +7,7 @@ import {
   audibleTransport,
 } from '../playback/audibleSurface';
 import { PITCH_RANGE_PERCENT } from '../playback/tempo';
+import { isQuantizeOn, setQuantize } from '../playback/quantizeStore';
 import type { MidiAction } from './actions';
 import { browseSurface, deckControlsFor, midiMixerControls } from './controlRegistry';
 
@@ -128,6 +129,23 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       const track = surface?.getSelectedTrack();
       if (!surface || !track) return;
       surface.load(target.deck, track);
+      return;
+    }
+    case 'quantize': {
+      // Registry-direct sticky state (midi-performance-ops 07, ADR 0019).
+      // The registry exists for React-owned capabilities; Quantize lives
+      // in a module-level store, so dispatch writes it the same way the
+      // TopBar Q button does — no indirection to drift through.
+      if (edge !== 'down') return;
+      setQuantize(!isQuantizeOn());
+      return;
+    }
+    case 'key-lock': {
+      // SHIFT+Q (midi-performance-ops 07): the Deck's Key Lock. The live
+      // state is engine-owned (React), so this goes through the registry
+      // like beatjump-size — registry-direct, never surface-routed.
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.toggleKeyLock();
       return;
     }
     default:

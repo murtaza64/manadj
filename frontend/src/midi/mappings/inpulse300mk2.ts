@@ -403,6 +403,37 @@ export const INPULSE_300_MK2: Mapping = {
     // 15 follow the layout — TODO(hardware-verify) at the next smoke test).
     ...shiftedPadClears('A', 6),
     ...shiftedPadClears('B', 7),
+
+    // Q buttons (midi-performance-ops 07): either deck's Q toggles the ONE
+    // app-wide Quantize — the hardware's per-deck placement is two handles
+    // on one switch, so both bind to the same deck-less target. Mixxx's
+    // Inpulse 300 file puts Q at note 0x02 on the deck transport channels.
+    {
+      // TODO(hardware-verify): from Mixxx's Inpulse 300 XML (Q = note 0x02).
+      match: { message: 'note', channel: 1, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'quantize' },
+    },
+    {
+      // TODO(hardware-verify): from Mixxx's Inpulse 300 XML (Q = note 0x02).
+      match: { message: 'note', channel: 2, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'quantize' },
+    },
+    // SHIFT+Q = that deck's Key Lock (time guard unshifted, pitch guard
+    // shifted — one physical home). Shifted controls emit on channel+3.
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'note', channel: 4, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'key-lock', deck: 'A' },
+    },
+    {
+      // TODO(hardware-verify): inferred from the ch+3 shift pattern.
+      match: { message: 'note', channel: 5, number: 0x02 },
+      controlType: 'button',
+      target: { control: 'key-lock', deck: 'B' },
+    },
   ],
 
   // LED Feedback addresses. Ground truth: Mixxx's Inpulse 300 mapping
@@ -433,6 +464,22 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x08 + i,
           onVelocity: 0x7e,
         })),
+        // Q lamp mirrors app-wide Quantize; Mixxx drives it at the button's
+        // own note (0x02) on the transport channel.
+        // TODO(hardware-verify): smoke-test with the Q bindings.
+        quantize: { channel: 1, number: 0x02, onVelocity: 0x7f },
+        // Key Lock lamp PROBE (midi-performance-ops 07): Mixxx drives NO
+        // output at the shifted-Q address (ch+3, same note) but DOES drive
+        // other shifted-layer lamps, so it is plausibly real. Wired
+        // optimistically: if the address is real, the Q lamp shows Key
+        // Lock while SHIFT is held; if it is not, these writes are inert,
+        // Key Lock stays screen-only, and the Q lamp remains
+        // quantize-only (one lamp never tells two truths). Record the
+        // probe outcome here at the smoke test: keep this address if the
+        // lamp responds, DELETE it if not (the encoder skips absent
+        // addresses).
+        // TODO(hardware-verify): shifted-Q lamp probe.
+        keyLockShifted: { channel: 4, number: 0x02, onVelocity: 0x7f },
       },
       B: {
         play: { channel: 2, number: 0x07, onVelocity: 0x7f },
@@ -448,6 +495,11 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x08 + i,
           onVelocity: 0x7e,
         })),
+        // TODO(hardware-verify): smoke-test with the Q bindings.
+        quantize: { channel: 2, number: 0x02, onVelocity: 0x7f },
+        // Same probe as deck A (see the comment there).
+        // TODO(hardware-verify): shifted-Q lamp probe.
+        keyLockShifted: { channel: 5, number: 0x02, onVelocity: 0x7f },
       },
     },
   },

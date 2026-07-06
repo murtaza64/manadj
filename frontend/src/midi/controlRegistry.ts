@@ -40,6 +40,9 @@ export interface MidiDeckControls {
   jogTouchTicks(ticks: number): void;
   /** SHIFT+jog ticks (signed): deliberate fast seek, playing or paused. */
   jogSeekTicks(ticks: number): void;
+  /** Toggle the Deck's Key Lock (midi-performance-ops 07) — same dual
+   * write as the on-screen toggle (engine live state + persisted flag). */
+  toggleKeyLock(): void;
 }
 
 /**

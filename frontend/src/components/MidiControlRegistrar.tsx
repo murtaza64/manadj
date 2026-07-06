@@ -7,6 +7,7 @@ import { useMixer } from '../hooks/useMixer';
 import { registerDeckControls, registerMixerControls } from '../midi/controlRegistry';
 import { JogController } from '../midi/jog';
 import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
+import { setKeyLockFlag } from '../playback/keyLockStore';
 
 /**
  * Headless glue (midi-controller 02/04): registers each shared Deck's
@@ -108,6 +109,16 @@ function DeckControlsRegistrar() {
           const { jog: j, ready: r } = latest.current;
           if (!r) return;
           j.onSeekTicks(ticks);
+        },
+        toggleKeyLock: () => {
+          // SHIFT+Q (midi-performance-ops 07): the exact dual write the
+          // on-screen key-lock toggle makes (DeckPanel) — the engine owns
+          // the live state (snapshot.keyLock drives the worklet mode),
+          // the store persists it for boot restore.
+          const { engine: e } = latest.current;
+          const on = e.getSnapshot().keyLock;
+          e.setKeyLock(!on);
+          setKeyLockFlag(deck, !on);
         },
         // LOAD deliberately absent (editor-midi 03): load policy is
         // view-owned and rides the browse-surface registration in Library.

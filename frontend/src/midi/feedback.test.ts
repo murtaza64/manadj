@@ -26,6 +26,8 @@ const idle = {
   atCuePoint: false,
   assignedPads: new Set<number>(),
   pfl: false,
+  quantize: false,
+  keyLock: false,
 };
 
 const lit = { pending: true, cueFlash: true };
@@ -100,6 +102,29 @@ describe('ledStates', () => {
     expect(ledStates({ ...idle, playing: true, pfl: true }).pfl).toBe(true);
     expect(ledStates({ ...idle, playing: true, pfl: false }).pfl).toBe(false);
   });
+
+  it('Q mirrors the app-wide Quantize state, any phase (midi-performance-ops 07)', () => {
+    expect(ledStates({ ...idle, quantize: true }, lit).quantize).toBe(true);
+    expect(ledStates({ ...idle, quantize: true }, dim).quantize).toBe(true);
+    expect(ledStates(idle).quantize).toBe(false);
+  });
+
+  it('Q is independent of transport state', () => {
+    expect(ledStates({ ...idle, playing: true, quantize: true }).quantize).toBe(true);
+    expect(ledStates({ ...idle, playing: true, quantize: false }).quantize).toBe(false);
+  });
+
+  it('Key Lock mirrors the deck flag, any phase (the shifted-Q probe light)', () => {
+    expect(ledStates({ ...idle, keyLock: true }, lit).keyLock).toBe(true);
+    expect(ledStates({ ...idle, keyLock: true }, dim).keyLock).toBe(true);
+    expect(ledStates(idle).keyLock).toBe(false);
+  });
+
+  it('Quantize and Key Lock never share a light state (one lamp, one truth)', () => {
+    const states = ledStates({ ...idle, quantize: true, keyLock: false });
+    expect(states.quantize).toBe(true);
+    expect(states.keyLock).toBe(false);
+  });
 });
 
 describe('audibleTransportOverride (editor-midi 05)', () => {
@@ -111,6 +136,8 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     atCuePoint: true,
     assignedPads: new Set([1, 4]),
     pfl: true,
+    quantize: true,
+    keyLock: true,
   };
 
   it('PLAY follows the audible holder (both decks report the one mix transport)', () => {
@@ -134,6 +161,12 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     expect(states.pads[3]).toBe(true);
     expect(states.pads[1]).toBe(false);
     expect(states.pfl).toBe(true);
+  });
+
+  it('Quantize and Key Lock pass through untouched (sticky state, not transport)', () => {
+    const states = ledStates(audibleTransportOverride(busy, true));
+    expect(states.quantize).toBe(true);
+    expect(states.keyLock).toBe(true);
   });
 });
 
@@ -188,11 +221,48 @@ describe('encodeDeckLeds', () => {
     ]);
   });
 
+  it('encodes Q at its button note per deck (midi-performance-ops 07)', () => {
+    expect(encodeDeckLeds(feedback, 'A', { ...dark, quantize: true })).toContainEqual([
+      0x91, 0x02, 0x7f,
+    ]);
+    expect(encodeDeckLeds(feedback, 'B', { ...dark, quantize: false })).toContainEqual([
+      0x92, 0x02, 0x00,
+    ]);
+  });
+
+  it('both decks encode the same quantize state at their own address (mirrored lamps)', () => {
+    const on = { ...dark, quantize: true };
+    expect(encodeDeckLeds(feedback, 'A', on)).toContainEqual([0x91, 0x02, 0x7f]);
+    expect(encodeDeckLeds(feedback, 'B', on)).toContainEqual([0x92, 0x02, 0x7f]);
+  });
+
+  it('encodes the Key Lock probe at the shifted-Q address (ch+3, same note)', () => {
+    expect(encodeDeckLeds(feedback, 'A', { ...dark, keyLock: true })).toContainEqual([
+      0x94, 0x02, 0x7f,
+    ]);
+    expect(encodeDeckLeds(feedback, 'B', { ...dark, keyLock: false })).toContainEqual([
+      0x95, 0x02, 0x00,
+    ]);
+  });
+
+  it('skips the Key Lock probe when the mapping omits the shifted-Q address', () => {
+    const withoutProbe = {
+      decks: {
+        A: { ...feedback.decks.A, keyLockShifted: undefined },
+        B: { ...feedback.decks.B, keyLockShifted: undefined },
+      },
+    };
+    const messages = encodeDeckLeds(withoutProbe, 'A', { ...dark, keyLock: true });
+    expect(messages.some(([status, number]) => status === 0x94 && number === 0x02)).toBe(false);
+    // The base Q lamp stays quantize-only — key lock never leaks onto it.
+    expect(messages).toContainEqual([0x91, 0x02, 0x00]);
+  });
+
   it('covers every light of the deck exactly once', () => {
     const messages = encodeDeckLeds(feedback, 'A', dark);
     const addresses = messages.map(([status, number]) => `${status}:${number}`);
     expect(new Set(addresses).size).toBe(addresses.length);
-    expect(addresses.length).toBeGreaterThanOrEqual(19); // PLAY + CUE + PFL + 2×8 pads
+    expect(addresses.length).toBeGreaterThanOrEqual(21); // PLAY+CUE+PFL+2×8 pads+Q+probe
   });
 });
 
@@ -239,5 +309,10 @@ describe('allOffMessages', () => {
     expect(messages).toContainEqual([0x97, 0x02, 0x00]);
     expect(messages).toContainEqual([0x96, 0x0d, 0x00]);
     expect(messages).toContainEqual([0x97, 0x0a, 0x00]);
+    // Q lamps and the shifted-Q Key Lock probe darken too.
+    expect(messages).toContainEqual([0x91, 0x02, 0x00]);
+    expect(messages).toContainEqual([0x92, 0x02, 0x00]);
+    expect(messages).toContainEqual([0x94, 0x02, 0x00]);
+    expect(messages).toContainEqual([0x95, 0x02, 0x00]);
   });
 });

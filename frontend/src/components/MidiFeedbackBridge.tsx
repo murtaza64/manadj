@@ -19,6 +19,7 @@ import {
   audibleTransportState,
   subscribeAudible,
 } from '../playback/audibleSurface';
+import { isQuantizeOn, subscribeQuantize } from '../playback/quantizeStore';
 
 /**
  * Headless Feedback glue (midi-pad-leds 01/02/03): per deck, subscribes to
@@ -59,6 +60,13 @@ function DeckFeedbackPublisher({
   // the same change subscription as the on-screen PFL button, so hardware
   // toggles, screen clicks and this light can never disagree.
   const pfl = useMixerValue((m) => m.getChannelState(deck).pfl);
+  // Q lamp (midi-performance-ops 07): the app-wide Quantize store — the
+  // same subscription the TopBar Q toggle renders from, so both hardware
+  // lamps and the screen always agree.
+  const quantize = useSyncExternalStore(subscribeQuantize, isQuantizeOn);
+  // Key Lock lives in the engine snapshot (like the on-screen toggle) —
+  // feeds the SHIFT-layer Q lamp probe only.
+  const keyLock = useDeckSnapshot((s) => s.keyLock);
   // Keyed by the loaded Track: a Load re-keys the query, an empty deck
   // disables it (placeholder []) — both resolve to all pads dark until
   // real assignments arrive.
@@ -105,7 +113,17 @@ function DeckFeedbackPublisher({
 
   useEffect(() => {
     if (outputs.length === 0) return;
-    const input = { playing, pendingPlay, previewing, hasCuePoint, atCuePoint, assignedPads, pfl };
+    const input = {
+      playing,
+      pendingPlay,
+      previewing,
+      hasCuePoint,
+      atCuePoint,
+      assignedPads,
+      pfl,
+      quantize,
+      keyLock,
+    };
     const states = ledStates(
       holderPlaying === null ? input : audibleTransportOverride(input, holderPlaying),
       { pending: pendingPhase, cueFlash: cueFlashPhase }
@@ -125,6 +143,8 @@ function DeckFeedbackPublisher({
     atCuePoint,
     assignedPads,
     pfl,
+    quantize,
+    keyLock,
     holderPlaying,
     pendingPhase,
     cueFlashPhase,
