@@ -1,4 +1,6 @@
-# 24 — Pickup during an editor audition creates dual deck drivers (choppy Deck B)
+# 25 — Pickup during an editor audition creates dual deck drivers (choppy Deck B)
+
+(Renumbered from 24, 2026-07-05 — parallel filing collided with 24-live-replan.)
 
 Status: ready-for-agent
 
