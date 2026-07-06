@@ -1,6 +1,6 @@
 # 24 — Live re-plan: plan-input edits reflect into ongoing Set playback
 
-Status: ready-for-human (implemented 2026-07-06, change `uuzluzpl`, lane setlist — parked for review)
+Status: done (approved in-session + landed 2026-07-06, merge `wyqkrrqy`, lane setlist)
 
 ## Parent
 

@@ -237,10 +237,18 @@ describe('decoded-buffer cache (mix-editor 28)', () => {
     engine.seek(10);
     engine.jumpBeats(4); // 4 beats at 120 = 2s
     expect(engine.getPlayhead()).toBeCloseTo(12);
-    engine.setTrackBpm(240);
+    engine.setTrackBpm(9, 240);
     expect(engine.getSnapshot().bpm).toBe(240);
     engine.jumpBeats(4); // 4 beats at 240 = 1s
     expect(engine.getPlayhead()).toBeCloseTo(13);
+  });
+
+  it('setTrackBpm ignores a push addressed to a track that is not loaded', async () => {
+    putCachedBuffer(10, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({ trackId: 10, audioUrl: 'http://127.0.0.1:1/none', bpm: 120 });
+    engine.setTrackBpm(99, 240);
+    expect(engine.getSnapshot().bpm).toBe(120);
   });
 });
 

@@ -1,6 +1,6 @@
 # 34 — Transport input routing: controller = decks, spacebar = Conductor
 
-Status: ready-for-agent
+Status: ready-for-human (implemented 2026-07-06, change `vkwnvxvv`, lane conductor — awaiting review)
 
 ## Parent
 
@@ -36,3 +36,29 @@ The Controller's play button currently drives the Set toolbar's transport. That 
 ## Blocked by
 
 - Soft: 24-live-replan in flight on the Conductor-owning lane (transport entry points may shift under it) — dispatch after 24 parks
+
+## Comments
+
+**2026-07-06 — implemented (change `vkwnvxvv`, lane conductor). Parked ready-for-human.**
+
+What was built:
+
+- **Controller = decks** — `Conductor.activate`'s surface registration no longer exposes a Conductor transport (the sets 04/22 wiring, undone): it registers a PASS-THROUGH to the shared surface's own transport handlers (`sharedTransport()`, new accessor in `playback/audibleSurface.ts` — guards included). The engine emit lands outside the self-op guard, so controller play/pause/cue hits the deck AND reads as a manual gesture → takeover, exactly like the on-screen deck buttons. `transportState` removed from the registration — `audibleTransportOverride` never applies during conduction, so transport LEDs mirror on-screen deck reality. No Mapping entry drives the Conductor (grep-clean in `midi/`).
+- **Spacebar = mix-level transport of the context** — new pure seam `sets/spaceTransport.ts`: `resolveSetSpaceVerb(status, pickupLit)` (playing→pause, paused→resume, idle+lit→pickup, idle→play-from-start; pickup outranks restart) + `dispatchSetSpace()` (claims the key whenever a Set is selected — `setStore.getSelectedSetId()`, which Library keeps in sync with the sidebar selection — even while the plan is still assembling, so space never surprise-toggles a deck). Pause/resume go through `conductorTogglePlay`; the idle verbs execute via a registered adapter.
+- **`sets/SetSpaceTransport.tsx`** — headless App-level feed (ConductorPlanFeed's pattern, same deliberately-shared query keys): while a Set is selected, assembles its plan (`useSetPlan`) and registers the adapter (pickup evaluates `evaluatePickup` against a fresh snapshot at the keypress — poll-free; `pickupSetPlayback` re-checks and no-ops when unlit, never falling through to a restart).
+- **Wiring**: library hub (`useKeyboardShortcuts.ts` space case — Set wins over the focused deck, legacy toggle otherwise) and `PerformanceView.tsx` (space was deliberately unbound; now dispatches the Set context, stays unbound with no Set selected). Editor untouched — its capture listener keeps space = audition. Focus guards untouched in both hubs (isTypingTarget / isGuardedKeyEvent run first).
+- `conductorStore.ts` grew `getConductorState()` (non-hook snapshot read).
+
+**MIDI-dispatch coordination note for lane setui (33, controller browse/load):** NOTHING in `midi/dispatch.ts`, `midi/controlRegistry.ts`, `Library.tsx`, or `SetDetailPane.tsx` was touched. The controller change lives entirely in `sets/Conductor.ts` (surface registration) + a new `sharedTransport()` accessor appended in `playback/audibleSurface.ts`. Browse-surface routing is untouched; no conflict with 33's `registerBrowseSurface` gating expected.
+
+Gate on the change: `npx vitest run` 1128 ✓ (new `spaceTransport.test.ts`, Conductor.test.ts "controller transport during conduction"), `npm run build` ✓, eslint clean on touched files. No backend/python changes; no migrations (heads: `0022`).
+
+**Verification walkthrough** (lane app running):
+
+- Open **http://localhost:5343** (or desktop shell: `npm --prefix /Users/murtaza/manadj/desktop start -- --port 5343`). Sandbox DB has Sets "post-forest" (18 tracks) and "FUCKBOY SUMMER VOL 1".
+1. Library → Sets → **post-forest**. Press **Space** → the set plays from the start (toolbar shows conducting). Space → pause. Space → resume.
+2. While conducting, click a deck's on-screen play/pause (takeover — conducting stops, audio continues). The decks keep sounding where the set left them → press **Space** → **Pickup**: conducting resumes from the live deck state, no restart. (Space only restarts from the top when Pickup is unlit — e.g. after pausing both decks and seeking them away.)
+3. Switch to the **Performance** view with the set still selected in the embedded browse → Space drives the same Conductor transport there. d/k still toggle the individual decks (takeover as before).
+4. Select a **playlist** (not a Set) → Space back to legacy: library view toggles the focused deck; Performance view does nothing.
+5. Transition editor → Space auditions, unchanged.
+6. Controller (if attached): during conduction, the hardware play button toggles the DECK and stops the Conductor (audio continues); play LEDs mirror the decks, not the set.

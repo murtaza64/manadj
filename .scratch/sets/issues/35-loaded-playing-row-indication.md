@@ -1,6 +1,6 @@
 # 35 — Set rows: per-deck loaded highlight + animated playing indicator
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -34,3 +34,50 @@ During Set playback only one row is highlighted ("the active row"). But conducti
 ## Blocked by
 
 —
+
+## Comments
+
+Implemented 2026-07-06 (setui lane, jj change `lmutuszo` — `sets:
+35-loaded-playing-row-indication`, on top of 31/32). Notes:
+
+- Pure rules in `frontend/src/sets/rowMarks.ts` (vitest-tested):
+  `loadedDecks` / `isRowPlaying` / `loadedWash`. Occupancy reads live off
+  the two shared DeckEngines (`useDeckOccupancy`: primitive slices, pane
+  re-renders only on load/play/pause) — view-only, no store changes.
+- Loaded wash = deck color at 16% alpha, inline (wins over hover + the
+  `.selected` blue wash; the blue ring still marks selection — the old
+  conducting-wash precedent). Same track on both decks → A→B gradient.
+- Playing mark = 3 green EQ bars in the ▶ play-from column; on row hover
+  it yields to the ▶ affordance (Spotify idiom) — but only when the ▶
+  actually appears (a plan-less playing row keeps its mark). Deviation
+  from the strict "states outrank hovers" reading flagged on
+  perf-layout 08, not forked. `prefers-reduced-motion` renders the bars
+  static.
+- The single conducting "active row" highlight (mauve wash) is REMOVED —
+  a conducting row is a loaded+playing row now. Follow auto-scroll still
+  keys off the Conductor's activeEntryIndex, unchanged.
+- `playing` = the deck transport flag (hot-cue preview does not animate
+  the row) — reading "actually playing" as transport state.
+- For review judgment: a selected+loaded row shows identity wash + blue
+  ring (no blue wash) — precedent-following but worth an eyeball.
+
+## Verification walkthrough (ready-for-human)
+
+Lane app on setui: http://localhost:5313 (or
+`npm --prefix desktop start -- --port 5313`). Review tree includes 31+32.
+
+1. Open the demo Set, ▶ Play set. The current track's row washes in its
+   HOLDING deck's color (cyan/magenta) with animated green EQ bars in
+   the leftmost column; the pre-loaded next row washes in the other
+   deck's color, no bars until it enters.
+2. Mid-window (during a pinned overlap): BOTH rows washed, BOTH animating.
+3. Pause the Conductor: washes stay, bars stop (paused-but-loaded).
+4. DIVERGENCE check (the acceptance case): take over (touch a deck
+   directly), then manually load a DIFFERENT Set track onto a deck from
+   the row context menu — the wash jumps to the row actually loaded,
+   plan parity be damned. Load a non-Set track: no Set row marked.
+5. Coexistence: select a loaded row (blue ring over the wash), hover it
+   (bars yield to ▶ only where play-from exists), and check badges
+   (NEVER AUDIBLE / ⚠) still read.
+6. Plain manual use (Conductor idle): loading any Set track onto a deck
+   still washes its row — the marks mirror the Decks, not the Conductor.

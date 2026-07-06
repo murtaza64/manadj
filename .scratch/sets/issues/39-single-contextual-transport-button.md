@@ -1,4 +1,6 @@
-# 36 — Single contextual transport button
+# 39 — Single contextual transport button
+
+(Renumbered from 36, 2026-07-06 — parallel filing collided with 36-trailing-suggest-row.)
 
 Status: ready-for-agent
 

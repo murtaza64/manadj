@@ -16,6 +16,7 @@ import { MidiControllerBridge } from './components/MidiControllerBridge';
 import { MidiControlRegistrar } from './components/MidiControlRegistrar';
 import { MidiFeedbackBridge } from './components/MidiFeedbackBridge';
 import { AudioRoutingBridge } from './components/AudioRoutingBridge';
+import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
@@ -86,6 +87,10 @@ function App() {
         <MidiControlRegistrar />
         <MidiFeedbackBridge />
         <AudioRoutingBridge />
+        {/* Live re-plan (sets 24): plan-input subscription for the
+            conducting Set — above the view switch, like the Conductor
+            it feeds. */}
+        <ConductorPlanFeed />
         <FilterProvider>
           <div className="app-shell">
             <TopBar mode={view} onModeChange={setView} />

@@ -289,7 +289,7 @@ function TrackZone({ track }: { track: Track | null }) {
           dense
           disabled={!tempoEnabled}
           onSave={saveBpm}
-          onCommitted={(bpm) => engine.setTrackBpm(bpm)}
+          onCommitted={(bpm) => track && engine.setTrackBpm(track.id, bpm)}
           grid={{ getPlayhead: () => engine.getPlayhead(), disabled: !tempoEnabled }}
         />
       </div>
