@@ -22,10 +22,9 @@
 // - No modulation pass (u_modTex — ladder clips are static previews).
 // - The mirrored-lane layout supplies orientation; the style/slot anchor
 //   is ignored (ladder layout wins — issue 30 constraint).
-// - Full brightness: the GL minimap dims its body 0.55x so full-height
-//   markers pop over it (WaveformRendererV2 constructor); ladder clips ARE
-//   the content and have no such markers, so the surface renders the slot
-//   undimmed (brightness is surface config, not style).
+// - Body brightness matches the GL minimap's 0.55x dim (MINIMAP_BRIGHTNESS
+//   below): the ladder renders the minimap slot, and full brightness read
+//   as oversaturated next to the deck minimaps (review feedback 2026-07-05).
 
 import type { DecodedWaveform, LodPack } from '../waveform/blob';
 import type { RGB, StyleParams } from '../waveform/styles';
@@ -471,6 +470,11 @@ export function computeStyledColumns(
   }
   return out;
 }
+
+/** The GL minimap's body dim (WaveformRendererV2 constructor: minimap mode
+ * multiplies body brightness by 0.55 — markers stay full). The ladder
+ * renders the same minimap slot, so it dims identically. */
+export const MINIMAP_BRIGHTNESS = 0.55;
 
 /** Canvas background matching the shader's BG. */
 export const WAVE_BG_CSS = toCss(BG, 1);

@@ -25,7 +25,7 @@ import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { HOT_CUE_CSS_COLORS } from '../waveform/WaveformRendererV2';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
-import { drawStyledWave } from './ladderWaveStyle';
+import { drawStyledWave, MINIMAP_BRIGHTNESS } from './ladderWaveStyle';
 import type { PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
 import { getLadderView, setLadderView } from './setStore';
 
@@ -620,6 +620,7 @@ function LadderWave({
       height: h,
       dir,
       range,
+      brightness: MINIMAP_BRIGHTNESS,
     });
 
     for (const c of cues) {
