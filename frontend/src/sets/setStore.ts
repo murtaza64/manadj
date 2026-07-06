@@ -105,8 +105,10 @@ export function setSetScroll(setId: number, top: number): void {
   scrollTopBySet.set(setId, top);
 }
 
-export function getLadderView(setId: number): LadderView {
-  return ladderViewBySet.get(setId) ?? { zoom: 1, scrollLeft: 0 };
+/** Null until the user has panned/zoomed this Set's ladder — the ladder
+ * picks its own default framing (which needs the plan's total length). */
+export function getLadderView(setId: number): LadderView | null {
+  return ladderViewBySet.get(setId) ?? null;
 }
 
 export function setLadderView(setId: number, view: LadderView): void {
