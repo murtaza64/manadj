@@ -12,6 +12,7 @@ import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { toThreeBands } from '../waveform/blob';
 import { useHotCues } from '../hooks/useHotCues';
 import { MixPlayer } from './MixPlayer';
+import { ConductorLanePlayhead } from './ConductorLanePlayhead';
 import { GlobalMinimap } from './GlobalMinimap';
 import { LaneCanvas } from './LaneCanvas';
 import { LANE_COLORS } from './laneColors';
@@ -187,11 +188,24 @@ export function DawTimeline({
   // drawing use it as a fallback so waveforms + envelopes render
   // immediately. Audio readiness still gates transport (play button,
   // park-after-ready), never drawing.
-  const durA = player.engineA.getSnapshot().duration || (waveA?.duration ?? 0);
-  const durB = player.engineB.getSnapshot().duration || (waveB?.duration ?? 0);
+  //
+  // The engine read is trusted ONLY while the engine holds this side's
+  // track: the editor plays through the SHARED decks (ADR 0022), and a
+  // mounted-but-silent editor over a conducting Set (the normal case
+  // since sets 21) sees the Conductor ping-pong OTHER tracks through
+  // them — unguarded, the timeline's block math re-warped at every
+  // handover ("misaligned depending on the set's play position").
+  const engineDur = (snap: { trackId: number | null; duration: number }, trackId: number | null) =>
+    trackId !== null && snap.trackId === trackId ? snap.duration : 0;
+  const durA = engineDur(player.engineA.getSnapshot(), trackAId) || (waveA?.duration ?? 0);
+  const durB = engineDur(player.engineB.getSnapshot(), trackBId) || (waveB?.duration ?? 0);
   const waveDursRef = useRef({ a: 0, b: 0 });
   useEffect(() => {
     waveDursRef.current = { a: waveA?.duration ?? 0, b: waveB?.duration ?? 0 };
+  });
+  const trackIdsRef = useRef({ a: trackAId, b: trackBId });
+  useEffect(() => {
+    trackIdsRef.current = { a: trackAId, b: trackBId };
   });
   const tr = mix.transition;
 
@@ -437,9 +451,16 @@ export function DawTimeline({
       const scrollPx = scrollPxRef.current;
       // Dirty check: skip every write/draw below when nothing that feeds
       // them changed since the last frame (idle editor = idle GPU).
-      // Same pre-decode duration fallback as the render path (issue 28).
-      const dA = player.engineA.getSnapshot().duration || waveDursRef.current.a;
-      const dB = player.engineB.getSnapshot().duration || waveDursRef.current.b;
+      // Same pre-decode duration fallback — and the same own-track gate —
+      // as the render path (issue 28; conductor-load misalignment fix).
+      const snapA = player.engineA.getSnapshot();
+      const snapB = player.engineB.getSnapshot();
+      const dA =
+        (snapA.trackId === trackIdsRef.current.a ? snapA.duration : 0) ||
+        waveDursRef.current.a;
+      const dB =
+        (snapB.trackId === trackIdsRef.current.b ? snapB.duration : 0) ||
+        waveDursRef.current.b;
       const drawKey =
         `${scrollPx}:${px}:${player.getMixTime()}:${viewport.clientWidth}:` +
         `${dA}:${dB}:${modelVersionRef.current}`;
@@ -1150,6 +1171,11 @@ export function DawTimeline({
 
           {/* Mix playhead */}
           <div ref={playheadRef} className="editor-playhead" />
+
+          {/* Live Conductor playhead (sets 38): where the ongoing set is
+              on THIS pair's timeline — the outgoing's solo, the window,
+              and the incoming's tail. */}
+          <ConductorLanePlayhead store={store} pxPerSec={pxPerSec} />
         </div>
       </div>
 

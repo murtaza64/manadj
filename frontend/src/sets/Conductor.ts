@@ -33,6 +33,7 @@ import {
   isAudible,
   registerSurface,
   releaseAudible,
+  sharedTransport,
   subscribeAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
@@ -395,13 +396,23 @@ export class Conductor {
 
   private activate(opts: { silencePrevious?: boolean } = {}): void {
     registerSurface('conductor', {
-      // Hardware transport mirrors the Conductor while it holds audibility
-      // (ADR 0019); pads/jumps/jog are deliberately unregistered — those
-      // gesture classes drop rather than mean something surprising.
-      transport: { togglePlay: () => this.togglePlay() },
-      transportState: {
-        playing: () => this.playing,
-        subscribe: (fn) => this.subscribe(fn),
+      // Controller transport ALWAYS controls the Decks (sets 34): deck
+      // transport is a deck-class gesture (ADR 0013) and the Conductor is
+      // not an Audible surface (ADR 0024) — its transport is a view-level
+      // control, so the hardware gets NO Conductor access (no hijacked
+      // buttons; a future Conductor mapping would be an explicit entry,
+      // never deck play). Pass the gestures through to the shared
+      // surface's own handlers (load-state guards included): the engine
+      // emit lands outside the self-op guard, so a controller play/pause
+      // IS a manual deck gesture → takeover, exactly like the on-screen
+      // deck buttons. No transportState either — LED Feedback keeps
+      // mirroring on-screen deck reality. Pads/jumps/jog stay
+      // unregistered: those gesture classes drop rather than mean
+      // something surprising.
+      transport: {
+        togglePlay: (deck) => sharedTransport()?.togglePlay(deck),
+        cueDown: (deck) => sharedTransport()?.cueDown?.(deck),
+        cueUp: (deck) => sharedTransport()?.cueUp?.(deck),
       },
       silence: () => this.handleSilence(),
     });
