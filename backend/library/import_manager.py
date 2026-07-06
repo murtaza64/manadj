@@ -193,6 +193,9 @@ class LibraryImportManager:
                 # Imported Tracks get Waveform data via the task system.
                 from ..waveform_tasks import enqueue_missing_waveforms
                 enqueue_missing_waveforms(self.manadj_session)
+                # ... and native grid+key Analysis (ADR 0024).
+                from ..analysis_tasks import enqueue_missing_analysis
+                enqueue_missing_analysis(self.manadj_session)
                 if derive_provenance:
                     from ..acquisition.provenance import derive_and_write_provenance
                     imported_paths = [c.filepath for c in candidates]

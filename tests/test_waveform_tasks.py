@@ -72,8 +72,9 @@ def test_create_track_enqueues_generation(db):
 
     track = crud.create_track(db, schemas.TrackCreate(filename="/tracks/new.mp3"))
     tasks = list_tasks(db, ref=f"track:{track.id}", state="pending")
-    assert len(tasks) == 1
-    assert tasks[0].type == WAVEFORM_TASK_TYPE
+    # One waveform task (plus the analysis task — see test_analysis_tasks).
+    waveform_tasks = [t for t in tasks if t.type == WAVEFORM_TASK_TYPE]
+    assert len(waveform_tasks) == 1
 
 
 # ------------------------------------------------------------------ handling

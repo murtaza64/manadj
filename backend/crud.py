@@ -256,6 +256,9 @@ def create_track(db: Session, track: schemas.TrackCreate):
     # New Tracks get Waveform data via the task system (lazy import: cycle).
     from .waveform_tasks import enqueue_waveform_task
     enqueue_waveform_task(db, db_track.id)
+    # ... and native grid+key Analysis (ADR 0024, same pattern).
+    from .analysis_tasks import enqueue_analysis_task
+    enqueue_analysis_task(db, db_track.id)
 
     return db_track
 

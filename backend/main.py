@@ -62,6 +62,10 @@ def _waveform_generation_enabled() -> bool:
     return os.getenv("DISABLE_WAVEFORM_WORKER", "").lower() not in ("true", "1", "yes")
 
 
+def _analysis_enabled() -> bool:
+    return os.getenv("DISABLE_ANALYSIS_WORKER", "").lower() not in ("true", "1", "yes")
+
+
 def _build_task_worker() -> "TaskWorker | None":
     """The task worker (ADR-0003): waveform generation always, downloads if configured."""
     import logging
@@ -77,6 +81,14 @@ def _build_task_worker() -> "TaskWorker | None":
     else:
         logging.getLogger("backend.main").info(
             "waveform generation disabled via DISABLE_WAVEFORM_WORKER"
+        )
+
+    if _analysis_enabled():
+        from .analysis_tasks import ANALYSIS_TASK_TYPE, make_analysis_handler
+        handlers[ANALYSIS_TASK_TYPE] = make_analysis_handler()
+    else:
+        logging.getLogger("backend.main").info(
+            "native analysis disabled via DISABLE_ANALYSIS_WORKER"
         )
 
     config = get_config()
@@ -122,6 +134,18 @@ async def startup_event():
             db = SessionLocal()
             try:
                 enqueue_missing_waveforms(db)
+            finally:
+                db.close()
+
+        # Sweep: any Track still missing native Analysis gets a task
+        # (ADR 0024; bails have diagnostics and are done, not missing).
+        if _analysis_enabled():
+            from .analysis_tasks import enqueue_missing_analysis
+            from .database import SessionLocal
+
+            db = SessionLocal()
+            try:
+                enqueue_missing_analysis(db)
             finally:
                 db.close()
 
