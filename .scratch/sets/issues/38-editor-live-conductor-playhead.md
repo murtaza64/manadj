@@ -1,6 +1,6 @@
 # 38 — Editor: live Conductor playhead over the loaded transition
 
-Status: ready-for-agent
+Status: ready-for-human (implemented 2026-07-06, change `pytsnqou`, lane conductor — awaiting review, stacked on 34's park `vkwnvxvv`)
 
 ## Parent
 
@@ -42,3 +42,24 @@ the editor's lane timeline — so live-editing a set's sounding adjacency
 ## Blocked by
 
 - 24-live-replan (parked ready-for-human — provides `pinUuid`, `soundingWindowAt`)
+
+## Comments
+
+**2026-07-06 — implemented (change `pytsnqou`, lane conductor, stacked on 34 `vkwnvxvv`). Parked ready-for-human.**
+
+What was built:
+
+- **Pure mapping seam** — `authoredPlayheadAt(execPlan, mixTime, transitionUuid)` in `sets/replan.ts`: matches `soundingWindowAt`'s window by `pinUuid` against the editor's active transition, maps mix time onto the AUTHORED axis via the EXECUTED adjacency's geometry (`transition.startSec + (mix − adj.mixStartSec) · adj.rateOutgoing` — the planner's authoredLocalAt), null-hides outside [0,1) of the window. Tested in `replan.test.ts` ("authoredPlayheadAt"): Riding + Fixed rates, solo/other-pin/hard-cut hiding, deferred-geometry truthfulness (graft keeps the marker on the OLD executed span), re-pin mid-window (GRAFT_PIN_UUID → marker disappears).
+- **Overlay** — `editor/ConductorLanePlayhead.tsx`: one vertical marker (saturated orange, `.editor-conductor-playhead`, z between jumps and the pink mix playhead) mounted in `DawTimeline`'s `.editor-timeline-content` beside the mix playhead — spans lanes A + waves + lanes B. Self-owned rAF outside React, transform/display writes only (the mix playhead's idiom); reads `getConductor()` + the editor session's active uuid; content px = `authored × pxPerSec` (content is scroll-transformed as a whole, no scroll term). Zoom re-renders feed the loop through a ref — no rAF rebuilds.
+- No planner/model/backend changes; waveform-strip echoes deferred per the issue's scope line.
+
+Gate on the stack: `npx vitest run` 1133 ✓ (5 new authoredPlayheadAt tests), `npm run build` ✓, eslint clean on touched files, `uv run alembic heads` → one (`0022`).
+
+**Verification walkthrough** (lane app running, same stack as 34's park):
+
+- Open **http://localhost:5343** (or desktop shell: `npm --prefix /Users/murtaza/manadj/desktop start -- --port 5343`).
+1. Library → Sets → **post-forest** → play the set (Space or ▶) → open a PINNED adjacency's transition in the editor (click the adjacency/chip) — playback keeps running (21).
+2. Let playback run into that window (or seek into it via the ladder): an **orange vertical marker** appears across the lane stack and tracks left→right through the window, matching what is heard; it disappears when the window completes (incoming's solo).
+3. While the marker is live, drag an EQ/fader lane: the change is audible immediately (24) and the marker keeps tracking.
+4. While the marker is live, drag the window's geometry (start/duration): the editor draws the new window, the set keeps executing the old one — the marker keeps moving over the OLD span (truthful to what is heard) until the window completes.
+5. Load a DIFFERENT transition (another session item / another pair) while the set plays through the first: no marker. Conductor stopped/idle: no marker.
