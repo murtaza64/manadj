@@ -69,7 +69,7 @@
 
 .sticky-col-cell {
   position: sticky;
-  background: var(--base);
+  background: var(--crust);
   z-index: 1;
 }
 

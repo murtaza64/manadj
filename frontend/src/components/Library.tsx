@@ -741,7 +741,7 @@ export default function Library({
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--mantle)'
+      background: 'var(--crust)'
     }}>
       {/* Waveform at top (full width), controls and editor below.
           Hidden in browseOnly mode (deck surface rendered by the host). */}

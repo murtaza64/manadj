@@ -1,7 +1,7 @@
 .track-row {
   height: 28px;
   border-bottom: 1px solid var(--surface0);
-  background: var(--base);
+  background: var(--crust);
   /* No background transition: sticky cells set their background via their
      own (untransitioned) rules, so a fade here makes the non-sticky cells
      visibly lag the sticky ones on selection. Instant is also just right
@@ -10,15 +10,15 @@
 }
 
 .track-row:hover {
-  background: #1f1f1f;
+  background: var(--mantle);
 }
 
 .track-row-selected {
-  background: #2a2a3e !important;
+  background: #242438 !important;
 }
 
 .track-row-selected:hover {
-  background: #32324a !important;
+  background: #2a2a3e !important;
 }
 
 /* Loaded on the Deck: left accent stripe, independent of selection */
@@ -28,15 +28,15 @@
 
 /* Sticky cell backgrounds that match row state */
 .track-row:hover .sticky-col-cell {
-  background: #1f1f1f !important;
+  background: var(--mantle) !important;
 }
 
 .track-row-selected .sticky-col-cell {
-  background: #2a2a3e !important;
+  background: #242438 !important;
 }
 
 .track-row-selected:hover .sticky-col-cell {
-  background: #32324a !important;
+  background: #2a2a3e !important;
 }
 
 .track-cell {
@@ -48,7 +48,7 @@
 /* Sticky column cell styles */
 .track-cell.sticky-col {
   position: sticky;
-  background: var(--base);
+  background: var(--crust);
   z-index: 1;
 }
 
@@ -77,7 +77,7 @@
 
 .track-energy-cell.sticky-col {
   position: sticky;
-  background: var(--base);
+  background: var(--crust);
   z-index: 1;
 }
 
