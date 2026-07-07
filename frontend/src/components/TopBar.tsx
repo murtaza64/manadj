@@ -73,13 +73,10 @@ export function TopBar({
         ))}
       </nav>
       <h1 className="topbar-title">{MODES.find((m) => m.id === mode)?.title}</h1>
-      {/* Audio-ownership chip (sets 40): leads the right cluster (it
-          carries the margin-left:auto formerly on the MIDI badge) so its
-          width changes eat free space instead of shifting neighbors. */}
-      <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />
       <MidiBadge />
       <QuantizeToggle />
       <AudioRoutingPicker />
+      <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />
     </header>
   );
 }

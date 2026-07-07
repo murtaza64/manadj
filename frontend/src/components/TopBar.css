@@ -85,10 +85,9 @@
   color: var(--text);
 }
 
-/* MIDI Controller badge: top right, lit while a mapped device is attached.
-   (Its former margin-left: auto moved to the always-mounted ownership
-   chip, which now leads the right cluster — sets 40.) */
+/* MIDI Controller badge: leads the right cluster. */
 .topbar-midi {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -144,10 +143,8 @@
 /* Audio-ownership chip (sets 40): who owns the decks, always present in
    the same slot. Muted while the shared decks hold; the muted→colored
    flip is the takeover/stand-down signal. Fixed height/typography across
-   faces; it leads the right cluster (margin-left: auto), so width changes
-   (set names) grow into free space — no layout shift of its neighbors. */
+   faces. */
 .topbar-ownership {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
