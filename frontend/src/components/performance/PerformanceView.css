@@ -104,22 +104,20 @@
 }
 
 /* Linked toggle (linked-pairs 02): pair-central, riding the deck divider
-   between the two minimaps. Solid backing so it reads as sitting ON the
-   rule, not over a waveform. */
+   between the two minimaps. Borderless background patch cuts a gap in the
+   separator behind the icon. */
 .perf-decks-link {
   position: absolute;
   left: 50%;
   top: 11px; /* perf-decks + deckpanel padding: the minimap row */
   transform: translateX(-50%);
-  width: 30px; /* square: minimap-container height both ways */
+  width: 22px; /* narrow cutout so it doesn't cover the minimaps */
   height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2;
-  background: var(--mantle, #181825);
-  border: 1px solid var(--surface1);
-  border-radius: 4px;
+  background: var(--crust, #11111b);
 }
 
 .perf-deckpanel {
