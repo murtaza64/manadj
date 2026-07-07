@@ -633,13 +633,19 @@
   align-items: stretch;
 }
 
+/* The clusters are unboxed (mirrors Performance mode's unboxed zones): a
+   single vertical rule between adjacent children carries the grouping,
+   not full borders. See PerformanceView.css .perf-deckpanel.mirrored. */
+.editor-infobar > * + * {
+  border-left: 1px solid var(--surface0, #313244);
+}
+
 .editor-deckcard {
   display: flex;
   flex-direction: column;
   gap: 3px;
   padding: 4px 8px;
 
-  border: 1px solid var(--surface0, #313244);
   font-size: 12px;
   min-width: 0;
 }
@@ -860,7 +866,6 @@
   gap: 3px;
   align-items: center;
   padding: 4px 10px;
-  border: 1px solid var(--surface0, #313244);
 
   font-size: 12px;
 }
