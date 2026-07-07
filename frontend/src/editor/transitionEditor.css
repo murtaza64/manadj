@@ -650,6 +650,13 @@
   min-width: 0;
 }
 
+/* Empty deck (issue 36): the full control skeleton renders DEAD so the
+   panel height is fixed — dim the empty-state placeholder text to match
+   the disabled-control opacity (0.4). Deck-accent identity edge stays. */
+.editor-deckcard-empty {
+  opacity: 0.4;
+}
+
 .editor-deckcard.a {
   border-left: 3px solid var(--deck-a);
 }

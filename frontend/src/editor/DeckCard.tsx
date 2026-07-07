@@ -74,25 +74,27 @@ export function DeckCard({
     trigger: (_slot, timeSeconds) => gestures?.toCue(timeSeconds),
   });
 
-  if (!track) {
-    return (
-      <div className={`editor-deckcard ${deck.toLowerCase()}`}>
-        <div className="editor-deckcard-head">
-          <span className={`editor-decklabel ${deck.toLowerCase()}`}>{deck}</span>
-          <span className="editor-tweaktitle">no track — select below and load</span>
-        </div>
-      </div>
-    );
-  }
-
+  // Empty and loaded states share ONE row structure so the info-bar panel
+  // is a fixed height — loading a track never shifts the layout (issue 36).
+  // When !track the controls render DEAD: BpmControl, HotCue, and
+  // useHotCueSlots are all null-safe and disable themselves; the gesture
+  // buttons key off `gestures.enabled` (false until a track's BPM exists).
   return (
-    <div className={`editor-deckcard ${deck.toLowerCase()}`}>
+    <div className={`editor-deckcard ${deck.toLowerCase()}${track ? '' : ' empty'}`}>
       <div className="editor-deckcard-head">
         <span className={`editor-decklabel ${deck.toLowerCase()}`}>{deck}</span>
-        <span className="editor-tweaktitle" title={track.title || track.filename}>
-          {track.title || track.filename}
-        </span>
-        <span className="editor-deckcard-artist">{track.artist || '—'}</span>
+        {track ? (
+          <>
+            <span className="editor-tweaktitle" title={track.title || track.filename}>
+              {track.title || track.filename}
+            </span>
+            <span className="editor-deckcard-artist">{track.artist || '—'}</span>
+          </>
+        ) : (
+          <span className="editor-tweaktitle editor-deckcard-empty">
+            no track — select below and load
+          </span>
+        )}
       </div>
       <div className="editor-deckcard-row">
         <span
@@ -108,7 +110,7 @@ export function DeckCard({
             player.setBpm(deck, bpm);
             // Editor loads mirror onto the shared decks (issue 07): keep
             // the shared engine's beat-jump math honest too.
-            if (deckScope.loadedTrack?.id === track.id) {
+            if (track && deckScope.loadedTrack?.id === track.id) {
               deckScope.engine.setTrackBpm(track.id, bpm);
             }
             onBpmSaved(bpm);
@@ -125,10 +127,11 @@ export function DeckCard({
             </em>
           )}
         </span>
-        <span className="editor-deckcard-key">{formatKeyDisplay(track.key)}</span>
+        <span className="editor-deckcard-key">{track ? formatKeyDisplay(track.key) : '—'}</span>
         <button
           className={`editor-mutebtn${player.isMuted(deck) ? ' on' : ''}`}
           aria-pressed={player.isMuted(deck)}
+          disabled={!track}
           title={`Mute deck ${deck} (overrides the fader lane)`}
           onClick={() => player.setMuted(deck, !player.isMuted(deck))}
         >
@@ -153,10 +156,18 @@ export function DeckCard({
           title="Alignment nudge: realign the pair ±10ms — arrows move the incoming track's block on screen (edits the sketch, not the grid)"
         >
           <span className="editor-pair-label">align</span>
-          <button title="Nudge the incoming block 10ms left" onClick={() => onAlignmentNudge(-0.01)}>
+          <button
+            disabled={!track}
+            title="Nudge the incoming block 10ms left"
+            onClick={() => onAlignmentNudge(-0.01)}
+          >
             ◀
           </button>
-          <button title="Nudge the incoming block 10ms right" onClick={() => onAlignmentNudge(0.01)}>
+          <button
+            disabled={!track}
+            title="Nudge the incoming block 10ms right"
+            onClick={() => onAlignmentNudge(0.01)}
+          >
             ▶
           </button>
         </span>
@@ -182,7 +193,11 @@ export function DeckCard({
               >
                 <JumpBackIcon />
               </button>
-              <button title="Halve size" onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}>
+              <button
+                disabled={!track}
+                title="Halve size"
+                onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}
+              >
                 1/2
               </button>
               <span
@@ -191,7 +206,11 @@ export function DeckCard({
               >
                 {gestureBeats}
               </span>
-              <button title="Double size" onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}>
+              <button
+                disabled={!track}
+                title="Double size"
+                onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}
+              >
                 x2
               </button>
               <button
