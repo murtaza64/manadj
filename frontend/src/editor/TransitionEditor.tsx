@@ -1004,6 +1004,11 @@ function EditorCenterPanel({
 
   return (
     <div className="editor-center">
+      {/* Row 1: transport + the two mode toggles. TEMPO/SNAP engaged =
+          inverted green fill (app-wide active-state color; top-bar quantize
+          toggle is the model). Blur after click so neither steals keyboard
+          focus (keyboard-focus 01). Semantics unchanged: tempoMatch =
+          persisted model state, snap = view state (mix-editor 32). */}
       <div className="editor-center-row">
         <button
           className={`player-button ${
@@ -1032,63 +1037,6 @@ function EditorCenterPanel({
         >
           ⇄
         </button>
-        <TransitionSwitcher
-          items={store.liveItems()}
-          active={session.active}
-          onNavigate={(dir) => store.navigateTransition(dir)}
-          onRename={(name) => store.renameActive(name)}
-          onToggleFavorite={() => store.toggleFavorite()}
-          onDelete={() => store.deleteActive()}
-        />
-        {/* Linked (linked-pairs 01): symmetric pair fact, independent of
-            the ★ on the active Transition. */}
-        <LinkToggle aTrackId={trackAId} bTrackId={trackBId} />
-        <TemplatesDropdown
-          templates={templates}
-          canSave={canSaveTemplate}
-          saveDisabledReason={saveDisabledReason}
-          canApply={pairLoaded}
-          onApply={applyTemplateToPair}
-          onSaveCurrent={() => setSaveModalOpen(true)}
-          onRename={(tpl, name) => saveTemplate({ ...tpl, name })}
-          onDelete={deleteTemplate}
-        />
-      </div>
-      {notices.length > 0 && (
-        <div className="editor-notices" title="Dismiss" onClick={() => setNotices([])}>
-          {notices.map((n, i) => (
-            <div key={i}>{n}</div>
-          ))}
-        </div>
-      )}
-      {/* Beat-domain readouts (issue 18): display-only — the timeline
-          gestures are the manipulation surface. Seconds live in the
-          tooltip; a gridless track's fields fall back to time (dimmed). */}
-      <div className="editor-center-row editor-readouts">
-        <Readout
-          label="start"
-          beatValue={sideA.beatgrid ? barBeatLabel(sideA.beatgrid, tr.startSec) : null}
-          seconds={tr.startSec}
-        />
-        <Readout
-          label="length"
-          beatValue={
-            sideA.beatgrid ? lengthBeatsLabel(sideA.beatgrid, tr.startSec, tr.durationSec) : null
-          }
-          seconds={tr.durationSec}
-        />
-        <Readout
-          label="B entry"
-          beatValue={sideB.beatgrid ? bEntryLabel(sideB.beatgrid, tr.bInSec) : null}
-          seconds={tr.bInSec}
-        />
-      </div>
-      {/* TEMPO/SNAP button toggles (mix-editor 32): engaged = inverted
-          green fill (the app-wide active-state color — the top-bar
-          quantize toggle is the model). Blur after click so neither
-          steals keyboard focus (keyboard-focus 01). Semantics unchanged:
-          tempoMatch = persisted model state, snap = view state. */}
-      <div className="editor-center-row">
         <button
           className={`editor-toggle${tr.tempoMatch ? ' on' : ''}`}
           aria-pressed={tr.tempoMatch}
@@ -1111,6 +1059,59 @@ function EditorCenterPanel({
         >
           SNAP
         </button>
+      </div>
+      {/* Row 2: Transition selection + templates + pair-link. */}
+      <div className="editor-center-row">
+        <TransitionSwitcher
+          items={store.liveItems()}
+          active={session.active}
+          onNavigate={(dir) => store.navigateTransition(dir)}
+          onRename={(name) => store.renameActive(name)}
+          onToggleFavorite={() => store.toggleFavorite()}
+          onDelete={() => store.deleteActive()}
+        />
+        <TemplatesDropdown
+          templates={templates}
+          canSave={canSaveTemplate}
+          saveDisabledReason={saveDisabledReason}
+          canApply={pairLoaded}
+          onApply={applyTemplateToPair}
+          onSaveCurrent={() => setSaveModalOpen(true)}
+          onRename={(tpl, name) => saveTemplate({ ...tpl, name })}
+          onDelete={deleteTemplate}
+        />
+        {/* Linked (linked-pairs 01): symmetric pair fact, independent of
+            the ★ on the active Transition. */}
+        <LinkToggle aTrackId={trackAId} bTrackId={trackBId} />
+      </div>
+      {notices.length > 0 && (
+        <div className="editor-notices" title="Dismiss" onClick={() => setNotices([])}>
+          {notices.map((n, i) => (
+            <div key={i}>{n}</div>
+          ))}
+        </div>
+      )}
+      {/* Row 3: beat-domain readouts (issue 18) — display-only; the timeline
+          gestures are the manipulation surface. Seconds live in the tooltip;
+          a gridless track's fields fall back to time (dimmed). */}
+      <div className="editor-center-row editor-readouts">
+        <Readout
+          label="start"
+          beatValue={sideA.beatgrid ? barBeatLabel(sideA.beatgrid, tr.startSec) : null}
+          seconds={tr.startSec}
+        />
+        <Readout
+          label="length"
+          beatValue={
+            sideA.beatgrid ? lengthBeatsLabel(sideA.beatgrid, tr.startSec, tr.durationSec) : null
+          }
+          seconds={tr.durationSec}
+        />
+        <Readout
+          label="B entry"
+          beatValue={sideB.beatgrid ? bEntryLabel(sideB.beatgrid, tr.bInSec) : null}
+          seconds={tr.bInSec}
+        />
       </div>
       {takeDraft && (
         <div className="editor-center-row editor-take-banner">

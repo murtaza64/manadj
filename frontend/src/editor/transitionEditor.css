@@ -72,7 +72,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   padding: 0;
   overflow: hidden;
   min-width: 0;
@@ -629,22 +629,38 @@
 .editor-infobar {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  gap: 12px;
+  /* No column gap: the vertical separators (border-left on the trailing
+     children) then sit flush on the A|center and center|B boundaries.
+     Symmetry comes from equal horizontal padding on all three children
+     (10px each side), so every divider has 10px of space on both sides. */
+  column-gap: 0;
   align-items: stretch;
 }
 
 /* The clusters are unboxed (mirrors Performance mode's unboxed zones): a
-   single vertical rule between adjacent children carries the grouping,
+   single inset vertical rule between adjacent children carries the grouping,
    not full borders. See PerformanceView.css .perf-deckpanel.mirrored. */
 .editor-infobar > * + * {
-  border-left: 1px solid var(--surface0, #313244);
+  position: relative;
+}
+
+.editor-infobar > * + *::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 1px;
+  background: var(--surface0, #313244);
+  pointer-events: none;
 }
 
 .editor-deckcard {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 4px 8px;
+  gap: 7px;
+  padding: 8px 10px;
 
   font-size: 12px;
   min-width: 0;
@@ -678,6 +694,17 @@
   min-width: 0;
 }
 
+.editor-deckcard-head .editor-mutebtn {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-left: auto;
+}
+
+.editor-deckcard.b .editor-deckcard-head .editor-mutebtn {
+  margin-right: auto;
+  margin-left: 0;
+}
+
 .editor-deckcard-artist {
   font-size: 11px;
   color: var(--subtext0, #a6adc8);
@@ -709,7 +736,8 @@
   width: 72px; /* look comes from the shared control idiom below */
 }
 
-.editor-deckcard-row button {
+.editor-deckcard-row button,
+.editor-deckcard-head button {
   background: none;
   border: 1px solid var(--surface1, #45475a);
   color: var(--text, #cdd6f4);
@@ -721,16 +749,19 @@
 
 /* Unified vocabulary: hover = tint + white border (accent clusters pin
    their accent border below), press = fill step */
-.editor-deckcard-row button:hover:not(:disabled) {
+.editor-deckcard-row button:hover:not(:disabled),
+.editor-deckcard-head button:hover:not(:disabled) {
   background: var(--surface0, #313244);
   border-color: var(--text, #cdd6f4);
 }
 
-.editor-deckcard-row button:active:not(:disabled) {
+.editor-deckcard-row button:active:not(:disabled),
+.editor-deckcard-head button:active:not(:disabled) {
   background: var(--surface1, #45475a);
 }
 
-.editor-deckcard-row button:disabled {
+.editor-deckcard-row button:disabled,
+.editor-deckcard-head button:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -843,15 +874,18 @@
    accent (it scopes slides), disengaged = default chrome — the color IS
    the state cue (user feedback: open padlock alone read ambiguously). */
 
-/* Cue pads: their own bottom row (1-8 left-to-right on both cards); set
-   pads keep their cue colors (identity). Compact sizing beats HotCue.css's
-   pad metrics. */
+/* Cue pads: inline group on the gesture row (1-8 left-to-right on both
+   cards); set pads keep their cue colors (identity). Compact sizing beats
+   HotCue.css's pad metrics. */
 .editor-cuerow {
+  display: inline-flex;
+  align-items: center;
   gap: 2px;
 }
 
 .editor-cuerow .hot-cue {
-  height: 20px;
+  /* Match the segmented pairs / gesture controls on the same row (22px). */
+  height: 22px;
   width: 26px;
   min-width: 26px;
   padding: 0;
@@ -860,19 +894,39 @@
 }
 
 /* Cue slots always read 1-8 left-to-right: the card's mirrored layout
-   (row-reverse on deck B) does not apply to the gesture/pad rows — but
-   they still hug B's right edge like everything else on the card. */
+   (row-reverse on deck B) does not apply to the gesture/pad rows. */
 .editor-deckcard.b .editor-deckcard-row.editor-slides {
   flex-direction: row;
-  justify-content: flex-end;
+}
+
+/* Gesture-row main cluster (slide/jump pair + cues) stays grouped. */
+.editor-slides-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Deck B only (has lock): push the main cluster right so lock can sit left. */
+.editor-slides-main.with-lock {
+  margin-left: auto;
+}
+
+/* Align the bottom-row B lock with the top-corner mute: card horizontal
+   padding is 10px, corner inset is 8px. */
+.editor-deckcard.b .editor-deckcard-row.editor-slides > .editor-lockbtn {
+  margin-left: -2px;
 }
 
 .editor-center {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  /* Three rows (transport+toggles / switcher+templates+link / readouts)
+     distributed evenly down the panel's full height, rather than
+     top-packed with a fixed gap. */
+  justify-content: space-evenly;
   align-items: center;
-  padding: 4px 10px;
+  gap: 4px;
+  padding: 8px 10px;
 
   font-size: 12px;
 }
@@ -881,6 +935,28 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* Center-panel controls use one 22px vertical rhythm. Scoped here so the
+   shared player/link controls keep their native sizing elsewhere. */
+.editor-center .player-button,
+.editor-center .editor-toggle,
+.editor-center .editor-templates-trigger,
+.editor-center .link-toggle {
+  height: 22px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.editor-center .player-button {
+  padding: 0 10px;
+}
+
+.editor-center .link-toggle {
+  padding: 0 5px;
 }
 
 /* Beat-domain readouts (issue 18): display-only values, monospace so they
@@ -1005,7 +1081,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
+  width: 28px;
+  min-width: 28px;
+  /* Match the segmented pairs / cue pads on the same rows (22px). */
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+  box-sizing: border-box;
 }
 
 /* Engaged = inverted fill: lock in the alignment accent (it scopes

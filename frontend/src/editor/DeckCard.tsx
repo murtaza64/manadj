@@ -95,6 +95,15 @@ export function DeckCard({
             no track — select below and load
           </span>
         )}
+        <button
+          className={`editor-mutebtn${player.isMuted(deck) ? ' on' : ''}`}
+          aria-pressed={player.isMuted(deck)}
+          disabled={!track}
+          title={`Mute deck ${deck} (overrides the fader lane)`}
+          onClick={() => player.setMuted(deck, !player.isMuted(deck))}
+        >
+          <MuteIcon muted={player.isMuted(deck)} />
+        </button>
       </div>
       <div className="editor-deckcard-row">
         <span
@@ -128,132 +137,124 @@ export function DeckCard({
           )}
         </span>
         <span className="editor-deckcard-key">{track ? formatKeyDisplay(track.key) : '—'}</span>
-        <button
-          className={`editor-mutebtn${player.isMuted(deck) ? ' on' : ''}`}
-          aria-pressed={player.isMuted(deck)}
-          disabled={!track}
-          title={`Mute deck ${deck} (overrides the fader lane)`}
-          onClick={() => player.setMuted(deck, !player.isMuted(deck))}
-        >
-          <MuteIcon muted={player.isMuted(deck)} />
-        </button>
         <span className="editor-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
       </div>
-      {/* One gesture row (align + jump/slide + lock), then the cue pads on
-          their own bottom row. */}
+      {/* One gesture row: align + jump/slide + lock + the hot-cue pads,
+          all on the same line. */}
       <div
         className={`editor-deckcard-row editor-slides${
           gestures?.kind === 'slide' ? ' editor-alignment' : ''
         }`}
       >
-        {/* Alignment nudge (accented — realigns the pair): plain ◀/▶ +
-            accent, per the PRD icon language. The grid cluster lives with
-            BPM above (one domain — ADR 0016). Apparent-motion polarity
-            (mix-editor 32): arrows follow the incoming block's on-screen
-            motion, so both cards' ▶ mean "block right". */}
-        <span
-          className="editor-pair editor-alignment"
-          title="Alignment nudge: realign the pair ±10ms — arrows move the incoming track's block on screen (edits the sketch, not the grid)"
-        >
-          <span className="editor-pair-label">align</span>
-          <button
-            disabled={!track}
-            title="Nudge the incoming block 10ms left"
-            onClick={() => onAlignmentNudge(-0.01)}
-          >
-            ◀
-          </button>
-          <button
-            disabled={!track}
-            title="Nudge the incoming block 10ms right"
-            onClick={() => onAlignmentNudge(0.01)}
-          >
-            ▶
-          </button>
-        </span>
         {gestures && (
           <>
-            <span
-              className="editor-pair"
-              title={
-                gestures.kind === 'slide'
-                  ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put — arrows move its block on screen'
-                  : 'Transport: moves the playhead — both decks follow, alignment untouched'
-              }
-            >
-              <span className="editor-pair-label">{gestures.kind}</span>
-              <button
-                disabled={!gestures.enabled}
-                title={
-                  gestures.kind === 'slide'
-                    ? `Slide ${deck}'s block ${gestureBeats} of its beats left`
-                    : `Jump the playhead ${gestureBeats} of ${deck}'s beats back`
-                }
-                onClick={() => gestures.beats(-gestureBeats)}
-              >
-                <JumpBackIcon />
-              </button>
-              <button
-                disabled={!track}
-                title="Halve size"
-                onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}
-              >
-                1/2
-              </button>
-              <span
-                className="editor-slidesize"
-                title={`Size (${deck}'s beats — shared with the deck's beatjump)`}
-              >
-                {gestureBeats}
-              </span>
-              <button
-                disabled={!track}
-                title="Double size"
-                onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}
-              >
-                x2
-              </button>
-              <button
-                disabled={!gestures.enabled}
-                title={
-                  gestures.kind === 'slide'
-                    ? `Slide ${deck}'s block ${gestureBeats} of its beats right`
-                    : `Jump the playhead ${gestureBeats} of ${deck}'s beats forward`
-                }
-                onClick={() => gestures.beats(gestureBeats)}
-              >
-                <JumpForwardIcon />
-              </button>
-            </span>
             {lock && (
               <button
                 className={`editor-lockbtn${lock.on ? ' on' : ''}`}
                 aria-pressed={lock.on}
+                disabled={!track}
                 title="Locked window: slides carry the window WITH this track (same audio stays under it); unlocked, the window stays with the other track"
                 onClick={lock.toggle}
               >
                 <LockIcon locked={lock.on} />
               </button>
             )}
+            <span className={`editor-slides-main${lock ? ' with-lock' : ''}`}>
+              {/* Alignment nudge (accented — realigns the pair): plain ◀/▶
+                  + accent, per the PRD icon language. Apparent-motion
+                  polarity (mix-editor 32): arrows follow the incoming
+                  block's on-screen motion, so both cards' ▶ mean "block
+                  right". */}
+              <span
+                className="editor-pair editor-alignment"
+                title="Alignment nudge: realign the pair ±10ms — arrows move the incoming track's block on screen (edits the sketch, not the grid)"
+              >
+                <span className="editor-pair-label">align</span>
+                <button
+                  disabled={!track}
+                  title="Nudge the incoming block 10ms left"
+                  onClick={() => onAlignmentNudge(-0.01)}
+                >
+                  ◀
+                </button>
+                <button
+                  disabled={!track}
+                  title="Nudge the incoming block 10ms right"
+                  onClick={() => onAlignmentNudge(0.01)}
+                >
+                  ▶
+                </button>
+              </span>
+              <span
+                className="editor-pair"
+                title={
+                  gestures.kind === 'slide'
+                    ? 'Slides realign the pair: this deck re-cues, the playhead and the other deck stay put — arrows move its block on screen'
+                    : 'Transport: moves the playhead — both decks follow, alignment untouched'
+                }
+              >
+                <span className="editor-pair-label">{gestures.kind}</span>
+                <button
+                  disabled={!gestures.enabled}
+                  title={
+                    gestures.kind === 'slide'
+                      ? `Slide ${deck}'s block ${gestureBeats} of its beats left`
+                      : `Jump the playhead ${gestureBeats} of ${deck}'s beats back`
+                  }
+                  onClick={() => gestures.beats(-gestureBeats)}
+                >
+                  <JumpBackIcon />
+                </button>
+                <button
+                  disabled={!track}
+                  title="Halve size"
+                  onClick={() => setGestureBeats(halveBeatjump(gestureBeats))}
+                >
+                  1/2
+                </button>
+                <span
+                  className="editor-slidesize"
+                  title={`Size (${deck}'s beats — shared with the deck's beatjump)`}
+                >
+                  {gestureBeats}
+                </span>
+                <button
+                  disabled={!track}
+                  title="Double size"
+                  onClick={() => setGestureBeats(doubleBeatjump(gestureBeats))}
+                >
+                  x2
+                </button>
+                <button
+                  disabled={!gestures.enabled}
+                  title={
+                    gestures.kind === 'slide'
+                      ? `Slide ${deck}'s block ${gestureBeats} of its beats right`
+                      : `Jump the playhead ${gestureBeats} of ${deck}'s beats forward`
+                  }
+                  onClick={() => gestures.beats(gestureBeats)}
+                >
+                  <JumpForwardIcon />
+                </button>
+              </span>
+              <span className="editor-cuerow">
+                {SLOTS.map((slot) => (
+                  <HotCue
+                    key={slot}
+                    slotNumber={slot}
+                    hotCue={cueActions.bySlot.get(slot)}
+                    disabled={!cueActions.enabled}
+                    isPreviewing={false}
+                    onDown={cueActions.down}
+                    onUp={cueActions.up}
+                    onDelete={cueActions.remove}
+                  />
+                ))}
+              </span>
+            </span>
           </>
         )}
       </div>
-      {gestures && (
-        <div className="editor-deckcard-row editor-slides editor-cuerow">
-          {SLOTS.map((slot) => (
-            <HotCue
-              key={slot}
-              slotNumber={slot}
-              hotCue={cueActions.bySlot.get(slot)}
-              disabled={!cueActions.enabled}
-              isPreviewing={false}
-              onDown={cueActions.down}
-              onUp={cueActions.up}
-              onDelete={cueActions.remove}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
