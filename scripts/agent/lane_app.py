@@ -86,6 +86,54 @@ def ensure_frontend_deps() -> None:
     )
 
 
+def _venv_is_stale() -> bool:
+    """True if LANE_ROOT/.venv is missing or its interpreter points elsewhere.
+
+    uv writes console-script shebangs with an *absolute* interpreter path
+    (e.g. `#!/…/.venv/bin/python`). After the umbrella move (repo → default/,
+    or any lane relocation) those shebangs still point at the vanished old
+    path, so `uv run uvicorn` dies with "Failed to spawn: No such file or
+    directory" even though `import uvicorn` works. Detect by reading a console
+    script's shebang and checking that its interpreter resolves inside *this*
+    workspace's .venv. Missing .venv counts as stale (needs a sync).
+    """
+    venv = LANE_ROOT / ".venv"
+    if not venv.exists():
+        return True
+    # Prefer a console script (absolute-path shebang); fall back across a few.
+    for script in ("uvicorn", "alembic", "fastapi"):
+        path = venv / "bin" / script
+        if not path.exists():
+            continue
+        try:
+            first = path.read_text(errors="replace").splitlines()[0]
+        except (OSError, IndexError):
+            continue
+        if not first.startswith("#!"):
+            continue
+        # The shebang interpreter path is what uv baked in at build time; its
+        # *directory* (…/.venv/bin) is the staleness signal. Resolve the dir
+        # (normalizes . / symlinked parents) but never the python symlink
+        # itself — that points at the shared uv-managed interpreter outside
+        # any .venv and would always look "stale".
+        interp = Path(first[2:].strip().split()[0])
+        try:
+            interp_dir = interp.parent.resolve()
+        except OSError:
+            return True
+        return venv.resolve() != interp_dir.parent
+    # No console script found to probe — treat as fresh (nothing to spawn).
+    return False
+
+
+def ensure_venv() -> None:
+    if not _venv_is_stale():
+        return
+    print("rebuilding lane venv (missing or stale absolute-shebang after move)…")
+    subprocess.run(["rm", "-rf", str(LANE_ROOT / ".venv")], check=True)
+    subprocess.run(["uv", "sync"], cwd=LANE_ROOT, check=True)
+
+
 def running_pid() -> int | None:
     try:
         pid = int(PID_FILE.read_text().strip())
@@ -101,6 +149,7 @@ def cmd_start(args: argparse.Namespace) -> None:
     backend_port, vite_port = resolve_ports(args)
     ensure_sandbox_db()
     ensure_frontend_deps()
+    ensure_venv()
     RUNTIME_DIR.mkdir(exist_ok=True)
     log = open(LOG_FILE, "a")
     proc = subprocess.Popen(
