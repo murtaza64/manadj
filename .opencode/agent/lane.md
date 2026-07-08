@@ -1,6 +1,9 @@
 ---
 description: manadj lane agent — yolo-style unattended implementation session confined to its own lane. Spawned by es agent spawn --agent lane; session cwd is the lane workspace. Write boundary enforced by permissions (ADR 0028); everything outside the lane is deny-by-default, never ask (unattended sessions must not stall on prompts).
 mode: primary
+# Cost default: spawned lane agents run on opus unless the spawner passes
+# --model explicitly (editspace-migration 05).
+model: anthropic/claude-opus-4-8
 # NOTE (incident 2026-07-08): edit-permission deny rules are INERT in current
 # opencode (verified empirically — agent and project level, every pattern
 # syntax). Do not add edit denies here and trust them. The real-DB write wall
