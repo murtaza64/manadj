@@ -101,6 +101,9 @@ class LinkByUrlRequest(BaseModel):
 class DownloadStatus(BaseModel):
     task_state: str
     error: str | None
+    # ISO-8601 UTC deferral floor when a pending task is cooling down after a
+    # rate-limit (issue 08); None unless deferred into the future.
+    cooling_down_until: str | None = None
 
 
 class BulkQueueRequest(BaseModel):
@@ -143,6 +146,18 @@ def _correspondence_map(db: Session) -> dict[int, CorrespondenceInfo]:
     }
 
 
+def _cooling_down_until(task: "Task") -> str | None:
+    """ISO-8601 UTC when a pending, future-deferred task resumes; else None."""
+    from datetime import datetime, timezone
+
+    if task.state != "pending" or task.not_before is None:
+        return None
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if task.not_before <= now:
+        return None
+    return task.not_before.replace(tzinfo=timezone.utc).isoformat()
+
+
 def _download_map(db: Session) -> dict[int, DownloadStatus]:
     """source_item_id -> latest download-task status."""
     statuses: dict[int, DownloadStatus] = {}
@@ -151,7 +166,9 @@ def _download_map(db: Session) -> dict[int, DownloadStatus]:
     for task in db.query(Task).filter(Task.type == "download").order_by(Task.id).all():
         if task.ref and task.ref.startswith("source_item:"):
             statuses[int(task.ref.split(":", 1)[1])] = DownloadStatus(
-                task_state=task.state, error=task.error
+                task_state=task.state,
+                error=task.error,
+                cooling_down_until=_cooling_down_until(task),
             )
     return statuses
 
@@ -196,7 +213,11 @@ def _item_response(db: Session, item_id: int) -> SourceItemResponse:
         resp.provenance = _provenance_map(db).get(resp.correspondence.track_id)
     tasks = list_tasks(db, ref=f"source_item:{item_id}")
     if tasks:
-        resp.download = DownloadStatus(task_state=tasks[0].state, error=tasks[0].error)
+        resp.download = DownloadStatus(
+            task_state=tasks[0].state,
+            error=tasks[0].error,
+            cooling_down_until=_cooling_down_until(tasks[0]),
+        )
     return resp
 
 

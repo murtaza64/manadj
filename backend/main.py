@@ -104,6 +104,7 @@ def _build_task_worker() -> "TaskWorker | None":
         )
 
     config = get_config()
+    delays: dict[str, float] = {}
     if config.soundcloud.oauth_token and config.library.tracks_directory:
         from .acquisition.download import download_handler
         from .acquisition.source import SoundCloudSource
@@ -112,6 +113,8 @@ def _build_task_worker() -> "TaskWorker | None":
         handlers["download"] = download_handler(
             source, Path(config.library.tracks_directory), config.acquisition.cleanup
         )
+        # Pace downloads under SoundCloud's request budget (issue 08).
+        delays["download"] = config.acquisition.download_delay_secs
     else:
         logging.getLogger("backend.main").warning(
             "download handler not registered: soundcloud oauth_token or tracks_directory missing"
@@ -119,7 +122,7 @@ def _build_task_worker() -> "TaskWorker | None":
 
     if not handlers:
         return None
-    return TaskWorker(SessionLocal, handlers)
+    return TaskWorker(SessionLocal, handlers, delays=delays)
 
 
 _task_worker: "TaskWorker | None" = None

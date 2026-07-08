@@ -126,6 +126,30 @@ class TestDownloadChain:
         assert task.state == "failed"
         assert task.error is not None and "geo-blocked" in task.error
 
+    def test_simulated_429_defers_instead_of_failing(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        """A 429 from the Source returns the task to pending (issue 08)."""
+        from backend.acquisition.source import RateLimitedError
+
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        source = FakeSource(
+            [item_data("111")],
+            download_error=RateLimitedError("HTTP Error 429: Too Many Requests"),
+        )
+        refresh(db_session, source)
+        item = list_source_items(db_session)[0]
+        queue_item(db_session, item.id)
+
+        run_pending(db_session, make_handlers(source, tracks_dir))
+
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "pending"
+        assert task.attempts == 1
+        assert task.not_before is not None
+        assert task.error is None
+
 
 class TestMetadataEmbedding:
     def test_cleaned_metadata_embedded_in_file(

@@ -426,6 +426,16 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
         </div>
       )}
 
+      {item.download?.cooling_down_until && (
+        <div className="acquisition-cooldown">
+          rate-limited — cooling down until{' '}
+          {new Date(item.download.cooling_down_until).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </div>
+      )}
+
       {item.download?.error && (
         <div className="acquisition-error">
           download failed: {item.download.error}

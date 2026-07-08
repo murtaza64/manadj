@@ -25,6 +25,10 @@ class Task(Base):
     ref: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     state: Mapped[str] = mapped_column(String, nullable=False, default="pending", index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Rate-limit backoff (issue 08): retry accounting and a deferral floor.
+    # A pending task is only eligible once now() >= not_before (NULL = ready).
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    not_before: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

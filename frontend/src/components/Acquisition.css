@@ -139,6 +139,12 @@
   font-size: var(--font-xs);
 }
 
+.acquisition-cooldown {
+  color: var(--yellow);
+  padding: var(--space-sm);
+  font-size: var(--font-xs);
+}
+
 .acquisition-chip {
   border: none;
   font-size: var(--font-xs);

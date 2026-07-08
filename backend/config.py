@@ -34,6 +34,9 @@ class AcquisitionConfig:
     """Acquisition configuration."""
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
+    # Seconds the worker sleeps between download tasks, to stay under
+    # SoundCloud's request budget (issue 08). 3s was assumed, not confirmed.
+    download_delay_secs: float = 3.0
 
 
 @dataclass
@@ -79,6 +82,13 @@ def _cleanup_config(data: dict[str, Any]) -> CleanupConfig:
     section: dict[str, Any] = data.get("acquisition", {}).get("cleanup", {})
     defaults = CleanupConfig()
     return CleanupConfig(junk_patterns=section.get("junk_patterns", defaults.junk_patterns))
+
+
+def _download_delay_secs(data: dict[str, Any]) -> float:
+    """Inter-download pacing from [acquisition], default 3s (issue 08)."""
+    section: dict[str, Any] = data.get("acquisition", {})
+    default = AcquisitionConfig().download_delay_secs
+    return float(section.get("download_delay_secs", default))
 
 
 def _soundcloud_token(data: dict[str, Any]) -> str | None:
@@ -142,6 +152,7 @@ def load_config() -> Config:
         acquisition=AcquisitionConfig(
             classification=_classification_config(data),
             cleanup=_cleanup_config(data),
+            download_delay_secs=_download_delay_secs(data),
         )
     )
 

@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,25 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
+
+
+class RateLimitedError(Exception):
+    """The Source rejected a request for exceeding its rate budget (HTTP 429).
+
+    Distinct from a permanent failure: the task system defers and retries the
+    work instead of marking it `failed` (acquisition issue 08). SoundCloud's
+    budget is ~600 requests / 10 min; a bulk catch-up trips it.
+    """
+
+
+def is_rate_limit(error: BaseException) -> bool:
+    """True if a yt-dlp / requests error indicates HTTP 429 (Too Many Requests).
+
+    yt-dlp surfaces the upstream status only in the message text, so we sniff
+    both the numeric code and the phrase.
+    """
+    text = str(error).lower()
+    return "429" in text or "too many requests" in text
 
 
 @dataclass(frozen=True)
@@ -57,6 +78,18 @@ class SoundCloudSource:
         self._session = requests.Session()
         self._session.headers["Authorization"] = f"OAuth {oauth_token}"
         self._session.headers["User-Agent"] = USER_AGENT
+        # Refresh resilience (issue 08): transparently retry transient 429s
+        # during likes listing, honouring the server's Retry-After header.
+        retry = Retry(
+            total=5,
+            status_forcelist=(429,),
+            backoff_factor=1.0,  # 0, 1, 2, 4, 8 s (exponential)
+            respect_retry_after_header=True,
+            allowed_methods=frozenset({"GET"}),
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
 
     def _get(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         resp = self._session.get(url, params=params, timeout=REQUEST_TIMEOUT_SECS)
@@ -95,8 +128,14 @@ class SoundCloudSource:
         return items
 
     def download(self, permalink_url: str, dest_dir: Path, basename: str) -> Path:
-        """Download best non-opus audio via yt-dlp (the user's proven incantation)."""
+        """Download best non-opus audio via yt-dlp (the user's proven incantation).
+
+        A 429 surfaces as RateLimitedError so the task system can defer rather
+        than fast-fail (issue 08). extractor_retries + exponential
+        retry_sleep_functions absorb transient blips before that point.
+        """
         from yt_dlp import YoutubeDL  # heavy import, keep it out of module load
+        from yt_dlp.utils import DownloadError
 
         options = {
             "format": "ba[acodec!=opus]/ba",
@@ -105,9 +144,22 @@ class SoundCloudSource:
             "password": self._oauth_token,
             "quiet": True,
             "noprogress": True,
+            # transient-blip absorption (issue 08)
+            "extractor_retries": 5,
+            "retry_sleep_functions": {
+                "http": lambda n: min(2 ** n, 60),
+                "extractor": lambda n: min(2 ** n, 60),
+            },
         }
-        with YoutubeDL(cast(Any, options)) as ydl:
-            info = cast("dict[str, Any] | None", ydl.extract_info(permalink_url, download=True))
+        try:
+            with YoutubeDL(cast(Any, options)) as ydl:
+                info = cast(
+                    "dict[str, Any] | None", ydl.extract_info(permalink_url, download=True)
+                )
+        except DownloadError as e:
+            if is_rate_limit(e):
+                raise RateLimitedError(str(e)) from e
+            raise
         if info is None:
             raise RuntimeError(f"yt-dlp returned no info for {permalink_url}")
         downloads: list[dict[str, Any]] = info.get("requested_downloads") or []

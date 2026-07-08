@@ -20,10 +20,12 @@ class TaskWorker:
         session_factory: "sessionmaker",  # type: ignore[type-arg]
         handlers: dict[str, Handler],
         poll_interval: float = POLL_INTERVAL_SECS,
+        delays: dict[str, float] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._handlers = handlers
         self._poll_interval = poll_interval
+        self._delays = delays or {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -46,7 +48,7 @@ class TaskWorker:
         while not self._stop.is_set():
             db = self._session_factory()
             try:
-                run_pending(db, self._handlers)
+                run_pending(db, self._handlers, delays=self._delays)
             except Exception:
                 logger.exception("task worker iteration failed")
             finally:

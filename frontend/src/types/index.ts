@@ -426,6 +426,8 @@ export interface ProvenanceInfo {
 export interface DownloadStatus {
   task_state: 'pending' | 'running' | 'done' | 'failed';
   error: string | null;
+  // ISO-8601 UTC deferral floor when a rate-limited task is cooling down.
+  cooling_down_until?: string | null;
 }
 
 export interface SourceCorrespondenceInfo {

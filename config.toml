@@ -11,6 +11,11 @@ rekordbox_path = "/Users/murtaza/Library/Pioneer/rekordbox"
 # Path to music library directory for importing tracks
 tracks_directory = "/Users/murtaza/Music/Tracks"
 
+[acquisition]
+# Seconds the download worker waits between tasks, to stay under SoundCloud's
+# request budget (~600 req / 10 min). Rate-limit (429) backoff is automatic.
+download_delay_secs = 3
+
 [acquisition.classification]
 # Heuristics that classify Source Items as track / mix / clip.
 # Items shorter than clip_max_duration_secs are clips; longer than
