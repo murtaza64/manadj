@@ -12,6 +12,7 @@ import { BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
 import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
 import { useDeckBeatgridSync } from '../hooks/useDeckBeatgridSync';
+import { BEATGRID_RETRY, beatgridRetryDelay } from '../hooks/useBeatgridData';
 import { useDeckBpmSync } from '../hooks/useDeckBpmSync';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
@@ -137,7 +138,10 @@ export function DeckProvider({ children }: { children: ReactNode }) {
             queryKey: ['beatgrid', track.id],
             queryFn: () => api.beatgrids.get(track.id),
             staleTime: Infinity,
-            retry: false,
+            // Ride out background analysis with bounded retries, symmetric
+            // with useBeatgridData / the waveform blob (deck-asset-refresh 01).
+            retry: BEATGRID_RETRY,
+            retryDelay: beatgridRetryDelay,
           }),
         ]).then(([r]) => r);
         return {

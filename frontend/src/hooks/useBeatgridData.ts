@@ -9,6 +9,19 @@ import type { BeatgridResponse } from '../types';
 export const GRID_NUDGE_MS = 10;
 
 /**
+ * Bounded-retry policy shared by every ['beatgrid', id] fetch site (this
+ * hook and DeckContext's load-time fetchQuery), mirroring the waveform blob
+ * (useWaveformBlob.ts): a freshly-downloaded track's beatgrid 400/404s until
+ * the background analysis task writes the grid, so retry with exponential
+ * backoff to ride that out. Bounded at 5 so tracks that legitimately have no
+ * grid (analysis bailed) settle into error instead of retrying forever
+ * (deck-asset-refresh 01).
+ */
+export const BEATGRID_RETRY = 5;
+export const beatgridRetryDelay = (attemptIndex: number) =>
+  Math.min(1000 * 2 ** attemptIndex, 10000);
+
+/**
  * Hook for fetching beatgrid data.
  *
  * Fetches beatgrid from API and caches indefinitely.
@@ -20,7 +33,8 @@ export function useBeatgridData(trackId: number | null) {
     queryFn: () => api.beatgrids.get(trackId!),
     enabled: trackId !== null,
     staleTime: Infinity,  // Beatgrids rarely change
-    retry: false,  // Don't retry - if it fails, it's likely missing BPM
+    retry: BEATGRID_RETRY,  // Ride out background analysis; bounded (see BEATGRID_RETRY)
+    retryDelay: beatgridRetryDelay,
   });
 
   return {
