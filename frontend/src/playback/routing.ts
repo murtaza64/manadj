@@ -21,10 +21,10 @@ export interface OutputPair {
 
 export interface SavedDevice {
   deviceId: string;
-  /** Display label (cue entries include the pair, e.g. "… (outs 3/4)");
+  /** Display label (pair entries include e.g. "… (outs 3/4)");
    * matching is by id (+ pair). */
   label: string;
-  /** Cue only: which output pair to occupy; absent/null = device default. */
+  /** Which output pair to occupy; absent/null = device default. */
   pair?: OutputPair | null;
 }
 
@@ -40,6 +40,8 @@ export const DEFAULT_ROUTING_PREFS: RoutingPrefs = { master: null, cue: null };
 export interface ResolvedRouting {
   /** Sink for the main context; null = system default. */
   masterSinkId: string | null;
+  /** Output pair on the master sink; null = device default. */
+  masterPair: OutputPair | null;
   /** The saved master device is gone — fell back to the system default. */
   masterMissing: boolean;
   /** Sink for the cue context; null = Cue bus disabled. */
@@ -59,6 +61,7 @@ export function resolveRouting(
   const cuePresent = prefs.cue !== null && available.has(prefs.cue.deviceId);
   return {
     masterSinkId: masterPresent ? prefs.master!.deviceId : null,
+    masterPair: masterPresent ? (prefs.master!.pair ?? null) : null,
     masterMissing: prefs.master !== null && !masterPresent,
     cueSinkId: cuePresent ? prefs.cue!.deviceId : null,
     cuePair: cuePresent ? (prefs.cue!.pair ?? null) : null,
@@ -67,15 +70,13 @@ export function resolveRouting(
 }
 
 /**
- * The CUE picker's entries (explicit-output-pairs follow-up): a plain
- * stereo device is one entry; a multichannel interface splits into its
+ * Output picker entries (explicit-output-pairs follow-up): a plain stereo
+ * device is one entry; a multichannel interface splits into its
  * stereo pairs, labelled 1-based — the Inpulse (one 4-out device,
  * hardware-learned) becomes "… (outs 1/2)" (rear RCA) and "… (outs 3/4)"
- * (front headphone jack). MASTER keeps whole-device entries: routing
- * master to a non-default pair is the single-context optimization ADR 0017
- * defers.
+ * (front headphone jack).
  */
-export function cueOutputOptions(devices: readonly AudioOutputDevice[]): SavedDevice[] {
+export function outputPairOptions(devices: readonly AudioOutputDevice[]): SavedDevice[] {
   return devices.flatMap((d): SavedDevice[] => {
     if (d.maxChannelCount < 4) {
       return [{ deviceId: d.deviceId, label: d.label, pair: null }];
@@ -90,7 +91,7 @@ export function cueOutputOptions(devices: readonly AudioOutputDevice[]): SavedDe
 }
 
 /** Same saved choice — id and pair (label is display-only). */
-export function sameCueChoice(a: SavedDevice, b: SavedDevice): boolean {
+export function sameOutputChoice(a: SavedDevice, b: SavedDevice): boolean {
   const pa = a.pair ?? null;
   const pb = b.pair ?? null;
   return (

@@ -16,7 +16,7 @@
  * The desktop shell pre-grants "media" and "speaker-selection"
  * (desktop/main.js) so this never prompts there; a plain browser tab shows
  * one mic prompt the first time. Hands-on-verified glue (ADR 0002) — the
- * tested seams are routing.ts's resolveRouting/cueOutputOptions.
+ * tested seams are routing.ts's resolveRouting/outputPairOptions.
  */
 
 export interface AudioOutputDevice {

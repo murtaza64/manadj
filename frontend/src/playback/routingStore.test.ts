@@ -10,13 +10,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function fakeMixer() {
-  const masterSinks: (string | null)[] = [];
-  const cueSinks: (string | null)[] = [];
+  const masterSinks: { id: string | null; pair: { left: number; right: number } | null }[] = [];
+  const cueSinks: { id: string | null; pair: { left: number; right: number } | null }[] = [];
   return {
     masterSinks,
     cueSinks,
-    setMasterSinkId: async (id: string | null) => void masterSinks.push(id),
-    setCueSinkId: async (id: string | null) => void cueSinks.push(id),
+    setMasterSinkId: async (id: string | null, pair: { left: number; right: number } | null = null) =>
+      void masterSinks.push({ id, pair }),
+    setCueSinkId: async (id: string | null, pair: { left: number; right: number } | null = null) =>
+      void cueSinks.push({ id, pair }),
   };
 }
 
@@ -65,8 +67,22 @@ describe('routingStore — sink application', () => {
     store.setMasterDevice({ deviceId: 'dev-speakers', label: 'Speakers' });
     store.setCueDevice({ deviceId: 'dev-phones', label: 'Phones' });
     await vi.waitFor(() => {
-      expect(primary.masterSinks.at(-1)).toBe('dev-speakers');
-      expect(primary.cueSinks.at(-1)).toBe('dev-phones');
+      expect(primary.masterSinks.at(-1)).toEqual({ id: 'dev-speakers', pair: null });
+      expect(primary.cueSinks.at(-1)).toEqual({ id: 'dev-phones', pair: null });
+    });
+  });
+
+  it('applies selected output pairs to both master and cue', async () => {
+    const store = await loadStore(['dev-inpulse']);
+    const primary = fakeMixer();
+
+    store.initAudioRouting(primary as never);
+    await store.refreshRouting();
+    store.setMasterDevice({ deviceId: 'dev-inpulse', label: 'Inpulse (outs 1/2)', pair: { left: 0, right: 1 } });
+    store.setCueDevice({ deviceId: 'dev-inpulse', label: 'Inpulse (outs 3/4)', pair: { left: 2, right: 3 } });
+    await vi.waitFor(() => {
+      expect(primary.masterSinks.at(-1)).toEqual({ id: 'dev-inpulse', pair: { left: 0, right: 1 } });
+      expect(primary.cueSinks.at(-1)).toEqual({ id: 'dev-inpulse', pair: { left: 2, right: 3 } });
     });
   });
 });
