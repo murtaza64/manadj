@@ -1,56 +1,42 @@
-# Issue tracker: Local Markdown
+# Issue tracker: sidecar Markdown
 
-Issues and PRDs for this repo live as markdown files in `.scratch/`.
+Issues live in the editspace sidecar at
+`~/manadj/.editspace/issues/<feature-slug>/` — out-of-tree relative to every
+lane working copy, shared live, its own jj repo (with the rest of the sidecar).
+PRDs moved back into repo history at `docs/prds/<feature-slug>.md` (ADR 0028:
+split by contention — issues are high-contention, PRDs are authored
+deliberately).
 
 ## Conventions
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The PRD is `.scratch/<feature-slug>/PRD.md`
-- Implementation issues are `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`
-- Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
-- Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- One feature per directory: `issues/<feature-slug>/`
+- Implementation issues are `issues/<feature-slug>/<NN>-<slug>.md`, numbered from `01`
+- Triage state is a `Status:` line near the top (vocabulary: `triage-labels.md`);
+  `es issue` buckets on the first word, so annotations after it are fine
+- Dependencies: `Blocked by:` (satisfied when the blocker is parked) and
+  `Needs review of:` (satisfied only by human approval) — lines or `## Blocked by` sections
+- Comments append under `## Comments`
+
+## Writing
+
+- Claim: `es issue claim <path> --lane <lane>` (atomic: Status + Lane + record)
+- Comment: `es issue comment <path> "<text>"` (append-only)
+- Status flip: direct edit of your own issue's `Status:` line, then
+  `jj -R ~/manadj/.editspace commit -m "<feature>: <what>"`
+- New issues/PRDs: create the file, commit the sidecar (issues) or land via
+  docs fast-path (PRDs)
+
+## Reading
+
+- `es issue list [--frontier]` — status table / grabbable frontier
+- Files are plain markdown: Read/Grep them directly
 
 ## When a skill says "publish to the issue tracker"
 
-Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
+Issues → new file under `.editspace/issues/<feature-slug>/`, then commit the
+sidecar repo. PRDs → `docs/prds/<feature-slug>.md` in the repo, landed via the
+docs fast-path.
 
 ## When a skill says "fetch the relevant ticket"
 
-Read the file at the referenced path. The user will normally pass the path or the issue number directly.
-
-## Wayfinding operations
-
-Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
-
-- **Map**: `.scratch/<effort>/map.md` — the Notes / Decisions-so-far / Fog body.
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:` line records the ticket type (`research`/`prototype`/`grilling`/`task`); a `Status:` line records `claimed`/`resolved`.
-- **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
-- **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
-- **Claim**: set `Status: claimed` and save before any work.
-- **Resolve**: append the answer under an `## Answer` heading, set `Status: resolved`, then append a context pointer (gist + link) to the map's Decisions-so-far in `map.md`.
-
-## Maturity ladder (added 2026-07-06)
-
-File like Takes, promote like Transitions: filing is cheap capture, `ready-for-agent` is deliberate promotion.
-
-- File early, label honestly — an issue after loose discussion is correct *if* labeled `needs-triage` (or a `grilling`-typed ticket). Filing ≠ authorization; the Status line authorizes.
-- File the question, not the decomposition: one "grill X" issue, never speculative sub-issues — slicing is a grilling output.
-- `ready-for-agent` bar: an agent can start without asking anything. Litmus: if you can't write acceptance criteria yet, it isn't ready; if writing them takes a design decision, grill first.
-- Issue size: one landable-or-parkable unit = one Walkthrough. No single walkthrough describes it → too big; sneak-fix-sized diff → too small to file.
-- PRD threshold: decomposition exceeds ~2 issues or decisions cut across slices. A PRD is the grill's residue, not ceremony.
-- An issue gated on human timing is labeled `ready-for-agent` with a `Blocked by: <condition> (human calls it)` line — the blocked line, not the label, carries the gate.
-
-## PRD user stories: default actor
-
-The actor defaults to the DJ and is omitted ("Loop N beats from where I am, so I can hold a section"); name the actor only when it differs ("As the developer tuning detection…"). Benefit clauses stay — they carry spec weight.
-
-## Location and write path (tracker exodus, 2026-07-06)
-
-The tracker lives at `/Users/murtaza/manadj/.scratch/` — outside the main repo, one shared live copy for all lanes, versioned as its own jj repo (git-backed `jj git init`; jj 0.43 has no bare init — the git backend is an implementation detail, interact via jj only). Paths in skills/issues stay `<feature>/issues/NN-…` relative to the tracker root.
-
-Write via `uv run scripts/agent/tracker.py`:
-- `new <feature>/issues/NN-slug.md` (body on stdin; refuses existing paths — numbering races surface here)
-- `comment <path> "text"` (O_APPEND under `## Comments`)
-- `flip <path> "<status>"` (validates against triage vocabulary; done-notes allowed)
-
-Every subcommand commits to the tracker repo with session attribution. Raw edits remain possible; own-file flips and append-only comments stay the law. Rationale + rejected SQLite alternative and its escalation trigger: ADR 0026 amendment.
+Read the file at the referenced path.
