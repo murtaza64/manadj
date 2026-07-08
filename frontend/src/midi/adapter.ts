@@ -35,11 +35,12 @@ import type { DecoderState } from './translator';
 
 export interface AttachMidiOptions {
   mappings: readonly Mapping[];
+  onActivity?: () => void;
   onAction: (action: MidiAction) => void;
 }
 
 /** Attach once at the app provider level; returns a detach function. */
-export function attachMidiController({ mappings, onAction }: AttachMidiOptions): () => void {
+export function attachMidiController({ mappings, onActivity, onAction }: AttachMidiOptions): () => void {
   let disposed = false;
   let access: MIDIAccess | null = null;
   const attached = new Map<MIDIInput, () => void>();
@@ -52,6 +53,7 @@ export function attachMidiController({ mappings, onAction }: AttachMidiOptions):
     let state: DecoderState = initialDecoderState();
     const onMessage = (event: MIDIMessageEvent) => {
       if (!event.data) return;
+      onActivity?.();
       const result = translateMidiMessage(event.data, state, mapping);
       state = result.state;
       for (const action of result.actions) onAction(action);

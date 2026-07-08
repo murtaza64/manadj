@@ -6,6 +6,7 @@
    embedded library takes every remaining pixel. */
 
 .perf-root {
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -13,6 +14,23 @@
   color: var(--text);
   overflow: hidden;
   font-size: 12px;
+}
+
+.perf-root.midi-cursor-hidden,
+.perf-root.midi-cursor-hidden :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
+  cursor: none !important;
+}
+
+.perf-root.midi-cursor-hidden :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
+  cursor: auto !important;
+}
+
+.perf-root.midi-cursor-hidden::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  cursor: none;
 }
 
 /* ── Performance surface: content-sized top ───────────────────── */

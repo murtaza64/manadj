@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { attachMidiController } from '../midi/adapter';
+import { markMidiActivity } from '../midi/activity';
 import { dispatchMidiAction } from '../midi/dispatch';
 import { INPULSE_300_MK2 } from '../midi/mappings/inpulse300mk2';
 
@@ -15,6 +16,7 @@ export function MidiControllerBridge() {
     () =>
       attachMidiController({
         mappings: [INPULSE_300_MK2],
+        onActivity: markMidiActivity,
         onAction: dispatchMidiAction,
       }),
     []

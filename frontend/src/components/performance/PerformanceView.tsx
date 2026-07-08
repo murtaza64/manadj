@@ -32,6 +32,7 @@ import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { dispatchSetSpace } from '../../sets/spaceTransport';
 import { isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
+import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
 import './PerformanceView.css';
 
 const LOCK_HINT_MS = 1500;
@@ -82,6 +83,8 @@ function LockDimmedLibrary({
 export function PerformanceView() {
   const { A, B } = useDecks();
   const libraryRef = useRef<LibraryBrowseHandle>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useMidiCursorSuppression(rootRef);
 
   // ── Load lock ──────────────────────────────────────────────────────────
   const [lockHint, setLockHint] = useState<ChannelId | null>(null);
@@ -170,7 +173,7 @@ export function PerformanceView() {
   };
 
   return (
-    <div className={`perf-root${hintsOn ? '' : ' kbd-hints-off'}`}>
+    <div ref={rootRef} className={`perf-root${hintsOn ? '' : ' kbd-hints-off'}`}>
       {/* Performance surface — content-sized; the library gets the rest */}
       <div className="perf-surface">
         <div className="perf-waves">
