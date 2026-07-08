@@ -22,10 +22,16 @@ describe('stealsFocus (the global no-focus rule\'s target predicate)', () => {
     expect(stealsFocus(icon)).toBe(true);
   });
 
-  it.each(['checkbox', 'radio', 'range'])('covers input type=%s', (type) => {
+  it.each(['checkbox', 'radio'])('covers input type=%s', (type) => {
     const el = input(type);
     document.body.appendChild(el);
     expect(stealsFocus(el)).toBe(true);
+  });
+
+  it('leaves range alone (the drag is the default action of mousedown)', () => {
+    const el = input('range');
+    document.body.appendChild(el);
+    expect(stealsFocus(el)).toBe(false);
   });
 
   it.each(['text', 'search', 'number', 'password'])(
@@ -104,5 +110,38 @@ describe('installNoFocusRule', () => {
 
     uninstall();
     expect(press(button)).toBe(false);
+  });
+
+  it('leaves range mousedown alone but blurs it on pointerup', () => {
+    const uninstall = installNoFocusRule();
+    const range = input('range');
+    document.body.appendChild(range);
+
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    range.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(false);
+
+    range.focus();
+    expect(document.activeElement).toBe(range);
+
+    range.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    expect(document.activeElement).not.toBe(range);
+
+    uninstall();
+  });
+
+  it('does not blur a range opted in via data-focusable', () => {
+    const uninstall = installNoFocusRule();
+    const region = document.createElement('div');
+    region.setAttribute('data-focusable', '');
+    const range = input('range');
+    region.appendChild(range);
+    document.body.appendChild(region);
+
+    range.focus();
+    range.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    expect(document.activeElement).toBe(range);
+
+    uninstall();
   });
 });
