@@ -106,6 +106,8 @@ def main() -> int:
             "uvicorn",
             "backend.main:app",
             "--reload",
+            "--reload-dir",
+            "backend",
             "--host",
             "0.0.0.0",
             "--port",

@@ -8,6 +8,8 @@ import {
 } from 'react';
 import type { AutomationChannelValues, ChannelId, Mixer } from '../playback/mixer';
 
+const IDLE_AUTOMATION_POLL_MS = 250;
+
 /**
  * The one Mixer (ADR 0009), provided app-wide by DeckProvider. The instance
  * itself is the interface: channel strip controls (setTrim/setEq/setFilter/
@@ -65,7 +67,12 @@ export function useAutomationGhost(channel: ChannelId): AutomationChannelValues 
   const [ghost, setGhost] = useState<AutomationChannelValues | null>(null);
   useEffect(() => {
     let raf = 0;
+    let idleTimer = 0;
     let last: AutomationChannelValues | null = null;
+    const schedule = (active: boolean) => {
+      if (active) raf = requestAnimationFrame(tick);
+      else idleTimer = window.setTimeout(tick, IDLE_AUTOMATION_POLL_MS);
+    };
     const tick = () => {
       const next = mixer.getAutomation(channel);
       if (!sameAutomation(last, next)) {
@@ -74,11 +81,12 @@ export function useAutomationGhost(channel: ChannelId): AutomationChannelValues 
         last = next && { fader: next.fader, filter: next.filter, eq: { ...next.eq } };
         setGhost(last);
       }
-      raf = requestAnimationFrame(tick);
+      schedule(next !== null);
     };
     raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf);
+      window.clearTimeout(idleTimer);
     };
   }, [mixer, channel]);
   return ghost;

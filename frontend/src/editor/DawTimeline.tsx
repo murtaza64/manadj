@@ -45,6 +45,7 @@ import type { BeatgridData } from '../types';
 /** Zoom-in ceiling. At 240 px/s a 128 BPM beat spans ~112px — enough room
  * to place breakpoints between beats. */
 const MAX_PX_PER_SEC = 240;
+const IDLE_TICK_MS = 250;
 
 /** Envelope-preview LUT resolution (samples across the window). */
 const MOD_LUT_N = 2048;
@@ -419,12 +420,19 @@ export function DawTimeline({
     let perfMax = 0;
     let perfLast = performance.now();
     let raf = 0;
+    let idleTimer = 0;
     let lastDrawKey = '';
+    const schedule = (active: boolean) => {
+      if (active) raf = requestAnimationFrame(tick);
+      else idleTimer = window.setTimeout(tick, IDLE_TICK_MS);
+    };
     const tick = () => {
-      raf = requestAnimationFrame(tick);
       const t0 = perf ? performance.now() : 0;
       const viewport = viewportRef.current;
-      if (!viewport) return;
+      if (!viewport) {
+        schedule(false);
+        return;
+      }
       // Apply at most one accumulated wheel-zoom step per frame. flushSync
       // commits the React re-render (block widths, ruler) NOW, so the
       // transforms/windows painted below use the same px — no torn frames.
@@ -463,7 +471,8 @@ export function DawTimeline({
       const drawKey =
         `${scrollPx}:${px}:${player.getMixTime()}:${viewport.clientWidth}:` +
         `${dA}:${dB}:${modelVersionRef.current}`;
-      if (drawKey !== lastDrawKey) {
+      const didDraw = drawKey !== lastDrawKey;
+      if (didDraw) {
         lastDrawKey = drawKey;
         if (contentRef.current) {
           contentRef.current.style.transform = `translateX(${-scrollPx}px)`;
@@ -551,9 +560,13 @@ export function DawTimeline({
           perfLast = t0;
         }
       }
+      schedule(player.isPlaying() || pendingZoomRef.current !== null || didDraw);
     };
     tick();
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(idleTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player]);
 
@@ -1247,4 +1260,3 @@ export function DawTimeline({
     </div>
   );
 }
-

@@ -29,6 +29,8 @@ import { getConductor } from '../sets/conductorStore';
 import { authoredPlayheadAt } from '../sets/replan';
 import { useEditorSelector, type EditorStore } from './editorStore';
 
+const IDLE_TICK_MS = 250;
+
 export function ConductorLanePlayhead({
   store,
   pxPerSec,
@@ -55,25 +57,38 @@ export function ConductorLanePlayhead({
   });
   useEffect(() => {
     let raf = 0;
+    let idleTimer = 0;
+    const schedule = (active: boolean) => {
+      if (active) raf = requestAnimationFrame(tick);
+      else idleTimer = window.setTimeout(tick, IDLE_TICK_MS);
+    };
     const tick = () => {
-      raf = requestAnimationFrame(tick);
       const el = ref.current;
-      if (!el) return;
+      if (!el) {
+        schedule(false);
+        return;
+      }
       const { activeUuid, pxPerSec } = inputs.current;
       const conductor = getConductor();
+      const active = conductor !== null && conductor.isActive();
       const authored =
-        conductor?.isActive() && activeUuid !== null
+        conductor !== null && active && activeUuid !== null
           ? authoredPlayheadAt(conductor.plan, conductor.getMixTime(), activeUuid)
           : null;
       if (authored === null) {
         el.style.display = 'none';
+        schedule(active);
         return;
       }
       el.style.display = '';
       el.style.transform = `translateX(${authored * pxPerSec}px)`;
+      schedule(true);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(idleTimer);
+    };
   }, []);
   return (
     <div ref={ref} className="editor-conductor-playhead" style={{ display: 'none' }} />

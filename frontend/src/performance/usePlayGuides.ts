@@ -34,6 +34,7 @@ function guideDeck(engine: DeckEngine): GuideDeck {
 }
 
 const EMPTY_FRAMES: PlayGuideFrame[] = [];
+const IDLE_GUIDE_POLL_MS = 250;
 
 function signature(frames: PlayGuideFrame[]): string {
   return frames
@@ -62,21 +63,33 @@ export function usePlayGuides(): PlayGuideFrame[] {
   useEffect(() => {
     void initTransitionStore();
     let raf = 0;
+    let idleTimer = 0;
     let lastSig = '';
+    const schedule = (active: boolean) => {
+      if (active) raf = requestAnimationFrame(tick);
+      else idleTimer = window.setTimeout(tick, IDLE_GUIDE_POLL_MS);
+    };
     const tick = () => {
-      const next = computePlayGuides(snapshotPairStore(), {
+      const decks = {
         A: guideDeck(engineA),
         B: guideDeck(engineB),
+      };
+      const next = computePlayGuides(snapshotPairStore(), {
+        A: decks.A,
+        B: decks.B,
       });
       const sig = signature(next);
       if (sig !== lastSig) {
         lastSig = sig;
         setFrames(next.length === 0 ? EMPTY_FRAMES : next);
       }
-      raf = requestAnimationFrame(tick);
+      schedule(decks.A.playing || decks.B.playing);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(idleTimer);
+    };
   }, [engineA, engineB]);
 
   return frames;
