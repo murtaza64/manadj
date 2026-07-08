@@ -17,6 +17,18 @@ from .logging_config import setup_logging
 # Configure logging with colors and override uvicorn handlers
 setup_logging()
 
+# Pre-migration backup of the real DB (editspace-migration 06; incident
+# 2026-07-08). Only when THIS instance serves the real DB — lane backends run
+# against their own sandbox clones and must not touch the real file.
+import sys as _sys
+
+_repo_root = Path(__file__).parent.parent
+_sys.path.insert(0, str(_repo_root / "scripts" / "agent"))
+import db_backup as _db_backup  # noqa: E402
+
+if (_repo_root / "data" / "library.db").resolve() == _db_backup.REAL_DB.resolve():
+    _db_backup.maybe_backup()
+
 # Migrate the database to the latest revision (replaces Base.metadata.create_all)
 _alembic_cfg = AlembicConfig(str(Path(__file__).parent.parent / "alembic.ini"))
 _alembic_cfg.attributes["configure_logger"] = False  # don't clobber app logging

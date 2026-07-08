@@ -112,6 +112,11 @@ def ensure_sandbox_db() -> None:
     real = MAIN_ROOT / "data" / "library.db"
     if not real.exists():
         sys.exit(f"error: real DB not found at {real}")
+    # Every clone doubles as a real-DB backup point (editspace-migration 06).
+    sys.path.insert(0, str(Path(__file__).parent))
+    import db_backup
+
+    db_backup.maybe_backup()
     db.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["cp", "-c", str(real), str(db)], check=True)
     print(f"cloned sandbox DB (APFS) from {real}")

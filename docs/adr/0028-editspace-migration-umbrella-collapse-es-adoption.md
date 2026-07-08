@@ -75,3 +75,25 @@ discovery from `~/manadj`, and editspace-lock behavior with embedded sidecars
 is re-adopted into a lane afterward. Docs rewrite (AGENTS.md,
 `parallel-work.md` slimmed to divergences, `spawn-session.md` retired to a
 pointer) lands as the migration's final phase, via the new process itself.
+
+## Amendment (2026-07-08, post-incident): §3's permission design was wrong
+
+The §3 permission-set design failed in verification and cost the real DB a
+destructive write (recovered from a lane clone; loss window Jul 5 evening →
+incident). Empirical findings, all decoy-verified: opencode `edit` deny rules
+are **inert** (agent- and project-level, every pattern syntax — exact paths
+included); `external_directory` is the only gate that fires for file tools and
+it matches the **containing directory**, not the file path; being binary, it
+cannot express readable-but-not-writable, so config alone cannot protect the
+real DB while lanes clone from it. Corrected design, three independent layers:
+(1) lane agents get **no** `data/` whitelist entry at all — deny-by-default
+covers reads and writes; sandbox cloning moves inside `lane_app.py`, whose
+internal `cp` is invisible to the bash-path parser (choke-point pattern, as
+`land.py`); (2) the `data-write-guard` plugin hard-blocks file-tool writes
+under `~/manadj/data` for every agent and session — the 0026 escalation
+trigger honored, deterministic containment instead of pattern matching;
+(3) automatic backups (`scripts/agent/db_backup.py`): pre-migration on real-DB
+backend startup, on every lane-app sandbox clone, lane-closure harvest,
+48h/daily/weekly retention, incident-tested restore runbook. Binding process
+rule: destructive tests target decoys only, never a real asset, regardless of
+what gates supposedly protect it.
