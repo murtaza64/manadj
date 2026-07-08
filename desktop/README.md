@@ -12,6 +12,19 @@ state — `make dev` still runs the backend and Vite; this is just the window
     make app PORT=5193    # attaches to a lane's Vite port
     npx electron . --url http://localhost:5193   # arbitrary URL
 
+Profiling:
+
+    MANADJ_REMOTE_DEBUG=1 make dev-app
+    MANADJ_REMOTE_DEBUG=1 MANADJ_REMOTE_DEBUG_PORT=9223 make app
+    npx electron . --remote-debug --remote-debug-port 9223
+
+Open `http://127.0.0.1:9222/json` (or the chosen port) to attach Chrome
+DevTools Protocol clients. The renderer also exposes:
+
+    window.__MANADJ_PERF__.markIdleScenario('editor idle')
+    window.__MANADJ_PERF__.getFrameCounters()
+    window.__MANADJ_PERF__.resetFrameCounters()
+
 If nothing is running at the target, the shell shows a retry page and
 auto-loads once the server comes up. `make dev-app` is orchestration in
 `scripts/dev.py`, not in the shell — the shell itself stays attach-only.

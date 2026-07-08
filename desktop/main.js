@@ -16,19 +16,34 @@ const DEFAULT_URL = "http://localhost:5173";
 const RETRY_INTERVAL_MS = 2000;
 const STATE_FILE = path.join(__dirname, "window-state.json");
 
+function argValue(argv, flag) {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === flag) return argv[i + 1];
+    if (argv[i].startsWith(flag + "=")) return argv[i].slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+function enableRemoteDebugging(argv) {
+  const requested =
+    process.env.MANADJ_REMOTE_DEBUG === "1" || argv.includes("--remote-debug");
+  if (!requested) return;
+
+  const port =
+    process.env.MANADJ_REMOTE_DEBUG_PORT || argValue(argv, "--remote-debug-port") || "9222";
+  app.commandLine.appendSwitch("remote-debugging-port", port);
+  app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+  process.stdout.write(`[app] remote debugging: http://127.0.0.1:${port}/json\n`);
+}
+
+enableRemoteDebugging(process.argv);
+
 // --- target URL from --url / --port -----------------------------------------
 
 function targetUrl(argv) {
-  const get = (flag) => {
-    for (let i = 0; i < argv.length; i++) {
-      if (argv[i] === flag) return argv[i + 1];
-      if (argv[i].startsWith(flag + "=")) return argv[i].slice(flag.length + 1);
-    }
-    return undefined;
-  };
-  const url = get("--url");
+  const url = argValue(argv, "--url");
   if (url) return url;
-  const port = get("--port");
+  const port = argValue(argv, "--port");
   if (port) return `http://localhost:${port}`;
   return DEFAULT_URL;
 }
