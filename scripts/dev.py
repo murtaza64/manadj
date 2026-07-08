@@ -115,7 +115,7 @@ def main() -> int:
         ],
         cwd=ROOT,
         line_queue=line_queue,
-        env_overrides={"DISABLE_WAVEFORM_WORKER": "1"},
+        # env_overrides={"DISABLE_WAVEFORM_WORKER": "1"},
     )
 
     frontend = spawn_process(

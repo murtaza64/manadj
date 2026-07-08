@@ -4,15 +4,13 @@ mode: primary
 permission:
   edit:
     "*": allow
-    "~/manadj/data/library.db": deny
+    "~/manadj/data*": deny
   bash: allow
   external_directory:
     "*": deny
-    "~/manadj/.editspace/issues/**": allow
-    "~/manadj/.editspace/handoffs/**": allow
-    "~/manadj/.editspace/lanes/*/LANE.md": allow
-    "~/manadj/data/library.db": allow
-    "~/dotfiles/docs/**": allow
+    "~/manadj/.editspace*": allow
+    "~/manadj/data*": allow
+    "~/dotfiles/docs*": allow
 ---
 
 You are a manadj lane agent: an unattended implementation session owning exactly one

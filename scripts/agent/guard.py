@@ -5,9 +5,12 @@
 # ///
 """Am-I-stale preflight (run on session resume and before landing).
 
-Checks, from inside a lane: registry ownership, workspace/registry
-agreement, and whether main moved since your stack's merge base. Exits
-non-zero with one line per finding; silent-zero when clean.
+Checks, from inside an es lane workspace: lane-record ownership,
+workspace/record agreement, and whether main moved since your stack's
+merge base. Exits non-zero with one line per finding; silent-zero when
+clean. Post-migration (ADR 0028): lanes live in the embedded sidecar at
+~/manadj/.editspace/lanes/<lane>/repos/murtaza64/manadj, records are
+LANE.md, identity is $EDITSPACE_AGENT_ID (editspace-lock plugin).
 """
 
 from __future__ import annotations
@@ -20,8 +23,25 @@ import sys
 from pathlib import Path
 
 DEFAULT_WS = Path("/Users/murtaza/manadj")
-UMBRELLA = DEFAULT_WS  # collapsed root (ADR 0028); .lanes lookups retire in issue 03
+SIDECAR = DEFAULT_WS / ".editspace"
 LANE_ROOT = Path(__file__).resolve().parents[2]
+
+
+def lane_name() -> str | None:
+    """Lane from a lanes/<lane>/... component of this workspace's path."""
+    try:
+        rel = LANE_ROOT.resolve().relative_to(SIDECAR.resolve()).parts
+    except ValueError:
+        return None
+    return rel[1] if len(rel) >= 2 and rel[0] == "lanes" else None
+
+
+def session_id() -> str:
+    """Bare session ID from $EDITSPACE_AGENT_ID (opencode:<id>) or legacy env."""
+    agent = os.environ.get("EDITSPACE_AGENT_ID", "")
+    if agent.startswith("opencode:"):
+        return agent.removeprefix("opencode:")
+    return os.environ.get("OPENCODE_SESSION_ID", "")
 
 
 def jj(*args: str) -> str:
@@ -31,37 +51,41 @@ def jj(*args: str) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--session", default=os.environ.get("OPENCODE_SESSION_ID"))
+    ap.add_argument("--session", default=session_id())
     args = ap.parse_args()
 
     findings: list[str] = []
-    lane = LANE_ROOT.name
+    lane = lane_name()
 
-    if LANE_ROOT == DEFAULT_WS:
+    if LANE_ROOT.resolve() == DEFAULT_WS.resolve():
         sys.exit("STALE: you are in the default workspace — read-only for "
                  "agents; open a lane")
+    if lane is None:
+        sys.exit(f"STALE: {LANE_ROOT} is not an es lane workspace — open a "
+                 "lane (es lane create / es agent spawn)")
 
-    lane_file = UMBRELLA / ".lanes" / f"{lane}.md"
-    if not lane_file.exists():
-        findings.append(f"no registry file for lane {lane!r} — register it "
-                        f"({lane_file})")
+    record = SIDECAR / "lanes" / lane / "LANE.md"
+    if not record.exists():
+        findings.append(f"no LANE.md for lane {lane!r} — record missing "
+                        f"({record})")
         owner = ""
     else:
-        m = re.search(r"owner:\s*(\S+)", lane_file.read_text())
+        m = re.search(r"owner:\s*(\S+)", record.read_text())
         owner = m.group(1) if m else ""
-        if not owner.startswith("ses_"):
-            findings.append(f"registry owner is junk ({owner!r}) — stamp a "
-                            "session ID")
-        elif args.session and owner != args.session:
+        owner_ses = owner.removeprefix("opencode:")
+        if not owner:
+            findings.append("lane record has no owner — stamp one")
+        elif args.session and owner_ses != args.session and owner != "human":
             findings.append(f"lane owned by {owner}, you are {args.session} — "
                             "the lane was handed over; open your own")
         elif not args.session:
-            findings.append("cannot verify ownership: no $OPENCODE_SESSION_ID "
+            findings.append("cannot verify ownership: no $EDITSPACE_AGENT_ID "
                             "(plugin not loaded?) — proceed with care")
 
     workspaces = jj("workspace", "list")
-    if not re.search(rf"^{re.escape(lane)}:", workspaces, re.M):
-        findings.append(f"workspace {lane!r} not in `jj workspace list` — "
+    ws_name = f"manadj--{lane}"
+    if not re.search(rf"^{re.escape(ws_name)}:", workspaces, re.M):
+        findings.append(f"workspace {ws_name!r} not in `jj workspace list` — "
                         "it was forgotten while you were away")
 
     behind = jj("log", "--no-graph", "-r", "main ~ ::@", "-T", '"x"')

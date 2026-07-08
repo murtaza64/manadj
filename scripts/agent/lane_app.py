@@ -5,11 +5,12 @@
 # ///
 """Run the manadj app from a lane workspace, for human review.
 
-Thin daemonizer around scripts/dev.py: reads the lane's port offset from the
-main repo's .lanes registry, ensures the sandbox DB clone exists, and runs the
-dev processes in the background (PID + logs in .lane-app/, gitignored).
+Thin daemonizer around scripts/dev.py: resolves the lane's ports from its
+LANE.md record (self-assigning a free offset on first start — ADR 0028),
+ensures the sandbox DB clone exists, and runs the dev processes in the
+background (PID + logs in .lane-app/, gitignored).
 
-Usage (from inside a lane workspace):
+Usage (from inside an es lane workspace):
   uv run scripts/agent/lane_app.py start [--backend-port N --vite-port N]
   uv run scripts/agent/lane_app.py status
   uv run scripts/agent/lane_app.py stop
@@ -30,39 +31,78 @@ import time
 from pathlib import Path
 
 MAIN_ROOT = Path("/Users/murtaza/manadj")
-UMBRELLA = MAIN_ROOT  # collapsed root (ADR 0028); .lanes lookups retire in issue 03
+SIDECAR = MAIN_ROOT / ".editspace"
 LANE_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_DIR = LANE_ROOT / ".lane-app"
 PID_FILE = RUNTIME_DIR / "dev.pid"
 LOG_FILE = RUNTIME_DIR / "dev.log"
 
-
-def lane_name() -> str:
-    name = LANE_ROOT.name
-    prefix = f"{MAIN_ROOT.name}-"
-    return name.removeprefix(prefix) if name.startswith(prefix) else name
+BASE_BACKEND, BASE_VITE = 8000, 5173
+PORTS_RE = re.compile(r"^ports:\s*backend\s+(\d+),\s*vite\s+(\d+)\s*$", re.M)
 
 
-def registry_ports() -> tuple[int, int] | None:
-    """Parse 'backend NNNN, vite NNNN' from this lane's .lanes file."""
-    lane_file = UMBRELLA / ".lanes" / f"{lane_name()}.md"
-    if not lane_file.exists():
+def lane_name() -> str | None:
+    """Lane from this workspace's lanes/<lane>/... path inside the sidecar."""
+    try:
+        rel = LANE_ROOT.resolve().relative_to(SIDECAR.resolve()).parts
+    except ValueError:
         return None
-    m = re.search(r"backend\s+(\d+).*?vite\s+(\d+)", lane_file.read_text())
+    return rel[1] if len(rel) >= 2 and rel[0] == "lanes" else None
+
+
+def lane_record() -> Path | None:
+    lane = lane_name()
+    return SIDECAR / "lanes" / lane / "LANE.md" if lane else None
+
+
+def record_ports() -> tuple[int, int] | None:
+    """Parse 'ports: backend NNNN, vite NNNN' from this lane's LANE.md."""
+    record = lane_record()
+    if record is None or not record.exists():
+        return None
+    m = PORTS_RE.search(record.read_text())
     return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def taken_offsets() -> set[int]:
+    """Port offsets already claimed in sibling LANE.md records."""
+    taken: set[int] = set()
+    lanes_dir = SIDECAR / "lanes"
+    try:
+        records = sorted(lanes_dir.glob("*/LANE.md"))
+    except OSError:
+        return taken
+    for rec in records:
+        try:
+            m = PORTS_RE.search(rec.read_text())
+        except OSError:
+            continue
+        if m:
+            taken.add(int(m.group(1)) - BASE_BACKEND)
+    return taken
+
+
+def self_assign_ports() -> tuple[int, int]:
+    """Claim the next free +10 offset and write it to this lane's LANE.md."""
+    record = lane_record()
+    if record is None or not record.exists():
+        sys.exit(
+            f"error: no LANE.md for this workspace ({LANE_ROOT}) — is this an "
+            "es lane? Pass --backend-port and --vite-port to override."
+        )
+    taken = taken_offsets()
+    offset = next(o for o in range(10, 1000, 10) if o not in taken)
+    backend, vite = BASE_BACKEND + offset, BASE_VITE + offset
+    with record.open("a") as f:
+        f.write(f"ports: backend {backend}, vite {vite}\n")
+    print(f"self-assigned port offset +{offset} (backend {backend}, vite {vite})")
+    return backend, vite
 
 
 def resolve_ports(args: argparse.Namespace) -> tuple[int, int]:
     if args.backend_port and args.vite_port:
         return args.backend_port, args.vite_port
-    ports = registry_ports()
-    if ports is None:
-        sys.exit(
-            f"error: no port entry for lane {lane_name()!r} in "
-            f"{MAIN_ROOT / '.lanes'} — pass --backend-port and --vite-port "
-            "(and record them in the lane's .lanes file)"
-        )
-    return ports
+    return record_ports() or self_assign_ports()
 
 
 def ensure_sandbox_db() -> None:

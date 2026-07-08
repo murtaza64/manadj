@@ -5,9 +5,11 @@
 # ///
 """The fleet view: one line per lane — ownership, liveness, litter, verdict.
 
-Read-only. Sweeping stays a deliberate act (close protocol,
-docs/agents/parallel-work.md). Liveness comes from `GET /session`
+Read-only. Sweeping stays a deliberate act (close protocol; lanes live in
+the embedded sidecar, ADR 0028). Liveness comes from `GET /session`
 `time.updated` — never `/session/status`, which only lists busy sessions.
+Complements `es lanes` (owner/issue/status) with manadj-specific litter
+checks: conflicted @, described empties, unlanded counts, dead owners.
 """
 
 from __future__ import annotations
@@ -20,17 +22,23 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_WS = Path("/Users/murtaza/manadj")
-UMBRELLA = DEFAULT_WS  # collapsed root (ADR 0028); .lanes lookups retire in issue 03
+SIDECAR = DEFAULT_WS / ".editspace"
 LIVE_HORIZON_S = 30 * 60  # owner session updated within this = live
 
 
 def api(port: int, path: str):
-    url = f"http://127.0.0.1:{port}{path}?directory={UMBRELLA}"
+    url = f"http://127.0.0.1:{port}{path}?directory={DEFAULT_WS}"
     with urllib.request.urlopen(url, timeout=10) as r:
         return json.load(r)
 
 
 def discover_port() -> int | None:
+    for port in (4096,):
+        try:
+            api(port, "/global/health")
+            return port
+        except Exception:
+            pass
     out = subprocess.run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
                          capture_output=True, text=True).stdout
     for line in out.splitlines()[1:]:
@@ -50,6 +58,10 @@ def jj(*args: str) -> str:
                           cwd=DEFAULT_WS).stdout
 
 
+def bare_session(owner: str) -> str:
+    return owner.removeprefix("opencode:")
+
+
 def main() -> None:
     port = discover_port()
     sessions: dict[str, float] = {}
@@ -58,35 +70,36 @@ def main() -> None:
             sessions[s["id"]] = s.get("time", {}).get("updated", 0) / 1000
 
     # Workspace list — hyphen-safe: names are everything before the first ": ".
+    # Lane workspaces are named manadj--<lane>.
     workspaces: dict[str, str] = {}
     for line in jj("workspace", "list").splitlines():
         name, _, rest = line.partition(": ")
-        if name:
-            workspaces[name] = rest
+        if name.startswith("manadj--"):
+            workspaces[name.removeprefix("manadj--")] = rest
 
-    registry = {f.stem: f.read_text()
-                for f in (UMBRELLA / ".lanes").glob("*.md") if f.stem != "README"}
+    records = {p.parent.name: p.read_text()
+               for p in sorted((SIDECAR / "lanes").glob("*/LANE.md"))}
+    lane_dirs = {p.name for p in (SIDECAR / "lanes").glob("*") if p.is_dir()}
 
     now = time.time()
     sweepable: list[str] = []
-    for lane in sorted(set(workspaces) | set(registry)):
-        if lane == "default":
-            continue
+    for lane in sorted(set(workspaces) | set(records) | lane_dirs):
         flags: list[str] = []
         owner = ""
         if lane not in workspaces:
-            flags.append("registry-without-workspace (delete the file)")
-        if lane not in registry:
-            flags.append("workspace-without-registry (register or close)")
+            flags.append("record-without-workspace (close: remove lane dir)")
+        if lane not in records:
+            flags.append("workspace-without-record (LANE.md missing)")
         else:
-            m = re.search(r"owner:\s*(\S+)", registry[lane])
+            m = re.search(r"owner:\s*(\S+)", records[lane])
             owner = m.group(1) if m else ""
-            if not owner.startswith("ses_"):
+            if not bare_session(owner).startswith("ses_") and owner != "human":
                 flags.append(f"junk-owner({owner or 'missing'})")
 
         live = "?"
-        if owner.startswith("ses_"):
-            upd = sessions.get(owner)
+        ses = bare_session(owner)
+        if ses.startswith("ses_"):
+            upd = sessions.get(ses)
             if upd is None:
                 live = "gone"
             else:
@@ -96,22 +109,20 @@ def main() -> None:
         unlanded = ""
         if lane in workspaces:
             at = workspaces[lane]
-            if "(conflict)" in at.lower() or "conflict" in at:
+            if "conflict" in at.lower():
                 flags.append("CONFLICTED-@ (abandon + re-merge)")
-            if "(empty)" not in at and at.strip():
-                pass  # @ carries content — normal working state
             out = jj("log", "--no-graph",
-                     "-r", f"(mutable() & ::{lane}@) ~ empty()", "-T", '"x"')
+                     "-r", f"(mutable() & ::manadj--{lane}@) ~ empty()", "-T", '"x"')
             unlanded = f"unlanded={len(out)}" if out else ""
-            m = re.search(r"\(empty\)\s+\S", at)
-            if "(empty)" in at and not at.strip().endswith("(empty)"):
+            if "(empty)" in at and not at.strip().endswith("(no description set)"):
                 flags.append("described-empty-@ (hygiene: never describe placeholders)")
 
         verdict = ""
-        if lane in workspaces and live in ("gone",) and not unlanded and "CONFLICTED-@" not in " ".join(flags):
+        if lane in workspaces and live == "gone" and not unlanded \
+                and "CONFLICTED-@ (abandon + re-merge)" not in flags:
             verdict = "SWEEPABLE"
             sweepable.append(lane)
-        print(f"{lane:14} owner={owner or '-':30} {live:10} {unlanded:12} "
+        print(f"{lane:32} owner={owner or '-':40} {live:10} {unlanded:12} "
               f"{' '.join(flags)} {verdict}")
 
     if sweepable:

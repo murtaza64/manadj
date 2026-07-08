@@ -21,8 +21,26 @@ import sys
 from pathlib import Path
 
 DEFAULT_WS = Path("/Users/murtaza/manadj")
-UMBRELLA = DEFAULT_WS  # collapsed root (ADR 0028); .lanes lookups retire in issue 03
+SIDECAR = DEFAULT_WS / ".editspace"
 LANE_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _lane_and_record() -> tuple[str, Path | None]:
+    """(lane name, LANE.md path) for this workspace, from its sidecar path."""
+    try:
+        rel = LANE_ROOT.resolve().relative_to(SIDECAR.resolve()).parts
+    except ValueError:
+        return LANE_ROOT.name, None
+    if len(rel) >= 2 and rel[0] == "lanes":
+        return rel[1], SIDECAR / "lanes" / rel[1] / "LANE.md"
+    return LANE_ROOT.name, None
+
+
+def _session_id() -> str:
+    agent = os.environ.get("EDITSPACE_AGENT_ID", "")
+    if agent.startswith("opencode:"):
+        return agent.removeprefix("opencode:")
+    return os.environ.get("OPENCODE_SESSION_ID", "")
 
 
 def jj(*args: str, cwd: Path = LANE_ROOT) -> str:
@@ -45,8 +63,8 @@ def main() -> None:
     ap.add_argument("change", help="revision to land (your verified head/merge)")
     ap.add_argument("--hot-reload", action="store_true",
                     help="also move default@ to new trunk if it is an idle placeholder")
-    ap.add_argument("--session", default=os.environ.get("OPENCODE_SESSION_ID"),
-                    help="caller session ID (default: $OPENCODE_SESSION_ID)")
+    ap.add_argument("--session", default=_session_id(),
+                    help="caller session ID (default: $EDITSPACE_AGENT_ID)")
     args = ap.parse_args()
 
     # Retry invariant: main must be an ancestor of the target.
@@ -62,21 +80,20 @@ def main() -> None:
         refuse(f"conflicted change(s) in the landing range: {conflicted}",
                "abandon the conflicted merge, resolve in-lane, re-merge")
 
-    # Ownership: the lane's registry owner must be the caller (when knowable).
-    lane = LANE_ROOT.name
-    lane_file = UMBRELLA / ".lanes" / f"{lane}.md"
-    if LANE_ROOT == DEFAULT_WS:
+    # Ownership: the lane record's owner must be the caller (when knowable).
+    if LANE_ROOT.resolve() == DEFAULT_WS.resolve():
         refuse("landing from the default workspace",
                "land from your lane; the default workspace is read-only for agents")
-    if args.session and lane_file.exists():
-        m = re.search(r"owner:\s*(\S+)", lane_file.read_text())
-        owner = m.group(1) if m else ""
+    lane, record = _lane_and_record()
+    if args.session and record is not None and record.exists():
+        m = re.search(r"owner:\s*(\S+)", record.read_text())
+        owner = (m.group(1) if m else "").removeprefix("opencode:")
         if owner.startswith("ses_") and owner != args.session:
             refuse(f"lane {lane!r} is owned by {owner}, not {args.session}",
                    "the lane moved on while you were away (guard.py would have "
                    "told you) — open your own lane")
     elif not args.session:
-        print("warning: caller session unknown (no $OPENCODE_SESSION_ID) — "
+        print("warning: caller session unknown (no $EDITSPACE_AGENT_ID) — "
               "ownership check skipped")
 
     jj("bookmark", "move", "main", "--to", args.change)
