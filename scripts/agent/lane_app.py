@@ -29,8 +29,8 @@ import sys
 import time
 from pathlib import Path
 
-MAIN_ROOT = Path("/Users/murtaza/manadj/default")
-UMBRELLA = MAIN_ROOT.parent
+MAIN_ROOT = Path("/Users/murtaza/manadj")
+UMBRELLA = MAIN_ROOT  # collapsed root (ADR 0028); .lanes lookups retire in issue 03
 LANE_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_DIR = LANE_ROOT / ".lane-app"
 PID_FILE = RUNTIME_DIR / "dev.pid"

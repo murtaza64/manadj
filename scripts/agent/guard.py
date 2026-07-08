@@ -19,8 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_WS = Path("/Users/murtaza/manadj/default")
-UMBRELLA = DEFAULT_WS.parent
+DEFAULT_WS = Path("/Users/murtaza/manadj")
+UMBRELLA = DEFAULT_WS  # collapsed root (ADR 0028); .lanes lookups retire in issue 03
 LANE_ROOT = Path(__file__).resolve().parents[2]
 
 

@@ -218,7 +218,7 @@ The files multiple lanes touch, and how to touch them:
 - **The real DB exists only in the default workspace** (`data/library.db` is
   workspace-relative). Lanes never reference the default workspace's `data/`.
 - Lanes needing data **clone, never symlink, never plain-copy**:
-  `cp -c /Users/murtaza/manadj/default/data/library.db data/library.db`
+  `cp -c /Users/murtaza/manadj/data/library.db data/library.db`
   (APFS clone: instant, block-shared, fully isolated). Staleness is a feature;
   re-clone for fresher data. Track audio is referenced by absolute path and is
   read-only — nothing to copy.
@@ -294,7 +294,7 @@ report instead. Each lane records a port offset in its `.lanes/` file (e.g.
   there until that working copy moves. After advancing `main`, check the
   default workspace's `@`: if it is an idle placeholder (empty change, no
   description — or its own stale "post-landing" empty), move it to a fresh
-  change on the new trunk: `jj -R /Users/murtaza/manadj/default new main`. Vite and
+  change on the new trunk: `jj -R /Users/murtaza/manadj new main`. Vite and
   the auto-reload backend pick the landed change up immediately. If `@` has
   file changes or a real description, it's the human's — leave it alone and
   say the app needs a manual update instead. (Note: moving default@ onto a

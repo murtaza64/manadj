@@ -9,3 +9,6 @@ waveform_tests/
 node_modules/
 .lane-app/
 
+.editspace/
+.scratch/
+tmp/

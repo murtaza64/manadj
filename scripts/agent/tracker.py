@@ -26,7 +26,7 @@ from datetime import date
 from pathlib import Path
 
 TRACKER = Path("/Users/murtaza/manadj/.scratch")
-LABELS_DOC = Path("/Users/murtaza/manadj/default/docs/agents/triage-labels.md")
+LABELS_DOC = Path("/Users/murtaza/manadj/docs/agents/triage-labels.md")
 FALLBACK_LABELS = {"needs-triage", "needs-info", "ready-for-agent",
                    "ready-for-human", "wontfix"}
 

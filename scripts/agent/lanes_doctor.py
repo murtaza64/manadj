@@ -19,8 +19,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-DEFAULT_WS = Path("/Users/murtaza/manadj/default")
-UMBRELLA = DEFAULT_WS.parent
+DEFAULT_WS = Path("/Users/murtaza/manadj")
+UMBRELLA = DEFAULT_WS  # collapsed root (ADR 0028); .lanes lookups retire in issue 03
 LIVE_HORIZON_S = 30 * 60  # owner session updated within this = live
 
 
