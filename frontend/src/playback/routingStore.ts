@@ -79,7 +79,7 @@ async function recompute(): Promise<void> {
   snapshot = { prefs, resolved, devices };
   notify();
   if (!mixer) return;
-  await applyMasterSink(mixer, resolved.masterSinkId);
+  await applyMasterSink(mixer, resolved.masterSinkId, resolved.masterPair);
   try {
     await mixer.setCueSinkId(resolved.cueSinkId, resolved.cuePair);
   } catch (err) {
@@ -88,12 +88,16 @@ async function recompute(): Promise<void> {
   }
 }
 
-async function applyMasterSink(target: MasterRoutable, sinkId: string | null): Promise<void> {
+async function applyMasterSink(
+  target: MasterRoutable,
+  sinkId: string | null,
+  pair: SavedDevice['pair'] = null
+): Promise<void> {
   try {
-    await target.setMasterSinkId(sinkId);
+    await target.setMasterSinkId(sinkId, pair ?? null);
   } catch (err) {
     console.warn('[routing] master sink failed; falling back to default', err);
-    await target.setMasterSinkId(null).catch(() => undefined);
+    await target.setMasterSinkId(null, null).catch(() => undefined);
   }
 }
 
