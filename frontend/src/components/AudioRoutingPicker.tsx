@@ -6,10 +6,8 @@
  * the select red, so the choice survives replugging — resolution handles
  * the fallback live (routingStore).
  *
- * The CUE list splits multichannel interfaces into explicit stereo pairs
- * (cueOutputOptions — the Inpulse: "(outs 1/2)" rear RCA, "(outs 3/4)"
- * front headphone jack); MASTER keeps whole-device entries (non-default
- * master pairs are the single-context optimization ADR 0017 defers).
+ * Multichannel interfaces split into explicit stereo pairs (the Inpulse:
+ * "(outs 1/2)" rear RCA, "(outs 3/4)" front headphone jack) for both buses.
  *
  * Devices are (re-)enumerated when a select is pressed — the moment labels
  * may get unlocked — never at boot for unrouted setups (permission prompt
@@ -24,7 +22,7 @@ import {
   setMasterDevice,
   subscribeRouting,
 } from '../playback/routingStore';
-import { cueOutputOptions, sameCueChoice } from '../playback/routing';
+import { outputPairOptions, sameOutputChoice } from '../playback/routing';
 import type { SavedDevice } from '../playback/routing';
 import { AutoBlurSelect } from './AutoBlurSelect';
 
@@ -45,7 +43,7 @@ function BusSelect({
   onPick: (device: SavedDevice | null) => void;
 }) {
   const savedIndex =
-    saved === null ? -1 : options.findIndex((option) => sameCueChoice(option, saved));
+    saved === null ? -1 : options.findIndex((option) => sameOutputChoice(option, saved));
   return (
     <label
       className={`topbar-routing-bus${missing ? ' missing' : ''}`}
@@ -94,7 +92,7 @@ export function AudioRoutingPicker() {
         noneLabel="System default"
         saved={prefs.master}
         missing={resolved.masterMissing}
-        options={devices.map((d) => ({ deviceId: d.deviceId, label: d.label, pair: null }))}
+        options={outputPairOptions(devices)}
         onPick={setMasterDevice}
       />
       <BusSelect
@@ -102,7 +100,7 @@ export function AudioRoutingPicker() {
         noneLabel="Off"
         saved={prefs.cue}
         missing={resolved.cueMissing}
-        options={cueOutputOptions(devices)}
+        options={outputPairOptions(devices)}
         onPick={setCueDevice}
       />
     </div>

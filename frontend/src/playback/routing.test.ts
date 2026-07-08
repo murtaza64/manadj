@@ -7,10 +7,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ROUTING_PREFS,
   cueChannelPair,
-  cueOutputOptions,
+  outputPairOptions,
   parseRoutingPrefs,
   resolveRouting,
-  sameCueChoice,
+  sameOutputChoice,
 } from './routing';
 import type { RoutingPrefs } from './routing';
 
@@ -26,6 +26,7 @@ describe('resolveRouting', () => {
   it('nothing saved: master on the system default, cue disabled, nothing missing', () => {
     expect(resolveRouting(DEFAULT_ROUTING_PREFS, [MAC.deviceId])).toEqual({
       masterSinkId: null,
+      masterPair: null,
       masterMissing: false,
       cueSinkId: null,
       cuePair: null,
@@ -39,6 +40,7 @@ describe('resolveRouting', () => {
       INPULSE.deviceId,
     ]);
     expect(resolved.masterSinkId).toBe(MAC.deviceId);
+    expect(resolved.masterPair).toBeNull();
     expect(resolved.cueSinkId).toBe(INPULSE.deviceId);
     expect(resolved.masterMissing).toBe(false);
     expect(resolved.cueMissing).toBe(false);
@@ -53,9 +55,19 @@ describe('resolveRouting', () => {
     expect(resolved.cuePair).toEqual({ left: 2, right: 3 });
   });
 
+  it('a saved master pair rides through resolution', () => {
+    const resolved = resolveRouting(
+      prefs({ master: { ...INPULSE, pair: { left: 2, right: 3 } } }),
+      [INPULSE.deviceId]
+    );
+    expect(resolved.masterSinkId).toBe(INPULSE.deviceId);
+    expect(resolved.masterPair).toEqual({ left: 2, right: 3 });
+  });
+
   it('saved master missing: falls back to the system default and says so', () => {
     const resolved = resolveRouting(prefs({ master: INPULSE }), [MAC.deviceId]);
     expect(resolved.masterSinkId).toBeNull();
+    expect(resolved.masterPair).toBeNull();
     expect(resolved.masterMissing).toBe(true);
   });
 
@@ -86,6 +98,7 @@ describe('resolveRouting', () => {
     const resolved = resolveRouting(prefs({ master: MAC, cue: INPULSE }), []);
     expect(resolved).toEqual({
       masterSinkId: null,
+      masterPair: null,
       masterMissing: true,
       cueSinkId: null,
       cuePair: null,
@@ -94,25 +107,25 @@ describe('resolveRouting', () => {
   });
 });
 
-describe('cueOutputOptions (explicit output pairs)', () => {
+describe('outputPairOptions (explicit output pairs)', () => {
   const stereo = { ...MAC, maxChannelCount: 2 };
   const fourOut = { ...INPULSE, maxChannelCount: 4 };
 
   it('a stereo device is one plain entry', () => {
-    expect(cueOutputOptions([stereo])).toEqual([
+    expect(outputPairOptions([stereo])).toEqual([
       { deviceId: MAC.deviceId, label: MAC.label, pair: null },
     ]);
   });
 
   it('a 4-out interface splits into two 1-based-labelled pairs', () => {
-    expect(cueOutputOptions([fourOut])).toEqual([
+    expect(outputPairOptions([fourOut])).toEqual([
       { deviceId: INPULSE.deviceId, label: `${INPULSE.label} (outs 1/2)`, pair: { left: 0, right: 1 } },
       { deviceId: INPULSE.deviceId, label: `${INPULSE.label} (outs 3/4)`, pair: { left: 2, right: 3 } },
     ]);
   });
 
   it('bigger interfaces get one entry per pair', () => {
-    const options = cueOutputOptions([{ deviceId: 'x', label: 'Big', maxChannelCount: 6 }]);
+    const options = outputPairOptions([{ deviceId: 'x', label: 'Big', maxChannelCount: 6 }]);
     expect(options.map((o) => o.label)).toEqual([
       'Big (outs 1/2)',
       'Big (outs 3/4)',
@@ -121,7 +134,7 @@ describe('cueOutputOptions (explicit output pairs)', () => {
   });
 
   it('mixed lists keep enumeration order', () => {
-    const options = cueOutputOptions([stereo, fourOut]);
+    const options = outputPairOptions([stereo, fourOut]);
     expect(options.map((o) => o.label)).toEqual([
       MAC.label,
       `${INPULSE.label} (outs 1/2)`,
@@ -130,26 +143,26 @@ describe('cueOutputOptions (explicit output pairs)', () => {
   });
 });
 
-describe('sameCueChoice', () => {
+describe('sameOutputChoice', () => {
   it('matches by device id and pair, not label', () => {
     const saved = { deviceId: 'x', label: 'old label (outs 3/4)', pair: { left: 2, right: 3 } };
-    expect(sameCueChoice(saved, { deviceId: 'x', label: 'new', pair: { left: 2, right: 3 } })).toBe(
+    expect(sameOutputChoice(saved, { deviceId: 'x', label: 'new', pair: { left: 2, right: 3 } })).toBe(
       true
     );
-    expect(sameCueChoice(saved, { deviceId: 'x', label: 'new', pair: { left: 0, right: 1 } })).toBe(
+    expect(sameOutputChoice(saved, { deviceId: 'x', label: 'new', pair: { left: 0, right: 1 } })).toBe(
       false
     );
-    expect(sameCueChoice(saved, { deviceId: 'y', label: 'new', pair: { left: 2, right: 3 } })).toBe(
+    expect(sameOutputChoice(saved, { deviceId: 'y', label: 'new', pair: { left: 2, right: 3 } })).toBe(
       false
     );
   });
 
   it('treats absent and null pair as the same (device default)', () => {
-    expect(sameCueChoice({ deviceId: 'x', label: 'a' }, { deviceId: 'x', label: 'b', pair: null })).toBe(
+    expect(sameOutputChoice({ deviceId: 'x', label: 'a' }, { deviceId: 'x', label: 'b', pair: null })).toBe(
       true
     );
     expect(
-      sameCueChoice({ deviceId: 'x', label: 'a' }, { deviceId: 'x', label: 'b', pair: { left: 2, right: 3 } })
+      sameOutputChoice({ deviceId: 'x', label: 'a' }, { deviceId: 'x', label: 'b', pair: { left: 2, right: 3 } })
     ).toBe(false);
   });
 });

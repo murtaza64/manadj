@@ -42,7 +42,7 @@ import {
   sweepPositionToFilter,
 } from './graph';
 import type { EqBand } from './graph';
-import { CueBridge } from './cueBridge';
+import { BusOutputBridge, CueBridge } from './cueBridge';
 import type { OutputPair } from './routing';
 import {
   channelFaderToGain,
@@ -227,6 +227,8 @@ export class Mixer {
   private ctx: AudioContext | null = null;
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
+  private masterLimiter: DynamicsCompressorNode | null = null;
+  private masterBridge: BusOutputBridge | null = null;
   private cueGain: GainNode | null = null;
   private blendCueGain: GainNode | null = null;
   private blendMasterGain: GainNode | null = null;
@@ -262,6 +264,8 @@ export class Mixer {
   private master = 1; // 0..1
   /** Master bus output device (headphone-cue 01); null = system default. */
   private masterSinkId: string | null = null;
+  /** Output pair on the master sink; null = device default. */
+  private masterPair: OutputPair | null = null;
   /** Cue bus output device (headphone-cue 02); null = Cue bus disabled —
    * PFL state still toggles, it just reaches no ears (PRD). */
   private cueSinkId: string | null = null;
@@ -294,7 +298,7 @@ export class Mixer {
       strips.B.crossfadeGain.connect(program);
       program.connect(masterGain);
       masterGain.connect(limiter);
-      limiter.connect(ctx.destination);
+      const masterBridge = new BusOutputBridge(ctx);
 
       // Cue bus (headphone-cue 02/03, ADR 0017): PFL taps and the master
       // blend are mixed IN THE MAIN GRAPH and leave over the MediaStream
@@ -322,6 +326,8 @@ export class Mixer {
       this.ctx = ctx;
       this.strips = strips;
       this.masterGain = masterGain;
+      this.masterLimiter = limiter;
+      this.masterBridge = masterBridge;
       this.cueGain = cueGain;
       this.blendCueGain = blendCueGain;
       this.blendMasterGain = blendMasterGain;
@@ -343,14 +349,14 @@ export class Mixer {
           }
         }
       }
-      if (this.masterSinkId !== null) {
-        void ctx.setSinkId(this.masterSinkId).catch((err: unknown) => {
-          // Saved device gone at revival: stay on the default — master
-          // audio must never die over routing (headphone-cue PRD).
-          console.warn('[Mixer] master sink reapply failed; using default', err);
-          this.masterSinkId = null;
-        });
-      }
+      void this.applyMasterRoute().catch((err: unknown) => {
+        // Saved device gone at revival: stay on the default — master
+        // audio must never die over routing (headphone-cue PRD).
+        console.warn('[Mixer] master sink reapply failed; using default', err);
+        this.masterSinkId = null;
+        this.masterPair = null;
+        void this.applyMasterRoute();
+      });
       if (this.cueSinkId !== null) {
         void cueBridge.setSink(this.cueSinkId, this.cuePair).catch((err: unknown) => {
           // Cue device gone at revival: Cue bus disabled, master unaffected.
@@ -583,12 +589,13 @@ export class Mixer {
   }
 
   /**
-   * Route the Master bus — the whole main context — to an output device
-   * (headphone-cue 01, ADR 0017). null = system default. Remembered across
+   * Route the Master bus to an output device (headphone-cue 01/07,
+   * ADR 0017). null sink = system default; null pair = device default.
+   * Explicit pairs use the bridge/channel-merger path. Remembered across
    * graph revivals; rejects if the device is gone (callers fall back per
    * routing.ts).
    */
-  async setMasterSinkId(sinkId: string | null): Promise<void> {
+  async setMasterSinkId(sinkId: string | null, pair: OutputPair | null = null): Promise<void> {
     // Store first, apply only to a LIVE context (headphone-cue 06
     // follow-up): routing a context-less mixer must not force-create an
     // AudioContext (registration would leak contexts and race dispose —
@@ -596,9 +603,28 @@ export class Mixer {
     // on creation/revival, so a disposed-then-revived mixer keeps its
     // routing (the Mixer's "safe to keep using after dispose" contract).
     this.masterSinkId = sinkId;
+    this.masterPair = sinkId === null ? null : pair;
     const ctx = this.ctx;
     if (!ctx || ctx.state === 'closed') return;
-    await ctx.setSinkId(sinkId ?? '');
+    await this.applyMasterRoute();
+  }
+
+  private async applyMasterRoute(): Promise<void> {
+    const ctx = this.ctx;
+    const limiter = this.masterLimiter;
+    if (!ctx || ctx.state === 'closed' || !limiter) return;
+    limiter.disconnect();
+
+    if (this.masterSinkId !== null && this.masterPair !== null) {
+      await ctx.setSinkId('');
+      await this.masterBridge!.setSink(this.masterSinkId, this.masterPair, () => null, 'master');
+      limiter.connect(this.masterBridge!.input);
+      return;
+    }
+
+    this.masterBridge?.stop();
+    await ctx.setSinkId(this.masterSinkId ?? '');
+    limiter.connect(ctx.destination);
   }
 
   // ── Cue bus (headphone-cue 02, ADR 0017) ─────────────────────────────
@@ -679,10 +705,13 @@ export class Mixer {
   /** Tear down. Safe to keep using — the graph revives on demand. */
   dispose(): void {
     this.cueBridge?.stop();
+    this.masterBridge?.stop();
     if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
     this.ctx = null;
     this.strips = null;
     this.masterGain = null;
+    this.masterLimiter = null;
+    this.masterBridge = null;
     this.cueGain = null;
     this.blendCueGain = null;
     this.blendMasterGain = null;
