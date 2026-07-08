@@ -257,6 +257,22 @@ describe('hot-cue-down under Quantize (phase-preserving triggers)', () => {
     expect(effects[0].at).toBeCloseTo(0.9, 10);
   });
 
+  it('pressing just before a beat starts before the cue so the cue hits the approaching beat', () => {
+    // playhead 1.2 → nearest beat 1.25, phase -0.05; cue 0.75 → land 0.7.
+    const s = state({ playing: true, playhead: 1.2 });
+    const [next, effects] = reduceTransport(s, { type: 'hot-cue-down', slot: 1, time: 0.75 }, quantized());
+    expect(next.playhead).toBeCloseTo(0.7, 10);
+    expect(effects[0]).toEqual({ type: 'start', at: expect.closeTo(0.7, 10) });
+  });
+
+  it('pressing just after a beat does not jump an extra beat forward', () => {
+    // playhead 1.3 → nearest beat 1.25, phase +0.05; cue 0.75 → land 0.8.
+    const s = state({ playing: true, playhead: 1.3 });
+    const [next, effects] = reduceTransport(s, { type: 'hot-cue-down', slot: 1, time: 0.75 }, quantized());
+    expect(next.playhead).toBeCloseTo(0.8, 10);
+    expect(effects[0]).toEqual({ type: 'start', at: expect.closeTo(0.8, 10) });
+  });
+
   it('lands exactly on the cue with Quantize off', () => {
     const ctx: TransportContext = { quantize: false, beatTimes: [0.25, 0.75, 1.25, 1.75] };
     const s = state({ playing: true, playhead: 1.4 });

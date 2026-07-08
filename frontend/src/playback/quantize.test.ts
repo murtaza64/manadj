@@ -65,8 +65,18 @@ describe('addBeats', () => {
 });
 
 describe('phasePreservingJumpTarget', () => {
-  it('lands at the cue plus the playhead intra-beat phase', () => {
-    // playhead 1.4: beat before is 1.25, phase 0.15; cue on-grid at 0.75.
+  it('pressing just after a beat lands at the cue plus the signed nearest-beat phase', () => {
+    // playhead 1.3: nearest beat is 1.25, phase +0.05; cue on-grid at 0.75.
+    expect(phasePreservingJumpTarget(0.75, 1.3, GRID)).toBeCloseTo(0.8, 10);
+  });
+
+  it('pressing just before a beat lands before the cue so the cue reaches the approaching beat', () => {
+    // playhead 1.2: nearest beat is 1.25, phase -0.05; cue on-grid at 0.75.
+    expect(phasePreservingJumpTarget(0.75, 1.2, GRID)).toBeCloseTo(0.7, 10);
+  });
+
+  it('keeps using the previous beat when it is the nearest gridline', () => {
+    // playhead 1.4: nearest beat is 1.25, phase +0.15; cue on-grid at 0.75.
     expect(phasePreservingJumpTarget(0.75, 1.4, GRID)).toBeCloseTo(0.9, 10);
   });
 
@@ -74,9 +84,9 @@ describe('phasePreservingJumpTarget', () => {
     expect(phasePreservingJumpTarget(0.75, 1.75, GRID)).toBeCloseTo(0.75, 10);
   });
 
-  it('snaps an off-grid cue to its nearest beat before adding the phase', () => {
-    // cue 0.8 → nearest beat 0.75; phase 0.15 → 0.9.
-    expect(phasePreservingJumpTarget(0.8, 1.4, GRID)).toBeCloseTo(0.9, 10);
+  it('snaps an off-grid cue to its nearest beat before adding the signed phase', () => {
+    // cue 0.8 → nearest beat 0.75; playhead phase -0.05 → 0.7.
+    expect(phasePreservingJumpTarget(0.8, 1.2, GRID)).toBeCloseTo(0.7, 10);
   });
 
   it('is a whole-beat displacement of the playhead', () => {
@@ -91,7 +101,8 @@ describe('phasePreservingJumpTarget', () => {
     expect(phasePreservingJumpTarget(0.8, 1.4, [])).toBe(0.8);
   });
 
-  it('degrades to the exact cue when the playhead is before the first beat', () => {
-    expect(phasePreservingJumpTarget(0.75, 0.1, GRID)).toBe(0.75);
+  it('uses the approaching first beat when the playhead is before the grid', () => {
+    // playhead 0.1: nearest beat is 0.25, phase -0.15; cue 0.75 → 0.6.
+    expect(phasePreservingJumpTarget(0.75, 0.1, GRID)).toBeCloseTo(0.6, 10);
   });
 });

@@ -201,9 +201,9 @@ export function reduceTransport(
       // region.
       if (s.playing) {
         // Jump and keep playing. Quantize governs the trigger: the jump is
-        // immediate but lands at cue + intra-beat phase (a whole-beat
-        // displacement — looping 02). Paused triggers below are seeks and
-        // land exactly, regardless of the toggle.
+        // immediate but lands at cue + signed nearest-beat phase (a
+        // whole-beat displacement — looping 02). Paused triggers below are
+        // seeks and land exactly, regardless of the toggle.
         const at = ctx.quantize
           ? phasePreservingJumpTarget(e.time, s.playhead, ctx.beatTimes)
           : e.time;

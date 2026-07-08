@@ -90,13 +90,14 @@ export function beatsBetween(
 /**
  * Quantized trigger landing (looping 02): a phase-preserving jump. Executes
  * immediately; the landing is the cue's beat (nearest gridline — placement
- * usually put it there) plus the playhead's intra-beat phase, so the jump is
- * a whole-beat displacement and the groove never stumbles. Deliberately does
- * NOT land exactly on the cue unless the playhead was on a gridline (CDJ
- * convention — do not "fix").
+ * usually put it there) plus the playhead's signed phase from its nearest
+ * beat. Pressing just before a beat starts before the cue, so the cue lands
+ * on the approaching beat; pressing just after starts after the cue, aligned
+ * with the beat that just passed. The displacement is whole-beat, so the
+ * groove never stumbles. Deliberately does NOT land exactly on the cue unless
+ * the playhead was on a gridline (CDJ convention — do not "fix").
  *
- * Degrades to the exact cue without a grid, or with the playhead before the
- * first beat (no phase to preserve).
+ * Degrades to the exact cue without a grid.
  */
 export function phasePreservingJumpTarget(
   cue: number,
@@ -104,10 +105,7 @@ export function phasePreservingJumpTarget(
   beatTimes: readonly number[] | null | undefined
 ): number {
   if (!beatTimes || beatTimes.length === 0) return cue;
-  const lo = lowerBound(playhead, beatTimes);
-  // Last beat at or before the playhead; on-gridline playheads have phase 0.
-  const beforeIdx = lo < beatTimes.length && beatTimes[lo] === playhead ? lo : lo - 1;
-  if (beforeIdx < 0) return cue;
-  const phase = playhead - beatTimes[beforeIdx];
+  const nearest = snapToNearestBeat(playhead, beatTimes);
+  const phase = playhead - nearest;
   return snapToNearestBeat(cue, beatTimes) + phase;
 }
