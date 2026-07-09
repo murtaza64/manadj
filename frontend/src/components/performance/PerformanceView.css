@@ -676,6 +676,62 @@
   border-color: var(--blue);
 }
 
+/* Soft-takeover hint (midi-controller 18): a mismatched hardware fader/
+   knob is being suppressed (softTakeover.ts via dispatch) — pulse the
+   on-screen control and point the way the HARDWARE must move to pick up.
+   Ghost-orange family deliberately: like the automation ghost, it means
+   "the hardware position is not what you hear". Ends on pickup or after
+   the decay (takeoverFeedback.ts). */
+@keyframes takeover-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.perf-fader.perf-takeover .perf-fader-handle {
+  color: var(--orange, #ff8000);
+  border-color: var(--orange, #ff8000);
+  animation: takeover-pulse 0.8s ease-in-out infinite;
+}
+
+/* Direction rides the handle: 'up' = increase = right (faders are
+   horizontal and never mirror — right = faster/louder universally). */
+.perf-fader.perf-takeover-up .perf-fader-handle::after {
+  content: ' ▸';
+}
+.perf-fader.perf-takeover-down .perf-fader-handle::before {
+  content: '◂ ';
+}
+
+.perf-knob.perf-takeover .perf-knob-dial {
+  border-color: var(--orange, #ff8000);
+  animation: takeover-pulse 0.8s ease-in-out infinite;
+}
+.perf-knob.perf-takeover .perf-knob-pointer::after {
+  background: var(--orange, #ff8000);
+}
+/* Turn direction beside the knob label: clockwise raises, counter lowers. */
+.perf-knob.perf-takeover-up > span::after {
+  content: ' ↻';
+  color: var(--orange, #ff8000);
+}
+.perf-knob.perf-takeover-down > span::after {
+  content: ' ↺';
+  color: var(--orange, #ff8000);
+}
+
+/* Static highlight still reads without motion; only the pulse goes. */
+@media (prefers-reduced-motion: reduce) {
+  .perf-takeover .perf-fader-handle,
+  .perf-takeover .perf-knob-dial {
+    animation: none;
+  }
+}
+
 /* Foot: prominent playback readouts beside MATCH + nudge */
 .perf-mix-foot {
   display: flex;

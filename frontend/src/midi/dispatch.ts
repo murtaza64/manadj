@@ -23,6 +23,7 @@ import {
   SoftTakeover,
   UNIPOLAR_PICKUP_TOLERANCE,
 } from './softTakeover';
+import { reportPickedUp, reportSuppressed, takeoverKey } from './takeoverFeedback';
 
 /** Encoder detents per action are tiny; cap steps so a burst can't warp the
  * selection across the whole library in one message. */
@@ -341,7 +342,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const controls = deckControlsFor(target.deck);
       if (!controls) return null;
       return {
-        key: `pitch:${target.deck}`,
+        key: takeoverKey.pitch(target.deck),
         tolerance: PITCH_PICKUP_TOLERANCE,
         value: bipolar(value) * PITCH_RANGE_PERCENT,
         current: controls.getPitch(),
@@ -352,7 +353,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const mixer = midiMixerControls();
       if (!mixer) return null;
       return {
-        key: `trim:${target.channel}`,
+        key: takeoverKey.trim(target.channel),
         tolerance: UNIPOLAR_PICKUP_TOLERANCE,
         value,
         current: mixer.getChannelState(target.channel).trim,
@@ -363,7 +364,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const mixer = midiMixerControls();
       if (!mixer) return null;
       return {
-        key: `eq:${target.channel}:${target.band}`,
+        key: takeoverKey.eq(target.channel, target.band),
         tolerance: UNIPOLAR_PICKUP_TOLERANCE,
         value,
         current: mixer.getChannelState(target.channel).eq[target.band],
@@ -374,7 +375,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const mixer = midiMixerControls();
       if (!mixer) return null;
       return {
-        key: `filter:${target.channel}`,
+        key: takeoverKey.filter(target.channel),
         tolerance: BIPOLAR_PICKUP_TOLERANCE,
         value: bipolar(value),
         current: mixer.getChannelState(target.channel).filter,
@@ -385,7 +386,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const mixer = midiMixerControls();
       if (!mixer) return null;
       return {
-        key: `channel-fader:${target.channel}`,
+        key: takeoverKey.channelFader(target.channel),
         tolerance: UNIPOLAR_PICKUP_TOLERANCE,
         value,
         current: mixer.getChannelState(target.channel).fader,
@@ -396,7 +397,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const mixer = midiMixerControls();
       if (!mixer) return null;
       return {
-        key: 'crossfader',
+        key: takeoverKey.crossfader(),
         tolerance: BIPOLAR_PICKUP_TOLERANCE,
         value: bipolar(value),
         current: mixer.getCrossfader(),
@@ -407,7 +408,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const mixer = midiMixerControls();
       if (!mixer) return null;
       return {
-        key: 'master',
+        key: takeoverKey.master(),
         tolerance: UNIPOLAR_PICKUP_TOLERANCE,
         value,
         current: mixer.getMaster(),
@@ -418,7 +419,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const mixer = midiMixerControls();
       if (!mixer) return null;
       return {
-        key: 'cue-level',
+        key: takeoverKey.cueLevel(),
         tolerance: UNIPOLAR_PICKUP_TOLERANCE,
         value,
         current: mixer.getCueLevel(),
@@ -429,7 +430,7 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
       const mixer = midiMixerControls();
       if (!mixer) return null;
       return {
-        key: 'cue-mix',
+        key: takeoverKey.cueMix(),
         tolerance: UNIPOLAR_PICKUP_TOLERANCE,
         value,
         current: mixer.getCueMix(),
@@ -442,6 +443,12 @@ function routeAbsolute(target: AbsoluteAction['target'], value: number): Absolut
 function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void {
   const route = routeAbsolute(target, value);
   if (!route) return;
-  if (!takeoverFor(route.key, route.tolerance).feed(route.value, route.current)) return;
+  if (!takeoverFor(route.key, route.tolerance).feed(route.value, route.current)) {
+    // Waiting for pickup: tell the on-screen control which way the hand
+    // must move (midi-controller 18).
+    reportSuppressed(route.key, route.value < route.current ? 'up' : 'down');
+    return;
+  }
+  reportPickedUp(route.key);
   route.apply(route.value);
 }

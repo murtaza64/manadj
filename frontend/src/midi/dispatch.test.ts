@@ -30,6 +30,7 @@ import {
   _resetSoftTakeoverForTests,
   dispatchMidiAction,
 } from './dispatch';
+import { _resetTakeoverFeedbackForTests, takeoverHint, takeoverKey } from './takeoverFeedback';
 
 const button = (
   control: 'transport' | 'cue',
@@ -193,6 +194,7 @@ afterEach(() => {
   _resetMidiControlsForTests();
   _resetGridChordForTests();
   _resetSoftTakeoverForTests();
+  _resetTakeoverFeedbackForTests();
 });
 
 describe('routing', () => {
@@ -874,6 +876,28 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
       value: 0.2,
     });
     expect(calls).toEqual(['mixer:fader:A:1', 'mixer:fader:B:1', 'mixer:fader:A:0.2']);
+  });
+
+  it('suppressed moves surface a directional feedback hint; pickup clears it (18)', () => {
+    registerFakeDeckControls('A');
+    fakePitch.A = 4; // software +4%, fader low
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.2 });
+    // Suppressed, and the hand must move UP toward +4.
+    expect(takeoverHint(takeoverKey.pitch('A'))).toBe('up');
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.8 });
+    // Crossed +4: picked up, hint gone.
+    expect(takeoverHint(takeoverKey.pitch('A'))).toBeNull();
+  });
+
+  it('feedback hints carry the mixer control identity (18)', () => {
+    registerFakeMixerControls();
+    fakeMixer.channels.B.trim = 0.9;
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'B' }, value: 0.2 });
+    expect(takeoverHint(takeoverKey.trim('B'))).toBe('up');
+    expect(takeoverHint(takeoverKey.trim('A'))).toBeNull();
+    // Latched controls never hint.
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 1 });
+    expect(takeoverHint(takeoverKey.master())).toBeNull();
   });
 
   it('eq bands have independent takeover state', () => {

@@ -12,6 +12,8 @@
  */
 import { useRef } from 'react';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
+import { useTakeoverHint } from '../../hooks/useTakeoverHint';
+import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
 import { CUE_LEVEL_DEFAULT, CUE_MIX_DEFAULT } from '../../playback/mixer';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
@@ -33,6 +35,7 @@ export function Knob({
   value,
   onChange,
   ghost = null,
+  takeover = null,
 }: {
   label: string;
   min: number;
@@ -45,6 +48,9 @@ export function Knob({
    * automation value while an overlay is engaged. Display only — never
    * affects the real pointer (base state) or gesture handling. */
   ghost?: number | null;
+  /** Soft-takeover hint (midi-controller 18): pulses the knob and shows
+   * which way the HARDWARE must turn to pick up. Display only. */
+  takeover?: TakeoverDirection | null;
 }) {
   const drag = useRef<{ startY: number; startValue: number } | null>(null);
 
@@ -59,7 +65,7 @@ export function Knob({
   const ghostAngle = ghost === null ? null : toAngle(ghost);
 
   return (
-    <div className="perf-knob">
+    <div className={`perf-knob${takeover ? ` perf-takeover perf-takeover-${takeover}` : ''}`}>
       <div
         className="perf-knob-dial"
         onPointerDown={(e) => {
@@ -121,6 +127,7 @@ export function HFader({
   crossfade = false,
   title,
   ghost = null,
+  takeover = null,
 }: {
   label: string;
   min: number;
@@ -139,6 +146,9 @@ export function HFader({
    * track at the live automation value while an overlay is engaged. The
    * real handle (base state) and gesture handling are untouched. */
   ghost?: number | null;
+  /** Soft-takeover hint (midi-controller 18): pulses the handle and points
+   * toward the software value ('up' = right). Display only. */
+  takeover?: TakeoverDirection | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -160,7 +170,7 @@ export function HFader({
   return (
     <div
       ref={ref}
-      className={`perf-fader${accent ? ' accent' : ''}${disabled ? ' disabled' : ''}`}
+      className={`perf-fader${accent ? ' accent' : ''}${disabled ? ' disabled' : ''}${takeover ? ` perf-takeover perf-takeover-${takeover}` : ''}`}
       title={title}
       onPointerDown={(e) => {
         if (disabled) return;
@@ -250,6 +260,12 @@ export function MixerStrip({
   // so the hardware level knob repaints PHONES live.
   const cueMix = useMixerValue((m) => m.getCueMix());
   const cueLevel = useMixerValue((m) => m.getCueLevel());
+  // Soft-takeover hints (midi-controller 18): pulse the control a
+  // mismatched hardware knob is reaching for.
+  const cueMixTakeover = useTakeoverHint(takeoverKey.cueMix());
+  const cueLevelTakeover = useTakeoverHint(takeoverKey.cueLevel());
+  const crossfaderTakeover = useTakeoverHint(takeoverKey.crossfader());
+  const masterTakeover = useTakeoverHint(takeoverKey.master());
 
   return (
     <div className="perf-strip">
@@ -271,6 +287,7 @@ export function MixerStrip({
           defaultValue={CUE_MIX_DEFAULT}
           onChange={(v) => mixer.setCueMix(v)}
           title="Headphone blend: cue only ← → master only (double-click = cue only)"
+          takeover={cueMixTakeover}
         />
         <HFader
           label="PHONES"
@@ -281,6 +298,7 @@ export function MixerStrip({
           fill
           onChange={(v) => mixer.setCueLevel(v)}
           title="Headphone (cue) level"
+          takeover={cueLevelTakeover}
         />
       </div>
       <div className="perf-strip-slot wide">
@@ -309,6 +327,7 @@ export function MixerStrip({
           disabled={!xfOn}
           onChange={(v) => mixer.setCrossfader(v)}
           title="Crossfader (double-click to center)"
+          takeover={crossfaderTakeover}
         />
         <span className="perf-xfade-end">B</span>
         {/* Invisible twin of the XF toggle: keeps the fader's center on the
@@ -327,6 +346,7 @@ export function MixerStrip({
           fill
           onChange={(v) => mixer.setMaster(v)}
           title="Master volume"
+          takeover={masterTakeover}
         />
       </div>
     </div>

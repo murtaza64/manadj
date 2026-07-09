@@ -19,6 +19,8 @@ import { api } from '../../api/client';
 import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
 import { useMatchAction } from '../../hooks/useMatchAction';
 import { useAutomationGhost, useMixer, useMixerValue } from '../../hooks/useMixer';
+import { useTakeoverHint } from '../../hooks/useTakeoverHint';
+import { takeoverKey } from '../../midi/takeoverFeedback';
 import { useScrubTransport } from '../../hooks/useScrubTransport';
 import WebGLWaveform from '../WebGLWaveform';
 import WaveformMinimap from '../WaveformMinimap';
@@ -382,6 +384,19 @@ function MixZone({ track }: { track: Track | null }) {
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
   const keyLock = useDeckSnapshot((s) => s.keyLock);
+
+  // Soft-takeover hints (midi-controller 18): pulse the control a
+  // mismatched hardware fader/knob is reaching for. Read per control —
+  // eqKnob is a render helper, so band hints are read here, not inside it.
+  const trimTakeover = useTakeoverHint(takeoverKey.trim(deck));
+  const eqTakeover = {
+    low: useTakeoverHint(takeoverKey.eq(deck, 'low')),
+    mid: useTakeoverHint(takeoverKey.eq(deck, 'mid')),
+    high: useTakeoverHint(takeoverKey.eq(deck, 'high')),
+  };
+  const filterTakeover = useTakeoverHint(takeoverKey.filter(deck));
+  const faderTakeover = useTakeoverHint(takeoverKey.channelFader(deck));
+  const pitchTakeover = useTakeoverHint(takeoverKey.pitch(deck));
   const drifted = keyDrifted(keyLock, pitch);
   // Effective BPM follows the pitch fader only: a nudge's momentary bend is
   // a phase correction, not a tempo change — the readout must not wobble
@@ -426,6 +441,7 @@ function MixZone({ track }: { track: Track | null }) {
       value={channel.eq[band]}
       onChange={(v) => mixer.setEq(deck, band, v)}
       ghost={auto ? auto.eq[band] : null}
+      takeover={eqTakeover[band]}
     />
   );
 
@@ -441,6 +457,7 @@ function MixZone({ track }: { track: Track | null }) {
           defaultValue={0.5}
           value={channel.trim}
           onChange={(v) => mixer.setTrim(deck, v)}
+          takeover={trimTakeover}
         />
         {eqKnob('low', 'LOW')}
         {eqKnob('mid', 'MID')}
@@ -453,6 +470,7 @@ function MixZone({ track }: { track: Track | null }) {
           value={channel.filter}
           onChange={(v) => mixer.setFilter(deck, v)}
           ghost={auto ? auto.filter : null}
+          takeover={filterTakeover}
         />
         {/* PFL (headphone-cue 02): mixer state, so it works with no track
             loaded and repaints from hardware toggles (note 0x0C). Headphone
@@ -491,6 +509,7 @@ function MixZone({ track }: { track: Track | null }) {
         onChange={(v) => mixer.setFader(deck, v)}
         title="Channel volume (double-click = full)"
         ghost={auto ? auto.fader : null}
+        takeover={faderTakeover}
       />
       {/* Horizontal pitch: right = faster (grill decision — the vertical
           fader's hardware polarity died with the vertical fader). */}
@@ -505,6 +524,7 @@ function MixZone({ track }: { track: Track | null }) {
         onChange={(v) => engine.setPitch(Math.round(v * 10) / 10)}
         disabled={!ready}
         title="Pitch (right = faster; double-click resets)"
+        takeover={pitchTakeover}
       />
       <div className="perf-mix-foot">
         {/* Key Lock (key-lock 03): Deck setting — works with no track
