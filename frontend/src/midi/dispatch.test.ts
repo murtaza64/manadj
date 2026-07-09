@@ -25,7 +25,11 @@ import {
   registerFollowMacro,
   registerMixerControls,
 } from './controlRegistry';
-import { _resetGridChordForTests, dispatchMidiAction } from './dispatch';
+import {
+  _resetGridChordForTests,
+  _resetSoftTakeoverForTests,
+  dispatchMidiAction,
+} from './dispatch';
 
 const button = (
   control: 'transport' | 'cue',
@@ -37,6 +41,11 @@ let calls: string[];
 /** Whether the shared surface's fake decks report a running loop
  * (drives the loop-or-jump-size disambiguation tests). */
 let sharedLoopActive: boolean;
+/** Fake engine pitch per deck — setPitch writes it, getPitch reads it, so
+ * the soft-takeover fold (midi-controller 15) sees applied values echo
+ * back like the real engine. Tests simulate EXTERNAL pitch changes (MATCH,
+ * reload) by assigning directly. */
+let fakePitch: Record<ChannelId, number>;
 
 function registerFakeDeckControls(deck: ChannelId): void {
   registerDeckControls(deck, {
@@ -45,7 +54,11 @@ function registerFakeDeckControls(deck: ChannelId): void {
     hotCueClear: (pad) => calls.push(`${deck}:hotCueClear:${pad}`),
     beatjump: (direction) => calls.push(`${deck}:beatjump:${direction}`),
     beatjumpSize: (change) => calls.push(`${deck}:beatjumpSize:${change}`),
-    setPitch: (percent) => calls.push(`${deck}:setPitch:${percent}`),
+    setPitch: (percent) => {
+      fakePitch[deck] = percent;
+      calls.push(`${deck}:setPitch:${percent}`);
+    },
+    getPitch: () => fakePitch[deck],
     match: () => calls.push(`${deck}:match`),
     jogTicks: (ticks) => calls.push(`${deck}:jog:${ticks}`),
     jogTouchTicks: (ticks) => calls.push(`${deck}:jogTouch:${ticks}`),
@@ -77,6 +90,7 @@ function registerFakeMixerControls(): void {
 beforeEach(() => {
   calls = [];
   sharedLoopActive = false;
+  fakePitch = { A: 0, B: 0 };
   registerSurface('shared', {
     transport: {
       togglePlay: (d) => calls.push(`shared:toggle:${d}`),
@@ -122,6 +136,7 @@ afterEach(() => {
   _resetAudibleSurfacesForTests();
   _resetMidiControlsForTests();
   _resetGridChordForTests();
+  _resetSoftTakeoverForTests();
 });
 
 describe('routing', () => {
@@ -678,12 +693,48 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
     expect(calls).toEqual(['A:match']);
   });
 
-  it('pitch rescales 0..1 to ±PITCH_RANGE_PERCENT', () => {
+  it('pitch rescales 0..1 to ±PITCH_RANGE_PERCENT once picked up', () => {
     registerFakeDeckControls('B');
-    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'B' }, value: 0 });
+    // Software pitch is 0: the centered value latches the takeover, then
+    // the extremes track normally.
     dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'B' }, value: 0.5 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'B' }, value: 0 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'B' }, value: 1 });
-    expect(calls).toEqual(['B:setPitch:-8', 'B:setPitch:0', 'B:setPitch:8']);
+    expect(calls).toEqual(['B:setPitch:0', 'B:setPitch:-8', 'B:setPitch:8']);
+  });
+
+  it('soft takeover (midi-controller 15): a mismatched fader is silent until it crosses', () => {
+    registerFakeDeckControls('A');
+    fakePitch.A = 4; // software pitch +4%, fader physically low
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.2 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.5 });
+    expect(calls).toEqual([]); // no jump: -4.8 and 0 both suppressed
+    // 0.8 → +4.8 crosses the software +4: picked up and applied
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.8 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.75 });
+    expect(calls).toEqual([`A:setPitch:${(0.8 * 2 - 1) * 8}`, `A:setPitch:${(0.75 * 2 - 1) * 8}`]);
+  });
+
+  it('soft takeover: an external pitch change unlatches the fader', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.5 });
+    expect(calls).toEqual(['A:setPitch:0']); // latched at center
+    fakePitch.A = 5; // MATCH (external): software jumps to +5
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.55 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.6 });
+    expect(calls).toEqual(['A:setPitch:0']); // +0.8 / +1.6 suppressed
+    // fader reaches +5 territory: picked up again
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.85 });
+    expect(calls).toEqual(['A:setPitch:0', `A:setPitch:${(0.85 * 2 - 1) * 8}`]);
+  });
+
+  it('soft takeover is per deck: one deck picking up does not latch the other', () => {
+    registerFakeDeckControls('A');
+    registerFakeDeckControls('B');
+    fakePitch.B = 4;
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 0.5 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'B' }, value: 0.5 });
+    expect(calls).toEqual(['A:setPitch:0']); // B (at +4) stays suppressed
   });
 
   it('unipolar mixer targets pass the normalized value through', () => {

@@ -17,6 +17,8 @@ import {
 } from './controlRegistry';
 import { initialGridChordState, reduceGridChord } from './gridChord';
 import type { GridChordCommand, GridChordEvent } from './gridChord';
+import { PITCH_PICKUP_TOLERANCE, SoftTakeover } from './softTakeover';
+import type { ChannelId } from '../playback/mixer';
 
 /** Encoder detents per action are tiny; cap steps so a burst can't warp the
  * selection across the whole library in one message. */
@@ -286,21 +288,50 @@ function bipolar(value: number): number {
 }
 
 /**
- * Jump semantics (PRD decision): the incoming position applies immediately,
- * no soft takeover. The translator normalizes to 0..1; bipolar targets
- * (pitch/filter/crossfader) rescale here to the engine/Mixer conventions.
+ * Soft takeover for pitch (midi-controller 15): each pitch fader folds
+ * through a pickup state machine (softTakeover.ts — the tested seam)
+ * before applying, so a mismatched fader can't jump the tempo. Mixer-class
+ * controls keep jump semantics deliberately — hardware is the authority
+ * there and the screen follows it (09).
+ */
+const pitchTakeovers = new Map<ChannelId, SoftTakeover>();
+
+function pitchTakeoverFor(deck: ChannelId): SoftTakeover {
+  let takeover = pitchTakeovers.get(deck);
+  if (!takeover) {
+    takeover = new SoftTakeover(PITCH_PICKUP_TOLERANCE);
+    pitchTakeovers.set(deck, takeover);
+  }
+  return takeover;
+}
+
+export function _resetSoftTakeoverForTests(): void {
+  pitchTakeovers.clear();
+}
+
+/**
+ * Jump semantics for mixer-class controls (PRD decision): the incoming
+ * position applies immediately. Pitch alone gets soft takeover (15) —
+ * see pitchTakeoverFor. The translator normalizes to 0..1; bipolar
+ * targets (pitch/filter/crossfader) rescale here to the engine/Mixer
+ * conventions.
  */
 function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void {
   switch (target.control) {
-    case 'pitch':
+    case 'pitch': {
       // Deck rate is the AUDIBLE surface's business (ADR 0022): in the
       // editor the conductor owns B's rate (tempo-match), so a hardware
       // pitch move there would fight the arrangement math (perpetual
       // drift-correct re-seeks). Dropped like any unregistered gesture;
       // mixer-class controls below stay live pass-throughs by design.
       if (audibleHolder() !== 'shared') return;
-      deckControlsFor(target.deck)?.setPitch(bipolar(value) * PITCH_RANGE_PERCENT);
+      const controls = deckControlsFor(target.deck);
+      if (!controls) return;
+      const percent = bipolar(value) * PITCH_RANGE_PERCENT;
+      if (!pitchTakeoverFor(target.deck).feed(percent, controls.getPitch())) return;
+      controls.setPitch(percent);
       return;
+    }
     case 'trim':
       midiMixerControls()?.setTrim(target.channel, value);
       return;

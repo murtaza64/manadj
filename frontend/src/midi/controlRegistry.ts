@@ -32,6 +32,9 @@ export interface MidiDeckControls {
   beatjumpSize(change: 'halve' | 'double'): void;
   /** Absolute pitch in percent (±PITCH_RANGE_PERCENT; the engine clamps). */
   setPitch(percent: number): void;
+  /** Current pitch in percent — read by dispatch's soft takeover
+   * (midi-controller 15) to decide when the hardware fader picks up. */
+  getPitch(): number;
   /** Stateless one-shot BPM match against the other deck (on-screen MATCH). */
   match(): void;
   /** Jog rim ticks (signed): bend when playing, seek when paused. */

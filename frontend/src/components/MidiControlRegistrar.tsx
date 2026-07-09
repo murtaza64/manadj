@@ -103,6 +103,9 @@ function DeckControlsRegistrar() {
           if (!r) return; // same gate as the on-screen pitch fader
           e.setPitch(percent);
         },
+        // Soft takeover's read side (midi-controller 15): the live engine
+        // pitch, so external changes (MATCH, reload) unlatch the fader.
+        getPitch: () => latest.current.engine.getSnapshot().pitchPercent,
         match: () => {
           // Out-of-reach/unavailable are silent: no hardware feedback channel.
           latest.current.matchAction();
