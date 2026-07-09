@@ -15,6 +15,16 @@ process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
 const DEFAULT_URL = "http://localhost:5173";
 const RETRY_INTERVAL_MS = 2000;
 const STATE_FILE = path.join(__dirname, "window-state.json");
+const APP_NAME = "manaDJ";
+const DOCK_ICON = path.join(__dirname, "..", "logo.png");
+
+// Rename what CAN be renamed at runtime (desktop-shell 06). The macOS
+// dock/menu-bar NAME comes from the bundle's Info.plist, which
+// ensure-electron.sh patches; setName covers the rest (e.g. notifications).
+// userData defaults to appData/<name>, so pin it first — renaming must not
+// silently relocate the shell's profile (localStorage, window server state).
+app.setPath("userData", path.join(app.getPath("appData"), "manadj-desktop"));
+app.setName(APP_NAME);
 
 function argValue(argv, flag) {
   for (let i = 0; i < argv.length; i++) {
@@ -115,7 +125,7 @@ function attach(win) {
 function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
-    title: "manadj",
+    title: "manaDJ",
     // No native title bar: the app's TopBar is the titlebar (drag region +
     // double-click-to-zoom via CSS in frontend TopBar.css). Traffic lights
     // stay, vertically centered in the 40px bar.
@@ -127,6 +137,11 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
+  // Open maximized (desktop-shell 06 — zoomed, not macOS fullscreen). The
+  // persisted NORMAL bounds spread in above and getNormalBounds() below
+  // ignores the maximized state, so unmaximizing (double-click the TopBar)
+  // restores the last hand-set size across sessions.
+  win.maximize();
   win.on("close", () => saveBounds(win));
   forwardConsole(win.webContents);
   attach(win);
@@ -169,6 +184,13 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
     GRANTED.has(permission),
   );
+  // Dock icon is runtime-settable even on a raw Electron.app (unlike the
+  // name). Best-effort: a missing logo must never block the shell.
+  try {
+    app.dock?.setIcon(DOCK_ICON);
+  } catch {
+    // logo.png missing/unreadable — keep the default icon
+  }
   createWindow();
 });
 

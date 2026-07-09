@@ -43,7 +43,14 @@ multiplexed stream. DevTools (Cmd+Option+I) remains the richer surface.
   otherwise audio plays on while waveforms and UI clocks stall
 - Web MIDI (incl. sysex) auto-granted — the Controller never prompts
 - Closing the window quits the app (single window, no hidden-but-playing state)
-- Window bounds persist in `window-state.json` (gitignored)
+- Opens maximized (zoomed, not macOS fullscreen); unmaximizing restores the
+  last hand-set window size. Normal bounds persist in `window-state.json`
+  (gitignored); maximized sessions leave them untouched
+- Dock icon is `logo.png`, set at runtime (`app.dock.setIcon`). The dock/
+  menu-bar NAME can't be set at runtime on a raw Electron.app, so
+  `ensure-electron.sh` patches `CFBundleName`/`CFBundleDisplayName` in the
+  extracted bundle and re-signs it ad-hoc — re-applied automatically after
+  any `npm install` replaces `dist/`
 - No native title bar (`titleBarStyle: hidden`): the app's TopBar is the
   titlebar — drag to move, double-click to zoom (system behavior), traffic
   lights overlaid. The frontend detects the shell via user agent
