@@ -42,6 +42,30 @@ describe('SoftTakeover', () => {
     expect(u.feed(4, 4)).toBe(true);
   });
 
+  it('first touch gets grace: a knob resting at the software value latches even though its first report is already past it', () => {
+    // MIDI is silent until the control moves — fresh start, hardware
+    // neutral, software at defaults: the first sample lands a few steps
+    // beyond the value, not on it. Grace = 5× tolerance (0.5 here).
+    const t = new SoftTakeover(TOLERANCE);
+    expect(t.feed(0.4, 0)).toBe(true); // within grace: no wiggle needed
+    expect(t.feed(0.6, 0.4)).toBe(true); // latched, tracks on
+  });
+
+  it('first-touch grace has a limit: a genuinely parked control still needs pickup', () => {
+    const t = new SoftTakeover(TOLERANCE);
+    expect(t.feed(0.6, 0)).toBe(false); // beyond grace: suppressed
+    expect(t.feed(-0.05, 0)).toBe(true); // crossed 0: normal pickup
+  });
+
+  it('grace applies to the first sample only — not after an external-change unlatch', () => {
+    const t = new SoftTakeover(TOLERANCE);
+    expect(t.feed(2, 2)).toBe(true); // latched
+    // MATCH moves software to 2.3 — within grace of the hardware's 2,
+    // but the hardware genuinely sits elsewhere now: tight tolerance rules.
+    expect(t.feed(2.0, 2.3)).toBe(false);
+    expect(t.feed(2.35, 2.3)).toBe(true); // crossed: picked up
+  });
+
   it('external software change unlatches; movement stays suppressed until re-pickup', () => {
     const t = new SoftTakeover(TOLERANCE);
     expect(t.feed(0, 0)).toBe(true); // latched at 0

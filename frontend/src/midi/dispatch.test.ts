@@ -46,6 +46,32 @@ let sharedLoopActive: boolean;
  * back like the real engine. Tests simulate EXTERNAL pitch changes (MATCH,
  * reload) by assigning directly. */
 let fakePitch: Record<ChannelId, number>;
+/** Fake mixer state (midi-controller 17): setters write it, getters read
+ * it — same echo loop as fakePitch. Defaults mirror the real Mixer's
+ * (FLAT_CHANNEL, master 1, CUE_LEVEL_DEFAULT 0.7, CUE_MIX_DEFAULT 0) so
+ * tests read like the real boot state. External changes (mouse moves on
+ * screen) are simulated by assigning directly. */
+interface FakeMixerState {
+  channels: Record<
+    ChannelId,
+    { trim: number; eq: { low: number; mid: number; high: number }; filter: number; fader: number }
+  >;
+  crossfader: number;
+  master: number;
+  cueLevel: number;
+  cueMix: number;
+}
+let fakeMixer: FakeMixerState;
+
+function flatFakeMixer(): FakeMixerState {
+  const channel = () => ({
+    trim: 0.5,
+    eq: { low: 0.5, mid: 0.5, high: 0.5 },
+    filter: 0,
+    fader: 1,
+  });
+  return { channels: { A: channel(), B: channel() }, crossfader: 0, master: 1, cueLevel: 0.7, cueMix: 0 };
+}
 
 function registerFakeDeckControls(deck: ChannelId): void {
   registerDeckControls(deck, {
@@ -75,15 +101,44 @@ function registerFakeDeckControls(deck: ChannelId): void {
 
 function registerFakeMixerControls(): void {
   registerMixerControls({
-    setTrim: (channel, value) => calls.push(`mixer:trim:${channel}:${value}`),
-    setEq: (channel, band, value) => calls.push(`mixer:eq:${channel}:${band}:${value}`),
-    setFilter: (channel, position) => calls.push(`mixer:filter:${channel}:${position}`),
-    setFader: (channel, value) => calls.push(`mixer:fader:${channel}:${value}`),
-    setCrossfader: (position) => calls.push(`mixer:crossfader:${position}`),
-    setMaster: (value) => calls.push(`mixer:master:${value}`),
+    getChannelState: (channel) => fakeMixer.channels[channel],
+    getCrossfader: () => fakeMixer.crossfader,
+    getMaster: () => fakeMixer.master,
+    getCueLevel: () => fakeMixer.cueLevel,
+    getCueMix: () => fakeMixer.cueMix,
+    setTrim: (channel, value) => {
+      fakeMixer.channels[channel].trim = value;
+      calls.push(`mixer:trim:${channel}:${value}`);
+    },
+    setEq: (channel, band, value) => {
+      fakeMixer.channels[channel].eq[band] = value;
+      calls.push(`mixer:eq:${channel}:${band}:${value}`);
+    },
+    setFilter: (channel, position) => {
+      fakeMixer.channels[channel].filter = position;
+      calls.push(`mixer:filter:${channel}:${position}`);
+    },
+    setFader: (channel, value) => {
+      fakeMixer.channels[channel].fader = value;
+      calls.push(`mixer:fader:${channel}:${value}`);
+    },
+    setCrossfader: (position) => {
+      fakeMixer.crossfader = position;
+      calls.push(`mixer:crossfader:${position}`);
+    },
+    setMaster: (value) => {
+      fakeMixer.master = value;
+      calls.push(`mixer:master:${value}`);
+    },
     togglePfl: (channel) => calls.push(`mixer:pfl:${channel}`),
-    setCueLevel: (value) => calls.push(`mixer:cueLevel:${value}`),
-    setCueMix: (value) => calls.push(`mixer:cueMix:${value}`),
+    setCueLevel: (value) => {
+      fakeMixer.cueLevel = value;
+      calls.push(`mixer:cueLevel:${value}`);
+    },
+    setCueMix: (value) => {
+      fakeMixer.cueMix = value;
+      calls.push(`mixer:cueMix:${value}`);
+    },
   });
 }
 
@@ -91,6 +146,7 @@ beforeEach(() => {
   calls = [];
   sharedLoopActive = false;
   fakePitch = { A: 0, B: 0 };
+  fakeMixer = flatFakeMixer();
   registerSurface('shared', {
     transport: {
       togglePlay: (d) => calls.push(`shared:toggle:${d}`),
@@ -737,8 +793,11 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
     expect(calls).toEqual(['A:setPitch:0']); // B (at +4) stays suppressed
   });
 
-  it('unipolar mixer targets pass the normalized value through', () => {
+  it('unipolar mixer targets pass the normalized value through once picked up', () => {
     registerFakeMixerControls();
+    // Values at the software defaults latch immediately (exact match),
+    // then movement tracks — takeover extended to mixer targets (17).
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.5 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.25 });
     dispatchMidiAction({
       kind: 'absolute',
@@ -750,21 +809,87 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
       target: { control: 'channel-fader', channel: 'A' },
       value: 1,
     });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 1 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 0.75 });
     expect(calls).toEqual([
+      'mixer:trim:A:0.5',
       'mixer:trim:A:0.25',
       'mixer:eq:B:mid:0.5',
       'mixer:fader:A:1',
+      'mixer:master:1',
       'mixer:master:0.75',
     ]);
   });
 
-  it('bipolar mixer targets rescale to -1..1', () => {
+  it('bipolar mixer targets rescale to -1..1 once picked up', () => {
     registerFakeMixerControls();
+    // Center (0.5 → 0) matches the defaults and latches; extremes track.
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'filter', channel: 'A' }, value: 0.5 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'filter', channel: 'A' }, value: 0 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'crossfader' }, value: 0.5 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'crossfader' }, value: 1 });
-    expect(calls).toEqual(['mixer:filter:A:-1', 'mixer:crossfader:0', 'mixer:crossfader:1']);
+    expect(calls).toEqual([
+      'mixer:filter:A:0',
+      'mixer:filter:A:-1',
+      'mixer:crossfader:0',
+      'mixer:crossfader:1',
+    ]);
+  });
+
+  it('mixer takeover (17): a mismatched knob is silent until it crosses', () => {
+    registerFakeMixerControls();
+    // trim default 0.5, knob physically low: suppressed until crossing.
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.1 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.3 });
+    expect(calls).toEqual([]);
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'trim', channel: 'A' }, value: 0.6 });
+    expect(calls).toEqual(['mixer:trim:A:0.6']);
+  });
+
+  it('mixer takeover: an external (on-screen) change unlatches that control only', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'channel-fader', channel: 'A' },
+      value: 1,
+    });
+    expect(calls).toEqual(['mixer:fader:A:1']); // latched at the default
+    fakeMixer.channels.A.fader = 0.3; // mouse pulls the on-screen fader down
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'channel-fader', channel: 'A' },
+      value: 0.9,
+    });
+    expect(calls).toEqual(['mixer:fader:A:1']); // suppressed: no jump back up
+    // B's fader has its own takeover state — still latches at its default.
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'channel-fader', channel: 'B' },
+      value: 1,
+    });
+    // A picks up again on crossing 0.3 downward.
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'channel-fader', channel: 'A' },
+      value: 0.2,
+    });
+    expect(calls).toEqual(['mixer:fader:A:1', 'mixer:fader:B:1', 'mixer:fader:A:0.2']);
+  });
+
+  it('eq bands have independent takeover state', () => {
+    registerFakeMixerControls();
+    fakeMixer.channels.A.eq.low = 0.9; // low mismatched, mid at default
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'eq', channel: 'A', band: 'low' },
+      value: 0.5,
+    });
+    dispatchMidiAction({
+      kind: 'absolute',
+      target: { control: 'eq', channel: 'A', band: 'mid' },
+      value: 0.5,
+    });
+    expect(calls).toEqual(['mixer:eq:A:mid:0.5']); // low suppressed, mid latched
   });
 
   it('hardware center detents land on exactly zero (they sit a hair above 0.5)', () => {
@@ -818,11 +943,19 @@ describe('cue bus (headphone-cue 02)', () => {
     expect(calls).toEqual([]);
   });
 
-  it('cue-level and cue-mix pass the normalized value through (headphone-cue 03)', () => {
+  it('cue-level and cue-mix pass the normalized value through once picked up (headphone-cue 03)', () => {
     registerFakeMixerControls();
+    // Defaults: cueLevel 0.7, cueMix 0 — latch there, then move (17).
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-level' }, value: 0.7 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-level' }, value: 0.5 });
+    dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-mix' }, value: 0 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'cue-mix' }, value: 0.25 });
-    expect(calls).toEqual(['mixer:cueLevel:0.5', 'mixer:cueMix:0.25']);
+    expect(calls).toEqual([
+      'mixer:cueLevel:0.7',
+      'mixer:cueLevel:0.5',
+      'mixer:cueMix:0',
+      'mixer:cueMix:0.25',
+    ]);
   });
 });
 

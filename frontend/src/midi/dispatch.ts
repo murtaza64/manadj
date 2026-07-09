@@ -17,8 +17,12 @@ import {
 } from './controlRegistry';
 import { initialGridChordState, reduceGridChord } from './gridChord';
 import type { GridChordCommand, GridChordEvent } from './gridChord';
-import { PITCH_PICKUP_TOLERANCE, SoftTakeover } from './softTakeover';
-import type { ChannelId } from '../playback/mixer';
+import {
+  BIPOLAR_PICKUP_TOLERANCE,
+  PITCH_PICKUP_TOLERANCE,
+  SoftTakeover,
+  UNIPOLAR_PICKUP_TOLERANCE,
+} from './softTakeover';
 
 /** Encoder detents per action are tiny; cap steps so a burst can't warp the
  * selection across the whole library in one message. */
@@ -288,35 +292,44 @@ function bipolar(value: number): number {
 }
 
 /**
- * Soft takeover for pitch (midi-controller 15): each pitch fader folds
- * through a pickup state machine (softTakeover.ts — the tested seam)
- * before applying, so a mismatched fader can't jump the tempo. Mixer-class
- * controls keep jump semantics deliberately — hardware is the authority
- * there and the screen follows it (09).
+ * Soft takeover for every absolute target (midi-controller 15 pitch,
+ * extended to the whole class in 17): each physical control folds through
+ * a pickup state machine (softTakeover.ts — the tested seam) before
+ * applying, so a mismatched fader/knob can't jump the parameter. Keyed by
+ * the control's identity (per deck/channel/band).
  */
-const pitchTakeovers = new Map<ChannelId, SoftTakeover>();
+const takeovers = new Map<string, SoftTakeover>();
 
-function pitchTakeoverFor(deck: ChannelId): SoftTakeover {
-  let takeover = pitchTakeovers.get(deck);
+function takeoverFor(key: string, tolerance: number): SoftTakeover {
+  let takeover = takeovers.get(key);
   if (!takeover) {
-    takeover = new SoftTakeover(PITCH_PICKUP_TOLERANCE);
-    pitchTakeovers.set(deck, takeover);
+    takeover = new SoftTakeover(tolerance);
+    takeovers.set(key, takeover);
   }
   return takeover;
 }
 
 export function _resetSoftTakeoverForTests(): void {
-  pitchTakeovers.clear();
+  takeovers.clear();
+}
+
+/** One absolute target, resolved: identity, domain value, read, write. */
+interface AbsoluteRoute {
+  key: string;
+  tolerance: number;
+  /** Incoming hardware position in the target's own domain. */
+  value: number;
+  /** Current software value (base state — never the automation overlay). */
+  current: number;
+  apply: (value: number) => void;
 }
 
 /**
- * Jump semantics for mixer-class controls (PRD decision): the incoming
- * position applies immediately. Pitch alone gets soft takeover (15) —
- * see pitchTakeoverFor. The translator normalizes to 0..1; bipolar
- * targets (pitch/filter/crossfader) rescale here to the engine/Mixer
- * conventions.
+ * Resolve an absolute target to its route. The translator normalizes to
+ * 0..1; bipolar targets (pitch/filter/crossfader) rescale here to the
+ * engine/Mixer conventions. Null = drop (unregistered, or gated).
  */
-function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void {
+function routeAbsolute(target: AbsoluteAction['target'], value: number): AbsoluteRoute | null {
   switch (target.control) {
     case 'pitch': {
       // Deck rate is the AUDIBLE surface's business (ADR 0022): in the
@@ -324,37 +337,111 @@ function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void
       // pitch move there would fight the arrangement math (perpetual
       // drift-correct re-seeks). Dropped like any unregistered gesture;
       // mixer-class controls below stay live pass-throughs by design.
-      if (audibleHolder() !== 'shared') return;
+      if (audibleHolder() !== 'shared') return null;
       const controls = deckControlsFor(target.deck);
-      if (!controls) return;
-      const percent = bipolar(value) * PITCH_RANGE_PERCENT;
-      if (!pitchTakeoverFor(target.deck).feed(percent, controls.getPitch())) return;
-      controls.setPitch(percent);
-      return;
+      if (!controls) return null;
+      return {
+        key: `pitch:${target.deck}`,
+        tolerance: PITCH_PICKUP_TOLERANCE,
+        value: bipolar(value) * PITCH_RANGE_PERCENT,
+        current: controls.getPitch(),
+        apply: (v) => controls.setPitch(v),
+      };
     }
-    case 'trim':
-      midiMixerControls()?.setTrim(target.channel, value);
-      return;
-    case 'eq':
-      midiMixerControls()?.setEq(target.channel, target.band, value);
-      return;
-    case 'filter':
-      midiMixerControls()?.setFilter(target.channel, bipolar(value));
-      return;
-    case 'channel-fader':
-      midiMixerControls()?.setFader(target.channel, value);
-      return;
-    case 'crossfader':
-      midiMixerControls()?.setCrossfader(bipolar(value));
-      return;
-    case 'master':
-      midiMixerControls()?.setMaster(value);
-      return;
-    case 'cue-level':
-      midiMixerControls()?.setCueLevel(value);
-      return;
-    case 'cue-mix':
-      midiMixerControls()?.setCueMix(value);
-      return;
+    case 'trim': {
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: `trim:${target.channel}`,
+        tolerance: UNIPOLAR_PICKUP_TOLERANCE,
+        value,
+        current: mixer.getChannelState(target.channel).trim,
+        apply: (v) => mixer.setTrim(target.channel, v),
+      };
+    }
+    case 'eq': {
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: `eq:${target.channel}:${target.band}`,
+        tolerance: UNIPOLAR_PICKUP_TOLERANCE,
+        value,
+        current: mixer.getChannelState(target.channel).eq[target.band],
+        apply: (v) => mixer.setEq(target.channel, target.band, v),
+      };
+    }
+    case 'filter': {
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: `filter:${target.channel}`,
+        tolerance: BIPOLAR_PICKUP_TOLERANCE,
+        value: bipolar(value),
+        current: mixer.getChannelState(target.channel).filter,
+        apply: (v) => mixer.setFilter(target.channel, v),
+      };
+    }
+    case 'channel-fader': {
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: `channel-fader:${target.channel}`,
+        tolerance: UNIPOLAR_PICKUP_TOLERANCE,
+        value,
+        current: mixer.getChannelState(target.channel).fader,
+        apply: (v) => mixer.setFader(target.channel, v),
+      };
+    }
+    case 'crossfader': {
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: 'crossfader',
+        tolerance: BIPOLAR_PICKUP_TOLERANCE,
+        value: bipolar(value),
+        current: mixer.getCrossfader(),
+        apply: (v) => mixer.setCrossfader(v),
+      };
+    }
+    case 'master': {
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: 'master',
+        tolerance: UNIPOLAR_PICKUP_TOLERANCE,
+        value,
+        current: mixer.getMaster(),
+        apply: (v) => mixer.setMaster(v),
+      };
+    }
+    case 'cue-level': {
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: 'cue-level',
+        tolerance: UNIPOLAR_PICKUP_TOLERANCE,
+        value,
+        current: mixer.getCueLevel(),
+        apply: (v) => mixer.setCueLevel(v),
+      };
+    }
+    case 'cue-mix': {
+      const mixer = midiMixerControls();
+      if (!mixer) return null;
+      return {
+        key: 'cue-mix',
+        tolerance: UNIPOLAR_PICKUP_TOLERANCE,
+        value,
+        current: mixer.getCueMix(),
+        apply: (v) => mixer.setCueMix(v),
+      };
+    }
   }
+}
+
+function dispatchAbsolute(target: AbsoluteAction['target'], value: number): void {
+  const route = routeAbsolute(target, value);
+  if (!route) return;
+  if (!takeoverFor(route.key, route.tolerance).feed(route.value, route.current)) return;
+  route.apply(route.value);
 }

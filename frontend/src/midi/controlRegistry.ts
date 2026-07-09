@@ -92,8 +92,24 @@ export interface MidiBrowseSurface {
  * so the registrar can register the Mixer instance itself. Values use the
  * Mixer's own conventions: 0..1 for trim/EQ/fader/master, -1..1 for
  * filter/crossfader (dispatch rescales the translator's 0..1).
+ *
+ * The getters are the read side of soft takeover (midi-controller 17):
+ * dispatch compares incoming hardware positions against them before
+ * applying. They read BASE state — the Mixer's getters never expose the
+ * automation overlay (ADR 0022), which is exactly what takeover needs:
+ * hardware picks up against what the knobs will mean after disengage.
  */
 export interface MidiMixerControls {
+  getChannelState(channel: ChannelId): {
+    trim: number;
+    eq: Record<EqBand, number>;
+    filter: number;
+    fader: number;
+  };
+  getCrossfader(): number;
+  getMaster(): number;
+  getCueLevel(): number;
+  getCueMix(): number;
   setTrim(channel: ChannelId, value: number): void;
   setEq(channel: ChannelId, band: EqBand, value: number): void;
   setFilter(channel: ChannelId, position: number): void;
