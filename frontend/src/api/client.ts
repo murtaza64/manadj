@@ -26,6 +26,7 @@ import type {
   SourceItem,
   AcquisitionRefreshStats,
   Classification,
+  AnalysisTaskStatus,
 } from '../types';
 
 /** Wire shape of a Transition template (mix-editor issues 03 + 28) —
@@ -395,24 +396,24 @@ export const api = {
   },
 
   analyze: {
-    // Server-side write (ADR 0024): success stores the analyzed Beatgrid
-    // and its BPM projection; the response is diagnostics (bail included).
-    grid: async (trackId: number) => {
-      const response = await fetch(`${API_BASE}/analyze/grid/${trackId}`, {
+    // Manual analysis rides the task system (ADR 0003, task-system 01): this
+    // enqueues one `manual` grid+key task (overwriting freely) and returns
+    // its state; the worker analyzes off-thread. Poll status() until `done`,
+    // then refetch the track/grid.
+    enqueue: async (trackId: number): Promise<AnalysisTaskStatus | null> => {
+      const response = await fetch(`${API_BASE}/analyze/${trackId}`, {
         method: 'POST',
       });
       if (!response.ok) {
-        throw new Error(`Failed to analyze grid: ${response.statusText}`);
+        throw new Error(`Failed to enqueue analysis: ${response.statusText}`);
       }
       return response.json();
     },
 
-    key: async (trackId: number) => {
-      const response = await fetch(`${API_BASE}/analyze/key/${trackId}`, {
-        method: 'POST',
-      });
+    status: async (trackId: number): Promise<AnalysisTaskStatus | null> => {
+      const response = await fetch(`${API_BASE}/analyze/${trackId}/status`);
       if (!response.ok) {
-        throw new Error(`Failed to analyze key: ${response.statusText}`);
+        throw new Error(`Failed to fetch analysis status: ${response.statusText}`);
       }
       return response.json();
     },
