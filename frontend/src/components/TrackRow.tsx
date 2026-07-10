@@ -48,6 +48,16 @@ interface Props {
   /** Play order index (0-based) — renders the # cell (playlist tables).
    * undefined = no # column; null = track has no position (shouldn't happen). */
   orderIndex?: number | null;
+  /** Match score against the followed references (match-score PRD):
+   * undefined = column absent; null = Known row (evidence, not score). */
+  score?: number | null;
+  /** Why-did-this-match dimming (Follow views): undefined = no follow
+   * context. false dims the key cell (no compatible relation earned
+   * points). Primitives, not objects — the row is memoized. */
+  keyMatched?: boolean;
+  /** CSV of tag ids shared with a followed reference; tags outside it
+   * dim. undefined = no follow context (nothing dims). */
+  sharedTagIds?: string;
   markA?: TransitionMark;
   markB?: TransitionMark;
   /** Linked marks (linked-pairs 03): this row is Linked with the loaded
@@ -118,6 +128,9 @@ const TrackRow = memo(function TrackRow({
   dragSource,
   onContextMenu,
   orderIndex,
+  score,
+  keyMatched,
+  sharedTagIds,
   markA = 'none',
   markB = 'none',
   linkedA = false,
@@ -176,7 +189,7 @@ const TrackRow = memo(function TrackRow({
           </td>
         )}
         <td className={getCellClasses('key')} style={getCellStyle('key')}>
-          <div className="track-cell-single">
+          <div className={`track-cell-single${keyMatched === false ? ' track-signal-dim' : ''}`}>
             <KeyDisplay keyValue={track.key} />
           </div>
         </td>
@@ -207,10 +220,23 @@ const TrackRow = memo(function TrackRow({
           style={getCellStyle('marks')}
           title={markEvidence(markA, markB, linkedA, linkedB)}
         >
-          <div className="track-marks">
-            <span className="track-mark-slot mark-a">{markSlot(markA, linkedA)}</span>
-            <span className="track-mark-slot mark-b">{markSlot(markB, linkedB)}</span>
-          </div>
+          {/* While Follow filters, Compatible rows carry their Match
+              score here instead of (absent) evidence marks — one column,
+              two vocabularies. Any real mark wins the slot. */}
+          {score != null && markA === 'none' && markB === 'none' && !linkedA && !linkedB ? (
+            <div className="track-match-score">{Math.round(score)}</div>
+          ) : (
+            <div className="track-marks">
+              {/* Only occupied slots render, so a lone badge centers in
+                  the column instead of hugging its deck's side. */}
+              {markSlot(markA, linkedA) && (
+                <span className="track-mark-slot mark-a">{markSlot(markA, linkedA)}</span>
+              )}
+              {markSlot(markB, linkedB) && (
+                <span className="track-mark-slot mark-b">{markSlot(markB, linkedB)}</span>
+              )}
+            </div>
+          )}
         </td>
         <td className={getCellClasses('title')} style={getCellStyle('title')}>
           <div className="track-cell-text">
@@ -258,9 +284,16 @@ const TrackRow = memo(function TrackRow({
         </td>
         <td className="track-tags-cell" style={getCellStyle('tags')}>
           <div className="track-tags-container">
-            {track.tags.map(tag => (
-              <TagPill key={tag.id} tag={tag} />
-            ))}
+            {track.tags.map(tag => {
+              const dim =
+                sharedTagIds !== undefined &&
+                !sharedTagIds.split(',').includes(String(tag.id));
+              return (
+                <span key={tag.id} className={dim ? 'track-signal-dim' : undefined}>
+                  <TagPill tag={tag} />
+                </span>
+              );
+            })}
           </div>
         </td>
         <td className="track-cell" style={getCellStyle('quality')}>

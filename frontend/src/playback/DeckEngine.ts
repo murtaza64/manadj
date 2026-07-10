@@ -21,6 +21,7 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
 import { addBeats } from './quantize';
+import type { LaunchReference } from './quantize';
 import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
@@ -31,6 +32,15 @@ import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
 
+/**
+ * How far before track start the playhead may be parked (issue 07). A
+ * backward beat jump near the head lands in this pre-start lead-in instead
+ * of clamping to 0, preserving its beat distance; playback is silent across
+ * it and enters the track on time. Bounded so a runaway gesture can't push
+ * the playhead into an unbounded silent pre-roll — this is a musical lead-in.
+ */
+const MAX_LEAD_IN_SECONDS = 30;
+
 /** A playhead discontinuity: seek, beat jump, or hot-cue jump. */
 export interface DeckTransportGesture {
   action: 'seek' | 'jumpBeats' | 'hotCue';
@@ -38,28 +48,21 @@ export interface DeckTransportGesture {
   detail?: number;
 }
 
-export interface CueDefaultsInfo {
-  /** Persisted Main cue, if any (CDJ memory-cue behavior). */
-  savedCuePoint: number | null;
-  /**
-   * The Beatgrid's beat times in seconds, or null for gridless Tracks.
-   * First beat is the cue-default fallback; the full grid feeds Quantize
-   * math at gesture time (looping 01).
-   */
-  beatTimes: number[] | null;
-}
-
 export interface DeckTrackInfo {
   trackId: number;
   audioUrl: string;
   bpm: number | null;
+  /** Persisted Main cue, if any (CDJ memory-cue behavior). On the Track
+   * row — synchronous, no fetch. */
+  savedCuePoint?: number | null;
   /**
-   * Saved-cue / first-beat lookup, fetched by the caller in parallel with
-   * the audio. A promise so load() can start immediately — the engine knows
-   * about the new track from the first instant, and audio + cue metadata
-   * download concurrently. Rejections fall through to engine defaults.
+   * The Beatgrid's beat times in seconds (null/rejection = gridless),
+   * fetched by the caller in parallel with the audio. ONE round trip, no
+   * retries (ADR 0029): load() awaits its first settlement between decode
+   * and ready, so readiness never gates on background analysis. Grids that
+   * land later arrive via setBeatTimes (the deck's beatgrid sync observer).
    */
-  cueDefaults?: Promise<CueDefaultsInfo>;
+  beatTimes?: Promise<number[] | null>;
 }
 
 export interface DeckSnapshot {
@@ -109,6 +112,14 @@ export class DeckEngine {
   private pendingPlay = false;
   /** Loaded Track's Beatgrid beat times (null = gridless) — Quantize math. */
   private beatTimes: number[] | null = null;
+  /** The Main cue default is live until touched (ADR 0029 §2): true while
+   * the cue still sits at the load-time default and nothing has played —
+   * a late-arriving grid may upgrade it to the first beat. Any transport
+   * gesture freezes it. */
+  private cueIsLoadDefault = false;
+  /** First non-silent time computed at load — kept for the §2 re-park's
+   * precedence fallback. */
+  private loadFirstNonSilence: number | null = null;
 
   // ── Worklet source (ADR 0018) ────────────────────────────────────────
   /** The deck's single audio source, persistent per AudioContext. */
@@ -123,6 +134,20 @@ export class DeckEngine {
   private nextStartId = 1;
   /** Start requested before the node was ready (first play / ctx revival). */
   private pendingStartAt: number | null = null;
+  /** Timer for a deferred cross-deck launch (cue-quantize-bpm 04): the
+   * paused-deck launch holds off until the reference deck's next beat. Any
+   * stop or new start cancels it. */
+  private pendingLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // ── Pre-start lead-in (issue 07) ──────────────────────────────────────
+  /** True while the deck is running from a negative (pre-track) position:
+   * the clock counts up from the lead-in but no voice sounds yet. The
+   * scheduled `beginStart(0)` at the t=0 crossing clears it. */
+  private leadInActive = false;
+  /** Pending timer that fires the real worklet start at the t=0 crossing.
+   * Rescheduled on a rate change during the lead-in; cleared on any
+   * stop/seek/dispose. */
+  private leadInTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Clock anchor: playhead position (s) at ctx time `anchorCtxTime`. */
   private anchorPosition = 0;
@@ -182,6 +207,39 @@ export class DeckEngine {
     for (const listener of this.transportEventListeners) listener(e);
   }
 
+  /**
+   * Cross-deck launch reference (cue-quantize-bpm 04): supplies the OTHER
+   * deck's live phase (beat times + playhead) when it is audibly playing
+   * with a usable Beatgrid, else null. Set by DeckContext, which wires each
+   * engine to its peer. Read only for a *paused* deck's launch gestures —
+   * the engine stays peer-ignorant otherwise. Null degrades every launch to
+   * immediate (Quantize off, no playing peer, gridless peer).
+   */
+  private launchReferenceProvider: (() => LaunchReference | null) | null = null;
+
+  setLaunchReferenceProvider(provider: (() => LaunchReference | null) | null): void {
+    this.launchReferenceProvider = provider;
+  }
+
+  /** The peer's live launch reference, or null when there is no usable one
+   * (peer stopped, gridless, or no provider wired). */
+  launchReference(): LaunchReference | null {
+    return this.launchReferenceProvider?.() ?? null;
+  }
+
+  /**
+   * This deck's phase AS a launch reference (cue-quantize-bpm 04): its live
+   * beat times + playhead, but only when it is itself audible (playing or
+   * previewing) and has a usable Beatgrid (≥ 1 beat). Null otherwise — a
+   * paused, gridless, or stopped deck is no reference. The peer's provider
+   * calls this; the reads are live, so the phase is fresh at gesture time.
+   */
+  asLaunchReference(): LaunchReference | null {
+    if (!isAudioRunning(this.transport)) return null;
+    if (!this.beatTimes || this.beatTimes.length === 0) return null;
+    return { beatTimes: this.beatTimes, playhead: this.getPlayhead() };
+  }
+
   private readonly port: DeckAudioPort;
 
   constructor(port: DeckAudioPort) {
@@ -212,6 +270,8 @@ export class DeckEngine {
     };
     this.buffer = null;
     this.beatTimes = null;
+    this.cueIsLoadDefault = false;
+    this.loadFirstNonSilence = null;
     this.trackInfo = info;
     this.pendingPlay = false;
     // A nudge is a momentary correction against the *previous* pairing —
@@ -239,15 +299,18 @@ export class DeckEngine {
         putCachedBuffer(info.trackId, buffer);
       }
 
-      // Cue metadata was fetched concurrently with the audio; absence (or a
-      // failed lookup) falls through the default precedence.
-      const cueInfo = await (info.cueDefaults ?? Promise.resolve(null)).catch(
+      // The grid was fetched concurrently with the audio — ONE round trip
+      // (ADR 0029): usually settled before decode finishes, so this await
+      // costs nothing on the common path and never rides a retry ladder.
+      // Absence (or a failed lookup) falls through the default precedence;
+      // a grid that lands later arrives via setBeatTimes.
+      const beatTimes = await (info.beatTimes ?? Promise.resolve(null)).catch(
         () => null
       );
       if (abort.signal.aborted) return;
 
       this.buffer = buffer;
-      this.beatTimes = cueInfo?.beatTimes ?? null;
+      this.beatTimes = beatTimes && beatTimes.length > 0 ? beatTimes : null;
 
       // Resolve the initial Main cue (saved → first beat → first
       // non-silence → 0) and park the deck at it, CDJ-style. Non-silence
@@ -260,7 +323,7 @@ export class DeckEngine {
         }
       }
       const cue = resolveInitialCue({
-        saved: cueInfo?.savedCuePoint ?? null,
+        saved: info.savedCuePoint ?? null,
         firstBeat: this.beatTimes?.[0] ?? null,
         firstNonSilence,
       });
@@ -269,6 +332,10 @@ export class DeckEngine {
         cuePoint: this.clampTime(cue),
         playhead: this.clampTime(cue),
       };
+      this.loadFirstNonSilence = firstNonSilence;
+      // The default stays live until touched (ADR 0029 §2). A pendingPlay
+      // firing below counts as touching — the dispatch clears it.
+      this.cueIsLoadDefault = true;
 
       // Hand the samples to the worklet source ahead of the first start, so
       // a stab doesn't pay the channel-data copy. Cache-hit loads on a deck
@@ -337,7 +404,7 @@ export class DeckEngine {
 
   seek(seconds: number): void {
     if (!this.buffer) return;
-    const time = this.clampTime(seconds);
+    const time = this.clampPlayhead(seconds);
     this.fireTransportEvent({ action: 'seek', playhead: time });
     this.dispatch({ type: 'seek', time });
   }
@@ -359,7 +426,7 @@ export class DeckEngine {
       const bpm = this.trackInfo?.bpm ?? 120;
       raw = playhead + beats * (60 / bpm);
     }
-    const target = this.clampTime(raw);
+    const target = this.clampPlayhead(raw);
     this.fireTransportEvent({ action: 'jumpBeats', playhead: target, detail: beats });
     // Relative displacement, not a seek: an active loop translates with
     // the playhead (looping 04).
@@ -378,16 +445,38 @@ export class DeckEngine {
   }
 
   /** The loaded Track's Beatgrid changed (BPM re-tempo, nudge, downbeat
-   * mark — ADR 0016: BPM edits ARE grid operations): refresh the Quantize
-   * grid without a re-Load. The load-time snapshot used to serve stale
-   * beats to every transport placement gesture (cue-quantize-bpm 01).
-   * Addressed by trackId so a late push for a previous track is ignored;
-   * an empty grid means gridless. The Main cue is NOT re-resolved — cue
-   * defaults are a load-time decision. */
+   * mark — ADR 0016: BPM edits ARE grid operations; or background analysis
+   * landing after Load — ADR 0029): refresh the Quantize grid without a
+   * re-Load. The load-time snapshot used to serve stale beats to every
+   * transport placement gesture (cue-quantize-bpm 01). Addressed by
+   * trackId so a late push for a previous track is ignored; an empty grid
+   * means gridless.
+   *
+   * The Main cue default is live until touched (ADR 0029 §2): a grid
+   * arriving while the deck is still parked untouched at a saved-cue-less
+   * load default re-parks cue + playhead at the first beat — exactly what
+   * a load-time grid would have produced. The first transport gesture
+   * freezes it (cue defaults become a load-time decision again). */
   setBeatTimes(trackId: number, beatTimes: number[] | null): void {
     if (this.trackInfo?.trackId !== trackId) return;
     this.beatTimes = beatTimes && beatTimes.length > 0 ? beatTimes : null;
-    this.emit(); // hasBeatgrid may have flipped
+    if (
+      this.cueIsLoadDefault &&
+      this.loadState === 'ready' &&
+      this.buffer !== null &&
+      (this.trackInfo.savedCuePoint ?? null) === null &&
+      this.beatTimes !== null
+    ) {
+      const cue = this.clampTime(
+        resolveInitialCue({
+          saved: null,
+          firstBeat: this.beatTimes[0],
+          firstNonSilence: this.loadFirstNonSilence,
+        })
+      );
+      this.transport = { ...this.transport, cuePoint: cue, playhead: cue };
+    }
+    this.emit(); // hasBeatgrid (and possibly the parked cue) may have changed
   }
 
   cueDown(): void {
@@ -529,6 +618,15 @@ export class DeckEngine {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
       this.sourceNode.setRateAt(this.currentRate(), now);
+    } else if (this.leadInActive && this.audio) {
+      // Rate change mid-lead-in (issue 07): re-anchor the silent clock at
+      // the old rate, adopt the new one, then re-time the pending frame-0
+      // entry so it still lands exactly when the playhead reaches 0.
+      this.anchorPosition = this.getPlayhead(); // still at the old rate
+      this.anchorCtxTime = this.audio.ctx.currentTime;
+      this.pitchPercent = pitchPercent;
+      this.bendPercent = bendPercent;
+      this.scheduleLeadInStart();
     } else {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
@@ -543,14 +641,20 @@ export class DeckEngine {
     return isAudioRunning(this.transport);
   }
 
-  /** Current playhead in seconds. Cheap; safe to poll per animation frame. */
+  /** Current playhead in seconds. Cheap; safe to poll per animation frame.
+   * Reads the anchor clock while a voice runs OR during the pre-start
+   * lead-in (issue 07) — the lead-in has no voice yet, but the clock still
+   * counts up from the negative anchor through 0, driving the silent
+   * scroll and the on-time entry. */
   getPlayhead(): number {
-    if (this.runningStartId !== null && this.audio) {
+    if ((this.runningStartId !== null || this.leadInActive) && this.audio) {
       const elapsed =
         (this.audio.ctx.currentTime - this.anchorCtxTime) * this.currentRate();
       let position = this.anchorPosition + elapsed;
       // Active loop: fold the monotone clock into the region — the mirror
-      // of the worklet's sample wrap, exact across many wraps (modulo).
+      // of the worklet's sample wrap, exact across many wraps (modulo). A
+      // lead-in never has a loop (seek cancels it; a jump clamps its start
+      // to >= 0), so the fold is inert there.
       const loop = this.transport.loop;
       if (loop) {
         position = foldLoopPlayhead(
@@ -560,7 +664,7 @@ export class DeckEngine {
           this.anchorPosition
         );
       }
-      return this.clampTime(position);
+      return this.clampPlayhead(position);
     }
     return this.transport.playhead;
   }
@@ -580,6 +684,7 @@ export class DeckEngine {
    */
   dispose(): void {
     this.loadAbort?.abort();
+    this.clearPendingLaunch();
     this.stopAudio(this.getPlayhead());
     // Keep the node cached for revival; just detach it from the graph.
     this.sourceNode?.disconnect();
@@ -589,21 +694,44 @@ export class DeckEngine {
 
   // ── Internals ──────────────────────────────────────────────────────────
 
-  /** Ambient Quantize facts, assembled fresh per dispatch (gesture time). */
+  /** Ambient Quantize facts, assembled fresh per dispatch (gesture time).
+   * The launch reference (cue-quantize-bpm 04) is the peer's LIVE phase —
+   * only a *paused* deck's launch branches consult it; every other gesture
+   * ignores it. playRate scales a cross-deck launch's immediate ahead-entry. */
   private transportContext(): TransportContext {
-    return { quantize: isQuantizeOn(), beatTimes: this.beatTimes };
+    return {
+      quantize: isQuantizeOn(),
+      beatTimes: this.beatTimes,
+      launchReference: this.launchReference(),
+      playRate: this.currentRate(),
+    };
   }
+
+  /** Gestures that start sound or place the playhead/cue: any of these
+   * freezes the live cue default (ADR 0029 §2). Pause/cue-up/ended can't
+   * occur first (their DOWN/play counterparts precede them); loop-resize
+   * moves nothing. */
+  private static readonly CUE_FREEZING_EVENTS: ReadonlySet<TransportEvent['type']> =
+    new Set(['play', 'toggle-play', 'seek', 'jump', 'hot-cue-down', 'cue-down', 'loop-toggle', 'loop-preset']);
 
   private dispatch(event: TransportEvent): void {
     if (!this.buffer) return;
+    if (DeckEngine.CUE_FREEZING_EVENTS.has(event.type)) {
+      this.cueIsLoadDefault = false;
+    }
     const synced = { ...this.transport, playhead: this.getPlayhead() };
     const [next, effects] = reduceTransport(synced, event, this.transportContext());
     const cueChanged = next.cuePoint !== synced.cuePoint;
     const loopChanged = next.loop !== synced.loop;
     this.transport = next;
     for (const effect of effects) {
-      if (effect.type === 'start') this.startAudio(effect.at);
-      else this.stopAudio(effect.at);
+      if (effect.type === 'start') {
+        if (effect.delaySeconds && effect.delaySeconds > 0) {
+          this.scheduleLaunch(effect.at, effect.delaySeconds);
+        } else {
+          this.startAudio(effect.at);
+        }
+      } else this.stopAudio(effect.at);
     }
     // Loop state is a live source property, not an AudioEffect: push
     // region changes to the worklet whether or not audio (re)started —
@@ -640,10 +768,63 @@ export class DeckEngine {
     }
   }
 
+  /**
+   * A deferred cross-deck launch (cue-quantize-bpm 04): hold the start off
+   * by `delaySeconds` real seconds so the launching cue lands on the
+   * reference deck's next beat, then start at `at`. Cancels any prior
+   * pending launch (rapid re-triggers keep only the latest). A stop or an
+   * immediate start supersedes it (both clear the timer first). Kept off
+   * the audio-clock scheduler deliberately: the worklet start is immediate
+   * (no `when`), the deferral is at most half a reference beat, and grill
+   * note (3) forbids post-entry correction — a wall-clock timer is exact
+   * enough for a one-instant alignment.
+   */
+  private scheduleLaunch(at: number, delaySeconds: number): void {
+    this.clearPendingLaunch();
+    if (typeof setTimeout === 'undefined') {
+      this.startAudio(at);
+      return;
+    }
+    this.pendingLaunchTimer = setTimeout(() => {
+      this.pendingLaunchTimer = null;
+      // The gesture may have been abandoned (paused) while we waited; only
+      // start if audio is still wanted.
+      if (!isAudioRunning(this.transport)) return;
+      this.startAudio(at);
+    }, delaySeconds * 1000);
+  }
+
+  private clearPendingLaunch(): void {
+    if (this.pendingLaunchTimer !== null) {
+      clearTimeout(this.pendingLaunchTimer);
+      this.pendingLaunchTimer = null;
+    }
+  }
+
   private startAudio(at: number): void {
     if (!this.buffer) return;
+    // Any (re)start supersedes a pending cross-deck launch (04) and a
+    // pending lead-in: a new start below either replaces it (still
+    // negative) or crosses into the track (>= 0).
+    this.clearPendingLaunch();
+    this.clearLeadIn();
     const { ctx, input } = this.ensureAudio();
     if (ctx.state === 'suspended') this.resumeWithGestureRetry(ctx);
+    // Pre-start lead-in (issue 07): the request targets a position before
+    // the track. The lead-in is SILENT — retire any running voice (a
+    // mid-play backward jump must not keep sounding the old position) and
+    // clear a latched start, anchor the clock at the negative position NOW
+    // so the playhead counts up through 0 (silent scroll), and schedule the
+    // real frame-0 voice at the wall-clock instant the playhead reaches 0.
+    if (at < 0) {
+      this.pendingStartAt = null;
+      if (this.runningStartId !== null) {
+        this.sourceNode?.stop(); // worklet declick-fades internally
+        this.runningStartId = null;
+      }
+      this.beginLeadIn(ctx, at);
+      return;
+    }
     if (this.sourceNode && this.sourceNode.ctx === ctx) {
       this.beginStart(this.sourceNode, input, at);
       return;
@@ -655,14 +836,62 @@ export class DeckEngine {
     this.createSourceNode(ctx);
   }
 
+  /** Enter the pre-start lead-in (issue 07): anchor the clock at the
+   * negative position and schedule the frame-0 voice for the t=0 crossing.
+   * Silent until then; the clock (getPlayhead) drives the UI's lead-in
+   * scroll. Idempotent re-entry (a fresh negative seek mid-lead-in) just
+   * re-anchors and reschedules. */
+  private beginLeadIn(ctx: AudioContext, at: number): void {
+    this.anchorPosition = at;
+    this.anchorCtxTime = ctx.currentTime;
+    this.leadInActive = true;
+    this.scheduleLeadInStart();
+  }
+
+  /** (Re)arm the timer that fires the real frame-0 start when the playhead
+   * crosses 0. The delay is the remaining lead-in in wall-clock seconds —
+   * the negative distance divided by the composed rate. Recomputed from the
+   * live clock so a rate change mid-lead-in re-times the entry exactly. */
+  private scheduleLeadInStart(): void {
+    if (this.leadInTimer !== null) {
+      clearTimeout(this.leadInTimer);
+      this.leadInTimer = null;
+    }
+    if (!this.leadInActive) return;
+    const position = this.getPlayhead(); // clock read, still negative
+    const rate = this.currentRate();
+    const remainingWallMs = rate > 0 ? (-position / rate) * 1000 : 0;
+    this.leadInTimer = setTimeout(() => {
+      this.leadInTimer = null;
+      if (!this.leadInActive || !this.buffer) return;
+      this.leadInActive = false;
+      // Enter the track at frame 0, on time: startAudio takes the normal
+      // (non-negative) path from here, building the node if needed.
+      this.startAudio(0);
+    }, Math.max(0, remainingWallMs));
+  }
+
+  /** Cancel any pending lead-in (a stop, a fresh start, or dispose). */
+  private clearLeadIn(): void {
+    this.leadInActive = false;
+    if (this.leadInTimer !== null) {
+      clearTimeout(this.leadInTimer);
+      this.leadInTimer = null;
+    }
+  }
+
   private stopAudio(at: number): void {
+    this.clearPendingLaunch();
     this.pendingStartAt = null;
+    // A stop during the lead-in cancels the scheduled entry: the deck rests
+    // at its (possibly still-negative) pre-start position.
+    this.clearLeadIn();
     if (this.runningStartId !== null) {
       // The worklet declick-fades internally (its stop splice).
       this.sourceNode?.stop();
       this.runningStartId = null;
     }
-    this.transport = { ...this.transport, playhead: this.clampTime(at) };
+    this.transport = { ...this.transport, playhead: this.clampPlayhead(at) };
   }
 
   /** One pending gesture-retry at a time. */
@@ -792,9 +1021,22 @@ export class DeckEngine {
     return composeRate(this.pitchPercent, this.bendPercent);
   }
 
+  /** Clamp to real track time [0, duration] — the domain of cue points and
+   * loop regions, which can never live before the track starts. */
   private clampTime(seconds: number): number {
     const duration = this.buffer?.duration ?? 0;
     return Math.max(0, Math.min(seconds, duration));
+  }
+
+  /** Clamp a PLAYHEAD placement (seek/beat jump/clock read) to
+   * [-MAX_LEAD_IN_SECONDS, duration]: the playhead may sit in the pre-start
+   * lead-in (issue 07) so a backward beat jump near the head preserves its
+   * beat distance instead of collapsing to 0. Audio stays silent through the
+   * negative region; the clock counts up through 0 into the track. The floor
+   * bounds runaway math — a musical lead-in, not an infinite pre-roll. */
+  private clampPlayhead(seconds: number): number {
+    const duration = this.buffer?.duration ?? 0;
+    return Math.max(-MAX_LEAD_IN_SECONDS, Math.min(seconds, duration));
   }
 
   private buildSnapshot(): DeckSnapshot {

@@ -16,11 +16,10 @@ import { api } from '../api/client';
 import type { Track } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { clampToViewport } from '../components/ContextMenu';
-import { tierLabel } from '../follow/model';
+import { rankLabel, type CandidateRank } from '../follow/matchScore';
 import {
   suggestAppend,
   suggestInsert,
-  weakerTier,
   type EdgeKnownLookup,
 } from '../follow/suggest';
 import { knownStrengthOf } from '../links/known';
@@ -34,8 +33,13 @@ import './SetSuggestions.css';
 
 /** Tier 7 = "Other matches" — not worth suggesting from a whole-library
  * candidate pool (Follow mode's rest tier is post-filter; ours is not). */
-const REST_TIER = 7;
 const MAX_ROWS = 20;
+
+/** Edge caption: the Known stratum name, or the Match score (the shared
+ * order's heuristic axis — match-score PRD). */
+function edgeLabel(rank: CandidateRank): string {
+  return rank.known !== null ? rankLabel(rank) : `match ${Math.round(rank.score)}`;
+}
 
 export type SuggestTarget =
   | { kind: 'append'; last: Track }
@@ -116,10 +120,15 @@ export default function SetSuggestions({
   let rows: SuggestionRow[] = [];
   if (candidates) {
     if (target.kind === 'append') {
+      // The Affinity floor is the cut (suggest.ts admits only floored
+      // edges); the top-20 cap survives verbatim.
       rows = suggestAppend(candidates, inSetIds, target.last, knownOutOf(target.last.id))
-        .filter((s) => s.tier < REST_TIER)
         .slice(0, MAX_ROWS)
-        .map((s) => ({ track: s.track, edges: [tierLabel(s.tier)], known: s.tier <= 2 }));
+        .map((s) => ({
+          track: s.track,
+          edges: [edgeLabel(s.rank)],
+          known: s.rank.known !== null,
+        }));
     } else {
       rows = suggestInsert(
         candidates,
@@ -129,12 +138,11 @@ export default function SetSuggestions({
         knownOutOf(target.predecessor.id),
         knownInto(target.successor.id)
       )
-        .filter((s) => weakerTier(s) < REST_TIER)
         .slice(0, MAX_ROWS)
         .map((s) => ({
           track: s.track,
-          edges: [`out: ${tierLabel(s.outTier)}`, `in: ${tierLabel(s.inTier)}`],
-          known: Math.min(s.outTier, s.inTier) <= 2,
+          edges: [`out: ${edgeLabel(s.outRank)}`, `in: ${edgeLabel(s.inRank)}`],
+          known: s.outRank.known !== null || s.inRank.known !== null,
         }));
     }
   }

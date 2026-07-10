@@ -17,6 +17,7 @@
 // separate vertex-geometry pass ported from the legacy geometry renderer.
 
 import type { PlaybackClock } from '../playback/clock';
+import { STEP_RATIO } from '../utils/waveformZoom';
 import { playedDimBoundary } from './loopOverlay';
 import { MAX_LEVELS, TEX_WIDTH } from './blob';
 import type { DecodedWaveform, LodPack } from './blob';
@@ -49,7 +50,8 @@ export type WaveformModulation = (trackTimeSec: number) => {
 };
 
 const MIN_VISIBLE_SECONDS = 1;
-const WHEEL_STEP = 1.2;
+// one zoom sensitivity everywhere: utils/waveformZoom owns the constant
+const WHEEL_STEP = STEP_RATIO;
 const DEFAULT_VISIBLE_SECONDS = 20;
 const MOD_TEX_WIDTH = 1024;
 /** Modulation values are encoded /2 into uint8 so EQ boosts up to 2x survive. */

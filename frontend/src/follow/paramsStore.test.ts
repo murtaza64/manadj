@@ -36,7 +36,6 @@ describe('paramsStore', () => {
   it('boots with defaults when nothing is stored', async () => {
     const store = await loadStore();
     expect(store.getFollowParams()).toMatchObject({
-      harmonicKeys: true,
       bpm: true,
       bpmThresholdPercent: 5,
       knownOnly: false,
@@ -44,8 +43,10 @@ describe('paramsStore', () => {
   });
 
   it('restores stored params, clamping the BPM threshold into 0–15', async () => {
+    // Stale keys from the retired axes (match-score PRD) ride along
+    // harmlessly; the clamp still applies.
     const store = await loadStore('{"bpmThresholdPercent":40,"tags":true}');
-    expect(store.getFollowParams()).toMatchObject({ bpmThresholdPercent: 15, tags: true });
+    expect(store.getFollowParams()).toMatchObject({ bpmThresholdPercent: 15 });
     expect((await loadStore('garbage')).getFollowParams().bpmThresholdPercent).toBe(5);
   });
 
@@ -57,7 +58,7 @@ describe('paramsStore', () => {
     });
     store.setFollowParams({ knownOnly: true });
     expect(store.getFollowParams().knownOnly).toBe(true);
-    expect(store.getFollowParams().harmonicKeys).toBe(true); // merged, not replaced
+    expect(store.getFollowParams().bpm).toBe(true); // merged, not replaced
     expect(calls).toBe(1);
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ knownOnly: true });
   });

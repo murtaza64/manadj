@@ -327,18 +327,23 @@ export function useKeyboardShortcuts({
 // Keep the selected track's row visible (used by keyboard navigation, the
 // Library's imperative browse handle, and the hardware browser encoder).
 //
-// Motion-minimizing (midi-controller 10): no center pinning — while the row
-// is comfortably inside the viewport, nothing moves. Only when it nears the
-// top or bottom edge does the list scroll, and then by a SMOOTH half-page
-// burst in the direction of travel, so the screen glides once per half page
-// of navigation instead of moving per row. While a burst animates, further
-// triggers are suppressed (a restarted smooth scroll never finishes and
-// stutters); if a fast spin outruns the animation, the far-outside branch
-// catches the row up on the next call after the cooldown.
-const SCROLL_COOLDOWN_MS = 250;
+// Two regimes (midi-controller 10, 16):
+// - BURST (encoder spin / held key: calls < BURST_MS apart) — instant
+//   scrolling, tick for tick. While the row is comfortably inside the
+//   viewport nothing moves; once it reaches the edge margin the list
+//   follows instantly, keeping the row pinned a margin inside the edge.
+//   The viewport never trails the selection.
+// - LONE navigation — smooth. A far-off row (the selection jumped) lands
+//   a margin inside the edge it enters from; a row nearing the edge
+//   glides half a page in the direction of travel. An in-flight glide is
+//   protected by a short cooldown (a restarted smooth scroll never
+//   finishes and stutters); a burst tick overrides it instantly.
+const BURST_MS = 200;
+const SMOOTH_COOLDOWN_MS = 250;
 /** "Nears the edge" margin, in row heights. */
 const EDGE_MARGIN_ROWS = 2;
-let lastBurstMs = -Infinity;
+let lastCallMs = -Infinity;
+let lastSmoothMs = -Infinity;
 
 function scrollableAncestor(el: Element): HTMLElement | null {
   for (let parent = el.parentElement; parent; parent = parent.parentElement) {
@@ -352,41 +357,73 @@ function scrollableAncestor(el: Element): HTMLElement | null {
 export function scrollTrackIntoView(trackId: number) {
   const row = document.querySelector(`[data-track-id="${trackId}"]`);
   if (!row) return;
+  const now = performance.now();
+  const burst = now - lastCallMs < BURST_MS;
+  lastCallMs = now;
+
   const container = scrollableAncestor(row);
   if (!container) {
-    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    row.scrollIntoView({ behavior: burst ? 'auto' : 'smooth', block: 'nearest' });
     return;
   }
-
-  // A burst is still animating: let it glide.
-  const now = performance.now();
-  if (now - lastBurstMs < SCROLL_COOLDOWN_MS) return;
 
   const rowRect = row.getBoundingClientRect();
   const viewRect = container.getBoundingClientRect();
   const margin = rowRect.height * EDGE_MARGIN_ROWS;
-  const halfPage = viewRect.height / 2;
 
-  // Far outside the viewport (selection jumped, or a spin outran the last
-  // burst): land the row a comfortable margin inside the edge it enters
-  // from.
-  if (rowRect.bottom < viewRect.top || rowRect.top > viewRect.bottom) {
-    const fromTop = rowRect.top < viewRect.top;
-    container.scrollBy({
-      top: fromTop
-        ? rowRect.top - viewRect.top - margin
-        : rowRect.bottom - viewRect.bottom + margin,
-      behavior: 'smooth',
-    });
-    lastBurstMs = now;
+  const pastTop = rowRect.top < viewRect.top + margin;
+  const pastBottom = rowRect.bottom > viewRect.bottom - margin;
+  if (!pastTop && !pastBottom) return;
+
+  // Distance that puts the row exactly a margin inside the edge it is
+  // heading past (negative scrolls up).
+  const toEdge = pastTop
+    ? rowRect.top - viewRect.top - margin
+    : rowRect.bottom - viewRect.bottom + margin;
+
+  if (burst) {
+    container.scrollBy({ top: toEdge, behavior: 'auto' });
     return;
   }
 
-  if (rowRect.top < viewRect.top + margin) {
-    container.scrollBy({ top: -halfPage, behavior: 'smooth' });
-    lastBurstMs = now;
-  } else if (rowRect.bottom > viewRect.bottom - margin) {
-    container.scrollBy({ top: halfPage, behavior: 'smooth' });
-    lastBurstMs = now;
+  // Far outside the viewport: land the row a margin inside the entry edge.
+  if (rowRect.bottom < viewRect.top || rowRect.top > viewRect.bottom) {
+    container.scrollBy({ top: toEdge, behavior: 'smooth' });
+    lastSmoothMs = now;
+    return;
   }
+
+  // Near the edge: glide half a page, letting an in-flight glide finish.
+  if (now - lastSmoothMs < SMOOTH_COOLDOWN_MS) return;
+  container.scrollBy({ top: pastTop ? -viewRect.height / 2 : viewRect.height / 2, behavior: 'smooth' });
+  lastSmoothMs = now;
+}
+
+/** Is the track's row rendered and at least partially inside its scroll
+ * viewport? (False when the row left the list, e.g. filtered out.) */
+export function trackRowInView(trackId: number): boolean {
+  const row = document.querySelector(`[data-track-id="${trackId}"]`);
+  if (!row) return false;
+  const container = scrollableAncestor(row);
+  if (!container) return true;
+  const rowRect = row.getBoundingClientRect();
+  const viewRect = container.getBoundingClientRect();
+  return rowRect.bottom > viewRect.top && rowRect.top < viewRect.bottom;
+}
+
+/** Ids of the track rows currently fully visible in their scroll viewport,
+ * in DOM order. */
+export function visibleTrackIds(): Set<number> {
+  const ids = new Set<number>();
+  for (const row of document.querySelectorAll('[data-track-id]')) {
+    const container = scrollableAncestor(row);
+    const rowRect = row.getBoundingClientRect();
+    if (container) {
+      const viewRect = container.getBoundingClientRect();
+      if (rowRect.top < viewRect.top || rowRect.bottom > viewRect.bottom) continue;
+    }
+    const id = Number(row.getAttribute('data-track-id'));
+    if (Number.isFinite(id)) ids.add(id);
+  }
+  return ids;
 }

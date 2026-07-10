@@ -13,8 +13,6 @@
  */
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
-import { KNOWN_FAVORITED, KNOWN_SAVED } from '../links/known';
-import { engineIdToOpenKey, formatKeyDisplay } from '../utils/keyUtils';
 
 // ── State machine (follow-mode 02) ──────────────────────────────────────
 
@@ -98,21 +96,16 @@ export function followMacroToggles(
 
 // ── Parameters ──────────────────────────────────────────────────────────
 
-/** Energy relation of candidates to the reference. */
-export type EnergyPreset = 'up' | 'down' | 'near' | 'equal';
-
 /**
  * The matching parameters (the Follow parameters modal edits these).
- * Tag agreement is any-shared by definition (CONTEXT.md: Compatible) —
- * there is no ALL mode and no reference-deck choice (per-Deck toggles).
+ * The gate is BPM-only (match-score PRD): the per-axis key/tag/energy
+ * toggles retired with the gates they controlled — those signals inform
+ * the Match score now, and per-signal score toggles can return later as
+ * one-line weights if wanted.
  */
 export interface FollowParams {
-  harmonicKeys: boolean;
   bpm: boolean;
   bpmThresholdPercent: number;
-  tags: boolean;
-  energy: boolean;
-  energyPreset: EnergyPreset;
   /** Narrow the candidates to the known tier only — Linked ∪ saved
    * Transition (glossary: Known; formerly "proven only"). Consumed by
    * candidateIdSet, not by the per-reference query derivation. */
@@ -121,12 +114,8 @@ export interface FollowParams {
 
 /** Canonical defaults — the params store boots from these. */
 export const DEFAULT_FOLLOW_PARAMS: FollowParams = {
-  harmonicKeys: true,
   bpm: true,
   bpmThresholdPercent: 5,
-  tags: false,
-  energy: false,
-  energyPreset: 'near',
   knownOnly: false,
 };
 
@@ -138,84 +127,25 @@ export const DEFAULT_FOLLOW_PARAMS: FollowParams = {
  * derive to their neutral values.
  */
 export interface FollowQuery {
-  keyCamelotIds: string[];
   bpmCenter: number | null;
   bpmThresholdPercent: number | null;
-  tagIds: number[];
-  tagMatchMode: 'ANY';
-  energyMin: number;
-  energyMax: number;
-}
-
-/**
- * Harmonically compatible keys of a Track's Key, in OpenKey notation:
- * same key, wheel neighbours (±1, same mode), relative major/minor.
- */
-export function getHarmonicKeys(keyId: number | null | undefined): string[] {
-  if (keyId === null || keyId === undefined) return [];
-
-  const openKey = formatKeyDisplay(keyId);
-  const match = openKey.match(/^(\d+)(m|d)$/);
-  if (!match) return [];
-
-  const num = parseInt(match[1]);
-  const mode = match[2];
-  const prev = num === 1 ? 12 : num - 1;
-  const next = num === 12 ? 1 : num + 1;
-  const opposite = mode === 'm' ? 'd' : 'm';
-
-  return [openKey, `${prev}${mode}`, `${next}${mode}`, `${num}${opposite}`];
-}
-
-/** Candidate energy range for a reference energy under a preset. */
-export function getEnergyRange(
-  referenceEnergy: number,
-  preset: EnergyPreset
-): { min: number; max: number } {
-  switch (preset) {
-    case 'equal':
-      return { min: referenceEnergy, max: referenceEnergy };
-    case 'near':
-      return {
-        min: Math.max(1, referenceEnergy - 1),
-        max: Math.min(5, referenceEnergy + 1),
-      };
-    case 'up':
-      return { min: referenceEnergy, max: 5 };
-    case 'down':
-      return { min: 1, max: referenceEnergy };
-  }
 }
 
 /** Derive the heuristic-tier query for one reference Track. */
 export function deriveFollowQuery(reference: Track, params: FollowParams): FollowQuery {
+  // The gate is BPM-only (match-score PRD): key, tags, and energy stopped
+  // filtering — they are Match-score signals now (matchScore.ts), so their
+  // axes always derive neutral. The backend folds the BPM window
+  // dyadically (center, ×2, ÷2); half/double-time candidates arrive and
+  // score their proximity on the fold.
   const query: FollowQuery = {
-    keyCamelotIds: [],
     bpmCenter: null,
     bpmThresholdPercent: null,
-    tagIds: [],
-    tagMatchMode: 'ANY',
-    energyMin: 1,
-    energyMax: 5,
   };
-
-  if (params.harmonicKeys) {
-    query.keyCamelotIds = getHarmonicKeys(reference.key);
-  }
 
   if (params.bpm && reference.bpm) {
     query.bpmCenter = reference.bpm;
     query.bpmThresholdPercent = params.bpmThresholdPercent;
-  }
-
-  if (params.tags && reference.tags.length > 0) {
-    query.tagIds = reference.tags.map((t) => t.id);
-  }
-
-  if (params.energy && reference.energy !== undefined) {
-    const { min, max } = getEnergyRange(reference.energy, params.energyPreset);
-    query.energyMin = min;
-    query.energyMax = max;
   }
 
   return query;
@@ -230,19 +160,11 @@ export function deriveFollowQuery(reference: Track, params: FollowParams): Follo
  * nothing contributes.
  */
 export function followSummary(reference: Track, params: FollowParams): string {
+  // Mirrors deriveFollowQuery: the gate is BPM-only (match-score PRD), so
+  // key/tags/energy no longer appear — they inform the score, not the cut.
   const parts: string[] = [];
-  if (params.harmonicKeys && reference.key !== null && reference.key !== undefined) {
-    parts.push(formatKeyDisplay(reference.key));
-  }
   if (params.bpm && reference.bpm) {
     parts.push(`${Math.round(reference.bpm)}±${params.bpmThresholdPercent}%`);
-  }
-  if (params.energy && reference.energy !== undefined) {
-    const { min, max } = getEnergyRange(reference.energy, params.energyPreset);
-    parts.push(`E${min}–${max}`);
-  }
-  if (params.tags && reference.tags.length > 0) {
-    parts.push('tags');
   }
   if (params.knownOnly) {
     parts.push('◆🔗only');
@@ -305,93 +227,21 @@ export interface FollowReference {
   knownStrength: (id: number) => number | null;
 }
 
-/** Tier order is provisional (PRD) — keep changes inside this face. The
- * known tier's strengths ARE its leading tiers (linked-pairs 04), so the
- * Key tiers start right after the weakest known strength. */
-const TIER_KNOWN_BEST = KNOWN_FAVORITED;
-const TIER_KNOWN_SPAN = KNOWN_SAVED + 1;
-const TIER_SAME_KEY = TIER_KNOWN_SPAN;
-const TIER_RELATIVE_KEY = TIER_SAME_KEY + 1;
-const TIER_KEY_UP = TIER_RELATIVE_KEY + 1;
-const TIER_KEY_DOWN = TIER_KEY_UP + 1;
-const TIER_REST = TIER_KEY_DOWN + 1;
-
-function parseOpenKey(keyId: number | null | undefined): { num: number; mode: string } | null {
-  const openKey = engineIdToOpenKey(keyId);
-  const match = openKey?.match(/^(\d+)(m|d)$/);
-  return match ? { num: parseInt(match[1]), mode: match[2] } : null;
-}
-
-function tierAgainst(candidate: Track, reference: FollowReference): number {
-  const known = reference.knownStrength(candidate.id);
-  if (known !== null) return known;
-  const ref = parseOpenKey(reference.track.key);
-  const cand = parseOpenKey(candidate.key);
-  if (!ref || !cand) return TIER_REST;
-  if (cand.num === ref.num) {
-    return cand.mode === ref.mode ? TIER_SAME_KEY : TIER_RELATIVE_KEY;
-  }
-  if (cand.mode !== ref.mode) return TIER_REST;
-  const up = ref.num === 12 ? 1 : ref.num + 1;
-  const down = ref.num === 1 ? 12 : ref.num - 1;
-  if (cand.num === up) return TIER_KEY_UP;
-  if (cand.num === down) return TIER_KEY_DOWN;
-  return TIER_REST;
-}
-
-/**
- * Candidate strength: known (favorited Transition, Linked, unfavorited
- * Transition), same Key, relative Key, one Key up, one Key down, then
- * everything else that passed the filter. Best tier wins across followed
- * references.
- */
-export function followTier(candidate: Track, references: FollowReference[]): number {
-  let best = TIER_REST;
-  for (const reference of references) {
-    best = Math.min(best, tierAgainst(candidate, reference));
-    if (best === TIER_KNOWN_BEST) break;
-  }
-  return best;
-}
-
-/** Section-header names reifying the tiers (follow-mode 08). Indexed by
- * followTier's result; keep in lockstep with the tier constants above. */
-const TIER_LABELS: readonly string[] = [
-  '★ Favorited transition',
-  '🔗 Linked',
-  '◆ Saved transition',
-  'Same key',
-  'Relative key',
-  'Key up',
-  'Key down',
-  'Other matches',
-];
-
-export function tierLabel(tier: number): string {
-  return TIER_LABELS[tier] ?? TIER_LABELS[TIER_LABELS.length - 1];
-}
-
-/**
- * Tier-order the followed list. The sort is stable, so the incoming order
- * (the view's own sort) holds within each tier — tiering groups, never
- * overrides. No references = no reordering.
- */
-export function orderByTier(tracks: Track[], references: FollowReference[]): Track[] {
-  if (references.length === 0) return tracks;
-  const tiers = new Map(tracks.map((t) => [t.id, followTier(t, references)]));
-  return [...tracks].sort((x, y) => tiers.get(x.id)! - tiers.get(y.id)!);
-}
-
 export function candidateIdSet(
   heuristicSets: Track[][],
   // Anything keyed by track id — a Set of ids or the transition index's
   // per-reference Map (trackId → PairInfo).
   knownSets: ReadonlyArray<{ keys(): IterableIterator<number> }>,
-  knownOnly: boolean
+  knownOnly: boolean,
+  // The followed references themselves: a Track is never its own
+  // candidate (it self-matches at full score), and an already-loaded
+  // Track isn't a suggestion either way.
+  excludeIds: Iterable<number> = []
 ): Set<number> {
   const ids = knownOnly ? new Set<number>() : unionIds(heuristicSets);
   for (const known of knownSets) {
     for (const id of known.keys()) ids.add(id);
   }
+  for (const id of excludeIds) ids.delete(id);
   return ids;
 }

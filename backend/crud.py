@@ -96,25 +96,25 @@ def get_tracks(
                 models.TrackTag.tag_id.in_(tag_ids)
             )
 
-    # BPM range filter
+    # BPM range filter with dyadic fold (match-score PRD): a candidate
+    # passes if it is within threshold% of the center, center×2, or
+    # center÷2 — half/double-time moves are first-class (87 hip-hop under
+    # 174 dnb). Each fold's window scales with that fold, so proximity is
+    # measured against the nearest fold with no half-time discount.
     if bpm_center is not None and bpm_threshold_percent is not None:
-        # Calculate BPM range: center ± (center × threshold%)
-        threshold_value = bpm_center * (bpm_threshold_percent / 100.0)
-        bpm_min = bpm_center - threshold_value
-        bpm_max = bpm_center + threshold_value
-
-        # Convert BPM range to centiBPM for database comparison
-        bpm_min_centi = int(bpm_min * 100)
-        bpm_max_centi = int(bpm_max * 100)
-
-        # Filter tracks within range (exclude NULL bpm). The centibpm
-        # column is internal-only (ADR 0027): it exists so SQL sort/filter
-        # work without parsing grid JSON, kept honest by compliant writers.
-        query = query.filter(
-            models.Track.bpm >= bpm_min_centi,
-            models.Track.bpm <= bpm_max_centi,
-            models.Track.bpm.isnot(None)
-        )
+        fold_ranges = []
+        for fold in (bpm_center, bpm_center * 2, bpm_center / 2):
+            threshold_value = fold * (bpm_threshold_percent / 100.0)
+            # Convert to centiBPM for database comparison. The centibpm
+            # column is internal-only (ADR 0027): it exists so SQL
+            # sort/filter work without parsing grid JSON.
+            fold_ranges.append(
+                (models.Track.bpm >= int((fold - threshold_value) * 100))
+                & (models.Track.bpm <= int((fold + threshold_value) * 100))
+            )
+        # NULL bpm stays excluded: a gate needs a tempo to test (score
+        # neutrality is a scoring principle, not a gate one).
+        query = query.filter(models.Track.bpm.isnot(None), or_(*fold_ranges))
 
     # Key filter (ANY match) - convert OpenKey to Engine DJ IDs
     if key_camelot_ids:

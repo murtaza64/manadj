@@ -24,6 +24,15 @@ import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
 import { installNoFocusRule } from './focus/noFocusRule';
+import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
+
+/** The one poller keeping track rows / Analyze buttons live against
+ * background analysis (analysis-curation 03) — a bridge like the MIDI
+ * layers: above the view switch, renders nothing. */
+function AnalysisPendingBridge() {
+  useAnalysisPendingSync();
+  return null;
+}
 
 const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles'];
 
@@ -88,6 +97,7 @@ function App() {
         <MidiControlRegistrar />
         <MidiFeedbackBridge />
         <AudioRoutingBridge />
+        <AnalysisPendingBridge />
         {/* Live re-plan (sets 24): plan-input subscription for the
             conducting Set — above the view switch, like the Conductor
             it feeds. */}

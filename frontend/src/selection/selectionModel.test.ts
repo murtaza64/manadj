@@ -7,6 +7,7 @@ import {
   navigate,
   prune,
   rangeClick,
+  reanchorId,
   selectAll,
   toggleClick,
   type Selection,
@@ -120,6 +121,27 @@ describe('prune', () => {
   it('returns the same object when nothing changed', () => {
     const sel: Selection = { ids: [10, 30], anchorId: 30 };
     expect(prune(sel, ORDER)).toBe(sel);
+  });
+});
+
+describe('reanchorId', () => {
+  const IN_VIEW = new Set([20, 30, 40]);
+
+  it('picks the first in-view row in table order when moving down', () => {
+    expect(reanchorId(ORDER, IN_VIEW, 1)).toBe(20);
+  });
+
+  it('picks the last in-view row in table order when moving up', () => {
+    expect(reanchorId(ORDER, IN_VIEW, -1)).toBe(40);
+  });
+
+  it('ignores in-view ids that are not in this pane\u2019s order', () => {
+    expect(reanchorId(ORDER, new Set([99, 30]), 1)).toBe(30);
+  });
+
+  it('returns null when nothing in view belongs to the list', () => {
+    expect(reanchorId(ORDER, new Set(), 1)).toBe(null);
+    expect(reanchorId([], IN_VIEW, -1)).toBe(null);
   });
 });
 

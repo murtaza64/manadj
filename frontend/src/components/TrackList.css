@@ -52,6 +52,10 @@
   gap: 4px;
 }
 
+.sortable-header-content.align-center {
+  justify-content: center;
+}
+
 .sortable-header-content.align-right {
   justify-content: flex-end;
 }
@@ -60,11 +64,14 @@
   font-size: 10px;
 }
 
-/* Generic sticky column styles */
+/* Generic sticky column styles. Header z-index sits ABOVE the resize
+   handles (z 12): a non-sticky header sliding under a pinned one must
+   take its divider handle with it (the handles otherwise paint over the
+   pinned headers during horizontal scroll). */
 .sticky-col-header {
   position: sticky;
   background: var(--mantle);
-  z-index: 11;
+  z-index: 13;
 }
 
 .sticky-col-cell {
@@ -139,7 +146,9 @@ body.col-resizing { cursor: col-resize; user-select: none; }
    row (no data-track-id — drop/selection machinery ignores them). */
 .track-tier-header td {
   padding: 3px 12px;
-  background: var(--crust);
+  /* One shade lighter than the track rows (--crust): the section
+     boundary reads at a glance. */
+  background: var(--mantle);
   color: var(--green);
   font-size: 11px;
   font-weight: bold;
@@ -150,8 +159,37 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   user-select: none;
 }
 
+/* The label pins to the viewport's left edge while the table scrolls
+   horizontally (the spanning td is table-wide; only the span sticks). */
+.track-tier-header .track-tier-label {
+  position: sticky;
+  left: 12px;
+  display: inline-block;
+}
+
 .track-tier-header .track-tier-count {
   color: var(--subtext0);
   font-weight: normal;
   letter-spacing: normal;
+}
+
+/* Match score in the marks column (match-score PRD, tuning 2026-07-10):
+   Compatible rows show their score where Known rows show their evidence
+   marks — one column, two vocabularies (score vs marks). */
+.track-match-score {
+  font-size: 10px;
+  color: var(--subtext0);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Why-did-this-match dimming (match-score, tuning 2026-07-10): in Follow
+   views, signals that earned nothing toward the score fade — a
+   non-compatible key, tags the reference doesn't share. What stays lit is
+   WHY the row is here. */
+.track-signal-dim {
+  opacity: 0.3;
+}
+span.track-signal-dim {
+  display: inline-flex;
 }

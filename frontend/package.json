@@ -4,10 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "gen:keys": "uv run --project .. ../scripts/export/gen_key_table.py",
+    "check:keys": "uv run --project .. ../scripts/export/gen_key_table.py --check",
+    "predev": "npm run gen:keys",
     "dev": "vite",
+    "prebuild": "npm run gen:keys",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "pretest": "npm run gen:keys",
     "test": "vitest run"
   },
   "dependencies": {

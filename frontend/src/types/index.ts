@@ -118,8 +118,20 @@ export interface BeatgridResponse {
   id: number | null;
   track_id: number;
   data: BeatgridData;
+  /** "generated" = non-authoritative placeholder (ADR 0027 §3) — arrival
+   * polling treats it as not-yet-settled (ADR 0029 §3). */
+  origin: 'generated' | 'analyzed' | 'edited' | 'imported';
+  /** User-marked downbeat (seconds, ADR 0016); null = no mark. */
+  anchor_time: number | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+/** Grid-analysis diagnostics (GET /api/analyze/grid/{id}) — the fields
+ * arrival polling reads; the endpoint returns more (evidence, residuals). */
+export interface GridAnalysisDiagnostics {
+  track_id: number;
+  bailed: boolean;
 }
 
 export interface TrackEntry {
@@ -280,7 +292,8 @@ export interface LibraryTrackCandidate {
   title: string | null;
   artist: string | null;
   bpm: number | null;
-  key: string | null;
+  // Engine DJ key ID (0-23)
+  key: number | null;
   has_metadata: boolean;
 }
 
@@ -414,6 +427,8 @@ export interface SourceItem {
   correspondence: SourceCorrespondenceInfo | null;
   download: DownloadStatus | null;
   provenance: ProvenanceInfo | null;
+  // Cleanup-derived default query for Search Supplier pickers
+  search_query: string | null;
 }
 
 export interface ProvenanceInfo {
@@ -428,6 +443,49 @@ export interface DownloadStatus {
   error: string | null;
   // ISO-8601 UTC deferral floor when a rate-limited task is cooling down.
   cooling_down_until?: string | null;
+  // which Supplier is delivering the audio
+  via: 'soundcloud' | 'soulseek';
+}
+
+// Suppliers (see CONTEXT.md: Supplier / Direct Supplier / Search Supplier)
+export interface SupplierInfo {
+  id: string;
+  kind: 'direct' | 'search';
+}
+
+export interface SoulseekResult {
+  download_token: string;
+  filename: string;
+  format: string;
+  bitrate_kbps: number | null;
+  size_bytes: number | null;
+  duration_ms: number | null;
+  queue_length: number | null;
+  has_free_slot: boolean | null;
+  // derived server-side vs the item's duration; results arrive sorted
+  // exact-duration-lossless first (issue 04)
+  duration_delta_ms: number | null;
+}
+
+export interface SoulseekSearchResponse {
+  query: string;
+  results: SoulseekResult[];
+}
+
+// State of a track's latest analysis task (task-system 01): the Analyze
+// button enqueues one and polls this until it reaches `done`.
+export interface AnalysisTaskStatus {
+  task_id: number;
+  state: 'pending' | 'running' | 'done' | 'failed';
+  error: string | null;
+  manual: boolean;
+}
+
+// One in-flight analysis in the bulk pending view (analysis-curation 03).
+export interface AnalysisPendingItem {
+  track_id: number;
+  state: 'pending' | 'running';
+  manual: boolean;
 }
 
 export interface SourceCorrespondenceInfo {

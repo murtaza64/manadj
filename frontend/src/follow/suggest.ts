@@ -1,8 +1,8 @@
 /**
  * Set-building suggestions (sets 10) — pure ranking beside the Follow
- * model, reusing its tiering wholesale (known tier: favorited Transition,
- * Linked, unfavorited Transition; then Compatible key tiers), honoring
- * Transition directionality.
+ * model, sharing its ONE total edge order (match-score PRD): Known strata
+ * in Known-strength order, then Compatible descending by Match score,
+ * below-floor excluded. Honors Transition directionality.
  *
  * The unit here is the ORDERED EDGE from → to: append ranks candidates by
  * the edge out of the Set's last Track; insert scores both edges (out of
@@ -12,35 +12,37 @@
  * maps), so direction is the caller's contract: `knownOutOf*` means
  * anchor→candidate, `knownInto*` means candidate→anchor.
  *
- * Tier numbers stay in lockstep with model.ts (tierLabel names them) by
- * construction — an edge tier IS followTier against a single-edge
- * reference whose reference Track is the edge's `from` side.
+ * The Affinity floor is the cut (it replaced the old rest-tier cut): an
+ * unadmitted edge never appears. Inserts demand BOTH edges admitted — the
+ * old rule cut on the weaker edge, and an inadmissible handover on either
+ * side is exactly that.
  */
 import type { Track } from '../types';
-import { followTier } from './model';
+import { compareRanks, rankAgainst, type CandidateRank } from './matchScore';
 
 /** A known strength for one ordered edge, or null (not Known). */
 export type EdgeKnownLookup = (candidateId: number) => number | null;
 
 /**
- * Tier of the ordered edge from → to: the edge's known strength when it
- * has one, else the key relation of `to` relative to `from` (same,
- * relative, one up, one down, rest) — model.ts numbering throughout.
+ * Rank of the ordered edge from → to: its Known strength when it has one,
+ * else the Match score of `to` against `from` — matchScore.ts semantics
+ * throughout (an edge rank IS rankAgainst with a single-edge reference
+ * whose reference Track is the edge's `from` side).
  */
-export function edgeTier(from: Track, to: Track, knownStrength: number | null): number {
-  return followTier(to, [{ track: from, knownStrength: () => knownStrength }]);
+export function edgeRank(from: Track, to: Track, knownStrength: number | null): CandidateRank {
+  return rankAgainst(to, [{ track: from, knownStrength: () => knownStrength }]);
 }
 
 export interface AppendSuggestion {
   track: Track;
-  /** Edge tier out of the last Track (tierLabel names it). */
-  tier: number;
+  /** Edge rank out of the last Track (rankLabel/score name it). */
+  rank: CandidateRank;
 }
 
 /**
  * Rank append candidates by the edge out of the Set's last Track.
- * Tracks already in the Set never appear; the sort is stable, so the
- * incoming order holds within a tier.
+ * Tracks already in the Set never appear; unadmitted edges are cut (the
+ * floor); the sort is stable, so the incoming order holds within ties.
  */
 export function suggestAppend(
   candidates: readonly Track[],
@@ -50,27 +52,34 @@ export function suggestAppend(
 ): AppendSuggestion[] {
   return candidates
     .filter((t) => !inSetIds.has(t.id))
-    .map((track) => ({ track, tier: edgeTier(last, track, knownOutOfLast(track.id)) }))
-    .sort((a, b) => a.tier - b.tier);
+    .map((track) => ({ track, rank: edgeRank(last, track, knownOutOfLast(track.id)) }))
+    .filter((s) => s.rank.admitted)
+    .sort((a, b) => compareRanks(a.rank, b.rank));
 }
 
 export interface InsertSuggestion {
   track: Track;
-  /** Edge tier out of the predecessor (predecessor → candidate). */
-  outTier: number;
-  /** Edge tier into the successor (candidate → successor). */
-  inTier: number;
+  /** Edge rank out of the predecessor (predecessor → candidate). */
+  outRank: CandidateRank;
+  /** Edge rank into the successor (candidate → successor). */
+  inRank: CandidateRank;
 }
 
-/** An insert is judged by its worst handover (PRD). */
-export function weakerTier(s: Pick<InsertSuggestion, 'outTier' | 'inTier'>): number {
-  return Math.max(s.outTier, s.inTier);
+/** An insert is judged by its worst handover (PRD): the edge that ranks
+ * LATER in the shared order. */
+export function weakerRank(s: Pick<InsertSuggestion, 'outRank' | 'inRank'>): CandidateRank {
+  return compareRanks(s.outRank, s.inRank) >= 0 ? s.outRank : s.inRank;
+}
+
+function strongerRank(s: Pick<InsertSuggestion, 'outRank' | 'inRank'>): CandidateRank {
+  return compareRanks(s.outRank, s.inRank) < 0 ? s.outRank : s.inRank;
 }
 
 /**
  * Rank insert candidates for the adjacency predecessor → successor:
  * score both edges, order by the weaker edge, tie-break by the stronger.
- * Stable within full ties; in-Set Tracks excluded.
+ * Both edges must be admitted. Stable within full ties; in-Set Tracks
+ * excluded.
  */
 export function suggestInsert(
   candidates: readonly Track[],
@@ -84,12 +93,13 @@ export function suggestInsert(
     .filter((t) => !inSetIds.has(t.id))
     .map((track) => ({
       track,
-      outTier: edgeTier(predecessor, track, knownOutOfPredecessor(track.id)),
-      inTier: edgeTier(track, successor, knownIntoSuccessor(track.id)),
+      outRank: edgeRank(predecessor, track, knownOutOfPredecessor(track.id)),
+      inRank: edgeRank(track, successor, knownIntoSuccessor(track.id)),
     }))
+    .filter((s) => s.outRank.admitted && s.inRank.admitted)
     .sort(
       (a, b) =>
-        weakerTier(a) - weakerTier(b) ||
-        Math.min(a.outTier, a.inTier) - Math.min(b.outTier, b.inTier)
+        compareRanks(weakerRank(a), weakerRank(b)) ||
+        compareRanks(strongerRank(a), strongerRank(b))
     );
 }

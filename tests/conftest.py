@@ -19,6 +19,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.acquisition.source import SourceItemData
+from backend.acquisition.supplier import (
+    SupplierSearchResult,
+    TransferState,
+    TransferStatus,
+)
 from backend.models import Track
 
 ALEMBIC_INI = Path(__file__).parent.parent / "alembic.ini"
@@ -98,10 +103,20 @@ def audio_file(tmp_path: Path) -> Callable[..., Path]:
 
 
 class FakeSource:
-    """Fake at the Source seam: canned metadata, no network (ADR-0002).
+    """Fake at the Source + Supplier seams: canned data, no network (ADR-0002).
 
-    "Downloads" by copying a committed audio fixture into the target dir;
-    configure with download_file, or download_error to simulate failures.
+    As a Source it lists canned `list_items`. As a base Supplier it "downloads"
+    by copying a committed audio fixture into the target dir (configure
+    `download_file`, or `download_error` to simulate a failure).
+
+    It also stands in for a Search Supplier: `search_results` cans a search,
+    and `transfer_states` cans a transfer-state sequence advanced one step per
+    `transfer_status` poll (e.g. [QUEUED, IN_PROGRESS, COMPLETED] for a happy
+    transfer, or a run of QUEUED for a TTL-expiry test; the last state holds
+    once the sequence is exhausted). On COMPLETED the fixture file is staged
+    into `staging_dir` under the picked result's remote basename — mirroring
+    slskd, which downloads into its own directory and reports the path; the
+    download task moves it into the library.
     """
 
     def __init__(
@@ -109,10 +124,18 @@ class FakeSource:
         items: list[SourceItemData],
         download_file: Path | None = None,
         download_error: Exception | None = None,
+        search_results: list[SupplierSearchResult] | None = None,
+        transfer_states: list[TransferState] | None = None,
+        staging_dir: Path | None = None,
     ) -> None:
         self._items = items
         self._download_file = download_file
         self._download_error = download_error
+        self._search_results = search_results or []
+        self._transfer_states = list(transfer_states or [])
+        self._staging_dir = staging_dir
+        self._transfer_results: dict[str, SupplierSearchResult] = {}
+        self._poll_counts: dict[str, int] = {}
 
     def list_items(self) -> list[SourceItemData]:
         return self._items
@@ -124,3 +147,29 @@ class FakeSource:
         dest = dest_dir / f"{basename}{self._download_file.suffix}"
         shutil.copy(self._download_file, dest)
         return dest
+
+    # Search Supplier seam -------------------------------------------------
+    def search(self, query: str) -> list[SupplierSearchResult]:
+        return self._search_results
+
+    def request(self, result: SupplierSearchResult) -> str:
+        transfer_id = f"transfer:{result.download_token}"
+        self._transfer_results[transfer_id] = result
+        self._poll_counts[transfer_id] = 0
+        return transfer_id
+
+    def transfer_status(self, transfer_id: str) -> TransferStatus:
+        assert self._transfer_states, "FakeSource not configured for transfers"
+        n = self._poll_counts.get(transfer_id, 0)
+        # hold on the last canned state once the sequence is exhausted
+        state = self._transfer_states[min(n, len(self._transfer_states) - 1)]
+        self._poll_counts[transfer_id] = n + 1
+        if state is TransferState.COMPLETED:
+            assert self._staging_dir is not None, "FakeSource has no staging_dir"
+            assert self._download_file is not None, "FakeSource has no file to complete with"
+            result = self._transfer_results[transfer_id]
+            # remote filenames are windows-style paths on most peers
+            local = self._staging_dir / result.filename.replace("\\", "/").rsplit("/", 1)[-1]
+            shutil.copy(self._download_file, local)
+            return TransferStatus(state=state, local_path=local)
+        return TransferStatus(state=state)

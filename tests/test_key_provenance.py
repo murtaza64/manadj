@@ -22,7 +22,6 @@ from backend.database import get_db
 from backend.key import Key
 from backend.key_analysis import analyze_track_key
 from backend.models import Track
-from backend.routers import analyze
 from backend.sync_performance import EnginePerformanceFields
 from backend.track_metadata import apply_update
 from backend.track_metadata.models import TrackChanges
@@ -160,53 +159,12 @@ class TestImportProvenance:
         assert row.key_provenance == "imported"
 
 
-class TestKeyEndpoint:
-    @pytest.fixture
-    def app(self, db: Session) -> FastAPI:
-        app = FastAPI()
-        app.include_router(analyze.router, prefix="/api/analyze")
-        app.dependency_overrides[get_db] = lambda: db
-        return app
-
-    @pytest.fixture
-    def client(self, app: FastAPI) -> TestClient:
-        return TestClient(app)
-
-    def with_candidate(self, app: FastAPI, candidate: StubKeyCandidate) -> None:
-        app.dependency_overrides[analyze.get_key_candidate] = lambda: candidate
-
-    def test_post_detects_and_writes(self, app, client, db, make_track, audio_file):
-        track = make_track(filename=str(audio_file()), key=None)
-        self.with_candidate(app, StubKeyCandidate(AM))
-
-        response = client.post(f"/api/analyze/key/{track.id}")
-
-        assert response.status_code == 200
-        body = response.json()
-        assert body["track_id"] == track.id
-        assert body["candidate"] == "stub-key"
-        assert body["key"]["engine_id"] == AM.engine_id
-        assert body["key"]["musical"] == "Am"
-        assert body["confidence"] == 0.9
-        assert body["provenance"] == "analyzed"
-        db.expire_all()
-        assert db.query(Track).filter_by(id=track.id).one().key == AM.engine_id
-
-    def test_post_undetected_is_a_result(self, app, client, db, make_track, audio_file):
-        track = make_track(filename=str(audio_file()), key=None)
-        self.with_candidate(app, StubKeyCandidate(None, None))
-
-        response = client.post(f"/api/analyze/key/{track.id}")
-
-        assert response.status_code == 200
-        body = response.json()
-        assert body["key"] is None
-        db.expire_all()
-        assert db.query(Track).filter_by(id=track.id).one().key is None
-
-    def test_post_missing_track_404(self, app, client):
-        self.with_candidate(app, StubKeyCandidate(AM))
-        assert client.post("/api/analyze/key/9999").status_code == 404
+# The manual key path no longer has its own synchronous endpoint: the Analyze
+# button enqueues one `manual` grid+key task (task-system 01). The endpoint's
+# enqueue/observe behavior is covered by TestAnalyzeEndpoint in
+# test_grid_analysis.py; the key-writing behavior a manual task performs is the
+# analyze_track_key seam above (TestAnalyzeTrackKey) plus the task handler
+# (test_analysis_tasks.py).
 
 
 def test_default_key_candidate_is_the_shootout_winner():

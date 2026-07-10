@@ -94,6 +94,26 @@ export function navigate(sel: Selection, delta: 1 | -1, order: readonly number[]
   return click(sel, order[nextIndex]);
 }
 
+/**
+ * Re-anchor for navigation when the anchor row is off-screen (midi-
+ * controller 16): pick the row to restart from among the rows currently
+ * in the viewport — the first in table order when moving down, the last
+ * when moving up — so the knob picks up from what the user is looking at
+ * instead of jumping back to a stale position.
+ */
+export function reanchorId(
+  order: readonly number[],
+  inView: ReadonlySet<number>,
+  delta: 1 | -1
+): number | null {
+  if (delta === 1) {
+    for (const id of order) if (inView.has(id)) return id;
+  } else {
+    for (let i = order.length - 1; i >= 0; i--) if (inView.has(order[i])) return order[i];
+  }
+  return null;
+}
+
 /** Cmd-A: select every visible row in table order. The anchor survives if visible. */
 export function selectAll(sel: Selection, order: readonly number[]): Selection {
   if (order.length === 0) return EMPTY_SELECTION;

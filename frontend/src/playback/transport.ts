@@ -11,7 +11,13 @@
  * parallel-stack decision.
  */
 
-import { addBeats, phasePreservingJumpTarget, snapToNearestBeat } from './quantize';
+import {
+  addBeats,
+  crossDeckLaunchTarget,
+  phasePreservingJumpTarget,
+  snapToNearestBeat,
+} from './quantize';
+import type { LaunchReference } from './quantize';
 import { clampLoopBeats, LOOP_DEFAULT_BEATS, resizeLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
 
@@ -62,8 +68,13 @@ export type TransportEvent =
   | { type: 'ended' };
 
 export type AudioEffect =
-  /** (Re)start audio from `at` seconds. Restart-while-running implies a declicked stop+start. */
-  | { type: 'start'; at: number }
+  /**
+   * (Re)start audio from `at` seconds. Restart-while-running implies a
+   * declicked stop+start. `delaySeconds` (cue-quantize-bpm 04) holds the
+   * start off by that many real seconds — a cross-deck quantized launch
+   * that defers to the reference deck's next beat; 0/absent means now.
+   */
+  | { type: 'start'; at: number; delaySeconds?: number }
   /** Stop audio; playhead rests at `at` seconds. Idempotent if audio already stopped. */
   | { type: 'stop'; at: number };
 
@@ -78,6 +89,20 @@ export interface TransportContext {
   quantize: boolean;
   /** The Beatgrid's beat times in seconds, or null for gridless Tracks. */
   beatTimes: readonly number[] | null;
+  /**
+   * The OTHER deck's live phase when it is audibly playing with a usable
+   * Beatgrid (cue-quantize-bpm 04), else null. Present only for a *paused*
+   * deck's launch gestures (Play, Cue-hold, Hot-cue-hold): the launch
+   * schedules against this reference instead of starting immediately.
+   * Null degrades every launch to immediate.
+   */
+  launchReference?: LaunchReference | null;
+  /**
+   * The launching deck's composed playback rate (varispeed × nudge), used
+   * to scale a cross-deck launch's immediate ahead-entry into audio position.
+   * Defaults to unity.
+   */
+  playRate?: number;
 }
 
 const UNQUANTIZED: TransportContext = { quantize: false, beatTimes: null };
@@ -85,6 +110,26 @@ const UNQUANTIZED: TransportContext = { quantize: false, beatTimes: null };
 /** Nearest-beat snap when Quantize governs the gesture; exact otherwise. */
 function placementTime(time: number, ctx: TransportContext): number {
   return ctx.quantize ? snapToNearestBeat(time, ctx.beatTimes) : time;
+}
+
+/**
+ * A paused deck's launch (Play, Cue-hold, Hot-cue-hold) as a start effect
+ * (cue-quantize-bpm 04). With Quantize on and another deck audibly playing
+ * with a grid (ctx.launchReference), the launch aligns to that reference
+ * deck's nearest beat: it either defers the start or enters ahead of the
+ * launch point. Otherwise — Quantize off, no playing peer, or no reference
+ * grid — it starts immediately at `at`.
+ */
+function launchStart(at: number, ctx: TransportContext): AudioEffect {
+  if (!ctx.quantize || !ctx.launchReference) return { type: 'start', at };
+  const { at: entry, delaySeconds } = crossDeckLaunchTarget(
+    at,
+    ctx.playRate ?? 1,
+    ctx.launchReference
+  );
+  return delaySeconds > 0
+    ? { type: 'start', at: entry, delaySeconds }
+    : { type: 'start', at: entry };
 }
 
 /** Tolerance for "playhead is at the cue point" (matches library player). */
@@ -117,8 +162,9 @@ export function reduceTransport(
       if (s.playing) return [s, []];
       const next = { ...s, playing: true };
       // If a preview already has audio running, the deck simply takes over
-      // seamlessly; otherwise start from the playhead.
-      return [next, isAudioRunning(s) ? [] : [{ type: 'start', at: s.playhead }]];
+      // seamlessly; otherwise launch from the playhead — cross-deck
+      // quantized against a playing peer when Quantize is on (04).
+      return [next, isAudioRunning(s) ? [] : [launchStart(s.playhead, ctx)]];
     }
 
     case 'pause': {
@@ -170,8 +216,9 @@ export function reduceTransport(
         ];
       }
       if (s.cuePoint !== null && Math.abs(s.playhead - s.cuePoint) < AT_CUE_EPSILON) {
-        // Hold-to-preview from the cue point.
-        return [{ ...s, previewing: true }, [{ type: 'start', at: s.cuePoint }]];
+        // Hold-to-preview from the cue point — cross-deck quantized against
+        // a playing peer when Quantize is on (04).
+        return [{ ...s, previewing: true }, [launchStart(s.cuePoint, ctx)]];
       }
       // Set the cue point at the current position — a placement gesture, so
       // Quantize governs it. The parked playhead moves with the snapped cue,
@@ -209,10 +256,12 @@ export function reduceTransport(
           : e.time;
         return [{ ...s, playhead: at, loop: null }, [{ type: 'start', at }]];
       }
-      // Hold-to-preview from the hot cue.
+      // Hold-to-preview from the hot cue — cross-deck quantized against a
+      // playing peer when Quantize is on (04). The playhead records the hot
+      // cue point; the launch (delayed or entered ahead) is the start effect.
       return [
         { ...s, hotCuePreviewSlot: e.slot, playhead: e.time, loop: null },
-        [{ type: 'start', at: e.time }],
+        [launchStart(e.time, ctx)],
       ];
     }
 
