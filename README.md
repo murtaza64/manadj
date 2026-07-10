@@ -247,6 +247,128 @@ Update the path in sync scripts to point to your Engine DJ database:
 # Windows: C:\Users\{username}\Music\Engine Library\Database2\m.db
 ```
 
+### Soulseek Supplier (slskd)
+
+The Soulseek Supplier fulfills unfulfilled Source Items from the Soulseek
+network. manadj is a thin REST client; the actual Soulseek connection is a
+local [slskd](https://github.com/slskd/slskd) daemon. The Supplier is opt-in:
+if `slskd_url` / `SLSKD_API_KEY` are unset, it does not appear in the UI.
+
+#### 1. manadj side (config)
+
+`config.toml` (committed) — `[soulseek]` block:
+```toml
+[soulseek]
+slskd_url = "http://localhost:5030"
+```
+
+`.env` (gitignored, repo root) — the slskd API key:
+```
+SLSKD_API_KEY=<same key slskd is started with>
+```
+Generate a key with `openssl rand -hex 24` (48 hex chars, within slskd's
+16–255 range) and use the same value here and in slskd's launchd env below.
+No `staging_dir` is configured: manadj reads completed file paths straight
+from slskd's transfer API.
+
+#### 2. slskd side (daemon, macOS, launchd-managed)
+
+slskd is a self-contained distribution (binary + `wwwroot/` web UI; not in
+Homebrew). Install the latest `osx-arm64` (or `osx-x64`) release under
+`~/.local/opt/slskd` and manage it with launchd so it survives reboots
+without losing peer-queue positions.
+
+```bash
+# Download + install (adjust VERSION / arch as needed)
+VERSION=0.25.1
+curl -L -o /tmp/slskd.zip \
+  "https://github.com/slskd/slskd/releases/download/${VERSION}/slskd-${VERSION}-osx-arm64.zip"
+mkdir -p ~/.local/opt/slskd ~/.local/share/slskd/downloads ~/.local/share/slskd/incomplete
+unzip -o /tmp/slskd.zip -d ~/.local/opt/slskd
+chmod +x ~/.local/opt/slskd/slskd
+# macOS Gatekeeper: clear the quarantine flag on the unsigned binary
+xattr -dr com.apple.quarantine ~/.local/opt/slskd
+```
+
+Minimal slskd config at `~/.local/share/slskd/slskd.yml` (Soulseek credentials
++ download dirs; the API key is passed via launchd env, below). Any unused
+Soulseek username auto-registers on first connect. Note: on macOS slskd
+defaults its app dir to `~/Library/Application Support/slskd`, so the launchd
+plist pins `SLSKD_APP_DIR` to `~/.local/share/slskd` — the config file is only
+read from the app dir:
+```yaml
+soulseek:
+  username: <your soulseek username>
+  password: <your soulseek password>
+  listen_ip_address: 0.0.0.0
+  listen_port: 50300
+directories:
+  downloads: /Users/<you>/.local/share/slskd/downloads
+  incomplete: /Users/<you>/.local/share/slskd/incomplete
+shares:
+  directories: []   # supply-only; we share nothing back
+web:
+  https:
+    disabled: true  # localhost-only; plain HTTP on 5030
+```
+
+launchd agent at `~/Library/LaunchAgents/org.slskd.slskd.plist`. The primary
+API key is injected via `SLSKD_API_KEY` and must match `.env` above.
+`WorkingDirectory` must be the install dir so the web UI (`wwwroot/`)
+resolves:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>org.slskd.slskd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/<you>/.local/opt/slskd/slskd</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/<you>/.local/opt/slskd</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SLSKD_APP_DIR</key><string>/Users/<you>/.local/share/slskd</string>
+    <key>SLSKD_API_KEY</key><string><same key as .env></string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/<you>/.local/share/slskd/slskd.log</string>
+  <key>StandardErrorPath</key><string>/Users/<you>/.local/share/slskd/slskd.err</string>
+</dict>
+</plist>
+```
+
+To restart after config edits: `launchctl kickstart -k gui/$(id -u)/org.slskd.slskd`.
+Web UI at http://localhost:5030 (default login `slskd`/`slskd`).
+
+Load it (survives reboot via `RunAtLoad`):
+```bash
+launchctl load -w ~/Library/LaunchAgents/org.slskd.slskd.plist
+```
+
+#### 3. Verify
+
+REST API answers on localhost with the key, and a manual search returns
+results (search endpoints accept any authenticated key):
+```bash
+# Health / auth: should return 200 and the app version
+curl -s -H "X-API-Key: $SLSKD_API_KEY" http://localhost:5030/api/v0/application | head
+
+# Kick off a search
+curl -s -X POST http://localhost:5030/api/v0/searches \
+  -H "X-API-Key: $SLSKD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"searchText": "aphex twin windowlicker"}'
+# note the returned "id", then (after a few seconds) fetch responses:
+curl -s -H "X-API-Key: $SLSKD_API_KEY" \
+  http://localhost:5030/api/v0/searches/<id>/responses | head
+```
+
+A non-empty responses array confirms slskd is connected to the Soulseek
+network and manadj's `[soulseek]` config points at a live daemon.
+
 ## Development
 
 ### Backend Development
