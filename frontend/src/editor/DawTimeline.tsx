@@ -39,6 +39,7 @@ import { EditorStore, useEditorSelector } from './editorStore';
 import { jumpDeltaLabel } from './beatReadout';
 import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
 import { beatPeriodSec } from './templateModel';
+import { downbeatTierMap } from '../meter/ladder';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData } from '../types';
 
@@ -905,6 +906,11 @@ export function DawTimeline({
   /** One B beat in B's own seconds (Δ steppers and chip labels). */
   const beatSecB = beatgridB ? beatPeriodSec(beatgridB) : null;
 
+  // Downbeat time → Metric-ladder tier, per side (metric-ladder 01). Keyed
+  // on the exact floats of downbeat_times — the guides read the same array.
+  const tiersA = useMemo(() => downbeatTierMap(beatgridA), [beatgridA]);
+  const tiersB = useMemo(() => downbeatTierMap(beatgridB), [beatgridB]);
+
   // Beat/cue guide lines continued through the lane strips (normalized to the
   // transition window). Non-downbeats hidden when tighter than ~12px.
   const guidesA = useMemo<LaneGuide[]>(() => {
@@ -926,7 +932,7 @@ export function DawTimeline({
         if (b > tr.startSec + dur) break;
         const strong = downs.has(b);
         if (!strong && !showWeak) continue;
-        out.push({ x: (b - tr.startSec) / dur, strong });
+        out.push({ x: (b - tr.startSec) / dur, strong, tier: tiersA.get(b) });
       }
     }
     for (const c of hotCuesA) {
@@ -939,7 +945,7 @@ export function DawTimeline({
       });
     }
     return out;
-  }, [beatgridA, hotCuesA, tr.startSec, tr.durationSec, pxPerSec]);
+  }, [beatgridA, hotCuesA, tr.startSec, tr.durationSec, pxPerSec, tiersA]);
 
   const guidesB = useMemo<LaneGuide[]>(() => {
     const out: LaneGuide[] = [];
@@ -969,7 +975,7 @@ export function DawTimeline({
           const strong = downs.has(bt);
           if (!strong && !showWeak) continue;
           const mixT = g.mixStartSec + (bt - g.bStartSec) / rateB;
-          out.push({ x: (mixT - tr.startSec) / dur, strong });
+          out.push({ x: (mixT - tr.startSec) / dur, strong, tier: tiersB.get(bt) });
         }
       }
     }
@@ -988,7 +994,7 @@ export function DawTimeline({
       }
     }
     return out;
-  }, [beatgridB, hotCuesB, tr.startSec, tr.durationSec, rateB, pxPerSec, bSegments]);
+  }, [beatgridB, hotCuesB, tr.startSec, tr.durationSec, rateB, pxPerSec, bSegments, tiersB]);
 
   const laneStrip = (id: LaneId) => (
     <div key={id} className={`editor-lanestrip ${id.endsWith('A') ? 'a' : 'b'}`}>

@@ -18,8 +18,16 @@ export interface LaneGuide {
   x: number;
   /** Downbeats and cue lines render stronger than plain beats. */
   strong: boolean;
+  /** Metric-ladder tier of a downbeat guide (0 = bar … 4 = 16-bar
+   * boundary, metric-ladder 01); undefined on weak beats and cues. */
+  tier?: number;
   color?: string;
 }
+
+/** Lane-guide styling per Metric-ladder tier (bar … 16-bar). Dimmer than
+ * the waveform gridlines — guides sit under automation breakpoints. */
+const GUIDE_TIER_ALPHA: readonly number[] = [0.22, 0.28, 0.36, 0.45, 0.55];
+const GUIDE_TIER_WIDTH: readonly number[] = [1.5, 1.5, 2, 2.5, 3];
 
 /** Breakpoint circle radius (uniform for all points). */
 const LANE_POINT_R = 5;
@@ -209,6 +217,10 @@ export function LaneCanvas({
         ctx.globalAlpha = 0.5;
         ctx.fillRect(gx - 0.5, LANE_PAD, 1.5, lh);
         ctx.globalAlpha = 1;
+      } else if (g.tier !== undefined) {
+        const t = Math.min(g.tier, GUIDE_TIER_ALPHA.length - 1);
+        ctx.fillStyle = `rgba(255,255,255,${GUIDE_TIER_ALPHA[t]})`;
+        ctx.fillRect(gx, LANE_PAD, GUIDE_TIER_WIDTH[t], lh);
       } else {
         ctx.fillStyle = g.strong ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)';
         ctx.fillRect(gx, LANE_PAD, g.strong ? 1.5 : 1, lh);

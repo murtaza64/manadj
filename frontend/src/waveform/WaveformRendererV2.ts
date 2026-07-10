@@ -104,17 +104,54 @@ export function matchDownbeatIndices(
   beatTimes: readonly number[],
   downbeatTimes: readonly number[]
 ): Set<number> {
-  const EPS = 1e-6;
+  const tiers = matchBeatTiers(beatTimes, downbeatTimes, null);
   const indices = new Set<number>();
+  for (let i = 0; i < tiers.length; i++) if (tiers[i] >= 0) indices.add(i);
+  return indices;
+}
+
+/**
+ * Per-beat Metric-ladder tier (metric-ladder 01): beat index → the tier of
+ * that downbeat (`tiers` is parallel to `downbeatTimes`), or −1 for a weak
+ * beat. The epsilon two-pointer sweep `matchDownbeatIndices` is now sugar
+ * over; with no tiers every downbeat is tier 0 (plain bar — the legacy
+ * two-tier look).
+ */
+export function matchBeatTiers(
+  beatTimes: readonly number[],
+  downbeatTimes: readonly number[],
+  tiers: readonly number[] | null
+): Int8Array {
+  const EPS = 1e-6;
+  const out = new Int8Array(beatTimes.length).fill(-1);
   let j = 0;
   for (let i = 0; i < beatTimes.length; i++) {
     while (j < downbeatTimes.length && downbeatTimes[j] < beatTimes[i] - EPS) j++;
     if (j < downbeatTimes.length && Math.abs(downbeatTimes[j] - beatTimes[i]) <= EPS) {
-      indices.add(i);
+      out[i] = tiers ? (tiers[j] ?? 0) : 0;
     }
   }
-  return indices;
+  return out;
 }
+
+/** The slice of a LadderProjection the renderer consumes (metric-ladder 01):
+ * per-downbeat tiers plus each tier's bar span — spacing is read from the
+ * projection, never re-derived from a duple assumption. */
+export interface LadderGridInput {
+  tiers: readonly number[];
+  tierBars: readonly number[];
+}
+
+/** Metric-ladder gridline styling: width (dpr multiples) and alpha per
+ * tier, index 0 = bar … 4 = 16-bar boundary. Tier 0 keeps the legacy
+ * downbeat look; higher tiers escalate so phrase structure reads at a
+ * glance at any zoom. Tunable heuristics, not part of the model. */
+export const TIER_WIDTH: readonly number[] = [2, 2, 2.5, 3, 3.5];
+export const TIER_ALPHA: readonly number[] = [0.3, 0.38, 0.48, 0.6, 0.75];
+/** A tier's lines draw only when that tier's own spacing is at least this
+ * many px (dpr-scaled): zoomed out, low tiers cull and only phrase-level
+ * lines survive — the generalization of the legacy 2.5px/bar cutoff. */
+export const TIER_MIN_SPACING_PX = 2.5;
 
 export function cueCssColor(slot: number, stored?: string): string {
   return stored && CUE_COLOR_RE.test(stored) ? stored : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');
@@ -462,7 +499,10 @@ export class WaveformRendererV2 {
   private hotCues = new Map<number, { time: number; color?: string }>();
   private beatTimes: Float32Array | null = null;
   private downbeatTimes: Float32Array | null = null;
-  private downbeatIndices = new Set<number>();
+  /** Beat index → Metric-ladder tier (−1 = weak beat); parallel to beatTimes. */
+  private beatTiers: Int8Array | null = null;
+  /** Bars per tier-k group, from the ladder projection ([1] = tier-0 only). */
+  private tierBars: readonly number[] = [1];
 
   constructor(canvas: HTMLCanvasElement, config: WaveformRendererConfig = {}) {
     this.canvas = canvas;
@@ -517,13 +557,20 @@ export class WaveformRendererV2 {
     }
   }
 
-  public setBeatgrid(beatTimes: number[], downbeatTimes: number[]): void {
+  public setBeatgrid(
+    beatTimes: number[],
+    downbeatTimes: number[],
+    /** Metric-ladder projection slice (metric-ladder 01); omitted → every
+     * downbeat renders tier 0 (legacy two-tier look). */
+    ladder?: LadderGridInput | null,
+  ): void {
     this.beatTimes = new Float32Array(beatTimes);
     this.downbeatTimes = new Float32Array(downbeatTimes);
     // New data must invalidate the vertex cache explicitly (a nudged grid
     // otherwise keeps drawing stale lines — off-by-a-nudge).
     this.beatgridCache = null;
-    this.downbeatIndices = matchDownbeatIndices(beatTimes, downbeatTimes);
+    this.beatTiers = matchBeatTiers(beatTimes, downbeatTimes, ladder?.tiers ?? null);
+    this.tierBars = ladder?.tierBars ?? [1];
   }
 
   /** Per-column automation modulation (editor rows); null clears. */
@@ -918,23 +965,43 @@ export class WaveformRendererV2 {
 
   private buildBeatgridVertices(view: FrameView, pxPerSec: number): Float32Array {
     const beatTimes = this.beatTimes!;
+    const beatTiers = this.beatTiers;
+    const downbeatTimes = this.downbeatTimes;
+    const tierBars = this.tierBars;
     const lineWidth = 1 * view.dpr;
-    const downbeatWidth = 2 * view.dpr;
 
-    // Density culling (legacy parity): hide weak beats below ~12px/beat,
-    // everything below ~2.5px/bar.
+    // Density culling: weak beats hide below ~12px/beat (legacy parity);
+    // each Metric-ladder tier hides below its own minimum spacing, so
+    // zoomed out only phrase-level lines survive (metric-ladder 01). Bar
+    // width comes from the downbeat lattice itself (any time signature)
+    // and tier spans from the projection — no duple assumption here.
     const secPerBeat = beatTimes.length > 1 ? beatTimes[1] - beatTimes[0] : this.data!.duration;
     const pxPerBeat = secPerBeat * pxPerSec;
     const showWeakBeats = pxPerBeat >= 12 * view.dpr;
-    if (pxPerBeat * 4 < 2.5 * view.dpr) return new Float32Array(0);
+    const secPerBar =
+      downbeatTimes && downbeatTimes.length > 1
+        ? downbeatTimes[1] - downbeatTimes[0]
+        : secPerBeat * 4;
+    const pxPerBar = secPerBar * pxPerSec;
+    let minTier = tierBars.length;
+    for (let k = 0; k < tierBars.length; k++) {
+      if (pxPerBar * tierBars[k] >= TIER_MIN_SPACING_PX * view.dpr) {
+        minTier = k;
+        break;
+      }
+    }
+    if (minTier >= tierBars.length) return new Float32Array(0);
 
     const verts: number[] = [];
+    const maxStyle = TIER_WIDTH.length - 1;
     for (let i = 0; i < beatTimes.length; i++) {
-      const isDownbeat = this.downbeatIndices.has(i);
-      if (!showWeakBeats && !isDownbeat) continue;
+      const tier = beatTiers ? beatTiers[i] : -1;
+      if (tier < 0 && !showWeakBeats) continue;
+      if (tier >= 0 && tier < minTier) continue;
       const x = beatTimes[i] * pxPerSec;
-      const width = isDownbeat && showWeakBeats ? downbeatWidth : lineWidth;
-      const alpha = isDownbeat ? (showWeakBeats ? 0.3 : 0.15) : 0.15;
+      const s = tier < 0 ? -1 : Math.min(tier, maxStyle);
+      const width = s < 0 ? lineWidth : TIER_WIDTH[s] * view.dpr;
+      const alpha = s < 0 ? 0.15 : TIER_ALPHA[s];
       pushRect(verts, x, 0, width, view.h, alpha, alpha, alpha);
     }
     return new Float32Array(verts);
