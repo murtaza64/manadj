@@ -210,9 +210,9 @@ def cmd_start(args: argparse.Namespace) -> None:
         PID_FILE.unlink(missing_ok=True)
         sys.exit(f"dev processes exited immediately — see {LOG_FILE}")
     print(f"lane app running: lane={lane_name()} pid={proc.pid}")
-    print(f"  browser:       http://localhost:{vite_port}")
-    print(f"  desktop shell: npm --prefix {MAIN_ROOT}/desktop start -- --port {vite_port}")
-    print(f"  logs:          {LOG_FILE}")
+    print(f"  electron (preferred): make -C {MAIN_ROOT} electron PORT={vite_port}")
+    print(f"  browser (fallback):   http://localhost:{vite_port}")
+    print(f"  logs:                 {LOG_FILE}")
 
 
 def cmd_status(_args: argparse.Namespace) -> None:
