@@ -13,7 +13,7 @@ import './Player.css';
  * components the Performance DeckPanel renders, minus the key-hint slots.
  */
 export default function Player() {
-  const { engine, loadedTrack } = useDeck();
+  const { engine, loadedTrack, beatjumpBeats } = useDeck();
   const ready = useDeckReady();
   const loadState = useDeckSnapshot((s) => s.loadState);
   const loadError = useDeckSnapshot((s) => s.loadError);
@@ -34,6 +34,7 @@ export default function Player() {
           loop={loop}
           transport={scrubTransport}
           dimmed={trackId !== null && !ready}
+          beatjumpBeats={beatjumpBeats}
           playMarkerFraction={0.35}
           timeReadoutAnchor="top-left"
           /* Docked at the transport overlay's bottom edge (panel bottom

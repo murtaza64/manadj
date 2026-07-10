@@ -37,6 +37,9 @@ interface WebGLWaveformProps {
   visibleSeconds?: number;
   onVisibleSecondsChange?: (seconds: number) => void;
   className?: string;
+  /** Deck beatjump size for target guides (beatjump-guides 01); absent
+   * hides them. */
+  beatjumpBeats?: number | null;
   /** Fixed-playhead position, 0-1 (default PLAY_MARKER_FRACTION = 0.25).
    * Per-surface: the performance decks must stay at 0.25 (PlayGuideOverlay
    * aligns to it); the library player centers at 0.5. */
@@ -53,6 +56,7 @@ export default function WebGLWaveform({
   transport,
   loop = null,
   dimmed = false,
+  beatjumpBeats = null,
   visibleSeconds,
   onVisibleSecondsChange,
   className,
@@ -80,6 +84,7 @@ export default function WebGLWaveform({
     hotCues,
     beatgrid: beatgridData?.data ?? null,
     metricLadder: metricLadder ?? null,
+    beatjumpBeats,
     regions,
   });
 

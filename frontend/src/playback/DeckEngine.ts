@@ -39,7 +39,7 @@ export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
  * it and enters the track on time. Bounded so a runaway gesture can't push
  * the playhead into an unbounded silent pre-roll — this is a musical lead-in.
  */
-const MAX_LEAD_IN_SECONDS = 30;
+export const MAX_LEAD_IN_SECONDS = 30;
 
 /** A playhead discontinuity: seek, beat jump, or hot-cue jump. */
 export interface DeckTransportGesture {

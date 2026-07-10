@@ -24,6 +24,9 @@ interface Options {
   /** Persisted Metric-ladder deviation (metric-ladder 02): Reset marks the
    * resolver applies; absent/null = the default ladder. */
   metricLadder?: PersistedLadder | null;
+  /** Deck beatjump size for target guides (beatjump-guides 01); null/absent
+   * hides them. */
+  beatjumpBeats?: number | null;
   /** Shaded overlay regions (looping 05), e.g. the active loop. */
   regions?: OverlayRegion[];
   /** Driven mode: no self-running render loop — the caller's own motion
@@ -42,6 +45,7 @@ export function useWaveformRendererV2({
   hotCues,
   beatgrid,
   metricLadder,
+  beatjumpBeats = null,
   regions,
   driven = false,
   slot = 'full',
@@ -106,6 +110,10 @@ export function useWaveformRendererV2({
   useEffect(() => {
     if (regions) rendererRef.current?.setRegions(regions);
   }, [regions, waveformData]);
+
+  useEffect(() => {
+    rendererRef.current?.setBeatjumpGuides(beatjumpBeats);
+  }, [beatjumpBeats, waveformData]);
 
   return { canvasRef, rendererRef, initError, draw };
 }

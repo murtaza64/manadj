@@ -17,6 +17,8 @@
 // separate vertex-geometry pass ported from the legacy geometry renderer.
 
 import type { PlaybackClock } from '../playback/clock';
+import { addBeats } from '../playback/quantize';
+import { MAX_LEAD_IN_SECONDS } from '../playback/DeckEngine';
 import { STEP_RATIO } from '../utils/waveformZoom';
 import { playedDimBoundary } from './loopOverlay';
 import { MAX_LEVELS, TEX_WIDTH } from './blob';
@@ -171,6 +173,10 @@ function parseCueColor(color: string | undefined): [number, number, number] | nu
 /** Reset-mark indicator color (metric-ladder 02): gold — outside the hot
  * cue palette, warmer than the grey gridlines. */
 const RESET_MARK_COLOR: [number, number, number] = [1.0, 0.82, 0.4];
+
+/** Playhead pink (var(--pink)) — shared by the playhead bar and the
+ * beatjump target guides, which are playhead-relative by meaning. */
+const PLAYHEAD_COLOR: [number, number, number] = [0.96, 0.76, 0.91];
 
 /** GL-side palette: the CSS palette as 0-1 floats. */
 const HOT_CUE_COLORS: Record<number, [number, number, number]> = Object.fromEntries(
@@ -501,6 +507,10 @@ export class WaveformRendererV2 {
   private cuePoint: number | null = null;
   /** Reset-mark positions (downbeat-resolved seconds, metric-ladder 02). */
   private resetMarks: number[] = [];
+  /** Beatjump size (beats) for target guides; null hides them. */
+  private beatjumpBeats: number | null = null;
+  /** Plain-array view of beatTimes for beat-domain math (addBeats). */
+  private beatTimesPlain: readonly number[] | null = null;
   private regions: OverlayRegion[] = [];
   private hotCues = new Map<number, { time: number; color?: string }>();
   private beatTimes: Float32Array | null = null;
@@ -571,6 +581,7 @@ export class WaveformRendererV2 {
     ladder?: LadderGridInput | null,
   ): void {
     this.beatTimes = new Float32Array(beatTimes);
+    this.beatTimesPlain = beatTimes;
     this.downbeatTimes = new Float32Array(downbeatTimes);
     // New data must invalidate the vertex cache explicitly (a nudged grid
     // otherwise keeps drawing stale lines — off-by-a-nudge).
@@ -583,6 +594,13 @@ export class WaveformRendererV2 {
    * clears. Drawn per frame like cues, so they translate with content. */
   public setResetMarks(times: number[]): void {
     this.resetMarks = times;
+  }
+
+  /** Beatjump target guides (beatjump-guides 01): the deck's jump size in
+   * beats; null hides. Targets recompute per frame from the playhead via
+   * the same beat-domain math the jump itself uses. */
+  public setBeatjumpGuides(beats: number | null): void {
+    this.beatjumpBeats = beats;
   }
 
   /** Per-column automation modulation (editor rows); null clears. */
@@ -906,6 +924,7 @@ export class WaveformRendererV2 {
     const scratch: number[] = [];
     this.pushRegions(view, scratch); // under the markers
     if (this.cuePoint !== null) this.pushCuePoint(view, scratch);
+    this.pushBeatjumpGuides(view, scratch);
     this.drawTriangles(scratch, this.overlayVao!, this.overlayBuffer!);
 
     // Hot cues draw with standard alpha blending (accurate colors).
@@ -1084,6 +1103,39 @@ export class WaveformRendererV2 {
     }
   }
 
+  /** Beatjump target guides (beatjump-guides 01): where jump back/forward
+   * would land from the CURRENT playhead — a faint playhead-pink line plus
+   * a top chevron pointing along the jump. Recomputed per frame with the
+   * exact math the jump uses (addBeats, clamped like clampPlayhead), so
+   * the guide never lies. Grid-only (the gridless bpm fallback has no
+   * lattice worth aiming at) and hidden on minimaps. */
+  private pushBeatjumpGuides(view: FrameView, verts: number[]): void {
+    const beats = this.beatjumpBeats;
+    const beatTimes = this.beatTimesPlain;
+    if (beats === null || this.isMinimap || !this.data) return;
+    if (!beatTimes || beatTimes.length < 2) return;
+    const [pr, pg, pb] = PLAYHEAD_COLOR;
+    for (const dir of [-1, 1]) {
+      const raw = addBeats(view.playhead, dir * beats, beatTimes);
+      // The ENGINE's clamp, not 0: a backward jump may land in the silent
+      // lead-in, and the guide must land where the jump does.
+      const t = Math.max(-MAX_LEAD_IN_SECONDS, Math.min(this.data.duration, raw));
+      const x = this.timeToX(t, view);
+      if (x < 0 || x >= view.w) continue;
+      // Additive batch: colors premultiplied. Playhead pink, faint line.
+      const lineA = 0.28;
+      const w = 1 * view.dpr;
+      pushRect(verts, x - w / 2, 0, w, view.h, pr * lineA, pg * lineA, pb * lineA);
+      const c = 5 * view.dpr;
+      const chevA = 0.85;
+      verts.push(
+        x, 0, pr * chevA, pg * chevA, pb * chevA,
+        x, 1.6 * c, pr * chevA, pg * chevA, pb * chevA,
+        x + dir * c, 0.8 * c, pr * chevA, pg * chevA, pb * chevA,
+      );
+    }
+  }
+
   /** Gold pole + LEFT-flying pennant (cue flags fly right) at each Reset
    * mark — "the count restarts here" on every waveform surface. */
   private pushResetMarks(view: FrameView, verts: number[]): void {
@@ -1146,7 +1198,7 @@ export class WaveformRendererV2 {
     } else {
       x = view.w * (this.config.playMarkerPosition ?? 0.25);
     }
-    pushRect(verts, x, 0, 3, view.h, 0.96, 0.76, 0.91); // var(--pink)
+    pushRect(verts, x, 0, 3, view.h, ...PLAYHEAD_COLOR);
   }
 
   private ensureOverlayContext(): CanvasRenderingContext2D | null {

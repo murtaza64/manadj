@@ -91,7 +91,7 @@ export function DeckWaveform({
   visibleSeconds: number;
   onVisibleSecondsChange: (seconds: number) => void;
 }) {
-  const { engine, loadedTrack } = useDeck();
+  const { engine, loadedTrack, beatjumpBeats } = useDeck();
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
@@ -117,6 +117,7 @@ export function DeckWaveform({
       loop={loop}
       transport={transport}
       dimmed={loadedTrack !== null && !ready}
+      beatjumpBeats={beatjumpBeats}
       visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
       onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
     />
