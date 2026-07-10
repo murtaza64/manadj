@@ -919,7 +919,6 @@ export default function Library({
                   playOrder={playOrder}
                   dragSource="playlist-pane"
                   onLoadTrack={loadForTable}
-                  loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}
@@ -958,7 +957,6 @@ export default function Library({
                   getDragIds={editLibSel.getDragIds}
                   onRowContextMenu={handleRowContextMenuEditLib}
                   onLoadTrack={loadForTable}
-                  loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}
@@ -1023,7 +1021,6 @@ export default function Library({
                   playOrder={playOrder}
                   dragSource={selectedView === 'playlist' ? 'playlist-pane' : 'library'}
                   onLoadTrack={loadForTable}
-                  loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}

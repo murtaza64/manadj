@@ -16,8 +16,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type SetRowWire, type TakeRowWire } from '../api/client';
-import { useDecks, type DeckContextValue } from '../hooks/useDeck';
-import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
+import { useDecks } from '../hooks/useDeck';
+import { useDeckOccupancy } from '../hooks/useDeckOccupancy';
 import { useMixer } from '../hooks/useMixer';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { Track } from '../types';
@@ -1267,33 +1267,6 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
     </div>
-  );
-}
-
-/**
- * Both decks' live occupancy slices (sets 35), off the shared engines.
- * Primitive selectors per useSyncExternalStore rules (a fresh object
- * every read would loop); the map itself is memoized on the slices, so
- * the pane re-renders only on load / play / pause — not per tick.
- */
-function useEngineSlice<T>(engine: DeckEngine, selector: (s: DeckSnapshot) => T): T {
-  return useSyncExternalStore(
-    (cb) => engine.subscribe(cb),
-    () => selector(engine.getSnapshot())
-  );
-}
-
-function useDeckOccupancy(decks: Record<ChannelId, DeckContextValue>): DeckOccupancyMap {
-  const aTrackId = useEngineSlice(decks.A.engine, (s) => s.trackId);
-  const aPlaying = useEngineSlice(decks.A.engine, (s) => s.playing);
-  const bTrackId = useEngineSlice(decks.B.engine, (s) => s.trackId);
-  const bPlaying = useEngineSlice(decks.B.engine, (s) => s.playing);
-  return useMemo(
-    () => ({
-      A: { trackId: aTrackId, playing: aPlaying },
-      B: { trackId: bTrackId, playing: bPlaying },
-    }),
-    [aTrackId, aPlaying, bTrackId, bPlaying]
   );
 }
 
