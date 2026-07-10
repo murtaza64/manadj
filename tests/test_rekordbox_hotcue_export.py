@@ -16,12 +16,12 @@ from backend.models import HotCue, Track
 from rekordbox.perf_export import plan_hotcue_export
 
 
-def hot(row_id: str, slot: int, ms: int):
-    return SimpleNamespace(ID=row_id, Kind=slot, InMsec=ms)
+def hot(row_id: str, kind: int, ms: int, comment=None, color=-1):
+    return SimpleNamespace(ID=row_id, Kind=kind, InMsec=ms, Comment=comment, Color=color)
 
 
-def mem(row_id: str, ms: int):
-    return SimpleNamespace(ID=row_id, Kind=0, InMsec=ms)
+def mem(row_id: str, ms: int, comment=None, color=-1):
+    return SimpleNamespace(ID=row_id, Kind=0, InMsec=ms, Comment=comment, Color=color)
 
 
 # -- planner: add-only tier ----------------------------------------------------
@@ -134,7 +134,7 @@ def test_exports_library_cues(client_and_track):
     )
     assert res.status_code == 200
     assert res.json()["added"] == 1
-    assert exporter.calls == [("/music/t.flac", [(3, 30.0)], "add-only")]
+    assert exporter.calls == [("/music/t.flac", [(3, 30.0, "Drop", None)], "add-only")]
 
 
 def test_cueless_track_409(client_and_track, db):
@@ -157,3 +157,70 @@ def test_replace_heals_missing_memory_twin():
     plan = plan_hotcue_export({1: 30000}, [hot("h1", 1, 30000)], [], "replace-all")
     assert [(a.slot, a.rb_ms) for a in plan.adds] == [(0, 30000)]
     assert plan_hotcue_export({1: 30000}, [hot("h1", 1, 30000)], [], "add-only").empty
+
+
+def test_pad_mapping_final_table():
+    """Self-labeling-experiment mapping (cue_mapping.py): pad D = Kind 5,
+    pad H = Kind 9, Kind 4 never a hot cue. Planner keys by SLOT; a
+    desired slot-4 cue matches an RB Kind-5 row."""
+    plan = plan_hotcue_export(
+        {4: 40000},
+        [hot("h1", 5, 30000)],  # RB's pad-D row
+        [mem("m1", 30000)],
+        "replace-all",
+    )
+    assert {(m.row_id, m.rb_ms) for m in plan.moves} == {("h1", 40000), ("m1", 40000)}
+    assert not plan.soft_deletes  # matched, not treated as RB-only
+
+
+def test_palette_mapping():
+    from rekordbox.cue_mapping import nearest_palette_index, palette_index_to_hex
+
+    assert nearest_palette_index("#FF0000") == 1  # red
+    assert nearest_palette_index("#00FF00") == 4  # green
+    assert nearest_palette_index("#FFA500") == 2  # orange
+    assert nearest_palette_index(None) is None
+    assert nearest_palette_index("garbage") is None
+    assert palette_index_to_hex(2) == "#E8A029"
+    assert palette_index_to_hex(None) is None
+
+
+def test_replace_refreshes_stale_decoration_in_place():
+    """Replace-all owns decoration: an in-place row (and its twin) whose
+    label/color differ from the Library's get a CueRefresh — the Devotion
+    default-colors regression."""
+    plan = plan_hotcue_export(
+        {1: 30000},
+        [hot("h1", 1, 30000)],  # plain row, in place
+        [mem("m1", 30000)],
+        "replace-all",
+        deco={1: ("Drop", 3)},
+    )
+    assert not plan.adds and not plan.moves and not plan.soft_deletes
+    assert {(r.row_id, r.label, r.color_index) for r in plan.refreshes} == {
+        ("h1", "Drop", 3),
+        ("m1", "Drop", 3),
+    }
+    assert not plan.empty  # deco-only plans still apply
+
+
+def test_replace_matching_decoration_is_noop():
+    plan = plan_hotcue_export(
+        {1: 30000},
+        [hot("h1", 1, 30000, comment="Drop", color=3)],
+        [mem("m1", 30000, comment="Drop", color=3)],
+        "replace-all",
+        deco={1: ("Drop", 3)},
+    )
+    assert plan.empty
+
+
+def test_add_only_never_touches_decoration():
+    plan = plan_hotcue_export(
+        {1: 30000},
+        [hot("h1", 1, 30000)],
+        [mem("m1", 30000)],
+        "add-only",
+        deco={1: ("Drop", 3)},
+    )
+    assert plan.empty and plan.skipped_slots == [1]

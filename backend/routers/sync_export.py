@@ -72,7 +72,7 @@ def export_hotcues_endpoint(
     from rekordbox.perf_export import RekordboxRunningError, TrackNotInRekordboxError
 
     track = _track_or_404(db, request.track_id)
-    cues = [(c.slot_number, c.time_seconds) for c in track.hotcues]
+    cues = [(c.slot_number, c.time_seconds, c.label, c.color) for c in track.hotcues]
     if not cues:
         raise HTTPException(
             status_code=409, detail="Library has no hot cues for this track"
@@ -82,6 +82,41 @@ def export_hotcues_endpoint(
     except TrackNotInRekordboxError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RekordboxRunningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+class BeatgridExportRequest(BaseModel):
+    track_id: int  # always the confirmed tier: grid export overwrites RB's
+
+
+@router.post("/beatgrid/rekordbox")
+def export_beatgrid_endpoint(
+    request: BeatgridExportRequest,
+    db: Session = Depends(get_db),
+    exporter=Depends(get_rekordbox_perf_exporter),
+):
+    """Author the Rekordbox grid (ANLZ PQTZ + BPM scalar) from the
+    Library's saved Beatgrid. Placeholder grids never export."""
+    from backend.sync_status.compare import beatgrid_value_from_row
+
+    from rekordbox.perf_export import RekordboxRunningError, TrackNotInRekordboxError
+
+    track = _track_or_404(db, request.track_id)
+    grid = beatgrid_value_from_row(track.beatgrid)
+    if grid is None or not grid.tempo_changes:
+        raise HTTPException(
+            status_code=409,
+            detail="Library has no saved grid for this track (placeholders don't export)",
+        )
+    waveform = getattr(track, "waveform", None)
+    end_s = getattr(waveform, "duration", None)
+    try:
+        return exporter.export_beatgrid(track.filename, grid.tempo_changes, end_s)
+    except TrackNotInRekordboxError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RekordboxRunningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except (LookupError, ValueError) as e:
         raise HTTPException(status_code=409, detail=str(e))
 
 

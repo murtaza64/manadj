@@ -140,13 +140,17 @@ class RekordboxPerfExporter:
     # -- hot cues --------------------------------------------------------
 
     def export_hotcues(
-        self, filename: str, cues: list[tuple[int, float]], mode: str
+        self,
+        filename: str,
+        cues: list[tuple[int, float, str | None, str | None]],
+        mode: str,
     ) -> dict:
         """Reconcile the RB hotcue mirror for one track.
 
-        `cues` are (slot 1-8, manadj seconds); positions are translated
-        into RB's decode frame per container class. Returns a summary
-        {added, moved, deleted, skipped_slots}.
+        `cues` are (slot 1-8, manadj seconds, label, #RRGGBB color);
+        positions are translated into RB's decode frame per container
+        class, colors to the nearest RB palette index (cue_mapping).
+        Returns a summary {added, moved, deleted, skipped_slots}.
         """
         from pyrekordbox.db6.tables import DjmdCue
 
@@ -154,22 +158,31 @@ class RekordboxPerfExporter:
 
         ensure_rekordbox_closed()
         content = self._content_for(filename)
+        from rekordbox.cue_mapping import nearest_palette_index
+
         desired = {
             slot: manadj_seconds_to_rb_ms(sec, content.FolderPath)
-            for slot, sec in cues
+            for slot, sec, _label, _color in cues
         }
+        deco = {
+            slot: (label or None, nearest_palette_index(color))
+            for slot, _sec, label, color in cues
+        }
+        from rekordbox.cue_mapping import HOT_CUE_KINDS, MEMORY_KIND
+
         rows = (
             self._db.session.query(DjmdCue)
             .filter(DjmdCue.ContentID == content.ID, DjmdCue.rb_local_deleted == 0)
             .all()
         )
-        hot = [r for r in rows if r.Kind and 1 <= r.Kind <= 8]
-        memory = [r for r in rows if r.Kind == 0]
-        plan = plan_hotcue_export(desired, hot, memory, mode)
+        hot = [r for r in rows if r.Kind in HOT_CUE_KINDS]
+        memory = [r for r in rows if r.Kind == MEMORY_KIND]
+        plan = plan_hotcue_export(desired, hot, memory, mode, deco)
         summary = {
             "added": sum(1 for a in plan.adds if a.slot),
             "moved": 0,
             "deleted": 0,
+            "refreshed": 0,
             "skipped_slots": sorted(plan.skipped_slots),
         }
         if plan.empty:
@@ -183,25 +196,47 @@ class RekordboxPerfExporter:
             row.InFrame = _frames(mv.rb_ms)
             if row.Kind:  # count desired-slot moves, not their twins
                 summary["moved"] += 1
+        for rf in plan.refreshes:
+            row = by_id[rf.row_id]
+            row.Comment = rf.label
+            row.Color = rf.color_index if rf.color_index is not None else -1
+        summary["refreshed"] = len(plan.refreshes)
         for row_id in plan.soft_deletes:
             by_id[row_id].rb_local_deleted = 1
             if by_id[row_id].Kind:
                 summary["deleted"] += 1
+        from rekordbox.cue_mapping import SLOT_TO_KIND
+
         for add in plan.adds:
             # slot 0 = bare memory row (twin for a moved cue)
-            self._db.session.add(self._new_cue_row(content, add.slot, add.rb_ms))
+            kind = SLOT_TO_KIND.get(add.slot, 0) if add.slot else 0
+            label, color_idx = deco.get(add.slot, (None, None)) if add.slot else (None, None)
+            self._db.session.add(
+                self._new_cue_row(content, kind, add.rb_ms, label, color_idx)
+            )
             if add.slot and add.memory_twin:
-                self._db.session.add(self._new_cue_row(content, 0, add.rb_ms))
+                # the twin IS the same cue in the mirror model: same deco
+                self._db.session.add(
+                    self._new_cue_row(content, 0, add.rb_ms, label, color_idx)
+                )
         self._db.commit(autoinc=True)
         logger.info(
             "exported hotcues -> rekordbox %s: %s", content.FolderPath, summary
         )
         return summary
 
-    def _new_cue_row(self, content, kind: int, ms: int):
-        """RB7 minimal cue row shape (spike-verified): hot cue == memory
-        cue shape, only Kind differs; NULL extras (NULL is not 0 — rows
-        with zeroed extras render, mixed NULL/color rows silently don't)."""
+    def _new_cue_row(
+        self,
+        content,
+        kind: int,
+        ms: int,
+        label: str | None = None,
+        color_index: int | None = None,
+    ):
+        """RB7 cue row shape (spike + probe verified): hot cue == memory
+        cue shape, only Kind differs; Comment = label, Color = palette
+        INDEX (-1 = none). Never the legacy Color=255/ColorTableIndex
+        shape — RB7 silently doesn't render it."""
         from pyrekordbox.db6.tables import DjmdCue
 
         return DjmdCue(
@@ -216,7 +251,8 @@ class RekordboxPerfExporter:
             OutFrame=0,
             OutMpegFrame=0,
             OutMpegAbs=0,
-            Color=-1,
+            Comment=label,
+            Color=color_index if color_index is not None else -1,
             ContentUUID=content.UUID,
             UUID=str(uuid.uuid4()),
             rb_data_status=0,
@@ -224,6 +260,68 @@ class RekordboxPerfExporter:
             rb_local_deleted=0,
             rb_local_synced=0,
         )
+
+    # -- beatgrid --------------------------------------------------------
+
+    def export_beatgrid(
+        self,
+        filename: str,
+        tempo_changes: list,  # TempoChangeValue-shaped (manadj frame)
+        end_s: float | None = None,
+    ) -> dict:
+        """Author the RB grid (ANLZ PQTZ) from the Library's tempo
+        changes and write the DjmdContent.BPM scalar (dominant BPM,
+        ADR 0016 projection). Positions offset into RB's frame."""
+        from backend.beatgrid_utils import dominant_bpm
+        from backend.sync_status.models import TempoChangeValue
+
+        from rekordbox.anlz_grid import generate_beats, read_pqtz, write_pqtz
+        from rekordbox.decode_offset import export_offset_ms
+
+        ensure_rekordbox_closed()
+        content = self._content_for(filename)
+        dat_path = self._dat_path(content)
+        offset_s = export_offset_ms(content.FolderPath) / 1000.0
+        shifted = [
+            TempoChangeValue(
+                start_time=tc.start_time + offset_s,
+                bpm=tc.bpm,
+                bar_position=tc.bar_position,
+            )
+            for tc in tempo_changes
+        ]
+        if end_s is None:
+            # fall back to the DB track length first; the current grid's
+            # extent only as a last resort (a previously truncated grid
+            # would otherwise feed back its own truncation — live-fire
+            # lesson). Extent = last BEAT time, never a segment start.
+            from rekordbox.anlz_grid import pqtz_extent_s
+
+            end_s = float(content.Length or 0) or pqtz_extent_s(dat_path) or 0
+            if not end_s:
+                raise ValueError("cannot determine track end for grid generation")
+        beats = generate_beats(shifted, end_s + offset_s)
+        if not beats:
+            raise ValueError("generated an empty grid")
+
+        snapshot_library(self._db_dir)
+        count = write_pqtz(dat_path, beats)
+        duration = end_s - tempo_changes[0].start_time
+        bpm = dominant_bpm(
+            [{"start_time": tc.start_time, "bpm": tc.bpm} for tc in tempo_changes],
+            duration if duration > 0 else None,
+        )
+        content.BPM = int(round(bpm * 100))
+        self._db.commit(autoinc=True)
+        logger.info("exported beatgrid -> rekordbox %s (%d beats)", filename, count)
+        return {"beats": count, "tempo_changes": len(tempo_changes), "bpm": bpm}
+
+    def _dat_path(self, content) -> Path:
+        if not content.AnalysisDataPath:
+            raise TrackNotInRekordboxError(
+                f"{Path(content.FolderPath or '').name}: no ANLZ analysis in Rekordbox"
+            )
+        return self._db_dir / "share" / content.AnalysisDataPath.lstrip("/\\")
 
     def _key_row(self, key_obj):
         """djmdKey row for a Key: reuse an existing row in ANY notation the
@@ -290,23 +388,35 @@ class CueMove:
     rb_ms: int
 
 
+@dataclass(frozen=True)
+class CueRefresh:
+    """Label/color convergence on a row that stays in place (or moves):
+    replace-all owns the whole mirror, decoration included."""
+
+    row_id: str
+    label: str | None
+    color_index: int | None
+
+
 @dataclass
 class HotcueExportPlan:
     adds: list[CueAdd] = field(default_factory=list)
     moves: list[CueMove] = field(default_factory=list)
     soft_deletes: list[str] = field(default_factory=list)
+    refreshes: list[CueRefresh] = field(default_factory=list)  # replace-all deco
     skipped_slots: list[int] = field(default_factory=list)  # add-only: left alone
 
     @property
     def empty(self) -> bool:
-        return not (self.adds or self.moves or self.soft_deletes)
+        return not (self.adds or self.moves or self.soft_deletes or self.refreshes)
 
 
 def plan_hotcue_export(
     desired: dict[int, int],  # slot -> rb_ms (already offset-applied)
-    hot_rows: list,  # DjmdCue-shaped: .ID .Kind .InMsec
+    hot_rows: list,  # DjmdCue-shaped: .ID .Kind .InMsec (.Comment .Color)
     memory_rows: list,  # DjmdCue-shaped, Kind == 0
     mode: str,  # "add-only" | "replace-all"
+    deco: dict[int, tuple[str | None, int | None]] | None = None,  # slot -> (label, color idx)
 ) -> HotcueExportPlan:
     """Reconcile the RB cue mirror against the desired manadj cue set.
 
@@ -315,41 +425,66 @@ def plan_hotcue_export(
     slots update both mirror rows, RB-only hot cues and stray memory
     cues are soft-deleted (rb_local_deleted, spike-verified).
     """
+    from rekordbox.cue_mapping import KIND_TO_SLOT
+
     plan = HotcueExportPlan()
-    hot_by_slot = {r.Kind: r for r in hot_rows}
+    hot_by_slot = {KIND_TO_SLOT.get(r.Kind, r.Kind): r for r in hot_rows}
     memory_by_ms: dict[int, list] = {}
     for r in memory_rows:
         memory_by_ms.setdefault(r.InMsec, []).append(r)
 
-    def claim_twin(ms: int) -> bool:
-        """True if a memory row already sits at ms (and consume one)."""
+    def claim_twin(ms: int):
+        """The memory row already sitting at ms, consumed — or None."""
         rows = memory_by_ms.get(ms)
-        if rows:
-            rows.pop()
-            return True
-        return False
+        return rows.pop() if rows else None
+
+    def want_deco(slot: int):
+        return (deco or {}).get(slot, (None, None))
+
+    def refresh_if_stale(row, slot: int) -> None:
+        if mode != "replace-all" or row is None:
+            return
+        label, color_idx = want_deco(slot)
+        color_idx = color_idx if color_idx is not None else -1
+        if (row.Comment or None) != label or (row.Color if row.Color is not None else -1) != color_idx:
+            plan.refreshes.append(
+                CueRefresh(row_id=row.ID, label=label, color_index=color_idx)
+            )
 
     for slot in sorted(desired):
         ms = desired[slot]
         existing = hot_by_slot.pop(slot, None)
         if existing is None:
-            plan.adds.append(CueAdd(slot=slot, rb_ms=ms, memory_twin=not claim_twin(ms)))
+            plan.adds.append(
+                CueAdd(slot=slot, rb_ms=ms, memory_twin=claim_twin(ms) is None)
+            )
         elif mode == "add-only":
             plan.skipped_slots.append(slot)
-            claim_twin(existing.InMsec)  # its twin stays too
+            claim_twin(existing.InMsec)  # its twin stays too (deco untouched)
         elif existing.InMsec != ms:
             plan.moves.append(CueMove(row_id=existing.ID, rb_ms=ms))
+            refresh_if_stale(existing, slot)
             # move the twin with it, or create one at the new position
             old_twins = memory_by_ms.get(existing.InMsec)
             if old_twins:
-                plan.moves.append(CueMove(row_id=old_twins.pop().ID, rb_ms=ms))
-            elif not claim_twin(ms):
-                plan.adds.append(CueAdd(slot=0, rb_ms=ms, memory_twin=False))
+                twin = old_twins.pop()
+                plan.moves.append(CueMove(row_id=twin.ID, rb_ms=ms))
+                refresh_if_stale(twin, slot)
+            else:
+                twin = claim_twin(ms)
+                if twin is None:
+                    plan.adds.append(CueAdd(slot=0, rb_ms=ms, memory_twin=False))
+                else:
+                    refresh_if_stale(twin, slot)
         else:
-            # in place; keep its twin — replace-all also HEALS a missing
-            # twin (the mirror invariant is the point of the confirm tier)
-            if not claim_twin(ms) and mode == "replace-all":
+            # in place — replace-all still owns decoration, and HEALS a
+            # missing twin (the mirror invariant is the confirm tier's point)
+            refresh_if_stale(existing, slot)
+            twin = claim_twin(ms)
+            if twin is None and mode == "replace-all":
                 plan.adds.append(CueAdd(slot=0, rb_ms=ms, memory_twin=False))
+            else:
+                refresh_if_stale(twin, slot)
 
     if mode == "replace-all":
         # RB-only hot cues and unclaimed (stray) memory cues leave the mirror

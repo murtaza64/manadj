@@ -121,7 +121,9 @@ class RekordboxSurfaceReader:
     energy, and hot cues from djmdCue rows (positions translated from
     Rekordbox's decode frame into manadj's — rekordbox/decode_offset.py)."""
 
-    fields = frozenset({"title", "artist", "key", "energy", "tags", "hotcues"})
+    fields = frozenset(
+        {"title", "artist", "key", "energy", "tags", "hotcues", "beatgrid"}
+    )
     # RB can't render out-of-band cue labels/colors yet (spike finding;
     # rekordbox-perf-export/03): compare cue slot+position only.
     hotcue_fidelity = "position"
@@ -176,10 +178,41 @@ class RekordboxSurfaceReader:
                         tags=sorted(tags_by_content.get(c.ID, [])),
                         hotcues=hotcues,
                         hotcue_mirror_ok=mirror_ok,
+                        beatgrid=self._rb_beatgrid(c),
                     ),
                 )
             )
         return refs
+
+    def _rb_beatgrid(self, content):
+        """The track's PQTZ grid (ANLZ .DAT), offset into manadj's frame.
+        None when unanalyzed/unreadable — not a divergence."""
+        from rekordbox.anlz_grid import read_pqtz
+        from rekordbox.decode_offset import export_offset_ms
+
+        if not content.AnalysisDataPath:
+            return None
+        dat = (
+            Path(self._db._db_dir) / "share" / content.AnalysisDataPath.lstrip("/\\")
+        )
+        grid = read_pqtz(dat)
+        if grid is None or not grid.tempo_changes:
+            return grid
+        offset_s = export_offset_ms(content.FolderPath or "") / 1000.0
+        if offset_s == 0:
+            return grid
+        from backend.sync_status.models import BeatgridValue, TempoChangeValue
+
+        return BeatgridValue(
+            tempo_changes=[
+                TempoChangeValue(
+                    start_time=tc.start_time - offset_s,
+                    bpm=tc.bpm,
+                    bar_position=tc.bar_position,
+                )
+                for tc in grid.tempo_changes
+            ]
+        )
 
 
 def rb_hotcues_from_cue_rows(
@@ -187,9 +220,9 @@ def rb_hotcues_from_cue_rows(
 ) -> tuple[list[HotCueValue] | None, bool | None]:
     """Rekordbox djmdCue rows -> (hotcues in manadj frame, mirror_ok).
 
-    Hot cues are Kind 1-8 (provisionally Kind == slot letter; the spike
-    saw a hand-set ladder land on Kinds 1,2,3,5,6 — mapping verification
-    tracked in rekordbox-perf-export/02). Memory cues are Kind 0; per the
+    Hot cues map pads A-H to Kinds 1,2,3,9,5,6,7,8 (empirically
+    verified 2026-07-10 — see rekordbox/cue_mapping.py; the spike's
+    1,2,3,5,6 "anomaly" was pads A,B,C,E,F). Memory cues are Kind 0; per the
     mirroring model each hot cue should have a memory twin at the same
     millisecond, and stray memory cues mean the mirror is out of sync.
 
@@ -199,18 +232,24 @@ def rb_hotcues_from_cue_rows(
     """
     if not cue_rows:
         return None, None
+    from rekordbox.cue_mapping import (
+        HOT_CUE_KINDS,
+        KIND_TO_SLOT,
+        MEMORY_KIND,
+        palette_index_to_hex,
+    )
     from rekordbox.decode_offset import rb_ms_to_manadj_seconds
 
-    hot = [c for c in cue_rows if c.Kind and 1 <= c.Kind <= 8]
-    memory_ms = sorted(c.InMsec for c in cue_rows if c.Kind == 0)
+    hot = [c for c in cue_rows if c.Kind in HOT_CUE_KINDS]
+    memory_ms = sorted(c.InMsec for c in cue_rows if c.Kind == MEMORY_KIND)
     hotcues = [
         HotCueValue(
-            slot=c.Kind,
+            slot=KIND_TO_SLOT[c.Kind],
             time=rb_ms_to_manadj_seconds(c.InMsec, folder_path or ""),
             label=(c.Comment or None),
-            color=None,
+            color=palette_index_to_hex(c.Color if (c.Color or -1) >= 0 else None),
         )
-        for c in sorted(hot, key=lambda c: c.Kind)
+        for c in sorted(hot, key=lambda c: KIND_TO_SLOT[c.Kind])
     ]
     mirror_ok = memory_ms == sorted({c.InMsec for c in hot})
     return (hotcues if hotcues else None), mirror_ok

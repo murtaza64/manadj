@@ -718,6 +718,24 @@ export const api = {
      * mirrored to hot + memory cues. "add-only" never touches existing RB
      * rows; "replace-all" is the confirmed full-mirror reconcile (moves +
      * soft-deletes RB-only cues). Rekordbox must be closed. */
+    /** Author the Rekordbox grid (ANLZ PQTZ + BPM scalar) from the
+     * Library's saved Beatgrid. Always overwrites — confirmed tier.
+     * Rekordbox must be closed. */
+    exportBeatgridToRekordbox: async (request: {
+      track_id: number;
+    }): Promise<{ beats: number; tempo_changes: number; bpm: number }> => {
+      const res = await fetch(`${API_BASE}/sync/export/beatgrid/rekordbox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detail ?? 'Failed to export beatgrid to Rekordbox');
+      }
+      return res.json();
+    },
+
     exportHotcuesToRekordbox: async (request: {
       track_id: number;
       mode: 'add-only' | 'replace-all';

@@ -329,6 +329,15 @@ export function UnifiedTracksSync() {
     },
     onError: failed,
   });
+  const exportGridToRb = useMutation({
+    mutationFn: (row: StatusRow) =>
+      api.syncExport.exportBeatgridToRekordbox({ track_id: row.track_id! }),
+    onSuccess: (r) => {
+      done(`Grid → Rekordbox: ${r.beats} beats, ${r.tempo_changes} tempo change${r.tempo_changes === 1 ? '' : 's'}, ${r.bpm.toFixed(2)} BPM`);
+      refresh();
+    },
+    onError: failed,
+  });
   const exportKeyToRb = useMutation({
     mutationFn: (row: StatusRow) =>
       api.syncExport.exportKeyToRekordbox({ track_id: row.track_id! }),
@@ -355,7 +364,7 @@ export function UnifiedTracksSync() {
   const busy =
     generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
     importField.isPending || importPerf.isPending || bulkImportPerf.isPending ||
-    exportRowToDisk.isPending || exportKeyToRb.isPending || exportHotcuesToRb.isPending ||
+    exportRowToDisk.isPending || exportKeyToRb.isPending || exportHotcuesToRb.isPending || exportGridToRb.isPending ||
     exportTags.isPending || rebuildTagTree.isPending;
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
@@ -550,6 +559,13 @@ export function UnifiedTracksSync() {
           run: () => exportHotcuesToRb.mutate({ row, mode }),
         });
       }}
+      onExportGridToRb={() =>
+        setPending({
+          scope: `Overwrite the Rekordbox beatgrid for "${row.title || row.path}" with the Library's`,
+          sideEffects: 'rewrites the track\'s ANLZ grid + BPM in the Rekordbox database (Rekordbox must be closed; a re-analysis in Rekordbox will regenerate it)',
+          run: () => exportGridToRb.mutate(row),
+        })
+      }
       onExportKeyToRb={() =>
         // writes an external DB: always behind the pending-confirm bar
         setPending({
@@ -822,7 +838,7 @@ function PresenceBadges({ row, available }: { row: StatusRow; available: Surface
   );
 }
 
-function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onBulkImportPerf, onExportToDisk, onExportKeyToRb, onExportHotcuesToRb, surfacesAvailable }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onBulkImportPerf, onExportToDisk, onExportKeyToRb, onExportHotcuesToRb, onExportGridToRb, surfacesAvailable }: {
   row: StatusRow;
   surfacesAvailable: SurfaceId[];
   selectable: boolean;
@@ -836,6 +852,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   onExportToDisk: () => void;
   onExportKeyToRb: () => void;
   onExportHotcuesToRb: (mode: 'add-only' | 'replace-all') => void;
+  onExportGridToRb: () => void;
 }) {
   const expandable = row.diverged.length > 0;
   const [showViewer, setShowViewer] = useState(false);
@@ -879,7 +896,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
       </div>
       {expanded && expandable && (
         <div className="uts-expand">
-          <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} onExportKeyToRb={onExportKeyToRb} onExportHotcuesToRb={onExportHotcuesToRb} />
+          <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} onExportKeyToRb={onExportKeyToRb} onExportHotcuesToRb={onExportHotcuesToRb} onExportGridToRb={onExportGridToRb} />
           <div className="uts-expand-actions">
             {hasPerfDivergence && (
               <button className="uts-btn" onClick={() => setShowViewer(!showViewer)}>
@@ -980,12 +997,13 @@ function RowPerfDiff({ row, onImportPerf }: {
   );
 }
 
-function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, onExportHotcuesToRb }: {
+function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, onExportHotcuesToRb, onExportGridToRb }: {
   row: StatusRow;
   onImportField: (field: string, value: unknown) => void;
   onImportPerf: (field: PerfField, mode: PerfImportMode) => void;
   onExportKeyToRb: () => void;
   onExportHotcuesToRb: (mode: 'add-only' | 'replace-all') => void;
+  onExportGridToRb: () => void;
 }) {
   return (
     <table className="uts-matrix">
@@ -1061,9 +1079,13 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, o
                 const grid = v as BeatgridVal;
                 const importable = row.track_id !== null && s.id === 'engine' && d.importable_from.includes(s.id); // perf import verbs call the Engine endpoints — never offer them on other surfaces
                 const hasSaved = d.library_value !== null && d.library_value !== undefined;
+                const rbGridExportable = row.track_id !== null && s.id === 'rekordbox' && hasSaved;
                 return (
                   <td key={s.id} className="uts-conflict">
                     <GridSummary grid={grid} />
+                    {rbGridExportable && (
+                      <button className="uts-microbtn" onClick={onExportGridToRb}>replace grid in RB →</button>
+                    )}
                     {importable && (
                       <button
                         className="uts-microbtn"
