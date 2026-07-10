@@ -159,11 +159,6 @@ export function PerformanceView() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [tryLoad]);
 
-  // One zoom for both waveforms, in visible seconds (issue 05): equal
-  // effective BPM must mean equal beat spacing on screen. Survives loads —
-  // each waveform re-derives its track-relative factor from this value.
-  const [visibleSeconds, setVisibleSeconds] = useState(DEFAULT_VISIBLE_SECONDS);
-
   // On-control keyboard hints — togglable from the mixer strip, persisted.
   const [hintsOn, setHintsOn] = useState(initialHintsOn);
   const toggleHints = () => {
@@ -176,24 +171,7 @@ export function PerformanceView() {
     <div ref={rootRef} className={`perf-root${hintsOn ? '' : ' kbd-hints-off'}`}>
       {/* Performance surface — content-sized; the library gets the rest */}
       <div className="perf-surface">
-        <div className="perf-waves">
-          <DeckScope deck="A">
-            <DeckWaveform
-              visibleSeconds={visibleSeconds}
-              onVisibleSecondsChange={setVisibleSeconds}
-            />
-          </DeckScope>
-          <DeckScope deck="B">
-            <DeckWaveform
-              visibleSeconds={visibleSeconds}
-              onVisibleSecondsChange={setVisibleSeconds}
-            />
-          </DeckScope>
-          {/* Play guides (play-guides PRD): saved playing→paused Transitions
-              projected as press-play markers — one line spanning both rows,
-              labeled in the gutter. Derived, view-only, non-interactive. */}
-          <PlayGuideOverlay visibleSeconds={visibleSeconds} />
-        </div>
+        <PerfWaves />
         <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
         <div className="perf-decks">
           {/* Linked toggle (linked-pairs 02): pair-central — on the deck
@@ -222,6 +200,41 @@ export function PerformanceView() {
           <Library browseOnly onLoadToDeck={tryLoad} browseRef={libraryRef} />
         </DeckScope>
       </LockDimmedLibrary>
+    </div>
+  );
+}
+
+/**
+ * The shared-zoom island (performance-mode 08): `visibleSeconds` — one
+ * zoom for both waveforms (issue 05: equal effective BPM must mean equal
+ * beat spacing on screen; survives loads, each waveform re-derives its
+ * track-relative factor) — lives HERE, not in PerformanceView, so a wheel
+ * tick re-renders exactly its consumers: the two DeckWaveforms and the
+ * play-guide overlay. When this state sat at the view's top, every tick
+ * re-rendered the whole surface INCLUDING the embedded browse Library —
+ * the zoom stutter the library view never had (its zoom is
+ * renderer-local and touches no React state at all).
+ */
+function PerfWaves() {
+  const [visibleSeconds, setVisibleSeconds] = useState(DEFAULT_VISIBLE_SECONDS);
+  return (
+    <div className="perf-waves">
+      <DeckScope deck="A">
+        <DeckWaveform
+          visibleSeconds={visibleSeconds}
+          onVisibleSecondsChange={setVisibleSeconds}
+        />
+      </DeckScope>
+      <DeckScope deck="B">
+        <DeckWaveform
+          visibleSeconds={visibleSeconds}
+          onVisibleSecondsChange={setVisibleSeconds}
+        />
+      </DeckScope>
+      {/* Play guides (play-guides PRD): saved playing→paused Transitions
+          projected as press-play markers — one line spanning both rows,
+          labeled in the gutter. Derived, view-only, non-interactive. */}
+      <PlayGuideOverlay visibleSeconds={visibleSeconds} />
     </div>
   );
 }
