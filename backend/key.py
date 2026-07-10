@@ -80,6 +80,38 @@ class Key:
     }
 
     @classmethod
+    def table(cls) -> list[dict]:
+        """The full 24-key table as plain rows — the single Key authority.
+
+        Each row: {engine_id, musical, camelot, openkey, mixxx_id}, ordered by
+        Engine DJ ID (0-23). This is the source the frontend key table is
+        generated from (scripts/export/gen_key_table.py); do not hand-maintain
+        a second copy.
+        """
+        return [
+            {
+                "engine_id": engine_id,
+                "musical": musical,
+                "camelot": camelot,
+                "openkey": openkey,
+                "mixxx_id": mixxx_id,
+            }
+            for engine_id, (musical, camelot, openkey, mixxx_id) in sorted(
+                cls._ENGINE_TO_ALL.items()
+            )
+        ]
+
+    @classmethod
+    def enharmonics(cls) -> dict[str, str]:
+        """Enharmonic/alternative musical spellings → canonical musical name.
+
+        The canonical name is the one present in `table()`'s `musical` column.
+        Exported alongside `table()` so the frontend can resolve alternative
+        spellings (Gb→F#, C# Minor→C#m, …) without a second hand-kept map.
+        """
+        return dict(cls._ENHARMONIC)
+
+    @classmethod
     def from_engine_id(cls, engine_id: int | None) -> "Key | None":
         """Create Key from Engine DJ ID (0-23)."""
         if engine_id is None or engine_id not in cls._ENGINE_TO_ALL:
