@@ -40,3 +40,15 @@ junk_patterns = ["free\\s+(download|dl)", "out\\s+now", "coming\\s+soon", "ncs\\
 #   SOUNDCLOUD_OAUTH_TOKEN=...
 # (A real environment variable takes precedence over .env.)
 oauth_token = ""
+
+[soulseek]
+# Soulseek Supplier: manadj talks to a local slskd daemon over its REST API.
+# See README "Soulseek Supplier (slskd)" for standing up slskd itself.
+# Base URL of the slskd REST API. slskd's default HTTP port is 5030.
+# Leave unset/empty to disable the Soulseek Supplier entirely.
+slskd_url = "http://localhost:5030"
+# The slskd API key is a secret and lives in the gitignored .env file at the
+# repo root, NOT here (this file is committed):
+#   SLSKD_API_KEY=...
+# It must match the primary API key slskd is started with (SLSKD_API_KEY in
+# slskd's launchd env). A real environment variable takes precedence over .env.

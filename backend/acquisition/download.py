@@ -1,14 +1,17 @@
-"""The download task: Source audio -> tracks directory -> Track.
+"""The download task: Supplier audio -> tracks directory -> Track.
 
-The chain (issue 05): Cleanup names the file, the Source downloads it, the
+The chain (issue 05): Cleanup names the file, the Supplier downloads it, the
 normal Disk Import path creates the Track, then Source Correspondence +
 Audio Provenance are recorded and the Source Item becomes fulfilled.
+
+The chain consumes the base `Supplier` seam (download only), so any Supplier —
+the SoundCloud adapter today, Soulseek later — drives it unchanged.
 """
 
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -19,16 +22,13 @@ from ..track_metadata.file_facts import refresh_file_facts
 from .cleanup import CleanupConfig, clean_metadata, safe_basename
 from .manager import upsert_confirmed_correspondence
 from .models import AudioProvenance, SourceItem
+from .supplier import Supplier
 
 logger = logging.getLogger(__name__)
 
 
-class DownloadableSource(Protocol):
-    def download(self, permalink_url: str, dest_dir: Path, basename: str) -> Path: ...
-
-
 def download_handler(
-    source: DownloadableSource,
+    supplier: Supplier,
     tracks_dir: Path,
     cleanup_config: CleanupConfig | None = None,
 ) -> Callable[[Session, dict[str, Any]], None]:
@@ -58,7 +58,7 @@ def download_handler(
             path = collisions[0]
             logger.info("adopting orphaned file from previous attempt: %s", path)
         else:
-            path = source.download(item.permalink_url, tracks_dir, basename)
+            path = supplier.download(item.permalink_url, tracks_dir, basename)
             logger.info("downloaded %s -> %s", item.permalink_url, path)
 
         # Export the cleaned metadata to Disk before the import scan: the
