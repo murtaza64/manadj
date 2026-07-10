@@ -202,12 +202,13 @@ export function UnifiedTracksSync() {
     setPending(null);
   };
 
-  const generateRbxml = useMutation({
-    mutationFn: () => api.trackSync.syncEngineRBXML({ validate_files: true }),
+  const engineExport = useMutation({
+    mutationFn: () => api.trackSync.exportToEngine({ validate_files: true }),
     onSuccess: (r) =>
       done(
-        `RBXML generated${r.output_path ? ` at ${r.output_path}` : ''} (${r.exported_to_target ?? '?'} tracks). ` +
-        'Import it in Engine DJ (Import → Rekordbox XML); rows stay "missing downstream" until then.',
+        `Exported ${r.exported_to_target} tracks to Engine DJ` +
+        `${r.playlist_name ? ` (playlist "${r.playlist_name}")` : ''}. ` +
+        'Engine analyzes them on first load.',
       ),
     onError: failed,
   });
@@ -374,7 +375,7 @@ export function UnifiedTracksSync() {
   });
 
   const busy =
-    generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
+    engineExport.isPending || rekordboxSync.isPending || importFiles.isPending ||
     importField.isPending || importPerf.isPending || bulkImportPerf.isPending ||
     exportRowToDisk.isPending || exportKeyToRb.isPending || exportHotcuesToRb.isPending || exportGridToRb.isPending || autoExportRb.isPending ||
     exportTags.isPending || rebuildTagTree.isPending;
@@ -438,12 +439,23 @@ export function UnifiedTracksSync() {
     }
     if (key === 'missing-downstream') {
       const missingRb = list.filter((r) => !r.presence.rekordbox).length;
+      const missingEngine = list.filter((r) => !r.presence.engine).length;
       return (
         <span className="uts-group-actions">
-          {/* nondestructive: generates a file, imported manually in Engine (ADR-0006) */}
-          <button className="uts-btn" onClick={() => generateRbxml.mutate()}>
-            Generate RBXML for Engine import
-          </button>
+          {missingEngine > 0 && (
+            <button
+              className="uts-btn"
+              onClick={() =>
+                setPending({
+                  scope: `Export ${missingEngine} tracks to Engine DJ (all missing — selection not supported yet)`,
+                  sideEffects: `creates ${missingEngine} rows in the Engine database (Engine must be closed; snapshot taken first)`,
+                  run: () => engineExport.mutate(),
+                })
+              }
+            >
+              Export all → Engine
+            </button>
+          )}
           {missingRb > 0 && (
             <button
               className="uts-btn"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,9 +13,8 @@ from rekordbox.sync import (
     find_missing_tracks_in_manadj_from_rekordbox,
     find_missing_tracks_in_rekordbox,
 )
-from rekordbox.xml import create_rekordbox_xml_from_tracks
 
-from .models import EngineRBXMLSyncResult, RekordboxTrackSyncResult
+from .models import EngineTrackExportResult, RekordboxTrackSyncResult
 
 
 def default_needs_analysis_playlist_name() -> str:
@@ -23,38 +23,99 @@ def default_needs_analysis_playlist_name() -> str:
     return f"manadj - Needs Analysis [{date_str}]"
 
 
-def sync_engine_via_rbxml(
+def _file_tags(path: Path) -> dict:
+    """Best-effort album/genre/year/comment from the file's own tags —
+    manadj doesn't model these, but Engine displays them and won't
+    re-read tags for rows marked isMetadataImported."""
+    try:
+        import mutagen
+
+        mf = mutagen.File(path, easy=True)
+        if mf is None:
+            return {}
+
+        def tag(k: str) -> str | None:
+            v = mf.get(k) or [None]
+            return v[0]
+
+        year = None
+        if tag("date"):
+            try:
+                year = int(str(tag("date"))[:4])
+            except ValueError:
+                year = None
+        return {
+            "album": tag("album"),
+            "genre": tag("genre"),
+            "year": year,
+            "length_secs": int(mf.info.length) if mf.info.length else None,
+            "bitrate_kbps": int(getattr(mf.info, "bitrate", 0) / 1000) or None,
+        }
+    except Exception:
+        return {}
+
+
+def export_tracks_to_engine(
     manadj_session,
-    edj_session,
-    output_path: str | None = None,
+    engine_db: Any,
     playlist_name: str | None = None,
     validate_files: bool = True,
-) -> EngineRBXMLSyncResult:
-    """Export tracks missing in Engine DJ to Rekordbox XML."""
+) -> EngineTrackExportResult:
+    """Directly insert manadj-only tracks into Engine's m.db and collect
+    them in a needs-analysis playlist. Caller is responsible for the
+    Engine-closed guard and pre-write snapshot (router dependency)."""
     from enginedj.sync import find_missing_tracks_in_enginedj
+    from enginedj.track_export import EngineTrackSpec, insert_track
 
-    missing_tracks, stats = find_missing_tracks_in_enginedj(
-        manadj_session,
-        edj_session,
-        validate_paths=validate_files,
-    )
+    library_root = engine_db.database_path.parent
+
+    with engine_db.session_m() as edj_session:
+        missing, stats = find_missing_tracks_in_enginedj(
+            manadj_session,
+            edj_session,
+            validate_paths=validate_files,
+        )
+
+    inserted_ids: list[int] = []
+    with engine_db.session_m_write() as session:
+        for track in missing:
+            abs_path = Path(track.filename)
+            tags = _file_tags(abs_path)
+            spec = EngineTrackSpec(
+                abs_path=abs_path,
+                title=track.title or abs_path.stem,
+                artist=track.artist,
+                album=tags.get("album"),
+                genre=tags.get("genre"),
+                year=tags.get("year"),
+                length_secs=(
+                    int(track.duration_secs)
+                    if track.duration_secs
+                    else tags.get("length_secs")
+                ),
+                bitrate_kbps=track.bitrate_kbps or tags.get("bitrate_kbps"),
+            )
+            inserted_ids.append(insert_track(session, spec, library_root))
 
     final_playlist_name = playlist_name or default_needs_analysis_playlist_name()
-    final_output_path = Path(output_path) if output_path else Path("manadj_to_engine.xml")
+    playlist_created = False
+    if inserted_ids:
 
-    exported = create_rekordbox_xml_from_tracks(
-        missing_tracks,
-        final_output_path,
-        final_playlist_name,
-        validate_paths=validate_files,
-    )
+        @dataclass
+        class _Ref:
+            id: int
 
-    return EngineRBXMLSyncResult(
-        target='engine',
-        exported_to_target=exported,
-        skipped_file_not_found=stats.get('skipped_file_not_found', 0),
-        playlist_name=final_playlist_name,
-        output_path=str(final_output_path.resolve()),
+        engine_db.create_playlist(
+            final_playlist_name, [_Ref(i) for i in inserted_ids]
+        )
+        playlist_created = True
+
+    return EngineTrackExportResult(
+        target="engine",
+        exported_to_target=len(inserted_ids),
+        skipped_file_not_found=stats.get("skipped_file_not_found", 0),
+        playlist_name=final_playlist_name if inserted_ids else None,
+        playlist_created=playlist_created,
     )
 
 

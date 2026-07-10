@@ -34,22 +34,20 @@ class TrackSyncResult:
 
 
 @dataclass
-class EngineRBXMLSyncRequest:
-    """Request parameters for Engine DJ RBXML sync."""
+class EngineTrackExportRequest:
+    """Request parameters for direct Engine DJ track export."""
     playlist_name: str | None = None
-    output_path: str | None = None
     validate_files: bool = True
-    skip_import: bool = True
 
 
 @dataclass
-class EngineRBXMLSyncResult:
-    """Result of exporting manadj tracks to Engine DJ RBXML."""
+class EngineTrackExportResult:
+    """Result of directly inserting manadj tracks into Engine DJ."""
     target: str = 'engine'
     exported_to_target: int = 0
     skipped_file_not_found: int = 0
     playlist_name: str | None = None
-    output_path: str | None = None
+    playlist_created: bool = False
 
 
 @dataclass
