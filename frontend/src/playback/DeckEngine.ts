@@ -38,28 +38,21 @@ export interface DeckTransportGesture {
   detail?: number;
 }
 
-export interface CueDefaultsInfo {
-  /** Persisted Main cue, if any (CDJ memory-cue behavior). */
-  savedCuePoint: number | null;
-  /**
-   * The Beatgrid's beat times in seconds, or null for gridless Tracks.
-   * First beat is the cue-default fallback; the full grid feeds Quantize
-   * math at gesture time (looping 01).
-   */
-  beatTimes: number[] | null;
-}
-
 export interface DeckTrackInfo {
   trackId: number;
   audioUrl: string;
   bpm: number | null;
+  /** Persisted Main cue, if any (CDJ memory-cue behavior). On the Track
+   * row — synchronous, no fetch. */
+  savedCuePoint?: number | null;
   /**
-   * Saved-cue / first-beat lookup, fetched by the caller in parallel with
-   * the audio. A promise so load() can start immediately — the engine knows
-   * about the new track from the first instant, and audio + cue metadata
-   * download concurrently. Rejections fall through to engine defaults.
+   * The Beatgrid's beat times in seconds (null/rejection = gridless),
+   * fetched by the caller in parallel with the audio. ONE round trip, no
+   * retries (ADR 0029): load() awaits its first settlement between decode
+   * and ready, so readiness never gates on background analysis. Grids that
+   * land later arrive via setBeatTimes (the deck's beatgrid sync observer).
    */
-  cueDefaults?: Promise<CueDefaultsInfo>;
+  beatTimes?: Promise<number[] | null>;
 }
 
 export interface DeckSnapshot {
@@ -109,6 +102,14 @@ export class DeckEngine {
   private pendingPlay = false;
   /** Loaded Track's Beatgrid beat times (null = gridless) — Quantize math. */
   private beatTimes: number[] | null = null;
+  /** The Main cue default is live until touched (ADR 0029 §2): true while
+   * the cue still sits at the load-time default and nothing has played —
+   * a late-arriving grid may upgrade it to the first beat. Any transport
+   * gesture freezes it. */
+  private cueIsLoadDefault = false;
+  /** First non-silent time computed at load — kept for the §2 re-park's
+   * precedence fallback. */
+  private loadFirstNonSilence: number | null = null;
 
   // ── Worklet source (ADR 0018) ────────────────────────────────────────
   /** The deck's single audio source, persistent per AudioContext. */
@@ -212,6 +213,8 @@ export class DeckEngine {
     };
     this.buffer = null;
     this.beatTimes = null;
+    this.cueIsLoadDefault = false;
+    this.loadFirstNonSilence = null;
     this.trackInfo = info;
     this.pendingPlay = false;
     // A nudge is a momentary correction against the *previous* pairing —
@@ -239,15 +242,18 @@ export class DeckEngine {
         putCachedBuffer(info.trackId, buffer);
       }
 
-      // Cue metadata was fetched concurrently with the audio; absence (or a
-      // failed lookup) falls through the default precedence.
-      const cueInfo = await (info.cueDefaults ?? Promise.resolve(null)).catch(
+      // The grid was fetched concurrently with the audio — ONE round trip
+      // (ADR 0029): usually settled before decode finishes, so this await
+      // costs nothing on the common path and never rides a retry ladder.
+      // Absence (or a failed lookup) falls through the default precedence;
+      // a grid that lands later arrives via setBeatTimes.
+      const beatTimes = await (info.beatTimes ?? Promise.resolve(null)).catch(
         () => null
       );
       if (abort.signal.aborted) return;
 
       this.buffer = buffer;
-      this.beatTimes = cueInfo?.beatTimes ?? null;
+      this.beatTimes = beatTimes && beatTimes.length > 0 ? beatTimes : null;
 
       // Resolve the initial Main cue (saved → first beat → first
       // non-silence → 0) and park the deck at it, CDJ-style. Non-silence
@@ -260,7 +266,7 @@ export class DeckEngine {
         }
       }
       const cue = resolveInitialCue({
-        saved: cueInfo?.savedCuePoint ?? null,
+        saved: info.savedCuePoint ?? null,
         firstBeat: this.beatTimes?.[0] ?? null,
         firstNonSilence,
       });
@@ -269,6 +275,10 @@ export class DeckEngine {
         cuePoint: this.clampTime(cue),
         playhead: this.clampTime(cue),
       };
+      this.loadFirstNonSilence = firstNonSilence;
+      // The default stays live until touched (ADR 0029 §2). A pendingPlay
+      // firing below counts as touching — the dispatch clears it.
+      this.cueIsLoadDefault = true;
 
       // Hand the samples to the worklet source ahead of the first start, so
       // a stab doesn't pay the channel-data copy. Cache-hit loads on a deck
@@ -378,16 +388,38 @@ export class DeckEngine {
   }
 
   /** The loaded Track's Beatgrid changed (BPM re-tempo, nudge, downbeat
-   * mark — ADR 0016: BPM edits ARE grid operations): refresh the Quantize
-   * grid without a re-Load. The load-time snapshot used to serve stale
-   * beats to every transport placement gesture (cue-quantize-bpm 01).
-   * Addressed by trackId so a late push for a previous track is ignored;
-   * an empty grid means gridless. The Main cue is NOT re-resolved — cue
-   * defaults are a load-time decision. */
+   * mark — ADR 0016: BPM edits ARE grid operations; or background analysis
+   * landing after Load — ADR 0029): refresh the Quantize grid without a
+   * re-Load. The load-time snapshot used to serve stale beats to every
+   * transport placement gesture (cue-quantize-bpm 01). Addressed by
+   * trackId so a late push for a previous track is ignored; an empty grid
+   * means gridless.
+   *
+   * The Main cue default is live until touched (ADR 0029 §2): a grid
+   * arriving while the deck is still parked untouched at a saved-cue-less
+   * load default re-parks cue + playhead at the first beat — exactly what
+   * a load-time grid would have produced. The first transport gesture
+   * freezes it (cue defaults become a load-time decision again). */
   setBeatTimes(trackId: number, beatTimes: number[] | null): void {
     if (this.trackInfo?.trackId !== trackId) return;
     this.beatTimes = beatTimes && beatTimes.length > 0 ? beatTimes : null;
-    this.emit(); // hasBeatgrid may have flipped
+    if (
+      this.cueIsLoadDefault &&
+      this.loadState === 'ready' &&
+      this.buffer !== null &&
+      (this.trackInfo.savedCuePoint ?? null) === null &&
+      this.beatTimes !== null
+    ) {
+      const cue = this.clampTime(
+        resolveInitialCue({
+          saved: null,
+          firstBeat: this.beatTimes[0],
+          firstNonSilence: this.loadFirstNonSilence,
+        })
+      );
+      this.transport = { ...this.transport, cuePoint: cue, playhead: cue };
+    }
+    this.emit(); // hasBeatgrid (and possibly the parked cue) may have changed
   }
 
   cueDown(): void {
@@ -594,8 +626,18 @@ export class DeckEngine {
     return { quantize: isQuantizeOn(), beatTimes: this.beatTimes };
   }
 
+  /** Gestures that start sound or place the playhead/cue: any of these
+   * freezes the live cue default (ADR 0029 §2). Pause/cue-up/ended can't
+   * occur first (their DOWN/play counterparts precede them); loop-resize
+   * moves nothing. */
+  private static readonly CUE_FREEZING_EVENTS: ReadonlySet<TransportEvent['type']> =
+    new Set(['play', 'toggle-play', 'seek', 'jump', 'hot-cue-down', 'cue-down', 'loop-toggle', 'loop-preset']);
+
   private dispatch(event: TransportEvent): void {
     if (!this.buffer) return;
+    if (DeckEngine.CUE_FREEZING_EVENTS.has(event.type)) {
+      this.cueIsLoadDefault = false;
+    }
     const synced = { ...this.transport, playhead: this.getPlayhead() };
     const [next, effects] = reduceTransport(synced, event, this.transportContext());
     const cueChanged = next.cuePoint !== synced.cuePoint;

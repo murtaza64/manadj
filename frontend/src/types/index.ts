@@ -118,8 +118,20 @@ export interface BeatgridResponse {
   id: number | null;
   track_id: number;
   data: BeatgridData;
+  /** "generated" = non-authoritative placeholder (ADR 0027 §3) — arrival
+   * polling treats it as not-yet-settled (ADR 0029 §3). */
+  origin: 'generated' | 'analyzed' | 'edited' | 'imported';
+  /** User-marked downbeat (seconds, ADR 0016); null = no mark. */
+  anchor_time: number | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+/** Grid-analysis diagnostics (GET /api/analyze/grid/{id}) — the fields
+ * arrival polling reads; the endpoint returns more (evidence, residuals). */
+export interface GridAnalysisDiagnostics {
+  track_id: number;
+  bailed: boolean;
 }
 
 export interface TrackEntry {

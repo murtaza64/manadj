@@ -12,7 +12,6 @@ import { BEATJUMP_DEFAULT, clampBeatjump } from '../playback/beatjump';
 import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
 import { useDeckBeatgridSync } from '../hooks/useDeckBeatgridSync';
-import { BEATGRID_RETRY, beatgridRetryDelay } from '../hooks/useBeatgridData';
 import { useDeckBpmSync } from '../hooks/useDeckBpmSync';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
@@ -127,37 +126,32 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     (deck: ChannelId, track: Track) => {
       setLoadedTracks((prev) => ({ ...prev, [deck]: track }));
 
-      // Saved cue comes with the Track row itself (the Main cue lives on the
-      // Track); the beat times are fetched through the same query cache the
-      // beatgrid components use (usually already warm). The engine awaits
-      // this after decode; failures fall through the cue-default precedence
-      // (and leave the deck gridless for Quantize math).
-      const cueDefaults = (async () => {
-        const bg = await Promise.allSettled([
-          queryClient.fetchQuery<BeatgridResponse>({
-            queryKey: ['beatgrid', track.id],
-            queryFn: () => api.beatgrids.get(track.id),
-            staleTime: Infinity,
-            // Ride out background analysis with bounded retries, symmetric
-            // with useBeatgridData / the waveform blob (deck-asset-refresh 01).
-            retry: BEATGRID_RETRY,
-            retryDelay: beatgridRetryDelay,
-          }),
-        ]).then(([r]) => r);
-        return {
-          savedCuePoint: track.cue_point_time ?? null,
-          beatTimes:
-            bg.status === 'fulfilled' && bg.value.data.beat_times.length > 0
-              ? bg.value.data.beat_times
-              : null,
-        };
-      })();
+      // Beat times come through the same query cache the beatgrid
+      // components use (usually already warm). ONE round trip, no retries
+      // (ADR 0029): the engine awaits this single settlement after decode,
+      // so readiness never gates on background analysis — a fresh import's
+      // 400 settles fast and the deck plays gridless. The deck's sync
+      // observer (useDeckBeatgridSync) owns riding out analysis — retry,
+      // arrival polling — and pushes late grids via setBeatTimes; failures
+      // here fall through the cue-default precedence.
+      const beatTimes = queryClient
+        .fetchQuery<BeatgridResponse>({
+          queryKey: ['beatgrid', track.id],
+          queryFn: () => api.beatgrids.get(track.id),
+          staleTime: Infinity,
+          retry: false,
+        })
+        .then(
+          (bg) => (bg.data.beat_times.length > 0 ? bg.data.beat_times : null),
+          () => null
+        );
 
       void engines[deck].load({
         trackId: track.id,
         audioUrl: api.tracks.audioUrl(track.id),
         bpm: track.bpm ?? null,
-        cueDefaults,
+        savedCuePoint: track.cue_point_time ?? null,
+        beatTimes,
       });
     },
     [engines, queryClient]

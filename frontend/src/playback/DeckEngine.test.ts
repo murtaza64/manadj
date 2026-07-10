@@ -118,7 +118,7 @@ describe('DeckEngine active loop (looping 03)', () => {
       trackId,
       audioUrl: 'http://127.0.0.1:1/none',
       bpm: 120,
-      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+      beatTimes: Promise.resolve(grid),
     });
     return engine;
   }
@@ -166,7 +166,7 @@ describe('DeckEngine active loop (looping 03)', () => {
       trackId: 24,
       audioUrl: 'http://127.0.0.1:1/none',
       bpm: 120,
-      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes }),
+      beatTimes: Promise.resolve(beatTimes),
     });
     const s = engine.getSnapshot();
     expect(s.loop).toBeNull();
@@ -284,7 +284,7 @@ describe('jumpBeats displaces via the live grid (ADR 0027 §5)', () => {
       trackId,
       audioUrl: 'http://127.0.0.1:1/none',
       bpm: 120,
-      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+      beatTimes: Promise.resolve(grid),
     });
     return engine;
   }
@@ -400,7 +400,7 @@ describe('DeckEngine beatgrid refresh (cue-quantize-bpm 01)', () => {
       trackId,
       audioUrl: 'http://127.0.0.1:1/none',
       bpm: 120,
-      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+      beatTimes: Promise.resolve(grid),
     });
     return engine;
   }
@@ -432,5 +432,97 @@ describe('DeckEngine beatgrid refresh (cue-quantize-bpm 01)', () => {
     engine.seek(10);
     engine.toggleLoop(); // auto-loop is inert without a grid
     expect(engine.getSnapshot().loop).toBeNull();
+  });
+});
+
+describe('live cue default (ADR 0029 §2)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  // All-zero samples: firstNonSilence is null, so a gridless load parks at 0
+  // and a late grid's first beat is the visible upgrade.
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** 120 BPM grid whose first beat is off zero — the re-park is observable. */
+  const offsetGrid = Array.from({ length: 300 }, (_, i) => 0.75 + i * 0.5);
+  /** The same track re-gridded: first beat somewhere else entirely. */
+  const shiftedGrid = Array.from({ length: 300 }, (_, i) => 1.25 + i * 0.5);
+
+  async function loadedEngine(
+    trackId: number,
+    opts: { grid?: number[] | null; savedCuePoint?: number | null } = {}
+  ) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      savedCuePoint: opts.savedCuePoint ?? null,
+      beatTimes: Promise.resolve(opts.grid ?? null),
+    });
+    return engine;
+  }
+
+  it('ready flips even when the grid lookup rejects (one round trip, no retries)', async () => {
+    putCachedBuffer(50, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({
+      trackId: 50,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: null,
+      beatTimes: Promise.reject(new Error('analysis pending')),
+    });
+    expect(engine.getSnapshot().loadState).toBe('ready');
+    expect(engine.getSnapshot().hasBeatgrid).toBe(false);
+    expect(engine.getSnapshot().cuePoint).toBe(0);
+  });
+
+  it('a grid arriving on an untouched deck re-parks cue and playhead at the first beat', async () => {
+    const engine = await loadedEngine(51, { grid: null });
+    expect(engine.getSnapshot().cuePoint).toBe(0);
+    engine.setBeatTimes(51, offsetGrid);
+    expect(engine.getSnapshot().cuePoint).toBeCloseTo(0.75, 10);
+    expect(engine.getPlayhead()).toBeCloseTo(0.75, 10);
+  });
+
+  it('repeated arrivals keep upgrading while untouched (placeholder → analyzed)', async () => {
+    const engine = await loadedEngine(52, { grid: offsetGrid });
+    expect(engine.getSnapshot().cuePoint).toBeCloseTo(0.75, 10);
+    engine.setBeatTimes(52, shiftedGrid);
+    expect(engine.getSnapshot().cuePoint).toBeCloseTo(1.25, 10);
+  });
+
+  it('a saved cue is never re-parked', async () => {
+    const engine = await loadedEngine(53, { grid: null, savedCuePoint: 5 });
+    engine.setBeatTimes(53, offsetGrid);
+    expect(engine.getSnapshot().cuePoint).toBe(5);
+    expect(engine.getPlayhead()).toBe(5);
+  });
+
+  it('any transport gesture freezes the default (seek)', async () => {
+    const engine = await loadedEngine(54, { grid: null });
+    engine.seek(10);
+    engine.setBeatTimes(54, offsetGrid);
+    expect(engine.getSnapshot().cuePoint).toBe(0);
+    expect(engine.getPlayhead()).toBe(10);
+  });
+
+  it('a user-set cue freezes the default (cue-down)', async () => {
+    const engine = await loadedEngine(55, { grid: null });
+    engine.seek(10);
+    engine.cueDown(); // gridless: placement lands exactly at 10
+    engine.setBeatTimes(55, offsetGrid);
+    expect(engine.getSnapshot().cuePoint).toBe(10);
+  });
+
+  it('a grid removal never moves the parked cue', async () => {
+    const engine = await loadedEngine(56, { grid: offsetGrid });
+    engine.setBeatTimes(56, null);
+    expect(engine.getSnapshot().cuePoint).toBeCloseTo(0.75, 10);
   });
 });
