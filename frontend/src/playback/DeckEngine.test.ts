@@ -1,7 +1,36 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeckEngine } from './DeckEngine';
 import { _clearBufferCacheForTests, putCachedBuffer } from './bufferCache';
 import type { DeckAudioPort } from './mixer';
+
+// The lead-in audio tests drive the frame-0 entry through a mocked worklet
+// node — the pre-start scheduling and the on-time entry are the engine's
+// concern; the real DeckSourceNode needs an AudioWorklet the test env lacks.
+const startCalls: { positionFrames: number; startId: number }[] = [];
+const stopCalls: number[] = [];
+vi.mock('./worklet/deckSourceNode', () => {
+  class FakeDeckSourceNode {
+    static create = vi.fn(async (ctx: AudioContext) => new FakeDeckSourceNode(ctx));
+    ctx: AudioContext;
+    onEnded: ((startId: number) => void) | null = null;
+    constructor(ctx: AudioContext) {
+      this.ctx = ctx;
+    }
+    loadTrack(): void {}
+    start(positionFrames: number, startId: number): void {
+      startCalls.push({ positionFrames, startId });
+    }
+    stop(): void {
+      stopCalls.push(1);
+    }
+    setMode(): void {}
+    setLoop(): void {}
+    setRateAt(): void {}
+    connect(): void {}
+    disconnect(): void {}
+  }
+  return { DeckSourceNode: FakeDeckSourceNode };
+});
 
 /**
  * Engine-level bend semantics, exercised through the public interface with
@@ -554,5 +583,196 @@ describe('DeckEngine beatgrid refresh (cue-quantize-bpm 01)', () => {
     engine.seek(10);
     engine.toggleLoop(); // auto-loop is inert without a grid
     expect(engine.getSnapshot().loop).toBeNull();
+  });
+});
+
+describe('pre-start lead-in placement (issue 07)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** A 120 BPM grid from 0s: beats every 0.5s. */
+  const grid120 = Array.from({ length: 360 }, (_, i) => i * 0.5);
+
+  async function loadedEngine(trackId: number, grid: number[] | null = grid120) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(unusedPort);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+    });
+    return engine;
+  }
+
+  it('seek before the track holds a negative playhead instead of clamping to 0', async () => {
+    const engine = await loadedEngine(50);
+    engine.seek(-1.5);
+    expect(engine.getPlayhead()).toBeCloseTo(-1.5, 10);
+  });
+
+  it('a backward beat jump near the head preserves the beat distance', async () => {
+    const engine = await loadedEngine(51);
+    engine.seek(0.5); // half a second in
+    engine.jumpBeats(-4); // 4 beats × 0.5s back = 2s → -1.5s, not 0
+    expect(engine.getPlayhead()).toBeCloseTo(-1.5, 10);
+  });
+
+  it('preserves grid phase across the lead-in (jump out returns exactly)', async () => {
+    const engine = await loadedEngine(52);
+    engine.seek(0.375); // beat coordinate 0.75 (intra-beat phase 0.75)
+    engine.jumpBeats(-4); // extrapolates the edge interval into the lead-in
+    expect(engine.getPlayhead()).toBeCloseTo(-1.625, 10);
+    engine.jumpBeats(4); // back out lands exactly where it started
+    expect(engine.getPlayhead()).toBeCloseTo(0.375, 10);
+  });
+
+  it('bounds the lead-in at the floor (no unbounded pre-roll)', async () => {
+    const engine = await loadedEngine(53);
+    engine.seek(-1000);
+    expect(engine.getPlayhead()).toBeCloseTo(-30, 10); // MAX_LEAD_IN_SECONDS
+  });
+
+  it('never places a cue in the lead-in (cues are real track time)', async () => {
+    const engine = await loadedEngine(54);
+    engine.seek(-2);
+    engine.cueDown(); // set the cue at the current (negative) position
+    // A cue clamps to >= 0 even though the playhead is negative.
+    expect(engine.getSnapshot().cuePoint).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('pre-start lead-in audio (issue 07)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    startCalls.length = 0;
+    stopCalls.length = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    _clearBufferCacheForTests();
+  });
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** An AudioContext stub whose currentTime the test advances by hand,
+   * paired with a fake channel input. Only the fields the start path
+   * touches are present. */
+  function fakeAudioPort() {
+    const ctx = {
+      currentTime: 0,
+      state: 'running',
+      resume: () => Promise.resolve(),
+    } as { currentTime: number; state: AudioContextState; resume: () => Promise<void> };
+    const input = {} as AudioNode;
+    const port: DeckAudioPort = {
+      ensureAudio: () => ({ ctx: ctx as unknown as AudioContext, input }),
+    };
+    return { port, ctx };
+  }
+
+  async function loadedEngine(port: DeckAudioPort, trackId: number) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(port);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      cueDefaults: Promise.resolve({
+        savedCuePoint: null,
+        beatTimes: Array.from({ length: 360 }, (_, i) => i * 0.5),
+      }),
+    });
+    return engine;
+  }
+
+  it('plays silence through the lead-in, then enters the track on time at frame 0', async () => {
+    const { port, ctx } = fakeAudioPort();
+    const engine = await loadedEngine(port, 60);
+    engine.seek(-2); // two seconds of pre-start lead-in
+    engine.play();
+    // Silent: no worklet voice yet, clock parked at the lead-in start.
+    expect(startCalls).toHaveLength(0);
+    expect(engine.getPlayhead()).toBeCloseTo(-2, 6);
+
+    // Halfway through the lead-in: still silent, clock counting up.
+    ctx.currentTime = 1;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(startCalls).toHaveLength(0);
+    expect(engine.getPlayhead()).toBeCloseTo(-1, 6);
+
+    // The t=0 crossing: the frame-0 voice starts on time.
+    ctx.currentTime = 2;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(startCalls).toHaveLength(1);
+    expect(startCalls[0].positionFrames).toBe(0);
+    expect(engine.getPlayhead()).toBeCloseTo(0, 4);
+  });
+
+  it('a mid-play backward jump into the lead-in silences the running voice', async () => {
+    const { port, ctx } = fakeAudioPort();
+    const engine = await loadedEngine(port, 63);
+    engine.seek(1.5);
+    engine.play();
+    await vi.advanceTimersByTimeAsync(0); // flush the async node build
+    expect(startCalls).toHaveLength(1); // voice running at 1.5s
+    // Jump 4 beats back (2s at 120 BPM): target -0.5s, mid-play.
+    engine.jumpBeats(-4);
+    // The old voice is retired — the lead-in is silent, not the old audio
+    // playing on until track start.
+    expect(stopCalls).toHaveLength(1);
+    expect(startCalls).toHaveLength(1); // no new voice yet
+    expect(engine.getPlayhead()).toBeCloseTo(-0.5, 6);
+    // The t=0 crossing still enters on time at frame 0.
+    ctx.currentTime = 0.5;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(startCalls).toHaveLength(2);
+    expect(startCalls[1].positionFrames).toBe(0);
+  });
+
+  it('a pause during the lead-in cancels the entry and rests at the negative position', async () => {
+    const { port, ctx } = fakeAudioPort();
+    const engine = await loadedEngine(port, 61);
+    engine.seek(-2);
+    engine.play();
+    ctx.currentTime = 1;
+    engine.pause();
+    // Advancing past where the entry WOULD have fired: it must not.
+    ctx.currentTime = 5;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(startCalls).toHaveLength(0);
+    expect(engine.getPlayhead()).toBeCloseTo(-1, 4); // rested where paused
+  });
+
+  it('a rate change during the lead-in re-times the on-time entry', async () => {
+    const { port, ctx } = fakeAudioPort();
+    const engine = await loadedEngine(port, 62);
+    engine.seek(-2);
+    engine.play();
+    // Slow to 0.75× at the midpoint: 1s of lead-in remains, now at 0.75
+    // rate → 1.333s of wall-clock to the t=0 crossing.
+    ctx.currentTime = 1;
+    engine.setPitch(-25); // rate 0.75 (engine clamps at ±25%)
+    expect(startCalls).toHaveLength(0);
+    // At the OLD timing (another 1s → ctx 2) the entry must NOT fire yet.
+    ctx.currentTime = 2;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(startCalls).toHaveLength(0);
+    // At the re-timed crossing (~1.333s of wall-clock from the change).
+    ctx.currentTime = 2.334;
+    await vi.advanceTimersByTimeAsync(400);
+    expect(startCalls).toHaveLength(1);
+    expect(startCalls[0].positionFrames).toBe(0);
   });
 });

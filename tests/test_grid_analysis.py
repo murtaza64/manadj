@@ -199,7 +199,15 @@ class TestAnalyzeTrackGrid:
         assert track.bpm == 17400
 
 
-class TestAnalyzeGridEndpoint:
+class TestAnalyzeEndpoint:
+    """The manual Analyze endpoints now ride the task system (task-system 01):
+    POST enqueues a `manual` analysis task and returns its state instead of
+    running madmom in the request thread; the client polls GET .../status.
+    The analysis itself is tested at the task-handler seam
+    (test_analysis_tasks.py); these tests cover only the enqueue/observe API.
+    The GET /grid diagnostics read is unchanged.
+    """
+
     @pytest.fixture
     def app(self, db: Session) -> FastAPI:
         # Minimal app with just the analyze router — importing backend.main
@@ -213,53 +221,54 @@ class TestAnalyzeGridEndpoint:
     def client(self, app: FastAPI) -> TestClient:
         return TestClient(app)
 
-    def with_analyzer(self, app: FastAPI, ticks: list[float]) -> None:
-        app.dependency_overrides[analyze.get_grid_analyzer] = (
-            lambda: analyzer_for(ticks)
-        )
+    def test_post_enqueues_a_manual_task_and_returns_state(self, client, db, make_track):
+        from backend.analysis_tasks import ANALYSIS_TASK_TYPE
+        from backend.tasks.models import Task
 
-    def test_post_analyzes_and_reports(self, app, client, db, make_track, audio_file):
-        track = make_track(filename=str(audio_file()))
-        self.with_analyzer(app, ticks_at(174.62))
+        track = make_track()
+        response = client.post(f"/api/analyze/{track.id}")
 
-        response = client.post(f"/api/analyze/grid/{track.id}")
-
-        assert response.status_code == 200
+        assert response.status_code == 202
         body = response.json()
-        assert body["track_id"] == track.id
-        assert body["bailed"] is False
-        assert body["bpm"] == pytest.approx(174.62, abs=0.01)
-        assert body["candidate"] == "stub"
-        assert stored_grid(db, track.id).origin == "analyzed"
+        assert body["state"] == "pending"
+        assert body["manual"] is True
+        assert body["error"] is None
+        task = db.query(Task).filter(Task.type == ANALYSIS_TASK_TYPE).one()
+        assert task.ref == f"track:{track.id}"
+        assert task.payload["manual"] is True
 
-    def test_post_bail_is_a_result_not_an_error(self, app, client, db, make_track, audio_file):
-        track = make_track(filename=str(audio_file()))
-        self.with_analyzer(app, [1.0, 2.0, 3.0])
+    def test_post_dedups_against_in_flight_task(self, client, db, make_track):
+        from backend.tasks.models import Task
 
-        response = client.post(f"/api/analyze/grid/{track.id}")
+        track = make_track()
+        first = client.post(f"/api/analyze/{track.id}").json()
+        second = client.post(f"/api/analyze/{track.id}").json()
 
-        assert response.status_code == 200
-        body = response.json()
-        assert body["bailed"] is True
-        assert body["bpm"] is None
-        assert body["evidence"]["reason"] == "too few ticks"
-        assert stored_grid(db, track.id) is None
+        # Same in-flight task returned both times — one analysis at a time.
+        assert first["task_id"] == second["task_id"]
+        assert db.query(Task).count() == 1
 
-    def test_post_missing_track_404(self, app, client):
-        self.with_analyzer(app, ticks_at(128.0))
-        assert client.post("/api/analyze/grid/9999").status_code == 404
+    def test_post_missing_track_404(self, client):
+        assert client.post("/api/analyze/9999").status_code == 404
 
-    def test_post_missing_audio_file_404(self, app, client, make_track):
-        track = make_track(filename="/nowhere/gone.mp3")
-        self.with_analyzer(app, ticks_at(128.0))
-        assert client.post(f"/api/analyze/grid/{track.id}").status_code == 404
+    def test_status_reports_latest_task_state(self, client, make_track):
+        track = make_track()
+        assert client.get(f"/api/analyze/{track.id}/status").json() is None
 
-    def test_get_returns_stored_diagnostics(self, app, client, db, make_track, audio_file):
-        track = make_track(filename=str(audio_file()))
+        client.post(f"/api/analyze/{track.id}")
+        body = client.get(f"/api/analyze/{track.id}/status").json()
+        assert body["state"] == "pending"
+        assert body["manual"] is True
+
+    def test_status_missing_track_404(self, client):
+        assert client.get("/api/analyze/9999/status").status_code == 404
+
+    def test_get_grid_returns_stored_diagnostics(self, client, db, make_track):
+        track = make_track()
         assert client.get(f"/api/analyze/grid/{track.id}").status_code == 404
 
-        self.with_analyzer(app, ticks_at(128.0))
-        client.post(f"/api/analyze/grid/{track.id}")
+        # Diagnostics come from a real analysis run (the seam, not the endpoint).
+        analyze_track_grid(db, track, analyzer_for(ticks_at(128.0)))
 
         response = client.get(f"/api/analyze/grid/{track.id}")
         assert response.status_code == 200

@@ -430,6 +430,15 @@ export interface DownloadStatus {
   cooling_down_until?: string | null;
 }
 
+// State of a track's latest analysis task (task-system 01): the Analyze
+// button enqueues one and polls this until it reaches `done`.
+export interface AnalysisTaskStatus {
+  task_id: number;
+  state: 'pending' | 'running' | 'done' | 'failed';
+  error: string | null;
+  manual: boolean;
+}
+
 export interface SourceCorrespondenceInfo {
   track_id: number;
   status: 'proposed' | 'confirmed';

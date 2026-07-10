@@ -7,7 +7,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, hotcues, sync_playlists, sync_status, sync_performance, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sets
+from .routers import tracks, tags, waveforms, playlists, beatgrids, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sets
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -61,6 +61,7 @@ app.include_router(sync_tags.router, prefix="/api")
 app.include_router(sync_tracks.router, prefix="/api")
 app.include_router(sync_status.router, prefix="/api")
 app.include_router(sync_performance.router, prefix="/api")
+app.include_router(sync_export.router, prefix="/api")
 app.include_router(sync_library.router, prefix="/api")
 app.include_router(acquisition_router, prefix="/api/acquisition", tags=["acquisition"])
 app.include_router(transition_templates.router, prefix="/api/transition-templates", tags=["transition-templates"])
@@ -108,10 +109,11 @@ def _build_task_worker() -> "TaskWorker | None":
     if config.soundcloud.oauth_token and config.library.tracks_directory:
         from .acquisition.download import download_handler
         from .acquisition.source import SoundCloudSource
+        from .acquisition.supplier import SoundCloudSupplier
 
-        source = SoundCloudSource(config.soundcloud.oauth_token)
+        supplier = SoundCloudSupplier(SoundCloudSource(config.soundcloud.oauth_token))
         handlers["download"] = download_handler(
-            source, Path(config.library.tracks_directory), config.acquisition.cleanup
+            supplier, Path(config.library.tracks_directory), config.acquisition.cleanup
         )
         # Pace downloads under SoundCloud's request budget (issue 08).
         delays["download"] = config.acquisition.download_delay_secs

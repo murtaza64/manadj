@@ -32,6 +32,15 @@ import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
 export type LoadState = 'empty' | 'fetching' | 'decoding' | 'ready' | 'error';
 
+/**
+ * How far before track start the playhead may be parked (issue 07). A
+ * backward beat jump near the head lands in this pre-start lead-in instead
+ * of clamping to 0, preserving its beat distance; playback is silent across
+ * it and enters the track on time. Bounded so a runaway gesture can't push
+ * the playhead into an unbounded silent pre-roll — this is a musical lead-in.
+ */
+const MAX_LEAD_IN_SECONDS = 30;
+
 /** A playhead discontinuity: seek, beat jump, or hot-cue jump. */
 export interface DeckTransportGesture {
   action: 'seek' | 'jumpBeats' | 'hotCue';
@@ -128,6 +137,16 @@ export class DeckEngine {
    * paused-deck launch holds off until the reference deck's next beat. Any
    * stop or new start cancels it. */
   private pendingLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // ── Pre-start lead-in (issue 07) ──────────────────────────────────────
+  /** True while the deck is running from a negative (pre-track) position:
+   * the clock counts up from the lead-in but no voice sounds yet. The
+   * scheduled `beginStart(0)` at the t=0 crossing clears it. */
+  private leadInActive = false;
+  /** Pending timer that fires the real worklet start at the t=0 crossing.
+   * Rescheduled on a rate change during the lead-in; cleared on any
+   * stop/seek/dispose. */
+  private leadInTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Clock anchor: playhead position (s) at ctx time `anchorCtxTime`. */
   private anchorPosition = 0;
@@ -375,7 +394,7 @@ export class DeckEngine {
 
   seek(seconds: number): void {
     if (!this.buffer) return;
-    const time = this.clampTime(seconds);
+    const time = this.clampPlayhead(seconds);
     this.fireTransportEvent({ action: 'seek', playhead: time });
     this.dispatch({ type: 'seek', time });
   }
@@ -397,7 +416,7 @@ export class DeckEngine {
       const bpm = this.trackInfo?.bpm ?? 120;
       raw = playhead + beats * (60 / bpm);
     }
-    const target = this.clampTime(raw);
+    const target = this.clampPlayhead(raw);
     this.fireTransportEvent({ action: 'jumpBeats', playhead: target, detail: beats });
     // Relative displacement, not a seek: an active loop translates with
     // the playhead (looping 04).
@@ -567,6 +586,15 @@ export class DeckEngine {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
       this.sourceNode.setRateAt(this.currentRate(), now);
+    } else if (this.leadInActive && this.audio) {
+      // Rate change mid-lead-in (issue 07): re-anchor the silent clock at
+      // the old rate, adopt the new one, then re-time the pending frame-0
+      // entry so it still lands exactly when the playhead reaches 0.
+      this.anchorPosition = this.getPlayhead(); // still at the old rate
+      this.anchorCtxTime = this.audio.ctx.currentTime;
+      this.pitchPercent = pitchPercent;
+      this.bendPercent = bendPercent;
+      this.scheduleLeadInStart();
     } else {
       this.pitchPercent = pitchPercent;
       this.bendPercent = bendPercent;
@@ -581,14 +609,20 @@ export class DeckEngine {
     return isAudioRunning(this.transport);
   }
 
-  /** Current playhead in seconds. Cheap; safe to poll per animation frame. */
+  /** Current playhead in seconds. Cheap; safe to poll per animation frame.
+   * Reads the anchor clock while a voice runs OR during the pre-start
+   * lead-in (issue 07) — the lead-in has no voice yet, but the clock still
+   * counts up from the negative anchor through 0, driving the silent
+   * scroll and the on-time entry. */
   getPlayhead(): number {
-    if (this.runningStartId !== null && this.audio) {
+    if ((this.runningStartId !== null || this.leadInActive) && this.audio) {
       const elapsed =
         (this.audio.ctx.currentTime - this.anchorCtxTime) * this.currentRate();
       let position = this.anchorPosition + elapsed;
       // Active loop: fold the monotone clock into the region — the mirror
-      // of the worklet's sample wrap, exact across many wraps (modulo).
+      // of the worklet's sample wrap, exact across many wraps (modulo). A
+      // lead-in never has a loop (seek cancels it; a jump clamps its start
+      // to >= 0), so the fold is inert there.
       const loop = this.transport.loop;
       if (loop) {
         position = foldLoopPlayhead(
@@ -598,7 +632,7 @@ export class DeckEngine {
           this.anchorPosition
         );
       }
-      return this.clampTime(position);
+      return this.clampPlayhead(position);
     }
     return this.transport.playhead;
   }
@@ -727,9 +761,28 @@ export class DeckEngine {
 
   private startAudio(at: number): void {
     if (!this.buffer) return;
+    // Any (re)start supersedes a pending cross-deck launch (04) and a
+    // pending lead-in: a new start below either replaces it (still
+    // negative) or crosses into the track (>= 0).
     this.clearPendingLaunch();
+    this.clearLeadIn();
     const { ctx, input } = this.ensureAudio();
     if (ctx.state === 'suspended') this.resumeWithGestureRetry(ctx);
+    // Pre-start lead-in (issue 07): the request targets a position before
+    // the track. The lead-in is SILENT — retire any running voice (a
+    // mid-play backward jump must not keep sounding the old position) and
+    // clear a latched start, anchor the clock at the negative position NOW
+    // so the playhead counts up through 0 (silent scroll), and schedule the
+    // real frame-0 voice at the wall-clock instant the playhead reaches 0.
+    if (at < 0) {
+      this.pendingStartAt = null;
+      if (this.runningStartId !== null) {
+        this.sourceNode?.stop(); // worklet declick-fades internally
+        this.runningStartId = null;
+      }
+      this.beginLeadIn(ctx, at);
+      return;
+    }
     if (this.sourceNode && this.sourceNode.ctx === ctx) {
       this.beginStart(this.sourceNode, input, at);
       return;
@@ -741,15 +794,62 @@ export class DeckEngine {
     this.createSourceNode(ctx);
   }
 
+  /** Enter the pre-start lead-in (issue 07): anchor the clock at the
+   * negative position and schedule the frame-0 voice for the t=0 crossing.
+   * Silent until then; the clock (getPlayhead) drives the UI's lead-in
+   * scroll. Idempotent re-entry (a fresh negative seek mid-lead-in) just
+   * re-anchors and reschedules. */
+  private beginLeadIn(ctx: AudioContext, at: number): void {
+    this.anchorPosition = at;
+    this.anchorCtxTime = ctx.currentTime;
+    this.leadInActive = true;
+    this.scheduleLeadInStart();
+  }
+
+  /** (Re)arm the timer that fires the real frame-0 start when the playhead
+   * crosses 0. The delay is the remaining lead-in in wall-clock seconds —
+   * the negative distance divided by the composed rate. Recomputed from the
+   * live clock so a rate change mid-lead-in re-times the entry exactly. */
+  private scheduleLeadInStart(): void {
+    if (this.leadInTimer !== null) {
+      clearTimeout(this.leadInTimer);
+      this.leadInTimer = null;
+    }
+    if (!this.leadInActive) return;
+    const position = this.getPlayhead(); // clock read, still negative
+    const rate = this.currentRate();
+    const remainingWallMs = rate > 0 ? (-position / rate) * 1000 : 0;
+    this.leadInTimer = setTimeout(() => {
+      this.leadInTimer = null;
+      if (!this.leadInActive || !this.buffer) return;
+      this.leadInActive = false;
+      // Enter the track at frame 0, on time: startAudio takes the normal
+      // (non-negative) path from here, building the node if needed.
+      this.startAudio(0);
+    }, Math.max(0, remainingWallMs));
+  }
+
+  /** Cancel any pending lead-in (a stop, a fresh start, or dispose). */
+  private clearLeadIn(): void {
+    this.leadInActive = false;
+    if (this.leadInTimer !== null) {
+      clearTimeout(this.leadInTimer);
+      this.leadInTimer = null;
+    }
+  }
+
   private stopAudio(at: number): void {
     this.clearPendingLaunch();
     this.pendingStartAt = null;
+    // A stop during the lead-in cancels the scheduled entry: the deck rests
+    // at its (possibly still-negative) pre-start position.
+    this.clearLeadIn();
     if (this.runningStartId !== null) {
       // The worklet declick-fades internally (its stop splice).
       this.sourceNode?.stop();
       this.runningStartId = null;
     }
-    this.transport = { ...this.transport, playhead: this.clampTime(at) };
+    this.transport = { ...this.transport, playhead: this.clampPlayhead(at) };
   }
 
   /** One pending gesture-retry at a time. */
@@ -879,9 +979,22 @@ export class DeckEngine {
     return composeRate(this.pitchPercent, this.bendPercent);
   }
 
+  /** Clamp to real track time [0, duration] — the domain of cue points and
+   * loop regions, which can never live before the track starts. */
   private clampTime(seconds: number): number {
     const duration = this.buffer?.duration ?? 0;
     return Math.max(0, Math.min(seconds, duration));
+  }
+
+  /** Clamp a PLAYHEAD placement (seek/beat jump/clock read) to
+   * [-MAX_LEAD_IN_SECONDS, duration]: the playhead may sit in the pre-start
+   * lead-in (issue 07) so a backward beat jump near the head preserves its
+   * beat distance instead of collapsing to 0. Audio stays silent through the
+   * negative region; the clock counts up through 0 into the track. The floor
+   * bounds runaway math — a musical lead-in, not an infinite pre-roll. */
+  private clampPlayhead(seconds: number): number {
+    const duration = this.buffer?.duration ?? 0;
+    return Math.max(-MAX_LEAD_IN_SECONDS, Math.min(seconds, duration));
   }
 
   private buildSnapshot(): DeckSnapshot {

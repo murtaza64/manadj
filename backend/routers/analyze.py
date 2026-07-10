@@ -1,28 +1,37 @@
 """API router for audio analysis endpoints (grid and key detection).
 
 Analysis (ADR 0024) writes its artifacts server-side — an analyzed Beatgrid
-plus the BPM projection, a Track key with provenance "analyzed" — and
-returns the outcome; a grid bail or undetected key is a result (200), not
-an error. Heavy analysis deps stay out of module scope: candidates import
-madmom inside their method bodies only.
+plus the BPM projection, a Track key with provenance "analyzed". The manual
+Analyze run rides the task system (ADR 0003, task-system 01) exactly like
+downloads: POST enqueues a `manual` analysis task and returns its state
+instead of blocking a request thread through madmom; the client polls the
+task state and refetches the grid/key when it finishes. Heavy analysis deps
+stay out of module scope: candidates import madmom inside their method
+bodies only.
 """
 
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pathlib import Path
 
 from .. import crud, models
+from ..analysis_tasks import enqueue_analysis_task, latest_analysis_task
 from ..database import get_db
-from ..grid_analysis import analyze_track_grid, default_grid_analyzer, get_grid_analysis
-from ..key_analysis import analyze_track_key, default_key_candidate
+from ..grid_analysis import get_grid_analysis
 
 router = APIRouter()
 
 
-def get_grid_analyzer():
-    """Dependency seam: tests override this with a stub-candidate analyzer."""
-    return default_grid_analyzer()
+def _task_status(task) -> dict | None:
+    """The observable state of a track's latest analysis task, or None."""
+    if task is None:
+        return None
+    return {
+        "task_id": task.id,
+        "state": task.state,
+        "error": task.error,
+        "manual": bool(task.payload.get("manual")),
+    }
 
 
 def _grid_analysis_response(diagnostics: models.GridAnalysis) -> dict:
@@ -55,88 +64,39 @@ def get_track_grid_analysis(
     return _grid_analysis_response(diagnostics)
 
 
-@router.post("/grid/{track_id}")
-def analyze_track_grid_endpoint(
+@router.post("/{track_id}", status_code=202)
+def enqueue_manual_analysis(
     track_id: int,
     db: Session = Depends(get_db),
-    analyzer=Depends(get_grid_analyzer),
 ):
-    """Manually analyze a track's grid (ADR 0024).
+    """Enqueue a manual grid+key analysis of a track (ADR 0003, 0024).
 
-    Success writes the analyzed Beatgrid and its BPM projection server-side;
-    the client only refetches. Bail writes diagnostics only and returns them
-    with bailed=true — the track joins the needs-attention worklist.
-    Manual analysis overwrites any existing grid regardless of origin
-    (explicit intent; the overwrite ladder binds bulk runs only).
+    Replaces the old synchronous POST /grid and POST /key endpoints, which
+    ran madmom inside the request thread. This enqueues one `manual` analysis
+    task (grid and key together, overwriting freely — explicit intent, the
+    ladder binds bulk runs only) and returns its state. The worker does the
+    work off-thread; the client polls GET /{track_id}/status and refetches
+    the grid/key when the task reaches `done`. A dedup (a task already
+    pending/running for the track) returns that in-flight task's state.
     """
     track = crud.get_track(db, track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    audio_path = Path(track.filename)
-    if not audio_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Audio file not found at path: {track.filename}"
-        )
-
-    try:
-        diagnostics = analyze_track_grid(db, track, analyzer)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}"
-        )
-
-    return _grid_analysis_response(diagnostics)
+    enqueue_analysis_task(db, track_id, manual=True)
+    return _task_status(latest_analysis_task(db, track_id))
 
 
-def get_key_candidate():
-    """Dependency seam: tests override this with a stub key candidate."""
-    return default_key_candidate()
-
-
-@router.post("/key/{track_id}")
-def analyze_track_key_endpoint(
+@router.get("/{track_id}/status")
+def get_analysis_task_status(
     track_id: int,
     db: Session = Depends(get_db),
-    candidate=Depends(get_key_candidate),
 ):
-    """Manually analyze a track's key (ADR 0024).
-
-    Detection writes Track.key with provenance "analyzed" server-side; the
-    client only refetches. An undetected key is a result (200 with key null),
-    not an error, and writes nothing. Manual analysis overwrites regardless
-    of provenance (explicit intent; the ladder binds bulk runs only).
-    """
+    """The observable state of a track's latest analysis task (the poll target
+    for the Analyze button). 200 with null when the track has never been
+    analyzed by a task."""
     track = crud.get_track(db, track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    audio_path = Path(track.filename)
-    if not audio_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Audio file not found at path: {track.filename}"
-        )
-
-    try:
-        detected, confidence = analyze_track_key(db, track, candidate)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}"
-        )
-
-    return {
-        "track_id": track_id,
-        "candidate": candidate.name,
-        "key": None if detected is None else {
-            "musical": detected.musical,
-            "openkey": detected.openkey,
-            "camelot": detected.camelot,
-            "engine_id": detected.engine_id,
-        },
-        "confidence": confidence,
-        "provenance": None if detected is None else "analyzed",
-    }
+    return _task_status(latest_analysis_task(db, track_id))
