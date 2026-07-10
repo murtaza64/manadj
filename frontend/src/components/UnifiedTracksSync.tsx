@@ -424,7 +424,7 @@ export function UnifiedTracksSync() {
                     sideEffects:
                       t === 'engine'
                         ? 'updates the "manaDJ Tags" playlist tree (and energy star ratings) in the Engine DJ database'
-                        : 'updates MyTags (and energy colors) in the Rekordbox database',
+                        : 'updates MyTags (and energy colors + star ratings) in the Rekordbox database',
                     run: () => exportTags.mutate(t),
                   })
                 }
