@@ -202,7 +202,7 @@ Automatically determining a property of a Track from its audio — key, BPM, bea
 
 **Section**:
 An Analysis-produced labeled span of a Track: intro, buildup, drop, breakdown, outro, or other. Boundaries land on the Beatgrid's downbeat lattice (unsnapped on gridless Tracks). Buildup is relational — it ends where a drop begins; one without a following drop is a detector error by definition. Never hand-edited: the correction surface is the cue ladder, and consumers read Hot Cue slot 4 over the detected drop wherever both speak (the two-rung read).
-_Avoid_: phrase (the 16/32-bar metric unit, and Rekordbox's feature name), segment (MIR jargon)
+_Avoid_: phrase (a Metric-ladder unit of ambiguous size, and Rekordbox's feature name), segment (MIR jargon)
 
 **Structure**:
 A Track's full partition into Sections — the analysis fact of where its drops, buildups, and breakdowns are. Re-runnable opinion, replaced wholesale on re-analysis; detector-label mappings and thresholds are tunable heuristics, not part of the definition. Internal to manadj — never transferred by Sync, like Waveform data.
@@ -289,6 +289,13 @@ _Avoid_: headphone cue (as the toggle's name), solo
 
 **Beatgrid**:
 The mapping of beat positions across a Track, including tempo changes. Produced by Analysis, edited by hand, or brought in by External Import. A *placeholder grid* merely generated from the Track's BPM is not saved info — it may be replaced without confirmation, unlike an edited or imported grid. When a Beatgrid exists it is the authority on tempo: the Track's BPM is its projection (the grid's dominant tempo), not an independent field, and editing BPM is a grid operation (ADR 0016). A grid may carry an *anchor* — the downbeat the user explicitly marked — which re-tempo operations never move.
+
+**Metric ladder**:
+A Track's tiers of metric grouping above the bar: bars group into higher-tier units (hypermeter), each tier splitting duple or triple — in practice duple everywhere, giving the 2-, 4-, 8-, 16-bar tiers dance music runs on. Defined over the Beatgrid's downbeat lattice — the Beatgrid remains the sole authority on beats and bars (tempo and time signature), and the ladder only answers how bars group upward. Anatomy: an ordered stack of arities up from the bar, plus Reset marks; counting between marks is perfectly regular. Sub-bar grouping (the 2-beat strong/weak unit) is a projection of the time signature, not part of the ladder. Tiers are positions on the ladder, not named model concepts — "phrase" is deliberately not a model term (DJ usage ambiguously means 4, 8, 16, or 32 bars; say the tier's size instead — "4-bar group"). Every gridded Track has a ladder: the default — duple tiers from the Grid origin, no Reset marks — is a computed guess, not saved info (the placeholder-grid posture); only deviation is persisted. Manadj-internal, like Waveform data: never transferred by Sync, outside Divergence and Export; external phrase data could someday feed it as an Import source, never as a synced field.
+_Avoid_: phrase (ambiguous size; also Rekordbox's feature name)
+
+**Reset mark**:
+A downbeat where a Track's Metric ladder recounts from 1 across all tiers — how irregular hypermeter (fakeout extensions, pickup bars, inserted bars) is expressed. The ladder origin is simply the first mark, defaulting to the Grid origin. Parenthetical bars are derived, never stored: between marks, complete groups form bottom-up and a trailing incomplete group is the "extra bars" — with the discipline that orphans must trail, so a leading orphan (a pickup) is isolated by one more mark. Refers to a moment in track time and resolves to the *nearest downbeat at read* — a pure projection, never rewritten: grid edits and even full grid replacement never destroy or invalidate marks (a bad re-grid makes them land visibly oddly; the fix is fixing the grid). On a gridless Track the ladder is undefined — persisted marks lie dormant until a grid returns. A mark resets every tier; tier-selective resets are deliberately unrepresentable until real music demands them.
 
 **Grow / Shrink**:
 The fine re-tempo pair on a Track's Beatgrid: growing widens beat spacing (BPM down a hair), shrinking tightens it (BPM up). A grid operation like any BPM edit, honoring the grid's anchor. Distinct from a grid nudge, which translates the grid without changing its tempo.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { loopOverlayRegions } from '../waveform/loopOverlay';
@@ -130,17 +130,31 @@ export default function WebGLWaveform({
     }
   };
 
-  const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    if (visibleSeconds !== undefined && onVisibleSecondsChange) {
-      // Linked zoom: report the step; the shared value comes back as a prop.
-      event.nativeEvent.preventDefault();
-      onVisibleSecondsChange(
-        stepVisibleSeconds(visibleSeconds, event.deltaY < 0 ? 'in' : 'out')
-      );
-      return;
-    }
-    rendererRef.current?.handleWheel(event.nativeEvent);
-  };
+  // Wheel zoom must attach natively with { passive: false } (the pattern in
+  // PerfDiffViewer / OverviewLadder): React's onWheel lands in a passive
+  // listener, where the preventDefault is a no-op that logs a console error
+  // on every tick. Dependency-free effect: the canvas mounts and unmounts
+  // across the loading/error early returns, so re-attach every render.
+  const handleWheel = useCallback(
+    (event: WheelEvent) => {
+      if (visibleSeconds !== undefined && onVisibleSecondsChange) {
+        // Linked zoom: report the step; the shared value comes back as a prop.
+        event.preventDefault();
+        onVisibleSecondsChange(
+          stepVisibleSeconds(visibleSeconds, event.deltaY < 0 ? 'in' : 'out')
+        );
+        return;
+      }
+      rendererRef.current?.handleWheel(event);
+    },
+    [visibleSeconds, onVisibleSecondsChange, rendererRef],
+  );
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  });
 
   // Loading and error states
   if (isLoading) {
@@ -179,7 +193,6 @@ export default function WebGLWaveform({
         onMouseMove={handleMouseMove}
         onMouseUp={endDrag}
         onMouseLeave={endDrag}
-        onWheel={handleWheel}
       />
     </div>
   );

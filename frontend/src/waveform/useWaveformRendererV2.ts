@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData, HotCue } from '../types';
+import { resolveLadder } from '../meter/ladder';
 import type { DecodedWaveform } from './blob';
 import { WaveformRendererV2 } from './WaveformRendererV2';
 import type { OverlayRegion, WaveformRendererConfig } from './WaveformRendererV2';
@@ -83,7 +84,14 @@ export function useWaveformRendererV2({
 
   useEffect(() => {
     if (beatgrid) {
-      rendererRef.current?.setBeatgrid(beatgrid.beat_times, beatgrid.downbeat_times);
+      // Metric-ladder projection (metric-ladder 01): tier-weighted
+      // gridlines; the renderer never reads the ladder raw.
+      const ladder = resolveLadder(beatgrid);
+      rendererRef.current?.setBeatgrid(
+        beatgrid.beat_times,
+        beatgrid.downbeat_times,
+        ladder && { tiers: ladder.tiers, tierBars: ladder.tierBars },
+      );
     }
   }, [beatgrid, waveformData]);
 
