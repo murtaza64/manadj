@@ -767,6 +767,137 @@ describe('ended', () => {
   });
 });
 
+describe('cross-deck paused-launch quantization (cue-quantize-bpm 04)', () => {
+  // Reference (playing) deck's grid: beats every 0.5s from 0.25s.
+  const refGrid = [0.25, 0.75, 1.25, 1.75, 2.25];
+
+  /** Quantize on, launching deck gridless, reference deck playing at `refPlayhead`. */
+  function launchCtx(refPlayhead: number, playRate = 1): TransportContext {
+    return {
+      quantize: true,
+      beatTimes: null,
+      launchReference: { beatTimes: refGrid, playhead: refPlayhead },
+      playRate,
+    };
+  }
+
+  describe('play', () => {
+    it('defers the launch to the reference deck next beat when it is ahead', () => {
+      // ref playhead 1.1 → nearest beat 1.25, Δ +0.15: hold, enter on the playhead.
+      const [next, effects] = reduceTransport(
+        state({ playhead: 12.5 }),
+        { type: 'play' },
+        launchCtx(1.1)
+      );
+      expect(next.playing).toBe(true);
+      expect(effects).toEqual([{ type: 'start', at: 12.5, delaySeconds: expect.closeTo(0.15, 6) }]);
+    });
+
+    it('launches immediately entering ahead when the reference beat just passed', () => {
+      // ref playhead 1.4 → nearest beat 1.25, Δ -0.15: start now, entering
+      // 0.15s past the playhead — as though playback began on that beat.
+      const [, effects] = reduceTransport(
+        state({ playhead: 12.5 }),
+        { type: 'play' },
+        launchCtx(1.4)
+      );
+      expect(effects).toHaveLength(1);
+      const e = effects[0] as { type: string; at: number; delaySeconds?: number };
+      expect(e.type).toBe('start');
+      expect(e.at).toBeCloseTo(12.65, 6);
+      expect(e.delaySeconds ?? 0).toBe(0);
+    });
+
+    it('is immediate when Quantize is off', () => {
+      const [, effects] = reduceTransport(
+        state({ playhead: 12.5 }),
+        { type: 'play' },
+        { quantize: false, beatTimes: null, launchReference: { beatTimes: refGrid, playhead: 1.4 } }
+      );
+      expect(effects).toEqual([{ type: 'start', at: 12.5 }]);
+    });
+
+    it('is immediate when no other deck is playing (no reference)', () => {
+      const [, effects] = reduceTransport(
+        state({ playhead: 12.5 }),
+        { type: 'play' },
+        { quantize: true, beatTimes: null, launchReference: null }
+      );
+      expect(effects).toEqual([{ type: 'start', at: 12.5 }]);
+    });
+
+    it('is immediate when the reference has no usable grid', () => {
+      const [, effects] = reduceTransport(
+        state({ playhead: 12.5 }),
+        { type: 'play' },
+        { quantize: true, beatTimes: null, launchReference: { beatTimes: [], playhead: 1.4 } }
+      );
+      expect(effects).toEqual([{ type: 'start', at: 12.5 }]);
+    });
+
+    it('does not cross-quantize a takeover of a running preview', () => {
+      const s = state({ previewing: true, cuePoint: 10, playhead: 11 });
+      const [, effects] = reduceTransport(s, { type: 'play' }, launchCtx(1.1));
+      expect(effects).toEqual([]);
+    });
+  });
+
+  describe('cue-down hold-to-preview', () => {
+    it('defers preview launch from the cue point to the reference beat', () => {
+      const s = state({ cuePoint: 20, playhead: 20 });
+      const [next, effects] = reduceTransport(s, { type: 'cue-down' }, launchCtx(1.1));
+      expect(next.previewing).toBe(true);
+      expect(effects).toEqual([{ type: 'start', at: 20, delaySeconds: expect.closeTo(0.15, 6) }]);
+    });
+
+    it('is immediate when Quantize is off', () => {
+      const s = state({ cuePoint: 20, playhead: 20 });
+      const [, effects] = reduceTransport(s, { type: 'cue-down' }, {
+        quantize: false,
+        beatTimes: null,
+        launchReference: { beatTimes: refGrid, playhead: 1.1 },
+      });
+      expect(effects).toEqual([{ type: 'start', at: 20 }]);
+    });
+  });
+
+  describe('hot-cue-down hold-to-preview', () => {
+    it('defers preview launch from the hot cue to the reference beat', () => {
+      const s = state({ playhead: 5 });
+      const [next, effects] = reduceTransport(
+        s,
+        { type: 'hot-cue-down', slot: 2, time: 30 },
+        launchCtx(1.1)
+      );
+      expect(next.hotCuePreviewSlot).toBe(2);
+      expect(next.playhead).toBe(30);
+      expect(effects).toEqual([{ type: 'start', at: 30, delaySeconds: expect.closeTo(0.15, 6) }]);
+    });
+
+    it('launches immediately entering ahead of the hot cue when the reference beat just passed', () => {
+      const s = state({ playhead: 5 });
+      const [, effects] = reduceTransport(
+        s,
+        { type: 'hot-cue-down', slot: 2, time: 30 },
+        launchCtx(1.4)
+      );
+      const e = effects[0] as { type: string; at: number; delaySeconds?: number };
+      expect(e.at).toBeCloseTo(30.15, 6);
+      expect(e.delaySeconds ?? 0).toBe(0);
+    });
+
+    it('is immediate when Quantize is off', () => {
+      const s = state({ playhead: 5 });
+      const [, effects] = reduceTransport(s, { type: 'hot-cue-down', slot: 2, time: 30 }, {
+        quantize: false,
+        beatTimes: null,
+        launchReference: { beatTimes: refGrid, playhead: 1.1 },
+      });
+      expect(effects).toEqual([{ type: 'start', at: 30 }]);
+    });
+  });
+});
+
 describe('isAudioRunning', () => {
   it('is false when idle', () => {
     expect(isAudioRunning(state())).toBe(false);

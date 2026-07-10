@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Track, Tag, GridAnalysisResponse, KeyAnalysisResponse } from '../types';
+import type { Track, Tag, GridAnalysisResponse } from '../types';
 import { getTagColor } from '../utils/colorUtils';
 import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
@@ -66,9 +66,11 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Grid diagnostics for the selected track (shows a past/fresh bail marker).
+  // The key result no longer lives here — after a manual analysis task the
+  // client refetches the Track and reads Track.key directly.
   const [analysisResults, setAnalysisResults] = useState<{
     grid?: GridAnalysisResponse;
-    key?: KeyAnalysisResponse;
   } | null>(null);
   // Sync internal state when track prop changes
   useEffect(() => {
@@ -146,28 +148,39 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
     });
   };
 
-  // Handler for analyze button
+  // Handler for analyze button. Manual analysis now rides the task system
+  // (ADR 0003, task-system 01): enqueue one `manual` grid+key task and poll
+  // its state instead of blocking on a synchronous madmom request. Both
+  // sides write server-side (ADR 0024) — the grid path stores the analyzed
+  // Beatgrid + BPM projection (or bails), the key path stores Track.key with
+  // provenance "analyzed" (or detects nothing). The client only refetches
+  // once the task reaches `done`.
   const handleAnalyze = async () => {
     if (!track) return;
+    const trackId = track.id;
 
     setIsAnalyzing(true);
     try {
-      // Run both analyses in parallel
-      const [gridResult, keyResult] = await Promise.all([
-        api.analyze.grid(track.id),
-        api.analyze.key(track.id)
-      ]);
+      let status = await api.analyze.enqueue(trackId);
+      while (status && (status.state === 'pending' || status.state === 'running')) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        status = await api.analyze.status(trackId);
+      }
 
-      setAnalysisResults({ grid: gridResult, key: keyResult });
+      if (status?.state === 'failed') {
+        console.error('Analysis failed:', status.error);
+        return;
+      }
 
-      // Both analyses write server-side (ADR 0024): the grid path stores
-      // the analyzed Beatgrid + BPM projection (or bails and writes
-      // nothing); the key path stores Track.key with provenance
-      // "analyzed" (or detects nothing and writes nothing). The client
-      // only refetches.
-      queryClient.invalidateQueries({ queryKey: ['beatgrid', track.id] });
+      // Task done: refetch the grid diagnostics (shows a bail) and the track
+      // (BPM/key). Guard against the selection having moved on while the task
+      // ran — only apply results for the track we analyzed.
+      const gridResult = await api.analyze.getGrid(trackId).catch(() => undefined);
+      setAnalysisResults(prev =>
+        track?.id === trackId ? { ...prev, grid: gridResult } : prev
+      );
+      queryClient.invalidateQueries({ queryKey: ['beatgrid', trackId] });
       queryClient.invalidateQueries({ queryKey: ['tracks'] });
-
     } catch (error) {
       console.error('Analysis failed:', error);
     } finally {
@@ -345,7 +358,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
               <span style={{
                 color: isDisabled ? 'var(--overlay0)' : 'var(--text)',
                 fontSize: '12px',
-                opacity: analysisResults?.key ? 1 : 0.6
+                opacity: track?.key != null ? 1 : 0.6
               }}>
                 {track ? formatKeyDisplay(track.key) : '-'}
               </span>
