@@ -26,6 +26,7 @@ import {
   panWindow,
   zoomWindow,
 } from '../utils/perfDiffOverlay';
+import { STEP_RATIO } from '../utils/waveformZoom';
 import './PerfDiffViewer.css';
 
 // bright, fully saturated (repo preference) — Library cyan; external
@@ -273,7 +274,7 @@ function Viewer({ blob, savedMaincue, sides, onImport }: {
         };
       } else {
         const anchor = windowStart + ((e.clientX - rect.left) / rect.width) * windowSeconds;
-        const factor = e.deltaY > 0 ? 1.2 : 1 / 1.2; // deck WHEEL_STEP
+        const factor = e.deltaY > 0 ? STEP_RATIO : 1 / STEP_RATIO; // shared zoom sensitivity
         winRef.current = zoomWindow(windowStart, windowSeconds, anchor, factor, duration);
       }
       scheduleDraw();
