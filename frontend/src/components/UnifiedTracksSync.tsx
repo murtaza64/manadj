@@ -1162,17 +1162,25 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, o
 
 // ------------------------------------------------------------- hot cue diff
 
+// Sign-aware: decode-frame correction can yield small NEGATIVE times
+// (e.g. an RB m4a grid at 0.021s RB-frame = -0.002s manadj-frame);
+// flooring toward -inf rendered -0.002 as "-1:59.998".
+function fmtSignedTime(seconds: number, decimals: number, pad: number): string {
+  const sign = seconds < 0 ? '-' : '';
+  const abs = Math.abs(seconds);
+  const m = Math.floor(abs / 60);
+  return `${sign}${m}:${(abs - m * 60).toFixed(decimals).padStart(pad, '0')}`;
+}
+
 function fmtCueTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  return `${m}:${(seconds - m * 60).toFixed(1).padStart(4, '0')}`;
+  return fmtSignedTime(seconds, 1, 4);
 }
 
 /** Millisecond-resolution time for divergence display — comparison
  * tolerances are 1 ms, so anything coarser can render two genuinely
  * diverged values as identical text. */
 function fmtCueTimeMs(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  return `${m}:${(seconds - m * 60).toFixed(3).padStart(6, '0')}`;
+  return fmtSignedTime(seconds, 3, 6);
 }
 
 /** BPM at full stored resolution (4 decimals, trailing zeros trimmed) —
