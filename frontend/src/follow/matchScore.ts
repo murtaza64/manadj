@@ -45,9 +45,17 @@ export const KEY_BONUS = {
 
 export type KeyRelation = keyof typeof KEY_BONUS;
 
-/** Shared-tag count at which the log curve reaches 1.0. More keeps
- * scoring (monotone, never flat) — the curve just grows gently past it. */
-export const TAG_NORM_COUNT = 8;
+/**
+ * Tag contribution ladder (tuning session 2026-07-10): 3 shared tags must
+ * outrank ANY harmonic-key-only match (> KEY_BONUS.same), 2 must not —
+ * they sit exactly on the Affinity floor, the minimum heuristic
+ * admission. The log curve couldn't express that step (its 2→3 ratio is
+ * fixed at 1.26), so the early counts are hand-tuned; past the ladder it
+ * keeps growing gently forever (monotone, never flat).
+ */
+export const TAG_LADDER = [0, 0.3, 0.5, 0.9, 1.0] as const;
+/** Per-tag growth beyond the ladder. */
+export const TAG_TAIL_STEP = 0.03;
 
 /** BPM flat zone: within this % of the nearest dyadic fold the
  * contribution is full; beyond it, linear decay to the gate edge. */
@@ -83,12 +91,15 @@ export function keyRelation(
   return 'other';
 }
 
-/** Log-shaped tag contribution: steep at first, gentle forever. Monotone
- * and never flat — normalized to 1.0 at TAG_NORM_COUNT shared tags but
- * deliberately unclamped past it. */
+/** Tag contribution: the hand-tuned ladder, then a gentle unbounded
+ * tail. Steep at first (1→3 covers most of the budget), never flat. */
 export function tagContribution(sharedCount: number): number {
   if (sharedCount <= 0) return 0;
-  return Math.log2(1 + sharedCount) / Math.log2(1 + TAG_NORM_COUNT);
+  if (sharedCount < TAG_LADDER.length) return TAG_LADDER[sharedCount];
+  return (
+    TAG_LADDER[TAG_LADDER.length - 1] +
+    (sharedCount - (TAG_LADDER.length - 1)) * TAG_TAIL_STEP
+  );
 }
 
 /** Energy neighborhood, asymmetric: a rise slightly over a drop, ±2 or
@@ -140,6 +151,32 @@ function sharedTagCount(reference: Track, candidate: Track): number {
   if (!reference.tags?.length || !candidate.tags?.length) return 0;
   const referenceIds = new Set(reference.tags.map((t) => t.id));
   return candidate.tags.reduce((n, t) => n + (referenceIds.has(t.id) ? 1 : 0), 0);
+}
+
+/**
+ * Which affinity signals matched — the row-highlighting seam (tuning
+ * session 2026-07-10): the Follow views dim what did NOT contribute (key
+ * on a non-compatible relation, tags outside the shared set), so a row
+ * shows WHY it matched. Multi-reference: a signal counts when ANY
+ * followed reference matched it (best-position-wins, like the rank).
+ */
+export interface MatchedSignals {
+  key: boolean;
+  tagIds: Set<number>;
+}
+
+export function matchedSignals(candidate: Track, references: FollowReference[]): MatchedSignals {
+  const signals: MatchedSignals = { key: false, tagIds: new Set() };
+  for (const reference of references) {
+    if (keyRelation(reference.track.key, candidate.key) !== 'other') signals.key = true;
+    if (reference.track.tags?.length && candidate.tags?.length) {
+      const referenceIds = new Set(reference.track.tags.map((t) => t.id));
+      for (const tag of candidate.tags) {
+        if (referenceIds.has(tag.id)) signals.tagIds.add(tag.id);
+      }
+    }
+  }
+  return signals;
 }
 
 /** The affinity signals' weighted subtotal (key + tags + artist) — what
@@ -216,4 +253,61 @@ export function compareRanks(a: CandidateRank, b: CandidateRank): number {
     if (a.known !== b.known) return a.known - b.known;
   }
   return b.score - a.score;
+}
+
+/** Known-strata-only comparator: pins Known on top (in strength order)
+ * and treats all Compatible candidates as equal — a stable sort under it
+ * preserves the caller's order (e.g. a user's column sort) within the
+ * heuristic stratum while the strata stay pinned. */
+export function compareKnownStrata(a: CandidateRank, b: CandidateRank): number {
+  if (a.known === null && b.known === null) return 0;
+  if (a.known === null) return 1;
+  if (b.known === null) return -1;
+  return a.known - b.known;
+}
+
+/** Order tracks by the full rank (Known strata, then score) — Follow's
+ * default order. Stable: the incoming (server) order breaks exact ties. */
+export function orderByRank(
+  tracks: Track[],
+  references: FollowReference[],
+  bpmThresholdPercent?: number
+): Track[] {
+  return rankSort(tracks, references, compareRanks, bpmThresholdPercent);
+}
+
+/** Pin the Known strata but leave the heuristic stratum in the incoming
+ * order — the shape while a user's column sort drives the list. */
+export function pinKnownStrata(
+  tracks: Track[],
+  references: FollowReference[],
+  bpmThresholdPercent?: number
+): Track[] {
+  return rankSort(tracks, references, compareKnownStrata, bpmThresholdPercent);
+}
+
+function rankSort(
+  tracks: Track[],
+  references: FollowReference[],
+  compare: (a: CandidateRank, b: CandidateRank) => number,
+  bpmThresholdPercent?: number
+): Track[] {
+  const ranks = new Map(
+    tracks.map((t) => [t.id, rankAgainst(t, references, bpmThresholdPercent)])
+  );
+  return [...tracks].sort((a, b) => compare(ranks.get(a.id)!, ranks.get(b.id)!));
+}
+
+/** Known strata keep their section headers and marks (follow-mode 08);
+ * the heuristic stratum is one section — score orders within it. Kept in
+ * lockstep with links/known.ts strengths. */
+const KNOWN_LABELS: readonly string[] = [
+  '★ Favorited transition',
+  '🔗 Linked',
+  '◆ Saved transition',
+];
+
+export function rankLabel(rank: CandidateRank): string {
+  if (rank.known !== null) return KNOWN_LABELS[rank.known] ?? KNOWN_LABELS[KNOWN_LABELS.length - 1];
+  return 'Compatible';
 }

@@ -147,13 +147,15 @@
   text-align: center;
 }
 
-/* Energy square overrides for track list */
+/* Energy square overrides for track list. The squares are block divs, so
+   margin centers them (the cell's textAlign can't). */
 .track-energy-cell .energy-square {
   border: none;
   border-radius: 50%;
   width: 20px;
   height: 20px;
   padding: 0;
+  margin: 0 auto;
 }
 
 .track-energy-cell .energy-square.level-1.filled {
@@ -193,6 +195,7 @@
   width: 20px;
   height: 20px;
   padding: 0;
+  margin: 0 auto;
 }
 
 /* Quality / size / provenance columns */

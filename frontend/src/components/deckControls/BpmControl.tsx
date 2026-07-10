@@ -21,6 +21,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useBeatgridData } from '../../hooks/useBeatgridData';
 import { BpmGrowIcon, BpmShrinkIcon } from '../icons/BpmIcons';
+import { getBpmColor } from '../../utils/displayColors';
 import { GridEditButtons } from './GridEditControls';
 import type { GridEditConfig } from './GridEditControls';
 import {
@@ -149,6 +150,7 @@ export function BpmControl({
       <span className={`deck-bpm${dense ? ' dense' : ''}`}>
         <span
           className="deck-bpm-var"
+          style={{ color: getBpmColor(projection.bpm) ?? undefined }}
           title="variable beatgrid — edit the grid"
         >
           ~{formatBpm(projection.bpm)} (var)
@@ -249,6 +251,9 @@ export function BpmControl({
         type="text"
         className="deck-bpm-input"
         value={displayValue}
+        // Library color coding (sneak fix 2026-07-10): the tempo hue the
+        // track rows use, so a deck reads like its library row.
+        style={{ color: (!isFocused && getBpmColor(base)) || undefined }}
         title={exactTitle}
         placeholder="-"
         disabled={inputDisabled}

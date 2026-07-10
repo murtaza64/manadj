@@ -17,14 +17,10 @@ import {
   followedReferences,
   followMacroToggles,
   followSummary,
-  followTier,
-  orderByTier,
   reduceFollow,
-  tierLabel,
   unionIds,
   type FollowEvent,
   type FollowFlags,
-  type FollowReference,
 } from './model';
 
 /** Minimal Track for derivation: only key/bpm/energy/tags are read. */
@@ -66,18 +62,13 @@ describe('followedReferences — facts read through the track cache (ADR 0027 §
 describe('deriveFollowQuery — the gate is BPM-only (match-score PRD)', () => {
   const tag = (id: number): Tag => ({ id, name: `t${id}` }) as unknown as Tag;
 
-  it('key, tags, and energy derive neutral regardless of params — they score, never filter', () => {
-    const reference = track({ key: 19, energy: 3, tags: [tag(4), tag(9)] });
-    const q = deriveFollowQuery(reference, {
-      ...DEFAULT_FOLLOW_PARAMS,
-      harmonicKeys: true,
-      tags: true,
-      energy: true,
-      energyPreset: 'equal',
+  it('the query carries the BPM window and nothing else — key/tags/energy score, never filter', () => {
+    const reference = track({ key: 19, energy: 3, bpm: 174, tags: [tag(4), tag(9)] });
+    const q = deriveFollowQuery(reference, DEFAULT_FOLLOW_PARAMS);
+    expect(q).toEqual({
+      bpmCenter: 174,
+      bpmThresholdPercent: DEFAULT_FOLLOW_PARAMS.bpmThresholdPercent,
     });
-    expect(q.keyCamelotIds).toEqual([]);
-    expect(q.tagIds).toEqual([]);
-    expect(q).toMatchObject({ energyMin: 1, energyMax: 5 });
   });
 });
 
@@ -146,6 +137,14 @@ describe('candidateIdSet — known tier folded in (follow-mode 03 / linked-pairs
     expect([...candidateIdSet([[t(1)]], [new Set()], false)]).toEqual([1]);
   });
 
+  it('a followed reference is never its own candidate (self-match, loaded)', () => {
+    // Reference 100 self-matches into its heuristic set; a dual-follow
+    // partner may even hold it in a known set. Both excluded.
+    const ids = candidateIdSet([[t(100), t(1)]], [new Set([100, 2])], false, [100]);
+    expect([...ids].sort()).toEqual([1, 2]);
+    expect([...candidateIdSet([], [new Set([100])], true, [100])]).toEqual([]);
+  });
+
   it("accepts the transition index's from-direction map (constructed index)", () => {
     // The production shape: a real index built from a pair store. Track 7
     // has a saved Transition into 30; the 7:31 pair is empty (pristine
@@ -166,15 +165,7 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
 
   it('renders the BPM gate only — retired axes never appear (match-score PRD)', () => {
     expect(
-      followSummary(reference, {
-        harmonicKeys: true,
-        bpm: true,
-        bpmThresholdPercent: 4,
-        tags: true,
-        energy: true,
-        energyPreset: 'near',
-        knownOnly: false,
-      })
+      followSummary(reference, { bpm: true, bpmThresholdPercent: 4, knownOnly: false })
     ).toBe('128±4%');
   });
 
@@ -186,89 +177,6 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
 
   it('skips axes the reference has no data for; nothing enabled renders a dash', () => {
     expect(followSummary(track({}), DEFAULT_FOLLOW_PARAMS)).toBe('—');
-  });
-});
-
-describe('followTier / orderByTier — candidate strength (follow-mode 04 / linked-pairs 04)', () => {
-  // Engine key ids (keyUtils): 19=10m(Cm) 18=10d(Eb) 21=11m(Gm) 17=9m(Fm)
-  // 9=5m(C#m) 23=12m(Dm) 1=1m(Am).
-  // Known strengths (links/known.ts): favorited=0, linked=1, saved=2.
-  const ref = (
-    key: number | undefined,
-    known: Record<number, 0 | 1 | 2> = {}
-  ): FollowReference => ({
-    track: track({ id: 999, key }),
-    knownStrength: (id) => known[id] ?? null,
-  });
-
-  it('tiers: known (by strength) < same Key < relative < one up < one down < rest', () => {
-    const r = ref(19, { 50: 0, 51: 1, 52: 2 }); // 10m reference
-    expect(followTier(track({ id: 50, key: 9 }), [r])).toBe(0); // favorited trumps key
-    expect(followTier(track({ id: 51, key: 9 }), [r])).toBe(1); // linked
-    expect(followTier(track({ id: 52, key: 9 }), [r])).toBe(2); // unfavorited saved
-    expect(followTier(track({ id: 1, key: 19 }), [r])).toBe(3); // 10m same
-    expect(followTier(track({ id: 2, key: 18 }), [r])).toBe(4); // 10d relative
-    expect(followTier(track({ id: 3, key: 21 }), [r])).toBe(5); // 11m up
-    expect(followTier(track({ id: 4, key: 17 }), [r])).toBe(6); // 9m down
-    expect(followTier(track({ id: 5, key: 9 }), [r])).toBe(7); // 5m unrelated
-    expect(followTier(track({ id: 6, key: undefined }), [r])).toBe(7); // keyless
-  });
-
-  it('any known strength outranks every Key tier', () => {
-    const r = ref(19, { 52: 2 });
-    // Weakest known (unfavorited saved) still beats same-Key.
-    expect(followTier(track({ id: 52, key: 19 }), [r])).toBe(2);
-  });
-
-  it('wraps the wheel: 12m→1m is one up, 1m→12m is one down', () => {
-    expect(followTier(track({ id: 1, key: 1 }), [ref(23)])).toBe(5); // 12m ref, 1m up
-    expect(followTier(track({ id: 2, key: 23 }), [ref(1)])).toBe(6); // 1m ref, 12m down
-  });
-
-  it('a keyless reference contributes only its known tier', () => {
-    const r = ref(undefined, { 7: 0 });
-    expect(followTier(track({ id: 7, key: 19 }), [r])).toBe(0);
-    expect(followTier(track({ id: 8, key: 19 }), [r])).toBe(7);
-  });
-
-  it('best tier wins across followed references (a pair takes its best)', () => {
-    // Same key as ref B (tier 3) but merely one-up from ref A (tier 5).
-    const refs = [ref(19), ref(21)];
-    expect(followTier(track({ id: 1, key: 21 }), refs)).toBe(3);
-    // Linked to A (1) but favorited from B (0): best wins.
-    const known = [ref(19, { 9: 1 }), ref(21, { 9: 0 })];
-    expect(followTier(track({ id: 9, key: 9 }), known)).toBe(0);
-  });
-
-  it('orderByTier groups by tier and keeps the incoming order within a tier', () => {
-    const r = ref(19, { 40: 0, 41: 1 }); // 10m; 40 favorited, 41 linked
-    const input = [
-      track({ id: 10, key: 9 }), // rest
-      track({ id: 11, key: 19 }), // same
-      track({ id: 41, key: 9 }), // linked
-      track({ id: 12, key: 19 }), // same (after 11 in input)
-      track({ id: 40, key: 9 }), // favorited
-      track({ id: 13, key: 18 }), // relative
-    ];
-    expect(orderByTier(input, [r]).map((t) => t.id)).toEqual([40, 41, 11, 12, 13, 10]);
-    // Input untouched; no references = no reordering.
-    expect(input.map((t) => t.id)).toEqual([10, 11, 41, 12, 40, 13]);
-    expect(orderByTier(input, []).map((t) => t.id)).toEqual([10, 11, 41, 12, 40, 13]);
-  });
-});
-
-describe('tierLabel — section headers (follow-mode 08)', () => {
-  it('names all eight tiers', () => {
-    expect([0, 1, 2, 3, 4, 5, 6, 7].map(tierLabel)).toEqual([
-      '★ Favorited transition',
-      '🔗 Linked',
-      '◆ Saved transition',
-      'Same key',
-      'Relative key',
-      'Key up',
-      'Key down',
-      'Other matches',
-    ]);
   });
 });
 

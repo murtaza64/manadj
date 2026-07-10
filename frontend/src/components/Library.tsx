@@ -22,11 +22,16 @@ import {
   candidateIdSet,
   deriveFollowQuery,
   followedReferences,
-  followTier,
-  orderByTier,
-  tierLabel,
 } from '../follow/model';
 import type { FollowReference } from '../follow/model';
+import {
+  matchedSignals,
+  orderByRank,
+  passesAffinityFloor,
+  pinKnownStrata,
+  rankAgainst,
+  rankLabel,
+} from '../follow/matchScore';
 import { useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
 import { EMPTY_SELECTION, click, menuTargets } from '../selection/selectionModel';
@@ -159,13 +164,8 @@ export default function Library({
         // this library size (backend scoring is the named future answer).
         queryFn: (): Promise<PaginatedTracks> =>
           api.tracks.list(1, 10000, {
-            tagIds: q.tagIds,
-            energyMin: q.energyMin,
-            energyMax: q.energyMax,
-            tagMatchMode: q.tagMatchMode,
             bpmCenter: q.bpmCenter,
             bpmThresholdPercent: q.bpmThresholdPercent,
-            keyCamelotIds: q.keyCamelotIds,
             archived: selectedView === 'archived' ? true : undefined,
           }),
         placeholderData: (previousData: unknown) => previousData,
@@ -186,14 +186,23 @@ export default function Library({
     for (const id of linkedIdsOf(links, reference.id)) ids.add(id);
     return ids;
   });
-  const resolvedFollowQueries = followQueries.filter((q) => q.data !== undefined);
+  // The Affinity floor is the cut (match-score PRD): each reference's
+  // gated candidates are narrowed to the admitted ones before the union —
+  // BPM+energy comfort alone never admits; Known ORs in below regardless.
+  const resolvedFollowSets = followRefs.flatMap(({ reference }, i) => {
+    const data = followQueries[i].data;
+    if (data === undefined) return [];
+    return [(data.items ?? []).filter((t: Track) => passesAffinityFloor(reference, t))];
+  });
   const followCandidateIds = (() => {
     if (followRefs.length === 0) return null;
-    if (!followParams.knownOnly && resolvedFollowQueries.length === 0) return null;
+    if (!followParams.knownOnly && resolvedFollowSets.length === 0) return null;
     return candidateIdSet(
-      resolvedFollowQueries.map((q) => q.data!.items ?? []),
+      resolvedFollowSets,
       followKnownSets,
-      followParams.knownOnly
+      followParams.knownOnly,
+      // The loaded/followed tracks never list themselves.
+      followRefs.map(({ reference }) => reference.id)
     );
   })();
   /** References for tier ordering (follow-mode 04), known lookups
@@ -269,6 +278,11 @@ export default function Library({
   // it never rewrites Play order. Default (and reset on playlist switch)
   // is the # column ascending, i.e. Play order itself.
   const [playlistSort, setPlaylistSort] = useState<PlaylistSort>(PLAY_ORDER_SORT);
+  /** Follow sort mode (match-score PRD): score is the default order of
+   * the heuristic stratum; a column-header click hands the within-strata
+   * order to that column (Known stays pinned regardless); the score
+   * header hands it back. */
+  const [followScoreSort, setFollowScoreSort] = useState(true);
   const [prevSortPlaylistId, setPrevSortPlaylistId] = useState(selectedPlaylistId);
   if (prevSortPlaylistId !== selectedPlaylistId) {
     setPrevSortPlaylistId(selectedPlaylistId);
@@ -411,6 +425,8 @@ export default function Library({
   };
 
   const handleSort = (column: PlaylistSortColumn) => {
+    // A column sort takes over the within-strata order while following.
+    setFollowScoreSort(false);
     // Playlist table: local, view-only sort (Play order untouched).
     if (selectedView === 'playlist') {
       setPlaylistSort((prev) => nextPlaylistSort(prev, column));
@@ -438,12 +454,14 @@ export default function Library({
   // with the Follow candidate set composed client-side (follow-mode 01/03).
   let libraryTracks = allTracksData?.items || [];
   if (followCandidateIds) {
-    // Filter to candidates, then tier-order them (follow-mode 04): the
-    // stable sort keeps the server sort within each tier.
-    libraryTracks = orderByTier(
-      libraryTracks.filter((t: Track) => followCandidateIds.has(t.id)),
-      followReferences
-    );
+    // Filter to candidates, then rank-order them (match-score PRD):
+    // score is the default sort of the heuristic stratum; a user's column
+    // sort takes over within the strata (Known stays pinned regardless) —
+    // both sorts are stable, so the server order breaks ties.
+    const candidates = libraryTracks.filter((t: Track) => followCandidateIds.has(t.id));
+    libraryTracks = followScoreSort
+      ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
+      : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent);
   }
 
   // Playlist list, in the view-only playlist sort. The Follow filter
@@ -451,17 +469,32 @@ export default function Library({
   // to the library pane.
   let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
   if (followCandidateIds && !splitView) {
-    playlistTracks = orderByTier(
-      playlistTracks.filter((t: Track) => followCandidateIds.has(t.id)),
-      followReferences
-    );
+    const candidates = playlistTracks.filter((t: Track) => followCandidateIds.has(t.id));
+    playlistTracks = followScoreSort
+      ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
+      : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent);
   }
 
-  /** Tier section headers (follow-mode 08): only while Follow filters —
-   * manual browsing stays a flat table. Applies wherever the candidate
-   * filter applied (never the split's playlist pane). */
+  /** Section headers (follow-mode 08, match-score PRD): the Known strata
+   * keep their headers and marks; the heuristic stratum is one
+   * 'Compatible' section, score-ordered within. Only while Follow
+   * filters — manual browsing stays a flat table. */
   const followGroupLabel = followCandidateIds
-    ? (t: Track) => tierLabel(followTier(t, followReferences))
+    ? (t: Track) =>
+        rankLabel(rankAgainst(t, followReferences, followParams.bpmThresholdPercent))
+    : undefined;
+  /** Why-did-this-match dimming: rows grey the key/tags that earned
+   * nothing toward the score. */
+  const followMatchSignals = followCandidateIds
+    ? (t: Track) => matchedSignals(t, followReferences)
+    : undefined;
+  /** Match-score column (match-score PRD): visible while Follow filters.
+   * Known rows show their evidence marks, not a score (null = blank). */
+  const followScoreFor = followCandidateIds
+    ? (t: Track) => {
+        const rank = rankAgainst(t, followReferences, followParams.bpmThresholdPercent);
+        return rank.known !== null ? null : rank.score;
+      }
     : undefined;
 
   // ── Selection machinery: one instance per pane ─────────────────────────
@@ -933,6 +966,10 @@ export default function Library({
                   deckAId={decks.A.loadedTrack?.id ?? null}
                   deckBId={decks.B.loadedTrack?.id ?? null}
                   groupLabelFor={followGroupLabel}
+                  scoreFor={followScoreFor}
+                  scoreSorted={followScoreSort}
+                  onScoreSort={() => setFollowScoreSort(true)}
+                  matchSignalsFor={followMatchSignals}
                   sortColumn={filters.sortColumn}
                   sortDirection={filters.sortDirection}
                   onSort={handleSortLibrary}
@@ -994,6 +1031,10 @@ export default function Library({
                   deckAId={decks.A.loadedTrack?.id ?? null}
                   deckBId={decks.B.loadedTrack?.id ?? null}
                   groupLabelFor={followGroupLabel}
+                  scoreFor={followScoreFor}
+                  scoreSorted={followScoreSort}
+                  onScoreSort={() => setFollowScoreSort(true)}
+                  matchSignalsFor={followMatchSignals}
                   sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
                   sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
                   onSort={handleSort}

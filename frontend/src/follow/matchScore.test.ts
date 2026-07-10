@@ -17,6 +17,7 @@ import {
   foldedBpmDistancePercent,
   keyRelation,
   matchScore,
+  matchedSignals,
   passesAffinityFloor,
   rankAgainst,
   tagContribution,
@@ -57,19 +58,20 @@ describe('keyRelation', () => {
 });
 
 describe('tagContribution', () => {
-  it('is zero at zero and log-shaped: steep at first', () => {
+  it('walks the tuned ladder: 9 / 15 / 27 / 30 points of the 30 budget', () => {
     expect(tagContribution(0)).toBe(0);
-    // First shared tag is worth ~a third of the whole tag budget.
-    expect(tagContribution(1)).toBeGreaterThan(0.3);
-    // Early steps dwarf late steps.
-    const early = tagContribution(2) - tagContribution(1);
-    const late = tagContribution(8) - tagContribution(7);
-    expect(early).toBeGreaterThan(late * 2);
+    expect(WEIGHTS.tags * tagContribution(1)).toBeCloseTo(9, 10);
+    expect(WEIGHTS.tags * tagContribution(2)).toBeCloseTo(15, 10);
+    expect(WEIGHTS.tags * tagContribution(3)).toBeCloseTo(27, 10);
+    expect(WEIGHTS.tags * tagContribution(4)).toBeCloseTo(30, 10);
   });
 
-  it('reaches 1.0 at the norm count and keeps growing (never flat)', () => {
-    expect(tagContribution(8)).toBeCloseTo(1.0, 10);
-    expect(tagContribution(9)).toBeGreaterThan(tagContribution(8));
+  it('3 shared tags beat ANY harmonic-key-only match; 2 do not (tuning 2026-07-10)', () => {
+    expect(WEIGHTS.tags * tagContribution(3)).toBeGreaterThan(WEIGHTS.key * 1.0); // same key
+    expect(WEIGHTS.tags * tagContribution(2)).toBeLessThanOrEqual(WEIGHTS.key * 0.6); // weakest
+  });
+
+  it('keeps growing past the ladder (never flat)', () => {
     for (let n = 1; n <= 12; n++) {
       expect(tagContribution(n)).toBeGreaterThan(tagContribution(n - 1));
     }
@@ -175,7 +177,7 @@ describe('matchScore composition', () => {
     tags: [1, 2, 3, 4, 5, 6, 7, 8].map(tag),
   });
 
-  it('a full match across all five signals scores the full budget', () => {
+  it('a full match across all five signals scores the full budget (+ the tag tail)', () => {
     const twin = track({
       key: 19,
       bpm: 174,
@@ -183,7 +185,8 @@ describe('matchScore composition', () => {
       artist: 'Noisia',
       tags: [1, 2, 3, 4, 5, 6, 7, 8].map(tag),
     });
-    expect(matchScore(reference, twin)).toBeCloseTo(100, 10);
+    // 8 shared tags ride the unbounded tail slightly past the 30 budget.
+    expect(matchScore(reference, twin)).toBeCloseTo(100 + WEIGHTS.tags * 4 * 0.03, 10);
   });
 
   it('an empty candidate scores zero — unboosted, never punished', () => {
@@ -194,6 +197,40 @@ describe('matchScore composition', () => {
     const clash = track({ key: 9, tags: [tag(1), tag(2)] });
     const keyless = track({ tags: [tag(1), tag(2)] });
     expect(matchScore(reference, clash)).toBe(matchScore(reference, keyless));
+  });
+});
+
+describe('matchedSignals (row highlighting: why did this match?)', () => {
+  const referenceA = {
+    track: track({ id: 100, key: 19, tags: [tag(1), tag(2)] }),
+    knownStrength: () => null,
+  };
+  const referenceB = {
+    track: track({ id: 200, key: 9, tags: [tag(3)] }),
+    knownStrength: () => null,
+  };
+
+  it('reports the compatible key and the shared tag ids', () => {
+    const signals = matchedSignals(track({ key: 18, tags: [tag(2), tag(9)] }), [referenceA]);
+    expect(signals.key).toBe(true); // 10d is 10m's relative
+    expect([...signals.tagIds]).toEqual([2]);
+  });
+
+  it('a clashing or missing key reports false; no shared tags reports empty', () => {
+    expect(matchedSignals(track({ key: 9, tags: [tag(9)] }), [referenceA])).toEqual({
+      key: false,
+      tagIds: new Set(),
+    });
+    expect(matchedSignals(track({}), [referenceA]).key).toBe(false);
+  });
+
+  it('multi-reference: any reference matching counts (best-position-wins)', () => {
+    const signals = matchedSignals(track({ key: 9, tags: [tag(1), tag(3)] }), [
+      referenceA,
+      referenceB,
+    ]);
+    expect(signals.key).toBe(true); // same key as B
+    expect([...signals.tagIds].sort()).toEqual([1, 3]); // union across refs
   });
 });
 
