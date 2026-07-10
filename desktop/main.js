@@ -78,19 +78,41 @@ function saveBounds(win) {
   }
 }
 
-// --- retry page (shown while the dev server is down) --------------------------
+// --- splash page (shown until the dev server answers) -------------------------
+//
+// Loading screen: wordmark over a generic ring throbber. The status line
+// starts as a bare "loading" and only reveals the `make dev` hint once a
+// probe has actually failed (main process toggles body.down via
+// executeJavaScript) — the common case is a sub-second splash.
 
-function retryPageDataUrl(target) {
+function splashPageDataUrl(target) {
   const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>manadj</title><style>
-  body { background: #111; color: #ddd; font: 16px/1.5 -apple-system, sans-serif;
+<html><head><meta charset="utf-8"><title>manaDJ</title><style>
+  body { background: #111; color: #ddd; font: 14px/1.6 -apple-system, sans-serif;
          display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;
-         -webkit-app-region: drag; /* no titlebar — whole retry page drags the window */ }
-  code { color: #4fc3f7; }
+         -webkit-app-region: drag; /* no titlebar — whole splash drags the window */ }
   .box { text-align: center; }
+  .throbber { width: 28px; height: 28px; margin: 0 auto;
+              border: 3px solid #333; border-top-color: #4fc3f7; border-radius: 50%;
+              animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.04em; margin: 0 0 18px;
+       color: #eee; }
+  .status { color: #888; min-height: 3em; margin-top: 14px; }
+  .hint { display: none; }
+  body.down .loading { display: none; }
+  body.down .hint { display: block; }
+  code { color: #4fc3f7; }
 </style></head><body><div class="box">
-  <p>manadj is not running at <code>${target}</code></p>
-  <p>start it with <code>make dev</code> — retrying every ${RETRY_INTERVAL_MS / 1000}s</p>
+  <h1>manaDJ</h1>
+  <div class="throbber"></div>
+  <div class="status">
+    <p class="loading">loading…</p>
+    <div class="hint">
+      <p>not running at <code>${target}</code></p>
+      <p>start it with <code>make dev</code> — retrying every ${RETRY_INTERVAL_MS / 1000}s</p>
+    </div>
+  </div>
 </div></body></html>`;
   return "data:text/html;charset=utf-8," + encodeURIComponent(html);
 }
@@ -108,18 +130,26 @@ function probe(url) {
   });
 }
 
-function attach(win) {
-  win.loadURL(TARGET).catch(async () => {
+// Splash-first attach: show the branded splash immediately (no blank
+// window), then swap to the app as soon as the dev server answers. On a
+// failed probe, reveal the `make dev` hint and keep retrying.
+async function attach(win) {
+  await win.loadURL(splashPageDataUrl(TARGET)).catch(() => {});
+  const tryAttach = async () => {
     if (win.isDestroyed()) return;
-    await win.loadURL(retryPageDataUrl(TARGET));
-    const timer = setInterval(async () => {
-      if (win.isDestroyed()) return clearInterval(timer);
-      if (await probe(TARGET)) {
-        clearInterval(timer);
-        attach(win);
-      }
-    }, RETRY_INTERVAL_MS);
-  });
+    if (await probe(TARGET)) {
+      win.loadURL(TARGET).catch(() => {
+        // answered the probe but failed to load — treat as still down
+        if (!win.isDestroyed()) attach(win);
+      });
+      return;
+    }
+    win.webContents
+      .executeJavaScript("document.body.classList.add('down')")
+      .catch(() => {});
+    setTimeout(tryAttach, RETRY_INTERVAL_MS);
+  };
+  tryAttach();
 }
 
 function createWindow() {
@@ -131,6 +161,8 @@ function createWindow() {
     // stay, vertically centered in the 40px bar.
     titleBarStyle: "hidden",
     trafficLightPosition: { x: 16, y: 13 },
+    // Dark paint during navigation (splash → app) — never a white flash.
+    backgroundColor: "#111111",
     webPreferences: {
       // A DJ app must never have rAF/timers throttled while occluded:
       // audio would keep playing while UI clocks and waveforms stall.

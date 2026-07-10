@@ -1080,7 +1080,9 @@ export class WaveformRendererV2 {
   private pushCuePoint(view: FrameView, verts: number[]): void {
     const cueX = this.timeToX(this.cuePoint!, view);
     if (cueX < 0 || cueX >= view.w) return;
-    const [r, g, b] = [0.79, 0.86, 0.26]; // var(--yellow)
+    // The CUE button's accent (--energy-3 #ff9933) — marker and button
+    // read as one control.
+    const [r, g, b] = [1.0, 0.6, 0.2];
     pushRect(verts, cueX, 0, 2, view.h, r, g, b);
     const cx = cueX + 1;
     if (this.isMinimap) {
@@ -1094,7 +1096,9 @@ export class WaveformRendererV2 {
         cx, view.h - depth, r, g, b,
       );
     } else {
-      const triH = view.h * 0.05;
+      // Bottom identity triangle, sized to read at a glance (12% of the
+      // wave height, never smaller than the minimap glyph).
+      const triH = Math.max(view.h * 0.12, 8 * view.dpr);
       verts.push(
         cx - triH / 2, view.h, r, g, b,
         cx + triH / 2, view.h, r, g, b,
@@ -1172,19 +1176,12 @@ export class WaveformRendererV2 {
         pushRect(verts, x + 1 * view.dpr, 0, 5 * view.dpr, 5 * view.dpr, r, g, b);
         continue;
       }
-      // Edge-anchored rows (editor timeline): zoned-mark idiom
-      // (mix-editor 32 / hotcue-colors 01) — 2px pole flying a 5×5
-      // square flag at the row's OUTER edge (A top, B bottom), matching
-      // the minimap marks above; the numbered badge (2D overlay) stays.
-      if (this.anchor !== 'center') {
-        const poleW = 2 * view.dpr;
-        const flag = 5 * view.dpr;
-        pushRect(verts, x - poleW / 2, 0, poleW, view.h, r, g, b);
-        const flagY = this.anchor === 'top' ? 0 : view.h - flag;
-        pushRect(verts, x + poleW / 2, flagY, flag, flag, r, g, b);
-        continue;
-      }
-      pushRect(verts, x, 0, 3 * view.dpr, view.h, r, g, b);
+      // Zoomed surfaces (main waveform + editor timeline rows): 2px pole
+      // only — the numbered FLAG (2D overlay, renderHotCueNumbers) flies
+      // off the pole at the identity-zone edge, scaling the minimap's
+      // pole+flag idiom up.
+      const poleW = 2 * view.dpr;
+      pushRect(verts, x - poleW / 2, 0, poleW, view.h, r, g, b);
     }
   }
 
@@ -1231,32 +1228,29 @@ export class WaveformRendererV2 {
     return this.overlayCtx;
   }
 
+  /** Numbered square FLAG attached to the pole's top right (bottom right
+   * on bottom-anchored editor rows) — the minimap's pole+flag design
+   * scaled up, solid cue color with the slot number knocked out dark. */
   private renderHotCueNumbers(ctx: CanvasRenderingContext2D, view: FrameView): void {
     if (this.hotCues.size === 0) return;
     const squareSize = 16 * view.dpr;
-    const squareY =
-      this.anchor === 'top' ? 4 * view.dpr : view.h - squareSize - 4 * view.dpr;
+    const squareY = this.anchor === 'bottom' ? view.h - squareSize : 0;
     ctx.font = `bold ${12 * view.dpr}px monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const [slot, hc] of this.hotCues.entries()) {
       const x = this.timeToX(hc.time, view);
       if (x < 0 || x >= view.w) continue;
-      // Edge-anchored rows: clear the zoned mark's pole (2px, centered)
-      // + 5×5 flag; center-anchored keeps the legacy 3px-line offset.
-      const squareX =
-        this.anchor === 'center' ? x + 5 * view.dpr : x + 8 * view.dpr;
+      // Attached to the 2px pole's right edge (pole is centered on x).
+      const squareX = x + view.dpr;
       // Stored per-cue color first, like the marks (hotcue-colors 01).
       const color =
         hc.color && CUE_COLOR_RE.test(hc.color)
           ? hc.color
           : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');
-      ctx.fillStyle = 'rgb(17, 17, 17)';
-      ctx.fillRect(squareX, squareY, squareSize, squareSize);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(squareX + 0.5, squareY + 0.5, squareSize - 1, squareSize - 1);
       ctx.fillStyle = color;
+      ctx.fillRect(squareX, squareY, squareSize, squareSize);
+      ctx.fillStyle = 'rgb(17, 17, 17)';
       ctx.fillText(String(slot), squareX + squareSize / 2, squareY + squareSize / 2);
     }
   }

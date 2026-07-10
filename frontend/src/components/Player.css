@@ -159,6 +159,9 @@
   position: absolute;
   top: 8px;
   left: 8px;
+  /* Above the renderer's text-overlay canvas (z-index 1) — the hotcue
+     flags must fly behind the docked panels. */
+  z-index: 2;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
@@ -185,6 +188,8 @@
   position: absolute;
   top: 8px;
   left: 186px;
+  /* Above the text-overlay canvas, like .player-controls-overlay. */
+  z-index: 2;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 2px;

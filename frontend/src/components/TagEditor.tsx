@@ -12,6 +12,7 @@ import { BpmControl } from './deckControls/BpmControl';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
 import { formatKeyDisplay } from '../utils/keyUtils';
+import { getKeyColor } from '../utils/displayColors';
 import './TagEditor.css';
 
 interface Props {
@@ -362,9 +363,14 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px' }}>
               <KeyIcon />
+              {/* Library color coding: circle-of-fifths hue, like the
+                  track rows' key column (KeyDisplay). */}
               <span style={{
-                color: isDisabled ? 'var(--overlay0)' : 'var(--text)',
-                fontSize: '12px',
+                color: isDisabled
+                  ? 'var(--overlay0)'
+                  : (getKeyColor(formatKeyDisplay(track?.key)) ?? 'var(--text)'),
+                fontSize: '16px',
+                fontWeight: 600,
                 opacity: track?.key != null ? 1 : 0.6
               }}>
                 {track ? formatKeyDisplay(track.key) : '-'}

@@ -19,6 +19,7 @@ import { MuteIcon } from '../components/icons/MuteIcon';
 import { useDecks } from '../hooks/useDeck';
 import { useHotCueSlots } from '../hooks/useHotCueActions';
 import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
+import { getBpmColor, getKeyColor } from '../utils/displayColors';
 import { formatKeyDisplay } from '../utils/keyUtils';
 import { MixPlayer } from './MixPlayer';
 import type { Track } from '../types';
@@ -126,7 +127,13 @@ export function DeckCard({
           }}
           grid={{ getPlayhead: () => player.getTrackTime(deck) }}
         />
-        <span className="editor-bpm-eff" title="Effective BPM during the mix (after tempo match)">
+        {/* Library color coding: same BPM/key hues as the track rows
+            (getBpmColor / getKeyColor), matching the performance readout. */}
+        <span
+          className="editor-bpm-eff"
+          title="Effective BPM during the mix (after tempo match)"
+          style={{ color: getBpmColor(effectiveBpm) ?? undefined }}
+        >
           » {effectiveBpm !== null ? effectiveBpm.toFixed(1) : '—'}
           {Math.abs(pitchPercent) > 0.05 && (
             <em>
@@ -136,7 +143,12 @@ export function DeckCard({
             </em>
           )}
         </span>
-        <span className="editor-deckcard-key">{track ? formatKeyDisplay(track.key) : '—'}</span>
+        <span
+          className="editor-deckcard-key"
+          style={{ color: track ? (getKeyColor(formatKeyDisplay(track.key)) ?? undefined) : undefined }}
+        >
+          {track ? formatKeyDisplay(track.key) : '—'}
+        </span>
         <span className="editor-tweaktitle">{loadState !== 'ready' ? loadState : ''}</span>
       </div>
       {/* One gesture row: align + jump/slide + lock + the hot-cue pads,
