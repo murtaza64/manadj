@@ -320,6 +320,36 @@ export function UnifiedTracksSync() {
     onSuccess: () => done('Fields written to file'),
     onError: failed,
   });
+  const exportHotcuesToRb = useMutation({
+    mutationFn: (args: { row: StatusRow; mode: 'add-only' | 'replace-all' }) =>
+      api.syncExport.exportHotcuesToRekordbox({ track_id: args.row.track_id!, mode: args.mode }),
+    onSuccess: (r) => {
+      done(`Hot cues → Rekordbox: ${r.added} added, ${r.moved} moved, ${r.deleted} deleted`);
+      refresh();
+    },
+    onError: failed,
+  });
+  const autoExportRb = useMutation({
+    mutationFn: (track_ids: number[] | null) =>
+      api.syncExport.autoExportToRekordbox({ track_ids }),
+    onSuccess: (r) => {
+      done(
+        `Rekordbox auto-export: ${r.cues_added} cues added, ${r.keys_set} keys set ` +
+        `(${r.matched}/${r.scanned} tracks matched${r.unmatched ? `, ${r.unmatched} unmatched` : ''})`,
+      );
+      refresh();
+    },
+    onError: failed,
+  });
+  const exportGridToRb = useMutation({
+    mutationFn: (row: StatusRow) =>
+      api.syncExport.exportBeatgridToRekordbox({ track_id: row.track_id! }),
+    onSuccess: (r) => {
+      done(`Grid → Rekordbox: ${r.beats} beats, ${r.tempo_changes} tempo change${r.tempo_changes === 1 ? '' : 's'}, ${r.bpm.toFixed(2)} BPM`);
+      refresh();
+    },
+    onError: failed,
+  });
   const exportKeyToRb = useMutation({
     mutationFn: (row: StatusRow) =>
       api.syncExport.exportKeyToRekordbox({ track_id: row.track_id! }),
@@ -346,7 +376,7 @@ export function UnifiedTracksSync() {
   const busy =
     generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
     importField.isPending || importPerf.isPending || bulkImportPerf.isPending ||
-    exportRowToDisk.isPending || exportKeyToRb.isPending ||
+    exportRowToDisk.isPending || exportKeyToRb.isPending || exportHotcuesToRb.isPending || exportGridToRb.isPending || autoExportRb.isPending ||
     exportTags.isPending || rebuildTagTree.isPending;
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
@@ -394,7 +424,7 @@ export function UnifiedTracksSync() {
                     sideEffects:
                       t === 'engine'
                         ? 'updates the "manaDJ Tags" playlist tree (and energy star ratings) in the Engine DJ database'
-                        : 'updates MyTags (and energy colors) in the Rekordbox database',
+                        : 'updates MyTags (and energy colors + star ratings) in the Rekordbox database',
                     run: () => exportTags.mutate(t),
                   })
                 }
@@ -470,6 +500,16 @@ export function UnifiedTracksSync() {
           >
             Import performance data ← Engine
           </button>
+          {/* auto tier (issue 08): additive only — new cues + absent keys;
+              never touches existing RB values, so no confirmation */}
+          <button
+            className="uts-btn"
+            onClick={() =>
+              autoExportRb.mutate(list.map((r) => r.track_id!).filter((id) => id !== null))
+            }
+          >
+            Export new performance data → Rekordbox
+          </button>
         </span>
       );
     }
@@ -532,6 +572,22 @@ export function UnifiedTracksSync() {
       }}
       onBulkImportPerf={() => bulkImportPerf.mutate({ track_ids: [row.track_id!] })}
       onExportToDisk={() => exportRowToDisk.mutate(row)}
+      onExportHotcuesToRb={(mode) => {
+        // adds are the unconfirmed tier; the full mirror reconcile confirms
+        if (mode === 'add-only') return exportHotcuesToRb.mutate({ row, mode });
+        setPending({
+          scope: `Replace the Rekordbox cue mirror for "${row.title || row.path}" with the Library's hot cues`,
+          sideEffects: 'moves/deletes Rekordbox hot cues AND memory cues to match the Library (Rekordbox must be closed)',
+          run: () => exportHotcuesToRb.mutate({ row, mode }),
+        });
+      }}
+      onExportGridToRb={() =>
+        setPending({
+          scope: `Overwrite the Rekordbox beatgrid for "${row.title || row.path}" with the Library's`,
+          sideEffects: 'rewrites the track\'s ANLZ grid + BPM in the Rekordbox database (Rekordbox must be closed; a re-analysis in Rekordbox will regenerate it)',
+          run: () => exportGridToRb.mutate(row),
+        })
+      }
       onExportKeyToRb={() =>
         // writes an external DB: always behind the pending-confirm bar
         setPending({
@@ -804,7 +860,7 @@ function PresenceBadges({ row, available }: { row: StatusRow; available: Surface
   );
 }
 
-function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onBulkImportPerf, onExportToDisk, onExportKeyToRb, surfacesAvailable }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onBulkImportPerf, onExportToDisk, onExportKeyToRb, onExportHotcuesToRb, onExportGridToRb, surfacesAvailable }: {
   row: StatusRow;
   surfacesAvailable: SurfaceId[];
   selectable: boolean;
@@ -817,6 +873,8 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   onBulkImportPerf: () => void;
   onExportToDisk: () => void;
   onExportKeyToRb: () => void;
+  onExportHotcuesToRb: (mode: 'add-only' | 'replace-all') => void;
+  onExportGridToRb: () => void;
 }) {
   const expandable = row.diverged.length > 0;
   const [showViewer, setShowViewer] = useState(false);
@@ -860,7 +918,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
       </div>
       {expanded && expandable && (
         <div className="uts-expand">
-          <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} onExportKeyToRb={onExportKeyToRb} />
+          <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} onExportKeyToRb={onExportKeyToRb} onExportHotcuesToRb={onExportHotcuesToRb} onExportGridToRb={onExportGridToRb} />
           <div className="uts-expand-actions">
             {hasPerfDivergence && (
               <button className="uts-btn" onClick={() => setShowViewer(!showViewer)}>
@@ -961,11 +1019,13 @@ function RowPerfDiff({ row, onImportPerf }: {
   );
 }
 
-function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb }: {
+function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb, onExportHotcuesToRb, onExportGridToRb }: {
   row: StatusRow;
   onImportField: (field: string, value: unknown) => void;
   onImportPerf: (field: PerfField, mode: PerfImportMode) => void;
   onExportKeyToRb: () => void;
+  onExportHotcuesToRb: (mode: 'add-only' | 'replace-all') => void;
+  onExportGridToRb: () => void;
 }) {
   return (
     <table className="uts-matrix">
@@ -1016,6 +1076,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb }:
                 const lib = d.library_value as HotCueVal[];
                 const here = v as HotCueVal[];
                 const importable = row.track_id !== null && s.id === 'engine' && d.importable_from.includes(s.id); // perf import verbs call the Engine endpoints — never offer them on other surfaces
+                const rbExportable = row.track_id !== null && s.id === 'rekordbox' && lib.length > 0;
                 return (
                   <td key={s.id} className="uts-conflict">
                     <HotCueDiff library={lib} here={here} />
@@ -1027,6 +1088,12 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb }:
                         <button className="uts-microbtn" onClick={() => onImportPerf('hotcues', 'replace-all')}>← replace all</button>
                       </>
                     ))}
+                    {rbExportable && (
+                      <>
+                        <button className="uts-microbtn" onClick={() => onExportHotcuesToRb('add-only')}>export new →</button>
+                        <button className="uts-microbtn" onClick={() => onExportHotcuesToRb('replace-all')}>replace in RB →</button>
+                      </>
+                    )}
                   </td>
                 );
               }
@@ -1034,9 +1101,13 @@ function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb }:
                 const grid = v as BeatgridVal;
                 const importable = row.track_id !== null && s.id === 'engine' && d.importable_from.includes(s.id); // perf import verbs call the Engine endpoints — never offer them on other surfaces
                 const hasSaved = d.library_value !== null && d.library_value !== undefined;
+                const rbGridExportable = row.track_id !== null && s.id === 'rekordbox' && hasSaved;
                 return (
                   <td key={s.id} className="uts-conflict">
                     <GridSummary grid={grid} />
+                    {rbGridExportable && (
+                      <button className="uts-microbtn" onClick={onExportGridToRb}>replace grid in RB →</button>
+                    )}
                     {importable && (
                       <button
                         className="uts-microbtn"

@@ -14,8 +14,8 @@ from backend.sync_status.compare import hotcue_positions_equal
 from backend.sync_status.models import HotCueValue, SurfaceTrackRef, TrackFields
 
 
-def row(kind: int, ms: int, comment: str | None = None):
-    return SimpleNamespace(Kind=kind, InMsec=ms, Comment=comment)
+def row(kind: int, ms: int, comment: str | None = None, color: int = -1):
+    return SimpleNamespace(Kind=kind, InMsec=ms, Comment=comment, Color=color)
 
 
 def cues_no_offset(rows, monkeypatch=None):
@@ -156,3 +156,19 @@ def test_broken_mirror_warns(db):
     result = compute_sync_status(db, {"rekordbox": rb_reader(refs)})
     r = row_for(result, "/music/t.flac")
     assert any("memory cues" in w for w in r.warnings)
+
+
+def test_pad_mapping_final_table():
+    """Final table (cue_mapping.py): Kind 5 = pad D = slot 4,
+    Kind 9 = pad H = slot 8; Kind 4 is never a hot cue."""
+    hotcues, _ = rb_hotcues_from_cue_rows(
+        [row(5, 40000), row(9, 80000), row(0, 40000), row(0, 80000)], "/music/t.flac"
+    )
+    assert [(c.slot, c.time) for c in hotcues] == [(4, 40.0), (8, 80.0)]
+
+
+def test_color_index_reads_as_hex():
+    hotcues, _ = rb_hotcues_from_cue_rows(
+        [row(1, 1000, "x", color=2), row(0, 1000)], "/music/t.flac"
+    )
+    assert hotcues[0].color == "#E8A029"  # palette 2 = orange

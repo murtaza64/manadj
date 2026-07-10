@@ -250,6 +250,14 @@ class RekordboxTagSyncer:
                 rb_track.ColorID = "0"
                 stats.tracks_color_cleared += 1
 
+            # Energy also exports as the star rating (Rating is plain 0-5
+            # in the RB DB — verified against the real library). Same
+            # encoding as the Engine surface (energy 1-5 == stars 1-5).
+            # Absent energy leaves Rating alone: legacy hand-set stars
+            # survive until the track gains an energy.
+            if track.energy and not dry_run:
+                rb_track.Rating = track.energy
+
             stats.tracks_updated += 1
 
         return stats
