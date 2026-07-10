@@ -679,6 +679,26 @@ export const api = {
     },
   },
 
+  syncExport: {
+    /** Write the Library's key onto the matching Rekordbox track. Overwrites
+     * Rekordbox's saved key — callers confirm first. Rekordbox must be
+     * closed (409 with a readable reason otherwise). */
+    exportKeyToRekordbox: async (request: {
+      track_id: number;
+    }): Promise<{ exported: boolean; key: string }> => {
+      const res = await fetch(`${API_BASE}/sync/export/key/rekordbox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detail ?? 'Failed to export key to Rekordbox');
+      }
+      return res.json();
+    },
+  },
+
   transitions: {
     /** All saved Transitions (boot load; ADR 0011). Ordered pair, position. */
     list: async (): Promise<
