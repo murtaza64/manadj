@@ -5,6 +5,7 @@ import {
   MAX_VISIBLE_SECONDS,
   MIN_VISIBLE_SECONDS,
   clampVisibleSeconds,
+  STEP_RATIO,
   stepVisibleSeconds,
   trackWindowSeconds,
 } from './waveformZoom';
@@ -26,9 +27,9 @@ describe('clampVisibleSeconds', () => {
 });
 
 describe('stepVisibleSeconds', () => {
-  it('zooming in shows fewer seconds, out shows more', () => {
-    expect(stepVisibleSeconds(24, 'in')).toBeCloseTo(20, 10);
-    expect(stepVisibleSeconds(20, 'out')).toBeCloseTo(24, 10);
+  it('zooming in shows fewer seconds, out shows more (one shared ratio)', () => {
+    expect(stepVisibleSeconds(20, 'in')).toBeCloseTo(20 / STEP_RATIO, 10);
+    expect(stepVisibleSeconds(20, 'out')).toBeCloseTo(20 * STEP_RATIO, 10);
   });
 
   it('in/out round-trips', () => {

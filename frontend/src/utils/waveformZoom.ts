@@ -18,8 +18,12 @@ export const DEFAULT_VISIBLE_SECONDS = 20;
  * overlay projects against the same fraction the waveforms render with. */
 export const PLAY_MARKER_FRACTION = 0.25;
 
-/** Wheel step ratio (matches the renderer's own zoomIn/zoomOut step). */
-const STEP_RATIO = 1.2;
+/** Wheel step ratio per notch — THE zoom sensitivity, shared by the
+ * linked Performance zoom, the library deck renderer, and the sync
+ * view's diff viewer. Must be > 1 (in = ÷ratio, out = ×ratio; 1.0 would
+ * be no zoom). History: decks 1.2, old diff viewer 1.25, then 1.1;
+ * 1.05 ≈ quarter of the original 1.2 log-step. */
+export const STEP_RATIO = 1.05;
 
 export function clampVisibleSeconds(seconds: number): number {
   if (!isFinite(seconds)) return DEFAULT_VISIBLE_SECONDS;

@@ -69,6 +69,12 @@ class TrackFields:
     beatgrid: BeatgridValue | None = None
     # None = no user-set Main cue here (manadj: unset; Engine: not overridden)
     maincue: float | None = None
+    # Rekordbox only: each manadj hotcue mirrors to an RB hot cue AND a
+    # memory cue (performance-data-sync/08). False = the memory-cue set
+    # doesn't mirror the hot-cue set (stray or missing memory cues) —
+    # surfaced as a row warning, resolved by the export verbs (issue 03).
+    # None = mirroring doesn't apply to this surface.
+    hotcue_mirror_ok: bool | None = None
 
 
 @dataclass(frozen=True)

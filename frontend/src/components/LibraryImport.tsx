@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import KeyDisplay from './KeyDisplay';
 import type { LibraryImportRequest } from '../types';
 
 export function LibraryImport() {
@@ -261,7 +262,7 @@ export function LibraryImport() {
                     <td style={{
                       padding: '8px 12px',
                       color: 'var(--text)'
-                    }}>{candidate.key || '-'}</td>
+                    }}><KeyDisplay keyValue={candidate.key} /></td>
                     <td style={{
                       padding: '8px 12px',
                       textAlign: 'center'

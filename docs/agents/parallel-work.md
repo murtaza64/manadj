@@ -66,8 +66,12 @@ backups. Sanctioned ops on trunk/default-workspace flow only through
 `uv run scripts/agent/lane_app.py start|status|stop` from your lane: ensures
 sandbox DB + deps, self-assigns a free port offset on first start (recorded as
 a `ports:` line in your `LANE.md`), daemonizes backend+vite. Refuses in the
-default workspace. Desktop shell attaches from anywhere:
-`npm --prefix ~/manadj/desktop start -- --port <vite port>`.
+default workspace.
+
+Walkthroughs prefer the Electron desktop shell over a browser (Firefox has
+known audio breakage — headphone-cue 08). It attaches from anywhere:
+`make -C ~/manadj electron PORT=<vite port>`. Give this as the Walkthrough's
+opening step; the browser URL is the fallback.
 
 ## Closure (extends canon's lane teardown)
 

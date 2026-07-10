@@ -9,17 +9,35 @@ import type { BeatgridResponse } from '../types';
 export const GRID_NUDGE_MS = 10;
 
 /**
- * Bounded-retry policy shared by every ['beatgrid', id] fetch site (this
- * hook and DeckContext's load-time fetchQuery), mirroring the waveform blob
- * (useWaveformBlob.ts): a freshly-downloaded track's beatgrid 400/404s until
- * the background analysis task writes the grid, so retry with exponential
- * backoff to ride that out. Bounded at 5 so tracks that legitimately have no
- * grid (analysis bailed) settle into error instead of retrying forever
- * (deck-asset-refresh 01).
+ * Bounded-retry policy for ['beatgrid', id] observers, mirroring the
+ * waveform blob (useWaveformBlob.ts): a freshly-downloaded track's beatgrid
+ * 400/404s until the background analysis task writes the grid, so retry
+ * with exponential backoff to ride that out. Bounded at 5 so tracks that
+ * legitimately have no grid (analysis bailed) settle into error instead of
+ * retrying forever (deck-asset-refresh 01). NOT used by the deck load path:
+ * readiness gates on ONE round trip (ADR 0029) — grids that land after it
+ * reach the deck via the sync observer's arrival polling
+ * (useDeckBeatgridSync).
  */
 export const BEATGRID_RETRY = 5;
 export const beatgridRetryDelay = (attemptIndex: number) =>
   Math.min(1000 * 2 ** attemptIndex, 10000);
+
+/**
+ * The one home for ['beatgrid', id] observer options — useBeatgridData and
+ * the deck sync observer (useDeckBeatgridSync) spread this, so every
+ * observer shares one cache entry and one fetch policy.
+ */
+export function beatgridQueryOptions(trackId: number | null) {
+  return {
+    queryKey: ['beatgrid', trackId] as const,
+    queryFn: () => api.beatgrids.get(trackId!) as Promise<BeatgridResponse>,
+    enabled: trackId !== null,
+    staleTime: Infinity, // Beatgrids rarely change; edits invalidate explicitly
+    retry: BEATGRID_RETRY, // Ride out background analysis; bounded (see BEATGRID_RETRY)
+    retryDelay: beatgridRetryDelay,
+  };
+}
 
 /**
  * Hook for fetching beatgrid data.
@@ -28,14 +46,9 @@ export const beatgridRetryDelay = (attemptIndex: number) =>
  * Auto-generates on backend if track has BPM but no beatgrid.
  */
 export function useBeatgridData(trackId: number | null) {
-  const { data, isLoading, error } = useQuery<BeatgridResponse>({
-    queryKey: ['beatgrid', trackId],
-    queryFn: () => api.beatgrids.get(trackId!),
-    enabled: trackId !== null,
-    staleTime: Infinity,  // Beatgrids rarely change
-    retry: BEATGRID_RETRY,  // Ride out background analysis; bounded (see BEATGRID_RETRY)
-    retryDelay: beatgridRetryDelay,
-  });
+  const { data, isLoading, error } = useQuery<BeatgridResponse>(
+    beatgridQueryOptions(trackId)
+  );
 
   return {
     data,

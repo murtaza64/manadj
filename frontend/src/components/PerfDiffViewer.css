@@ -46,6 +46,10 @@
   gap: 6px;
 }
 
+/* two-layer stack: deck WebGL body underneath (inset to the wave band),
+   transparent 2D diff-overlay canvas on top (owns pointer events).
+   Layout geometry is inline in the component (definite boxes are load-
+   order-critical for the GL canvas); only cursor/behavior lives here. */
 .pdv-canvas {
   display: block;
   width: 100%;

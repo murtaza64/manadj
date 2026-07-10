@@ -26,6 +26,11 @@ import type {
   SourceItem,
   AcquisitionRefreshStats,
   Classification,
+  SupplierInfo,
+  SoulseekResult,
+  SoulseekSearchResponse,
+  AnalysisPendingItem,
+  AnalysisTaskStatus,
 } from '../types';
 
 /** Wire shape of a Transition template (mix-editor issues 03 + 28) —
@@ -395,24 +400,35 @@ export const api = {
   },
 
   analyze: {
-    // Server-side write (ADR 0024): success stores the analyzed Beatgrid
-    // and its BPM projection; the response is diagnostics (bail included).
-    grid: async (trackId: number) => {
-      const response = await fetch(`${API_BASE}/analyze/grid/${trackId}`, {
+    // Manual analysis rides the task system (ADR 0003, task-system 01): this
+    // enqueues one `manual` grid+key task (overwriting freely) and returns
+    // its state; the worker analyzes off-thread. Poll status() until `done`,
+    // then refetch the track/grid.
+    enqueue: async (trackId: number): Promise<AnalysisTaskStatus | null> => {
+      const response = await fetch(`${API_BASE}/analyze/${trackId}`, {
         method: 'POST',
       });
       if (!response.ok) {
-        throw new Error(`Failed to analyze grid: ${response.statusText}`);
+        throw new Error(`Failed to enqueue analysis: ${response.statusText}`);
       }
       return response.json();
     },
 
-    key: async (trackId: number) => {
-      const response = await fetch(`${API_BASE}/analyze/key/${trackId}`, {
-        method: 'POST',
-      });
+    status: async (trackId: number): Promise<AnalysisTaskStatus | null> => {
+      const response = await fetch(`${API_BASE}/analyze/${trackId}/status`);
       if (!response.ok) {
-        throw new Error(`Failed to analyze key: ${response.statusText}`);
+        throw new Error(`Failed to fetch analysis status: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    // Bulk in-flight view (analysis-curation 03): every pending/running
+    // analysis task, library-wide — the poll target that keeps track rows
+    // live and marks Analyze buttons already-running.
+    pending: async (): Promise<AnalysisPendingItem[]> => {
+      const response = await fetch(`${API_BASE}/analyze/pending`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch pending analyses: ${response.statusText}`);
       }
       return response.json();
     },
@@ -679,6 +695,26 @@ export const api = {
     },
   },
 
+  syncExport: {
+    /** Write the Library's key onto the matching Rekordbox track. Overwrites
+     * Rekordbox's saved key — callers confirm first. Rekordbox must be
+     * closed (409 with a readable reason otherwise). */
+    exportKeyToRekordbox: async (request: {
+      track_id: number;
+    }): Promise<{ exported: boolean; key: string }> => {
+      const res = await fetch(`${API_BASE}/sync/export/key/rekordbox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detail ?? 'Failed to export key to Rekordbox');
+      }
+      return res.json();
+    },
+  },
+
   transitions: {
     /** All saved Transitions (boot load; ADR 0011). Ordered pair, position. */
     list: async (): Promise<
@@ -829,6 +865,40 @@ export const api = {
         body: JSON.stringify({ track_id: trackId, audio_from: audioFrom || null }),
       });
       if (!res.ok) throw new Error('Failed to link track');
+      return res.json();
+    },
+
+    // Suppliers (soulseek-supplier issue 03). An unconfigured Supplier is
+    // absent from this list and its UI never renders.
+    getSuppliers: async (): Promise<SupplierInfo[]> => {
+      const res = await fetch(`${API_BASE}/acquisition/suppliers`);
+      if (!res.ok) throw new Error('Failed to fetch suppliers');
+      return res.json();
+    },
+
+    soulseekSearch: async (itemId: number, query: string): Promise<SoulseekSearchResponse> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: query || null }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Soulseek search failed');
+      }
+      return res.json();
+    },
+
+    soulseekPick: async (itemId: number, result: SoulseekResult): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/pick`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Soulseek pick failed');
+      }
       return res.json();
     },
   },

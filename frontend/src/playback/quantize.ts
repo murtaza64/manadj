@@ -109,3 +109,72 @@ export function phasePreservingJumpTarget(
   const phase = playhead - nearest;
   return snapToNearestBeat(cue, beatTimes) + phase;
 }
+
+/**
+ * The audible reference deck's live phase for a cross-deck launch
+ * (cue-quantize-bpm 04): the OTHER deck's beat times and its current
+ * playhead in seconds. There is no master clock — the audible deck IS the
+ * reference (two decks). Null when no other deck is audibly playing with a
+ * usable Beatgrid: the launch stays immediate.
+ */
+export interface LaunchReference {
+  /** The reference deck's Beatgrid beat times in seconds. */
+  beatTimes: readonly number[];
+  /** The reference deck's playhead in seconds, read at gesture time. */
+  playhead: number;
+}
+
+/**
+ * How a paused deck's launch (Play, Cue-hold, Hot-cue-hold) is scheduled
+ * against a *playing* reference deck when Quantize is on (cue-quantize-bpm
+ * 04). The launch defers the WHEN: it aligns to the reference deck's
+ * NEAREST beat instant, so the gesture is never more than half a
+ * reference-beat from its landing.
+ *
+ * Δ is the signed seconds from now to the reference's nearest beat
+ * (snapToNearestBeat(refPlayhead) − refPlayhead):
+ *
+ * - Δ in the future (> 0): defer the launch by Δ and enter at the snapped
+ *   cue exactly — `{ at: cue, delaySeconds: Δ }` — so the cue sounds on the
+ *   approaching reference beat.
+ * - Δ now or in the past (≤ 0): start immediately, positioned as though
+ *   playback had begun ON the passed beat: the entry jumps AHEAD of the cue
+ *   by the elapsed |Δ| scaled into the LAUNCHING deck's audio position by
+ *   its playback rate — `{ at: cue + |Δ|·playRate, delaySeconds: 0 }`. The
+ *   cue sits exactly |Δ| behind, phase-locked to the reference grid (the
+ *   same just-after-a-beat convention as the same-deck jump, issue 03).
+ *
+ * The reference cue is NOT re-snapped to the launching deck's own grid — the
+ * caller passes the already-resolved launch position (Play from the current
+ * playhead, Cue/Hot-cue from their point). Degrades to an immediate launch
+ * at `cue` when the reference has no usable grid (< 1 beat).
+ *
+ * `playRate` is the launching deck's composed rate (varispeed × nudge); at
+ * unity a Δ-second elapsed phase maps to a Δ-second audio ahead-entry.
+ */
+export interface LaunchSchedule {
+  /** Launching-deck audio position to enter at, in seconds. */
+  at: number;
+  /** Real seconds to defer the start by (0 = immediate). */
+  delaySeconds: number;
+}
+
+export function crossDeckLaunchTarget(
+  cue: number,
+  playRate: number,
+  reference: LaunchReference | null | undefined
+): LaunchSchedule {
+  if (!reference || reference.beatTimes.length === 0) {
+    return { at: cue, delaySeconds: 0 };
+  }
+  const nearest = snapToNearestBeat(reference.playhead, reference.beatTimes);
+  const delta = nearest - reference.playhead;
+  if (delta > 0) {
+    // The nearest reference beat is ahead: hold, then enter exactly on cue.
+    return { at: cue, delaySeconds: delta };
+  }
+  // The nearest reference beat is now or just passed |Δ| ago: launch
+  // immediately, entering |Δ|·rate AHEAD of the cue — as though playback
+  // had started on that beat — so the cue sits at the reference-beat phase.
+  return { at: cue - delta * playRate, delaySeconds: 0 };
+}

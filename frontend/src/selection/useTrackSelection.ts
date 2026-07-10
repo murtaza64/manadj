@@ -15,12 +15,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Track } from '../types';
-import { scrollTrackIntoView } from '../hooks/useKeyboardShortcuts';
+import {
+  scrollTrackIntoView,
+  trackRowInView,
+  visibleTrackIds,
+} from '../hooks/useKeyboardShortcuts';
 import type { SelectMods } from '../components/TrackRow';
 import {
+  click,
   EMPTY_SELECTION,
   navigate as navigateSelection,
   prune,
+  reanchorId,
   selectAll,
   selectGesture,
   type Selection,
@@ -68,7 +74,20 @@ export function useTrackSelection(tracks: Track[]): TrackSelection {
   }, []);
 
   const handleNavigate = useCallback((delta: 1 | -1) => {
-    const next = navigateSelection(selectionRef.current, delta, displayedIdsRef.current);
+    const sel = selectionRef.current;
+    // Re-anchor when the anchor row isn't on screen (a filter changed the
+    // rows underneath, or the user scrolled away): the first tick selects
+    // the row at the viewport edge in the direction of travel instead of
+    // jumping the list back to the stale position (midi-controller 16).
+    if (sel.anchorId === null || !trackRowInView(sel.anchorId)) {
+      const id = reanchorId(displayedIdsRef.current, visibleTrackIds(), delta);
+      if (id !== null) {
+        scrollTrackIntoView(id);
+        setSelection(click(sel, id));
+        return;
+      }
+    }
+    const next = navigateSelection(sel, delta, displayedIdsRef.current);
     if (next.anchorId !== null) scrollTrackIntoView(next.anchorId);
     setSelection(next);
   }, []);
