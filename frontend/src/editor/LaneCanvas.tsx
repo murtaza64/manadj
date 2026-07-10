@@ -21,6 +21,9 @@ export interface LaneGuide {
   /** Metric-ladder tier of a downbeat guide (0 = bar … 4 = 16-bar
    * boundary, metric-ladder 01); undefined on weak beats and cues. */
   tier?: number;
+  /** This downbeat's bar is parenthetical ("extra" — metric-ladder 03):
+   * the guide tints gold, continuing the waveform rows' band language. */
+  parenthetical?: boolean;
   color?: string;
 }
 
@@ -219,7 +222,11 @@ export function LaneCanvas({
         ctx.globalAlpha = 1;
       } else if (g.tier !== undefined) {
         const t = Math.min(g.tier, GUIDE_TIER_ALPHA.length - 1);
-        ctx.fillStyle = `rgba(255,255,255,${GUIDE_TIER_ALPHA[t]})`;
+        // Parenthetical bars tint gold (metric-ladder 03), matching the
+        // waveform rows' band treatment.
+        ctx.fillStyle = g.parenthetical
+          ? `rgba(255,209,102,${GUIDE_TIER_ALPHA[t] + 0.12})`
+          : `rgba(255,255,255,${GUIDE_TIER_ALPHA[t]})`;
         ctx.fillRect(gx, LANE_PAD, GUIDE_TIER_WIDTH[t], lh);
       } else {
         ctx.fillStyle = g.strong ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)';

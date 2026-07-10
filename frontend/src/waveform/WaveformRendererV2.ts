@@ -19,6 +19,7 @@
 import type { PlaybackClock } from '../playback/clock';
 import { addBeats } from '../playback/quantize';
 import { MAX_LEAD_IN_SECONDS } from '../playback/DeckEngine';
+import { barCountLabel } from '../meter/ladder';
 import { STEP_RATIO } from '../utils/waveformZoom';
 import { playedDimBoundary } from './loopOverlay';
 import { MAX_LEVELS, TEX_WIDTH } from './blob';
@@ -136,12 +137,15 @@ export function matchBeatTiers(
   return out;
 }
 
-/** The slice of a LadderProjection the renderer consumes (metric-ladder 01):
- * per-downbeat tiers plus each tier's bar span — spacing is read from the
- * projection, never re-derived from a duple assumption. */
+/** The slice of a LadderProjection the renderer consumes (metric-ladder
+ * 01/03): per-downbeat tiers, counts, and parenthetical flags, plus each
+ * tier's bar span — everything is read from the projection, never
+ * re-derived from a duple assumption. */
 export interface LadderGridInput {
   tiers: readonly number[];
   tierBars: readonly number[];
+  barIndexes: readonly number[];
+  parentheticals: readonly boolean[];
 }
 
 /** Metric-ladder gridline styling: width (dpr multiples) and alpha per
@@ -519,6 +523,8 @@ export class WaveformRendererV2 {
   private beatTiers: Int8Array | null = null;
   /** Bars per tier-k group, from the ladder projection ([1] = tier-0 only). */
   private tierBars: readonly number[] = [1];
+  /** The full ladder projection slice (counts + parentheticals, 03). */
+  private ladder: LadderGridInput | null = null;
 
   constructor(canvas: HTMLCanvasElement, config: WaveformRendererConfig = {}) {
     this.canvas = canvas;
@@ -588,6 +594,7 @@ export class WaveformRendererV2 {
     this.beatgridCache = null;
     this.beatTiers = matchBeatTiers(beatTimes, downbeatTimes, ladder?.tiers ?? null);
     this.tierBars = ladder?.tierBars ?? [1];
+    this.ladder = ladder ?? null;
   }
 
   /** Reset-mark indicator positions (already downbeat-resolved); empty
@@ -1026,6 +1033,7 @@ export class WaveformRendererV2 {
     if (minTier >= tierBars.length) return new Float32Array(0);
 
     const verts: number[] = [];
+    this.pushParentheticalBands(view, pxPerSec, verts);
     const maxStyle = TIER_WIDTH.length - 1;
     for (let i = 0; i < beatTimes.length; i++) {
       const tier = beatTiers ? beatTiers[i] : -1;
@@ -1038,6 +1046,34 @@ export class WaveformRendererV2 {
       pushRect(verts, x, 0, width, view.h, alpha, alpha, alpha);
     }
     return new Float32Array(verts);
+  }
+
+  /** Parenthetical ("extra") bars render visibly OTHER (metric-ladder 03):
+   * a gold edge band plus a faint full-height wash across each contiguous
+   * run, so a fakeout extension is unmissable before you're inside it.
+   * Time-anchored like the gridlines (cached per zoom). Gold is the
+   * Metric-ladder authoring color (Reset-mark pennants). */
+  private pushParentheticalBands(view: FrameView, pxPerSec: number, verts: number[]): void {
+    const ladder = this.ladder;
+    const downbeats = this.downbeatTimes;
+    if (!ladder || !downbeats || downbeats.length === 0) return;
+    const [r, g, b] = RESET_MARK_COLOR;
+    const bandH = 4 * view.dpr;
+    const bandY = this.anchor === 'bottom' ? view.h - bandH : 0;
+    const bandA = 0.5;
+    const washA = 0.05;
+    for (let i = 0; i < downbeats.length; i++) {
+      if (!ladder.parentheticals[i]) continue;
+      let end = i;
+      while (end + 1 < downbeats.length && ladder.parentheticals[end + 1]) end++;
+      // A parenthetical run is always bounded by a following reset's
+      // downbeat (the final open segment never flags), so end+1 exists.
+      const x0 = downbeats[i] * pxPerSec;
+      const x1 = downbeats[Math.min(end + 1, downbeats.length - 1)] * pxPerSec;
+      pushRect(verts, x0, 0, x1 - x0, view.h, r * washA, g * washA, b * washA);
+      pushRect(verts, x0, bandY, x1 - x0, bandH, r * bandA, g * bandA, b * bandA);
+      i = end;
+    }
   }
 
   private timeToX(t: number, view: FrameView): number {
@@ -1264,9 +1300,13 @@ export class WaveformRendererV2 {
   private renderTimeReadout(ctx: CanvasRenderingContext2D, view: FrameView): void {
     const duration = this.data!.duration;
     const bar = this.barNumberAt(view.playhead);
+    // Position-in-top-tier from the governing reset (metric-ladder 03):
+    // "bar 42 (13 of 16)" — parenthetical bars read "(+1)", "(+2)"…
+    const count =
+      bar !== null && this.ladder ? ` (${barCountLabel(this.ladder, bar - 1)})` : '';
     const text =
       `${formatReadoutTime(view.playhead)} / ${formatReadoutTime(duration)}` +
-      (bar !== null ? `  bar ${bar}` : '');
+      (bar !== null ? `  bar ${bar}${count}` : '');
     const pad = 6 * view.dpr;
     ctx.font = `bold ${12 * view.dpr}px monospace`;
     const metrics = ctx.measureText(text);

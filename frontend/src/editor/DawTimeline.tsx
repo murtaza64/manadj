@@ -39,7 +39,7 @@ import { EditorStore, useEditorSelector } from './editorStore';
 import { jumpDeltaLabel } from './beatReadout';
 import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
 import { beatPeriodSec } from './templateModel';
-import { downbeatTierMap } from '../meter/ladder';
+import { downbeatLadderMap } from '../meter/ladder';
 import { useMetricLadderData } from '../hooks/useMetricLadderData';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData } from '../types';
@@ -911,11 +911,11 @@ export function DawTimeline({
   /** One B beat in B's own seconds (Δ steppers and chip labels). */
   const beatSecB = beatgridB ? beatPeriodSec(beatgridB) : null;
 
-  // Downbeat time → Metric-ladder tier, per side (metric-ladder 01/02, with
-  // persisted Reset marks applied). Keyed on the exact floats of
-  // downbeat_times — the guides read the same array.
-  const tiersA = useMemo(() => downbeatTierMap(beatgridA, ladderA), [beatgridA, ladderA]);
-  const tiersB = useMemo(() => downbeatTierMap(beatgridB, ladderB), [beatgridB, ladderB]);
+  // Downbeat time → Metric-ladder tier + parenthetical flag, per side
+  // (metric-ladder 01/02/03, with persisted Reset marks applied). Keyed on
+  // the exact floats of downbeat_times — the guides read the same array.
+  const tiersA = useMemo(() => downbeatLadderMap(beatgridA, ladderA), [beatgridA, ladderA]);
+  const tiersB = useMemo(() => downbeatLadderMap(beatgridB, ladderB), [beatgridB, ladderB]);
 
   // Beat/cue guide lines continued through the lane strips (normalized to the
   // transition window). Non-downbeats hidden when tighter than ~12px.
@@ -938,7 +938,8 @@ export function DawTimeline({
         if (b > tr.startSec + dur) break;
         const strong = downs.has(b);
         if (!strong && !showWeak) continue;
-        out.push({ x: (b - tr.startSec) / dur, strong, tier: tiersA.get(b) });
+        const la = tiersA.get(b);
+        out.push({ x: (b - tr.startSec) / dur, strong, tier: la?.tier, parenthetical: la?.parenthetical });
       }
     }
     for (const c of hotCuesA) {
@@ -981,7 +982,8 @@ export function DawTimeline({
           const strong = downs.has(bt);
           if (!strong && !showWeak) continue;
           const mixT = g.mixStartSec + (bt - g.bStartSec) / rateB;
-          out.push({ x: (mixT - tr.startSec) / dur, strong, tier: tiersB.get(bt) });
+          const lb = tiersB.get(bt);
+          out.push({ x: (mixT - tr.startSec) / dur, strong, tier: lb?.tier, parenthetical: lb?.parenthetical });
         }
       }
     }

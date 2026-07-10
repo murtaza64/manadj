@@ -88,6 +88,26 @@ export function resolvedMarkTimes(
   return ordinals.map((o) => grid.downbeat_times[o]);
 }
 
+/** Readout for the bar at a downbeat ordinal (metric-ladder 03): position
+ * in the top tier counted from the governing reset — "13 of 16" — or the
+ * parenthetical count, "+1, +2…". The number a DJ holds in their head. */
+export function barCountLabel(
+  proj: {
+    barIndexes: readonly number[];
+    parentheticals: readonly boolean[];
+    tierBars: readonly number[];
+  },
+  ordinal: number,
+): string {
+  if (proj.parentheticals[ordinal]) {
+    let k = 1;
+    for (let i = ordinal - 1; i >= 0 && proj.parentheticals[i]; i--) k++;
+    return `+${k}`;
+  }
+  const top = proj.tierBars[proj.tierBars.length - 1];
+  return `${(proj.barIndexes[ordinal] % top) + 1} of ${top}`;
+}
+
 /** The stored Reset mark nearest a track time (delete-nearest's target);
  * null when there are none. Raw seconds on both sides — the ear aims at
  * the stored mark, not its downbeat resolution. */
@@ -109,18 +129,22 @@ function parentheticalCutoff(segmentBars: number, tierBars: readonly number[]): 
   return 0;
 }
 
-/** Downbeat time → tier, keyed on the exact floats of `downbeat_times` —
- * for consumers that look downbeats up by time from the SAME array (the
- * editor lane guides). Empty map when the ladder is undefined. */
-export function downbeatTierMap(
+/** Downbeat time → { tier, parenthetical }, keyed on the exact floats of
+ * `downbeat_times` — for consumers that look downbeats up by time from the
+ * SAME array (the editor lane guides). Empty map when the ladder is
+ * undefined. */
+export function downbeatLadderMap(
   grid: BeatgridData | null,
   persisted?: PersistedLadder | null,
-): Map<number, number> {
+): Map<number, { tier: number; parenthetical: boolean }> {
   const proj = resolveLadder(grid, persisted);
-  const map = new Map<number, number>();
+  const map = new Map<number, { tier: number; parenthetical: boolean }>();
   if (!proj || !grid) return map;
   for (let i = 0; i < proj.tiers.length; i++) {
-    map.set(grid.downbeat_times[i], proj.tiers[i]);
+    map.set(grid.downbeat_times[i], {
+      tier: proj.tiers[i],
+      parenthetical: proj.parentheticals[i],
+    });
   }
   return map;
 }
