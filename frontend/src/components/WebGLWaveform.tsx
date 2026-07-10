@@ -36,6 +36,13 @@ interface WebGLWaveformProps {
   visibleSeconds?: number;
   onVisibleSecondsChange?: (seconds: number) => void;
   className?: string;
+  /** Fixed-playhead position, 0-1 (default PLAY_MARKER_FRACTION = 0.25).
+   * Per-surface: the performance decks must stay at 0.25 (PlayGuideOverlay
+   * aligns to it); the library player centers at 0.5. */
+  playMarkerFraction?: number;
+  /** Time/bar readout placement (renderer config passthrough). */
+  timeReadoutAnchor?: 'bottom-right' | 'top-left';
+  timeReadoutOffset?: { x: number; y: number };
 }
 
 export default function WebGLWaveform({
@@ -48,6 +55,9 @@ export default function WebGLWaveform({
   visibleSeconds,
   onVisibleSecondsChange,
   className,
+  playMarkerFraction = PLAY_MARKER_FRACTION,
+  timeReadoutAnchor,
+  timeReadoutOffset,
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: beatgridData } = useBeatgridData(trackId);
@@ -59,8 +69,10 @@ export default function WebGLWaveform({
     waveformData,
     config: {
       isMinimapMode: false,
-      playMarkerPosition: PLAY_MARKER_FRACTION,
+      playMarkerPosition: playMarkerFraction,
       showTimeReadout: true,
+      timeReadoutAnchor,
+      timeReadoutOffset,
     },
     cuePoint,
     hotCues,

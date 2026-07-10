@@ -1,6 +1,10 @@
 /* Transition editor styles (editor-* namespace). */
 
 .editor-root {
+  /* Wave row height (each of the two rows). Doubled from the original
+     max(28px, 4vh); .editor-top grows by the total added height (which
+     equals one new row) so the strips/library keep their space. */
+  --waverow-h: max(56px, 8vh);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -11,7 +15,8 @@
 /* Top panel: the transition-editor surface (sibling of Library/Performance
    top panels); bottom half is the shared library browse surface. */
 .editor-top {
-  height: 50%;
+  /* 50% split, extended by the wave-row growth (taken from the library). */
+  height: calc(50% + var(--waverow-h));
   display: flex;
   flex-direction: column;
   background: var(--crust, #11111b);
@@ -108,10 +113,16 @@
   flex-direction: column;
 }
 
-/* Lane toggle gutter + time area, side by side. */
+/* Time area with the lane-toggle gutter overlaid at the left edge (the
+   viewport spans the full timeline width — waveforms run edge to edge). */
 .editor-timeline {
+  --lanegutter-w: 52px;
+  /* Backdrop panel over the automation strips: wide enough to back both the
+     toggle chips (--lanegutter-w) and the pinned lane labels beside them. */
+  --lanepanel-w: 116px;
+  position: relative;
   border: 1px solid var(--surface0, #313244);
-  background: #0b0b12;
+  background: #0b0b0b;
   /* Flexible stack height: adding/removing lanes redistributes THIS space
      (strips flex below) instead of growing the timeline vertically. */
   flex: 1 1 0;
@@ -132,20 +143,33 @@
 
 /* ── Lane toggle gutter (mix-editor 32): five chips per deck at the left
    edge of each deck's lane region — A top, B bottom. Engaged = inverted
-   fill in the lane color (inline styles carry the per-lane colors). ── */
+   fill in the lane color (inline styles carry the per-lane colors).
+   An OVERLAY, not a flex column: it floats over the lane strips so the
+   timeline viewport (and the waveforms) reach the screen edge. ── */
 .editor-lanegutter {
-  flex: 0 0 auto;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--lanegutter-w);
+  z-index: 3;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 4px;
+  /* The gap mirrors the two fixed-height wave rows between the strip
+     regions, so each chip group spans (about) its deck's strips. */
+  gap: calc(2 * var(--waverow-h, max(56px, 8vh)));
   padding: 3px;
-  border-right: 1px solid var(--surface0, #313244);
+  pointer-events: none;
 }
 
 .editor-lanetoggles {
   display: flex;
   flex-direction: column;
+  /* Fill the deck's strip region; chips distribute evenly across it —
+     space-evenly gives equal gaps between chips AND at both ends, so the
+     outer edges and the wave-facing edges breathe the same amount. */
+  flex: 1 1 0;
+  justify-content: space-evenly;
   gap: 2px;
 }
 
@@ -154,11 +178,13 @@
   font-size: 9px;
   font-weight: bold;
   line-height: 1;
-  background: transparent;
+  /* Opaque-ish backing: chips float over lane strips/waveforms now. */
+  background: rgba(11, 11, 11, 0.8);
   border: 1px solid;
   padding: 2px 4px;
   cursor: pointer;
   text-align: center;
+  pointer-events: auto;
   /* Off chips read dimmer than engaged fills; hover restores full punch. */
   opacity: 0.75;
 }
@@ -169,7 +195,7 @@
 
 .editor-lanetoggle.on {
   /* Inverted fill (unified engaged vocabulary); bg/border come inline. */
-  color: #0b0b12;
+  color: #0b0b0b;
   opacity: 1;
 }
 
@@ -298,10 +324,8 @@
 
 .editor-timeline-row {
   position: relative;
-  /* Half the pre-stack height: polarized half-waveforms carry the same
-     information in half the space (issue 13 proportions pass). Fixed —
-     lane strips flex around them. */
-  flex: 0 0 max(28px, 4vh);
+  /* Fixed height (--waverow-h) — lane strips flex around them. */
+  flex: 0 0 var(--waverow-h, max(56px, 8vh));
   touch-action: none;
 }
 
@@ -353,29 +377,60 @@
      grows. min-height keeps a strip editable in crowded stacks. */
   flex: 1 1 0;
   min-height: 22px;
-  border-bottom: 2px solid #1b1b28;
+  border-bottom: 2px solid #1b1b1b;
   touch-action: none;
 }
 
 /* Flat strips (mix-editor 32) + deck accent edge: A lanes read as A's, B
-   as B's via the 3px inset edge alone — no gradient wash. */
-/* Deck accent via inset shadow, NOT border-left: a border would shift the
-   absolutely-positioned lane windows off the shared time axis. */
+   as B's via the 3px edge alone — no gradient wash. */
 .editor-lanestrip.a {
-  background: #0e0e16;
-  box-shadow: inset 3px 0 0 rgba(var(--deck-a-rgb), 0.6);
+  background: #0e0e0e;
 }
 
 .editor-lanestrip.b {
-  background: #0e0e16;
-  box-shadow: inset 3px 0 0 rgba(var(--deck-b-rgb), 0.6);
+  background: #0e0e0e;
+}
+
+/* Backdrop panel: per-strip, pinned to the viewport's left edge like the
+   labels. Strips stack contiguously, so these fuse into one sidebar column
+   over the automation region — chips and labels stay readable over any
+   curves, while the wave rows (no backdrop) run edge to edge. z-index 2,
+   same as the lane canvases' overlays but ahead of them in paint order —
+   yet BEFORE the labels/edge bars in the DOM, so those (also z 2) still
+   paint on top of it. */
+.editor-lanebackdrop {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: -2px; /* swallow the strip's 2px border-bottom seam */
+  width: var(--lanepanel-w, 116px);
+  background: rgba(11, 11, 11, 0.85);
+  z-index: 2;
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* Lane accent edge: its own element (not border/inset shadow — a border
+   would shift the lane windows off the shared time axis), pinned by the
+   same per-frame counter-transform as .editor-lanelabel. Sits at the right
+   edge of the toggle column; per-LANE color arrives inline (LANE_COLORS). */
+.editor-laneedge {
+  position: absolute;
+  left: var(--lanegutter-w, 52px);
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  z-index: 2;
+  will-change: transform;
+  pointer-events: none;
 }
 
 .editor-lanestrip .editor-lanelabel {
   /* Pinned to the viewport's left edge by a per-frame counter-transform in
      the rAF tick (sticky can't track the content's translateX scroll). */
   position: absolute;
-  left: 4px;
+  /* Clears the overlaid lane-toggle gutter (chips float over the strips). */
+  left: calc(var(--lanegutter-w, 52px) + 4px);
   top: 2px;
   width: auto;
   z-index: 2;
@@ -385,7 +440,7 @@
   gap: 4px;
   font-size: 10px;
   font-family: monospace;
-  background: rgba(11, 11, 18, 0.8);
+  background: rgba(11, 11, 11, 0.8);
   padding: 1px 4px;
 
 }
@@ -395,10 +450,10 @@
   top: 2px;
   bottom: 2px;
   /* The editable region stands out from the rest of the strip. */
-  background: rgba(49, 50, 68, 0.35);
+  background: rgba(49, 49, 54, 0.35);
   /* Outline instead of border: borders inset the drawing surface, skewing
      guide/curve x-coordinates off the shared time axis. */
-  outline: 1px solid #45475a;
+  outline: 1px solid var(--surface1, #45454f);
 }
 
 /* Pointer target: overhangs the lane rect by LANE_PAD on the SIDES ONLY
@@ -438,7 +493,7 @@
   top: 0;
   bottom: 0;
   pointer-events: none;
-  background: rgba(11, 11, 18, 0.6);
+  background: rgba(11, 11, 11, 0.6);
 }
 
 .editor-overlap {
@@ -547,7 +602,7 @@
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  background: #0b0b12;
+  background: #0b0b0b;
   border: 1px solid var(--deck-b);
   border-radius: 4px;
   font-size: 11px;

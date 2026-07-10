@@ -34,6 +34,11 @@ export default function Player() {
           loop={loop}
           transport={scrubTransport}
           dimmed={trackId !== null && !ready}
+          playMarkerFraction={0.35}
+          timeReadoutAnchor="top-left"
+          /* Docked at the transport overlay's bottom edge (panel bottom
+             ≈ 104px, canvas 120px — the readout box spans ~98-118px). */
+          timeReadoutOffset={{ x: 14, y: 101 }}
         />
 
         {/* Controls overlay - top left: CUE / PLAY rows, then the beatjump row */}
@@ -55,7 +60,7 @@ export default function Player() {
           )}
         </div>
 
-        {/* Hot cues overlay - top right */}
+        {/* Hot cues overlay - beside the transport panel */}
         <div className="player-hotcues-overlay">
           <HotCuePads />
         </div>

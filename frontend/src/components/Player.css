@@ -180,11 +180,11 @@
   justify-content: center;
 }
 
-/* Hot cues overlay - positioned on top right */
+/* Hot cues overlay - beside the transport panel (8px + 170px panel + 8px) */
 .player-hotcues-overlay {
   position: absolute;
   top: 8px;
-  right: 8px;
+  left: 186px;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 2px;

@@ -24,7 +24,7 @@
   /* sticky banners scroll over content: background must be opaque
      (translucent tint composited over the page bg, not alpha) */
   border: 1px solid #00e67666;
-  background: linear-gradient(#00e67612, #00e67612) var(--base, #141414);
+  background: linear-gradient(#00e67612, #00e67612) var(--crust, #111);
   color: var(--text);
   padding: 8px 12px; margin-bottom: 12px; font-size: 13px; cursor: pointer;
 }
@@ -146,7 +146,7 @@
 .uts-pending {
   display: flex; align-items: center; gap: 12px;
   border: 1px solid #007aff88;
-  background: linear-gradient(#007aff12, #007aff12) var(--base, #141414);
+  background: linear-gradient(#007aff12, #007aff12) var(--crust, #111);
   padding: 10px 14px; margin-bottom: 12px; font-size: 13px;
 }
 .uts-pending-side { color: var(--subtext0, #999); font-size: 12px; }
@@ -159,7 +159,7 @@
 .uts-notice, .uts-pending, .uts-busy { position: sticky; top: 0; z-index: 10; }
 .uts-busy {
   border: 1px solid #ffcc0066;
-  background: linear-gradient(#ffcc0012, #ffcc0012) var(--base, #141414);
+  background: linear-gradient(#ffcc0012, #ffcc0012) var(--crust, #111);
   color: #ffcc00;
   padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
 }

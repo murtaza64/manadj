@@ -5,6 +5,7 @@
   padding: 16px 20px;
   overflow-y: auto;
   height: 100%;
+  background: var(--crust, #111);
 }
 
 .take-history-empty {

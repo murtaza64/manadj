@@ -194,9 +194,9 @@ export function LaneCanvas({
     const bx1 = Math.max(lx(0), 0);
     const bx2 = Math.min(lx(1), w);
     if (bx2 > bx1) {
-      ctx.fillStyle = 'rgba(24, 24, 37, 0.85)';
+      ctx.fillStyle = 'rgba(24, 24, 24, 0.85)';
       ctx.fillRect(bx1, LANE_PAD, bx2 - bx1, lh);
-      ctx.fillStyle = '#313244';
+      ctx.fillStyle = '#313136';
       ctx.fillRect(bx1, LANE_PAD + lh / 2, bx2 - bx1, 1);
     }
 
@@ -305,7 +305,7 @@ export function LaneCanvas({
       // Label to whichever side has room.
       const rightward = cx + 14 + tw < w;
       const tx = rightward ? cx + 12 : cx - 12 - tw;
-      ctx.fillStyle = 'rgba(17, 17, 27, 0.85)';
+      ctx.fillStyle = 'rgba(17, 17, 17, 0.85)';
       ctx.fillRect(tx - 2, cy - 7, tw + 4, 14);
       ctx.fillStyle = '#cdd6f4';
       ctx.fillText(text, tx, cy);

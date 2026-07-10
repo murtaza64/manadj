@@ -135,6 +135,11 @@ export function DawTimeline({
   /** Lane label elements, counter-transformed per frame so they pin to the
    * viewport's left edge (CSS sticky is blind to transform-based scroll). */
   const laneLabelRefs = useRef(new Map<LaneId, HTMLSpanElement>());
+  /** Lane-accent edge bars (right of the toggle column), pinned the same way. */
+  const laneEdgeRefs = useRef(new Map<LaneId, HTMLSpanElement>());
+  /** Per-strip backdrop panels behind the toggles/labels, pinned likewise —
+   * they form the visual left sidebar over the automation strips only. */
+  const laneBackdropRefs = useRef(new Map<LaneId, HTMLSpanElement>());
   /** Lane canvas scroll hooks: the tick feeds each one the visible content
    * range; a canvas repositions/redraws only when the view exits its drawn
    * span (viewport-windowed lane canvases — scroll-jitter fix). */
@@ -275,21 +280,19 @@ export function DawTimeline({
 
   const { data: hotCuesA = [] } = useHotCues(trackAId);
   const { data: hotCuesB = [] } = useHotCues(trackBId);
-  // Dimmed bands so hot cues / beatgrid pop in the editor rows (issue 05).
-  // Stacked half-waveforms (issue 13): A's baseline at its top edge (peaks
-  // grow down), B's at its bottom edge (peaks grow up) — loud peaks meet at
-  // the seam between the two rows for transient-vs-transient beat reading.
+  // Bipolar rows (cosmetic pass 2026-07-10, supersedes issue 13's stacked
+  // halves): both rows mirror around their own center baseline, at full
+  // band brightness like the library/performance waveforms (the issue-05
+  // 0.6 dim is retired; out-of-window dimming stays — .editor-inaudible).
   const rowConfigA = {
     isMinimapMode: false,
     playMarkerPosition: 0,
-    waveformBrightness: 0.6,
-    amplitudeAnchor: 'top' as const,
+    amplitudeAnchor: 'center' as const,
   };
   const rowConfigB = {
     isMinimapMode: false,
     playMarkerPosition: 0,
-    waveformBrightness: 0.6,
-    amplitudeAnchor: 'bottom' as const,
+    amplitudeAnchor: 'center' as const,
   };
   // Driven mode: the rAF tick below calls draw() for both rows right after
   // writing transforms + display windows — one motion clock, layer order
@@ -389,13 +392,19 @@ export function DawTimeline({
     drawRowsRef.current = { a: rendA.draw, b: rendB.draw };
   });
 
-  // Viewport width for the fixed row canvases.
+  // Viewport width for the fixed row canvases. Observed on the viewport
+  // itself, not window resize: the viewport can change width without the
+  // window (layout/CSS changes) and a stale width draws the wave rows
+  // compressed against the content-space lanes.
   const [viewW, setViewW] = useState(800);
   useEffect(() => {
-    const measure = () => setViewW(viewportRef.current?.clientWidth ?? 800);
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const measure = () => setViewW(viewport.clientWidth || 800);
     measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    const ro = new ResizeObserver(measure);
+    ro.observe(viewport);
+    return () => ro.disconnect();
   }, []);
 
   // Dirty tracking for the tick: bump on any React-side change that affects
@@ -480,6 +489,12 @@ export function DawTimeline({
         if (waveWrapARef.current) waveWrapARef.current.style.transform = `translateX(${scrollPx}px)`;
         if (waveWrapBRef.current) waveWrapBRef.current.style.transform = `translateX(${scrollPx}px)`;
         for (const el of laneLabelRefs.current.values()) {
+          el.style.transform = `translateX(${scrollPx}px)`;
+        }
+        for (const el of laneEdgeRefs.current.values()) {
+          el.style.transform = `translateX(${scrollPx}px)`;
+        }
+        for (const el of laneBackdropRefs.current.values()) {
           el.style.transform = `translateX(${scrollPx}px)`;
         }
         for (const fn of laneScrollDraws.current.values()) {
@@ -977,6 +992,21 @@ export function DawTimeline({
 
   const laneStrip = (id: LaneId) => (
     <div key={id} className={`editor-lanestrip ${id.endsWith('A') ? 'a' : 'b'}`}>
+      <span
+        className="editor-lanebackdrop"
+        ref={(el) => {
+          if (el) laneBackdropRefs.current.set(id, el);
+          else laneBackdropRefs.current.delete(id);
+        }}
+      />
+      <span
+        className="editor-laneedge"
+        style={{ background: LANE_COLORS[id] }}
+        ref={(el) => {
+          if (el) laneEdgeRefs.current.set(id, el);
+          else laneEdgeRefs.current.delete(id);
+        }}
+      />
       <span
         className="editor-lanelabel"
         style={{ color: LANE_COLORS[id] }}

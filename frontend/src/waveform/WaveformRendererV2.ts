@@ -30,6 +30,11 @@ export interface WaveformRendererConfig {
   playMarkerPosition?: number;
   /** Draw a time/bar readout on the overlay canvas (main waveform only). */
   showTimeReadout?: boolean;
+  /** Where the time/bar readout sits (default 'bottom-right'). */
+  timeReadoutAnchor?: 'bottom-right' | 'top-left';
+  /** CSS-px offset for the 'top-left' readout — lets a caller tuck it
+   * under its DOM overlays (the library player's transport panel). */
+  timeReadoutOffset?: { x: number; y: number };
   /** Scale waveform band colors only (0-1, default 1) — markers stay
    * full-strength (transition-editor rows use ~0.6). */
   waveformBrightness?: number;
@@ -1109,10 +1114,22 @@ export class WaveformRendererV2 {
       (bar !== null ? `  bar ${bar}` : '');
     const pad = 6 * view.dpr;
     ctx.font = `bold ${12 * view.dpr}px monospace`;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
     const metrics = ctx.measureText(text);
     const textHeight = 14 * view.dpr;
+    if (this.config.timeReadoutAnchor === 'top-left') {
+      const off = this.config.timeReadoutOffset ?? { x: 8, y: 8 };
+      const x = off.x * view.dpr;
+      const y = off.y * view.dpr;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = 'rgba(17, 17, 17, 0.7)';
+      ctx.fillRect(x - pad, y - pad / 2, metrics.width + pad * 2, textHeight + pad);
+      ctx.fillStyle = 'rgb(205, 214, 244)'; // var(--text)
+      ctx.fillText(text, x, y);
+      return;
+    }
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
     ctx.fillStyle = 'rgba(17, 17, 17, 0.7)';
     ctx.fillRect(
       view.w - pad * 2 - metrics.width,

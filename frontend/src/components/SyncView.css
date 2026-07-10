@@ -6,7 +6,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--base);
+  background: var(--crust, #111);
   color: var(--text);
   padding: var(--space-md);
   overflow: hidden;
