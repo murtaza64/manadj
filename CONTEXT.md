@@ -267,7 +267,7 @@ _Avoid_: loop roll (a different, slip-based feature)
 Planned concept: a persisted loop region on a Track, Hot-Cue-like (slots, Sync with Engine DJ's loops), from which an Active loop can be armed. Deferred until the Active loop exists.
 
 **Main cue**:
-The single repositionable cue position of a Track, moved with the "cue" button while DJing — distinct from Hot Cues by being one slot that moves freely during performance. Persisted with the Track (CDJ memory-cue behavior). When unset, it defaults to the Track's first beat if a Beatgrid exists, else the first non-silent audio.
+The single repositionable cue position of a Track, moved with the "cue" button while DJing — distinct from Hot Cues by being one slot that moves freely during performance. Persisted with the Track (CDJ memory-cue behavior). When unset, it defaults to the Track's first beat if a Beatgrid exists, else the first non-silent audio; the default is live until touched — a Beatgrid arriving while the Deck is still parked untouched upgrades it to the first beat, but the first play or cue move freezes it (revised 2026-07-10 from strictly load-time).
 
 **Controller**:
 A hardware MIDI control surface (e.g. the DJControl Inpulse 300 MK2) driving Decks, Mixer, and library browsing. An alternative input alongside keyboard and pointer — a Controller adds no new capabilities, only physical access to existing actions — plus Feedback on its own lights. Active app-wide, like the Decks it controls, not tied to any view.
