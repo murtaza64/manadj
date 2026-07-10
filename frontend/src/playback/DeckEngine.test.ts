@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeckEngine } from './DeckEngine';
 import { _clearBufferCacheForTests, putCachedBuffer } from './bufferCache';
 import type { DeckAudioPort } from './mixer';
@@ -375,6 +375,128 @@ describe('decoded-buffer cache (mix-editor 28)', () => {
     await engine.load({ trackId: 10, audioUrl: 'http://127.0.0.1:1/none', bpm: 120 });
     engine.setTrackBpm(99, 240);
     expect(engine.getSnapshot().bpm).toBe(120);
+  });
+});
+
+describe('DeckEngine cross-deck launch reference (cue-quantize-bpm 04)', () => {
+  afterEach(() => _clearBufferCacheForTests());
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** A 120 BPM grid from 0s: beats every 0.5s. */
+  const grid120 = Array.from({ length: 360 }, (_, i) => i * 0.5);
+
+  /**
+   * A port whose context never truly starts a voice: the worklet's
+   * addModule rejects in jsdom (swallowed by createSourceNode), so
+   * startAudio flips transport state without a running voice — enough to
+   * exercise asLaunchReference (playhead reads transport.playhead while
+   * runningStartId stays null) and the deferred-launch timer.
+   */
+  function stubPort(): DeckAudioPort {
+    const input = { connect: () => undefined, disconnect: () => undefined } as unknown as AudioNode;
+    const ctx = {
+      currentTime: 0,
+      state: 'running',
+      resume: () => Promise.resolve(),
+      audioWorklet: { addModule: () => Promise.reject(new Error('no worklet in jsdom')) },
+    } as unknown as AudioContext;
+    return { ensureAudio: () => ({ ctx, input }) };
+  }
+
+  async function loadedEngine(
+    trackId: number,
+    grid: number[] | null = grid120,
+    port: DeckAudioPort = stubPort()
+  ) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(port);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+    });
+    return engine;
+  }
+
+  it('asLaunchReference is null while paused', async () => {
+    const engine = await loadedEngine(50);
+    expect(engine.asLaunchReference()).toBeNull();
+  });
+
+  it('asLaunchReference is null when playing a gridless track', async () => {
+    const engine = await loadedEngine(51, null);
+    engine.seek(10);
+    engine.play();
+    expect(engine.asLaunchReference()).toBeNull();
+  });
+
+  it('asLaunchReference exposes live beat times and playhead while playing', async () => {
+    const engine = await loadedEngine(52);
+    engine.seek(10);
+    engine.play();
+    const ref = engine.asLaunchReference();
+    expect(ref).not.toBeNull();
+    expect(ref!.beatTimes).toBe(grid120);
+    expect(ref!.playhead).toBeCloseTo(10, 6);
+  });
+
+  it('a paused deck defers its launch to the playing peer beat (Quantize on)', async () => {
+    vi.useFakeTimers();
+    try {
+      // Peer A plays a gridded track; its playhead 1.1 → nearest beat 1.25,
+      // Δ +0.15s ahead: B's Play should hold ~0.15s, then start.
+      const peer = await loadedEngine(53, grid120);
+      peer.seek(1.1);
+      peer.play();
+
+      const launcher = await loadedEngine(54, grid120);
+      launcher.setLaunchReferenceProvider(() => peer.asLaunchReference());
+      launcher.seek(20);
+      launcher.play();
+      // Playing intent is latched immediately (the deck shows as playing);
+      // the audio launch is deferred behind the timer.
+      expect(launcher.getSnapshot().playing).toBe(true);
+      // Advancing past the deferral fires the launch without throwing.
+      vi.advanceTimersByTime(200);
+      expect(launcher.getSnapshot().playing).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('pausing during the deferral cancels the scheduled launch', async () => {
+    vi.useFakeTimers();
+    try {
+      const peer = await loadedEngine(55, grid120);
+      peer.seek(1.1);
+      peer.play();
+
+      const launcher = await loadedEngine(56, grid120);
+      launcher.setLaunchReferenceProvider(() => peer.asLaunchReference());
+      launcher.seek(20);
+      launcher.play();
+      launcher.pause(); // abandons the gesture before the timer fires
+      expect(launcher.getSnapshot().playing).toBe(false);
+      vi.advanceTimersByTime(500); // the cancelled timer must not resurrect audio
+      expect(launcher.getSnapshot().playing).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('launches immediately when Quantize governs but no peer is playing', async () => {
+    const launcher = await loadedEngine(57, grid120);
+    // No provider wired → launchReference() is null → immediate start.
+    launcher.seek(20);
+    launcher.play();
+    expect(launcher.getSnapshot().playing).toBe(true);
   });
 });
 

@@ -21,6 +21,7 @@ import { initialTransportState, isAudioRunning, reduceTransport } from './transp
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
 import { addBeats } from './quantize';
+import type { LaunchReference } from './quantize';
 import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
@@ -123,6 +124,10 @@ export class DeckEngine {
   private nextStartId = 1;
   /** Start requested before the node was ready (first play / ctx revival). */
   private pendingStartAt: number | null = null;
+  /** Timer for a deferred cross-deck launch (cue-quantize-bpm 04): the
+   * paused-deck launch holds off until the reference deck's next beat. Any
+   * stop or new start cancels it. */
+  private pendingLaunchTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Clock anchor: playhead position (s) at ctx time `anchorCtxTime`. */
   private anchorPosition = 0;
@@ -180,6 +185,39 @@ export class DeckEngine {
   private fireTransportEvent(e: DeckTransportGesture): void {
     this.onTransportEvent?.(e);
     for (const listener of this.transportEventListeners) listener(e);
+  }
+
+  /**
+   * Cross-deck launch reference (cue-quantize-bpm 04): supplies the OTHER
+   * deck's live phase (beat times + playhead) when it is audibly playing
+   * with a usable Beatgrid, else null. Set by DeckContext, which wires each
+   * engine to its peer. Read only for a *paused* deck's launch gestures —
+   * the engine stays peer-ignorant otherwise. Null degrades every launch to
+   * immediate (Quantize off, no playing peer, gridless peer).
+   */
+  private launchReferenceProvider: (() => LaunchReference | null) | null = null;
+
+  setLaunchReferenceProvider(provider: (() => LaunchReference | null) | null): void {
+    this.launchReferenceProvider = provider;
+  }
+
+  /** The peer's live launch reference, or null when there is no usable one
+   * (peer stopped, gridless, or no provider wired). */
+  launchReference(): LaunchReference | null {
+    return this.launchReferenceProvider?.() ?? null;
+  }
+
+  /**
+   * This deck's phase AS a launch reference (cue-quantize-bpm 04): its live
+   * beat times + playhead, but only when it is itself audible (playing or
+   * previewing) and has a usable Beatgrid (≥ 1 beat). Null otherwise — a
+   * paused, gridless, or stopped deck is no reference. The peer's provider
+   * calls this; the reads are live, so the phase is fresh at gesture time.
+   */
+  asLaunchReference(): LaunchReference | null {
+    if (!isAudioRunning(this.transport)) return null;
+    if (!this.beatTimes || this.beatTimes.length === 0) return null;
+    return { beatTimes: this.beatTimes, playhead: this.getPlayhead() };
   }
 
   private readonly port: DeckAudioPort;
@@ -580,6 +618,7 @@ export class DeckEngine {
    */
   dispose(): void {
     this.loadAbort?.abort();
+    this.clearPendingLaunch();
     this.stopAudio(this.getPlayhead());
     // Keep the node cached for revival; just detach it from the graph.
     this.sourceNode?.disconnect();
@@ -589,9 +628,17 @@ export class DeckEngine {
 
   // ── Internals ──────────────────────────────────────────────────────────
 
-  /** Ambient Quantize facts, assembled fresh per dispatch (gesture time). */
+  /** Ambient Quantize facts, assembled fresh per dispatch (gesture time).
+   * The launch reference (cue-quantize-bpm 04) is the peer's LIVE phase —
+   * only a *paused* deck's launch branches consult it; every other gesture
+   * ignores it. playRate scales a cross-deck launch's immediate ahead-entry. */
   private transportContext(): TransportContext {
-    return { quantize: isQuantizeOn(), beatTimes: this.beatTimes };
+    return {
+      quantize: isQuantizeOn(),
+      beatTimes: this.beatTimes,
+      launchReference: this.launchReference(),
+      playRate: this.currentRate(),
+    };
   }
 
   private dispatch(event: TransportEvent): void {
@@ -602,8 +649,13 @@ export class DeckEngine {
     const loopChanged = next.loop !== synced.loop;
     this.transport = next;
     for (const effect of effects) {
-      if (effect.type === 'start') this.startAudio(effect.at);
-      else this.stopAudio(effect.at);
+      if (effect.type === 'start') {
+        if (effect.delaySeconds && effect.delaySeconds > 0) {
+          this.scheduleLaunch(effect.at, effect.delaySeconds);
+        } else {
+          this.startAudio(effect.at);
+        }
+      } else this.stopAudio(effect.at);
     }
     // Loop state is a live source property, not an AudioEffect: push
     // region changes to the worklet whether or not audio (re)started —
@@ -640,8 +692,42 @@ export class DeckEngine {
     }
   }
 
+  /**
+   * A deferred cross-deck launch (cue-quantize-bpm 04): hold the start off
+   * by `delaySeconds` real seconds so the launching cue lands on the
+   * reference deck's next beat, then start at `at`. Cancels any prior
+   * pending launch (rapid re-triggers keep only the latest). A stop or an
+   * immediate start supersedes it (both clear the timer first). Kept off
+   * the audio-clock scheduler deliberately: the worklet start is immediate
+   * (no `when`), the deferral is at most half a reference beat, and grill
+   * note (3) forbids post-entry correction — a wall-clock timer is exact
+   * enough for a one-instant alignment.
+   */
+  private scheduleLaunch(at: number, delaySeconds: number): void {
+    this.clearPendingLaunch();
+    if (typeof setTimeout === 'undefined') {
+      this.startAudio(at);
+      return;
+    }
+    this.pendingLaunchTimer = setTimeout(() => {
+      this.pendingLaunchTimer = null;
+      // The gesture may have been abandoned (paused) while we waited; only
+      // start if audio is still wanted.
+      if (!isAudioRunning(this.transport)) return;
+      this.startAudio(at);
+    }, delaySeconds * 1000);
+  }
+
+  private clearPendingLaunch(): void {
+    if (this.pendingLaunchTimer !== null) {
+      clearTimeout(this.pendingLaunchTimer);
+      this.pendingLaunchTimer = null;
+    }
+  }
+
   private startAudio(at: number): void {
     if (!this.buffer) return;
+    this.clearPendingLaunch();
     const { ctx, input } = this.ensureAudio();
     if (ctx.state === 'suspended') this.resumeWithGestureRetry(ctx);
     if (this.sourceNode && this.sourceNode.ctx === ctx) {
@@ -656,6 +742,7 @@ export class DeckEngine {
   }
 
   private stopAudio(at: number): void {
+    this.clearPendingLaunch();
     this.pendingStartAt = null;
     if (this.runningStartId !== null) {
       // The worklet declick-fades internally (its stop splice).
