@@ -25,8 +25,11 @@ def cues_no_offset(rows, monkeypatch=None):
 # -- rb_hotcues_from_cue_rows -------------------------------------------------
 
 
-def test_no_rows_means_surface_carries_nothing():
-    assert rb_hotcues_from_cue_rows([], "/music/t.flac") == (None, None)
+def test_no_rows_is_an_empty_actionable_set():
+    """[] not None: RB always carries the cue field for present tracks —
+    empty vs a non-empty Library must diverge (export-only), else the
+    export verbs are unreachable exactly where they're needed (07)."""
+    assert rb_hotcues_from_cue_rows([], "/music/t.flac") == ([], None)
 
 
 def test_hot_and_memory_mirror():
@@ -172,3 +175,13 @@ def test_color_index_reads_as_hex():
         [row(1, 1000, "x", color=2), row(0, 1000)], "/music/t.flac"
     )
     assert hotcues[0].color == "#E8A029"  # palette 2 = orange
+
+
+def test_library_cues_vs_empty_rb_diverge_export_only(db):
+    make_track(db)  # library has 1 cue
+    refs = [ref("/music/t.flac", hotcues=[])]
+    result = compute_sync_status(db, {"rekordbox": rb_reader(refs)})
+    r = row_for(result, "/music/t.flac")
+    d = next(dd for dd in r.diverged if dd.field == "hotcues")
+    assert d.surface_values["rekordbox"] == []
+    assert "rekordbox" not in d.importable_from  # nothing to import; export-only

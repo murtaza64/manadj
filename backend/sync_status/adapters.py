@@ -226,12 +226,16 @@ def rb_hotcues_from_cue_rows(
     mirroring model each hot cue should have a memory twin at the same
     millisecond, and stray memory cues mean the mirror is out of sync.
 
-    Returns hotcues=None when the track has no cue rows at all (surface
-    carries nothing — not a divergence, matching the Engine reader's
-    no-blob semantics; library-ahead visibility is issue 05's slice).
+    Returns hotcues=[] when the track has no cue rows: unlike Engine
+    (where a missing blob means unanalyzed/unknown), Rekordbox always
+    carries the cue field for a present track, and an empty set against
+    a non-empty Library is an ACTIONABLE divergence now that export
+    verbs exist (rekordbox-perf-export/07; supersedes the slice-02
+    None-semantics). importable_from correctly excludes empty surfaces,
+    so these rows are export-only.
     """
     if not cue_rows:
-        return None, None
+        return [], None
     from rekordbox.cue_mapping import (
         HOT_CUE_KINDS,
         KIND_TO_SLOT,
@@ -252,7 +256,7 @@ def rb_hotcues_from_cue_rows(
         for c in sorted(hot, key=lambda c: KIND_TO_SLOT[c.Kind])
     ]
     mirror_ok = memory_ms == sorted({c.InMsec for c in hot})
-    return (hotcues if hotcues else None), mirror_ok
+    return hotcues, mirror_ok
 
 
 def _rb_related(content, relation: str, attr: str) -> str | None:
