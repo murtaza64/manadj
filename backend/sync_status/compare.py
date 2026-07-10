@@ -34,6 +34,21 @@ def hotcue_sets_equal(a: list[HotCueValue], b: list[HotCueValue]) -> bool:
     return True
 
 
+def hotcue_positions_equal(a: list[HotCueValue], b: list[HotCueValue]) -> bool:
+    """Slot+position equality, ignoring label and color — for Surfaces
+    that cannot carry cue names/colors (Rekordbox: the DB stores them but
+    doesn't render out-of-band values yet, so we don't compare what we
+    can't round-trip)."""
+    by_slot_a = {c.slot: c for c in a}
+    by_slot_b = {c.slot: c for c in b}
+    if by_slot_a.keys() != by_slot_b.keys():
+        return False
+    return all(
+        abs(by_slot_a[slot].time - by_slot_b[slot].time) <= CUE_TIME_TOLERANCE
+        for slot in by_slot_a
+    )
+
+
 def beatgrids_equal(a: BeatgridValue | None, b: BeatgridValue) -> bool:
     """Structural equality: same tempo-change count, each change agreeing on
     start time (cue tolerance), BPM (epsilon), and bar position."""

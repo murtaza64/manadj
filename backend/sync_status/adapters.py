@@ -13,7 +13,7 @@ from backend.library.scanner import scan_directory
 from backend.track_metadata import FileMetadataError, read_file_metadata
 
 from .aggregator import SurfaceReader
-from .models import SurfaceTrackRef, TrackFields
+from .models import HotCueValue, SurfaceTrackRef, TrackFields
 
 logger = logging.getLogger(__name__)
 
@@ -117,16 +117,20 @@ class EngineSurfaceReader:
 
 
 class RekordboxSurfaceReader:
-    """Rekordbox: DjmdContent rows plus MyTag assignments and color-encoded
-    energy."""
+    """Rekordbox: DjmdContent rows plus MyTag assignments, color-encoded
+    energy, and hot cues from djmdCue rows (positions translated from
+    Rekordbox's decode frame into manadj's — rekordbox/decode_offset.py)."""
 
-    fields = frozenset({"title", "artist", "key", "energy", "tags"})
+    fields = frozenset({"title", "artist", "key", "energy", "tags", "hotcues"})
+    # RB can't render out-of-band cue labels/colors yet (spike finding;
+    # rekordbox-perf-export/03): compare cue slot+position only.
+    hotcue_fidelity = "position"
 
     def __init__(self, rb_db) -> None:  # Rekordbox6Database
         self._db = rb_db
 
     def list_tracks(self) -> list[SurfaceTrackRef]:
-        from pyrekordbox.db6.tables import DjmdMyTag, DjmdSongMyTag
+        from pyrekordbox.db6.tables import DjmdCue, DjmdMyTag, DjmdSongMyTag
 
         from rekordbox.mappings import build_energy_color_map
 
@@ -151,9 +155,16 @@ class RekordboxSurfaceReader:
             if name:
                 tags_by_content.setdefault(song_tag.ContentID, []).append(name)
 
+        cues_by_content: dict[str, list] = {}
+        for cue in session.query(DjmdCue).filter(DjmdCue.rb_local_deleted == 0):
+            cues_by_content.setdefault(cue.ContentID, []).append(cue)
+
         refs = []
         for c in self._db.get_content():
             key_obj = Key.from_musical(_rb_key_name(c))
+            hotcues, mirror_ok = rb_hotcues_from_cue_rows(
+                cues_by_content.get(c.ID, []), c.FolderPath
+            )
             refs.append(
                 SurfaceTrackRef(
                     path=c.FolderPath,
@@ -163,10 +174,46 @@ class RekordboxSurfaceReader:
                         key=key_obj.engine_id if key_obj else None,
                         energy=color_to_energy.get(c.ColorID),
                         tags=sorted(tags_by_content.get(c.ID, [])),
+                        hotcues=hotcues,
+                        hotcue_mirror_ok=mirror_ok,
                     ),
                 )
             )
         return refs
+
+
+def rb_hotcues_from_cue_rows(
+    cue_rows: list, folder_path: str | None
+) -> tuple[list[HotCueValue] | None, bool | None]:
+    """Rekordbox djmdCue rows -> (hotcues in manadj frame, mirror_ok).
+
+    Hot cues are Kind 1-8 (provisionally Kind == slot letter; the spike
+    saw a hand-set ladder land on Kinds 1,2,3,5,6 — mapping verification
+    tracked in rekordbox-perf-export/02). Memory cues are Kind 0; per the
+    mirroring model each hot cue should have a memory twin at the same
+    millisecond, and stray memory cues mean the mirror is out of sync.
+
+    Returns hotcues=None when the track has no cue rows at all (surface
+    carries nothing — not a divergence, matching the Engine reader's
+    no-blob semantics; library-ahead visibility is issue 05's slice).
+    """
+    if not cue_rows:
+        return None, None
+    from rekordbox.decode_offset import rb_ms_to_manadj_seconds
+
+    hot = [c for c in cue_rows if c.Kind and 1 <= c.Kind <= 8]
+    memory_ms = sorted(c.InMsec for c in cue_rows if c.Kind == 0)
+    hotcues = [
+        HotCueValue(
+            slot=c.Kind,
+            time=rb_ms_to_manadj_seconds(c.InMsec, folder_path or ""),
+            label=(c.Comment or None),
+            color=None,
+        )
+        for c in sorted(hot, key=lambda c: c.Kind)
+    ]
+    mirror_ok = memory_ms == sorted({c.InMsec for c in hot})
+    return (hotcues if hotcues else None), mirror_ok
 
 
 def _rb_related(content, relation: str, attr: str) -> str | None:

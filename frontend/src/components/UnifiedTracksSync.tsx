@@ -15,6 +15,7 @@ import { formatKeyDisplay } from '../utils/keyUtils';
 import {
   PerfDiffViewer,
   type BeatgridVal,
+  type ExternalSide,
   type HotCueVal,
   type PerfDiffSides,
 } from './PerfDiffViewer';
@@ -895,18 +896,29 @@ function RowPerfDiff({ row, onImportPerf }: {
     retry: false,
   });
 
+  // every diverging external surface gets a lane below the waveform —
+  // a three-way divergence shows Library + Engine + Rekordbox at once
+  const externals: ExternalSide[] = (['engine', 'rekordbox'] as const)
+    .filter((sid) => [gridDiv, cuesDiv, maincueDiv].some((d) => d && sid in d.surface_values))
+    .map((sid) => ({
+      sid,
+      label: sid === 'rekordbox' ? 'Rekordbox' : 'Engine',
+      color: sid === 'rekordbox' ? '#FF1744' : '#FF6D00',
+      grid: (gridDiv?.surface_values[sid] as BeatgridVal | undefined) ?? null,
+      cues: (cuesDiv?.surface_values[sid] as HotCueVal[] | undefined) ?? [],
+      maincue: (maincueDiv?.surface_values[sid] as number | undefined) ?? null,
+    }));
+
   const sides: PerfDiffSides = {
     libraryGrid: gridDiv
       ? (gridDiv.library_value as BeatgridVal | null)
       : libGridResp?.data ? { tempo_changes: libGridResp.data.tempo_changes } : null,
-    engineGrid: (gridDiv?.surface_values['engine'] as BeatgridVal | undefined) ?? null,
     libraryCues: cuesDiv
       ? (cuesDiv.library_value as HotCueVal[])
       : ((libCuesResp ?? []) as { slot_number: number; time_seconds: number; label: string | null; color: string | null }[])
           .map((c) => ({ slot: c.slot_number, time: c.time_seconds, label: c.label, color: c.color })),
-    engineCues: (cuesDiv?.surface_values['engine'] as HotCueVal[] | undefined) ?? [],
     libraryMaincue: (maincueDiv?.library_value as number | null | undefined) ?? null,
-    engineMaincue: (maincueDiv?.surface_values['engine'] as number | undefined) ?? null,
+    externals,
   };
 
   return (
@@ -914,11 +926,15 @@ function RowPerfDiff({ row, onImportPerf }: {
       trackId={row.track_id!}
       sides={sides}
       onImport={{
-        hotcues: cuesDiv ? (mode) => onImportPerf('hotcues', mode) : undefined,
-        beatgrid: gridDiv
+        // import verbs pull from Engine: only offer them when ENGINE is
+        // the diverging surface (a rekordbox-only divergence has nothing
+        // to import from here)
+        hotcues: cuesDiv && 'engine' in cuesDiv.surface_values
+          ? (mode) => onImportPerf('hotcues', mode) : undefined,
+        beatgrid: gridDiv && 'engine' in gridDiv.surface_values
           ? () => onImportPerf('beatgrid', sides.libraryGrid ? 'replace' : 'fill-empty')
           : undefined,
-        maincue: maincueDiv
+        maincue: maincueDiv && 'engine' in maincueDiv.surface_values
           ? () => onImportPerf('maincue', sides.libraryMaincue !== null ? 'replace' : 'fill-empty')
           : undefined,
       }}
@@ -979,7 +995,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf }: {
               if (d.field === 'hotcues') {
                 const lib = d.library_value as HotCueVal[];
                 const here = v as HotCueVal[];
-                const importable = row.track_id !== null && d.importable_from.includes(s.id);
+                const importable = row.track_id !== null && s.id === 'engine' && d.importable_from.includes(s.id); // perf import verbs call the Engine endpoints — never offer them on other surfaces
                 return (
                   <td key={s.id} className="uts-conflict">
                     <HotCueDiff library={lib} here={here} />
@@ -996,7 +1012,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf }: {
               }
               if (d.field === 'beatgrid') {
                 const grid = v as BeatgridVal;
-                const importable = row.track_id !== null && d.importable_from.includes(s.id);
+                const importable = row.track_id !== null && s.id === 'engine' && d.importable_from.includes(s.id); // perf import verbs call the Engine endpoints — never offer them on other surfaces
                 const hasSaved = d.library_value !== null && d.library_value !== undefined;
                 return (
                   <td key={s.id} className="uts-conflict">
@@ -1013,7 +1029,7 @@ function DivergenceMatrix({ row, onImportField, onImportPerf }: {
                 );
               }
               if (d.field === 'maincue') {
-                const importable = row.track_id !== null && d.importable_from.includes(s.id);
+                const importable = row.track_id !== null && s.id === 'engine' && d.importable_from.includes(s.id); // perf import verbs call the Engine endpoints — never offer them on other surfaces
                 const hasSaved = d.library_value !== null && d.library_value !== undefined;
                 return (
                   <td key={s.id} className="uts-conflict">

@@ -19,6 +19,7 @@ from .compare import (
     CUE_TIME_TOLERANCE,
     beatgrid_value_from_row,
     beatgrids_equal,
+    hotcue_positions_equal,
     hotcue_sets_equal,
     hotcue_values_from_rows,
 )
@@ -196,11 +197,24 @@ def _collect_divergences(
 
     # hotcues: whole-set comparison (glossary "Diverged"). None means the
     # surface doesn't carry cues for this track — not a divergence.
+    # Surfaces that can't round-trip labels/colors declare
+    # hotcue_fidelity="position" (Rekordbox) and compare slot+time only.
     if "hotcues" in reader.fields and surface.hotcues is not None:
-        if not hotcue_sets_equal(lib.hotcues or [], surface.hotcues):
+        position_only = getattr(reader, "hotcue_fidelity", "full") == "position"
+        equal = (
+            hotcue_positions_equal(lib.hotcues or [], surface.hotcues)
+            if position_only
+            else hotcue_sets_equal(lib.hotcues or [], surface.hotcues)
+        )
+        if not equal:
             _record_divergence(
                 sid, reader, "hotcues", lib.hotcues or [], surface.hotcues, diverged, warnings
             )
+    if surface.hotcue_mirror_ok is False:
+        warnings.append(
+            f"{sid}: memory cues don't mirror the hot cues there "
+            "(stray or missing memory-cue twins)"
+        )
 
     # beatgrid: structural comparison; surface None (no grid there) is not a
     # divergence, and the Library's placeholder already reads as None.

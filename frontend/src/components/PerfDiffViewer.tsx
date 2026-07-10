@@ -1,20 +1,25 @@
 /**
  * Overlay diff viewer for performance data (PRD: performance-data-sync).
  *
- * One waveform — both sides describe the same audio — with two color-coded
- * overlay layers: Library vs Engine beatgrids (tick overlays computed from
- * the FULL tempo-change list), hot cue sets, and main cues. Zoomable to
- * beat level (wheel), pannable (drag). Read-only comparison plus
- * pick-a-side import actions; grid editing stays on the Deck panels.
+ * One waveform — all sides describe the same audio — with color-coded
+ * overlay layers per surface: beatgrids (tick overlays computed from the
+ * FULL tempo-change list), hot cue sets, and main cues. The waveform BODY
+ * is the deck renderer itself (WaveformRendererV2, driven mode, 'full'
+ * style slot) so look and styling match the decks exactly; the diff
+ * markers live on a transparent 2D canvas above it (the renderer's own
+ * overlay pass is single-surface and can't draw the vernier comparison).
+ * Zoomable to beat level (wheel, deck step), pannable (drag or horizontal
+ * scroll — no playback here). Read-only comparison plus pick-a-side
+ * import actions; grid editing stays on the Deck panels.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Track } from '../types';
-import { toThreeBands } from '../waveform/blob';
-import type { ThreeBandWaveform } from '../waveform/blob';
+import type { DecodedWaveform } from '../waveform/blob';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
+import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import {
   beatMarkersFromTempoChanges,
   markersInWindow,
@@ -23,25 +28,30 @@ import {
 } from '../utils/perfDiffOverlay';
 import './PerfDiffViewer.css';
 
-// bright, fully saturated (repo preference) — Library cyan, Engine orange
+// bright, fully saturated (repo preference) — Library cyan; external
+// sides carry their own colors (Engine orange, Rekordbox red)
 const LIBRARY_COLOR = '#00E5FF';
-const ENGINE_COLOR = '#FF6D00';
-// band colors matching WebGLWaveformRenderer's bandColors (low/mid/high)
-const BAND_LOW_COLOR = 'rgb(242, 97, 97)';
-const BAND_MID_COLOR = 'rgb(0, 255, 0)';
-const BAND_HIGH_COLOR = 'rgb(135, 222, 237)';
 
 export interface HotCueVal { slot: number; time: number; label: string | null; color: string | null }
 export interface TempoChangeVal { start_time: number; bpm: number; bar_position: number }
 export interface BeatgridVal { tempo_changes: TempoChangeVal[] }
 
+export interface ExternalSide {
+  sid: 'engine' | 'rekordbox';
+  label: string;
+  color: string;
+  grid: BeatgridVal | null;
+  cues: HotCueVal[];
+  maincue: number | null;
+}
+
 export interface PerfDiffSides {
   libraryGrid: BeatgridVal | null;
-  engineGrid: BeatgridVal | null;
   libraryCues: HotCueVal[];
-  engineCues: HotCueVal[];
   libraryMaincue: number | null;
-  engineMaincue: number | null;
+  /** Diverging external surfaces, all drawn below the waveform (Engine
+   * first). A three-way divergence shows Library + both. */
+  externals: ExternalSide[];
 }
 
 export function PerfDiffViewer({ trackId, sides, onImport }: {
@@ -59,13 +69,11 @@ export function PerfDiffViewer({ trackId, sides, onImport }: {
     queryKey: ['track', trackId],
     queryFn: () => api.tracks.getById(trackId),
   });
-  const waveform = useMemo(() => (blob ? toThreeBands(blob) : null), [blob]);
-
   if (isLoading) return <div className="pdv-empty">Loading waveform…</div>;
-  if (error || !waveform) return <div className="pdv-empty">No waveform available for this track yet</div>;
+  if (error || !blob) return <div className="pdv-empty">No waveform available for this track yet</div>;
   return (
     <Viewer
-      waveform={waveform}
+      blob={blob}
       savedMaincue={track?.cue_point_time ?? null}
       sides={sides}
       onImport={onImport}
@@ -73,8 +81,8 @@ export function PerfDiffViewer({ trackId, sides, onImport }: {
   );
 }
 
-function Viewer({ waveform, savedMaincue, sides, onImport }: {
-  waveform: ThreeBandWaveform;
+function Viewer({ blob, savedMaincue, sides, onImport }: {
+  blob: DecodedWaveform;
   savedMaincue: number | null;
   sides: PerfDiffSides;
   onImport: {
@@ -84,7 +92,23 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
   };
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const duration = waveform.duration;
+  const duration = blob.duration;
+  const extRows = Math.max(0, sides.externals.length - 1);
+  // deck renderer underneath: driven (we call draw), window pushed from
+  // winRef each frame, constant off-window clock = no playhead line
+  const staticClock = useMemo(() => ({ getPlayhead: () => -1e9 }), []);
+  const {
+    canvasRef: glCanvasRef,
+    rendererRef,
+    draw: drawBody,
+    initError,
+  } = useWaveformRendererV2({
+    clock: staticClock,
+    waveformData: blob,
+    config: { playMarkerPosition: 0, showTimeReadout: false },
+    driven: true,
+    slot: 'full',
+  });
   // The window lives in a ref and drawing goes straight to the canvas on
   // rAF — zoom/pan never re-renders React, which is what keeps it smooth.
   const winRef = useRef({ windowStart: 0, windowSeconds: duration });
@@ -97,11 +121,10 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
       : [],
     [sides.libraryGrid, duration],
   );
-  const engineMarkers = useMemo(
-    () => sides.engineGrid
-      ? beatMarkersFromTempoChanges(sides.engineGrid.tempo_changes, duration)
-      : [],
-    [sides.engineGrid, duration],
+  const externalMarkers = useMemo(
+    () => sides.externals.map((ext) =>
+      ext.grid ? beatMarkersFromTempoChanges(ext.grid.tempo_changes, duration) : []),
+    [sides.externals, duration],
   );
 
   const draw = useCallback(() => {
@@ -117,44 +140,22 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
     ctx.clearRect(0, 0, width, height);
 
     const { windowStart, windowSeconds } = winRef.current;
+    // the deck renderer paints the body for the same window underneath
+    rendererRef.current?.setDisplayWindow(
+      windowStart / duration,
+      (windowStart + windowSeconds) / duration,
+    );
+    drawBody();
     const xOf = (t: number) => ((t - windowStart) / windowSeconds) * width;
 
     // lanes: cue flags above and below the waveform band
     const waveTop = 28;
-    const waveBottom = height - 28;
-    const waveMid = (waveTop + waveBottom) / 2;
+    const waveBottom = height - 28 - Math.max(0, sides.externals.length - 1) * 18;
     const waveHalf = (waveBottom - waveTop) / 2;
 
-    // ---- waveform: per-pixel-column band maxima, three bands overlaid
-    // back to front, mirrored around the centerline — same technique and
-    // colors as the deck renderer's classic palette
-    const { low, mid, high } = waveform;
-    const n = low.length;
-    const peaksPerSecond = n / duration;
-    const bands: [Float32Array, string][] = [
-      [low, BAND_LOW_COLOR],
-      [mid, BAND_MID_COLOR],
-      [high, BAND_HIGH_COLOR],
-    ];
-    for (const [peaks, color] of bands) {
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      for (let px = 0; px < width; px++) {
-        const t0 = windowStart + (px / width) * windowSeconds;
-        const t1 = windowStart + ((px + 1) / width) * windowSeconds;
-        const i0 = Math.max(0, Math.floor(t0 * peaksPerSecond));
-        const i1 = Math.min(n, Math.max(i0 + 1, Math.ceil(t1 * peaksPerSecond)));
-        let amp = 0;
-        for (let i = i0; i < i1; i++) amp = Math.max(amp, peaks[i]);
-        const h = Math.min(1, amp) * waveHalf;
-        if (h > 0.5) ctx.rect(px, waveMid - h, 1, h * 2);
-      }
-      ctx.fill();
-    }
-
-    // ---- beatgrid overlays (Library from top, Engine from bottom — the
+    // ---- beatgrid overlays (Library from top, external surface from bottom — the
     // misalignment reads as a vernier at beat-level zoom)
-    const drawGrid = (markers: typeof libraryMarkers, color: string, fromTop: boolean) => {
+    const drawGrid = (markers: typeof libraryMarkers, color: string, fromTop: boolean, scale = 1) => {
       const visible = markersInWindow(markers, windowStart, windowSeconds);
       if (visible.length > width * 2) return; // too dense to mean anything
       for (const m of visible) {
@@ -163,7 +164,7 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
         ctx.globalAlpha = m.isDownbeat ? 0.95 : 0.45;
         ctx.lineWidth = m.isDownbeat ? 2 : 1;
         ctx.beginPath();
-        const len = m.isDownbeat ? waveHalf * 2 : waveHalf * 1.2;
+        const len = (m.isDownbeat ? waveHalf * 2 : waveHalf * 1.2) * scale;
         if (fromTop) {
           ctx.moveTo(x, waveTop);
           ctx.lineTo(x, waveTop + len);
@@ -176,14 +177,15 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
       ctx.globalAlpha = 1;
     };
     drawGrid(libraryMarkers, LIBRARY_COLOR, true);
-    drawGrid(engineMarkers, ENGINE_COLOR, false);
+    sides.externals.forEach((ext, i) =>
+      drawGrid(externalMarkers[i], ext.color, false, 1 - 0.35 * i));
 
-    // ---- hot cues (Library flags above, Engine flags below)
-    const drawCue = (cue: HotCueVal, above: boolean, fallback: string) => {
+    // ---- hot cues (Library flags above, external flags below)
+    const drawCue = (cue: HotCueVal, above: boolean, fallback: string, row = 0) => {
       const x = xOf(cue.time);
       if (x < -20 || x > width + 20) return;
       const color = cue.color || fallback;
-      const y = above ? waveTop - 4 : waveBottom + 4;
+      const y = above ? waveTop - 4 : waveBottom + 4 + row * 18;
       ctx.fillStyle = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
@@ -202,7 +204,8 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
       }
     };
     sides.libraryCues.forEach((c) => drawCue(c, true, LIBRARY_COLOR));
-    sides.engineCues.forEach((c) => drawCue(c, false, ENGINE_COLOR));
+    sides.externals.forEach((ext, i) =>
+      ext.cues.forEach((c) => drawCue(c, false, ext.color, i)));
 
     // ---- main cues (labeled triangles)
     const drawMain = (time: number | null, above: boolean, color: string) => {
@@ -229,8 +232,8 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
     // when the main cue isn't diverged, the Library's saved cue still gives
     // useful context — the waveform response carries it
     drawMain(sides.libraryMaincue ?? savedMaincue, true, LIBRARY_COLOR);
-    drawMain(sides.engineMaincue, false, ENGINE_COLOR);
-  }, [waveform, sides, libraryMarkers, engineMarkers, duration]);
+    sides.externals.forEach((ext) => drawMain(ext.maincue, false, ext.color));
+  }, [sides, libraryMarkers, externalMarkers, duration, drawBody, rendererRef, savedMaincue]);
 
   const scheduleDraw = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -260,9 +263,19 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       const { windowStart, windowSeconds } = winRef.current;
-      const anchor = windowStart + ((e.clientX - rect.left) / rect.width) * windowSeconds;
-      const factor = e.deltaY > 0 ? 1.25 : 0.8;
-      winRef.current = zoomWindow(windowStart, windowSeconds, anchor, factor, duration);
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.width : 1;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        // horizontal scroll pans — there's no playback to follow here
+        const dt = ((e.deltaX * unit) / rect.width) * windowSeconds;
+        winRef.current = {
+          windowSeconds,
+          windowStart: panWindow(windowStart, windowSeconds, dt, duration),
+        };
+      } else {
+        const anchor = windowStart + ((e.clientX - rect.left) / rect.width) * windowSeconds;
+        const factor = e.deltaY > 0 ? 1.2 : 1 / 1.2; // deck WHEEL_STEP
+        winRef.current = zoomWindow(windowStart, windowSeconds, anchor, factor, duration);
+      }
       scheduleDraw();
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -286,24 +299,28 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
   };
   const onPointerUp = () => { dragState.current = null; };
 
-  const gridsDiffer = sides.engineGrid !== null;
-  const variable = (sides.engineGrid?.tempo_changes.length ?? 0) > 1;
+  const engineSide = sides.externals.find((e) => e.sid === 'engine');
+  const variableExt = sides.externals.find((e) => (e.grid?.tempo_changes.length ?? 0) > 1);
 
   return (
     <div className="pdv-root">
       <div className="pdv-toolbar">
         <span className="pdv-legend">
           <span className="pdv-swatch" style={{ background: LIBRARY_COLOR }} /> Library (top)
-          <span className="pdv-swatch" style={{ background: ENGINE_COLOR }} /> Engine (bottom)
+          {sides.externals.map((ext) => (
+            <span key={ext.sid}>
+              <span className="pdv-swatch" style={{ background: ext.color }} /> {ext.label} (bottom)
+            </span>
+          ))}
         </span>
-        {variable && (
+        {variableExt && (
           <span className="pdv-variable" title="manadj rendering honors only the first tempo change for now; this viewer shows all of them">
-            ⚠ variable grid — {sides.engineGrid!.tempo_changes.length} tempo changes
+            ⚠ variable grid — {variableExt.grid!.tempo_changes.length} tempo changes ({variableExt.label})
           </span>
         )}
-        <span className="pdv-hint">wheel = zoom · drag = pan</span>
+        <span className="pdv-hint">wheel = zoom · horizontal scroll / drag = pan</span>
         <span className="pdv-actions">
-          {onImport.hotcues && sides.engineCues.length > 0 && (
+          {onImport.hotcues && (engineSide?.cues.length ?? 0) > 0 && (
             sides.libraryCues.length === 0
               ? <button className="uts-microbtn" onClick={() => onImport.hotcues!('fill-empty')}>← import cues</button>
               : <>
@@ -311,25 +328,45 @@ function Viewer({ waveform, savedMaincue, sides, onImport }: {
                   <button className="uts-microbtn" onClick={() => onImport.hotcues!('replace-all')}>← replace all cues</button>
                 </>
           )}
-          {onImport.beatgrid && gridsDiffer && (
+          {onImport.beatgrid && engineSide?.grid != null && (
             <button className="uts-microbtn" onClick={onImport.beatgrid}>
               {sides.libraryGrid ? '← replace grid' : '← import grid'}
             </button>
           )}
-          {onImport.maincue && sides.engineMaincue !== null && (
+          {onImport.maincue && engineSide?.maincue != null && (
             <button className="uts-microbtn" onClick={onImport.maincue}>
               {sides.libraryMaincue !== null ? '← replace main cue' : '← import main cue'}
             </button>
           )}
         </span>
       </div>
-      <canvas
-        ref={canvasRef}
-        className="pdv-canvas"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-      />
+      {/* layout is inlined and uses EXPLICIT width+height: canvas is a
+          replaced element, so top+bottom anchoring resolves height from the
+          intrinsic (attribute) size — which the deck renderer rewrites at
+          clientSize×dpr every frame, inflating the box. Explicit height
+          breaks that loop. */}
+      <div className="pdv-stack" style={{ position: 'relative', height: 220 }}>
+        {initError && <div className="pdv-empty">{initError}</div>}
+        <canvas
+          ref={glCanvasRef}
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 28,
+            width: '100%',
+            height: 220 - 28 - (28 + extRows * 18),
+            zIndex: 0,
+          }}
+        />
+        <canvas
+          ref={canvasRef}
+          className="pdv-canvas"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 2 }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+        />
+      </div>
     </div>
   );
 }
