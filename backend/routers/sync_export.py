@@ -5,6 +5,8 @@ injectable exporter dependency later slices (cues, grid) reuse. Mirrors
 the Engine import router's dependency posture so tests fake the exporter
 seam (ADR 0002/0004)."""
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -49,6 +51,38 @@ def _track_or_404(db: Session, track_id: int) -> models.Track:
 
 class KeyExportRequest(BaseModel):
     track_id: int
+
+
+class HotcueExportRequest(BaseModel):
+    track_id: int
+    # add-only: new slots only, never touches existing RB rows (the
+    # unconfirmed tier); replace-all: full mirror reconcile (confirmed) —
+    # moves update both mirror rows, RB-only cues are soft-deleted
+    mode: Literal["add-only", "replace-all"]
+
+
+@router.post("/hotcues/rekordbox")
+def export_hotcues_endpoint(
+    request: HotcueExportRequest,
+    db: Session = Depends(get_db),
+    exporter=Depends(get_rekordbox_perf_exporter),
+):
+    """Write the Library's hot cues onto the matching Rekordbox track,
+    mirrored to hot + memory cues (issue 08 semantics)."""
+    from rekordbox.perf_export import RekordboxRunningError, TrackNotInRekordboxError
+
+    track = _track_or_404(db, request.track_id)
+    cues = [(c.slot_number, c.time_seconds) for c in track.hotcues]
+    if not cues:
+        raise HTTPException(
+            status_code=409, detail="Library has no hot cues for this track"
+        )
+    try:
+        return exporter.export_hotcues(track.filename, cues, request.mode)
+    except TrackNotInRekordboxError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RekordboxRunningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/key/rekordbox")
