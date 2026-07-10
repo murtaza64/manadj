@@ -10,7 +10,9 @@ class LibraryTrackCandidate(BaseModel):
     title: str | None = None
     artist: str | None = None
     bpm: float | None = None
-    key: str | None = None
+    # Engine DJ key ID (0-23) — how key crosses the file-metadata seam
+    # (FileMetadata.key) and what Track.key stores.
+    key: int | None = None
     has_metadata: bool = False
 
 

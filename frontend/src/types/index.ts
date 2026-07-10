@@ -280,7 +280,8 @@ export interface LibraryTrackCandidate {
   title: string | null;
   artist: string | null;
   bpm: number | null;
-  key: string | null;
+  /** Engine DJ key ID (0-23), as read from the file's key tag. */
+  key: number | null;
   has_metadata: boolean;
 }
 
