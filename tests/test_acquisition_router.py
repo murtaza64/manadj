@@ -217,8 +217,11 @@ def test_soulseek_search_endpoint_smoke(soulseek_client: TestClient) -> None:
     assert len(body["results"]) == 1
     assert {
         "download_token", "filename", "format", "bitrate_kbps",
-        "size_bytes", "duration_ms", "queue_length",
+        "size_bytes", "duration_ms", "queue_length", "has_free_slot",
+        "duration_delta_ms",
     } <= set(body["results"][0])
+    # delta derived server-side against the item's duration (issue 04)
+    assert body["results"][0]["duration_delta_ms"] == 274_000 - CANNED_ITEM.duration_ms
 
     # explicit query is used as-is
     resp = soulseek_client.post(
