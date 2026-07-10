@@ -63,36 +63,21 @@ describe('followedReferences — facts read through the track cache (ADR 0027 §
   });
 });
 
-describe('deriveFollowQuery — harmonic keys', () => {
-  it('derives same key, adjacents (same mode), and relative for 10m (Cm)', () => {
-    // Engine key id 19 = 10m (Cm). Wheel neighbours 9m/11m, relative 10d.
-    const q = deriveFollowQuery(track({ key: 19 }), {
+describe('deriveFollowQuery — the gate is BPM-only (match-score PRD)', () => {
+  const tag = (id: number): Tag => ({ id, name: `t${id}` }) as unknown as Tag;
+
+  it('key, tags, and energy derive neutral regardless of params — they score, never filter', () => {
+    const reference = track({ key: 19, energy: 3, tags: [tag(4), tag(9)] });
+    const q = deriveFollowQuery(reference, {
       ...DEFAULT_FOLLOW_PARAMS,
       harmonicKeys: true,
+      tags: true,
+      energy: true,
+      energyPreset: 'equal',
     });
-    expect([...q.keyCamelotIds].sort()).toEqual(['10d', '10m', '11m', '9m']);
-  });
-
-  it('wraps the wheel at 12/1', () => {
-    // Engine key id 0 = 1d (C): neighbours 12d and 2d, relative 1m.
-    const q = deriveFollowQuery(track({ key: 0 }), {
-      ...DEFAULT_FOLLOW_PARAMS,
-      harmonicKeys: true,
-    });
-    expect([...q.keyCamelotIds].sort()).toEqual(['12d', '1d', '1m', '2d']);
-  });
-
-  it('derives no key filter when the axis is off or the Track has no Key', () => {
-    expect(
-      deriveFollowQuery(track({ key: 19 }), { ...DEFAULT_FOLLOW_PARAMS, harmonicKeys: false })
-        .keyCamelotIds
-    ).toEqual([]);
-    expect(
-      deriveFollowQuery(track({ key: undefined }), {
-        ...DEFAULT_FOLLOW_PARAMS,
-        harmonicKeys: true,
-      }).keyCamelotIds
-    ).toEqual([]);
+    expect(q.keyCamelotIds).toEqual([]);
+    expect(q.tagIds).toEqual([]);
+    expect(q).toMatchObject({ energyMin: 1, energyMax: 5 });
   });
 });
 
@@ -117,60 +102,7 @@ describe('deriveFollowQuery — BPM', () => {
   });
 });
 
-describe('deriveFollowQuery — energy presets', () => {
-  const at3 = (preset: 'up' | 'down' | 'near' | 'equal') =>
-    deriveFollowQuery(track({ energy: 3 }), {
-      ...DEFAULT_FOLLOW_PARAMS,
-      energy: true,
-      energyPreset: preset,
-    });
 
-  it('equal / near / up / down around energy 3', () => {
-    expect(at3('equal')).toMatchObject({ energyMin: 3, energyMax: 3 });
-    expect(at3('near')).toMatchObject({ energyMin: 2, energyMax: 4 });
-    expect(at3('up')).toMatchObject({ energyMin: 3, energyMax: 5 });
-    expect(at3('down')).toMatchObject({ energyMin: 1, energyMax: 3 });
-  });
-
-  it('near clamps to the 1–5 scale at the edges', () => {
-    const q = deriveFollowQuery(track({ energy: 5 }), {
-      ...DEFAULT_FOLLOW_PARAMS,
-      energy: true,
-      energyPreset: 'near',
-    });
-    expect(q).toMatchObject({ energyMin: 4, energyMax: 5 });
-  });
-
-  it('axis off leaves the full range', () => {
-    expect(deriveFollowQuery(track({ energy: 3 }), DEFAULT_FOLLOW_PARAMS)).toMatchObject({
-      energyMin: 1,
-      energyMax: 5,
-    });
-  });
-});
-
-describe('deriveFollowQuery — tags (any-shared)', () => {
-  const tag = (id: number): Tag => ({ id, name: `t${id}` }) as unknown as Tag;
-
-  it("derives the reference's tag ids with ANY semantics", () => {
-    const q = deriveFollowQuery(track({ tags: [tag(4), tag(9)] }), {
-      ...DEFAULT_FOLLOW_PARAMS,
-      tags: true,
-    });
-    expect(q.tagIds).toEqual([4, 9]);
-    expect(q.tagMatchMode).toBe('ANY');
-  });
-
-  it('derives no tag filter when the axis is off or the reference is untagged', () => {
-    expect(
-      deriveFollowQuery(track({ tags: [tag(4)] }), { ...DEFAULT_FOLLOW_PARAMS, tags: false })
-        .tagIds
-    ).toEqual([]);
-    expect(deriveFollowQuery(track({}), { ...DEFAULT_FOLLOW_PARAMS, tags: true }).tagIds).toEqual(
-      []
-    );
-  });
-});
 
 describe('unionIds — per-track OR of candidate sets', () => {
   const t = (id: number) => track({ id });
@@ -232,7 +164,7 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
   const tag = (id: number): Tag => ({ id, name: `t${id}` }) as unknown as Tag;
   const reference = track({ key: 19, bpm: 128, energy: 3, tags: [tag(1), tag(2)] });
 
-  it('renders the enabled axes from the reference', () => {
+  it('renders the BPM gate only — retired axes never appear (match-score PRD)', () => {
     expect(
       followSummary(reference, {
         harmonicKeys: true,
@@ -243,12 +175,12 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
         energyPreset: 'near',
         knownOnly: false,
       })
-    ).toBe('10m·128±4%·E2–4·tags');
+    ).toBe('128±4%');
   });
 
   it('marks known-only and skips disabled axes', () => {
     expect(
-      followSummary(reference, { ...DEFAULT_FOLLOW_PARAMS, harmonicKeys: false, bpm: false, knownOnly: true })
+      followSummary(reference, { ...DEFAULT_FOLLOW_PARAMS, bpm: false, knownOnly: true })
     ).toBe('◆🔗only');
   });
 

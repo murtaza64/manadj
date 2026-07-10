@@ -153,8 +153,12 @@ export default function Library({
       const q = deriveFollowQuery(reference, followParams);
       return {
         queryKey: ['tracks', 'follow', deck, reference.id, q, selectedView === 'archived'],
+        // Uncapped (match-score PRD): the loose BPM-only gate admits many
+        // more candidates; a parity truncation would silently drop them
+        // before scoring. 10000 is the API's per_page ceiling — plenty at
+        // this library size (backend scoring is the named future answer).
         queryFn: (): Promise<PaginatedTracks> =>
-          api.tracks.list(1, 1000, {
+          api.tracks.list(1, 10000, {
             tagIds: q.tagIds,
             energyMin: q.energyMin,
             energyMax: q.energyMax,

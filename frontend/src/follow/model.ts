@@ -189,6 +189,11 @@ export function getEnergyRange(
 
 /** Derive the heuristic-tier query for one reference Track. */
 export function deriveFollowQuery(reference: Track, params: FollowParams): FollowQuery {
+  // The gate is BPM-only (match-score PRD): key, tags, and energy stopped
+  // filtering — they are Match-score signals now (matchScore.ts), so their
+  // axes always derive neutral. The backend folds the BPM window
+  // dyadically (center, ×2, ÷2); half/double-time candidates arrive and
+  // score their proximity on the fold.
   const query: FollowQuery = {
     keyCamelotIds: [],
     bpmCenter: null,
@@ -199,23 +204,9 @@ export function deriveFollowQuery(reference: Track, params: FollowParams): Follo
     energyMax: 5,
   };
 
-  if (params.harmonicKeys) {
-    query.keyCamelotIds = getHarmonicKeys(reference.key);
-  }
-
   if (params.bpm && reference.bpm) {
     query.bpmCenter = reference.bpm;
     query.bpmThresholdPercent = params.bpmThresholdPercent;
-  }
-
-  if (params.tags && reference.tags.length > 0) {
-    query.tagIds = reference.tags.map((t) => t.id);
-  }
-
-  if (params.energy && reference.energy !== undefined) {
-    const { min, max } = getEnergyRange(reference.energy, params.energyPreset);
-    query.energyMin = min;
-    query.energyMax = max;
   }
 
   return query;
@@ -230,19 +221,11 @@ export function deriveFollowQuery(reference: Track, params: FollowParams): Follo
  * nothing contributes.
  */
 export function followSummary(reference: Track, params: FollowParams): string {
+  // Mirrors deriveFollowQuery: the gate is BPM-only (match-score PRD), so
+  // key/tags/energy no longer appear — they inform the score, not the cut.
   const parts: string[] = [];
-  if (params.harmonicKeys && reference.key !== null && reference.key !== undefined) {
-    parts.push(formatKeyDisplay(reference.key));
-  }
   if (params.bpm && reference.bpm) {
     parts.push(`${Math.round(reference.bpm)}±${params.bpmThresholdPercent}%`);
-  }
-  if (params.energy && reference.energy !== undefined) {
-    const { min, max } = getEnergyRange(reference.energy, params.energyPreset);
-    parts.push(`E${min}–${max}`);
-  }
-  if (params.tags && reference.tags.length > 0) {
-    parts.push('tags');
   }
   if (params.knownOnly) {
     parts.push('◆🔗only');

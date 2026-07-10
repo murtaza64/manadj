@@ -42,6 +42,28 @@ def test_list_tracks_fractional_bpm_center(client, make_track):
     assert [t["title"] for t in resp.json()["items"]] == ["In"]
 
 
+def test_list_tracks_bpm_dyadic_fold(client, make_track):
+    """The BPM gate folds dyadically (match-score PRD): half/double-time
+    candidates pass, each fold's window scales with the fold, and NULL-BPM
+    tracks stay excluded."""
+    make_track(title="Center", bpm=17400)  # 174
+    make_track(title="Half", bpm=8700)  # 87 = 174/2
+    make_track(title="Double", bpm=34800)  # 348 = 174×2
+    make_track(title="NearHalf", bpm=8850)  # 88.5: 1.7% off the 87 fold
+    make_track(title="Out", bpm=14000)  # 140: no fold within 5%
+    make_track(title="Gridless", bpm=None)
+    resp = client.get(
+        "/api/tracks/", params={"bpm_center": 174, "bpm_threshold_percent": 5}
+    )
+    assert resp.status_code == 200
+    assert sorted(t["title"] for t in resp.json()["items"]) == [
+        "Center",
+        "Double",
+        "Half",
+        "NearHalf",
+    ]
+
+
 def test_patch_track_bpm_round_trip(client, db, make_track):
     track = make_track()
     resp = client.patch(f"/api/tracks/{track.id}", json={"bpm": 128.5})
