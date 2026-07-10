@@ -113,6 +113,21 @@ def enqueue_analysis_task(
     return create_task(db, ANALYSIS_TASK_TYPE, payload, ref=_ref(track_id))
 
 
+def list_inflight_analysis_tasks(db: Session) -> list[Task]:
+    """Every pending/running analysis task — the bulk view the frontend
+    polls (analysis-curation 03): one request tells it every Track being
+    analyzed, whoever enqueued it (import, sweep, or the Analyze button)."""
+    return (
+        db.query(Task)
+        .filter(
+            Task.type == ANALYSIS_TASK_TYPE,
+            Task.state.in_(("pending", "running")),
+        )
+        .order_by(Task.id)
+        .all()
+    )
+
+
 def latest_analysis_task(db: Session, track_id: int) -> Task | None:
     """The most recent analysis task for a Track, if any — the observable
     state the Analyze button polls (like the download-task status map)."""

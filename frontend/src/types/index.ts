@@ -477,6 +477,13 @@ export interface AnalysisTaskStatus {
   manual: boolean;
 }
 
+// One in-flight analysis in the bulk pending view (analysis-curation 03).
+export interface AnalysisPendingItem {
+  track_id: number;
+  state: 'pending' | 'running';
+  manual: boolean;
+}
+
 export interface SourceCorrespondenceInfo {
   track_id: number;
   status: 'proposed' | 'confirmed';

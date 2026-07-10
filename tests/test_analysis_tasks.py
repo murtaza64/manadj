@@ -212,3 +212,44 @@ class TestSweep:
         enqueue_analysis_task(db, track.id)
         assert enqueue_missing_analysis(db) == 0
         assert len(pending_analysis_refs(db)) == 1
+
+
+class TestPendingEndpoint:
+    """GET /api/analyze/pending — the bulk in-flight view the frontend polls
+    (analysis-curation 03)."""
+
+    @staticmethod
+    def make_client(db):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from backend.database import get_db
+        from backend.routers import analyze
+
+        app = FastAPI()
+        app.include_router(analyze.router, prefix="/api/analyze")
+        app.dependency_overrides[get_db] = lambda: db
+        return TestClient(app)
+
+    def test_lists_inflight_tasks_with_track_ids(self, db, make_track):
+        a, b = make_track(), make_track()
+        enqueue_analysis_task(db, a.id)
+        enqueue_analysis_task(db, b.id, manual=True)
+
+        resp = self.make_client(db).get("/api/analyze/pending")
+        assert resp.status_code == 200
+        body = sorted(resp.json(), key=lambda item: item["track_id"])
+        assert body == [
+            {"track_id": a.id, "state": "pending", "manual": False},
+            {"track_id": b.id, "state": "pending", "manual": True},
+        ]
+
+    def test_settled_tasks_leave_the_set(self, db, make_track):
+        track = make_track()
+        enqueue_analysis_task(db, track.id)
+        task = db.query(Task).filter(Task.ref == f"track:{track.id}").one()
+        task.state = "done"
+        db.commit()
+
+        resp = self.make_client(db).get("/api/analyze/pending")
+        assert resp.json() == []

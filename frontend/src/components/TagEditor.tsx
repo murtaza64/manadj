@@ -7,6 +7,7 @@ import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
+import { useTrackAnalysisPending } from '../hooks/useAnalysisPending';
 import { BpmControl } from './deckControls/BpmControl';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
@@ -66,6 +67,12 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Background analysis in flight for this track (import/sweep-enqueued —
+  // analysis-curation 03): render the same running state as a manual click,
+  // so a fresh import doesn't invite a redundant trigger. (Enqueue dedups
+  // server-side; this makes that visible instead of discoverable.)
+  const backgroundAnalyzing = useTrackAnalysisPending(track?.id ?? null);
+  const analysisRunning = isAnalyzing || backgroundAnalyzing;
   // Grid diagnostics for the selected track (shows a past/fresh bail marker).
   // The key result no longer lives here — after a manual analysis task the
   // client refetches the Track and reads Track.key directly.
@@ -365,7 +372,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
             </div>
             <button
               onClick={handleAnalyze}
-              disabled={isDisabled || isAnalyzing}
+              disabled={isDisabled || analysisRunning}
               className="player-button"
               style={{
                 color: 'var(--green)',
@@ -376,9 +383,11 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 height: '24px',
                 marginLeft: '4px',
               }}
-              title="Analyze grid and key"
+              title={
+                analysisRunning ? 'Analysis in progress' : 'Analyze grid and key'
+              }
             >
-              {isAnalyzing ? '...' : 'A'}
+              {analysisRunning ? '...' : 'A'}
             </button>
             {analysisResults?.grid?.bailed && (
               <span

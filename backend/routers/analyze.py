@@ -15,7 +15,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import crud, models
-from ..analysis_tasks import enqueue_analysis_task, latest_analysis_task
+from ..analysis_tasks import (
+    enqueue_analysis_task,
+    latest_analysis_task,
+    list_inflight_analysis_tasks,
+)
 from ..database import get_db
 from ..grid_analysis import get_grid_analysis
 
@@ -62,6 +66,24 @@ def get_track_grid_analysis(
         raise HTTPException(status_code=404, detail="No grid analysis found for this track")
 
     return _grid_analysis_response(diagnostics)
+
+
+@router.get("/pending")
+def list_pending_analyses(db: Session = Depends(get_db)):
+    """Every in-flight (pending/running) analysis task, library-wide — the
+    bulk poll target (analysis-curation 03). The frontend diffs successive
+    responses: a track leaving the set means its analysis finished, so its
+    row/grid/diagnostics caches refetch; a track in the set renders the
+    Analyze button as already running (enqueue dedups server-side, but the
+    user shouldn't have to find that out by clicking)."""
+    return [
+        {
+            "track_id": task.payload.get("track_id"),
+            "state": task.state,
+            "manual": bool(task.payload.get("manual")),
+        }
+        for task in list_inflight_analysis_tasks(db)
+    ]
 
 
 @router.post("/{track_id}", status_code=202)

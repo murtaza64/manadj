@@ -29,6 +29,7 @@ import type {
   SupplierInfo,
   SoulseekResult,
   SoulseekSearchResponse,
+  AnalysisPendingItem,
   AnalysisTaskStatus,
 } from '../types';
 
@@ -417,6 +418,17 @@ export const api = {
       const response = await fetch(`${API_BASE}/analyze/${trackId}/status`);
       if (!response.ok) {
         throw new Error(`Failed to fetch analysis status: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    // Bulk in-flight view (analysis-curation 03): every pending/running
+    // analysis task, library-wide — the poll target that keeps track rows
+    // live and marks Analyze buttons already-running.
+    pending: async (): Promise<AnalysisPendingItem[]> => {
+      const response = await fetch(`${API_BASE}/analyze/pending`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch pending analyses: ${response.statusText}`);
       }
       return response.json();
     },
