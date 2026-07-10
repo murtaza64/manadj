@@ -108,10 +108,11 @@ def _build_task_worker() -> "TaskWorker | None":
     if config.soundcloud.oauth_token and config.library.tracks_directory:
         from .acquisition.download import download_handler
         from .acquisition.source import SoundCloudSource
+        from .acquisition.supplier import SoundCloudSupplier
 
-        source = SoundCloudSource(config.soundcloud.oauth_token)
+        supplier = SoundCloudSupplier(SoundCloudSource(config.soundcloud.oauth_token))
         handlers["download"] = download_handler(
-            source, Path(config.library.tracks_directory), config.acquisition.cleanup
+            supplier, Path(config.library.tracks_directory), config.acquisition.cleanup
         )
         # Pace downloads under SoundCloud's request budget (issue 08).
         delays["download"] = config.acquisition.download_delay_secs
