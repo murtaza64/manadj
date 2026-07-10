@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { KEY_TABLE } from '../utils/keyTable.generated';
 import './CircleOfFifthsModal.css';
 
 interface KeyInfo {
@@ -16,35 +17,20 @@ interface CircleOfFifthsModalProps {
   openPosition?: { x: number; y: number };
 }
 
-const MAJOR_KEYS_ORDER: KeyInfo[] = [
-  { openKey: '1d', musicalKey: 'C', position: 0 },
-  { openKey: '2d', musicalKey: 'G', position: 1 },
-  { openKey: '3d', musicalKey: 'D', position: 2 },
-  { openKey: '4d', musicalKey: 'A', position: 3 },
-  { openKey: '5d', musicalKey: 'E', position: 4 },
-  { openKey: '6d', musicalKey: 'B', position: 5 },
-  { openKey: '7d', musicalKey: 'F#', position: 6 },
-  { openKey: '8d', musicalKey: 'Db', position: 7 },
-  { openKey: '9d', musicalKey: 'Ab', position: 8 },
-  { openKey: '10d', musicalKey: 'Eb', position: 9 },
-  { openKey: '11d', musicalKey: 'Bb', position: 10 },
-  { openKey: '12d', musicalKey: 'F', position: 11 },
-];
+// The two rings are projections of the generated key table (the single Key
+// authority). Clock position is the OpenKey number minus one (1d/1m → 12
+// o'clock); the ring is chosen by the OpenKey suffix (d = major, m = minor).
+const buildRing = (suffix: 'd' | 'm'): KeyInfo[] =>
+  KEY_TABLE.filter((row) => row.openkey.endsWith(suffix))
+    .map((row) => ({
+      openKey: row.openkey,
+      musicalKey: row.musical,
+      position: parseInt(row.openkey) - 1,
+    }))
+    .sort((a, b) => a.position - b.position);
 
-const MINOR_KEYS_ORDER: KeyInfo[] = [
-  { openKey: '1m', musicalKey: 'Am', position: 0 },
-  { openKey: '2m', musicalKey: 'Em', position: 1 },
-  { openKey: '3m', musicalKey: 'Bm', position: 2 },
-  { openKey: '4m', musicalKey: 'F#m', position: 3 },
-  { openKey: '5m', musicalKey: 'C#m', position: 4 },
-  { openKey: '6m', musicalKey: 'G#m', position: 5 },
-  { openKey: '7m', musicalKey: 'D#m', position: 6 },
-  { openKey: '8m', musicalKey: 'Bbm', position: 7 },
-  { openKey: '9m', musicalKey: 'Fm', position: 8 },
-  { openKey: '10m', musicalKey: 'Cm', position: 9 },
-  { openKey: '11m', musicalKey: 'Gm', position: 10 },
-  { openKey: '12m', musicalKey: 'Dm', position: 11 },
-];
+const MAJOR_KEYS_ORDER: KeyInfo[] = buildRing('d');
+const MINOR_KEYS_ORDER: KeyInfo[] = buildRing('m');
 
 const createWedgePath = (
   innerRadius: number,
