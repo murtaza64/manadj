@@ -722,6 +722,70 @@ def update_beatgrid_tempo_changes(
     return beatgrid
 
 
+# Metric Ladders (ADR 0029)
+
+# v1 arities are fixed duple; stored per-row for forward-compatibility.
+DEFAULT_LADDER_ARITIES = [2, 2, 2, 2]
+
+
+def get_metric_ladder(db: Session, track_id: int):
+    """Get the persisted Metric-ladder row for a track (None = default)."""
+    return db.query(models.MetricLadder).filter(
+        models.MetricLadder.track_id == track_id
+    ).first()
+
+
+def upsert_metric_ladder(
+    db: Session,
+    track_id: int,
+    reset_marks: list[float],
+    arities: list[int] | None = None,
+) -> models.MetricLadder | None:
+    """Full-state upsert of a track's Metric-ladder deviation.
+
+    Normalizes marks (sorted, deduped). `arities=None` (the only value the
+    API sends — marks are the sole editable surface) preserves the stored
+    arities, defaulting for new rows. Deviation-only invariant: a state
+    equal to the computed default (no marks, duple arities) DELETES the
+    row instead of persisting it — returns None in that case.
+    """
+    if arities is None:
+        existing = get_metric_ladder(db, track_id)
+        arities = (
+            json.loads(existing.arities_json) if existing else DEFAULT_LADDER_ARITIES
+        )
+    marks = sorted(set(float(m) for m in reset_marks))
+
+    if not marks and arities == DEFAULT_LADDER_ARITIES:
+        delete_metric_ladder(db, track_id)
+        return None
+
+    ladder = get_metric_ladder(db, track_id)
+    if ladder:
+        ladder.reset_marks_json = json.dumps(marks)
+        ladder.arities_json = json.dumps(arities)
+        ladder.updated_at = func.now()
+    else:
+        ladder = models.MetricLadder(
+            track_id=track_id,
+            reset_marks_json=json.dumps(marks),
+            arities_json=json.dumps(arities),
+        )
+        db.add(ladder)
+    db.commit()
+    db.refresh(ladder)
+    return ladder
+
+
+def delete_metric_ladder(db: Session, track_id: int) -> bool:
+    """Drop a track's Metric-ladder row (back to the computed default)."""
+    deleted = db.query(models.MetricLadder).filter(
+        models.MetricLadder.track_id == track_id
+    ).delete()
+    db.commit()
+    return bool(deleted)
+
+
 # Hot Cue Functions
 
 def get_hotcues(db: Session, track_id: int):

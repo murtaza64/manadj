@@ -40,6 +40,7 @@ import { jumpDeltaLabel } from './beatReadout';
 import { JumpBackIcon, JumpForwardIcon } from '../components/icons/JumpIcons';
 import { beatPeriodSec } from './templateModel';
 import { downbeatTierMap } from '../meter/ladder';
+import { useMetricLadderData } from '../hooks/useMetricLadderData';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData } from '../types';
 
@@ -281,6 +282,8 @@ export function DawTimeline({
 
   const { data: hotCuesA = [] } = useHotCues(trackAId);
   const { data: hotCuesB = [] } = useHotCues(trackBId);
+  const { data: ladderA = null } = useMetricLadderData(trackAId);
+  const { data: ladderB = null } = useMetricLadderData(trackBId);
   // Bipolar rows (cosmetic pass 2026-07-10, supersedes issue 13's stacked
   // halves): both rows mirror around their own center baseline, at full
   // band brightness like the library/performance waveforms (the issue-05
@@ -305,6 +308,7 @@ export function DawTimeline({
     config: rowConfigA,
     hotCues: hotCuesA,
     beatgrid: beatgridA,
+    metricLadder: ladderA,
     driven: true,
   });
   const rendB = useWaveformRendererV2({
@@ -313,6 +317,7 @@ export function DawTimeline({
     config: rowConfigB,
     hotCues: hotCuesB,
     beatgrid: beatgridB,
+    metricLadder: ladderB,
     driven: true,
   });
   // Envelope preview on the rows (minimap parity): fader lanes scale bar
@@ -906,10 +911,11 @@ export function DawTimeline({
   /** One B beat in B's own seconds (Δ steppers and chip labels). */
   const beatSecB = beatgridB ? beatPeriodSec(beatgridB) : null;
 
-  // Downbeat time → Metric-ladder tier, per side (metric-ladder 01). Keyed
-  // on the exact floats of downbeat_times — the guides read the same array.
-  const tiersA = useMemo(() => downbeatTierMap(beatgridA), [beatgridA]);
-  const tiersB = useMemo(() => downbeatTierMap(beatgridB), [beatgridB]);
+  // Downbeat time → Metric-ladder tier, per side (metric-ladder 01/02, with
+  // persisted Reset marks applied). Keyed on the exact floats of
+  // downbeat_times — the guides read the same array.
+  const tiersA = useMemo(() => downbeatTierMap(beatgridA, ladderA), [beatgridA, ladderA]);
+  const tiersB = useMemo(() => downbeatTierMap(beatgridB, ladderB), [beatgridB, ladderB]);
 
   // Beat/cue guide lines continued through the lane strips (normalized to the
   // transition window). Non-downbeats hidden when tighter than ~12px.

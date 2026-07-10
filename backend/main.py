@@ -7,7 +7,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sets
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sets
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -53,6 +53,7 @@ app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
 app.include_router(waveforms.router, prefix="/api/waveforms", tags=["waveforms"])
 app.include_router(playlists.router, prefix="/api/playlists", tags=["playlists"])
 app.include_router(beatgrids.router, prefix="/api/beatgrids", tags=["beatgrids"])
+app.include_router(metric_ladders.router, prefix="/api/metric-ladders", tags=["metric-ladders"])
 app.include_router(hotcues.router, prefix="/api/hotcues", tags=["hotcues"])
 app.include_router(analyze.router, prefix="/api/analyze", tags=["analyze"])
 app.include_router(transitions.router, prefix="/api/transitions", tags=["transitions"])

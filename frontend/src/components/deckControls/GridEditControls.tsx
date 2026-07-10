@@ -1,10 +1,14 @@
 import {
   GRID_NUDGE_MS,
+  useBeatgridData,
   useNudgeBeatgrid,
   useSetBeatgridDownbeat,
 } from '../../hooks/useBeatgridData';
+import { useMetricLadderData, usePutMetricLadder } from '../../hooks/useMetricLadderData';
+import { nearestDownbeatOrdinal, nearestMark } from '../../meter/ladder';
 import { GridNudgeLeftIcon, GridNudgeRightIcon } from '../icons/GridIcons';
 import { AnchorIcon } from '../icons/AnchorIcon';
+import { ResetMarkDeleteIcon, ResetMarkIcon } from '../icons/MeterIcons';
 import './deckControls.css';
 
 /**
@@ -39,6 +43,9 @@ export function GridEditButtons({
 }) {
   const nudgeGrid = useNudgeBeatgrid();
   const setDownbeat = useSetBeatgridDownbeat();
+  const { data: beatgrid } = useBeatgridData(trackId);
+  const { data: ladder } = useMetricLadderData(trackId);
+  const putLadder = usePutMetricLadder();
 
   const gated = disabled || trackId === null;
   const title = (active: string) => (gated && disabledTitle ? disabledTitle : active);
@@ -46,6 +53,25 @@ export function GridEditButtons({
   const nudge = (offsetMs: number) => {
     if (trackId === null) return;
     nudgeGrid.mutate({ trackId, offsetMs });
+  };
+
+  // Reset-mark gestures (metric-ladder 02): ear-first — play into the
+  // moment, tap on the downbeat you hear the count restart. Each gesture
+  // is one full-state PUT; the inverse gesture is its undo.
+  const downbeats = beatgrid?.data.downbeat_times ?? [];
+  const marks = ladder?.reset_marks ?? [];
+
+  const markReset = () => {
+    if (trackId === null || downbeats.length === 0) return;
+    const snapped = downbeats[nearestDownbeatOrdinal(downbeats, getPlayhead())];
+    putLadder.mutate({ trackId, resetMarks: [...marks, snapped] });
+  };
+
+  const deleteNearestMark = () => {
+    if (trackId === null) return;
+    const nearest = nearestMark(marks, getPlayhead());
+    if (nearest === null) return;
+    putLadder.mutate({ trackId, resetMarks: marks.filter((m) => m !== nearest) });
   };
 
   return (
@@ -76,6 +102,30 @@ export function GridEditButtons({
         title={title(`Nudge grid ${GRID_NUDGE_MS}ms later`)}
       >
         <GridNudgeRightIcon />
+      </button>
+      <button
+        className="player-button"
+        disabled={gated || downbeats.length === 0 || putLadder.isPending}
+        onClick={markReset}
+        title={title(
+          downbeats.length === 0 && !gated
+            ? 'No beatgrid — the Metric ladder is undefined'
+            : 'Mark phrase reset at playhead (count restarts here)'
+        )}
+      >
+        <ResetMarkIcon />
+      </button>
+      <button
+        className="player-button"
+        disabled={gated || marks.length === 0 || putLadder.isPending}
+        onClick={deleteNearestMark}
+        title={title(
+          marks.length === 0 && !gated
+            ? 'No reset marks on this track'
+            : 'Delete the reset mark nearest the playhead'
+        )}
+      >
+        <ResetMarkDeleteIcon />
       </button>
     </>
   );

@@ -238,6 +238,32 @@ class Beatgrid(Base):
     track = relationship("Track", backref=backref("beatgrid", uselist=False))
 
 
+class MetricLadder(Base):
+    """Persisted Metric-ladder deviation (ADR 0029): Reset marks + arities.
+
+    Deviation-only (placeholder posture): no row = the computed default
+    ladder (duple tiers, Grid origin, no marks) — rows come into existence
+    only through authoring gestures. Reset marks are track-time seconds
+    resolving to the nearest downbeat at read; grid operations never
+    rewrite or invalidate them. Manadj-internal: outside Divergence,
+    Sync, and Export."""
+
+    __tablename__ = "metric_ladders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    track_id = Column(Integer, ForeignKey("tracks.id"), nullable=False, unique=True, index=True)
+    # Arity stack bottom-up from the bar (JSON list of 2|3). v1 authoring
+    # keeps this at the duple default; stored for forward-compatibility.
+    arities_json = Column(Text, nullable=False)
+    # JSON list of Reset marks, track-time seconds, sorted ascending.
+    reset_marks_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationship (one-to-one: track_id is unique)
+    track = relationship("Track", backref=backref("metric_ladder", uselist=False))
+
+
 class GridAnalysis(Base):
     """Native grid Analysis diagnostics (ADR 0024): the fit's verdict and
     evidence, one row per Track, overwritten on every run (no versioning —

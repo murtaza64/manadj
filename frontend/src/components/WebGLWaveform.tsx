@@ -3,6 +3,7 @@ import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { loopOverlayRegions } from '../waveform/loopOverlay';
 import { useBeatgridData } from '../hooks/useBeatgridData';
+import { useMetricLadderData } from '../hooks/useMetricLadderData';
 import { useHotCues } from '../hooks/useHotCues';
 import type { PlaybackClock } from '../playback/clock';
 import type { LoopRegion } from '../playback/loop';
@@ -61,6 +62,7 @@ export default function WebGLWaveform({
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: beatgridData } = useBeatgridData(trackId);
+  const { data: metricLadder } = useMetricLadderData(trackId);
   const { data: hotCues = [] } = useHotCues(trackId);
   const regions = useMemo(() => loopOverlayRegions(loop), [loop]);
 
@@ -77,6 +79,7 @@ export default function WebGLWaveform({
     cuePoint,
     hotCues,
     beatgrid: beatgridData?.data ?? null,
+    metricLadder: metricLadder ?? null,
     regions,
   });
 

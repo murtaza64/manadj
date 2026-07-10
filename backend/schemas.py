@@ -204,6 +204,32 @@ class BeatgridResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# Metric Ladder Schemas (ADR 0029)
+
+class MetricLadderResponse(BaseModel):
+    """The EFFECTIVE Metric ladder for a track (metric-ladder 02).
+
+    `persisted=False` means the computed default (duple arities, no Reset
+    marks — no row exists; placeholder posture). Marks are track-time
+    seconds; downbeat resolution happens client-side at read.
+    """
+    track_id: int
+    arities: list[int]
+    reset_marks: list[float]
+    persisted: bool
+    updated_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MetricLadderPut(BaseModel):
+    """Full-state upsert: the authoritative mark list. Marks are the ONLY
+    editable surface (ADR 0029: arity editing deferred; stored arities are
+    preserved, never written through this API). Sorting/dedup is
+    server-side; an empty body on default arities clears the row."""
+    reset_marks: list[float]
+
+
 # Hot Cue Schemas
 
 class HotCueSet(BaseModel):

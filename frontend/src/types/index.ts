@@ -127,6 +127,18 @@ export interface BeatgridResponse {
   updated_at: string | null;
 }
 
+/** The EFFECTIVE Metric ladder for a track (ADR 0029, metric-ladder 02):
+ * persisted=false = the computed default (no row — placeholder posture). */
+export interface MetricLadderResponse {
+  track_id: number;
+  arities: number[];
+  /** Reset marks, track-time seconds, sorted. Resolve to the downbeat
+   * lattice client-side (meter/ladder.ts) — a pure read-time projection. */
+  reset_marks: number[];
+  persisted: boolean;
+  updated_at: string | null;
+}
+
 /** Grid-analysis diagnostics (GET /api/analyze/grid/{id}) — the fields
  * arrival polling reads; the endpoint returns more (evidence, residuals). */
 export interface GridAnalysisDiagnostics {

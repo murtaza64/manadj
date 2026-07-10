@@ -168,6 +168,10 @@ function parseCueColor(color: string | undefined): [number, number, number] | nu
   ];
 }
 
+/** Reset-mark indicator color (metric-ladder 02): gold — outside the hot
+ * cue palette, warmer than the grey gridlines. */
+const RESET_MARK_COLOR: [number, number, number] = [1.0, 0.82, 0.4];
+
 /** GL-side palette: the CSS palette as 0-1 floats. */
 const HOT_CUE_COLORS: Record<number, [number, number, number]> = Object.fromEntries(
   Object.entries(HOT_CUE_CSS_COLORS).map(([slot, hex]) => [slot, parseCueColor(hex)!]),
@@ -495,6 +499,8 @@ export class WaveformRendererV2 {
   private overlayCtx: CanvasRenderingContext2D | null = null;
 
   private cuePoint: number | null = null;
+  /** Reset-mark positions (downbeat-resolved seconds, metric-ladder 02). */
+  private resetMarks: number[] = [];
   private regions: OverlayRegion[] = [];
   private hotCues = new Map<number, { time: number; color?: string }>();
   private beatTimes: Float32Array | null = null;
@@ -571,6 +577,12 @@ export class WaveformRendererV2 {
     this.beatgridCache = null;
     this.beatTiers = matchBeatTiers(beatTimes, downbeatTimes, ladder?.tiers ?? null);
     this.tierBars = ladder?.tierBars ?? [1];
+  }
+
+  /** Reset-mark indicator positions (already downbeat-resolved); empty
+   * clears. Drawn per frame like cues, so they translate with content. */
+  public setResetMarks(times: number[]): void {
+    this.resetMarks = times;
   }
 
   /** Per-column automation modulation (editor rows); null clears. */
@@ -897,7 +909,9 @@ export class WaveformRendererV2 {
     this.drawTriangles(scratch, this.overlayVao!, this.overlayBuffer!);
 
     // Hot cues draw with standard alpha blending (accurate colors).
+    // Reset marks push first so cue marks win where they collide.
     const hotCueVerts: number[] = [];
+    this.pushResetMarks(view, hotCueVerts);
     this.pushHotCues(view, hotCueVerts);
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     if (this.isMinimap) gl.uniform1f(uAlpha, 0.95);
@@ -1066,6 +1080,28 @@ export class WaveformRendererV2 {
         cx - triH / 2, view.h, r, g, b,
         cx + triH / 2, view.h, r, g, b,
         cx, view.h - triH, r, g, b,
+      );
+    }
+  }
+
+  /** Gold pole + LEFT-flying pennant (cue flags fly right) at each Reset
+   * mark — "the count restarts here" on every waveform surface. */
+  private pushResetMarks(view: FrameView, verts: number[]): void {
+    if (this.resetMarks.length === 0) return;
+    const [r, g, b] = RESET_MARK_COLOR;
+    for (const t of this.resetMarks) {
+      const x = this.timeToX(t, view);
+      if (x < 0 || x >= view.w) continue;
+      const poleW = 2 * view.dpr;
+      const flag = 6 * view.dpr;
+      pushRect(verts, x - poleW / 2, 0, poleW, view.h, r, g, b);
+      // Pennant at the mark's identity zone: top edge (bottom on
+      // bottom-anchored editor rows), pointing left.
+      const y0 = this.anchor === 'bottom' ? view.h - flag : 0;
+      verts.push(
+        x - poleW / 2, y0, r, g, b,
+        x - poleW / 2, y0 + flag, r, g, b,
+        x - poleW / 2 - flag, y0 + flag / 2, r, g, b,
       );
     }
   }

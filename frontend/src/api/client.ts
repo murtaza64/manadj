@@ -348,6 +348,41 @@ export const api = {
     },
   },
 
+  metricLadders: {
+    get: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/metric-ladders/${trackId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch metric ladder: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    /** Full-state upsert: the authoritative mark list (server sorts/dedupes;
+     * a default-state body clears the row; stored arities are preserved —
+     * marks are the only editable surface). */
+    put: async (trackId: number, resetMarks: number[]) => {
+      const response = await fetch(`${API_BASE}/metric-ladders/${trackId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset_marks: resetMarks }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to update metric ladder: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
+    delete: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/metric-ladders/${trackId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to clear metric ladder: ${response.statusText}`);
+      }
+      return response.json();
+    },
+  },
+
   hotcues: {
     get: async (trackId: number) => {
       const response = await fetch(`${API_BASE}/hotcues/${trackId}`);

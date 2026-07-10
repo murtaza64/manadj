@@ -6,7 +6,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlaybackClock } from '../playback/clock';
 import type { BeatgridData, HotCue } from '../types';
-import { resolveLadder } from '../meter/ladder';
+import { resolveLadder, resolvedMarkTimes } from '../meter/ladder';
+import type { PersistedLadder } from '../meter/ladder';
 import type { DecodedWaveform } from './blob';
 import { WaveformRendererV2 } from './WaveformRendererV2';
 import type { OverlayRegion, WaveformRendererConfig } from './WaveformRendererV2';
@@ -20,6 +21,9 @@ interface Options {
   cuePoint?: number | null;
   hotCues?: HotCue[];
   beatgrid?: BeatgridData | null;
+  /** Persisted Metric-ladder deviation (metric-ladder 02): Reset marks the
+   * resolver applies; absent/null = the default ladder. */
+  metricLadder?: PersistedLadder | null;
   /** Shaded overlay regions (looping 05), e.g. the active loop. */
   regions?: OverlayRegion[];
   /** Driven mode: no self-running render loop — the caller's own motion
@@ -37,6 +41,7 @@ export function useWaveformRendererV2({
   cuePoint = null,
   hotCues,
   beatgrid,
+  metricLadder,
   regions,
   driven = false,
   slot = 'full',
@@ -84,16 +89,19 @@ export function useWaveformRendererV2({
 
   useEffect(() => {
     if (beatgrid) {
-      // Metric-ladder projection (metric-ladder 01): tier-weighted
-      // gridlines; the renderer never reads the ladder raw.
-      const ladder = resolveLadder(beatgrid);
+      // Metric-ladder projection (metric-ladder 01/02): tier-weighted
+      // gridlines with any persisted Reset marks applied; the renderer
+      // never reads the ladder raw. Mark indicators draw at the RESOLVED
+      // downbeats (what the count actually anchors to), not raw seconds.
+      const ladder = resolveLadder(beatgrid, metricLadder);
       rendererRef.current?.setBeatgrid(
         beatgrid.beat_times,
         beatgrid.downbeat_times,
         ladder && { tiers: ladder.tiers, tierBars: ladder.tierBars },
       );
+      rendererRef.current?.setResetMarks(resolvedMarkTimes(beatgrid, metricLadder));
     }
-  }, [beatgrid, waveformData]);
+  }, [beatgrid, metricLadder, waveformData]);
 
   useEffect(() => {
     if (regions) rendererRef.current?.setRegions(regions);

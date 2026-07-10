@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BeatgridData, TempoChange } from '../types';
-import { DEFAULT_ARITIES, groupBars, resolveLadder } from './ladder';
+import { DEFAULT_ARITIES, groupBars, resolveLadder, resolvedMarkTimes } from './ladder';
 
 /** Constant-tempo grid fixture: expands segments into beat/downbeat arrays
  * the way the backend does (accumulate per segment, downbeat when the
@@ -116,5 +116,85 @@ describe('resolveLadder', () => {
     expect(proj.tiers[0]).toBe(4);
     expect(proj.tiers[2]).toBe(1);
     expect(proj.tiers[16]).toBe(4);
+  });
+});
+
+describe('resolveLadder with Reset marks', () => {
+  const barSec = (60 / 128) * 4; // 1.875s per 4/4 bar at 128
+  const grid40 = () => makeGrid([{ startTime: 0, bpm: 128, beats: 40 * 4 }]);
+  const marks = (...bars: number[]) => ({ reset_marks: bars.map((b) => b * barSec) });
+
+  it('fakeout: 16+4 before the real drop — trailing parenthetical', () => {
+    // Reset at the real drop (bar 20). Bars 0-15 complete a 16-group;
+    // 16-19 are the fakeout extension.
+    const proj = resolveLadder(grid40(), marks(20))!;
+    expect(proj.tiers[20]).toBe(4); // count restarts at the mark
+    expect(proj.barIndexes[20]).toBe(0);
+    expect(proj.barIndexes[21]).toBe(1);
+    expect(proj.parentheticals.slice(0, 16)).toEqual(new Array(16).fill(false));
+    expect(proj.parentheticals.slice(16, 20)).toEqual([true, true, true, true]);
+  });
+
+  it('final open segment is never parenthetical', () => {
+    // 20 bars after the mark at 20 in a 40-bar grid: incomplete 16-group
+    // at the tail, but no next reset to be short of.
+    const proj = resolveLadder(grid40(), marks(20))!;
+    expect(proj.parentheticals.slice(20)).toEqual(new Array(20).fill(false));
+  });
+
+  it('12-bar intro: forward counting flags the trailing 4; an extra mark makes 4+8 clean', () => {
+    const one = resolveLadder(grid40(), marks(12))!;
+    expect(one.parentheticals.slice(0, 8)).toEqual(new Array(8).fill(false));
+    expect(one.parentheticals.slice(8, 12)).toEqual([true, true, true, true]);
+
+    const two = resolveLadder(grid40(), marks(4, 12))!;
+    expect(two.parentheticals.slice(0, 12)).toEqual(new Array(12).fill(false));
+    expect(two.tiers[4]).toBe(4); // segment restart
+    expect(two.barIndexes[4]).toBe(0);
+  });
+
+  it('mid-breakdown inserted bar: 9-bar + 8-bar segments', () => {
+    // Marks at the realignment point (bar 9) and the drop (bar 17).
+    const proj = resolveLadder(grid40(), marks(9, 17))!;
+    expect(proj.parentheticals[8]).toBe(true); // the inserted bar
+    expect(proj.parentheticals.slice(0, 8)).toEqual(new Array(8).fill(false));
+    expect(proj.parentheticals.slice(9, 17)).toEqual(new Array(8).fill(false));
+    expect(proj.tiers[9]).toBe(4);
+    expect(proj.tiers[17]).toBe(4);
+  });
+
+  it('leading pickup: a 1-bar segment is all parenthetical', () => {
+    const proj = resolveLadder(grid40(), marks(3, 4))!;
+    expect(proj.parentheticals[3]).toBe(true);
+    expect(proj.barIndexes[4]).toBe(0);
+  });
+
+  it('marks resolve to the NEAREST downbeat and survive small grid shifts', () => {
+    // 30ms off the bar-20 downbeat (a grid nudge later moved the lattice).
+    const proj = resolveLadder(grid40(), { reset_marks: [20 * barSec + 0.03] })!;
+    expect(proj.tiers[20]).toBe(4);
+    expect(proj.barIndexes[20]).toBe(0);
+  });
+
+  it('resolvedMarkTimes lands marks on the lattice, deduped; dormant when gridless', () => {
+    const grid = grid40();
+    const offGrid = [12 * barSec + 0.03, 12 * barSec - 0.02, 20 * barSec];
+    expect(resolvedMarkTimes(grid, { reset_marks: offGrid })).toEqual([
+      grid.downbeat_times[12],
+      grid.downbeat_times[20],
+    ]);
+    expect(resolvedMarkTimes(null, { reset_marks: offGrid })).toEqual([]);
+    expect(resolvedMarkTimes(grid, null)).toEqual([]);
+  });
+
+  it('unsorted and duplicate marks normalize; a mark at the origin is a no-op', () => {
+    const a = resolveLadder(grid40(), marks(12, 4, 12))!;
+    const b = resolveLadder(grid40(), marks(4, 12))!;
+    expect(a.tiers).toEqual(b.tiers);
+    expect(a.parentheticals).toEqual(b.parentheticals);
+
+    const withZero = resolveLadder(grid40(), marks(0))!;
+    const without = resolveLadder(grid40())!;
+    expect(withZero.tiers).toEqual(without.tiers);
   });
 });
