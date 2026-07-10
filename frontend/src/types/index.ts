@@ -280,7 +280,8 @@ export interface LibraryTrackCandidate {
   title: string | null;
   artist: string | null;
   bpm: number | null;
-  key: string | null;
+  // Engine DJ key ID (0-23)
+  key: number | null;
   has_metadata: boolean;
 }
 
@@ -414,6 +415,8 @@ export interface SourceItem {
   correspondence: SourceCorrespondenceInfo | null;
   download: DownloadStatus | null;
   provenance: ProvenanceInfo | null;
+  // Cleanup-derived default query for Search Supplier pickers
+  search_query: string | null;
 }
 
 export interface ProvenanceInfo {
@@ -428,6 +431,29 @@ export interface DownloadStatus {
   error: string | null;
   // ISO-8601 UTC deferral floor when a rate-limited task is cooling down.
   cooling_down_until?: string | null;
+  // which Supplier is delivering the audio
+  via: 'soundcloud' | 'soulseek';
+}
+
+// Suppliers (see CONTEXT.md: Supplier / Direct Supplier / Search Supplier)
+export interface SupplierInfo {
+  id: string;
+  kind: 'direct' | 'search';
+}
+
+export interface SoulseekResult {
+  download_token: string;
+  filename: string;
+  format: string;
+  bitrate_kbps: number | null;
+  size_bytes: number | null;
+  duration_ms: number | null;
+  queue_length: number | null;
+}
+
+export interface SoulseekSearchResponse {
+  query: string;
+  results: SoulseekResult[];
 }
 
 export interface SourceCorrespondenceInfo {

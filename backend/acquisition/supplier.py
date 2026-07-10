@@ -77,7 +77,9 @@ class TransferState(Enum):
 
 @dataclass(frozen=True)
 class TransferStatus:
-    """A poll of a picked transfer: its state and (once done) the file path."""
+    """A poll of a picked transfer: its state and (once completed) the path
+    the Supplier staged the file at. The caller moves it where it belongs —
+    the Supplier has no say in the tracks directory or the final basename."""
 
     state: TransferState
     local_path: Path | None = None
@@ -90,13 +92,17 @@ class SearchSupplier(Supplier, Protocol):
     Extends the base with the two things a Direct Supplier lacks: searching
     for candidates, and asking a peer for a picked candidate then polling the
     resulting transfer to completion. Only Search Suppliers reach the picker.
+
+    A Search Supplier stages completed files wherever it likes (slskd's own
+    downloads dir); `transfer_status` reports that path and the download task
+    moves it into the library.
     """
 
     def search(self, query: str) -> list[SupplierSearchResult]:
         """Return candidate files matching the query."""
         ...
 
-    def request(self, result: SupplierSearchResult, dest_dir: Path, basename: str) -> str:
+    def request(self, result: SupplierSearchResult) -> str:
         """Ask a peer for a picked candidate; return a transfer id to poll."""
         ...
 

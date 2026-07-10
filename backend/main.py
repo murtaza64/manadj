@@ -121,6 +121,20 @@ def _build_task_worker() -> "TaskWorker | None":
             "download handler not registered: soundcloud oauth_token or tracks_directory missing"
         )
 
+    if config.soulseek.configured and config.library.tracks_directory:
+        from .acquisition.download import SOULSEEK_TASK_TYPE, soulseek_download_handler
+        from .acquisition.slskd import SlskdSupplier
+
+        assert config.soulseek.slskd_url is not None and config.soulseek.api_key is not None
+        slskd = SlskdSupplier(config.soulseek.slskd_url, config.soulseek.api_key)
+        handlers[SOULSEEK_TASK_TYPE] = soulseek_download_handler(
+            slskd, Path(config.library.tracks_directory), config.acquisition.cleanup
+        )
+    else:
+        logging.getLogger("backend.main").info(
+            "soulseek download handler not registered: [soulseek]/SLSKD_API_KEY unset"
+        )
+
     if not handlers:
         return None
     return TaskWorker(SessionLocal, handlers, delays=delays)

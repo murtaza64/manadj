@@ -30,6 +30,21 @@ class SoundCloudConfig:
 
 
 @dataclass
+class SoulseekConfig:
+    """Soulseek Supplier configuration (a local slskd daemon's REST API).
+
+    Both values set => the Supplier exists; otherwise it is absent entirely
+    (no UI affordance, no task handler). See README "Soulseek Supplier (slskd)".
+    """
+    slskd_url: str | None = None
+    api_key: str | None = None
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.slskd_url and self.api_key)
+
+
+@dataclass
 class AcquisitionConfig:
     """Acquisition configuration."""
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
@@ -45,6 +60,7 @@ class Config:
     database: DatabaseConfig
     library: LibraryConfig
     soundcloud: SoundCloudConfig
+    soulseek: SoulseekConfig
     acquisition: AcquisitionConfig
 
 
@@ -91,6 +107,15 @@ def _download_delay_secs(data: dict[str, Any]) -> float:
     return float(section.get("download_delay_secs", default))
 
 
+def _soulseek_config(data: dict[str, Any]) -> SoulseekConfig:
+    """[soulseek] slskd_url from config.toml; the API key from env/.env only."""
+    section: dict[str, Any] = data.get("soulseek", {})
+    return SoulseekConfig(
+        slskd_url=section.get("slskd_url") or None,
+        api_key=os.environ.get("SLSKD_API_KEY") or None,
+    )
+
+
 def _soundcloud_token(data: dict[str, Any]) -> str | None:
     """Token from the environment (or .env); config.toml fallback for convenience."""
     section: dict[str, Any] = data.get("soundcloud", {})
@@ -120,6 +145,7 @@ def load_config() -> Config:
                 tracks_directory=None
             ),
             soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token({})),
+            soulseek=_soulseek_config({}),
             acquisition=AcquisitionConfig()
         )
 
@@ -149,6 +175,7 @@ def load_config() -> Config:
             tracks_directory=tracks_dir
         ),
         soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token(data)),
+        soulseek=_soulseek_config(data),
         acquisition=AcquisitionConfig(
             classification=_classification_config(data),
             cleanup=_cleanup_config(data),
