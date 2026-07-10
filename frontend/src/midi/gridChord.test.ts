@@ -297,6 +297,8 @@ describe('shiftBeatgrid (the optimistic local apply)', () => {
   const response: BeatgridResponse = {
     id: 1,
     track_id: 7,
+    origin: 'edited',
+    anchor_time: null,
     data: {
       tempo_changes: [
         {

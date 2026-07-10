@@ -320,6 +320,15 @@ export function UnifiedTracksSync() {
     onSuccess: () => done('Fields written to file'),
     onError: failed,
   });
+  const exportKeyToRb = useMutation({
+    mutationFn: (row: StatusRow) =>
+      api.syncExport.exportKeyToRekordbox({ track_id: row.track_id! }),
+    onSuccess: (r) => {
+      done(`Key ${r.key} exported to Rekordbox`);
+      refresh();
+    },
+    onError: failed,
+  });
   const exportTags = useMutation({
     mutationFn: (target: 'engine' | 'rekordbox') =>
       target === 'engine'
@@ -337,7 +346,8 @@ export function UnifiedTracksSync() {
   const busy =
     generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
     importField.isPending || importPerf.isPending || bulkImportPerf.isPending ||
-    exportRowToDisk.isPending || exportTags.isPending || rebuildTagTree.isPending;
+    exportRowToDisk.isPending || exportKeyToRb.isPending ||
+    exportTags.isPending || rebuildTagTree.isPending;
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const attention = useMemo(() => rows.filter((r) => r.status !== 'in-sync'), [rows]);
@@ -522,6 +532,14 @@ export function UnifiedTracksSync() {
       }}
       onBulkImportPerf={() => bulkImportPerf.mutate({ track_ids: [row.track_id!] })}
       onExportToDisk={() => exportRowToDisk.mutate(row)}
+      onExportKeyToRb={() =>
+        // writes an external DB: always behind the pending-confirm bar
+        setPending({
+          scope: `Overwrite the key in Rekordbox for "${row.title || row.path}" with the Library's`,
+          sideEffects: 'writes to the Rekordbox database (Rekordbox must be closed)',
+          run: () => exportKeyToRb.mutate(row),
+        })
+      }
       surfacesAvailable={data.surfaces_available}
     />
   );
@@ -786,7 +804,7 @@ function PresenceBadges({ row, available }: { row: StatusRow; available: Surface
   );
 }
 
-function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onBulkImportPerf, onExportToDisk, surfacesAvailable }: {
+function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand, onImportField, onImportPerf, onBulkImportPerf, onExportToDisk, onExportKeyToRb, surfacesAvailable }: {
   row: StatusRow;
   surfacesAvailable: SurfaceId[];
   selectable: boolean;
@@ -798,6 +816,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
   onImportPerf: (field: PerfField, mode: PerfImportMode) => void;
   onBulkImportPerf: () => void;
   onExportToDisk: () => void;
+  onExportKeyToRb: () => void;
 }) {
   const expandable = row.diverged.length > 0;
   const [showViewer, setShowViewer] = useState(false);
@@ -841,7 +860,7 @@ function RowCard({ row, selectable, selected, onSelect, expanded, onToggleExpand
       </div>
       {expanded && expandable && (
         <div className="uts-expand">
-          <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} />
+          <DivergenceMatrix row={row} onImportField={onImportField} onImportPerf={onImportPerf} onExportKeyToRb={onExportKeyToRb} />
           <div className="uts-expand-actions">
             {hasPerfDivergence && (
               <button className="uts-btn" onClick={() => setShowViewer(!showViewer)}>
@@ -942,10 +961,11 @@ function RowPerfDiff({ row, onImportPerf }: {
   );
 }
 
-function DivergenceMatrix({ row, onImportField, onImportPerf }: {
+function DivergenceMatrix({ row, onImportField, onImportPerf, onExportKeyToRb }: {
   row: StatusRow;
   onImportField: (field: string, value: unknown) => void;
   onImportPerf: (field: PerfField, mode: PerfImportMode) => void;
+  onExportKeyToRb: () => void;
 }) {
   return (
     <table className="uts-matrix">
@@ -1045,11 +1065,19 @@ function DivergenceMatrix({ row, onImportField, onImportPerf }: {
                   </td>
                 );
               }
+              const canExportKey =
+                d.field === 'key' &&
+                s.id === 'rekordbox' &&
+                row.track_id !== null &&
+                !d.no_overwrite;
               return (
                 <td key={s.id} className="uts-conflict">
                   {fmtValue(d.field, v) || <span className="uts-novalue">no value</span>}
                   {canImport && (
                     <button className="uts-microbtn" onClick={() => onImportField(d.field, v)}>← import</button>
+                  )}
+                  {canExportKey && (
+                    <button className="uts-microbtn" onClick={onExportKeyToRb}>export →</button>
                   )}
                 </td>
               );

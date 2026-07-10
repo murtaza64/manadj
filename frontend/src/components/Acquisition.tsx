@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Classification, SourceItem, SourceItemState, Track } from '../types';
+import type { Classification, SoulseekResult, SourceItem, SourceItemState, Track } from '../types';
 import './Acquisition.css';
 
 // Review-split layout (chosen via UI prototype, see
@@ -325,6 +325,20 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
   const [audioFrom, setAudioFrom] = useState('');
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] });
 
+  // Supplier availability: an unconfigured Supplier is absent from this
+  // list and its UI never renders (soulseek-supplier issue 03).
+  const { data: suppliers } = useQuery({
+    queryKey: ['acquisitionSuppliers'],
+    queryFn: api.acquisition.getSuppliers,
+    staleTime: 5 * 60 * 1000,
+  });
+  const soulseekAvailable = (suppliers ?? []).some(s => s.id === 'soulseek');
+  // the picker shows for unfulfilled items not currently downloading:
+  // fresh ones, and ones whose last download (either Supplier) failed
+  const soulseekPickable =
+    item.state === 'new' ||
+    (item.state === 'queued' && (!item.download || item.download.task_state === 'failed'));
+
   const acceptMutation = useMutation({
     mutationFn: () => api.acquisition.acceptMatch(item.id),
     onSuccess: invalidate,
@@ -426,6 +440,13 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
         </div>
       )}
 
+      {item.download?.via === 'soulseek' &&
+        (item.download.task_state === 'pending' || item.download.task_state === 'running') && (
+          <div className="acquisition-soulseek-downloading">
+            ⇣ downloading via Soulseek…
+          </div>
+        )}
+
       {item.download?.cooling_down_until && (
         <div className="acquisition-cooldown">
           rate-limited — cooling down until{' '}
@@ -455,7 +476,9 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
             onClick={() => queueMutation.mutate()}
             disabled={queueMutation.isPending}
           >
-            ⇣ {item.download?.task_state === 'failed' ? 'retry download' : 'queue download'}
+            {/* always queues a SoundCloud download; a failed soulseek pick is
+                retried through the picker instead (no stored pick, PRD) */}
+            ⇣ {item.download?.task_state === 'failed' ? 'retry via soundcloud' : 'queue download'}
           </button>
           <button
             className="acquisition-action-button"
@@ -514,6 +537,109 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
           {linkSearch.length >= 2 && searchResults && searchResults.items.length === 0 && (
             <div className="acquisition-item-sub">no library tracks match</div>
           )}
+        </div>
+      )}
+
+      {soulseekAvailable && soulseekPickable && <SoulseekPicker item={item} />}
+    </div>
+  );
+}
+
+// duration deltas beyond this are rendered loudly (wrong recording guard)
+const DURATION_DELTA_LOUD_SECS = 3;
+
+function formatSize(bytes: number | null): string {
+  if (bytes == null) return '?';
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+function remoteBasename(filename: string): string {
+  const parts = filename.replace(/\\/g, '/').split('/');
+  return parts[parts.length - 1];
+}
+
+function SoulseekPicker({ item }: { item: SourceItem }) {
+  const queryClient = useQueryClient();
+  const [query, setQuery] = useState(item.search_query ?? item.title);
+
+  const searchMutation = useMutation({
+    mutationFn: () => api.acquisition.soulseekSearch(item.id, query.trim()),
+  });
+  const pickMutation = useMutation({
+    mutationFn: (result: SoulseekResult) => api.acquisition.soulseekPick(item.id, result),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] }),
+  });
+
+  const results = searchMutation.data?.results;
+  return (
+    <div className="acquisition-soulseek">
+      <div className="acquisition-sidebar-heading">soulseek</div>
+      <div className="acquisition-soulseek-search">
+        <input
+          className="acquisition-link-input"
+          placeholder="search soulseek…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && query.trim()) searchMutation.mutate();
+          }}
+        />
+        <button
+          className="acquisition-action-button"
+          disabled={!query.trim() || searchMutation.isPending}
+          onClick={() => searchMutation.mutate()}
+        >
+          {searchMutation.isPending ? 'searching…' : 'search'}
+        </button>
+      </div>
+      {searchMutation.isError && (
+        <div className="acquisition-error">{(searchMutation.error as Error).message}</div>
+      )}
+      {pickMutation.isError && (
+        <div className="acquisition-error">{(pickMutation.error as Error).message}</div>
+      )}
+      {results && results.length === 0 && (
+        <div className="acquisition-item-sub">no peers offered a match</div>
+      )}
+      {results && results.length > 0 && (
+        <div className="acquisition-soulseek-results">
+          {/* results arrive server-sorted: exact-duration-lossless first */}
+          <div className="acquisition-soulseek-row acquisition-soulseek-head">
+            <span>filename</span>
+            <span>fmt</span>
+            <span>kbps</span>
+            <span>size</span>
+            <span>length</span>
+            <span>queue</span>
+          </div>
+          {results.map(r => {
+            const deltaSecs =
+              r.duration_delta_ms != null ? Math.round(r.duration_delta_ms / 1000) : null;
+            const loud = deltaSecs === null || Math.abs(deltaSecs) > DURATION_DELTA_LOUD_SECS;
+            return (
+              <button
+                key={r.download_token}
+                className="acquisition-link-result acquisition-soulseek-row"
+                title={`${r.filename}\nclick to download via Soulseek`}
+                disabled={pickMutation.isPending}
+                onClick={() => pickMutation.mutate(r)}
+              >
+                <span className="acquisition-soulseek-filename">{remoteBasename(r.filename)}</span>
+                <span>{r.format || '?'}</span>
+                <span>{r.bitrate_kbps ?? '·'}</span>
+                <span>{formatSize(r.size_bytes)}</span>
+                <span className={loud ? 'acquisition-duration-loud' : undefined}>
+                  {r.duration_ms != null ? formatDuration(r.duration_ms) : '?:??'}
+                  {deltaSecs !== null && deltaSecs !== 0 && (
+                    <> ({deltaSecs > 0 ? '+' : ''}{deltaSecs}s)</>
+                  )}
+                </span>
+                <span className={r.has_free_slot ? 'acquisition-queue-free' : undefined}>
+                  {r.has_free_slot ? 'free' : r.queue_length != null ? `${r.queue_length}` : '?'}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

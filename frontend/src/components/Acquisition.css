@@ -345,3 +345,63 @@
   flex: 1;
   width: auto;
 }
+
+/* Soulseek picker (soulseek-supplier issue 03) */
+
+.acquisition-soulseek {
+  margin-top: var(--space-md);
+}
+
+.acquisition-soulseek-downloading {
+  color: var(--sapphire);
+  padding: var(--space-sm);
+  font-size: var(--font-xs);
+}
+
+.acquisition-soulseek-search {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+.acquisition-soulseek-search .acquisition-link-input {
+  flex: 1;
+  width: auto;
+}
+
+.acquisition-soulseek-results {
+  margin-top: var(--space-xs);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.acquisition-soulseek-row {
+  display: grid;
+  grid-template-columns: 1fr 3em 3.5em 5em 7em 3.5em;
+  gap: var(--space-sm);
+  align-items: baseline;
+}
+
+.acquisition-soulseek-head {
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--overlay1);
+  font-size: var(--font-xs);
+  border-bottom: 1px solid var(--surface1);
+}
+
+.acquisition-soulseek-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* duration mismatches beyond a few seconds render loudly: the main guard
+   against picking the wrong recording */
+.acquisition-duration-loud {
+  color: var(--red);
+  font-weight: bold;
+}
+
+.acquisition-queue-free {
+  color: var(--green);
+}

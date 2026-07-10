@@ -4,14 +4,18 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useDeckBeatgridSync } from './useDeckBeatgridSync';
+import {
+  ARRIVAL_POLL_MS,
+  gridArrivalPollMs,
+  useDeckBeatgridSync,
+} from './useDeckBeatgridSync';
 import { DeckEngine } from '../playback/DeckEngine';
 import { _clearBufferCacheForTests, putCachedBuffer } from '../playback/bufferCache';
 import type { DeckAudioPort } from '../playback/mixer';
 import type { BeatgridResponse } from '../types';
 
 vi.mock('../api/client', () => ({
-  api: { beatgrids: { get: vi.fn() } },
+  api: { beatgrids: { get: vi.fn() }, analyze: { getGrid: vi.fn() } },
 }));
 import { api } from '../api/client';
 
@@ -38,17 +42,23 @@ const grid120 = Array.from({ length: 360 }, (_, i) => i * 0.5);
 /** The same track re-tempo'd to 240 BPM: beats every 0.25s. */
 const grid240 = Array.from({ length: 720 }, (_, i) => i * 0.25);
 
-function beatgridResponse(trackId: number, beatTimes: number[]): BeatgridResponse {
+function beatgridResponse(
+  trackId: number,
+  beatTimes: number[],
+  origin: BeatgridResponse['origin'] = 'edited'
+): BeatgridResponse {
   return {
-    id: trackId,
+    id: origin === 'generated' ? null : trackId,
     track_id: trackId,
     data: {
       tempo_changes: [],
       beat_times: beatTimes,
       downbeat_times: [],
     },
-    origin: 'edited',
+    origin,
     anchor_time: null,
+    created_at: null,
+    updated_at: null,
   } as unknown as BeatgridResponse;
 }
 
@@ -59,7 +69,7 @@ async function loadedEngine(trackId: number, grid: number[]) {
     trackId,
     audioUrl: 'http://127.0.0.1:1/none',
     bpm: 120,
-    cueDefaults: Promise.resolve({ savedCuePoint: null, beatTimes: grid }),
+    beatTimes: Promise.resolve(grid),
   });
   return engine;
 }
@@ -93,6 +103,7 @@ describe('useDeckBeatgridSync (cue-quantize-bpm 01)', () => {
   afterEach(() => {
     _clearBufferCacheForTests();
     vi.mocked(api.beatgrids.get).mockReset();
+    vi.mocked(api.analyze.getGrid).mockReset();
   });
 
   it('a beatgrid refetch after invalidation re-arms Quantize with the new grid', async () => {
@@ -124,7 +135,7 @@ describe('useDeckBeatgridSync (cue-quantize-bpm 01)', () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    // Engine loaded gridless (cueDefaults fetch failed); cache has the grid.
+    // Engine loaded gridless (grid fetch failed); cache has the grid.
     const engine = await loadedEngine(6, []);
     queryClient.setQueryData(['beatgrid', 6], beatgridResponse(6, grid240));
 
@@ -135,5 +146,61 @@ describe('useDeckBeatgridSync (cue-quantize-bpm 01)', () => {
     expect(placeCue(engine)).toBeCloseTo(10.25, 10);
     unmount();
     queryClient.clear();
+  });
+
+  it('an analyzed grid replacing a placeholder re-parks the untouched cue (ADR 0029 §2/§3)', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    // Fresh-import shape: loaded gridless, cache holds the BPM placeholder
+    // (first beat 0 — the parked default doesn't visibly move).
+    const engine = await loadedEngine(7, []);
+    queryClient.setQueryData(['beatgrid', 7], beatgridResponse(7, grid120, 'generated'));
+    vi.mocked(api.analyze.getGrid).mockResolvedValue({ track_id: 7, bailed: false });
+
+    const { unmount } = renderSync(engine, 7, queryClient);
+    await act(async () => {});
+    expect(engine.getSnapshot().cuePoint).toBe(0);
+
+    // Background analysis lands: the arrival poll's refetch (here forced by
+    // an invalidation — the poll and the invalidation share the refetch
+    // path) serves the analyzed grid, whose first beat is off zero.
+    const analyzed = grid120.map((t) => t + 0.75);
+    vi.mocked(api.beatgrids.get).mockResolvedValue(
+      beatgridResponse(7, analyzed, 'analyzed')
+    );
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['beatgrid', 7] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(engine.getSnapshot().hasBeatgrid).toBe(true);
+    expect(engine.getSnapshot().cuePoint).toBeCloseTo(0.75, 10);
+    expect(engine.getPlayhead()).toBeCloseTo(0.75, 10);
+    unmount();
+    queryClient.clear();
+  });
+});
+
+describe('gridArrivalPollMs (ADR 0029 §3)', () => {
+  it('polls while the grid is missing', () => {
+    expect(gridArrivalPollMs(undefined, false)).toBe(ARRIVAL_POLL_MS);
+  });
+
+  it('polls while only a placeholder exists', () => {
+    expect(gridArrivalPollMs(beatgridResponse(1, grid120, 'generated'), false)).toBe(
+      ARRIVAL_POLL_MS
+    );
+  });
+
+  it('stops once a saved-origin grid arrives', () => {
+    for (const origin of ['analyzed', 'edited', 'imported'] as const) {
+      expect(gridArrivalPollMs(beatgridResponse(1, grid120, origin), false)).toBe(false);
+    }
+  });
+
+  it('stops when analysis bailed (Needs-attention owns those)', () => {
+    expect(gridArrivalPollMs(undefined, true)).toBe(false);
+    expect(gridArrivalPollMs(beatgridResponse(1, grid120, 'generated'), true)).toBe(false);
   });
 });
