@@ -142,3 +142,46 @@ def export_key_endpoint(
     except RekordboxRunningError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return {"exported": True, "key": scale}
+
+
+class AutoExportRequest(BaseModel):
+    track_ids: list[int] | None = None  # None = whole Library
+
+
+@router.post("/rekordbox/auto")
+def auto_export_endpoint(
+    request: AutoExportRequest,
+    db: Session = Depends(get_db),
+    exporter=Depends(get_rekordbox_perf_exporter),
+):
+    """The auto tier (issue 08 semantics): values NEW in the Library flow
+    out to Rekordbox without confirmation — hot cues add-only (existing
+    RB rows never touched), key only where Rekordbox has none. Grids are
+    never auto-exported: an analyzed RB track always has one (authoring
+    is the confirmed replace verb), an unanalyzed one can't be authored.
+    """
+    from rekordbox.perf_export import RekordboxRunningError, TrackNotInRekordboxError
+
+    query = db.query(models.Track)
+    if request.track_ids is not None:
+        query = query.filter(models.Track.id.in_(request.track_ids))
+    summary = {"scanned": 0, "matched": 0, "cues_added": 0, "keys_set": 0,
+               "unmatched": 0}
+    for track in query.all():
+        cues = [(c.slot_number, c.time_seconds, c.label, c.color) for c in track.hotcues]
+        if not cues and track.key is None:
+            continue
+        summary["scanned"] += 1
+        try:
+            if cues:
+                result = exporter.export_hotcues(track.filename, cues, "add-only")
+                summary["cues_added"] += result["added"]
+            if track.key is not None:
+                if exporter.export_key(track.filename, track.key, only_if_absent=True):
+                    summary["keys_set"] += 1
+            summary["matched"] += 1
+        except TrackNotInRekordboxError:
+            summary["unmatched"] += 1
+        except RekordboxRunningError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+    return summary

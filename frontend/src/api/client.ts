@@ -718,6 +718,24 @@ export const api = {
      * mirrored to hot + memory cues. "add-only" never touches existing RB
      * rows; "replace-all" is the confirmed full-mirror reconcile (moves +
      * soft-deletes RB-only cues). Rekordbox must be closed. */
+    /** The auto tier (issue 08): values NEW in the Library flow out to
+     * Rekordbox without confirmation — hot cues add-only, key only where
+     * Rekordbox has none. Never touches existing RB values. */
+    autoExportToRekordbox: async (request: {
+      track_ids: number[] | null;
+    }): Promise<{ scanned: number; matched: number; cues_added: number; keys_set: number; unmatched: number }> => {
+      const res = await fetch(`${API_BASE}/sync/export/rekordbox/auto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detail ?? 'Failed to auto-export to Rekordbox');
+      }
+      return res.json();
+    },
+
     /** Author the Rekordbox grid (ANLZ PQTZ + BPM scalar) from the
      * Library's saved Beatgrid. Always overwrites — confirmed tier.
      * Rekordbox must be closed. */

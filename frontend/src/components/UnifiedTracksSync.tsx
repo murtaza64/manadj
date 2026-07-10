@@ -329,6 +329,18 @@ export function UnifiedTracksSync() {
     },
     onError: failed,
   });
+  const autoExportRb = useMutation({
+    mutationFn: (track_ids: number[] | null) =>
+      api.syncExport.autoExportToRekordbox({ track_ids }),
+    onSuccess: (r) => {
+      done(
+        `Rekordbox auto-export: ${r.cues_added} cues added, ${r.keys_set} keys set ` +
+        `(${r.matched}/${r.scanned} tracks matched${r.unmatched ? `, ${r.unmatched} unmatched` : ''})`,
+      );
+      refresh();
+    },
+    onError: failed,
+  });
   const exportGridToRb = useMutation({
     mutationFn: (row: StatusRow) =>
       api.syncExport.exportBeatgridToRekordbox({ track_id: row.track_id! }),
@@ -364,7 +376,7 @@ export function UnifiedTracksSync() {
   const busy =
     generateRbxml.isPending || rekordboxSync.isPending || importFiles.isPending ||
     importField.isPending || importPerf.isPending || bulkImportPerf.isPending ||
-    exportRowToDisk.isPending || exportKeyToRb.isPending || exportHotcuesToRb.isPending || exportGridToRb.isPending ||
+    exportRowToDisk.isPending || exportKeyToRb.isPending || exportHotcuesToRb.isPending || exportGridToRb.isPending || autoExportRb.isPending ||
     exportTags.isPending || rebuildTagTree.isPending;
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
@@ -487,6 +499,16 @@ export function UnifiedTracksSync() {
             }
           >
             Import performance data ← Engine
+          </button>
+          {/* auto tier (issue 08): additive only — new cues + absent keys;
+              never touches existing RB values, so no confirmation */}
+          <button
+            className="uts-btn"
+            onClick={() =>
+              autoExportRb.mutate(list.map((r) => r.track_id!).filter((id) => id !== null))
+            }
+          >
+            Export new performance data → Rekordbox
           </button>
         </span>
       );

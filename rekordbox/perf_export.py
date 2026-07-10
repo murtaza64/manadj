@@ -118,13 +118,19 @@ class RekordboxPerfExporter:
 
     # -- key ---------------------------------------------------------------
 
-    def export_key(self, filename: str, engine_key_id: int) -> str:
+    def export_key(
+        self, filename: str, engine_key_id: int, only_if_absent: bool = False
+    ) -> str | None:
         """Write a Library key (canonical Engine ID) onto the matching
-        Rekordbox track. Returns the ScaleName written."""
+        Rekordbox track. Returns the ScaleName written; None when
+        only_if_absent and Rekordbox already has a key (the auto tier
+        never overwrites)."""
         from backend.key import Key
 
         ensure_rekordbox_closed()
         content = self._content_for(filename)
+        if only_if_absent and content.KeyID:
+            return None
         key_obj = Key.from_engine_id(engine_key_id)
         if key_obj is None:
             raise ValueError(f"invalid key id {engine_key_id!r}")
