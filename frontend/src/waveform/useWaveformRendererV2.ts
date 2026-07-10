@@ -101,7 +101,7 @@ export function useWaveformRendererV2({
       rendererRef.current?.setBeatgrid(
         beatgrid.beat_times,
         beatgrid.downbeat_times,
-        ladder && { tiers: ladder.tiers, tierBars: ladder.tierBars },
+        ladder, // the projection IS the renderer's LadderGridInput slice
       );
       rendererRef.current?.setResetMarks(resolvedMarkTimes(beatgrid, metricLadder));
     }

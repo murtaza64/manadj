@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { BeatgridData, TempoChange } from '../types';
-import { DEFAULT_ARITIES, groupBars, resolveLadder, resolvedMarkTimes } from './ladder';
+import {
+  DEFAULT_ARITIES,
+  barCountLabel,
+  groupBars,
+  resolveLadder,
+  resolvedMarkTimes,
+} from './ladder';
 
 /** Constant-tempo grid fixture: expands segments into beat/downbeat arrays
  * the way the backend does (accumulate per segment, downbeat when the
@@ -174,6 +180,25 @@ describe('resolveLadder with Reset marks', () => {
     const proj = resolveLadder(grid40(), { reset_marks: [20 * barSec + 0.03] })!;
     expect(proj.tiers[20]).toBe(4);
     expect(proj.barIndexes[20]).toBe(0);
+  });
+
+  it('barCountLabel: position in the top tier from the governing reset; parentheticals count "+k"', () => {
+    // Fakeout: mark at bar 20 → bars 0-15 count 1..16, 16-19 read +1..+4,
+    // and the count restarts at the mark.
+    const proj = resolveLadder(grid40(), marks(20))!;
+    expect(barCountLabel(proj, 0)).toBe('1 of 16');
+    expect(barCountLabel(proj, 12)).toBe('13 of 16');
+    expect(barCountLabel(proj, 15)).toBe('16 of 16');
+    expect(barCountLabel(proj, 16)).toBe('+1');
+    expect(barCountLabel(proj, 19)).toBe('+4');
+    expect(barCountLabel(proj, 20)).toBe('1 of 16');
+    expect(barCountLabel(proj, 32)).toBe('13 of 16');
+  });
+
+  it('barCountLabel wraps within the top tier on the default ladder', () => {
+    const proj = resolveLadder(grid40())!;
+    expect(barCountLabel(proj, 16)).toBe('1 of 16');
+    expect(barCountLabel(proj, 20)).toBe('5 of 16');
   });
 
   it('resolvedMarkTimes lands marks on the lattice, deduped; dormant when gridless', () => {
