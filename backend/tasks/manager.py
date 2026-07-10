@@ -26,6 +26,22 @@ BACKOFF_MINUTES = (5, 10, 20, 40, 80)
 MAX_ATTEMPTS = len(BACKOFF_MINUTES)
 
 
+class Deferred(Exception):  # noqa: N818 — control-flow signal, not an error
+    """Raised by a handler to say "not ready yet — poll me again later".
+
+    The task returns to `pending` with `not_before` set `retry_in_secs` ahead;
+    no attempt is consumed and no error is recorded. This is how a polling
+    task (e.g. `soulseek-download` watching a peer transfer) advances one
+    non-blocking step per worker tick instead of holding the worker hostage.
+    Unlike the rate-limit path there is no cap: the handler owns its own
+    give-up policy (e.g. a hard TTL).
+    """
+
+    def __init__(self, retry_in_secs: float, reason: str = "") -> None:
+        super().__init__(reason or f"deferred {retry_in_secs}s")
+        self.retry_in_secs = retry_in_secs
+
+
 def create_task(
     db: Session, type_: str, payload: dict[str, Any], ref: str | None = None
 ) -> Task:
@@ -81,6 +97,17 @@ def run_pending(
         try:
             handler = handlers[task_type]
             handler(db, task.payload)
+        except Deferred as d:
+            db.rollback()
+            task.state = "pending"
+            task.started_at = None
+            task.error = None
+            task.not_before = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+                seconds=d.retry_in_secs
+            )
+            db.commit()
+            processed += 1
+            continue
         except RateLimitedError as e:
             db.rollback()
             _defer_for_rate_limit(db, task, e)

@@ -25,8 +25,11 @@ from .manager import (
     restore_item,
     set_classification,
 )
+from .cleanup import clean_metadata
+from .download import pick_supplier_result
 from .models import AudioProvenance, SourceCorrespondence, SourceItem
 from .source import SoundCloudSource, Source
+from .supplier import SearchSupplier, SupplierSearchResult
 
 router = APIRouter()
 
@@ -40,6 +43,30 @@ def get_source() -> Source:
             detail="SoundCloud oauth_token not configured in config.toml [soundcloud]",
         )
     return SoundCloudSource(token)
+
+
+def get_soulseek_supplier() -> "SearchSupplier | None":
+    """Dependency: the Soulseek Supplier, or None when unconfigured.
+
+    None means the Supplier is absent entirely — no UI affordance, 404 from
+    its routes (PRD story 10). Overridden in tests.
+    """
+    cfg = get_config().soulseek
+    if not cfg.configured:
+        return None
+    from .slskd import SlskdSupplier
+
+    assert cfg.slskd_url is not None and cfg.api_key is not None
+    return SlskdSupplier(cfg.slskd_url, cfg.api_key)
+
+
+def _require_soulseek(supplier: "SearchSupplier | None") -> SearchSupplier:
+    if supplier is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Soulseek Supplier not configured ([soulseek] slskd_url + SLSKD_API_KEY)",
+        )
+    return supplier
 
 
 class RefreshResponse(BaseModel):
@@ -63,6 +90,9 @@ class SourceItemResponse(BaseModel):
     download: "DownloadStatus | None" = None
     # Audio Provenance of the corresponding Track, when one exists
     provenance: "ProvenanceInfo | None" = None
+    # Cleanup-derived default query for Search Supplier pickers (editable
+    # client-side; junk tokens would poison peer search)
+    search_query: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -104,6 +134,8 @@ class DownloadStatus(BaseModel):
     # ISO-8601 UTC deferral floor when a pending task is cooling down after a
     # rate-limit (issue 08); None unless deferred into the future.
     cooling_down_until: str | None = None
+    # which Supplier is delivering the audio: "soundcloud" | "soulseek"
+    via: str = "soundcloud"
 
 
 class BulkQueueRequest(BaseModel):
@@ -158,17 +190,27 @@ def _cooling_down_until(task: "Task") -> str | None:
     return task.not_before.replace(tzinfo=timezone.utc).isoformat()
 
 
+DOWNLOAD_TASK_TYPES = ("download", "soulseek-download")
+
+
+def _via(task: "Task") -> str:
+    return "soulseek" if task.type == "soulseek-download" else "soundcloud"
+
+
 def _download_map(db: Session) -> dict[int, DownloadStatus]:
-    """source_item_id -> latest download-task status."""
+    """source_item_id -> latest download-task status (either Supplier)."""
     statuses: dict[int, DownloadStatus] = {}
     from ..tasks.models import Task
 
-    for task in db.query(Task).filter(Task.type == "download").order_by(Task.id).all():
+    for task in (
+        db.query(Task).filter(Task.type.in_(DOWNLOAD_TASK_TYPES)).order_by(Task.id).all()
+    ):
         if task.ref and task.ref.startswith("source_item:"):
             statuses[int(task.ref.split(":", 1)[1])] = DownloadStatus(
                 task_state=task.state,
                 error=task.error,
                 cooling_down_until=_cooling_down_until(task),
+                via=_via(task),
             )
     return statuses
 
@@ -189,6 +231,12 @@ def _provenance_map(db: Session) -> dict[int, ProvenanceInfo]:
     }
 
 
+def _search_query(item: SourceItem) -> str:
+    """The Cleanup-derived default query for Search Supplier pickers."""
+    meta = clean_metadata(item.title, item.uploader, get_config().acquisition.cleanup)
+    return f"{meta.artist} {meta.title}" if meta.artist else meta.title
+
+
 @router.get("/items", response_model=list[SourceItemResponse])
 def get_source_items(db: Session = Depends(get_db)) -> list[SourceItemResponse]:
     correspondences = _correspondence_map(db)
@@ -199,6 +247,7 @@ def get_source_items(db: Session = Depends(get_db)) -> list[SourceItemResponse]:
         resp = SourceItemResponse.model_validate(item)
         resp.correspondence = correspondences.get(item.id)
         resp.download = downloads.get(item.id)
+        resp.search_query = _search_query(item)
         if resp.correspondence is not None:
             resp.provenance = provenances.get(resp.correspondence.track_id)
         responses.append(resp)
@@ -209,14 +258,16 @@ def _item_response(db: Session, item_id: int) -> SourceItemResponse:
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
     resp = SourceItemResponse.model_validate(item)
     resp.correspondence = _correspondence_map(db).get(item.id)
+    resp.search_query = _search_query(item)
     if resp.correspondence is not None:
         resp.provenance = _provenance_map(db).get(resp.correspondence.track_id)
-    tasks = list_tasks(db, ref=f"source_item:{item_id}")
+    tasks = [t for t in list_tasks(db, ref=f"source_item:{item_id}") if t.type in DOWNLOAD_TASK_TYPES]
     if tasks:
         resp.download = DownloadStatus(
             task_state=tasks[0].state,
             error=tasks[0].error,
             cooling_down_until=_cooling_down_until(tasks[0]),
+            via=_via(tasks[0]),
         )
     return resp
 
@@ -323,3 +374,87 @@ def override_classification(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return SourceItemResponse.model_validate(item)
+
+
+# --- Suppliers (soulseek-supplier issue 03) ---------------------------------
+
+
+class SupplierInfo(BaseModel):
+    id: str
+    kind: str  # "direct" | "search"
+
+
+class SoulseekSearchRequest(BaseModel):
+    # None/empty => use the Cleanup-derived default query
+    query: str | None = None
+
+
+class SoulseekResult(BaseModel):
+    """One candidate file, shaped for the picker (PRD story 4)."""
+
+    download_token: str
+    filename: str
+    format: str
+    bitrate_kbps: int | None
+    size_bytes: int | None
+    duration_ms: int | None
+    queue_length: int | None
+
+
+class SoulseekSearchResponse(BaseModel):
+    query: str  # the query actually searched (echoes the default when unset)
+    results: list[SoulseekResult]
+
+
+@router.get("/suppliers", response_model=list[SupplierInfo])
+def list_suppliers(
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> list[SupplierInfo]:
+    """The configured Suppliers. An unconfigured Supplier is absent, not
+    disabled — the UI shows no affordance for it (PRD story 10)."""
+    suppliers: list[SupplierInfo] = []
+    if get_config().soundcloud.oauth_token:
+        suppliers.append(SupplierInfo(id="soundcloud", kind="direct"))
+    if supplier is not None:
+        suppliers.append(SupplierInfo(id="soulseek", kind="search"))
+    return suppliers
+
+
+@router.post("/items/{item_id}/soulseek/search", response_model=SoulseekSearchResponse)
+def soulseek_search(
+    item_id: int,
+    body: SoulseekSearchRequest,
+    db: Session = Depends(get_db),
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> SoulseekSearchResponse:
+    """Search Soulseek for candidates for an unfulfilled item."""
+    sup = _require_soulseek(supplier)
+    try:
+        item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="source item not found")
+    query = (body.query or "").strip() or _search_query(item)
+    results = sup.search(query)
+    return SoulseekSearchResponse(
+        query=query,
+        results=[SoulseekResult(**vars(r)) for r in results],
+    )
+
+
+@router.post("/items/{item_id}/soulseek/pick", response_model=SourceItemResponse)
+def soulseek_pick(
+    item_id: int,
+    body: SoulseekResult,
+    db: Session = Depends(get_db),
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> SourceItemResponse:
+    """The operator picked a candidate: start the transfer, queue the task."""
+    sup = _require_soulseek(supplier)
+    result = SupplierSearchResult(**body.model_dump())
+    try:
+        pick_supplier_result(db, item_id, sup, result)
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="source item not found")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _item_response(db, item_id)
