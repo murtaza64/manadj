@@ -16,8 +16,8 @@ import type {
   SyncResult,
   SyncPlaylistRequest,
   TrackSyncResult,
-  EngineRBXMLSyncRequest,
-  EngineRBXMLSyncResult,
+  EngineTrackExportRequest,
+  EngineTrackExportResult,
   RekordboxTrackSyncRequest,
   RekordboxTrackSyncResult,
   LibraryImportResult,
@@ -634,13 +634,16 @@ export const api = {
       return res.json();
     },
 
-    syncEngineRBXML: async (request: EngineRBXMLSyncRequest): Promise<EngineRBXMLSyncResult> => {
-      const res = await fetch(`${API_BASE}/sync/tracks/engine/sync-rbxml`, {
+    exportToEngine: async (request: EngineTrackExportRequest): Promise<EngineTrackExportResult> => {
+      const res = await fetch(`${API_BASE}/sync/tracks/engine/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
-      if (!res.ok) throw new Error('Failed to export Engine DJ RBXML');
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detail ?? 'Failed to export tracks to Engine DJ');
+      }
       return res.json();
     },
 

@@ -262,19 +262,17 @@ export interface TrackSyncResult {
   missing_in_manadj: TrackDiscrepancy[];  // Import candidates
 }
 
-export interface EngineRBXMLSyncRequest {
+export interface EngineTrackExportRequest {
   playlist_name?: string;
-  output_path?: string;
   validate_files?: boolean;
-  skip_import?: boolean;
 }
 
-export interface EngineRBXMLSyncResult {
+export interface EngineTrackExportResult {
   target: 'engine';
   exported_to_target: number;
   skipped_file_not_found: number;
   playlist_name: string | null;
-  output_path: string | null;
+  playlist_created: boolean;
 }
 
 export interface RekordboxTrackSyncRequest {

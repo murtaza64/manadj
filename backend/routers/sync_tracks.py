@@ -8,12 +8,12 @@ from backend.config import get_config
 from backend.tracks.sync_manager import TrackSyncManager
 from backend.tracks.models import (
     TrackSyncResult,
-    EngineRBXMLSyncRequest,
-    EngineRBXMLSyncResult,
+    EngineTrackExportRequest,
+    EngineTrackExportResult,
     RekordboxTrackSyncRequest,
     RekordboxTrackSyncResult,
 )
-from backend.tracks.executor import sync_engine_via_rbxml, sync_rekordbox_tracks
+from backend.tracks.executor import export_tracks_to_engine, sync_rekordbox_tracks
 from rekordbox.connection import get_rekordbox_db
 
 router = APIRouter(prefix="/sync/tracks", tags=["sync"])
@@ -88,32 +88,45 @@ def get_rekordbox_track_discrepancies(
     return result
 
 
-@router.post("/engine/sync-rbxml", response_model=EngineRBXMLSyncResult)
-def sync_engine_tracks_rbxml(
-    request: EngineRBXMLSyncRequest,
+@router.post("/engine/export", response_model=EngineTrackExportResult)
+def export_engine_tracks(
+    request: EngineTrackExportRequest,
     db: Session = Depends(get_db),
 ):
-    """Export missing manadj tracks to RBXML for Engine DJ import."""
+    """Directly insert manadj-only tracks into Engine DJ's database.
+
+    ADR 0006 (amended): direct insertion replaced the RBXML detour.
+    Engine must be closed (409); the Database2 dir is snapshotted once
+    per process run before the first write.
+    """
     config = get_config()
 
     if not config.database.engine_dj_path:
         raise HTTPException(status_code=404, detail="Engine DJ database not configured")
 
-    from enginedj.connection import EngineDJDatabase
     from pathlib import Path
 
+    from enginedj.connection import EngineDJDatabase
+    from enginedj.track_export import (
+        EngineRunningError,
+        ensure_engine_closed,
+        snapshot_database,
+    )
+
+    try:
+        ensure_engine_closed()
+    except EngineRunningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
     engine_db = EngineDJDatabase(Path(config.database.engine_dj_path))
+    snapshot_database(engine_db.database_path)
 
-    with engine_db.session_m() as edj_session:
-        result = sync_engine_via_rbxml(
-            manadj_session=db,
-            edj_session=edj_session,
-            output_path=request.output_path,
-            playlist_name=request.playlist_name,
-            validate_files=request.validate_files,
-        )
-
-    return result
+    return export_tracks_to_engine(
+        manadj_session=db,
+        engine_db=engine_db,
+        playlist_name=request.playlist_name,
+        validate_files=request.validate_files,
+    )
 
 
 @router.post("/rekordbox/sync", response_model=RekordboxTrackSyncResult)
