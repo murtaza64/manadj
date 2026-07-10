@@ -312,7 +312,13 @@ A named render recipe over Waveform data: a shader variant plus its tunable disp
 A place Source Items come from — where demand for tracks originates (SoundCloud likes today). Unlike an External library, a Source holds no copy of manadj's library state. Either Native or External. Distinct from a Supplier: a Source is where wanted tracks are discovered; a Supplier is where audio is obtained. SoundCloud is both.
 
 **Supplier**:
-A place manadj can obtain audio from. SoundCloud (direct download) and Soulseek (peer search) are Suppliers; Soulseek is supply-only — it has no Source Items. A Source Item may be fulfilled through any Supplier; Audio Provenance records which one actually supplied the audio.
+A place manadj can obtain audio from. SoundCloud and Soulseek are Suppliers; Soulseek is supply-only — it has no Source Items. A Source Item may be fulfilled through any Supplier; Audio Provenance records which one actually supplied the audio. Either Direct or Search.
+
+**Direct Supplier**:
+A Supplier where the Source Item itself addresses the audio — fulfillment is a download, no choosing involved (SoundCloud).
+
+**Search Supplier**:
+A Supplier with no per-item address: candidates are found by searching, and one must be picked before download (Soulseek). Only Search Suppliers involve a picker.
 
 **Native Source**:
 A Source manadj is integrated with: it can Refresh Source Items from it (SoundCloud today). Provenance recorded from its downloads carries a structured external ID. Whether it can also supply audio is a Supplier question, not a Source one.
