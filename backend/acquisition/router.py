@@ -27,6 +27,7 @@ from .manager import (
 )
 from .cleanup import clean_metadata
 from .download import pick_supplier_result
+from .picker import shape_results
 from .models import AudioProvenance, SourceCorrespondence, SourceItem
 from .source import SoundCloudSource, Source
 from .supplier import SearchSupplier, SupplierSearchResult
@@ -399,6 +400,10 @@ class SoulseekResult(BaseModel):
     size_bytes: int | None
     duration_ms: int | None
     queue_length: int | None
+    has_free_slot: bool | None = None
+    # derived server-side against the item's duration (search only; ignored
+    # on pick — the Supplier needs none of it)
+    duration_delta_ms: int | None = None
 
 
 class SoulseekSearchResponse(BaseModel):
@@ -434,10 +439,13 @@ def soulseek_search(
     except NoResultFound:
         raise HTTPException(status_code=404, detail="source item not found")
     query = (body.query or "").strip() or _search_query(item)
-    results = sup.search(query)
+    shaped = shape_results(sup.search(query), item.duration_ms)
     return SoulseekSearchResponse(
         query=query,
-        results=[SoulseekResult(**vars(r)) for r in results],
+        results=[
+            SoulseekResult(**vars(s.result), duration_delta_ms=s.duration_delta_ms)
+            for s in shaped
+        ],
     )
 
 
@@ -450,7 +458,7 @@ def soulseek_pick(
 ) -> SourceItemResponse:
     """The operator picked a candidate: start the transfer, queue the task."""
     sup = _require_soulseek(supplier)
-    result = SupplierSearchResult(**body.model_dump())
+    result = SupplierSearchResult(**body.model_dump(exclude={"duration_delta_ms"}))
     try:
         pick_supplier_result(db, item_id, sup, result)
     except NoResultFound:

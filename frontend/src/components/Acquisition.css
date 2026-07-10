@@ -377,7 +377,7 @@
 
 .acquisition-soulseek-row {
   display: grid;
-  grid-template-columns: 1fr 3em 3.5em 5em 7em;
+  grid-template-columns: 1fr 3em 3.5em 5em 7em 3.5em;
   gap: var(--space-sm);
   align-items: baseline;
 }
@@ -400,4 +400,8 @@
 .acquisition-duration-loud {
   color: var(--red);
   font-weight: bold;
+}
+
+.acquisition-queue-free {
+  color: var(--green);
 }

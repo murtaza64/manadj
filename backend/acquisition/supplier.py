@@ -58,6 +58,8 @@ class SupplierSearchResult:
     size_bytes: int | None
     duration_ms: int | None
     queue_length: int | None
+    # whether the peer had an open upload slot at search time
+    has_free_slot: bool | None = None
 
 
 class TransferState(Enum):

@@ -461,6 +461,10 @@ export interface SoulseekResult {
   size_bytes: number | null;
   duration_ms: number | null;
   queue_length: number | null;
+  has_free_slot: boolean | null;
+  // derived server-side vs the item's duration; results arrive sorted
+  // exact-duration-lossless first (issue 04)
+  duration_delta_ms: number | null;
 }
 
 export interface SoulseekSearchResponse {

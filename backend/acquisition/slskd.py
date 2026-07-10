@@ -89,6 +89,7 @@ class SlskdSupplier:
         for resp in responses:
             username = resp.get("username", "")
             queue = resp.get("queueLength")
+            free_slot = resp.get("hasFreeUploadSlot")
             for f in resp.get("files", []):
                 filename = f.get("filename", "")
                 size = f.get("size")
@@ -104,6 +105,7 @@ class SlskdSupplier:
                         size_bytes=size,
                         duration_ms=length_secs * 1000 if length_secs else None,
                         queue_length=queue,
+                        has_free_slot=free_slot,
                     )
                 )
         logger.info("slskd search %r: %d candidate files", query, len(results))

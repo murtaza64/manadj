@@ -603,16 +603,18 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
       )}
       {results && results.length > 0 && (
         <div className="acquisition-soulseek-results">
+          {/* results arrive server-sorted: exact-duration-lossless first */}
           <div className="acquisition-soulseek-row acquisition-soulseek-head">
             <span>filename</span>
             <span>fmt</span>
             <span>kbps</span>
             <span>size</span>
             <span>length</span>
+            <span>queue</span>
           </div>
           {results.map(r => {
             const deltaSecs =
-              r.duration_ms != null ? Math.round((r.duration_ms - item.duration_ms) / 1000) : null;
+              r.duration_delta_ms != null ? Math.round(r.duration_delta_ms / 1000) : null;
             const loud = deltaSecs === null || Math.abs(deltaSecs) > DURATION_DELTA_LOUD_SECS;
             return (
               <button
@@ -631,6 +633,9 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
                   {deltaSecs !== null && deltaSecs !== 0 && (
                     <> ({deltaSecs > 0 ? '+' : ''}{deltaSecs}s)</>
                   )}
+                </span>
+                <span className={r.has_free_slot ? 'acquisition-queue-free' : undefined}>
+                  {r.has_free_slot ? 'free' : r.queue_length != null ? `${r.queue_length}` : '?'}
                 </span>
               </button>
             );
