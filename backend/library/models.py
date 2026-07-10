@@ -10,8 +10,9 @@ class LibraryTrackCandidate(BaseModel):
     title: str | None = None
     artist: str | None = None
     bpm: float | None = None
-    # Engine DJ key ID (0-23) — how key crosses the file-metadata seam
-    # (FileMetadata.key) and what Track.key stores.
+    # Engine DJ key ID (0-23), as read_file_metadata returns and Track.key
+    # stores. Was mistyped `str` — the scan crashed on the first key-tagged
+    # file it ever met (a Soulseek FLAC/MP3 rip; SoundCloud audio is untagged).
     key: int | None = None
     has_metadata: bool = False
 

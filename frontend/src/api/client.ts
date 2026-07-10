@@ -26,6 +26,9 @@ import type {
   SourceItem,
   AcquisitionRefreshStats,
   Classification,
+  SupplierInfo,
+  SoulseekResult,
+  SoulseekSearchResponse,
   AnalysisTaskStatus,
 } from '../types';
 
@@ -850,6 +853,40 @@ export const api = {
         body: JSON.stringify({ track_id: trackId, audio_from: audioFrom || null }),
       });
       if (!res.ok) throw new Error('Failed to link track');
+      return res.json();
+    },
+
+    // Suppliers (soulseek-supplier issue 03). An unconfigured Supplier is
+    // absent from this list and its UI never renders.
+    getSuppliers: async (): Promise<SupplierInfo[]> => {
+      const res = await fetch(`${API_BASE}/acquisition/suppliers`);
+      if (!res.ok) throw new Error('Failed to fetch suppliers');
+      return res.json();
+    },
+
+    soulseekSearch: async (itemId: number, query: string): Promise<SoulseekSearchResponse> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: query || null }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Soulseek search failed');
+      }
+      return res.json();
+    },
+
+    soulseekPick: async (itemId: number, result: SoulseekResult): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/pick`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.detail || 'Soulseek pick failed');
+      }
       return res.json();
     },
   },

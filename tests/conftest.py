@@ -112,8 +112,11 @@ class FakeSource:
     It also stands in for a Search Supplier: `search_results` cans a search,
     and `transfer_states` cans a transfer-state sequence advanced one step per
     `transfer_status` poll (e.g. [QUEUED, IN_PROGRESS, COMPLETED] for a happy
-    transfer, or a run of QUEUED for a TTL-expiry test). On COMPLETED the file
-    is copied in exactly as `download` does, so the picked bytes land on disk.
+    transfer, or a run of QUEUED for a TTL-expiry test; the last state holds
+    once the sequence is exhausted). On COMPLETED the fixture file is staged
+    into `staging_dir` under the picked result's remote basename — mirroring
+    slskd, which downloads into its own directory and reports the path; the
+    download task moves it into the library.
     """
 
     def __init__(
@@ -123,13 +126,15 @@ class FakeSource:
         download_error: Exception | None = None,
         search_results: list[SupplierSearchResult] | None = None,
         transfer_states: list[TransferState] | None = None,
+        staging_dir: Path | None = None,
     ) -> None:
         self._items = items
         self._download_file = download_file
         self._download_error = download_error
         self._search_results = search_results or []
         self._transfer_states = list(transfer_states or [])
-        self._transfer_dests: dict[str, tuple[Path, str]] = {}
+        self._staging_dir = staging_dir
+        self._transfer_results: dict[str, SupplierSearchResult] = {}
         self._poll_counts: dict[str, int] = {}
 
     def list_items(self) -> list[SourceItemData]:
@@ -147,11 +152,9 @@ class FakeSource:
     def search(self, query: str) -> list[SupplierSearchResult]:
         return self._search_results
 
-    def request(
-        self, result: SupplierSearchResult, dest_dir: Path, basename: str
-    ) -> str:
+    def request(self, result: SupplierSearchResult) -> str:
         transfer_id = f"transfer:{result.download_token}"
-        self._transfer_dests[transfer_id] = (dest_dir, basename)
+        self._transfer_results[transfer_id] = result
         self._poll_counts[transfer_id] = 0
         return transfer_id
 
@@ -162,9 +165,11 @@ class FakeSource:
         state = self._transfer_states[min(n, len(self._transfer_states) - 1)]
         self._poll_counts[transfer_id] = n + 1
         if state is TransferState.COMPLETED:
-            dest_dir, basename = self._transfer_dests[transfer_id]
+            assert self._staging_dir is not None, "FakeSource has no staging_dir"
             assert self._download_file is not None, "FakeSource has no file to complete with"
-            local = dest_dir / f"{basename}{self._download_file.suffix}"
+            result = self._transfer_results[transfer_id]
+            # remote filenames are windows-style paths on most peers
+            local = self._staging_dir / result.filename.replace("\\", "/").rsplit("/", 1)[-1]
             shutil.copy(self._download_file, local)
             return TransferStatus(state=state, local_path=local)
         return TransferStatus(state=state)
