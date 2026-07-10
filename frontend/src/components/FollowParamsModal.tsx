@@ -8,8 +8,7 @@
 import { useEffect } from 'react';
 import './FollowParamsModal.css';
 import type { Track } from '../types';
-import { followSummary, getEnergyRange } from '../follow/model';
-import type { EnergyPreset } from '../follow/model';
+import { followSummary } from '../follow/model';
 import { resetFollowParams, setFollowParams, useFollowParams } from '../follow/paramsStore';
 import { LinkIcon } from '../links/LinkIcon';
 import { formatKeyDisplay } from '../utils/keyUtils';
@@ -22,13 +21,6 @@ interface FollowParamsModalProps {
   references: ReadonlyArray<{ deck: ChannelId; reference: Track }>;
   openPosition?: { x: number; y: number };
 }
-
-const ENERGY_PRESETS: ReadonlyArray<{ preset: EnergyPreset; label: string }> = [
-  { preset: 'equal', label: 'Equal' },
-  { preset: 'near', label: 'Near ±1' },
-  { preset: 'up', label: 'Up' },
-  { preset: 'down', label: 'Down' },
-];
 
 export default function FollowParamsModal({
   isOpen,
@@ -70,16 +62,12 @@ export default function FollowParamsModal({
 
   if (!isOpen) return null;
 
-  // An axis is meaningful when ANY followed reference carries the datum;
-  // with nothing followed, everything stays editable (pre-configuring).
+  // The axis is meaningful when ANY followed reference carries a BPM;
+  // with nothing followed, it stays editable (pre-configuring). The gate
+  // is BPM-only (match-score PRD): key/tags/energy inform the Match
+  // score, not the cut, so their toggles retired with their gates.
   const anyRef = references.length > 0;
-  const hasKey = !anyRef || references.some(({ reference }) => reference.key !== null && reference.key !== undefined);
   const hasBpm = !anyRef || references.some(({ reference }) => !!reference.bpm);
-  const hasTags = !anyRef || references.some(({ reference }) => reference.tags.length > 0);
-  const hasEnergy = !anyRef || references.some(({ reference }) => reference.energy !== undefined);
-
-  const previewEnergy = references.find(({ reference }) => reference.energy !== undefined)
-    ?.reference.energy;
 
   return (
     <div
@@ -144,21 +132,6 @@ export default function FollowParamsModal({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* Harmonic Keys */}
-          <div className={`follow-modal-criteria-item ${!hasKey ? 'disabled' : ''}`}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={params.harmonicKeys}
-                onChange={(e) => setFollowParams({ harmonicKeys: e.target.checked })}
-              />
-              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>Harmonic Keys</span>
-            </label>
-            <div style={{ fontSize: '12px', color: 'var(--subtext0)', paddingLeft: '24px' }}>
-              Compatible keys for mixing (same, ±1, relative)
-            </div>
-          </div>
-
           {/* BPM */}
           <div className={`follow-modal-criteria-item ${!hasBpm ? 'disabled' : ''}`}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
@@ -182,56 +155,6 @@ export default function FollowParamsModal({
               className="follow-modal-threshold-slider"
               style={{ paddingLeft: '24px', width: 'calc(100% - 24px)' }}
             />
-          </div>
-
-          {/* Tags — any-shared by definition (CONTEXT.md: Compatible) */}
-          <div className={`follow-modal-criteria-item ${!hasTags ? 'disabled' : ''}`}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={params.tags}
-                onChange={(e) => setFollowParams({ tags: e.target.checked })}
-              />
-              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>Shares a tag</span>
-            </label>
-            <div style={{ fontSize: '12px', color: 'var(--subtext0)', paddingLeft: '24px' }}>
-              At least one tag in common with the followed track
-            </div>
-          </div>
-
-          {/* Energy */}
-          <div className={`follow-modal-criteria-item ${!hasEnergy ? 'disabled' : ''}`}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={params.energy}
-                onChange={(e) => setFollowParams({ energy: e.target.checked })}
-              />
-              <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>Energy</span>
-            </label>
-            <div style={{ paddingLeft: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div className="follow-modal-energy-presets">
-                {ENERGY_PRESETS.map(({ preset, label }) => (
-                  <button
-                    key={preset}
-                    onClick={() => setFollowParams({ energyPreset: preset })}
-                    disabled={!params.energy}
-                    className={`follow-modal-energy-preset-btn ${params.energyPreset === preset ? 'active' : ''}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {params.energy && previewEnergy !== undefined && (
-                <div className="follow-modal-preview-text">
-                  Will match: Energy{' '}
-                  {(() => {
-                    const { min, max } = getEnergyRange(previewEnergy, params.energyPreset);
-                    return `${min}-${max}`;
-                  })()}
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Known only (linked-pairs 04, formerly "proven only") */}

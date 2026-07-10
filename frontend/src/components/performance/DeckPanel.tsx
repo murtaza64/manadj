@@ -37,6 +37,7 @@ import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { trackWindowSeconds } from '../../utils/waveformZoom';
 import { formatKeyDisplay } from '../../utils/keyUtils';
+import { getBpmColor, getKeyColor } from '../../utils/displayColors';
 import { setKeyLockFlag } from '../../playback/keyLockStore';
 import { DECK_KEYS } from './performanceKeys';
 import type { EqBand } from '../../playback/graph';
@@ -570,6 +571,9 @@ function MixZone({ track }: { track: Track | null }) {
             className={`perf-readout-val perf-readout-key${
               drifted ? ' perf-key-drift' : ''
             }`}
+            // Library color coding (sneak fix 2026-07-10): same
+            // circle-of-fifths hue as the track rows' key column.
+            style={{ color: getKeyColor(formatKeyDisplay(track?.key)) ?? undefined }}
           >
             {/* Always rendered so the readout width never jumps; invisible
                 until the key has drifted. */}
@@ -581,7 +585,10 @@ function MixZone({ track }: { track: Track | null }) {
         </span>
         <span className="perf-mix-spacer" />
         <span className="perf-readout" title="Effective BPM (base × pitch × bend)">
-          <span className="perf-readout-val">
+          <span
+            className="perf-readout-val"
+            style={{ color: getBpmColor(effective) ?? undefined }}
+          >
             {effective !== null ? effective.toFixed(1) : '-'}
           </span>
           <span className="perf-readout-sub">

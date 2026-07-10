@@ -13,8 +13,9 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
   { id: 'key', width: 35, sticky: true, align: 'right' },
   { id: 'bpm', width: 35, sticky: true },
   { id: 'energy', width: 35, sticky: true },
-  // Marks column (follow-mode 09): two fixed evidence slots (A, B) —
-  // blank header, not sortable, no resize handle (fixed width).
+  // Marks/match column (follow-mode 09, match-score PRD): two evidence
+  // slots (A, B), or the Match score while Follow filters. Crosshair
+  // header; resizable like any column.
   { id: 'marks', width: 34, sticky: true },
   { id: 'title', width: 180, sticky: true, showShadow: true },
   { id: 'artist', width: 180 },

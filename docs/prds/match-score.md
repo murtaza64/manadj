@@ -1,6 +1,6 @@
 # PRD: Match score
 
-Status: ready-for-agent
+Status: implemented (lane matchscore, 2026-07-10 — issues .editspace/issues/match-score/01-03; tag-ladder + row-dimming tuning from the interactive session folded into 03)
 
 ## Problem Statement
 

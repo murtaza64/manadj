@@ -1,6 +1,6 @@
 import React, { type JSX } from 'react';
 import TrackRow, { type SelectMods, type TransitionMark } from './TrackRow';
-import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon } from './icons';
+import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon, CrosshairIcon } from './icons';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
 import type { PairInfo } from '../editor/transitionIndex';
@@ -48,6 +48,17 @@ interface TrackListProps {
    * pre-grouped tracks (Follow's tier ordering); this only renders the
    * boundaries. Absent = flat table. */
   groupLabelFor?: (track: Track) => string;
+  /** Match score column (match-score PRD): when set, a score column
+   * renders (Follow views). Known rows show their marks, not a score —
+   * callers may return null for them. */
+  scoreFor?: (track: Track) => number | null;
+  /** Whether score is the active sort (the Follow default). */
+  scoreSorted?: boolean;
+  /** Score header click: return to the score order. */
+  onScoreSort?: () => void;
+  /** Why-did-this-match dimming (Follow views): per-row matched signals;
+   * rows dim the key/tags that earned nothing. */
+  matchSignalsFor?: (track: Track) => { key: boolean; tagIds: Set<number> };
   sortColumn: SortColumn | null;
   sortDirection: 'asc' | 'desc';
   onSort: (column: SortColumn) => void;
@@ -72,6 +83,10 @@ export default function TrackList({
   deckAId,
   deckBId,
   groupLabelFor,
+  scoreFor,
+  scoreSorted = false,
+  onScoreSort,
+  matchSignalsFor,
   sortColumn,
   sortDirection,
   onSort
@@ -90,12 +105,15 @@ export default function TrackList({
     column,
     icon,
     columnId,
-    label
+    label,
+    center = false
   }: {
     column: SortColumn;
     icon?: JSX.Element;
     columnId: string;
     label?: string;
+    /** Center the icon (narrow icon-only columns: key/bpm/energy). */
+    center?: boolean;
   }) => {
     const config = getColumnConfig(columnId)!;
     const className = [
@@ -115,7 +133,7 @@ export default function TrackList({
 
     return (
       <th className={className} style={style} onClick={() => onSort(column)}>
-        <div className={`sortable-header-content ${config.align === 'right' ? 'align-right' : ''}`}>
+        <div className={`sortable-header-content ${center ? 'align-center' : config.align === 'right' ? 'align-right' : ''}`}>
           {icon || label}
           {sortColumn === column && (
             <span className="sort-indicator">
@@ -139,20 +157,45 @@ export default function TrackList({
         <thead>
           <tr>
             {playOrder !== undefined && <SortableHeader column="position" label="#" columnId="order" />}
-            <SortableHeader column="key" icon={<KeyIcon />} columnId="key" />
-            <SortableHeader column="bpm" icon={<SpeedIcon />} columnId="bpm" />
-            <SortableHeader column="energy" icon={<EnergyIcon />} columnId="energy" />
-            {/* Marks column (follow-mode 09): blank header, no sort, no
-                resize — two fixed evidence slots per row. */}
+            <SortableHeader column="key" icon={<KeyIcon />} columnId="key" center />
+            <SortableHeader column="bpm" icon={<SpeedIcon />} columnId="bpm" center />
+            <SortableHeader column="energy" icon={<EnergyIcon />} columnId="energy" center />
+            {/* Marks/match column (follow-mode 09, match-score PRD): two
+                evidence slots per row; while Follow filters, Compatible
+                rows show their Match score here and the crosshair header
+                returns the list to the score order after a column sort
+                took over (client-side, so not a SortColumn). A full
+                column citizen: crosshair name, resize handle. */}
             <th
-              className="sticky-col-header"
+              className={`sortable-header sticky-col-header${scoreFor !== undefined && scoreSorted ? ' sorted' : ''}`}
               style={{
                 width: 'var(--colw-marks)',
                 minWidth: 'var(--colw-marks)',
                 maxWidth: 'var(--colw-marks)',
                 left: 'var(--colleft-marks)',
               }}
-            />
+              onClick={scoreFor !== undefined ? onScoreSort : undefined}
+              title={
+                scoreFor !== undefined
+                  ? 'Match score (click to sort by match)'
+                  : 'Evidence marks (saved transitions, links); match score while following'
+              }
+            >
+              {/* The crosshair names the column always; sorting by match
+                  only means something while Follow filters. */}
+              <div className="sortable-header-content align-center">
+                <CrosshairIcon width={13} height={13} />
+                {scoreFor !== undefined && scoreSorted && (
+                  <span className="sort-indicator">▼</span>
+                )}
+              </div>
+              <ColumnResizeHandle
+                columnId="marks"
+                currentWidth={widths.marks}
+                onResize={setWidth}
+                onReset={resetWidth}
+              />
+            </th>
             <SortableHeader column="title" icon={<MusicIcon />} columnId="title" />
             <SortableHeader column="artist" icon={<PersonIcon />} columnId="artist" />
             <SortableHeader column="created_at" icon={<CalendarIcon />} columnId="created_at" />
@@ -198,6 +241,7 @@ export default function TrackList({
               let previousLabel: string | null = null;
               return tracks.map((track: Track) => {
                 const label = groupLabelFor?.(track) ?? null;
+                const signals = matchSignalsFor?.(track);
                 const opensGroup = label !== null && label !== previousLabel;
                 previousLabel = label;
                 return (
@@ -205,8 +249,12 @@ export default function TrackList({
                     {opensGroup && (
                       <tr className="track-tier-header">
                         <td colSpan={playOrder !== undefined ? 12 : 11}>
-                          {label}
-                          <span className="track-tier-count"> — {counts.get(label!)}</span>
+                          {/* Sticky-left so the label survives horizontal
+                              scroll — the td spans the whole (wide) table. */}
+                          <span className="track-tier-label">
+                            {label}
+                            <span className="track-tier-count"> — {counts.get(label!)}</span>
+                          </span>
                         </td>
                       </tr>
                     )}
@@ -221,6 +269,9 @@ export default function TrackList({
                       dragSource={dragSource}
                       onContextMenu={onRowContextMenu}
                       orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
+                      score={scoreFor !== undefined ? scoreFor(track) : undefined}
+                      keyMatched={signals ? signals.key : undefined}
+                      sharedTagIds={signals ? [...signals.tagIds].join(',') : undefined}
                       markA={markFor(transitionMarksA, track.id)}
                       markB={markFor(transitionMarksB, track.id)}
                       linkedA={linkedFor(deckAId, track.id)}
