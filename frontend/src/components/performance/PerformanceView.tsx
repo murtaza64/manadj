@@ -1,10 +1,10 @@
 /**
  * The Performance view (performance-mode issues 03/04/05; layout per
- * perf-layout 01): two-deck surface over an embedded Library. Top surface
+ * perf-layout 01): four-Deck surface over an embedded Library. Top surface
  * is CONTENT-SIZED — stacked full-width waveforms, the MixerStrip
- * (X-FADER + MASTER), then Deck A | Deck B (each deck carries its own
+ * (X-FADER + MASTER), then a 2×2 A–D grid (each deck carries its own
  * channel controls in its MIX zone). The real Library browse surface
- * (browseOnly, per-row load-to-A/B buttons) takes every remaining pixel.
+ * (browseOnly, per-row load-to-A–D buttons) takes every remaining pixel.
  *
  * This view owns its keyboard outright (issue 04): per-deck DeckKeys hubs
  * inside each scope, table keys here (↑/↓ navigate, ←/→ load to A/B,
@@ -65,23 +65,34 @@ function useDeckLocked(engine: DeckEngine): boolean {
 function LockDimmedLibrary({
   engineA,
   engineB,
+  engineC,
+  engineD,
   children,
 }: {
   engineA: DeckEngine;
   engineB: DeckEngine;
+  engineC: DeckEngine;
+  engineD: DeckEngine;
   children: ReactNode;
 }) {
   const lockedA = useDeckLocked(engineA);
   const lockedB = useDeckLocked(engineB);
+  const lockedC = useDeckLocked(engineC);
+  const lockedD = useDeckLocked(engineD);
   return (
-    <div className={`perf-library${lockedA ? ' lock-A' : ''}${lockedB ? ' lock-B' : ''}`}>
+    <div
+      className={`perf-library${lockedA ? ' lock-A' : ''}${lockedB ? ' lock-B' : ''}${
+        lockedC ? ' lock-C' : ''
+      }${lockedD ? ' lock-D' : ''}`}
+    >
       {children}
     </div>
   );
 }
 
 export function PerformanceView() {
-  const { A, B } = useDecks();
+  const decks = useDecks();
+  const { A, B, C, D } = decks;
   const libraryRef = useRef<LibraryBrowseHandle>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   useMidiCursorSuppression(rootRef);
@@ -98,20 +109,21 @@ export function PerformanceView() {
   // this callback is too (memoized rows depend on it).
   const engineA = A.engine;
   const engineB = B.engine;
-  const loadA = A.loadTrack;
-  const loadB = B.loadTrack;
+  const engineC = C.engine;
+  const engineD = D.engine;
   const tryLoad = useCallback(
     (deck: ChannelId, track: Track) => {
-      const engine = deck === 'A' ? engineA : engineB;
+      const target = decks[deck];
+      const engine = target.engine;
       if (isDeckLocked(engine)) {
         setLockHint(deck);
         if (lockHintTimer.current) clearTimeout(lockHintTimer.current);
         lockHintTimer.current = setTimeout(() => setLockHint(null), LOCK_HINT_MS);
         return;
       }
-      (deck === 'A' ? loadA : loadB)(track);
+      target.loadTrack(track);
     },
-    [engineA, engineB, loadA, loadB]
+    [decks]
   );
 
   // ── Table keys: ↑/↓ navigate, ← load A, → load B, Enter = A ───────────
@@ -190,12 +202,23 @@ export function PerformanceView() {
             <DeckPanel mirrored lockHint={lockHint === 'B'} />
             <DeckKeys />
           </DeckScope>
+          <DeckScope deck="C">
+            <DeckPanel lockHint={lockHint === 'C'} />
+          </DeckScope>
+          <DeckScope deck="D">
+            <DeckPanel mirrored lockHint={lockHint === 'D'} />
+          </DeckScope>
         </div>
       </div>
 
       {/* Browse surface — the real Library, all remaining height. All loads
           (hover buttons, double-click, arrow keys) go through the load lock. */}
-      <LockDimmedLibrary engineA={engineA} engineB={engineB}>
+      <LockDimmedLibrary
+        engineA={engineA}
+        engineB={engineB}
+        engineC={engineC}
+        engineD={engineD}
+      >
         <DeckScope deck="A">
           <Library browseOnly onLoadToDeck={tryLoad} browseRef={libraryRef} />
         </DeckScope>
@@ -206,7 +229,7 @@ export function PerformanceView() {
 
 /**
  * The shared-zoom island (performance-mode 08): `visibleSeconds` — one
- * zoom for both waveforms (issue 05: equal effective BPM must mean equal
+ * zoom for all waveforms (issue 05: equal effective BPM must mean equal
  * beat spacing on screen; survives loads, each waveform re-derives its
  * track-relative factor) — lives HERE, not in PerformanceView, so a wheel
  * tick re-renders exactly its consumers: the two DeckWaveforms and the
@@ -226,6 +249,18 @@ function PerfWaves() {
         />
       </DeckScope>
       <DeckScope deck="B">
+        <DeckWaveform
+          visibleSeconds={visibleSeconds}
+          onVisibleSecondsChange={setVisibleSeconds}
+        />
+      </DeckScope>
+      <DeckScope deck="C">
+        <DeckWaveform
+          visibleSeconds={visibleSeconds}
+          onVisibleSecondsChange={setVisibleSeconds}
+        />
+      </DeckScope>
+      <DeckScope deck="D">
         <DeckWaveform
           visibleSeconds={visibleSeconds}
           onVisibleSecondsChange={setVisibleSeconds}

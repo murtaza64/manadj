@@ -350,6 +350,14 @@ a.provenance-chip:hover {
   color: var(--deck-b);
 }
 
+.track-load-button-C {
+  color: var(--deck-c);
+}
+
+.track-load-button-D {
+  color: var(--deck-d);
+}
+
 /* Play order (#) cell — playlist tables only (playlist-editing 04) */
 .track-order-cell {
   color: var(--subtext0);

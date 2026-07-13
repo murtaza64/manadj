@@ -6,6 +6,7 @@ import KeyDisplay from './KeyDisplay';
 import { formatRelativeTime } from '../utils/dateUtils';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
+import { CHANNEL_IDS } from '../playback/mixer';
 import { getColumnConfig } from './columnConfig';
 import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDrag';
 import { LinkIcon } from '../links/LinkIcon';
@@ -257,7 +258,7 @@ const TrackRow = memo(function TrackRow({
           </div>
           {onLoadToDeck && (
             <span className="track-load-buttons">
-              {(['A', 'B'] as const).map((deck) => (
+              {CHANNEL_IDS.map((deck) => (
                 <button
                   key={deck}
                   className={`track-load-button track-load-button-${deck}`}
