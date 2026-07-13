@@ -25,6 +25,16 @@ export function DeckKeys() {
   );
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
 
+  // Switching the focused Deck must not strand a held control on the old
+  // layer. Engine identity changes only when this focused scope changes.
+  useEffect(
+    () => () => {
+      engine.setBend(0);
+      engine.cueUp();
+    },
+    [engine]
+  );
+
   useEffect(() => {
     const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
     const padSlot = (key: string) => {

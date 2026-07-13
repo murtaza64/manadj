@@ -49,6 +49,8 @@ export type ButtonTarget =
   /** SHIFT+Q: that Deck's Key Lock toggle (midi-performance-ops 07) —
    * registry-direct sticky Deck state, never surface-routed. */
   | { control: 'key-lock'; deck: ChannelId }
+  /** Switch the layered physical deck surface on one side (four-Deck 03). */
+  | { control: 'control-focus'; side: 'left' | 'right' }
   /** The assistant button (midi-performance-ops 08): a macro over the
    * per-Deck Follow model — all on (playing Decks, or both when nothing
    * plays) or all off. Registry-direct, browse-adjacent. */

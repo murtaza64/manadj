@@ -22,6 +22,8 @@ export interface DeckKeyMap {
   pads: [string, string, string, string];
 }
 
+export const CONTROL_FOCUS_KEYS = { left: '[', right: ']' } as const;
+
 /** INPUT types that take typed text (keyboard-focus 01: a focused
  * checkbox/radio/range must NOT silence the hubs — the no-focus rule
  * keeps them from focusing at all; this guard makes any leak non-fatal). */

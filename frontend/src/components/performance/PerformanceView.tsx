@@ -30,9 +30,10 @@ import { LinkToggle } from '../../links/LinkToggle';
 import { DeckKeys } from './DeckKeys';
 import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { dispatchSetSpace } from '../../sets/spaceTransport';
-import { isGuardedKeyEvent } from './performanceKeys';
+import { CONTROL_FOCUS_KEYS, isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
 import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
+import { toggleControlFocus, useControlFocus } from '../../performance/controlFocus';
 import './PerformanceView.css';
 
 const LOCK_HINT_MS = 1500;
@@ -96,6 +97,7 @@ export function PerformanceView() {
   const libraryRef = useRef<LibraryBrowseHandle>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   useMidiCursorSuppression(rootRef);
+  const controlFocus = useControlFocus();
 
   // ── Load lock ──────────────────────────────────────────────────────────
   const [lockHint, setLockHint] = useState<ChannelId | null>(null);
@@ -139,6 +141,14 @@ export function PerformanceView() {
       if (event.key === ' ') {
         event.preventDefault();
         dispatchSetSpace();
+        return;
+      }
+
+      if (event.key === CONTROL_FOCUS_KEYS.left || event.key === CONTROL_FOCUS_KEYS.right) {
+        event.preventDefault();
+        if (!event.repeat) {
+          toggleControlFocus(event.key === CONTROL_FOCUS_KEYS.left ? 'left' : 'right');
+        }
         return;
       }
 
@@ -196,17 +206,21 @@ export function PerformanceView() {
           </div>
           <DeckScope deck="A">
             <DeckPanel lockHint={lockHint === 'A'} />
-            <DeckKeys />
           </DeckScope>
           <DeckScope deck="B">
             <DeckPanel mirrored lockHint={lockHint === 'B'} />
-            <DeckKeys />
           </DeckScope>
           <DeckScope deck="C">
             <DeckPanel lockHint={lockHint === 'C'} />
           </DeckScope>
           <DeckScope deck="D">
             <DeckPanel mirrored lockHint={lockHint === 'D'} />
+          </DeckScope>
+          <DeckScope deck={controlFocus.left}>
+            <DeckKeys />
+          </DeckScope>
+          <DeckScope deck={controlFocus.right}>
+            <DeckKeys />
           </DeckScope>
         </div>
       </div>

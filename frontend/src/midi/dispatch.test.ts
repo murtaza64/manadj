@@ -31,6 +31,10 @@ import {
   dispatchMidiAction,
 } from './dispatch';
 import { _resetTakeoverFeedbackForTests, takeoverHint, takeoverKey } from './takeoverFeedback';
+import {
+  _resetControlFocusForTests,
+  getControlFocus,
+} from '../performance/controlFocus';
 
 const button = (
   control: 'transport' | 'cue',
@@ -201,9 +205,21 @@ afterEach(() => {
   _resetGridChordForTests();
   _resetSoftTakeoverForTests();
   _resetTakeoverFeedbackForTests();
+  _resetControlFocusForTests();
 });
 
 describe('routing', () => {
+  it('controller layer buttons toggle shared Control focus on their down edge', () => {
+    const action = (edge: 'down' | 'up'): MidiAction => ({
+      kind: 'button',
+      edge,
+      target: { control: 'control-focus', side: 'left' },
+    });
+    dispatchMidiAction(action('down'));
+    dispatchMidiAction(action('up'));
+    expect(getControlFocus()).toEqual({ left: 'C', right: 'B' });
+  });
+
   it('shared surface: transport and cue reach the shared handlers per deck', () => {
     dispatchMidiAction(button('transport', 'A', 'down'));
     dispatchMidiAction(button('cue', 'B', 'down'));
