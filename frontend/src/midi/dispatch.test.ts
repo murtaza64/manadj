@@ -71,7 +71,13 @@ function flatFakeMixer(): FakeMixerState {
     filter: 0,
     fader: 1,
   });
-  return { channels: { A: channel(), B: channel() }, crossfader: 0, master: 1, cueLevel: 0.7, cueMix: 0 };
+  return {
+    channels: { A: channel(), B: channel(), C: channel(), D: channel() },
+    crossfader: 0,
+    master: 1,
+    cueLevel: 0.7,
+    cueMix: 0,
+  };
 }
 
 function registerFakeDeckControls(deck: ChannelId): void {
@@ -146,7 +152,7 @@ function registerFakeMixerControls(): void {
 beforeEach(() => {
   calls = [];
   sharedLoopActive = false;
-  fakePitch = { A: 0, B: 0 };
+  fakePitch = { A: 0, B: 0, C: 0, D: 0 };
   fakeMixer = flatFakeMixer();
   registerSurface('shared', {
     transport: {

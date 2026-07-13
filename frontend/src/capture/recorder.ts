@@ -21,17 +21,20 @@
  * gate with scripted fakes plus the real detector.
  */
 import type { DeckSnapshot } from '../playback/DeckEngine';
-import type { ChannelState } from '../playback/mixer';
+import { CHANNEL_IDS } from '../playback/mixer';
+import type { ChannelId, ChannelState } from '../playback/mixer';
+import { channelCrossfaderGain, channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import { initialCaptureState, reduceCapture } from './detector';
 import type { CaptureState } from './detector';
+import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { CaptureChannel, CaptureControlId, CaptureEvent, DetectedTake } from './events';
 
 const TICK_MS = 1000;
 
 /** What the recorder reads from the Mixer. */
 export interface CaptureMixerSource {
-  getChannelState(channel: CaptureChannel): ChannelState;
+  getChannelState(channel: ChannelId): ChannelState;
   getCrossfader(): number;
   getCrossfaderEnabled(): boolean;
   getMaster(): number;
@@ -56,19 +59,21 @@ export class CaptureRecorder {
   private timer: ReturnType<typeof setInterval> | null = null;
   /** True while a non-shared surface holds audibility: drop everything. */
   private gated = false;
+  private surfaceGated = false;
+  private multiDeckGated = false;
   private lastChannel: Record<CaptureChannel, ChannelState>;
   private lastCrossfader: number;
   private lastCrossfaderEnabled: boolean;
   private lastMaster: number;
-  private lastDeck: Record<CaptureChannel, DeckSnapshot>;
+  private lastDeck: Record<ChannelId, DeckSnapshot>;
 
   private readonly mixer: CaptureMixerSource;
-  private readonly engines: Record<CaptureChannel, CaptureDeckSource>;
+  private readonly engines: Record<ChannelId, CaptureDeckSource>;
   private readonly onTake: (take: DetectedTake) => void;
 
   constructor(
     mixer: CaptureMixerSource,
-    engines: Record<CaptureChannel, CaptureDeckSource>,
+    engines: Record<ChannelId, CaptureDeckSource>,
     onTake: (take: DetectedTake) => void
   ) {
     this.mixer = mixer;
@@ -78,15 +83,24 @@ export class CaptureRecorder {
     this.lastCrossfader = mixer.getCrossfader();
     this.lastCrossfaderEnabled = mixer.getCrossfaderEnabled();
     this.lastMaster = mixer.getMaster();
-    this.lastDeck = { A: engines.A.getSnapshot(), B: engines.B.getSnapshot() };
+    this.lastDeck = {
+      A: engines.A.getSnapshot(),
+      B: engines.B.getSnapshot(),
+      C: engines.C.getSnapshot(),
+      D: engines.D.getSnapshot(),
+    };
   }
 
   start(): void {
-    this.gated = audibleHolder() !== 'shared';
-    this.unsubs.push(subscribeAudible((holder) => this.setGated(holder !== 'shared')));
+    this.surfaceGated = audibleHolder() !== 'shared';
+    this.multiDeckGated = this.tooManyAudibleDecks();
+    this.gated = this.surfaceGated || this.multiDeckGated;
+    this.unsubs.push(subscribeAudible((holder) => this.setSurfaceGated(holder !== 'shared')));
     this.unsubs.push(this.mixer.subscribe(() => this.diffMixer()));
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
+    for (const ch of CHANNEL_IDS) {
       this.unsubs.push(this.engines[ch].subscribe(() => this.diffDeck(ch)));
+    }
+    for (const ch of ['A', 'B'] as CaptureChannel[]) {
       this.engines[ch].setTransportEventHandler((e) =>
         this.feed({ t: this.now(), kind: 'transport', channel: ch, ...e })
       );
@@ -97,7 +111,18 @@ export class CaptureRecorder {
 
   /** Audibility flip (ADR 0022). Gaining the gate discards the in-flight
    * engagement; losing it re-seeds the detector from current reality. */
-  private setGated(gated: boolean): void {
+  private setSurfaceGated(gated: boolean): void {
+    this.surfaceGated = gated;
+    this.applyGate();
+  }
+
+  private updateMultiDeckGate(): void {
+    this.multiDeckGated = this.tooManyAudibleDecks();
+    this.applyGate();
+  }
+
+  private applyGate(): void {
+    const gated = this.surfaceGated || this.multiDeckGated;
     if (gated === this.gated) return;
     this.gated = gated;
     if (gated) {
@@ -105,6 +130,32 @@ export class CaptureRecorder {
     } else {
       this.seed();
     }
+  }
+
+  /** Phase-1 safety: the detector remains the existing A/B pair machine.
+   * A third Master-audible Deck discards and suspends the engagement until
+   * multi-Deck pair machines land in issue 10. */
+  private tooManyAudibleDecks(): boolean {
+    return CHANNEL_IDS.filter((deck) => this.deckAudible(deck)).length > 2;
+  }
+
+  private deckAudible(deck: ChannelId): boolean {
+    if (!this.engines[deck].getSnapshot().playing) return false;
+    const state = this.mixer.getChannelState(deck);
+    const { audibleGain, eqKillBelow, filterKillBeyond } = DEFAULT_DETECTOR_PARAMS;
+    if (
+      state.eq.low <= eqKillBelow &&
+      state.eq.mid <= eqKillBelow &&
+      state.eq.high <= eqKillBelow
+    ) {
+      return false;
+    }
+    if (Math.abs(state.filter) >= filterKillBeyond) return false;
+    const xfGain = channelCrossfaderGain(
+      deck,
+      this.mixer.getCrossfaderEnabled() ? this.mixer.getCrossfader() : 0
+    );
+    return trimToGain(state.trim) * channelFaderToGain(state.fader) * xfGain >= audibleGain;
   }
 
   /**
@@ -115,6 +166,7 @@ export class CaptureRecorder {
    */
   private seed(): void {
     const t = this.now();
+    for (const ch of CHANNEL_IDS) this.lastDeck[ch] = this.engines[ch].getSnapshot();
     for (const ch of ['A', 'B'] as CaptureChannel[]) {
       const c = this.mixer.getChannelState(ch);
       for (const [control, read] of CaptureRecorder.CHANNEL_CONTROLS) {
@@ -193,6 +245,7 @@ export class CaptureRecorder {
   ];
 
   private diffMixer(): void {
+    this.updateMultiDeckGate();
     const t = this.now();
     for (const ch of ['A', 'B'] as CaptureChannel[]) {
       const prev = this.lastChannel[ch];
@@ -221,12 +274,14 @@ export class CaptureRecorder {
     }
   }
 
-  private diffDeck(ch: CaptureChannel): void {
+  private diffDeck(ch: ChannelId): void {
     const t = this.now();
     const prev = this.lastDeck[ch];
     const cur = this.engines[ch].getSnapshot();
     if (cur === prev) return;
     this.lastDeck[ch] = cur;
+    this.updateMultiDeckGate();
+    if (ch !== 'A' && ch !== 'B') return;
     if (cur.trackId !== prev.trackId) {
       this.feed({ t, kind: 'load', channel: ch, trackId: cur.trackId, bpm: cur.bpm });
     }

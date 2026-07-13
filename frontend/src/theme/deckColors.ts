@@ -1,7 +1,8 @@
 /**
  * Deck colors (deck-colors 01) — THE single source of truth for the
- * per-Deck identity colors (CONTEXT.md: Deck color). A cyan, B magenta,
- * as established by the Transition editor. Identity only: state colors
+ * per-Deck identity colors (CONTEXT.md: Deck color). A cyan and B magenta
+ * come from the Transition editor; C orange and D violet extend the set.
+ * Identity only: state colors
  * (green = active, blue = accent) never denote a Deck.
  *
  * TS/canvas consumers import DECK_COLORS; CSS consumers use the variables
@@ -9,11 +10,14 @@
  * `--deck-a-rgb` / `--deck-b-rgb` (comma-separated triplets, for
  * `rgba(var(--deck-b-rgb), 0.14)` alpha washes).
  */
+import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 
 export const DECK_COLORS: Record<ChannelId, string> = {
   A: '#00e5ff',
   B: '#ff2d95',
+  C: '#ff7a00',
+  D: '#8f4dff',
 };
 
 /** '#rrggbb' → 'r, g, b' (for rgba(var(--…-rgb), alpha) washes). */
@@ -26,7 +30,7 @@ export function hexToRgbTriplet(hex: string): string {
 export function installDeckColorVars(
   root: { style: { setProperty(name: string, value: string): void } } = document.documentElement
 ): void {
-  for (const deck of ['A', 'B'] as const) {
+  for (const deck of CHANNEL_IDS) {
     root.style.setProperty(`--deck-${deck.toLowerCase()}`, DECK_COLORS[deck]);
     root.style.setProperty(`--deck-${deck.toLowerCase()}-rgb`, hexToRgbTriplet(DECK_COLORS[deck]));
   }

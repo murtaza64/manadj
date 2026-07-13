@@ -15,21 +15,22 @@
  * holds — same visible behavior as before the editor shared the decks.
  */
 import type { DeckEngine } from '../playback/DeckEngine';
+import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 import { audibleHolder } from '../playback/audibleSurface';
 import { dispatchFollow } from './followStore';
 
-const DECKS: readonly ChannelId[] = ['A', 'B'];
-
-/** Subscribe to both engines; returns a dispose. */
+/** Subscribe to all engines; returns a dispose. */
 export function initFollowPlaybackBridge(
   engines: Record<ChannelId, DeckEngine>
 ): () => void {
   const playing: Record<ChannelId, boolean> = {
     A: engines.A.getSnapshot().playing,
     B: engines.B.getSnapshot().playing,
+    C: engines.C.getSnapshot().playing,
+    D: engines.D.getSnapshot().playing,
   };
-  const unsubscribes = DECKS.map((deck) =>
+  const unsubscribes = CHANNEL_IDS.map((deck) =>
     engines[deck].subscribe(() => {
       const now = engines[deck].getSnapshot().playing;
       if (now === playing[deck]) return;

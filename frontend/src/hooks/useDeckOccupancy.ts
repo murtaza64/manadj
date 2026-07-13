@@ -26,11 +26,17 @@ export function useDeckOccupancy(decks: Record<ChannelId, DeckContextValue>): De
   const aPlaying = useEngineSlice(decks.A.engine, (s) => s.playing);
   const bTrackId = useEngineSlice(decks.B.engine, (s) => s.trackId);
   const bPlaying = useEngineSlice(decks.B.engine, (s) => s.playing);
+  const cTrackId = useEngineSlice(decks.C.engine, (s) => s.trackId);
+  const cPlaying = useEngineSlice(decks.C.engine, (s) => s.playing);
+  const dTrackId = useEngineSlice(decks.D.engine, (s) => s.trackId);
+  const dPlaying = useEngineSlice(decks.D.engine, (s) => s.playing);
   return useMemo(
     () => ({
       A: { trackId: aTrackId, playing: aPlaying },
       B: { trackId: bTrackId, playing: bPlaying },
+      C: { trackId: cTrackId, playing: cPlaying },
+      D: { trackId: dTrackId, playing: dPlaying },
     }),
-    [aTrackId, aPlaying, bTrackId, bPlaying]
+    [aTrackId, aPlaying, bTrackId, bPlaying, cTrackId, cPlaying, dTrackId, dPlaying]
   );
 }

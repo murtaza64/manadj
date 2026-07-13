@@ -16,7 +16,7 @@ import { CaptureRecorder } from './recorder';
 import type { CaptureDeckSource, CaptureMixerSource } from './recorder';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { DetectedTake } from './events';
-import type { ChannelState } from '../playback/mixer';
+import type { ChannelId, ChannelState } from '../playback/mixer';
 import type { DeckSnapshot } from '../playback/DeckEngine';
 import {
   _resetAudibleSurfacesForTests,
@@ -32,11 +32,16 @@ function flatChannel(): ChannelState {
 }
 
 class FakeMixerSource implements CaptureMixerSource {
-  private channels: Record<'A' | 'B', ChannelState> = { A: flatChannel(), B: flatChannel() };
+  private channels: Record<ChannelId, ChannelState> = {
+    A: flatChannel(),
+    B: flatChannel(),
+    C: flatChannel(),
+    D: flatChannel(),
+  };
   private crossfader = 0;
   private listeners = new Set<() => void>();
 
-  getChannelState(ch: 'A' | 'B'): ChannelState {
+  getChannelState(ch: ChannelId): ChannelState {
     return this.channels[ch];
   }
   getCrossfader(): number {
@@ -53,7 +58,7 @@ class FakeMixerSource implements CaptureMixerSource {
     return () => this.listeners.delete(fn);
   }
 
-  setFader(ch: 'A' | 'B', fader: number): void {
+  setFader(ch: ChannelId, fader: number): void {
     this.channels[ch] = { ...this.channels[ch], fader };
     for (const fn of this.listeners) fn();
   }
@@ -119,7 +124,12 @@ function surface() {
 /** A rig: recorder over fakes, real detector, fake clock at second `t`. */
 function rig() {
   const mixer = new FakeMixerSource();
-  const decks = { A: new FakeDeckSource(), B: new FakeDeckSource() };
+  const decks = {
+    A: new FakeDeckSource(),
+    B: new FakeDeckSource(),
+    C: new FakeDeckSource(),
+    D: new FakeDeckSource(),
+  };
   const takes: DetectedTake[] = [];
   const recorder = new CaptureRecorder(mixer, decks, (take) => takes.push(take));
   return { mixer, decks, takes, recorder, advance: (sec: number) => vi.advanceTimersByTime(sec * 1000) };
@@ -161,6 +171,25 @@ describe('capture gate (ADR 0022)', () => {
     expect(r.takes).toHaveLength(1);
     expect(r.takes[0].outgoingTrackId).toBe(1);
     expect(r.takes[0].incomingTrackId).toBe(2);
+    r.recorder.dispose();
+  });
+
+  it('a third audible Deck discards and suspends the pair engagement', () => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    r.decks.B.load(2);
+    r.decks.C.load(3);
+    r.mixer.setFader('B', 0);
+    r.decks.A.play();
+    r.decks.C.play();
+    r.advance(10);
+    r.decks.B.play();
+    r.mixer.setFader('B', 1); // A+B+C become Master-audible
+    r.advance(2);
+    r.mixer.setFader('A', 0);
+    r.advance(HORIZON + 1);
+    expect(r.takes).toHaveLength(0);
     r.recorder.dispose();
   });
 

@@ -24,9 +24,10 @@
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import { bContentSegments, bTrackTimeAt } from '../editor/mixModel';
 import { audibleHolder, type AudibleSurfaceId } from '../playback/audibleSurface';
-import type { ChannelId } from '../playback/mixer';
 import { channelFaderToGain, crossfaderGains, trimToGain } from '../playback/mixerMath';
 import type { PlanAutomation, PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
+
+type PlanDeck = PlannedEntry['deck'];
 
 /** Default alignment tolerance for the two-deck blend case: the
  * Conductor's drift tolerance (issue 16). Tunable — but raising it past
@@ -61,8 +62,8 @@ export interface PickupChannelSnapshot {
 }
 
 export interface PickupSnapshot {
-  decks: Record<ChannelId, PickupDeckSnapshot>;
-  channels: Record<ChannelId, PickupChannelSnapshot>;
+  decks: Record<PlanDeck, PickupDeckSnapshot>;
+  channels: Record<PlanDeck, PickupChannelSnapshot>;
   crossfader: number;
   crossfaderEnabled: boolean;
   /** The audible-surface holder at the read (sets 25): pickup adopts a
@@ -94,7 +95,7 @@ export type PickupDecision =
       flip: boolean;
       /** The audible (anchor) decks — untouchable at the instant; their
        * pitch converges by ramp instead of snapping. */
-      anchors: ChannelId[];
+      anchors: PlanDeck[];
     }
   | { lit: false; reason: PickupUnlitReason; message: string };
 
@@ -103,7 +104,7 @@ export type PickupDecision =
 /** What the snapshot needs from the Mixer (base state only — the
  * automation overlay is the Conductor's own writing, ADR 0022). */
 export interface PickupMixerReads {
-  getChannelState(ch: ChannelId): {
+  getChannelState(ch: PlanDeck): {
     trim: number;
     fader: number;
     eq: { low: number; mid: number; high: number };
@@ -125,9 +126,9 @@ export interface PickupDeckReads {
  * pure, consuming it as snapshot data.) */
 export function readPickupSnapshot(
   mixer: PickupMixerReads,
-  engines: Record<ChannelId, PickupDeckReads>
+  engines: Record<PlanDeck, PickupDeckReads>
 ): PickupSnapshot {
-  const deckOf = (ch: ChannelId): PickupDeckSnapshot => {
+  const deckOf = (ch: PlanDeck): PickupDeckSnapshot => {
     const s = engines[ch].getSnapshot();
     return {
       trackId: s.trackId,
@@ -136,7 +137,7 @@ export function readPickupSnapshot(
       pitchPercent: s.pitchPercent,
     };
   };
-  const channelOf = (ch: ChannelId): PickupChannelSnapshot => {
+  const channelOf = (ch: PlanDeck): PickupChannelSnapshot => {
     const c = mixer.getChannelState(ch);
     return { trim: c.trim, fader: c.fader, eq: { ...c.eq }, filter: c.filter };
   };
@@ -155,7 +156,7 @@ const { audibleGain, eqKillBelow, filterKillBeyond } = DEFAULT_DETECTOR_PARAMS;
 
 /** detector.ts's deckAudible without the transport gate: would this
  * channel be audible on the Master bus if its deck ran? */
-function channelAudible(snap: PickupSnapshot, ch: ChannelId): boolean {
+function channelAudible(snap: PickupSnapshot, ch: PlanDeck): boolean {
   if (snap.decks[ch].trackId === null) return false;
   const c = snap.channels[ch];
   if (c.eq.low <= eqKillBelow && c.eq.mid <= eqKillBelow && c.eq.high <= eqKillBelow) {
@@ -165,12 +166,12 @@ function channelAudible(snap: PickupSnapshot, ch: ChannelId): boolean {
   return channelGain(snap, ch) >= audibleGain;
 }
 
-function xfGain(snap: PickupSnapshot, ch: ChannelId): number {
+function xfGain(snap: PickupSnapshot, ch: PlanDeck): number {
   const xf = crossfaderGains(snap.crossfaderEnabled ? snap.crossfader : 0);
   return ch === 'A' ? xf.a : xf.b;
 }
 
-function channelGain(snap: PickupSnapshot, ch: ChannelId): number {
+function channelGain(snap: PickupSnapshot, ch: PlanDeck): number {
   const c = snap.channels[ch];
   return trimToGain(c.trim) * channelFaderToGain(c.fader) * xfGain(snap, ch);
 }
@@ -288,11 +289,11 @@ export function evaluatePickup(
   return twoDeckPickup(plan, snap, audible, params.toleranceSec ?? DEFAULT_PICKUP_TOLERANCE_S);
 }
 
-const deckName = (ch: ChannelId) => `Deck ${ch}`;
+const deckName = (ch: PlanDeck) => `Deck ${ch}`;
 
-const otherDeck = (ch: ChannelId): ChannelId => (ch === 'A' ? 'B' : 'A');
+const otherDeck = (ch: PlanDeck): PlanDeck => (ch === 'A' ? 'B' : 'A');
 
-function oneDeckPickup(plan: SetPlan, snap: PickupSnapshot, ch: ChannelId): PickupDecision {
+function oneDeckPickup(plan: SetPlan, snap: PickupSnapshot, ch: PlanDeck): PickupDecision {
   const deck = snap.decks[ch];
   const candidates = plan.entries
     .map((e, i) => ({ entry: e, idx: i }))
@@ -322,7 +323,7 @@ function oneDeckPickup(plan: SetPlan, snap: PickupSnapshot, ch: ChannelId): Pick
 function twoDeckPickup(
   plan: SetPlan,
   snap: PickupSnapshot,
-  audible: ChannelId[],
+  audible: PlanDeck[],
   toleranceSec: number
 ): PickupDecision {
   // The audibly dominant deck anchors reasons ("fade the OTHER one out").
@@ -332,7 +333,7 @@ function twoDeckPickup(
       : [audible[1], audible[0]];
   const fadeHint = `fade ${deckName(other)} out and the button lights`;
 
-  const inSet = (ch: ChannelId) => plan.entries.some((e) => e.trackId === snap.decks[ch].trackId);
+  const inSet = (ch: PlanDeck) => plan.entries.some((e) => e.trackId === snap.decks[ch].trackId);
   if (!inSet(dom) || !inSet(other)) {
     const stray = inSet(dom) ? other : dom;
     return {
@@ -432,8 +433,8 @@ export function flipPlanDecks(plan: SetPlan): SetPlan {
  * fader (the automation overlay pins the crossfader neutral, and fader
  * gain is value² — value·√xf preserves the sounding gain at engage).
  */
-export function pickupStartLanes(snap: PickupSnapshot): Record<ChannelId, PlanAutomation> {
-  const lane = (ch: ChannelId): PlanAutomation => {
+export function pickupStartLanes(snap: PickupSnapshot): Record<PlanDeck, PlanAutomation> {
+  const lane = (ch: PlanDeck): PlanAutomation => {
     const c = snap.channels[ch];
     return {
       fader: c.fader * Math.sqrt(xfGain(snap, ch)),

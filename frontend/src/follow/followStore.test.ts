@@ -36,14 +36,21 @@ afterEach(() => {
 describe('followStore', () => {
   it('restores persisted flags on boot', async () => {
     const store = await loadStore('{"A":true,"B":false}');
-    expect(store.getFollowFlags()).toEqual({ A: true, B: false });
+    expect(store.getFollowFlags()).toEqual({ A: true, B: false, C: false, D: false });
   });
 
   it('treats garbage and non-boolean values as off', async () => {
-    expect((await loadStore('not json')).getFollowFlags()).toEqual({ A: false, B: false });
+    expect((await loadStore('not json')).getFollowFlags()).toEqual({
+      A: false,
+      B: false,
+      C: false,
+      D: false,
+    });
     expect((await loadStore('{"A":"yes","B":1}')).getFollowFlags()).toEqual({
       A: false,
       B: false,
+      C: false,
+      D: false,
     });
   });
 
@@ -52,9 +59,14 @@ describe('followStore', () => {
     const seen: unknown[] = [];
     store.subscribeFollow(() => seen.push(store.getFollowFlags()));
     store.dispatchFollow({ type: 'toggle', deck: 'A', loaded: true });
-    expect(store.getFollowFlags()).toEqual({ A: true, B: false });
-    expect(seen).toEqual([{ A: true, B: false }]);
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual({ A: true, B: false });
+    expect(store.getFollowFlags()).toEqual({ A: true, B: false, C: false, D: false });
+    expect(seen).toEqual([{ A: true, B: false, C: false, D: false }]);
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual({
+      A: true,
+      B: false,
+      C: false,
+      D: false,
+    });
   });
 
   it('a rejected event neither persists nor notifies', async () => {

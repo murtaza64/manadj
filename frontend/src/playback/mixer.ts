@@ -46,13 +46,14 @@ import { BusOutputBridge, CueBridge } from './cueBridge';
 import type { OutputPair } from './routing';
 import {
   channelFaderToGain,
-  crossfaderGains,
+  channelCrossfaderGain,
   cueLevelToGain,
   cueMixGains,
   trimToGain,
 } from './mixerMath';
 
-export type ChannelId = 'A' | 'B';
+export const CHANNEL_IDS = ['A', 'B', 'C', 'D'] as const;
+export type ChannelId = (typeof CHANNEL_IDS)[number];
 
 /** What a deck needs from the audio layer: a live context and its channel input. */
 export interface DeckAudioPort {
@@ -239,6 +240,8 @@ export class Mixer {
   private channels: Record<ChannelId, ChannelState> = {
     A: structuredClone(FLAT_CHANNEL),
     B: structuredClone(FLAT_CHANNEL),
+    C: structuredClone(FLAT_CHANNEL),
+    D: structuredClone(FLAT_CHANNEL),
   };
   private crossfader = 0; // -1 (A) .. 1 (B)
   /** Crossfader bypass: while false the fader position is kept but both
@@ -283,6 +286,8 @@ export class Mixer {
       const strips: Record<ChannelId, ChannelStrip> = {
         A: new ChannelStrip(ctx, this.channels.A),
         B: new ChannelStrip(ctx, this.channels.B),
+        C: new ChannelStrip(ctx, this.channels.C),
+        D: new ChannelStrip(ctx, this.channels.D),
       };
       const masterGain = ctx.createGain();
       masterGain.gain.value = this.master;
@@ -294,8 +299,7 @@ export class Mixer {
       // what the room hears, before how loud the room hears it. The cue/mix
       // blend taps it here so the master fader never changes the headphones.
       const program = ctx.createGain();
-      strips.A.crossfadeGain.connect(program);
-      strips.B.crossfadeGain.connect(program);
+      for (const channel of CHANNEL_IDS) strips[channel].crossfadeGain.connect(program);
       program.connect(masterGain);
       masterGain.connect(limiter);
       const masterBridge = new BusOutputBridge(ctx);
@@ -305,8 +309,7 @@ export class Mixer {
       // bridge. Its own safety limiter — two full-scale cued tracks clip
       // like the master case above.
       const cueSum = ctx.createGain();
-      strips.A.pflGain.connect(cueSum);
-      strips.B.pflGain.connect(cueSum);
+      for (const channel of CHANNEL_IDS) strips[channel].pflGain.connect(cueSum);
       const { cue: cueSide, master: masterSide } = cueMixGains(this.cueMix);
       const blendCueGain = ctx.createGain();
       blendCueGain.gain.value = cueSide;
@@ -337,10 +340,9 @@ export class Mixer {
       // automation-aware: a revival while the overlay is engaged restores
       // automation ownership (ADR 0022), not base state.
       this.applyCrossfader(false);
-      this.applyFilter('A');
-      this.applyFilter('B');
+      for (const channel of CHANNEL_IDS) this.applyFilter(channel);
       if (this.automation) {
-        for (const channel of ['A', 'B'] as const) {
+        for (const channel of CHANNEL_IDS) {
           const v = this.automation[channel];
           if (!v) continue;
           strips[channel].faderGain.gain.value = channelFaderToGain(v.fader);
@@ -409,7 +411,7 @@ export class Mixer {
     const owner = Symbol('automation-owner');
     this.automationOwner = owner;
     if (!this.automation) {
-      this.automation = { A: null, B: null };
+      this.automation = { A: null, B: null, C: null, D: null };
       if (this.liveGraph()) this.applyCrossfader(true);
     }
     return owner;
@@ -434,7 +436,7 @@ export class Mixer {
     const live = this.liveGraph();
     if (!live) return;
     const { ctx, strips } = live;
-    for (const channel of ['A', 'B'] as const) {
+    for (const channel of CHANNEL_IDS) {
       const st = this.channels[channel];
       rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(st.fader));
       for (const band of ['low', 'mid', 'high'] as const) {
@@ -630,7 +632,7 @@ export class Mixer {
   // ── Cue bus (headphone-cue 02, ADR 0017) ─────────────────────────────
 
   /** PFL this channel into the headphones — post-EQ/filter, pre-fader.
-   * Both channels may be cued at once (they sum). */
+   * Any channels may be cued together (they sum). */
   setPfl(channel: ChannelId, on: boolean): void {
     this.channels[channel] = { ...this.channels[channel], pfl: on };
     this.notify();
@@ -722,13 +724,17 @@ export class Mixer {
     if (!this.ctx || !this.strips) return;
     // Overlay engaged → pinned neutral (ADR 0022); bypass guard → neutral.
     const position = this.automation ? 0 : this.crossfaderEnabled ? this.crossfader : 0;
-    const { a, b } = crossfaderGains(position);
+    const targets = Object.fromEntries(
+      CHANNEL_IDS.map((channel) => [channel, channelCrossfaderGain(channel, position)])
+    ) as Record<ChannelId, number>;
     if (ramp) {
-      rampGain(this.ctx, this.strips.A.crossfadeGain.gain, a);
-      rampGain(this.ctx, this.strips.B.crossfadeGain.gain, b);
+      for (const channel of CHANNEL_IDS) {
+        rampGain(this.ctx, this.strips[channel].crossfadeGain.gain, targets[channel]);
+      }
     } else {
-      this.strips.A.crossfadeGain.gain.value = a;
-      this.strips.B.crossfadeGain.gain.value = b;
+      for (const channel of CHANNEL_IDS) {
+        this.strips[channel].crossfadeGain.gain.value = targets[channel];
+      }
     }
   }
 

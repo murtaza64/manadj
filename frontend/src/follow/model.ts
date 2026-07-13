@@ -12,6 +12,7 @@
  * state machine (spread/drop/sticky rules) is issue 02; ranking is 04.
  */
 import type { Track } from '../types';
+import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 
 // ── State machine (follow-mode 02) ──────────────────────────────────────
@@ -28,8 +29,6 @@ export type FollowEvent =
   | { type: 'toggle'; deck: ChannelId; loaded: boolean }
   | { type: 'play'; deck: ChannelId; playing: Record<ChannelId, boolean> }
   | { type: 'pause'; deck: ChannelId; playing: Record<ChannelId, boolean> };
-
-const DECKS: readonly ChannelId[] = ['A', 'B'];
 
 /**
  * Follow rides playback (mirrors the transport-reducer pattern):
@@ -52,16 +51,16 @@ export function reduceFollow(flags: FollowFlags, event: FollowEvent): FollowFlag
       return { ...flags, [event.deck]: true };
     }
     case 'play': {
-      if (!DECKS.some((d) => flags[d])) return flags;
+      if (!CHANNEL_IDS.some((d) => flags[d])) return flags;
       const next: Record<ChannelId, boolean> = { ...flags, [event.deck]: true };
-      for (const d of DECKS) {
+      for (const d of CHANNEL_IDS) {
         if (next[d] && !event.playing[d]) next[d] = false;
       }
       return next;
     }
     case 'pause': {
       if (!flags[event.deck]) return flags;
-      const otherStillPlaying = DECKS.some((d) => d !== event.deck && event.playing[d]);
+      const otherStillPlaying = CHANNEL_IDS.some((d) => d !== event.deck && event.playing[d]);
       return otherStillPlaying ? { ...flags, [event.deck]: false } : flags;
     }
   }
@@ -88,10 +87,10 @@ export function followMacroToggles(
   flags: FollowFlags,
   playing: Record<ChannelId, boolean>
 ): readonly ChannelId[] {
-  const following = DECKS.filter((d) => flags[d]);
+  const following = CHANNEL_IDS.filter((d) => flags[d]);
   if (following.length > 0) return following; // toggle-off always works
-  const playingDecks = DECKS.filter((d) => playing[d]);
-  return playingDecks.length > 0 ? playingDecks : [...DECKS];
+  const playingDecks = CHANNEL_IDS.filter((d) => playing[d]);
+  return playingDecks.length > 0 ? playingDecks : [...CHANNEL_IDS];
 }
 
 // ── Parameters ──────────────────────────────────────────────────────────
@@ -209,7 +208,7 @@ export function followedReferences(
   loaded: Record<ChannelId, Track | null>,
   fresh?: (id: number) => Track | null | undefined
 ): Array<{ deck: ChannelId; reference: Track }> {
-  return DECKS.flatMap((deck) => {
+  return CHANNEL_IDS.flatMap((deck) => {
     const snapshot = loaded[deck];
     if (!flags[deck] || !snapshot) return [];
     return [{ deck, reference: fresh?.(snapshot.id) ?? snapshot }];

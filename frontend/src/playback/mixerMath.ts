@@ -65,3 +65,12 @@ export function crossfaderGains(position: number): { a: number; b: number } {
     b: clamp01(1 + x),
   };
 }
+
+/** Phase-1 four-Deck assignment: A/C on the left, B/D on the right. */
+export function channelCrossfaderGain(
+  channel: 'A' | 'B' | 'C' | 'D',
+  position: number
+): number {
+  const { a, b } = crossfaderGains(position);
+  return channel === 'A' || channel === 'C' ? a : b;
+}

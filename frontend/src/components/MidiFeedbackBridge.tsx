@@ -144,6 +144,9 @@ function DeckFeedbackPublisher({
     );
     for (const output of outputs) {
       if (!output.mapping.feedback) continue;
+      // Existing two-Deck Mappings expose only A/B feedback. Layered C/D
+      // feedback arrives with the GRV6 Mapping in issue 05.
+      if (deck !== 'A' && deck !== 'B') continue;
       for (const message of encodeDeckLeds(output.mapping.feedback, deck, states)) {
         output.send(message);
       }

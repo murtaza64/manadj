@@ -309,7 +309,7 @@ function TrackZone({ track }: { track: Track | null }) {
 
 function PlayZone() {
   const { deck, engine } = useDeck();
-  const keys = DECK_KEYS[deck];
+  const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
   const ready = useDeckReady();
   const bend = useDeckSnapshot((s) => s.bendPercent);
 

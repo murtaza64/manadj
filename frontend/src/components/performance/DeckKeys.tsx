@@ -26,7 +26,7 @@ export function DeckKeys() {
   const hotCues = useHotCueActions(loadedTrack?.id ?? null);
 
   useEffect(() => {
-    const keys = DECK_KEYS[deck];
+    const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
     const padSlot = (key: string) => {
       const i = keys.pads.indexOf(key);
       return i === -1 ? null : i + 1;

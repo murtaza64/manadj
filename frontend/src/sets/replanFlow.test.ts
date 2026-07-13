@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Transition } from '../editor/mixModel';
 import { _resetAudibleSurfacesForTests } from '../playback/audibleSurface';
 import type { DeckEngine } from '../playback/DeckEngine';
-import type { ChannelId, Mixer } from '../playback/mixer';
+import type { Mixer } from '../playback/mixer';
 import {
   getConductor,
   replanSetPlayback,
@@ -153,9 +153,9 @@ function harness() {
   const engines = { A: new FakeEngine(), B: new FakeEngine() };
   const audio = {
     mixer: fakeMixer(),
-    engines: engines as unknown as Record<ChannelId, DeckEngine>,
+    engines: engines as unknown as Record<'A' | 'B', DeckEngine>,
   };
-  const loadTrack = (deck: ChannelId, trackId: number) => {
+  const loadTrack = (deck: 'A' | 'B', trackId: number) => {
     engines[deck].trackId = trackId;
   };
   return { engines, audio, loadTrack };

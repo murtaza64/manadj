@@ -41,6 +41,8 @@ import {
   type SetPlan,
 } from './planner';
 
+type PlanDeck = Extract<ChannelId, 'A' | 'B'>;
+
 /** The pin uuid the graft plans a frozen sounding window under, when the
  * live pin no longer matches it (re-pin / unpin mid-window). */
 export const GRAFT_PIN_UUID = '__live-window-graft__';
@@ -54,7 +56,7 @@ export type ReplanDecision =
        * anchor's entry on its physical deck. */
       flip: boolean;
       /** The audibly dominant deck the mapping anchored on. */
-      anchor: ChannelId;
+      anchor: PlanDeck;
     }
   | {
       ok: false;
@@ -112,7 +114,7 @@ export function evaluateReplan(
   const state = planStateAt(oldExecPlan, mixTime);
   const playing = (['A', 'B'] as const).filter((ch) => state.decks[ch].playing);
 
-  let anchor: ChannelId;
+  let anchor: PlanDeck;
   let anchorTrackId: number | null;
   let tau: number;
   let oldIdx: number;
