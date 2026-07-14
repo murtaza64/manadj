@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, type JSX } from 'react';
 import TrackRow, { type LoadedMark, type SelectMods, type TransitionMark } from './TrackRow';
+import { packRowEvidence } from './rowEvidence';
 import { useDecks } from '../hooks/useDeck';
 import { useDeckOccupancy } from '../hooks/useDeckOccupancy';
 import { loadedDecks } from '../sets/rowMarks';
@@ -42,15 +43,14 @@ interface TrackListProps {
   onLoadTrack: (track: Track) => void;
   /** When set (Performance view), rows get hover load-to-A/B buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
-  /** Saved-Transition marks (transition-library 02): targets with a
-   * Transition FROM deck A's / deck B's loaded track. */
-  transitionMarksA?: ReadonlyMap<number, PairInfo>;
-  transitionMarksB?: ReadonlyMap<number, PairInfo>;
-  /** Linked marks (linked-pairs 03): the Linked set plus each deck's
+  /** Saved-Transition marks (transition-library 02; A–D per
+   * four-deck-performance 21): per Deck, targets with a Transition FROM
+   * that Deck's loaded track. */
+  transitionMarks?: Partial<Record<ChannelId, ReadonlyMap<number, PairInfo>>>;
+  /** Linked marks (linked-pairs 03): the Linked set plus each Deck's
    * loaded track id, resolved per row (symmetric, unordered pairs). */
   links?: ReadonlySet<LinkKey>;
-  deckAId?: number | null;
-  deckBId?: number | null;
+  deckIds?: Partial<Record<ChannelId, number | null>>;
   /** Section headers (follow-mode 08): when set, a full-width header row
    * (label — count) opens each run of equal labels. The caller supplies
    * pre-grouped tracks (Follow's tier ordering); this only renders the
@@ -84,11 +84,9 @@ export default function TrackList({
   playOrder,
   onLoadTrack,
   onLoadToDeck,
-  transitionMarksA,
-  transitionMarksB,
+  transitionMarks,
   links,
-  deckAId,
-  deckBId,
+  deckIds,
   groupLabelFor,
   scoreFor,
   scoreSorted = false,
@@ -113,6 +111,12 @@ export default function TrackList({
   /** Memo-friendly Linked flag: is this row Linked with the deck's track? */
   const linkedFor = (deckId: number | null | undefined, id: number): boolean =>
     links !== undefined && deckId != null && isLinked(links, deckId, id);
+  /** All four Decks' evidence, packed to one primitive per row (issue 21). */
+  const evidenceFor = (id: number): string =>
+    packRowEvidence(
+      (deck) => markFor(transitionMarks?.[deck], id),
+      (deck) => linkedFor(deckIds?.[deck], id)
+    );
   const { widths, setWidth, resetWidth, cssVars } = useColumnWidths(playOrder !== undefined);
   const colSpan = playOrder !== undefined ? 12 : 11;
 
@@ -373,10 +377,7 @@ export default function TrackList({
                     score={scoreFor !== undefined ? scoreFor(track) : undefined}
                     keyMatched={signals ? signals.key : undefined}
                     sharedTagIds={signals ? [...signals.tagIds].join(',') : undefined}
-                    markA={markFor(transitionMarksA, track.id)}
-                    markB={markFor(transitionMarksB, track.id)}
-                    linkedA={linkedFor(deckAId, track.id)}
-                    linkedB={linkedFor(deckBId, track.id)}
+                    evidence={evidenceFor(track.id)}
                   />
                 );
               })}

@@ -129,14 +129,25 @@ export default function Library({
   const deckReady = useDeckReady();
   const showToast = useToast();
 
-  // Transition-library discovery (transition-library 02): per-row marks for
-  // tracks with a saved Transition FROM either loaded deck, starred when
-  // the pair is Preferred. Index rebuilds live on editor save events.
+  // Transition-library discovery (transition-library 02; A–D per
+  // four-deck-performance 21): per-row marks for tracks with a saved
+  // Transition FROM any loaded Deck, starred when the pair is Preferred.
+  // Index rebuilds live on editor save events.
   const decks = useDecks();
   const transitionIndex = useTransitionIndex();
   const links = useLinks();
-  const fromA = transitionsFrom(transitionIndex, decks.A.loadedTrack?.id);
-  const fromB = transitionsFrom(transitionIndex, decks.B.loadedTrack?.id);
+  const transitionMarks = {
+    A: transitionsFrom(transitionIndex, decks.A.loadedTrack?.id),
+    B: transitionsFrom(transitionIndex, decks.B.loadedTrack?.id),
+    C: transitionsFrom(transitionIndex, decks.C.loadedTrack?.id),
+    D: transitionsFrom(transitionIndex, decks.D.loadedTrack?.id),
+  };
+  const deckIds = {
+    A: decks.A.loadedTrack?.id ?? null,
+    B: decks.B.loadedTrack?.id ?? null,
+    C: decks.C.loadedTrack?.id ?? null,
+    D: decks.D.loadedTrack?.id ?? null,
+  };
 
   // ── Follow mode (follow-mode 01) ───────────────────────────────────────
   // Follow composes BESIDE the manual filters: one candidates query per
@@ -953,11 +964,9 @@ export default function Library({
                   dragSource="playlist-pane"
                   onLoadTrack={loadForTable}
                   onLoadToDeck={onLoadToDeck}
-                  transitionMarksA={fromA}
-                  transitionMarksB={fromB}
+                  transitionMarks={transitionMarks}
                   links={links}
-                  deckAId={decks.A.loadedTrack?.id ?? null}
-                  deckBId={decks.B.loadedTrack?.id ?? null}
+                  deckIds={deckIds}
                   sortColumn={playlistSort.column}
                   sortDirection={playlistSort.direction}
                   onSort={handleSort}
@@ -995,11 +1004,9 @@ export default function Library({
                   onRowContextMenu={handleRowContextMenuEditLib}
                   onLoadTrack={loadForTable}
                   onLoadToDeck={onLoadToDeck}
-                  transitionMarksA={fromA}
-                  transitionMarksB={fromB}
+                  transitionMarks={transitionMarks}
                   links={links}
-                  deckAId={decks.A.loadedTrack?.id ?? null}
-                  deckBId={decks.B.loadedTrack?.id ?? null}
+                  deckIds={deckIds}
                   groupLabelFor={followGroupLabel}
                   scoreFor={followScoreFor}
                   scoreSorted={followScoreSort}
@@ -1063,11 +1070,9 @@ export default function Library({
                   dragSource={selectedView === 'playlist' ? 'playlist-pane' : 'library'}
                   onLoadTrack={loadForTable}
                   onLoadToDeck={onLoadToDeck}
-                  transitionMarksA={fromA}
-                  transitionMarksB={fromB}
+                  transitionMarks={transitionMarks}
                   links={links}
-                  deckAId={decks.A.loadedTrack?.id ?? null}
-                  deckBId={decks.B.loadedTrack?.id ?? null}
+                  deckIds={deckIds}
                   groupLabelFor={followGroupLabel}
                   scoreFor={followScoreFor}
                   scoreSorted={followScoreSort}
