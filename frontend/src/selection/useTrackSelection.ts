@@ -51,8 +51,13 @@ export interface TrackSelection {
   getDragIds: (trackId: number) => number[];
 }
 
-export function useTrackSelection(tracks: Track[]): TrackSelection {
-  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+export function useTrackSelection(
+  tracks: Track[],
+  /** Seed for a restored session (four-deck-performance 27); the mount
+   * prune drops any ids that no longer exist in the visible list. */
+  initialSelection: Selection = EMPTY_SELECTION
+): TrackSelection {
+  const [selection, setSelection] = useState<Selection>(initialSelection);
 
   const selectedTrack = tracks.find((t) => t.id === selection.anchorId) ?? null;
 
@@ -60,8 +65,13 @@ export function useTrackSelection(tracks: Track[]): TrackSelection {
   const displayedIdsKey = displayedIds.join(',');
 
   // Reconcile the selection when the visible list changes (filters, sort,
-  // view switches): selected rows that vanished are dropped.
+  // view switches): selected rows that vanished are dropped. An EMPTY list
+  // is exempt — it is a loading state (a fresh mount whose query hasn't
+  // resolved), not a verdict, and pruning against it would wipe a restored
+  // session selection (four-deck-performance 27). Rows invisible while
+  // empty behave as unselected anyway (selectedTrack is null).
   useEffect(() => {
+    if (displayedIds.length === 0) return;
     setSelection((prev) => prune(prev, displayedIds));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayedIdsKey]);

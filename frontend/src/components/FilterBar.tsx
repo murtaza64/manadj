@@ -116,10 +116,10 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
     <div style={{
       background: 'var(--mantle)',
       borderBottom: '1px solid var(--surface0)',
-      padding: '12px',
+      padding: '4px 12px',
       display: 'flex',
       flexDirection: 'column',
-      gap: '12px'
+      gap: '8px'
     }}>
       {/* Filter bar - order: Tag, Search, Energy, Key, BPM, Follow toggles + summary, Clear All, Result Count */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -159,7 +159,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
         <input
           ref={searchRef}
           type="text"
-          placeholder="Search by filename..."
+          placeholder="search..."
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           onKeyDown={(e) => {

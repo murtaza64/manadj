@@ -44,7 +44,7 @@ export const EnergyIcon = ({ width = 16, height = 16, opacity = 0.7, className }
 export const TagIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
   <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
     <path d="M1 1v6l7 7 6-6-7-7H1zm3 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"
-          fill="var(--text)" opacity={opacity}/>
+          fill="currentColor" opacity={opacity}/>
   </svg>
 );
 

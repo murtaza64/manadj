@@ -253,6 +253,10 @@ export default function PlaylistSidebar({
         overflow: 'hidden',
         outline: focused ? '1px solid var(--blue)' : '1px solid transparent',
         outlineOffset: '-1px',
+        // Pinned, not inherited: the standalone Library inherits the
+        // browser's 16px while .perf-root sets 12px — the embedded and
+        // standalone sidebars diverged. 13px matches the track table.
+        fontSize: '13px',
       }}>
       {/* "All tracks" special view (brand/sync/mode switch live in the TopBar) */}
       <div

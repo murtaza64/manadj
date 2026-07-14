@@ -20,6 +20,7 @@ import {
   type BrowseArea,
   type SidebarEntry,
 } from './browseNav';
+import { browseSession, restoredView, updateBrowseSession } from './browseStore';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { registerBrowseSurface } from '../midi/controlRegistry';
@@ -119,10 +120,15 @@ export default function Library({
   // own browse instance, and the Set pane must survive mode switches. A
   // fresh mount restores the store's selection; local view changes write
   // back through the handlers below.
+  // View/playlist selection seeds from the browse-session store (issue
+  // 27): mode switches remount this component, and the session must ride
+  // through. A selected Set wins the seed (setStore is the Set authority).
   const [selectedView, setSelectedView] = useState<ViewType>(() =>
-    getSelectedSetId() !== null ? 'set' : 'all'
+    restoredView(getSelectedSetId() !== null)
   );
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(
+    () => browseSession().playlistId
+  );
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
   // Cross-view set navigation (sets 40, TopBar ownership chip): the store
@@ -260,7 +266,7 @@ export default function Library({
   // The split stacks two panes: the playlist (Play order) on top, the full
   // library with its FilterBar below. Closed, the playlist view is exactly
   // the single-table layout (which still supports drag-reordering).
-  const [isSplitViewOpen, setIsSplitViewOpen] = useState(false);
+  const [isSplitViewOpen, setIsSplitViewOpen] = useState(() => browseSession().splitViewOpen);
   const splitView =
     !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null && isSplitViewOpen;
   // Leaving the playlist (or the view) closes the split — adjust-during-
@@ -278,7 +284,7 @@ export default function Library({
   // the sidebar or a track pane. Click focuses, Tab/Shift+Tab (and the
   // hardware tilt, issue 25) walk the ring; keyboard routes to it.
   // Opening/closing the split resets focus to its first track pane.
-  const [focusedArea, setFocusedArea] = useState<BrowseArea>('main');
+  const [focusedArea, setFocusedArea] = useState<BrowseArea>(() => browseSession().focusedArea);
   const [prevSplitView, setPrevSplitView] = useState(splitView);
   if (prevSplitView !== splitView) {
     setPrevSplitView(splitView);
@@ -291,7 +297,9 @@ export default function Library({
   // The sidebar cursor: a highlight that walks rows without opening them
   // (rekordbox tree semantics); Enter/press opens. Seeded from the current
   // selection when the sidebar gains focus.
-  const [sidebarCursor, setSidebarCursor] = useState<string | null>(null);
+  const [sidebarCursor, setSidebarCursor] = useState<string | null>(
+    () => browseSession().sidebarCursor
+  );
   const { data: sidebarPlaylists = [] } = useQuery({
     queryKey: ['playlists'],
     queryFn: api.playlists.list,
@@ -584,7 +592,7 @@ export default function Library({
   // depending on the view; the top pane in the split). 'editLibrary' only
   // exists while editing.
   const currentTracks = selectedView === 'playlist' ? playlistTracks : libraryTracks;
-  const mainSel = useTrackSelection(currentTracks);
+  const mainSel = useTrackSelection(currentTracks, browseSession().mainSelection);
   const editLibSel = useTrackSelection(splitView ? libraryTracks : EMPTY_TRACKS);
 
   /** The pane keyboard input acts on. */
@@ -592,9 +600,16 @@ export default function Library({
   const selectedTrack = activeSel.selectedTrack;
 
   // Switching views/playlists clears the main selection outright (prune
-  // would do most of it; this also covers same-id coincidences).
+  // would do most of it; this also covers same-id coincidences). The MOUNT
+  // run is exempt: a fresh instance restoring the browse session (issue 27)
+  // hasn't switched anything — clearing there wiped the restored selection.
   const resetMainSelection = mainSel.setSelection;
+  const prevViewCtxRef = useRef<[ViewType, number | null] | null>(null);
   useEffect(() => {
+    const prev = prevViewCtxRef.current;
+    prevViewCtxRef.current = [selectedView, selectedPlaylistId];
+    if (prev === null) return;
+    if (prev[0] === selectedView && prev[1] === selectedPlaylistId) return;
     resetMainSelection(EMPTY_SELECTION);
   }, [selectedView, selectedPlaylistId, resetMainSelection]);
 
@@ -890,6 +905,38 @@ export default function Library({
   };
   const splitViewAvailable = !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null;
 
+  // ── Session write-back (issue 27) ───────────────────────────────────────
+  // The next Library mount (any mode's instance) seeds from the store.
+  useEffect(() => {
+    updateBrowseSession({
+      view: selectedView,
+      playlistId: selectedPlaylistId,
+      splitViewOpen: isSplitViewOpen,
+      focusedArea,
+      sidebarCursor,
+    });
+  }, [selectedView, selectedPlaylistId, isSplitViewOpen, focusedArea, sidebarCursor]);
+  useEffect(() => {
+    updateBrowseSession({ mainSelection: mainSel.selection });
+  }, [mainSel.selection]);
+
+  // Main-table scroll position: restored once rows exist (query cache
+  // makes that the first paint after a mode flip), saved on unmount.
+  const browseScrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRestoredRef = useRef(false);
+  useEffect(() => {
+    if (scrollRestoredRef.current) return;
+    const el = browseScrollRef.current;
+    if (!el || currentTracks.length === 0) return;
+    el.scrollTop = browseSession().scrollTop;
+    scrollRestoredRef.current = true;
+  }, [currentTracks.length]);
+  // Saved on every scroll, not at unmount: React nulls callback refs
+  // before passive cleanups run, so an unmount-time read sees nothing.
+  const handleBrowseScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (scrollRestoredRef.current) updateBrowseSession({ scrollTop: e.currentTarget.scrollTop });
+  };
+
   // The hardware surface routes through the same area-aware handlers,
   // ref-backed so the mount-scoped registration reads live state.
   const browseNavRef = useRef({
@@ -1164,7 +1211,13 @@ export default function Library({
               {/* Track table. In playlist view it is the playlist pane:
                   drag-reordering works without opening the split. */}
               <div
-                ref={selectedView === 'playlist' ? playlistPaneRef : undefined}
+                ref={(el) => {
+                  // Session scroll target (issue 27) + the playlist pane's
+                  // drag-reorder geometry when this table IS the playlist.
+                  browseScrollRef.current = el;
+                  playlistPaneRef.current = selectedView === 'playlist' ? el : null;
+                }}
+                onScroll={handleBrowseScroll}
                 onDragOver={selectedView === 'playlist' ? handlePlaylistPaneDragOver : undefined}
                 onDragLeave={selectedView === 'playlist' ? handlePlaylistPaneDragLeave : undefined}
                 onDrop={selectedView === 'playlist' ? handlePlaylistPaneDrop : undefined}

@@ -10,8 +10,8 @@ export interface ColumnConfig {
 export const COLUMN_CONFIG: ColumnConfig[] = [
   // Play order (#): playlist tables only — tables opt in via useColumnWidths(showOrder)
   { id: 'order', width: 36, sticky: true, align: 'right' },
-  { id: 'key', width: 35, sticky: true, align: 'right' },
-  { id: 'bpm', width: 35, sticky: true },
+  { id: 'key', width: 40, sticky: true, align: 'right' },
+  { id: 'bpm', width: 40, sticky: true },
   { id: 'energy', width: 35, sticky: true },
   // Marks/match column (follow-mode 09, match-score PRD): two evidence
   // slots (per Deck A–D with evidence), or the Match score while Follow

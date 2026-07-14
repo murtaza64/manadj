@@ -9,35 +9,43 @@
   color: var(--subtext1);
 }
 
-/* Tag-filter disclosure icon */
+/* Tag-filter disclosure icon. Engaged = green (matching the app's other
+   engaged accents; it was blue since introduction, deliberately changed
+   2026-07-14). Hover keeps the pointer affordance only — no background
+   tint on a bare icon. */
 .filter-bar-tag-toggle {
   position: relative;
   cursor: pointer;
   width: 16px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text);
-}
-
-.filter-bar-tag-toggle:hover {
-  background: var(--surface0);
 }
 
 .filter-bar-tag-toggle.open {
-  color: var(--blue);
+  color: var(--green);
 }
 
-/* Search field (text input: opaque bg is intentional) */
+/* Search field (text input: opaque bg is intentional). "Cut out" of the
+   filter bar: stretched over the row and through the bar's 4px vertical
+   padding (negative margins), no top/bottom border of its own — the bar's
+   edges frame it; only the left/right seams are drawn. */
 .filter-bar-search {
   flex: 1;
-  padding: 8px 12px;
+  align-self: stretch;
+  margin: -4px 0;
+  padding: 0 10px;
   background: var(--base);
-  border: 1px solid var(--surface1);
+  /* Top/bottom borders exist but are transparent at rest (they sit on the
+     bar's own edge lines, so coloring them frames the cut-out without any
+     layout shift). No hover highlight — focus is the only lit state. */
+  border: 1px solid transparent;
+  border-left-color: var(--surface1);
+  border-right-color: var(--surface1);
   color: var(--text);
   font-size: 14px;
-}
-
-.filter-bar-search:hover {
-  border-color: var(--text);
 }
 
 .filter-bar-search:focus {
