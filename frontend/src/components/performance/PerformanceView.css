@@ -525,10 +525,11 @@
 .perf-transport-col {
   display: grid;
   grid-template-columns: 1fr;
-  /* Four rows: a short nudge row, then cue-walk / CUE / PLAY sharing the
-     rest equally — so the cue-walk row matches the jump/loop rows and the
-     added row cannot grow the deck band (the nudge pair paid for it). */
-  grid-template-rows: 18px repeat(3, minmax(0, 1fr));
+  /* Four equal rows mirroring the padcol's four (jump/loop/pads/pads), so
+     nudge/cue-walk/CUE/PLAY boundaries align with them exactly. minmax(0)
+     lets rows compress below button min-content — the added cue-walk row
+     must never grow the deck band. */
+  grid-template-rows: repeat(4, minmax(0, 1fr));
   gap: 4px;
   width: 56px;
 }
