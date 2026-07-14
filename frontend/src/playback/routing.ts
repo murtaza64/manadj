@@ -12,6 +12,7 @@
  *   bus is disabled. Master is never affected by cue routing.
  */
 import type { AudioOutputDevice } from './audioDevices';
+import { audioDeviceMapping, verifiedRouteDefaults } from './audioDeviceMapping';
 
 /** A stereo pair of a device's output channels, 0-based. */
 export interface OutputPair {
@@ -44,28 +45,71 @@ export interface ResolvedRouting {
   masterPair: OutputPair | null;
   /** The saved master device is gone — fell back to the system default. */
   masterMissing: boolean;
+  /** Recognized device is present, but no hardware-verified/default pair exists. */
+  masterNeedsPair: boolean;
   /** Sink for the cue context; null = Cue bus disabled. */
   cueSinkId: string | null;
   /** Output pair on the cue sink; null = device default / auto. */
   cuePair: OutputPair | null;
   /** The saved cue device is gone — Cue bus disabled until it returns. */
   cueMissing: boolean;
+  /** Recognized device is present, but no hardware-verified/default pair exists. */
+  cueNeedsPair: boolean;
+}
+
+interface ResolvedBus {
+  sinkId: string | null;
+  pair: OutputPair | null;
+  missing: boolean;
+  needsPair: boolean;
+}
+
+function resolveBus(
+  saved: SavedDevice | null,
+  available: ReadonlyMap<string, AudioOutputDevice>,
+  bus: 'master' | 'cue'
+): ResolvedBus {
+  if (saved === null) return { sinkId: null, pair: null, missing: false, needsPair: false };
+  const device = available.get(saved.deviceId);
+  if (!device) return { sinkId: null, pair: null, missing: true, needsPair: false };
+
+  if (saved.pair) {
+    // The channel-count probe deliberately degrades to stereo on timeout.
+    // An explicit saved choice is stronger knowledge; the bridge validates
+    // against the live sink and applies its per-bus failure policy.
+    return { sinkId: saved.deviceId, pair: saved.pair, missing: false, needsPair: false };
+  }
+
+  const defaults = verifiedRouteDefaults(device.label, device.maxChannelCount);
+  if (defaults) {
+    return { sinkId: saved.deviceId, pair: defaults[bus], missing: false, needsPair: false };
+  }
+
+  // An identified Mapping with unknown channel order must not silently use
+  // the hardware's first pair for either bus. Generic devices retain their
+  // normal default-output behavior.
+  if (audioDeviceMapping(device.label)) {
+    return { sinkId: null, pair: null, missing: false, needsPair: true };
+  }
+  return { sinkId: saved.deviceId, pair: null, missing: false, needsPair: false };
 }
 
 export function resolveRouting(
   prefs: RoutingPrefs,
-  availableIds: readonly string[]
+  availableDevices: readonly AudioOutputDevice[]
 ): ResolvedRouting {
-  const available = new Set(availableIds);
-  const masterPresent = prefs.master !== null && available.has(prefs.master.deviceId);
-  const cuePresent = prefs.cue !== null && available.has(prefs.cue.deviceId);
+  const available = new Map(availableDevices.map((device) => [device.deviceId, device]));
+  const master = resolveBus(prefs.master, available, 'master');
+  const cue = resolveBus(prefs.cue, available, 'cue');
   return {
-    masterSinkId: masterPresent ? prefs.master!.deviceId : null,
-    masterPair: masterPresent ? (prefs.master!.pair ?? null) : null,
-    masterMissing: prefs.master !== null && !masterPresent,
-    cueSinkId: cuePresent ? prefs.cue!.deviceId : null,
-    cuePair: cuePresent ? (prefs.cue!.pair ?? null) : null,
-    cueMissing: prefs.cue !== null && !cuePresent,
+    masterSinkId: master.sinkId,
+    masterPair: master.pair,
+    masterMissing: master.missing,
+    masterNeedsPair: master.needsPair,
+    cueSinkId: cue.sinkId,
+    cuePair: cue.pair,
+    cueMissing: cue.missing,
+    cueNeedsPair: cue.needsPair,
   };
 }
 
@@ -102,12 +146,11 @@ export function sameOutputChoice(a: SavedDevice, b: SavedDevice): boolean {
 
 /**
  * Which output channels the Cue bus occupies when the user hasn't chosen a
- * pair explicitly (legacy prefs / dev tracer): a ≥4-out sink defaults to
- * 0-based 2/3 — outs 3/4, the Inpulse's headphone jack — leaving 1/2 free
- * for master. null = the device's default stereo pair.
+ * pair explicitly. Only hardware-verified Mapping knowledge may provide a
+ * pair; unknown and not-yet-verified devices return null.
  */
-export function cueChannelPair(maxChannelCount: number): OutputPair | null {
-  return maxChannelCount >= 4 ? { left: 2, right: 3 } : null;
+export function cueChannelPair(label: string, maxChannelCount: number): OutputPair | null {
+  return verifiedRouteDefaults(label, maxChannelCount)?.cue ?? null;
 }
 
 /**

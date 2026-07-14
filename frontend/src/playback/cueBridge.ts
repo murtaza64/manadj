@@ -9,10 +9,9 @@
  * Output channels (hardware-learned): a stereo stream lands on a device's
  * first pair, but the Inpulse enumerates as ONE 4-channel device whose
  * headphone jack is outputs 3/4. The picker lets the user choose the pair
- * explicitly (outputPairOptions, the tested seam); without a choice the
- * bridge falls back to cueChannelPair's auto default (3/4 on ≥4-out
- * sinks). Outs 1/2 stay free for master, which makes the all-Inpulse setup
- * (master → RCA, cue → headphones) work with no extra routing.
+ * explicitly (outputPairOptions, the tested seam). Device-specific defaults
+ * are resolved before this bridge from hardware-verified Mapping knowledge;
+ * this layer never guesses a multichannel device's physical channel order.
  *
  * If the cue device disappears the bridge is torn down (`stop`) and the Cue
  * bus goes silent; the main graph keeps feeding the destination node, which
@@ -21,7 +20,6 @@
  * Hands-on-verified (ADR 0002: no Web Audio mocking); the pure seams are
  * routing.ts and mixerMath.ts.
  */
-import { cueChannelPair } from './routing';
 import type { OutputPair } from './routing';
 
 type FallbackPair = (maxChannelCount: number) => OutputPair | null;
@@ -90,9 +88,14 @@ export class BusOutputBridge {
   ): void {
     const source = ctx.createMediaStreamSource(this.destination.stream);
     const max = ctx.destination.maxChannelCount;
-    // An explicit pair the device can't actually reach (it changed shape
-    // since it was saved) degrades to the bus fallback rather than throwing.
-    const pair = chosen !== null && chosen.right < max ? chosen : fallbackPair(max);
+    // An explicit pair is user/hardware knowledge. If the live sink cannot
+    // reach it, fail this bus rather than silently playing from another jack.
+    if (chosen !== null && (chosen.left >= max || chosen.right >= max)) {
+      throw new RangeError(
+        `${debugName} output pair ${chosen.left + 1}/${chosen.right + 1} is unavailable on ${max}-channel sink`
+      );
+    }
+    const pair = chosen ?? fallbackPair(max);
     if (!pair) {
       source.connect(ctx.destination);
       return;
@@ -117,6 +120,6 @@ export class BusOutputBridge {
 
 export class CueBridge extends BusOutputBridge {
   async setSink(sinkId: string, pair: OutputPair | null = null): Promise<void> {
-    await super.setSink(sinkId, pair, cueChannelPair, 'cue');
+    await super.setSink(sinkId, pair, () => null, 'cue');
   }
 }

@@ -16,6 +16,10 @@ import type { RoutingPrefs } from './routing';
 
 const MAC = { deviceId: 'mac-speakers', label: 'MacBook Pro Speakers' };
 const INPULSE = { deviceId: 'inpulse-34', label: 'DJControl Inpulse 300 MK2' };
+const GRV6 = { deviceId: 'grv6', label: 'AlphaTheta DDJ-GRV6' };
+const MAC_OUTPUT = { ...MAC, maxChannelCount: 2 };
+const INPULSE_OUTPUT = { ...INPULSE, maxChannelCount: 4 };
+const GRV6_OUTPUT = { ...GRV6, maxChannelCount: 8 };
 
 const prefs = (p: Partial<RoutingPrefs>): RoutingPrefs => ({
   ...DEFAULT_ROUTING_PREFS,
@@ -24,24 +28,24 @@ const prefs = (p: Partial<RoutingPrefs>): RoutingPrefs => ({
 
 describe('resolveRouting', () => {
   it('nothing saved: master on the system default, cue disabled, nothing missing', () => {
-    expect(resolveRouting(DEFAULT_ROUTING_PREFS, [MAC.deviceId])).toEqual({
+    expect(resolveRouting(DEFAULT_ROUTING_PREFS, [MAC_OUTPUT])).toEqual({
       masterSinkId: null,
       masterPair: null,
       masterMissing: false,
       cueSinkId: null,
       cuePair: null,
       cueMissing: false,
+      masterNeedsPair: false,
+      cueNeedsPair: false,
     });
   });
 
   it('saved devices present: both buses get their saved sinks', () => {
-    const resolved = resolveRouting(prefs({ master: MAC, cue: INPULSE }), [
-      MAC.deviceId,
-      INPULSE.deviceId,
-    ]);
+    const resolved = resolveRouting(prefs({ master: MAC, cue: INPULSE }), [MAC_OUTPUT, INPULSE_OUTPUT]);
     expect(resolved.masterSinkId).toBe(MAC.deviceId);
     expect(resolved.masterPair).toBeNull();
     expect(resolved.cueSinkId).toBe(INPULSE.deviceId);
+    expect(resolved.cuePair).toEqual({ left: 2, right: 3 });
     expect(resolved.masterMissing).toBe(false);
     expect(resolved.cueMissing).toBe(false);
   });
@@ -49,7 +53,7 @@ describe('resolveRouting', () => {
   it('a saved cue pair rides through resolution', () => {
     const resolved = resolveRouting(
       prefs({ cue: { ...INPULSE, pair: { left: 2, right: 3 } } }),
-      [INPULSE.deviceId]
+      [INPULSE_OUTPUT]
     );
     expect(resolved.cueSinkId).toBe(INPULSE.deviceId);
     expect(resolved.cuePair).toEqual({ left: 2, right: 3 });
@@ -58,21 +62,21 @@ describe('resolveRouting', () => {
   it('a saved master pair rides through resolution', () => {
     const resolved = resolveRouting(
       prefs({ master: { ...INPULSE, pair: { left: 2, right: 3 } } }),
-      [INPULSE.deviceId]
+      [INPULSE_OUTPUT]
     );
     expect(resolved.masterSinkId).toBe(INPULSE.deviceId);
     expect(resolved.masterPair).toEqual({ left: 2, right: 3 });
   });
 
   it('saved master missing: falls back to the system default and says so', () => {
-    const resolved = resolveRouting(prefs({ master: INPULSE }), [MAC.deviceId]);
+    const resolved = resolveRouting(prefs({ master: INPULSE }), [MAC_OUTPUT]);
     expect(resolved.masterSinkId).toBeNull();
     expect(resolved.masterPair).toBeNull();
     expect(resolved.masterMissing).toBe(true);
   });
 
   it('saved cue device missing: cue disabled and flagged, master untouched', () => {
-    const resolved = resolveRouting(prefs({ master: MAC, cue: INPULSE }), [MAC.deviceId]);
+    const resolved = resolveRouting(prefs({ master: MAC, cue: INPULSE }), [MAC_OUTPUT]);
     expect(resolved.masterSinkId).toBe(MAC.deviceId);
     expect(resolved.masterMissing).toBe(false);
     expect(resolved.cueSinkId).toBeNull();
@@ -81,15 +85,13 @@ describe('resolveRouting', () => {
   });
 
   it('no cue saved is not "missing" — just off', () => {
-    const resolved = resolveRouting(prefs({ master: MAC }), [MAC.deviceId]);
+    const resolved = resolveRouting(prefs({ master: MAC }), [MAC_OUTPUT]);
     expect(resolved.cueSinkId).toBeNull();
     expect(resolved.cueMissing).toBe(false);
   });
 
   it('master and cue may share a device (single-interface setups)', () => {
-    const resolved = resolveRouting(prefs({ master: INPULSE, cue: INPULSE }), [
-      INPULSE.deviceId,
-    ]);
+    const resolved = resolveRouting(prefs({ master: INPULSE, cue: INPULSE }), [INPULSE_OUTPUT]);
     expect(resolved.masterSinkId).toBe(INPULSE.deviceId);
     expect(resolved.cueSinkId).toBe(INPULSE.deviceId);
   });
@@ -103,7 +105,53 @@ describe('resolveRouting', () => {
       cueSinkId: null,
       cuePair: null,
       cueMissing: true,
+      masterNeedsPair: false,
+      cueNeedsPair: false,
     });
+  });
+
+  it('recognizes an unverified GRV6 but requires explicit pairs instead of guessing', () => {
+    const resolved = resolveRouting(prefs({ master: GRV6, cue: GRV6 }), [GRV6_OUTPUT]);
+    expect(resolved).toEqual({
+      masterSinkId: null,
+      masterPair: null,
+      masterMissing: false,
+      masterNeedsPair: true,
+      cueSinkId: null,
+      cuePair: null,
+      cueMissing: false,
+      cueNeedsPair: true,
+    });
+  });
+
+  it('routes explicit GRV6 pairs independently and restores them after replug', () => {
+    const saved = prefs({
+      master: { ...GRV6, pair: { left: 0, right: 1 } },
+      cue: { ...GRV6, pair: { left: 6, right: 7 } },
+    });
+    const plugged = resolveRouting(saved, [GRV6_OUTPUT]);
+    expect(plugged.masterPair).toEqual({ left: 0, right: 1 });
+    expect(plugged.cuePair).toEqual({ left: 6, right: 7 });
+
+    const unplugged = resolveRouting(saved, []);
+    expect(unplugged.masterSinkId).toBeNull();
+    expect(unplugged.cueSinkId).toBeNull();
+    expect(unplugged.masterMissing).toBe(true);
+    expect(unplugged.cueMissing).toBe(true);
+
+    expect(resolveRouting(saved, [GRV6_OUTPUT])).toEqual(plugged);
+  });
+
+  it('losing a separate Cue device leaves the Master route intact', () => {
+    const saved = prefs({
+      master: MAC,
+      cue: { ...GRV6, pair: { left: 2, right: 3 } },
+    });
+    const resolved = resolveRouting(saved, [MAC_OUTPUT]);
+    expect(resolved.masterSinkId).toBe(MAC.deviceId);
+    expect(resolved.masterMissing).toBe(false);
+    expect(resolved.cueSinkId).toBeNull();
+    expect(resolved.cueMissing).toBe(true);
   });
 });
 
@@ -213,18 +261,18 @@ describe('parseRoutingPrefs (headphone-cue 04)', () => {
 
 describe('cueChannelPair (auto fallback when no pair chosen)', () => {
   it('stereo (and smaller) devices use the default pair', () => {
-    expect(cueChannelPair(0)).toBeNull();
-    expect(cueChannelPair(1)).toBeNull();
-    expect(cueChannelPair(2)).toBeNull();
-    expect(cueChannelPair(3)).toBeNull();
+    expect(cueChannelPair(INPULSE.label, 0)).toBeNull();
+    expect(cueChannelPair(INPULSE.label, 1)).toBeNull();
+    expect(cueChannelPair(INPULSE.label, 2)).toBeNull();
+    expect(cueChannelPair(INPULSE.label, 3)).toBeNull();
   });
 
   it('a 4-out interface (the Inpulse) gets the headphone pair, 0-based 2/3', () => {
-    expect(cueChannelPair(4)).toEqual({ left: 2, right: 3 });
+    expect(cueChannelPair(INPULSE.label, 4)).toEqual({ left: 2, right: 3 });
   });
 
-  it('bigger interfaces still cue on 3/4', () => {
-    expect(cueChannelPair(6)).toEqual({ left: 2, right: 3 });
-    expect(cueChannelPair(8)).toEqual({ left: 2, right: 3 });
+  it('does not transfer the Inpulse channel order to unknown or unverified devices', () => {
+    expect(cueChannelPair('Big generic interface', 8)).toBeNull();
+    expect(cueChannelPair(GRV6.label, 8)).toBeNull();
   });
 });

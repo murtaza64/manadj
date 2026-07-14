@@ -53,10 +53,13 @@ let prefs: RoutingPrefs = loadPrefs();
 let devices: AudioOutputDevice[] = [];
 let snapshot: RoutingSnapshot = {
   prefs,
-  resolved: resolveRouting(prefs, []),
+  resolved: resolveRouting(prefs, devices),
   devices,
 };
 const listeners = new Set<() => void>();
+let routingRevision = 0;
+let refreshRevision = 0;
+let applyQueue: Promise<void> = Promise.resolve();
 
 function notify(): void {
   for (const listener of listeners) listener();
@@ -75,17 +78,27 @@ export function getRoutingSnapshot(): RoutingSnapshot {
 /** Re-resolve against the current device list and push the sinks at the
  * Mixer. Apply failures degrade per the PRD and never throw. */
 async function recompute(): Promise<void> {
-  const resolved = resolveRouting(prefs, devices.map((d) => d.deviceId));
+  const resolved = resolveRouting(prefs, devices);
+  const revision = ++routingRevision;
   snapshot = { prefs, resolved, devices };
   notify();
-  if (!mixer) return;
-  await applyMasterSink(mixer, resolved.masterSinkId, resolved.masterPair);
-  try {
-    await mixer.setCueSinkId(resolved.cueSinkId, resolved.cuePair);
-  } catch (err) {
-    // setCueSinkId already disabled itself; just surface it.
-    console.warn('[routing] cue sink failed; cue bus disabled', err);
-  }
+  const target = mixer;
+  if (!target) return;
+  // Sink changes can take long enough for another picker/devicechange update
+  // to arrive. Serialize them, skip stale queued work, and always finish on
+  // the newest complete Master+Cue route.
+  applyQueue = applyQueue.then(async () => {
+    if (revision !== routingRevision || mixer !== target) return;
+    await applyMasterSink(target, resolved.masterSinkId, resolved.masterPair);
+    if (revision !== routingRevision || mixer !== target) return;
+    try {
+      await target.setCueSinkId(resolved.cueSinkId, resolved.cuePair);
+    } catch (err) {
+      // setCueSinkId already disabled itself; just surface it.
+      console.warn('[routing] cue sink failed; cue bus disabled', err);
+    }
+  });
+  await applyQueue;
 }
 
 async function applyMasterSink(
@@ -103,7 +116,10 @@ async function applyMasterSink(
 
 /** Enumerate (may unlock labels — see audioDevices.ts) and re-apply. */
 export async function refreshRouting(): Promise<void> {
-  devices = await listAudioOutputs();
+  const revision = ++refreshRevision;
+  const nextDevices = await listAudioOutputs();
+  if (revision !== refreshRevision) return;
+  devices = nextDevices;
   await recompute();
 }
 
@@ -135,6 +151,9 @@ export function initAudioRouting(target: Mixer): () => void {
   });
   return () => {
     unsubscribe();
-    if (mixer === target) mixer = null;
+    if (mixer === target) {
+      mixer = null;
+      routingRevision++;
+    }
   };
 }

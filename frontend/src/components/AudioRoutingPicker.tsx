@@ -31,6 +31,7 @@ function BusSelect({
   noneLabel,
   saved,
   missing,
+  needsPair,
   options,
   onPick,
 }: {
@@ -38,6 +39,7 @@ function BusSelect({
   noneLabel: string;
   saved: SavedDevice | null;
   missing: boolean;
+  needsPair: boolean;
   /** The choosable entries; option values are indexes into this list. */
   options: readonly SavedDevice[];
   onPick: (device: SavedDevice | null) => void;
@@ -46,10 +48,12 @@ function BusSelect({
     saved === null ? -1 : options.findIndex((option) => sameOutputChoice(option, saved));
   return (
     <label
-      className={`topbar-routing-bus${missing ? ' missing' : ''}`}
+      className={`topbar-routing-bus${missing || needsPair ? ' missing' : ''}`}
       title={
         missing
           ? `${label}: saved device is unplugged — ${label === 'CUE' ? 'cue disabled' : 'using the system default'}`
+          : needsPair
+            ? `${label}: choose an explicit output pair — this device's physical channel order is not hardware-verified`
           : `${label} output device`
       }
     >
@@ -66,9 +70,9 @@ function BusSelect({
       >
         <option value="">{noneLabel}</option>
         {/* The saved choice when it matches nothing enumerable (unplugged,
-            or a pair the device no longer has) — kept so it survives. */}
+            pair unavailable, or pair still needs hardware verification). */}
         {saved !== null && savedIndex < 0 && (
-          <option value="saved">{saved.label} (missing)</option>
+          <option value="saved">{saved.label} ({needsPair ? 'choose output pair' : 'missing'})</option>
         )}
         {options.map((option, i) => (
           <option key={`${option.deviceId}:${option.pair?.left ?? 'd'}`} value={String(i)}>
@@ -92,6 +96,7 @@ export function AudioRoutingPicker() {
         noneLabel="System default"
         saved={prefs.master}
         missing={resolved.masterMissing}
+        needsPair={resolved.masterNeedsPair}
         options={outputPairOptions(devices)}
         onPick={setMasterDevice}
       />
@@ -100,6 +105,7 @@ export function AudioRoutingPicker() {
         noneLabel="Off"
         saved={prefs.cue}
         missing={resolved.cueMissing}
+        needsPair={resolved.cueNeedsPair}
         options={outputPairOptions(devices)}
         onPick={setCueDevice}
       />
