@@ -5,6 +5,7 @@ import { dispatchSetSpace } from '../sets/spaceTransport';
 import { GRID_NUDGE_MS } from './useBeatgridData';
 import { useDeck, useDeckReady, useDeckSnapshot } from './useDeck';
 import { useScrubLoop } from './useScrubLoop';
+import { activeScrollers, scrollerFor } from '../components/virtualRows';
 
 /**
  * Library keyboard hub. Keys split by scope (ADR 0008):
@@ -355,11 +356,21 @@ function scrollableAncestor(el: Element): HTMLElement | null {
 }
 
 export function scrollTrackIntoView(trackId: number) {
-  const row = document.querySelector(`[data-track-id="${trackId}"]`);
-  if (!row) return;
   const now = performance.now();
   const burst = now - lastCallMs < BURST_MS;
   lastCallMs = now;
+
+  // Virtualized table: the row may not be mounted. The registered scroller
+  // brings it into view by index geometry (track-table-virtualization 01).
+  const scroller = scrollerFor(trackId);
+  if (scroller) {
+    if (!burst) lastSmoothMs = now;
+    scroller.scrollIntoView(trackId, !burst);
+    return;
+  }
+
+  const row = document.querySelector(`[data-track-id="${trackId}"]`);
+  if (!row) return;
 
   const container = scrollableAncestor(row);
   if (!container) {
@@ -402,6 +413,8 @@ export function scrollTrackIntoView(trackId: number) {
 /** Is the track's row rendered and at least partially inside its scroll
  * viewport? (False when the row left the list, e.g. filtered out.) */
 export function trackRowInView(trackId: number): boolean {
+  const scroller = scrollerFor(trackId);
+  if (scroller) return scroller.inView(trackId);
   const row = document.querySelector(`[data-track-id="${trackId}"]`);
   if (!row) return false;
   const container = scrollableAncestor(row);
@@ -414,6 +427,14 @@ export function trackRowInView(trackId: number): boolean {
 /** Ids of the track rows currently fully visible in their scroll viewport,
  * in DOM order. */
 export function visibleTrackIds(): Set<number> {
+  // Prefer the registered scroller(s): virtualized tables mount only the
+  // visible window, so a DOM scan would miss the true viewport bounds.
+  const scrollers = activeScrollers();
+  if (scrollers.length > 0) {
+    const ids = new Set<number>();
+    for (const s of scrollers) for (const id of s.visibleIds()) ids.add(id);
+    return ids;
+  }
   const ids = new Set<number>();
   for (const row of document.querySelectorAll('[data-track-id]')) {
     const container = scrollableAncestor(row);
