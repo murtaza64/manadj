@@ -40,12 +40,12 @@ export type LoadedMark = string;
 interface Props {
   track: Track;
   isSelected: boolean;
-  /** The Deck(s) this track is loaded on (live occupancy, both decks). */
+  /** The Deck(s) this track is loaded on (live occupancy across A–D). */
   loadedOn: LoadedMark;
   onSelect: (track: Track, mods: SelectMods) => void;
   /** Load this track onto the Deck (double-click). */
   onLoad: (track: Track) => void;
-  /** When set (Performance view), show hover load-to-A/B buttons. */
+  /** When set (Performance view), show hover load-to-A–D buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
   /**
    * The ids a drag from this row carries: the whole selection when the row

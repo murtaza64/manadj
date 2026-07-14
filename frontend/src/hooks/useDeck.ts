@@ -4,9 +4,9 @@ import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
 
 /**
- * Deck addressing (performance-mode issue 02): both Decks live app-wide in
- * DeckProvider (contexts/DeckContext.tsx); a component reads *its* deck from
- * the nearest <DeckScope deck="A|B">. Hook signatures are deck-blind — the
+ * Deck addressing (performance-mode issue 02): all four Decks live app-wide
+ * in DeckProvider (contexts/DeckContext.tsx); a component reads *its* deck
+ * from the nearest <DeckScope deck="A|B|C|D">. Hook signatures are deck-blind — the
  * whole single-deck component kit (Player, HotCue, keyboard hub, TagEditor)
  * works unchanged under any scope. (Context objects + hooks live here, apart
  * from the providers, for fast refresh.)
@@ -48,9 +48,9 @@ export function useDeck(): DeckContextValue {
 }
 
 /**
- * Both decks at once — for the few cross-deck spots (BPM match, load-to-A/B
- * buttons) that can't live inside a single scope. Everything else should
- * stay deck-blind and use useDeck.
+ * All four Decks at once — for the few cross-deck spots (BPM match,
+ * load-to-A–D buttons) that can't live inside a single scope. Everything
+ * else should stay deck-blind and use useDeck.
  */
 export function useDecks(): Record<ChannelId, DeckContextValue> {
   const registry = useContext(DeckRegistryContext);

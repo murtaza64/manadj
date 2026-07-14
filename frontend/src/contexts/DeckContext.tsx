@@ -197,8 +197,8 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   useDeckBpmSync(engines.C, loadedTracks.C?.id ?? null);
   useDeckBpmSync(engines.D, loadedTracks.D?.id ?? null);
 
-  // ── Loaded-pair persistence ────────────────────────────────────────────
-  // The shared decks ARE "what's loaded on A/B" across every mode — the
+  // ── Loaded-Deck persistence ────────────────────────────────────────────
+  // The shared Decks ARE "what's loaded on A–D" across every mode — the
   // Transition editor's loads come through this same path (ADR 0022).
   // Persist track ids on every Load; restore once on boot (a Load
   // allocates audio memory but nothing plays until the user does).

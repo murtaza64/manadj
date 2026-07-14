@@ -1,12 +1,14 @@
 /**
  * Decoded-audio cache (mix-editor 28): trackId → AudioBuffer, tiny LRU.
  *
- * Four entries covers both surfaces (shared decks A/B + the editor's
- * private pair), so mode-switching into the Transition editor reuses the
- * shared decks' decode instead of re-fetching and re-decoding both
- * tracks — the difference between seconds and instant. AudioBuffers are
- * not bound to the AudioContext that decoded them, so cross-surface reuse
- * is safe.
+ * A tiny most-recent-N LRU across both surfaces (the shared Decks A–D and
+ * the editor's private pair), so mode-switching into the Transition editor
+ * reuses a recent shared-Deck decode instead of re-fetching and
+ * re-decoding — the difference between seconds and instant. AudioBuffers
+ * are not bound to the AudioContext that decoded them, so cross-surface
+ * reuse is safe. (Capacity is the recency budget, not a per-Deck count —
+ * sizing it against four shared Decks + an editor pair is a separate tuning
+ * question, not a two-Deck invariant.)
  *
  * Invalidation: replacing a Track's audio must call
  * `invalidateCachedBuffer` (hook for track-identity/02 replace-audio).

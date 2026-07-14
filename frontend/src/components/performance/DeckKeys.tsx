@@ -1,8 +1,10 @@
 /**
  * DeckKeys — the Performance view's per-deck key bindings (issue 04), a
  * null-rendering component mounted once per <DeckScope>. Deck-blind: it
- * reads its deck from the scope and its keys from DECK_KEYS, so A and B are
- * the same code with mirrored maps.
+ * reads its Deck from the scope and its keys from DECK_KEYS by SIDE, so
+ * every Deck is the same code — the left-hand map drives whichever Deck is
+ * left-focused (A or C), the right-hand map whichever is right-focused
+ * (B or D). The map is mirrored per hand, not per physical Deck.
  *
  * Guards mirror the library hub: keys are ignored while an input/textarea/
  * contenteditable has focus or with ctrl/meta/alt held; hold-style keys
@@ -36,6 +38,8 @@ export function DeckKeys() {
   );
 
   useEffect(() => {
+    // Pick the hand map by side: left-side Decks (A/C) use the left-hand
+    // ('A') layout, right-side (B/D) the right-hand ('B') layout.
     const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
     const padSlot = (key: string) => {
       const i = keys.pads.indexOf(key);

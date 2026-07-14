@@ -781,9 +781,9 @@ export default function Library({
 
   // The same handle, registered module-level as the active browse surface
   // for the hardware Controller (midi-controller 05): encoder moves this
-  // selection, LOAD A/B reads it and loads with the view's policy
-  // (editor-midi 03). Registration is mount-scoped; handlers read the live
-  // selection and policy through refs.
+  // selection, the LOAD controls read it and load with the view's policy
+  // (editor-midi 03) onto the Deck the mapping targets. Registration is
+  // mount-scoped; handlers read the live selection and policy through refs.
   //
   // While a Set is the visible browse list, the LIBRARY YIELDS (sets 33):
   // the SetDetailPane registers its own surface, and gating here (rather

@@ -74,7 +74,7 @@ export function reduceFollow(flags: FollowFlags, event: FollowEvent): FollowFlag
  * apply: the macro is a shortcut, not a new model.
  *
  * - No Deck follows → enable Follow on all playing Decks; if nothing
- *   plays, on both Decks (legal: paused Decks may follow while nothing
+ *   plays, on all four Decks (legal: paused Decks may follow while nothing
  *   plays). The press satisfies "turning Follow on from nothing is the
  *   user's act".
  * - Any Deck follows → all Follow off, regardless of which deck had it or
