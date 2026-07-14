@@ -35,20 +35,31 @@
 }
 
 /* Loaded identity wash from rowMarks.loadedWash: one generic path for all
-   A–D combinations. The second layer keeps sticky cells opaque. */
+   A–D combinations. The second layer keeps sticky cells opaque.
+
+   The wash layer is viewport-FIXED: the row and each sticky cell paint
+   their backgrounds in their own boxes, so a scrolling multi-Deck
+   gradient would restart inside every pinned column. Fixed attachment
+   gives them one shared coordinate system — the gradient runs once,
+   continuously, across pinned and scrolled cells alike (and stays
+   aligned under horizontal scroll). The opaque under-layer keeps normal
+   attachment; it's a solid color either way. */
 .track-row-loaded,
 .track-row-loaded .sticky-col-cell {
   background: var(--loaded-wash), var(--crust) !important;
+  background-attachment: fixed, scroll !important;
 }
 
 .track-row-loaded:hover,
 .track-row-loaded:hover .sticky-col-cell {
   background: var(--loaded-wash), var(--mantle) !important;
+  background-attachment: fixed, scroll !important;
 }
 
 .track-row-selected.track-row-loaded,
 .track-row-selected.track-row-loaded .sticky-col-cell {
   background: var(--loaded-wash), #242438 !important;
+  background-attachment: fixed, scroll !important;
 }
 
 .track-cell {
