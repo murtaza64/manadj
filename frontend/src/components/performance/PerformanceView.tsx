@@ -26,7 +26,7 @@ import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
 import { MixerStrip } from './MixerStrip';
-import { LinkToggle } from '../../links/LinkToggle';
+import { EdgePairLinks } from '../../links/PerformancePairLinks';
 import { DeckKeys } from './DeckKeys';
 import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { dispatchSetSpace } from '../../sets/spaceTransport';
@@ -196,14 +196,10 @@ export function PerformanceView() {
         <PerfWaves />
         <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
         <div className="perf-decks">
-          {/* Linked toggle (linked-pairs 02): pair-central — on the deck
-              divider, between the two minimaps. */}
-          <div className="perf-decks-link">
-            <LinkToggle
-              aTrackId={A.loadedTrack?.id ?? null}
-              bTrackId={B.loadedTrack?.id ?? null}
-            />
-          </div>
+          {/* Six-pair Linking (four-deck-performance 19): the four
+              adjacent pairs ride the grid's shared edges; the diagonals
+              live on the mixer strip (DiagonalPairLinks). */}
+          <EdgePairLinks />
           <DeckScope deck="A">
             <DeckPanel lockHint={lockHint === 'A'} />
           </DeckScope>

@@ -1,0 +1,171 @@
+/* Six-pair Link toggles on the Performance surface (four-deck-performance
+   19). Green = Linked, matching the editor LinkToggle; the hint state
+   (favorited Transition, no Link) pulses toward green the same way. */
+
+/* ── Adjacent pairs: chips on the 2×2 grid's shared edges ──────────── */
+
+/* Each chip sits on the shared edge of its two Decks, pulled in toward
+   the grid center point; the crust background cuts a gap in the
+   divider/border line behind it. */
+.pairlink-edge {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  background: var(--crust, #11111b);
+  padding: 1px 2px;
+}
+
+.pairlink-edge.edge-ab { left: 50%; top: 38%; }
+.pairlink-edge.edge-cd { left: 50%; top: 62%; }
+.pairlink-edge.edge-ac { left: 45%; top: 50%; }
+.pairlink-edge.edge-bd { left: 55%; top: 50%; }
+
+.pairlink-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  background: transparent;
+  border: 1px solid var(--surface1, #45475a);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--subtext0, #a6adc8);
+  opacity: 0.8;
+}
+
+.pairlink-chip:hover:not(:disabled) {
+  opacity: 1;
+  border-color: var(--overlay0, #6c7086);
+}
+
+.pairlink-chip:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.pairlink-chip.linked {
+  border-color: #00e676;
+  color: #00e676;
+  opacity: 1;
+}
+
+.pairlink-chip.hint {
+  animation: pairlink-pulse 2s ease-in-out infinite;
+}
+
+/* ── Diagonal pairs: grid mini-maps on the mixer strip ─────────────── */
+
+/* They sit absolutely over the wide crossfader slot's right edge so the
+   fader's centering flex math is untouched. */
+.perf-strip-slot.wide { position: relative; }
+
+.pairlink-strip {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pairlink-diag {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--surface1, #45475a);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--subtext0, #a6adc8);
+  opacity: 0.85;
+}
+
+.pairlink-diag svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.pairlink-diag svg line {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+
+/* The chain icon rides the stroke's center on a crust patch; rotated so
+   its links lie along the diagonal (the glyph natively ascends). */
+.pairlink-diag-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  background: var(--crust, #11111b);
+  border-radius: 2px;
+  padding: 1px;
+}
+
+.pairlink-diag-icon.descending {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.pairlink-diag-letter {
+  position: absolute;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pairlink-diag-letter.pos-tl { top: 2px; left: 3px; }
+.pairlink-diag-letter.pos-tr { top: 2px; right: 3px; }
+.pairlink-diag-letter.pos-bl { bottom: 2px; left: 3px; }
+.pairlink-diag-letter.pos-br { bottom: 2px; right: 3px; }
+
+.pairlink-diag-letter.deck-a { color: var(--deck-a); }
+.pairlink-diag-letter.deck-b { color: var(--deck-b); }
+.pairlink-diag-letter.deck-c { color: var(--deck-c); }
+.pairlink-diag-letter.deck-d { color: var(--deck-d); }
+
+.pairlink-diag:hover:not(:disabled) {
+  opacity: 1;
+  border-color: var(--overlay0, #6c7086);
+}
+
+.pairlink-diag:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.pairlink-diag:disabled .pairlink-diag-letter {
+  color: var(--subtext0, #a6adc8);
+}
+
+.pairlink-diag.linked {
+  border-color: #00e676;
+  color: #00e676;
+  opacity: 1;
+}
+
+.pairlink-diag.linked svg line {
+  opacity: 1;
+}
+
+.pairlink-diag.hint {
+  animation: pairlink-pulse 2s ease-in-out infinite;
+}
+
+@keyframes pairlink-pulse {
+  0%,
+  100% {
+    color: var(--subtext0, #a6adc8);
+    border-color: var(--surface1, #45475a);
+  }
+  50% {
+    color: #00e676;
+    border-color: #00e676;
+  }
+}

@@ -15,6 +15,7 @@ import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
 import { CUE_LEVEL_DEFAULT, CUE_MIX_DEFAULT } from '../../playback/mixer';
+import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
 const KNOB_DRAG_RANGE_PX = 150;
@@ -335,6 +336,11 @@ export function MixerStrip({
         <span className="player-button perf-strip-toggle perf-strip-ghost" aria-hidden="true">
           XF
         </span>
+        {/* Diagonal pair Links (four-deck-performance 19): A·D and B·C
+            have no shared Deck edge, so their toggles hang here beside
+            the crossfader. Adjacent pairs live on the Deck grid's edges
+            (EdgePairLinks). */}
+        <DiagonalPairLinks />
       </div>
       <div className="perf-strip-slot">
         <HFader
