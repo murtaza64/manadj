@@ -145,7 +145,11 @@ body.col-resizing { cursor: col-resize; user-select: none; }
    candidate tier while Follow filters. Never selectable, never a track
    row (no data-track-id — drop/selection machinery ignores them). */
 .track-tier-header td {
-  padding: 3px 12px;
+  /* Fixed height matches the ordinary row so the virtualizer's uniform
+     row geometry (virtualRows.ROW_HEIGHT) holds for the one indexed
+     stream — headers and rows window as a unit. */
+  height: 28px;
+  padding: 0 12px;
   /* One shade lighter than the track rows (--crust): the section
      boundary reads at a glance. */
   background: var(--mantle);

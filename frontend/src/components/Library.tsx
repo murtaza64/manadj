@@ -44,6 +44,7 @@ import {
   type RowRect,
 } from '../selection/dropIndex';
 import { isTrackDrag, readTrackDragPayload, readTrackDragSource } from '../selection/trackDrag';
+import { ROW_HEIGHT } from './virtualRows';
 import ContextMenu, { useContextMenuState } from './ContextMenu';
 import { useToast } from './Toast';
 import { useAddTracksToPlaylist, useTrackMenuItems } from './useTrackMenuItems';
@@ -540,13 +541,17 @@ export default function Library({
     [playlistData]
   );
 
-  /** Row rectangles in the pane's content coordinates (scroll included). */
-  const paneRowRects = (pane: HTMLDivElement): RowRect[] => {
-    const paneRect = pane.getBoundingClientRect();
-    return Array.from(pane.querySelectorAll('tbody tr[data-track-id]')).map((row) => {
-      const r = (row as HTMLElement).getBoundingClientRect();
-      return { top: r.top - paneRect.top + pane.scrollTop, height: r.height };
-    });
+  /** Uniform row rectangles from index geometry, not a DOM scan
+   * (track-table-virtualization 01): the table virtualizes, so off-screen
+   * rows have no rectangle to query. Rows are ROW_HEIGHT tall and start
+   * below the sticky header; the playlist pane has no tier headers, so the
+   * row index equals the track index. */
+  const paneRowRects = (pane: HTMLDivElement, rowCount: number): RowRect[] => {
+    const headHeight = (pane.querySelector('thead') as HTMLElement | null)?.offsetHeight ?? 0;
+    return Array.from({ length: rowCount }, (_unused, i) => ({
+      top: headHeight + i * ROW_HEIGHT,
+      height: ROW_HEIGHT,
+    }));
   };
 
   const handlePlaylistPaneDragOver = (e: React.DragEvent) => {
@@ -555,7 +560,7 @@ export default function Library({
     e.dataTransfer.dropEffect = 'copy';
     const pane = playlistPaneRef.current;
     if (!pane) return;
-    const rects = paneRowRects(pane);
+    const rects = paneRowRects(pane, playlistTracks.length);
     const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
     const index = canPositionDrops ? insertionIndexFromPointer(pointerY, rects) : rects.length;
     setDropIndicator({ index, y: indicatorY(index, rects) });

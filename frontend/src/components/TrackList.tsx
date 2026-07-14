@@ -1,4 +1,4 @@
-import React, { type JSX } from 'react';
+import React, { useEffect, useMemo, useRef, type JSX } from 'react';
 import TrackRow, { type SelectMods, type TransitionMark } from './TrackRow';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon, CrosshairIcon } from './icons';
 import type { Track } from '../types';
@@ -8,6 +8,13 @@ import { isLinked, type LinkKey } from '../links/linkStore';
 import { getColumnConfig } from './columnConfig';
 import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { useColumnWidths } from '../hooks/useColumnWidths';
+import {
+  ROW_HEIGHT,
+  registerTrackScroller,
+  scrollIndexIntoView,
+  useVirtualWindow,
+  type TrackScroller,
+} from './virtualRows';
 import './TrackList.css';
 
 /** 'position' = Play order (#), playlist tables only. */
@@ -100,6 +107,96 @@ export default function TrackList({
   const linkedFor = (deckId: number | null | undefined, id: number): boolean =>
     links !== undefined && deckId != null && isLinked(links, deckId, id);
   const { widths, setWidth, resetWidth, cssVars } = useColumnWidths(playOrder !== undefined);
+  const colSpan = playOrder !== undefined ? 12 : 11;
+
+  // ── One indexed stream: tier headers + ordinary rows ──────────────────
+  // Follow groups arrive pre-ordered; a header row opens each run of equal
+  // labels. Flattening headers and tracks into a single VirtualRow[] lets
+  // the virtualizer window over the combined stream, so a header scrolls
+  // with its rows and the mounted set is bounded whether or not Follow
+  // filters (the issue's "one stable ordered stream").
+  type VirtualRow =
+    | { kind: 'header'; key: string; label: string; count: number }
+    | { kind: 'track'; key: number; track: Track };
+  const rows = useMemo<VirtualRow[]>(() => {
+    const out: VirtualRow[] = [];
+    if (!groupLabelFor) {
+      for (const t of tracks) out.push({ kind: 'track', key: t.id, track: t });
+      return out;
+    }
+    // A full tally (one pass) is robust to a caller that didn't pre-sort;
+    // headers still open only on label changes down the stream.
+    const counts = new Map<string, number>();
+    for (const t of tracks) {
+      const label = groupLabelFor(t);
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    let previousLabel: string | null = null;
+    for (const t of tracks) {
+      const label = groupLabelFor(t);
+      if (label !== previousLabel) {
+        out.push({ kind: 'header', key: `h:${label}`, label, count: counts.get(label) ?? 0 });
+        previousLabel = label;
+      }
+      out.push({ kind: 'track', key: t.id, track: t });
+    }
+    return out;
+  }, [tracks, groupLabelFor]);
+
+  // Track id → stream index, for the keyboard scroll-to-track path.
+  const indexOfTrack = useMemo(() => {
+    const m = new Map<number, number>();
+    rows.forEach((r, i) => {
+      if (r.kind === 'track') m.set(r.track.id, i);
+    });
+    return m;
+  }, [rows]);
+
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const { start, end, metrics, container } = useVirtualWindow(tableRef, rows.length);
+
+  // Register a scroller so keyboard navigation can bring an off-screen
+  // (unmounted) row into view by index geometry (useTrackSelection reads
+  // this instead of querying the DOM). Ref-backed so registration is
+  // mount-scoped while handlers see live geometry.
+  const scrollGeom = useRef({ rows, indexOfTrack, metrics, container });
+  useEffect(() => {
+    scrollGeom.current = { rows, indexOfTrack, metrics, container };
+  });
+  useEffect(() => {
+    const scroller: TrackScroller = {
+      has: (id) => scrollGeom.current.indexOfTrack.has(id),
+      inView: (id) => {
+        const g = scrollGeom.current;
+        const i = g.indexOfTrack.get(id);
+        if (i === undefined) return false;
+        const top = i * ROW_HEIGHT;
+        return top + ROW_HEIGHT > g.metrics.scrollTop &&
+          top < g.metrics.scrollTop + g.metrics.clientHeight;
+      },
+      scrollIntoView: (id, smooth) => {
+        const g = scrollGeom.current;
+        const i = g.indexOfTrack.get(id);
+        const c = g.container();
+        if (i === undefined || !c) return;
+        scrollIndexIntoView(c, i, g.metrics, ROW_HEIGHT, 3, smooth);
+      },
+      visibleIds: () => {
+        const g = scrollGeom.current;
+        const first = Math.floor(g.metrics.scrollTop / ROW_HEIGHT);
+        const last = Math.ceil(
+          (g.metrics.scrollTop + g.metrics.clientHeight) / ROW_HEIGHT
+        );
+        const ids: number[] = [];
+        for (let i = Math.max(0, first); i < Math.min(g.rows.length, last); i++) {
+          const r = g.rows[i];
+          if (r.kind === 'track') ids.push(r.track.id);
+        }
+        return ids;
+      },
+    };
+    return registerTrackScroller(scroller);
+  }, []);
 
   const SortableHeader = ({
     column,
@@ -153,7 +250,7 @@ export default function TrackList({
 
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%', ...cssVars }}>
-      <table className="track-table">
+      <table className="track-table" ref={tableRef}>
         <thead>
           <tr>
             {playOrder !== undefined && <SortableHeader column="position" label="#" columnId="order" />}
@@ -216,71 +313,73 @@ export default function TrackList({
         <tbody>
           {isLoading && tracks.length === 0 ? (
             <tr>
-              <td colSpan={playOrder !== undefined ? 12 : 11} className="track-table-message track-table-loading">
+              <td colSpan={colSpan} className="track-table-message track-table-loading">
                 Loading tracks...
               </td>
             </tr>
           ) : error ? (
             <tr>
-              <td colSpan={playOrder !== undefined ? 12 : 11} className="track-table-message track-table-error">
+              <td colSpan={colSpan} className="track-table-message track-table-error">
                 Error loading tracks
               </td>
             </tr>
           ) : (
-            (() => {
-              // Group counts for the header rows (one pass; labels arrive
-              // pre-grouped, so counting runs of equals suffices — but a
-              // full tally is robust to a caller that didn't sort).
-              const counts = new Map<string, number>();
-              if (groupLabelFor) {
-                for (const t of tracks) {
-                  const label = groupLabelFor(t);
-                  counts.set(label, (counts.get(label) ?? 0) + 1);
+            <>
+              {/* Top spacer: the off-screen rows above the window, as one
+                  <tr> of their total height — the scrollbar and sticky
+                  thead behave as if every row were mounted. */}
+              {start > 0 && (
+                <tr aria-hidden="true" style={{ height: start * ROW_HEIGHT }}>
+                  <td colSpan={colSpan} style={{ padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {rows.slice(start, end).map((row) => {
+                if (row.kind === 'header') {
+                  return (
+                    <tr key={row.key} className="track-tier-header" style={{ height: ROW_HEIGHT }}>
+                      <td colSpan={colSpan}>
+                        {/* Sticky-left so the label survives horizontal
+                            scroll — the td spans the whole (wide) table. */}
+                        <span className="track-tier-label">
+                          {row.label}
+                          <span className="track-tier-count"> — {row.count}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
                 }
-              }
-              let previousLabel: string | null = null;
-              return tracks.map((track: Track) => {
-                const label = groupLabelFor?.(track) ?? null;
+                const track = row.track;
                 const signals = matchSignalsFor?.(track);
-                const opensGroup = label !== null && label !== previousLabel;
-                previousLabel = label;
                 return (
-                  <React.Fragment key={track.id}>
-                    {opensGroup && (
-                      <tr className="track-tier-header">
-                        <td colSpan={playOrder !== undefined ? 12 : 11}>
-                          {/* Sticky-left so the label survives horizontal
-                              scroll — the td spans the whole (wide) table. */}
-                          <span className="track-tier-label">
-                            {label}
-                            <span className="track-tier-count"> — {counts.get(label!)}</span>
-                          </span>
-                        </td>
-                      </tr>
-                    )}
-                    <TrackRow
-                      track={track}
-                      isSelected={selectedIds.has(track.id)}
-                      isLoaded={loadedTrackId === track.id}
-                      onSelect={onSelectTrack}
-                      onLoad={onLoadTrack}
-                      onLoadToDeck={onLoadToDeck}
-                      getDragIds={getDragIds}
-                      dragSource={dragSource}
-                      onContextMenu={onRowContextMenu}
-                      orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
-                      score={scoreFor !== undefined ? scoreFor(track) : undefined}
-                      keyMatched={signals ? signals.key : undefined}
-                      sharedTagIds={signals ? [...signals.tagIds].join(',') : undefined}
-                      markA={markFor(transitionMarksA, track.id)}
-                      markB={markFor(transitionMarksB, track.id)}
-                      linkedA={linkedFor(deckAId, track.id)}
-                      linkedB={linkedFor(deckBId, track.id)}
-                    />
-                  </React.Fragment>
+                  <TrackRow
+                    key={track.id}
+                    track={track}
+                    isSelected={selectedIds.has(track.id)}
+                    isLoaded={loadedTrackId === track.id}
+                    onSelect={onSelectTrack}
+                    onLoad={onLoadTrack}
+                    onLoadToDeck={onLoadToDeck}
+                    getDragIds={getDragIds}
+                    dragSource={dragSource}
+                    onContextMenu={onRowContextMenu}
+                    orderIndex={playOrder !== undefined ? (playOrder.get(track.id) ?? null) : undefined}
+                    score={scoreFor !== undefined ? scoreFor(track) : undefined}
+                    keyMatched={signals ? signals.key : undefined}
+                    sharedTagIds={signals ? [...signals.tagIds].join(',') : undefined}
+                    markA={markFor(transitionMarksA, track.id)}
+                    markB={markFor(transitionMarksB, track.id)}
+                    linkedA={linkedFor(deckAId, track.id)}
+                    linkedB={linkedFor(deckBId, track.id)}
+                  />
                 );
-              });
-            })()
+              })}
+              {/* Bottom spacer: the off-screen rows below the window. */}
+              {end < rows.length && (
+                <tr aria-hidden="true" style={{ height: (rows.length - end) * ROW_HEIGHT }}>
+                  <td colSpan={colSpan} style={{ padding: 0, border: 0 }} />
+                </tr>
+              )}
+            </>
           )}
         </tbody>
       </table>
