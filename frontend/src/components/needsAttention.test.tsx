@@ -41,7 +41,7 @@ function renderRow(track: Track): { container: HTMLElement; root: Root } {
       <TrackRow
         track={track}
         isSelected={false}
-        isLoaded={false}
+        loadedOn="none"
         onSelect={noop}
         onLoad={noop}
         getDragIds={() => [track.id]}

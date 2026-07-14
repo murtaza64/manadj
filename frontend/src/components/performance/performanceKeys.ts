@@ -7,8 +7,6 @@
  * single-deck muscle-memory hazard, confirmed decision). Pads 5-8 are
  * mouse-only. No curation keys; beatgrid/mixer stay mouse-only.
  */
-import type { ChannelId } from '../../playback/mixer';
-
 export interface DeckKeyMap {
   /** Hold-cue (CDJ style). */
   cue: string;
@@ -23,6 +21,8 @@ export interface DeckKeyMap {
   /** Hot cue pads 1-4, in slot order. */
   pads: [string, string, string, string];
 }
+
+export const CONTROL_FOCUS_KEYS = { left: '[', right: ']' } as const;
 
 /** INPUT types that take typed text (keyboard-focus 01: a focused
  * checkbox/radio/range must NOT silence the hubs — the no-focus rule
@@ -52,7 +52,7 @@ export function isGuardedKeyEvent(event: KeyboardEvent): boolean {
   return isTypingTarget(event) || event.ctrlKey || event.metaKey || event.altKey;
 }
 
-export const DECK_KEYS: Record<ChannelId, DeckKeyMap> = {
+export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
   A: {
     cue: 'f',
     play: 'd',

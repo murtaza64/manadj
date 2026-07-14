@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   channelFaderToGain,
+  channelCrossfaderGain,
   crossfaderGains,
   cueLevelToGain,
   cueMixGains,
@@ -132,5 +133,20 @@ describe('crossfaderGains', () => {
   it('clamps out-of-range positions', () => {
     expect(crossfaderGains(-3).a).toBe(1);
     expect(crossfaderGains(3).b).toBe(1);
+  });
+});
+
+describe('channelCrossfaderGain — four-Deck phase-1 grouping', () => {
+  it('assigns A/C left and B/D right', () => {
+    expect(channelCrossfaderGain('A', -1)).toBe(1);
+    expect(channelCrossfaderGain('C', -1)).toBe(1);
+    expect(channelCrossfaderGain('B', -1)).toBe(0);
+    expect(channelCrossfaderGain('D', -1)).toBe(0);
+  });
+
+  it('is transparent for all four Decks at center', () => {
+    for (const deck of ['A', 'B', 'C', 'D'] as const) {
+      expect(channelCrossfaderGain(deck, 0)).toBe(1);
+    }
   });
 });

@@ -52,7 +52,45 @@
   flex-direction: column;
 }
 .perf-waves .waveform-container,
-.perf-waves .waveform-container canvas { height: 76px; }
+.perf-waves .waveform-container canvas { height: 52px; }
+
+.perf-wave-row {
+  position: relative;
+  --wave-deck-color: var(--text);
+}
+
+.perf-wave-row.deck-a { --wave-deck-color: var(--deck-a); }
+.perf-wave-row.deck-b { --wave-deck-color: var(--deck-b); }
+.perf-wave-row.deck-c { --wave-deck-color: var(--deck-c); }
+.perf-wave-row.deck-d { --wave-deck-color: var(--deck-d); }
+
+.perf-wave-row::before,
+.perf-wave-row::after {
+  content: '';
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--wave-deck-color);
+  opacity: 0.2;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.perf-wave-row::before { left: 0; }
+.perf-wave-row::after { right: 0; }
+.perf-wave-row.focused::before,
+.perf-wave-row.focused::after { opacity: 1; }
+
+.perf-wave-row .waveform-container {
+  transition: opacity 120ms ease, filter 120ms ease;
+}
+
+.perf-wave-row:not(.focused) .waveform-container {
+  opacity: 0.72;
+  filter: saturate(0.6);
+}
 
 /* ── Mixer strip: X-FADER centered, MASTER on the right ───────── */
 
@@ -121,6 +159,11 @@
   position: relative;
 }
 
+/* A/B on the first row, C/D on the second. */
+.perf-decks > .perf-deckpanel:nth-of-type(n + 3) {
+  border-top: 1px solid var(--surface1);
+}
+
 /* Linked toggle (linked-pairs 02): pair-central, riding the deck divider
    between the two minimaps. Borderless background patch cuts a gap in the
    separator behind the icon. */
@@ -144,6 +187,42 @@
   gap: 6px;
   min-width: 0;
   padding: 5px 12px 6px;
+  position: relative;
+  --focus-color: var(--text);
+}
+
+.perf-deckpanel.deck-a { --focus-color: var(--deck-a); }
+.perf-deckpanel.deck-b { --focus-color: var(--deck-b); }
+.perf-deckpanel.deck-c { --focus-color: var(--deck-c); }
+.perf-deckpanel.deck-d { --focus-color: var(--deck-d); }
+
+.perf-deckpanel.focused {
+  box-shadow: inset 0 0 0 2px var(--focus-color);
+}
+
+.perf-deckpanel.focused::after {
+  content: 'CONTROL';
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--focus-color);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  pointer-events: none;
+}
+
+.perf-deckpanel:is(.deck-a, .deck-c).focused::after { content: 'CONTROL  ['; }
+.perf-deckpanel:is(.deck-b, .deck-d).focused::after { content: 'CONTROL  ]'; }
+
+/* Only the focused Deck on each side owns that hand's keyboard map. */
+.perf-deckpanel:not(.focused) .perf-kbd { display: none; }
+
+.perf-deckpanel.focused .perf-decktag {
+  color: var(--crust);
+  background: var(--focus-color);
+  border-color: var(--focus-color);
 }
 
 /* The one separator: a single vertical rule between the two decks. */
@@ -177,6 +256,16 @@
 .perf-decktag.deck-b {
   color: var(--deck-b);
   border-color: var(--deck-b);
+}
+
+.perf-decktag.deck-c {
+  color: var(--deck-c);
+  border-color: var(--deck-c);
+}
+
+.perf-decktag.deck-d {
+  color: var(--deck-d);
+  border-color: var(--deck-d);
 }
 
 /* ── The band and its zones ───────────────────────────────────── */
@@ -883,7 +972,9 @@
 
 /* Row affordances dim while their deck is locked (audibly running) */
 .perf-library.lock-A .track-load-button-A,
-.perf-library.lock-B .track-load-button-B {
+.perf-library.lock-B .track-load-button-B,
+.perf-library.lock-C .track-load-button-C,
+.perf-library.lock-D .track-load-button-D {
   opacity: 0.35;
   cursor: not-allowed;
 }

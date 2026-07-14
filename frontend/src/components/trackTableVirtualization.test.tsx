@@ -8,21 +8,34 @@
 //
 //   1. Mounted <tr data-track-id> count stays bounded as the list grows to
 //      1,000+ Tracks (only the visible window + overscan mounts).
-//   2. A prop churn on the scale of a Follow play/pause (new selection,
-//      new marks maps, re-ordered candidate list) re-runs the row build
+//   2. A prop churn on the scale of a Follow play/pause (new selection and
+//      a re-ordered candidate list) re-runs the row build
 //      within a small mounted-row budget — the transport-update budget.
 //
 // jsdom has no layout, so the viewport geometry is injected: the scroll
 // container's clientHeight and a fixed row height give a deterministic
 // window. The assertions are on DOM node counts, not wall-clock time, so
 // the loop is fast and stable in CI.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import TrackList from './TrackList';
 import { setVirtualViewportMeasurer, ROW_HEIGHT } from './virtualRows';
 import type { Track } from '../types';
+
+// TrackList reads live deck occupancy in the app. Deck identity is
+// orthogonal to this virtualization seam, so keep the standalone harness
+// focused with a stable empty occupancy snapshot.
+vi.mock('../hooks/useDeck', () => ({ useDecks: () => ({}) }));
+vi.mock('../hooks/useDeckOccupancy', () => ({
+  useDeckOccupancy: () => ({
+    A: { trackId: null, playing: false },
+    B: { trackId: null, playing: false },
+    C: { trackId: null, playing: false },
+    D: { trackId: null, playing: false },
+  }),
+}));
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
@@ -74,7 +87,6 @@ function renderList(props: Partial<React.ComponentProps<typeof TrackList>> & { t
     onSelectTrack: noop,
     getDragIds: (id: number) => [id],
     onLoadTrack: noop,
-    loadedTrackId: null,
     sortColumn: null,
     sortDirection: 'asc',
     onSort: noop,
@@ -136,18 +148,16 @@ describe('TrackTable virtualization — transport-update budget', () => {
     const { container, root, rerender } = renderList({
       tracks,
       selectedIds: emptySet,
-      loadedTrackId: null,
     });
     cleanup.push(() => act(() => root.unmount()));
 
     const before = mountedRowCount(container);
 
-    // Simulate the churn a Follow play/pause produces: the loaded track
-    // changes, selection moves, the candidate list is re-ordered. None of
-    // this may un-bound the mounted row set.
+    // Simulate the candidate-list churn a Follow play/pause produces:
+    // selection moves and the candidate list is re-ordered. Neither may
+    // un-bound the mounted row set.
     rerender({
       tracks: [...tracks].reverse(),
-      loadedTrackId: 500,
       selectedIds: new Set([500]),
     });
 

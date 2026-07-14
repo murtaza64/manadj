@@ -11,7 +11,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Transition } from '../editor/mixModel';
-import type { ChannelId } from '../playback/mixer';
 import {
   evaluatePickup,
   flipPlanDecks,
@@ -88,7 +87,7 @@ function unlit(d: PickupDecision): Extract<PickupDecision, { lit: false }> {
 
 /** Round-trip: at the decision's instant, the (maybe flipped) plan puts
  * the physical deck exactly at its current playhead, playing. */
-function expectRoundTrip(plan: SetPlan, s: PickupSnapshot, ch: ChannelId): void {
+function expectRoundTrip(plan: SetPlan, s: PickupSnapshot, ch: 'A' | 'B'): void {
   const d = lit(evaluatePickup(plan, s));
   const exec = d.flip ? flipPlanDecks(plan) : plan;
   const state = planStateAt(exec, d.mixTime);

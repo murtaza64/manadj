@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
-import { Mixer } from '../playback/mixer';
+import { CHANNEL_IDS, Mixer } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
 import type { ChannelId } from '../playback/mixer';
@@ -20,33 +20,33 @@ import { initWakeLockBridge } from '../playback/wakeLock';
 import { getKeyLockFlags } from '../playback/keyLockStore';
 import type { BeatgridResponse, Track } from '../types';
 
-const DECK_IDS = ['A', 'B'] as const;
-
-/** Loaded-pair persistence: `{"A": trackId|null, "B": trackId|null}`. */
+/** Loaded-Deck persistence: one Track id (or null) per fixed Deck. */
 const LOADED_TRACKS_KEY = 'manadj-loaded-tracks';
 
 function readStoredLoadedIds(): Record<ChannelId, number | null> {
   try {
     const raw = localStorage.getItem(LOADED_TRACKS_KEY);
-    if (!raw) return { A: null, B: null };
+    if (!raw) return { A: null, B: null, C: null, D: null };
     const parsed = JSON.parse(raw) as Partial<Record<ChannelId, unknown>>;
     return {
       A: typeof parsed.A === 'number' ? parsed.A : null,
       B: typeof parsed.B === 'number' ? parsed.B : null,
+      C: typeof parsed.C === 'number' ? parsed.C : null,
+      D: typeof parsed.D === 'number' ? parsed.D : null,
     };
   } catch {
-    return { A: null, B: null };
+    return { A: null, B: null, C: null, D: null };
   }
 }
 
 /**
- * Both Decks and the Mixer (ADRs 0008/0009). Sits above the view switch, so
+ * All Decks and the Mixer (ADRs 0008/0009). Sits above the view switch, so
  * they outlive any view: a mix keeps playing while you flip to the library.
  * The Mixer owns the one AudioContext; each deck is one of its channel
  * inputs (graph nodes only — no audio memory until Load).
  *
- * Components address a deck through <DeckScope deck="A|B"> — the provider
- * itself only publishes the registry (both decks) and the Mixer.
+ * Components address a deck through <DeckScope deck="A|B|C|D"> — the
+ * provider itself only publishes the registry and the Mixer.
  *
  * Loading is explicit (glossary: Load) — views call loadTrack deliberately
  * (Enter / double-click); selection never loads. Loading also resolves the
@@ -63,38 +63,44 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     // Performance, library, and the Transition editor's conductor — plays
     // through these. There is no other Mixer instance in the app.
     const m = new Mixer();
-    const engineA = new DeckEngine(m.portFor('A'));
-    const engineB = new DeckEngine(m.portFor('B'));
+    const created = Object.fromEntries(
+      CHANNEL_IDS.map((deck) => [deck, new DeckEngine(m.portFor(deck))])
+    ) as Record<ChannelId, DeckEngine>;
     // Key Lock boot restore (key-lock 03): sticky per Deck, default ON.
     // The editor plays through it too (ADR 0022 — carve-out retired).
     const keyLock = getKeyLockFlags();
-    engineA.setKeyLock(keyLock.A);
-    engineB.setKeyLock(keyLock.B);
+    for (const deck of CHANNEL_IDS) created[deck].setKeyLock(keyLock[deck]);
     return {
       mixer: m,
-      engines: { A: engineA, B: engineB } as Record<ChannelId, DeckEngine>,
+      engines: created,
     };
   });
   useEffect(
     () => () => {
       // Decks stop against the still-open context, then the Mixer closes it.
-      engines.A.dispose();
-      engines.B.dispose();
+      for (const deck of CHANNEL_IDS) engines[deck].dispose();
       mixer.dispose();
     },
     [engines, mixer]
   );
 
   // Cross-deck quantized launch (cue-quantize-bpm 04): each deck's paused
-  // launch (Play, Cue-hold, Hot-cue-hold) references the OTHER deck's live
-  // phase. Wire each engine's reference provider to its peer's live
-  // reference (null unless the peer is audibly playing with a Beatgrid).
+  // launch (Play, Cue-hold, Hot-cue-hold) references another live Deck's
+  // phase. Stable Deck order is the interim choice until multi-Deck MATCH
+  // and reference selection land in issue 04.
   useEffect(() => {
-    engines.A.setLaunchReferenceProvider(() => engines.B.asLaunchReference());
-    engines.B.setLaunchReferenceProvider(() => engines.A.asLaunchReference());
+    for (const deck of CHANNEL_IDS) {
+      engines[deck].setLaunchReferenceProvider(() => {
+        for (const candidate of CHANNEL_IDS) {
+          if (candidate === deck) continue;
+          const reference = engines[candidate].asLaunchReference();
+          if (reference) return reference;
+        }
+        return null;
+      });
+    }
     return () => {
-      engines.A.setLaunchReferenceProvider(null);
-      engines.B.setLaunchReferenceProvider(null);
+      for (const deck of CHANNEL_IDS) engines[deck].setLaunchReferenceProvider(null);
     };
   }, [engines]);
 
@@ -129,10 +135,14 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   const [loadedTracks, setLoadedTracks] = useState<Record<ChannelId, Track | null>>({
     A: null,
     B: null,
+    C: null,
+    D: null,
   });
   const [beatjumps, setBeatjumps] = useState<Record<ChannelId, number>>({
     A: BEATJUMP_DEFAULT,
     B: BEATJUMP_DEFAULT,
+    C: BEATJUMP_DEFAULT,
+    D: BEATJUMP_DEFAULT,
   });
 
   const loadTrackOnto = useCallback(
@@ -176,12 +186,16 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // refetch on invalidation and push the fresh beats into the engines.
   useDeckBeatgridSync(engines.A, loadedTracks.A?.id ?? null);
   useDeckBeatgridSync(engines.B, loadedTracks.B?.id ?? null);
+  useDeckBeatgridSync(engines.C, loadedTracks.C?.id ?? null);
+  useDeckBeatgridSync(engines.D, loadedTracks.D?.id ?? null);
   // Same pattern for the tempo scalar feeding beat-jump math
   // (cue-quantize-bpm 02): the per-surface setTrackBpm calls give edits
   // immediate effect; these observers make every other path (analysis,
   // sync imports, edits from the other deck's surfaces) converge too.
   useDeckBpmSync(engines.A, loadedTracks.A?.id ?? null);
   useDeckBpmSync(engines.B, loadedTracks.B?.id ?? null);
+  useDeckBpmSync(engines.C, loadedTracks.C?.id ?? null);
+  useDeckBpmSync(engines.D, loadedTracks.D?.id ?? null);
 
   // ── Loaded-pair persistence ────────────────────────────────────────────
   // The shared decks ARE "what's loaded on A/B" across every mode — the
@@ -198,7 +212,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     if (restoreStarted.current) return; // StrictMode re-run guard
     restoreStarted.current = true;
     const stored = readStoredLoadedIds();
-    for (const deck of DECK_IDS) {
+    for (const deck of CHANNEL_IDS) {
       const id = stored[deck];
       if (id === null) continue;
       api.tracks
@@ -215,10 +229,12 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // stored pair before the async restore lands. There is no unload gesture,
   // so an all-null write is only ever that boot state.
   useEffect(() => {
-    if (loadedTracks.A === null && loadedTracks.B === null) return;
+    if (CHANNEL_IDS.every((deck) => loadedTracks[deck] === null)) return;
     localStorage.setItem(
       LOADED_TRACKS_KEY,
-      JSON.stringify({ A: loadedTracks.A?.id ?? null, B: loadedTracks.B?.id ?? null })
+      JSON.stringify(
+        Object.fromEntries(CHANNEL_IDS.map((deck) => [deck, loadedTracks[deck]?.id ?? null]))
+      )
     );
   }, [loadedTracks]);
 
@@ -229,14 +245,14 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // views, the Set view's track facts) refetches without a reload
   // (sets 19; the plan itself no longer reads the Main cue).
   useEffect(() => {
-    for (const deck of DECK_IDS) {
+    for (const deck of CHANNEL_IDS) {
       engines[deck].setCueSetHandler((trackId, timeSeconds) => {
         void api.waveforms
           .updateCuePoint(trackId, timeSeconds)
           .then(() => queryClient.invalidateQueries({ queryKey: ['tracks'] }));
         setLoadedTracks((prev) => {
           const next = { ...prev };
-          for (const d of DECK_IDS) {
+          for (const d of CHANNEL_IDS) {
             const t = next[d];
             if (t && t.id === trackId) next[d] = { ...t, cue_point_time: timeSeconds };
           }
@@ -245,15 +261,12 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       });
     }
     return () => {
-      for (const deck of DECK_IDS) engines[deck].setCueSetHandler(null);
+      for (const deck of CHANNEL_IDS) engines[deck].setCueSetHandler(null);
     };
   }, [engines, queryClient]);
 
   // Per-deck loadTrack functions stay identity-stable across state changes
   // (memoized rows key their re-renders on them).
-  const loadTrackA = useCallback((t: Track) => loadTrackOnto('A', t), [loadTrackOnto]);
-  const loadTrackB = useCallback((t: Track) => loadTrackOnto('B', t), [loadTrackOnto]);
-
   // Each scope value is memoized on its own deck's slice, so a Load or
   // beatjump change on A never re-renders B's subtree (and vice versa).
   const makeScope = useCallback(
@@ -265,12 +278,12 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       deck,
       engine: engines[deck],
       loadedTrack,
-      loadTrack: deck === 'A' ? loadTrackA : loadTrackB,
+      loadTrack: (track) => loadTrackOnto(deck, track),
       beatjumpBeats,
       setBeatjumpBeats: (beats) =>
         setBeatjumps((prev) => ({ ...prev, [deck]: clampBeatjump(beats) })),
     }),
-    [engines, loadTrackA, loadTrackB]
+    [engines, loadTrackOnto]
   );
   const scopeA = useMemo(
     () => makeScope('A', loadedTracks.A, beatjumps.A),
@@ -280,9 +293,17 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     () => makeScope('B', loadedTracks.B, beatjumps.B),
     [makeScope, loadedTracks.B, beatjumps.B]
   );
+  const scopeC = useMemo(
+    () => makeScope('C', loadedTracks.C, beatjumps.C),
+    [makeScope, loadedTracks.C, beatjumps.C]
+  );
+  const scopeD = useMemo(
+    () => makeScope('D', loadedTracks.D, beatjumps.D),
+    [makeScope, loadedTracks.D, beatjumps.D]
+  );
   const registry = useMemo<Record<ChannelId, DeckContextValue>>(
-    () => ({ A: scopeA, B: scopeB }),
-    [scopeA, scopeB]
+    () => ({ A: scopeA, B: scopeB, C: scopeC, D: scopeD }),
+    [scopeA, scopeB, scopeC, scopeD]
   );
 
   // Register the 'shared' audible surface (ADR 0013) — the permanent
@@ -349,8 +370,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       // Pause only (ADR 0022): the one context keeps running — the
       // claimant (the editor) plays through it.
       silence: () => {
-        engines.A.pause();
-        engines.B.pause();
+        for (const deck of CHANNEL_IDS) engines[deck].pause();
       },
     });
     return () => unregisterSurface('shared');

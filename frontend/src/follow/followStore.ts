@@ -14,6 +14,8 @@
 import { useSyncExternalStore } from 'react';
 import { reduceFollow } from './model';
 import type { FollowEvent, FollowFlags } from './model';
+import { CHANNEL_IDS } from '../playback/mixer';
+import type { ChannelId } from '../playback/mixer';
 
 export type { FollowFlags };
 
@@ -22,11 +24,16 @@ const STORAGE_KEY = 'manadj-follow-flags';
 function loadFlags(): FollowFlags {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { A: false, B: false };
-    const parsed = JSON.parse(raw) as Partial<Record<'A' | 'B', unknown>>;
-    return { A: parsed.A === true, B: parsed.B === true };
+    if (!raw) return { A: false, B: false, C: false, D: false };
+    const parsed = JSON.parse(raw) as Partial<Record<ChannelId, unknown>>;
+    return {
+      A: parsed.A === true,
+      B: parsed.B === true,
+      C: parsed.C === true,
+      D: parsed.D === true,
+    };
   } catch {
-    return { A: false, B: false };
+    return { A: false, B: false, C: false, D: false };
   }
 }
 
@@ -58,7 +65,7 @@ export function getFollowFlags(): FollowFlags {
 /** Run an event through the reducer; persist + notify only on change. */
 export function dispatchFollow(event: FollowEvent): void {
   const next = reduceFollow(flags, event);
-  if (next.A === flags.A && next.B === flags.B) return;
+  if (CHANNEL_IDS.every((deck) => next[deck] === flags[deck])) return;
   flags = next;
   saveFlags(next);
   notify();

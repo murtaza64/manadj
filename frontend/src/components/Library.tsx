@@ -149,7 +149,12 @@ export default function Library({
   const followParams = useFollowParams();
   const followRefs = followedReferences(
     followFlags,
-    { A: decks.A.loadedTrack, B: decks.B.loadedTrack },
+    {
+      A: decks.A.loadedTrack,
+      B: decks.B.loadedTrack,
+      C: decks.C.loadedTrack,
+      D: decks.D.loadedTrack,
+    },
     // Facts read through the track cache (ADR 0027 §7): an edited BPM
     // re-centers the candidate query without a re-Load.
     (id) => queryClient.getQueryData<Track>(['track', id])
@@ -924,7 +929,6 @@ export default function Library({
                   playOrder={playOrder}
                   dragSource="playlist-pane"
                   onLoadTrack={loadForTable}
-                  loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}
@@ -941,8 +945,12 @@ export default function Library({
               <FilterBar
                 totalTracks={allTracksData?.library_total || 0}
                 filteredCount={libraryTracks.length}
-                loadedA={decks.A.loadedTrack}
-                loadedB={decks.B.loadedTrack}
+                loadedByDeck={{
+                  A: decks.A.loadedTrack,
+                  B: decks.B.loadedTrack,
+                  C: decks.C.loadedTrack,
+                  D: decks.D.loadedTrack,
+                }}
               />
               <div
                 onMouseDownCapture={() => setFocusedPane('library')}
@@ -963,7 +971,6 @@ export default function Library({
                   getDragIds={editLibSel.getDragIds}
                   onRowContextMenu={handleRowContextMenuEditLib}
                   onLoadTrack={loadForTable}
-                  loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}
@@ -986,8 +993,12 @@ export default function Library({
               <FilterBar
                 totalTracks={totalTracks}
                 filteredCount={currentTracks.length}
-                loadedA={decks.A.loadedTrack}
-                loadedB={decks.B.loadedTrack}
+                loadedByDeck={{
+                  A: decks.A.loadedTrack,
+                  B: decks.B.loadedTrack,
+                  C: decks.C.loadedTrack,
+                  D: decks.D.loadedTrack,
+                }}
               />
 
               {/* Track table. In playlist view it is the playlist pane:
@@ -1028,7 +1039,6 @@ export default function Library({
                   playOrder={playOrder}
                   dragSource={selectedView === 'playlist' ? 'playlist-pane' : 'library'}
                   onLoadTrack={loadForTable}
-                  loadedTrackId={loadedTrack?.id ?? null}
                   onLoadToDeck={onLoadToDeck}
                   transitionMarksA={fromA}
                   transitionMarksB={fromB}

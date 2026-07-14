@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { BeatgridResponse } from '../types';
+import type { BeatgridResponse, HotCue, MetricLadderResponse } from '../types';
 
 /**
  * Grid-nudge step in milliseconds — the ONE home for the ±10ms every grid
@@ -69,6 +69,27 @@ export function useSetBeatgridDownbeat() {
     onSuccess: (_data, variables) => {
       // Invalidate beatgrid query to trigger refetch
       queryClient.invalidateQueries({ queryKey: ['beatgrid', variables.trackId] });
+    },
+  });
+}
+
+interface DropAnchorResponse {
+  beatgrid: BeatgridResponse;
+  metric_ladder: MetricLadderResponse;
+  hotcues: HotCue[];
+}
+
+/** One atomic assertion of the grid anchor, Ladder anchor, and cue ladder. */
+export function useDropAnchor() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ trackId, dropTime }: { trackId: number; dropTime: number }) =>
+      api.beatgrids.dropAnchor(trackId, dropTime) as Promise<DropAnchorResponse>,
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(['beatgrid', variables.trackId], data.beatgrid);
+      queryClient.setQueryData(['metric-ladder', variables.trackId], data.metric_ladder);
+      queryClient.invalidateQueries({ queryKey: ['hotcues'] });
     },
   });
 }

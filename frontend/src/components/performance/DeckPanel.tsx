@@ -36,6 +36,7 @@ import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { trackWindowSeconds } from '../../utils/waveformZoom';
+import { focusDeck, useControlFocus } from '../../performance/controlFocus';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../../utils/displayColors';
 import { setKeyLockFlag } from '../../playback/keyLockStore';
@@ -91,7 +92,9 @@ export function DeckWaveform({
   visibleSeconds: number;
   onVisibleSecondsChange: (seconds: number) => void;
 }) {
-  const { engine, loadedTrack, beatjumpBeats } = useDeck();
+  const { deck, engine, loadedTrack, beatjumpBeats } = useDeck();
+  const controlFocus = useControlFocus();
+  const focused = controlFocus.left === deck || controlFocus.right === deck;
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
@@ -110,17 +113,21 @@ export function DeckWaveform({
   const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, 0));
 
   return (
-    <WebGLWaveform
-      trackId={loadedTrack?.id ?? null}
-      clock={engine}
-      cuePoint={cuePoint}
-      loop={loop}
-      transport={transport}
-      dimmed={loadedTrack !== null && !ready}
-      beatjumpBeats={beatjumpBeats}
-      visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
-      onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
-    />
+    <div
+      className={`perf-wave-row deck-${deck.toLowerCase()}${focused ? ' focused' : ''}`}
+    >
+      <WebGLWaveform
+        trackId={loadedTrack?.id ?? null}
+        clock={engine}
+        cuePoint={cuePoint}
+        loop={loop}
+        transport={transport}
+        dimmed={loadedTrack !== null && !ready}
+        beatjumpBeats={beatjumpBeats}
+        visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
+        onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
+      />
+    </div>
   );
 }
 
@@ -309,7 +316,7 @@ function TrackZone({ track }: { track: Track | null }) {
 
 function PlayZone() {
   const { deck, engine } = useDeck();
-  const keys = DECK_KEYS[deck];
+  const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
   const ready = useDeckReady();
   const bend = useDeckSnapshot((s) => s.bendPercent);
 
@@ -624,13 +631,20 @@ export function DeckPanel({
   lockHint?: boolean;
 }) {
   const { deck, engine } = useDeck();
+  const controlFocus = useControlFocus();
+  const focused = controlFocus.left === deck || controlFocus.right === deck;
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
   const track = useDeckTrack();
 
   return (
-    <section className={`perf-deckpanel${mirrored ? ' mirrored' : ''}`}>
+    <section
+      className={`perf-deckpanel deck-${deck.toLowerCase()}${mirrored ? ' mirrored' : ''}${
+        focused ? ' focused' : ''
+      }`}
+      onPointerDownCapture={() => focusDeck(deck)}
+    >
       <div className="perf-deck-minimap">
         <span className={`perf-decktag deck-${deck.toLowerCase()}`}>{deck}</span>
         {lockHint && <span className="perf-lock-hint">PLAYING — LOAD BLOCKED</span>}

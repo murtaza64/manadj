@@ -325,6 +325,18 @@ export const api = {
       return response.json();
     },
 
+    dropAnchor: async (trackId: number, dropTime: number) => {
+      const response = await fetch(`${API_BASE}/beatgrids/${trackId}/drop-anchor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drop_time: dropTime }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to anchor drop: ${response.statusText}`);
+      }
+      return response.json();
+    },
+
     nudge: async (trackId: number, offsetMs: number) => {
       const response = await fetch(`${API_BASE}/beatgrids/${trackId}/nudge`, {
         method: 'POST',

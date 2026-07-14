@@ -23,6 +23,9 @@ import {
   type FollowFlags,
 } from './model';
 
+const followFlags = (A = false, B = false, C = false, D = false): FollowFlags => ({ A, B, C, D });
+const loaded = (A: Track | null, B: Track | null = null) => ({ A, B, C: null, D: null });
+
 /** Minimal Track for derivation: only key/bpm/energy/tags are read. */
 function track(fields: Partial<Track> = {}): Track {
   return {
@@ -37,24 +40,24 @@ describe('followedReferences — facts read through the track cache (ADR 0027 §
   // loadedTrack is a load-time snapshot (identity + display); tempo FACTS
   // come from the ['track', id] cache row when one exists. After a re-tempo
   // 87→174 the follow query must center on 174 without a re-Load.
-  const flags: FollowFlags = { A: true, B: false };
+  const followed = followFlags(true);
   const stale = track({ id: 7, bpm: 87 });
 
   it('builds the reference from the fresh cache row when available', () => {
     const fresh = track({ id: 7, bpm: 174 });
-    const refs = followedReferences(flags, { A: stale, B: null }, () => fresh);
+    const refs = followedReferences(followed, loaded(stale), () => fresh);
     expect(refs).toEqual([{ deck: 'A', reference: fresh }]);
     const q = deriveFollowQuery(refs[0].reference, DEFAULT_FOLLOW_PARAMS);
     expect(q.bpmCenter).toBe(174);
   });
 
   it('falls back to the loaded snapshot when the cache has no row', () => {
-    const refs = followedReferences(flags, { A: stale, B: null }, () => undefined);
+    const refs = followedReferences(followed, loaded(stale), () => undefined);
     expect(refs).toEqual([{ deck: 'A', reference: stale }]);
   });
 
   it('keeps working without a lookup (identity-only callers)', () => {
-    const refs = followedReferences(flags, { A: stale, B: null });
+    const refs = followedReferences(followed, loaded(stale));
     expect(refs).toEqual([{ deck: 'A', reference: stale }]);
   });
 });
@@ -182,13 +185,13 @@ describe('followSummary — the FilterBar indicator text (follow-mode 05)', () =
 
 describe('reduceFollow — the Follow state machine', () => {
   // Event `playing` maps are POST-event deck-running state.
-  const OFF: FollowFlags = { A: false, B: false };
-  const play = (deck: 'A' | 'B', playing: Record<'A' | 'B', boolean>): FollowEvent => ({
+  const OFF = followFlags();
+  const play = (deck: 'A' | 'B' | 'C' | 'D', playing: FollowFlags): FollowEvent => ({
     type: 'play',
     deck,
     playing,
   });
-  const pause = (deck: 'A' | 'B', playing: Record<'A' | 'B', boolean>): FollowEvent => ({
+  const pause = (deck: 'A' | 'B' | 'C' | 'D', playing: FollowFlags): FollowEvent => ({
     type: 'pause',
     deck,
     playing,
@@ -196,10 +199,7 @@ describe('reduceFollow — the Follow state machine', () => {
 
   describe('manual toggle', () => {
     it('enables a Deck with a loaded Track', () => {
-      expect(reduceFollow(OFF, { type: 'toggle', deck: 'A', loaded: true })).toEqual({
-        A: true,
-        B: false,
-      });
+      expect(reduceFollow(OFF, { type: 'toggle', deck: 'A', loaded: true })).toEqual(followFlags(true));
     });
 
     it('rejects enabling an empty Deck', () => {
@@ -208,7 +208,7 @@ describe('reduceFollow — the Follow state machine', () => {
 
     it('disables regardless of loaded state', () => {
       expect(
-        reduceFollow({ A: true, B: false }, { type: 'toggle', deck: 'A', loaded: false })
+        reduceFollow(followFlags(true), { type: 'toggle', deck: 'A', loaded: false })
       ).toEqual(OFF);
     });
 
@@ -217,44 +217,32 @@ describe('reduceFollow — the Follow state machine', () => {
       // events carry no playing context at all); the spread/expiry rules
       // re-assert on the next transport event.
       expect(
-        reduceFollow({ A: false, B: true }, { type: 'toggle', deck: 'A', loaded: true })
-      ).toEqual({ A: true, B: true });
+        reduceFollow(followFlags(false, true), { type: 'toggle', deck: 'A', loaded: true })
+      ).toEqual(followFlags(true, true));
     });
   });
 
   describe('spread on play', () => {
     it('a Deck starting while any Deck follows begins following', () => {
-      expect(reduceFollow({ A: true, B: false }, play('B', { A: true, B: true }))).toEqual({
-        A: true,
-        B: true,
-      });
+      expect(reduceFollow(followFlags(true), play('B', followFlags(true, true)))).toEqual(followFlags(true, true));
     });
 
     it('never self-enables: with Follow off everywhere, play changes nothing', () => {
-      expect(reduceFollow(OFF, play('A', { A: true, B: false }))).toEqual(OFF);
+      expect(reduceFollow(OFF, play('A', followFlags(true)))).toEqual(OFF);
     });
   });
 
   describe('drop on pause', () => {
     it('a pausing Deck stops following when another Deck still plays', () => {
-      expect(reduceFollow({ A: true, B: true }, pause('A', { A: false, B: true }))).toEqual({
-        A: false,
-        B: true,
-      });
+      expect(reduceFollow(followFlags(true, true), pause('A', followFlags(false, true)))).toEqual(followFlags(false, true));
     });
 
     it('the sole playing Deck keeps following through mid-set silence', () => {
-      expect(reduceFollow({ A: true, B: false }, pause('A', { A: false, B: false }))).toEqual({
-        A: true,
-        B: false,
-      });
+      expect(reduceFollow(followFlags(true), pause('A', followFlags()))).toEqual(followFlags(true));
     });
 
     it('pausing a non-following Deck changes nothing', () => {
-      expect(reduceFollow({ A: true, B: false }, pause('B', { A: true, B: false }))).toEqual({
-        A: true,
-        B: false,
-      });
+      expect(reduceFollow(followFlags(true), pause('B', followFlags(true)))).toEqual(followFlags(true));
     });
   });
 
@@ -262,68 +250,65 @@ describe('reduceFollow — the Follow state machine', () => {
     it('any Deck starting revokes Follow from a paused following Deck', () => {
       // A follows from the sole-playing exception (paused); starting B
       // spreads to B and expires A's stickiness.
-      expect(reduceFollow({ A: true, B: false }, play('B', { A: false, B: true }))).toEqual({
-        A: false,
-        B: true,
-      });
+      expect(reduceFollow(followFlags(true), play('B', followFlags(false, true)))).toEqual(followFlags(false, true));
     });
   });
 
   it('rides a whole transition: enable → spread → fade out → hand over', () => {
     // Enable Follow on A (loaded, playing), start B, then pause A.
     let flags = reduceFollow(OFF, { type: 'toggle', deck: 'A', loaded: true });
-    flags = reduceFollow(flags, play('A', { A: true, B: false }));
-    flags = reduceFollow(flags, play('B', { A: true, B: true }));
-    expect(flags).toEqual({ A: true, B: true });
-    flags = reduceFollow(flags, pause('A', { A: false, B: true }));
-    expect(flags).toEqual({ A: false, B: true });
+    flags = reduceFollow(flags, play('A', followFlags(true)));
+    flags = reduceFollow(flags, play('B', followFlags(true, true)));
+    expect(flags).toEqual(followFlags(true, true));
+    flags = reduceFollow(flags, pause('A', followFlags(false, true)));
+    expect(flags).toEqual(followFlags(false, true));
   });
 });
 
 describe('followMacroToggles — the assistant button (midi-performance-ops 08)', () => {
-  const OFF: FollowFlags = { A: false, B: false };
+  const OFF = followFlags();
 
   describe('no Deck follows: enable on the playing Decks', () => {
     it('one playing Deck → toggle that Deck only', () => {
-      expect(followMacroToggles(OFF, { A: true, B: false })).toEqual(['A']);
-      expect(followMacroToggles(OFF, { A: false, B: true })).toEqual(['B']);
+      expect(followMacroToggles(OFF, followFlags(true))).toEqual(['A']);
+      expect(followMacroToggles(OFF, followFlags(false, true))).toEqual(['B']);
     });
 
     it('both playing → toggle both', () => {
-      expect(followMacroToggles(OFF, { A: true, B: true })).toEqual(['A', 'B']);
+      expect(followMacroToggles(OFF, followFlags(true, true))).toEqual(['A', 'B']);
     });
 
     it('nothing plays → toggle both Decks (paused Decks may follow while nothing plays)', () => {
-      expect(followMacroToggles(OFF, { A: false, B: false })).toEqual(['A', 'B']);
+      expect(followMacroToggles(OFF, followFlags())).toEqual(['A', 'B', 'C', 'D']);
     });
   });
 
   describe('any Deck follows: all Follow off', () => {
     it('one following Deck → toggle exactly that Deck off, whatever plays', () => {
-      expect(followMacroToggles({ A: true, B: false }, { A: false, B: true })).toEqual(['A']);
-      expect(followMacroToggles({ A: false, B: true }, { A: true, B: true })).toEqual(['B']);
+      expect(followMacroToggles(followFlags(true), followFlags(false, true))).toEqual(['A']);
+      expect(followMacroToggles(followFlags(false, true), followFlags(true, true))).toEqual(['B']);
     });
 
     it('both following → toggle both off', () => {
-      expect(followMacroToggles({ A: true, B: true }, { A: true, B: true })).toEqual(['A', 'B']);
+      expect(followMacroToggles(followFlags(true, true), followFlags(true, true))).toEqual(['A', 'B']);
     });
 
     it('a paused following Deck is still turned off — never "add the other" (asymmetric on purpose)', () => {
       // B follows while paused (sole-playing sticky); A plays. The press
       // dismisses assistance, it does not spread it to A.
-      expect(followMacroToggles({ A: false, B: true }, { A: true, B: false })).toEqual(['B']);
+      expect(followMacroToggles(followFlags(false, true), followFlags(true))).toEqual(['B']);
     });
   });
 
   it('composes with the reducer: enable-from-nothing then dismiss round-trips to OFF', () => {
     // Press 1 with A playing (both loaded): enable on A.
     let flags = OFF;
-    for (const deck of followMacroToggles(flags, { A: true, B: false })) {
+    for (const deck of followMacroToggles(flags, followFlags(true))) {
       flags = reduceFollow(flags, { type: 'toggle', deck, loaded: true });
     }
-    expect(flags).toEqual({ A: true, B: false });
+    expect(flags).toEqual(followFlags(true));
     // Press 2: any Deck follows → all off.
-    for (const deck of followMacroToggles(flags, { A: true, B: false })) {
+    for (const deck of followMacroToggles(flags, followFlags(true))) {
       flags = reduceFollow(flags, { type: 'toggle', deck, loaded: true });
     }
     expect(flags).toEqual(OFF);
@@ -333,10 +318,10 @@ describe('followMacroToggles — the assistant button (midi-performance-ops 08)'
     // Nothing plays, only A is loaded: the macro proposes both, the
     // reducer enables A only — the button is a shortcut, not a new model.
     let flags = OFF;
-    const loaded = { A: true, B: false };
-    for (const deck of followMacroToggles(flags, { A: false, B: false })) {
-      flags = reduceFollow(flags, { type: 'toggle', deck, loaded: loaded[deck] });
+    const loadedDecks = followFlags(true);
+    for (const deck of followMacroToggles(flags, followFlags())) {
+      flags = reduceFollow(flags, { type: 'toggle', deck, loaded: loadedDecks[deck] });
     }
-    expect(flags).toEqual({ A: true, B: false });
+    expect(flags).toEqual(followFlags(true));
   });
 });

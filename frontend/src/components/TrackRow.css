@@ -21,11 +21,6 @@
   background: #2a2a3e !important;
 }
 
-/* Loaded on the Deck: left accent stripe, independent of selection */
-.track-row-loaded {
-  box-shadow: inset 3px 0 0 0 var(--pink, #f5c2e7);
-}
-
 /* Sticky cell backgrounds that match row state */
 .track-row:hover .sticky-col-cell {
   background: var(--mantle) !important;
@@ -37,6 +32,63 @@
 
 .track-row-selected:hover .sticky-col-cell {
   background: #2a2a3e !important;
+}
+
+/* Loaded on a Deck: identity wash, mirroring the Set view (sets 35) —
+   the holding deck's color at low alpha (A cyan / B magenta, both = A→B
+   edge stripes), over every row state. Sticky cells repeat the mix over
+   their opaque backgrounds (they must occlude scrolled content), and the
+   deck-colored edge stripe survives selection. */
+.track-row-loaded-a {
+  box-shadow: inset 3px 0 0 0 var(--deck-a);
+}
+.track-row-loaded-b {
+  box-shadow: inset 3px 0 0 0 var(--deck-b);
+}
+.track-row-loaded-ab {
+  box-shadow: inset 3px 0 0 0 var(--deck-a), inset -3px 0 0 0 var(--deck-b);
+}
+
+.track-row-loaded-a,
+.track-row-loaded-a .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-a) 16%, var(--crust)) !important;
+}
+.track-row-loaded-b,
+.track-row-loaded-b .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-b) 16%, var(--crust)) !important;
+}
+.track-row-loaded-ab,
+.track-row-loaded-ab .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-a) 8%, color-mix(in srgb, var(--deck-b) 8%, var(--crust))) !important;
+}
+
+.track-row-loaded-a:hover,
+.track-row-loaded-a:hover .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-a) 16%, var(--mantle)) !important;
+}
+.track-row-loaded-b:hover,
+.track-row-loaded-b:hover .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-b) 16%, var(--mantle)) !important;
+}
+.track-row-loaded-ab:hover,
+.track-row-loaded-ab:hover .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-a) 8%, color-mix(in srgb, var(--deck-b) 8%, var(--mantle))) !important;
+}
+
+/* Selected + loaded: selection blue under the identity wash (the Set
+   view keeps the wash and marks selection with a ring; here the blue
+   base plays that role). Higher specificity than .track-row-selected. */
+.track-row-selected.track-row-loaded-a,
+.track-row-selected.track-row-loaded-a .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-a) 16%, #242438) !important;
+}
+.track-row-selected.track-row-loaded-b,
+.track-row-selected.track-row-loaded-b .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-b) 16%, #242438) !important;
+}
+.track-row-selected.track-row-loaded-ab,
+.track-row-selected.track-row-loaded-ab .sticky-col-cell {
+  background: color-mix(in srgb, var(--deck-a) 8%, color-mix(in srgb, var(--deck-b) 8%, #242438)) !important;
 }
 
 .track-cell {
@@ -296,6 +348,14 @@ a.provenance-chip:hover {
 
 .track-load-button-B {
   color: var(--deck-b);
+}
+
+.track-load-button-C {
+  color: var(--deck-c);
+}
+
+.track-load-button-D {
+  color: var(--deck-d);
 }
 
 /* Play order (#) cell — playlist tables only (playlist-editing 04) */

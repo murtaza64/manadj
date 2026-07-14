@@ -11,9 +11,8 @@
  * covers it.
  */
 import type { DeckEngine } from './DeckEngine';
+import { CHANNEL_IDS } from './mixer';
 import type { ChannelId } from './mixer';
-
-const DECKS: readonly ChannelId[] = ['A', 'B'];
 
 /** Subscribe to both engines; returns a dispose that also releases. */
 export function initWakeLockBridge(engines: Record<ChannelId, DeckEngine>): () => void {
@@ -49,7 +48,7 @@ export function initWakeLockBridge(engines: Record<ChannelId, DeckEngine>): () =
   };
 
   const update = () => {
-    const anyPlaying = DECKS.some((deck) => engines[deck].getSnapshot().playing);
+    const anyPlaying = CHANNEL_IDS.some((deck) => engines[deck].getSnapshot().playing);
     if (anyPlaying === wanted) return;
     wanted = anyPlaying;
     if (wanted) void acquire();
@@ -61,7 +60,7 @@ export function initWakeLockBridge(engines: Record<ChannelId, DeckEngine>): () =
     if (document.visibilityState === 'visible' && wanted) void acquire();
   };
 
-  const unsubscribes = DECKS.map((deck) => engines[deck].subscribe(update));
+  const unsubscribes = CHANNEL_IDS.map((deck) => engines[deck].subscribe(update));
   document.addEventListener('visibilitychange', onVisibility);
   update();
 

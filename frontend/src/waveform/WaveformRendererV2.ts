@@ -146,6 +146,8 @@ export interface LadderGridInput {
   tierBars: readonly number[];
   barIndexes: readonly number[];
   parentheticals: readonly boolean[];
+  parentheticalCounts: readonly number[];
+  topBars: readonly number[];
 }
 
 /** Metric-ladder gridline styling: width (dpr multiples) and alpha per
@@ -1177,11 +1179,13 @@ export class WaveformRendererV2 {
   }
 
   /** Gold pole + LEFT-flying pennant (cue flags fly right) at each Reset
-   * mark — "the count restarts here" on every waveform surface. */
+   * mark. The earliest mark is the derived anchor and gets a solid pennant;
+   * later resets are outlined (ADR 0030). */
   private pushResetMarks(view: FrameView, verts: number[]): void {
     if (this.resetMarks.length === 0) return;
     const [r, g, b] = RESET_MARK_COLOR;
-    for (const t of this.resetMarks) {
+    for (let markIndex = 0; markIndex < this.resetMarks.length; markIndex++) {
+      const t = this.resetMarks[markIndex];
       const x = this.timeToX(t, view);
       if (x < 0 || x >= view.w) continue;
       const poleW = 2 * view.dpr;
@@ -1190,11 +1194,39 @@ export class WaveformRendererV2 {
       // Pennant at the mark's identity zone: top edge (bottom on
       // bottom-anchored editor rows), pointing left.
       const y0 = this.anchor === 'bottom' ? view.h - flag : 0;
-      verts.push(
-        x - poleW / 2, y0, r, g, b,
-        x - poleW / 2, y0 + flag, r, g, b,
-        x - poleW / 2 - flag, y0 + flag / 2, r, g, b,
-      );
+      const poleX = x - poleW / 2;
+      if (markIndex === 0) {
+        verts.push(
+          poleX, y0, r, g, b,
+          poleX, y0 + flag, r, g, b,
+          poleX - flag, y0 + flag / 2, r, g, b,
+        );
+      } else {
+        const outlineW = 1.25 * view.dpr;
+        pushLineSegment(verts, poleX, y0, poleX, y0 + flag, outlineW, r, g, b);
+        pushLineSegment(
+          verts,
+          poleX,
+          y0,
+          poleX - flag,
+          y0 + flag / 2,
+          outlineW,
+          r,
+          g,
+          b,
+        );
+        pushLineSegment(
+          verts,
+          poleX - flag,
+          y0 + flag / 2,
+          poleX,
+          y0 + flag,
+          outlineW,
+          r,
+          g,
+          b,
+        );
+      }
     }
   }
 
@@ -1489,6 +1521,32 @@ function pushRect(
     x + w, y, r, g, b,
     x + w, y + h, r, g, b,
     x, y + h, r, g, b,
+  );
+}
+
+/** Two triangles forming a constant-width line segment. */
+function pushLineSegment(
+  verts: number[],
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  width: number,
+  r: number,
+  g: number,
+  b: number,
+): void {
+  const length = Math.hypot(x1 - x0, y1 - y0);
+  if (length === 0) return;
+  const px = (-(y1 - y0) / length) * (width / 2);
+  const py = ((x1 - x0) / length) * (width / 2);
+  verts.push(
+    x0 + px, y0 + py, r, g, b,
+    x1 + px, y1 + py, r, g, b,
+    x0 - px, y0 - py, r, g, b,
+    x1 + px, y1 + py, r, g, b,
+    x1 - px, y1 - py, r, g, b,
+    x0 - px, y0 - py, r, g, b,
   );
 }
 

@@ -1,6 +1,7 @@
 import {
   GRID_NUDGE_MS,
   useBeatgridData,
+  useDropAnchor,
   useNudgeBeatgrid,
   useSetBeatgridDownbeat,
 } from '../../hooks/useBeatgridData';
@@ -8,7 +9,7 @@ import { useMetricLadderData, usePutMetricLadder } from '../../hooks/useMetricLa
 import { nearestDownbeatOrdinal, nearestMark } from '../../meter/ladder';
 import { GridNudgeLeftIcon, GridNudgeRightIcon } from '../icons/GridIcons';
 import { AnchorIcon } from '../icons/AnchorIcon';
-import { ResetMarkDeleteIcon, ResetMarkIcon } from '../icons/MeterIcons';
+import { DropAnchorIcon, ResetMarkDeleteIcon, ResetMarkIcon } from '../icons/MeterIcons';
 import './deckControls.css';
 
 /**
@@ -43,6 +44,7 @@ export function GridEditButtons({
 }) {
   const nudgeGrid = useNudgeBeatgrid();
   const setDownbeat = useSetBeatgridDownbeat();
+  const dropAnchor = useDropAnchor();
   const { data: beatgrid } = useBeatgridData(trackId);
   const { data: ladder } = useMetricLadderData(trackId);
   const putLadder = usePutMetricLadder();
@@ -94,6 +96,17 @@ export function GridEditButtons({
         title={title('Set downbeat at playhead (anchors the grid)')}
       >
         <AnchorIcon />
+      </button>
+      <button
+        className="player-button"
+        disabled={gated || dropAnchor.isPending}
+        onClick={() => {
+          if (trackId === null) return;
+          dropAnchor.mutate({ trackId, dropTime: getPlayhead() });
+        }}
+        title={title('Anchor drop at playhead (grid, ladder, and cue ladder)')}
+      >
+        <DropAnchorIcon />
       </button>
       <button
         className="player-button"

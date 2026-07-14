@@ -11,6 +11,7 @@
  * definition, a loaded+playing row now.
  */
 import { DECK_COLORS } from '../theme/deckColors';
+import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 
 /** One deck's live occupancy slice: what's loaded, whether it plays. */
@@ -22,10 +23,10 @@ export interface DeckOccupancy {
 export type DeckOccupancyMap = Record<ChannelId, DeckOccupancy>;
 
 /** The decks currently holding this track (usually 0 or 1; both when the
- * same track is loaded twice). Order A, B — the wash gradient reads
+ * same track is loaded twice). Order A–D — the wash gradient reads
  * left→right. */
 export function loadedDecks(trackId: number, occupancy: DeckOccupancyMap): ChannelId[] {
-  return (['A', 'B'] as const).filter((d) => occupancy[d].trackId === trackId);
+  return CHANNEL_IDS.filter((d) => occupancy[d].trackId === trackId);
 }
 
 /** True when any deck holding this track is playing (the deck-neutral

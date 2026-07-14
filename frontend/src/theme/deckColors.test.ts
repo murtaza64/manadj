@@ -9,7 +9,7 @@ describe('deckColors', () => {
     expect(hexToRgbTriplet('#ff2d95')).toBe('255, 45, 149');
   });
 
-  it('installs hex and rgb variables for both Decks', () => {
+  it('installs hex and rgb variables for all Decks', () => {
     const seen: Record<string, string> = {};
     installDeckColorVars({ style: { setProperty: (n, v) => void (seen[n] = v) } });
     expect(seen).toEqual({
@@ -17,6 +17,10 @@ describe('deckColors', () => {
       '--deck-a-rgb': '0, 229, 255',
       '--deck-b': DECK_COLORS.B,
       '--deck-b-rgb': '255, 45, 149',
+      '--deck-c': DECK_COLORS.C,
+      '--deck-c-rgb': '255, 122, 0',
+      '--deck-d': DECK_COLORS.D,
+      '--deck-d-rgb': '143, 77, 255',
     });
   });
 });
