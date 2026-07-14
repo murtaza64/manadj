@@ -8,7 +8,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { DECK_COLORS, hexToRgbTriplet } from '../theme/deckColors';
-import { cueCssColor } from '../waveform/WaveformRendererV2';
+import { cueCssColor } from '../hotcues/palette';
 import { bContentSegments, bEndMixTime, bTrackTimeAt, laneValuesAt } from './mixModel';
 import { MixPlayer } from './MixPlayer';
 import type { EditorMix } from './mixModel';

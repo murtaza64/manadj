@@ -31,6 +31,7 @@ export function HotCuePads({ padKbd }: { padKbd?: (slot: number) => ReactNode })
             onDown={actions.down}
             onUp={actions.up}
             onDelete={actions.remove}
+            onDecorate={actions.decorate}
           />
         );
         return padKbd ? (

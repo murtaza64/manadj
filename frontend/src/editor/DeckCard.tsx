@@ -260,6 +260,7 @@ export function DeckCard({
                     onDown={cueActions.down}
                     onUp={cueActions.up}
                     onDelete={cueActions.remove}
+                    onDecorate={cueActions.decorate}
                   />
                 ))}
               </span>

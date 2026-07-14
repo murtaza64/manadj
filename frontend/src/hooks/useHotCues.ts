@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { HotCue } from '../types';
+import { HOT_CUE_CSS_COLORS } from '../hotcues/palette';
 
 export function useHotCues(trackId: number | null) {
   return useQuery<HotCue[]>({
@@ -26,8 +27,8 @@ export function useSetHotCue() {
       slotNumber: number;
       data: {
         time_seconds: number;
-        label?: string;
-        color?: string;
+        label?: string | null;
+        color?: string | null;
       };
     }) => api.hotcues.set(trackId, slotNumber, data),
     onMutate: async (variables) => {
@@ -50,8 +51,12 @@ export function useSetHotCue() {
           newArray[existingIndex] = {
             ...newArray[existingIndex],
             time_seconds: variables.data.time_seconds,
-            label: variables.data.label,
-            color: variables.data.color,
+            label: variables.data.label === undefined
+              ? newArray[existingIndex].label
+              : variables.data.label,
+            color: variables.data.color === undefined
+              ? newArray[existingIndex].color
+              : variables.data.color,
           };
           return newArray;
         } else {
@@ -63,8 +68,10 @@ export function useSetHotCue() {
               track_id: variables.trackId,
               slot_number: variables.slotNumber,
               time_seconds: variables.data.time_seconds,
-              label: variables.data.label,
-              color: variables.data.color,
+              label: variables.data.label ?? null,
+              color: variables.data.color
+                ?? HOT_CUE_CSS_COLORS[variables.slotNumber]
+                ?? null,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             },

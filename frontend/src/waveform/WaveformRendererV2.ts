@@ -20,6 +20,7 @@ import type { PlaybackClock } from '../playback/clock';
 import { addBeats } from '../playback/quantize';
 import { MAX_LEAD_IN_SECONDS } from '../playback/DeckEngine';
 import { barCountLabel } from '../meter/ladder';
+import { HOT_CUE_CSS_COLORS } from '../hotcues/palette';
 import { STEP_RATIO } from '../utils/waveformZoom';
 import { playedDimBoundary } from './loopOverlay';
 import { MAX_LEVELS, TEX_WIDTH } from './blob';
@@ -78,17 +79,6 @@ function formatReadoutTime(seconds: number): string {
  * what colorless (in-app-created) cues get. Mirrors --hc-1..--hc-8 in
  * styles/variables.css (the GL pass can't read CSS vars — keep in sync).
  * Also reused by the Set overview ladder (sets 04 review). */
-export const HOT_CUE_CSS_COLORS: Record<number, string> = {
-  1: '#1e90ff', // blue
-  2: '#ffd400', // yellow
-  3: '#ff8800', // orange
-  4: '#ff4455', // red
-  5: '#2ed573', // green
-  6: '#ff5cc8', // pink
-  7: '#a855f7', // purple
-  8: '#00cec9', // teal
-};
-
 const CUE_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 /** CSS-side cue color resolution (hotcue-colors 01): the stored per-cue
@@ -161,13 +151,9 @@ export const TIER_ALPHA: readonly number[] = [0.3, 0.38, 0.48, 0.6, 0.75];
  * lines survive — the generalization of the legacy 2.5px/bar cutoff. */
 export const TIER_MIN_SPACING_PX = 2.5;
 
-export function cueCssColor(slot: number, stored?: string): string {
-  return stored && CUE_COLOR_RE.test(stored) ? stored : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');
-}
-
 /** '#RRGGBB' → 0-1 floats; null for anything else (falls back to the
  * slot palette — stored colors are Engine-import hex, but don't trust). */
-function parseCueColor(color: string | undefined): [number, number, number] | null {
+function parseCueColor(color: string | null | undefined): [number, number, number] | null {
   if (!color || !CUE_COLOR_RE.test(color)) return null;
   return [
     parseInt(color.slice(1, 3), 16) / 255,
@@ -518,7 +504,7 @@ export class WaveformRendererV2 {
   /** Plain-array view of beatTimes for beat-domain math (addBeats). */
   private beatTimesPlain: readonly number[] | null = null;
   private regions: OverlayRegion[] = [];
-  private hotCues = new Map<number, { time: number; color?: string }>();
+  private hotCues = new Map<number, { time: number; color?: string | null }>();
   private beatTimes: Float32Array | null = null;
   private downbeatTimes: Float32Array | null = null;
   /** Beat index → Metric-ladder tier (−1 = weak beat); parallel to beatTimes. */
@@ -573,7 +559,7 @@ export class WaveformRendererV2 {
   }
 
   public setHotCues(
-    hotCues: Array<{ slot_number: number; time_seconds: number; color?: string }>,
+    hotCues: Array<{ slot_number: number; time_seconds: number; color?: string | null }>,
   ): void {
     this.hotCues.clear();
     for (const hc of hotCues) {
