@@ -107,14 +107,17 @@
 .perf-strip-slot { width: 130px; justify-self: end; }
 
 .perf-strip-slot.wide {
-  width: 270px;
+  width: auto;
   justify-self: center;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.perf-strip-slot.wide .perf-fader { flex: 1; min-width: 0; }
+/* Fixed fader width (the slot is content-sized now that the assignment
+   segments ride it); symmetric flanks keep its center on the deck
+   divider axis. */
+.perf-strip-slot.wide .perf-fader { width: 170px; flex-shrink: 0; }
 
 .perf-strip-left {
   justify-self: start;
@@ -139,9 +142,9 @@
 .perf-strip-toggle.on,
 .perf-strip-toggle.on:hover:not(:disabled),
 .perf-strip-toggle.on:active:not(:disabled) {
-  background: var(--yellow);
+  background: var(--green);
   color: var(--base);
-  border-color: var(--yellow);
+  border-color: var(--green);
 }
 
 .perf-strip-ghost { visibility: hidden; }
@@ -662,6 +665,64 @@
 /* TRIM/EQ/FLT and PFL spread evenly across the knob row (PFL rightmost,
    same side on both decks) */
 .perf-knobrow .perf-pfl { align-self: flex-start; }
+
+/* Crossfader assignment segments (four-deck 08): deck-labeled L/T/R on
+   the strip's center row, flanking the X-FADER. */
+.perf-xf-assign {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--surface1);
+  flex-shrink: 0;
+}
+
+/* XF bypassed: the topology is moot — dim like the fader itself. */
+.perf-xf-assign.disabled { opacity: 0.4; }
+.perf-xf-assign.disabled .player-button { cursor: default; }
+
+.perf-xf-assign-deck {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--text);
+  border-right: 1px solid var(--surface1);
+}
+
+/* Deck colors (CONTEXT.md: Deck color) — identity, never state. */
+.perf-xf-assign-deck.deck-a { color: var(--deck-a); }
+.perf-xf-assign-deck.deck-b { color: var(--deck-b); }
+.perf-xf-assign-deck.deck-c { color: var(--deck-c); }
+.perf-xf-assign-deck.deck-d { color: var(--deck-d); }
+
+.perf-xf-assign .player-button {
+  width: 14px;
+  min-width: 0;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  color: var(--overlay0);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.perf-xf-assign .player-button + .player-button { border-left: 1px solid var(--surface1); }
+
+.perf-xf-assign .player-button.on,
+.perf-xf-assign .player-button.on:hover:not(:disabled),
+.perf-xf-assign .player-button.on:active:not(:disabled) {
+  background: var(--green);
+  color: var(--base);
+}
+
+/* Thru engaged reads neutral: the channel is deliberately OUT of the
+   crossfader topology — grey, not the active green. */
+.perf-xf-assign .player-button.thru.on,
+.perf-xf-assign .player-button.thru.on:hover:not(:disabled),
+.perf-xf-assign .player-button.thru.on:active:not(:disabled) {
+  background: var(--overlay1);
+  color: var(--base);
+}
 
 /* Custom horizontal faders: the label rides the handle (no label column).
    Polarity is universal (right = faster / louder) — faders never mirror. */

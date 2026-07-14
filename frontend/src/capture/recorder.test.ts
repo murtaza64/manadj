@@ -17,6 +17,7 @@ import type { CaptureDeckSource, CaptureMixerSource } from './recorder';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { DetectedTake } from './events';
 import type { ChannelId, ChannelState } from '../playback/mixer';
+import { DEFAULT_CROSSFADER_ASSIGNMENTS } from '../playback/crossfaderAssignmentStore';
 import type { DeckSnapshot } from '../playback/DeckEngine';
 import {
   _resetAudibleSurfacesForTests,
@@ -46,6 +47,9 @@ class FakeMixerSource implements CaptureMixerSource {
   }
   getCrossfader(): number {
     return this.crossfader;
+  }
+  getCrossfaderAssignment(ch: ChannelId) {
+    return DEFAULT_CROSSFADER_ASSIGNMENTS[ch];
   }
   getCrossfaderEnabled(): boolean {
     return true;

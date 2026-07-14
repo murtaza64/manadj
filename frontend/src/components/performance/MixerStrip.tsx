@@ -15,6 +15,8 @@ import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
 import { CUE_LEVEL_DEFAULT, CUE_MIX_DEFAULT } from '../../playback/mixer';
+import type { ChannelId } from '../../playback/mixer';
+import { CROSSFADER_ASSIGNMENTS } from '../../playback/crossfaderAssignmentStore';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
@@ -108,10 +110,9 @@ export function Knob({
  * (pitch zero); `fill` paints the track up to the handle (level-style
  * controls like VOL — meaningless for bipolar ones like pitch);
  * `fillColor` overrides the fill's color (Deck color on channel VOL).
- * `crossfade` paints opposite-side Deck-color fills instead: the region
- * right of the handle cyan (A), left magenta (B), so each colored width
- * tracks that Deck's presence (hard left = full-width cyan = all A);
- * position-based, never gain-curve-based (deck-colors 02).
+ * `crossfade` paints neutral opposite-side fills. Channel assignment is
+ * surfaced on each channel strip; the crossfader no longer implies fixed
+ * Deck identities.
  */
 export function HFader({
   label,
@@ -206,7 +207,7 @@ export function HFader({
             className="perf-fader-fill"
             style={{
               width: `${Math.max(0, Math.min(1, fraction)) * 100}%`,
-              background: 'var(--deck-b)',
+              background: 'var(--overlay1)',
             }}
           />
           <div
@@ -215,7 +216,7 @@ export function HFader({
               left: 'auto',
               right: 0,
               width: `${(1 - Math.max(0, Math.min(1, fraction))) * 100}%`,
-              background: 'var(--deck-a)',
+              background: 'var(--overlay1)',
             }}
           />
         </>
@@ -239,6 +240,44 @@ export function HFader({
       >
         {label}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Per-channel crossfader assignment (four-deck 08): a deck-labeled L/T/R
+ * segment riding the strip beside the X-FADER — assignment is crossfader
+ * topology, so it lives with the crossfader, not on the per-deck MIX
+ * zones. Deck letters carry the Deck identity colors; the lit segment is
+ * state — active green like the strip's other toggles, except thru,
+ * which lights grey (opted out of the topology, not "active" in it).
+ * While the crossfader is bypassed (XF off) the whole topology is moot —
+ * the segments grey out and disable, like the fader itself.
+ */
+function XfAssign({ deck }: { deck: ChannelId }) {
+  const mixer = useMixer();
+  const assignment = useMixerValue((m) => m.getCrossfaderAssignment(deck));
+  const xfOn = useMixerValue((m) => m.getCrossfaderEnabled());
+  return (
+    <div
+      className={`perf-xf-assign${xfOn ? '' : ' disabled'}`}
+      role="group"
+      aria-label={`Deck ${deck} crossfader assignment`}
+    >
+      <span className={`perf-xf-assign-deck deck-${deck.toLowerCase()}`}>{deck}</span>
+      {CROSSFADER_ASSIGNMENTS.map((a) => (
+        <button
+          key={a}
+          className={`player-button${a === 'thru' ? ' thru' : ''}${assignment === a ? ' on' : ''}`}
+          onClick={() => mixer.setCrossfaderAssignment(deck, a)}
+          disabled={!xfOn}
+          aria-label={`Assign Deck ${deck} to crossfader ${a}`}
+          aria-pressed={assignment === a}
+          title={`Deck ${deck} crossfader: ${a}`}
+        >
+          {a === 'left' ? 'L' : a === 'right' ? 'R' : 'T'}
+        </button>
+      ))}
     </div>
   );
 }
@@ -308,15 +347,20 @@ export function MixerStrip({
           onClick={() => mixer.setCrossfaderEnabled(!xfOn)}
           title={
             xfOn
-              ? 'Disable crossfader (both channels at unity)'
+              ? 'Disable crossfader (all channels at unity)'
               : 'Enable crossfader'
           }
         >
           XF
         </button>
+        {/* Assignment segments flank the fader on their default sides
+            (A/C left, B/D right — matching the 2×2 deck grid columns);
+            an assignment is free to point anywhere regardless. */}
+        <XfAssign deck="A" />
+        <XfAssign deck="C" />
         {/* End labels flank the fader (flex flow, never over the track);
             physical orientation — only the fills are reversed. */}
-        <span className="perf-xfade-end">A</span>
+        <span className="perf-xfade-end">L</span>
         <HFader
           label="X-FADER"
           min={-1}
@@ -330,7 +374,9 @@ export function MixerStrip({
           title="Crossfader (double-click to center)"
           takeover={crossfaderTakeover}
         />
-        <span className="perf-xfade-end">B</span>
+        <span className="perf-xfade-end">R</span>
+        <XfAssign deck="B" />
+        <XfAssign deck="D" />
         {/* Invisible twin of the XF toggle: keeps the fader's center on the
             deck divider axis. */}
         <span className="player-button perf-strip-toggle perf-strip-ghost" aria-hidden="true">
