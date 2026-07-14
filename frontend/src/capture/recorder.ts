@@ -23,6 +23,7 @@
 import type { DeckSnapshot } from '../playback/DeckEngine';
 import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId, ChannelState } from '../playback/mixer';
+import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
 import { channelCrossfaderGain, channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import { initialCaptureState, reduceCapture } from './detector';
@@ -36,6 +37,7 @@ const TICK_MS = 1000;
 export interface CaptureMixerSource {
   getChannelState(channel: ChannelId): ChannelState;
   getCrossfader(): number;
+  getCrossfaderAssignment(channel: ChannelId): CrossfaderAssignment;
   getCrossfaderEnabled(): boolean;
   getMaster(): number;
   subscribe(listener: () => void): () => void;
@@ -152,7 +154,7 @@ export class CaptureRecorder {
     }
     if (Math.abs(state.filter) >= filterKillBeyond) return false;
     const xfGain = channelCrossfaderGain(
-      deck,
+      this.mixer.getCrossfaderAssignment(deck),
       this.mixer.getCrossfaderEnabled() ? this.mixer.getCrossfader() : 0
     );
     return trimToGain(state.trim) * channelFaderToGain(state.fader) * xfGain >= audibleGain;

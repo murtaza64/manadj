@@ -45,6 +45,14 @@ import type { EqBand } from './graph';
 import { BusOutputBridge, CueBridge } from './cueBridge';
 import type { OutputPair } from './routing';
 import {
+  loadCrossfaderAssignments,
+  saveCrossfaderAssignments,
+} from './crossfaderAssignmentStore';
+import type {
+  CrossfaderAssignment,
+  CrossfaderAssignments,
+} from './crossfaderAssignmentStore';
+import {
   channelFaderToGain,
   channelCrossfaderGain,
   cueLevelToGain,
@@ -243,7 +251,8 @@ export class Mixer {
     C: structuredClone(FLAT_CHANNEL),
     D: structuredClone(FLAT_CHANNEL),
   };
-  private crossfader = 0; // -1 (A) .. 1 (B)
+  private crossfader = 0; // -1 (left) .. 1 (right)
+  private crossfaderAssignments: CrossfaderAssignments = loadCrossfaderAssignments();
   /** Crossfader bypass: while false the fader position is kept but both
    * channels run at unity (as if centered) — an accidental-kill guard. */
   private crossfaderEnabled = true;
@@ -524,6 +533,10 @@ export class Mixer {
     return this.crossfader;
   }
 
+  getCrossfaderAssignment(channel: ChannelId): CrossfaderAssignment {
+    return this.crossfaderAssignments[channel];
+  }
+
   getMaster(): number {
     return this.master;
   }
@@ -562,11 +575,21 @@ export class Mixer {
     rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(value));
   }
 
-  /** position in [-1 (full A), 1 (full B)]. */
+  /** position in [-1 (full left), 1 (full right)]. */
   setCrossfader(position: number): void {
     this.crossfader = position;
     this.notify();
     if (this.automation) return; // pinned to neutral; lands on disengage
+    this.ensure();
+    this.applyCrossfader(true);
+  }
+
+  setCrossfaderAssignment(channel: ChannelId, assignment: CrossfaderAssignment): void {
+    if (this.crossfaderAssignments[channel] === assignment) return;
+    this.crossfaderAssignments = { ...this.crossfaderAssignments, [channel]: assignment };
+    saveCrossfaderAssignments(this.crossfaderAssignments);
+    this.notify();
+    if (this.automation) return; // pinned neutral; assignment lands on disengage
     this.ensure();
     this.applyCrossfader(true);
   }
@@ -725,7 +748,10 @@ export class Mixer {
     // Overlay engaged → pinned neutral (ADR 0022); bypass guard → neutral.
     const position = this.automation ? 0 : this.crossfaderEnabled ? this.crossfader : 0;
     const targets = Object.fromEntries(
-      CHANNEL_IDS.map((channel) => [channel, channelCrossfaderGain(channel, position)])
+      CHANNEL_IDS.map((channel) => [
+        channel,
+        channelCrossfaderGain(this.crossfaderAssignments[channel], position),
+      ])
     ) as Record<ChannelId, number>;
     if (ramp) {
       for (const channel of CHANNEL_IDS) {

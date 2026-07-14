@@ -16,7 +16,7 @@ import { ConductorLanePlayhead } from './ConductorLanePlayhead';
 import { GlobalMinimap } from './GlobalMinimap';
 import { LaneCanvas } from './LaneCanvas';
 import { DECK_LANE_ORDER, LANE_COLORS, LANE_LABELS } from './laneColors';
-import { cueCssColor } from '../waveform/WaveformRendererV2';
+import { cueCssColor } from '../hotcues/palette';
 import type { LaneGuide } from './LaneCanvas';
 import {
   LANE_IDS,

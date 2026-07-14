@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
+from backend.hotcue_palette import HOT_CUE_SLOT_COLORS
 from backend.models import Beatgrid, HotCue, Waveform
 from backend.routers import hotcues
 
@@ -71,3 +72,48 @@ def test_gridless_track_stores_verbatim(client, db, make_track):
     resp = client.put(f"/api/hotcues/{t.id}/3", json={"time_seconds": 12.345})
     assert resp.status_code == 200, resp.text
     assert stored_time(db, t.id, 3) == 12.345
+
+
+@pytest.mark.parametrize("slot,color", HOT_CUE_SLOT_COLORS.items())
+def test_new_cue_gets_its_slot_default_color(client, db, make_track, slot, color):
+    t = make_track()
+
+    resp = client.put(f"/api/hotcues/{t.id}/{slot}", json={"time_seconds": slot * 10.0})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["color"] == color
+    row = db.query(HotCue).filter_by(track_id=t.id, slot_number=slot).one()
+    assert row.color == color
+
+
+def test_label_and_color_persist_and_can_be_cleared(client, db, make_track):
+    t = make_track()
+    decorated = client.put(
+        f"/api/hotcues/{t.id}/4",
+        json={"time_seconds": 40.0, "label": "DROP", "color": "#abcdef"},
+    )
+    assert decorated.status_code == 200, decorated.text
+    assert decorated.json()["label"] == "DROP"
+    assert decorated.json()["color"] == "#abcdef"
+
+    cleared = client.put(
+        f"/api/hotcues/{t.id}/4",
+        json={"time_seconds": 40.0, "label": None, "color": "#ff4455"},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["label"] is None
+    assert cleared.json()["color"] == "#ff4455"
+
+
+def test_position_only_update_preserves_decoration(client, db, make_track):
+    t = make_track()
+    client.put(
+        f"/api/hotcues/{t.id}/2",
+        json={"time_seconds": 20.0, "label": "BUILD", "color": "#123456"},
+    )
+
+    resp = client.put(f"/api/hotcues/{t.id}/2", json={"time_seconds": 21.5})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["label"] == "BUILD"
+    assert resp.json()["color"] == "#123456"

@@ -136,17 +136,25 @@ describe('crossfaderGains', () => {
   });
 });
 
-describe('channelCrossfaderGain — four-Deck phase-1 grouping', () => {
-  it('assigns A/C left and B/D right', () => {
-    expect(channelCrossfaderGain('A', -1)).toBe(1);
-    expect(channelCrossfaderGain('C', -1)).toBe(1);
-    expect(channelCrossfaderGain('B', -1)).toBe(0);
-    expect(channelCrossfaderGain('D', -1)).toBe(0);
+describe('channelCrossfaderGain — per-channel assignment', () => {
+  it('applies mixed assignments across all four channels', () => {
+    const assignments = { A: 'left', B: 'thru', C: 'right', D: 'left' } as const;
+    expect(channelCrossfaderGain(assignments.A, -1)).toBe(1);
+    expect(channelCrossfaderGain(assignments.B, -1)).toBe(1);
+    expect(channelCrossfaderGain(assignments.C, -1)).toBe(0);
+    expect(channelCrossfaderGain(assignments.D, 1)).toBe(0);
   });
 
-  it('is transparent for all four Decks at center', () => {
-    for (const deck of ['A', 'B', 'C', 'D'] as const) {
-      expect(channelCrossfaderGain(deck, 0)).toBe(1);
-    }
+  it('keeps thru at unity across the full throw', () => {
+    expect(channelCrossfaderGain('thru', -1)).toBe(1);
+    expect(channelCrossfaderGain('thru', 0)).toBe(1);
+    expect(channelCrossfaderGain('thru', 1)).toBe(1);
+  });
+
+  it('preserves the existing dipless left/right curve', () => {
+    expect(channelCrossfaderGain('left', 0)).toBe(1);
+    expect(channelCrossfaderGain('right', 0)).toBe(1);
+    expect(channelCrossfaderGain('left', 0.5)).toBeCloseTo(0.5, 10);
+    expect(channelCrossfaderGain('right', -0.5)).toBeCloseTo(0.5, 10);
   });
 });

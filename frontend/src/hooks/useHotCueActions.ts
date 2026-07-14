@@ -17,6 +17,8 @@ export interface HotCueActions {
   up: (slot: number) => void;
   /** Delete the hot cue in a slot. */
   remove: (slot: number) => void;
+  /** Persist a set cue's display decoration without moving it. */
+  decorate: (slot: number, label: string | null, color: string) => void;
 }
 
 /** The injectable seam (deck-controls 05): what pressing a SET cue does —
@@ -87,7 +89,18 @@ export function useHotCueSlots(
     if (cue) deleteHotCue.mutate({ trackId, slotNumber: slot });
   };
 
-  return { bySlot, enabled, down, up, remove };
+  const decorate = (slot: number, label: string | null, color: string) => {
+    if (!enabled || trackId === null) return;
+    const cue = bySlot.get(slot);
+    if (!cue) return;
+    setHotCue.mutate({
+      trackId,
+      slotNumber: slot,
+      data: { time_seconds: cue.time_seconds, label, color },
+    });
+  };
+
+  return { bySlot, enabled, down, up, remove, decorate };
 }
 
 /**

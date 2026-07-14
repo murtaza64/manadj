@@ -11,6 +11,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..acquisition.source import RateLimitedError
@@ -193,11 +194,88 @@ def recover_interrupted(db: Session) -> int:
 
 
 def list_tasks(
-    db: Session, ref: str | None = None, state: str | None = None
+    db: Session,
+    ref: str | None = None,
+    state: str | None = None,
+    type_: str | None = None,
+    limit: int | None = None,
+    recent_days: int | None = None,
 ) -> list[Task]:
     query = db.query(Task)
     if ref is not None:
         query = query.filter(Task.ref == ref)
     if state is not None:
         query = query.filter(Task.state == state)
-    return query.order_by(Task.id.desc()).all()
+    if type_ is not None:
+        query = query.filter(Task.type == type_)
+    if recent_days is not None:
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=recent_days)
+        query = query.filter(
+            or_(
+                Task.created_at >= cutoff,
+                (Task.state == "failed") & Task.dismissed_at.is_(None),
+            )
+        )
+    query = query.order_by(Task.id.desc())
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
+
+
+def task_summary(db: Session) -> tuple[dict[str, int], Task | None, int]:
+    """State counts, the oldest running task, and the failure worklist size."""
+    counts = {state: 0 for state in ("pending", "running", "done", "failed")}
+    for state, count in db.query(Task.state, func.count(Task.id)).group_by(Task.state):
+        counts[state] = count
+    running = (
+        db.query(Task).filter(Task.state == "running").order_by(Task.id).first()
+    )
+    failures = (
+        db.query(func.count(Task.id))
+        .filter(Task.state == "failed", Task.dismissed_at.is_(None))
+        .scalar()
+    )
+    return counts, running, int(failures or 0)
+
+
+def _reset_for_retry(task: Task) -> None:
+    task.state = "pending"
+    task.error = None
+    task.attempts = 0
+    task.not_before = None
+    task.started_at = None
+    task.finished_at = None
+    task.dismissed_at = None
+
+
+def retry_task(db: Session, task: Task) -> Task:
+    if task.state != "failed":
+        raise ValueError("Only failed tasks can be retried")
+    _reset_for_retry(task)
+    db.commit()
+    return task
+
+
+def dismiss_task(db: Session, task: Task) -> Task:
+    task.dismissed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.commit()
+    return task
+
+
+def retry_tasks(db: Session, type_: str | None = None) -> int:
+    tasks = list_tasks(db, state="failed", type_=type_)
+    for task in tasks:
+        _reset_for_retry(task)
+    db.commit()
+    return len(tasks)
+
+
+def dismiss_tasks(
+    db: Session, state: str | None = None, type_: str | None = None
+) -> int:
+    tasks = list_tasks(db, state=state, type_=type_)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for task in tasks:
+        task.dismissed_at = now
+    db.commit()
+    return len(tasks)

@@ -335,6 +335,18 @@ describe('automation overlay — node ownership round trip', () => {
     expect(fingerprint(Fake.instances[0])).not.toEqual(fingerprint(Fake.instances[1]));
   });
 
+  it('lands assignment changes made under automation on disengage', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.setCrossfader(1); // A/C are killed by the default left assignment
+    const ctx = Fake.instances[0];
+    const before = fingerprint(ctx);
+    const token = mixer.engageAutomation();
+    mixer.setCrossfaderAssignment('A', 'thru');
+    mixer.disengageAutomation(token);
+    expect(fingerprint(ctx)).not.toEqual(before); // A now stays at unity; C remains killed
+  });
+
   it('graph revival while engaged restores automation ownership, not base state', () => {
     const Fake = withFakeAudio();
     const mixer = new Mixer();

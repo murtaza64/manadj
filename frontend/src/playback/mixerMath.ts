@@ -66,11 +66,12 @@ export function crossfaderGains(position: number): { a: number; b: number } {
   };
 }
 
-/** Phase-1 four-Deck assignment: A/C on the left, B/D on the right. */
+/** Per-channel crossfader assignment. Thru bypasses the crossfader. */
 export function channelCrossfaderGain(
-  channel: 'A' | 'B' | 'C' | 'D',
+  assignment: 'left' | 'thru' | 'right',
   position: number
 ): number {
   const { a, b } = crossfaderGains(position);
-  return channel === 'A' || channel === 'C' ? a : b;
+  if (assignment === 'thru') return 1;
+  return assignment === 'left' ? a : b;
 }
