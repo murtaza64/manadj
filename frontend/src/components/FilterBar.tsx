@@ -14,6 +14,7 @@ import { useSearchKeys } from './searchKeys';
 import { dispatchFollow, useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
 import { followedReferences, followSummary } from '../follow/model';
+import type { ChannelId } from '../playback/mixer';
 import './FilterBar.css';
 
 interface FilterBarProps {
@@ -21,11 +22,10 @@ interface FilterBarProps {
   filteredCount: number;
   /** Loaded decks — Follow's reference model: the followed Deck's loaded
    * Track is the match reference, never the selection. */
-  loadedA: Track | null;
-  loadedB: Track | null;
+  loadedByDeck: Record<ChannelId, Track | null>;
 }
 
-export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB }: FilterBarProps) {
+export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: FilterBarProps) {
   const { filters, setFilters } = useFilters();
   const [searchInput, setSearchInput] = useState(filters.search);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -90,7 +90,6 @@ export default function FilterBar({ totalTracks, filteredCount, loadedA, loadedB
   const followFlags = useFollowFlags();
   const followParams = useFollowParams();
   const queryClient = useQueryClient();
-  const loadedByDeck = { A: loadedA, B: loadedB } as const;
   /** Followed references, for the summary chips and the modal context —
    * facts through the track cache (ADR 0027 §7), so the modal shows the
    * edited BPM, not the load-time snapshot. */

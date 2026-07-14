@@ -33,21 +33,23 @@ afterEach(() => {
 });
 
 describe('keyLockStore', () => {
-  it('defaults both decks ON with nothing persisted', async () => {
+  it('defaults all Decks ON with nothing persisted', async () => {
     const store = await loadStore();
-    expect(store.getKeyLockFlags()).toEqual({ A: true, B: true });
+    expect(store.getKeyLockFlags()).toEqual({ A: true, B: true, C: true, D: true });
   });
 
   it('restores persisted flags on boot', async () => {
     const store = await loadStore('{"A":false,"B":true}');
-    expect(store.getKeyLockFlags()).toEqual({ A: false, B: true });
+    expect(store.getKeyLockFlags()).toEqual({ A: false, B: true, C: true, D: true });
   });
 
   it('treats garbage as the default (ON) — only explicit false is off', async () => {
-    expect((await loadStore('not json')).getKeyLockFlags()).toEqual({ A: true, B: true });
+    expect((await loadStore('not json')).getKeyLockFlags()).toEqual({ A: true, B: true, C: true, D: true });
     expect((await loadStore('{"A":"no","B":0}')).getKeyLockFlags()).toEqual({
       A: true,
       B: true,
+      C: true,
+      D: true,
     });
   });
 
@@ -61,7 +63,12 @@ describe('keyLockStore', () => {
     expect(calls).toBe(0);
     store.setKeyLockFlag('A', false);
     expect(calls).toBe(1);
-    expect(store.getKeyLockFlags()).toEqual({ A: false, B: true });
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual({ A: false, B: true });
+    expect(store.getKeyLockFlags()).toEqual({ A: false, B: true, C: true, D: true });
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual({
+      A: false,
+      B: true,
+      C: true,
+      D: true,
+    });
   });
 });

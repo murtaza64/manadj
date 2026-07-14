@@ -8,19 +8,21 @@
  * mode); this store is the persistence + boot-restore face. DeckContext
  * applies it at engine creation; the MixZone toggle writes both.
  */
-export type KeyLockFlags = { A: boolean; B: boolean };
+import type { ChannelId } from './mixer';
+
+export type KeyLockFlags = Record<ChannelId, boolean>;
 
 const STORAGE_KEY = 'manadj-keylock';
 
 function loadFlags(): KeyLockFlags {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { A: true, B: true };
-    const parsed = JSON.parse(raw) as Partial<Record<'A' | 'B', unknown>>;
+    if (!raw) return { A: true, B: true, C: true, D: true };
+    const parsed = JSON.parse(raw) as Partial<Record<ChannelId, unknown>>;
     // Default ON: only an explicit false turns a deck's lock off.
-    return { A: parsed.A !== false, B: parsed.B !== false };
+    return { A: parsed.A !== false, B: parsed.B !== false, C: parsed.C !== false, D: parsed.D !== false };
   } catch {
-    return { A: true, B: true };
+    return { A: true, B: true, C: true, D: true };
   }
 }
 
@@ -45,7 +47,7 @@ export function getKeyLockFlags(): KeyLockFlags {
   return flags;
 }
 
-export function setKeyLockFlag(deck: 'A' | 'B', on: boolean): void {
+export function setKeyLockFlag(deck: ChannelId, on: boolean): void {
   if (flags[deck] === on) return;
   flags = { ...flags, [deck]: on };
   saveFlags(flags);

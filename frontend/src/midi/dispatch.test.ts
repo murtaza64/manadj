@@ -31,6 +31,10 @@ import {
   dispatchMidiAction,
 } from './dispatch';
 import { _resetTakeoverFeedbackForTests, takeoverHint, takeoverKey } from './takeoverFeedback';
+import {
+  _resetControlFocusForTests,
+  getControlFocus,
+} from '../performance/controlFocus';
 
 const button = (
   control: 'transport' | 'cue',
@@ -71,7 +75,13 @@ function flatFakeMixer(): FakeMixerState {
     filter: 0,
     fader: 1,
   });
-  return { channels: { A: channel(), B: channel() }, crossfader: 0, master: 1, cueLevel: 0.7, cueMix: 0 };
+  return {
+    channels: { A: channel(), B: channel(), C: channel(), D: channel() },
+    crossfader: 0,
+    master: 1,
+    cueLevel: 0.7,
+    cueMix: 0,
+  };
 }
 
 function registerFakeDeckControls(deck: ChannelId): void {
@@ -146,7 +156,7 @@ function registerFakeMixerControls(): void {
 beforeEach(() => {
   calls = [];
   sharedLoopActive = false;
-  fakePitch = { A: 0, B: 0 };
+  fakePitch = { A: 0, B: 0, C: 0, D: 0 };
   fakeMixer = flatFakeMixer();
   registerSurface('shared', {
     transport: {
@@ -195,9 +205,21 @@ afterEach(() => {
   _resetGridChordForTests();
   _resetSoftTakeoverForTests();
   _resetTakeoverFeedbackForTests();
+  _resetControlFocusForTests();
 });
 
 describe('routing', () => {
+  it('controller layer buttons toggle shared Control focus on their down edge', () => {
+    const action = (edge: 'down' | 'up'): MidiAction => ({
+      kind: 'button',
+      edge,
+      target: { control: 'control-focus', side: 'left' },
+    });
+    dispatchMidiAction(action('down'));
+    dispatchMidiAction(action('up'));
+    expect(getControlFocus()).toEqual({ left: 'C', right: 'B' });
+  });
+
   it('shared surface: transport and cue reach the shared handlers per deck', () => {
     dispatchMidiAction(button('transport', 'A', 'down'));
     dispatchMidiAction(button('cue', 'B', 'down'));

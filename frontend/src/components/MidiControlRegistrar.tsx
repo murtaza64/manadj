@@ -182,6 +182,8 @@ function FollowMacroRegistrar() {
         const playing = {
           A: registry.A.engine.getSnapshot().playing,
           B: registry.B.engine.getSnapshot().playing,
+          C: registry.C.engine.getSnapshot().playing,
+          D: registry.D.engine.getSnapshot().playing,
         };
         for (const deck of followMacroToggles(getFollowFlags(), playing)) {
           dispatchFollow({
@@ -204,6 +206,12 @@ export function MidiControlRegistrar() {
         <DeckControlsRegistrar />
       </DeckScope>
       <DeckScope deck="B">
+        <DeckControlsRegistrar />
+      </DeckScope>
+      <DeckScope deck="C">
+        <DeckControlsRegistrar />
+      </DeckScope>
+      <DeckScope deck="D">
         <DeckControlsRegistrar />
       </DeckScope>
       <MixerRegistrar />

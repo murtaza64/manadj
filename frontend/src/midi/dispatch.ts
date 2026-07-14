@@ -24,6 +24,7 @@ import {
   UNIPOLAR_PICKUP_TOLERANCE,
 } from './softTakeover';
 import { reportPickedUp, reportSuppressed, takeoverKey } from './takeoverFeedback';
+import { toggleControlFocus } from '../performance/controlFocus';
 
 /** Encoder detents per action are tiny; cap steps so a burst can't warp the
  * selection across the whole library in one message. */
@@ -132,6 +133,9 @@ function dispatchRelative(target: RelativeAction['target'], ticks: number): void
 
 function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): void {
   switch (target.control) {
+    case 'control-focus':
+      if (edge === 'down') toggleControlFocus(target.side);
+      return;
     case 'transport': {
       if (edge !== 'down') return;
       audibleTransport()?.togglePlay(target.deck);

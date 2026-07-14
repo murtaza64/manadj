@@ -38,12 +38,13 @@ import {
   unregisterSurface,
 } from '../playback/audibleSurface';
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
-import type { ChannelId, Mixer } from '../playback/mixer';
+import type { Mixer } from '../playback/mixer';
 import {
   jumpCrossed,
   planStateAt,
   type PlanAutomation,
   type PlanState,
+  type PlannedEntry,
   type SetPlan,
 } from './planner';
 import { soundingWindowAt, soundingWindowKey } from './replan';
@@ -67,6 +68,7 @@ const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAut
 });
 
 const LANE_EPS = 1e-3;
+type PlanDeck = PlannedEntry['deck'];
 
 const laneDiffers = (a: PlanAutomation, b: PlanAutomation): boolean =>
   Math.abs(a.fader - b.fader) > LANE_EPS ||
@@ -76,20 +78,20 @@ const laneDiffers = (a: PlanAutomation, b: PlanAutomation): boolean =>
   Math.abs(a.filter - b.filter) > LANE_EPS;
 
 const lanesDiffer = (
-  a: Record<ChannelId, PlanAutomation>,
-  b: Record<ChannelId, PlanAutomation>
+  a: Record<PlanDeck, PlanAutomation>,
+  b: Record<PlanDeck, PlanAutomation>
 ): boolean => laneDiffers(a.A, b.A) || laneDiffers(a.B, b.B);
 
 export type ConductorStopReason = 'ended' | 'stopped' | 'takeover' | 'displaced';
 
 export interface ConductorAudio {
   mixer: Mixer;
-  engines: Record<ChannelId, DeckEngine>;
+  engines: Record<PlanDeck, DeckEngine>;
 }
 
 export interface ConductorHooks {
   /** The deck provider's one Load path (ADR 0022), by track id. */
-  loadTrack(deck: ChannelId, trackId: number): void;
+  loadTrack(deck: PlanDeck, trackId: number): void;
   /** Warm the decoded-buffer cache for an upcoming entry (sets 14):
    * fetch + decode + putCachedBuffer, so the deck load at handover is a
    * near-instant cache hit. Fire-and-forget. */
@@ -103,7 +105,7 @@ export class Conductor {
    * (sets 24) — via replacePlan only, never assigned elsewhere. */
   private _plan: SetPlan;
   private readonly mixer: Mixer;
-  private readonly engines: Record<ChannelId, DeckEngine>;
+  private readonly engines: Record<PlanDeck, DeckEngine>;
   private readonly hooks: ConductorHooks;
 
   /** Surface claimed + watchers attached (between start and teardown). */
@@ -124,12 +126,12 @@ export class Conductor {
   private suppressSilence = false;
   /** Last load requested per deck (one request per target; the engine's
    * snapshot lags the async fetch). */
-  private loadRequested: Record<ChannelId, number | null> = { A: null, B: null };
+  private loadRequested: Record<PlanDeck, number | null> = { A: null, B: null };
   /** Last entry index handed to the prefetch hook (sets 14). */
   private prefetchedIndex = -1;
   /** Last automation values written (the sounding mix) — written into
    * base mixer state at takeover so disengaging is inaudible. */
-  private lastLanes: Record<ChannelId, PlanAutomation> | null = null;
+  private lastLanes: Record<PlanDeck, PlanAutomation> | null = null;
   /** A seek landed: the next tick re-positions decks unconditionally
    * (sub-tolerance seeks must not be swallowed by the drift check). */
   private pendingHardSync = false;
@@ -142,9 +144,9 @@ export class Conductor {
     durationSec: number;
     /** Null = lanes swap immediately (a live re-plan whose lane values
      * ride the mix — sets 24); the pitch ease still runs. */
-    startLanes: Record<ChannelId, PlanAutomation> | null;
+    startLanes: Record<PlanDeck, PlanAutomation> | null;
     /** Present only for the anchor (audible-at-pickup) decks. */
-    startPitch: Partial<Record<ChannelId, number>>;
+    startPitch: Partial<Record<PlanDeck, number>>;
   } | null = null;
 
   private unsubs: (() => void)[] = [];
@@ -266,8 +268,8 @@ export class Conductor {
     mixTime: number,
     opts: {
       rampSec: number;
-      rampDecks: ChannelId[];
-      startLanes: Record<ChannelId, PlanAutomation>;
+      rampDecks: PlanDeck[];
+      startLanes: Record<PlanDeck, PlanAutomation>;
     }
   ): void {
     if (this.active || this.playing) return;
@@ -279,7 +281,7 @@ export class Conductor {
     this.lastTickT = t;
     this.activeEntryIndex = planStateAt(this.plan, t).activeEntryIndex;
     this.pendingHardSync = true; // silent decks position hard on the first tick
-    const startPitch: Partial<Record<ChannelId, number>> = {};
+    const startPitch: Partial<Record<PlanDeck, number>> = {};
     for (const deck of opts.rampDecks) {
       startPitch[deck] = this.engines[deck].getSnapshot().pitchPercent;
     }
@@ -340,7 +342,7 @@ export class Conductor {
       this.emit();
       return;
     }
-    const startPitch: Partial<Record<ChannelId, number>> = {};
+    const startPitch: Partial<Record<PlanDeck, number>> = {};
     for (const deck of ['A', 'B'] as const) {
       const snap = this.engines[deck].getSnapshot();
       if (!snap.playing || !state.decks[deck].playing) continue;
@@ -526,7 +528,7 @@ export class Conductor {
     if (this.selfOps === 0 && this.active) this.takeover();
   };
 
-  private watchEngine(deck: ChannelId): () => void {
+  private watchEngine(deck: PlanDeck): () => void {
     const engine = this.engines[deck];
     let prev = engine.getSnapshot();
     return engine.subscribe(() => {
@@ -753,7 +755,7 @@ export class Conductor {
 
   /** Reconcile one deck's loaded track against the plan's occupant.
    * Returns readiness (loaded + decoded, right track). */
-  private ensureDeckTrack(deck: ChannelId, state: PlanState): boolean {
+  private ensureDeckTrack(deck: PlanDeck, state: PlanState): boolean {
     const desired = state.decks[deck];
     if (desired.trackId === null) return false;
     const snap = this.engines[deck].getSnapshot();
@@ -771,7 +773,7 @@ export class Conductor {
    * the audio has already run out (self-parked at the end): nothing left
    * to play. True only in that dead zone — a target back inside the
    * buffer (a seek) still restarts normally. */
-  private audioExhausted(deck: ChannelId, targetTrackTime: number): boolean {
+  private audioExhausted(deck: PlanDeck, targetTrackTime: number): boolean {
     const snap = this.engines[deck].getSnapshot();
     return (
       !snap.playing &&
@@ -801,7 +803,7 @@ export class Conductor {
    * `rampP` < 1 = pickup convergence: an anchor deck's pitch eases from
    * its adopted value to the plan's, and the anchor is never re-seeked
    * mid-ramp (seamless by construction — sets 16). */
-  private syncDeck(deck: ChannelId, state: PlanState, hard: boolean, rampP = 1): void {
+  private syncDeck(deck: PlanDeck, state: PlanState, hard: boolean, rampP = 1): void {
     const engine = this.engines[deck];
     const target = state.decks[deck];
     const snap: DeckSnapshot = engine.getSnapshot();

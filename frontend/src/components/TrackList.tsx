@@ -1,5 +1,8 @@
 import React, { type JSX } from 'react';
-import TrackRow, { type SelectMods, type TransitionMark } from './TrackRow';
+import TrackRow, { type LoadedMark, type SelectMods, type TransitionMark } from './TrackRow';
+import { useDecks } from '../hooks/useDeck';
+import { useDeckOccupancy } from '../hooks/useDeckOccupancy';
+import { loadedDecks } from '../sets/rowMarks';
 import { MusicIcon, PersonIcon, KeyIcon, SpeedIcon, EnergyIcon, TagIcon, CalendarIcon, CrosshairIcon } from './icons';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
@@ -30,8 +33,6 @@ interface TrackListProps {
   playOrder?: ReadonlyMap<number, number>;
   /** Load a track onto the Deck (double-click; Enter goes via the keyboard hub). */
   onLoadTrack: (track: Track) => void;
-  /** The Deck's loaded track, for row highlighting. */
-  loadedTrackId: number | null;
   /** When set (Performance view), rows get hover load-to-A/B buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
   /** Saved-Transition marks (transition-library 02): targets with a
@@ -75,7 +76,6 @@ export default function TrackList({
   onRowContextMenu,
   playOrder,
   onLoadTrack,
-  loadedTrackId,
   onLoadToDeck,
   transitionMarksA,
   transitionMarksB,
@@ -91,6 +91,13 @@ export default function TrackList({
   sortDirection,
   onSort
 }: TrackListProps) {
+  // Live deck occupancy (both decks) → per-row loaded identity mark,
+  // mirroring the Set view's wash (sets 35). Memoized on engine slices,
+  // so rows re-render only on load/play changes.
+  const occupancy = useDeckOccupancy(useDecks());
+  /** Memo-friendly loaded mark: which deck(s) hold this row's track. */
+  const loadedFor = (id: number): LoadedMark =>
+    (loadedDecks(id, occupancy).join('').toLowerCase() || 'none') as LoadedMark;
   /** Memo-friendly per-row mark state (strings, not objects). */
   const markFor = (marks: ReadonlyMap<number, PairInfo> | undefined, id: number): TransitionMark => {
     const info = marks?.get(id);
@@ -261,7 +268,7 @@ export default function TrackList({
                     <TrackRow
                       track={track}
                       isSelected={selectedIds.has(track.id)}
-                      isLoaded={loadedTrackId === track.id}
+                      loadedOn={loadedFor(track.id)}
                       onSelect={onSelectTrack}
                       onLoad={onLoadTrack}
                       onLoadToDeck={onLoadToDeck}

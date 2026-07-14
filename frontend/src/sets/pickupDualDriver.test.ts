@@ -103,7 +103,7 @@ function fakeMixer(): Mixer {
     disengageAutomation: () => {},
     setAutomation: () => {},
     subscribe: () => () => {},
-    getChannelState: (ch: ChannelId) => channels[ch],
+    getChannelState: (ch: 'A' | 'B') => channels[ch],
     getCrossfader: () => 0,
     getCrossfaderEnabled: () => false,
     getMaster: () => 1,

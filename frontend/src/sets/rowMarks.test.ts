@@ -10,6 +10,8 @@ const occ = (
 ): DeckOccupancyMap => ({
   A: { trackId: null, playing: false, ...a },
   B: { trackId: null, playing: false, ...b },
+  C: { trackId: null, playing: false },
+  D: { trackId: null, playing: false },
 });
 
 describe('loadedDecks', () => {

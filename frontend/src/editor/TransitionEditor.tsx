@@ -487,11 +487,16 @@ function TransitionEditorInner() {
     registerSurface('editor', {
       transport: { togglePlay: auditionTogglePlay },
       pads: {
-        hotCueDown: (deck, pad) => midiCues.current[deck].down(pad),
-        hotCueClear: (deck, pad) => midiCues.current[deck].remove(pad),
+        hotCueDown: (deck, pad) => {
+          if (deck === 'A' || deck === 'B') midiCues.current[deck].down(pad);
+        },
+        hotCueClear: (deck, pad) => {
+          if (deck === 'A' || deck === 'B') midiCues.current[deck].remove(pad);
+        },
       },
         jumps: {
         beatjump: (deck, direction) => {
+          if (deck !== 'A' && deck !== 'B') return;
           const { bpmA: a, bpmB: b, slideDeckB: slide } = midiGestures.current;
           const bpm = deck === 'A' ? a : b;
           if (!bpm || bpm <= 0) return; // same gate as the on-screen cluster
@@ -685,7 +690,13 @@ function TransitionEditorInner() {
   const browsePanel = useMemo(
     () => (
       <DeckScope deck="A">
-        <Library browseOnly onLoadToDeck={assignTrack} browseRef={libraryRef} />
+        <Library
+          browseOnly
+          onLoadToDeck={(deck, track) => {
+            if (deck === 'A' || deck === 'B') assignTrack(deck, track);
+          }}
+          browseRef={libraryRef}
+        />
       </DeckScope>
     ),
     [assignTrack]

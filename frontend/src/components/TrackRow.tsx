@@ -6,6 +6,7 @@ import KeyDisplay from './KeyDisplay';
 import { formatRelativeTime } from '../utils/dateUtils';
 import type { Track } from '../types';
 import type { ChannelId } from '../playback/mixer';
+import { CHANNEL_IDS } from '../playback/mixer';
 import { getColumnConfig } from './columnConfig';
 import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDrag';
 import { LinkIcon } from '../links/LinkIcon';
@@ -25,11 +26,16 @@ export interface SelectMods {
   toggle: boolean;
 }
 
+/** Which Deck(s) hold this row's track — deck IDENTITY, mirroring the Set
+ * view's loaded wash (sets 35): A cyan / B magenta, 'ab' when both.
+ * A string, not an array — the row is memoized. */
+export type LoadedMark = 'none' | 'a' | 'b' | 'ab';
+
 interface Props {
   track: Track;
   isSelected: boolean;
-  /** True when this track is on the Deck. */
-  isLoaded: boolean;
+  /** The Deck(s) this track is loaded on (live occupancy, both decks). */
+  loadedOn: LoadedMark;
   onSelect: (track: Track, mods: SelectMods) => void;
   /** Load this track onto the Deck (double-click). */
   onLoad: (track: Track) => void;
@@ -120,7 +126,7 @@ function markEvidence(
 const TrackRow = memo(function TrackRow({
   track,
   isSelected,
-  isLoaded,
+  loadedOn,
   onSelect,
   onLoad,
   onLoadToDeck,
@@ -163,7 +169,7 @@ const TrackRow = memo(function TrackRow({
 
   return (
     <tr
-      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${isLoaded ? 'track-row-loaded' : ''} ${track.archived_at ? 'track-row-archived' : ''}`}
+      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${loadedOn !== 'none' ? `track-row-loaded track-row-loaded-${loadedOn}` : ''} ${track.archived_at ? 'track-row-archived' : ''}`}
       onClick={(e) => onSelect(track, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDoubleClick={() => onLoad(track)}
       data-track-id={track.id}
@@ -252,7 +258,7 @@ const TrackRow = memo(function TrackRow({
           </div>
           {onLoadToDeck && (
             <span className="track-load-buttons">
-              {(['A', 'B'] as const).map((deck) => (
+              {CHANNEL_IDS.map((deck) => (
                 <button
                   key={deck}
                   className={`track-load-button track-load-button-${deck}`}

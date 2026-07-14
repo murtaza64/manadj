@@ -61,10 +61,7 @@ type DeckChord =
       moved: boolean;
     };
 
-export interface GridChordState {
-  A: DeckChord | null;
-  B: DeckChord | null;
-}
+export type GridChordState = Record<ChannelId, DeckChord | null>;
 
 /** The jog stream a tick arrived on — preserved so pass-through keeps its
  * surface-routed meaning (rim = bend/seek, touch = fine paused seek). */
@@ -92,7 +89,7 @@ export type GridChordCommand =
   | { type: 'bpm-commit'; deck: ChannelId; deltaBpm: number };
 
 export function initialGridChordState(): GridChordState {
-  return { A: null, B: null };
+  return { A: null, B: null, C: null, D: null };
 }
 
 export function reduceGridChord(
