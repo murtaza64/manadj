@@ -17,6 +17,8 @@ export interface HotCueActions {
   up: (slot: number) => void;
   /** Delete the hot cue in a slot. */
   remove: (slot: number) => void;
+  /** Walk position-ordered Hot Cues with track start as the floor. */
+  walk?: (direction: 'prev' | 'next') => void;
   /** Persist a set cue's display decoration without moving it. */
   decorate: (slot: number, label: string | null, color: string) => void;
 }
@@ -113,10 +115,23 @@ export function useHotCueSlots(
 export function useHotCueActions(trackId: number | null): HotCueActions {
   const { engine } = useDeck();
   const ready = useDeckReady();
-  return useHotCueSlots(trackId, {
+  const actions = useHotCueSlots(trackId, {
     enabled: ready,
     getPlayhead: () => engine.getPlayhead(),
     trigger: (slot, t) => engine.hotCueDown(slot, t),
     release: (slot, t) => engine.hotCueUp(slot, t),
   });
+  const stops = useMemo(
+    () =>
+      [...new Set([0, ...Array.from(actions.bySlot.values(), (cue) => cue.time_seconds)])].sort(
+        (a, b) => a - b
+      ),
+    [actions.bySlot]
+  );
+  return {
+    ...actions,
+    walk: (direction) => {
+      if (actions.enabled) engine.hotCueWalk(direction, stops);
+    },
+  };
 }

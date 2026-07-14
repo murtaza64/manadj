@@ -28,6 +28,7 @@ import TagPill from '../TagPill';
 import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
 import { BeatjumpRow } from '../deckControls/BeatjumpRow';
+import { CueWalkButtons } from '../deckControls/CueWalkButtons';
 import { LoopRow } from '../deckControls/LoopRow';
 import { EnergyIcon, MusicIcon, PersonIcon, SpeedIcon, TagIcon } from '../icons';
 import { BpmControl } from '../deckControls/BpmControl';
@@ -370,6 +371,7 @@ function PlayZone() {
               <Kbd k={keys.nudgeForward} />
             </button>
           </div>
+          <CueWalkButtons />
           <TransportPair cueKbd={<Kbd k={keys.cue} />} playKbd={<Kbd k={keys.play} />} />
         </div>
       </div>

@@ -192,6 +192,7 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     deck.pfl,
     ...deck.hotCuePads,
     ...deck.hotCuePadsShifted,
+    ...deck.jumpPads,
     ...deck.gridPads,
     deck.quantize,
     ...(deck.keyLock ? [deck.keyLock] : []),
@@ -219,8 +220,17 @@ export function encodeDeckLeds(
     ...addresses.hotCuePadsShifted.map((address, i) =>
       encodeLed(address, states.pads[i] ?? false)
     ),
-    // Grid-edit (SAMPLER) layer (midi-performance-ops 05).
-    ...addresses.gridPads.map((address, i) => encodeLed(address, states.gridPads[i] ?? false)),
+    ...addresses.jumpPads.map((address) => encodeLed(address, false)),
+    // Grid-edit layer. A Mapping may provide its own bound-pad mask; those
+    // action pads share the deck's has-Beatgrid state rather than per-pad state.
+    ...addresses.gridPads.map((address, i) =>
+      encodeLed(
+        address,
+        addresses.gridPadMapped
+          ? (addresses.gridPadMapped[i] ?? false) && states.gridPads.some(Boolean)
+          : (states.gridPads[i] ?? false)
+      )
+    ),
     encodeLed(addresses.quantize, states.quantize),
     ...(addresses.keyLock ? [encodeLed(addresses.keyLock, states.keyLock)] : []),
     // The Key Lock lamp probe (midi-performance-ops 07): written only when

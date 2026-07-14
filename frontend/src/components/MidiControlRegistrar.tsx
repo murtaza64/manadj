@@ -89,10 +89,17 @@ function DeckControlsRegistrar() {
         // Same remove path as the on-screen pads (React Query curation), so
         // screen state and pad lights follow the clear.
         hotCueClear: (pad) => latest.current.hotCues.remove(pad),
+        cueWalk: (direction) => latest.current.hotCues.walk?.(direction),
         beatjump: (direction) => {
           const { engine: e, ready: r, beatjumpBeats: beats } = latest.current;
           if (!r) return; // same gate as BeatjumpRow's disabled jumps
           e.jumpBeats(direction === 'back' ? -beats : beats);
+        },
+        beatjumpWindow: (direction, divisor) => {
+          const { engine: e, ready: r, beatjumpBeats: beats } = latest.current;
+          if (!r) return;
+          const distance = beats / divisor;
+          e.jumpBeats(direction === 'back' ? -distance : distance);
         },
         beatjumpSize: (change) => {
           const { beatjumpBeats: beats, setBeatjumpBeats: set } = latest.current;
@@ -129,6 +136,9 @@ function DeckControlsRegistrar() {
         // data ops; gridless-Track gating lives in useGridEditActions.
         gridNudgeStep: (direction) => latest.current.gridEdit.nudgeStep(direction),
         gridSetDownbeat: () => latest.current.gridEdit.setDownbeatAtPlayhead(),
+        gridDropAnchor: () => latest.current.gridEdit.dropAnchorAtPlayhead(),
+        gridMarkReset: () => latest.current.gridEdit.markResetAtPlayhead(),
+        gridDeleteReset: () => latest.current.gridEdit.deleteResetNearestPlayhead(),
         gridBpm: (change) => latest.current.gridEdit.bpm(change),
         gridNudgeLocal: (offsetMs) => latest.current.gridEdit.nudgeLocal(offsetMs),
         gridNudgeCommit: (offsetMs) => latest.current.gridEdit.nudgeCommit(offsetMs),

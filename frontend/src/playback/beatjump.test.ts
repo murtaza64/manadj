@@ -7,6 +7,7 @@ import {
   clampBeatjump,
   doubleBeatjump,
   halveBeatjump,
+  jumpWindow,
 } from './beatjump';
 
 describe('beatjump size', () => {
@@ -36,5 +37,10 @@ describe('beatjump size', () => {
     expect(clampBeatjump(0)).toBe(1);
     expect(clampBeatjump(500)).toBe(128);
     expect(clampBeatjump(48)).toBe(48);
+  });
+
+  it('derives the four GRV6 pad-pair sizes from the configured size', () => {
+    expect(jumpWindow(32)).toEqual([4, 8, 16, 32]);
+    expect(jumpWindow(1)).toEqual([0.125, 0.25, 0.5, 1]);
   });
 });

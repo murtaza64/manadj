@@ -671,6 +671,17 @@ describe('live cue default (ADR 0029 §2)', () => {
     expect(engine.getSnapshot().cuePoint).toBe(10);
   });
 
+  it('hot-cue walk lands paused and persists the landed stop as Cue', async () => {
+    const engine = await loadedEngine(57, { grid: null, savedCuePoint: 2 });
+    const onCueSet = vi.fn();
+    engine.setCueSetHandler(onCueSet);
+    engine.seek(7);
+    engine.hotCueWalk('next', [0, 4, 12, 24]);
+    expect(engine.getPlayhead()).toBe(12);
+    expect(engine.getSnapshot()).toMatchObject({ playing: false, cuePoint: 12 });
+    expect(onCueSet).toHaveBeenCalledWith(57, 12);
+  });
+
   it('a grid removal never moves the parked cue', async () => {
     const engine = await loadedEngine(56, { grid: offsetGrid });
     engine.setBeatTimes(56, null);

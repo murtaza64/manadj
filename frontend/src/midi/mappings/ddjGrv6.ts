@@ -15,6 +15,16 @@ const DECKS: readonly DeckMidi[] = [
   { deck: 'D', channel: 3, padChannel: 13, shiftedPadChannel: 14 },
 ];
 
+const PAD_BLOCK = {
+  hotCue: 0,
+  grid: 16,
+  beatjump: 32,
+  beatLoop: 96,
+} as const;
+
+const LOOP_PRESETS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
+const JUMP_DIVISORS = [8, 8, 4, 4, 2, 2, 1, 1] as const;
+
 const button = (
   channel: number,
   number: number,
@@ -40,7 +50,7 @@ const led = (channel: number, number: number): LedAddress => ({
   onVelocity: 0x7f,
 });
 
-function deckBindings({ deck, channel, padChannel }: DeckMidi): Binding[] {
+function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi): Binding[] {
   return [
     button(channel, 11, { control: 'transport', deck }),
     button(channel, 12, { control: 'cue', deck }),
@@ -53,6 +63,14 @@ function deckBindings({ deck, channel, padChannel }: DeckMidi): Binding[] {
     // The controller reports selected logical Deck state on note 60:
     // velocity 0x7f for selected, 0 for the displaced layer.
     button(channel, 60, { control: 'set-control-focus', deck }),
+    button(channel, 16, { control: 'beatjump', deck, direction: 'back' }),
+    button(channel, 17, { control: 'beatjump', deck, direction: 'forward' }),
+    button(channel, 76, { control: 'loop-or-jump-size', deck, change: 'halve' }),
+    button(channel, 119, { control: 'loop-or-jump-size', deck, change: 'double' }),
+    button(channel, 20, { control: 'loop-toggle', deck }),
+    button(channel, 77, { control: 'loop-toggle', deck }),
+    button(channel, 81, { control: 'hot-cue-walk', deck, direction: 'prev' }),
+    button(channel, 83, { control: 'hot-cue-walk', deck, direction: 'next' }),
     // PDF polarity is explicit: minus side = minimum, plus side = maximum.
     // Verify the physical fader orientation when the controller arrives.
     absolute14(channel, 0, 32, { control: 'pitch', deck }),
@@ -95,11 +113,57 @@ function deckBindings({ deck, channel, padChannel }: DeckMidi): Binding[] {
       target: { control: 'jog-seek', deck },
       encoding: 'offset-64',
     },
-    // The PDF assigns note block 0 to the first pad mode; verify HOT CUE
-    // mode and shifted-pad illumination against the physical device.
     ...Array.from({ length: 8 }, (_, pad) =>
-      button(padChannel, pad, { control: 'hot-cue', deck, pad: pad + 1 })
+      button(padChannel, PAD_BLOCK.hotCue + pad, { control: 'hot-cue', deck, pad: pad + 1 })
     ),
+    ...Array.from({ length: 8 }, (_, pad) =>
+      button(shiftedPadChannel, PAD_BLOCK.hotCue + pad, {
+        control: 'hot-cue-clear',
+        deck,
+        pad: pad + 1,
+      })
+    ),
+    ...Array.from({ length: 8 }, (_, pad) =>
+      button(padChannel, PAD_BLOCK.beatjump + pad, {
+        control: 'beatjump-window',
+        deck,
+        direction: pad % 2 === 0 ? 'back' : 'forward',
+        divisor: JUMP_DIVISORS[pad],
+      })
+    ),
+    button(shiftedPadChannel, PAD_BLOCK.beatjump + 6, {
+      control: 'beatjump-size',
+      deck,
+      change: 'halve',
+    }),
+    button(shiftedPadChannel, PAD_BLOCK.beatjump + 7, {
+      control: 'beatjump-size',
+      deck,
+      change: 'double',
+    }),
+    ...LOOP_PRESETS.map((beats, pad) =>
+      button(shiftedPadChannel, PAD_BLOCK.beatLoop + pad, {
+        control: 'loop-preset',
+        deck,
+        beats,
+      })
+    ),
+    button(padChannel, PAD_BLOCK.grid, { control: 'grid-bpm', deck, change: 'shrink' }),
+    button(padChannel, PAD_BLOCK.grid + 1, { control: 'grid-bpm', deck, change: 'grow' }),
+    button(padChannel, PAD_BLOCK.grid + 2, {
+      control: 'grid-nudge',
+      deck,
+      direction: 'earlier',
+    }),
+    button(padChannel, PAD_BLOCK.grid + 3, { control: 'grid-anchor', deck }),
+    button(padChannel, PAD_BLOCK.grid + 4, { control: 'grid-drop-anchor', deck }),
+    button(padChannel, PAD_BLOCK.grid + 5, {
+      control: 'grid-nudge',
+      deck,
+      direction: 'later',
+    }),
+    button(padChannel, PAD_BLOCK.grid + 6, { control: 'grid-reset-mark', deck }),
+    button(padChannel, PAD_BLOCK.grid + 7, { control: 'grid-reset-delete', deck }),
   ];
 }
 
@@ -110,10 +174,15 @@ function deckFeedback({ channel, padChannel, shiftedPadChannel }: DeckMidi): Dec
     pfl: led(channel, 84),
     hotCuePads: Array.from({ length: 8 }, (_, pad) => led(padChannel, pad)),
     hotCuePadsShifted: Array.from({ length: 8 }, (_, pad) => led(shiftedPadChannel, pad)),
-    gridPads: [],
+    jumpPads: Array.from({ length: 8 }, (_, pad) => led(padChannel, PAD_BLOCK.beatjump + pad)),
+    gridPads: Array.from({ length: 8 }, (_, pad) => led(padChannel, PAD_BLOCK.grid + pad)),
+    gridPadMapped: Array.from({ length: 8 }, () => true),
     quantize: led(channel, 53),
     keyLock: led(channel, 26),
-    loopPads: [],
+    loopPads: LOOP_PRESETS.map((beats, pad) => ({
+      ...led(shiftedPadChannel, PAD_BLOCK.beatLoop + pad),
+      beats,
+    })),
     loopPadsShifted: [],
   };
 }

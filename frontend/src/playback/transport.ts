@@ -54,6 +54,8 @@ export type TransportEvent =
   | { type: 'cue-up' }
   | { type: 'hot-cue-down'; slot: number; time: number | null }
   | { type: 'hot-cue-up'; slot: number; time: number | null }
+  /** Paused-only memory-cue-style walk over track start plus Hot Cues. */
+  | { type: 'hot-cue-walk'; direction: 'prev' | 'next'; stops: readonly number[] }
   /** Auto-loop engage/release (looping 03). Inert on gridless Tracks. */
   | { type: 'loop-toggle' }
   /** Resize (looping 04, midi-performance-ops 01): halve/double or an
@@ -274,6 +276,25 @@ export function reduceTransport(
       return [
         { ...s, hotCuePreviewSlot: null, playhead: e.time },
         [{ type: 'stop', at: e.time }],
+      ];
+    }
+
+    case 'hot-cue-walk': {
+      if (s.playing || e.stops.length === 0) return [s, []];
+      const target =
+        e.direction === 'prev'
+          ? ([...e.stops].reverse().find((stop) => stop < s.playhead - AT_CUE_EPSILON) ?? e.stops[0])
+          : (e.stops.find((stop) => stop > s.playhead + AT_CUE_EPSILON) ?? e.stops[e.stops.length - 1]);
+      return [
+        {
+          ...s,
+          previewing: false,
+          hotCuePreviewSlot: null,
+          playhead: target,
+          cuePoint: target,
+          loop: null,
+        },
+        isAudioRunning(s) ? [{ type: 'stop', at: target }] : [],
       ];
     }
 

@@ -82,12 +82,17 @@ export interface DeckFeedback {
    * while SHIFT is held (e.g. showing which slots SHIFT+pad can clear).
    */
   hotCuePadsShifted: readonly LedAddress[];
+  /** Beat Jump mode addresses. Kept dark until hardware acceptance decides
+   * a useful state convention; declaring them still clears stale lights. */
+  jumpPads: readonly LedAddress[];
   /**
    * Pads 1..8 by index, grid-edit (SAMPLER) base-layer addresses
    * (midi-performance-ops 05). Mapped pads light steadily iff the deck's
    * Track has a Beatgrid; pad 3 and unbound pads stay dark always.
    */
   gridPads: readonly LedAddress[];
+  /** Device-specific mapped-pad mask. Omit to use the legacy state mask. */
+  gridPadMapped?: readonly boolean[];
   /**
    * The deck's Q button light (midi-performance-ops 07) — mirrors the ONE
    * app-wide Quantize state: both decks' Q lamps and the TopBar toggle

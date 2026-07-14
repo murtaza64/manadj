@@ -343,9 +343,12 @@ export function DeckProvider({ children }: { children: ReactNode }) {
         hotCueDown: (deck, pad) => deckControlsFor(deck)?.hotCueDown(pad),
         hotCueUp: (deck, pad) => deckControlsFor(deck)?.hotCueUp(pad),
         hotCueClear: (deck, pad) => deckControlsFor(deck)?.hotCueClear(pad),
+        cueWalk: (deck, direction) => deckControlsFor(deck)?.cueWalk(direction),
       },
       jumps: {
         beatjump: (deck, direction) => deckControlsFor(deck)?.beatjump(direction),
+        beatjumpWindow: (deck, direction, divisor) =>
+          deckControlsFor(deck)?.beatjumpWindow(direction, divisor),
       },
       loops: {
         toggleLoop: (deck) => {

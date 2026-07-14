@@ -579,6 +579,7 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x08 + i,
           onVelocity: 0x7e,
         })),
+        jumpPads: [],
         // Grid-edit (SAMPLER) pad lamps echo their button notes 0x30-0x37
         // on the pad channel, like every other pad lamp on this device
         // (hardware-verified 2026-07-06).
@@ -614,6 +615,7 @@ export const INPULSE_300_MK2: Mapping = {
           number: 0x08 + i,
           onVelocity: 0x7e,
         })),
+        jumpPads: [],
         // Hardware-verified 2026-07-06.
         gridPads: Array.from({ length: 8 }, (_, i) => ({
           channel: 7,

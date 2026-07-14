@@ -26,8 +26,10 @@ export interface MidiDeckControls {
   hotCueUp(pad: number): void;
   /** SHIFT+pad: delete the slot's hot cue (no-op when empty). */
   hotCueClear(pad: number): void;
+  cueWalk(direction: 'prev' | 'next'): void;
   /** Jump by the deck's current beatjump size. */
   beatjump(direction: 'back' | 'forward'): void;
+  beatjumpWindow(direction: 'back' | 'forward', divisor: 1 | 2 | 4 | 8): void;
   /** Halve/double the deck's beatjump size (shared with on-screen controls). */
   beatjumpSize(change: 'halve' | 'double'): void;
   /** Absolute pitch in percent (±PITCH_RANGE_PERCENT; the engine clamps). */
@@ -50,6 +52,9 @@ export interface MidiDeckControls {
   /** Set the grid's downbeat/anchor at the playhead (the existing
    * set-downbeat path, ADR 0016). Gridless Track: no-op. */
   gridSetDownbeat(): void;
+  gridDropAnchor(): void;
+  gridMarkReset(): void;
+  gridDeleteReset(): void;
   /** Grid tempo ops: Grow/Shrink micro-adjust; BPM halve/double via the
    * serialized BPM commit chain. Gridless or variable grid: no-op. */
   gridBpm(change: 'grow' | 'shrink' | 'halve' | 'double'): void;

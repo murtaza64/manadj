@@ -103,6 +103,72 @@ describe('seek', () => {
   });
 });
 
+describe('hot-cue-walk', () => {
+  const stops = [0, 4, 12, 24];
+
+  it('walks by position, lands paused, moves Cue, and cancels the loop', () => {
+    const s = state({
+      playhead: 7,
+      cuePoint: 2,
+      loop: { start: 4, end: 8, lengthBeats: 8 },
+    });
+    const [next, effects] = reduceTransport(s, {
+      type: 'hot-cue-walk',
+      direction: 'next',
+      stops,
+    });
+    expect(next).toMatchObject({ playing: false, playhead: 12, cuePoint: 12, loop: null });
+    expect(effects).toEqual([]);
+  });
+
+  it('uses track start as the floor and does not wrap at either edge', () => {
+    const [floor] = reduceTransport(state({ playhead: 0, cuePoint: 4 }), {
+      type: 'hot-cue-walk',
+      direction: 'prev',
+      stops,
+    });
+    const [ceiling] = reduceTransport(state({ playhead: 24, cuePoint: 4 }), {
+      type: 'hot-cue-walk',
+      direction: 'next',
+      stops,
+    });
+    expect(floor.playhead).toBe(0);
+    expect(floor.cuePoint).toBe(0);
+    expect(ceiling.playhead).toBe(24);
+    expect(ceiling.cuePoint).toBe(24);
+  });
+
+  it('is a no-op while playing', () => {
+    const s = state({ playing: true, playhead: 7 });
+    const [next, effects] = reduceTransport(s, {
+      type: 'hot-cue-walk',
+      direction: 'next',
+      stops,
+    });
+    expect(next).toBe(s);
+    expect(effects).toEqual([]);
+  });
+
+  it('ends a paused cue preview and lands stopped', () => {
+    const [next, effects] = reduceTransport(state({ previewing: true, playhead: 7 }), {
+      type: 'hot-cue-walk',
+      direction: 'next',
+      stops,
+    });
+    expect(next).toMatchObject({ previewing: false, playhead: 12, cuePoint: 12 });
+    expect(effects).toEqual([{ type: 'stop', at: 12 }]);
+  });
+
+  it('ignores Quantize', () => {
+    const [next] = reduceTransport(
+      state({ playhead: 7 }),
+      { type: 'hot-cue-walk', direction: 'next', stops },
+      quantized([0, 10, 20])
+    );
+    expect(next.playhead).toBe(12);
+  });
+});
+
 describe('cue-down', () => {
   it('sets the cue point at the playhead when paused away from the cue', () => {
     const [next, effects] = reduceTransport(state({ playhead: 20 }), { type: 'cue-down' });

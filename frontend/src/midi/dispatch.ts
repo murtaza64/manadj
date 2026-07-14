@@ -163,9 +163,19 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       audiblePads()?.hotCueClear(target.deck, target.pad);
       return;
     }
+    case 'hot-cue-walk': {
+      if (edge !== 'down') return;
+      audiblePads()?.cueWalk?.(target.deck, target.direction);
+      return;
+    }
     case 'beatjump': {
       if (edge !== 'down') return;
       audibleJumps()?.beatjump(target.deck, target.direction);
+      return;
+    }
+    case 'beatjump-window': {
+      if (edge !== 'down') return;
+      audibleJumps()?.beatjumpWindow?.(target.deck, target.direction, target.divisor);
       return;
     }
     case 'loop-toggle': {
@@ -237,6 +247,21 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
     case 'grid-anchor': {
       if (edge !== 'down') return;
       deckControlsFor(target.deck)?.gridSetDownbeat();
+      return;
+    }
+    case 'grid-drop-anchor': {
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.gridDropAnchor();
+      return;
+    }
+    case 'grid-reset-mark': {
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.gridMarkReset();
+      return;
+    }
+    case 'grid-reset-delete': {
+      if (edge !== 'down') return;
+      deckControlsFor(target.deck)?.gridDeleteReset();
       return;
     }
     case 'grid-bpm': {

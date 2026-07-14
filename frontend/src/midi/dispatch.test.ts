@@ -89,7 +89,10 @@ function registerFakeDeckControls(deck: ChannelId): void {
     hotCueDown: (pad) => calls.push(`${deck}:hotCueDown:${pad}`),
     hotCueUp: (pad) => calls.push(`${deck}:hotCueUp:${pad}`),
     hotCueClear: (pad) => calls.push(`${deck}:hotCueClear:${pad}`),
+    cueWalk: (direction) => calls.push(`${deck}:cueWalk:${direction}`),
     beatjump: (direction) => calls.push(`${deck}:beatjump:${direction}`),
+    beatjumpWindow: (direction, divisor) =>
+      calls.push(`${deck}:beatjumpWindow:${direction}:${divisor}`),
     beatjumpSize: (change) => calls.push(`${deck}:beatjumpSize:${change}`),
     setPitch: (percent) => {
       fakePitch[deck] = percent;
@@ -102,6 +105,9 @@ function registerFakeDeckControls(deck: ChannelId): void {
     jogSeekTicks: (ticks) => calls.push(`${deck}:jogSeek:${ticks}`),
     gridNudgeStep: (direction) => calls.push(`${deck}:gridNudge:${direction}`),
     gridSetDownbeat: () => calls.push(`${deck}:gridAnchor`),
+    gridDropAnchor: () => calls.push(`${deck}:gridDropAnchor`),
+    gridMarkReset: () => calls.push(`${deck}:gridMarkReset`),
+    gridDeleteReset: () => calls.push(`${deck}:gridDeleteReset`),
     gridBpm: (change) => calls.push(`${deck}:gridBpm:${change}`),
     gridNudgeLocal: (offsetMs) => calls.push(`${deck}:gridLocal:${offsetMs}`),
     gridNudgeCommit: (offsetMs) => calls.push(`${deck}:gridCommit:${offsetMs}`),
@@ -170,9 +176,12 @@ beforeEach(() => {
       hotCueDown: (deck, pad) => deckControlsFor(deck)?.hotCueDown(pad),
       hotCueUp: (deck, pad) => deckControlsFor(deck)?.hotCueUp(pad),
       hotCueClear: (deck, pad) => deckControlsFor(deck)?.hotCueClear(pad),
+      cueWalk: (deck, direction) => deckControlsFor(deck)?.cueWalk(direction),
     },
     jumps: {
       beatjump: (deck, direction) => deckControlsFor(deck)?.beatjump(direction),
+      beatjumpWindow: (deck, direction, divisor) =>
+        deckControlsFor(deck)?.beatjumpWindow(direction, divisor),
     },
     jog: {
       rimTicks: (deck, ticks) => deckControlsFor(deck)?.jogTicks(ticks),
@@ -406,6 +415,21 @@ describe('pads route per audible surface (ADR 0019, editor-midi 01)', () => {
     dispatchMidiAction(hotCue('A', 1, 'down'));
     expect(calls).toEqual(['A:hotCueDown:1', 'editor:padDown:A:1', 'A:hotCueDown:1']);
   });
+
+  it('hot-cue-walk routes through the pads class on down only', () => {
+    registerFakeDeckControls('C');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'hot-cue-walk', deck: 'C', direction: 'prev' },
+    });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'hot-cue-walk', deck: 'C', direction: 'prev' },
+    });
+    expect(calls).toEqual(['C:cueWalk:prev']);
+  });
 });
 
 describe('jumps route per audible surface (editor-midi 02)', () => {
@@ -452,6 +476,16 @@ describe('jumps route per audible surface (editor-midi 02)', () => {
       target: { control: 'beatjump-size', deck: 'A', change: 'double' },
     });
     expect(calls).toEqual(['A:beatjumpSize:double']);
+  });
+
+  it('routes a sized window jump through the audible jumps class', () => {
+    registerFakeDeckControls('D');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'beatjump-window', deck: 'D', direction: 'forward', divisor: 4 },
+    });
+    expect(calls).toEqual(['D:beatjumpWindow:forward:4']);
   });
 });
 
@@ -622,6 +656,15 @@ describe('grid-edit pads are registry-direct (midi-performance-ops 05, ADR 0019)
       'A:gridBpm:halve',
       'A:gridBpm:double',
     ]);
+  });
+
+  it('routes drop-anchor and reset-mark edits on down only', () => {
+    registerFakeDeckControls('C');
+    for (const control of ['grid-drop-anchor', 'grid-reset-mark', 'grid-reset-delete'] as const) {
+      dispatchMidiAction({ kind: 'button', edge: 'down', target: { control, deck: 'C' } });
+      dispatchMidiAction({ kind: 'button', edge: 'up', target: { control, deck: 'C' } });
+    }
+    expect(calls).toEqual(['C:gridDropAnchor', 'C:gridMarkReset', 'C:gridDeleteReset']);
   });
 
   it('grid targets act identically while the editor holds audibility (stored data, not gestures)', () => {
