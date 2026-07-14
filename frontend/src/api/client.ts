@@ -417,8 +417,8 @@ export const api = {
 
     set: async (trackId: number, slotNumber: number, data: {
       time_seconds: number;
-      label?: string;
-      color?: string;
+      label?: string | null;
+      color?: string | null;
     }) => {
       const response = await fetch(
         `${API_BASE}/hotcues/${trackId}/${slotNumber}`,

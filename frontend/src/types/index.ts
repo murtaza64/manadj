@@ -414,8 +414,8 @@ export interface HotCue {
   track_id: number;
   slot_number: number;  // 1-8
   time_seconds: number;
-  label?: string;
-  color?: string;
+  label: string | null;
+  color: string | null;
   created_at: string;
   updated_at: string;
 }
