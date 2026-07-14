@@ -98,16 +98,18 @@ describe('PairEdgeChip', () => {
 });
 
 describe('PairDiagonalChip', () => {
-  it('maps its Deck letters to the corners the stroke joins', () => {
+  it('staggers its Deck letters in the pair diagonal direction', () => {
     const ad = render(<PairDiagonalChip a="A" b="D" ta={offender} tb={wicked} />);
+    expect(ad.querySelector('.pairlink-diag-letters')!.className).toContain('descending');
     const adLetters = ad.querySelectorAll('.pairlink-diag-letter');
-    expect(adLetters[0].className).toContain('pos-tl');
-    expect(adLetters[1].className).toContain('pos-br');
+    expect(adLetters[0].textContent).toBe('A');
+    expect(adLetters[1].textContent).toBe('D');
 
     const bc = render(<PairDiagonalChip a="B" b="C" ta={offender} tb={wicked} />);
+    expect(bc.querySelector('.pairlink-diag-letters')!.className).toContain('ascending');
     const bcLetters = bc.querySelectorAll('.pairlink-diag-letter');
-    expect(bcLetters[0].className).toContain('pos-tr');
-    expect(bcLetters[1].className).toContain('pos-bl');
+    expect(bcLetters[0].textContent).toBe('B');
+    expect(bcLetters[1].textContent).toBe('C');
   });
 
   it('toggles its pair like any other Link surface', () => {

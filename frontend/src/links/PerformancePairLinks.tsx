@@ -76,9 +76,9 @@ export function PairEdgeChip({
 }
 
 /**
- * Mini-map toggle for a diagonal pair: the two Deck letters in their grid
- * corners, joined by the stroke the Link crosses (A↘D descends, B↙C
- * ascends), with the chain icon riding the stroke's center.
+ * Toggle for a diagonal pair: the chain icon beside the two Deck letters
+ * staggered in the pair's diagonal direction — A over D descending (A↘D),
+ * C under B ascending (B↙C) — so which Decks a chip joins is glanceable.
  */
 export function PairDiagonalChip({
   a,
@@ -101,26 +101,10 @@ export function PairDiagonalChip({
       title={title}
       onClick={toggle}
     >
-      <span
-        className={`pairlink-diag-letter deck-${a.toLowerCase()} ${
-          descending ? 'pos-tl' : 'pos-tr'
-        }`}
-      >
-        {a}
-      </span>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <line x1={descending ? 5 : 19} y1={5} x2={descending ? 19 : 5} y2={19} />
-      </svg>
-      {/* The chain rides the stroke, rotated to lie along it. */}
-      <span className={`pairlink-diag-icon${descending ? ' descending' : ''}`}>
-        <LinkIcon size={10} />
-      </span>
-      <span
-        className={`pairlink-diag-letter deck-${b.toLowerCase()} ${
-          descending ? 'pos-br' : 'pos-bl'
-        }`}
-      >
-        {b}
+      <LinkIcon size={10} />
+      <span className={`pairlink-diag-letters${descending ? ' descending' : ' ascending'}`}>
+        <span className={`pairlink-diag-letter first deck-${a.toLowerCase()}`}>{a}</span>
+        <span className={`pairlink-diag-letter second deck-${b.toLowerCase()}`}>{b}</span>
       </span>
     </button>
   );
