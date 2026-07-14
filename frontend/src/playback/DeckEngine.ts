@@ -507,6 +507,20 @@ export class DeckEngine {
     this.dispatch({ type: 'hot-cue-up', slot, time: timeSeconds });
   }
 
+  /** Paused-only memory-cue-style walk. Stops are position-sorted. */
+  hotCueWalk(direction: 'prev' | 'next', stops: readonly number[]): void {
+    if (!this.buffer) return;
+    const before = this.getPlayhead();
+    this.dispatch({
+      type: 'hot-cue-walk',
+      direction,
+      stops: stops.map((stop) => this.clampTime(stop)),
+    });
+    if (this.transport.playhead !== before) {
+      this.fireTransportEvent({ action: 'seek', playhead: this.transport.playhead });
+    }
+  }
+
   /** Auto-loop engage/release (looping 03). Inert on gridless Tracks (the
    * reducer refuses to guess); the playhead never moves on engage. */
   toggleLoop(): void {
@@ -712,7 +726,17 @@ export class DeckEngine {
    * occur first (their DOWN/play counterparts precede them); loop-resize
    * moves nothing. */
   private static readonly CUE_FREEZING_EVENTS: ReadonlySet<TransportEvent['type']> =
-    new Set(['play', 'toggle-play', 'seek', 'jump', 'hot-cue-down', 'cue-down', 'loop-toggle', 'loop-preset']);
+    new Set([
+      'play',
+      'toggle-play',
+      'seek',
+      'jump',
+      'hot-cue-down',
+      'hot-cue-walk',
+      'cue-down',
+      'loop-toggle',
+      'loop-preset',
+    ]);
 
   private dispatch(event: TransportEvent): void {
     if (!this.buffer) return;
@@ -757,9 +781,9 @@ export class DeckEngine {
     }
     this.emit();
 
-    // A cue-down that moved the cue is the user setting it — persistence hook.
+    // Cue placement and cue-walk landings persist the Deck Cue.
     if (
-      event.type === 'cue-down' &&
+      (event.type === 'cue-down' || event.type === 'hot-cue-walk') &&
       cueChanged &&
       next.cuePoint !== null &&
       this.trackInfo

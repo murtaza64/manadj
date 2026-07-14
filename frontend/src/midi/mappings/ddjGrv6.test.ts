@@ -106,8 +106,106 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     ]);
   });
 
-  it('leaves Groove Circuit, effects, stems, and shifted pad actions unmapped', () => {
-    expect(translate([press(0, 0), press(4, 16), press(8, 0), press(14, 16)])).toEqual([]);
+  it('maps the deck loop section across A-D', () => {
+    expect(
+      translate([
+        press(0, 16),
+        press(1, 17),
+        press(2, 76),
+        press(3, 119),
+        press(0, 20),
+        press(1, 77),
+        press(2, 81),
+        press(3, 83),
+      ])
+    ).toEqual([
+      { kind: 'button', target: { control: 'beatjump', deck: 'A', direction: 'back' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beatjump', deck: 'B', direction: 'forward' }, edge: 'down' },
+      { kind: 'button', target: { control: 'loop-or-jump-size', deck: 'C', change: 'halve' }, edge: 'down' },
+      { kind: 'button', target: { control: 'loop-or-jump-size', deck: 'D', change: 'double' }, edge: 'down' },
+      { kind: 'button', target: { control: 'loop-toggle', deck: 'A' }, edge: 'down' },
+      { kind: 'button', target: { control: 'loop-toggle', deck: 'B' }, edge: 'down' },
+      { kind: 'button', target: { control: 'hot-cue-walk', deck: 'C', direction: 'prev' }, edge: 'down' },
+      { kind: 'button', target: { control: 'hot-cue-walk', deck: 'D', direction: 'next' }, edge: 'down' },
+    ]);
+  });
+
+  it('maps shifted Hot Cue pads to clear on every deck', () => {
+    expect(translate([press(8, 0), press(10, 7), press(12, 3), press(14, 5)])).toEqual([
+      { kind: 'button', target: { control: 'hot-cue-clear', deck: 'A', pad: 1 }, edge: 'down' },
+      { kind: 'button', target: { control: 'hot-cue-clear', deck: 'B', pad: 8 }, edge: 'down' },
+      { kind: 'button', target: { control: 'hot-cue-clear', deck: 'C', pad: 4 }, edge: 'down' },
+      { kind: 'button', target: { control: 'hot-cue-clear', deck: 'D', pad: 6 }, edge: 'down' },
+    ]);
+  });
+
+  it('maps Beat Jump pads as four left/right size pairs', () => {
+    expect(translate(Array.from({ length: 8 }, (_, pad) => press(7, 32 + pad)))).toEqual(
+      [8, 8, 4, 4, 2, 2, 1, 1].map((divisor, pad) => ({
+        kind: 'button',
+        target: {
+          control: 'beatjump-window',
+          deck: 'A',
+          direction: pad % 2 === 0 ? 'back' : 'forward',
+          divisor,
+        },
+        edge: 'down',
+      }))
+    );
+    expect(translate([press(8, 38), press(8, 39)])).toEqual([
+      { kind: 'button', target: { control: 'beatjump-size', deck: 'A', change: 'halve' }, edge: 'down' },
+      { kind: 'button', target: { control: 'beatjump-size', deck: 'A', change: 'double' }, edge: 'down' },
+    ]);
+  });
+
+  it('maps Beat Loop pads to the quarter-through-32-beat ladder', () => {
+    const beats = [0.25, 0.5, 1, 2, 4, 8, 16, 32];
+    expect(translate(beats.map((_, pad) => press(8, 96 + pad)))).toEqual(
+      beats.map((size) => ({
+        kind: 'button',
+        target: { control: 'loop-preset', deck: 'A', beats: size },
+        edge: 'down',
+      }))
+    );
+  });
+
+  it('maps STEMS pads to the BPM panel actions in DOM order', () => {
+    expect(translate(Array.from({ length: 8 }, (_, pad) => press(7, 16 + pad)))).toEqual([
+      { kind: 'button', target: { control: 'grid-bpm', deck: 'A', change: 'shrink' }, edge: 'down' },
+      { kind: 'button', target: { control: 'grid-bpm', deck: 'A', change: 'grow' }, edge: 'down' },
+      { kind: 'button', target: { control: 'grid-nudge', deck: 'A', direction: 'earlier' }, edge: 'down' },
+      { kind: 'button', target: { control: 'grid-anchor', deck: 'A' }, edge: 'down' },
+      { kind: 'button', target: { control: 'grid-drop-anchor', deck: 'A' }, edge: 'down' },
+      { kind: 'button', target: { control: 'grid-nudge', deck: 'A', direction: 'later' }, edge: 'down' },
+      { kind: 'button', target: { control: 'grid-reset-mark', deck: 'A' }, edge: 'down' },
+      { kind: 'button', target: { control: 'grid-reset-delete', deck: 'A' }, edge: 'down' },
+    ]);
+  });
+
+  it('routes pad mode blocks across the B-D deck channels', () => {
+    expect(translate([press(9, 32), press(12, 96), press(13, 23)])).toEqual([
+      {
+        kind: 'button',
+        target: { control: 'beatjump-window', deck: 'B', direction: 'back', divisor: 8 },
+        edge: 'down',
+      },
+      {
+        kind: 'button',
+        target: { control: 'loop-preset', deck: 'C', beats: 0.25 },
+        edge: 'down',
+      },
+      {
+        kind: 'button',
+        target: { control: 'grid-reset-delete', deck: 'D' },
+        edge: 'down',
+      },
+    ]);
+  });
+
+  it('leaves Groove Circuit, effects, Pad FX, Sampler, Key Shift, and Keyboard unmapped', () => {
+    expect(
+      translate([press(0, 0), press(4, 16), press(8, 16), press(7, 48), press(14, 112), press(7, 64)])
+    ).toEqual([]);
   });
 
   it('declares A–D transport, PFL, and Hot Cue Feedback addresses', () => {
@@ -118,6 +216,9 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     });
     expect(DDJ_GRV6.feedback?.decks.D?.hotCuePads).toHaveLength(8);
     expect(DDJ_GRV6.feedback?.decks.D?.hotCuePadsShifted).toHaveLength(8);
+    expect(DDJ_GRV6.feedback?.decks.D?.jumpPads).toHaveLength(8);
+    expect(DDJ_GRV6.feedback?.decks.D?.gridPads).toHaveLength(8);
+    expect(DDJ_GRV6.feedback?.decks.D?.loopPads).toHaveLength(8);
   });
 
   it('encodes C/D logical deck Feedback on their official output channels', () => {
@@ -136,5 +237,23 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     expect(messages).toContainEqual([0x92, 84, 0x7f]);
     expect(messages).toContainEqual([0x92, 26, 0x7f]);
     expect(messages).toContainEqual([0x9b, 0, 0x7f]);
+    expect(messages).toContainEqual([0x9c, 0, 0x7f]);
+  });
+
+  it('addresses Beat Jump, GRID, and Beat Loop mode blocks independently', () => {
+    const states = {
+      play: false,
+      cue: false,
+      pfl: false,
+      pads: Array(8).fill(false),
+      gridPads: [true, true, false, true, true, true, true, true],
+      quantize: false,
+      keyLock: false,
+      loopBeats: 0.25,
+    };
+    const messages = encodeDeckLeds(DDJ_GRV6.feedback!, 'D', states);
+    expect(messages).toContainEqual([0x9d, 32, 0]);
+    expect(messages).toContainEqual([0x9d, 18, 0x7f]);
+    expect(messages).toContainEqual([0x9e, 96, 0x7f]);
   });
 });

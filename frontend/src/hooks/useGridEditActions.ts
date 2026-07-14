@@ -10,9 +10,12 @@ import {
 import {
   GRID_NUDGE_MS,
   useBeatgridData,
+  useDropAnchor,
   useNudgeBeatgrid,
   useSetBeatgridDownbeat,
 } from './useBeatgridData';
+import { useMetricLadderData, usePutMetricLadder } from './useMetricLadderData';
+import { nearestDownbeatOrdinal, nearestMark } from '../meter/ladder';
 import { shiftBeatgrid } from '../midi/gridChord';
 import { useDeck, useDeckReady } from './useDeck';
 import type { BeatgridResponse } from '../types';
@@ -42,6 +45,9 @@ export interface GridEditActions {
   nudgeStep(direction: 'earlier' | 'later'): void;
   /** Set the grid's downbeat/anchor at the deck's playhead. */
   setDownbeatAtPlayhead(): void;
+  dropAnchorAtPlayhead(): void;
+  markResetAtPlayhead(): void;
+  deleteResetNearestPlayhead(): void;
   /** Grow/Shrink micro-adjust; BPM halve/double (screen-identical rounding). */
   bpm(change: 'grow' | 'shrink' | 'halve' | 'double'): void;
   /** Spin-to-nudge tick apply (midi-performance-ops 06): shift the CACHED
@@ -77,6 +83,9 @@ export function useGridEditActions(): GridEditActions {
 
   const nudgeGrid = useNudgeBeatgrid();
   const setDownbeat = useSetBeatgridDownbeat();
+  const dropAnchor = useDropAnchor();
+  const { data: ladder } = useMetricLadderData(trackId);
+  const putLadder = usePutMetricLadder();
   /** Serializes nudge POSTs (each is a server-side read-modify-write). */
   const nudgeChain = useRef<Promise<unknown>>(Promise.resolve());
 
@@ -139,6 +148,26 @@ export function useGridEditActions(): GridEditActions {
       // `ready` gates the playhead read, like the on-screen buttons' gates.
       if (!hasBeatgrid || trackId === null || !ready) return;
       setDownbeat.mutate({ trackId, downbeatTime: engine.getPlayhead() });
+    },
+    dropAnchorAtPlayhead: () => {
+      if (!hasBeatgrid || trackId === null || !ready) return;
+      dropAnchor.mutate({ trackId, dropTime: engine.getPlayhead() });
+    },
+    markResetAtPlayhead: () => {
+      const downbeats = grid?.data.downbeat_times ?? [];
+      if (!hasBeatgrid || trackId === null || !ready || downbeats.length === 0) return;
+      const snapped = downbeats[nearestDownbeatOrdinal(downbeats, engine.getPlayhead())];
+      putLadder.mutate({
+        trackId,
+        resetMarks: [...(ladder?.reset_marks ?? []), snapped],
+      });
+    },
+    deleteResetNearestPlayhead: () => {
+      if (!hasBeatgrid || trackId === null || !ready) return;
+      const marks = ladder?.reset_marks ?? [];
+      const nearest = nearestMark(marks, engine.getPlayhead());
+      if (nearest === null) return;
+      putLadder.mutate({ trackId, resetMarks: marks.filter((mark) => mark !== nearest) });
     },
     bpm: (change) => {
       if (!hasBeatgrid || trackId === null) return;

@@ -37,6 +37,7 @@ export interface SurfacePads {
   hotCueDown(deck: ChannelId, pad: number): void;
   hotCueUp?(deck: ChannelId, pad: number): void;
   hotCueClear(deck: ChannelId, pad: number): void;
+  cueWalk?(deck: ChannelId, direction: 'prev' | 'next'): void;
 }
 
 /** Jump gesture class (ADR 0019): beatjump. The shared surface jumps the
@@ -45,6 +46,11 @@ export interface SurfacePads {
  * mutates the shared per-deck size and stays registry-direct. */
 export interface SurfaceJumps {
   beatjump(deck: ChannelId, direction: 'back' | 'forward'): void;
+  beatjumpWindow?(
+    deck: ChannelId,
+    direction: 'back' | 'forward',
+    divisor: 1 | 2 | 4 | 8
+  ): void;
 }
 
 /** Loop gesture class (ADR 0019, looping 03, midi-performance-ops 02/03):

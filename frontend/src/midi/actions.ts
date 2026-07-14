@@ -24,7 +24,15 @@ export type ButtonTarget =
   | { control: 'cue'; deck: ChannelId }
   | { control: 'hot-cue'; deck: ChannelId; pad: number }
   | { control: 'hot-cue-clear'; deck: ChannelId; pad: number }
+  | { control: 'hot-cue-walk'; deck: ChannelId; direction: 'prev' | 'next' }
   | { control: 'beatjump'; deck: ChannelId; direction: 'back' | 'forward' }
+  /** Jump by a fraction of the Deck's configured beatjump window. */
+  | {
+      control: 'beatjump-window';
+      deck: ChannelId;
+      direction: 'back' | 'forward';
+      divisor: 1 | 2 | 4 | 8;
+    }
   | { control: 'beatjump-size'; deck: ChannelId; change: 'halve' | 'double' }
   /** Auto-loop engage/release (looping 03) — loops gesture class; no
    * hardware binding yet (loop-section mapping is follow-up MIDI work). */
@@ -39,6 +47,9 @@ export type ButtonTarget =
   | { control: 'grid-nudge'; deck: ChannelId; direction: 'earlier' | 'later' }
   /** Set-downbeat at the playhead — records the grid's anchor (ADR 0016). */
   | { control: 'grid-anchor'; deck: ChannelId }
+  | { control: 'grid-drop-anchor'; deck: ChannelId }
+  | { control: 'grid-reset-mark'; deck: ChannelId }
+  | { control: 'grid-reset-delete'; deck: ChannelId }
   /** Grid tempo ops: Grow/Shrink micro-adjust (glossary) and BPM
    * halve/double, all through the one BPM write path. */
   | { control: 'grid-bpm'; deck: ChannelId; change: 'grow' | 'shrink' | 'halve' | 'double' }

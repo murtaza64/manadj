@@ -11,6 +11,42 @@
   align-items: stretch;
   border: 1px solid var(--surface1);
   box-sizing: border-box;
+  position: relative;
+}
+
+.deck-jumpwindow-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.deck-jumpwindow-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.deck-jumpwindow-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(54px, 1fr));
+  gap: 2px;
+  padding: 4px;
+  background: var(--base);
+  border: 1px solid var(--surface2);
+}
+
+.deck-jumpwindow-popover .player-button {
+  min-width: 0;
+  padding: 3px 5px;
+  font-size: 10px;
+}
+
+.deck-cuewalk {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
 }
 
 .deck-jumprow .player-button {

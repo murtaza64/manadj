@@ -26,3 +26,8 @@ export function halveBeatjump(beats: number): number {
 export function doubleBeatjump(beats: number): number {
   return clampBeatjump(beats * 2);
 }
+
+/** Four GRV6 Beat Jump pad-pair sizes, derived from the one Deck size. */
+export function jumpWindow(beats: number): readonly [number, number, number, number] {
+  return [beats / 8, beats / 4, beats / 2, beats];
+}
