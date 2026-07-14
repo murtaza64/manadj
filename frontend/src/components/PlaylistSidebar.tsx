@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
@@ -40,6 +40,11 @@ interface PlaylistSidebarProps {
   /** Sets section (sets 01): sidebar siblings of Playlists. */
   selectedSetId: number | null;
   onSelectSet: (setId: number) => void;
+  /** Area focus + walk cursor (four-deck-performance 24): when the sidebar
+   * is the focused browse area it shows a focus outline, and cursorKey
+   * highlights the row the keyboard/encoder cursor is parked on. */
+  focused?: boolean;
+  cursorKey?: string | null;
 }
 
 export default function PlaylistSidebar({
@@ -50,6 +55,8 @@ export default function PlaylistSidebar({
   onTrackDrop,
   selectedSetId,
   onSelectSet,
+  focused = false,
+  cursorKey = null,
 }: PlaylistSidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
@@ -62,6 +69,17 @@ export default function PlaylistSidebar({
     queryKey: ['playlists'],
     queryFn: api.playlists.list,
   });
+
+  // Keep the walk cursor's row visible (the playlist/sets lists scroll).
+  useEffect(() => {
+    if (!cursorKey) return;
+    document
+      .querySelector(`[data-entry-key="${CSS.escape(cursorKey)}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [cursorKey]);
+
+  const rowClass = (key: string, selected: boolean) =>
+    `pl-sidebar-row${selected ? ' selected' : ''}${cursorKey === key ? ' cursor' : ''}`;
 
   const createMutation = useMutation({
     mutationFn: (name: string) => api.playlists.create({ name }),
@@ -233,11 +251,14 @@ export default function PlaylistSidebar({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
+        outline: focused ? '1px solid var(--blue)' : '1px solid transparent',
+        outlineOffset: '-1px',
       }}>
       {/* "All tracks" special view (brand/sync/mode switch live in the TopBar) */}
       <div
+        data-entry-key="view:all"
         onClick={() => onSelectView('all')}
-        className={`pl-sidebar-row${selectedView === 'all' ? ' selected' : ''}`}
+        className={rowClass('view:all', selectedView === 'all')}
         style={{ borderBottom: '1px solid var(--surface0)' }}
       >
         All tracks
@@ -245,8 +266,9 @@ export default function PlaylistSidebar({
 
       {/* "Unprocessed" special view */}
       <div
+        data-entry-key="view:unprocessed"
         onClick={() => onSelectView('unprocessed')}
-        className={`pl-sidebar-row${selectedView === 'unprocessed' ? ' selected' : ''}`}
+        className={rowClass('view:unprocessed', selectedView === 'unprocessed')}
         style={{ borderBottom: '1px solid var(--surface0)' }}
       >
         Unprocessed
@@ -256,8 +278,9 @@ export default function PlaylistSidebar({
           bailed and that still have no saved grid — resolve by manual
           gridding or External Import */}
       <div
+        data-entry-key="view:needs-attention"
         onClick={() => onSelectView('needs-attention')}
-        className={`pl-sidebar-row${selectedView === 'needs-attention' ? ' selected' : ''}`}
+        className={rowClass('view:needs-attention', selectedView === 'needs-attention')}
         style={{ borderBottom: '1px solid var(--surface0)' }}
       >
         Needs attention
@@ -266,8 +289,9 @@ export default function PlaylistSidebar({
       {/* "Archived" special view (CONTEXT.md: Archived — out of the active
           Library; one click away, never mixed in) */}
       <div
+        data-entry-key="view:archived"
         onClick={() => onSelectView('archived')}
-        className={`pl-sidebar-row${selectedView === 'archived' ? ' selected' : ''}`}
+        className={rowClass('view:archived', selectedView === 'archived')}
         style={{ color: 'var(--subtext0)', borderBottom: '1px solid var(--surface0)' }}
       >
         Archived
@@ -302,6 +326,7 @@ export default function PlaylistSidebar({
             <div
               key={playlist.id}
               data-playlist-row
+              data-entry-key={`playlist:${playlist.id}`}
               draggable={renamingId !== playlist.id}
               onDragStart={(e) => setPlaylistDragPayload(e.dataTransfer, playlist.id)}
               onClick={() => onSelectPlaylist(playlist.id)}
@@ -312,9 +337,10 @@ export default function PlaylistSidebar({
               onDragOver={(e) => handleRowDragOver(e, playlist.id)}
               onDragLeave={() => setDragOverPlaylistId((cur) => (cur === playlist.id ? null : cur))}
               onDrop={(e) => handleRowDrop(e, playlist.id)}
-              className={`pl-sidebar-row${
-                selectedView === 'playlist' && selectedPlaylistId === playlist.id ? ' selected' : ''
-              }`}
+              className={rowClass(
+                `playlist:${playlist.id}`,
+                selectedView === 'playlist' && selectedPlaylistId === playlist.id
+              )}
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -401,6 +427,7 @@ export default function PlaylistSidebar({
           selectedSetId={selectedView === 'set' ? selectedSetId : null}
           onSelectSet={onSelectSet}
           onSelectedSetDeleted={() => onSelectView('all')}
+          cursorKey={cursorKey}
         />
       </div>
 

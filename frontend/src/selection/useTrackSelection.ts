@@ -21,6 +21,7 @@ import {
   visibleTrackIds,
 } from '../hooks/useKeyboardShortcuts';
 import type { SelectMods } from '../components/TrackRow';
+import { endTargetId, pageTargetId } from '../components/browseNav';
 import {
   click,
   EMPTY_SELECTION,
@@ -41,6 +42,10 @@ export interface TrackSelection {
   selectedTrack: Track | null;
   handleRowSelect: (track: Track, mods: SelectMods) => void;
   handleNavigate: (delta: 1 | -1) => void;
+  /** Coarse navigation (four-deck-performance 24): jump a page of rows /
+   * to the list's first or last row, collapsing to a single selection. */
+  handleNavigatePage: (direction: 1 | -1) => void;
+  handleNavigateEnd: (direction: 1 | -1) => void;
   handleSelectAll: () => void;
   /** Drag payload for a row: the whole selection when the row is in it. */
   getDragIds: (trackId: number) => number[];
@@ -92,6 +97,21 @@ export function useTrackSelection(tracks: Track[]): TrackSelection {
     setSelection(next);
   }, []);
 
+  const handleNavigatePage = useCallback((direction: 1 | -1) => {
+    const sel = selectionRef.current;
+    const id = pageTargetId(displayedIdsRef.current, sel.anchorId, direction);
+    if (id === null) return;
+    scrollTrackIntoView(id);
+    setSelection(click(sel, id));
+  }, []);
+
+  const handleNavigateEnd = useCallback((direction: 1 | -1) => {
+    const id = endTargetId(displayedIdsRef.current, direction);
+    if (id === null) return;
+    scrollTrackIntoView(id);
+    setSelection(click(selectionRef.current, id));
+  }, []);
+
   const handleSelectAll = useCallback(() => {
     setSelection((prev) => selectAll(prev, displayedIdsRef.current));
   }, []);
@@ -110,6 +130,8 @@ export function useTrackSelection(tracks: Track[]): TrackSelection {
     selectedTrack,
     handleRowSelect,
     handleNavigate,
+    handleNavigatePage,
+    handleNavigateEnd,
     handleSelectAll,
     getDragIds,
   };

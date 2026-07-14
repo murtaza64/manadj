@@ -62,3 +62,10 @@
 .pl-sidebar-new:active {
   background: var(--surface1);
 }
+
+/* Sidebar walk cursor (four-deck-performance 24): where keyboard/encoder
+   navigation is parked — distinct from .selected (the open view). */
+.pl-sidebar-row.cursor {
+  outline: 1px solid var(--blue);
+  outline-offset: -1px;
+}

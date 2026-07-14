@@ -25,6 +25,7 @@ import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
 import { installNoFocusRule } from './focus/noFocusRule';
 import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
+import { isTypingTarget } from './components/performance/performanceKeys';
 
 /** The one poller keeping track rows / Analyze buttons live against
  * background analysis (analysis-curation 03) — a bridge like the MIDI
@@ -63,6 +64,28 @@ function App() {
   // Keyboard-focus hygiene: buttons/checkboxes never take click-focus
   // (keyboard-focus 01) — one enforcement site for the whole app.
   useEffect(installNoFocusRule, []);
+
+  // Performance ⟷ Library toggle: ` (backtick), app-wide (four-deck-
+  // performance 24). One key, two modes — other modes are pointer-only
+  // destinations; the toggle serves the hardware/keys performance loop.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== '`' || isTypingTarget(event)) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      event.preventDefault();
+      setViewState((current) => {
+        const next = current === 'performance' ? 'library' : 'performance';
+        try {
+          localStorage.setItem(MODE_KEY, next);
+        } catch {
+          // persistence is best-effort
+        }
+        return next;
+      });
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // A Take review request (Transition history row) opens the editor; the
   // mounted editor consumes the pending uuid itself (takeReview.ts).

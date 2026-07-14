@@ -58,3 +58,9 @@
 .sets-sidebar-new:active {
   background: var(--surface1);
 }
+
+/* Sidebar walk cursor (four-deck-performance 24). */
+.sets-sidebar-row.cursor {
+  outline: 1px solid var(--blue);
+  outline-offset: -1px;
+}

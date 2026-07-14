@@ -78,6 +78,15 @@ export interface MidiBrowseSurface {
   /** Move the selection up (-1) / down (+1), scrolling it into view. */
   navigate(delta: 1 | -1): void;
   getSelectedTrack(): Track | null;
+  /** Optional area-navigation extensions (four-deck-performance 24/25):
+   * the Library implements them; simpler surfaces (Set pane) may not.
+   * Dispatch treats a missing member as a silent no-op. */
+  navigatePage?(direction: 1 | -1): void;
+  navigateEnd?(direction: 1 | -1): void;
+  /** Walk the browse-area ring (sidebar/panes). */
+  areaMove?(delta: 1 | -1): void;
+  /** Open the focused area's cursor row (sidebar: open view/playlist). */
+  activate?(): void;
   /**
    * Load a Track — with the EMBEDDING VIEW's policy (editor-midi 03, ADR
    * 0019): load policy is view-owned, not audibility-owned. The editor

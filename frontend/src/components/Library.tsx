@@ -8,6 +8,18 @@ import TagEditor, { type TagEditorHandle } from './TagEditor';
 import Player from './Player';
 import PlaylistSidebar, { type ViewType } from './PlaylistSidebar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import {
+  BROWSE_PAGE_ROWS,
+  browseAreas,
+  cursorEnd,
+  entryKey,
+  moveBrowseArea,
+  moveCursor,
+  selectionEntryKey,
+  sidebarEntries,
+  type BrowseArea,
+  type SidebarEntry,
+} from './browseNav';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { registerBrowseSurface } from '../midi/controlRegistry';
@@ -262,14 +274,37 @@ export default function Library({
     setIsSplitViewOpen(false);
   }
 
-  // Focus model: click focuses a pane; Tab switches; keyboard routes to it.
-  // Opening/closing the split resets focus to the playlist pane.
-  const [focusedPane, setFocusedPane] = useState<'playlist' | 'library'>('playlist');
+  // Focus model (four-deck-performance 24): one focused browse AREA —
+  // the sidebar or a track pane. Click focuses, Tab/Shift+Tab (and the
+  // hardware tilt, issue 25) walk the ring; keyboard routes to it.
+  // Opening/closing the split resets focus to its first track pane.
+  const [focusedArea, setFocusedArea] = useState<BrowseArea>('main');
   const [prevSplitView, setPrevSplitView] = useState(splitView);
   if (prevSplitView !== splitView) {
     setPrevSplitView(splitView);
-    setFocusedPane('playlist');
+    setFocusedArea(splitView ? 'playlist' : 'main');
   }
+  const sidebarFocused = focusedArea === 'sidebar';
+  /** The split-pane projection of the focused area (legacy pane logic). */
+  const focusedPane: 'playlist' | 'library' = focusedArea === 'library' ? 'library' : 'playlist';
+
+  // The sidebar cursor: a highlight that walks rows without opening them
+  // (rekordbox tree semantics); Enter/press opens. Seeded from the current
+  // selection when the sidebar gains focus.
+  const [sidebarCursor, setSidebarCursor] = useState<string | null>(null);
+  const { data: sidebarPlaylists = [] } = useQuery({
+    queryKey: ['playlists'],
+    queryFn: api.playlists.list,
+  });
+  const { data: sidebarSets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
+  const sidebarNavEntries = useMemo(
+    () =>
+      sidebarEntries(
+        sidebarPlaylists.map((p: { id: number }) => p.id),
+        sidebarSets.map((s: { id: number }) => s.id)
+      ),
+    [sidebarPlaylists, sidebarSets]
+  );
 
   // Fetch all tracks ('all'/'unprocessed' views, and the edit-mode library pane)
   const { data: allTracksData, isLoading: isLoadingAllTracks, error: allTracksError } = useQuery({
@@ -691,11 +726,11 @@ export default function Library({
       if (!sel.selection.ids.includes(track.id)) {
         sel.setSelection(click(sel.selection, track.id));
       }
-      if (deps.splitView) setFocusedPane(pane === 'editLibrary' ? 'library' : 'playlist');
+      if (deps.splitView) setFocusedArea(pane === 'editLibrary' ? 'library' : 'playlist');
       openRowMenu(pos.x, pos.y, { track, pane });
     },
-    // setFocusedPane is a stable setState — listed for the compiler lint.
-    [openRowMenu, setFocusedPane]
+    // setFocusedArea is a stable setState — listed for the compiler lint.
+    [openRowMenu, setFocusedArea]
   );
   const handleRowContextMenuMain = useCallback(
     (track: Track, pos: { x: number; y: number }) => rowContextMenu('main', track, pos),
@@ -796,12 +831,99 @@ export default function Library({
     mainSelRef.current = mainSel;
   });
   const viewingSet = selectedView === 'set' && selectedSetId !== null;
+
+  // ── Area/sidebar navigation routing (four-deck-performance 24) ─────────
+  // One router serves the keyboard hub and the hardware surface: the
+  // focused area owns navigation. Sidebar focused, motion walks the
+  // cursor; otherwise it drives the focused pane's selection.
+  const openSidebarEntry = (entry: SidebarEntry) => {
+    if (entry.kind === 'view') {
+      setSelectedView(entry.view);
+      selectSet(null);
+    } else if (entry.kind === 'playlist') {
+      setSelectedView('playlist');
+      setSelectedPlaylistId(entry.id);
+      selectSet(null);
+    } else {
+      setSelectedView('set');
+      setSelectedSetId(entry.id);
+      selectSet(entry.id);
+    }
+  };
+  const handleAreaMove = (delta: 1 | -1) => {
+    const next = moveBrowseArea(browseAreas(splitView), focusedArea, delta);
+    if (next === 'sidebar' && !sidebarFocused) {
+      // Enter the sidebar where the current selection lives.
+      setSidebarCursor(
+        (cur) =>
+          cur ??
+          selectionEntryKey(selectedView, selectedPlaylistId, selectedSetId) ??
+          (sidebarNavEntries.length > 0 ? entryKey(sidebarNavEntries[0]) : null)
+      );
+    }
+    setFocusedArea(next);
+  };
+  const moveSidebarCursor = (delta: number) => {
+    const next = moveCursor(sidebarNavEntries, sidebarCursor, delta);
+    if (next) setSidebarCursor(entryKey(next));
+  };
+  const handleNavigateArea = (delta: 1 | -1) =>
+    sidebarFocused ? moveSidebarCursor(delta) : activeSel.handleNavigate(delta);
+  const handleNavigatePageArea = (direction: 1 | -1) =>
+    sidebarFocused
+      ? moveSidebarCursor(direction * BROWSE_PAGE_ROWS)
+      : activeSel.handleNavigatePage(direction);
+  const handleNavigateEndArea = (direction: 1 | -1) => {
+    if (!sidebarFocused) {
+      activeSel.handleNavigateEnd(direction);
+      return;
+    }
+    const next = cursorEnd(sidebarNavEntries, direction);
+    if (next) setSidebarCursor(entryKey(next));
+  };
+  const activateSidebarCursor = () => {
+    const entry = sidebarNavEntries.find((e) => entryKey(e) === sidebarCursor);
+    if (!entry) return;
+    openSidebarEntry(entry);
+    // Opening pushes focus into the (single) track pane, rekordbox-style.
+    setFocusedArea('main');
+  };
+  const splitViewAvailable = !browseOnly && selectedView === 'playlist' && selectedPlaylistId !== null;
+
+  // The hardware surface routes through the same area-aware handlers,
+  // ref-backed so the mount-scoped registration reads live state.
+  const browseNavRef = useRef({
+    navigate: handleNavigateArea,
+    navigatePage: handleNavigatePageArea,
+    navigateEnd: handleNavigateEndArea,
+    areaMove: handleAreaMove,
+    activate: () => {
+      // Table focused, press is a no-op: LOAD owns loading (design doc).
+      if (sidebarFocused) activateSidebarCursor();
+    },
+  });
+  useEffect(() => {
+    browseNavRef.current = {
+      navigate: handleNavigateArea,
+      navigatePage: handleNavigatePageArea,
+      navigateEnd: handleNavigateEndArea,
+      areaMove: handleAreaMove,
+      activate: () => {
+        if (sidebarFocused) activateSidebarCursor();
+      },
+    };
+  });
+
   useEffect(() => {
     if (viewingSet) return; // the Set pane owns the browse surface
     return registerBrowseSurface({
-      navigate: (delta) => mainSelRef.current.handleNavigate(delta),
+      navigate: (delta) => browseNavRef.current.navigate(delta),
       getSelectedTrack: () => mainSelRef.current.selectedTrack,
       load: (deck, track) => loadWithViewPolicyRef.current(deck, track),
+      navigatePage: (direction) => browseNavRef.current.navigatePage(direction),
+      navigateEnd: (direction) => browseNavRef.current.navigateEnd(direction),
+      areaMove: (delta) => browseNavRef.current.areaMove(delta),
+      activate: () => browseNavRef.current.activate(),
     });
   }, [viewingSet]);
 
@@ -812,13 +934,15 @@ export default function Library({
     {!browseOnly && (
       <LibraryHub
         selectedTrack={selectedTrack}
-        onNavigate={activeSel.handleNavigate}
+        onNavigate={handleNavigateArea}
         onSelectAll={activeSel.handleSelectAll}
-        onRemoveSelected={removeEnabled ? handleRemoveSelected : undefined}
-        onSwitchPane={
-          splitView
-            ? () => setFocusedPane((p) => (p === 'playlist' ? 'library' : 'playlist'))
-            : undefined
+        onRemoveSelected={removeEnabled && !sidebarFocused ? handleRemoveSelected : undefined}
+        onAreaMove={handleAreaMove}
+        onNavigatePage={handleNavigatePageArea}
+        onNavigateEnd={handleNavigateEndArea}
+        onActivate={sidebarFocused ? activateSidebarCursor : undefined}
+        onToggleSplitView={
+          splitViewAvailable ? () => setIsSplitViewOpen((v) => !v) : undefined
         }
         onLoadTrack={loadTrack}
         onNudgeBeatgrid={handleNudgeBeatgrid}
@@ -870,21 +994,17 @@ export default function Library({
           selectedView={selectedView}
           selectedPlaylistId={selectedPlaylistId}
           onSelectView={(view) => {
-            setSelectedView(view);
-            selectSet(null);
+            // Sidebar rows only send the special views; playlist/set rows
+            // use their dedicated callbacks below.
+            if (view === 'playlist' || view === 'set') return;
+            openSidebarEntry({ kind: 'view', view });
           }}
-          onSelectPlaylist={(id) => {
-            setSelectedView('playlist');
-            setSelectedPlaylistId(id);
-            selectSet(null);
-          }}
+          onSelectPlaylist={(id) => openSidebarEntry({ kind: 'playlist', id })}
           onTrackDrop={handleTrackDrop}
           selectedSetId={selectedSetId}
-          onSelectSet={(id) => {
-            setSelectedView('set');
-            setSelectedSetId(id);
-            selectSet(id);
-          }}
+          onSelectSet={(id) => openSidebarEntry({ kind: 'set', id })}
+          focused={sidebarFocused}
+          cursorKey={sidebarFocused ? sidebarCursor : null}
         />
 
         {/* Main library area (filter + table; split panes when editing) */}
@@ -935,7 +1055,7 @@ export default function Library({
               {/* Playlist pane (Play order) */}
               <div
                 ref={playlistPaneRef}
-                onMouseDownCapture={() => setFocusedPane('playlist')}
+                onMouseDownCapture={() => setFocusedArea('playlist')}
                 onDragOver={handlePlaylistPaneDragOver}
                 onDragLeave={handlePlaylistPaneDragLeave}
                 onDrop={handlePlaylistPaneDrop}
@@ -944,7 +1064,7 @@ export default function Library({
                   flex: 1,
                   minHeight: 0,
                   overflow: 'auto',
-                  outline: focusedPane === 'playlist' ? '1px solid var(--blue)' : '1px solid transparent',
+                  outline: focusedArea === 'playlist' ? '1px solid var(--blue)' : '1px solid transparent',
                   outlineOffset: '-1px',
                 }}
               >
@@ -995,12 +1115,12 @@ export default function Library({
                 }}
               />
               <div
-                onMouseDownCapture={() => setFocusedPane('library')}
+                onMouseDownCapture={() => setFocusedArea('library')}
                 style={{
                   flex: 1,
                   minHeight: 0,
                   overflow: 'auto',
-                  outline: focusedPane === 'library' ? '1px solid var(--blue)' : '1px solid transparent',
+                  outline: focusedArea === 'library' ? '1px solid var(--blue)' : '1px solid transparent',
                   outlineOffset: '-1px',
                 }}
               >
@@ -1117,7 +1237,11 @@ function LibraryHub({
   onNavigate,
   onSelectAll,
   onRemoveSelected,
-  onSwitchPane,
+  onAreaMove,
+  onNavigatePage,
+  onNavigateEnd,
+  onActivate,
+  onToggleSplitView,
   onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
@@ -1129,7 +1253,11 @@ function LibraryHub({
   onNavigate: (delta: 1 | -1) => void;
   onSelectAll: () => void;
   onRemoveSelected?: () => void;
-  onSwitchPane?: () => void;
+  onAreaMove?: (delta: 1 | -1) => void;
+  onNavigatePage?: (direction: 1 | -1) => void;
+  onNavigateEnd?: (direction: 1 | -1) => void;
+  onActivate?: () => void;
+  onToggleSplitView?: () => void;
   onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid: (offsetMs: number) => void;
   onSetDownbeat: () => void;
@@ -1145,7 +1273,11 @@ function LibraryHub({
     onNavigate,
     onSelectAll,
     onRemoveSelected,
-    onSwitchPane,
+    onAreaMove,
+    onNavigatePage,
+    onNavigateEnd,
+    onActivate,
+    onToggleSplitView,
     onLoadTrack,
     onNudgeBeatgrid,
     onSetDownbeat,

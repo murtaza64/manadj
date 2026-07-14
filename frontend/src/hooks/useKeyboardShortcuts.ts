@@ -26,9 +26,18 @@ interface UseKeyboardShortcutsProps {
   /** Delete/Backspace: remove the selection from the viewed playlist
    * (only provided in playlist views — playlist-editing 04). */
   onRemoveSelected?: () => void;
-  /** Tab: switch pane focus (only provided in the split edit view —
-   * playlist-editing 05). */
-  onSwitchPane?: () => void;
+  /** Tab/Shift+Tab: walk the browse-area ring (sidebar/panes) — replaces
+   * the old split-only pane toggle (four-deck-performance 24). */
+  onAreaMove?: (delta: 1 | -1) => void;
+  /** PageDown/PageUp: coarse selection jump on the focused area. */
+  onNavigatePage?: (direction: 1 | -1) => void;
+  /** End/Home: first/last row of the focused area. */
+  onNavigateEnd?: (direction: 1 | -1) => void;
+  /** Enter, when the sidebar is focused: open the cursor row (takes
+   * precedence over loading the track selection). */
+  onActivate?: () => void;
+  /** V: toggle the split playlist view (playlist views only). */
+  onToggleSplitView?: () => void;
   onLoadTrack: (track: Track) => void;
   onNudgeBeatgrid?: (offsetMs: number) => void;
   onSetDownbeat?: () => void;
@@ -45,7 +54,11 @@ export function useKeyboardShortcuts({
   onNavigate,
   onSelectAll,
   onRemoveSelected,
-  onSwitchPane,
+  onAreaMove,
+  onNavigatePage,
+  onNavigateEnd,
+  onActivate,
+  onToggleSplitView,
   onLoadTrack,
   onNudgeBeatgrid,
   onSetDownbeat,
@@ -111,16 +124,39 @@ export function useKeyboardShortcuts({
         onRemoveSelected();
       }
 
-      // Pane focus: Tab switches between the split view's panes
-      if (event.key === 'Tab' && onSwitchPane) {
+      // Area focus: Tab/Shift+Tab walk the browse-area ring (sidebar and
+      // track panes — four-deck-performance 24).
+      if (event.key === 'Tab' && onAreaMove) {
         event.preventDefault();
-        onSwitchPane();
+        onAreaMove(event.shiftKey ? -1 : 1);
       }
 
-      // Load: Enter puts the selection on the Deck (the browse -> Deck bridge).
-      // Skip when a button has focus (e.g. after clicking a player control) —
-      // Enter there should not surprise-load the selection.
+      // Coarse navigation on the focused area (four-deck-performance 24).
+      if ((event.key === 'PageDown' || event.key === 'PageUp') && onNavigatePage) {
+        event.preventDefault();
+        onNavigatePage(event.key === 'PageDown' ? 1 : -1);
+      }
+      if ((event.key === 'End' || event.key === 'Home') && onNavigateEnd) {
+        event.preventDefault();
+        onNavigateEnd(event.key === 'End' ? 1 : -1);
+      }
+
+      // Split view: V toggles the playlist edit split (playlist views only).
+      if (key === 'v' && onToggleSplitView) {
+        event.preventDefault();
+        onToggleSplitView();
+      }
+
+      // Enter. Sidebar focused: open the cursor row. Otherwise it puts the
+      // selection on the Deck (the browse -> Deck bridge). Skip when a
+      // button has focus (e.g. after clicking a player control) — Enter
+      // there should not surprise-load the selection.
       if (event.key === 'Enter') {
+        if (onActivate) {
+          event.preventDefault();
+          onActivate();
+          return;
+        }
         if (!selectedTrack || target.tagName === 'BUTTON') return;
         event.preventDefault();
         onLoadTrack(selectedTrack);
@@ -305,7 +341,11 @@ export function useKeyboardShortcuts({
     onNavigate,
     onSelectAll,
     onRemoveSelected,
-    onSwitchPane,
+    onAreaMove,
+    onNavigatePage,
+    onNavigateEnd,
+    onActivate,
+    onToggleSplitView,
     onLoadTrack,
     onNudgeBeatgrid,
     onSetDownbeat,

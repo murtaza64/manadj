@@ -35,12 +35,16 @@ interface SetsSidebarSectionProps {
   onSelectSet: (id: number) => void;
   /** The selected Set was deleted — eject the view (parent decides where). */
   onSelectedSetDeleted: () => void;
+  /** The sidebar navigation cursor's entry key (`set:<id>` rows here) —
+   * four-deck-performance 24. Null when the sidebar is unfocused. */
+  cursorKey?: string | null;
 }
 
 export default function SetsSidebarSection({
   selectedSetId,
   onSelectSet,
   onSelectedSetDeleted,
+  cursorKey = null,
 }: SetsSidebarSectionProps) {
   const queryClient = useQueryClient();
   const showToast = useToast();
@@ -164,6 +168,7 @@ export default function SetsSidebarSection({
           <div
             key={set.id}
             data-set-row
+            data-entry-key={`set:${set.id}`}
             onClick={() => onSelectSet(set.id)}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -179,7 +184,7 @@ export default function SetsSidebarSection({
             onDrop={(e) => void handleRowDrop(e, set.id)}
             className={`sets-sidebar-row${selectedSetId === set.id ? ' selected' : ''}${
               dragOverSetId === set.id ? ' drag-over' : ''
-            }`}
+            }${cursorKey === `set:${set.id}` ? ' cursor' : ''}`}
             style={{ borderLeft: set.color ? `3px solid ${set.color}` : 'none' }}
           >
             {renamingId === set.id ? (
