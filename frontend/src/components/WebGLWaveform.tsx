@@ -31,7 +31,7 @@ interface WebGLWaveformProps {
    * Linked time-zoom (Performance view): when set, the waveform shows this
    * many seconds regardless of track duration, and wheel zoom reports the
    * new value through onVisibleSecondsChange instead of zooming locally —
-   * the parent owns the one zoom both decks share. When absent (library),
+   * the parent owns the one zoom all four Decks share. When absent (library),
    * the renderer keeps its own zoom.
    */
   visibleSeconds?: number;

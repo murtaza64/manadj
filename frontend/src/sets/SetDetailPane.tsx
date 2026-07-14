@@ -774,8 +774,8 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // inventing a parallel one. The embedding Library YIELDS its own
   // registration while a Set is the visible browse list (stack order
   // alone can't be trusted: child effects run before parent effects),
-  // so the encoder walks THIS list and LOAD A/B load THIS selection —
-  // through the same view policy as the on-screen paths (the
+  // so the encoder walks THIS list and the LOAD controls load THIS
+  // selection — through the same view policy as the on-screen paths (the
   // onLoadToDeck prop IS Library's loadWithViewPolicy). Encoder select
   // ≡ click select: one selection
   // model (the set store) that 17's menu and 18's ops already read; the

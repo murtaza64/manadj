@@ -64,8 +64,8 @@ export function TransportPair({
             : ''
         }`}
         // Phase-lock the 1s cue flash to the document timeline: the
-        // animation starts when the class lands (any moment), so two decks
-        // would flash out of phase — a negative delay of (now mod period)
+        // animation starts when the class lands (any moment), so concurrent
+        // Decks would flash out of phase — a negative delay of (now mod period)
         // re-anchors every instance to the same global epoch. Set via ref
         // (commit phase): render must stay pure.
         ref={(el) => {

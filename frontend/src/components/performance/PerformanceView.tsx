@@ -7,9 +7,12 @@
  * (browseOnly, per-row load-to-A–D buttons) takes every remaining pixel.
  *
  * This view owns its keyboard outright (issue 04): per-deck DeckKeys hubs
- * inside each scope, table keys here (↑/↓ navigate, ←/→ load to A/B,
- * Enter = A). Space is deliberately unbound — single-deck muscle memory
- * must not toggle a live deck. The embedded library mounts no hub.
+ * inside each scope, table keys here (↑/↓ navigate; ←/→ load to the focused
+ * left/right Decks; Enter = the focused left Deck — issue 22). Control focus
+ * decides the target, not the letter, so ← and Enter follow A↔C and → follows
+ * B↔D without disturbing the selection. Space is deliberately unbound —
+ * single-deck muscle memory must not toggle a live deck. The embedded library
+ * mounts no hub.
  *
  * Load lock (view policy, not provider): a Load onto an audibly-running
  * deck is refused with a hint — in this view a deck is replaced only
@@ -30,7 +33,7 @@ import { EdgePairLinks } from '../../links/PerformancePairLinks';
 import { DeckKeys } from './DeckKeys';
 import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { dispatchSetSpace } from '../../sets/spaceTransport';
-import { CONTROL_FOCUS_KEYS, isGuardedKeyEvent } from './performanceKeys';
+import { CONTROL_FOCUS_KEYS, browseLoadTarget, isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
 import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
 import { toggleControlFocus, useControlFocus } from '../../performance/controlFocus';
@@ -98,6 +101,13 @@ export function PerformanceView() {
   const rootRef = useRef<HTMLDivElement>(null);
   useMidiCursorSuppression(rootRef);
   const controlFocus = useControlFocus();
+  // Live focus for the once-bound keydown listener: ← / → / Enter must
+  // target the CURRENT focused Decks, but re-binding on every focus change
+  // would churn the document listener. A ref keeps the handler stable.
+  const controlFocusRef = useRef(controlFocus);
+  useEffect(() => {
+    controlFocusRef.current = controlFocus;
+  });
 
   // ── Load lock ──────────────────────────────────────────────────────────
   const [lockHint, setLockHint] = useState<ChannelId | null>(null);
@@ -128,7 +138,7 @@ export function PerformanceView() {
     [decks]
   );
 
-  // ── Table keys: ↑/↓ navigate, ← load A, → load B, Enter = A ───────────
+  // ── Table keys: ↑/↓ navigate; ←/→ load focused left/right; Enter = left ─
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isGuardedKeyEvent(event)) return;
@@ -158,22 +168,20 @@ export function PerformanceView() {
         return;
       }
 
-      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-        const selected = libraryRef.current?.getSelectedTrack();
-        if (!selected) return;
-        event.preventDefault();
-        tryLoad(event.key === 'ArrowLeft' ? 'A' : 'B', selected);
+      // ← / → / Enter Load to the focused left/right Decks (issue 22): the
+      // pure browseLoadTarget maps key + Control focus to a physical Deck,
+      // so changing focus retargets the next Load without touching the
+      // selection. Enter is suppressed on a focused button (library-hub
+      // parity) before it can claim a target.
+      if (event.key === 'Enter' && (event.target as HTMLElement).tagName === 'BUTTON') {
         return;
       }
-
-      // Enter loads to A — but not from a focused button (library-hub parity).
-      if (event.key === 'Enter') {
-        const target = event.target as HTMLElement;
-        if (target.tagName === 'BUTTON') return;
+      const loadDeck = browseLoadTarget(event.key, controlFocusRef.current);
+      if (loadDeck) {
         const selected = libraryRef.current?.getSelectedTrack();
         if (!selected) return;
         event.preventDefault();
-        tryLoad('A', selected);
+        tryLoad(loadDeck, selected);
       }
     };
 
@@ -230,7 +238,12 @@ export function PerformanceView() {
         engineD={engineD}
       >
         <DeckScope deck="A">
-          <Library browseOnly onLoadToDeck={tryLoad} browseRef={libraryRef} />
+          <Library
+            browseOnly
+            onLoadToDeck={tryLoad}
+            doubleClickDeck={controlFocus.left}
+            browseRef={libraryRef}
+          />
         </DeckScope>
       </LockDimmedLibrary>
     </div>

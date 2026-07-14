@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { isTextEntryTarget, isTypingTarget } from './performanceKeys';
+import { browseLoadTarget, isTextEntryTarget, isTypingTarget } from './performanceKeys';
+import type { ControlFocus } from '../../performance/controlFocus';
 
 function input(type: string): HTMLInputElement {
   const el = document.createElement('input');
@@ -50,5 +51,47 @@ describe('isTextEntryTarget (the hubs\' typing guard, keyboard-focus 01)', () =>
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
     expect(seen).toBe(true);
     el.remove();
+  });
+});
+
+describe('browseLoadTarget (focus-aware Performance Load routing, issue 22)', () => {
+  const ac: ControlFocus = { left: 'C', right: 'B' };
+  const bd: ControlFocus = { left: 'A', right: 'D' };
+  const def: ControlFocus = { left: 'A', right: 'B' };
+
+  it('← and Enter target the focused left Deck (default A)', () => {
+    expect(browseLoadTarget('ArrowLeft', def)).toBe('A');
+    expect(browseLoadTarget('Enter', def)).toBe('A');
+  });
+
+  it('→ targets the focused right Deck (default B)', () => {
+    expect(browseLoadTarget('ArrowRight', def)).toBe('B');
+  });
+
+  it('follows left focus onto C: ← and Enter load C', () => {
+    expect(browseLoadTarget('ArrowLeft', ac)).toBe('C');
+    expect(browseLoadTarget('Enter', ac)).toBe('C');
+    // The right side is untouched by a left flip.
+    expect(browseLoadTarget('ArrowRight', ac)).toBe('B');
+  });
+
+  it('follows right focus onto D: → loads D', () => {
+    expect(browseLoadTarget('ArrowRight', bd)).toBe('D');
+    // The left side is untouched by a right flip.
+    expect(browseLoadTarget('ArrowLeft', bd)).toBe('A');
+    expect(browseLoadTarget('Enter', bd)).toBe('A');
+  });
+
+  it('covers all four Decks across the two independent sides', () => {
+    const both: ControlFocus = { left: 'C', right: 'D' };
+    expect(browseLoadTarget('ArrowLeft', both)).toBe('C');
+    expect(browseLoadTarget('Enter', both)).toBe('C');
+    expect(browseLoadTarget('ArrowRight', both)).toBe('D');
+  });
+
+  it('returns null for non-Load keys (↑/↓, space, letters)', () => {
+    for (const key of ['ArrowUp', 'ArrowDown', ' ', 'a', 'k', '[', ']']) {
+      expect(browseLoadTarget(key, def)).toBeNull();
+    }
   });
 });

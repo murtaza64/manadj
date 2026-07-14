@@ -26,7 +26,7 @@ import type {
   SourceMode,
 } from './protocol';
 
-/** addModule once per context (both Decks share the Mixer's context). */
+/** addModule once per context (all Decks share the Mixer's context). */
 const moduleReady = new WeakMap<BaseAudioContext, Promise<void>>();
 
 function ensureModule(ctx: AudioContext): Promise<void> {

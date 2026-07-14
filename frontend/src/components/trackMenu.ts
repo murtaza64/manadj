@@ -1,7 +1,7 @@
 /**
  * Universal track menu (sets 17): the operations that always make sense
  * on a track, regardless of surface, in one stable order — Load to
- * Deck A / B · Add to playlist ▸ · Add to set ▸ · [surface items] ·
+ * Deck A / B / C / D · Add to playlist ▸ · Add to set ▸ · [surface items] ·
  * Archive|Unarchive. New universal operations get one home here.
  *
  * Pure core: callers supply the target tracks (1..n), container lists,
@@ -11,7 +11,7 @@
  * track only, and Archive↔Unarchive is per-track (`archived_at`) — a
  * mixed multi-selection shows both verdicts, each acting on its subset.
  */
-import type { ChannelId } from '../playback/mixer';
+import { CHANNEL_IDS, type ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
 import type { MenuItem } from './ContextMenu';
 
@@ -86,7 +86,7 @@ export function trackMenuItems(input: TrackMenuInput): MenuItem[] {
     // single target — necessarily the clicked row under the targeting
     // rule. Revisit if issue 18 ever changes target resolution.
     const loadDisabledTitle = multi ? 'Load acts on a single track' : undefined;
-    for (const deck of ['A', 'B'] as const) {
+    for (const deck of CHANNEL_IDS) {
       items.push({
         label: `Load to Deck ${deck}`,
         disabled: multi,

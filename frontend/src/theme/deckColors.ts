@@ -6,9 +6,9 @@
  * (green = active, blue = accent) never denote a Deck.
  *
  * TS/canvas consumers import DECK_COLORS; CSS consumers use the variables
- * installed at boot (main.tsx): `--deck-a` / `--deck-b` (hex) and
- * `--deck-a-rgb` / `--deck-b-rgb` (comma-separated triplets, for
- * `rgba(var(--deck-b-rgb), 0.14)` alpha washes).
+ * installed at boot (main.tsx), one pair per fixed Deck: `--deck-a` …
+ * `--deck-d` (hex) and `--deck-a-rgb` … `--deck-d-rgb` (comma-separated
+ * triplets, for `rgba(var(--deck-c-rgb), 0.14)` alpha washes).
  */
 import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';

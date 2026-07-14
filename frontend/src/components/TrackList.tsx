@@ -41,7 +41,7 @@ interface TrackListProps {
   playOrder?: ReadonlyMap<number, number>;
   /** Load a track onto the Deck (double-click; Enter goes via the keyboard hub). */
   onLoadTrack: (track: Track) => void;
-  /** When set (Performance view), rows get hover load-to-A/B buttons. */
+  /** When set (Performance view), rows get hover load-to-A–D buttons. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
   /** Saved-Transition marks (transition-library 02; A–D per
    * four-deck-performance 21): per Deck, targets with a Transition FROM
@@ -96,7 +96,7 @@ export default function TrackList({
   sortDirection,
   onSort
 }: TrackListProps) {
-  // Live deck occupancy (both decks) → per-row loaded identity mark,
+  // Live deck occupancy (across A–D) → per-row loaded identity mark,
   // mirroring the Set view's wash (sets 35). Memoized on engine slices,
   // so rows re-render only on load/play changes.
   const occupancy = useDeckOccupancy(useDecks());

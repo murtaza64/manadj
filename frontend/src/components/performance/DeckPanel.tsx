@@ -1,6 +1,6 @@
 /**
  * One Deck panel + its full-width waveform — deck-blind: everything reads
- * the nearest <DeckScope>, so the same component renders Deck A and Deck B.
+ * the nearest <DeckScope>, so the same component renders every Deck A–D.
  *
  * Ultra-flat layout (perf-layout 01): thin minimap header, then ONE dense
  * horizontal band in three zones ordered outer → inner (`mirrored` flips
@@ -11,7 +11,7 @@
  *   MIX   — TRIM | [LOW MID HI] | FLT knobs, VOL + PITCH label-on-handle
  *           faders, KEY + effective-BPM(+pitch%) readouts beside MATCH.
  * Habit controls never mirror: transport order, slider polarity (right =
- * faster) and the foot's readout/button order are identical on both decks.
+ * faster) and the foot's readout/button order are identical on every Deck.
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -89,7 +89,7 @@ export function DeckWaveform({
   visibleSeconds,
   onVisibleSecondsChange,
 }: {
-  /** The one zoom both decks share (WALL-CLOCK seconds) — held by the view. */
+  /** The one zoom all four Decks share (WALL-CLOCK seconds) — held by the view. */
   visibleSeconds: number;
   onVisibleSecondsChange: (seconds: number) => void;
 }) {
@@ -317,6 +317,8 @@ function TrackZone({ track }: { track: Track | null }) {
 
 function PlayZone() {
   const { deck, engine } = useDeck();
+  // Hand hints by side: left-side Decks (A/C) show the left-hand ('A')
+  // keys, right-side (B/D) the right-hand ('B') keys.
   const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
   const ready = useDeckReady();
   const bend = useDeckSnapshot((s) => s.bendPercent);
@@ -471,7 +473,7 @@ function MixZone({ track }: { track: Track | null }) {
     <div className="perf-zone perf-zone-mix">
       <div className="perf-knobrow">
         {/* TRIM/EQ/FLT and PFL spread evenly across the row; PFL at the
-            right end on both decks */}
+            right end on every Deck */}
         <Knob
           label="TRIM"
           min={0}

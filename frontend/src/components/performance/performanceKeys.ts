@@ -1,7 +1,11 @@
 /**
  * The Performance view's two-handed key map (PRD decision) — one table
  * shared by the key bindings (DeckKeys) and the on-control kbd hints, so
- * they can't drift. Mirrored hands: left = Deck A, right = Deck B.
+ * they can't drift. Its two entries are the two HANDS, not two Decks: the
+ * left hand's keys and the right hand's mirrored keys. Which physical Deck
+ * a hand drives is Control focus, not the key map — the left hand follows
+ * A↔C and the right hand B↔D. The map stays two-valued because a keyboard
+ * has two hands; four Decks are reached by re-focusing, never by more keys.
  *
  * Space is deliberately absent (unbound in the Performance view —
  * single-deck muscle-memory hazard, confirmed decision). Pads 5-8 are
@@ -23,6 +27,23 @@ export interface DeckKeyMap {
 }
 
 export const CONTROL_FOCUS_KEYS = { left: '[', right: ']' } as const;
+
+import type { ChannelId } from '../../playback/mixer';
+import type { ControlFocus } from '../../performance/controlFocus';
+
+/**
+ * The Performance browse surface's focus-aware Load target (issue 22): the
+ * key decides a side, Control focus decides which physical Deck that side
+ * currently addresses. ← / Enter target the focused left Deck (A or C), →
+ * the focused right Deck (B or D). Any other key is not a Load key → null.
+ * Pure so the A–D routing is testable without a DOM (ADR 0002); the view
+ * feeds the result through its single load-lock path.
+ */
+export function browseLoadTarget(key: string, focus: ControlFocus): ChannelId | null {
+  if (key === 'ArrowLeft' || key === 'Enter') return focus.left;
+  if (key === 'ArrowRight') return focus.right;
+  return null;
+}
 
 /** INPUT types that take typed text (keyboard-focus 01: a focused
  * checkbox/radio/range must NOT silence the hubs — the no-focus rule
@@ -52,6 +73,9 @@ export function isGuardedKeyEvent(event: KeyboardEvent): boolean {
   return isTypingTarget(event) || event.ctrlKey || event.metaKey || event.altKey;
 }
 
+// The two keys are the left/right HAND layouts, not Deck A/B: 'A' is the
+// left-hand map (driving the A↔C-focused Deck), 'B' the right-hand map
+// (driving B↔D). DeckKeys/DeckPanel pick a hand from the scope's side.
 export const DECK_KEYS: Record<'A' | 'B', DeckKeyMap> = {
   A: {
     cue: 'f',

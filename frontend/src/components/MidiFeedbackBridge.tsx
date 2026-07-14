@@ -175,7 +175,7 @@ function DeckFeedbackPublisher({
 
 /**
  * The assistant lamp (midi-performance-ops 08): lit iff any Deck follows.
- * Not deck-scoped — one button over both Decks — so it publishes beside
+ * Not deck-scoped — one button over all Decks — so it publishes beside
  * the per-deck publishers. Subscribes to the follow store (every change
  * source funnels through it: the hardware macro, the FilterBar toggles,
  * playback spread/revoke), and resends on output-set changes, which is the
