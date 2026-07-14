@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { memo, type CSSProperties, type ReactNode } from 'react';
 import TagPill from './TagPill';
 import EnergySquare from './EnergySquare';
 import BPMDisplay from './BPMDisplay';
@@ -10,6 +10,8 @@ import { CHANNEL_IDS } from '../playback/mixer';
 import { getColumnConfig } from './columnConfig';
 import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDrag';
 import { LinkIcon } from '../links/LinkIcon';
+import { DECK_COLORS } from '../theme/deckColors';
+import { loadedWash } from '../sets/rowMarks';
 import './TrackRow.css';
 
 /** Saved-Transition mark state for one source deck (transition-library
@@ -26,10 +28,9 @@ export interface SelectMods {
   toggle: boolean;
 }
 
-/** Which Deck(s) hold this row's track — deck IDENTITY, mirroring the Set
- * view's loaded wash (sets 35): A cyan / B magenta, 'ab' when both.
- * A string, not an array — the row is memoized. */
-export type LoadedMark = 'none' | 'a' | 'b' | 'ab';
+/** Lowercase Deck ids holding this Track, or `none`. A primitive string
+ * keeps row memoization effective for every A–D combination. */
+export type LoadedMark = string;
 
 interface Props {
   track: Track;
@@ -144,6 +145,22 @@ const TrackRow = memo(function TrackRow({
 }: Props) {
   // Extract just the filename from the full path
   const filename = track.filename.split('/').pop() || track.filename;
+  const holdingDecks =
+    loadedOn === 'none'
+      ? []
+      : (loadedOn.toUpperCase().split('') as ChannelId[]);
+  const wash = loadedWash(holdingDecks);
+  const loadedStyle: CSSProperties = wash
+    ? ({
+        '--loaded-wash': wash,
+        boxShadow:
+          holdingDecks.length === 1
+            ? `inset 3px 0 0 0 ${DECK_COLORS[holdingDecks[0]]}`
+            : `inset 3px 0 0 0 ${DECK_COLORS[holdingDecks[0]]}, inset -3px 0 0 0 ${
+                DECK_COLORS[holdingDecks[holdingDecks.length - 1]]
+              }`,
+      } as CSSProperties)
+    : {};
 
   // Helper to get cell style from column config
   const getCellStyle = (columnId: string) => {
@@ -169,11 +186,11 @@ const TrackRow = memo(function TrackRow({
 
   return (
     <tr
-      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${loadedOn !== 'none' ? `track-row-loaded track-row-loaded-${loadedOn}` : ''} ${track.archived_at ? 'track-row-archived' : ''}`}
+      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${loadedOn !== 'none' ? 'track-row-loaded' : ''} ${track.archived_at ? 'track-row-archived' : ''}`}
       onClick={(e) => onSelect(track, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDoubleClick={() => onLoad(track)}
       data-track-id={track.id}
-      style={{ cursor: 'pointer' }}
+      style={{ cursor: 'pointer', ...loadedStyle }}
       draggable={true}
       onDragStart={(e) => {
         setTrackDragPayload(e.dataTransfer, getDragIds(track.id), dragSource);

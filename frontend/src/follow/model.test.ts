@@ -16,6 +16,7 @@ import {
   deriveFollowQuery,
   followedReferences,
   followMacroToggles,
+  partitionFollowedTracks,
   followSummary,
   reduceFollow,
   unionIds,
@@ -59,6 +60,21 @@ describe('followedReferences — facts read through the track cache (ADR 0027 §
   it('keeps working without a lookup (identity-only callers)', () => {
     const refs = followedReferences(followed, loaded(stale));
     expect(refs).toEqual([{ deck: 'A', reference: stale }]);
+  });
+});
+
+describe('partitionFollowedTracks', () => {
+  it('pins followed Tracks in reference order and dedupes doubles', () => {
+    const tracks = [track({ id: 1 }), track({ id: 2 }), track({ id: 3 }), track({ id: 4 })];
+    const result = partitionFollowedTracks(tracks, [3, 1, 3]);
+    expect(result.followed.map((item) => item.id)).toEqual([3, 1]);
+    expect(result.rest.map((item) => item.id)).toEqual([2, 4]);
+  });
+
+  it('does not inject a followed Track outside the visible source list', () => {
+    const result = partitionFollowedTracks([track({ id: 2 })], [9, 2]);
+    expect(result.followed.map((item) => item.id)).toEqual([2]);
+    expect(result.rest).toEqual([]);
   });
 });
 
@@ -262,6 +278,16 @@ describe('reduceFollow — the Follow state machine', () => {
     expect(flags).toEqual(followFlags(true, true));
     flags = reduceFollow(flags, pause('A', followFlags(false, true)));
     expect(flags).toEqual(followFlags(false, true));
+  });
+
+  it('rides a three-Deck blend and retains every playing reference', () => {
+    let flags = reduceFollow(OFF, { type: 'toggle', deck: 'A', loaded: true });
+    flags = reduceFollow(flags, play('A', followFlags(true)));
+    flags = reduceFollow(flags, play('B', followFlags(true, true)));
+    flags = reduceFollow(flags, play('C', followFlags(true, true, true)));
+    expect(flags).toEqual(followFlags(true, true, true));
+    flags = reduceFollow(flags, pause('B', followFlags(true, false, true)));
+    expect(flags).toEqual(followFlags(true, false, true));
   });
 });
 

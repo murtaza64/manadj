@@ -13,7 +13,7 @@
  * Habit controls never mirror: transport order, slider polarity (right =
  * faster) and the foot's readout/button order are identical on both decks.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { useDeck, useDeckReady, useDecks, useDeckSnapshot } from '../../hooks/useDeck';
@@ -41,6 +41,7 @@ import { formatKeyDisplay } from '../../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../../utils/displayColors';
 import { setKeyLockFlag } from '../../playback/keyLockStore';
 import { DECK_KEYS } from './performanceKeys';
+import { CHANNEL_IDS } from '../../playback/mixer';
 import type { EqBand } from '../../playback/graph';
 import type { Track } from '../../types';
 
@@ -418,17 +419,29 @@ function MixZone({ track }: { track: Track | null }) {
     if (hintTimer.current) clearTimeout(hintTimer.current);
   }, []);
 
-  const other = decks[deck === 'A' ? 'B' : 'A'];
-  // MATCH enable gate reads the other deck's tempo through the track cache
-  // (ADR 0027 §7, the useMatchAction pattern): loadedTrack is a load-time
-  // snapshot — after a re-tempo the gate must see the fresh value.
-  const queryClient = useQueryClient();
-  const otherLoaded = other.loadedTrack;
-  const otherBpm = otherLoaded
-    ? (queryClient.getQueryData<Track>(['track', otherLoaded.id])?.bpm ??
-      otherLoaded.bpm ??
-      null)
-    : null;
+  const subscribeMatchTargets = useCallback(
+    (listener: () => void) => {
+      const unsubs = CHANNEL_IDS.filter((candidate) => candidate !== deck).map((candidate) =>
+        decks[candidate].engine.subscribe(listener)
+      );
+      return () => unsubs.forEach((unsubscribe) => unsubscribe());
+    },
+    [deck, decks]
+  );
+  const getHasPlayingReference = useCallback(
+    () =>
+      CHANNEL_IDS.some(
+        (candidate) =>
+          candidate !== deck &&
+          decks[candidate].engine.getSnapshot().playing &&
+          !!decks[candidate].engine.getSnapshot().bpm
+      ),
+    [deck, decks]
+  );
+  const hasPlayingReference = useSyncExternalStore(
+    subscribeMatchTargets,
+    getHasPlayingReference
+  );
 
   // Shared with the hardware SYNC button (useMatchAction applies the pitch);
   // only the out-of-reach hint is on-screen-specific.
@@ -608,10 +621,10 @@ function MixZone({ track }: { track: Track | null }) {
             ≠ flashes red while the target is out of pitch-fader reach. */}
         <button
           className={`player-button perf-mini perf-match${hint ? ' perf-match-hint' : ''}`}
-          disabled={!ready || !track?.bpm || otherBpm === null}
+          disabled={!ready || !track?.bpm || !hasPlayingReference}
           onClick={onMatch}
           aria-label="Match tempo"
-          title="Match the other deck's tempo (half/double-aware)"
+          title="Match the nearest playing Deck's tempo (half/double-aware)"
         >
           {hint ? '\u2260' : '='}
         </button>

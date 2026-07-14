@@ -36,7 +36,7 @@ function formatPitch(percent: number): string {
 }
 
 export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number }) {
-  const { A, B } = useDecks();
+  const { A, B, C, D } = useDecks();
   const frames = usePlayGuides();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,6 +52,8 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
 
   const engineA = A.engine;
   const engineB = B.engine;
+  const engineC = C.engine;
+  const engineD = D.engine;
   useEffect(() => {
     let raf = 0;
     const tick = () => {
@@ -62,7 +64,14 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
       // Each direction projects on ITS outgoing Deck's timeline (both-paused
       // shows two directions at once — issue 01).
       for (const frame of framesRef.current) {
-        const engine = frame.outgoing === 'A' ? engineA : engineB;
+        const engine =
+          frame.outgoing === 'A'
+            ? engineA
+            : frame.outgoing === 'B'
+              ? engineB
+              : frame.outgoing === 'C'
+                ? engineC
+                : engineD;
         const snapshot = engine.getSnapshot();
         // Pitch only, like the zoom scaling — a momentary bend must not
         // wobble the marker (performance-mode 06 reasoning).
@@ -70,7 +79,8 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
         const windowSeconds = trackWindowSeconds(visibleRef.current, rate);
         const playhead = engine.getPlayhead();
         for (const guide of frame.guides) {
-          const node = itemRefs.current.get(guide.uuid);
+          const key = `${frame.outgoing}>${frame.incoming}:${guide.uuid}`;
+          const node = itemRefs.current.get(key);
           if (!node) continue;
           const frac = guideScreenFraction(
             guide.aTime,
@@ -89,28 +99,34 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [engineA, engineB]);
+  }, [engineA, engineB, engineC, engineD]);
 
   if (frames.length === 0) return null;
 
   return (
     <div ref={containerRef} className="perf-playguides" aria-hidden>
       {frames.map((frame) =>
-        frame.guides.map((guide) => (
-          <div
-            key={guide.uuid}
+        frame.guides.map((guide) => {
+          const key = `${frame.outgoing}>${frame.incoming}:${guide.uuid}`;
+          return (
+            <div
+            key={key}
             ref={(el) => {
-              if (el) itemRefs.current.set(guide.uuid, el);
-              else itemRefs.current.delete(guide.uuid);
+              if (el) itemRefs.current.set(key, el);
+              else itemRefs.current.delete(key);
             }}
             className={`perf-playguide incoming-${frame.incoming.toLowerCase()}${
               guide.missed ? ' missed' : ''
             }`}
             style={{ display: 'none' }}
           >
-            <div className="perf-playguide-line" />
-            <div className="perf-playguide-chip">
+            <div className={`perf-playguide-line deck-row-${frame.outgoing.toLowerCase()}`} />
+            <div className={`perf-playguide-line deck-row-${frame.incoming.toLowerCase()}`} />
+            <div className={`perf-playguide-chip deck-row-${frame.incoming.toLowerCase()}`}>
               <span className="perf-playguide-glyph">▶</span>
+              <span className="perf-playguide-pair">
+                {frame.outgoing}→{frame.incoming}
+              </span>
               {guide.favorite && <span className="perf-playguide-star">★</span>}
               <span className="perf-playguide-name">{guide.name}</span>
               {guide.requiredPitchPercent !== null && (
@@ -122,8 +138,9 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
                 </span>
               )}
             </div>
-          </div>
-        ))
+            </div>
+          );
+        })
       )}
     </div>
   );

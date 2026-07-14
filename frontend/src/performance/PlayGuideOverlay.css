@@ -1,5 +1,5 @@
-/* Play guides (play-guides PRD): the spanning line + gutter chip over the
- * Performance view's stacked waveforms, and the minimap marks. Identity
+/* Play guides (play-guides PRD): pair-row line segments + a labeled chip
+ * over the Performance view's stacked waveforms, and the minimap marks. Identity
  * colors only — the PAUSED (incoming) Deck's color; never state colors.
  * Non-interactive by definition: pointer-events none throughout. */
 
@@ -23,10 +23,9 @@
 
 .perf-playguide-line {
   position: absolute;
-  top: 0;
-  bottom: 0;
   left: -1px;
   width: 2px;
+  height: 25%;
 }
 .perf-playguide.incoming-a .perf-playguide-line {
   background: var(--deck-a);
@@ -34,13 +33,23 @@
 .perf-playguide.incoming-b .perf-playguide-line {
   background: var(--deck-b);
 }
+.perf-playguide.incoming-c .perf-playguide-line {
+  background: var(--deck-c);
+}
+.perf-playguide.incoming-d .perf-playguide-line {
+  background: var(--deck-d);
+}
+
+.perf-playguide-line.deck-row-a { top: 0; }
+.perf-playguide-line.deck-row-b { top: 25%; }
+.perf-playguide-line.deck-row-c { top: 50%; }
+.perf-playguide-line.deck-row-d { top: 75%; }
 
 /* Label chip: straddles the row boundary, hanging to the RIGHT of the
  * line (hot-cue badge convention — the marker stays unobscured). Distinct
  * from a Hot Cue at a glance: play glyph + name, no slot badge. */
 .perf-playguide-chip {
   position: absolute;
-  top: 50%;
   left: 4px;
   transform: translateY(-50%);
   display: flex;
@@ -53,6 +62,10 @@
   white-space: nowrap;
   line-height: 16px;
 }
+.perf-playguide-chip.deck-row-a { top: 12.5%; }
+.perf-playguide-chip.deck-row-b { top: 37.5%; }
+.perf-playguide-chip.deck-row-c { top: 62.5%; }
+.perf-playguide-chip.deck-row-d { top: 87.5%; }
 .perf-playguide.incoming-a .perf-playguide-chip {
   border-color: var(--deck-a);
   color: var(--deck-a);
@@ -60,6 +73,19 @@
 .perf-playguide.incoming-b .perf-playguide-chip {
   border-color: var(--deck-b);
   color: var(--deck-b);
+}
+.perf-playguide.incoming-c .perf-playguide-chip {
+  border-color: var(--deck-c);
+  color: var(--deck-c);
+}
+.perf-playguide.incoming-d .perf-playguide-chip {
+  border-color: var(--deck-d);
+  color: var(--deck-d);
+}
+
+.perf-playguide-pair {
+  color: var(--text);
+  font-size: 9px;
 }
 
 .perf-playguide-glyph {
@@ -136,6 +162,12 @@
 }
 .perf-minimap-guide.incoming-b {
   color: var(--deck-b);
+}
+.perf-minimap-guide.incoming-c {
+  color: var(--deck-c);
+}
+.perf-minimap-guide.incoming-d {
+  color: var(--deck-d);
 }
 /* The NEXT guide (earliest non-missed): the one to act on. */
 .perf-minimap-guide.next {

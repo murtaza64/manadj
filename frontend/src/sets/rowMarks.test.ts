@@ -6,12 +6,14 @@ import { isRowPlaying, loadedDecks, loadedWash, type DeckOccupancyMap } from './
 
 const occ = (
   a: Partial<DeckOccupancyMap['A']> = {},
-  b: Partial<DeckOccupancyMap['B']> = {}
+  b: Partial<DeckOccupancyMap['B']> = {},
+  c: Partial<DeckOccupancyMap['C']> = {},
+  d: Partial<DeckOccupancyMap['D']> = {}
 ): DeckOccupancyMap => ({
   A: { trackId: null, playing: false, ...a },
   B: { trackId: null, playing: false, ...b },
-  C: { trackId: null, playing: false },
-  D: { trackId: null, playing: false },
+  C: { trackId: null, playing: false, ...c },
+  D: { trackId: null, playing: false, ...d },
 });
 
 describe('loadedDecks', () => {
@@ -23,6 +25,12 @@ describe('loadedDecks', () => {
 
   it('both decks at once when both hold the track', () => {
     expect(loadedDecks(7, occ({ trackId: 7 }, { trackId: 7 }))).toEqual(['A', 'B']);
+  });
+
+  it('orders all holding Decks A→B→C→D', () => {
+    expect(
+      loadedDecks(7, occ({ trackId: 7 }, {}, { trackId: 7 }, { trackId: 7 }))
+    ).toEqual(['A', 'C', 'D']);
   });
 
   it('empty decks mark nothing', () => {
@@ -49,6 +57,15 @@ describe('loadedWash', () => {
   it('identity wash carries the holding deck color', () => {
     expect(loadedWash(['A'])).toContain(DECK_COLORS.A);
     expect(loadedWash(['B'])).toContain(DECK_COLORS.B);
+    expect(loadedWash(['C'])).toContain(DECK_COLORS.C);
+    expect(loadedWash(['D'])).toContain(DECK_COLORS.D);
+  });
+
+  it('multi-Deck gradients keep stable A→B→C→D color order', () => {
+    const wash = loadedWash(['A', 'B', 'C', 'D'])!;
+    expect([DECK_COLORS.A, DECK_COLORS.B, DECK_COLORS.C, DECK_COLORS.D].map((color) =>
+      wash.indexOf(color)
+    )).toEqual([...wash.matchAll(/#[0-9a-f]{6}/gi)].map((match) => match.index));
   });
 
   it('two-deck load reads as an A→B gradient', () => {
