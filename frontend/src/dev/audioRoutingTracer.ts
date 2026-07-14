@@ -25,7 +25,7 @@ const TONE_HZ = 440;
 const TONE_GAIN = 0.1;
 
 interface AudioRoutingTracer {
-  devices(): Promise<AudioOutputDevice[]>;
+  devices(force?: boolean): Promise<AudioOutputDevice[]>;
   setMaster(query: string | null, pairNumber?: number): Promise<void>;
   setCue(query: string | null, pairNumber?: number): Promise<void>;
   startCue(query: string, pairNumber?: number): Promise<void>;
@@ -69,8 +69,8 @@ export function installAudioRoutingTracer(mixer: Mixer): void {
   const mainCtx = () => mixer.portFor('A').ensureAudio().ctx;
 
   window.__routing = {
-    devices: async () => {
-      const devices = await listAudioOutputs();
+    devices: async (force = false) => {
+      const devices = await listAudioOutputs(force);
       console.table(devices);
       return devices;
     },

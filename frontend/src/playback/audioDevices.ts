@@ -26,13 +26,18 @@ export interface AudioOutputDevice {
   maxChannelCount: number;
 }
 
-const PROBE_TIMEOUT_MS = 2000;
+const PROBE_TIMEOUT_MS = 5000;
+const SINK_SETTLE_MS = 250;
 const channelCountCache = new Map<string, number>();
 
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+const PROBE_TIMEOUT = Symbol('channel-count-timeout');
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof PROBE_TIMEOUT> {
   return Promise.race([
     promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+    new Promise<typeof PROBE_TIMEOUT>((resolve) =>
+      setTimeout(() => resolve(PROBE_TIMEOUT), ms)
+    ),
   ]);
 }
 
@@ -42,13 +47,25 @@ async function probeMaxChannelCount(deviceId: string): Promise<number> {
   const ctx = new AudioContext();
   try {
     const count = await withTimeout(
-      ctx.setSinkId(deviceId).then(() => ctx.destination.maxChannelCount),
-      PROBE_TIMEOUT_MS,
-      2
+      ctx.setSinkId(deviceId).then(
+        () =>
+          new Promise<number>((resolve) =>
+            setTimeout(() => resolve(ctx.destination.maxChannelCount), SINK_SETTLE_MS)
+          )
+      ),
+      PROBE_TIMEOUT_MS
     );
+    // A cold CoreAudio sink can exceed the timeout immediately after plug-in.
+    // Stereo is the safe UI fallback, but it is not device knowledge: never
+    // cache it, so the next refresh can discover the real multichannel count.
+    if (count === PROBE_TIMEOUT) {
+      console.warn('[audioDevices] output channel probe timed out; will retry', deviceId);
+      return 2;
+    }
     channelCountCache.set(deviceId, count);
     return count;
-  } catch {
+  } catch (err) {
+    console.warn('[audioDevices] output channel probe failed; will retry', deviceId, err);
     return 2; // vanished mid-probe or unsupported: treat as plain stereo
   } finally {
     void ctx.close();
@@ -69,7 +86,8 @@ async function outputsOf(devices: MediaDeviceInfo[]): Promise<AudioOutputDevice[
   return result;
 }
 
-export async function listAudioOutputs(): Promise<AudioOutputDevice[]> {
+export async function listAudioOutputs(forceProbe = false): Promise<AudioOutputDevice[]> {
+  if (forceProbe) channelCountCache.clear();
   const locked = (devices: MediaDeviceInfo[]) => {
     const outputs = devices.filter((d) => d.kind === 'audiooutput' && d.deviceId !== '');
     return outputs.length === 0 || outputs.some((d) => d.label === '');

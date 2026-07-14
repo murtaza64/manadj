@@ -17,6 +17,7 @@
 import { useSyncExternalStore } from 'react';
 import {
   getRoutingSnapshot,
+  forceRefreshRouting,
   refreshRouting,
   setCueDevice,
   setMasterDevice,
@@ -109,6 +110,15 @@ export function AudioRoutingPicker() {
         options={outputPairOptions(devices)}
         onPick={setCueDevice}
       />
+      <button
+        type="button"
+        className="topbar-routing-refresh"
+        title="Force refresh audio devices and output-channel probes"
+        aria-label="Refresh audio devices"
+        onClick={() => void forceRefreshRouting()}
+      >
+        ↻
+      </button>
     </div>
   );
 }

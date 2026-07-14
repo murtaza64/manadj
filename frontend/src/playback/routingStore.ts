@@ -123,6 +123,16 @@ export async function refreshRouting(): Promise<void> {
   await recompute();
 }
 
+/** User-requested hard refresh: discard session channel-count probes before
+ * enumerating. Useful immediately after a multichannel device is plugged in. */
+export async function forceRefreshRouting(): Promise<void> {
+  const revision = ++refreshRevision;
+  const nextDevices = await listAudioOutputs(true);
+  if (revision !== refreshRevision) return;
+  devices = nextDevices;
+  await recompute();
+}
+
 export function setMasterDevice(device: SavedDevice | null): void {
   prefs = { ...prefs, master: device };
   savePrefs(prefs);

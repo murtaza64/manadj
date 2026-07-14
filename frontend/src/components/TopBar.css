@@ -234,3 +234,19 @@
   border-color: var(--red);
   color: var(--red);
 }
+
+.topbar-routing-refresh {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--overlay1);
+  font: inherit;
+  cursor: pointer;
+}
+
+.topbar-routing-refresh:hover {
+  border-color: var(--text);
+  color: var(--text);
+}
