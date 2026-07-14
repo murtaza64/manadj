@@ -84,9 +84,15 @@ interface LibraryProps {
    * (the Performance view embeds the library this way). Implies: the
    * library keyboard hub is not mounted (each view owns its hub). */
   browseOnly?: boolean;
-  /** Per-row hover load-to-A/B buttons (Performance view). Double-click
-   * also routes through this (deck A), so the view's load policy applies. */
+  /** Per-row hover load-to-A–D buttons (Performance view). Double-click
+   * also routes through this, so the view's load policy (and load lock)
+   * applies to it too. */
   onLoadToDeck?: (deck: ChannelId, track: Track) => void;
+  /** Which Deck an embedded double-click targets (issue 22). The
+   * Performance view passes its focused left Deck so double-click follows
+   * A↔C; absent, double-click uses Deck A (the standalone Library keeps its
+   * stable audition player). Only meaningful with onLoadToDeck. */
+  doubleClickDeck?: ChannelId;
   /** Selection access for the embedding view's keyboard hub. */
   browseRef?: Ref<LibraryBrowseHandle>;
 }
@@ -94,6 +100,7 @@ interface LibraryProps {
 export default function Library({
   browseOnly = false,
   onLoadToDeck,
+  doubleClickDeck = 'A',
   browseRef,
 }: LibraryProps) {
   // Set-view state lives in the set store (sets 01): every mode mounts its
@@ -749,14 +756,17 @@ export default function Library({
     ? playlistData?.tracks?.length || 0
     : allTracksData?.library_total || 0;
 
-  // Embedded, double-click routes through the view's load policy (deck A)
-  // instead of loading directly. Memoized — the rows are.
+  // Embedded, double-click routes through the view's load policy (and its
+  // load lock) instead of loading directly, targeting the embedding view's
+  // double-click Deck (issue 22: the Performance focused left Deck; Deck A
+  // otherwise). Standalone, it loads onto this Library's own Deck A scope.
+  // Memoized — the rows are.
   const loadForTable = useMemo(
     () =>
       browseOnly && onLoadToDeck
-        ? (t: Track) => onLoadToDeck('A', t)
+        ? (t: Track) => onLoadToDeck(doubleClickDeck, t)
         : loadTrack,
-    [browseOnly, onLoadToDeck, loadTrack]
+    [browseOnly, onLoadToDeck, doubleClickDeck, loadTrack]
   );
 
   // Selection access for an embedding view's own keyboard hub (issue 04).

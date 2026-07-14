@@ -4,8 +4,8 @@
  * independent literals from the issue's spec, never recomputed through
  * the code under test.
  *
- * Universal items, stable order: Load to Deck A / B · Add to playlist ▸ ·
- * Add to set ▸ · [surface items] · Archive|Unarchive. Archive↔Unarchive
+ * Universal items, stable order: Load to Deck A / B / C / D · Add to
+ * playlist ▸ · Add to set ▸ · [surface items] · Archive|Unarchive. Archive↔Unarchive
  * is per-track (archived_at): a mixed multi-selection shows both, each
  * acting on its own subset.
  */
@@ -49,10 +49,12 @@ function input(overrides: Partial<TrackMenuInput> = {}): TrackMenuInput {
 const labels = (items: ReturnType<typeof trackMenuItems>) => items.map((i) => i.label);
 
 describe('stable order', () => {
-  it('single live track: Load A/B · Add to playlist · Add to set · Archive', () => {
+  it('single live track: Load A–D · Add to playlist · Add to set · Archive', () => {
     expect(labels(trackMenuItems(input()))).toEqual([
       'Load to Deck A',
       'Load to Deck B',
+      'Load to Deck C',
+      'Load to Deck D',
       'Add to playlist',
       'Add to set',
       'Archive track',
@@ -71,24 +73,41 @@ describe('stable order', () => {
 
   it('with Load items, Add to playlist is separated from them', () => {
     const items = trackMenuItems(input());
-    expect(items[2].label).toBe('Add to playlist');
-    expect(items[2].separatorBefore).toBe(true);
+    expect(items[4].label).toBe('Add to playlist');
+    expect(items[4].separatorBefore).toBe(true);
   });
 });
 
 describe('Load to Deck', () => {
-  it('loads the single target', () => {
-    const loadToDeck = vi.fn();
-    const items = trackMenuItems(input({ tracks: [live(7)], loadToDeck }));
-    items[1].onSelect!();
-    expect(loadToDeck).toHaveBeenCalledWith('B', expect.objectContaining({ id: 7 }));
+  it('offers all four fixed Decks in A–D order', () => {
+    const items = trackMenuItems(input());
+    expect(labels(items).slice(0, 4)).toEqual([
+      'Load to Deck A',
+      'Load to Deck B',
+      'Load to Deck C',
+      'Load to Deck D',
+    ]);
   });
 
-  it('is disabled on multi, with the explanatory title', () => {
+  it('each Load item routes to its own Deck with the single target', () => {
+    const loadToDeck = vi.fn();
+    const items = trackMenuItems(input({ tracks: [live(7)], loadToDeck }));
+    for (const [i, deck] of (['A', 'B', 'C', 'D'] as const).entries()) {
+      items[i].onSelect!();
+      expect(loadToDeck).toHaveBeenNthCalledWith(
+        i + 1,
+        deck,
+        expect.objectContaining({ id: 7 })
+      );
+    }
+  });
+
+  it('is disabled on multi across all four Decks, with the explanatory title', () => {
     const items = trackMenuItems(input({ tracks: [live(1), live(2)] }));
-    expect(items[0].disabled).toBe(true);
+    for (let i = 0; i < 4; i++) {
+      expect(items[i].disabled).toBe(true);
+    }
     expect(items[0].title).toBe('Load acts on a single track');
-    expect(items[1].disabled).toBe(true);
   });
 });
 
@@ -99,38 +118,38 @@ describe('Add to playlist / Add to set submenus', () => {
     const items = trackMenuItems(
       input({ tracks: [live(1), live(2)], addToPlaylist, addToSet })
     );
-    items[2].submenu![1].onSelect!();
+    items[4].submenu![1].onSelect!();
     expect(addToPlaylist).toHaveBeenCalledWith(11, [1, 2]);
-    items[3].submenu![0].onSelect!();
+    items[5].submenu![0].onSelect!();
     expect(addToSet).toHaveBeenCalledWith(20, [1, 2]);
   });
 
   it('multi labels carry the target count', () => {
     const items = trackMenuItems(input({ tracks: [live(1), live(2), live(3)] }));
-    expect(items[2].label).toBe('Add 3 to playlist');
-    expect(items[3].label).toBe('Add 3 to set');
+    expect(items[4].label).toBe('Add 3 to playlist');
+    expect(items[5].label).toBe('Add 3 to set');
   });
 
   it('excludeSetId / excludePlaylistId: the current container never lists itself', () => {
     const items = trackMenuItems(input({ excludeSetId: 20, excludePlaylistId: 11 }));
-    expect(items[2].submenu!.map((i) => i.label)).toEqual(['Warmup']);
-    expect(items[3].submenu!.map((i) => i.label)).toEqual(['Saturday']);
+    expect(items[4].submenu!.map((i) => i.label)).toEqual(['Warmup']);
+    expect(items[5].submenu!.map((i) => i.label)).toEqual(['Saturday']);
   });
 
   it('empty container lists disable the item with a tooltip', () => {
     const items = trackMenuItems(input({ playlists: [], sets: [] }));
-    expect(items[2].disabled).toBe(true);
-    expect(items[2].title).toBe('No playlists yet');
-    expect(items[3].disabled).toBe(true);
-    expect(items[3].title).toBe('No sets yet');
+    expect(items[4].disabled).toBe(true);
+    expect(items[4].title).toBe('No playlists yet');
+    expect(items[5].disabled).toBe(true);
+    expect(items[5].title).toBe('No sets yet');
   });
 
   it('a list emptied by exclusion disables with the "no other" tooltip', () => {
     const items = trackMenuItems(
       input({ sets: [{ id: 20, name: 'Friday' }], excludeSetId: 20 })
     );
-    expect(items[3].disabled).toBe(true);
-    expect(items[3].title).toBe('No other sets');
+    expect(items[5].disabled).toBe(true);
+    expect(items[5].title).toBe('No other sets');
   });
 });
 
@@ -195,6 +214,8 @@ describe('surface-append point', () => {
     expect(labels(items)).toEqual([
       'Load to Deck A',
       'Load to Deck B',
+      'Load to Deck C',
+      'Load to Deck D',
       'Add 2 to playlist',
       'Add 2 to set',
       'Remove from set',

@@ -24,6 +24,23 @@ export interface DeckKeyMap {
 
 export const CONTROL_FOCUS_KEYS = { left: '[', right: ']' } as const;
 
+import type { ChannelId } from '../../playback/mixer';
+import type { ControlFocus } from '../../performance/controlFocus';
+
+/**
+ * The Performance browse surface's focus-aware Load target (issue 22): the
+ * key decides a side, Control focus decides which physical Deck that side
+ * currently addresses. ← / Enter target the focused left Deck (A or C), →
+ * the focused right Deck (B or D). Any other key is not a Load key → null.
+ * Pure so the A–D routing is testable without a DOM (ADR 0002); the view
+ * feeds the result through its single load-lock path.
+ */
+export function browseLoadTarget(key: string, focus: ControlFocus): ChannelId | null {
+  if (key === 'ArrowLeft' || key === 'Enter') return focus.left;
+  if (key === 'ArrowRight') return focus.right;
+  return null;
+}
+
 /** INPUT types that take typed text (keyboard-focus 01: a focused
  * checkbox/radio/range must NOT silence the hubs — the no-focus rule
  * keeps them from focusing at all; this guard makes any leak non-fatal). */
