@@ -92,7 +92,7 @@ Follow-ups:
 - Follow references all playing Decks once engaged and unions their candidate sets. The last reference survives full silence.
 - Play guides remain pairwise and quantify over every playing→paused Deck pair. No composite guide or governing Deck is introduced.
 - The standalone Library player stays fixed to Deck A. Performance browse/load actions address all four Decks.
-- The GRV6 Mapping covers unambiguous controls that already have manadj actions. Groove Circuit, effects, stems, and ambiguous global controls remain absent pending a controller-in-hand grill.
+- The GRV6 Mapping covers unambiguous controls that already have manadj actions. Controls may be repurposed away from their printed labels when gesture shape and scope match (CONTEXT.md, Mapping entry); the 2026-07-14 pre-hardware design session resolved most ambiguous controls (`docs/research/ddj-grv6-mapping-design.md`). Groove Circuit, effects-section, and remaining global controls stay absent pending the controller-in-hand session.
 - Phase 1 includes GRV6 Master/Cue audio routing and hardware verification, not MIDI-only support.
 - Until phase 2, capture supports at most two audible Decks and suspends the engagement when a third becomes audible.
 - Transitions and Cameos remain strictly pairwise. Their lanes address semantic roles, never physical Deck identity. Pairwise captures from a multi-Deck engagement share a capture-session clock and engagement identity.
@@ -130,3 +130,4 @@ Follow-ups:
 - ADR 0032 records the fixed-four/pairwise-artifact boundary.
 - Deck C/D colors and exact responsive spacing belong to the Performance layout prototype; colors must remain saturated and distinct from state colors.
 - The GRV6 MIDI message list is the phase-1 Mapping source. The physical controller is the authority for undocumented or ambiguous behavior.
+- Hardware reference and mapping-design records: `docs/research/ddj-grv6-hardware.md`, `docs/research/ddj-grv6-mapping-design.md`. The design doc carries the open questions and the hardware-verification list for the controller-in-hand session.
