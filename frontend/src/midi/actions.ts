@@ -51,6 +51,8 @@ export type ButtonTarget =
   | { control: 'key-lock'; deck: ChannelId }
   /** Switch the layered physical deck surface on one side (four-Deck 03). */
   | { control: 'control-focus'; side: 'left' | 'right' }
+  /** Select an explicit Deck layer when hardware reports logical state. */
+  | { control: 'set-control-focus'; deck: ChannelId }
   /** The assistant button (midi-performance-ops 08): a macro over the
    * per-Deck Follow model — all on (playing Decks, or both when nothing
    * plays) or all off. Registry-direct, browse-adjacent. */

@@ -3,6 +3,7 @@ import { attachMidiController } from '../midi/adapter';
 import { markMidiActivity } from '../midi/activity';
 import { dispatchMidiAction } from '../midi/dispatch';
 import { INPULSE_300_MK2 } from '../midi/mappings/inpulse300mk2';
+import { DDJ_GRV6 } from '../midi/mappings/ddjGrv6';
 
 /**
  * Mounts the Controller layer once, above the view switch (PRD scope):
@@ -15,7 +16,7 @@ export function MidiControllerBridge() {
   useEffect(
     () =>
       attachMidiController({
-        mappings: [INPULSE_300_MK2],
+        mappings: [INPULSE_300_MK2, DDJ_GRV6],
         onActivity: markMidiActivity,
         onAction: dispatchMidiAction,
       }),

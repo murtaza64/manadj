@@ -131,9 +131,14 @@ export function translateMidiMessage(
     }
     case 'relative': {
       if (messageType !== 'cc') return silence;
-      // Two's-complement ticks (hardware-learned): 0x01.. = clockwise,
-      // 0x7f.. = counter-clockwise. Zero is a no-op, not an action.
-      const ticks = value < 0x40 ? value : value - 0x80;
+      // Most devices use two's-complement ticks. Pioneer/AlphaTheta jogs
+      // report 64 as rest, 65+ clockwise and 63- counter-clockwise.
+      const ticks =
+        binding.encoding === 'offset-64'
+          ? value - 0x40
+          : value < 0x40
+            ? value
+            : value - 0x80;
       if (ticks === 0) return silence;
       return {
         actions: [{ kind: 'relative', target: binding.target, ticks }],

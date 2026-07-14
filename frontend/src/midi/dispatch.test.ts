@@ -220,6 +220,15 @@ describe('routing', () => {
     expect(getControlFocus()).toEqual({ left: 'C', right: 'B' });
   });
 
+  it('logical layer state selects an explicit focused Deck', () => {
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'set-control-focus', deck: 'D' },
+    });
+    expect(getControlFocus()).toEqual({ left: 'A', right: 'D' });
+  });
+
   it('shared surface: transport and cue reach the shared handlers per deck', () => {
     dispatchMidiAction(button('transport', 'A', 'down'));
     dispatchMidiAction(button('cue', 'B', 'down'));

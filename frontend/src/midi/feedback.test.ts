@@ -303,8 +303,8 @@ describe('encodeDeckLeds', () => {
   it('skips the Key Lock probe when the mapping omits the shifted-Q address', () => {
     const withoutProbe = {
       decks: {
-        A: { ...feedback.decks.A, keyLockShifted: undefined },
-        B: { ...feedback.decks.B, keyLockShifted: undefined },
+        A: { ...feedback.decks.A!, keyLockShifted: undefined },
+        B: { ...feedback.decks.B!, keyLockShifted: undefined },
       },
     };
     const messages = encodeDeckLeds(withoutProbe, 'A', { ...dark, keyLock: true });

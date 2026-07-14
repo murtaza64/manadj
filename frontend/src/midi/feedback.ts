@@ -1,4 +1,6 @@
 import type { DeckFeedback, LedAddress, MappingFeedback } from './mapping';
+import { CHANNEL_IDS } from '../playback/mixer';
+import type { ChannelId } from '../playback/mixer';
 
 /**
  * The Feedback seam (midi-pad-leds PRD, ADR 0002): deck state in →
@@ -192,6 +194,7 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
     ...deck.hotCuePadsShifted,
     ...deck.gridPads,
     deck.quantize,
+    ...(deck.keyLock ? [deck.keyLock] : []),
     ...(deck.keyLockShifted ? [deck.keyLockShifted] : []),
     ...deck.loopPads,
     ...deck.loopPadsShifted,
@@ -201,10 +204,11 @@ function deckAddresses(deck: DeckFeedback): readonly LedAddress[] {
 /** Desired light states for one deck → the full message set to send. */
 export function encodeDeckLeds(
   feedback: MappingFeedback,
-  deck: 'A' | 'B',
+  deck: ChannelId,
   states: DeckLedStates
 ): readonly MidiMessage[] {
   const addresses = feedback.decks[deck];
+  if (!addresses) return [];
   return [
     encodeLed(addresses.play, states.play),
     encodeLed(addresses.cue, states.cue),
@@ -218,6 +222,7 @@ export function encodeDeckLeds(
     // Grid-edit (SAMPLER) layer (midi-performance-ops 05).
     ...addresses.gridPads.map((address, i) => encodeLed(address, states.gridPads[i] ?? false)),
     encodeLed(addresses.quantize, states.quantize),
+    ...(addresses.keyLock ? [encodeLed(addresses.keyLock, states.keyLock)] : []),
     // The Key Lock lamp probe (midi-performance-ops 07): written only when
     // the mapping carries the shifted-Q address; absent = probe failed and
     // Key Lock is screen-only.
@@ -237,8 +242,10 @@ export function encodeDeckLeds(
  * follows — mirrors the FilterBar, whatever caused the change (button
  * macro, screen toggles, playback spread/revoke).
  */
-export function assistantLedLit(follows: Record<'A' | 'B', boolean>): boolean {
-  return follows.A || follows.B;
+export function assistantLedLit(
+  follows: Readonly<Partial<Record<ChannelId, boolean>>>
+): boolean {
+  return CHANNEL_IDS.some((deck) => follows[deck] === true);
 }
 
 /**
@@ -258,9 +265,10 @@ export function encodeAssistantLed(
  */
 export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[] {
   return [
-    ...(['A', 'B'] as const).flatMap((deck) =>
-      deckAddresses(feedback.decks[deck]).map((address) => encodeLed(address, false))
-    ),
+    ...CHANNEL_IDS.flatMap((deck) => {
+      const addresses = feedback.decks[deck];
+      return addresses ? deckAddresses(addresses).map((address) => encodeLed(address, false)) : [];
+    }),
     ...encodeAssistantLed(feedback, false),
   ];
 }

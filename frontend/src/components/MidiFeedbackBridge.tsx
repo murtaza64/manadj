@@ -24,6 +24,7 @@ import {
   subscribeAudible,
 } from '../playback/audibleSurface';
 import { isQuantizeOn, subscribeQuantize } from '../playback/quantizeStore';
+import { useControlFocus } from '../performance/controlFocus';
 
 /**
  * Headless Feedback glue (midi-pad-leds 01/02/03): per deck, subscribes to
@@ -53,6 +54,10 @@ function DeckFeedbackPublisher({
   onNeedsClock: (needs: boolean) => void;
 }) {
   const { deck, loadedTrack } = useDeck();
+  // A layered Controller may expose a different logical Deck on the same
+  // physical surface after focus changes. Re-send all logical deck state so
+  // the newly visible layer repaints immediately.
+  const controlFocus = useControlFocus();
   const playing = useDeckSnapshot((s) => s.playing);
   const pendingPlay = useDeckSnapshot((s) => s.pendingPlay);
   const previewing = useDeckSnapshot((s) => s.previewing);
@@ -144,9 +149,6 @@ function DeckFeedbackPublisher({
     );
     for (const output of outputs) {
       if (!output.mapping.feedback) continue;
-      // Existing two-Deck Mappings expose only A/B feedback. Layered C/D
-      // feedback arrives with the GRV6 Mapping in issue 05.
-      if (deck !== 'A' && deck !== 'B') continue;
       for (const message of encodeDeckLeds(output.mapping.feedback, deck, states)) {
         output.send(message);
       }
@@ -167,6 +169,8 @@ function DeckFeedbackPublisher({
     holderPlaying,
     pendingPhase,
     cueFlashPhase,
+    controlFocus.left,
+    controlFocus.right,
     outputs,
   ]);
 
@@ -229,9 +233,13 @@ function useBlinkClock(active: boolean): BlinkPhases {
 export function MidiFeedbackBridge() {
   const [needsA, setNeedsA] = useState(false);
   const [needsB, setNeedsB] = useState(false);
+  const [needsC, setNeedsC] = useState(false);
+  const [needsD, setNeedsD] = useState(false);
   const onNeedsA = useCallback((needs: boolean) => setNeedsA(needs), []);
   const onNeedsB = useCallback((needs: boolean) => setNeedsB(needs), []);
-  const phases = useBlinkClock(needsA || needsB);
+  const onNeedsC = useCallback((needs: boolean) => setNeedsC(needs), []);
+  const onNeedsD = useCallback((needs: boolean) => setNeedsD(needs), []);
+  const phases = useBlinkClock(needsA || needsB || needsC || needsD);
   return (
     <>
       <DeckScope deck="A">
@@ -239,6 +247,12 @@ export function MidiFeedbackBridge() {
       </DeckScope>
       <DeckScope deck="B">
         <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsB} />
+      </DeckScope>
+      <DeckScope deck="C">
+        <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsC} />
+      </DeckScope>
+      <DeckScope deck="D">
+        <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsD} />
       </DeckScope>
       <AssistantFeedbackPublisher />
     </>

@@ -1,4 +1,5 @@
 import type { AbsoluteTarget, ButtonTarget, RelativeTarget } from './actions';
+import type { ChannelId } from '../playback/mixer';
 
 /**
  * Mapping schema (glossary: Mapping): the device-specific translation from
@@ -39,7 +40,12 @@ export type Binding = BindingBase &
          * faster, but the raw CC grows upward). */
         invert?: boolean;
       }
-    | { controlType: 'relative'; target: RelativeTarget }
+    | {
+        controlType: 'relative';
+        target: RelativeTarget;
+        /** Default MIDI two's-complement, or center-relative 64±ticks. */
+        encoding?: 'twos-complement' | 'offset-64';
+      }
   );
 
 /**
@@ -88,6 +94,8 @@ export interface DeckFeedback {
    * always agree.
    */
   quantize: LedAddress;
+  /** Dedicated base-layer Key Lock / Master Tempo lamp, when present. */
+  keyLock?: LedAddress;
   /**
    * The SHIFT-layer Q address (channel+3, same note) — a PROBE
    * (midi-performance-ops 07): if the hardware drives a lamp there, it
@@ -115,7 +123,8 @@ export type LoopPadLamp = LedAddress & { beats: number };
 
 /** Device knowledge for Feedback: every light the app writes, per deck. */
 export interface MappingFeedback {
-  decks: Record<'A' | 'B', DeckFeedback>;
+  /** A two-Deck Controller may omit C/D; layered four-Deck devices provide all. */
+  decks: Partial<Record<ChannelId, DeckFeedback>>;
   /**
    * The assistant button's light (midi-performance-ops 08) — lit iff any
    * Deck follows (mirrors the FilterBar). One button, so it lives beside
