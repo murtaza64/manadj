@@ -26,6 +26,7 @@ import { ToastProvider } from './components/Toast';
 import { installNoFocusRule } from './focus/noFocusRule';
 import { useAnalysisPendingSync } from './hooks/useAnalysisPending';
 import { isTypingTarget } from './components/performance/performanceKeys';
+import { registerViewToggle } from './midi/controlRegistry';
 
 /** The one poller keeping track rows / Analyze buttons live against
  * background analysis (analysis-curation 03) — a bridge like the MIDI
@@ -65,27 +66,31 @@ function App() {
   // (keyboard-focus 01) — one enforcement site for the whole app.
   useEffect(installNoFocusRule, []);
 
-  // Performance ⟷ Library toggle: ` (backtick), app-wide (four-deck-
-  // performance 24). One key, two modes — other modes are pointer-only
+  // Performance ⟷ Library toggle (four-deck-performance 24/25): one
+  // action, two handles — ` (backtick) app-wide, and the hardware VIEW
+  // button through the registry. Other modes are pointer-only
   // destinations; the toggle serves the hardware/keys performance loop.
+  const toggleView = () =>
+    setViewState((current) => {
+      const next = current === 'performance' ? 'library' : 'performance';
+      try {
+        localStorage.setItem(MODE_KEY, next);
+      } catch {
+        // persistence is best-effort
+      }
+      return next;
+    });
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== '`' || isTypingTarget(event)) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       event.preventDefault();
-      setViewState((current) => {
-        const next = current === 'performance' ? 'library' : 'performance';
-        try {
-          localStorage.setItem(MODE_KEY, next);
-        } catch {
-          // persistence is best-effort
-        }
-        return next;
-      });
+      toggleView();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
+  useEffect(() => registerViewToggle(toggleView), []);
 
   // A Take review request (Transition history row) opens the editor; the
   // mounted editor consumes the pending uuid itself (takeReview.ts).

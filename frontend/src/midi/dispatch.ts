@@ -14,7 +14,9 @@ import {
   deckControlsFor,
   midiFollowMacro,
   midiMixerControls,
+  midiViewToggle,
 } from './controlRegistry';
+import { getFollowParams, setFollowParams } from '../follow/paramsStore';
 import { initialGridChordState, reduceGridChord } from './gridChord';
 import type { GridChordCommand, GridChordEvent } from './gridChord';
 import {
@@ -305,6 +307,53 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       // decision (follow/model.ts: followMacroToggles).
       if (edge !== 'down') return;
       midiFollowMacro()?.();
+      return;
+    }
+    // Browse cluster (four-deck-performance 25): all view-owned, so they
+    // ride the browse surface's optional area-navigation methods (issue
+    // 24). A surface without the method — or no surface — drops the press.
+    case 'browse-activate': {
+      if (edge !== 'down') return;
+      browseSurface()?.activate?.();
+      return;
+    }
+    case 'browse-area-move': {
+      if (edge !== 'down') return;
+      browseSurface()?.areaMove?.(target.direction === 'right' ? 1 : -1);
+      return;
+    }
+    case 'selection-page': {
+      if (edge !== 'down') return;
+      browseSurface()?.navigatePage?.(target.direction === 'down' ? 1 : -1);
+      return;
+    }
+    case 'selection-end': {
+      if (edge !== 'down') return;
+      browseSurface()?.navigateEnd?.(target.direction === 'bottom' ? 1 : -1);
+      return;
+    }
+    case 'browse-focus-sidebar': {
+      if (edge !== 'down') return;
+      browseSurface()?.focusSidebar?.();
+      return;
+    }
+    case 'split-view-toggle': {
+      if (edge !== 'down') return;
+      browseSurface()?.toggleSplitView?.();
+      return;
+    }
+    case 'view-toggle': {
+      // Registry-direct: the app-view switch is App-owned React state
+      // (App registers the handler, like the Follow macro).
+      if (edge !== 'down') return;
+      midiViewToggle()?.();
+      return;
+    }
+    case 'follow-known-only': {
+      // Module-store direct, like Quantize: "known only" lives in the
+      // Follow params store and means the same thing everywhere.
+      if (edge !== 'down') return;
+      setFollowParams({ knownOnly: !getFollowParams().knownOnly });
       return;
     }
     default:
