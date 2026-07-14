@@ -498,6 +498,28 @@ export interface AnalysisPendingItem {
   manual: boolean;
 }
 
+export type TaskState = 'pending' | 'running' | 'done' | 'failed';
+
+export interface TaskSummary {
+  counts: Record<TaskState, number>;
+  running_task: { type: string; ref: string | null } | null;
+  undismissed_failures: number;
+}
+
+export interface TaskRow {
+  id: number;
+  type: string;
+  ref: string | null;
+  state: TaskState;
+  error: string | null;
+  attempts: number;
+  not_before: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  dismissed_at: string | null;
+}
+
 export interface SourceCorrespondenceInfo {
   track_id: number;
   status: 'proposed' | 'confirmed';

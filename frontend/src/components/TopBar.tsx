@@ -9,6 +9,7 @@ import { connectedControllers, subscribeControllers } from '../midi/connectionSt
 import { isQuantizeOn, setQuantize, subscribeQuantize } from '../playback/quantizeStore';
 import { AudioRoutingPicker } from './AudioRoutingPicker';
 import { AudioOwnershipChip } from './AudioOwnershipChip';
+import { TasksWidget } from './TasksWidget';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles';
@@ -74,6 +75,7 @@ export function TopBar({
       </nav>
       <h1 className="topbar-title">{MODES.find((m) => m.id === mode)?.title}</h1>
       <MidiBadge />
+      <TasksWidget />
       <QuantizeToggle />
       <AudioRoutingPicker />
       <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />

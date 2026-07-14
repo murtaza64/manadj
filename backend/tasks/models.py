@@ -32,6 +32,7 @@ class Task(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     @property
     def payload(self) -> dict[str, Any]:
