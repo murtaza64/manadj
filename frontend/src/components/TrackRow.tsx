@@ -12,13 +12,18 @@ import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDra
 import { LinkIcon } from '../links/LinkIcon';
 import { DECK_COLORS } from '../theme/deckColors';
 import { loadedWash } from '../sets/rowMarks';
+import {
+  parseRowEvidence,
+  rowEvidenceTitle,
+  type TransitionMark,
+} from './rowEvidence';
 import './TrackRow.css';
 
 /** Saved-Transition mark state for one source deck (transition-library
  * 02): 'saved' = the loaded deck's track has a Transition into this row;
  * 'preferred' = that pair has a favorited one. Strings keep the row memo
- * effective. */
-export type TransitionMark = 'none' | 'saved' | 'preferred';
+ * effective. Re-exported from the pure evidence seam (issue 21). */
+export type { TransitionMark } from './rowEvidence';
 
 /** Click modifiers, interpreted by the selection model (playlist-editing 02). */
 export interface SelectMods {
@@ -65,13 +70,11 @@ interface Props {
   /** CSV of tag ids shared with a followed reference; tags outside it
    * dim. undefined = no follow context (nothing dims). */
   sharedTagIds?: string;
-  markA?: TransitionMark;
-  markB?: TransitionMark;
-  /** Linked marks (linked-pairs 03): this row is Linked with the loaded
-   * deck's track. Symmetric, so shown alongside — never instead of — the
-   * directional Transition marks. */
-  linkedA?: boolean;
-  linkedB?: boolean;
+  /** Per-Deck evidence marks (four-deck-performance 21), PACKED
+   * (`packRowEvidence`): ◆/★ Transition marks and the symmetric Linked
+   * chain for every Deck A–D. One primitive string keeps the row memo
+   * effective. '' / undefined = no evidence. */
+  evidence?: string;
 }
 
 const LOSSLESS = new Set(['flac', 'alac', 'pcm']);
@@ -102,26 +105,6 @@ function markSlot(mark: TransitionMark, linked: boolean): ReactNode {
   return null;
 }
 
-/** Tooltip: the FULL evidence behind both slots (slots show only the
- * strongest per Deck). Undefined when the row carries none. */
-function markEvidence(
-  markA: TransitionMark,
-  markB: TransitionMark,
-  linkedA: boolean,
-  linkedB: boolean
-): string | undefined {
-  const evidence: string[] = [];
-  if (markA !== 'none') {
-    evidence.push(`Saved transition from deck A's track${markA === 'preferred' ? ' (favorite)' : ''}`);
-  }
-  if (linkedA) evidence.push("Linked with deck A's track");
-  if (markB !== 'none') {
-    evidence.push(`Saved transition from deck B's track${markB === 'preferred' ? ' (favorite)' : ''}`);
-  }
-  if (linkedB) evidence.push("Linked with deck B's track");
-  return evidence.length > 0 ? evidence.join(' · ') : undefined;
-}
-
 /** Memoized: the table is large, and rows must not re-render on deck/selection
  * churn unless their own props changed. */
 const TrackRow = memo(function TrackRow({
@@ -138,11 +121,11 @@ const TrackRow = memo(function TrackRow({
   score,
   keyMatched,
   sharedTagIds,
-  markA = 'none',
-  markB = 'none',
-  linkedA = false,
-  linkedB = false,
+  evidence = '',
 }: Props) {
+  // ≤4 tiny segments; parsing per render is cheaper than defeating the
+  // row memo with object props.
+  const deckEvidence = parseRowEvidence(evidence);
   // Extract just the filename from the full path
   const filename = track.filename.split('/').pop() || track.filename;
   const holdingDecks =
@@ -234,30 +217,29 @@ const TrackRow = memo(function TrackRow({
             </div>
           )}
         </td>
-        {/* Marks column (follow-mode 09): one slot per Deck, strongest
-            evidence wins (★ favorited Transition > 🔗 Linked > ◆ saved
-            Transition — the Known ranking); slots keep their width when
-            empty, so titles never shift. Tooltip carries ALL evidence. */}
+        {/* Marks column (follow-mode 09; A–D per four-deck-performance
+            21): one slot per Deck with evidence, strongest wins (★
+            favorited Transition > 🔗 Linked > ◆ saved Transition — the
+            Known ranking). Tooltip carries ALL evidence. */}
         <td
           className={getCellClasses('marks', 'track-marks-cell')}
           style={getCellStyle('marks')}
-          title={markEvidence(markA, markB, linkedA, linkedB)}
+          title={rowEvidenceTitle(deckEvidence)}
         >
           {/* While Follow filters, Compatible rows carry their Match
               score here instead of (absent) evidence marks — one column,
               two vocabularies. Any real mark wins the slot. */}
-          {score != null && markA === 'none' && markB === 'none' && !linkedA && !linkedB ? (
+          {score != null && deckEvidence.length === 0 ? (
             <div className="track-match-score">{Math.round(score)}</div>
           ) : (
             <div className="track-marks">
               {/* Only occupied slots render, so a lone badge centers in
                   the column instead of hugging its deck's side. */}
-              {markSlot(markA, linkedA) && (
-                <span className="track-mark-slot mark-a">{markSlot(markA, linkedA)}</span>
-              )}
-              {markSlot(markB, linkedB) && (
-                <span className="track-mark-slot mark-b">{markSlot(markB, linkedB)}</span>
-              )}
+              {deckEvidence.map(({ deck, mark, linked }) => (
+                <span key={deck} className={`track-mark-slot mark-${deck.toLowerCase()}`}>
+                  {markSlot(mark, linked)}
+                </span>
+              ))}
             </div>
           )}
         </td>

@@ -14,8 +14,10 @@ export const COLUMN_CONFIG: ColumnConfig[] = [
   { id: 'bpm', width: 35, sticky: true },
   { id: 'energy', width: 35, sticky: true },
   // Marks/match column (follow-mode 09, match-score PRD): two evidence
-  // slots (A, B), or the Match score while Follow filters. Crosshair
-  // header; resizable like any column.
+  // slots (per Deck A–D with evidence), or the Match score while Follow
+  // filters. Crosshair header; resizable like any column. Wide enough
+  // for the common 1–2 slots; 3–4 simultaneous Decks of evidence still
+  // fit at reduced slot width (rows never wrap).
   { id: 'marks', width: 34, sticky: true },
   { id: 'title', width: 180, sticky: true, showShadow: true },
   { id: 'artist', width: 180 },

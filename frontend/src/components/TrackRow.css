@@ -234,9 +234,9 @@ a.provenance-chip:hover {
   text-decoration: underline;
 }
 
-/* Marks column (follow-mode 09): two fixed slots (A, B) in Deck colors,
-   strongest evidence per Deck (★ > 🔗 > ◆). Slots hold their width when
-   empty — the title edge never moves. */
+/* Marks column (follow-mode 09; A–D per four-deck-performance 21): one
+   slot per Deck with evidence, in Deck colors, strongest evidence per
+   Deck (★ > 🔗 > ◆). Only occupied slots render. */
 .track-marks {
   display: flex;
   align-items: center;
@@ -259,6 +259,25 @@ a.provenance-chip:hover {
 
 .track-mark-slot.mark-b {
   color: var(--deck-b);
+}
+
+.track-mark-slot.mark-c {
+  color: var(--deck-c);
+}
+
+.track-mark-slot.mark-d {
+  color: var(--deck-d);
+}
+
+/* 3–4 Decks of simultaneous evidence: compact the slots so they still
+   fit the default column width instead of clipping. */
+.track-marks:has(> :nth-child(3)) {
+  gap: 0;
+}
+
+.track-marks:has(> :nth-child(3)) .track-mark-slot {
+  width: 8px;
+  font-size: 9px;
 }
 
 /* Load-to-deck hover buttons (Performance view's embedded library). The
