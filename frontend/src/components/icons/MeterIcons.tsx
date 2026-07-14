@@ -28,3 +28,16 @@ export function ResetMarkDeleteIcon() {
     </svg>
   );
 }
+
+/** A drop landing on a baseline — the three-artifact Drop-anchor gesture. */
+export function DropAnchorIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+      <path
+        d="M8 1.5 C6.5 4 4.5 6.2 4.5 8.6 A3.5 3.5 0 0 0 11.5 8.6 C11.5 6.2 9.5 4 8 1.5 Z"
+        fill="currentColor"
+      />
+      <path d="M2 13.5 H14" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}

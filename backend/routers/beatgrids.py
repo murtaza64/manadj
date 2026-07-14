@@ -14,12 +14,17 @@ from ..beatgrid_utils import (
     set_downbeat_at_time,
 )
 from ..track_metadata.units import bpm_to_centibpm, centibpm_to_bpm
+from ..drop_anchor_ops import apply_drop_anchor
 
 router = APIRouter()
 
 
 class SetDownbeatRequest(BaseModel):
     downbeat_time: float
+
+
+class DropAnchorRequest(BaseModel):
+    drop_time: float
 
 
 class NudgeGridRequest(BaseModel):
@@ -140,6 +145,67 @@ def set_beatgrid_downbeat(
     )
 
     return _format_beatgrid_response(beatgrid, db)
+
+
+@router.post("/{track_id}/drop-anchor")
+def drop_anchor(
+    track_id: int,
+    request: DropAnchorRequest,
+    db: Session = Depends(get_db),
+):
+    """Assert one drop as the grid anchor, Ladder anchor, and cue ladder."""
+    waveform = crud.get_waveform(db, track_id)
+    if not waveform:
+        raise HTTPException(status_code=400, detail="Waveform not found")
+
+    beatgrid = crud.get_beatgrid(db, track_id)
+    if beatgrid:
+        tempo_changes = json.loads(beatgrid.tempo_changes_json)
+    else:
+        track = crud.get_track(db, track_id)
+        if not track or not track.bpm:
+            raise HTTPException(status_code=400, detail="Track has no BPM")
+        tempo_changes = constant_tempo_changes(centibpm_to_bpm(track.bpm))
+
+    if len(tempo_changes) > 1:
+        new_tempo_changes = re_anchor_tempo_changes(tempo_changes, request.drop_time)
+    else:
+        tc = tempo_changes[0]
+        new_tempo_changes = set_downbeat_at_time(
+            user_downbeat_time=request.drop_time,
+            bpm=tc["bpm"],
+            time_signature_num=tc["time_signature_num"],
+            time_signature_den=tc["time_signature_den"],
+        )
+
+    try:
+        beatgrid, ladder, hotcues = apply_drop_anchor(
+            db,
+            track_id,
+            request.drop_time,
+            new_tempo_changes,
+            waveform.duration,
+        )
+        db.commit()
+        db.refresh(beatgrid)
+        db.refresh(ladder)
+        for cue in hotcues:
+            db.refresh(cue)
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "beatgrid": _format_beatgrid_response(beatgrid, db),
+        "metric_ladder": {
+            "track_id": track_id,
+            "arities": json.loads(ladder.arities_json),
+            "reset_marks": json.loads(ladder.reset_marks_json),
+            "persisted": True,
+            "updated_at": ladder.updated_at,
+        },
+        "hotcues": hotcues,
+    }
 
 
 @router.post("/{track_id}/nudge", response_model=schemas.BeatgridResponse)
