@@ -20,7 +20,7 @@
 import { initialTransportState, isAudioRunning, reduceTransport } from './transport';
 import type { TransportContext, TransportEvent, TransportState } from './transport';
 import { isQuantizeOn } from './quantizeStore';
-import { addBeats } from './quantize';
+import { addBeats, crossDeckLaunchTarget } from './quantize';
 import type { LaunchReference } from './quantize';
 import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
@@ -814,7 +814,19 @@ export class DeckEngine {
       // The gesture may have been abandoned (paused) while we waited; only
       // start if audio is still wanted.
       if (!isAudioRunning(this.transport)) return;
-      this.startAudio(at);
+      // A setTimeout is at the main thread's mercy: a callback that fires
+      // late (e.g. a Follow/match re-rank blocking the thread after the
+      // play gesture) must not start at the stale target — that lands the
+      // launch off the reference beat by exactly the lateness. Re-derive
+      // against the LIVE reference: a just-passed beat is absorbed by the
+      // entry-ahead branch (phase-correct immediate start); a still-ahead
+      // beat re-defers. A reference gone silent degrades to the plain cue.
+      const schedule = crossDeckLaunchTarget(at, this.currentRate(), this.launchReference());
+      if (schedule.delaySeconds > 0) {
+        this.scheduleLaunch(at, schedule.delaySeconds);
+        return;
+      }
+      this.startAudio(schedule.at);
     }, delaySeconds * 1000);
   }
 
