@@ -788,6 +788,8 @@ def delete_metric_ladder(db: Session, track_id: int) -> bool:
 
 # Hot Cue Functions
 
+_HOT_CUE_DECORATION_UNSET = object()
+
 def get_hotcues(db: Session, track_id: int):
     """Get all hot cues for a track."""
     return db.query(models.HotCue).filter(
@@ -808,8 +810,8 @@ def set_hotcue(
     track_id: int,
     slot_number: int,
     time_seconds: float,
-    label: str | None = None,
-    color: str | None = None
+    label: str | None | object = _HOT_CUE_DECORATION_UNSET,
+    color: str | None | object = _HOT_CUE_DECORATION_UNSET,
 ):
     """Set or update a hot cue.
 
@@ -825,18 +827,25 @@ def set_hotcue(
     if hotcue:
         # Update existing
         hotcue.time_seconds = time_seconds
-        if label is not None:
+        if label is not _HOT_CUE_DECORATION_UNSET:
             hotcue.label = label
-        if color is not None:
+        if color is not _HOT_CUE_DECORATION_UNSET:
             hotcue.color = color
     else:
+        from backend.hotcue_palette import HOT_CUE_SLOT_COLORS
+
         # Create new
+        # Labels are optional; every manadj-authored cue gets a stored color.
         hotcue = models.HotCue(
             track_id=track_id,
             slot_number=slot_number,
             time_seconds=time_seconds,
-            label=label,
-            color=color
+            label=None if label is _HOT_CUE_DECORATION_UNSET else label,
+            color=(
+                HOT_CUE_SLOT_COLORS[slot_number]
+                if color is _HOT_CUE_DECORATION_UNSET or color is None
+                else color
+            ),
         )
         db.add(hotcue)
 

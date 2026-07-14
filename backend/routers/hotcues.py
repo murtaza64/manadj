@@ -47,13 +47,17 @@ def set_hotcue(
     if not 1 <= slot_number <= 8:
         raise HTTPException(status_code=400, detail="Slot number must be between 1 and 8")
 
+    decoration = {
+        field: getattr(data, field)
+        for field in ("label", "color")
+        if field in data.model_fields_set
+    }
     return crud.set_hotcue(
         db,
         track_id=track_id,
         slot_number=slot_number,
         time_seconds=data.time_seconds,
-        label=data.label,
-        color=data.color
+        **decoration,
     )
 
 

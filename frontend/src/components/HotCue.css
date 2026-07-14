@@ -18,6 +18,25 @@
   background: transparent;
   cursor: pointer;
   transition: all 0.1s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.hot-cue-number {
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  font-size: 7px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+.hot-cue-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 8px;
+  white-space: nowrap;
 }
 
 .hot-cue.cue-1 { --cue-color: var(--hc-1); }
@@ -68,3 +87,126 @@
   pointer-events: none;
   cursor: not-allowed;
 }
+
+.hot-cue-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgb(0 0 0 / 55%);
+}
+
+.hot-cue-editor {
+  position: fixed;
+  box-sizing: border-box;
+  width: 280px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--surface1);
+  background: var(--mantle);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+  color: var(--text);
+}
+
+.hot-cue-editor h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+
+.hot-cue-editor label,
+.hot-cue-editor fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+  color: var(--subtext0);
+  font-size: 11px;
+}
+
+.hot-cue-editor input[type='text'],
+.hot-cue-editor label input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--surface1);
+  background: var(--base);
+  color: var(--text);
+}
+
+.hot-cue-palette {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.hot-cue-palette button,
+.hot-cue-custom-color {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 23px;
+  padding: 0;
+  border: 1px solid var(--surface2);
+  cursor: pointer;
+  transition: border-color 0.1s ease, outline-color 0.1s ease;
+}
+
+.hot-cue-palette button:hover,
+.hot-cue-custom-color:hover {
+  border-color: var(--text);
+}
+
+.hot-cue-palette button:active,
+.hot-cue-custom-color:active {
+  outline: 2px solid var(--overlay1);
+  outline-offset: 1px;
+}
+
+.hot-cue-palette button.selected {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+
+.hot-cue-custom-color {
+  background: transparent;
+}
+
+.hot-cue-editor-actions {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 7px;
+}
+
+.hot-cue-editor-actions button {
+  padding: 5px 9px;
+  border: 1px solid var(--surface1);
+  background: var(--surface0);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+
+.hot-cue-editor-actions button:hover {
+  border-color: var(--text);
+  background: var(--surface1);
+}
+
+.hot-cue-editor-actions button:active {
+  background: var(--surface2);
+}
+
+.hot-cue-editor-actions .danger { color: var(--red); }
+.hot-cue-editor-actions .danger:hover {
+  border-color: var(--red);
+  background: var(--red);
+  color: var(--base);
+}
+.hot-cue-editor-actions .danger:active { background: color-mix(in srgb, var(--red) 75%, black); }
+
+.hot-cue-editor-actions .primary { border-color: var(--blue); color: var(--blue); }
+.hot-cue-editor-actions .primary:hover {
+  background: var(--blue);
+  color: var(--base);
+}
+.hot-cue-editor-actions .primary:active { background: color-mix(in srgb, var(--blue) 75%, black); }

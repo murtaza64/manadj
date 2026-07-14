@@ -31,6 +31,9 @@ import type {
   SoulseekSearchResponse,
   AnalysisPendingItem,
   AnalysisTaskStatus,
+  TaskRow,
+  TaskState,
+  TaskSummary,
 } from '../types';
 
 /** Wire shape of a Transition template (mix-editor issues 03 + 28) —
@@ -56,6 +59,61 @@ const API_BASE = `${BACKEND_URL}/api`;
 export { BACKEND_URL };
 
 export const api = {
+  tasks: {
+    summary: async (): Promise<TaskSummary> => {
+      const response = await fetch(`${API_BASE}/tasks/summary`);
+      if (!response.ok) throw new Error('Failed to fetch task summary');
+      return response.json();
+    },
+
+    list: async (filters?: {
+      state?: TaskState;
+      type?: string;
+      limit?: number;
+    }): Promise<TaskRow[]> => {
+      const params = new URLSearchParams();
+      if (filters?.state) params.set('state', filters.state);
+      if (filters?.type) params.set('type', filters.type);
+      if (filters?.limit) params.set('limit', String(filters.limit));
+      const query = params.size ? `?${params}` : '';
+      const response = await fetch(`${API_BASE}/tasks${query}`);
+      if (!response.ok) throw new Error('Failed to fetch tasks');
+      return response.json();
+    },
+
+    retry: async (id: number): Promise<TaskRow> => {
+      const response = await fetch(`${API_BASE}/tasks/${id}/retry`, { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to retry task');
+      return response.json();
+    },
+
+    dismiss: async (id: number): Promise<TaskRow> => {
+      const response = await fetch(`${API_BASE}/tasks/${id}/dismiss`, { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to dismiss task');
+      return response.json();
+    },
+
+    retryBulk: async (filters: { state?: TaskState; type?: string }): Promise<{ updated: number }> => {
+      const response = await fetch(`${API_BASE}/tasks/bulk/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filters),
+      });
+      if (!response.ok) throw new Error('Failed to retry tasks');
+      return response.json();
+    },
+
+    dismissBulk: async (filters: { state?: TaskState; type?: string }): Promise<{ updated: number }> => {
+      const response = await fetch(`${API_BASE}/tasks/bulk/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filters),
+      });
+      if (!response.ok) throw new Error('Failed to dismiss tasks');
+      return response.json();
+    },
+  },
+
   tracks: {
     getById: async (id: number) => {
       const res = await fetch(`${API_BASE}/tracks/${id}`);
@@ -417,8 +475,8 @@ export const api = {
 
     set: async (trackId: number, slotNumber: number, data: {
       time_seconds: number;
-      label?: string;
-      color?: string;
+      label?: string | null;
+      color?: string | null;
     }) => {
       const response = await fetch(
         `${API_BASE}/hotcues/${trackId}/${slotNumber}`,

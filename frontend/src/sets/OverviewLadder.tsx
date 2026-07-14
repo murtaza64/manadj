@@ -23,7 +23,7 @@ import type { HotCue, Track } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
-import { HOT_CUE_CSS_COLORS } from '../waveform/WaveformRendererV2';
+import { HOT_CUE_CSS_COLORS } from '../hotcues/palette';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
 import { drawStyledWave, MINIMAP_BRIGHTNESS } from './ladderWaveStyle';
