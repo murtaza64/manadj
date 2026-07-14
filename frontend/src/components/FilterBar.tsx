@@ -15,6 +15,7 @@ import { dispatchFollow, useFollowFlags } from '../follow/followStore';
 import { useFollowParams } from '../follow/paramsStore';
 import { followedReferences, followSummary } from '../follow/model';
 import type { ChannelId } from '../playback/mixer';
+import { CHANNEL_IDS } from '../playback/mixer';
 import './FilterBar.css';
 
 interface FilterBarProps {
@@ -305,7 +306,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
           }
         </button>
 
-        {/* Follow mode: ◎ [A][B][⚙] (follow-mode 07). Per-Deck toggles
+        {/* Follow mode: ◎ [A][B][C][D][⚙] (follow-mode 07). Per-Deck toggles
             compose beside the manual filters (never writes them); the list
             keeps matching the followed Deck's loaded Track hands-off. The
             derived summary lives in the toggles' tooltips (no layout
@@ -314,7 +315,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
           <CrosshairIcon />
         </div>
         <div style={{ display: 'flex', gap: 0 }}>
-          {(['A', 'B'] as const).map((deck) => {
+          {CHANNEL_IDS.map((deck) => {
             const reference = loadedByDeck[deck];
             const on = followFlags[deck];
             // Only ENABLING requires a loaded Track — an on-flag must
@@ -323,7 +324,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
             const actionable = reference !== null || on;
             // Deck color when on (identity, CONTEXT.md: Deck color) —
             // green would say "active" without saying which deck. Applied
-            // via the on-a/on-b classes (FilterBar.css).
+            // via the per-Deck on-* classes (FilterBar.css).
             return (
               <button
                 key={deck}

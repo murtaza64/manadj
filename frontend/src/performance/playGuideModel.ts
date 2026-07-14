@@ -19,6 +19,8 @@
  * construction (it rides the waveform like any track-time landmark).
  */
 import type { PairStore } from '../editor/pairStore';
+import { CHANNEL_IDS } from '../playback/mixer';
+import type { ChannelId } from '../playback/mixer';
 
 export interface GuideDeck {
   trackId: number | null;
@@ -56,10 +58,10 @@ const TOLERANCE_EPS = 1e-9;
 
 export interface PlayGuideFrame {
   /** Which Deck is the outgoing (playing) side. */
-  outgoing: 'A' | 'B';
+  outgoing: ChannelId;
   /** The paused Deck — whose color the guide carries, and whose play
    * button the guide is about. */
-  incoming: 'A' | 'B';
+  incoming: ChannelId;
   guides: PlayGuide[];
 }
 
@@ -81,27 +83,25 @@ export function guideScreenFraction(
 }
 
 /**
- * Compute the Play guides for the current Deck pair, as directional
- * frames. Appearance conditions (issue 01):
- * - both Decks playing → nothing (nothing to press);
- * - one playing, the other loaded and paused → that direction only;
- * - both paused (prep state) → both directions at once — either Deck could
- *   become the outgoing side; starting one prunes to the live direction.
+ * Compute pairwise Play guides across all four Decks. Every playing Deck
+ * may guide every loaded paused Deck. With nothing playing, all ordered
+ * loaded pairs are prep candidates; starting playback prunes to live
+ * playing→paused directions.
  * A direction appears only when it has saved Transitions.
  */
 export function computePlayGuides(
   store: PairStore,
-  decks: { A: GuideDeck; B: GuideDeck }
+  decks: Record<ChannelId, GuideDeck>
 ): PlayGuideFrame[] {
-  if (decks.A.playing && decks.B.playing) return [];
-  const directions: Array<['A' | 'B', 'A' | 'B']> = decks.A.playing
-    ? [['A', 'B']]
-    : decks.B.playing
-      ? [['B', 'A']]
-      : [
-          ['A', 'B'],
-          ['B', 'A'],
-        ];
+  const playing = CHANNEL_IDS.filter((deck) => decks[deck].playing);
+  const outgoingCandidates = playing.length > 0 ? playing : CHANNEL_IDS;
+  const directions: Array<[ChannelId, ChannelId]> = [];
+  for (const outgoing of outgoingCandidates) {
+    for (const incoming of CHANNEL_IDS) {
+      if (incoming === outgoing || decks[incoming].playing) continue;
+      directions.push([outgoing, incoming]);
+    }
+  }
   const frames: PlayGuideFrame[] = [];
   for (const [outgoing, incoming] of directions) {
     const frame = directionFrame(store, outgoing, incoming, decks[outgoing], decks[incoming]);
@@ -113,8 +113,8 @@ export function computePlayGuides(
 /** One direction's frame, or null when unloaded or nothing is saved. */
 function directionFrame(
   store: PairStore,
-  outgoing: 'A' | 'B',
-  incoming: 'A' | 'B',
+  outgoing: ChannelId,
+  incoming: ChannelId,
   out: GuideDeck,
   inc: GuideDeck
 ): PlayGuideFrame | null {

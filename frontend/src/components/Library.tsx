@@ -22,6 +22,7 @@ import {
   candidateIdSet,
   deriveFollowQuery,
   followedReferences,
+  partitionFollowedTracks,
 } from '../follow/model';
 import type { FollowReference } from '../follow/model';
 import {
@@ -217,6 +218,8 @@ export default function Library({
     knownStrength: (id: number) =>
       knownStrengthOf(transitionsFrom(transitionIndex, reference.id), links, reference.id, id),
   }));
+  const followedTrackIds = followRefs.map(({ reference }) => reference.id);
+  const followedTrackIdSet = new Set(followedTrackIds);
 
   // Beatgrid mutation hooks
   const setDownbeat = useSetBeatgridDownbeat();
@@ -458,45 +461,65 @@ export default function Library({
   // Library list ('all'/'unprocessed' views and the edit-mode library pane),
   // with the Follow candidate set composed client-side (follow-mode 01/03).
   let libraryTracks = allTracksData?.items || [];
-  if (followCandidateIds) {
+  if (followRefs.length > 0) {
+    const { followed, rest } = partitionFollowedTracks(libraryTracks, followedTrackIds);
     // Filter to candidates, then rank-order them (match-score PRD):
     // score is the default sort of the heuristic stratum; a user's column
     // sort takes over within the strata (Known stays pinned regardless) —
     // both sorts are stable, so the server order breaks ties.
-    const candidates = libraryTracks.filter((t: Track) => followCandidateIds.has(t.id));
-    libraryTracks = followScoreSort
-      ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
-      : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent);
+    const candidates = followCandidateIds
+      ? rest.filter((t: Track) => followCandidateIds.has(t.id))
+      : rest;
+    const ordered = followCandidateIds
+      ? followScoreSort
+        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
+        : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent)
+      : candidates;
+    libraryTracks = [...followed, ...ordered];
   }
 
   // Playlist list, in the view-only playlist sort. The Follow filter
   // applies only outside edit mode — in the split, the FilterBar belongs
   // to the library pane.
   let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
-  if (followCandidateIds && !splitView) {
-    const candidates = playlistTracks.filter((t: Track) => followCandidateIds.has(t.id));
-    playlistTracks = followScoreSort
-      ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
-      : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent);
+  if (followRefs.length > 0 && !splitView) {
+    const { followed, rest } = partitionFollowedTracks(playlistTracks, followedTrackIds);
+    const candidates = followCandidateIds
+      ? rest.filter((t: Track) => followCandidateIds.has(t.id))
+      : rest;
+    const ordered = followCandidateIds
+      ? followScoreSort
+        ? orderByRank(candidates, followReferences, followParams.bpmThresholdPercent)
+        : pinKnownStrata(candidates, followReferences, followParams.bpmThresholdPercent)
+      : candidates;
+    playlistTracks = [...followed, ...ordered];
   }
 
   /** Section headers (follow-mode 08, match-score PRD): the Known strata
    * keep their headers and marks; the heuristic stratum is one
    * 'Compatible' section, score-ordered within. Only while Follow
    * filters — manual browsing stays a flat table. */
-  const followGroupLabel = followCandidateIds
+  const followGroupLabel = followRefs.length > 0
     ? (t: Track) =>
-        rankLabel(rankAgainst(t, followReferences, followParams.bpmThresholdPercent))
+        followedTrackIdSet.has(t.id)
+          ? 'Following'
+          : followCandidateIds
+            ? rankLabel(rankAgainst(t, followReferences, followParams.bpmThresholdPercent))
+            : 'Library'
     : undefined;
   /** Why-did-this-match dimming: rows grey the key/tags that earned
    * nothing toward the score. */
   const followMatchSignals = followCandidateIds
-    ? (t: Track) => matchedSignals(t, followReferences)
+    ? (t: Track) =>
+        followedTrackIdSet.has(t.id)
+          ? { key: true, tagIds: new Set(t.tags.map((tag) => tag.id)) }
+          : matchedSignals(t, followReferences)
     : undefined;
   /** Match-score column (match-score PRD): visible while Follow filters.
    * Known rows show their evidence marks, not a score (null = blank). */
   const followScoreFor = followCandidateIds
     ? (t: Track) => {
+        if (followedTrackIdSet.has(t.id)) return null;
         const rank = rankAgainst(t, followReferences, followParams.bpmThresholdPercent);
         return rank.known !== null ? null : rank.score;
       }

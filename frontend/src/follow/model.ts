@@ -215,6 +215,25 @@ export function followedReferences(
   });
 }
 
+/** Split a visible source list into followed Tracks (deduped in Deck/reference
+ * order) and everything else. Follow uses the pinned rows as an actionable
+ * `Following` section above the ranked candidates. */
+export function partitionFollowedTracks(
+  tracks: Track[],
+  followedIds: readonly number[]
+): { followed: Track[]; rest: Track[] } {
+  const byId = new Map(tracks.map((track) => [track.id, track]));
+  const seen = new Set<number>();
+  const followed: Track[] = [];
+  for (const id of followedIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const track = byId.get(id);
+    if (track) followed.push(track);
+  }
+  return { followed, rest: tracks.filter((track) => !seen.has(track.id)) };
+}
+
 // ── Ranking (follow-mode 04) ────────────────────────────────────────────
 
 /** A followed Deck's reference for tiering: its Track plus its known-tier

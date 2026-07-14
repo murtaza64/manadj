@@ -6,6 +6,9 @@
  * (bend = 0) therefore restores the exact pitch-only rate.
  */
 
+import { CHANNEL_IDS } from './mixer';
+import type { ChannelId } from './mixer';
+
 /** Varispeed range, percent — the pitch fader's reach. */
 export const PITCH_RANGE_PERCENT = 8;
 
@@ -48,6 +51,37 @@ export function keyDrifted(keyLockOn: boolean, pitchPercent: number): boolean {
 export type BpmMatchResult =
   | { kind: 'match'; pitchPercent: number }
   | { kind: 'out-of-reach' };
+
+export interface TempoReferenceDeck {
+  playing: boolean;
+  bpm: number | null;
+  pitchPercent: number;
+}
+
+/** Pick the other playing Deck whose effective tempo is nearest to the
+ * scoped Deck's current effective tempo, folding half/double-time feels.
+ * CHANNEL_IDS order is the stable tie-break. */
+export function nearestPlayingTempoReference(
+  ownDeck: ChannelId,
+  ownEffectiveBpm: number,
+  decks: Record<ChannelId, TempoReferenceDeck>
+): { deck: ChannelId; effectiveBpm: number } | null {
+  if (ownEffectiveBpm <= 0) return null;
+  let best: { deck: ChannelId; effectiveBpm: number; distance: number } | null = null;
+  for (const deck of CHANNEL_IDS) {
+    if (deck === ownDeck) continue;
+    const candidate = decks[deck];
+    if (!candidate.playing || candidate.bpm === null || candidate.bpm <= 0) continue;
+    const effective = effectiveBpm(candidate.bpm, candidate.pitchPercent);
+    const distance = Math.min(
+      Math.abs(effective - ownEffectiveBpm),
+      Math.abs(effective * 2 - ownEffectiveBpm),
+      Math.abs(effective / 2 - ownEffectiveBpm)
+    );
+    if (!best || distance < best.distance) best = { deck, effectiveBpm: effective, distance };
+  }
+  return best ? { deck: best.deck, effectiveBpm: best.effectiveBpm } : null;
+}
 
 /**
  * BPM match (tempo only — phase stays a hand skill): the pitch that makes

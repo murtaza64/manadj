@@ -14,6 +14,7 @@ import { initTransitionStore, snapshotPairStore } from '../editor/pairStore';
 import { computePlayGuides } from './playGuideModel';
 import type { GuideDeck, PlayGuideFrame } from './playGuideModel';
 import type { DeckEngine } from '../playback/DeckEngine';
+import { CHANNEL_IDS } from '../playback/mixer';
 
 function guideDeck(engine: DeckEngine): GuideDeck {
   const s = engine.getSnapshot();
@@ -41,6 +42,8 @@ function signature(frames: PlayGuideFrame[]): string {
     .map(
       (frame) =>
         frame.outgoing +
+        '>' +
+        frame.incoming +
         '|' +
         frame.guides
           .map(
@@ -55,9 +58,11 @@ function signature(frames: PlayGuideFrame[]): string {
 
 /** The current Play guide frames (per direction), updated on content change. */
 export function usePlayGuides(): PlayGuideFrame[] {
-  const { A, B } = useDecks();
-  const engineA = A.engine;
-  const engineB = B.engine;
+  const decks = useDecks();
+  const engineA = decks.A.engine;
+  const engineB = decks.B.engine;
+  const engineC = decks.C.engine;
+  const engineD = decks.D.engine;
   const [frames, setFrames] = useState<PlayGuideFrame[]>(EMPTY_FRAMES);
 
   useEffect(() => {
@@ -73,24 +78,23 @@ export function usePlayGuides(): PlayGuideFrame[] {
       const decks = {
         A: guideDeck(engineA),
         B: guideDeck(engineB),
+        C: guideDeck(engineC),
+        D: guideDeck(engineD),
       };
-      const next = computePlayGuides(snapshotPairStore(), {
-        A: decks.A,
-        B: decks.B,
-      });
+      const next = computePlayGuides(snapshotPairStore(), decks);
       const sig = signature(next);
       if (sig !== lastSig) {
         lastSig = sig;
         setFrames(next.length === 0 ? EMPTY_FRAMES : next);
       }
-      schedule(decks.A.playing || decks.B.playing);
+      schedule(CHANNEL_IDS.some((deck) => decks[deck].playing));
     };
     raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf);
       window.clearTimeout(idleTimer);
     };
-  }, [engineA, engineB]);
+  }, [engineA, engineB, engineC, engineD]);
 
   return frames;
 }

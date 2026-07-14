@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { bpmMatch, composeRate, effectiveBpm, keyDrifted } from './tempo';
+import {
+  bpmMatch,
+  composeRate,
+  effectiveBpm,
+  keyDrifted,
+  nearestPlayingTempoReference,
+} from './tempo';
 
 describe('composeRate', () => {
   it('is unity with no pitch and no bend', () => {
@@ -115,5 +121,44 @@ describe('bpmMatch', () => {
       kind: 'match',
       pitchPercent: expect.closeTo((126 / 128 - 1) * 100, 10),
     });
+  });
+});
+
+describe('nearestPlayingTempoReference', () => {
+  const candidate = (bpm: number | null, playing = false, pitchPercent = 0) => ({
+    bpm,
+    playing,
+    pitchPercent,
+  });
+
+  it('chooses the nearest playing effective tempo across A–D', () => {
+    const result = nearestPlayingTempoReference('A', 174, {
+      A: candidate(174, true),
+      B: candidate(170, true),
+      C: candidate(173, true, 1), // 174.73 — nearest
+      D: candidate(175, false),
+    });
+    expect(result).toEqual({ deck: 'C', effectiveBpm: expect.closeTo(174.73, 10) });
+  });
+
+  it('folds half/double-time and uses A–D order for an exact tie', () => {
+    const result = nearestPlayingTempoReference('D', 174, {
+      A: candidate(87, true),
+      B: candidate(174, true),
+      C: candidate(173, true),
+      D: candidate(174, true),
+    });
+    expect(result).toEqual({ deck: 'A', effectiveBpm: 87 });
+  });
+
+  it('ignores paused, BPM-less, and scoped Decks; no eligible Deck is null', () => {
+    expect(
+      nearestPlayingTempoReference('C', 174, {
+        A: candidate(174, false),
+        B: candidate(null, true),
+        C: candidate(174, true),
+        D: candidate(174, false),
+      })
+    ).toBeNull();
   });
 });

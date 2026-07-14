@@ -281,8 +281,8 @@ function PerfWaves() {
         />
       </DeckScope>
       {/* Play guides (play-guides PRD): saved playing→paused Transitions
-          projected as press-play markers — one line spanning both rows,
-          labeled in the gutter. Derived, view-only, non-interactive. */}
+          projected as pair-labeled press-play markers on only their two
+          waveform rows. Derived, view-only, non-interactive. */}
       <PlayGuideOverlay visibleSeconds={visibleSeconds} />
     </div>
   );

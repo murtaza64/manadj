@@ -13,11 +13,6 @@
 import { describe, expect, it } from 'vitest';
 import { computePlayGuides, guideScreenFraction } from './playGuideModel';
 
-/** Most tests exercise a single direction — grab its frame. */
-function computeFrame(...args: Parameters<typeof computePlayGuides>) {
-  const frames = computePlayGuides(...args);
-  return frames.length > 0 ? frames[0] : null;
-}
 import type { GuideDeck } from './playGuideModel';
 import type { PairStore } from '../editor/pairStore';
 import type { Transition } from '../editor/mixModel';
@@ -55,6 +50,18 @@ function deck(overrides: Partial<GuideDeck>): GuideDeck {
     pitchPercent: 0,
     ...overrides,
   };
+}
+
+type DeckInput = { A: GuideDeck; B: GuideDeck; C?: GuideDeck; D?: GuideDeck };
+
+function allDecks(input: DeckInput) {
+  return { ...input, C: input.C ?? deck({}), D: input.D ?? deck({}) };
+}
+
+/** Most tests exercise a single direction — grab its frame. */
+function computeFrame(store: PairStore, input: DeckInput) {
+  const frames = computePlayGuides(store, allDecks(input));
+  return frames.length > 0 ? frames[0] : null;
 }
 
 describe('computePlayGuides — dynamic projection', () => {
@@ -297,15 +304,39 @@ describe('computePlayGuides — appearance conditions', () => {
     });
     expect(frame).toBeNull();
   });
+
+  it('emits every saved playing→paused pair across four Decks', () => {
+    const fourStore = {
+      ...pairStore('1:2', [savedTransition({ uuid: 'ab' })]),
+      ...pairStore('3:2', [savedTransition({ uuid: 'cb' })]),
+      ...pairStore('3:4', [savedTransition({ uuid: 'cd' })]),
+      // A→C exists but both are playing, so it is not actionable.
+      ...pairStore('1:3', [savedTransition({ uuid: 'ac' })]),
+    };
+    const frames = computePlayGuides(
+      fourStore,
+      allDecks({
+        A: deck({ trackId: 1, playing: true }),
+        B: deck({ trackId: 2 }),
+        C: deck({ trackId: 3, playing: true }),
+        D: deck({ trackId: 4 }),
+      })
+    );
+    expect(frames.map((frame) => `${frame.outgoing}>${frame.incoming}`)).toEqual([
+      'A>B',
+      'C>B',
+      'C>D',
+    ]);
+  });
 });
 
 describe('computePlayGuides — both Decks paused (prep state, issue 01)', () => {
   it('shows the saved direction, projected from the static playheads', () => {
     const store = pairStore('1:2', [savedTransition()]);
-    const frames = computePlayGuides(store, {
+    const frames = computePlayGuides(store, allDecks({
       A: deck({ trackId: 1, playhead: 10 }),
       B: deck({ trackId: 2, playhead: 24 }),
-    });
+    }));
     expect(frames).toHaveLength(1);
     expect(frames[0]).toMatchObject({ outgoing: 'A', incoming: 'B' });
     expect(frames[0].guides[0].aTime).toBe(72);
@@ -318,10 +349,10 @@ describe('computePlayGuides — both Decks paused (prep state, issue 01)', () =>
       ...pairStore('1:2', [savedTransition({ uuid: 'ab' })]),
       ...pairStore('2:1', [savedTransition({ uuid: 'ba', startSec: 30, bInSec: 4 })]),
     };
-    const frames = computePlayGuides(store, {
+    const frames = computePlayGuides(store, allDecks({
       A: deck({ trackId: 1, playhead: 10 }),
       B: deck({ trackId: 2, playhead: 24 }),
-    });
+    }));
     expect(frames.map((f) => [f.outgoing, f.incoming])).toEqual([
       ['A', 'B'],
       ['B', 'A'],
@@ -335,19 +366,19 @@ describe('computePlayGuides — both Decks paused (prep state, issue 01)', () =>
       ...pairStore('1:2', [savedTransition({ uuid: 'ab' })]),
       ...pairStore('2:1', [savedTransition({ uuid: 'ba', startSec: 30, bInSec: 4 })]),
     };
-    const frames = computePlayGuides(store, {
+    const frames = computePlayGuides(store, allDecks({
       A: deck({ trackId: 1, playhead: 10 }),
       B: deck({ trackId: 2, playing: true, playhead: 24 }),
-    });
+    }));
     expect(frames.map((f) => [f.outgoing, f.incoming])).toEqual([['B', 'A']]);
   });
 
   it('missed works off the static outgoing playhead: re-cueing the outgoing Deck past the press moment flags it', () => {
     const store = pairStore('1:2', [savedTransition()]);
-    const frames = computePlayGuides(store, {
+    const frames = computePlayGuides(store, allDecks({
       A: deck({ trackId: 1, playhead: 90 }),
       B: deck({ trackId: 2, playhead: 24 }),
-    });
+    }));
     expect(frames[0].guides[0]).toMatchObject({ aTime: 72, missed: true });
   });
 });

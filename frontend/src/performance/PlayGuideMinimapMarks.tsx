@@ -15,41 +15,32 @@
  */
 import { useDeck, useDeckSnapshot } from '../hooks/useDeck';
 import { usePlayGuides } from './usePlayGuides';
+import { minimapGuidesForDeck } from './playGuideMinimapModel';
 import './PlayGuideOverlay.css';
 
 export function PlayGuideMinimapMarks() {
   const { deck } = useDeck();
   const duration = useDeckSnapshot((s) => s.duration);
   const frames = usePlayGuides();
-  // This Deck's minimap carries the direction it is the OUTGOING side of
-  // (at most one frame per outgoing Deck).
-  const frame = frames.find((f) => f.outgoing === deck);
-  if (!frame || duration <= 0) return null;
-
-  const guides = frame.guides.filter((g) => g.aTime >= 0 && g.aTime <= duration);
-  // Exactly one emphasized guide: the earliest non-missed (guides are not
-  // guaranteed sorted by aTime).
-  let nextUuid: string | null = null;
-  let nextATime = Infinity;
-  for (const g of guides) {
-    if (!g.missed && g.aTime < nextATime) {
-      nextATime = g.aTime;
-      nextUuid = g.uuid;
-    }
-  }
+  // One outgoing Deck may guide several paused Decks. Merge every frame
+  // rather than keeping only the first pair (the old A/B assumption).
+  const guides = minimapGuidesForDeck(frames, deck, duration);
+  if (guides.length === 0) return null;
 
   return (
     <div className="perf-minimap-guides" aria-hidden>
-      {guides.map((g) => (
+      {guides.map(({ key, incoming, guide, next }) => {
+        return (
         <div
-          key={g.uuid}
-          className={`perf-minimap-guide incoming-${frame.incoming.toLowerCase()}${
-            g.missed ? ' missed' : g.uuid === nextUuid ? ' next' : ''
+          key={key}
+          className={`perf-minimap-guide incoming-${incoming.toLowerCase()}${
+            guide.missed ? ' missed' : next ? ' next' : ''
           }`}
-          style={{ left: `${(g.aTime / duration) * 100}%` }}
-          title={g.name}
+          style={{ left: `${(guide.aTime / duration) * 100}%` }}
+          title={`${deck}→${incoming}: ${guide.name}`}
         />
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -113,7 +113,7 @@
   background: var(--surface1);
 }
 
-/* Follow toggles (A/B) + gear — engaged = inverted deck-color fill */
+/* Follow toggles (A–D) + gear — engaged = inverted deck-color fill */
 .filter-bar-follow-btn {
   background: transparent;
   border: 1px solid var(--surface1);
@@ -131,7 +131,9 @@
 }
 
 .filter-bar-follow-btn.on-a,
-.filter-bar-follow-btn.on-b {
+.filter-bar-follow-btn.on-b,
+.filter-bar-follow-btn.on-c,
+.filter-bar-follow-btn.on-d {
   position: relative;
   z-index: 1;
 }
@@ -165,6 +167,22 @@
 .filter-bar-follow-btn.on-b:active:not(:disabled) {
   background: var(--deck-b);
   border-color: var(--deck-b);
+  color: var(--base);
+}
+
+.filter-bar-follow-btn.on-c,
+.filter-bar-follow-btn.on-c:hover:not(:disabled),
+.filter-bar-follow-btn.on-c:active:not(:disabled) {
+  background: var(--deck-c);
+  border-color: var(--deck-c);
+  color: var(--base);
+}
+
+.filter-bar-follow-btn.on-d,
+.filter-bar-follow-btn.on-d:hover:not(:disabled),
+.filter-bar-follow-btn.on-d:active:not(:disabled) {
+  background: var(--deck-d);
+  border-color: var(--deck-d);
   color: var(--base);
 }
 
