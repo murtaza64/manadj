@@ -1,0 +1,74 @@
+/* Sessions list (Sessions PRD, ADR 0033). Bright saturated accents per
+   project style — green marks the live/persisted-record family. */
+
+.sessions-list {
+  padding: 16px 20px;
+  overflow-y: auto;
+  height: 100%;
+  background: var(--crust, #111);
+}
+
+.sessions-list-empty {
+  color: #888;
+  padding: 32px 8px;
+  font-size: 14px;
+}
+
+.sessions-list-error {
+  color: #ff2d55;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.sessions-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.sessions-list-table th {
+  text-align: left;
+  color: #777;
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 10px;
+  border-bottom: 1px solid #26263a;
+}
+
+.sessions-list-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #1a1a28;
+}
+
+.session-when {
+  color: #999;
+  white-space: nowrap;
+}
+
+.session-duration {
+  color: #ccc;
+  white-space: nowrap;
+}
+
+.session-duration.live {
+  color: #00ff6a;
+  font-weight: 700;
+}
+
+.session-takes {
+  color: #00e5ff;
+}
+
+.session-delete {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.session-delete:hover {
+  color: #ff2d55;
+}

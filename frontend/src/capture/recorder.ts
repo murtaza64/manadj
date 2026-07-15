@@ -72,15 +72,21 @@ export class CaptureRecorder {
   private readonly mixer: CaptureMixerSource;
   private readonly engines: Record<ChannelId, CaptureDeckSource>;
   private readonly onTake: (take: DetectedTake) => void;
+  /** Session persistence sink (Sessions PRD, ADR 0033): every event the
+   * recorder logs is streamed here beside the in-memory rolling log the
+   * detector reads. Optional — tests that only exercise detection omit it. */
+  private readonly onEvent?: (event: CaptureEvent) => void;
 
   constructor(
     mixer: CaptureMixerSource,
     engines: Record<ChannelId, CaptureDeckSource>,
-    onTake: (take: DetectedTake) => void
+    onTake: (take: DetectedTake) => void,
+    onEvent?: (event: CaptureEvent) => void
   ) {
     this.mixer = mixer;
     this.engines = engines;
     this.onTake = onTake;
+    this.onEvent = onEvent;
     this.lastChannel = { A: mixer.getChannelState('A'), B: mixer.getChannelState('B') };
     this.lastCrossfader = mixer.getCrossfader();
     this.lastCrossfaderEnabled = mixer.getCrossfaderEnabled();
@@ -218,6 +224,10 @@ export class CaptureRecorder {
 
   private feed(e: CaptureEvent): void {
     if (this.gated) return; // drop early, not at the sink (ADR 0022)
+    // Persist beside the detector's rolling log (ADR 0033). Phase 1 mirrors
+    // the recorder's current gating; issue 02 makes the log whole (all four
+    // decks) and writes tenure markers on gate transitions.
+    this.onEvent?.(e);
     const [next, takes] = reduceCapture(this.state, e);
     this.state = next;
     for (const take of takes) this.onTake(take);

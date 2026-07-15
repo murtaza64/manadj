@@ -12,13 +12,14 @@ import { AudioOwnershipChip } from './AudioOwnershipChip';
 import { TasksWidget } from './TasksWidget';
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles' | 'jog-tune';
+export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sessions' | 'sync' | 'styles' | 'jog-tune';
 
 const MODES: { id: AppMode; icon: string; title: string }[] = [
   { id: 'library', icon: '≡', title: 'Library' },
   { id: 'performance', icon: '▸', title: 'Performance' },
   { id: 'transition', icon: '⋈', title: 'Transition editor' },
   { id: 'history', icon: '↻', title: 'Transition history' },
+  { id: 'sessions', icon: '▦', title: 'Sessions' },
   { id: 'sync', icon: '⇄', title: 'Sync' },
   { id: 'styles', icon: '◔', title: 'Waveform styles' },
   { id: 'jog-tune', icon: '◎', title: 'Jog calibration' },

@@ -13,7 +13,13 @@ import { queryClient } from '../api/queryClient';
 import { recordFreshTake } from './freshTakes';
 import type { DetectedTake } from './events';
 
-export function persistTake(take: DetectedTake): void {
+/**
+ * @param sessionUuid the Session this Take was detected within (ADR 0033) —
+ *   stamped as provenance; null for detection outside a Session (or when
+ *   the sink has not opened one). Origin is always `detected` here;
+ *   hand-cut Takes (issue 06) take a different path.
+ */
+export function persistTake(take: DetectedTake, sessionUuid: string | null = null): void {
   const uuid = crypto.randomUUID();
   void api.takes
     .create({
@@ -26,6 +32,8 @@ export function persistTake(take: DetectedTake): void {
       detector_version: take.detectorVersion,
       params: take.params,
       events: take.events,
+      session_uuid: sessionUuid,
+      origin: 'detected',
     })
     .then(() => {
       void queryClient.invalidateQueries({ queryKey: ['takes'] });
