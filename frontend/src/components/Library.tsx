@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
 import type { Ref } from 'react';
+import { dragEdgeScrollDelta } from './dragScroll';
 import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
@@ -656,6 +657,12 @@ export default function Library({
     e.dataTransfer.dropEffect = 'copy';
     const pane = playlistPaneRef.current;
     if (!pane) return;
+    // Edge auto-scroll: dragging near the pane's top/bottom scrolls it so
+    // off-screen rows are reachable (dragScroll.ts). Applied before the
+    // indicator math so the drop index reflects the new scrollTop.
+    const paneRect = pane.getBoundingClientRect();
+    const scrollDelta = dragEdgeScrollDelta(e.clientY, paneRect.top, paneRect.bottom);
+    if (scrollDelta !== 0) pane.scrollTop += scrollDelta;
     const rects = paneRowRects(pane, playlistTracks.length);
     const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
     const index = canPositionDrops ? insertionIndexFromPointer(pointerY, rects) : rects.length;
