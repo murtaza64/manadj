@@ -216,10 +216,12 @@ export const DDJ_GRV6: Mapping = {
     button(6, 58, { control: 'selection-page', direction: 'down' }),
     button(6, 57, { control: 'selection-end', direction: 'top' }),
     button(6, 59, { control: 'selection-end', direction: 'bottom' }),
-    // Tilt ◄/► walk the browse-area ring. Note the E1 quirk: plain
-    // tilt-right is note 46, breaking the otherwise sequential block.
+    // Tilt ◄/► walk the browse-area ring. The tilt block is sequential
+    // (56/58/60/62 = fwd/back/left/right; shifts 57/59/61/63) —
+    // hardware-verified 2026-07-15: the E1 PDF's table layout misled an
+    // earlier read into note 46 for tilt-right, leaving it dead.
     button(6, 60, { control: 'browse-area-move', direction: 'left' }),
-    button(6, 46, { control: 'browse-area-move', direction: 'right' }),
+    button(6, 62, { control: 'browse-area-move', direction: 'right' }),
     button(6, 101, { control: 'browse-focus-sidebar' }),
     button(6, 102, { control: 'split-view-toggle' }),
     button(6, 122, { control: 'view-toggle' }),

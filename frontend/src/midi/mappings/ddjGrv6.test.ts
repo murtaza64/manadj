@@ -259,9 +259,9 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
 });
 
 describe('browse cluster (four-deck-performance 25)', () => {
-  it('maps rotary press and tilt directions, including the E1 tilt-right quirk', () => {
+  it('maps rotary press and the sequential tilt block (right = 62, hardware-verified)', () => {
     expect(
-      translate([press(6, 65), press(6, 56), press(6, 58), press(6, 60), press(6, 46)])
+      translate([press(6, 65), press(6, 56), press(6, 58), press(6, 60), press(6, 62)])
     ).toEqual([
       { kind: 'button', target: { control: 'browse-activate' }, edge: 'down' },
       { kind: 'button', target: { control: 'selection-page', direction: 'up' }, edge: 'down' },
