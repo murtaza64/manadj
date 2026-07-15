@@ -13,9 +13,26 @@
  * loads, and coarse periodic playhead samples.
  */
 
+/**
+ * The pair-machine channel: the phase-1 Handover detector and everything
+ * downstream of a Take (its `init` snapshot, vectorization, the drafted
+ * Transition) are an ordered A/B pair. A Take slice only ever contains A/B
+ * events (ADR 0032 phase-1).
+ */
 export type CaptureChannel = 'A' | 'B';
 
-/** Mixer control ids. Channel-scoped except crossfader/-Enabled/master. */
+/**
+ * A physical deck in the log (Sessions PRD, ADR 0033). The Session records
+ * ALL FOUR decks unconditionally — the log is whole, so a detector that
+ * doesn't yet exist (phase-2 multi-deck, Cameo) can re-analyze old
+ * Sessions. The A/B pair machine ignores C/D for its verdicts but counts
+ * them for the >2-audible self-gate.
+ */
+export type CaptureDeck = 'A' | 'B' | 'C' | 'D';
+
+/** Mixer control ids. Channel-scoped except crossfader/-Enabled/master.
+ * `crossfaderAssignment` encodes a deck's crossfader side so the log alone
+ * reconstructs audibility for all four decks (left=-1, thru=0, right=1). */
 export type CaptureControlId =
   | 'trim'
   | 'eqLow'
@@ -24,6 +41,7 @@ export type CaptureControlId =
   | 'filter'
   | 'fader'
   | 'pfl'
+  | 'crossfaderAssignment'
   | 'crossfader'
   | 'crossfaderEnabled'
   | 'master';
@@ -34,41 +52,49 @@ export type CaptureEvent =
       kind: 'control';
       control: CaptureControlId;
       /** null for the channel-less controls (crossfader, master, …). */
-      channel: CaptureChannel | null;
-      /** Control-native value (pfl/crossfaderEnabled encode booleans 0/1). */
+      channel: CaptureDeck | null;
+      /** Control-native value (pfl/crossfaderEnabled encode booleans 0/1;
+       * crossfaderAssignment encodes left=-1/thru=0/right=1). */
       value: number;
     }
   | {
       t: number;
       kind: 'transport';
-      channel: CaptureChannel;
+      channel: CaptureDeck;
       action: 'play' | 'pause' | 'seek' | 'jumpBeats' | 'hotCue' | 'cue';
       /** Deck track-time after the action (s). */
       playhead: number;
       /** Action-specific: beats for jumpBeats, slot for hotCue. */
       detail?: number;
     }
-  | { t: number; kind: 'pitch' | 'bend'; channel: CaptureChannel; value: number }
+  | { t: number; kind: 'pitch' | 'bend'; channel: CaptureDeck; value: number }
   /** Active-loop state change (looping 06): engage/resize carry the new
    * region, release/cancel/Load-clear carry null. Evidence for collapsing
    * a held loop into one repeated Jump event at vectorization. */
   | {
       t: number;
       kind: 'loop';
-      channel: CaptureChannel;
+      channel: CaptureDeck;
       /** Deck playhead at the change (s). */
       playhead: number;
       /** The region after the change (track seconds), or null. */
       region: { start: number; end: number } | null;
     }
-  | { t: number; kind: 'load'; channel: CaptureChannel; trackId: number | null; bpm: number | null }
+  | { t: number; kind: 'load'; channel: CaptureDeck; trackId: number | null; bpm: number | null }
   /** Coarse periodic sample (~1 Hz): keeps alignment reconstructible and
    * drives time-based settlement in the detector. */
-  | { t: number; kind: 'tick'; playheads: Partial<Record<CaptureChannel, number>> }
+  | { t: number; kind: 'tick'; playheads: Partial<Record<CaptureDeck, number>> }
+  /** Audible-surface tenure marker (Sessions PRD, ADR 0033): a machine
+   * (Transition-editor audition, Conductor, Session replay) held the shared
+   * surface. `start` opens the hold, its end closes it — the log records
+   * THAT the surface was held, never what the machine played. The pair
+   * detector treats a tenure hold exactly as the old surface gate did. */
+  | { t: number; kind: 'tenure'; edge: 'start' | 'end'; holder: string }
   /** Synthetic slice head (never in the live stream): the detector stamps
    * the engagement-open state into every Take slice, so vectorization
    * (issue 03) starts from known controls instead of assumed defaults —
-   * and knows which physical deck was the outgoing one. */
+   * and knows which physical deck was the outgoing one. Always the A/B
+   * pair — a Take is a pair artifact (ADR 0032 phase-1). */
   | {
       t: number;
       kind: 'init';

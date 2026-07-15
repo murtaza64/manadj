@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CaptureRecorder } from './recorder';
 import type { CaptureDeckSource, CaptureMixerSource } from './recorder';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
-import type { DetectedTake } from './events';
+import type { CaptureEvent, DetectedTake } from './events';
 import type { ChannelId, ChannelState } from '../playback/mixer';
 import { DEFAULT_CROSSFADER_ASSIGNMENTS } from '../playback/crossfaderAssignmentStore';
 import type { DeckSnapshot } from '../playback/DeckEngine';
@@ -125,7 +125,8 @@ function surface() {
   return { transport: { togglePlay: () => undefined }, silence: () => undefined };
 }
 
-/** A rig: recorder over fakes, real detector, fake clock at second `t`. */
+/** A rig: recorder over fakes, real detector, fake clock at second `t`.
+ * `logged` captures the whole fed stream (the Session sink's input). */
 function rig() {
   const mixer = new FakeMixerSource();
   const decks = {
@@ -135,8 +136,21 @@ function rig() {
     D: new FakeDeckSource(),
   };
   const takes: DetectedTake[] = [];
-  const recorder = new CaptureRecorder(mixer, decks, (take) => takes.push(take));
-  return { mixer, decks, takes, recorder, advance: (sec: number) => vi.advanceTimersByTime(sec * 1000) };
+  const logged: CaptureEvent[] = [];
+  const recorder = new CaptureRecorder(
+    mixer,
+    decks,
+    (take) => takes.push(take),
+    (event) => logged.push(event)
+  );
+  return {
+    mixer,
+    decks,
+    takes,
+    logged,
+    recorder,
+    advance: (sec: number) => vi.advanceTimersByTime(sec * 1000),
+  };
 }
 
 /** Incumbent setup + the detector-tested clean blend (detector.test.ts):
@@ -178,7 +192,7 @@ describe('capture gate (ADR 0022)', () => {
     r.recorder.dispose();
   });
 
-  it('a third audible Deck discards and suspends the pair engagement', () => {
+  it('a third audible Deck suspends the verdict but the log stays whole (ADR 0033)', () => {
     const r = rig();
     r.recorder.start();
     r.decks.A.load(1);
@@ -193,7 +207,44 @@ describe('capture gate (ADR 0022)', () => {
     r.advance(2);
     r.mixer.setFader('A', 0);
     r.advance(HORIZON + 1);
+    // Detector self-gates over >2 audible: no Take.
     expect(r.takes).toHaveLength(0);
+    // But the log is whole — deck C's activity was NOT dropped (no deck-count
+    // gating in the fed stream): its load and play both reached the sink.
+    expect(
+      r.logged.some((e) => e.kind === 'load' && e.channel === 'C' && e.trackId === 3)
+    ).toBe(true);
+    expect(
+      r.logged.some((e) => e.kind === 'transport' && e.channel === 'C' && e.action === 'play')
+    ).toBe(true);
+    r.recorder.dispose();
+  });
+
+  it('a machine claiming the surface brackets a tenure marker; releasing closes it', () => {
+    const r = rig();
+    r.recorder.start();
+    claimAudible('editor');
+    const start = r.logged.filter((e) => e.kind === 'tenure' && e.edge === 'start');
+    expect(start).toHaveLength(1);
+    expect(start[0].kind === 'tenure' && start[0].holder).toBe('editor');
+    releaseAudible('editor');
+    expect(r.logged.some((e) => e.kind === 'tenure' && e.edge === 'end')).toBe(true);
+    r.recorder.dispose();
+  });
+
+  it("suppresses the machine's own events between tenure start and end", () => {
+    const r = rig();
+    r.recorder.start();
+    claimAudible('editor');
+    const afterClaimLen = r.logged.length; // includes the tenure-start marker
+    // The machine drives the decks; none of this should reach the log.
+    r.decks.A.load(1);
+    r.decks.A.play();
+    r.mixer.setFader('A', 0.3);
+    r.advance(3);
+    const duringTenure = r.logged.slice(afterClaimLen);
+    expect(duringTenure).toHaveLength(0); // machine's events all dropped
+    releaseAudible('editor');
     r.recorder.dispose();
   });
 
