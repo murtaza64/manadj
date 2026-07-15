@@ -114,6 +114,57 @@ export function resolveRouting(
 }
 
 /**
+ * How the resolved routes physically leave the app (four-deck 32).
+ *
+ * The main context's sink IS the master device: master always plays
+ * through the main context's own destination, never over a bridge. A
+ * routed-away destination renders pure silence, and after 30s Chromium's
+ * SilentSinkSuspender swaps the real sink for a timer-driven fake one
+ * whose clock collapses under render load (crbug.com/40247085) — decks
+ * audibly drop to ~half speed. Keeping master on the destination means
+ * the clock that drives the decks is fed by the audio the room hears.
+ *
+ * Cue joins the main context (a wider discrete destination + merger)
+ * when it targets the SAME device on an explicit pair; only cross-device
+ * cue still uses the ADR 0017 MediaStream bridge.
+ */
+export interface OutputPlan {
+  /** Sink for the main context ('' = system default). */
+  mainSinkId: string;
+  /** Master placement on the main destination; null = plain stereo. */
+  masterPairInMain: OutputPair | null;
+  /** Cue placement on the main destination (same-device path). */
+  cuePairInMain: OutputPair | null;
+  /** Cross-device cue delivery over the bridge; null = none. */
+  cueBridge: { sinkId: string; pair: OutputPair | null } | null;
+}
+
+export function planOutput(route: {
+  masterSinkId: string | null;
+  masterPair: OutputPair | null;
+  cueSinkId: string | null;
+  cuePair: OutputPair | null;
+}): OutputPlan {
+  const mainSinkId = route.masterSinkId ?? '';
+  const masterPairInMain = route.masterSinkId === null ? null : route.masterPair;
+  if (route.cueSinkId === null) {
+    return { mainSinkId, masterPairInMain, cuePairInMain: null, cueBridge: null };
+  }
+  // Same device + explicit pair → single-context delivery. The system
+  // default ('' vs an explicit id) is never treated as the same device:
+  // ids alone can't prove identity, and the bridge path is correct there.
+  if (route.masterSinkId !== null && route.cueSinkId === route.masterSinkId && route.cuePair) {
+    return { mainSinkId, masterPairInMain, cuePairInMain: route.cuePair, cueBridge: null };
+  }
+  return {
+    mainSinkId,
+    masterPairInMain,
+    cuePairInMain: null,
+    cueBridge: { sinkId: route.cueSinkId, pair: route.cuePair },
+  };
+}
+
+/**
  * Output picker entries (explicit-output-pairs follow-up): a plain stereo
  * device is one entry; a multichannel interface splits into its
  * stereo pairs, labelled 1-based — the Inpulse (one 4-out device,

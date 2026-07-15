@@ -9,6 +9,7 @@ import {
   cueChannelPair,
   outputPairOptions,
   parseRoutingPrefs,
+  planOutput,
   resolveRouting,
   sameOutputChoice,
 } from './routing';
@@ -274,5 +275,81 @@ describe('cueChannelPair (auto fallback when no pair chosen)', () => {
   it('does not transfer the Inpulse channel order to unknown or unverified devices', () => {
     expect(cueChannelPair('Big generic interface', 8)).toBeNull();
     expect(cueChannelPair(GRV6.label, 8)).toBeNull();
+  });
+});
+
+describe('planOutput (four-deck 32: single-context same-device delivery)', () => {
+  const PAIR_12 = { left: 0, right: 1 };
+  const PAIR_34 = { left: 2, right: 3 };
+
+  it('all defaults: main context on the system default, no pairs, no bridge', () => {
+    expect(
+      planOutput({ masterSinkId: null, masterPair: null, cueSinkId: null, cuePair: null })
+    ).toEqual({ mainSinkId: '', masterPairInMain: null, cuePairInMain: null, cueBridge: null });
+  });
+
+  it('master+cue on the same device with explicit pairs: single context, no bridge', () => {
+    expect(
+      planOutput({
+        masterSinkId: GRV6.deviceId,
+        masterPair: PAIR_12,
+        cueSinkId: GRV6.deviceId,
+        cuePair: PAIR_34,
+      })
+    ).toEqual({
+      mainSinkId: GRV6.deviceId,
+      masterPairInMain: PAIR_12,
+      cuePairInMain: PAIR_34,
+      cueBridge: null,
+    });
+  });
+
+  it('cross-device cue keeps the bridge; master stays on the main destination', () => {
+    expect(
+      planOutput({
+        masterSinkId: GRV6.deviceId,
+        masterPair: PAIR_12,
+        cueSinkId: INPULSE.deviceId,
+        cuePair: PAIR_34,
+      })
+    ).toEqual({
+      mainSinkId: GRV6.deviceId,
+      masterPairInMain: PAIR_12,
+      cuePairInMain: null,
+      cueBridge: { sinkId: INPULSE.deviceId, pair: PAIR_34 },
+    });
+  });
+
+  it('master on the system default is never the same device as an explicit cue sink', () => {
+    expect(
+      planOutput({ masterSinkId: null, masterPair: null, cueSinkId: GRV6.deviceId, cuePair: PAIR_34 })
+    ).toEqual({
+      mainSinkId: '',
+      masterPairInMain: null,
+      cuePairInMain: null,
+      cueBridge: { sinkId: GRV6.deviceId, pair: PAIR_34 },
+    });
+  });
+
+  it('same device without an explicit cue pair stays on the bridge (auto = device default)', () => {
+    expect(
+      planOutput({
+        masterSinkId: GRV6.deviceId,
+        masterPair: PAIR_12,
+        cueSinkId: GRV6.deviceId,
+        cuePair: null,
+      })
+    ).toEqual({
+      mainSinkId: GRV6.deviceId,
+      masterPairInMain: PAIR_12,
+      cuePairInMain: null,
+      cueBridge: { sinkId: GRV6.deviceId, pair: null },
+    });
+  });
+
+  it('explicit master device without a pair follows the sink with a plain destination', () => {
+    expect(
+      planOutput({ masterSinkId: MAC.deviceId, masterPair: null, cueSinkId: null, cuePair: null })
+    ).toEqual({ mainSinkId: MAC.deviceId, masterPairInMain: null, cuePairInMain: null, cueBridge: null });
   });
 });
