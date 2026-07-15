@@ -6,9 +6,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BEAT_FLASH_FALLBACK_PERIOD_MS,
   BLINK_INTERVAL_MS,
-  CUE_FLASH_INTERVAL_MS,
   allOffMessages,
+  beatFlashAnimationDelayMs,
+  beatFlashFraction,
+  beatFlashPeriodMs,
+  beatFlashPhase,
   assistantLedLit,
   audibleTransportOverride,
   blinkPhase,
@@ -20,6 +24,8 @@ import { INPULSE_300_MK2 } from './mappings/inpulse300mk2';
 
 const feedback = INPULSE_300_MK2.feedback!;
 
+/** A loaded, paused, untouched deck (transport states need `loaded`;
+ * unloaded darkness has its own tests). */
 const idle = {
   playing: false,
   pendingPlay: false,
@@ -27,6 +33,7 @@ const idle = {
   hasCuePoint: false,
   atCuePoint: false,
   assignedPads: new Set<number>(),
+  loaded: true,
   pfl: false,
   hasBeatgrid: false,
   quantize: false,
@@ -34,16 +41,29 @@ const idle = {
   loopBeats: null,
 };
 
-const lit = { pending: true, cueFlash: true };
-const dim = { pending: false, cueFlash: false };
+const unloaded = { ...idle, loaded: false };
+
+const lit = { pending: true, beatFlash: true };
+const dim = { pending: false, beatFlash: false };
 
 describe('ledStates', () => {
   it('PLAY is solid while playing', () => {
     expect(ledStates({ ...idle, playing: true }).play).toBe(true);
   });
 
-  it('PLAY is off while paused', () => {
-    expect(ledStates({ ...idle, playing: false }).play).toBe(false);
+  it('PLAY follows the beat flash while a loaded deck is paused (CDJ pause)', () => {
+    expect(ledStates(idle, lit).play).toBe(true);
+    expect(ledStates(idle, dim).play).toBe(false);
+  });
+
+  it('PLAY beat-flashes through a hold-to-preview (CDJ: preview is pause-mode)', () => {
+    expect(ledStates({ ...idle, previewing: true }, lit).play).toBe(true);
+    expect(ledStates({ ...idle, previewing: true }, dim).play).toBe(false);
+  });
+
+  it('PLAY is dark on an empty deck, any phase', () => {
+    expect(ledStates(unloaded, lit).play).toBe(false);
+    expect(ledStates(unloaded, dim).play).toBe(false);
   });
 
   it('PLAY follows the pending phase while play is latched during a load', () => {
@@ -65,21 +85,30 @@ describe('ledStates', () => {
     expect(ledStates({ ...idle, previewing: true }, dim).cue).toBe(true);
   });
 
-  it('CUE flashes while paused away from the cue point (mirrors the screen)', () => {
+  it('CUE beat-flashes while paused away from the cue point (mirrors the screen)', () => {
     const away = { ...idle, hasCuePoint: true, atCuePoint: false };
     expect(ledStates(away, lit).cue).toBe(true);
     expect(ledStates(away, dim).cue).toBe(false);
   });
 
-  it('CUE is off while paused with no cue point set', () => {
-    expect(ledStates(idle, lit).cue).toBe(false);
+  it('CUE beat-flashes while paused with no cue set — a cue is recordable here (CDJ)', () => {
+    expect(ledStates(idle, lit).cue).toBe(true);
+    expect(ledStates(idle, dim).cue).toBe(false);
   });
 
-  it('CUE is off while playing, even over the cue point', () => {
-    expect(ledStates({ ...idle, playing: true, hasCuePoint: true, atCuePoint: true }).cue).toBe(
-      false
-    );
-    expect(ledStates({ ...idle, playing: true, hasCuePoint: true }, lit).cue).toBe(false);
+  it('CUE is solid while playing with a cue set (return available), any phase', () => {
+    const cued = { ...idle, playing: true, hasCuePoint: true };
+    expect(ledStates(cued, lit).cue).toBe(true);
+    expect(ledStates(cued, dim).cue).toBe(true);
+  });
+
+  it('CUE is dark while playing with no cue set', () => {
+    expect(ledStates({ ...idle, playing: true }, lit).cue).toBe(false);
+  });
+
+  it('CUE is dark on an empty deck, any phase', () => {
+    expect(ledStates(unloaded, lit).cue).toBe(false);
+    expect(ledStates(unloaded, dim).cue).toBe(false);
   });
 
   it('lights exactly the assigned pad slots', () => {
@@ -166,6 +195,7 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
     hasCuePoint: true,
     atCuePoint: true,
     assignedPads: new Set([1, 4]),
+    loaded: true,
     pfl: true,
     hasBeatgrid: true,
     quantize: true,
@@ -211,7 +241,7 @@ describe('audibleTransportOverride (editor-midi 05)', () => {
   });
 });
 
-const dark = ledStates(idle);
+const dark = ledStates(unloaded);
 
 describe('encodeDeckLeds', () => {
   it('encodes deck A PLAY on as a note-on at the mapped address', () => {
@@ -377,12 +407,70 @@ describe('blinkPhase', () => {
     expect(blinkPhase(t + BLINK_INTERVAL_MS)).toBe(!blinkPhase(t));
   });
 
-  it('cue flash runs a 1s cycle (the on-screen CUE flash period)', () => {
-    const t = 424242;
-    expect(blinkPhase(t + CUE_FLASH_INTERVAL_MS, CUE_FLASH_INTERVAL_MS)).toBe(
-      !blinkPhase(t, CUE_FLASH_INTERVAL_MS)
-    );
-    expect(blinkPhase(t + 1000, CUE_FLASH_INTERVAL_MS)).toBe(blinkPhase(t, CUE_FLASH_INTERVAL_MS));
+});
+
+describe('beat flash (four-deck 31: CDJ paused-transport cadence)', () => {
+  it('period is two beats at the effective BPM (half-time: lit a beat, dark a beat)', () => {
+    expect(beatFlashPeriodMs(120)).toBe(1000);
+    expect(beatFlashPeriodMs(60)).toBe(2000);
+    expect(beatFlashPeriodMs(174)).toBeCloseTo((60000 / 174) * 2, 6);
+  });
+
+  it('gridless/unloaded/invalid BPM falls back to the stable 1 Hz cadence', () => {
+    expect(beatFlashPeriodMs(null)).toBe(BEAT_FLASH_FALLBACK_PERIOD_MS);
+    expect(beatFlashPeriodMs(0)).toBe(BEAT_FLASH_FALLBACK_PERIOD_MS);
+    expect(beatFlashPeriodMs(-128)).toBe(BEAT_FLASH_FALLBACK_PERIOD_MS);
+    expect(beatFlashPeriodMs(Number.NaN)).toBe(BEAT_FLASH_FALLBACK_PERIOD_MS);
+  });
+
+  it('beatFraction is the paused playhead position within the two-beat cycle', () => {
+    const grid = [0, 0.5, 1.0, 1.5]; // 120 BPM
+    expect(beatFlashFraction(0, grid)).toBe(0);
+    expect(beatFlashFraction(0.5, grid)).toBeCloseTo(0.5, 9); // beat 1 = dark half
+    expect(beatFlashFraction(0.625, grid)).toBeCloseTo(0.625, 9);
+    expect(beatFlashFraction(1.0, grid)).toBeCloseTo(0, 9); // beat 2 = lit again
+  });
+
+  it('beatFraction extrapolates beyond the grid edges and stays in [0,1)', () => {
+    const grid = [0, 0.5];
+    expect(beatFlashFraction(1.25, grid)).toBeCloseTo(0.25, 9); // 2.5 beats into cycle 2
+    expect(beatFlashFraction(-0.25, grid)).toBeCloseTo(0.75, 9); // -0.5 beats
+  });
+
+  it('beatFraction degrades to 0 without a usable grid', () => {
+    expect(beatFlashFraction(12.3, null)).toBe(0);
+    expect(beatFlashFraction(12.3, [4.2])).toBe(0);
+  });
+
+  it('lamp is lit the first beat of the cycle, dark the second', () => {
+    expect(beatFlashPhase(0, 500)).toBe(true);
+    expect(beatFlashPhase(249, 500)).toBe(true);
+    expect(beatFlashPhase(250, 500)).toBe(false);
+    expect(beatFlashPhase(499, 500)).toBe(false);
+    expect(beatFlashPhase(500, 500)).toBe(true);
+  });
+
+  it('the beat fraction shifts the phase: decks flash to their own grids', () => {
+    // A deck paused mid-beat is half a cycle out from one paused on a beat.
+    expect(beatFlashPhase(0, 500, 0.5)).toBe(false);
+    expect(beatFlashPhase(250, 500, 0.5)).toBe(true);
+    // Same BPM + same fraction = in step, regardless of wall epoch.
+    expect(beatFlashPhase(12345, 500, 0.25)).toBe(beatFlashPhase(12345 + 500, 500, 0.25));
+  });
+
+  it('the CSS anchor and the lamp phase agree (screen/hardware parity)', () => {
+    for (const [now, period, fraction] of [
+      [0, 500, 0],
+      [333, 500, 0.25],
+      [7777, 469, 0.9],
+      [100, 1000, 0],
+    ] as const) {
+      const delay = beatFlashAnimationDelayMs(now, period, fraction);
+      expect(delay).toBeGreaterThanOrEqual(0);
+      expect(delay).toBeLessThan(period);
+      // The keyframes are lit for the first half of the cycle.
+      expect(delay / period < 0.5).toBe(beatFlashPhase(now, period, fraction));
+    }
   });
 });
 

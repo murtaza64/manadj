@@ -1,6 +1,7 @@
 import type { DeckFeedback, LedAddress, MappingFeedback } from './mapping';
 import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
+import { beatsBetween } from '../playback/quantize';
 
 /**
  * The Feedback seam (midi-pad-leds PRD, ADR 0002): deck state in →
@@ -38,6 +39,11 @@ export interface DeckLedInput {
    * cannot drift. Empty deck = empty set = all pads dark.
    */
   assignedPads: ReadonlySet<number>;
+  /**
+   * A Track is loaded (four-deck 31): gates the paused-transport flashes —
+   * an empty Deck keeps PLAY and CUE dark (CDJ parity).
+   */
+  loaded: boolean;
   /**
    * This channel feeds the Cue bus (Mixer channel state, headphone-cue 05)
    * — the one non-deck input; the bridge reads it off the Mixer's change
@@ -101,40 +107,106 @@ export type MidiMessage = readonly [number, number, number];
  * epoch-anchoring trick as the on-screen CUE flash animation. `true` = lit.
  */
 export const BLINK_INTERVAL_MS = 250; // pending-play PLAY blink, ~2 Hz
-export const CUE_FLASH_INTERVAL_MS = 500; // CUE away-flash, 1 Hz — the screen's period
 
 export function blinkPhase(nowMs: number, intervalMs: number = BLINK_INTERVAL_MS): boolean {
   return Math.floor(nowMs / intervalMs) % 2 === 0;
 }
 
-/** The two blink phases in play; both `true` when no clock is running. */
-export interface BlinkPhases {
-  /** ~2 Hz — PLAY while play is latched during a load. */
-  pending: boolean;
-  /** 1 Hz — CUE while paused away from the cue point (screen parity). */
-  cueFlash: boolean;
+/**
+ * Paused-transport beat flash (four-deck 31), HALF-TIME: the cycle spans
+ * two beats — lit through one beat, dark through the next — at the Deck's
+ * effective BPM, phase-locked to its own Beatgrid, so four paused Decks
+ * each pulse to their own Track, not to a shared wall interval. (Per-beat
+ * cycling was hands-on rejected as frantic.) Gridless / unloaded /
+ * BPM-less Decks use the fixed fallback.
+ */
+export const BEAT_FLASH_BEATS_PER_CYCLE = 2;
+export const BEAT_FLASH_FALLBACK_PERIOD_MS = 1000; // 1 Hz — the old screen cadence
+
+export function beatFlashPeriodMs(effectiveBpm: number | null): number {
+  if (effectiveBpm === null || !Number.isFinite(effectiveBpm) || effectiveBpm <= 0) {
+    return BEAT_FLASH_FALLBACK_PERIOD_MS;
+  }
+  return (60_000 / effectiveBpm) * BEAT_FLASH_BEATS_PER_CYCLE;
 }
 
-const STEADY: BlinkPhases = { pending: true, cueFlash: true };
+/** The paused playhead's position within the two-beat flash cycle, [0, 1)
+ * — the phase anchor. 0 without a usable grid (fallback stays
+ * epoch-anchored). */
+export function beatFlashFraction(
+  playheadSeconds: number,
+  beatTimes: readonly number[] | null
+): number {
+  if (!beatTimes || beatTimes.length < 2) return 0;
+  const beats = beatsBetween(beatTimes[0], playheadSeconds, beatTimes);
+  const cycle = BEAT_FLASH_BEATS_PER_CYCLE;
+  return (((beats % cycle) + cycle) % cycle) / cycle;
+}
+
+/** CSS-animation anchor for the on-screen flash: the negative delay (ms)
+ * that puts a lit-then-dark keyframe pair at the same phase
+ * beatFlashPhase computes — screen and Controller lamps agree. */
+export function beatFlashAnimationDelayMs(
+  nowMs: number,
+  periodMs: number,
+  beatFraction = 0
+): number {
+  return ((((nowMs / periodMs + beatFraction) % 1) + 1) % 1) * periodMs;
+}
+
+/** Lit for the first beat of each two-beat cycle; the lit edge lands where
+ * the Deck's grid beats land relative to its paused playhead. */
+export function beatFlashPhase(nowMs: number, periodMs: number, beatFraction = 0): boolean {
+  return beatFlashAnimationDelayMs(nowMs, periodMs, beatFraction) / periodMs < 0.5;
+}
+
+/** The blink phases in play; all `true` when no clock is running. */
+export interface BlinkPhases {
+  /** ~2 Hz wall clock — PLAY while play is latched during a load. */
+  pending: boolean;
+  /** Beat-phased (beatFlashPhase) — paused PLAY and away-from-cue CUE.
+   * Both lamps share the phase: on a CDJ they blink in step. */
+  beatFlash: boolean;
+}
+
+const STEADY: BlinkPhases = { pending: true, beatFlash: true };
 
 /**
- * Deck state → desired light states. Phases only matter for the blinking
- * states (pendingPlay PLAY, paused-away-from-cue CUE); solid/off states
- * ignore them.
+ * Deck state → desired light states, per the CDJ lamp table (four-deck 31;
+ * verified against the CDJ-2000NXS2 manual DRI1290A p.15/21/23, CDJ-3000
+ * functional parity):
+ *
+ *   PLAY  lit while playing; FLASHES whenever paused (any pause, including
+ *         paused at the cue and through a hold-to-preview — preview is
+ *         pause-mode on a CDJ); pending-play keeps its distinct ~2 Hz
+ *         wall-clock blink (a manadj state a CDJ does not have).
+ *   CUE   lit paused AT the cue (stab armed); lit through hold-to-preview;
+ *         lit during playback WITH a cue set (return available); FLASHES
+ *         paused away from the cue — including with NO cue set (a cue is
+ *         recordable here); dark while playing without a cue; dark unloaded.
+ *
+ * Pioneer documents no flash rate; manadj drives the paused flash at the
+ * Deck's effective BPM phase-locked to its grid (beatFlashPhase), falling
+ * back to 1 Hz. Phases only matter for the blinking states; solid/off
+ * states ignore them. Editor-audibility keeps its own documented shape:
+ * audibleTransportOverride suppresses every flash (PLAY mirrors the
+ * holder's transport solid/dark; CUE stays dark).
  */
 export function ledStates(input: DeckLedInput, phases: BlinkPhases = STEADY): DeckLedStates {
   const paused = !input.playing && !input.previewing;
+  const pausedLoaded = paused && input.loaded;
   return {
-    play: input.playing || (input.pendingPlay && phases.pending),
-    // Solid when a stab is armed (paused at the cue), lit through a
-    // hold-to-preview (the playhead runs away from the cue; previewing
-    // keeps the light on), flashing when paused away from a set cue
-    // (mirrors the on-screen CUE button), off while playing.
-    cue:
-      input.previewing ||
-      (paused &&
-        input.hasCuePoint &&
-        (input.atCuePoint || phases.cueFlash)),
+    play: input.playing
+      ? true
+      : input.pendingPlay
+        ? phases.pending
+        : (pausedLoaded || input.previewing) && phases.beatFlash,
+    cue: input.previewing
+      ? true
+      : input.playing
+        ? input.hasCuePoint
+        : pausedLoaded &&
+          (input.hasCuePoint && input.atCuePoint ? true : phases.beatFlash),
     pfl: input.pfl,
     pads: Array.from({ length: PAD_COUNT }, (_, i) => input.assignedPads.has(i + 1)),
     gridPads: GRID_PAD_MAPPED.map((mapped) => mapped && input.hasBeatgrid),
@@ -176,6 +248,10 @@ export function audibleTransportOverride(
     previewing: false,
     hasCuePoint: false,
     atCuePoint: false,
+    // Suppresses the paused-transport beat flash too (four-deck 31): an
+    // editor-paused shared Deck shows PLAY dark, not flashing — the
+    // holder's transport is a mirror, not a CDJ pause.
+    loaded: false,
   };
 }
 

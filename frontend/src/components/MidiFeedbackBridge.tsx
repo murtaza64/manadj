@@ -8,15 +8,17 @@ import { useMixerValue } from '../hooks/useMixer';
 import { useFollowFlags } from '../follow/followStore';
 import {
   BLINK_INTERVAL_MS,
-  CUE_FLASH_INTERVAL_MS,
   assistantLedLit,
   audibleTransportOverride,
+  beatFlashFraction,
+  beatFlashPeriodMs,
+  beatFlashPhase,
   blinkPhase,
   encodeAssistantLed,
   encodeDeckLeds,
   ledStates,
 } from '../midi/feedback';
-import type { BlinkPhases } from '../midi/feedback';
+import { effectiveBpm } from '../playback/tempo';
 import { connectedOutputs, subscribeOutputs } from '../midi/outputStore';
 import {
   audibleHolder,
@@ -46,14 +48,15 @@ import { useControlFocus } from '../performance/controlFocus';
  */
 
 function DeckFeedbackPublisher({
-  phases,
+  clockNow,
   onNeedsClock,
 }: {
-  phases: BlinkPhases;
+  /** Shared blink-clock timestamp, or null while no light blinks. */
+  clockNow: number | null;
   /** Report whether this deck currently has a blinking light. */
   onNeedsClock: (needs: boolean) => void;
 }) {
-  const { deck, loadedTrack } = useDeck();
+  const { deck, engine, loadedTrack } = useDeck();
   // A layered Controller may expose a different logical Deck on the same
   // physical surface after focus changes. Re-send all logical deck state so
   // the newly visible layer repaints immediately.
@@ -117,16 +120,34 @@ function DeckFeedbackPublisher({
   // clock, and gates the phase values entering the effect below — a deck
   // with nothing blinking sees constant `true` phases, so the other deck's
   // blinking never causes resends here. Overridden transport never blinks
-  // (pending-blink and cue-flash are shared-surface behaviors).
-  const cueFlashing = !overridden && !playing && !previewing && hasCuePoint && !atCuePoint;
-  const needsClock = (!overridden && pendingPlay) || cueFlashing;
+  // (pending-blink and the paused beat flash are shared-surface behaviors).
+  // CDJ pause flash (four-deck 31): any loaded paused deck blinks PLAY (and
+  // CUE when away from the cue), so the clock runs whenever one is paused.
+  const loaded = loadedTrack != null;
+  const bpm = useDeckSnapshot((s) => s.bpm);
+  const pitchPercent = useDeckSnapshot((s) => s.pitchPercent);
+  const pausedFlashing = !overridden && loaded && !playing;
+  const needsClock = (!overridden && pendingPlay) || pausedFlashing;
   useEffect(() => {
     onNeedsClock(needsClock);
     return () => onNeedsClock(false);
   }, [needsClock, onNeedsClock]);
 
-  const pendingPhase = pendingPlay ? phases.pending : true;
-  const cueFlashPhase = cueFlashing ? phases.cueFlash : true;
+  const pendingPhase =
+    pendingPlay && clockNow !== null ? blinkPhase(clockNow, BLINK_INTERVAL_MS) : true;
+  // Beat-phased paused flash: cadence from the Deck's effective BPM, phase
+  // from its paused playhead against its own grid (feedback.ts seam).
+  // getPlayhead() is an imperative read on the clock tick — the playhead
+  // only moves via gestures while paused, and each tick recomputes anyway.
+  const beatFlash = useMemo(() => {
+    if (!pausedFlashing || clockNow === null) return true;
+    const period = beatFlashPeriodMs(bpm !== null ? effectiveBpm(bpm, pitchPercent) : null);
+    const fraction = beatFlashFraction(
+      engine.getPlayhead(),
+      hasBeatgrid && beatgrid ? beatgrid.beat_times : null
+    );
+    return beatFlashPhase(clockNow, period, fraction);
+  }, [pausedFlashing, clockNow, bpm, pitchPercent, engine, hasBeatgrid, beatgrid]);
 
   useEffect(() => {
     if (outputs.length === 0) return;
@@ -137,6 +158,7 @@ function DeckFeedbackPublisher({
       hasCuePoint,
       atCuePoint,
       assignedPads,
+      loaded,
       pfl,
       hasBeatgrid,
       quantize,
@@ -145,7 +167,7 @@ function DeckFeedbackPublisher({
     };
     const states = ledStates(
       holderPlaying === null ? input : audibleTransportOverride(input, holderPlaying),
-      { pending: pendingPhase, cueFlash: cueFlashPhase }
+      { pending: pendingPhase, beatFlash }
     );
     for (const output of outputs) {
       if (!output.mapping.feedback) continue;
@@ -161,6 +183,7 @@ function DeckFeedbackPublisher({
     hasCuePoint,
     atCuePoint,
     assignedPads,
+    loaded,
     pfl,
     hasBeatgrid,
     quantize,
@@ -168,7 +191,7 @@ function DeckFeedbackPublisher({
     loopBeats,
     holderPlaying,
     pendingPhase,
-    cueFlashPhase,
+    beatFlash,
     controlFocus.left,
     controlFocus.right,
     outputs,
@@ -201,32 +224,33 @@ function AssistantFeedbackPublisher() {
   return null;
 }
 
+/** Tick period for the shared blink clock. Fast enough to resolve a beat
+ * flash at any playable tempo (200 BPM = 300 ms period, 150 ms half-cycle);
+ * per-deck phase booleans are derived from the timestamp, so lights still
+ * only resend on their own transitions. */
+const CLOCK_TICK_MS = 50;
+
 /** The one app-driven blink clock (the device has no native blink),
  * running only while some deck has a blinking light (pending-play PLAY or
- * away-from-cue CUE flash). Phases are clock-derived so both decks and the
- * on-screen CUE flash stay in step regardless of when each started. */
-function useBlinkClock(active: boolean): BlinkPhases {
-  const [phases, setPhases] = useState<BlinkPhases>({ pending: true, cueFlash: true });
+ * the CDJ paused flash). Emits a shared timestamp; each deck derives its
+ * own beat-phased booleans from it (feedback.ts), so all decks and the
+ * on-screen transport stay in step regardless of when each started. */
+function useBlinkClock(active: boolean): number | null {
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
-    if (!active) return; // no timer while nothing is blinking
-    const tick = () => {
-      const now = performance.now();
-      const next: BlinkPhases = {
-        pending: blinkPhase(now, BLINK_INTERVAL_MS),
-        cueFlash: blinkPhase(now, CUE_FLASH_INTERVAL_MS),
-      };
-      setPhases((prev) =>
-        prev.pending === next.pending && prev.cueFlash === next.cueFlash ? prev : next
-      );
-    };
+    if (!active) {
+      setNow(null); // no timer while nothing is blinking
+      return;
+    }
+    const tick = () => setNow(performance.now());
     tick();
-    const interval = setInterval(tick, BLINK_INTERVAL_MS);
+    const interval = setInterval(tick, CLOCK_TICK_MS);
     return () => {
       clearInterval(interval);
-      setPhases({ pending: true, cueFlash: true });
+      setNow(null);
     };
   }, [active]);
-  return phases;
+  return now;
 }
 
 /** Mounted once inside DeckProvider, alongside MidiControlRegistrar. */
@@ -239,20 +263,20 @@ export function MidiFeedbackBridge() {
   const onNeedsB = useCallback((needs: boolean) => setNeedsB(needs), []);
   const onNeedsC = useCallback((needs: boolean) => setNeedsC(needs), []);
   const onNeedsD = useCallback((needs: boolean) => setNeedsD(needs), []);
-  const phases = useBlinkClock(needsA || needsB || needsC || needsD);
+  const clockNow = useBlinkClock(needsA || needsB || needsC || needsD);
   return (
     <>
       <DeckScope deck="A">
-        <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsA} />
+        <DeckFeedbackPublisher clockNow={clockNow} onNeedsClock={onNeedsA} />
       </DeckScope>
       <DeckScope deck="B">
-        <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsB} />
+        <DeckFeedbackPublisher clockNow={clockNow} onNeedsClock={onNeedsB} />
       </DeckScope>
       <DeckScope deck="C">
-        <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsC} />
+        <DeckFeedbackPublisher clockNow={clockNow} onNeedsClock={onNeedsC} />
       </DeckScope>
       <DeckScope deck="D">
-        <DeckFeedbackPublisher phases={phases} onNeedsClock={onNeedsD} />
+        <DeckFeedbackPublisher clockNow={clockNow} onNeedsClock={onNeedsD} />
       </DeckScope>
       <AssistantFeedbackPublisher />
     </>
