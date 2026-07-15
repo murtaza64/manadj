@@ -144,7 +144,7 @@ function DeckFeedbackPublisher({
     const period = beatFlashPeriodMs(bpm !== null ? effectiveBpm(bpm, pitchPercent) : null);
     const fraction = beatFlashFraction(
       engine.getPlayhead(),
-      hasBeatgrid && beatgrid ? beatgrid.beat_times : null
+      hasBeatgrid && beatgrid ? beatgrid.data.beat_times : null
     );
     return beatFlashPhase(clockNow, period, fraction);
   }, [pausedFlashing, clockNow, bpm, pitchPercent, engine, hasBeatgrid, beatgrid]);
@@ -233,24 +233,21 @@ const CLOCK_TICK_MS = 50;
 /** The one app-driven blink clock (the device has no native blink),
  * running only while some deck has a blinking light (pending-play PLAY or
  * the CDJ paused flash). Emits a shared timestamp; each deck derives its
- * own beat-phased booleans from it (feedback.ts), so all decks and the
- * on-screen transport stay in step regardless of when each started. */
+ * own beat-phased booleans from it (feedback.ts), so all Controller lamps
+ * stay in step regardless of when each started. */
 function useBlinkClock(active: boolean): number | null {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
-    if (!active) {
-      setNow(null); // no timer while nothing is blinking
-      return;
-    }
+    if (!active) return;
     const tick = () => setNow(performance.now());
-    tick();
+    const frame = requestAnimationFrame(tick);
     const interval = setInterval(tick, CLOCK_TICK_MS);
     return () => {
+      cancelAnimationFrame(frame);
       clearInterval(interval);
-      setNow(null);
     };
   }, [active]);
-  return now;
+  return active ? now : null;
 }
 
 /** Mounted once inside DeckProvider, alongside MidiControlRegistrar. */

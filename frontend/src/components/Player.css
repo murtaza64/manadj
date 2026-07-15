@@ -100,8 +100,8 @@
 
 .player-button-cue {
   background: transparent;
-  color: var(--energy-3);
-  border: 1px solid var(--energy-3);
+  color: var(--text);
+  border: 1px solid var(--surface2);
   min-width: 60px;
   font-weight: bold;
 }
@@ -110,50 +110,11 @@
   border-color: var(--energy-3);
 }
 
-/* Flashing state - paused away from the cue (or no cue set: recordable).
-   CDJ paused flash (four-deck 31): duration + phase are set inline per
-   deck (TransportPair) — beat period at effective BPM, grid-anchored. */
-.player-button-cue-away-from-cue {
-  animation: cue-flash 1s steps(1, end) infinite;
-}
-
-@keyframes cue-flash {
-  0%, 100% {
-    color: var(--energy-3);
-    border-color: var(--energy-3);
-  }
-  50% {
-    color: var(--text);
-    border-color: var(--text);
-  }
-}
-
 /* Solid state - paused at cue point, or playing with a cue set (CDJ:
    return available) */
 .player-button-cue-at-cue {
   color: var(--energy-3);
   border-color: var(--energy-3);
-}
-
-/* CDJ paused flash (four-deck 31): PLAY pulses between its lit and paused
-   looks whenever a loaded deck is paused. Duration/phase inline per deck
-   (TransportPair), matching the Controller lamp phase exactly. */
-.player-button-play-flash {
-  animation: play-flash 1s steps(1, end) infinite;
-}
-
-@keyframes play-flash {
-  0%,
-  100% {
-    background: var(--green);
-    color: var(--base);
-    border-color: var(--green);
-  }
-  50% {
-    background: transparent;
-    color: var(--green);
-    border-color: var(--green);
-  }
 }
 
 /* Filled state - being held/previewing. Held IS the press, so pin the
