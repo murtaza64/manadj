@@ -12,7 +12,7 @@ import { AudioOwnershipChip } from './AudioOwnershipChip';
 import { TasksWidget } from './TasksWidget';
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles';
+export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles' | 'jog-tune';
 
 const MODES: { id: AppMode; icon: string; title: string }[] = [
   { id: 'library', icon: '≡', title: 'Library' },
@@ -21,6 +21,7 @@ const MODES: { id: AppMode; icon: string; title: string }[] = [
   { id: 'history', icon: '↻', title: 'Transition history' },
   { id: 'sync', icon: '⇄', title: 'Sync' },
   { id: 'styles', icon: '◔', title: 'Waveform styles' },
+  { id: 'jog-tune', icon: '◎', title: 'Jog calibration' },
 ];
 
 /** App-wide Quantize toggle: lit while beat-relative gestures snap. */

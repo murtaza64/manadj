@@ -53,7 +53,7 @@ const MAX_SELECTION_STEPS = 8;
 export function dispatchMidiAction(action: MidiAction): void {
   if (action.kind === 'button') return dispatchButton(action.target, action.edge);
   if (action.kind === 'absolute') return dispatchAbsolute(action.target, action.value);
-  return dispatchRelative(action.target, action.ticks);
+  return dispatchRelative(action);
 }
 
 /**
@@ -82,8 +82,11 @@ function executeGridChordCommand(command: GridChordCommand): void {
     case 'pass-jog': {
       // Not armed: the tick keeps its normal surface-routed meaning.
       const jog = audibleJog();
-      if (command.stream === 'rim') jog?.rimTicks(command.deck, command.ticks);
-      else jog?.touchTicks(command.deck, command.ticks);
+      if (command.stream === 'rim') {
+        jog?.rimTicks(command.deck, command.ticks, command.jogProfile);
+      } else {
+        jog?.touchTicks(command.deck, command.ticks, command.jogProfile);
+      }
       return;
     }
     case 'local-nudge':
@@ -108,19 +111,20 @@ type ButtonAction = Extract<MidiAction, { kind: 'button' }>;
 type AbsoluteAction = Extract<MidiAction, { kind: 'absolute' }>;
 type RelativeAction = Extract<MidiAction, { kind: 'relative' }>;
 
-function dispatchRelative(target: RelativeAction['target'], ticks: number): void {
+function dispatchRelative(action: RelativeAction): void {
+  const { target, ticks, jogProfile } = action;
   switch (target.control) {
     case 'jog':
       // Rim and touch flow through the chord fold first (midi-performance-
       // ops 06): armed decks nudge the grid, unarmed decks pass through to
       // the audible surface unchanged.
-      runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'rim', ticks });
+      runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'rim', ticks, jogProfile });
       return;
     case 'jog-touch':
-      runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'touch', ticks });
+      runGridChord({ type: 'jog-ticks', deck: target.deck, stream: 'touch', ticks, jogProfile });
       return;
     case 'jog-seek':
-      audibleJog()?.shiftRimTicks(target.deck, ticks);
+      audibleJog()?.shiftRimTicks(target.deck, ticks, jogProfile);
       return;
     case 'selection-move': {
       const surface = browseSurface();

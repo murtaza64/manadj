@@ -141,7 +141,14 @@ export function translateMidiMessage(
             : value - 0x80;
       if (ticks === 0) return silence;
       return {
-        actions: [{ kind: 'relative', target: binding.target, ticks }],
+        actions: [
+          {
+            kind: 'relative',
+            target: binding.target,
+            ticks,
+            ...(binding.jogProfile ? { jogProfile: binding.jogProfile } : {}),
+          },
+        ],
         state,
       };
     }

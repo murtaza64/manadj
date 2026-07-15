@@ -88,12 +88,12 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
         cc(3, 41, 62),
       ])
     ).toEqual([
-      { kind: 'relative', target: { control: 'jog', deck: 'C' }, ticks: 1 },
-      { kind: 'relative', target: { control: 'jog', deck: 'C' }, ticks: -1 },
-      { kind: 'relative', target: { control: 'jog-touch', deck: 'D' }, ticks: 1 },
-      { kind: 'relative', target: { control: 'jog', deck: 'D' }, ticks: -1 },
-      { kind: 'relative', target: { control: 'jog-seek', deck: 'D' }, ticks: 2 },
-      { kind: 'relative', target: { control: 'jog-seek', deck: 'D' }, ticks: -2 },
+      { kind: 'relative', target: { control: 'jog', deck: 'C' }, ticks: 1, jogProfile: 'grv6' },
+      { kind: 'relative', target: { control: 'jog', deck: 'C' }, ticks: -1, jogProfile: 'grv6' },
+      { kind: 'relative', target: { control: 'jog-touch', deck: 'D' }, ticks: 1, jogProfile: 'grv6' },
+      { kind: 'relative', target: { control: 'jog', deck: 'D' }, ticks: -1, jogProfile: 'grv6' },
+      { kind: 'relative', target: { control: 'jog-seek', deck: 'D' }, ticks: 2, jogProfile: 'grv6' },
+      { kind: 'relative', target: { control: 'jog-seek', deck: 'D' }, ticks: -2, jogProfile: 'grv6' },
     ]);
   });
 

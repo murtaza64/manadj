@@ -18,6 +18,7 @@
  * dropped. Module-level on purpose: the MIDI layer lives outside React.
  */
 import type { ChannelId } from './mixer';
+import type { JogProfile } from '../midi/jogCalibration';
 
 export type AudibleSurfaceId = 'shared' | 'editor' | 'conductor';
 
@@ -76,11 +77,11 @@ export interface SurfaceLoops {
 export interface SurfaceJog {
   /** Bare rim (CC #9): bend when playing / gentle seek when paused on the
    * shared decks; always a scrub/Slide in the editor. */
-  rimTicks(deck: ChannelId, ticks: number): void;
+  rimTicks(deck: ChannelId, ticks: number, jogProfile?: JogProfile): void;
   /** Touch surface (CC #10): the fine tier. */
-  touchTicks(deck: ChannelId, ticks: number): void;
+  touchTicks(deck: ChannelId, ticks: number, jogProfile?: JogProfile): void;
   /** SHIFT+rim: the deliberate velocity-accelerated fast tier. */
-  shiftRimTicks(deck: ChannelId, ticks: number): void;
+  shiftRimTicks(deck: ChannelId, ticks: number, jogProfile?: JogProfile): void;
 }
 
 /** Minimal observable transport state (ADR 0019): lets LED Feedback

@@ -1,4 +1,5 @@
 import type { ChannelId } from '../playback/mixer';
+import type { JogProfile } from './jogCalibration';
 
 /**
  * The closed action vocabulary a Mapping binds hardware controls to (PRD:
@@ -119,4 +120,4 @@ export type RelativeTarget =
 export type MidiAction =
   | { kind: 'button'; target: ButtonTarget; edge: 'down' | 'up' }
   | { kind: 'absolute'; target: AbsoluteTarget; value: number }
-  | { kind: 'relative'; target: RelativeTarget; ticks: number };
+  | { kind: 'relative'; target: RelativeTarget; ticks: number; jogProfile?: JogProfile };

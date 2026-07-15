@@ -366,9 +366,9 @@ export function DeckProvider({ children }: { children: ReactNode }) {
         },
       },
       jog: {
-        rimTicks: (deck, ticks) => deckControlsFor(deck)?.jogTicks(ticks),
-        touchTicks: (deck, ticks) => deckControlsFor(deck)?.jogTouchTicks(ticks),
-        shiftRimTicks: (deck, ticks) => deckControlsFor(deck)?.jogSeekTicks(ticks),
+        rimTicks: (deck, ticks, profile) => deckControlsFor(deck)?.jogTicks(ticks, profile),
+        touchTicks: (deck, ticks, profile) => deckControlsFor(deck)?.jogTouchTicks(ticks, profile),
+        shiftRimTicks: (deck, ticks, profile) => deckControlsFor(deck)?.jogSeekTicks(ticks, profile),
       },
       // Pause only (ADR 0022): the one context keeps running — the
       // claimant (the editor) plays through it.

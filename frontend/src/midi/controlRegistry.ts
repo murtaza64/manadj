@@ -1,6 +1,7 @@
 import type { EqBand } from '../playback/graph';
 import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
+import type { JogProfile } from './jogCalibration';
 
 /**
  * Module-level registry for non-transport Controller targets (midi-controller
@@ -40,11 +41,11 @@ export interface MidiDeckControls {
   /** Stateless one-shot BPM match against the other deck (on-screen MATCH). */
   match(): void;
   /** Jog rim ticks (signed): bend when playing, seek when paused. */
-  jogTicks(ticks: number): void;
+  jogTicks(ticks: number, jogProfile?: JogProfile): void;
   /** Jog touch-surface ticks (signed): fine seek when paused only. */
-  jogTouchTicks(ticks: number): void;
+  jogTouchTicks(ticks: number, jogProfile?: JogProfile): void;
   /** SHIFT+jog ticks (signed): deliberate fast seek, playing or paused. */
-  jogSeekTicks(ticks: number): void;
+  jogSeekTicks(ticks: number, jogProfile?: JogProfile): void;
   /** One discrete grid-nudge step (±GRID_NUDGE_MS), persisting — the same
    * op as the on-screen nudge buttons. Gridless Track: no-op
    * (midi-performance-ops 05). */

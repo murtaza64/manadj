@@ -84,6 +84,7 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
       controlType: 'relative',
       target: { control: 'jog', deck },
       encoding: 'offset-64',
+      jogProfile: 'grv6',
     },
     // Platter ROTATION streams differ by Vinyl mode. Vinyl-on rotation uses
     // the existing touch-stream behavior: fine seek while paused, ignored
@@ -94,24 +95,28 @@ function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi
       controlType: 'relative',
       target: { control: 'jog-touch', deck },
       encoding: 'offset-64',
+      jogProfile: 'grv6',
     },
     {
       match: { message: 'cc', channel, number: 35 },
       controlType: 'relative',
       target: { control: 'jog', deck },
       encoding: 'offset-64',
+      jogProfile: 'grv6',
     },
     {
       match: { message: 'cc', channel, number: 38 },
       controlType: 'relative',
       target: { control: 'jog-seek', deck },
       encoding: 'offset-64',
+      jogProfile: 'grv6',
     },
     {
       match: { message: 'cc', channel, number: 41 },
       controlType: 'relative',
       target: { control: 'jog-seek', deck },
       encoding: 'offset-64',
+      jogProfile: 'grv6',
     },
     ...Array.from({ length: 8 }, (_, pad) =>
       button(padChannel, PAD_BLOCK.hotCue + pad, { control: 'hot-cue', deck, pad: pad + 1 })
