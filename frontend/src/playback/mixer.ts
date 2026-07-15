@@ -10,8 +10,17 @@
  *   per-channel PFL tap (post-EQ/filter, pre-fader) -> cue sum ->\
  *     cue-side blend gain  \
  *                           +-> cue gain (cue level) -> cue limiter ->
- *   program -> master-side /    MediaStream bridge -> second context
- *     blend gain (cue/mix)      sunk to the cue device (cueBridge.ts)
+ *   program -> master-side /    same-device: merger into the main
+ *     blend gain (cue/mix)      destination; cross-device: MediaStream
+ *                               bridge -> second context (cueBridge.ts)
+ *
+ * Output delivery (four-deck 32): the main context's sink IS the master
+ * device — master never leaves over a bridge, so the destination that
+ * drives the deck clock always carries the room's audio. Cue shares the
+ * main destination (discrete channels + merger) when it targets the same
+ * device on an explicit pair; the bridge remains for cross-device cue.
+ * See planOutput (routing.ts) and SINK_KEEPALIVE_LEVEL (cueBridge.ts) for
+ * the silent-sink-suspender rationale (crbug.com/40247085).
  *
  * "Program" is the summed post-crossfader signal BEFORE the master volume:
  * the cue/mix blend brings the room mix into the headphones without the
@@ -42,7 +51,8 @@ import {
   sweepPositionToFilter,
 } from './graph';
 import type { EqBand } from './graph';
-import { BusOutputBridge, CueBridge } from './cueBridge';
+import { CueBridge, attachSinkKeepalive } from './cueBridge';
+import { planOutput } from './routing';
 import type { OutputPair } from './routing';
 import {
   loadCrossfaderAssignments,
@@ -237,11 +247,20 @@ export class Mixer {
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
   private masterLimiter: DynamicsCompressorNode | null = null;
-  private masterBridge: BusOutputBridge | null = null;
   private cueGain: GainNode | null = null;
   private blendCueGain: GainNode | null = null;
   private blendMasterGain: GainNode | null = null;
+  private cueLimiter: DynamicsCompressorNode | null = null;
   private cueBridge: CueBridge | null = null;
+  /** Live merger wiring on the main destination (explicit pairs). */
+  private outputWiring: {
+    merger: ChannelMergerNode;
+    masterSplit: ChannelSplitterNode;
+    cueSplit: ChannelSplitterNode | null;
+  } | null = null;
+  /** Serializes async routing applies — concurrent setSinkId/wiring
+   * interleavings must not tear the output graph. */
+  private routingChain: Promise<void> = Promise.resolve();
   private listeners = new Set<() => void>();
 
   // Control state survives graph rebuilds (StrictMode revival).
@@ -311,7 +330,6 @@ export class Mixer {
       for (const channel of CHANNEL_IDS) strips[channel].crossfadeGain.connect(program);
       program.connect(masterGain);
       masterGain.connect(limiter);
-      const masterBridge = new BusOutputBridge(ctx);
 
       // Cue bus (headphone-cue 02/03, ADR 0017): PFL taps and the master
       // blend are mixed IN THE MAIN GRAPH and leave over the MediaStream
@@ -333,16 +351,21 @@ export class Mixer {
       blendCueGain.connect(cueGain);
       blendMasterGain.connect(cueGain);
       cueGain.connect(cueLimiter);
-      cueLimiter.connect(cueBridge.input);
+      // cueLimiter's downstream (merger or bridge) is wired per route by
+      // applyOutputRouting below.
+
+      // The suspender guard (see cueBridge.ts): the main clock drives every
+      // deck; it must never be handed to the fake timer sink.
+      attachSinkKeepalive(ctx);
 
       this.ctx = ctx;
       this.strips = strips;
       this.masterGain = masterGain;
       this.masterLimiter = limiter;
-      this.masterBridge = masterBridge;
       this.cueGain = cueGain;
       this.blendCueGain = blendCueGain;
       this.blendMasterGain = blendMasterGain;
+      this.cueLimiter = cueLimiter;
       this.cueBridge = cueBridge;
 
       // Reapply position-dependent settings on the fresh graph. These are
@@ -360,22 +383,16 @@ export class Mixer {
           }
         }
       }
-      void this.applyMasterRoute().catch((err: unknown) => {
+      // Reapply the stored routing (cue failures are absorbed inside —
+      // they disable the Cue bus without touching master).
+      void this.applyOutputRouting().catch((err: unknown) => {
         // Saved device gone at revival: stay on the default — master
         // audio must never die over routing (headphone-cue PRD).
         console.warn('[Mixer] master sink reapply failed; using default', err);
         this.masterSinkId = null;
         this.masterPair = null;
-        void this.applyMasterRoute();
+        void this.applyOutputRouting();
       });
-      if (this.cueSinkId !== null) {
-        void cueBridge.setSink(this.cueSinkId, this.cuePair).catch((err: unknown) => {
-          // Cue device gone at revival: Cue bus disabled, master unaffected.
-          console.warn('[Mixer] cue sink reapply failed; cue disabled', err);
-          this.cueSinkId = null;
-          this.notify();
-        });
-      }
     }
     return { ctx: this.ctx, strips: this.strips };
   }
@@ -615,9 +632,10 @@ export class Mixer {
 
   /**
    * Route the Master bus to an output device (headphone-cue 01/07,
-   * ADR 0017). null sink = system default; null pair = device default.
-   * Explicit pairs use the bridge/channel-merger path. Remembered across
-   * graph revivals; rejects if the device is gone (callers fall back per
+   * four-deck 32). null sink = system default; null pair = device
+   * default. The main context's sink follows this device; explicit pairs
+   * open a wider discrete destination + merger. Remembered across graph
+   * revivals; rejects if the device is gone (callers fall back per
    * routing.ts).
    */
   async setMasterSinkId(sinkId: string | null, pair: OutputPair | null = null): Promise<void> {
@@ -631,25 +649,122 @@ export class Mixer {
     this.masterPair = sinkId === null ? null : pair;
     const ctx = this.ctx;
     if (!ctx || ctx.state === 'closed') return;
-    await this.applyMasterRoute();
+    await this.applyOutputRouting();
   }
 
-  private async applyMasterRoute(): Promise<void> {
-    const ctx = this.ctx;
-    const limiter = this.masterLimiter;
-    if (!ctx || ctx.state === 'closed' || !limiter) return;
-    limiter.disconnect();
+  /** Serialized entry point — see routingChain. */
+  private applyOutputRouting(): Promise<void> {
+    const run = this.routingChain.then(() => this.doApplyOutputRouting());
+    this.routingChain = run.catch(() => undefined);
+    return run;
+  }
 
-    if (this.masterSinkId !== null && this.masterPair !== null) {
-      await ctx.setSinkId('');
-      await this.masterBridge!.setSink(this.masterSinkId, this.masterPair, () => null, 'master');
-      limiter.connect(this.masterBridge!.input);
-      return;
+  /**
+   * Wire both buses to the plan (planOutput): main context sink = master
+   * device; explicit pairs go through a discrete merger on the main
+   * destination; cross-device cue over the bridge. Master failures throw
+   * (callers fall back per routing.ts); cue failures disable the Cue bus
+   * and never affect master.
+   */
+  private async doApplyOutputRouting(): Promise<void> {
+    const ctx = this.ctx;
+    const masterLimiter = this.masterLimiter;
+    const cueLimiter = this.cueLimiter;
+    if (!ctx || ctx.state === 'closed' || !masterLimiter || !cueLimiter) return;
+
+    const plan = planOutput({
+      masterSinkId: this.masterSinkId,
+      masterPair: this.masterPair,
+      cueSinkId: this.cueSinkId,
+      cuePair: this.cuePair,
+    });
+
+    await ctx.setSinkId(plan.mainSinkId);
+
+    masterLimiter.disconnect();
+    cueLimiter.disconnect();
+    if (this.outputWiring) {
+      this.outputWiring.merger.disconnect();
+      this.outputWiring.masterSplit.disconnect();
+      this.outputWiring.cueSplit?.disconnect();
+      this.outputWiring = null;
+    }
+    // Sane baseline while (re)wiring; the merger branch widens it again.
+    ctx.destination.channelCount = 2;
+    ctx.destination.channelInterpretation = 'speakers';
+
+    const max = ctx.destination.maxChannelCount;
+    const needed = (pair: OutputPair) => pair.right + 1;
+    if (plan.masterPairInMain && needed(plan.masterPairInMain) > max) {
+      // An explicit pair is user/hardware knowledge: fail master routing
+      // (caller falls back) rather than silently playing from another jack.
+      masterLimiter.connect(ctx.destination);
+      throw new RangeError(
+        `master output pair ${plan.masterPairInMain.left + 1}/${plan.masterPairInMain.right + 1} ` +
+          `is unavailable on ${max}-channel sink`
+      );
+    }
+    let cuePairInMain = plan.cuePairInMain;
+    if (cuePairInMain && needed(cuePairInMain) > max) {
+      console.warn(
+        `[Mixer] cue pair ${cuePairInMain.left + 1}/${cuePairInMain.right + 1} unavailable ` +
+          `on ${max}-channel master sink; cue disabled`
+      );
+      cuePairInMain = null;
+      this.cueSinkId = null;
+      this.cuePair = null;
+      this.notify();
     }
 
-    this.masterBridge?.stop();
-    await ctx.setSinkId(this.masterSinkId ?? '');
-    limiter.connect(ctx.destination);
+    if (plan.masterPairInMain || cuePairInMain) {
+      const channels = Math.max(
+        2,
+        plan.masterPairInMain ? needed(plan.masterPairInMain) : 2,
+        cuePairInMain ? needed(cuePairInMain) : 2
+      );
+      // 'discrete' = no speaker-layout up/down-mixing between the merger
+      // and the hardware (same contract as the bridge path).
+      ctx.destination.channelCount = channels;
+      ctx.destination.channelInterpretation = 'discrete';
+      const merger = ctx.createChannelMerger(channels);
+      const masterPair = plan.masterPairInMain ?? { left: 0, right: 1 };
+      const masterSplit = ctx.createChannelSplitter(2);
+      masterLimiter.connect(masterSplit);
+      masterSplit.connect(merger, 0, masterPair.left);
+      masterSplit.connect(merger, 1, masterPair.right);
+      let cueSplit: ChannelSplitterNode | null = null;
+      if (cuePairInMain) {
+        cueSplit = ctx.createChannelSplitter(2);
+        cueLimiter.connect(cueSplit);
+        cueSplit.connect(merger, 0, cuePairInMain.left);
+        cueSplit.connect(merger, 1, cuePairInMain.right);
+      }
+      merger.connect(ctx.destination);
+      this.outputWiring = { merger, masterSplit, cueSplit };
+      console.debug(
+        `[Mixer] ${max}-out sink: master on outputs ${masterPair.left + 1}/${masterPair.right + 1}` +
+          (cuePairInMain ? `, cue on outputs ${cuePairInMain.left + 1}/${cuePairInMain.right + 1}` : '')
+      );
+    } else {
+      masterLimiter.connect(ctx.destination);
+    }
+
+    if (plan.cueBridge) {
+      try {
+        await this.cueBridge!.setSink(plan.cueBridge.sinkId, plan.cueBridge.pair);
+        cueLimiter.connect(this.cueBridge!.input);
+      } catch (err) {
+        // Cue device gone / pair unreachable: Cue bus disabled, master
+        // unaffected (headphone-cue PRD).
+        console.warn('[Mixer] cue sink apply failed; cue disabled', err);
+        this.cueBridge?.stop();
+        this.cueSinkId = null;
+        this.cuePair = null;
+        this.notify();
+      }
+    } else {
+      this.cueBridge?.stop();
+    }
   }
 
   // ── Cue bus (headphone-cue 02, ADR 0017) ─────────────────────────────
@@ -699,25 +814,33 @@ export class Mixer {
   }
 
   /**
-   * Route the Cue bus to an output device over the bridge, optionally on
-   * an explicit output pair (picker "(outs 3/4)" entries; null = device
-   * default / auto). null sink tears the delivery down (Cue bus disabled —
-   * PFL state keeps toggling, silently). Rejects (and stays disabled) if
-   * the device is gone; master is never affected by cue routing.
+   * Route the Cue bus to an output device, optionally on an explicit
+   * output pair (picker "(outs 3/4)" entries; null = device default /
+   * auto). Same device as master → main-destination merger; otherwise the
+   * bridge (planOutput). null sink tears the delivery down (Cue bus
+   * disabled — PFL state keeps toggling, silently). Rejects (and stays
+   * disabled) if the device is gone; master is never affected by cue
+   * routing.
    */
   async setCueSinkId(sinkId: string | null, pair: OutputPair | null = null): Promise<void> {
+    const ctx = this.ctx;
     if (sinkId === null) {
       this.cueSinkId = null;
       this.cuePair = null;
-      this.cueBridge?.stop();
+      if (ctx && ctx.state !== 'closed') await this.applyOutputRouting();
       this.notify();
       return;
     }
-    this.ensure(); // the bridge exists after this
+    this.ensure();
+    this.cueSinkId = sinkId;
+    this.cuePair = pair;
     try {
-      await this.cueBridge!.setSink(sinkId, pair);
-      this.cueSinkId = sinkId;
-      this.cuePair = pair;
+      await this.applyOutputRouting();
+      // Cue failures are absorbed by the apply (master must survive);
+      // resurface them here for the picker's error path.
+      if (this.cueSinkId !== sinkId) {
+        throw new Error(`cue route to ${sinkId} failed`);
+      }
     } catch (err) {
       this.cueSinkId = null;
       this.cuePair = null;
@@ -730,17 +853,17 @@ export class Mixer {
   /** Tear down. Safe to keep using — the graph revives on demand. */
   dispose(): void {
     this.cueBridge?.stop();
-    this.masterBridge?.stop();
     if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
     this.ctx = null;
     this.strips = null;
     this.masterGain = null;
     this.masterLimiter = null;
-    this.masterBridge = null;
     this.cueGain = null;
     this.blendCueGain = null;
     this.blendMasterGain = null;
+    this.cueLimiter = null;
     this.cueBridge = null;
+    this.outputWiring = null;
   }
 
   private applyCrossfader(ramp: boolean): void {

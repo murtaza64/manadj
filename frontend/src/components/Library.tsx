@@ -865,16 +865,23 @@ export default function Library({
       selectSet(entry.id);
     }
   };
-  const handleAreaMove = (delta: 1 | -1) => {
-    const next = moveBrowseArea(browseAreas(splitView), focusedArea, delta);
-    if (next === 'sidebar' && !sidebarFocused) {
-      // Enter the sidebar where the current selection lives.
+  /** Focus the sidebar, seeding the cursor where the selection lives. */
+  const enterSidebar = () => {
+    if (!sidebarFocused) {
       setSidebarCursor(
         (cur) =>
           cur ??
           selectionEntryKey(selectedView, selectedPlaylistId, selectedSetId) ??
           (sidebarNavEntries.length > 0 ? entryKey(sidebarNavEntries[0]) : null)
       );
+    }
+    setFocusedArea('sidebar');
+  };
+  const handleAreaMove = (delta: 1 | -1) => {
+    const next = moveBrowseArea(browseAreas(splitView), focusedArea, delta);
+    if (next === 'sidebar') {
+      enterSidebar();
+      return;
     }
     setFocusedArea(next);
   };
@@ -939,7 +946,7 @@ export default function Library({
 
   // The hardware surface routes through the same area-aware handlers,
   // ref-backed so the mount-scoped registration reads live state.
-  const browseNavRef = useRef({
+  const currentBrowseNav = () => ({
     navigate: handleNavigateArea,
     navigatePage: handleNavigatePageArea,
     navigateEnd: handleNavigateEndArea,
@@ -948,17 +955,12 @@ export default function Library({
       // Table focused, press is a no-op: LOAD owns loading (design doc).
       if (sidebarFocused) activateSidebarCursor();
     },
+    focusSidebar: enterSidebar,
+    toggleSplitView: splitViewAvailable ? () => setIsSplitViewOpen((v) => !v) : () => {},
   });
+  const browseNavRef = useRef(currentBrowseNav());
   useEffect(() => {
-    browseNavRef.current = {
-      navigate: handleNavigateArea,
-      navigatePage: handleNavigatePageArea,
-      navigateEnd: handleNavigateEndArea,
-      areaMove: handleAreaMove,
-      activate: () => {
-        if (sidebarFocused) activateSidebarCursor();
-      },
-    };
+    browseNavRef.current = currentBrowseNav();
   });
 
   useEffect(() => {
@@ -971,6 +973,8 @@ export default function Library({
       navigateEnd: (direction) => browseNavRef.current.navigateEnd(direction),
       areaMove: (delta) => browseNavRef.current.areaMove(delta),
       activate: () => browseNavRef.current.activate(),
+      focusSidebar: () => browseNavRef.current.focusSidebar(),
+      toggleSplitView: () => browseNavRef.current.toggleSplitView(),
     });
   }, [viewingSet]);
 

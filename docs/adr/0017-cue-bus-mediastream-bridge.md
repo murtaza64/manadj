@@ -45,3 +45,30 @@ worse than room acoustics.
   audible glitches; the "constant-ish tens of ms" assumption holds, and
   headphone-internal blend alignment was confirmed by ear across the full
   cue/mix sweep.
+
+## Amendment (2026-07-15, four-deck 32): bridge is cross-device only
+
+Routing master over a bridge left the main context's own destination
+rendering pure silence. After 30 s Chromium's SilentSinkSuspender
+(media/base/silent_sink_suspender.cc) swaps the real sink for a
+FakeAudioWorker whose per-callback frame clock drops buffers when its timer
+thread runs late — under real render load (deck worklets) the main context
+clock, and thus every deck, collapsed to ~0.4-0.6× wall time
+(crbug.com/40247085; reproduced and verified live on the DDJ-GRV6 and the
+Inpulse).
+
+Decisions:
+- The main context's sink IS the master device (`planOutput`, routing.ts).
+  Master never leaves over a bridge; explicit pairs open a wider 'discrete'
+  destination with a merger. The clock that drives the decks is fed by the
+  audio the room hears.
+- Cue joins the main destination when it targets the same device on an
+  explicit pair. The MediaStream bridge remains for CROSS-DEVICE cue only.
+- Every context we create keeps an inaudible ~-140 dBFS ConstantSource on
+  its destination (`attachSinkKeepalive`, cueBridge.ts) so the suspender
+  can never engage on a clock that matters.
+
+The 2026-07-05 note above ("outs 1/2 stay free, so master → same device
+gives the all-Inpulse setup without the single-context optimization") is
+superseded: that configuration is exactly the one that starved the main
+destination.

@@ -92,6 +92,10 @@ export interface MidiBrowseSurface {
   areaMove?(delta: 1 | -1): void;
   /** Open the focused area's cursor row (sidebar: open view/playlist). */
   activate?(): void;
+  /** Jump area focus straight to the sidebar (hardware BACK). */
+  focusSidebar?(): void;
+  /** Toggle the split playlist view where available (SHIFT+BACK). */
+  toggleSplitView?(): void;
   /**
    * Load a Track — with the EMBEDDING VIEW's policy (editor-midi 03, ADR
    * 0019): load policy is view-owned, not audibility-owned. The editor
@@ -198,9 +202,27 @@ export function midiFollowMacro(): (() => void) | null {
   return followMacro;
 }
 
+// The Performance ⟷ Library view toggle (four-deck-performance 25): the
+// view switch is App-owned React state, so App registers a handler the
+// same way the Follow macro does.
+let viewToggle: (() => void) | null = null;
+
+/** Register the app-view toggle; returns an unregister function. */
+export function registerViewToggle(run: () => void): () => void {
+  viewToggle = run;
+  return () => {
+    if (viewToggle === run) viewToggle = null;
+  };
+}
+
+export function midiViewToggle(): (() => void) | null {
+  return viewToggle;
+}
+
 export function _resetMidiControlsForTests(): void {
   deckControls.clear();
   mixerControls = null;
   browseSurfaces.length = 0;
   followMacro = null;
+  viewToggle = null;
 }

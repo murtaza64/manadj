@@ -24,7 +24,9 @@ import {
   registerDeckControls,
   registerFollowMacro,
   registerMixerControls,
+  registerViewToggle,
 } from './controlRegistry';
+import { getFollowParams, setFollowParams } from '../follow/paramsStore';
 import {
   _resetGridChordForTests,
   _resetSoftTakeoverForTests,
@@ -1261,5 +1263,99 @@ describe('assistant follow macro (midi-performance-ops 08)', () => {
     unregister();
     dispatchMidiAction(press('down'));
     expect(calls).toEqual([]);
+  });
+});
+
+describe('browse cluster (four-deck-performance 25)', () => {
+  const press = (target: Extract<MidiAction, { kind: 'button' }>['target']): MidiAction[] => [
+    { kind: 'button', edge: 'down', target },
+    { kind: 'button', edge: 'up', target },
+  ];
+
+  /** A surface implementing the optional area-navigation methods. */
+  function registerAreaSurface() {
+    registerBrowseSurface({
+      navigate: () => undefined,
+      getSelectedTrack: () => null,
+      load: () => undefined,
+      navigatePage: (direction) => calls.push(`page:${direction}`),
+      navigateEnd: (direction) => calls.push(`end:${direction}`),
+      areaMove: (delta) => calls.push(`area:${delta}`),
+      activate: () => calls.push('activate'),
+      focusSidebar: () => calls.push('focusSidebar'),
+      toggleSplitView: () => calls.push('splitView'),
+    });
+  }
+
+  it('routes activate, area moves, paging, ends, sidebar focus, and split toggle, down edge only', () => {
+    registerAreaSurface();
+    for (const action of [
+      ...press({ control: 'browse-activate' }),
+      ...press({ control: 'browse-area-move', direction: 'left' }),
+      ...press({ control: 'browse-area-move', direction: 'right' }),
+      ...press({ control: 'selection-page', direction: 'up' }),
+      ...press({ control: 'selection-page', direction: 'down' }),
+      ...press({ control: 'selection-end', direction: 'top' }),
+      ...press({ control: 'selection-end', direction: 'bottom' }),
+      ...press({ control: 'browse-focus-sidebar' }),
+      ...press({ control: 'split-view-toggle' }),
+    ]) {
+      dispatchMidiAction(action);
+    }
+    expect(calls).toEqual([
+      'activate',
+      'area:-1',
+      'area:1',
+      'page:-1',
+      'page:1',
+      'end:-1',
+      'end:1',
+      'focusSidebar',
+      'splitView',
+    ]);
+  });
+
+  it('a surface without the optional methods drops the presses silently', () => {
+    registerBrowseSurface({
+      navigate: () => undefined,
+      getSelectedTrack: () => null,
+      load: () => undefined,
+    });
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'browse-activate' } });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'browse-area-move', direction: 'right' },
+    });
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'browse-focus-sidebar' } });
+    expect(calls).toEqual([]);
+  });
+
+  it('no browse surface: the whole cluster is a no-op', () => {
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'browse-activate' } });
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'selection-page', direction: 'down' },
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('view-toggle routes to the registered app handler, down edge only', () => {
+    const unregister = registerViewToggle(() => calls.push('viewToggle'));
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'view-toggle' } });
+    dispatchMidiAction({ kind: 'button', edge: 'up', target: { control: 'view-toggle' } });
+    unregister();
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'view-toggle' } });
+    expect(calls).toEqual(['viewToggle']);
+  });
+
+  it('follow-known-only flips the Follow params store on the down edge only', () => {
+    const before = getFollowParams().knownOnly;
+    dispatchMidiAction({ kind: 'button', edge: 'down', target: { control: 'follow-known-only' } });
+    expect(getFollowParams().knownOnly).toBe(!before);
+    dispatchMidiAction({ kind: 'button', edge: 'up', target: { control: 'follow-known-only' } });
+    expect(getFollowParams().knownOnly).toBe(!before);
+    setFollowParams({ knownOnly: before });
   });
 });

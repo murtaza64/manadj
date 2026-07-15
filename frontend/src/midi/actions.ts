@@ -77,7 +77,22 @@ export type ButtonTarget =
    * class); idle it changes the beatjump size, exactly like the dedicated
    * `beatjump-size` target (which stays in the vocabulary for devices
    * without the overload). */
-  | { control: 'loop-or-jump-size'; deck: ChannelId; change: 'halve' | 'double' };
+  | { control: 'loop-or-jump-size'; deck: ChannelId; change: 'halve' | 'double' }
+  /** Browse-cluster buttons (four-deck-performance 25): routed to the
+   * active browse surface's optional area-navigation methods (issue 24) —
+   * a surface without them drops the press, like any unregistered target. */
+  | { control: 'browse-activate' }
+  | { control: 'browse-area-move'; direction: 'left' | 'right' }
+  | { control: 'selection-page'; direction: 'up' | 'down' }
+  | { control: 'selection-end'; direction: 'top' | 'bottom' }
+  | { control: 'browse-focus-sidebar' }
+  | { control: 'split-view-toggle' }
+  /** Performance ⟷ Library app-view toggle — registry-direct (the view
+   * switch is App-owned, like the keyboard backtick). */
+  | { control: 'view-toggle' }
+  /** SHIFT+DISCOVER: Follow's "known only" narrowing — module-store
+   * direct, like Quantize. */
+  | { control: 'follow-known-only' };
 
 export type AbsoluteTarget =
   | { control: 'pitch'; deck: ChannelId }

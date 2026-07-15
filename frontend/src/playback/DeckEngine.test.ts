@@ -876,3 +876,88 @@ describe('pre-start lead-in audio (issue 07)', () => {
     expect(startCalls[0].positionFrames).toBe(0);
   });
 });
+
+describe('deferred quantized launch under main-thread jank', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    startCalls.length = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    _clearBufferCacheForTests();
+  });
+
+  const fakeBuffer = {
+    duration: 180,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100),
+  } as unknown as AudioBuffer;
+
+  /** A 120 BPM grid from 0s: beats every 0.5s. */
+  const grid120 = Array.from({ length: 360 }, (_, i) => i * 0.5);
+
+  function fakeAudioPort() {
+    const ctx = {
+      currentTime: 0,
+      state: 'running',
+      resume: () => Promise.resolve(),
+    } as { currentTime: number; state: AudioContextState; resume: () => Promise<void> };
+    const input = {} as AudioNode;
+    const port: DeckAudioPort = {
+      ensureAudio: () => ({ ctx: ctx as unknown as AudioContext, input }),
+    };
+    return { port, ctx };
+  }
+
+  async function loadedEngine(port: DeckAudioPort, trackId: number) {
+    putCachedBuffer(trackId, fakeBuffer);
+    const engine = new DeckEngine(port);
+    await engine.load({
+      trackId,
+      audioUrl: 'http://127.0.0.1:1/none',
+      bpm: 120,
+      beatTimes: Promise.resolve(grid120),
+    });
+    return engine;
+  }
+
+  it('a launch timer fired late still starts on the reference beat', async () => {
+    // Peer plays from 1.3: the launcher's nearest peer beat is 1.5, so the
+    // deferred branch holds the start 0.2s.
+    const a = fakeAudioPort();
+    const peer = await loadedEngine(a.port, 70);
+    peer.seek(1.3);
+    peer.play();
+    await vi.advanceTimersByTimeAsync(0); // flush the async node build
+
+    const b = fakeAudioPort();
+    const launcher = await loadedEngine(b.port, 71);
+    launcher.setLaunchReferenceProvider(() => peer.asLaunchReference());
+    launcher.seek(20);
+    startCalls.length = 0;
+    launcher.play();
+    expect(startCalls).toHaveLength(0); // deferred behind the 200ms timer
+
+    // JANK: the main thread is blocked (e.g. a Follow/match re-rank), so
+    // 500ms of audio time passes with NO timer able to run; the callback
+    // fires only when the block lifts.
+    a.ctx.currentTime = 0.5;
+    b.ctx.currentTime = 0.5;
+    await vi.advanceTimersByTimeAsync(500);
+    // A correct engine may either start phase-adjusted right here or
+    // re-defer to the peer's next beat — allow it to complete.
+    a.ctx.currentTime = 0.7;
+    b.ctx.currentTime = 0.7;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(startCalls).toHaveLength(1);
+
+    // The whole point of the deferral: the launcher rides the peer's beat
+    // phase. Both grids are 0.5s-spaced from 0 and both decks run at unity
+    // rate, so phase equality is time-invariant — a late fire must not
+    // have smeared it.
+    const phase = (playhead: number) => ((playhead % 0.5) + 0.5) % 0.5;
+    const phaseGap = Math.abs(phase(peer.getPlayhead()) - phase(launcher.getPlayhead()));
+    expect(Math.min(phaseGap, 0.5 - phaseGap)).toBeLessThan(0.02);
+  });
+});

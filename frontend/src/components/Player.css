@@ -183,7 +183,8 @@
   justify-content: center;
 }
 
-/* Hot cues overlay - beside the transport panel (8px + 170px panel + 8px) */
+/* Hot cues overlay - beside the transport panel (8px + 170px panel + 8px).
+   The cue-walk buttons flank the 4×2 pad grid as full-height columns. */
 .player-hotcues-overlay {
   position: absolute;
   top: 8px;
@@ -191,11 +192,27 @@
   /* Above the text-overlay canvas, like .player-controls-overlay. */
   z-index: 2;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: auto repeat(4, 1fr) auto;
   gap: 2px;
   padding: 8px;
   background: rgba(17, 17, 17, 0.8);
   backdrop-filter: blur(4px);
+}
+
+.player-cuewalk {
+  min-width: 0;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.player-cuewalk-prev {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+
+.player-cuewalk-next {
+  grid-column: 6;
+  grid-row: 1 / 3;
 }
 
 .player-error {

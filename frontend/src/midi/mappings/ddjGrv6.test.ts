@@ -257,3 +257,40 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     expect(messages).toContainEqual([0x9e, 96, 0x7f]);
   });
 });
+
+describe('browse cluster (four-deck-performance 25)', () => {
+  it('maps rotary press and tilt directions, including the E1 tilt-right quirk', () => {
+    expect(
+      translate([press(6, 65), press(6, 56), press(6, 58), press(6, 60), press(6, 46)])
+    ).toEqual([
+      { kind: 'button', target: { control: 'browse-activate' }, edge: 'down' },
+      { kind: 'button', target: { control: 'selection-page', direction: 'up' }, edge: 'down' },
+      { kind: 'button', target: { control: 'selection-page', direction: 'down' }, edge: 'down' },
+      { kind: 'button', target: { control: 'browse-area-move', direction: 'left' }, edge: 'down' },
+      { kind: 'button', target: { control: 'browse-area-move', direction: 'right' }, edge: 'down' },
+    ]);
+  });
+
+  it('maps shifted vertical tilts to list ends (the official top/bottom)', () => {
+    expect(translate([press(6, 57), press(6, 59)])).toEqual([
+      { kind: 'button', target: { control: 'selection-end', direction: 'top' }, edge: 'down' },
+      { kind: 'button', target: { control: 'selection-end', direction: 'bottom' }, edge: 'down' },
+    ]);
+  });
+
+  it('maps BACK/VIEW/DISCOVER and their shift layers', () => {
+    expect(translate([press(6, 101), press(6, 102), press(6, 122), press(6, 53), press(6, 104)])).toEqual([
+      { kind: 'button', target: { control: 'browse-focus-sidebar' }, edge: 'down' },
+      { kind: 'button', target: { control: 'split-view-toggle' }, edge: 'down' },
+      { kind: 'button', target: { control: 'view-toggle' }, edge: 'down' },
+      { kind: 'button', target: { control: 'follow-macro' }, edge: 'down' },
+      { kind: 'button', target: { control: 'follow-known-only' }, edge: 'down' },
+    ]);
+  });
+
+  it('leaves PREVIEW, shifted rotate, shifted press, and shifted loads absent', () => {
+    expect(
+      translate([press(6, 54), press(6, 55), press(6, 66), press(6, 88), cc(6, 100, 1)])
+    ).toEqual([]);
+  });
+});

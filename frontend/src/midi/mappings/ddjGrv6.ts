@@ -199,6 +199,28 @@ export const DDJ_GRV6: Mapping = {
       target: { control: 'selection-move' },
     },
     ...DECKS.map(({ deck }, index) => button(6, 70 + index, { control: 'load', deck })),
+    // Browse cluster (four-deck-performance 25, design doc). All on the
+    // global channel: rotary press/tilt drive the area-navigation surface;
+    // BACK/VIEW/DISCOVER follow the mapping design. PREVIEW, shifted
+    // rotate (official: waveform zoom), shifted press/tilt-L/R, and
+    // shifted LOAD stay deliberately absent.
+    button(6, 65, { control: 'browse-activate' }),
+    // Tilt ▲/▼ page the focused list; their shift layer jumps to the ends
+    // (the official top/bottom behavior).
+    button(6, 56, { control: 'selection-page', direction: 'up' }),
+    button(6, 58, { control: 'selection-page', direction: 'down' }),
+    button(6, 57, { control: 'selection-end', direction: 'top' }),
+    button(6, 59, { control: 'selection-end', direction: 'bottom' }),
+    // Tilt ◄/► walk the browse-area ring. Note the E1 quirk: plain
+    // tilt-right is note 46, breaking the otherwise sequential block.
+    button(6, 60, { control: 'browse-area-move', direction: 'left' }),
+    button(6, 46, { control: 'browse-area-move', direction: 'right' }),
+    button(6, 101, { control: 'browse-focus-sidebar' }),
+    button(6, 102, { control: 'split-view-toggle' }),
+    button(6, 122, { control: 'view-toggle' }),
+    // DISCOVER's official job is track suggestion — manadj's Follow.
+    button(6, 53, { control: 'follow-macro' }),
+    button(6, 104, { control: 'follow-known-only' }),
     // Sound Color FX knobs are the four per-channel sweep filters.
     ...DECKS.map(({ deck }, index) =>
       absolute14(6, 23 + index, 55 + index, { control: 'filter', channel: deck })

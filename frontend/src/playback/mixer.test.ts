@@ -86,6 +86,15 @@ class FakeAudioContext {
   createMediaStreamDestination() {
     return Object.assign(new FakeNode(), { stream: {} });
   }
+  createConstantSource() {
+    return Object.assign(new FakeNode(), { offset: this.param(1), start(): void {} });
+  }
+  createChannelSplitter() {
+    return new FakeNode();
+  }
+  createChannelMerger() {
+    return new FakeNode();
+  }
   async setSinkId(): Promise<void> {}
   async suspend(): Promise<void> {
     this.state = 'suspended';

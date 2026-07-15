@@ -35,6 +35,7 @@ import { PlayGuideOverlay } from '../../performance/PlayGuideOverlay';
 import { dispatchSetSpace } from '../../sets/spaceTransport';
 import { CONTROL_FOCUS_KEYS, browseLoadTarget, isGuardedKeyEvent } from './performanceKeys';
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
+import { PERFORMANCE_WAVEFORM_ORDER } from './waveformOrder';
 import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
 import { toggleControlFocus, useControlFocus } from '../../performance/controlFocus';
 import './PerformanceView.css';
@@ -265,30 +266,14 @@ function PerfWaves() {
   const [visibleSeconds, setVisibleSeconds] = useState(DEFAULT_VISIBLE_SECONDS);
   return (
     <div className="perf-waves">
-      <DeckScope deck="A">
-        <DeckWaveform
-          visibleSeconds={visibleSeconds}
-          onVisibleSecondsChange={setVisibleSeconds}
-        />
-      </DeckScope>
-      <DeckScope deck="B">
-        <DeckWaveform
-          visibleSeconds={visibleSeconds}
-          onVisibleSecondsChange={setVisibleSeconds}
-        />
-      </DeckScope>
-      <DeckScope deck="C">
-        <DeckWaveform
-          visibleSeconds={visibleSeconds}
-          onVisibleSecondsChange={setVisibleSeconds}
-        />
-      </DeckScope>
-      <DeckScope deck="D">
-        <DeckWaveform
-          visibleSeconds={visibleSeconds}
-          onVisibleSecondsChange={setVisibleSeconds}
-        />
-      </DeckScope>
+      {PERFORMANCE_WAVEFORM_ORDER.map((deck) => (
+        <DeckScope key={deck} deck={deck}>
+          <DeckWaveform
+            visibleSeconds={visibleSeconds}
+            onVisibleSecondsChange={setVisibleSeconds}
+          />
+        </DeckScope>
+      ))}
       {/* Play guides (play-guides PRD): saved playing→paused Transitions
           projected as pair-labeled press-play markers on only their two
           waveform rows. Derived, view-only, non-interactive. */}

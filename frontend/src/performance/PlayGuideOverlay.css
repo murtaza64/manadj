@@ -40,11 +40,6 @@
   background: var(--deck-d);
 }
 
-.perf-playguide-line.deck-row-a { top: 0; }
-.perf-playguide-line.deck-row-b { top: 25%; }
-.perf-playguide-line.deck-row-c { top: 50%; }
-.perf-playguide-line.deck-row-d { top: 75%; }
-
 /* Label chip: straddles the row boundary, hanging to the RIGHT of the
  * line (hot-cue badge convention — the marker stays unobscured). Distinct
  * from a Hot Cue at a glance: play glyph + name, no slot badge. */
@@ -62,10 +57,6 @@
   white-space: nowrap;
   line-height: 16px;
 }
-.perf-playguide-chip.deck-row-a { top: 12.5%; }
-.perf-playguide-chip.deck-row-b { top: 37.5%; }
-.perf-playguide-chip.deck-row-c { top: 62.5%; }
-.perf-playguide-chip.deck-row-d { top: 87.5%; }
 .perf-playguide.incoming-a .perf-playguide-chip {
   border-color: var(--deck-a);
   color: var(--deck-a);

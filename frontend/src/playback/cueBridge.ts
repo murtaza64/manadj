@@ -1,10 +1,17 @@
 /**
- * Cross-device / output-pair bus delivery (ADR 0017). One AudioContext has
- * one output device, so a bus signal leaves the MAIN graph through a
- * MediaStreamAudioDestinationNode and re-enters a second, otherwise empty
- * AudioContext whose sink is the target device. Everything that matters
- * musically stays before this bridge, in the main graph and on the main
- * clock — the bridge only ships the result.
+ * CROSS-DEVICE bus delivery (ADR 0017, narrowed by four-deck 32). One
+ * AudioContext has one output device, so a bus signal leaves the MAIN
+ * graph through a MediaStreamAudioDestinationNode and re-enters a second,
+ * otherwise empty AudioContext whose sink is the target device.
+ * Everything that matters musically stays before this bridge, in the main
+ * graph and on the main clock — the bridge only ships the result.
+ *
+ * Same-device buses do NOT come here: master (and cue on the master
+ * device) plays through the main context's own destination via
+ * planOutput/applyOutputRouting (routing.ts / mixer.ts), because a main
+ * context whose destination renders silence gets its real sink swapped
+ * for a timer-driven fake one after 30s (Chromium SilentSinkSuspender,
+ * crbug.com/40247085) whose clock collapses under render load.
  *
  * Output channels (hardware-learned): a stereo stream lands on a device's
  * first pair, but the Inpulse enumerates as ONE 4-channel device whose
@@ -21,6 +28,22 @@
  * routing.ts and mixerMath.ts.
  */
 import type { OutputPair } from './routing';
+
+/**
+ * Defeats Chromium's silent-sink suspender: an always-on DC offset at
+ * ~-140 dBFS keeps AreFramesZero() false so the real device sink (and its
+ * honest clock) is never swapped for the fake timer-driven one. Inaudible
+ * and cheaper than the glitchy real↔fake transitions it prevents.
+ */
+export const SINK_KEEPALIVE_LEVEL = 1e-7;
+
+/** Attach the keepalive to a context's destination (see above). */
+export function attachSinkKeepalive(ctx: AudioContext): void {
+  const keepalive = ctx.createConstantSource();
+  keepalive.offset.value = SINK_KEEPALIVE_LEVEL;
+  keepalive.connect(ctx.destination);
+  keepalive.start();
+}
 
 type FallbackPair = (maxChannelCount: number) => OutputPair | null;
 
@@ -87,6 +110,7 @@ export class BusOutputBridge {
     debugName: string
   ): void {
     const source = ctx.createMediaStreamSource(this.destination.stream);
+    attachSinkKeepalive(ctx);
     const max = ctx.destination.maxChannelCount;
     // An explicit pair is user/hardware knowledge. If the live sink cannot
     // reach it, fail this bus rather than silently playing from another jack.
