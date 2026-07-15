@@ -100,3 +100,36 @@ LOAD 1–4 (double-press = instant doubles).
 
 No dedicated beatjump buttons, no crossfader assign switches, no Smart CFX /
 SMART FADER / silent cue, no per-deck grid buttons, no sampler volume knob.
+
+## Control-state reporting (issue 34, hardware-verified 2026-07-15)
+
+Method: hot-plug-aware sniffer (`scripts/probes/midi_sniff.py`) armed before
+USB connection; E1 MIDI list cross-checked. No undocumented writes attempted.
+
+- **No spontaneous state dump.** Power-on, USB connect, port open, and a
+  settle window produce ZERO MIDI-IN messages.
+- **No state request exists.** The E1 list contains no SysEx at all; every
+  MIDI-IN row is gesture-triggered (press/rotate/slide).
+- **Layer switches ARE reported**: DECK N press emits note 114 plus note 60
+  velocity 0x7F on the activated deck's channel and 0x00 on the displaced
+  deck's channel (the Mapping already binds note 60 to set-control-focus).
+- **Shared controls report on the ACTIVE layer's channel only**; positions
+  are NOT re-reported for the newly active layer. Soft takeover must re-arm
+  per layer on every switch. One exception observed: GRV GAIN (CC 18/50)
+  spontaneously reported on DECK 3/4 activation (not decks 1/2) — treat as
+  unreliable; do not depend on it.
+- Absolute controls send 14-bit MSB/LSB CC pairs per the E1 list (tempo
+  0/32 per deck channel, trim 4/36, crossfader 31/63 on global channel 7).
+- **Policy consequence** (34 acceptance): cold startup, on-demand sync, and
+  hot reconnect all retain full soft takeover for every absolute control;
+  a layer change marks all shared controls stale/unsynced.
+
+## Lamp memory (issue 28 probe, hardware-verified 2026-07-15)
+
+- MASTER TEMPO lamp (note 26): OFF=0x00 / ON=0x7F on ALL four channels; no
+  per-deck polarity differences.
+- **Per-layer lamp memory**: the device stores lamp state per channel and
+  displays the active layer's stored value. Writes to an inactive layer's
+  channel are stored silently and repainted by the hardware on layer switch
+  — no host involvement in layer repaints (MidiFeedbackBridge's re-send on
+  control-focus change is still correct, merely redundant for this lamp).
