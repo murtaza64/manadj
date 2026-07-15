@@ -4,6 +4,7 @@
 // state. See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
 
 const { app, BrowserWindow, net, session } = require("electron");
+const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -117,6 +118,28 @@ function splashPageDataUrl(target) {
   return "data:text/html;charset=utf-8," + encodeURIComponent(html);
 }
 
+// --- CoreAudio channel-label assertion (four-deck 33) --------------------------
+//
+// Known Mappings whose firmware ships all-Unknown output channel labels,
+// which Chromium collapses to stereo (issue 32 / ADR 0017 amendment).
+// Labels are numeric AudioChannelLabel values: 1,2,5,6 = L,R,LS,RS.
+// Fire-and-forget at startup: the helper is idempotent, the written labels
+// persist across replug/reboot, and a missing device/toolchain only logs.
+const CHANNEL_LABEL_ASSERTS = [{ name: "DDJ-GRV6", labels: "1,2,5,6" }];
+
+function assertChannelLabels() {
+  if (process.platform !== "darwin") return;
+  const helper = path.join(__dirname, "assert-channel-labels.swift");
+  for (const { name, labels } of CHANNEL_LABEL_ASSERTS) {
+    execFile("swift", [helper, name, labels], (err, stdout, stderr) => {
+      for (const text of `${stdout}${stderr}`.trim().split("\n")) {
+        if (text) process.stdout.write(`[app] ${text}\n`);
+      }
+      if (err) process.stdout.write(`[app] channel-label assert failed for ${name}: ${err.message}\n`);
+    });
+  }
+}
+
 // --- main ---------------------------------------------------------------------
 
 const TARGET = targetUrl(process.argv);
@@ -223,6 +246,7 @@ app.whenReady().then(() => {
   } catch {
     // logo.png missing/unreadable — keep the default icon
   }
+  assertChannelLabels();
   createWindow();
 });
 
