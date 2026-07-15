@@ -21,6 +21,10 @@ import { usePlayGuides } from './usePlayGuides';
 import { guideScreenFraction } from './playGuideModel';
 import { composeRate } from '../playback/tempo';
 import { trackWindowSeconds } from '../utils/waveformZoom';
+import {
+  waveformRowCenterPercent,
+  waveformRowTopPercent,
+} from '../components/performance/waveformOrder';
 import './PlayGuideOverlay.css';
 
 /** Where the deck waveforms pin the playhead (DeckWaveform's renderer
@@ -110,34 +114,43 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
           const key = `${frame.outgoing}>${frame.incoming}:${guide.uuid}`;
           return (
             <div
-            key={key}
-            ref={(el) => {
-              if (el) itemRefs.current.set(key, el);
-              else itemRefs.current.delete(key);
-            }}
-            className={`perf-playguide incoming-${frame.incoming.toLowerCase()}${
-              guide.missed ? ' missed' : ''
-            }`}
-            style={{ display: 'none' }}
-          >
-            <div className={`perf-playguide-line deck-row-${frame.outgoing.toLowerCase()}`} />
-            <div className={`perf-playguide-line deck-row-${frame.incoming.toLowerCase()}`} />
-            <div className={`perf-playguide-chip deck-row-${frame.incoming.toLowerCase()}`}>
-              <span className="perf-playguide-glyph">▶</span>
-              <span className="perf-playguide-pair">
-                {frame.outgoing}→{frame.incoming}
-              </span>
-              {guide.favorite && <span className="perf-playguide-star">★</span>}
-              <span className="perf-playguide-name">{guide.name}</span>
-              {guide.requiredPitchPercent !== null && (
-                <span
-                  className="perf-playguide-pitch"
-                  title="Set the paused deck's pitch to this for the alignment to hold"
-                >
-                  {formatPitch(guide.requiredPitchPercent)}
+              key={key}
+              ref={(el) => {
+                if (el) itemRefs.current.set(key, el);
+                else itemRefs.current.delete(key);
+              }}
+              className={`perf-playguide incoming-${frame.incoming.toLowerCase()}${
+                guide.missed ? ' missed' : ''
+              }`}
+              style={{ display: 'none' }}
+            >
+              <div
+                className="perf-playguide-line"
+                style={{ top: `${waveformRowTopPercent(frame.outgoing)}%` }}
+              />
+              <div
+                className="perf-playguide-line"
+                style={{ top: `${waveformRowTopPercent(frame.incoming)}%` }}
+              />
+              <div
+                className="perf-playguide-chip"
+                style={{ top: `${waveformRowCenterPercent(frame.incoming)}%` }}
+              >
+                <span className="perf-playguide-glyph">▶</span>
+                <span className="perf-playguide-pair">
+                  {frame.outgoing}→{frame.incoming}
                 </span>
-              )}
-            </div>
+                {guide.favorite && <span className="perf-playguide-star">★</span>}
+                <span className="perf-playguide-name">{guide.name}</span>
+                {guide.requiredPitchPercent !== null && (
+                  <span
+                    className="perf-playguide-pitch"
+                    title="Set the paused deck's pitch to this for the alignment to hold"
+                  >
+                    {formatPitch(guide.requiredPitchPercent)}
+                  </span>
+                )}
+              </div>
             </div>
           );
         })
