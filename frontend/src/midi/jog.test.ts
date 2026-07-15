@@ -13,6 +13,7 @@ import {
   JOG_TOUCH_SEEK_SECONDS_PER_TICK,
   JogController,
   bendFromWindowAverage,
+  defaultJogCalibration,
   jogSeekDelta,
   smoothedRate,
 } from './jog';
@@ -28,6 +29,18 @@ describe('jog math', () => {
   it('bend clamps at ±JOG_BEND_MAX_PERCENT', () => {
     expect(bendFromWindowAverage(1e6)).toBe(JOG_BEND_MAX_PERCENT);
     expect(bendFromWindowAverage(-1e6)).toBe(-JOG_BEND_MAX_PERCENT);
+  });
+
+  it('calibration independently scales bend and fast seek', () => {
+    const calibration = {
+      ...defaultJogCalibration(),
+      bendPercentPerTick: 2,
+      bendFilterWindow: 4,
+      fastSeekSecondsPerTick: 0.01,
+      fastSeekAccelTicksPerSecond: 100,
+    };
+    expect(bendFromWindowAverage(0.5, calibration)).toBe(1);
+    expect(jogSeekDelta(2, 0, calibration)).toBeCloseTo(0.02);
   });
 
   it('seek travel is per-tick at rest and grows with rate', () => {
@@ -76,6 +89,17 @@ describe('JogController', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('playing: calibration controls the spring-back window length', () => {
+    playing = true;
+    const calibration = { ...defaultJogCalibration(), bendFilterWindow: 2 };
+    const jog = new JogController(port);
+    jog.onTicks(1, 1000, calibration);
+    vi.advanceTimersByTime(JOG_BEND_FILTER_PERIOD_MS);
+    expect(calls[0]).toBe(`bend:${(JOG_BEND_PERCENT_PER_TICK / 2).toFixed(3)}`);
+    vi.advanceTimersByTime(2 * JOG_BEND_FILTER_PERIOD_MS);
+    expect(calls[calls.length - 1]).toBe('bend:0.000');
   });
 
   it('playing: accumulated ticks bend after one filter period, sign follows direction', () => {
@@ -167,6 +191,18 @@ describe('JogController', () => {
     const expected = `seek:${(60 + 8 * JOG_SEEK_SECONDS_PER_TICK).toFixed(3)}`;
     expect(calls).toHaveLength(10);
     expect(calls.every((c) => c === expected)).toBe(true);
+  });
+
+  it('uses independent calibration for paused rim and touch streams', () => {
+    const calibration = {
+      ...defaultJogCalibration(),
+      rimSeekSecondsPerTick: 0.02,
+      touchSeekSecondsPerTick: 0.003,
+    };
+    const jog = new JogController(port);
+    jog.onTicks(2, 1000, calibration);
+    jog.onTouchTicks(3, 2000, calibration);
+    expect(calls).toEqual(['seek:60.040', 'seek:60.009']);
   });
 
   it('SHIFT+wheel: hard spins travel much farther per tick than slow ones', () => {

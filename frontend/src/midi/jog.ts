@@ -1,3 +1,11 @@
+import {
+  DEFAULT_JOG_CALIBRATION,
+  defaultJogCalibration,
+} from './jogCalibration';
+import type { JogCalibration } from './jogCalibration';
+
+export { defaultJogCalibration } from './jogCalibration';
+
 /**
  * Jog wheel behavior (midi-controller 03/11): relative ticks in, bend or
  * seek out. Pure math + a small stateful controller; no Web MIDI, no React
@@ -86,15 +94,22 @@ export function smoothedRate(prevRate: number, ticks: number, dtMs: number): num
 }
 
 /** Bend for a window-average of ticks-per-period: linear, clamped. */
-export function bendFromWindowAverage(averageTicksPerPeriod: number): number {
-  const bend = averageTicksPerPeriod * JOG_BEND_PERCENT_PER_TICK;
-  return Math.min(Math.max(bend, -JOG_BEND_MAX_PERCENT), JOG_BEND_MAX_PERCENT);
+export function bendFromWindowAverage(
+  averageTicksPerPeriod: number,
+  calibration: JogCalibration = DEFAULT_JOG_CALIBRATION
+): number {
+  const bend = averageTicksPerPeriod * calibration.bendPercentPerTick;
+  return Math.min(Math.max(bend, -calibration.bendMaxPercent), calibration.bendMaxPercent);
 }
 
 /** Fast-seek travel (SHIFT+wheel): per-tick base, quadratic in rate. */
-export function jogSeekDelta(ticks: number, rate: number): number {
-  const accel = 1 + (Math.abs(rate) / JOG_SEEK_ACCEL_TPS) ** 2;
-  return ticks * JOG_SEEK_SECONDS_PER_TICK * Math.min(accel, JOG_SEEK_ACCEL_MAX);
+export function jogSeekDelta(
+  ticks: number,
+  rate: number,
+  calibration: JogCalibration = DEFAULT_JOG_CALIBRATION
+): number {
+  const accel = 1 + (Math.abs(rate) / calibration.fastSeekAccelTicksPerSecond) ** 2;
+  return ticks * calibration.fastSeekSecondsPerTick * Math.min(accel, calibration.fastSeekAccelMax);
 }
 
 export class JogController {
@@ -106,10 +121,11 @@ export class JogController {
 
   // Bend filter state (Mixxx model).
   private pendingBendTicks = 0;
-  private bendWindow: number[] = new Array<number>(JOG_BEND_FILTER_WINDOW).fill(0);
+  private bendWindow: number[] = new Array<number>(DEFAULT_JOG_CALIBRATION.bendFilterWindow).fill(0);
   private bendHead = 0;
   private bendTimer: ReturnType<typeof setInterval> | null = null;
   private appliedBend = 0;
+  private bendCalibration = defaultJogCalibration();
 
   constructor(port: JogDeckPort) {
     this.port = port;
@@ -120,19 +136,28 @@ export class JogController {
    * ignored while playing — there is no scratch model, and the dense touch
    * stream would swamp the rim's bend filter.
    */
-  onTouchTicks(ticks: number, nowMs: number = performance.now()): void {
+  onTouchTicks(
+    ticks: number,
+    nowMs: number = performance.now(),
+    calibration: JogCalibration = DEFAULT_JOG_CALIBRATION
+  ): void {
     if (this.port.isPlaying()) return;
     this.lastFineActivityMs = nowMs;
-    this.port.seek(this.port.getPlayhead() + ticks * JOG_TOUCH_SEEK_SECONDS_PER_TICK);
+    this.port.seek(this.port.getPlayhead() + ticks * calibration.touchSeekSecondsPerTick);
   }
 
   /** Rim rotation (CC #9): bend when playing, gentle linear nudge-seek when
    * paused — unless the ticks continue a touch gesture (a released,
    * still-spinning platter), which keeps the fine rate. */
-  onTicks(ticks: number, nowMs: number = performance.now()): void {
+  onTicks(
+    ticks: number,
+    nowMs: number = performance.now(),
+    calibration: JogCalibration = DEFAULT_JOG_CALIBRATION
+  ): void {
     this.foldRate(ticks, nowMs);
 
     if (this.port.isPlaying()) {
+      this.setBendCalibration(calibration);
       this.pendingBendTicks += ticks;
       this.startBendFilter();
       return;
@@ -143,12 +168,12 @@ export class JogController {
     // Released but still spinning: same gesture, same seconds-per-tick.
     if (this.lastFineActivityMs !== null && nowMs - this.lastFineActivityMs < JOG_FINE_CONTINUATION_MS) {
       this.lastFineActivityMs = nowMs;
-      this.port.seek(this.port.getPlayhead() + ticks * JOG_TOUCH_SEEK_SECONDS_PER_TICK);
+      this.port.seek(this.port.getPlayhead() + ticks * calibration.touchSeekSecondsPerTick);
       return;
     }
 
     // Gentle by design: no velocity acceleration on the bare rim.
-    this.port.seek(this.port.getPlayhead() + ticks * JOG_SEEK_SECONDS_PER_TICK);
+    this.port.seek(this.port.getPlayhead() + ticks * calibration.rimSeekSecondsPerTick);
   }
 
   /**
@@ -157,10 +182,14 @@ export class JogController {
    * shift+wheel does the same). Releases any bend first so a mid-bend shift
    * press never leaves a stale rate offset.
    */
-  onSeekTicks(ticks: number, nowMs: number = performance.now()): void {
+  onSeekTicks(
+    ticks: number,
+    nowMs: number = performance.now(),
+    calibration: JogCalibration = DEFAULT_JOG_CALIBRATION
+  ): void {
     this.foldRate(ticks, nowMs);
     this.releaseBend();
-    this.port.seek(this.port.getPlayhead() + jogSeekDelta(ticks, this.rate));
+    this.port.seek(this.port.getPlayhead() + jogSeekDelta(ticks, this.rate, calibration));
   }
 
   /** Shared velocity fold: shifted and unshifted streams are one physical
@@ -182,15 +211,27 @@ export class JogController {
     this.bendTimer = setInterval(() => this.onBendPeriod(), JOG_BEND_FILTER_PERIOD_MS);
   }
 
+  private setBendCalibration(calibration: JogCalibration): void {
+    const window = Math.max(1, Math.round(calibration.bendFilterWindow));
+    if (window !== this.bendWindow.length) {
+      // Live tuning starts a fresh filter rather than mixing samples that
+      // were normalized for a different window length.
+      this.pendingBendTicks = 0;
+      this.bendWindow = new Array<number>(window).fill(0);
+      this.bendHead = 0;
+    }
+    this.bendCalibration = calibration;
+  }
+
   private onBendPeriod(): void {
     // Drain the accumulator into the window (Mixxx: getJogFactor per buffer).
     this.bendWindow[this.bendHead] = this.pendingBendTicks;
     this.pendingBendTicks = 0;
-    this.bendHead = (this.bendHead + 1) % JOG_BEND_FILTER_WINDOW;
+    this.bendHead = (this.bendHead + 1) % this.bendWindow.length;
 
     let sum = 0;
     for (const slot of this.bendWindow) sum += slot;
-    const bend = bendFromWindowAverage(sum / JOG_BEND_FILTER_WINDOW);
+    const bend = bendFromWindowAverage(sum / this.bendWindow.length, this.bendCalibration);
     this.applyBend(bend);
 
     // Window empty and nothing pending: the gesture has fully decayed.

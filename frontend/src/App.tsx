@@ -5,6 +5,7 @@ import { queryClient } from './api/queryClient';
 // Waveform style panel (edits the persisted style slots live).
 const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
+const JogTuningPage = lazy(() => import('./midi/JogTuningPage'));
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
@@ -36,7 +37,7 @@ function AnalysisPendingBridge() {
   return null;
 }
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles', 'jog-tune'];
 
 /** Session-state persistence of the top-panel mode: reopen where you were. */
 const MODE_KEY = 'manadj-app-mode';
@@ -148,6 +149,10 @@ function App() {
               ) : view === 'styles' ? (
                 <Suspense fallback={null}>
                   <StyleTuningPage />
+                </Suspense>
+              ) : view === 'jog-tune' ? (
+                <Suspense fallback={null}>
+                  <JogTuningPage />
                 </Suspense>
               ) : (
                 /* The library view is Deck A (performance-mode issue 02). */

@@ -9,6 +9,9 @@ four-deck-performance).
 
 ## Wire facts
 
+Jog resolution and software prior art were measured during hardware acceptance;
+see [`ddj-grv6-jog-calibration.md`](ddj-grv6-jog-calibration.md).
+
 - Everything sends MIDI except the rear MIC ATT. trim (analog).
 - Deck controls: NOTE/CC on channels 1–4 (deck = channel). Right deck reuses
   left-deck note numbers except the DECK buttons.

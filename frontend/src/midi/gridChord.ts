@@ -1,5 +1,6 @@
 import type { ChannelId } from '../playback/mixer';
 import type { BeatgridResponse } from '../types';
+import type { JogProfile } from './jogCalibration';
 
 /**
  * The grid-edit chord reducer (midi-performance-ops 06) — spin-to-nudge as
@@ -72,11 +73,23 @@ export type GridChordEvent =
   | { type: 'pad-up'; deck: ChannelId; direction: 'earlier' | 'later' }
   | { type: 'bpm-pad-down'; deck: ChannelId; op: 'grow' | 'shrink' }
   | { type: 'bpm-pad-up'; deck: ChannelId; op: 'grow' | 'shrink' }
-  | { type: 'jog-ticks'; deck: ChannelId; stream: JogStream; ticks: number };
+  | {
+      type: 'jog-ticks';
+      deck: ChannelId;
+      stream: JogStream;
+      ticks: number;
+      jogProfile?: JogProfile;
+    };
 
 export type GridChordCommand =
   /** Not armed: the tick keeps its normal surface-routed jog meaning. */
-  | { type: 'pass-jog'; deck: ChannelId; stream: JogStream; ticks: number }
+  | {
+      type: 'pass-jog';
+      deck: ChannelId;
+      stream: JogStream;
+      ticks: number;
+      jogProfile?: JogProfile;
+    }
   /** Nudge-armed: apply this tick batch to the local grid, optimistically. */
   | { type: 'local-nudge'; deck: ChannelId; offsetMs: number }
   /** Zero-tick nudge release: the discrete ±10ms step (issue 05's tap). */
@@ -114,7 +127,18 @@ export function reduceGridChord(
 
     case 'jog-ticks': {
       if (!chord) {
-        return [s, [{ type: 'pass-jog', deck: e.deck, stream: e.stream, ticks: e.ticks }]];
+        return [
+          s,
+          [
+            {
+              type: 'pass-jog',
+              deck: e.deck,
+              stream: e.stream,
+              ticks: e.ticks,
+              ...(e.jogProfile ? { jogProfile: e.jogProfile } : {}),
+            },
+          ],
+        ];
       }
       if (chord.kind === 'nudge') {
         const offsetMs = e.ticks * GRID_SPIN_NUDGE_MS_PER_TICK;

@@ -13,6 +13,7 @@ import {
   registerMixerControls,
 } from '../midi/controlRegistry';
 import { JogController } from '../midi/jog';
+import { getJogCalibration } from '../midi/jogCalibrationStore';
 import { doubleBeatjump, halveBeatjump } from '../playback/beatjump';
 import { setKeyLockFlag } from '../playback/keyLockStore';
 
@@ -117,20 +118,20 @@ function DeckControlsRegistrar() {
           // Out-of-reach/unavailable are silent: no hardware feedback channel.
           latest.current.matchAction();
         },
-        jogTicks: (ticks) => {
+        jogTicks: (ticks, profile) => {
           const { jog: j, ready: r } = latest.current;
           if (!r) return; // no track/decoding: nothing to bend or seek
-          j.onTicks(ticks);
+          j.onTicks(ticks, undefined, getJogCalibration(profile));
         },
-        jogTouchTicks: (ticks) => {
+        jogTouchTicks: (ticks, profile) => {
           const { jog: j, ready: r } = latest.current;
           if (!r) return;
-          j.onTouchTicks(ticks);
+          j.onTouchTicks(ticks, undefined, getJogCalibration(profile));
         },
-        jogSeekTicks: (ticks) => {
+        jogSeekTicks: (ticks, profile) => {
           const { jog: j, ready: r } = latest.current;
           if (!r) return;
-          j.onSeekTicks(ticks);
+          j.onSeekTicks(ticks, undefined, getJogCalibration(profile));
         },
         // Grid-edit pads (midi-performance-ops 05): registry-direct stored-
         // data ops; gridless-Track gating lives in useGridEditActions.

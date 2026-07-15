@@ -1,5 +1,6 @@
 import type { AbsoluteTarget, ButtonTarget, RelativeTarget } from './actions';
 import type { ChannelId } from '../playback/mixer';
+import type { JogProfile } from './jogCalibration';
 
 /**
  * Mapping schema (glossary: Mapping): the device-specific translation from
@@ -45,6 +46,8 @@ export type Binding = BindingBase &
         target: RelativeTarget;
         /** Default MIDI two's-complement, or center-relative 64±ticks. */
         encoding?: 'twos-complement' | 'offset-64';
+        /** Device-specific live jog calibration, carried through dispatch. */
+        jogProfile?: JogProfile;
       }
   );
 

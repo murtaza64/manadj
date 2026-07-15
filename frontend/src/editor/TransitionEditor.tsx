@@ -14,6 +14,7 @@ import { gridFirstBpm } from '../components/deckControls/bpmCommit';
 import { useHotCueSlots } from '../hooks/useHotCueActions';
 import { useHotCues } from '../hooks/useHotCues';
 import { JogController } from '../midi/jog';
+import { getJogCalibration } from '../midi/jogCalibrationStore';
 import Library from '../components/Library';
 import type { LibraryBrowseHandle } from '../components/Library';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
@@ -509,9 +510,24 @@ function TransitionEditorInner() {
         },
       },
       jog: {
-        rimTicks: (deck, ticks) => (deck === 'A' ? midiJogA : midiJogB).onTicks(ticks),
-        touchTicks: (deck, ticks) => (deck === 'A' ? midiJogA : midiJogB).onTouchTicks(ticks),
-        shiftRimTicks: (deck, ticks) => (deck === 'A' ? midiJogA : midiJogB).onSeekTicks(ticks),
+        rimTicks: (deck, ticks, profile) =>
+          (deck === 'A' ? midiJogA : midiJogB).onTicks(
+            ticks,
+            undefined,
+            getJogCalibration(profile)
+          ),
+        touchTicks: (deck, ticks, profile) =>
+          (deck === 'A' ? midiJogA : midiJogB).onTouchTicks(
+            ticks,
+            undefined,
+            getJogCalibration(profile)
+          ),
+        shiftRimTicks: (deck, ticks, profile) =>
+          (deck === 'A' ? midiJogA : midiJogB).onSeekTicks(
+            ticks,
+            undefined,
+            getJogCalibration(profile)
+          ),
       },
       // LED Feedback mirrors the audible surface (editor-midi 05): one mix
       // transport, reported for both decks — both PLAY LEDs follow it.
