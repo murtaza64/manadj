@@ -631,6 +631,8 @@ export default function Library({
   // Positional drops only when the pane shows actual Play order; under any
   // other sort the drop appends (and in-pane reorders are refused).
   const playlistPaneRef = useRef<HTMLDivElement>(null);
+  /** Previous dragover timestamp — feeds the time-normalized edge scroll. */
+  const lastDragOverTsRef = useRef(0);
   const [dropIndicator, setDropIndicator] = useState<{ index: number; y: number } | null>(null);
   const canPositionDrops = isPlayOrderSort(playlistSort);
   const playlistMemberIds = useMemo(
@@ -658,10 +660,13 @@ export default function Library({
     const pane = playlistPaneRef.current;
     if (!pane) return;
     // Edge auto-scroll: dragging near the pane's top/bottom scrolls it so
-    // off-screen rows are reachable (dragScroll.ts). Applied before the
-    // indicator math so the drop index reflects the new scrollTop.
+    // off-screen rows are reachable (dragScroll.ts, time-normalized).
+    // Applied before the indicator math so the drop index reflects the
+    // new scrollTop.
     const paneRect = pane.getBoundingClientRect();
-    const scrollDelta = dragEdgeScrollDelta(e.clientY, paneRect.top, paneRect.bottom);
+    const elapsedMs = e.timeStamp - lastDragOverTsRef.current;
+    lastDragOverTsRef.current = e.timeStamp;
+    const scrollDelta = dragEdgeScrollDelta(e.clientY, paneRect.top, paneRect.bottom, elapsedMs);
     if (scrollDelta !== 0) pane.scrollTop += scrollDelta;
     const rects = paneRowRects(pane, playlistTracks.length);
     const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
