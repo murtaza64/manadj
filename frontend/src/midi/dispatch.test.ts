@@ -55,7 +55,7 @@ let sharedLoopActive: boolean;
 let fakePitch: Record<ChannelId, number>;
 /** Fake mixer state (midi-controller 17): setters write it, getters read
  * it — same echo loop as fakePitch. Defaults mirror the real Mixer's
- * (FLAT_CHANNEL, master 1, CUE_LEVEL_DEFAULT 0.7, CUE_MIX_DEFAULT 0) so
+ * (neutral channel, Master unity, CUE_LEVEL_DEFAULT 0.7, CUE_MIX_DEFAULT 0) so
  * tests read like the real boot state. External changes (mouse moves on
  * screen) are simulated by assigning directly. */
 interface FakeMixerState {

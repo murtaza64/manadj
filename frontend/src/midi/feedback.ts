@@ -1,7 +1,8 @@
-import type { DeckFeedback, LedAddress, MappingFeedback } from './mapping';
+import type { DeckFeedback, LedAddress, MappingFeedback, MeterAddress } from './mapping';
 import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 import { beatsBetween } from '../playback/quantize';
+import { encodeMeterValue } from './levelMeter';
 
 /**
  * The Feedback seam (midi-pad-leds PRD, ADR 0002): deck state in →
@@ -345,9 +346,37 @@ export function encodeAssistantLed(
   return feedback.assistant ? [encodeLed(feedback.assistant, lit)] : [];
 }
 
+const CONTROL_CHANGE = 0xb;
+
 /**
- * Every mapped light dark — sent on detach and dispose so stale state
- * never lingers on the hardware.
+ * A channel level meter's normalized position [0, 1] → its CC message.
+ * Ordinary VU is capped below the device's red range; `peak` explicitly
+ * enters red. This is the same split Mixxx's Pioneer mappings use between
+ * `vu_meter` (scaled to 0x75) and `peak_indicator` (0x77).
+ */
+export function encodeMeter(
+  address: MeterAddress,
+  normalized: number,
+  peak = false
+): MidiMessage {
+  const span = address.levelMaxValue - address.minValue;
+  const value = peak
+    ? address.peakValue
+    : address.minValue + encodeMeterValue(normalized, span);
+  return [(CONTROL_CHANGE << 4) | address.channel, address.number, value];
+}
+
+/**
+ * A meter's dark (silent) message — its minValue. Sent on resync-to-silent
+ * and in all-off so a detached/disposed device shows no residual level.
+ */
+export function meterOffMessage(address: MeterAddress): MidiMessage {
+  return [(CONTROL_CHANGE << 4) | address.channel, address.number, address.minValue];
+}
+
+/**
+ * Every mapped light dark AND every meter cleared — sent on detach and
+ * dispose so stale state never lingers on the hardware.
  */
 export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[] {
   return [
@@ -356,5 +385,9 @@ export function allOffMessages(feedback: MappingFeedback): readonly MidiMessage[
       return addresses ? deckAddresses(addresses).map((address) => encodeLed(address, false)) : [];
     }),
     ...encodeAssistantLed(feedback, false),
+    ...CHANNEL_IDS.flatMap((channel) => {
+      const meter = feedback.meters?.[channel];
+      return meter ? [meterOffMessage(meter)] : [];
+    }),
   ];
 }

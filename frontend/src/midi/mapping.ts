@@ -129,6 +129,26 @@ export interface DeckFeedback {
 /** A LOOP-mode pad light: its address plus the preset size it represents. */
 export type LoopPadLamp = LedAddress & { beats: number };
 
+/**
+ * One channel level meter's output address (four-deck-performance 36).
+ * Unlike an LedAddress (a boolean note-on light), a meter is a CONTINUOUS
+ * control-change output: the device lights an LED ladder from the CC value.
+ * Normal level and clipping are distinct because Pioneer-family hardware
+ * reserves its red range for a peak indicator rather than ordinary VU.
+ */
+export interface MeterAddress {
+  /** MIDI channel, 0-based (the CC status byte's low nibble). */
+  channel: number;
+  /** CC number (the first data byte). */
+  number: number;
+  /** CC value meaning "silent / dark" (device-specific; usually 0). */
+  minValue: number;
+  /** Highest CC value used for ordinary (non-clipping) level. */
+  levelMaxValue: number;
+  /** CC value that enters the device's red range, used only for clipping. */
+  peakValue: number;
+}
+
 /** Device knowledge for Feedback: every light the app writes, per deck. */
 export interface MappingFeedback {
   /** A two-Deck Controller may omit C/D; layered four-Deck devices provide all. */
@@ -139,6 +159,13 @@ export interface MappingFeedback {
    * the decks. Optional: absent until the address is hardware-learned.
    */
   assistant?: LedAddress;
+  /**
+   * Per-channel level-meter output addresses (four-deck-performance 36).
+   * A four-channel device provides all of A–D; a device without host-driven
+   * meters omits this entirely (no meter output is ever sent). Each meter
+   * follows only its own channel's signal (channel isolation).
+   */
+  meters?: Partial<Record<ChannelId, MeterAddress>>;
 }
 
 export interface Mapping {

@@ -14,7 +14,11 @@ import { useRef } from 'react';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
-import { CUE_LEVEL_DEFAULT, CUE_MIX_DEFAULT } from '../../playback/mixer';
+import {
+  CUE_LEVEL_DEFAULT,
+  CUE_MIX_DEFAULT,
+  MASTER_LEVEL_DEFAULT,
+} from '../../playback/mixer';
 import type { ChannelId } from '../../playback/mixer';
 import { CROSSFADER_ASSIGNMENTS } from '../../playback/crossfaderAssignmentStore';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
@@ -394,10 +398,10 @@ export function MixerStrip({
           min={0}
           max={1}
           value={master}
-          defaultValue={1}
+          defaultValue={MASTER_LEVEL_DEFAULT}
           fill
           onChange={(v) => mixer.setMaster(v)}
-          title="Master volume"
+          title="Master volume (double-click = 0 dB; top quarter-turn boosts to +6 dB)"
           takeover={masterTakeover}
         />
       </div>

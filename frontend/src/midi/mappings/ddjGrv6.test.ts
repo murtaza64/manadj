@@ -240,6 +240,19 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     expect(messages).toContainEqual([0x9c, 0, 0x7f]);
   });
 
+  it('declares an isolated A–D channel level-meter address per deck channel', () => {
+    const meters = DDJ_GRV6.feedback?.meters;
+    expect(meters?.A).toMatchObject({
+      channel: 0,
+      minValue: 0,
+      levelMaxValue: 0x75,
+      peakValue: 0x77,
+    });
+    expect(meters?.B?.channel).toBe(1);
+    expect(meters?.C?.channel).toBe(2);
+    expect(meters?.D?.channel).toBe(3);
+  });
+
   it('addresses Beat Jump, GRID, and Beat Loop mode blocks independently', () => {
     const states = {
       play: false,

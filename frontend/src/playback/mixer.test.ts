@@ -60,6 +60,8 @@ class FakeNode {
 class FakeAudioContext {
   static instances: FakeAudioContext[] = [];
   params: FakeParam[] = [];
+  waveShapers: Array<FakeNode & { curve: Float32Array<ArrayBuffer> | null; oversample: string }> = [];
+  analyserData: readonly number[] = [0];
   currentTime = 0;
   state = 'running';
   destination = new FakeNode();
@@ -85,20 +87,29 @@ class FakeAudioContext {
       Q: this.param(1),
     });
   }
-  createDynamicsCompressor() {
-    return Object.assign(new FakeNode(), {
-      threshold: this.param(-24),
-      knee: this.param(30),
-      ratio: this.param(12),
-      attack: this.param(0.003),
-      release: this.param(0.25),
+  createWaveShaper() {
+    const node = Object.assign(new FakeNode(), {
+      curve: null as Float32Array<ArrayBuffer> | null,
+      oversample: 'none',
     });
+    this.waveShapers.push(node);
+    return node;
   }
   createMediaStreamDestination() {
     return Object.assign(new FakeNode(), { stream: {} });
   }
   createConstantSource() {
     return Object.assign(new FakeNode(), { offset: this.param(1), start(): void {} });
+  }
+  createAnalyser() {
+    return Object.assign(new FakeNode(), {
+      fftSize: 2048,
+      getFloatTimeDomainData: (buffer: Float32Array): void => {
+        for (let i = 0; i < buffer.length; i++) {
+          buffer[i] = this.analyserData[i % this.analyserData.length];
+        }
+      },
+    });
   }
   createChannelSplitter() {
     return new FakeNode();
@@ -145,6 +156,24 @@ afterEach(() => {
 });
 
 // ── No-graph policy paths (context creation forbidden) ─────────────────
+
+describe('channel level meter tap', () => {
+  it('returns silence without force-creating an AudioContext', () => {
+    forbidAudio();
+    expect(new Mixer().readChannelLevel('A')).toEqual({ meanAbsolute: 0, clipped: false });
+  });
+
+  it('reads mean absolute level rather than sample peak', () => {
+    const Audio = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    Audio.instances[0].analyserData = [1, -0.5, 0.25, 0];
+    expect(mixer.readChannelLevel('A')).toEqual({
+      meanAbsolute: (1 + 0.5 + 0.25) / 4,
+      clipped: true,
+    });
+  });
+});
 
 describe('automation overlay — no side-effectful context creation', () => {
   it('engage/write/disengage with no graph never create a context', () => {
@@ -384,7 +413,20 @@ describe('automation overlay — node ownership round trip', () => {
 });
 
 describe('master recording tap', () => {
-  it('stays post-limiter across output routing changes and disconnects independently', async () => {
+  it('builds bounded final ceilings for Master and Cue', () => {
+    const Fake = withFakeAudio();
+    const mixer = new Mixer();
+    mixer.portFor('A').ensureAudio();
+    const { waveShapers } = Fake.instances[0];
+    expect(waveShapers).toHaveLength(2);
+    for (const ceiling of waveShapers) {
+      expect(ceiling.curve?.[0]).toBeCloseTo(-Math.pow(10, -2 / 20), 6);
+      expect(ceiling.curve?.at(-1)).toBeCloseTo(Math.pow(10, -2 / 20), 6);
+      expect(ceiling.oversample).toBe('none');
+    }
+  });
+
+  it('stays post-ceiling across output routing changes and disconnects independently', async () => {
     withFakeAudio();
     const mixer = new Mixer();
     const tap = mixer.createMasterRecordingTap();

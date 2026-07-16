@@ -1,5 +1,5 @@
 import type { ChannelId } from '../../playback/mixer';
-import type { Binding, DeckFeedback, LedAddress, Mapping } from '../mapping';
+import type { Binding, DeckFeedback, LedAddress, Mapping, MeterAddress } from '../mapping';
 
 interface DeckMidi {
   deck: ChannelId;
@@ -48,6 +48,26 @@ const led = (channel: number, number: number): LedAddress => ({
   channel,
   number,
   onVelocity: 0x7f,
+});
+
+/**
+ * Channel level-meter output (four-deck-performance 36). AlphaTheta DDJ
+ * channel meters are a CONTROL-CHANGE output on each deck's channel — the
+ * device drives its five-segment LED ladder from CC 2 on deck channels 0–3.
+ * Official E1 MIDI-OUT ranges (hardware-confirmed 2026-07-16):
+ *   0x00–0x25 dark; 0x26–0x40 one green; 0x41–0x56 two greens;
+ *   0x57–0x64 + one orange; 0x65–0x76 + two oranges;
+ *   0x77–0x7f + red.
+ * Mixxx's Pioneer mapping caps ordinary `vu_meter` at 0x75 and sends 0x77
+ * only when `peak_indicator` reports clipping. We mirror that distinction.
+ */
+const METER_CC = 2;
+const meter = (channel: number): MeterAddress => ({
+  channel,
+  number: METER_CC,
+  minValue: 0,
+  levelMaxValue: 0x75,
+  peakValue: 0x77,
 });
 
 function deckBindings({ deck, channel, padChannel, shiftedPadChannel }: DeckMidi): Binding[] {
@@ -239,5 +259,8 @@ export const DDJ_GRV6: Mapping = {
   ],
   feedback: {
     decks: Object.fromEntries(DECKS.map((entry) => [entry.deck, deckFeedback(entry)])),
+    // Each fixed A–D channel meter on its own deck channel — the meter
+    // follows only that channel's signal (channel isolation).
+    meters: Object.fromEntries(DECKS.map((entry) => [entry.deck, meter(entry.channel)])),
   },
 };

@@ -4,12 +4,12 @@
  * Signal chain per channel:
  *   deck envelopes -> channel input -> trim -> 3-band isolator EQ ->
  *   sweep filter -> channel fader -> crossfader gain -> master gain ->
- *   safety limiter (always on) -> destination
+ *   -2 dBFS sample ceiling (always on) -> destination
  *
  * Cue bus (headphone-cue, ADR 0017), all in the same graph/clock:
  *   per-channel PFL tap (post-EQ/filter, pre-fader) -> cue sum ->\
  *     cue-side blend gain  \
- *                           +-> cue gain (cue level) -> cue limiter ->
+ *                           +-> cue gain (cue level) -> cue ceiling ->
  *   program -> master-side /    same-device: merger into the main
  *     blend gain (cue/mix)      destination; cross-device: MediaStream
  *                               bridge -> second context (cueBridge.ts)
@@ -67,8 +67,11 @@ import {
   channelCrossfaderGain,
   cueLevelToGain,
   cueMixGains,
+  MASTER_UNITY_VALUE,
+  masterValueToGain,
   trimToGain,
 } from './mixerMath';
+import { samplePeakCeilingCurve } from './gainStaging';
 
 export const CHANNEL_IDS = ['A', 'B', 'C', 'D'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
@@ -80,9 +83,16 @@ export interface DeckAudioPort {
 
 export interface MasterRecordingTap {
   ctx: AudioContext;
-  /** Unity-gain post-limiter source. Connect the recorder input here. */
+  /** Unity-gain post-ceiling source. Connect the recorder input here. */
   input: AudioNode;
   disconnect(): void;
+}
+
+/** One channel-meter sample: Mixxx-style mean absolute level plus a
+ * separate clipping flag (its `vu_meter` / `peak_indicator` split). */
+export interface ChannelLevelSample {
+  meanAbsolute: number;
+  clipped: boolean;
 }
 
 /** Per-channel control state, [0,1] except filter [-1,1] and pfl (bool). */
@@ -133,6 +143,9 @@ export const CUE_LEVEL_DEFAULT = 0.7;
  * the PRD's "cue-heavy" default landed as 0.25 and got dialed to 0). */
 export const CUE_MIX_DEFAULT = 0;
 
+/** Explicit 0 dB Master position; the final quarter-turn reaches +6 dB. */
+export const MASTER_LEVEL_DEFAULT = MASTER_UNITY_VALUE;
+
 function makeFilter(
   ctx: AudioContext,
   type: 'lowpass' | 'highpass',
@@ -149,16 +162,17 @@ function chain(nodes: AudioNode[]): void {
   for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
 }
 
-/** Safety limiter — two summed full-scale tracks clip otherwise. Used on
- * both bus outputs (master and cue). */
-function makeLimiter(ctx: AudioContext): DynamicsCompressorNode {
-  const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -3;
-  limiter.knee.value = 0;
-  limiter.ratio.value = 20;
-  limiter.attack.value = 0.003;
-  limiter.release.value = 0.25;
-  return limiter;
+const LIVE_CEILING_CURVE = samplePeakCeilingCurve();
+
+/** Transparent-below-threshold final sample ceiling (ADR 0034). The former
+ * DynamicsCompressorNode added makeup gain, compressed ordinary mixes, and
+ * still overshot above 0 dBFS. Neutral trim now provides summing headroom;
+ * this node only bounds mistakes/transients at -2 dBFS. */
+function makeSamplePeakCeiling(ctx: AudioContext): WaveShaperNode {
+  const ceiling = ctx.createWaveShaper();
+  ceiling.curve = LIVE_CEILING_CURVE;
+  ceiling.oversample = 'none';
+  return ceiling;
 }
 
 /**
@@ -190,6 +204,13 @@ class ChannelStrip {
   readonly faderGain: GainNode;
   readonly crossfadeGain: GainNode;
   readonly pflGain: GainNode;
+  /** Level-meter tap (four-deck-performance 36): reads the channel's own
+   * signal post-EQ/filter, pre-fader — the same tap point as the PFL bus,
+   * so a channel meters whether or not its fader is up (DJ-mixer behavior).
+   * An AnalyserNode is a pure sink (no downstream), so it never alters the
+   * audio. */
+  readonly meterAnalyser: AnalyserNode;
+  private readonly meterBuffer: Float32Array<ArrayBuffer>;
 
   constructor(ctx: AudioContext, state: ChannelState) {
     this.input = ctx.createGain();
@@ -242,10 +263,32 @@ class ChannelStrip {
     this.pflGain = ctx.createGain();
     this.pflGain.gain.value = state.pfl ? 1 : 0;
 
+    this.meterAnalyser = ctx.createAnalyser();
+    // Small window: the bridge samples at ~display rate and wants the recent
+    // mean-absolute level used by Mixxx's EngineVuMeter, not sample peak.
+    this.meterAnalyser.fftSize = 1024;
+    this.meterBuffer = new Float32Array(new ArrayBuffer(this.meterAnalyser.fftSize * 4));
+
     sum.connect(this.sweep);
     this.sweep.connect(this.faderGain);
     this.sweep.connect(this.pflGain);
+    this.sweep.connect(this.meterAnalyser);
     this.faderGain.connect(this.crossfadeGain);
+  }
+
+  /** Mean absolute sample over the analyser window. This matches Mixxx's
+   * EngineVuMeter input statistic (`sumAbsPerChannel`) and avoids mastered
+   * tracks sitting on red merely because their sample peaks approach 0 dBFS. */
+  levelSample(): ChannelLevelSample {
+    this.meterAnalyser.getFloatTimeDomainData(this.meterBuffer);
+    let sum = 0;
+    let clipped = false;
+    for (let i = 0; i < this.meterBuffer.length; i++) {
+      const magnitude = Math.abs(this.meterBuffer[i]);
+      sum += magnitude;
+      if (magnitude >= 1) clipped = true;
+    }
+    return { meanAbsolute: sum / this.meterBuffer.length, clipped };
   }
 }
 
@@ -253,14 +296,14 @@ export class Mixer {
   private ctx: AudioContext | null = null;
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
-  private masterLimiter: DynamicsCompressorNode | null = null;
-  /** Stable post-limiter fan-out. Routing rewires this node; recorder taps
-   * hang directly off the limiter and therefore survive route changes. */
+  private masterCeiling: WaveShaperNode | null = null;
+  /** Stable post-ceiling fan-out. Routing rewires this node; recorder taps
+   * hang directly off the ceiling and therefore survive route changes. */
   private masterOutput: GainNode | null = null;
   private cueGain: GainNode | null = null;
   private blendCueGain: GainNode | null = null;
   private blendMasterGain: GainNode | null = null;
-  private cueLimiter: DynamicsCompressorNode | null = null;
+  private cueCeiling: WaveShaperNode | null = null;
   private cueBridge: CueBridge | null = null;
   /** Live merger wiring on the main destination (explicit pairs). */
   private outputWiring: {
@@ -302,7 +345,7 @@ export class Mixer {
    * engaged after it (the engage/disengage pairs of two surfaces can
    * interleave: editor audition ↔ set Conductor). */
   private automationOwner: symbol | null = null;
-  private master = 1; // 0..1
+  private master = MASTER_LEVEL_DEFAULT; // control position 0..1
   /** Master bus output device (headphone-cue 01); null = system default. */
   private masterSinkId: string | null = null;
   /** Output pair on the master sink; null = device default. */
@@ -328,12 +371,12 @@ export class Mixer {
         D: new ChannelStrip(ctx, this.channels.D),
       };
       const masterGain = ctx.createGain();
-      masterGain.gain.value = this.master;
+      masterGain.gain.value = masterValueToGain(this.master);
 
-      // Always-on master safety limiter.
-      const limiter = makeLimiter(ctx);
+      // Always-on live sample ceiling (ADR 0034).
+      const masterCeiling = makeSamplePeakCeiling(ctx);
       const masterOutput = ctx.createGain();
-      limiter.connect(masterOutput);
+      masterCeiling.connect(masterOutput);
 
       // "Program" = the summed post-crossfader signal, pre master volume —
       // what the room hears, before how loud the room hears it. The cue/mix
@@ -341,12 +384,11 @@ export class Mixer {
       const program = ctx.createGain();
       for (const channel of CHANNEL_IDS) strips[channel].crossfadeGain.connect(program);
       program.connect(masterGain);
-      masterGain.connect(limiter);
+      masterGain.connect(masterCeiling);
 
       // Cue bus (headphone-cue 02/03, ADR 0017): PFL taps and the master
       // blend are mixed IN THE MAIN GRAPH and leave over the MediaStream
-      // bridge. Its own safety limiter — two full-scale cued tracks clip
-      // like the master case above.
+      // bridge. Its own sample ceiling guards summed PFL overloads.
       const cueSum = ctx.createGain();
       for (const channel of CHANNEL_IDS) strips[channel].pflGain.connect(cueSum);
       const { cue: cueSide, master: masterSide } = cueMixGains(this.cueMix);
@@ -356,14 +398,14 @@ export class Mixer {
       blendMasterGain.gain.value = masterSide;
       const cueGain = ctx.createGain();
       cueGain.gain.value = cueLevelToGain(this.cueLevel);
-      const cueLimiter = makeLimiter(ctx);
+      const cueCeiling = makeSamplePeakCeiling(ctx);
       const cueBridge = new CueBridge(ctx);
       cueSum.connect(blendCueGain);
       program.connect(blendMasterGain);
       blendCueGain.connect(cueGain);
       blendMasterGain.connect(cueGain);
-      cueGain.connect(cueLimiter);
-      // cueLimiter's downstream (merger or bridge) is wired per route by
+      cueGain.connect(cueCeiling);
+      // cueCeiling's downstream (merger or bridge) is wired per route by
       // applyOutputRouting below.
 
       // The suspender guard (see cueBridge.ts): the main clock drives every
@@ -373,12 +415,12 @@ export class Mixer {
       this.ctx = ctx;
       this.strips = strips;
       this.masterGain = masterGain;
-      this.masterLimiter = limiter;
+      this.masterCeiling = masterCeiling;
       this.masterOutput = masterOutput;
       this.cueGain = cueGain;
       this.blendCueGain = blendCueGain;
       this.blendMasterGain = blendMasterGain;
-      this.cueLimiter = cueLimiter;
+      this.cueCeiling = cueCeiling;
       this.cueBridge = cueBridge;
 
       // Reapply position-dependent settings on the fresh graph. These are
@@ -529,12 +571,12 @@ export class Mixer {
     return this.ensure().ctx;
   }
 
-  /** A route-independent tap of exactly what leaves the master limiter. */
+  /** A route-independent tap of exactly what leaves the live Master ceiling. */
   createMasterRecordingTap(): MasterRecordingTap {
     const { ctx } = this.ensure();
-    const limiter = this.masterLimiter!;
+    const ceiling = this.masterCeiling!;
     const input = ctx.createGain();
-    limiter.connect(input);
+    ceiling.connect(input);
     let connected = true;
     return {
       ctx,
@@ -542,10 +584,23 @@ export class Mixer {
       disconnect: () => {
         if (!connected) return;
         connected = false;
-        limiter.disconnect(input);
+        ceiling.disconnect(input);
         input.disconnect();
       },
     };
+  }
+
+  /**
+   * Recent mean-absolute level of a channel's signal, post-EQ/
+   * filter and pre-fader (four-deck-performance 36) — the level-meter tap.
+   * Reads the LIVE graph only (never force-creates a context: a background
+   * meter sampler must not leak contexts the way headphone-cue 06 did);
+   * returns 0 with no graph, which the meter shows as dark.
+   */
+  readChannelLevel(channel: ChannelId): ChannelLevelSample {
+    const live = this.liveGraph();
+    if (!live) return { meanAbsolute: 0, clipped: false };
+    return live.strips[channel].levelSample();
   }
 
   /** The audio access a deck is constructed against. */
@@ -659,7 +714,7 @@ export class Mixer {
     this.master = value;
     this.notify();
     const { ctx } = this.ensure();
-    if (this.masterGain) rampGain(ctx, this.masterGain.gain, value);
+    if (this.masterGain) rampGain(ctx, this.masterGain.gain, masterValueToGain(value));
   }
 
   /**
@@ -701,8 +756,8 @@ export class Mixer {
   private async doApplyOutputRouting(): Promise<void> {
     const ctx = this.ctx;
     const masterOutput = this.masterOutput;
-    const cueLimiter = this.cueLimiter;
-    if (!ctx || ctx.state === 'closed' || !masterOutput || !cueLimiter) return;
+    const cueCeiling = this.cueCeiling;
+    if (!ctx || ctx.state === 'closed' || !masterOutput || !cueCeiling) return;
 
     const plan = planOutput({
       masterSinkId: this.masterSinkId,
@@ -714,7 +769,7 @@ export class Mixer {
     await ctx.setSinkId(plan.mainSinkId);
 
     masterOutput.disconnect();
-    cueLimiter.disconnect();
+    cueCeiling.disconnect();
     if (this.outputWiring) {
       this.outputWiring.merger.disconnect();
       this.outputWiring.masterSplit.disconnect();
@@ -767,7 +822,7 @@ export class Mixer {
       let cueSplit: ChannelSplitterNode | null = null;
       if (cuePairInMain) {
         cueSplit = ctx.createChannelSplitter(2);
-        cueLimiter.connect(cueSplit);
+        cueCeiling.connect(cueSplit);
         cueSplit.connect(merger, 0, cuePairInMain.left);
         cueSplit.connect(merger, 1, cuePairInMain.right);
       }
@@ -784,7 +839,7 @@ export class Mixer {
     if (plan.cueBridge) {
       try {
         await this.cueBridge!.setSink(plan.cueBridge.sinkId, plan.cueBridge.pair);
-        cueLimiter.connect(this.cueBridge!.input);
+        cueCeiling.connect(this.cueBridge!.input);
       } catch (err) {
         // Cue device gone / pair unreachable: Cue bus disabled, master
         // unaffected (headphone-cue PRD).
@@ -889,12 +944,12 @@ export class Mixer {
     this.ctx = null;
     this.strips = null;
     this.masterGain = null;
-    this.masterLimiter = null;
+    this.masterCeiling = null;
     this.masterOutput = null;
     this.cueGain = null;
     this.blendCueGain = null;
     this.blendMasterGain = null;
-    this.cueLimiter = null;
+    this.cueCeiling = null;
     this.cueBridge = null;
     this.outputWiring = null;
   }

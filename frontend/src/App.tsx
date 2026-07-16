@@ -16,6 +16,7 @@ import { DeckProvider, DeckScope } from './contexts/DeckContext';
 import { MidiControllerBridge } from './components/MidiControllerBridge';
 import { MidiControlRegistrar } from './components/MidiControlRegistrar';
 import { MidiFeedbackBridge } from './components/MidiFeedbackBridge';
+import { MidiLevelMeterBridge } from './components/MidiLevelMeterBridge';
 import { AudioRoutingBridge } from './components/AudioRoutingBridge';
 import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import { SetSpaceTransport } from './sets/SetSpaceTransport';
@@ -125,6 +126,7 @@ function App() {
         <MidiControllerBridge />
         <MidiControlRegistrar />
         <MidiFeedbackBridge />
+        <MidiLevelMeterBridge />
         <AudioRoutingBridge />
         <AnalysisPendingBridge />
         {/* Live re-plan (sets 24): plan-input subscription for the

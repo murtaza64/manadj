@@ -127,6 +127,38 @@ USB connection; E1 MIDI list cross-checked. No undocumented writes attempted.
   hot reconnect all retain full soft takeover for every absolute control;
   a layer change marks all shared controls stale/unsynced.
 
+## Channel level meters (issue 36, E1 + hardware verified 2026-07-16)
+
+The four Mixer channel level indicators are MIDI-OUT (`## Mixer` above). The
+manadj driver (four-deck-performance 36) sends a per-channel CONTROL-CHANGE
+on each deck channel (0–3 = A–D), CC 2. The official E1 MIDI-OUT ranges are:
+
+- `0x00–0x25`: dark
+- `0x26–0x40`: one green
+- `0x41–0x56`: two greens
+- `0x57–0x64`: two greens + one orange
+- `0x65–0x76`: two greens + two oranges
+- `0x77–0x7f`: all above + red
+
+The signal
+tapped is each channel's own post-EQ/filter, pre-fader level (the PFL tap
+point in `mixer.ts`), so a channel meters whether or not its fader is up.
+
+Level shaping follows Mixxx's `EngineVuMeter` (`src/engine/enginevumeter.cpp`):
+sample-window mean absolute value, normalized as
+`log10(32767 * meanAbs / 1000 + 1)`, sampled at 30 Hz, immediate attack and
+10% decay per tick. Normal VU is capped at `0x75`, matching Mixxx's Pioneer
+mapping; it cannot enter the E1 red range. A separate sample-clipping flag
+sends `0x77` and holds red for 500 ms, matching Mixxx `peak_indicator`.
+This avoids both the initial sample-peak implementation's constant redline
+and the second implementation's mistake of letting ordinary VU reach red.
+
+Master-headroom 01 sets trim center to -6 dB (-18..+6 dB throw). Orange at
+the loudest passage is the target, matching the official manual. The meter
+tap includes trim/EQ/filter but excludes fader/crossfader/Master: red means
+that channel exceeded full-scale, while summed overload is handled by the
+separate Master ceiling.
+
 ## Lamp memory (issue 28 probe, hardware-verified 2026-07-15)
 
 - MASTER TEMPO lamp (note 26): OFF=0x00 / ON=0x7F on ALL four channels; no

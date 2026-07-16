@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MASTER_UNITY_VALUE,
   channelFaderToGain,
   channelCrossfaderGain,
   crossfaderGains,
   cueLevelToGain,
   cueMixGains,
+  masterValueToGain,
   trimToGain,
 } from './mixerMath';
 
@@ -34,21 +36,38 @@ describe('channelFaderToGain', () => {
 });
 
 describe('trimToGain', () => {
-  it('is unity at center', () => {
-    expect(trimToGain(0.5)).toBe(1);
+  it('leaves 6 dB of summing headroom at center', () => {
+    expect(trimToGain(0.5)).toBeCloseTo(Math.pow(10, -6 / 20), 10);
   });
 
-  it('boosts +12 dB at the top', () => {
-    expect(trimToGain(1)).toBeCloseTo(Math.pow(10, 12 / 20), 10);
+  it('boosts to +6 dB at the top', () => {
+    expect(trimToGain(1)).toBeCloseTo(Math.pow(10, 6 / 20), 10);
   });
 
-  it('cuts -12 dB at the bottom', () => {
-    expect(trimToGain(0)).toBeCloseTo(Math.pow(10, -12 / 20), 10);
+  it('cuts to -18 dB at the bottom', () => {
+    expect(trimToGain(0)).toBeCloseTo(Math.pow(10, -18 / 20), 10);
   });
 
   it('clamps out-of-range values', () => {
-    expect(trimToGain(-0.5)).toBeCloseTo(Math.pow(10, -12 / 20), 10);
-    expect(trimToGain(1.5)).toBeCloseTo(Math.pow(10, 12 / 20), 10);
+    expect(trimToGain(-0.5)).toBeCloseTo(Math.pow(10, -18 / 20), 10);
+    expect(trimToGain(1.5)).toBeCloseTo(Math.pow(10, 6 / 20), 10);
+  });
+});
+
+describe('masterValueToGain', () => {
+  it('is silent at the bottom and unity at the explicit default', () => {
+    expect(masterValueToGain(0)).toBe(0);
+    expect(masterValueToGain(MASTER_UNITY_VALUE)).toBe(1);
+  });
+
+  it('provides +6 dB at maximum', () => {
+    expect(masterValueToGain(1)).toBeCloseTo(Math.pow(10, 6 / 20), 10);
+  });
+
+  it('uses an audio taper below unity and clamps its input', () => {
+    expect(masterValueToGain(MASTER_UNITY_VALUE / 2)).toBeCloseTo(0.25, 10);
+    expect(masterValueToGain(-1)).toBe(0);
+    expect(masterValueToGain(2)).toBeCloseTo(Math.pow(10, 6 / 20), 10);
   });
 });
 

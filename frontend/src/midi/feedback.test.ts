@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BEAT_FLASH_FALLBACK_PERIOD_MS,
   BLINK_INTERVAL_MS,
+  encodeMeter,
+  meterOffMessage,
   allOffMessages,
   beatFlashAnimationDelayMs,
   beatFlashFraction,
@@ -530,5 +532,44 @@ describe('allOffMessages', () => {
     expect(messages).toContainEqual([0x96, 0x1c, 0x00]);
     expect(messages).toContainEqual([0x97, 0x17, 0x00]);
     expect(messages).toContainEqual([0x97, 0x18, 0x00]);
+  });
+});
+
+describe('channel level meters (four-deck-performance 36)', () => {
+  const meterFeedback = {
+    decks: {},
+    meters: {
+      A: { channel: 0, number: 2, minValue: 0, levelMaxValue: 0x75, peakValue: 0x77 },
+      B: { channel: 1, number: 2, minValue: 0, levelMaxValue: 0x75, peakValue: 0x77 },
+      C: { channel: 2, number: 2, minValue: 0, levelMaxValue: 0x75, peakValue: 0x77 },
+      D: { channel: 3, number: 2, minValue: 0, levelMaxValue: 0x75, peakValue: 0x77 },
+    },
+  };
+
+  it('encodeMeter emits a CC on the channel with a scaled value', () => {
+    // Loud normal level stops below red; clipping explicitly enters red.
+    expect(encodeMeter(meterFeedback.meters.C, 1)).toEqual([0xb2, 2, 0x75]);
+    expect(encodeMeter(meterFeedback.meters.C, 0.5, true)).toEqual([0xb2, 2, 0x77]);
+    // Silence → minValue (dark).
+    expect(encodeMeter(meterFeedback.meters.A, 0)).toEqual([0xb0, 2, 0]);
+  });
+
+  it('isolates each meter to its own channel', () => {
+    expect(encodeMeter(meterFeedback.meters.A, 1)[0]).toBe(0xb0);
+    expect(encodeMeter(meterFeedback.meters.B, 1)[0]).toBe(0xb1);
+    expect(encodeMeter(meterFeedback.meters.C, 1)[0]).toBe(0xb2);
+    expect(encodeMeter(meterFeedback.meters.D, 1)[0]).toBe(0xb3);
+  });
+
+  it('meterOffMessage sends the silent value', () => {
+    expect(meterOffMessage(meterFeedback.meters.D)).toEqual([0xb3, 2, 0]);
+  });
+
+  it('allOffMessages clears every meter to silent', () => {
+    const messages = allOffMessages(meterFeedback);
+    expect(messages).toContainEqual([0xb0, 2, 0]);
+    expect(messages).toContainEqual([0xb1, 2, 0]);
+    expect(messages).toContainEqual([0xb2, 2, 0]);
+    expect(messages).toContainEqual([0xb3, 2, 0]);
   });
 });

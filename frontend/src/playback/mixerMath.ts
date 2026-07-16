@@ -5,6 +5,12 @@
  */
 
 const TRIM_RANGE_DB = 12;
+/** Center leaves 6 dB per-channel headroom for two unity channels to sum.
+ * The physical throw remains 24 dB wide: -18 dB .. +6 dB. */
+export const TRIM_CENTER_DB = -6;
+/** Master reserves its final quarter-turn for make-up gain. */
+export const MASTER_UNITY_VALUE = 0.75;
+export const MASTER_MAX_DB = 6;
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
@@ -19,10 +25,22 @@ export function channelFaderToGain(value: number): number {
   return v * v;
 }
 
-/** Trim position [0,1] → linear gain. Center = unity; ±12 dB at the ends. */
+/** Trim position [0,1] → linear gain. Center = -6 dB; range -18 .. +6 dB. */
 export function trimToGain(value: number): number {
   const v = clamp01(value);
-  return Math.pow(10, ((v - 0.5) * 2 * TRIM_RANGE_DB) / 20);
+  return Math.pow(10, (TRIM_CENTER_DB + (v - 0.5) * 2 * TRIM_RANGE_DB) / 20);
+}
+
+/** Master position [0,1] → gain. Below unity it uses an audio taper; the
+ * final quarter-turn rises linearly in dB to +6 dB. */
+export function masterValueToGain(value: number): number {
+  const v = clamp01(value);
+  if (v <= MASTER_UNITY_VALUE) {
+    const normalized = v / MASTER_UNITY_VALUE;
+    return normalized * normalized;
+  }
+  const boostDb = ((v - MASTER_UNITY_VALUE) / (1 - MASTER_UNITY_VALUE)) * MASTER_MAX_DB;
+  return Math.pow(10, boostDb / 20);
 }
 
 /**
@@ -56,7 +74,8 @@ export function cueMixGains(position: number): { cue: number; master: number } {
  * Dipless curve: a channel is at unity anywhere in its own half INCLUDING
  * center, and fades linearly to a full kill at the opposite end. Center is
  * transparent (no -3 dB dip — the library's single-deck loudness must not
- * change), and the summed center case is the limiter's job.
+ * change). Neutral trim supplies the expected two-channel summing headroom;
+ * the final sample ceiling guards correlated/extreme overloads.
  */
 export function crossfaderGains(position: number): { a: number; b: number } {
   const x = Math.max(-1, Math.min(1, position));
