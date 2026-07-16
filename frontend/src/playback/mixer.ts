@@ -78,6 +78,13 @@ export interface DeckAudioPort {
   ensureAudio(): { ctx: AudioContext; input: AudioNode };
 }
 
+export interface MasterRecordingTap {
+  ctx: AudioContext;
+  /** Unity-gain post-limiter source. Connect the recorder input here. */
+  input: AudioNode;
+  disconnect(): void;
+}
+
 /** Per-channel control state, [0,1] except filter [-1,1] and pfl (bool). */
 export interface ChannelState {
   trim: number;
@@ -247,6 +254,9 @@ export class Mixer {
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
   private masterLimiter: DynamicsCompressorNode | null = null;
+  /** Stable post-limiter fan-out. Routing rewires this node; recorder taps
+   * hang directly off the limiter and therefore survive route changes. */
+  private masterOutput: GainNode | null = null;
   private cueGain: GainNode | null = null;
   private blendCueGain: GainNode | null = null;
   private blendMasterGain: GainNode | null = null;
@@ -322,6 +332,8 @@ export class Mixer {
 
       // Always-on master safety limiter.
       const limiter = makeLimiter(ctx);
+      const masterOutput = ctx.createGain();
+      limiter.connect(masterOutput);
 
       // "Program" = the summed post-crossfader signal, pre master volume —
       // what the room hears, before how loud the room hears it. The cue/mix
@@ -362,6 +374,7 @@ export class Mixer {
       this.strips = strips;
       this.masterGain = masterGain;
       this.masterLimiter = limiter;
+      this.masterOutput = masterOutput;
       this.cueGain = cueGain;
       this.blendCueGain = blendCueGain;
       this.blendMasterGain = blendMasterGain;
@@ -516,6 +529,25 @@ export class Mixer {
     return this.ensure().ctx;
   }
 
+  /** A route-independent tap of exactly what leaves the master limiter. */
+  createMasterRecordingTap(): MasterRecordingTap {
+    const { ctx } = this.ensure();
+    const limiter = this.masterLimiter!;
+    const input = ctx.createGain();
+    limiter.connect(input);
+    let connected = true;
+    return {
+      ctx,
+      input,
+      disconnect: () => {
+        if (!connected) return;
+        connected = false;
+        limiter.disconnect(input);
+        input.disconnect();
+      },
+    };
+  }
+
   /** The audio access a deck is constructed against. */
   portFor(channel: ChannelId): DeckAudioPort {
     return {
@@ -668,9 +700,9 @@ export class Mixer {
    */
   private async doApplyOutputRouting(): Promise<void> {
     const ctx = this.ctx;
-    const masterLimiter = this.masterLimiter;
+    const masterOutput = this.masterOutput;
     const cueLimiter = this.cueLimiter;
-    if (!ctx || ctx.state === 'closed' || !masterLimiter || !cueLimiter) return;
+    if (!ctx || ctx.state === 'closed' || !masterOutput || !cueLimiter) return;
 
     const plan = planOutput({
       masterSinkId: this.masterSinkId,
@@ -681,7 +713,7 @@ export class Mixer {
 
     await ctx.setSinkId(plan.mainSinkId);
 
-    masterLimiter.disconnect();
+    masterOutput.disconnect();
     cueLimiter.disconnect();
     if (this.outputWiring) {
       this.outputWiring.merger.disconnect();
@@ -698,7 +730,7 @@ export class Mixer {
     if (plan.masterPairInMain && needed(plan.masterPairInMain) > max) {
       // An explicit pair is user/hardware knowledge: fail master routing
       // (caller falls back) rather than silently playing from another jack.
-      masterLimiter.connect(ctx.destination);
+      masterOutput.connect(ctx.destination);
       throw new RangeError(
         `master output pair ${plan.masterPairInMain.left + 1}/${plan.masterPairInMain.right + 1} ` +
           `is unavailable on ${max}-channel sink`
@@ -729,7 +761,7 @@ export class Mixer {
       const merger = ctx.createChannelMerger(channels);
       const masterPair = plan.masterPairInMain ?? { left: 0, right: 1 };
       const masterSplit = ctx.createChannelSplitter(2);
-      masterLimiter.connect(masterSplit);
+      masterOutput.connect(masterSplit);
       masterSplit.connect(merger, 0, masterPair.left);
       masterSplit.connect(merger, 1, masterPair.right);
       let cueSplit: ChannelSplitterNode | null = null;
@@ -746,7 +778,7 @@ export class Mixer {
           (cuePairInMain ? `, cue on outputs ${cuePairInMain.left + 1}/${cuePairInMain.right + 1}` : '')
       );
     } else {
-      masterLimiter.connect(ctx.destination);
+      masterOutput.connect(ctx.destination);
     }
 
     if (plan.cueBridge) {
@@ -858,6 +890,7 @@ export class Mixer {
     this.strips = null;
     this.masterGain = null;
     this.masterLimiter = null;
+    this.masterOutput = null;
     this.cueGain = null;
     this.blendCueGain = null;
     this.blendMasterGain = null;

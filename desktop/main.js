@@ -3,10 +3,11 @@
 // Attaches to an already-running manadj (`make dev`); owns no processes or
 // state. See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
 
-const { app, BrowserWindow, net, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, session } = require("electron");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { registerRecordingIpc } = require("./recording");
 
 // The Vite dev target has no CSP, so Electron's renderer-console security
 // warning is permanent noise — especially now that renderer console is
@@ -187,6 +188,7 @@ function createWindow() {
     // Dark paint during navigation (splash → app) — never a white flash.
     backgroundColor: "#111111",
     webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
       // A DJ app must never have rAF/timers throttled while occluded:
       // audio would keep playing while UI clocks and waveforms stall.
       backgroundThrottling: false,
@@ -247,6 +249,8 @@ app.whenReady().then(() => {
     // logo.png missing/unreadable — keep the default icon
   }
   assertChannelLabels();
+  const disposeRecordingIpc = registerRecordingIpc({ app, dialog, ipcMain });
+  app.once("before-quit", disposeRecordingIpc);
   createWindow();
 });
 

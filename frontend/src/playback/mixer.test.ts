@@ -39,10 +39,21 @@ class FakeParam {
 }
 
 class FakeNode {
-  connect(): FakeNode {
-    return this;
+  readonly inputs = new Set<FakeNode>();
+  readonly outputs = new Set<FakeNode>();
+
+  connect(destination: FakeNode): FakeNode {
+    this.outputs.add(destination);
+    destination.inputs.add(this);
+    return destination;
   }
-  disconnect(): void {}
+  disconnect(destination?: FakeNode): void {
+    const targets = destination ? [destination] : [...this.outputs];
+    for (const target of targets) {
+      this.outputs.delete(target);
+      target.inputs.delete(this);
+    }
+  }
 }
 
 /** Records every AudioParam it creates, for multiset assertions. */
@@ -369,5 +380,21 @@ describe('automation overlay — node ownership round trip', () => {
     expect(fingerprint(revived)).toContain(channelFaderToGain(0.13));
     expect(fingerprint(revived)).not.toContain(channelFaderToGain(0.42)); // base not applied
     expect(mixer.getChannelState('A').fader).toBe(0.42); // base untouched
+  });
+});
+
+describe('master recording tap', () => {
+  it('stays post-limiter across output routing changes and disconnects independently', async () => {
+    withFakeAudio();
+    const mixer = new Mixer();
+    const tap = mixer.createMasterRecordingTap();
+    const input = tap.input as unknown as FakeNode;
+    expect(input.inputs.size).toBe(1);
+
+    await mixer.setMasterSinkId('grv6', { left: 2, right: 3 });
+    expect(input.inputs.size).toBe(1);
+
+    tap.disconnect();
+    expect(input.inputs.size).toBe(0);
   });
 });

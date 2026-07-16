@@ -115,6 +115,49 @@
   box-shadow: 0 0 6px var(--green);
 }
 
+.topbar-recorder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+}
+
+.topbar-recorder select,
+.topbar-recorder button {
+  height: 24px;
+  padding: 0 6px;
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--subtext0);
+  font: 800 9px/1 monospace;
+}
+
+.topbar-recorder select { width: 62px; }
+.topbar-recorder button { cursor: pointer; }
+.topbar-recorder button:disabled { cursor: wait; opacity: 0.65; }
+
+.topbar-record-dot,
+.topbar-record-square {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--red);
+}
+
+.topbar-record-dot { border-radius: 50%; }
+.topbar-recorder.recording .topbar-record-stop {
+  min-width: 58px;
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--base);
+}
+.topbar-recorder.recording .topbar-record-square { background: var(--base); }
+.topbar-recorder.ready .topbar-record-retry {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+.topbar-record-error { color: var(--red); font: 900 12px/1 monospace; }
+
 /* Quantize toggle (looping 01): app-wide, lit green while gestures snap. */
 .topbar-quantize {
   width: 24px;

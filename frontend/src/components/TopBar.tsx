@@ -10,6 +10,7 @@ import { isQuantizeOn, setQuantize, subscribeQuantize } from '../playback/quanti
 import { AudioRoutingPicker } from './AudioRoutingPicker';
 import { AudioOwnershipChip } from './AudioOwnershipChip';
 import { TasksWidget } from './TasksWidget';
+import { MasterRecorderControl } from './MasterRecorderControl';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles' | 'jog-tune';
@@ -76,6 +77,7 @@ export function TopBar({
       </nav>
       <h1 className="topbar-title">{MODES.find((m) => m.id === mode)?.title}</h1>
       <MidiBadge />
+      <MasterRecorderControl />
       <TasksWidget />
       <QuantizeToggle />
       <AudioRoutingPicker />
