@@ -401,7 +401,7 @@ export function MixerStrip({
           defaultValue={MASTER_LEVEL_DEFAULT}
           fill
           onChange={(v) => mixer.setMaster(v)}
-          title="Master volume (double-click = 0 dB; top quarter-turn boosts to +6 dB)"
+          title="Master volume (double-click = 0 dB; upper half boosts to +6 dB)"
           takeover={masterTakeover}
         />
       </div>

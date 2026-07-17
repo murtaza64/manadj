@@ -143,7 +143,7 @@ export const CUE_LEVEL_DEFAULT = 0.7;
  * the PRD's "cue-heavy" default landed as 0.25 and got dialed to 0). */
 export const CUE_MIX_DEFAULT = 0;
 
-/** Explicit 0 dB Master position; the final quarter-turn reaches +6 dB. */
+/** Explicit 0 dB Master position; the upper half reaches +6 dB. */
 export const MASTER_LEVEL_DEFAULT = MASTER_UNITY_VALUE;
 
 function makeFilter(

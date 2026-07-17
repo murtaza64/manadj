@@ -88,8 +88,8 @@ Master.
 - Master and Cue end in a -2 dBFS sample-peak ceiling, linear below the
   threshold. It catches correlated/extreme overloads and reserves
   intersample/DAC headroom. It is a final guard, not a loudness processor.
-- Master uses an audio taper to explicit 0 dB unity at 75%, then provides
-  0..+6 dB over its final quarter-turn. This user-controlled make-up gain
+- Master uses an audio taper to explicit 0 dB unity at 50%, then provides
+  0..+6 dB over its upper half. This user-controlled make-up gain
   precedes the ceiling.
 - The recording tap is post-live-ceiling. The desktop -2 dBFS export
   limiter remains a defensive codec/file boundary and should normally be

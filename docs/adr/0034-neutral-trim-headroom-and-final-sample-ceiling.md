@@ -14,7 +14,7 @@ an undocumented center dip. Master and Cue remove `DynamicsCompressorNode`
 and end in a transfer-linear, -2 dBFS sample-peak ceiling. The recording tap
 is post-ceiling; the file-export ceiling remains boundary defense.
 
-Master has explicit 0 dB unity at 75% and +6 dB at maximum. Boost occurs
+Master has explicit 0 dB unity at 50% and +6 dB at maximum. Boost occurs
 before the final ceiling: it can restore single-track room level after the
 neutral-trim shift, but spends summing headroom rather than bypassing output
 protection.

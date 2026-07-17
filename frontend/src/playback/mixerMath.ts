@@ -8,8 +8,8 @@ const TRIM_RANGE_DB = 12;
 /** Center leaves 6 dB per-channel headroom for two unity channels to sum.
  * The physical throw remains 24 dB wide: -18 dB .. +6 dB. */
 export const TRIM_CENTER_DB = -6;
-/** Master reserves its final quarter-turn for make-up gain. */
-export const MASTER_UNITY_VALUE = 0.75;
+/** Master reserves its upper half for make-up gain. */
+export const MASTER_UNITY_VALUE = 0.5;
 export const MASTER_MAX_DB = 6;
 
 function clamp01(v: number): number {
@@ -32,7 +32,7 @@ export function trimToGain(value: number): number {
 }
 
 /** Master position [0,1] → gain. Below unity it uses an audio taper; the
- * final quarter-turn rises linearly in dB to +6 dB. */
+ * upper half rises linearly in dB to +6 dB. */
 export function masterValueToGain(value: number): number {
   const v = clamp01(value);
   if (v <= MASTER_UNITY_VALUE) {
