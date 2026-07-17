@@ -413,12 +413,12 @@ describe('automation overlay — node ownership round trip', () => {
 });
 
 describe('master recording tap', () => {
-  it('builds bounded final ceilings for Master and Cue', () => {
+  it('builds bounded final ceilings for Master, recording, and Cue', () => {
     const Fake = withFakeAudio();
     const mixer = new Mixer();
     mixer.portFor('A').ensureAudio();
     const { waveShapers } = Fake.instances[0];
-    expect(waveShapers).toHaveLength(2);
+    expect(waveShapers).toHaveLength(3);
     for (const ceiling of waveShapers) {
       expect(ceiling.curve?.[0]).toBeCloseTo(-Math.pow(10, -2 / 20), 6);
       expect(ceiling.curve?.at(-1)).toBeCloseTo(Math.pow(10, -2 / 20), 6);
@@ -427,11 +427,15 @@ describe('master recording tap', () => {
   });
 
   it('stays post-ceiling across output routing changes and disconnects independently', async () => {
-    withFakeAudio();
+    const Fake = withFakeAudio();
     const mixer = new Mixer();
     const tap = mixer.createMasterRecordingTap();
     const input = tap.input as unknown as FakeNode;
     expect(input.inputs.size).toBe(1);
+    const [masterCeiling, recordingCeiling] = Fake.instances[0].waveShapers;
+    expect(input.inputs.has(recordingCeiling)).toBe(true);
+    expect(input.inputs.has(masterCeiling)).toBe(false);
+    expect(recordingCeiling.inputs).not.toEqual(masterCeiling.inputs);
 
     await mixer.setMasterSinkId('grv6', { left: 2, right: 3 });
     expect(input.inputs.size).toBe(1);

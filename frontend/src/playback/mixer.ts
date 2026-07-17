@@ -83,7 +83,7 @@ export interface DeckAudioPort {
 
 export interface MasterRecordingTap {
   ctx: AudioContext;
-  /** Unity-gain post-ceiling source. Connect the recorder input here. */
+  /** Pre-Master, post-recording-ceiling source. Connect the recorder here. */
   input: AudioNode;
   disconnect(): void;
 }
@@ -296,10 +296,11 @@ export class Mixer {
   private ctx: AudioContext | null = null;
   private strips: Record<ChannelId, ChannelStrip> | null = null;
   private masterGain: GainNode | null = null;
-  private masterCeiling: WaveShaperNode | null = null;
-  /** Stable post-ceiling fan-out. Routing rewires this node; recorder taps
-   * hang directly off the ceiling and therefore survive route changes. */
+  /** Stable post-ceiling fan-out. Routing rewires this node. */
   private masterOutput: GainNode | null = null;
+  /** Independent pre-Master recording guard: monitor volume/boost must not
+   * alter the recorded Mix. Recorder taps hang here across route changes. */
+  private recordingCeiling: WaveShaperNode | null = null;
   private cueGain: GainNode | null = null;
   private blendCueGain: GainNode | null = null;
   private blendMasterGain: GainNode | null = null;
@@ -375,6 +376,7 @@ export class Mixer {
 
       // Always-on live sample ceiling (ADR 0034).
       const masterCeiling = makeSamplePeakCeiling(ctx);
+      const recordingCeiling = makeSamplePeakCeiling(ctx);
       const masterOutput = ctx.createGain();
       masterCeiling.connect(masterOutput);
 
@@ -383,6 +385,7 @@ export class Mixer {
       // blend taps it here so the master fader never changes the headphones.
       const program = ctx.createGain();
       for (const channel of CHANNEL_IDS) strips[channel].crossfadeGain.connect(program);
+      program.connect(recordingCeiling);
       program.connect(masterGain);
       masterGain.connect(masterCeiling);
 
@@ -415,8 +418,8 @@ export class Mixer {
       this.ctx = ctx;
       this.strips = strips;
       this.masterGain = masterGain;
-      this.masterCeiling = masterCeiling;
       this.masterOutput = masterOutput;
+      this.recordingCeiling = recordingCeiling;
       this.cueGain = cueGain;
       this.blendCueGain = blendCueGain;
       this.blendMasterGain = blendMasterGain;
@@ -571,10 +574,11 @@ export class Mixer {
     return this.ensure().ctx;
   }
 
-  /** A route-independent tap of exactly what leaves the live Master ceiling. */
+  /** Route-independent pre-Master recording tap. Its own -2 dBFS ceiling
+   * bounds the file without coupling it to monitor Master gain/boost. */
   createMasterRecordingTap(): MasterRecordingTap {
     const { ctx } = this.ensure();
-    const ceiling = this.masterCeiling!;
+    const ceiling = this.recordingCeiling!;
     const input = ctx.createGain();
     ceiling.connect(input);
     let connected = true;
@@ -944,8 +948,8 @@ export class Mixer {
     this.ctx = null;
     this.strips = null;
     this.masterGain = null;
-    this.masterCeiling = null;
     this.masterOutput = null;
+    this.recordingCeiling = null;
     this.cueGain = null;
     this.blendCueGain = null;
     this.blendMasterGain = null;

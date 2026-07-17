@@ -11,8 +11,9 @@ recordings.
 Trim center is -6 dB and its 24 dB throw is -18..+6 dB. The dipless
 crossfader remains unity: headroom is explicit at each channel rather than
 an undocumented center dip. Master and Cue remove `DynamicsCompressorNode`
-and end in a transfer-linear, -2 dBFS sample-peak ceiling. The recording tap
-is post-ceiling; the file-export ceiling remains boundary defense.
+and end in a transfer-linear, -2 dBFS sample-peak ceiling. Recording branches
+from the pre-Master program sum through its own -2 dBFS ceiling, so monitor
+Master gain never changes the file; the export ceiling remains boundary defense.
 
 Master has explicit 0 dB unity at 50% and +6 dB at maximum. Boost occurs
 before the final ceiling: it can restore single-track room level after the

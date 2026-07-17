@@ -91,9 +91,10 @@ Master.
 - Master uses an audio taper to explicit 0 dB unity at 50%, then provides
   0..+6 dB over its upper half. This user-controlled make-up gain
   precedes the ceiling.
-- The recording tap is post-live-ceiling. The desktop -2 dBFS export
+- Recording branches from the program sum before monitor Master gain and
+  passes through an independent -2 dBFS sample ceiling. The desktop export
   limiter remains a defensive codec/file boundary and should normally be
-  inactive. Browser float WAV now receives the same bounded live signal.
+  inactive. Monitor volume/boost cannot alter the file.
 - The ceiling is sample-peak, not a true-peak lookahead limiter. The 2 dB
   reserve is deliberate; physical loopback validates the remaining DAC
   reconstruction risk.
