@@ -116,7 +116,15 @@ export class ActiveMasterRecording {
     this.tap.disconnect();
     try {
       await this.node.flush();
-      if (this.bridge && this.id) await this.bridge.stop(this.id);
+      if (this.bridge && this.id) {
+        const result = await this.bridge.stop(this.id);
+        if (result.bytes === 0) throw new Error('recording captured no audio');
+        console.info(
+          `[recording] captured ${result.bytes} PCM bytes (${result.durationSeconds.toFixed(1)}s)`
+        );
+      } else if (this.chunks.every((chunk) => chunk.length === 0)) {
+        throw new Error('recording captured no audio');
+      }
       return new StoppedMasterRecording(
         this.bridge,
         this.id,

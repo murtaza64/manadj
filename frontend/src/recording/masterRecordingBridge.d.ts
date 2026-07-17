@@ -7,7 +7,7 @@ interface MasterRecordingSaveRequest {
 interface MasterRecordingBridge {
   start(meta: { sampleRate: number; channels: 2 }): Promise<{ id: string }>;
   write(id: string, buffer: ArrayBuffer): void;
-  stop(id: string): Promise<void>;
+  stop(id: string): Promise<{ bytes: number; durationSeconds: number }>;
   save(request: MasterRecordingSaveRequest): Promise<{ canceled: boolean; path?: string }>;
   discard(id: string): Promise<void>;
 }

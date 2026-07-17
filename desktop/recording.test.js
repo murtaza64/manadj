@@ -2,12 +2,14 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const test = require("node:test");
 const {
   ensureRecordingExtension,
   ffmpegRecordingArgs,
   loadLastSaveDirectory,
   registerRecordingIpc,
+  runFfmpeg,
   safeSuggestedName,
   saveLastSaveDirectory,
 } = require("./recording");
@@ -79,6 +81,40 @@ test("allows only one save dialog per stopped recording", async () => {
     assert.deepEqual(await first, { canceled: true });
   } finally {
     dispose();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("production preload delivers PCM ArrayBuffers to Electron main", () => {
+  const electron = require("electron");
+  const output = execFileSync(electron, [path.join(__dirname, "recording-ipc-smoke.js")], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.match(output, /recording IPC bytes=16/);
+});
+
+test("ffmpeg preserves recording duration in WAV and MP3 outputs", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "manadj-recording-codec-test-"));
+  const rawPath = path.join(directory, "one-second.f32le");
+  const sampleRate = 48000;
+  fs.writeFileSync(rawPath, Buffer.alloc(sampleRate * 2 * 4));
+  try {
+    for (const format of ["wav", "mp3"]) {
+      const outputPath = path.join(directory, `out.${format}`);
+      await runFfmpeg(
+        ffmpegRecordingArgs({ rawPath, outputPath, sampleRate, channels: 2, format }),
+      );
+      const duration = Number(
+        execFileSync(
+          "ffprobe",
+          ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", outputPath],
+          { encoding: "utf8" },
+        ).trim(),
+      );
+      assert.ok(Math.abs(duration - 1) < 0.05, `${format} duration was ${duration}`);
+    }
+  } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

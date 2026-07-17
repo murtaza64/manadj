@@ -79,6 +79,7 @@ function runFfmpeg(args) {
 
 function closeSessionStream(session) {
   if (session.status !== "recording") return Promise.resolve();
+  if (session.streamError) return Promise.reject(session.streamError);
   session.status = "stopping";
   return new Promise((resolve, reject) => {
     session.stream.once("error", reject);
@@ -108,19 +109,27 @@ function registerRecordingIpc({ app, dialog, ipcMain }) {
     }
     const id = randomUUID();
     const rawPath = path.join(os.tmpdir(), `manadj-recording-${id}.f32le`);
-    sessions.set(id, {
+    const session = {
       rawPath,
       sampleRate,
       channels,
       status: "recording",
       stream: fs.createWriteStream(rawPath),
+      streamError: null,
+    };
+    // A write error (most notably disk full) can happen long before Stop.
+    // Keep it attached for the session lifetime so Electron never crashes
+    // on an unhandled stream error; Stop surfaces it through the recorder UI.
+    session.stream.on("error", (error) => {
+      session.streamError = error;
     });
+    sessions.set(id, session);
     return { id };
   });
 
   ipcMain.on("recording:chunk", (_event, payload) => {
     const session = sessions.get(payload?.id);
-    if (!session || session.status !== "recording") return;
+    if (!session || session.status !== "recording" || session.streamError) return;
     const data = payload.buffer;
     if (data instanceof ArrayBuffer) session.stream.write(Buffer.from(data));
     else if (ArrayBuffer.isView(data)) {
@@ -132,6 +141,11 @@ function registerRecordingIpc({ app, dialog, ipcMain }) {
     const session = sessions.get(id);
     if (!session) throw new Error("recording session not found");
     await closeSessionStream(session);
+    const bytes = fs.statSync(session.rawPath).size;
+    return {
+      bytes,
+      durationSeconds: bytes / (session.sampleRate * session.channels * 4),
+    };
   });
 
   ipcMain.handle("recording:save", async (_event, request) => {
@@ -194,6 +208,7 @@ module.exports = {
   ffmpegRecordingArgs,
   loadLastSaveDirectory,
   registerRecordingIpc,
+  runFfmpeg,
   safeSuggestedName,
   saveLastSaveDirectory,
 };
