@@ -56,7 +56,7 @@ RB's ad-hoc "CUE" point is not persisted anywhere track-addressable
 (no DB row, no ANLZ/edb write). Memory cues are the only cue
 persistence; a future Main-cue sync maps to a memory cue or nothing.
 
-## Decode-frame offsets (exp F/G, definitive)
+## Decode-frame offsets (exp F/G — m4a-plain since field-corrected)
 
 Same-content transcodes of one flac; RB analyzed each; offset = shift of
 RB's own PQTZ grid vs the flac's (466 beats, 1 ms spread). ffmpeg frame
@@ -69,8 +69,20 @@ cross-correlation.
 | mp3, no Xing header | **−2** (≈0) |
 | mp3, Xing, no LAME tag | **+23** |
 | mp3, LAME tag (CRC irrelevant) | **+49** |
-| m4a, no iTunSMPB (ffmpeg-encoded) | **+23** |
+| m4a, no iTunSMPB (ffmpeg-encoded) | ~~+23~~ **0** (field-corrected) |
 | m4a, iTunSMPB (CoreAudio/iTunes) | **+48** |
+
+**m4a-plain correction (2026-07-17, alien-playlist grid audit):** after
+exporting 35 tracks' grids/cues with the spike's +23, the user's manual
+grid corrections in rekordbox clustered at a tight **−24 ms median across
+32 real m4a-plain files** (constant per track; the one lossless track
+needed 0). RB and ffmpeg therefore agree on real-library m4a-plain files
+(SoundCloud/Lavf), and the offset is now **0**. The spike's +23 came from
+one ffmpeg transcode — likely lacking the edit-list/priming metadata real
+files carry (23 ms = one 1024-sample AAC priming window @ 44.1 kHz). The
+class may be heterogeneous; if a future export lands a constant ±23 off
+on some m4a subset, split the class on edit-list presence rather than
+re-tuning the constant.
 
 Export rule: `RB_ms = manadj_ms + offset(class)`. RB ignores LAME CRC
 validity, collapsing mixxx-utils' C/D distinction. Classification code:

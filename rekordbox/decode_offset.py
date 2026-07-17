@@ -44,7 +44,12 @@ EXPORT_OFFSET_MS: dict[ContainerClass, int] = {
     ContainerClass.MP3_NO_XING: -2,
     ContainerClass.MP3_XING_ONLY: 23,
     ContainerClass.MP3_LAME: 49,
-    ContainerClass.M4A_PLAIN: 23,
+    # Field-measured 0, overriding the spike transcode's +23 (2026-07-17,
+    # alien-playlist grid corrections: 32 real m4a-plain files needed a
+    # tight −24 ms median correction after export — RB and ffmpeg agree on
+    # these files, likely because real Lavf/SoundCloud m4a carries an edit
+    # list the spike transcode lacked. One AAC priming window = 23 ms.
+    ContainerClass.M4A_PLAIN: 0,
     ContainerClass.M4A_SMPB: 48,
 }
 

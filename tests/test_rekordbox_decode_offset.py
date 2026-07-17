@@ -86,7 +86,9 @@ def test_m4a_with_and_without_smpb(tmp_path):
     smpb = tmp_path / "smpb.m4a"
     smpb.write_bytes(b"\x00\x00\x00\x20ftypM4A " + b"\x00" * 128 + b"iTunSMPB" + b"\x00" * 128)
     assert classify(plain) is ContainerClass.M4A_PLAIN
-    assert export_offset_ms(plain) == 23
+    # Field-measured 0 (2026-07-17 alien grid corrections), not the spike
+    # transcode's +23 — see decode_offset.EXPORT_OFFSET_MS.
+    assert export_offset_ms(plain) == 0
     assert classify(smpb) is ContainerClass.M4A_SMPB
     assert export_offset_ms(smpb) == 48
 
