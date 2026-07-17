@@ -29,6 +29,11 @@ import type { SignalsmithWasmModule } from './vendor/signalsmithStretchModule';
  * noise-like rather than tonal (the package's own default). */
 const TONALITY_LIMIT_HZ = 8000;
 
+/** Warm-prime block size — matches the render quantum, the shape the
+ * window/seek model is verified for (larger warm blocks under-warm:
+ * probe-measured). */
+const WARM_BLOCK = 128;
+
 /**
  * Signalsmith Stretch behind the kernel's StretchEngine seam.
  *
@@ -72,12 +77,38 @@ class SignalsmithEngine implements StretchEngine {
     m._setTransposeSemitones(0, TONALITY_LIMIT_HZ / sampleRate);
   }
 
-  reset(): void {
+  /** Warm-primed reset (stab-declick 01): zero the stretcher, then render
+   * and DISCARD ~inputLatency of the track's own history ending at the
+   * start position, in production-shaped 128-frame blocks. A bare reset
+   * left the overlap-add state empty and gutted the first ~60 ms of every
+   * stab (probe: 3% RMS in the first 10 ms; warmed: 97%). Costs ~2 ms
+   * once per stab. History before track start reads as silence — the
+   * genuine context. */
+  prime(
+    channels: Float32Array[],
+    positionFrames: number,
+    rate: number,
+    loop: LoopFrames | null
+  ): void {
     const m = this.m;
     if (!m) return;
     m._reset();
     SignalsmithEngine.applyNoTranspose(m);
+    const warmOut = m._inputLatency();
+    if (!this.warmScratch) {
+      this.warmScratch = [new Float32Array(WARM_BLOCK), new Float32Array(WARM_BLOCK)];
+    }
+    let remaining = warmOut;
+    let position = positionFrames - warmOut * rate;
+    while (remaining > 0) {
+      const frames = Math.min(WARM_BLOCK, remaining);
+      this.render(this.warmScratch, frames, channels, position, rate, loop);
+      position += frames * rate;
+      remaining -= frames;
+    }
   }
+
+  private warmScratch: Float32Array[] | null = null;
 
   render(
     out: Float32Array[],
@@ -131,7 +162,11 @@ class DeckSourceProcessor extends AudioWorkletProcessor {
   constructor(options?: { processorOptions?: DeckSourceProcessorOptions }) {
     super();
     const declickSeconds = options?.processorOptions?.declickSeconds ?? 0.005;
-    this.kernel = new DeckSourceKernel(Math.round(declickSeconds * sampleRate));
+    const attackSeconds = options?.processorOptions?.attackSeconds ?? declickSeconds;
+    this.kernel = new DeckSourceKernel(
+      Math.round(declickSeconds * sampleRate),
+      Math.round(attackSeconds * sampleRate)
+    );
     this.kernel.setStretchEngine(
       new SignalsmithEngine((err) => {
         const message: DeckSourceEvent = {

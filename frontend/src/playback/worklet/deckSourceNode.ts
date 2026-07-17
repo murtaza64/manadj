@@ -16,7 +16,7 @@
  */
 
 import processorUrl from './deckSourceProcessor?worker&url';
-import { DECLICK_S } from '../graph';
+import { DECLICK_ATTACK_S, DECLICK_S } from '../graph';
 import { DECK_SOURCE_PROCESSOR, RATE_PARAM } from './protocol';
 import type {
   DeckSourceCommand,
@@ -55,6 +55,7 @@ export class DeckSourceNode {
     this.ctx = ctx;
     const processorOptions: DeckSourceProcessorOptions = {
       declickSeconds: DECLICK_S,
+      attackSeconds: DECLICK_ATTACK_S,
     };
     this.node = new AudioWorkletNode(ctx, DECK_SOURCE_PROCESSOR, {
       numberOfInputs: 0,

@@ -137,6 +137,102 @@ describe('DeckSourceKernel resample voice', () => {
   });
 });
 
+describe('DeckSourceKernel asymmetric declick (stab-declick 01)', () => {
+  const ATTACK = 1;
+
+  it('starts reach unity in attackFrames while stops keep the full declick', () => {
+    const data = new Float32Array(64).fill(1);
+    const kernel = new DeckSourceKernel(DECLICK, ATTACK);
+    kernel.setTrack([data], 1);
+    kernel.start(0, 1);
+    const { out } = render(kernel, 4);
+    // attack = 1 frame: frame 0 is age 0 (silent, envelope anchor), unity
+    // from frame 1 — versus the symmetric kernel's 4-frame ramp.
+    expect(out[0][0]).toBe(0);
+    expect(out[0][1]).toBe(1);
+    expect(out[0][2]).toBe(1);
+
+    kernel.stop();
+    const { out: tail } = render(kernel, DECLICK + 1);
+    // Fade-out still spans the full declick window.
+    expect(tail[0][0]).toBeCloseTo(1, 6);
+    expect(tail[0][1]).toBeCloseTo(0.75, 6);
+    expect(tail[0][3]).toBeCloseTo(0.25, 6);
+    expect(tail[0][DECLICK]).toBe(0);
+  });
+
+  it('loop wrap keeps the symmetric equal-gain crossfade (sums to unity)', () => {
+    const data = new Float32Array(64).fill(1);
+    const kernel = new DeckSourceKernel(DECLICK, ATTACK);
+    kernel.setTrack([data], 1);
+    kernel.setLoop({ startFrames: 0, endFrames: 16 });
+    kernel.start(0, 1);
+    render(kernel, 8); // past fade-in
+    const { out } = render(kernel, 16); // crosses the wrap at frame 8
+    // Constant-1 content through the wrap splice: tail (full-declick down)
+    // + wrapped voice (full-declick up) must sum to 1, not bump to ~1.75.
+    for (let i = 0; i < 16; i++) {
+      expect(out[0][i]).toBeGreaterThan(0.99);
+      expect(out[0][i]).toBeLessThan(1.01);
+    }
+  });
+
+  it('stab splice: retiring tail fades over declick under the short attack', () => {
+    const data = new Float32Array(64).fill(1);
+    const kernel = new DeckSourceKernel(DECLICK, ATTACK);
+    kernel.setTrack([data], 1);
+    kernel.start(0, 1);
+    render(kernel, 8);
+    kernel.start(0, 2); // stab restart
+    const { out } = render(kernel, DECLICK + 1);
+    // New voice at unity from frame 1; old tail still audible and fading
+    // (sum briefly exceeds 1 — deliberate: stab content is uncorrelated).
+    expect(out[0][1]).toBeGreaterThan(1);
+    expect(out[0][DECLICK]).toBeCloseTo(1, 6); // tail gone, live at unity
+  });
+
+  it('zero attack starts at unity on frame 0 (instant, CDJ-style)', () => {
+    const data = new Float32Array(64).fill(1);
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    kernel.setTrack([data], 1);
+    kernel.start(0, 1);
+    const { out } = render(kernel, 4);
+    expect(out[0][0]).toBe(1);
+    expect(out[0][1]).toBe(1);
+
+    // Stops still fade over the full declick — no click on pause.
+    kernel.stop();
+    const { out: tail } = render(kernel, DECLICK + 1);
+    expect(tail[0][1]).toBeCloseTo(0.75, 6);
+    expect(tail[0][DECLICK]).toBe(0);
+  });
+
+  it('zero attack leaves loop wraps on the symmetric crossfade', () => {
+    const data = new Float32Array(64).fill(1);
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    kernel.setTrack([data], 1);
+    kernel.setLoop({ startFrames: 0, endFrames: 16 });
+    kernel.start(0, 1);
+    render(kernel, 8);
+    const { out } = render(kernel, 16);
+    for (let i = 0; i < 16; i++) {
+      expect(out[0][i]).toBeGreaterThan(0.99);
+      expect(out[0][i]).toBeLessThan(1.01);
+    }
+  });
+
+  it('single-arg constructor stays symmetric (attack = declick)', () => {
+    const data = new Float32Array(64).fill(1);
+    const kernel = new DeckSourceKernel(DECLICK);
+    kernel.setTrack([data], 1);
+    kernel.start(0, 1);
+    const { out } = render(kernel, DECLICK);
+    for (let i = 0; i < DECLICK; i++) {
+      expect(out[0][i]).toBeCloseTo(i / DECLICK, 6);
+    }
+  });
+});
+
 describe('DeckSourceKernel stop and splice', () => {
   it('stop declick-fades to silence and never reports ended', () => {
     const data = ramp(64);
@@ -246,7 +342,7 @@ describe('DeckSourceKernel end of track', () => {
  */
 class FakeStretchEngine implements StretchEngine {
   ready = true;
-  resets = 0;
+  primes: Array<{ position: number; rate: number }> = [];
   calls: Array<{
     position: number;
     rate: number;
@@ -254,8 +350,8 @@ class FakeStretchEngine implements StretchEngine {
     loop: { startFrames: number; endFrames: number } | null;
   }> = [];
 
-  reset(): void {
-    this.resets++;
+  prime(...args: Parameters<StretchEngine['prime']>): void {
+    this.primes.push({ position: args[1], rate: args[2] });
   }
 
   render(
@@ -347,27 +443,32 @@ describe('DeckSourceKernel stretch mode (Key Lock)', () => {
     }
   });
 
-  it('same-mode setMode is a no-op (no splice, no reset)', () => {
+  it('same-mode setMode is a no-op (no splice, no prime)', () => {
     const fake = new FakeStretchEngine();
     const kernel = stretchKernel(ramp(64), fake);
     kernel.start(0, 1);
     render(kernel, 8);
-    const resets = fake.resets;
+    const primes = fake.primes.length;
     kernel.setMode('stretch');
     render(kernel, 8);
-    expect(fake.resets).toBe(resets);
+    expect(fake.primes.length).toBe(primes);
   });
 
-  it('resets the engine once per stretch voice', () => {
+  it('warm-primes the engine once per voice at its start position', () => {
     const fake = new FakeStretchEngine();
     const kernel = stretchKernel(ramp(256), fake);
     kernel.start(0, 1);
     render(kernel, 8);
     render(kernel, 8);
-    expect(fake.resets).toBe(1);
-    kernel.start(100, 2); // stab: new voice, new prime
+    expect(fake.primes).toEqual([{ position: 0, rate: 1 }]);
+    // Stab: fresh voice, fresh warm prime at the stab position — full
+    // onset energy AND no residue (stab-declick 01).
+    kernel.start(100, 2);
     render(kernel, 8);
-    expect(fake.resets).toBe(2);
+    expect(fake.primes).toEqual([
+      { position: 0, rate: 1 },
+      { position: 100, rate: 1 },
+    ]);
   });
 
   it('falls back to resample without an engine, and while not ready', () => {
@@ -523,7 +624,7 @@ describe('DeckSourceKernel loop wrap (looping 03)', () => {
       { startFrames: 8, endFrames: 16 },
       { startFrames: 8, endFrames: 16 },
     ]);
-    expect(fake.resets).toBe(1);
+    expect(fake.primes.length).toBe(1);
   });
 
   it('a mid-block stretch wrap is output-continuous (no fade dip, no splice)', () => {

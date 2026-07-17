@@ -38,8 +38,20 @@ import type { LoopFrames, SourceMode } from './protocol';
  * stretcher hears the wrapped signal and smooths the wrap itself. */
 export interface StretchEngine {
   readonly ready: boolean;
-  /** Prime for a fresh voice (start/stab/mode-switch). */
-  reset(): void;
+  /** Prime for a fresh voice (start/stab/mode-switch): reset internal
+   * state, then warm it with the track's own history ending at
+   * `positionFrames`, output discarded (stab-declick 01). A bare reset
+   * ramps output 3%→100% over ~60 ms (zeroed overlap-add state) — the
+   * "empty stab"; skipping reset instead bled audible residue of the
+   * previous position. Warm-primed reset gives full onset energy
+   * (−0.3 dB in the first 10 ms, probe-measured) with only the track's
+   * genuine pre-cue context in the OLA state. */
+  prime(
+    channels: Float32Array[],
+    positionFrames: number,
+    rate: number,
+    loop: LoopFrames | null
+  ): void;
   render(
     out: Float32Array[],
     frames: number,
@@ -58,6 +70,11 @@ interface Voice {
   position: number;
   /** Output frames rendered since start (drives the fade-in envelope). */
   age: number;
+  /** Fade-in length for THIS voice (stab-declick 01): user starts/stabs
+   * use the short attack (a kick's transient survives); loop-wrap and
+   * mode-switch splice voices keep the full declick so their equal-gain
+   * crossfade with the correlated retiring tail still sums to unity. */
+  attackFrames: number;
   /** Fade-out state; null while live. Gain falls linearly from g0 over
    * declickFrames of fade age. */
   fade: { g0: number; age: number } | null;
@@ -74,18 +91,23 @@ export class DeckSourceKernel {
   private live: Voice | null = null;
   private fading: Voice[] = [];
   private readonly declickFrames: number;
+  /** Start/stab attack length; ≤ declickFrames (stab-declick 01). */
+  private readonly attackFrames: number;
   /** Active loop region in track frames (looping 03), or null. */
   private loop: LoopFrames | null = null;
 
   private mode: SourceMode = 'resample';
   private stretchEngine: StretchEngine | null = null;
-  /** Voice the stretcher was last reset for — one prime per voice. */
+  /** Voice the stretcher was last primed for — one warm prime per voice
+   * (stab-declick 01; see StretchEngine.prime). */
   private primedVoice: Voice | null = null;
   /** Block scratch for stretch output (gain applied per frame by the kernel). */
   private scratch: Float32Array[] = [];
 
-  constructor(declickFrames: number) {
+  constructor(declickFrames: number, attackFrames: number = declickFrames) {
     this.declickFrames = Math.max(1, declickFrames);
+    // 0 = instant unity on starts/stabs (stab-declick 01).
+    this.attackFrames = Math.max(0, Math.min(attackFrames, this.declickFrames));
   }
 
   /** Hand over a track's channel data. Future starts read the new track;
@@ -119,11 +141,24 @@ export class DeckSourceKernel {
     if (!live) return;
     const { channels, srRatio, position, startId } = live;
     this.retireLive();
-    this.live = { channels, srRatio, position, age: 0, fade: null, startId, mode };
+    // Full-declick attack: equal-gain crossfade with the correlated tail.
+    this.live = {
+      channels,
+      srRatio,
+      position,
+      age: 0,
+      attackFrames: this.declickFrames,
+      fade: null,
+      startId,
+      mode,
+    };
   }
 
   /** (Re)start at a track frame. A running voice is retired into the
-   * declick fade — the splice that keeps stabs click-free. */
+   * declick fade — the splice that keeps stabs click-free. The new voice
+   * uses the SHORT attack (stab-declick 01): stab content is uncorrelated
+   * with the retiring tail, so the punchy attack wins over exact
+   * equal-gain summing. */
   start(positionFrames: number, startId: number): void {
     if (!this.track) return;
     this.retireLive();
@@ -133,6 +168,7 @@ export class DeckSourceKernel {
       srRatio: this.track.srRatio,
       position: Math.max(0, Math.min(positionFrames, Math.max(0, length - 1))),
       age: 0,
+      attackFrames: this.attackFrames,
       fade: null,
       startId,
       mode: this.mode,
@@ -174,7 +210,12 @@ export class DeckSourceKernel {
       const engine = this.stretchEngine;
       if (engine?.ready && liveAtStart.srRatio === 1) {
         if (this.primedVoice !== liveAtStart) {
-          engine.reset();
+          engine.prime(
+            liveAtStart.channels,
+            liveAtStart.position,
+            rates[0],
+            this.renderLoopFor(liveAtStart)
+          );
           this.primedVoice = liveAtStart;
         }
         liveBlock = this.scratchFor(out.length, frames);
@@ -242,8 +283,11 @@ export class DeckSourceKernel {
             // voice onto the resample path mid-block and pop every cycle.
             voice.position = wrapped;
           } else {
-            // Resample path: the same declick splice as a stab — retire
-            // the edge voice, fade a fresh one in at the wrapped position.
+            // Resample path: a declick splice — retire the edge voice,
+            // fade a fresh one in at the wrapped position. Full-declick
+            // attack (NOT the stab attack): the wrapped content is
+            // correlated with the tail, and only the symmetric equal-gain
+            // crossfade sums to unity across the wrap.
             const { channels, srRatio, startId, mode } = voice;
             this.retireLive();
             this.live = {
@@ -251,6 +295,7 @@ export class DeckSourceKernel {
               srRatio,
               position: wrapped,
               age: 0,
+              attackFrames: this.declickFrames,
               fade: null,
               startId,
               mode,
@@ -297,12 +342,15 @@ export class DeckSourceKernel {
     return this.scratch;
   }
 
-  /** Envelope: fade-in age/declick capped at 1; fade-out slopes g0 → 0. */
+  /** Envelope: fade-in age/attack capped at 1 (per-voice attack length,
+   * stab-declick 01; 0 = instant unity); fade-out slopes g0 → 0 over the
+   * full declick. */
   private gainOf(voice: Voice): number {
     if (voice.fade) {
       return Math.max(0, voice.fade.g0 * (1 - voice.fade.age / this.declickFrames));
     }
-    return Math.min(1, voice.age / this.declickFrames);
+    if (voice.attackFrames <= 0) return 1;
+    return Math.min(1, voice.age / voice.attackFrames);
   }
 
   /** Linear-interpolate the voice at its position into out[·][frame]. */

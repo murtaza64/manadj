@@ -9,8 +9,17 @@ export type EqBand = 'low' | 'mid' | 'high';
 /** Butterworth Q expressed in dB (20·log10(1/√2)) for LR4 cascades. */
 export const BUTTERWORTH_Q_DB = -3.0103;
 
-/** Declick micro-fade length for source start/stop seams. */
+/** Declick micro-fade length for source stop/splice seams. */
 export const DECLICK_S = 0.005;
+
+/** Attack fade for user starts/stabs (stab-declick 01): ZERO — instant
+ * unity, CDJ-style. 5 ms shaved the punch off cue stabs and even 1 ms
+ * still felt soft in the hardware A/B; a stab that doesn't start at a
+ * zero crossing may carry a tiny edge click, which is the accepted CDJ
+ * trade. Internal splices (loop wrap, mode switch) keep DECLICK_S — their
+ * equal-gain crossfade of correlated content must stay symmetric or the
+ * wrap bumps ~+5 dB. */
+export const DECLICK_ATTACK_S = 0;
 
 /** Sweep filter frequency bounds. */
 const SWEEP_LP_MIN_HZ = 80; // fully swept low-pass

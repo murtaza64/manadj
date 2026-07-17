@@ -48,6 +48,8 @@ export type DeckSourceEvent =
  * so the worklet bundle only ever pulls in pure modules. */
 export interface DeckSourceProcessorOptions {
   declickSeconds: number;
+  /** Start/stab attack fade (stab-declick 01); defaults to declickSeconds. */
+  attackSeconds?: number;
 }
 
 /** Registered processor name. */
