@@ -97,9 +97,18 @@ master-headroom):** the knob attenuates the device's own analog Master
 output stage in hardware AND reports CC 8/40. Verified by playing external
 audio (VLC) into the device: output level tracks the knob with no host
 involvement. Binding the CC to the app's digital Master therefore
-double-applies every move; the mapping leaves it unbound. HEADPHONES
-LEVEL/MIX and BOOTH LEVEL are suspected analog-plus-MIDI too — run the same
-external-audio test before binding or unbinding them.
+double-applies every move; the mapping leaves it unbound.
+
+**The headphone monitor stage is hardware too (verified 2026-07-17,
+unbound-knob probe):** with no cue-level/cue-mix bindings, HEADPHONES
+LEVEL still attenuates and HEADPHONES MIX still blends, and MASTER CUE
+(note 99, never bound) gates the master pair into the phones. The device
+mixes USB outs 3/4 (manadj's cue bus) with the master pair in hardware.
+Consequence: manadj sends a pure PFL cue bus on 3/4 (digital cue-mix 0 =
+cue only) and leaves LEVEL/MIX/MASTER CUE to the hardware; the on-screen
+PHONES fader is best left at 100% on this device (its taper reaches unity
+only at the top). BOOTH LEVEL remains untested — assume analog+MIDI until
+probed.
 
 ## Browse
 

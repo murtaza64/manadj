@@ -212,6 +212,10 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     expect(translate([cc(6, 8, 96), cc(6, 40, 0)])).toEqual([]);
   });
 
+  it('leaves HEADPHONES LEVEL/MIX unmapped (analog-knob probe)', () => {
+    expect(translate([cc(6, 13, 96), cc(6, 45, 0), cc(6, 12, 32), cc(6, 44, 0)])).toEqual([]);
+  });
+
   it('declares A–D transport, PFL, and Hot Cue Feedback addresses', () => {
     expect(DDJ_GRV6.feedback?.decks.C).toMatchObject({
       play: { channel: 2, number: 11, onVelocity: 127 },

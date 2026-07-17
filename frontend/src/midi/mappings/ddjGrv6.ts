@@ -259,10 +259,12 @@ export const DDJ_GRV6: Mapping = {
     // Master double-applies every move (VLC playback confirmed the analog
     // path alone tracks the knob). Room volume belongs to the knob;
     // the on-screen Master (unity 50%, +6 dB max) remains for other
-    // outputs. HEADPHONES LEVEL/MIX below are suspected analog too —
-    // verify with the same VLC test before unbinding.
-    absolute14(6, 13, 45, { control: 'cue-level' }),
-    absolute14(6, 12, 44, { control: 'cue-mix' }),
+    // outputs. HEADPHONES LEVEL (CC 13/45), HEADPHONES MIX (CC 12/44),
+    // and MASTER CUE (note 99) are also hardware-side (verified
+    // 2026-07-17): the device blends USB outs 3/4 (manadj's cue bus)
+    // with the master pair in its own headphone stage — MIX blends,
+    // MASTER CUE gates master in, LEVEL attenuates. All stay unbound;
+    // manadj sends a pure PFL cue bus on 3/4 (cue-mix default 0).
   ],
   feedback: {
     decks: Object.fromEntries(DECKS.map((entry) => [entry.deck, deckFeedback(entry)])),
