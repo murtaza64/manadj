@@ -8,6 +8,7 @@ const {
   ensureRecordingExtension,
   ffmpegRecordingArgs,
   loadLastSaveDirectory,
+  RECORDING_PEAK_CEILING,
   registerRecordingIpc,
   runFfmpeg,
   safeSuggestedName,
@@ -98,7 +99,13 @@ test("ffmpeg preserves recording duration in WAV and MP3 outputs", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "manadj-recording-codec-test-"));
   const rawPath = path.join(directory, "one-second.f32le");
   const sampleRate = 48000;
-  fs.writeFileSync(rawPath, Buffer.alloc(sampleRate * 2 * 4));
+  const samples = Buffer.alloc(sampleRate * 2 * 4);
+  for (let frame = 0; frame < sampleRate; frame++) {
+    const sample = 1.25 * Math.sin((2 * Math.PI * 1000 * frame) / sampleRate);
+    samples.writeFloatLE(sample, frame * 8);
+    samples.writeFloatLE(sample, frame * 8 + 4);
+  }
+  fs.writeFileSync(rawPath, samples);
   try {
     for (const format of ["wav", "mp3"]) {
       const outputPath = path.join(directory, `out.${format}`);
@@ -113,7 +120,47 @@ test("ffmpeg preserves recording duration in WAV and MP3 outputs", async () => {
         ).trim(),
       );
       assert.ok(Math.abs(duration - 1) < 0.05, `${format} duration was ${duration}`);
+      const decoded = execFileSync(
+        "ffmpeg",
+        ["-v", "error", "-i", outputPath, "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"],
+        { maxBuffer: 2_000_000 },
+      );
+      let peak = 0;
+      for (let offset = 0; offset < decoded.length; offset += 4) {
+        peak = Math.max(peak, Math.abs(decoded.readFloatLE(offset)));
+      }
+      assert.ok(peak <= 1, `${format} decoded peak was ${peak}`);
+      assert.ok(peak >= RECORDING_PEAK_CEILING * 0.8, `${format} peak was unexpectedly low: ${peak}`);
     }
+
+    const quietRaw = path.join(directory, "quiet.f32le");
+    const quietSamples = Buffer.alloc(sampleRate * 2 * 4);
+    for (let frame = 0; frame < sampleRate; frame++) {
+      const sample = 0.25 * Math.sin((2 * Math.PI * 1000 * frame) / sampleRate);
+      quietSamples.writeFloatLE(sample, frame * 8);
+      quietSamples.writeFloatLE(sample, frame * 8 + 4);
+    }
+    fs.writeFileSync(quietRaw, quietSamples);
+    const quietWav = path.join(directory, "quiet.wav");
+    await runFfmpeg(
+      ffmpegRecordingArgs({
+        rawPath: quietRaw,
+        outputPath: quietWav,
+        sampleRate,
+        channels: 2,
+        format: "wav",
+      }),
+    );
+    const quietDecoded = execFileSync(
+      "ffmpeg",
+      ["-v", "error", "-i", quietWav, "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"],
+      { maxBuffer: 2_000_000 },
+    );
+    let quietPeak = 0;
+    for (let offset = 0; offset < quietDecoded.length; offset += 4) {
+      quietPeak = Math.max(quietPeak, Math.abs(quietDecoded.readFloatLE(offset)));
+    }
+    assert.ok(Math.abs(quietPeak - 0.25) < 0.001, `below-ceiling peak changed to ${quietPeak}`);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

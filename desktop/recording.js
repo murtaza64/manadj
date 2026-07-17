@@ -5,6 +5,9 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const sessions = new Map();
+// MP3 encoding can add ~1.5 dB of intersample/codec overshoot. A -2 dBFS
+// sample ceiling kept the analyzed +2.4 dBTP repro below 0 dBTP after encode.
+const RECORDING_PEAK_CEILING = 0.794328;
 
 function recordingExtension(format) {
   return format === "mp3" ? ".mp3" : ".wav";
@@ -56,6 +59,8 @@ function ffmpegRecordingArgs({ rawPath, outputPath, sampleRate, channels, format
     "-i",
     rawPath,
     "-vn",
+    "-af",
+    `alimiter=limit=${RECORDING_PEAK_CEILING}:attack=5:release=50:level=disabled`,
     ...codec,
     "-y",
     outputPath,
@@ -207,6 +212,7 @@ module.exports = {
   ensureRecordingExtension,
   ffmpegRecordingArgs,
   loadLastSaveDirectory,
+  RECORDING_PEAK_CEILING,
   registerRecordingIpc,
   runFfmpeg,
   safeSuggestedName,
