@@ -253,7 +253,14 @@ export const DDJ_GRV6: Mapping = {
       absolute14(6, 23 + index, 55 + index, { control: 'filter', channel: deck })
     ),
     absolute14(6, 31, 63, { control: 'crossfader' }),
-    absolute14(6, 8, 40, { control: 'master' }),
+    // MASTER LEVEL (CC 8/40) is deliberately UNBOUND (hardware-verified
+    // 2026-07-17, master-headroom): the knob attenuates the GRV6's own
+    // analog output stage AND reports CC — binding it to the digital
+    // Master double-applies every move (VLC playback confirmed the analog
+    // path alone tracks the knob). Room volume belongs to the knob;
+    // the on-screen Master (unity 50%, +6 dB max) remains for other
+    // outputs. HEADPHONES LEVEL/MIX below are suspected analog too —
+    // verify with the same VLC test before unbinding.
     absolute14(6, 13, 45, { control: 'cue-level' }),
     absolute14(6, 12, 44, { control: 'cue-mix' }),
   ],

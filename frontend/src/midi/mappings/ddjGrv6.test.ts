@@ -208,6 +208,10 @@ describe('DDJ-GRV6 Mapping — official E1 message table', () => {
     ).toEqual([]);
   });
 
+  it('leaves MASTER LEVEL unmapped (analog knob; digital binding double-applies)', () => {
+    expect(translate([cc(6, 8, 96), cc(6, 40, 0)])).toEqual([]);
+  });
+
   it('declares A–D transport, PFL, and Hot Cue Feedback addresses', () => {
     expect(DDJ_GRV6.feedback?.decks.C).toMatchObject({
       play: { channel: 2, number: 11, onVelocity: 127 },

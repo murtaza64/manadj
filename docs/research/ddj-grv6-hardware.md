@@ -92,6 +92,15 @@ assign switches). MASTER LEVEL, MASTER CUE, BOOTH LEVEL (sends MIDI).
 Front: HEADPHONES LEVEL, HEADPHONES MIX. Rear: MIC LEVEL (MIDI), MIC ATT.
 (analog), Android MONO/STEREO switch.
 
+**MASTER LEVEL is analog + MIDI (hardware-verified 2026-07-17,
+master-headroom):** the knob attenuates the device's own analog Master
+output stage in hardware AND reports CC 8/40. Verified by playing external
+audio (VLC) into the device: output level tracks the knob with no host
+involvement. Binding the CC to the app's digital Master therefore
+double-applies every move; the mapping leaves it unbound. HEADPHONES
+LEVEL/MIX and BOOTH LEVEL are suspected analog-plus-MIDI too — run the same
+external-audio test before binding or unbinding them.
+
 ## Browse
 
 Smart Rotary Selector: rotate (shift = waveform zoom), press (enter),
