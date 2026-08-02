@@ -6,6 +6,7 @@ import argparse
 import os
 import queue
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -34,6 +35,14 @@ def format_label(name: str, use_color: bool) -> str:
     if color is None:
         return label
     return f"{color}{label}{RESET}"
+
+
+def ensure_port_available(name: str, port: int) -> None:
+    with socket.socket() as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as error:
+            raise RuntimeError(f"{name} port {port} is already in use") from error
 
 
 def spawn_process(
@@ -93,6 +102,13 @@ def main() -> int:
     parser.add_argument("--backend-port", type=int, default=8000)
     parser.add_argument("--vite-port", type=int, default=5173)
     args = parser.parse_args()
+
+    try:
+        ensure_port_available("backend", args.backend_port)
+        ensure_port_available("Vite", args.vite_port)
+    except RuntimeError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
 
     line_queue: queue.Queue[tuple[str, str]] = queue.Queue()
     shutting_down = False
