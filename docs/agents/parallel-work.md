@@ -91,7 +91,7 @@ absorb as fresh implementation changes, abandon the prototype.
 
 ## The default workspace
 
-The human's: real DB, real app (ports 8000/5173), their working copy.
+The human's: real DB, real app (ports 8127/5173), their working copy.
 Read-only for agents — all agent work happens in lanes (docs lanes are cheap).
 Agent-initiated `@` moves are limited to `land.py --hot-reload`'s sanctioned
 post-landing maneuver, gated on `@` being an idle placeholder (empty,

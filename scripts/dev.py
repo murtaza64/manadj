@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_BACKEND_PORT = 8127
 RESET = "\033[0m"
 LABEL_COLORS = {
     "backend": "\033[1;34m",
@@ -99,7 +100,7 @@ def main() -> int:
         action="store_true",
         help="also launch the desktop shell; quitting it stops everything",
     )
-    parser.add_argument("--backend-port", type=int, default=8000)
+    parser.add_argument("--backend-port", type=int, default=DEFAULT_BACKEND_PORT)
     parser.add_argument("--vite-port", type=int, default=5173)
     args = parser.parse_args()
 

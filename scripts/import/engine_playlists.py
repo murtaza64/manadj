@@ -20,7 +20,7 @@ class PlaylistImporter:
     def __init__(
         self,
         engine_db_path: Path,
-        manadj_base_url: str = "http://localhost:8000"
+        manadj_base_url: str = "http://localhost:8127"
     ):
         self.engine_db = EngineDJDatabase(engine_db_path)
         self.manadj_base_url = manadj_base_url.rstrip('/')
@@ -249,7 +249,7 @@ class PlaylistImporter:
             self._load_manadj_tracks()
         except Exception as e:
             print(f"ERROR: Failed to load manadj tracks: {e}")
-            print("Make sure manadj backend is running at http://localhost:8000")
+            print("Make sure manadj backend is running at http://localhost:8127")
             return
 
         # Get playlists from Engine DJ
@@ -300,8 +300,8 @@ def main():
     )
     parser.add_argument(
         "--url",
-        default="http://localhost:8000",
-        help="manadj backend URL (default: http://localhost:8000)"
+        default="http://localhost:8127",
+        help="manadj backend URL (default: http://localhost:8127)"
     )
     parser.add_argument(
         "--skip-nested",

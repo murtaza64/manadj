@@ -52,7 +52,7 @@ export interface TransitionTemplateWire {
 }
 
 // Backend URL configuration - can be overridden with VITE_API_URL env var
-const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:8127';
 const API_BASE = `${BACKEND_URL}/api`;
 
 // Export for use in other components (e.g., for static file URLs)

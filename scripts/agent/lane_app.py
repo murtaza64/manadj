@@ -16,7 +16,7 @@ Usage (from inside an es lane workspace):
   uv run scripts/agent/lane_app.py stop
 
 Refuses to run in the default workspace — that is the human's real app
-(ports 8000/5173, real DB), managed by hand (docs/agents/parallel-work.md).
+(ports 8127/5173, real DB), managed by hand (docs/agents/parallel-work.md).
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ RUNTIME_DIR = LANE_ROOT / ".lane-app"
 PID_FILE = RUNTIME_DIR / "dev.pid"
 LOG_FILE = RUNTIME_DIR / "dev.log"
 
-BASE_BACKEND, BASE_VITE = 8000, 5173
+BASE_BACKEND, BASE_VITE = 8127, 5173
 PORTS_RE = re.compile(r"^ports:\s*backend\s+(\d+),\s*vite\s+(\d+)\s*$", re.M)
 
 

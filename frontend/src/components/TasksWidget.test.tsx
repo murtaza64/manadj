@@ -47,6 +47,6 @@ it('renders active queue depth and the failure badge', async () => {
   expect(host.textContent).toContain('1 running / 4 pending');
   expect(host.querySelector('[aria-label="3 undismissed failures"]')).not.toBeNull();
   await api.tasks.summary();
-  expect(globalThis.fetch).toHaveBeenCalledWith('http://localhost:8000/api/tasks/summary');
+  expect(globalThis.fetch).toHaveBeenCalledWith('http://localhost:8127/api/tasks/summary');
   act(() => root.unmount());
 });
