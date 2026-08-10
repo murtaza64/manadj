@@ -58,6 +58,44 @@ const API_BASE = `${BACKEND_URL}/api`;
 // Export for use in other components (e.g., for static file URLs)
 export { BACKEND_URL };
 
+export function detailToMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string') return detail || fallback;
+
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap(item => {
+      if (typeof item === 'string') return [item];
+      if (!item || typeof item !== 'object') return [];
+      const message = (item as Record<string, unknown>).msg;
+      return typeof message === 'string' ? [message] : [];
+    });
+    if (messages.length > 0) return messages.join('; ');
+  }
+
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const value = detail as Record<string, unknown>;
+    const message = typeof value.message === 'string' ? value.message : '';
+    const resultErrors = Array.isArray(value.results)
+      ? value.results.flatMap(result => {
+          if (!result || typeof result !== 'object') return [];
+          const row = result as Record<string, unknown>;
+          if (!row.error) return [];
+          const error = typeof row.error === 'string' ? row.error : JSON.stringify(row.error);
+          const target = typeof row.target === 'string' ? `${row.target}: ` : '';
+          return [`${target}${error}`];
+        })
+      : [];
+    if (message && resultErrors.length > 0) return `${message}: ${resultErrors.join('; ')}`;
+    if (message) return message;
+    if (resultErrors.length > 0) return resultErrors.join('; ');
+  }
+
+  try {
+    return detail == null ? fallback : JSON.stringify(detail) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export const api = {
   tasks: {
     summary: async (): Promise<TaskSummary> => {
@@ -645,7 +683,7 @@ export const api = {
       });
       if (!res.ok) {
         const error = await res.json();
-        throw new Error(error.detail || 'Failed to sync playlist');
+        throw new Error(detailToMessage(error.detail, 'Failed to sync playlist'));
       }
       return res.json();
     },
@@ -712,7 +750,7 @@ export const api = {
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;
-        throw new Error(detail ?? 'Failed to export tracks to Engine DJ');
+        throw new Error(detailToMessage(detail, 'Failed to export tracks to Engine DJ'));
       }
       return res.json();
     },
@@ -817,7 +855,7 @@ export const api = {
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;
-        throw new Error(detail ?? 'Failed to export key to Rekordbox');
+        throw new Error(detailToMessage(detail, 'Failed to export key to Rekordbox'));
       }
       return res.json();
     },
@@ -839,7 +877,7 @@ export const api = {
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;
-        throw new Error(detail ?? 'Failed to auto-export to Rekordbox');
+        throw new Error(detailToMessage(detail, 'Failed to auto-export to Rekordbox'));
       }
       return res.json();
     },
@@ -857,7 +895,7 @@ export const api = {
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;
-        throw new Error(detail ?? 'Failed to export beatgrid to Rekordbox');
+        throw new Error(detailToMessage(detail, 'Failed to export beatgrid to Rekordbox'));
       }
       return res.json();
     },
@@ -873,7 +911,7 @@ export const api = {
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => null))?.detail;
-        throw new Error(detail ?? 'Failed to export hot cues to Rekordbox');
+        throw new Error(detailToMessage(detail, 'Failed to export hot cues to Rekordbox'));
       }
       return res.json();
     },
@@ -945,7 +983,7 @@ export const api = {
       const res = await fetch(`${API_BASE}/acquisition/refresh`, { method: 'POST' });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
-        throw new Error(error.detail || 'Failed to refresh source items');
+        throw new Error(detailToMessage(error.detail, 'Failed to refresh source items'));
       }
       return res.json();
     },
@@ -986,7 +1024,7 @@ export const api = {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/ignore`, { method: 'POST' });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
-        throw new Error(error.detail || 'Failed to ignore item');
+        throw new Error(detailToMessage(error.detail, 'Failed to ignore item'));
       }
       return res.json();
     },
@@ -995,7 +1033,7 @@ export const api = {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/restore`, { method: 'POST' });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
-        throw new Error(error.detail || 'Failed to restore item');
+        throw new Error(detailToMessage(error.detail, 'Failed to restore item'));
       }
       return res.json();
     },
@@ -1008,7 +1046,7 @@ export const api = {
       });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
-        throw new Error(error.detail || 'Failed to set provenance');
+        throw new Error(detailToMessage(error.detail, 'Failed to set provenance'));
       }
       return res.json();
     },
@@ -1017,7 +1055,7 @@ export const api = {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/queue`, { method: 'POST' });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
-        throw new Error(error.detail || 'Failed to queue download');
+        throw new Error(detailToMessage(error.detail, 'Failed to queue download'));
       }
       return res.json();
     },
@@ -1048,7 +1086,7 @@ export const api = {
       });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
-        throw new Error(error.detail || 'Soulseek search failed');
+        throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
       }
       return res.json();
     },
@@ -1061,7 +1099,7 @@ export const api = {
       });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
-        throw new Error(error.detail || 'Soulseek pick failed');
+        throw new Error(detailToMessage(error.detail, 'Soulseek pick failed'));
       }
       return res.json();
     },
