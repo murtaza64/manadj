@@ -91,6 +91,14 @@
   border-color: var(--teal);
 }
 
+.playlist-full-export-button {
+  margin-left: 8px;
+  background: var(--yellow);
+  border-color: var(--yellow);
+  color: var(--base);
+  font-weight: 800;
+}
+
 .detail-back-button {
   padding: 6px 12px;
   background: var(--surface0);

@@ -24,6 +24,24 @@ describe('playlistSync', () => {
     }))
       .rejects.toThrow('1 of 2 syncs failed: rekordbox: 2 tracks not found');
   });
+
+  it('exports a playlist to selected performance-data destinations', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      playlist_name: 'Alien & Friends',
+      results: [],
+    })));
+
+    await api.playlistSync.exportPerformance('Alien & Friends', ['rekordbox', 'engine']);
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:8127/api/sync/export/playlists/Alien%20%26%20Friends/performance',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets: ['rekordbox', 'engine'] }),
+      },
+    );
+  });
 });
 
 describe('detailToMessage', () => {

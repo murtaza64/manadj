@@ -185,3 +185,27 @@ def auto_export_endpoint(
         except RekordboxRunningError as e:
             raise HTTPException(status_code=409, detail=str(e))
     return summary
+
+
+class PlaylistFullExportRequest(BaseModel):
+    targets: list[Literal["rekordbox", "engine"]]
+
+
+def get_playlist_full_export_service(db: Session = Depends(get_db)):
+    from backend.playlist_full_export import build_playlist_full_export_service
+
+    return build_playlist_full_export_service(db)
+
+
+@router.post("/playlists/{playlist_name}/performance")
+def export_playlist_performance_endpoint(
+    playlist_name: str,
+    request: PlaylistFullExportRequest,
+    service=Depends(get_playlist_full_export_service),
+):
+    if not request.targets:
+        raise HTTPException(status_code=422, detail="Select at least one destination")
+    try:
+        return service.export(playlist_name, request.targets)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { UnifiedPlaylist, Track, SyncResult } from '../types';
 import { formatKeyDisplay } from '../utils/keyUtils';
+import { PlaylistFullExportModal } from './PlaylistFullExportModal';
 import './PlaylistDetailView.css';
 
 interface PlaylistDetailViewProps {
@@ -13,6 +14,7 @@ interface PlaylistDetailViewProps {
 export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps) {
   const [syncResult, setSyncResult] = useState<SyncResult | SyncResult[] | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const queryClient = useQueryClient();
   // Collect all manadj track IDs
   const manadjTrackIds = (playlist.manadj || [])
@@ -139,6 +141,14 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
                 Rekordbox
               </button>
             )}
+            {hasManadj && (
+              <button
+                onClick={() => setExportOpen(true)}
+                className="sync-button playlist-full-export-button"
+              >
+                Export all data
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -257,6 +267,12 @@ export function PlaylistDetailView({ playlist, onBack }: PlaylistDetailViewProps
           );
         })}
       </div>
+      {exportOpen && (
+        <PlaylistFullExportModal
+          playlistName={playlist.name}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
     </div>
   );
 }

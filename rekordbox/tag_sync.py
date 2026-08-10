@@ -146,7 +146,8 @@ class RekordboxTagSyncer:
         self,
         rb_tag_map: dict[int, str],
         energy_to_color_id: dict[int, str],
-        dry_run: bool = True
+        dry_run: bool = True,
+        track_ids: list[int] | None = None,
     ) -> TagSyncStats:
         """
         Sync track tag assignments and colors from manadj to Rekordbox.
@@ -193,12 +194,16 @@ class RekordboxTagSyncer:
 
         # Get all ACTIVE manadj tracks with tags OR energy values
         # (Archived Tracks leave Export — CONTEXT.md)
-        tracks = self.manadj_session.query(Track).filter(
-            Track.is_active,
-            (Track.energy.isnot(None)) | (Track.id.in_(
-                self.manadj_session.query(TrackTag.track_id).distinct()
-            ))
-        ).all()
+        tracks = self.manadj_session.query(Track).filter(Track.is_active)
+        if track_ids is None:
+            tracks = tracks.filter(
+                (Track.energy.isnot(None)) | (Track.id.in_(
+                    self.manadj_session.query(TrackTag.track_id).distinct()
+                ))
+            )
+        else:
+            tracks = tracks.filter(Track.id.in_(track_ids))
+        tracks = tracks.all()
         stats.tracks_processed = len(tracks)
 
         for track in tracks:
