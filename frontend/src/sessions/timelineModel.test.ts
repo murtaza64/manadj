@@ -482,3 +482,41 @@ describe('hot-cue stab traces (sessions 11)', () => {
     expect(m.decks.C.playingSpans).toEqual([]);
   });
 });
+
+describe('jog scrub does not explode markers/traces (perf)', () => {
+  it('a stream of tiny seeks is one continuous trace, no markers', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 100 },
+    ];
+    // 200 rim-tick seeks nudging ±0.3s over 2s (a jog scrub).
+    let ph = 100;
+    for (let i = 0; i < 200; i++) {
+      ph += (i % 3 === 0 ? -0.2 : 0.25);
+      events.push({ t: 2 + (i + 1) * 0.01, kind: 'transport', channel: 'A', action: 'seek', playhead: ph });
+    }
+    events.push({ t: 5, kind: 'transport', channel: 'A', action: 'pause', playhead: ph });
+    const m = deriveTimeline(events);
+    // No jump markers for the scrub; the whole thing is ~one trace.
+    expect(m.decks.A.gestures.filter((g) => g.action === 'seek')).toEqual([]);
+    expect(m.decks.A.traces.length).toBeLessThanOrEqual(2);
+    // Decimated: far fewer points than seeks.
+    expect(m.decks.A.traces.flat().length).toBeLessThan(60);
+  });
+
+  it('a genuine leap-seek still marks and breaks', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 3, kind: 'tick', playheads: { A: 11 } },
+      { t: 4, kind: 'transport', channel: 'A', action: 'seek', playhead: 120 }, // leap
+      { t: 5, kind: 'tick', playheads: { A: 121 } },
+      { t: 6, kind: 'transport', channel: 'A', action: 'pause', playhead: 122 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.decks.A.gestures.filter((g) => g.action === 'seek')).toHaveLength(1);
+    expect(m.decks.A.traces.length).toBe(2);
+  });
+});
