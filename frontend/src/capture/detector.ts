@@ -19,8 +19,8 @@
  * Settlement is time-driven: the ~1 Hz tick events advance the clock, so
  * the reducer never needs a timer.
  */
-import { channelCrossfaderGain, channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
+import { isDeckAudible } from './audibility';
 import {
   DEFAULT_DETECTOR_PARAMS,
   DETECTOR_VERSION,
@@ -135,16 +135,13 @@ export function initialCaptureState(params: DetectorParams = DEFAULT_DETECTOR_PA
 }
 
 function deckAudible(s: CaptureState, ch: CaptureDeck): boolean {
-  const d = s.decks[ch];
-  if (!d.playing) return false;
-  // Kill-style mix-outs never touch the fader: an EQ full-kill or a sweep
-  // filter ridden to an end silences the deck just as finally.
-  const { eqKillBelow, filterKillBeyond } = s.params;
-  if (d.eq.low <= eqKillBelow && d.eq.mid <= eqKillBelow && d.eq.high <= eqKillBelow) return false;
-  if (Math.abs(d.filter) >= filterKillBeyond) return false;
-  const xfGain = channelCrossfaderGain(d.assignment, s.crossfaderEnabled ? s.crossfader : 0);
-  const gain = trimToGain(d.trim) * channelFaderToGain(d.fader) * xfGain;
-  return gain >= s.params.audibleGain;
+  // The one audibility definition, shared with the Session timeline
+  // (capture/audibility.ts, sessions 04).
+  return isDeckAudible(
+    s.decks[ch],
+    { crossfader: s.crossfader, crossfaderEnabled: s.crossfaderEnabled },
+    s.params
+  );
 }
 
 /** How many decks are Master-audible right now (all four; ADR 0033). */

@@ -425,6 +425,13 @@ class SessionRow(BaseModel):
     take_count: int
 
 
+class SessionDetail(SessionRow):
+    """One Session with its whole event log — the timeline's read model
+    (sessions 04). Chunks concatenated in seq order into one opaque event
+    array; the client reads it with the capture vocabulary's real types."""
+    events: list[dict]
+
+
 # Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)
 
 
