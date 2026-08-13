@@ -19,10 +19,13 @@ import type { ReplayStopReason } from './SessionReplayDriver';
 class FakeEngine {
   trackId: number | null = null;
   playing = false;
+  previewing = false;
   playhead = 0;
   playheadAt = 0;
   pitchPercent = 0;
   seeks: number[] = [];
+  /** Machine preview calls (sessions 12): what the driver executed. */
+  previews: ({ kind: 'start'; at: number } | { kind: 'end'; returnTo: number })[] = [];
   private subs = new Set<() => void>();
   private taps = new Set<() => void>();
   private readonly clock: () => number;
@@ -39,7 +42,7 @@ class FakeEngine {
       duration: 600,
       pitchPercent: this.pitchPercent,
       bendPercent: 0,
-      previewing: false,
+      previewing: this.previewing,
       hotCuePreviewSlot: null,
       keyLock: true,
     } as ReturnType<DeckEngine['getSnapshot']>;
@@ -73,6 +76,31 @@ class FakeEngine {
 
   setPitch(p: number): void {
     this.pitchPercent = p;
+    this.emit();
+  }
+
+  /** Machine-grade preview entry point (sessions 12) — real-engine
+   * semantics: no-op while playing or already previewing; release no-ops
+   * unless a preview runs (the mid-window skip boundary). */
+  previewAt(at: number): void {
+    if (this.playing || this.previewing) return;
+    this.previews.push({ kind: 'start', at });
+    this.previewing = true;
+    this.playhead = at;
+    this.playheadAt = this.clock();
+    this.emit();
+  }
+  endPreview(returnTo: number): void {
+    if (!this.previewing) return;
+    this.previews.push({ kind: 'end', returnTo });
+    this.previewing = false;
+    this.playhead = returnTo;
+    this.emit();
+  }
+
+  /** A HUMAN stab (outside any driver call): previewing flips. */
+  humanStab(): void {
+    this.previewing = true;
     this.emit();
   }
 
@@ -609,6 +637,64 @@ describe('SessionReplayDriver — Conductor protocol parity', () => {
     // The center cue at offset 2 restores B's lane (center transparent).
     r.advance(2.0);
     expect(r.mixer.automation?.B?.fader).toBeCloseTo(1, 5);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — stab replay (sessions 12)', () => {
+  function stabLog(): CaptureEvent[] {
+    return [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 1.5, kind: 'load', channel: 'C', trackId: 33, bpm: 140 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 6, kind: 'transport', channel: 'C', action: 'previewStart', playhead: 64, detail: 3 },
+      { t: 7, kind: 'tick', playheads: { A: 55, C: 65 } },
+      { t: 8, kind: 'transport', channel: 'C', action: 'previewEnd', playhead: 64 },
+      { t: 10, kind: 'tick', playheads: { A: 58 } },
+    ];
+  }
+
+  it('executes a stab audibly on the original deck via the preview entry point', async () => {
+    const r = rig(planFor(stabLog(), 4));
+    await r.driver.start();
+    expect(r.engines.C.previews).toEqual([]);
+    // offset 2 (t=6): the stab launches on C — exact position, previewing.
+    r.advance(2.0);
+    expect(r.engines.C.previews).toEqual([{ kind: 'start', at: 64 }]);
+    expect(r.engines.C.previewing).toBe(true);
+    expect(r.engines.C.playing).toBe(false);
+    // offset 4 (t=8): released — stopped back at the recorded return.
+    r.advance(2.0);
+    expect(r.engines.C.previews).toEqual([
+      { kind: 'start', at: 64 },
+      { kind: 'end', returnTo: 64 },
+    ]);
+    expect(r.engines.C.previewing).toBe(false);
+    expect(r.engines.C.playhead).toBe(64);
+    // The driver's own preview gestures never tripped the watchers.
+    expect(r.stops).toEqual([]);
+    r.driver.stop();
+  });
+
+  it('a HUMAN stab mid-replay is a takeover (previewing flip outside self-ops)', async () => {
+    const r = rig(planFor(stabLog(), 4));
+    await r.driver.start();
+    r.engines.B.humanStab();
+    expect(r.stops).toEqual(['takeover']);
+    expect(audibleHolder()).toBe('shared');
+  });
+
+  it('a window opening mid-stab skips it (dangling previewEnd no-ops)', async () => {
+    const r = rig(planFor(stabLog(), 7)); // inside the stab
+    await r.driver.start();
+    // C seeds as a paused deck (previewing is not modeled in seeds — v1
+    // boundary); the dangling previewEnd cue at offset 1 no-ops.
+    r.advance(1.0);
+    expect(r.engines.C.previews).toEqual([]);
+    expect(r.engines.C.previewing).toBe(false);
+    expect(r.stops).toEqual([]);
     r.driver.stop();
   });
 });

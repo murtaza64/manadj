@@ -467,6 +467,29 @@ export class SessionReplayDriver {
         if (prev) this.anchors[cue.channel] = { ...prev, offset: cue.offsetS, playhead: cue.playhead };
         break;
       }
+      case 'previewStart': {
+        // Stab (sessions 12): audible preview via the machine-grade entry
+        // point — quantize-free, cue points untouched. Anchored like play
+        // for bookkeeping; the corrector skips non-playing decks, so a stab
+        // runs uncorrected (they last seconds — drift is negligible).
+        const engine = this.engines[cue.channel];
+        engine.previewAt(cue.playhead);
+        const prev = this.anchors[cue.channel];
+        this.anchors[cue.channel] = {
+          offset: cue.offsetS,
+          playhead: cue.playhead,
+          rate: prev?.rate ?? 1 + (this.plan.seed.decks[cue.channel]?.pitch ?? 0) / 100,
+        };
+        break;
+      }
+      case 'previewEnd': {
+        // Stop at the recorded return position. If the window opened
+        // mid-stab (no matching previewStart), the engine no-ops — the v1
+        // mid-window boundary: an already-open stab is skipped.
+        this.engines[cue.channel].endPreview(cue.playhead);
+        delete this.anchors[cue.channel];
+        break;
+      }
       case 'pitch': {
         this.engines[cue.channel].setPitch(cue.value);
         // Re-anchor at the expected position under the OLD rate, then run

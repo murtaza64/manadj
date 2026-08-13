@@ -54,6 +54,17 @@ export type TransportEvent =
   | { type: 'cue-up' }
   | { type: 'hot-cue-down'; slot: number; time: number | null }
   | { type: 'hot-cue-up'; slot: number; time: number | null }
+  /** Machine-grade preview launch (stab replay, sessions 12): start preview
+   * audio at exactly `at` — Quantize deliberately bypassed (replay must
+   * reproduce the recorded timing, not re-quantize against the live
+   * toggle) and the cue point untouched (replay never mutates performer
+   * state). The deck reads as previewing, so takeover hands it over in the
+   * true state. */
+  | { type: 'preview-launch'; at: number }
+  /** Machine-grade preview release: stop at `returnTo` (the recorded
+   * post-release position from the previewEnd event). No-op unless a
+   * preview is running. */
+  | { type: 'preview-release'; returnTo: number }
   /** Paused-only memory-cue-style walk over track start plus Hot Cues. */
   | { type: 'hot-cue-walk'; direction: 'prev' | 'next'; stops: readonly number[] }
   /** Auto-loop engage/release (looping 03). Inert on gridless Tracks. */
@@ -276,6 +287,32 @@ export function reduceTransport(
       return [
         { ...s, hotCuePreviewSlot: null, playhead: e.time },
         [{ type: 'stop', at: e.time }],
+      ];
+    }
+
+    case 'preview-launch': {
+      // Replay stab (sessions 12): exact-position start, no quantize, no
+      // cue-point mutation. `previewing` flips regardless of whether the
+      // recorded stab was main-cue or hot-cue — replay does not care which
+      // button was held, and takeover reads a true preview state. Launch is
+      // an absolute relocation: an active loop cancels (hot-cue parity).
+      if (s.playing || isAudioRunning(s)) return [s, []];
+      return [
+        { ...s, previewing: true, playhead: e.at, loop: null },
+        [{ type: 'start', at: e.at }],
+      ];
+    }
+
+    case 'preview-release': {
+      if (!s.previewing && s.hotCuePreviewSlot === null) return [s, []];
+      if (s.playing) {
+        // Play landed during the preview (possible via takeover races):
+        // deck keeps running, preview flags clear.
+        return [{ ...s, previewing: false, hotCuePreviewSlot: null }, []];
+      }
+      return [
+        { ...s, previewing: false, hotCuePreviewSlot: null, playhead: e.returnTo, loop: null },
+        [{ type: 'stop', at: e.returnTo }],
       ];
     }
 
