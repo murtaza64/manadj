@@ -30,7 +30,7 @@ function fmtDuration(startedAt: string, endedAt: string | null): string {
   return `${h}h${String(m).padStart(2, '0')}m`;
 }
 
-export function SessionsListView() {
+export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }) {
   const queryClient = useQueryClient();
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
@@ -62,7 +62,12 @@ export function SessionsListView() {
           </thead>
           <tbody>
             {rows.map((s) => (
-              <tr key={s.uuid} className="session-row">
+              <tr
+                key={s.uuid}
+                className={`session-row${onOpen ? ' openable' : ''}`}
+                onClick={onOpen ? () => onOpen(s.uuid) : undefined}
+                title={onOpen ? 'Open this Session’s timeline' : undefined}
+              >
                 <td className="session-when">{fmtWhen(s.started_at)}</td>
                 <td className={`session-duration${s.ended_at === null ? ' live' : ''}`}>
                   {fmtDuration(s.started_at, s.ended_at)}
@@ -72,7 +77,10 @@ export function SessionsListView() {
                   <button
                     className="session-delete"
                     title="Delete this Session (Takes are kept)"
-                    onClick={() => void remove(s.uuid)}
+                    onClick={(e) => {
+                      e.stopPropagation(); // never open the timeline on delete
+                      void remove(s.uuid);
+                    }}
                   >
                     ✕
                   </button>

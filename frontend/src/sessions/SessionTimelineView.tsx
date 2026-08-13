@@ -10,12 +10,14 @@
  * scrub readout here is already the replay planner's input.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { SessionRowWire, TakeRowWire } from '../api/client';
 import { DECK_COLORS } from '../theme/deckColors';
 import { requestTakeReview } from '../capture/takeReview';
 import type { CaptureDeck, CaptureEvent } from '../capture/events';
+import { decodeWaveformBlob, toThreeBands } from '../waveform/blob';
+import type { ThreeBandWaveform } from '../waveform/blob';
 import {
   ALL_DECKS,
   buildTimeAxis,
@@ -23,7 +25,7 @@ import {
   stateAt,
 } from './timelineModel';
 import type { TimelineModel } from './timelineModel';
-import { SessionWaveformSpan } from './SessionWaveformSpan';
+import { drawSpanWaveform } from './waveformLanes';
 import './sessionTimeline.css';
 
 // ── Layout ──────────────────────────────────────────────────────────────
@@ -152,22 +154,57 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
     return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
   };
 
-  // Shared waveform canvas.
+  // Waveform blobs for every loaded track — the same query keys as
+  // useWaveformBlob, so decodes are shared with the decks/editor.
+  const blobQueries = useQueries({
+    queries: (model?.trackIds ?? []).map((id) => ({
+      queryKey: ['waveform-blob', id],
+      queryFn: async () => decodeWaveformBlob(await api.waveforms.getData(id)),
+      staleTime: Infinity,
+      retry: 5,
+      refetchInterval: (query: { state: { data: unknown } }) =>
+        query.state.data === undefined ? 8000 : false,
+    })),
+  });
+  const blobsReadyKey = blobQueries.map((q) => (q.data ? '1' : '0')).join('');
+  const bandsByTrack = useMemo(() => {
+    const out: Record<number, ThreeBandWaveform> = {};
+    (model?.trackIds ?? []).forEach((id, i) => {
+      const d = blobQueries[i]?.data;
+      if (d) out[id] = toThreeBands(d);
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, blobsReadyKey]);
+
+  // Waveform canvas: one owner draws everything (resize+clear+paint in a
+  // single effect, so axis/zoom changes can never leave stale paint).
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [ctx, setCtx] = useState<CanvasRenderingContext2D | null>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !model || !axis) return;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = svgH * dpr;
-    const c = canvas.getContext('2d');
-    if (c) {
-      c.setTransform(dpr, 0, 0, dpr, 0, 0);
-      c.clearRect(0, 0, width, svgH);
-    }
-    setCtx(c);
-  }, [width, svgH, model]);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, svgH);
+    ALL_DECKS.forEach((deck, i) => {
+      for (const span of model.decks[deck].trackSpans) {
+        drawSpanWaveform(
+          ctx,
+          bandsByTrack[span.trackId] ?? null,
+          span,
+          model.decks[deck],
+          axis,
+          DECK_COLORS[deck],
+          { width, yOffset: laneY(i), height: LANE_H }
+        );
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, axis, width, svgH, bandsByTrack]);
 
   return (
     <div className="session-timeline">
@@ -222,26 +259,6 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
           <div className="stl-scroll">
             <div className="stl-stage" style={{ width, height: svgH }}>
               <canvas ref={canvasRef} className="stl-canvas" style={{ width, height: svgH }} />
-              {/* Hidden per-track-span waveform painters (each holds a
-                  useWaveformBlob and draws into the shared canvas). */}
-              {ctx
-                ? ALL_DECKS.flatMap((deck, i) =>
-                    model.decks[deck].trackSpans.map((sp, j) => (
-                      <SessionWaveformSpan
-                        key={`${deck}-${j}-${sp.trackId}-${sp.start}`}
-                        trackSpan={sp}
-                        deck={model.decks[deck]}
-                        axis={axis}
-                        color={DECK_COLORS[deck]}
-                        width={width}
-                        height={LANE_H}
-                        yOffset={laneY(i)}
-                        ctx={ctx}
-                      />
-                    ))
-                  )
-                : null}
-
               <svg
                 ref={svgRef}
                 width={width}

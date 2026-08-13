@@ -48,21 +48,6 @@ def list_sessions(db: Session = Depends(get_db)) -> list[schemas.SessionRow]:
     return [_row(db, s) for s in rows]
 
 
-@router.get("/{uuid}", response_model=schemas.SessionDetail)
-def get_session(uuid: str, db: Session = Depends(get_db)) -> schemas.SessionDetail:
-    """One Session with its whole event log: chunks concatenated in seq
-    order (the relationship's order_by). The timeline reads this once and
-    derives everything else client-side (sessions 04)."""
-    s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
-    if s is None:
-        raise HTTPException(status_code=404, detail="session not found")
-    events: list[dict] = []
-    for chunk in s.chunks:
-        events.extend(json.loads(chunk.events_json))
-    header = _row(db, s)
-    return schemas.SessionDetail(**header.model_dump(), events=events)
-
-
 @router.post("", response_model=schemas.SessionRow)
 def create_session(
     payload: schemas.SessionCreate, db: Session = Depends(get_db)
@@ -99,6 +84,21 @@ def recover_open_sessions(db: Session = Depends(get_db)) -> dict:
         s.ended_at = last_chunk_at or s.started_at
     db.commit()
     return {"closed": len(rows)}
+
+
+@router.get("/{uuid}", response_model=schemas.SessionDetail)
+def get_session(uuid: str, db: Session = Depends(get_db)) -> schemas.SessionDetail:
+    """One Session with its whole event log: chunks concatenated in seq
+    order (the relationship's order_by). The diagnostic/inspection seam —
+    the persisted events, readable through the app boundary."""
+    s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
+    if s is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    events: list[dict] = []
+    for chunk in s.chunks:
+        events.extend(json.loads(chunk.events_json))
+    header = _row(db, s)
+    return schemas.SessionDetail(**header.model_dump(), events=events)
 
 
 @router.post("/{uuid}/chunks", response_model=schemas.SessionRow)

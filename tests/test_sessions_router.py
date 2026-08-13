@@ -96,7 +96,7 @@ def test_append_chunks_accumulate(client):
 
 
 def test_get_session_concatenates_chunks_in_seq_order(client):
-    """The timeline's read model (sessions 04): one fetch, whole log."""
+    """The inspection read model: one fetch, whole log, seq-ordered."""
     client.post("/api/sessions", json={"uuid": "s1"})
     # Append out of order — the fetch must still read seq-ordered.
     client.post(

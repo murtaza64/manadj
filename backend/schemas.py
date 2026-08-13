@@ -426,9 +426,10 @@ class SessionRow(BaseModel):
 
 
 class SessionDetail(SessionRow):
-    """One Session with its whole event log — the timeline's read model
-    (sessions 04). Chunks concatenated in seq order into one opaque event
-    array; the client reads it with the capture vocabulary's real types."""
+    """One Session with its whole event log — chunks concatenated in seq
+    order into one opaque event array. The inspection/diagnostic read model
+    (Sessions PRD, ADR 0033): fetch the persisted events through the app
+    boundary; clients read them with the capture vocabulary's real types."""
     events: list[dict]
 
 
