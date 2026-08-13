@@ -37,7 +37,8 @@ export function recordFreshTake(aTrackId: number, bTrackId: number, uuid: string
 export function clearFreshTake(aTrackId: number, bTrackId: number): void {
   const key = pairKey(aTrackId, bTrackId);
   if (!(key in snapshot)) return;
-  const { [key]: _gone, ...rest } = snapshot;
+  const rest = { ...snapshot };
+  delete rest[key];
   snapshot = rest;
   notify();
 }
