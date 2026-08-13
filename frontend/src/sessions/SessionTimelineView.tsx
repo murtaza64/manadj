@@ -9,13 +9,18 @@
  * interactive). Playback (auditioning a moment) is sessions 05 — the
  * scrub readout here is already the replay planner's input.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { SessionRowWire, TakeRowWire } from '../api/client';
 import { DECK_COLORS } from '../theme/deckColors';
 import { requestTakeReview } from '../capture/takeReview';
+import { useDecks } from '../hooks/useDeck';
+import { useMixer } from '../hooks/useMixer';
+import { useToast } from '../components/Toast';
 import type { CaptureDeck, CaptureEvent } from '../capture/events';
+import { planReplay } from './replayPlanner';
+import { replayState, startReplay, stopReplay, subscribeReplay } from './replayStore';
 import { decodeWaveformBlob, toThreeBands } from '../waveform/blob';
 import type { ThreeBandWaveform } from '../waveform/blob';
 import {
@@ -141,6 +146,56 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
     () => (events && selection.kind === 'moment' ? stateAt(events, selection.t) : null),
     [events, selection]
   );
+
+  // ── Replay (sessions 05): the shared live decks play the moment ───────
+  const decks = useDecks();
+  const mixer = useMixer();
+  const toast = useToast();
+  const replay = useSyncExternalStore(subscribeReplay, replayState);
+  const decksRef = useRef(decks);
+  decksRef.current = decks;
+  const replayFrom = (t: number) => {
+    if (!events) return;
+    const res = planReplay(events, t);
+    if (!res.ok) {
+      toast(
+        res.reason === 'empty-log'
+          ? 'Nothing to replay — this Session has no events.'
+          : 'Nothing to replay at this moment — no track was loaded, and none is coming.'
+      );
+      return;
+    }
+    const loadTrack = async (deck: CaptureDeck, trackId: number): Promise<boolean> => {
+      try {
+        const track = await api.tracks.getById(trackId);
+        decksRef.current[deck].loadTrack(track);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    void startReplay(
+      session.uuid,
+      res.plan,
+      {
+        mixer,
+        engines: {
+          A: decks.A.engine,
+          B: decks.B.engine,
+          C: decks.C.engine,
+          D: decks.D.engine,
+        },
+      },
+      loadTrack,
+      (reason) => {
+        if (reason === 'load-failed') {
+          toast('Replay refused — a track this moment needs is missing from the library.');
+        } else if (reason === 'takeover') {
+          toast('Takeover — the decks are yours; capture resumed.');
+        }
+      }
+    );
+  };
 
   const width = BASE_W * zoom;
   const svgH = RULER_H + CHIP_STRIP_H + 4 * (LANE_H + LANE_GAP);
@@ -303,6 +358,9 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
             momentState={momentState}
             trackNames={trackNames}
             model={model}
+            replayStatus={replay.status}
+            onReplay={replayFrom}
+            onStopReplay={stopReplay}
             onOpenTake={(uuid) => requestTakeReview(uuid)}
             onClear={() => setSelection({ kind: 'none' })}
           />
@@ -630,6 +688,9 @@ function DetailPanel({
   momentState,
   trackNames,
   model,
+  replayStatus,
+  onReplay,
+  onStopReplay,
   onOpenTake,
   onClear,
 }: {
@@ -638,6 +699,9 @@ function DetailPanel({
   momentState: ReturnType<typeof stateAt> | null;
   trackNames: Record<number, string>;
   model: TimelineModel;
+  replayStatus: 'idle' | 'loading' | 'playing';
+  onReplay(t: number): void;
+  onStopReplay(): void;
   onOpenTake(uuid: string): void;
   onClear(): void;
 }) {
@@ -672,20 +736,35 @@ function DetailPanel({
                 ✕
               </button>
             </div>
+            <div className="stl-replay-row">
+              {replayStatus === 'idle' ? (
+                <button
+                  className="stl-replay"
+                  title="Replay through the shared live decks from this moment — any manual gesture takes over"
+                  onClick={() => onReplay(selection.t)}
+                >
+                  ▶ Replay from {fmtClock(selection.t)}
+                </button>
+              ) : (
+                <button className="stl-replay stop" onClick={onStopReplay}>
+                  {replayStatus === 'loading' ? 'Loading decks… (click to cancel)' : '■ Stop replay'}
+                </button>
+              )}
+            </div>
             <div className="stl-stub-body">
               {ALL_DECKS.some((d) => momentState.decks[d].trackId !== null) ? (
                 <>
-                  Auditioning this moment (sessions 05) replays through the live decks from here:{' '}
                   {ALL_DECKS.filter((d) => momentState.decks[d].trackId !== null)
                     .map(
                       (d) =>
                         `${trackNames[momentState.decks[d].trackId!] ?? momentState.decks[d].trackId} on ${d} @ ${fmtClock(momentState.decks[d].playhead)}`
                     )
                     .join(' · ')}
-                  .
+                  . Grab anything mid-replay to take over — the decks stay as the replay left
+                  them and capture resumes.
                 </>
               ) : (
-                'No tracks loaded at this moment.'
+                'No tracks loaded at this moment (replay will start silent and follow the log).'
               )}
             </div>
             <StateReadout state={momentState} trackNames={trackNames} />

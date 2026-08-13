@@ -341,3 +341,28 @@
 .stl-error {
   color: #ff2d55;
 }
+
+/* ── Replay (sessions 05) ── */
+
+.stl-replay-row {
+  margin-bottom: 8px;
+}
+/* Green = the app-wide active/engage color (the editor toggle model). */
+.stl-replay {
+  background: var(--green, #5ed75e);
+  border: 1px solid var(--green, #5ed75e);
+  color: var(--base, #1e1e1e);
+  font-weight: 700;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: var(--font-xs, 13px);
+}
+.stl-replay:hover {
+  filter: brightness(1.1);
+}
+.stl-replay.stop {
+  background: transparent;
+  color: var(--red, #ff4466);
+  border-color: var(--red, #ff4466);
+  font-weight: 600;
+}
