@@ -14,7 +14,6 @@ import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
 import { useDeckBeatgridSync } from '../hooks/useDeckBeatgridSync';
 import { useDeckBpmSync } from '../hooks/useDeckBpmSync';
-import { RemountStableResource } from '../utils/remountStableResource';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
 import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
@@ -123,36 +122,31 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // streams the whole event log to the backend as ~5s chunks and stamps
   // every detected Take with the Session's uuid. page-hide flushes the tail
   // so a kill costs seconds, not the Session.
-  const [capture] = useState(
-    () =>
-      new RemountStableResource(
-        () => {
-          const sink = new SessionSink();
-          sink.start();
-          const recorder = new CaptureRecorder(
-            mixer,
-            engines,
-            (take) => persistTake(take, sink.currentSessionUuid),
-            (event, activatesSession) => sink.record(event, activatesSession)
-          );
-          recorder.start();
-          const onHide = () => {
-            if (document.visibilityState === 'hidden') sink.flush();
-          };
-          document.addEventListener('visibilitychange', onHide);
-          return () => {
-            document.removeEventListener('visibilitychange', onHide);
-            recorder.dispose();
-            sink.stop();
-          };
-        },
-        (stop) => stop()
-      )
-  );
   useEffect(() => {
-    capture.mount();
-    return () => capture.unmount();
-  }, [capture]);
+    // StrictMode disposes the DeckEngines between its synthetic effect
+    // mounts, clearing their subscribers. Create a fresh recorder on the
+    // second mount so load/play events are subscribed again. The first
+    // SessionSink remains ephemeral because rows now open lazily on the
+    // first live event, so this does not recreate the duplicate-row bug.
+    const sink = new SessionSink();
+    sink.start();
+    const recorder = new CaptureRecorder(
+      mixer,
+      engines,
+      (take) => persistTake(take, sink.currentSessionUuid),
+      (event, activatesSession) => sink.record(event, activatesSession)
+    );
+    recorder.start();
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') sink.flush();
+    };
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      recorder.dispose();
+      sink.stop();
+    };
+  }, [engines, mixer]);
   // Dev-only audio routing tracer (headphone-cue 01): console helpers for
   // sink switching + the cue bridge. Lazy import keeps it out of prod.
   useEffect(() => {

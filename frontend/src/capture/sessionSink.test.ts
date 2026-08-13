@@ -95,6 +95,22 @@ describe('SessionSink activation', () => {
     expect(api.sessions.end).not.toHaveBeenCalled();
   });
 
+  it('creates one row across a StrictMode-style sink remount', async () => {
+    const syntheticMount = new SessionSink();
+    syntheticMount.start();
+    syntheticMount.record(tick(0), false);
+    syntheticMount.stop();
+
+    const realMount = new SessionSink();
+    realMount.start();
+    realMount.record(tick(0), false);
+    realMount.record({ t: 1, kind: 'load', channel: 'A', trackId: 42, bpm: 174 }, true);
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+
+    expect(api.sessions.create).toHaveBeenCalledOnce();
+    realMount.stop();
+  });
+
   it('opens once on the first live event and keeps the buffered seed', async () => {
     const sink = new SessionSink();
     sink.start();
