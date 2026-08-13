@@ -28,7 +28,7 @@ import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import type { AudibleSurfaceId } from '../playback/audibleSurface';
 import { initialCaptureState, reduceCapture } from './detector';
 import type { CaptureState } from './detector';
-import type { CaptureChannel, CaptureControlId, CaptureEvent, DetectedTake } from './events';
+import type { CaptureControlId, CaptureEvent, DetectedTake } from './events';
 
 const TICK_MS = 1000;
 
@@ -126,7 +126,13 @@ export class CaptureRecorder {
     for (const ch of CHANNEL_IDS) {
       this.unsubs.push(this.engines[ch].subscribe(() => this.diffDeck(ch)));
     }
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
+    // Detailed transport evidence (seek / jumpBeats / hotCue) for ALL FOUR
+    // Decks (sessions 09): these gestures leave no snapshot diff, so a
+    // handler is the only way they reach the Session log. C/D get exactly
+    // the same handler as A/B — the pair-only boundary is the detector's
+    // Take classification, never the whole-Session capture (ADR 0033).
+    // `ch` is a physical CaptureDeck: identity is preserved on the event.
+    for (const ch of CHANNEL_IDS) {
       this.engines[ch].setTransportEventHandler((e) =>
         this.feed({ t: this.now(), kind: 'transport', channel: ch, ...e })
       );
@@ -228,7 +234,9 @@ export class CaptureRecorder {
   dispose(): void {
     for (const u of this.unsubs) u();
     this.unsubs = [];
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
+    // Clear the detailed transport handler on ALL FOUR Decks (sessions 09),
+    // matching start()'s four-Deck installation.
+    for (const ch of CHANNEL_IDS) {
       this.engines[ch].setTransportEventHandler(null);
     }
     if (this.timer !== null) clearInterval(this.timer);

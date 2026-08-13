@@ -20,6 +20,7 @@ import type { AudibleSurfaceId } from '../playback/audibleSurface';
 export type ChipFace =
   | { kind: 'set'; setId: number; playing: boolean }
   | { kind: 'audition' }
+  | { kind: 'replay' }
   | { kind: 'decks' };
 
 export interface ConductorSnapshot {
@@ -32,6 +33,7 @@ export function resolveChipFace(
   conductor: ConductorSnapshot
 ): ChipFace {
   if (holder === 'editor') return { kind: 'audition' };
+  if (holder === 'replay') return { kind: 'replay' };
   if (holder === 'conductor' && conductor.setId !== null && conductor.status !== 'idle') {
     return { kind: 'set', setId: conductor.setId, playing: conductor.status === 'playing' };
   }
@@ -68,6 +70,8 @@ export function chipTooltip(face: ChipFace, ctx: ChipContext): string {
     }
     case 'audition':
       return 'Editor audition owns the decks. Space toggles the audition. Click to open the editor.';
+    case 'replay':
+      return 'Session replay owns the decks. Any deck or mixer gesture takes over — the decks are yours as the replay left them, and capture resumes.';
     case 'decks':
       if (ctx.editorMounted) {
         return 'Manual decks. Space plays the editor audition (it will claim the decks).';

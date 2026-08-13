@@ -22,7 +22,8 @@ import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
-import { SessionsListView } from './components/sessions/SessionsListView';
+import { SessionsView } from './sessions/SessionsView';
+import { OPEN_SESSION_EVENT } from './sessions/openSession';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
@@ -111,6 +112,14 @@ function App() {
     return () => window.removeEventListener(OPEN_PAIR_EVENT, onOpenPair);
   }, []);
 
+  // A Session-moment request (history's "view in Session", sessions 04)
+  // opens the Sessions view; the mounted SessionsView consumes the payload.
+  useEffect(() => {
+    const onOpenSession = () => setView('sessions');
+    window.addEventListener(OPEN_SESSION_EVENT, onOpenSession);
+    return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpenSession);
+  }, []);
+
   if (window.location.pathname === '/midi-inspect') {
     return (
       <Suspense fallback={null}>
@@ -148,7 +157,7 @@ function App() {
               ) : view === 'history' ? (
                 <TakeHistoryView />
               ) : view === 'sessions' ? (
-                <SessionsListView />
+                <SessionsView />
               ) : view === 'sync' ? (
                 <SyncView />
               ) : view === 'styles' ? (

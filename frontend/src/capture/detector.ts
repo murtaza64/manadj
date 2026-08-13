@@ -19,8 +19,8 @@
  * Settlement is time-driven: the ~1 Hz tick events advance the clock, so
  * the reducer never needs a timer.
  */
-import { channelCrossfaderGain, channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
+import { isDeckAudible } from './audibility';
 import {
   DEFAULT_DETECTOR_PARAMS,
   DETECTOR_VERSION,
@@ -135,16 +135,13 @@ export function initialCaptureState(params: DetectorParams = DEFAULT_DETECTOR_PA
 }
 
 function deckAudible(s: CaptureState, ch: CaptureDeck): boolean {
-  const d = s.decks[ch];
-  if (!d.playing) return false;
-  // Kill-style mix-outs never touch the fader: an EQ full-kill or a sweep
-  // filter ridden to an end silences the deck just as finally.
-  const { eqKillBelow, filterKillBeyond } = s.params;
-  if (d.eq.low <= eqKillBelow && d.eq.mid <= eqKillBelow && d.eq.high <= eqKillBelow) return false;
-  if (Math.abs(d.filter) >= filterKillBeyond) return false;
-  const xfGain = channelCrossfaderGain(d.assignment, s.crossfaderEnabled ? s.crossfader : 0);
-  const gain = trimToGain(d.trim) * channelFaderToGain(d.fader) * xfGain;
-  return gain >= s.params.audibleGain;
+  // The one audibility definition, shared with the Session timeline
+  // (capture/audibility.ts, sessions 04).
+  return isDeckAudible(
+    s.decks[ch],
+    { crossfader: s.crossfader, crossfaderEnabled: s.crossfaderEnabled },
+    s.params
+  );
 }
 
 /** How many decks are Master-audible right now (all four; ADR 0033). */
@@ -360,6 +357,10 @@ export function reduceCapture(
   // Audibility edges — CESSATIONS FIRST: an event flipping both decks at
   // once (a crossfader flick) must anchor as a cut at the cessation, on
   // either incumbency, not ride whichever deck the loop visited first.
+  // PHASE-1 PAIR BOUNDARY (ADR 0032, sessions 09): this A/B loop is the
+  // pair-machine Take classifier, deliberately not the whole-Session log —
+  // C/D evidence is captured in full (recorder) and counted for the
+  // >2-audible self-gate above; only the HANDOVER verdict trades on A/B.
   const edges = (['A', 'B'] as CaptureChannel[])
     .map((ch) => ({ ch, audible: deckAudible(s, ch) }))
     .filter(({ ch, audible }) => audible !== s.decks[ch].audible)

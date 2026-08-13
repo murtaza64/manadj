@@ -1216,6 +1216,14 @@ export const api = {
       return res.json();
     },
 
+    /** One Session with its whole event log (chunks concatenated) — the
+     * timeline's read model (sessions 04). */
+    get: async (uuid: string): Promise<SessionDetailWire> => {
+      const res = await fetch(`${API_BASE}/sessions/${uuid}`);
+      if (!res.ok) throw new Error(`Failed to fetch session (${res.status})`);
+      return res.json();
+    },
+
     /** Close Sessions orphaned by a prior crash/reload before recording. */
     recover: async (): Promise<number> => {
       const res = await fetch(`${API_BASE}/sessions/recover`, { method: 'POST' });
@@ -1386,6 +1394,12 @@ export interface SessionRowWire {
   started_at: string;
   ended_at: string | null;
   take_count: number;
+}
+
+export interface SessionDetailWire extends SessionRowWire {
+  /** The whole event log, chunks concatenated in seq order. Opaque to the
+   * backend; this client reads it with the capture module's real types. */
+  events: CaptureEventWire[];
 }
 
 // ── Set wire types (sets 01) ────────────────────────────────────────────

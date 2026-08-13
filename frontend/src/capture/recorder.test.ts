@@ -90,9 +90,15 @@ function emptySnapshot(): DeckSnapshot {
   };
 }
 
+type TransportGesture = { action: 'seek' | 'jumpBeats' | 'hotCue'; playhead: number; detail?: number };
+
 class FakeDeckSource implements CaptureDeckSource {
   private snapshot = emptySnapshot();
   private listeners = new Set<() => void>();
+  /** The recorder-owned detailed transport handler slot (sessions 09):
+   * stored so tests can fire seek/jumpBeats/hotCue gestures and assert
+   * installation/cleanup on every deck. */
+  transportHandler: ((e: TransportGesture) => void) | null = null;
 
   getSnapshot(): DeckSnapshot {
     return this.snapshot;
@@ -104,7 +110,13 @@ class FakeDeckSource implements CaptureDeckSource {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
-  setTransportEventHandler(): void {}
+  setTransportEventHandler(handler: ((e: TransportGesture) => void) | null): void {
+    this.transportHandler = handler;
+  }
+  /** A handler-only transport gesture (leaves no snapshot diff). */
+  fireTransport(e: TransportGesture): void {
+    this.transportHandler?.(e);
+  }
 
   private mutate(patch: Partial<DeckSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
@@ -371,6 +383,79 @@ describe('capture gate (ADR 0022)', () => {
     releaseAudible('editor');
     performBlend(r); // re-seeded reality: same blend now counts
     expect(r.takes).toHaveLength(1);
+    r.recorder.dispose();
+  });
+});
+
+// ── Four-deck transport parity (sessions 09) ──────────────────────────────
+// C/D Session evidence must match A/B: the detailed transport handler
+// (seek / jumpBeats / hotCue — handler-only gestures that leave no
+// snapshot diff) installs on ALL FOUR decks, feeds physical-deck-true
+// events, and clears on dispose. The pair-only boundary is the detector's
+// Take classification, never the whole-Session log.
+
+describe('four-deck transport parity (sessions 09)', () => {
+  const DECKS = ['A', 'B', 'C', 'D'] as const;
+
+  it('installs the detailed transport handler on all four decks, and clears it on dispose', () => {
+    const r = rig();
+    for (const d of DECKS) expect(r.decks[d].transportHandler).toBeNull();
+    r.recorder.start();
+    for (const d of DECKS) expect(r.decks[d].transportHandler).toBeTypeOf('function');
+    r.recorder.dispose();
+    for (const d of DECKS) expect(r.decks[d].transportHandler).toBeNull();
+  });
+
+  it('a C seek / D jumpBeats / C hotCue land in the log with the same shape as on A', () => {
+    const r = rig();
+    r.recorder.start();
+    const before = r.logged.length;
+
+    r.decks.A.fireTransport({ action: 'seek', playhead: 41.5 });
+    r.decks.C.fireTransport({ action: 'seek', playhead: 41.5 });
+    r.decks.D.fireTransport({ action: 'jumpBeats', playhead: 88.25, detail: 32 });
+    r.decks.C.fireTransport({ action: 'hotCue', playhead: 120.125, detail: 3 });
+
+    const fed = r.logged.slice(before).filter((e) => e.kind === 'transport');
+    expect(fed).toHaveLength(4);
+    const [aSeek, cSeek, dJump, cCue] = fed as Extract<CaptureEvent, { kind: 'transport' }>[];
+    // Physical identity preserved; C's event is A's event with channel C.
+    expect(aSeek).toMatchObject({ action: 'seek', channel: 'A', playhead: 41.5 });
+    expect(cSeek).toMatchObject({ action: 'seek', channel: 'C', playhead: 41.5 });
+    const { channel: chA, ...restA } = aSeek;
+    const { channel: chC, ...restC } = cSeek;
+    expect(chA).toBe('A');
+    expect(chC).toBe('C');
+    expect(restC).toEqual(restA); // identical shape and precision
+    expect(dJump).toMatchObject({ action: 'jumpBeats', channel: 'D', playhead: 88.25, detail: 32 });
+    expect(cCue).toMatchObject({ action: 'hotCue', channel: 'C', playhead: 120.125, detail: 3 });
+    r.recorder.dispose();
+  });
+
+  it('C/D handler gestures respect the surface gate like A/B (machine tenure)', () => {
+    const r = rig();
+    r.recorder.start();
+    claimAudible('editor');
+    const before = r.logged.length;
+    r.decks.C.fireTransport({ action: 'seek', playhead: 10 });
+    r.decks.D.fireTransport({ action: 'hotCue', playhead: 20, detail: 1 });
+    // Nothing but the tenure marker rode the log while gated.
+    expect(r.logged.slice(before).filter((e) => e.kind === 'transport')).toHaveLength(0);
+    releaseAudible('editor');
+    r.recorder.dispose();
+  });
+
+  it('D snapshot evidence (load/play/pitch) still reaches the log', () => {
+    const r = rig();
+    r.recorder.start();
+    const before = r.logged.length;
+    r.decks.D.load(77);
+    r.decks.D.play();
+    const fed = r.logged.slice(before);
+    expect(fed.some((e) => e.kind === 'load' && e.channel === 'D' && e.trackId === 77)).toBe(true);
+    expect(
+      fed.some((e) => e.kind === 'transport' && e.channel === 'D' && e.action === 'play')
+    ).toBe(true);
     r.recorder.dispose();
   });
 });
