@@ -5,6 +5,7 @@ export type CrossfaderAssignment = (typeof CROSSFADER_ASSIGNMENTS)[number];
 export type CrossfaderAssignments = Record<ChannelId, CrossfaderAssignment>;
 
 const STORAGE_KEY = 'manadj-crossfader-assignments';
+const POSITION_STORAGE_KEY = 'manadj-crossfader-position';
 
 export const DEFAULT_CROSSFADER_ASSIGNMENTS: CrossfaderAssignments = {
   A: 'left',
@@ -36,6 +37,24 @@ export function loadCrossfaderAssignments(): CrossfaderAssignments {
 export function saveCrossfaderAssignments(assignments: CrossfaderAssignments): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(assignments));
+  } catch {
+    // Persistence is best-effort; the Mixer keeps the session state.
+  }
+}
+
+export function loadCrossfaderPosition(): number {
+  try {
+    const value = Number(localStorage.getItem(POSITION_STORAGE_KEY));
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(-1, Math.min(1, value));
+  } catch {
+    return 0;
+  }
+}
+
+export function saveCrossfaderPosition(position: number): void {
+  try {
+    localStorage.setItem(POSITION_STORAGE_KEY, String(position));
   } catch {
     // Persistence is best-effort; the Mixer keeps the session state.
   }

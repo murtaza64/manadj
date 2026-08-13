@@ -56,7 +56,9 @@ import { planOutput } from './routing';
 import type { OutputPair } from './routing';
 import {
   loadCrossfaderAssignments,
+  loadCrossfaderPosition,
   saveCrossfaderAssignments,
+  saveCrossfaderPosition,
 } from './crossfaderAssignmentStore';
 import type {
   CrossfaderAssignment,
@@ -324,7 +326,7 @@ export class Mixer {
     C: structuredClone(FLAT_CHANNEL),
     D: structuredClone(FLAT_CHANNEL),
   };
-  private crossfader = 0; // -1 (left) .. 1 (right)
+  private crossfader = loadCrossfaderPosition(); // -1 (left) .. 1 (right)
   private crossfaderAssignments: CrossfaderAssignments = loadCrossfaderAssignments();
   /** Crossfader bypass: while false the fader position is kept but both
    * channels run at unity (as if centered) — an accidental-kill guard. */
@@ -686,6 +688,7 @@ export class Mixer {
   /** position in [-1 (full left), 1 (full right)]. */
   setCrossfader(position: number): void {
     this.crossfader = position;
+    saveCrossfaderPosition(position);
     this.notify();
     if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();

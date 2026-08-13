@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Mixer } from './mixer';
 
 const STORAGE_KEY = 'manadj-crossfader-assignments';
+const POSITION_STORAGE_KEY = 'manadj-crossfader-position';
 
 function fakeStorage(initial: Record<string, string> = {}): Storage {
   const map = new Map(Object.entries(initial));
@@ -61,5 +62,23 @@ describe('Mixer crossfader assignment persistence', () => {
     expect(mixer.getCrossfaderAssignment('B')).toBe('right');
     expect(mixer.getCrossfaderAssignment('C')).toBe('right');
     expect(mixer.getCrossfaderAssignment('D')).toBe('right');
+  });
+});
+
+describe('Mixer crossfader position persistence', () => {
+  it('restores the last position in a new Mixer', () => {
+    vi.stubGlobal('localStorage', fakeStorage());
+    const first = new Mixer();
+    first.engageAutomation(); // avoid constructing the audio graph in this store test
+    first.setCrossfader(-0.63);
+
+    const restarted = new Mixer();
+    expect(restarted.getCrossfader()).toBe(-0.63);
+    expect(localStorage.getItem(POSITION_STORAGE_KEY)).toBe('-0.63');
+  });
+
+  it('falls back to center for invalid persisted positions', () => {
+    vi.stubGlobal('localStorage', fakeStorage({ [POSITION_STORAGE_KEY]: 'wat' }));
+    expect(new Mixer().getCrossfader()).toBe(0);
   });
 });
