@@ -374,6 +374,10 @@ describe('cue-stab traces (sessions 10)', () => {
     expect(trackTimeAt(m.decks.B, 6.5)).toBeCloseTo(61.5, 5);
     // The stab is NOT a playing span (previewing, not playing).
     expect(m.decks.B.playingSpans).toEqual([]);
+    // The launch is a CUE press: it gets the ▲ marker (sessions 11).
+    expect(m.decks.B.gestures).toContainEqual(
+      expect.objectContaining({ t: 5, action: 'cue', playhead: 60 })
+    );
   });
 
   it('tick playheads of a non-previewing, non-playing deck stay ignored', () => {
@@ -387,7 +391,6 @@ describe('cue-stab traces (sessions 10)', () => {
     expect(m.decks.A.traces).toEqual([]);
   });
 });
-
 describe('audibleTrackIds (distinct Master-audible Track count)', () => {
   it('counts a Track that became audible; not one only loaded/silent', () => {
     const events: CaptureEvent[] = [
@@ -444,5 +447,38 @@ describe('audibleTrackIds (distinct Master-audible Track count)', () => {
     });
     const m = deriveTimeline(evs);
     expect(m.audibleTrackIds.sort((a, b) => a - b)).toEqual([10, 11, 12, 13]);
+  });
+});
+
+describe('hot-cue stab traces (sessions 11)', () => {
+  it("the launch hotCue gesture does not sever the stab's trace (no leading gap)", () => {
+    // Real launch order: previewStart (snapshot flip), then the hotCue
+    // gesture (handler tap), then ticks. The trace must run from launch.
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'C', trackId: 11, bpm: 128 },
+      { t: 5, kind: 'transport', channel: 'C', action: 'previewStart', playhead: 64, detail: 3 },
+      { t: 5, kind: 'transport', channel: 'C', action: 'hotCue', playhead: 64, detail: 3 },
+      { t: 6, kind: 'tick', playheads: { C: 65 } },
+      { t: 7, kind: 'tick', playheads: { C: 66 } },
+      // Release snaps back to the slot time (hot-cue-up), like a cue return.
+      { t: 8, kind: 'transport', channel: 'C', action: 'previewEnd', playhead: 64 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.decks.C.traces).toHaveLength(1);
+    const trace = m.decks.C.traces[0];
+    expect(trace[0]).toMatchObject({ t: 5, playhead: 64 });
+    // The snap-back is a discontinuity: the trace ends at the last real sample.
+    expect(trace.at(-1)!).toMatchObject({ t: 7, playhead: 66 });
+    // The waveform map covers the whole stab, launch included.
+    expect(trackTimeAt(m.decks.C, 5.5)).toBeCloseTo(64.5, 5);
+    // The gesture mark renders with its slot — and ONLY the hotCue mark
+    // (no extra cue-press marker: the slot mark IS the press marker here).
+    expect(m.decks.C.gestures).toContainEqual(
+      expect.objectContaining({ t: 5, action: 'hotCue', detail: 3 })
+    );
+    expect(m.decks.C.gestures.filter((g) => g.action === 'cue')).toEqual([]);
+    // Still not a playing span.
+    expect(m.decks.C.playingSpans).toEqual([]);
   });
 });

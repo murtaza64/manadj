@@ -351,8 +351,15 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
         }
       }
     } else if (e.kind === 'transport') {
-      if (e.action === 'play' || e.action === 'previewStart') sampleTrace(e.channel, e.t, e.playhead);
-      else if (e.action === 'pause' || e.action === 'cue' || e.action === 'previewEnd') {
+      if (e.action === 'play' || e.action === 'previewStart') {
+        sampleTrace(e.channel, e.t, e.playhead);
+        // Cue-press marker (sessions 11): a main-cue stab launch IS a CUE
+        // press — mark it like return-to-cue (▲). Hot-cue stabs already get
+        // their ◆slot mark from the launch hotCue gesture (detail = slot).
+        if (e.action === 'previewStart' && e.detail === undefined) {
+          gestures[e.channel].push({ t: e.t, action: 'cue', playhead: e.playhead });
+        }
+      } else if (e.action === 'pause' || e.action === 'cue' || e.action === 'previewEnd') {
         sampleTrace(e.channel, e.t, e.playhead);
         breakTrace(e.channel);
         if (e.action === 'cue') {
@@ -369,7 +376,13 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
         });
         if (preJump !== null) sampleTrace(e.channel, e.t, preJump);
         breakTrace(e.channel);
-        if (s.decks[e.channel].playing) sampleTrace(e.channel, e.t, e.playhead);
+        // Re-open for previewing decks too (sessions 11): a hot-cue stab's
+        // launch fires previewStart then its hotCue gesture — without this
+        // the gesture would sever the just-opened trace until the first
+        // tick (~1s leading gap in the stab's waveform).
+        if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
+          sampleTrace(e.channel, e.t, e.playhead);
+        }
       }
     }
 

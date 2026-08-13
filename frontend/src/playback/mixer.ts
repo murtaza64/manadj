@@ -56,7 +56,11 @@ import { planOutput } from './routing';
 import type { OutputPair } from './routing';
 import {
   loadCrossfaderAssignments,
+  loadCrossfaderEnabled,
+  loadCrossfaderPosition,
   saveCrossfaderAssignments,
+  saveCrossfaderEnabled,
+  saveCrossfaderPosition,
 } from './crossfaderAssignmentStore';
 import type {
   CrossfaderAssignment,
@@ -324,11 +328,11 @@ export class Mixer {
     C: structuredClone(FLAT_CHANNEL),
     D: structuredClone(FLAT_CHANNEL),
   };
-  private crossfader = 0; // -1 (left) .. 1 (right)
+  private crossfader = loadCrossfaderPosition(); // -1 (left) .. 1 (right)
   private crossfaderAssignments: CrossfaderAssignments = loadCrossfaderAssignments();
   /** Crossfader bypass: while false the fader position is kept but both
    * channels run at unity (as if centered) — an accidental-kill guard. */
-  private crossfaderEnabled = true;
+  private crossfaderEnabled = loadCrossfaderEnabled();
   /**
    * Automation overlay (ADR 0022): while non-null, drawn automation owns
    * the lane-driven node params (AutomationChannelValues) with REPLACEMENT
@@ -686,6 +690,7 @@ export class Mixer {
   /** position in [-1 (full left), 1 (full right)]. */
   setCrossfader(position: number): void {
     this.crossfader = position;
+    saveCrossfaderPosition(position);
     this.notify();
     if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();
@@ -708,6 +713,7 @@ export class Mixer {
 
   setCrossfaderEnabled(enabled: boolean): void {
     this.crossfaderEnabled = enabled;
+    saveCrossfaderEnabled(enabled);
     this.notify();
     if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();
