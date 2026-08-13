@@ -669,3 +669,27 @@ describe('SessionReplayDriver — status callbacks (playhead desync fix)', () =>
     r.driver.stop();
   });
 });
+
+describe('SessionReplayDriver — steady playback is left alone (jitter fix)', () => {
+  it('small tick-vs-clock skew never triggers a corrective seek', async () => {
+    const events: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      // Recorded ticks lag the true clock by ~0.1s each (wall-clock skew).
+      { t: 3, kind: 'tick', playheads: { A: 50.9 } },
+      { t: 4, kind: 'tick', playheads: { A: 51.8 } },
+      { t: 5, kind: 'tick', playheads: { A: 52.7 } },
+      { t: 6, kind: 'tick', playheads: { A: 53.6 } },
+      { t: 7, kind: 'tick', playheads: { A: 54.5 } },
+    ];
+    const r = rig(planFor(events, 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    // Advance across every tick; the engine plays at true rate. A skew of
+    // ~0.1-0.4s stays under the 0.5s resync threshold → zero seeks.
+    for (let i = 0; i < 5; i++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    r.driver.stop();
+  });
+});
