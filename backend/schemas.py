@@ -425,6 +425,14 @@ class SessionRow(BaseModel):
     take_count: int
 
 
+class SessionDetail(SessionRow):
+    """One Session with its whole event log — chunks concatenated in seq
+    order into one opaque event array. The inspection/diagnostic read model
+    (Sessions PRD, ADR 0033): fetch the persisted events through the app
+    boundary; clients read them with the capture vocabulary's real types."""
+    events: list[dict]
+
+
 # Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)
 
 

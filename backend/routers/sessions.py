@@ -86,6 +86,21 @@ def recover_open_sessions(db: Session = Depends(get_db)) -> dict:
     return {"closed": len(rows)}
 
 
+@router.get("/{uuid}", response_model=schemas.SessionDetail)
+def get_session(uuid: str, db: Session = Depends(get_db)) -> schemas.SessionDetail:
+    """One Session with its whole event log: chunks concatenated in seq
+    order (the relationship's order_by). The diagnostic/inspection seam —
+    the persisted events, readable through the app boundary."""
+    s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
+    if s is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    events: list[dict] = []
+    for chunk in s.chunks:
+        events.extend(json.loads(chunk.events_json))
+    header = _row(db, s)
+    return schemas.SessionDetail(**header.model_dump(), events=events)
+
+
 @router.post("/{uuid}/chunks", response_model=schemas.SessionRow)
 def append_chunk(
     uuid: str, payload: schemas.SessionChunkAppend, db: Session = Depends(get_db)

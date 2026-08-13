@@ -95,6 +95,36 @@ def test_append_chunks_accumulate(client):
     assert r1.status_code == 200, r1.text
 
 
+def test_get_session_concatenates_chunks_in_seq_order(client):
+    """The inspection read model: one fetch, whole log, seq-ordered."""
+    client.post("/api/sessions", json={"uuid": "s1"})
+    # Append out of order — the fetch must still read seq-ordered.
+    client.post(
+        "/api/sessions/s1/chunks",
+        json={"seq": 1, "events": [{"t": 6.0, "kind": "tick", "playheads": {}}]},
+    )
+    client.post(
+        "/api/sessions/s1/chunks",
+        json={"seq": 0, "events": [{"t": 1.0, "kind": "tick", "playheads": {}}]},
+    )
+    resp = client.get("/api/sessions/s1")
+    assert resp.status_code == 200, resp.text
+    detail = resp.json()
+    assert detail["uuid"] == "s1"
+    assert detail["take_count"] == 0
+    assert [e["t"] for e in detail["events"]] == [1.0, 6.0]
+
+
+def test_get_session_empty_log(client):
+    client.post("/api/sessions", json={"uuid": "s1"})
+    detail = client.get("/api/sessions/s1").json()
+    assert detail["events"] == []
+
+
+def test_get_unknown_session_404(client):
+    assert client.get("/api/sessions/nope").status_code == 404
+
+
 def test_append_unknown_session_404(client):
     assert client.post("/api/sessions/nope/chunks", json={"seq": 0, "events": []}).status_code == 404
 
