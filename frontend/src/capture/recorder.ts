@@ -207,6 +207,17 @@ export class CaptureRecorder {
       if (snap.playing) {
         this.feed({ t, kind: 'transport', channel: ch, action: 'play', playhead: this.engines[ch].getPlayhead() });
       }
+      if (snap.previewing) {
+        // A CUE stab already held at seed time (boot/re-seed mid-hold, ADR
+        // 0033): open its bracket so the log/timeline see the running preview.
+        this.feed({
+          t,
+          kind: 'transport',
+          channel: ch,
+          action: 'previewStart',
+          playhead: this.engines[ch].getPlayhead(),
+        });
+      }
     }
     this.lastCrossfader = this.mixer.getCrossfader();
     this.lastCrossfaderEnabled = this.mixer.getCrossfaderEnabled();
@@ -261,7 +272,12 @@ export class CaptureRecorder {
     if (this.surfaceGated) return;
     const playheads: Partial<Record<ChannelId, number>> = {};
     for (const ch of CHANNEL_IDS) {
-      if (this.lastDeck[ch].playing) playheads[ch] = this.engines[ch].getPlayhead();
+      // A previewing deck (CUE stab, ADR 0033) has a moving, audible
+      // playhead just like a playing one — sample it so the stab's motion
+      // rides the ~1 Hz ticks and the timeline can draw its waveform trace.
+      if (this.lastDeck[ch].playing || this.lastDeck[ch].previewing) {
+        playheads[ch] = this.engines[ch].getPlayhead();
+      }
     }
     this.feed({ t: this.now(), kind: 'tick', playheads });
   }
@@ -340,6 +356,21 @@ export class CaptureRecorder {
         kind: 'transport',
         channel: ch,
         action: cur.playing ? 'play' : 'pause',
+        playhead: this.engines[ch].getPlayhead(),
+      });
+    }
+    if (cur.previewing !== prev.previewing) {
+      // CUE stab (hold-to-preview, ADR 0033): audio runs and is
+      // Master-audible while `previewing`, but `playing` never flips. Log
+      // the stab as previewStart/previewEnd (with the moving playhead, which
+      // the ~1 Hz tick also samples) so the timeline can render it and
+      // replay can reproduce it. The detector ignores both edges — preview
+      // is inert to detection v1 (deliberate; see detector.ts).
+      this.feed({
+        t,
+        kind: 'transport',
+        channel: ch,
+        action: cur.previewing ? 'previewStart' : 'previewEnd',
         playhead: this.engines[ch].getPlayhead(),
       });
     }

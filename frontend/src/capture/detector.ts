@@ -176,6 +176,14 @@ function applyEvent(s: CaptureState, e: CaptureEvent): void {
     case 'transport':
       if (e.action === 'play') s.decks[e.channel].playing = true;
       else if (e.action === 'pause' || e.action === 'cue') s.decks[e.channel].playing = false;
+      // PHASE-1 PREVIEW BOUNDARY (ADR 0033 cue-stab capture): previewStart/
+      // previewEnd bracket a Master-audible CUE stab in the log, but the
+      // phase-1 pair detector deliberately ignores them — a stab does NOT
+      // flip `playing`, count toward audibility/engagements, or trip the
+      // >2-audible self-gate. This keeps detection byte-identical to before
+      // preview evidence existed. Revisiting preview audibility semantics is
+      // a follow-up grill, not this issue. (seek/jumpBeats/hotCue likewise
+      // ride the log as evidence without touching detection state.)
       break;
     case 'load':
       s.decks[e.channel].trackId = e.trackId;

@@ -61,7 +61,14 @@ export type CaptureEvent =
       t: number;
       kind: 'transport';
       channel: CaptureDeck;
-      action: 'play' | 'pause' | 'seek' | 'jumpBeats' | 'hotCue' | 'cue';
+      /** `previewStart`/`previewEnd` bracket a CUE stab (hold-to-preview:
+       * cue-down from the cue point, released on cue-up — Master-audible
+       * when the fader is up, but sets `previewing`, not `playing`, ADR
+       * 0033 cue-stab capture). The log records the stab so the timeline can
+       * render it and replay can reproduce it (via engine cueDown/cueUp);
+       * the phase-1 pair detector ignores both edges — preview audibility is
+       * inert to detection v1 (deliberate; a follow-up grill revisits it). */
+      action: 'play' | 'pause' | 'seek' | 'jumpBeats' | 'hotCue' | 'cue' | 'previewStart' | 'previewEnd';
       /** Deck track-time after the action (s). */
       playhead: number;
       /** Action-specific: beats for jumpBeats, slot for hotCue. */
