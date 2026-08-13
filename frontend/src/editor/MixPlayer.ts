@@ -358,6 +358,10 @@ export class MixPlayer {
     // Not audible → not ours to pitch (sets 21). play() re-applies on the
     // audition that claims, so the editor's tempo match is never stale.
     if (!this.audible()) return;
+    // Sketch origin invariant: A's track time is mix time, so A must run at
+    // native rate. A persisted Performance pitch would drift against the
+    // arrangement until the safety corrector audibly re-seeks it.
+    this.engineA.setPitch(0);
     this.engineB.setPitch(
       this.mix.transition.tempoMatch ? tempoMatchPitch(this.bpm.a, this.bpm.b) : 0
     );
