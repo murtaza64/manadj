@@ -12,7 +12,9 @@
  *   after settle → the completed Take is preserved
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../api/client';
 import { CaptureRecorder } from './recorder';
+import { SessionSink } from './sessionSink';
 import type { CaptureDeckSource, CaptureMixerSource } from './recorder';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { CaptureEvent, DetectedTake } from './events';
@@ -25,6 +27,23 @@ import {
   registerSurface,
   releaseAudible,
 } from '../playback/audibleSurface';
+
+// For the real-SessionSink provenance seam (sessions 11): the sink's I/O is
+// mocked; everything else in this file never touches the api.
+vi.mock('../api/client', () => ({
+  api: {
+    sessions: {
+      recover: vi.fn().mockResolvedValue(0),
+      create: vi.fn().mockResolvedValue({}),
+      appendChunk: vi.fn().mockResolvedValue({}),
+      end: vi.fn().mockResolvedValue({}),
+    },
+  },
+}));
+
+vi.mock('../api/queryClient', () => ({
+  queryClient: { invalidateQueries: vi.fn().mockResolvedValue(undefined) },
+}));
 
 const HORIZON = DEFAULT_DETECTOR_PARAMS.settleHorizonS;
 
@@ -152,8 +171,11 @@ function surface() {
 }
 
 /** A rig: recorder over fakes, real detector, fake clock at second `t`.
- * `logged` captures the whole fed stream (the Session sink's input). */
-function rig() {
+ * `logged` captures the whole fed stream (the Session sink's input);
+ * `activated` the per-event activation flags (Master-audibility, sessions
+ * 11); `splits` counts onSplit firings (`onSplit` returns `splitResult`,
+ * mimicking SessionSink.split()'s had-a-row answer). */
+function rig(onTake?: (take: DetectedTake) => void) {
   const mixer = new FakeMixerSource();
   const decks = {
     A: new FakeDeckSource(),
@@ -163,17 +185,33 @@ function rig() {
   };
   const takes: DetectedTake[] = [];
   const logged: CaptureEvent[] = [];
+  const activated: boolean[] = [];
+  const splits: number[] = [];
+  const result = { splitResult: true };
   const recorder = new CaptureRecorder(
     mixer,
     decks,
-    (take) => takes.push(take),
-    (event) => logged.push(event)
+    (take) => {
+      takes.push(take);
+      onTake?.(take);
+    },
+    (event, activatesSession) => {
+      logged.push(event);
+      activated.push(activatesSession);
+    },
+    () => {
+      splits.push(performance.now() / 1000);
+      return result.splitResult;
+    }
   );
   return {
     mixer,
     decks,
     takes,
     logged,
+    activated,
+    splits,
+    result,
     recorder,
     advance: (sec: number) => vi.advanceTimersByTime(sec * 1000),
   };
@@ -588,5 +626,221 @@ describe('cue-stab capture (sessions 10)', () => {
     expect(r.takes[0].outgoingTrackId).toBe(1);
     expect(r.takes[0].incomingTrackId).toBe(2);
     r.recorder.dispose();
+  });
+});
+
+// ── Ten-minute silence split + audible-only activation (sessions 11) ──────
+// A Session ends after ten continuous minutes with no Master-audible Deck
+// (tenure = non-performance = inactivity), and a row only ever OPENS on a
+// Master-audible instant: loads, cueing, control setup, and tenures buffer
+// as context (activatesSession=false) but never create a row.
+
+describe('audible-only activation (sessions 11)', () => {
+  it('silent setup — loads, seeks, cue stabs, control moves, tenure — never activates', () => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    r.decks.A.seek(30);
+    r.decks.A.fireTransport({ action: 'seek', playhead: 30 });
+    r.decks.B.load(2);
+    r.mixer.setFader('B', 0.3);
+    r.decks.A.previewStart(); // CUE stab: the audibility definition ignores preview
+    r.advance(2);
+    r.decks.A.previewEnd();
+    claimAudible('editor');
+    r.advance(2);
+    releaseAudible('editor');
+    r.advance(5);
+    expect(r.activated.length).toBeGreaterThan(0);
+    expect(r.activated.some(Boolean)).toBe(false);
+    r.recorder.dispose();
+  });
+
+  it('the first Master-audible instant activates, on that exact event', () => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    expect(r.activated.some(Boolean)).toBe(false);
+    r.decks.A.play(); // fader up, trim centered: Master-audible
+    const idx = r.activated.findIndex(Boolean);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(r.logged[idx]).toMatchObject({ kind: 'transport', action: 'play', channel: 'A' });
+    r.recorder.dispose();
+  });
+
+  it('playing into a killed channel does not activate; opening the fader does', () => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    r.mixer.setFader('A', 0);
+    r.decks.A.play();
+    r.advance(5);
+    expect(r.activated.some(Boolean)).toBe(false);
+    r.mixer.setFader('A', 1); // the first Master-audible instant
+    expect(r.activated[r.activated.length - 1]).toBe(true);
+    r.recorder.dispose();
+  });
+});
+
+describe('ten-minute silence split (sessions 11)', () => {
+  /** Silence B (the blend's survivor) and return the pause instant. */
+  function goSilent(r: ReturnType<typeof rig>): void {
+    r.decks.B.pause();
+  }
+
+  it('9:59 of continuous silence does not split; 10:00 does — exactly once', () => {
+    const r = rig();
+    r.recorder.start();
+    performBlend(r);
+    goSilent(r);
+    r.advance(599);
+    expect(r.splits).toHaveLength(0);
+    r.advance(2);
+    expect(r.splits).toHaveLength(1);
+    // Dormant: continued silence never fires again, and no further split.
+    r.advance(3600);
+    expect(r.splits).toHaveLength(1);
+    r.recorder.dispose();
+  });
+
+  it('a Master-audible blip before the threshold resets the full ten-minute clock', () => {
+    const r = rig();
+    r.recorder.start();
+    performBlend(r);
+    goSilent(r);
+    r.advance(590);
+    r.decks.B.play(); // audible again just before the threshold
+    r.advance(1);
+    r.decks.B.pause();
+    r.advance(598);
+    expect(r.splits).toHaveLength(0); // full clock restarted at the pause
+    r.advance(3);
+    expect(r.splits).toHaveLength(1);
+    r.recorder.dispose();
+  });
+
+  it('machine tenure counts as inactivity: ten gated minutes split the Session', () => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    r.decks.A.play(); // performance, then the editor takes the surface
+    r.advance(5);
+    claimAudible('editor');
+    r.advance(599);
+    expect(r.splits).toHaveLength(0);
+    r.advance(2);
+    expect(r.splits).toHaveLength(1);
+    // The next Session's buffered context re-marks the still-open hold.
+    const tenureStarts = r.logged.filter((e) => e.kind === 'tenure' && e.edge === 'start');
+    expect(tenureStarts.length).toBe(2);
+    releaseAudible('editor');
+    r.recorder.dispose();
+  });
+
+  it('no engagement spans the boundary; a post-split blend is detected fresh with the new pair', () => {
+    const r = rig();
+    r.recorder.start();
+    performBlend(r); // Take 1: 1 → 2
+    expect(r.takes).toHaveLength(1);
+    goSilent(r);
+    r.advance(601);
+    expect(r.splits).toHaveLength(1);
+    expect(r.takes).toHaveLength(1); // nothing settled across the boundary
+    // Live performance resumes: a fresh blend on fresh tracks. (A had kept
+    // playing into its killed fader — stop it before re-cueing, as a real
+    // Load would.)
+    r.decks.A.pause();
+    r.decks.A.load(3);
+    r.decks.B.load(4);
+    r.mixer.setFader('A', 1);
+    r.mixer.setFader('B', 0);
+    r.decks.A.play();
+    r.advance(10);
+    r.decks.B.play();
+    r.advance(2);
+    r.mixer.setFader('B', 1);
+    r.advance(8);
+    r.mixer.setFader('A', 0);
+    r.advance(HORIZON + 1);
+    expect(r.takes).toHaveLength(2);
+    expect(r.takes[1].outgoingTrackId).toBe(3);
+    expect(r.takes[1].incomingTrackId).toBe(4);
+    r.recorder.dispose();
+  });
+
+  it('a rowless split (silence from boot) does not reset or re-seed the detector', () => {
+    const r = rig();
+    r.result.splitResult = false; // the sink had no row open
+    r.recorder.start();
+    r.advance(601);
+    expect(r.splits).toHaveLength(1); // the clock fired…
+    // …but nothing re-seeded: no seed control burst after the boot seed.
+    const seeds = r.logged.filter(
+      (e) => e.kind === 'control' && e.control === 'crossfader'
+    );
+    expect(seeds).toHaveLength(1); // boot seed only
+    r.recorder.dispose();
+  });
+});
+
+describe('split Take provenance (sessions 11, real SessionSink)', () => {
+  it('a post-split blend persists a new Session row and stamps its Takes with the new uuid', async () => {
+    const sink = new SessionSink();
+    sink.start();
+    const uuids: (string | null)[] = [];
+    const mixer = new FakeMixerSource();
+    const decks = {
+      A: new FakeDeckSource(),
+      B: new FakeDeckSource(),
+      C: new FakeDeckSource(),
+      D: new FakeDeckSource(),
+    };
+    // DeckContext's exact wiring (minus persistTake's HTTP): the settle-time
+    // sink uuid is the Take's provenance stamp.
+    const recorder = new CaptureRecorder(
+      mixer,
+      decks,
+      () => uuids.push(sink.currentSessionUuid),
+      (event, activatesSession) => sink.record(event, activatesSession),
+      () => sink.split()
+    );
+    recorder.start();
+    const r = {
+      mixer,
+      decks,
+      advance: (sec: number) => vi.advanceTimersByTime(sec * 1000),
+    } as ReturnType<typeof rig>;
+    performBlend(r); // Take 1 in Session 1
+    expect(uuids).toHaveLength(1);
+    const firstUuid = uuids[0];
+    expect(firstUuid).not.toBeNull();
+    decks.B.pause();
+    r.advance(601); // the split: Session 1 ends, dormant
+    expect(sink.currentSessionUuid).toBeNull();
+    // Live again: Session 2 opens lazily on the first audible instant.
+    decks.A.pause();
+    decks.A.load(3);
+    decks.B.load(4);
+    mixer.setFader('A', 1);
+    mixer.setFader('B', 0);
+    decks.A.play();
+    r.advance(10);
+    decks.B.play();
+    r.advance(2);
+    mixer.setFader('B', 1);
+    r.advance(8);
+    mixer.setFader('A', 0);
+    r.advance(HORIZON + 1);
+    expect(uuids).toHaveLength(2);
+    expect(uuids[1]).not.toBeNull();
+    expect(uuids[1]).not.toBe(firstUuid);
+    // Drain the sink's serialized write chain (recover → create → the idle
+    // period's ~120 timer flushes → end → create) — microtasks only.
+    for (let i = 0; i < 2000; i += 1) await Promise.resolve();
+    // Two persisted Session rows; the old one ended at the split.
+    expect(api.sessions.create).toHaveBeenCalledTimes(2);
+    expect(api.sessions.end).toHaveBeenCalledExactlyOnceWith(firstUuid);
+    recorder.dispose();
+    sink.stop();
   });
 });
