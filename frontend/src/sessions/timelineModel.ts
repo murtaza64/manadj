@@ -44,12 +44,41 @@ export interface TenureSpan extends Span {
  * within a trace, track time interpolates linearly between samples. */
 export type PlayheadTrace = { t: number; playhead: number }[];
 
+/** A discrete transport gesture worth a marker (seek / beat jump / hot
+ * cue): handler-only evidence the lane renders as glyphs (sessions 04
+ * iteration). `playhead` is the post-gesture track position. */
+export interface GestureMark {
+  t: number;
+  action: 'seek' | 'jumpBeats' | 'hotCue' | 'cue';
+  playhead: number;
+  detail?: number;
+}
+
+/** A held loop: engage/resize → release/cancel (region null). */
+export interface LoopSpan extends Span {
+  /** The last region held (track seconds). */
+  region: { start: number; end: number };
+  /** Unclosed at log end. */
+  open: boolean;
+}
+
+/** One step of the audibility-gain series: from `t`, this deck contributes
+ * `gain` to Master (0 while inaudible/tenure-masked). The area-chart fill. */
+export interface GainStep {
+  t: number;
+  gain: number;
+}
+
 export interface DeckTimeline {
   deck: CaptureDeck;
   trackSpans: TrackSpan[];
   playingSpans: Span[];
   audibleSpans: Span[];
   traces: PlayheadTrace[];
+  gestures: GestureMark[];
+  loops: LoopSpan[];
+  /** Step series (event-aligned) of audible Master gain; 0 = silent. */
+  gainSteps: GainStep[];
 }
 
 export interface TimelineModel {
@@ -229,6 +258,14 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
   const traces = perDeck<PlayheadTrace[]>(() => []);
   const openTrace = perDeck<PlayheadTrace | null>(() => null);
 
+  const gestures = perDeck<GestureMark[]>(() => []);
+  const loops = perDeck<LoopSpan[]>(() => []);
+  const openLoop = perDeck<{ since: number; region: { start: number; end: number } } | null>(
+    () => null
+  );
+  const gainSteps = perDeck<GainStep[]>(() => []);
+  const lastGain = perDeck<number>(() => 0);
+
   const tenures: TenureSpan[] = [];
   let openTenure: { holder: string; since: number } | null = null;
 
@@ -259,6 +296,20 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
   };
 
   for (const e of events) {
+    // Pre-event playhead for the affected deck: seek-class gestures must
+    // CLOSE the old trace at the jump instant (extrapolated), not at the
+    // last tick — otherwise every jump leaves an up-to-1s waveform gap.
+    let preJump: number | null = null;
+    if (
+      e.kind === 'transport' &&
+      (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue')
+    ) {
+      const d = s.decks[e.channel];
+      if (d.playing) {
+        preJump = d.playhead + (e.t - d.playheadAt) * (1 + d.pitch / 100);
+      }
+    }
+
     applyEvent(s, e);
 
     // Track spans (loads).
@@ -286,10 +337,42 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
       else if (e.action === 'pause' || e.action === 'cue') {
         sampleTrace(e.channel, e.t, e.playhead);
         breakTrace(e.channel);
+        if (e.action === 'cue') {
+          gestures[e.channel].push({ t: e.t, action: 'cue', playhead: e.playhead });
+        }
       } else {
-        // seek / jumpBeats / hotCue: close the old line, start anew.
+        // seek / jumpBeats / hotCue: a discontinuity gesture — mark it,
+        // close the old line AT the jump instant, start anew.
+        gestures[e.channel].push({
+          t: e.t,
+          action: e.action,
+          playhead: e.playhead,
+          detail: e.detail,
+        });
+        if (preJump !== null) sampleTrace(e.channel, e.t, preJump);
         breakTrace(e.channel);
         if (s.decks[e.channel].playing) sampleTrace(e.channel, e.t, e.playhead);
+      }
+    }
+
+    // Held loops (looping 06 evidence): engage/resize carry a region,
+    // release/cancel/Load-clear carry null.
+    if (e.kind === 'loop') {
+      const open = openLoop[e.channel];
+      if (e.region !== null) {
+        if (open === null) openLoop[e.channel] = { since: e.t, region: e.region };
+        else open.region = e.region; // resize: keep the span, update region
+      } else if (open !== null) {
+        loops[e.channel].push({ start: open.since, end: e.t, region: open.region, open: false });
+        openLoop[e.channel] = null;
+      }
+    }
+    if (e.kind === 'load') {
+      const open = openLoop[e.channel];
+      if (open !== null) {
+        // A Load clears the loop (DeckEngine semantics).
+        loops[e.channel].push({ start: open.since, end: e.t, region: open.region, open: false });
+        openLoop[e.channel] = null;
       }
     }
 
@@ -310,6 +393,13 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
       if (a) audibleCount += 1;
       audible[ch].set(a, e.t);
       playing[ch].set(s.decks[ch].playing, e.t);
+      // Audible-gain step series (the area-chart fill): the deck's Master
+      // contribution, zero while silent or tenure-masked.
+      const gain = a ? deckMasterGain(s.decks[ch], mixerInputs(s)) : 0;
+      if (gain !== lastGain[ch]) {
+        gainSteps[ch].push({ t: e.t, gain });
+        lastGain[ch] = gain;
+      }
     }
     suspended.set(audibleCount > 2, e.t);
     overlap.set(audibleCount >= 2, e.t);
@@ -322,6 +412,8 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     playing[ch].close(end);
     const open = openTrack[ch];
     if (open) trackSpans[ch].push({ start: open.since, end, trackId: open.trackId });
+    const loop = openLoop[ch];
+    if (loop) loops[ch].push({ start: loop.since, end, region: loop.region, open: true });
     breakTrace(ch);
   }
   suspended.close(end);
@@ -340,6 +432,9 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
         playingSpans: playing[ch].spans,
         audibleSpans: audible[ch].spans,
         traces: traces[ch],
+        gestures: gestures[ch],
+        loops: loops[ch],
+        gainSteps: gainSteps[ch],
       },
     ])
   ) as Record<CaptureDeck, DeckTimeline>;
@@ -399,7 +494,12 @@ export function stateAt(events: CaptureEvent[], t: number): StateAtT {
   const decks = Object.fromEntries(
     ALL_DECKS.map((ch) => {
       const d = s.decks[ch];
-      const extrapolated = d.playing ? d.playhead + (t - d.playheadAt) : d.playhead;
+      // Pitch-aware extrapolation: a deck at +4.6% advances 1.046 track-sec
+      // per wall-sec. Rate-blind extrapolation seeded replays with a
+      // per-deck phase error ∝ (T − last tick) × pitch — the "blend isn't
+      // beatmatched, differently every time" bug.
+      const rate = 1 + d.pitch / 100;
+      const extrapolated = d.playing ? d.playhead + (t - d.playheadAt) * rate : d.playhead;
       return [
         ch,
         {
@@ -429,34 +529,46 @@ export function stateAt(events: CaptureEvent[], t: number): StateAtT {
   };
 }
 
-// ── Piecewise time axis with idle collapse ───────────────────────────────
+// ── Piecewise time axis with idle collapse (pixel space) ────────────────
 
 export interface AxisSegment extends Span {
   collapsed: boolean;
-  /** x extent in [0..1] of the drawable width. */
-  x0: number;
-  x1: number;
+  /** Pixel extent within the total timeline width. */
+  px0: number;
+  px1: number;
 }
 
 export interface TimeAxis {
   segments: AxisSegment[];
-  /** Capture time → x in [0..1]. */
-  tToX(t: number): number;
-  /** x in [0..1] → capture time (collapsed markers map to their start). */
-  xToT(x: number): number;
+  /** Capture time → timeline px. */
+  tToPx(t: number): number;
+  /** Timeline px → capture time (collapsed markers map to their start). */
+  pxToT(x: number): number;
+  /** Total timeline width in px. */
+  totalPx: number;
   /** Sum of un-collapsed duration (drives tick/zoom decisions). */
   visibleDurationS: number;
+  /** The zoom this axis was built at. */
+  pxPerSec: number;
 }
 
-/** Collapsed idle stretches get this fraction of the drawable width each
- * (clamped so pathological sessions still render). */
-const COLLAPSED_FRACTION = 0.02;
+/** Collapsed idle stretches are FIXED pixels regardless of zoom — a
+ * zoom-scaling marker inflates around the cursor and makes the content
+ * visibly jump during zoom gestures (04 iteration bug). */
+export const COLLAPSED_MARKER_PX = 28;
 
 export function buildTimeAxis(
   model: TimelineModel,
-  opts: { collapseIdle: boolean; thresholdS: number; expanded?: ReadonlySet<number> }
+  opts: {
+    collapseIdle: boolean;
+    thresholdS: number;
+    expanded?: ReadonlySet<number>;
+    /** Zoom: pixels per un-collapsed second. */
+    pxPerSec: number;
+  }
 ): TimeAxis {
   const { start, end } = model;
+  const pxPerSec = Math.max(0.0001, opts.pxPerSec);
   const collapsible = opts.collapseIdle
     ? model.idle.filter(
         (sp, i) => sp.end - sp.start >= opts.thresholdS && !(opts.expanded?.has(i) ?? false)
@@ -468,61 +580,71 @@ export function buildTimeAxis(
   let cursor = start;
   for (const sp of collapsible) {
     if (sp.start > cursor) {
-      segments.push({ start: cursor, end: sp.start, collapsed: false, x0: 0, x1: 0 });
+      segments.push({ start: cursor, end: sp.start, collapsed: false, px0: 0, px1: 0 });
     }
-    segments.push({ start: sp.start, end: sp.end, collapsed: true, x0: 0, x1: 0 });
+    segments.push({ start: sp.start, end: sp.end, collapsed: true, px0: 0, px1: 0 });
     cursor = sp.end;
   }
   if (end > cursor || segments.length === 0) {
-    segments.push({ start: cursor, end: Math.max(end, cursor), collapsed: false, x0: 0, x1: 0 });
+    segments.push({ start: cursor, end: Math.max(end, cursor), collapsed: false, px0: 0, px1: 0 });
   }
 
-  const collapsedCount = segments.filter((seg) => seg.collapsed).length;
-  const collapsedFraction = Math.min(0.3, collapsedCount * COLLAPSED_FRACTION);
-  const perCollapsed = collapsedCount > 0 ? collapsedFraction / collapsedCount : 0;
   const visibleDurationS = segments
     .filter((seg) => !seg.collapsed)
     .reduce((acc, seg) => acc + (seg.end - seg.start), 0);
-  const scale = visibleDurationS > 0 ? (1 - collapsedFraction) / visibleDurationS : 0;
 
   let x = 0;
   for (const seg of segments) {
-    seg.x0 = x;
-    x += seg.collapsed ? perCollapsed : (seg.end - seg.start) * scale;
-    seg.x1 = x;
+    seg.px0 = x;
+    x += seg.collapsed ? COLLAPSED_MARKER_PX : (seg.end - seg.start) * pxPerSec;
+    seg.px1 = x;
   }
-  if (segments.length > 0) segments[segments.length - 1].x1 = 1;
+  const totalPx = x;
 
-  const tToX = (t: number): number => {
+  const tToPx = (t: number): number => {
     if (segments.length === 0) return 0;
     if (t <= segments[0].start) return 0;
     for (const seg of segments) {
       if (t <= seg.end) {
-        if (seg.collapsed) return seg.x0 + (seg.x1 - seg.x0) / 2;
+        if (seg.collapsed) return (seg.px0 + seg.px1) / 2;
         const dur = seg.end - seg.start;
-        return dur <= 0 ? seg.x0 : seg.x0 + ((t - seg.start) / dur) * (seg.x1 - seg.x0);
+        return dur <= 0 ? seg.px0 : seg.px0 + ((t - seg.start) / dur) * (seg.px1 - seg.px0);
       }
     }
-    return 1;
+    return totalPx;
   };
 
-  const xToT = (xq: number): number => {
+  const pxToT = (xq: number): number => {
     if (segments.length === 0) return 0;
     if (xq <= 0) return segments[0].start;
     for (const seg of segments) {
-      if (xq <= seg.x1) {
+      if (xq <= seg.px1) {
         if (seg.collapsed) return seg.start;
-        const w = seg.x1 - seg.x0;
-        return w <= 0 ? seg.start : seg.start + ((xq - seg.x0) / w) * (seg.end - seg.start);
+        const w = seg.px1 - seg.px0;
+        return w <= 0 ? seg.start : seg.start + ((xq - seg.px0) / w) * (seg.end - seg.start);
       }
     }
     return segments[segments.length - 1].end;
   };
 
-  return { segments, tToX, xToT, visibleDurationS };
+  return { segments, tToPx, pxToT, totalPx, visibleDurationS, pxPerSec };
 }
 
 // ── Trace lookup (session time → track time; waveform mapping) ──────────
+
+/** The deck's audible Master gain at session time `t` (step lookup;
+ * binary search — the render path calls this per pixel column). */
+export function gainAt(steps: GainStep[], t: number): number {
+  if (steps.length === 0 || t < steps[0].t) return 0;
+  let lo = 0;
+  let hi = steps.length - 1;
+  while (hi - lo > 0) {
+    const mid = (lo + hi + 1) >> 1;
+    if (steps[mid].t <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  return steps[lo].gain;
+}
 
 /** The track time playing on `ch` at session time `t`, or null if the deck
  * wasn't producing a trace there (stopped / no samples). Linear between

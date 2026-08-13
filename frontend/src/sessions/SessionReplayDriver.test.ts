@@ -117,7 +117,11 @@ interface ChannelShape {
   pfl: boolean;
 }
 
+type LaneShape = { fader: number; eq: { low: number; mid: number; high: number }; filter: number };
+
 class FakeMixer {
+  /** The automation overlay (null = disengaged). Writes never notify. */
+  automation: Partial<Record<ChannelId, LaneShape>> | null = null;
   channels: Record<ChannelId, ChannelShape> = {
     A: freshChannel(),
     B: freshChannel(),
@@ -187,6 +191,20 @@ class FakeMixer {
   }
   getMaster(): number {
     return this.master;
+  }
+
+  engageAutomation(): symbol {
+    this.automation = {};
+    return Symbol('automation-owner');
+  }
+  setAutomation(ch: ChannelId, v: LaneShape): void {
+    if (this.automation) this.automation[ch] = v; // never notifies
+  }
+  disengageAutomation(): void {
+    this.automation = null;
+  }
+  getAutomation(ch: ChannelId): LaneShape | null {
+    return this.automation?.[ch] ?? null;
   }
 
   subscribe(fn: () => void): () => void {
@@ -316,12 +334,16 @@ describe('SessionReplayDriver — seed and schedule', () => {
     expect(r.engines.A.trackId).toBe(11);
     expect(r.engines.A.playing).toBe(true);
     expect(r.engines.A.playhead).toBeCloseTo(53, 0);
-    expect(r.mixer.channels.A.fader).toBe(1);
-    expect(r.mixer.crossfaderEnabled).toBe(false);
+    // Mixer output rides the automation OVERLAY (the Conductor protocol);
+    // the user's base state is untouched during playback.
+    expect(r.mixer.automation?.A?.fader).toBe(1);
+    expect(r.mixer.channels.A.fader).toBe(1); // base: user's, unwritten
+    expect(r.mixer.crossfaderEnabled).toBe(true); // base spared entirely
 
     // t+1 → nothing yet; the fader cue lands at offset 1 (t=6).
     r.advance(1.0);
-    expect(r.mixer.channels.A.fader).toBe(0.25);
+    expect(r.mixer.automation?.A?.fader).toBe(0.25);
+    expect(r.mixer.channels.A.fader).toBe(1); // still the user's
     // offset 3 (t=8): pause cue parks A at 56.
     r.advance(2.0);
     expect(r.engines.A.playing).toBe(false);
@@ -387,9 +409,13 @@ describe('SessionReplayDriver — takeover', () => {
 
     expect(r.stops).toEqual(['takeover']);
     expect(audibleHolder()).toBe('shared');
-    // No state restore — the deck plays on exactly as replay left it.
+    // The deck plays on exactly as replay left it; the sounding lane
+    // values sync into base (the touched B fader keeps the user's value).
     expect(r.engines.A.playing).toBe(true);
     expect(r.mixer.channels.B.fader).toBe(0.4);
+    expect(r.mixer.channels.A.fader).toBe(1); // synced from the A lane
+    expect(r.mixer.crossfader).toBe(0); // folded into lanes → base neutral
+    expect(r.mixer.automation).toBeNull(); // overlay disengaged
   });
 
   it('a manual transport gesture (pause) is a takeover', async () => {
@@ -480,5 +506,109 @@ describe('SessionReplayDriver — four-deck parity (sessions 09)', () => {
     await r.driver.start();
     r.engines.C.humanSeekGesture();
     expect(r.stops).toEqual(['takeover']);
+  });
+});
+
+describe('SessionReplayDriver — pause/resume/seek (04 iteration)', () => {
+  it('pause freezes the session clock and parks rolling decks; resume re-anchors', async () => {
+    const r = rig(planFor(simpleLog(), 5));
+    await r.driver.start();
+    expect(r.driver.nowT()).toBeCloseTo(5, 3);
+    r.advance(1.0);
+    expect(r.driver.nowT()).toBeCloseTo(6, 3);
+
+    r.driver.pauseReplay();
+    expect(r.driver.isPaused()).toBe(true);
+    expect(r.engines.A.playing).toBe(false); // parked, not taken over
+    expect(r.stops).toEqual([]);
+    const frozen = r.driver.nowT();
+    r.advance(3.0); // wall clock moves; session clock must not
+    expect(r.driver.nowT()).toBe(frozen);
+
+    r.driver.resumeReplay();
+    expect(r.driver.isPaused()).toBe(false);
+    expect(r.engines.A.playing).toBe(true);
+    r.advance(0.5);
+    expect(r.driver.nowT()).toBeCloseTo(frozen! + 0.5, 3);
+    r.driver.stop();
+  });
+
+  it('pausing is not a takeover and its own deck ops never trip watchers', async () => {
+    const r = rig(planFor(simpleLog(), 5));
+    await r.driver.start();
+    r.driver.pauseReplay();
+    r.driver.resumeReplay();
+    expect(r.stops).toEqual([]);
+    r.driver.stop();
+    expect(r.stops).toEqual(['stopped']);
+  });
+
+  it('seekTo swaps plans without releasing the surface (no tenure flap)', async () => {
+    const r = rig(planFor(simpleLog(), 5));
+    await r.driver.start();
+    expect(audibleHolder()).toBe('replay');
+    r.advance(0.5);
+
+    await r.driver.seekTo(planFor(simpleLog(), 2));
+    expect(audibleHolder()).toBe('replay'); // never released
+    expect(r.stops).toEqual([]);
+    expect(r.driver.nowT()).toBeCloseTo(2, 1);
+    // Seeded back to the earlier moment: A near playhead 50 (t=2 → play @50).
+    expect(r.engines.A.playing).toBe(true);
+    expect(r.engines.A.playhead).toBeCloseTo(50, 0);
+    r.driver.stop();
+  });
+
+  it('seeking while paused stays paused at the new moment', async () => {
+    const r = rig(planFor(simpleLog(), 5));
+    await r.driver.start();
+    r.driver.pauseReplay();
+    await r.driver.seekTo(planFor(simpleLog(), 3));
+    expect(r.driver.isPaused()).toBe(true);
+    expect(r.driver.nowT()).toBeCloseTo(3, 3);
+    expect(r.engines.A.playing).toBe(false);
+    r.driver.resumeReplay();
+    expect(r.engines.A.playing).toBe(true);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — Conductor protocol parity', () => {
+  it('exposes lanes on ALL FOUR decks via getAutomation (the ghost display feed)', async () => {
+    const r = rig(planFor(simpleLog(), 5));
+    await r.driver.start();
+    // useAutomationGhost polls getAutomation — every deck must serve it,
+    // beyond the Conductor's A/B (four-deck replay, sessions 09).
+    for (const d of ['A', 'B', 'C', 'D'] as const) {
+      expect(r.mixer.getAutomation(d)).not.toBeNull();
+    }
+    r.driver.stop();
+    expect(r.mixer.automation).toBeNull();
+  });
+
+  it('folds the recorded crossfader into the fader lanes (value·√xf)', async () => {
+    const events: CaptureEvent[] = [
+      ...seedEvents(0),
+      // Crossfader ENABLED, hard left: B (right side) is cut.
+      { t: 0.5, kind: 'control', control: 'crossfaderEnabled', channel: null, value: 1 },
+      { t: 0.6, kind: 'control', control: 'crossfader', channel: null, value: -1 },
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 1.5, kind: 'load', channel: 'B', trackId: 22, bpm: 172 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 3, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+      { t: 6, kind: 'control', control: 'crossfader', channel: null, value: 0 },
+      { t: 8, kind: 'tick', playheads: { A: 6, B: 5 } },
+    ];
+    const r = rig(planFor(events, 4));
+    await r.driver.start();
+    // At T=4: xf hard left → A (left) full, B (right) silent.
+    expect(r.mixer.automation?.A?.fader).toBeCloseTo(1, 5);
+    expect(r.mixer.automation?.B?.fader).toBeCloseTo(0, 5);
+    // Base crossfader untouched during playback.
+    expect(r.mixer.crossfader).toBe(0);
+    // The center cue at offset 2 restores B's lane (center transparent).
+    r.advance(2.0);
+    expect(r.mixer.automation?.B?.fader).toBeCloseTo(1, 5);
+    r.driver.stop();
   });
 });
