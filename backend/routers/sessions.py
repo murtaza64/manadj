@@ -65,6 +65,27 @@ def create_session(
     return _row(db, s)
 
 
+@router.post("/recover")
+def recover_open_sessions(db: Session = Depends(get_db)) -> dict:
+    """Close Sessions orphaned by a renderer crash/reload.
+
+    `ended_at IS NULL` means the end request never reached the backend, not
+    necessarily that the recorder is still alive. Boot calls this before it
+    opens a new Session. Use the last persisted chunk time (or started_at for
+    an empty legacy row), so downtime is not counted as performance duration.
+    """
+    rows = db.query(models.Session).filter(models.Session.ended_at.is_(None)).all()
+    for s in rows:
+        last_chunk_at = (
+            db.query(func.max(models.SessionChunk.created_at))
+            .filter(models.SessionChunk.session_id == s.id)
+            .scalar()
+        )
+        s.ended_at = last_chunk_at or s.started_at
+    db.commit()
+    return {"closed": len(rows)}
+
+
 @router.post("/{uuid}/chunks", response_model=schemas.SessionRow)
 def append_chunk(
     uuid: str, payload: schemas.SessionChunkAppend, db: Session = Depends(get_db)

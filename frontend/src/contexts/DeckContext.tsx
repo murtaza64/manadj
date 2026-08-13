@@ -133,7 +133,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
             mixer,
             engines,
             (take) => persistTake(take, sink.currentSessionUuid),
-            (event) => sink.record(event)
+            (event, activatesSession) => sink.record(event, activatesSession)
           );
           recorder.start();
           const onHide = () => {

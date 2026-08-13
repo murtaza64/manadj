@@ -5,9 +5,25 @@
  * the safety valve is flagged for an early cut. Timers and I/O live in the
  * SessionSink shell and are not exercised here.
  */
-import { describe, expect, it } from 'vitest';
-import { ChunkBuffer } from './sessionSink';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../api/client';
+import { ChunkBuffer, SessionSink } from './sessionSink';
 import type { CaptureEvent } from './events';
+
+vi.mock('../api/client', () => ({
+  api: {
+    sessions: {
+      recover: vi.fn().mockResolvedValue(0),
+      create: vi.fn().mockResolvedValue({}),
+      appendChunk: vi.fn().mockResolvedValue({}),
+      end: vi.fn().mockResolvedValue({}),
+    },
+  },
+}));
+
+vi.mock('../api/queryClient', () => ({
+  queryClient: { invalidateQueries: vi.fn().mockResolvedValue(undefined) },
+}));
 
 function tick(t: number): CaptureEvent {
   return { t, kind: 'tick', playheads: {} };
@@ -57,5 +73,61 @@ describe('ChunkBuffer', () => {
     // Draining clears the overflow.
     buf.drain();
     expect(buf.overflowing).toBe(false);
+  });
+});
+
+describe('SessionSink activation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('does not persist an empty boot/remount lifetime', () => {
+    const sink = new SessionSink();
+    sink.start();
+    sink.record(tick(0), false);
+    sink.stop();
+
+    expect(api.sessions.create).not.toHaveBeenCalled();
+    expect(api.sessions.appendChunk).not.toHaveBeenCalled();
+    expect(api.sessions.end).not.toHaveBeenCalled();
+  });
+
+  it('opens once on the first live event and keeps the buffered seed', async () => {
+    const sink = new SessionSink();
+    sink.start();
+    sink.record(tick(0), false);
+    sink.record({ t: 1, kind: 'load', channel: 'A', trackId: 42, bpm: 174 }, true);
+    sink.flush();
+    for (let i = 0; i < 12; i += 1) await Promise.resolve();
+
+    expect(api.sessions.create).toHaveBeenCalledOnce();
+    expect(api.sessions.appendChunk).toHaveBeenCalledOnce();
+    expect(vi.mocked(api.sessions.appendChunk).mock.calls[0][2]).toEqual([
+      tick(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 42, bpm: 174 },
+    ]);
+    sink.stop();
+  });
+
+  it('waits for stale-session recovery before opening the live Session', async () => {
+    let finishRecovery: (() => void) | undefined;
+    vi.mocked(api.sessions.recover).mockReturnValueOnce(
+      new Promise<number>((resolve) => {
+        finishRecovery = () => resolve(1);
+      })
+    );
+    const sink = new SessionSink();
+    sink.start();
+    sink.record({ t: 1, kind: 'load', channel: 'A', trackId: 42, bpm: 174 }, true);
+
+    await Promise.resolve();
+    expect(api.sessions.create).not.toHaveBeenCalled();
+    finishRecovery?.();
+    for (let i = 0; i < 4; i += 1) await Promise.resolve();
+    expect(api.sessions.create).toHaveBeenCalledOnce();
+    sink.stop();
   });
 });

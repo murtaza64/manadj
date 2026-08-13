@@ -1216,7 +1216,15 @@ export const api = {
       return res.json();
     },
 
-    /** Open a Session (recorder start); the client mints the uuid. */
+    /** Close Sessions orphaned by a prior crash/reload before recording. */
+    recover: async (): Promise<number> => {
+      const res = await fetch(`${API_BASE}/sessions/recover`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to recover sessions (${res.status})`);
+      const body: { closed: number } = await res.json();
+      return body.closed;
+    },
+
+    /** Open a Session on the first live event; the client mints the uuid. */
     create: async (uuid: string, startedAt?: string): Promise<SessionRowWire> => {
       const res = await fetch(`${API_BASE}/sessions`, {
         method: 'POST',

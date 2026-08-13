@@ -77,13 +77,14 @@ export class CaptureRecorder {
   /** Session persistence sink (Sessions PRD, ADR 0033): every event the
    * recorder logs is streamed here beside the in-memory rolling log the
    * detector reads. Optional — tests that only exercise detection omit it. */
-  private readonly onEvent?: (event: CaptureEvent) => void;
+  private readonly onEvent?: (event: CaptureEvent, activatesSession: boolean) => void;
+  private seeding = false;
 
   constructor(
     mixer: CaptureMixerSource,
     engines: Record<ChannelId, CaptureDeckSource>,
     onTake: (take: DetectedTake) => void,
-    onEvent?: (event: CaptureEvent) => void
+    onEvent?: (event: CaptureEvent, activatesSession: boolean) => void
   ) {
     this.mixer = mixer;
     this.engines = engines;
@@ -168,6 +169,7 @@ export class CaptureRecorder {
    * audibility (everything that moved while gated was dropped).
    */
   private seed(): void {
+    this.seeding = true;
     const t = this.now();
     // All four decks unconditionally (ADR 0033): controls, assignments,
     // loaded tracks, running transports.
@@ -209,6 +211,7 @@ export class CaptureRecorder {
     this.lastCrossfader = this.mixer.getCrossfader();
     this.lastCrossfaderEnabled = this.mixer.getCrossfaderEnabled();
     this.lastMaster = this.mixer.getMaster();
+    this.seeding = false;
   }
 
   dispose(): void {
@@ -243,7 +246,12 @@ export class CaptureRecorder {
     // Persist beside the detector's rolling log (ADR 0033): the Session
     // records all four decks; the detector reads the same stream and
     // self-gates over >2-audible stretches / machine tenures.
-    this.onEvent?.(e);
+    const activatesSession =
+      !this.seeding &&
+      e.kind !== 'tenure' &&
+      e.kind !== 'init' &&
+      (e.kind !== 'tick' || Object.keys(e.playheads).length > 0);
+    this.onEvent?.(e, activatesSession);
     const [next, takes] = reduceCapture(this.state, e);
     this.state = next;
     for (const take of takes) this.onTake(take);

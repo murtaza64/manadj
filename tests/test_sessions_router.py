@@ -65,6 +65,22 @@ def test_duplicate_session_uuid_400(client):
     assert client.post("/api/sessions", json={"uuid": "s1"}).status_code == 400
 
 
+def test_recover_closes_orphaned_open_sessions_without_creating_one(client):
+    client.post("/api/sessions", json={"uuid": "empty"})
+    client.post("/api/sessions", json={"uuid": "with-events"})
+    client.post(
+        "/api/sessions/with-events/chunks",
+        json={"seq": 0, "events": [{"t": 1.0, "kind": "tick", "playheads": {}}]},
+    )
+
+    resp = client.post("/api/sessions/recover")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"closed": 2}
+    rows = client.get("/api/sessions").json()
+    assert len(rows) == 2
+    assert all(row["ended_at"] is not None for row in rows)
+
+
 def test_append_chunks_accumulate(client):
     client.post("/api/sessions", json={"uuid": "s1"})
     r0 = client.post(
