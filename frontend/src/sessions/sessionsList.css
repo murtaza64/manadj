@@ -80,3 +80,11 @@
 .session-row.openable:hover td {
   background: rgba(0, 229, 255, 0.06);
 }
+
+.session-tracks {
+  color: #a6e3a1;
+  font-variant-numeric: tabular-nums;
+}
+.session-tracks-loading {
+  color: var(--overlay0, #6c7086);
+}

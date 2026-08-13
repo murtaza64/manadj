@@ -391,6 +391,64 @@ describe('cue-stab traces (sessions 10)', () => {
     expect(m.decks.A.traces).toEqual([]);
   });
 });
+describe('audibleTrackIds (distinct Master-audible Track count)', () => {
+  it('counts a Track that became audible; not one only loaded/silent', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 10, kind: 'transport', channel: 'A', action: 'pause', playhead: 8 },
+      // B loaded and even played, but fader down the whole time → silent.
+      { t: 3, kind: 'load', channel: 'B', trackId: 9, bpm: 172 },
+      { t: 4, kind: 'control', control: 'fader', channel: 'B', value: 0 },
+      { t: 5, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+      { t: 11, kind: 'transport', channel: 'B', action: 'pause', playhead: 6 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.audibleTrackIds).toEqual([7]);
+  });
+
+  it('repeated audible plays of the same Track count once', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 6, kind: 'transport', channel: 'A', action: 'pause', playhead: 4 },
+      // Same track brought back on deck C later.
+      { t: 8, kind: 'load', channel: 'C', trackId: 7, bpm: 174 },
+      { t: 9, kind: 'transport', channel: 'C', action: 'play', playhead: 0 },
+      { t: 14, kind: 'transport', channel: 'C', action: 'pause', playhead: 5 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.audibleTrackIds).toEqual([7]);
+  });
+
+  it('a Track only audible under a machine tenure does NOT count', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'tenure', edge: 'start', holder: 'editor' },
+      { t: 2, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 3, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 9, kind: 'transport', channel: 'A', action: 'pause', playhead: 6 },
+      { t: 10, kind: 'tenure', edge: 'end', holder: 'shared' },
+    ];
+    const m = deriveTimeline(events);
+    // Tenure masks audibility, so nothing counts.
+    expect(m.audibleTrackIds).toEqual([]);
+  });
+
+  it('counts every distinct audible Track across four decks', () => {
+    const evs: CaptureEvent[] = [...seed(0)];
+    (['A', 'B', 'C', 'D'] as const).forEach((ch, i) => {
+      const id = 10 + i;
+      evs.push({ t: 1 + i, kind: 'load', channel: ch, trackId: id, bpm: 174 });
+      evs.push({ t: 2 + i, kind: 'transport', channel: ch, action: 'play', playhead: 0 });
+      evs.push({ t: 20 + i, kind: 'transport', channel: ch, action: 'pause', playhead: 5 });
+    });
+    const m = deriveTimeline(evs);
+    expect(m.audibleTrackIds.sort((a, b) => a - b)).toEqual([10, 11, 12, 13]);
+  });
+});
 
 describe('hot-cue stab traces (sessions 11)', () => {
   it("the launch hotCue gesture does not sever the stab's trace (no leading gap)", () => {

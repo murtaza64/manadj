@@ -612,3 +612,60 @@ describe('SessionReplayDriver — Conductor protocol parity', () => {
     r.driver.stop();
   });
 });
+
+describe('SessionReplayDriver — status callbacks (playhead desync fix)', () => {
+  function rigWithStatus(plan: ReplayPlan) {
+    const clock = { t: 100 };
+    const read = () => clock.t;
+    const mixer = new FakeMixer(read);
+    const engines = {
+      A: new FakeEngine(read), B: new FakeEngine(read),
+      C: new FakeEngine(read), D: new FakeEngine(read),
+    };
+    const statuses: string[] = [];
+    const stops: ReplayStopReason[] = [];
+    const driver = new SessionReplayDriver(
+      plan,
+      { mixer: mixer as unknown as Mixer, engines: engines as unknown as Record<ChannelId, DeckEngine> },
+      {
+        loadTrack: async (deck, trackId) => { engines[deck].finishLoad(trackId); return true; },
+        onStopped: (r) => stops.push(r),
+        onStatus: (s) => statuses.push(s),
+      }
+    );
+    return { clock, mixer, engines, statuses, stops, driver,
+             advance: (dt: number) => { clock.t += dt; for (const cb of rafQueue.splice(0)) cb(); } };
+  }
+
+  it('pushes loading → playing on start, and never leaves status stale', async () => {
+    const r = rigWithStatus(planFor(simpleLog(), 5));
+    await r.driver.start();
+    expect(r.statuses).toEqual(['loading', 'playing']);
+    // The driver clock is live and authoritative while rolling.
+    expect(r.driver.nowT()).not.toBeNull();
+    r.driver.stop();
+    // Stop reports via onStopped (store maps to idle), not onStatus.
+    expect(r.stops).toEqual(['stopped']);
+    expect(r.driver.nowT()).toBeNull();
+  });
+
+  it('pushes paused/playing on pause/resume', async () => {
+    const r = rigWithStatus(planFor(simpleLog(), 5));
+    await r.driver.start();
+    r.driver.pauseReplay();
+    r.driver.resumeReplay();
+    expect(r.statuses).toEqual(['loading', 'playing', 'paused', 'playing']);
+    r.driver.stop();
+  });
+
+  it('seekTo keeps status coherent (playing→playing, no idle flap)', async () => {
+    const r = rigWithStatus(planFor(simpleLog(), 5));
+    await r.driver.start();
+    await r.driver.seekTo(planFor(simpleLog(), 2));
+    // No 'idle'/stop emitted; still rolling and reporting a clock.
+    expect(r.stops).toEqual([]);
+    expect(r.statuses.filter((s) => s === 'playing').length).toBeGreaterThanOrEqual(2);
+    expect(r.driver.nowT()).not.toBeNull();
+    r.driver.stop();
+  });
+});

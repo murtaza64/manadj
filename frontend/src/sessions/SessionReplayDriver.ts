@@ -53,6 +53,8 @@ export interface ReplayAudio {
   engines: Record<ChannelId, DeckEngine>;
 }
 
+export type ReplayLiveStatus = 'loading' | 'playing' | 'paused';
+
 export interface ReplayHooks {
   /** Resolve + load a track onto a shared deck (the provider's one Load
    * path). Resolves false when the track is missing from the library. */
@@ -62,6 +64,11 @@ export interface ReplayHooks {
    * design: the human's gesture wins), and the cause makes that
    * diagnosable instead of mysterious. */
   onStopped(reason: ReplayStopReason, cause?: string): void;
+  /** The DRIVER is authoritative for live status — it pushes every
+   * transition (loading→playing→paused→…) so the store never has to
+   * INFER status from a resolved promise (the source of the
+   * playhead-freezes-but-audio-continues desync). Optional for tests. */
+  onStatus?(status: ReplayLiveStatus): void;
 }
 
 /** Phase tolerance for the continuous corrector: past this, re-seek. Tight
@@ -163,6 +170,7 @@ export class SessionReplayDriver {
       return;
     }
     this.active = true;
+    this.status('loading');
     // The Conductor's mixer protocol: own the fader/EQ/filter nodes via
     // the overlay; the user's base state stays theirs (and stays visible
     // under the ghost pointers).
@@ -207,6 +215,7 @@ export class SessionReplayDriver {
       ...ALL_DECKS.map((d) => this.watchEngine(d)),
       ...ALL_DECKS.map((d) => this.engines[d].addTransportEventListener(this.gestureTap(d)))
     );
+    this.status('playing');
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -231,6 +240,7 @@ export class SessionReplayDriver {
     this.self(() => {
       for (const d of this.pausedDecks) this.engines[d].pause();
     });
+    this.status('paused');
   }
 
   /** Space again: re-anchor the clock and resume the parked decks. */
@@ -242,6 +252,7 @@ export class SessionReplayDriver {
       for (const d of this.pausedDecks) this.engines[d].play();
     });
     this.pausedDecks = [];
+    this.status('playing');
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -288,9 +299,11 @@ export class SessionReplayDriver {
       this.self(() => {
         for (const d of this.pausedDecks) this.engines[d].pause();
       });
+      this.status('paused');
       return;
     }
     this.anchorAudioTime = this.mixer.now();
+    this.status('playing');
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -690,5 +703,9 @@ export class SessionReplayDriver {
     if (this.stoppedFired) return;
     this.stoppedFired = true;
     this.hooks.onStopped(reason, cause);
+  }
+
+  private status(s: ReplayLiveStatus): void {
+    this.hooks.onStatus?.(s);
   }
 }
