@@ -61,17 +61,20 @@ export type CaptureEvent =
       t: number;
       kind: 'transport';
       channel: CaptureDeck;
-      /** `previewStart`/`previewEnd` bracket a CUE stab (hold-to-preview:
-       * cue-down from the cue point, released on cue-up — Master-audible
-       * when the fader is up, but sets `previewing`, not `playing`, ADR
-       * 0033 cue-stab capture). The log records the stab so the timeline can
-       * render it and replay can reproduce it (via engine cueDown/cueUp);
-       * the phase-1 pair detector ignores both edges — preview audibility is
-       * inert to detection v1 (deliberate; a follow-up grill revisits it). */
+      /** `previewStart`/`previewEnd` bracket a stab (hold-to-preview from
+       * the main cue — sessions 10 — or a hot cue — sessions 11):
+       * Master-audible when the fader is up, but a preview flag flips, not
+       * `playing` (ADR 0033). The log records the stab so the timeline can
+       * render it and replay can reproduce it; the phase-1 pair detector
+       * ignores both edges — preview audibility is inert to detection v1
+       * (deliberate; a follow-up grill revisits it). A hot-cue stab ALSO
+       * logs its launch `hotCue` gesture (handler tap, after the start
+       * edge). */
       action: 'play' | 'pause' | 'seek' | 'jumpBeats' | 'hotCue' | 'cue' | 'previewStart' | 'previewEnd';
       /** Deck track-time after the action (s). */
       playhead: number;
-      /** Action-specific: beats for jumpBeats, slot for hotCue. */
+      /** Action-specific: beats for jumpBeats, slot for hotCue, slot for a
+       * hot-cue stab's previewStart (absent on a main-cue stab). */
       detail?: number;
     }
   | { t: number; kind: 'pitch' | 'bend'; channel: CaptureDeck; value: number }
