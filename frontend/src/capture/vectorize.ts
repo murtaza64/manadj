@@ -302,25 +302,29 @@ function buildLanes(
     if (e.kind !== 'control' || e.t < windowStartS || e.t > windowEndS) continue;
     const x = (e.t - windowStartS) / windowLen;
     const touched: LaneId[] = [];
-    if (e.control === 'fader' && e.channel) {
-      state.decks[e.channel].fader = e.value;
-      touched.push(`fader${role(e.channel)}` as LaneId);
+    // A Take slice is an A/B pair (ADR 0032 phase-1); C/D never appear in
+    // one. Narrow the log's four-deck channel to the pair here.
+    const ch: CaptureChannel | null =
+      e.channel === 'A' || e.channel === 'B' ? e.channel : null;
+    if (e.control === 'fader' && ch) {
+      state.decks[ch].fader = e.value;
+      touched.push(`fader${role(ch)}` as LaneId);
     } else if (e.control === 'crossfader' || e.control === 'crossfaderEnabled') {
       if (e.control === 'crossfader') state.crossfader = e.value;
       else state.crossfaderEnabled = e.value !== 0;
       touched.push('faderA', 'faderB');
-    } else if (e.control === 'eqLow' && e.channel) {
-      state.decks[e.channel].eq.low = e.value;
-      touched.push(`eqLow${role(e.channel)}` as LaneId);
-    } else if (e.control === 'eqMid' && e.channel) {
-      state.decks[e.channel].eq.mid = e.value;
-      touched.push(`eqMid${role(e.channel)}` as LaneId);
-    } else if (e.control === 'eqHigh' && e.channel) {
-      state.decks[e.channel].eq.high = e.value;
-      touched.push(`eqHigh${role(e.channel)}` as LaneId);
-    } else if (e.control === 'filter' && e.channel) {
-      state.decks[e.channel].filter = e.value;
-      touched.push(`filter${role(e.channel)}` as LaneId);
+    } else if (e.control === 'eqLow' && ch) {
+      state.decks[ch].eq.low = e.value;
+      touched.push(`eqLow${role(ch)}` as LaneId);
+    } else if (e.control === 'eqMid' && ch) {
+      state.decks[ch].eq.mid = e.value;
+      touched.push(`eqMid${role(ch)}` as LaneId);
+    } else if (e.control === 'eqHigh' && ch) {
+      state.decks[ch].eq.high = e.value;
+      touched.push(`eqHigh${role(ch)}` as LaneId);
+    } else if (e.control === 'filter' && ch) {
+      state.decks[ch].filter = e.value;
+      touched.push(`filter${role(ch)}` as LaneId);
     }
     for (const id of touched) push(id, x, laneValue(id));
   }

@@ -366,6 +366,68 @@ class TransitionTemplate(Base):
     )
 
 
+class Session(Base):
+    """The persisted whole event log of one recorder lifetime (Sessions
+    PRD, ADR 0033).
+
+    One row per continuous run of the live performance surface — app start
+    to close, one capture clock, all four Decks. The events themselves live
+    in `session_chunks` (append-only, streamed ~5s), keeping this row a thin
+    header the Sessions list reads without touching the log. `ended_at` is
+    nullable: an open Session (still recording, or an orphaned partial from
+    a crash) has none. Identity is the client-generated `uuid`.
+
+    Deleting a Session cascades its chunks and never touches a Take — Takes
+    keep their own event slice and remain self-contained (ADR 0033).
+    """
+
+    __tablename__ = "sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    started_at = Column(DateTime, nullable=False, default=func.now())
+    ended_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    chunks = relationship(
+        "SessionChunk",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="SessionChunk.seq",
+    )
+
+    __table_args__ = (
+        Index("idx_sessions_uuid", "uuid", unique=True),
+        Index("idx_sessions_started_at", "started_at"),
+    )
+
+
+class SessionChunk(Base):
+    """An append-only batch of capture events within a Session (ADR 0033).
+
+    Chunks arrive in `seq` order (~5s flush cadence, plus gate transitions
+    and page-hide). `events_json` is an opaque JSON array of the capture
+    event vocabulary — the same opaque-JSON posture as a Take's slice; no
+    binary format (ADR 0033). Whole chunks, never edited in place.
+    """
+
+    __tablename__ = "session_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    seq = Column(Integer, nullable=False)  # append order within the Session
+    events_json = Column(Text, nullable=False)  # opaque JSON array of capture events
+    created_at = Column(DateTime, default=func.now())
+
+    session = relationship("Session", back_populates="chunks")
+
+    __table_args__ = (
+        Index("idx_session_chunks_session", "session_id"),
+        Index("idx_session_chunks_session_seq", "session_id", "seq", unique=True),
+    )
+
+
 class Take(Base):
     """A detected Handover captured during live playback (ADR 0020,
     transition-takes 02).
@@ -377,6 +439,12 @@ class Take(Base):
     snapshot are opaque JSON — the evidence, re-derivable as detection and
     vectorization improve; the queryable columns are the history/tuning
     metadata. Identity is the client-generated `uuid`.
+
+    A Take carries the Session it was born from (`session_uuid`, provenance
+    not dependency — the Session may be deleted; ADR 0033) and an `origin`
+    mark (`detected` for the detector's verdicts, `manual` for hand-cut
+    Takes, issue 06). Pre-Sessions Takes are sessionless (`session_uuid`
+    NULL) and count as `detected`.
     """
 
     __tablename__ = "takes"
@@ -393,6 +461,12 @@ class Take(Base):
     params_json = Column(Text, nullable=False)  # detector-parameter snapshot (opaque)
     events_json = Column(Text, nullable=False)  # raw capture-event slice (opaque)
     promoted_transition_uuid = Column(String, nullable=True)
+    # Provenance (ADR 0033): the Session this Take was detected/cut within
+    # (nullable — the Session is prunable, and pre-Sessions Takes have none).
+    session_uuid = Column(String, nullable=True)
+    # How the Take came to be: "detected" (the detector) or "manual"
+    # (hand-cut, issue 06). Never NULL for new rows; the migration backfills.
+    origin = Column(String, nullable=False, default="detected")
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -413,6 +487,7 @@ class Take(Base):
         Index("idx_takes_a", "a_track_id"),
         Index("idx_takes_b", "b_track_id"),
         Index("idx_takes_detected_at", "detected_at"),
+        Index("idx_takes_session", "session_uuid"),
     )
 
 

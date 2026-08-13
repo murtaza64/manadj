@@ -349,7 +349,9 @@ class TakeCreate(BaseModel):
     a = outgoing Track, b = incoming. `params` is the detector-parameter
     snapshot and `events` the raw capture-event slice — both opaque
     (stored as JSON text, never queried): the evidence, kept re-derivable
-    for detector/vectorizer tuning (issue 05).
+    for detector/vectorizer tuning (issue 05). `session_uuid` is the
+    Session this Take was born from (provenance, nullable; ADR 0033) and
+    `origin` marks how — `detected` (default) or `manual` (issue 06).
     """
     uuid: str
     a_track_id: int
@@ -360,6 +362,8 @@ class TakeCreate(BaseModel):
     detector_version: int
     params: dict
     events: list[dict]
+    session_uuid: str | None = None
+    origin: str = "detected"
 
 
 class TakeRow(BaseModel):
@@ -373,6 +377,8 @@ class TakeRow(BaseModel):
     confidence: float
     detector_version: int
     promoted_transition_uuid: str | None = None
+    session_uuid: str | None = None
+    origin: str = "detected"
 
 
 class TakeDetail(TakeRow):
@@ -384,6 +390,39 @@ class TakeDetail(TakeRow):
 class TakePromotedPatch(BaseModel):
     """Set/clear a Take's promoted-Transition reference (issue 03)."""
     promoted_transition_uuid: str | None
+
+
+# Session Schemas (Sessions PRD, ADR 0033)
+
+
+class SessionCreate(BaseModel):
+    """Open a Session — one recorder lifetime. The client mints the uuid so
+    chunk appends can start immediately (fire-and-forget, no round-trip for
+    the id). `started_at` optional: the backend defaults to now."""
+    uuid: str
+    started_at: datetime | None = None
+
+
+class SessionChunkAppend(BaseModel):
+    """One append-only batch of capture events (~5s flush; ADR 0033).
+
+    `seq` is the append order within the Session; `events` is an opaque
+    JSON array of the capture event vocabulary, stored verbatim."""
+    seq: int
+    events: list[dict]
+
+
+class SessionEndPatch(BaseModel):
+    """Close a Session (set ended_at). Optional timestamp; defaults to now."""
+    ended_at: datetime | None = None
+
+
+class SessionRow(BaseModel):
+    """Sessions-list metadata: no chunks, just the header + Take count."""
+    uuid: str
+    started_at: datetime
+    ended_at: datetime | None = None
+    take_count: int
 
 
 # Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)

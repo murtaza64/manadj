@@ -5,6 +5,7 @@ import { DeckEngine } from '../playback/DeckEngine';
 import { CHANNEL_IDS, Mixer } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
+import { SessionSink } from '../capture/sessionSink';
 import type { ChannelId } from '../playback/mixer';
 import { registerSurface, unregisterSurface } from '../playback/audibleSurface';
 import { deckControlsFor } from '../midi/controlRegistry';
@@ -116,10 +117,30 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // this surface's Mixer + decks, the pure detector finds Handovers, and
   // settled Takes persist to the Transition history. Lives here because
   // the provider owns the shared surface and outlives every view switch.
+  //
+  // A recorder lifetime is one Session (Sessions PRD, ADR 0033): the sink
+  // streams the whole event log to the backend as ~5s chunks and stamps
+  // every detected Take with the Session's uuid. page-hide flushes the tail
+  // so a kill costs seconds, not the Session.
   useEffect(() => {
-    const recorder = new CaptureRecorder(mixer, engines, persistTake);
+    const sink = new SessionSink();
+    sink.start();
+    const recorder = new CaptureRecorder(
+      mixer,
+      engines,
+      (take) => persistTake(take, sink.currentSessionUuid),
+      (event) => sink.record(event)
+    );
     recorder.start();
-    return () => recorder.dispose();
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') sink.flush();
+    };
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      recorder.dispose();
+      sink.stop();
+    };
   }, [engines, mixer]);
   // Dev-only audio routing tracer (headphone-cue 01): console helpers for
   // sink switching + the cue bridge. Lazy import keeps it out of prod.

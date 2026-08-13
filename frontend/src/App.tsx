@@ -22,6 +22,7 @@ import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
+import { SessionsListView } from './components/sessions/SessionsListView';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
@@ -38,7 +39,7 @@ function AnalysisPendingBridge() {
   return null;
 }
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles', 'jog-tune'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sessions', 'sync', 'styles', 'jog-tune'];
 
 /** Session-state persistence of the top-panel mode: reopen where you were. */
 const MODE_KEY = 'manadj-app-mode';
@@ -146,6 +147,8 @@ function App() {
                 <TransitionEditor />
               ) : view === 'history' ? (
                 <TakeHistoryView />
+              ) : view === 'sessions' ? (
+                <SessionsListView />
               ) : view === 'sync' ? (
                 <SyncView />
               ) : view === 'styles' ? (
