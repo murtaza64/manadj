@@ -12,11 +12,12 @@
  *    This is the seam the vitest covers.
  *
  *  - `SessionSink` — the timer/I/O shell around the buffer, matching the
- *    take sink's fire-and-forget posture (ADR 0011): opens a Session on
- *    `start()`, appends drained chunks in `seq` order, `flush()`es on
- *    demand, `end()`s on `stop()`. A dead backend loses a chunk (logged),
- *    capture keeps running; there is no retry queue. The Session uuid it
- *    holds is what stamps each Take (`persistTake` reads `currentSessionUuid`).
+ *    take sink's fire-and-forget posture (ADR 0011): starts buffering on
+ *    `start()`, opens the persisted Session on the first live event, appends
+ *    drained chunks in `seq` order, and `end()`s on `stop()`. Synthetic
+ *    boot/remount lifetimes therefore leave no empty Session rows. A dead
+ *    backend loses a chunk (logged), capture keeps running; there is no
+ *    retry queue. The Session uuid it holds stamps each Take.
  */
 import { api } from '../api/client';
 import { queryClient } from '../api/queryClient';
@@ -75,31 +76,45 @@ export class SessionSink {
   private seq = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private started = false;
+  /** Serialize recovery → create → chunk appends → end. In particular, a
+   * first live event arriving during boot must not be closed by recovery. */
+  private writes: Promise<void> = Promise.resolve();
 
-  /** The open Session's uuid, or null before start / after stop. Read by
-   * `persistTake` to stamp each Take with its Session (ADR 0033). */
+  /** The persisted Session's uuid, or null before the first live event / after
+   * stop. Read by `persistTake` to stamp each Take (ADR 0033). */
   get currentSessionUuid(): string | null {
     return this.uuid;
   }
 
-  /** Open the Session and begin the ~5s flush timer. Fire-and-forget: the
-   * uuid is minted locally so chunk appends need no create round-trip. */
+  /** Begin buffering and the ~5s flush timer. The database row opens lazily
+   * on the first live event, not on a synthetic React boot/remount. */
   start(): void {
     if (this.started) return;
     this.started = true;
-    this.uuid = crypto.randomUUID();
-    const uuid = this.uuid;
-    void api.sessions
-      .create(uuid)
+    this.writes = api.sessions
+      .recover()
       .then(() => void queryClient.invalidateQueries({ queryKey: ['sessions'] }))
-      .catch((err) => console.error('session: create failed', err));
+      .catch((err) => console.error('session: stale-session recovery failed', err));
     this.timer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
   }
 
-  /** Record one event. Overflowing the safety valve cuts a chunk early. */
-  record(event: CaptureEvent): void {
+  private activate(): void {
+    if (this.uuid !== null) return;
+    const uuid = crypto.randomUUID();
+    this.uuid = uuid;
+    this.writes = this.writes
+      .then(() => api.sessions.create(uuid))
+      .then(() => void queryClient.invalidateQueries({ queryKey: ['sessions'] }))
+      .catch((err) => console.error('session: create failed', err));
+  }
+
+  /** Record one event. Seed snapshots and empty ticks pass
+   * `activatesSession=false`: they remain buffered as reconstruction context
+   * but do not create an empty row. The first live event opens the Session. */
+  record(event: CaptureEvent, activatesSession = true): void {
     if (!this.started) return;
     this.buffer.push(event);
+    if (activatesSession) this.activate();
     if (this.buffer.overflowing) this.flush();
   }
 
@@ -111,8 +126,8 @@ export class SessionSink {
     const events = this.buffer.drain();
     if (events.length === 0) return;
     const seq = this.seq++;
-    void api.sessions
-      .appendChunk(uuid, seq, events)
+    this.writes = this.writes
+      .then(() => api.sessions.appendChunk(uuid, seq, events))
       .then(() => void queryClient.invalidateQueries({ queryKey: ['sessions'] }))
       .catch((err) => console.error('session: chunk append failed — tail lost', err));
   }
@@ -123,10 +138,13 @@ export class SessionSink {
     this.flush();
     const uuid = this.uuid;
     if (uuid !== null) {
-      void api.sessions
-        .end(uuid)
+      this.writes = this.writes
+        .then(() => api.sessions.end(uuid))
         .then(() => void queryClient.invalidateQueries({ queryKey: ['sessions'] }))
         .catch((err) => console.error('session: end failed', err));
+    } else {
+      // A boot/remount that saw no live event is intentionally ephemeral.
+      this.buffer.drain();
     }
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
