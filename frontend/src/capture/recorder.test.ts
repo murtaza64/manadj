@@ -164,6 +164,13 @@ class FakeDeckSource implements CaptureDeckSource {
   previewEnd(): void {
     this.mutate({ previewing: false });
   }
+  /** A hot-cue stab (sessions 11): the held slot flips, not `playing`. */
+  hotCuePreview(slot: number): void {
+    this.mutate({ hotCuePreviewSlot: slot });
+  }
+  hotCuePreviewEnd(): void {
+    this.mutate({ hotCuePreviewSlot: null });
+  }
 }
 
 function surface() {
@@ -842,5 +849,127 @@ describe('split Take provenance (sessions 11, real SessionSink)', () => {
     expect(api.sessions.end).toHaveBeenCalledExactlyOnceWith(firstUuid);
     recorder.dispose();
     sink.stop();
+  });
+});
+
+// ── Hot-cue stab capture (sessions 11) ────────────────────────────────────
+// Hold-to-preview from a HOT CUE flips `hotCuePreviewSlot`, not `playing`
+// (and not `previewing`). The recorder derives ONE preview flag from both,
+// so hot-cue stabs get the same previewStart/previewEnd brackets — with
+// `detail` carrying the slot — plus tick playhead coverage. The launch also
+// logs its `hotCue` gesture via the handler tap, AFTER the start edge.
+
+describe('hot-cue stab capture (sessions 11)', () => {
+  const DECKS = ['A', 'B', 'C', 'D'] as const;
+
+  it('brackets a hot-cue stab with previewStart (detail = slot) and previewEnd', () => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    const before = r.logged.length;
+    r.decks.A.seek(64); // the hot cue's position
+    r.decks.A.hotCuePreview(3); // hot-cue-down: hold-to-preview
+    r.decks.A.seek(66); // audio runs forward while held
+    r.decks.A.hotCuePreviewEnd(); // hot-cue-up: released
+    const fed = r.logged
+      .slice(before)
+      .filter((e): e is Extract<CaptureEvent, { kind: 'transport' }> => e.kind === 'transport');
+    expect(fed).toHaveLength(2);
+    expect(fed[0]).toMatchObject({ action: 'previewStart', channel: 'A', playhead: 64, detail: 3 });
+    expect(fed[1]).toMatchObject({ action: 'previewEnd', channel: 'A', playhead: 66 });
+    expect(fed[1].detail).toBeUndefined();
+    r.recorder.dispose();
+  });
+
+  it('the launch hotCue gesture rides the log after the start edge (stream shape)', () => {
+    // The engine fires the handler tap AFTER the reducer (snapshot flip):
+    // the recorder passes both through synchronously in that order.
+    const r = rig();
+    r.recorder.start();
+    r.decks.B.load(2);
+    const before = r.logged.length;
+    r.decks.B.seek(64);
+    r.decks.B.hotCuePreview(1); // snapshot flip → previewStart
+    r.decks.B.fireTransport({ action: 'hotCue', playhead: 64, detail: 1 }); // handler tap
+    const actions = r.logged
+      .slice(before)
+      .filter((e): e is Extract<CaptureEvent, { kind: 'transport' }> => e.kind === 'transport')
+      .map((e) => e.action);
+    expect(actions).toEqual(['previewStart', 'hotCue']);
+    r.decks.B.hotCuePreviewEnd();
+    r.recorder.dispose();
+  });
+
+  it("ticks sample a hot-cue-previewing deck's playhead", () => {
+    const r = rig();
+    r.recorder.start();
+    r.decks.C.load(3);
+    r.decks.C.seek(80);
+    r.decks.C.hotCuePreview(2);
+    const before = r.logged.length;
+    r.decks.C.seek(81); // audio advances during the hold
+    r.advance(1);
+    const ticks = r.logged
+      .slice(before)
+      .filter((e): e is Extract<CaptureEvent, { kind: 'tick' }> => e.kind === 'tick');
+    expect(ticks.some((e) => e.playheads.C === 81)).toBe(true);
+    r.decks.C.hotCuePreviewEnd();
+    r.recorder.dispose();
+  });
+
+  it('play-takeover during a hold emits ONE edge pair (start at hold, end at release)', () => {
+    // Engine semantics: play during a preview takes over without restarting
+    // audio; the preview flag clears only on release. The derived flag must
+    // not emit extra edges at the takeover.
+    const r = rig();
+    r.recorder.start();
+    r.decks.D.load(4);
+    const before = r.logged.length;
+    r.decks.D.hotCuePreview(1); // hold
+    r.decks.D.play(); // takeover: playing flips, slot still held
+    r.decks.D.hotCuePreviewEnd(); // release: deck keeps playing
+    const actions = r.logged
+      .slice(before)
+      .filter((e): e is Extract<CaptureEvent, { kind: 'transport' }> => e.kind === 'transport')
+      .map((e) => e.action);
+    expect(actions).toEqual(['previewStart', 'play', 'previewEnd']);
+    r.recorder.dispose();
+  });
+
+  it('a hot-cue stab respects the machine-tenure gate', () => {
+    const r = rig();
+    r.recorder.start();
+    claimAudible('editor');
+    const before = r.logged.length;
+    r.decks.A.hotCuePreview(2);
+    r.advance(2);
+    r.decks.A.hotCuePreviewEnd();
+    const fed = r.logged
+      .slice(before)
+      .filter((e) => e.kind === 'transport' || e.kind === 'tick');
+    expect(fed).toHaveLength(0);
+    releaseAudible('editor');
+    r.recorder.dispose();
+  });
+
+  it('captures hot-cue stabs on all four decks', () => {
+    const r = rig();
+    r.recorder.start();
+    for (const d of DECKS) r.decks[d].load(10);
+    const before = r.logged.length;
+    for (const d of DECKS) {
+      r.decks[d].hotCuePreview(5);
+      r.decks[d].hotCuePreviewEnd();
+    }
+    const fed = r.logged
+      .slice(before)
+      .filter((e): e is Extract<CaptureEvent, { kind: 'transport' }> => e.kind === 'transport');
+    for (const d of DECKS) {
+      expect(fed.some((e) => e.channel === d && e.action === 'previewStart' && e.detail === 5)).toBe(
+        true
+      );
+      expect(fed.some((e) => e.channel === d && e.action === 'previewEnd')).toBe(true);
+    }
+    r.recorder.dispose();
   });
 });

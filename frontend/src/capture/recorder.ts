@@ -131,6 +131,14 @@ export class CaptureRecorder {
     return a === 'left' ? -1 : a === 'right' ? 1 : 0;
   }
 
+  /** Preview audio running (sessions 10/11): a main-cue stab (`previewing`)
+   * or a hot-cue stab (`hotCuePreviewSlot`). ONE derived flag — a stab is a
+   * stab regardless of which button is held, and mixed transitions
+   * (play-takeover during a hold) must emit a single edge pair. */
+  private static previewRunning(s: DeckSnapshot): boolean {
+    return s.previewing || s.hotCuePreviewSlot !== null;
+  }
+
   start(): void {
     this.silence = new SilenceSplitClock(this.now());
     const holder = audibleHolder();
@@ -227,8 +235,8 @@ export class CaptureRecorder {
       if (snap.playing) {
         this.feed({ t, kind: 'transport', channel: ch, action: 'play', playhead: this.engines[ch].getPlayhead() });
       }
-      if (snap.previewing) {
-        // A CUE stab already held at seed time (boot/re-seed mid-hold, ADR
+      if (CaptureRecorder.previewRunning(snap)) {
+        // A stab already held at seed time (boot/re-seed mid-hold, ADR
         // 0033): open its bracket so the log/timeline see the running preview.
         this.feed({
           t,
@@ -236,6 +244,7 @@ export class CaptureRecorder {
           channel: ch,
           action: 'previewStart',
           playhead: this.engines[ch].getPlayhead(),
+          detail: snap.hotCuePreviewSlot ?? undefined,
         });
       }
     }
@@ -326,10 +335,10 @@ export class CaptureRecorder {
     }
     const playheads: Partial<Record<ChannelId, number>> = {};
     for (const ch of CHANNEL_IDS) {
-      // A previewing deck (CUE stab, ADR 0033) has a moving, audible
-      // playhead just like a playing one — sample it so the stab's motion
-      // rides the ~1 Hz ticks and the timeline can draw its waveform trace.
-      if (this.lastDeck[ch].playing || this.lastDeck[ch].previewing) {
+      // A previewing deck (cue or hot-cue stab, ADR 0033) has a moving,
+      // audible playhead just like a playing one — sample it so the stab's
+      // motion rides the ~1 Hz ticks and the timeline can draw its trace.
+      if (this.lastDeck[ch].playing || CaptureRecorder.previewRunning(this.lastDeck[ch])) {
         playheads[ch] = this.engines[ch].getPlayhead();
       }
     }
@@ -413,19 +422,24 @@ export class CaptureRecorder {
         playhead: this.engines[ch].getPlayhead(),
       });
     }
-    if (cur.previewing !== prev.previewing) {
-      // CUE stab (hold-to-preview, ADR 0033): audio runs and is
-      // Master-audible while `previewing`, but `playing` never flips. Log
-      // the stab as previewStart/previewEnd (with the moving playhead, which
-      // the ~1 Hz tick also samples) so the timeline can render it and
-      // replay can reproduce it. The detector ignores both edges — preview
-      // is inert to detection v1 (deliberate; see detector.ts).
+    const prevPreview = CaptureRecorder.previewRunning(prev);
+    const curPreview = CaptureRecorder.previewRunning(cur);
+    if (curPreview !== prevPreview) {
+      // Stab (hold-to-preview, ADR 0033): audio runs and is Master-audible
+      // while a main-cue (`previewing`, sessions 10) or hot-cue
+      // (`hotCuePreviewSlot`, sessions 11) preview is held, but `playing`
+      // never flips. Log the stab as previewStart/previewEnd (with the
+      // moving playhead, which the ~1 Hz tick also samples) so the timeline
+      // can render it and replay can reproduce it. `detail` carries the hot
+      // cue slot on a hot-cue stab's start edge. The detector ignores both
+      // edges — preview is inert to detection v1 (deliberate; detector.ts).
       this.feed({
         t,
         kind: 'transport',
         channel: ch,
-        action: cur.previewing ? 'previewStart' : 'previewEnd',
+        action: curPreview ? 'previewStart' : 'previewEnd',
         playhead: this.engines[ch].getPlayhead(),
+        detail: curPreview ? (cur.hotCuePreviewSlot ?? undefined) : undefined,
       });
     }
     if (cur.pitchPercent !== prev.pitchPercent) {
