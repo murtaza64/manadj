@@ -65,6 +65,13 @@ import { useToast } from './Toast';
 import { useAddTracksToPlaylist, useTrackMenuItems } from './useTrackMenuItems';
 import SetDetailPane from '../sets/SetDetailPane';
 import { getSelectedSetId, selectSet } from '../sets/setStore';
+import {
+  OPEN_SESSION_EVENT,
+  getSelectedSessionUuid,
+  selectSession,
+} from '../sessions/openSession';
+import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
+import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
 import {
   PLAY_ORDER_SORT,
@@ -125,12 +132,15 @@ export default function Library({
   // 27): mode switches remount this component, and the session must ride
   // through. A selected Set wins the seed (setStore is the Set authority).
   const [selectedView, setSelectedView] = useState<ViewType>(() =>
-    restoredView(getSelectedSetId() !== null)
+    restoredView(getSelectedSetId() !== null, getSelectedSessionUuid() !== null)
   );
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(
     () => browseSession().playlistId
   );
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
+  const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
+    getSelectedSessionUuid()
+  );
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
   // Cross-view set navigation (sets 40, TopBar ownership chip): the store
   // already carries the selection; this nudges an ALREADY-mounted browse
@@ -144,6 +154,19 @@ export default function Library({
     };
     window.addEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
     return () => window.removeEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
+  }, []);
+  // Session deep-link (sessions 04): same two-part shape as Sets — the
+  // store carries the selection; this nudges a mounted instance.
+  useEffect(() => {
+    const onOpenSession = () => {
+      const uuid = getSelectedSessionUuid();
+      if (uuid === null) return;
+      setSelectedView('session');
+      setSelectedSessionUuid(uuid);
+      selectSet(null);
+    };
+    window.addEventListener(OPEN_SESSION_EVENT, onOpenSession);
+    return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpenSession);
   }, []);
   const queryClient = useQueryClient();
   const tagEditorRef = useRef<TagEditorHandle | null>(null);
@@ -858,6 +881,7 @@ export default function Library({
     mainSelRef.current = mainSel;
   });
   const viewingSet = selectedView === 'set' && selectedSetId !== null;
+  const viewingSessionPane = selectedView === 'session';
 
   // ── Area/sidebar navigation routing (four-deck-performance 24) ─────────
   // One router serves the keyboard hub and the hardware surface: the
@@ -867,14 +891,20 @@ export default function Library({
     if (entry.kind === 'view') {
       setSelectedView(entry.view);
       selectSet(null);
+      // The Sessions ENTRY shows the list; re-clicking it while a
+      // timeline is open acts as "back to the list".
+      setSelectedSessionUuid(null);
+      selectSession(null);
     } else if (entry.kind === 'playlist') {
       setSelectedView('playlist');
       setSelectedPlaylistId(entry.id);
       selectSet(null);
+      selectSession(null);
     } else {
       setSelectedView('set');
       setSelectedSetId(entry.id);
       selectSet(entry.id);
+      selectSession(null);
     }
   };
   /** Focus the sidebar, seeding the cursor where the selection lives. */
@@ -977,6 +1007,7 @@ export default function Library({
 
   useEffect(() => {
     if (viewingSet) return; // the Set pane owns the browse surface
+    if (viewingSessionPane) return; // sessions own the main area; no hidden list grabs
     return registerBrowseSurface({
       navigate: (delta) => browseNavRef.current.navigate(delta),
       getSelectedTrack: () => mainSelRef.current.selectedTrack,
@@ -988,7 +1019,7 @@ export default function Library({
       focusSidebar: () => browseNavRef.current.focusSidebar(),
       toggleSplitView: () => browseNavRef.current.toggleSplitView(),
     });
-  }, [viewingSet]);
+  }, [viewingSet, viewingSessionPane]);
 
   return (
     <>
@@ -1030,9 +1061,10 @@ export default function Library({
           borderBottom: '1px solid var(--surface0)'
         }}>
           <Player />
-          <div style={{
-            display: 'flex'
-          }}>
+          {/* Session pane open: the metadata editor hides entirely — its
+              content is readable from the deck rows, and the timeline
+              needs the vertical room (sessions 04 integration). */}
+          <div style={{ display: viewingSessionPane ? 'none' : 'flex' }}>
             {/* Loaded-track authority (issue 23): the panel edits the
                 loaded track; row selection only browses/loads. */}
             <TagEditor
@@ -1110,7 +1142,20 @@ export default function Library({
             </div>
           )}
 
-          {selectedView === 'set' && selectedSetId !== null ? (
+          {selectedView === 'session' ? (
+            /* Sessions (sessions 04): the list in place of the track
+               table; a selected session swaps to its timeline. */
+            selectedSessionUuid !== null ? (
+              <SessionTimelinePane sessionUuid={selectedSessionUuid} />
+            ) : (
+              <SessionsListView
+                onOpen={(uuid) => {
+                  setSelectedSessionUuid(uuid);
+                  selectSession(uuid);
+                }}
+              />
+            )
+          ) : selectedView === 'set' && selectedSetId !== null ? (
             /* Set detail view (sets 01): replaces the track table. */
             <SetDetailPane setId={selectedSetId} onLoadToDeck={loadWithViewPolicy} />
           ) : splitView ? (

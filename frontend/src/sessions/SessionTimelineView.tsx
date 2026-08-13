@@ -56,11 +56,18 @@ import './sessionTimeline.css';
 /** Physical fader order, as the Performance view arranges the decks. */
 const LANE_ORDER: CaptureDeck[] = ['C', 'A', 'B', 'D'];
 
-const LANE_H = 84;
+/** Full-size lane height; lanes SCALE DOWN to fit short hosts (the
+ * Performance view's embedded browse hands the pane far less height than
+ * the Library — the timeline must fit what it gets). */
+const LANE_H_MAX = 84;
+const LANE_H_MIN = 40;
 const LANE_GAP = 6;
 const CHIP_STRIP_H = 30;
 const RULER_H = 22;
 const MAX_PX_PER_SEC = 60;
+/** Canvas draws this much beyond the viewport each side, so native
+ * scrolling never outruns the painted window between re-centers. */
+const CANVAS_MARGIN = 400;
 
 // ── Formatting ──────────────────────────────────────────────────────────
 
@@ -93,10 +100,30 @@ interface Props {
   session: SessionRowWire;
   /** Deep-link: center on this capture-clock moment on open (history jump). */
   focusS?: number | null;
-  onBack(): void;
+  /** Standalone-mode back affordance; embedded in the Library the sidebar
+   * IS the navigation (Sets parity) and this is omitted. */
+  onBack?: () => void;
 }
 
 export function SessionTimelineView({ session, focusS, onBack }: Props) {
+  // Responsive vertical budget: lanes scale, chrome sheds when tight.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [rootH, setRootH] = useState(900);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setRootH(el.clientHeight));
+    ro.observe(el);
+    setRootH(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+  // One-row chrome: controls+state+hints live in the top strip; the
+  // timeline gets everything else.
+  const laneH = Math.max(
+    LANE_H_MIN,
+    Math.min(LANE_H_MAX, Math.floor((rootH - 125) / 4))
+  );
+
   const [collapseIdle, setCollapseIdle] = useState(true);
   const [thresholdS, setThresholdS] = useState(45);
   const [expandedIdle, setExpandedIdle] = useState<Set<number>>(new Set());
@@ -173,20 +200,13 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
     const ro = new ResizeObserver(() => setViewportW(el.clientWidth));
     ro.observe(el);
     setViewportW(el.clientWidth);
-    // rAF-throttled scroll tracking: drives the windowed canvas + ruler.
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        setScrollX(el.scrollLeft);
-      });
-    };
+    // Synchronous scroll tracking: sticky labels/areas repaint the same
+    // frame (the old rAF throttle made them visibly trail the scroll).
+    const onScroll = () => setScrollX(el.scrollLeft);
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       ro.disconnect();
       el.removeEventListener('scroll', onScroll);
-      if (raf) cancelAnimationFrame(raf);
     };
   }, [hasModel]);
 
@@ -367,27 +387,49 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
       }
       return;
     }
+    // The playhead reads the DRIVER's clock directly, not store status —
+    // one authoritative source. `replayNowT()` returns null only when the
+    // driver is genuinely inactive (torn down): the loop keeps its last
+    // position rather than snapping the cursor away on a transient null.
     let raf = 0;
     const loop = () => {
       const t = replayNowT();
-      if (t !== null) lastReplayTRef.current = t;
-      setReplayT(t);
+      if (t !== null) {
+        lastReplayTRef.current = t;
+        setReplayT(t);
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [replayHere]);
 
-  // Space: pause/resume the replay (view-scoped, like the editor's space).
+  // Space: pause/resume while rolling; START playback from the selected
+  // moment when idle (view-scoped, like the editor's space).
+  const spaceRef = useRef({ selection, replayFrom });
+  spaceRef.current = { selection, replayFrom };
   useEffect(() => {
+    // CAPTURE phase + stopPropagation: the library/performance hubs also
+    // bind space (deck play toggle) — both firing turned a pause into a
+    // deck gesture, which the replay driver rightly read as a takeover.
+    // When the timeline owns the gesture, nobody else hears it.
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== 'Space' || isTypingTarget(e)) return;
-      if (!replayHere) return;
-      e.preventDefault();
-      toggleReplayPause();
+      if (replayHere) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleReplayPause();
+        return;
+      }
+      const { selection: sel, replayFrom: start } = spaceRef.current;
+      if (sel.kind === 'moment') {
+        e.preventDefault();
+        e.stopPropagation();
+        start(sel.t);
+      }
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => document.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [replayHere]);
 
   // ── Waveform + beatgrid data ──────────────────────────────────────────
@@ -434,20 +476,24 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
 
   const slot = useStyleSlot('full');
 
-  const svgH = RULER_H + CHIP_STRIP_H + 4 * (LANE_H + LANE_GAP);
+  const svgH = RULER_H + CHIP_STRIP_H + 4 * (laneH + LANE_GAP);
   const lanesTop = RULER_H + CHIP_STRIP_H;
-  const laneY = (deck: CaptureDeck) => lanesTop + LANE_ORDER.indexOf(deck) * (LANE_H + LANE_GAP);
+  const laneY = (deck: CaptureDeck) => lanesTop + LANE_ORDER.indexOf(deck) * (laneH + LANE_GAP);
 
-  // ── The waveform canvas: viewport-sized, windowed to the visible px ───
+  // ── The waveform canvas: windowed to the visible px + margin ─────────
   // (a multi-hour session at high zoom is hundreds of thousands of px —
-  // a full-width canvas backing store would freeze the renderer).
+  // a full-width canvas backing store would freeze the renderer). The
+  // window is quantized: native scroll carries the canvas smoothly (it
+  // lives in the scrolled content); the redraw only re-centers when the
+  // scroll crosses a quantum, so edges never blank within the margin.
+  const canvasWinStart = Math.max(0, Math.floor((scrollX - CANVAS_MARGIN) / 300) * 300);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !model || !axis) return;
     const dpr = window.devicePixelRatio || 1;
-    const x0 = Math.max(0, Math.floor(scrollX));
-    const x1 = Math.min(width, x0 + viewportW);
+    const x0 = Math.max(0, Math.floor(canvasWinStart));
+    const x1 = Math.min(width, x0 + viewportW + 2 * CANVAS_MARGIN);
     const winW = Math.max(1, x1 - x0);
     canvas.width = winW * dpr;
     canvas.height = svgH * dpr;
@@ -459,7 +505,7 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
     ctx.clearRect(0, 0, winW, svgH);
     ctx.translate(-x0, 0); // helpers draw in timeline coordinates
     for (const deck of LANE_ORDER) {
-      const geo = { width, yOffset: laneY(deck), height: LANE_H, x0, x1 };
+      const geo = { width, yOffset: laneY(deck), height: laneH, x0, x1 };
       const dt = model.decks[deck];
       // 1. Audibility area chart (behind).
       drawAudibilityArea(ctx, dt.gainSteps, axis, DECK_COLORS[deck], geo);
@@ -485,7 +531,7 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, axis, width, svgH, scrollX, viewportW, wavesByTrack, gridsByTrack, runsByDeck, slot]);
+  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, runsByDeck, slot]);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pxAt = (clientX: number): number => {
@@ -508,22 +554,67 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
   };
 
   return (
-    <div className="session-timeline">
+    <div className="session-timeline" ref={rootRef}>
       <div className="stl-controls">
-        <button className="stl-back" onClick={onBack}>
-          ‹ Sessions
-        </button>
+        {onBack ? (
+          <button className="stl-back" onClick={onBack}>
+            ‹ Sessions
+          </button>
+        ) : null}
         <span className="stl-title">
           {fmtWhen(session.started_at)}
           {model ? ` · ${fmtDur(model.end - model.start)} · ${takes.length} takes` : ''}
         </span>
+
+        {/* Selection cluster: replay transport / take opener, inline. */}
+        {selection.kind === 'moment' ? (
+          replayHere && replay.status !== 'idle' ? (
+            <span className="stl-cluster">
+              {replay.status !== 'loading' ? (
+                <button className="stl-replay" onClick={toggleReplayPause}>
+                  {replay.status === 'paused' ? '▶' : '⏸'}
+                </button>
+              ) : null}
+              <button className="stl-replay stop" onClick={stopReplay}>
+                {replay.status === 'loading' ? 'loading…' : '■'}
+              </button>
+            </span>
+          ) : (
+            <button
+              className="stl-replay"
+              title="Replay through the shared live decks from this moment — any manual gesture takes over"
+              onClick={() => replayFrom(selection.t)}
+            >
+              ▶ {fmtClock(selection.t)}
+            </button>
+          )
+        ) : null}
+        {selection.kind === 'take' ? (
+          <span className="stl-cluster">
+            <button
+              className="stl-open-editor"
+              onClick={() => requestTakeReview(selection.take.uuid)}
+            >
+              Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
+              {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id} · open in
+              editor
+            </button>
+            <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
+              ✕
+            </button>
+          </span>
+        ) : null}
+
+        {/* Inline state readout: cursor (or selected moment) reconstruction. */}
+        <InlineReadout state={scrubState ?? momentState} trackNames={trackNames} />
+
         <label>
           <input
             type="checkbox"
             checked={collapseIdle}
             onChange={(e) => setCollapseIdle(e.target.checked)}
           />
-          collapse idle ≥
+          idle ≥
         </label>
         <select
           value={thresholdS}
@@ -541,13 +632,18 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
             checked={showTraces}
             onChange={(e) => setShowTraces(e.target.checked)}
           />
-          playheads
+          traces
         </label>
         <span className="stl-zoom">
           <button title="Zoom to fit" onClick={() => setPxPerSec(null)}>
             fit
           </button>
-          <span className="stl-zoom-hint">wheel = zoom · shift/trackpad = pan</span>
+        </span>
+        <span
+          className="stl-hint"
+          title="waveform = audio that played · background fill = audibility (height = Master gain) · ◆N hot cue · ↷N/↶N beat jump · ↕ seek · ▶/▪ play/pause · ⌐¬ loop · dashes = machine tenure · wheel = zoom, trackpad = pan"
+        >
+          hover=scrub · click=moment/seek · space=pause · ⓘ
         </span>
       </div>
 
@@ -573,6 +669,8 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
                   width={width}
                   viewX0={scrollX - 200}
                   viewX1={scrollX + viewportW + 200}
+                  scrollX={scrollX}
+                  laneH={laneH}
                   lanesTop={lanesTop}
                   laneY={laneY}
                   takes={takes}
@@ -599,21 +697,6 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
             </div>
           </div>
 
-          <Legend />
-
-          <DetailPanel
-            selection={selection}
-            scrubState={scrubState}
-            momentState={momentState}
-            trackNames={trackNames}
-            model={model}
-            replayStatus={replayHere ? replay.status : 'idle'}
-            onReplay={replayFrom}
-            onStopReplay={stopReplay}
-            onTogglePause={toggleReplayPause}
-            onOpenTake={(uuid) => requestTakeReview(uuid)}
-            onClear={() => setSelection({ kind: 'none' })}
-          />
         </>
       ) : (
         <div className="stl-loading">Loading session…</div>
@@ -631,6 +714,9 @@ interface SceneProps {
   /** Visible px window (±margin) — dense per-time elements render only here. */
   viewX0: number;
   viewX1: number;
+  /** Exact viewport left edge in timeline px (sticky labels). */
+  scrollX: number;
+  laneH: number;
   lanesTop: number;
   laneY(deck: CaptureDeck): number;
   takes: TakeRowWire[];
@@ -653,6 +739,8 @@ function TimelineScene({
   width,
   viewX0,
   viewX1,
+  scrollX,
+  laneH,
   lanesTop,
   laneY,
   takes,
@@ -669,7 +757,7 @@ function TimelineScene({
   onIdleToggle,
 }: SceneProps) {
   const X = (t: number) => axis.tToPx(t);
-  const lanesBottom = laneY('D') + LANE_H;
+  const lanesBottom = laneY('D') + laneH;
 
   const ticks: number[] = [];
   {
@@ -720,6 +808,9 @@ function TimelineScene({
           y={laneY(deck)}
           model={model}
           X={X}
+          axis={axis}
+          scrollX={scrollX}
+          h={laneH}
           trackNames={trackNames}
           showTraces={showTraces}
         />
@@ -905,6 +996,9 @@ function DeckLane({
   y,
   model,
   X,
+  axis,
+  scrollX,
+  h,
   trackNames,
   showTraces,
 }: {
@@ -912,12 +1006,14 @@ function DeckLane({
   y: number;
   model: TimelineModel;
   X(t: number): number;
+  axis: ReturnType<typeof buildTimeAxis>;
+  scrollX: number;
+  h: number;
   trackNames: Record<number, string>;
   showTraces: boolean;
 }) {
   const dt = model.decks[deck];
   const color = DECK_COLORS[deck];
-  const h = LANE_H;
   const maxPlayhead = Math.max(1, ...dt.traces.flat().map((p) => p.playhead));
 
   // Marker text with context: hot-cue slot (1-8, the pads' numbering),
@@ -941,19 +1037,37 @@ function DeckLane({
 
       {dt.trackSpans.map((sp, i) => {
         const label = trackNames[sp.trackId] ?? `#${sp.trackId}`;
-        const lx = X(sp.start) + 18;
-        // Chronological render order puts newer labels on top; the faded
-        // backing dissolves whatever they cover.
+        const mx = X(sp.start);
+        const estW = label.length * 6.4;
+        // Loads often happen DURING idle (load, then play) — the load
+        // time maps into the collapsed marker, which would bury the bar
+        // and title under the opaque idle rect. Snap the label anchor to
+        // the marker's right edge so the track's start stays readable.
+        const idleSeg = axis.segments.find(
+          (g) => g.collapsed && sp.start >= g.start && sp.start <= g.end
+        );
+        const anchor = idleSeg ? idleSeg.px1 + 4 : mx;
+        // The LOAD event is a vertical bar; its title hangs off it (text
+        // left edge AT the marker). If THIS span covers the viewport's
+        // left edge (the first loaded track in view), the label sticks to
+        // the edge — pushed out by its own span end as the next load
+        // approaches. Chronological render order puts newer labels on
+        // top; the faded backing dissolves whatever they cover.
+        const covering = anchor < scrollX && X(sp.end) > scrollX;
+        const lx = covering
+          ? Math.max(anchor, Math.min(scrollX + 6, X(sp.end) - estW - 8))
+          : anchor;
         return (
           <g key={`trk-${i}`}>
+            <line x1={mx} y1={y} x2={mx} y2={y + h} stroke={color} className="stl-load-bar" />
             <rect
-              x={lx - 16}
+              x={lx - 12}
               y={y + 3}
-              width={label.length * 6.4 + 22}
+              width={estW + 18}
               height={14}
               fill="url(#stl-label-fade)"
             />
-            <text x={lx} y={y + 14} className="stl-track-label" fill={color}>
+            <text x={lx + 3} y={y + 14} className="stl-track-label" fill={color}>
               {label}
             </text>
           </g>
@@ -1027,206 +1141,40 @@ function DeckLane({
   );
 }
 
-function Legend() {
-  return (
-    <div className="stl-legend">
-      <span>
-        <i className="stl-swatch stl-swatch-wave" /> waveform (audio that played)
-      </span>
-      <span>
-        <i className="stl-swatch stl-swatch-area" /> audibility (fill height = Master gain)
-      </span>
-      <span>
-        <i className="stl-swatch stl-swatch-trace" /> playhead trace
-      </span>
-      <span>◆ hot cue · ↷ beat jump · ↕ seek · ⌐¬ loop</span>
-      <span>
-        <i className="stl-swatch stl-swatch-tenure" /> machine tenure
-      </span>
-      <span>
-        <i className="stl-swatch stl-swatch-take" /> Take (click → editor)
-      </span>
-      <span className="stl-legend-hint">
-        hover = scrub · click = moment (seeks during replay) · space = pause replay
-      </span>
-    </div>
-  );
-}
-
-// ── Detail panel ──────────────────────────────────────────────────────────
-
-function DetailPanel({
-  selection,
-  scrubState,
-  momentState,
-  trackNames,
-  model,
-  replayStatus,
-  onReplay,
-  onStopReplay,
-  onTogglePause,
-  onOpenTake,
-  onClear,
-}: {
-  selection: Selection;
-  scrubState: ReturnType<typeof stateAt> | null;
-  momentState: ReturnType<typeof stateAt> | null;
-  trackNames: Record<number, string>;
-  model: TimelineModel;
-  replayStatus: 'idle' | 'loading' | 'playing' | 'paused';
-  onReplay(t: number): void;
-  onStopReplay(): void;
-  onTogglePause(): void;
-  onOpenTake(uuid: string): void;
-  onClear(): void;
-}) {
-  return (
-    <div className="stl-panel">
-      <div className="stl-panel-col">
-        <div className="stl-panel-title">Scrub — state at cursor</div>
-        {scrubState ? (
-          <StateReadout state={scrubState} trackNames={trackNames} />
-        ) : (
-          <div className="stl-dim">
-            Hover the timeline to read reconstructed deck state at any moment.
-          </div>
-        )}
-      </div>
-
-      <div className="stl-panel-col">
-        {selection.kind === 'none' ? (
-          <>
-            <div className="stl-panel-title">Selection</div>
-            <div className="stl-dim">
-              Click a moment to inspect it, or a Take chip to open it in the editor.
-            </div>
-          </>
-        ) : null}
-
-        {selection.kind === 'moment' && momentState ? (
-          <>
-            <div className="stl-panel-title">
-              Moment {fmtClock(selection.t)}
-              <button className="stl-clear" onClick={onClear}>
-                ✕
-              </button>
-            </div>
-            <div className="stl-replay-row">
-              {replayStatus === 'idle' ? (
-                <button
-                  className="stl-replay"
-                  title="Replay through the shared live decks from this moment — any manual gesture takes over"
-                  onClick={() => onReplay(selection.t)}
-                >
-                  ▶ Replay from {fmtClock(selection.t)}
-                </button>
-              ) : (
-                <>
-                  {replayStatus !== 'loading' ? (
-                    <button className="stl-replay" onClick={onTogglePause}>
-                      {replayStatus === 'paused' ? '▶ Resume (space)' : '⏸ Pause (space)'}
-                    </button>
-                  ) : null}
-                  <button className="stl-replay stop" onClick={onStopReplay}>
-                    {replayStatus === 'loading' ? 'Loading decks… (cancel)' : '■ Stop'}
-                  </button>
-                </>
-              )}
-            </div>
-            <div className="stl-stub-body">
-              {ALL_DECKS.some((d) => momentState.decks[d].trackId !== null) ? (
-                <>
-                  {LANE_ORDER.filter((d) => momentState.decks[d].trackId !== null)
-                    .map(
-                      (d) =>
-                        `${trackNames[momentState.decks[d].trackId!] ?? momentState.decks[d].trackId} on ${d} @ ${fmtClock(momentState.decks[d].playhead)}`
-                    )
-                    .join(' · ')}
-                  . Click elsewhere to seek during playback; grab anything to take over.
-                </>
-              ) : (
-                'No tracks loaded at this moment (replay will start silent and follow the log).'
-              )}
-            </div>
-            <StateReadout state={momentState} trackNames={trackNames} />
-          </>
-        ) : null}
-
-        {selection.kind === 'take' ? (
-          <>
-            <div className="stl-panel-title">
-              Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
-              {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id}
-              <button className="stl-clear" onClick={onClear}>
-                ✕
-              </button>
-            </div>
-            <div className="stl-stub-body">
-              window {fmtClock(selection.take.window_start_s)}–
-              {fmtClock(selection.take.window_end_s)} · confidence{' '}
-              {selection.take.confidence.toFixed(2)} · origin {selection.take.origin}
-            </div>
-            <button className="stl-open-editor" onClick={() => onOpenTake(selection.take.uuid)}>
-              Open in Transition editor →
-            </button>
-          </>
-        ) : null}
-      </div>
-
-      <div className="stl-panel-col stl-panel-facts">
-        <div className="stl-panel-title">Session facts</div>
-        <div className="stl-facts">
-          <span>log span {fmtDur(model.end - model.start)}</span>
-          <span>
-            {model.idle.length} idle stretch{model.idle.length === 1 ? '' : 'es'}
-          </span>
-          <span>
-            {model.tenures.length} tenure hold{model.tenures.length === 1 ? '' : 's'}
-          </span>
-          <span>{model.suspended.length} suspended (&gt;2 audible)</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StateReadout({
+/** One-line state readout: the cursor's (or selected moment's)
+ * reconstruction, per deck in physical order — playhead + audibility.
+ * The full detail lives in the lanes themselves now; this is the glance. */
+function InlineReadout({
   state,
   trackNames,
 }: {
-  state: ReturnType<typeof stateAt>;
+  state: ReturnType<typeof stateAt> | null;
   trackNames: Record<number, string>;
 }) {
+  if (!state) return <span className="stl-inline-readout dim">—</span>;
   return (
-    <table className="stl-readout">
-      <tbody>
-        <tr className="stl-readout-head">
-          <td>{fmtClock(state.t)}</td>
-          <td colSpan={3}>
-            xf {state.crossfader.toFixed(2)}
-            {state.tenureHolder ? ` · ${state.tenureHolder} holds the surface` : ''}
-          </td>
-        </tr>
-        {LANE_ORDER.map((d) => {
-          const ds = state.decks[d];
-          return (
-            <tr key={d} className={ds.audible ? 'audible' : ds.playing ? 'playing' : 'silent'}>
-              <td style={{ color: DECK_COLORS[d] }}>{d}</td>
-              <td className="stl-readout-track">
-                {ds.trackId !== null ? trackNames[ds.trackId] ?? `#${ds.trackId}` : '—'}
-              </td>
-              <td>{ds.trackId !== null ? fmtClock(ds.playhead) : ''}</td>
-              <td>
-                {ds.audible
-                  ? `audible ${(ds.gain * 100).toFixed(0)}%`
-                  : ds.playing
-                    ? 'playing (silent)'
-                    : 'stopped'}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <span className="stl-inline-readout" title={LANE_ORDER.map((d) => {
+      const ds = state.decks[d];
+      return `${d}: ${ds.trackId !== null ? trackNames[ds.trackId] ?? ds.trackId : '—'} @ ${fmtClock(ds.playhead)} ${ds.audible ? `audible ${(ds.gain * 100).toFixed(0)}%` : ds.playing ? 'playing (silent)' : 'stopped'}`;
+    }).join('\n')}>
+      <b>{fmtClock(state.t)}</b>
+      {LANE_ORDER.map((d) => {
+        const ds = state.decks[d];
+        return (
+          <span
+            key={d}
+            className={ds.audible ? 'audible' : ds.playing ? 'playing' : 'silent'}
+            style={{ color: DECK_COLORS[d] }}
+          >
+            {d}
+            <i>
+              {ds.trackId !== null ? fmtClock(ds.playhead) : '—'}
+              {ds.audible ? `·${(ds.gain * 100).toFixed(0)}%` : ''}
+            </i>
+          </span>
+        );
+      })}
+      {state.tenureHolder ? <em>{state.tenureHolder} holds</em> : null}
+    </span>
   );
 }

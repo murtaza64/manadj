@@ -50,7 +50,8 @@ export function AudioOwnershipChip({
     } else if (face.kind === 'audition') {
       onModeChange('transition');
     } else if (face.kind === 'replay') {
-      onModeChange('sessions');
+      // Sessions live in the Library now (sessions 04 integration).
+      onModeChange('library');
     }
     // DECKS: nothing to navigate to — the chip never touches audio.
   };

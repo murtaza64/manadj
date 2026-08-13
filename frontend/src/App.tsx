@@ -22,7 +22,6 @@ import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
-import { SessionsView } from './sessions/SessionsView';
 import { OPEN_SESSION_EVENT } from './sessions/openSession';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { OPEN_PAIR_EVENT } from './editor/openPair';
@@ -40,7 +39,7 @@ function AnalysisPendingBridge() {
   return null;
 }
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sessions', 'sync', 'styles', 'jog-tune'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles', 'jog-tune'];
 
 /** Session-state persistence of the top-panel mode: reopen where you were. */
 const MODE_KEY = 'manadj-app-mode';
@@ -113,9 +112,10 @@ function App() {
   }, []);
 
   // A Session-moment request (history's "view in Session", sessions 04)
-  // opens the Sessions view; the mounted SessionsView consumes the payload.
+  // opens the Library — Sessions live there now (sidebar section + pane);
+  // the mounted Library consumes the selection from the session store.
   useEffect(() => {
-    const onOpenSession = () => setView('sessions');
+    const onOpenSession = () => setView('library');
     window.addEventListener(OPEN_SESSION_EVENT, onOpenSession);
     return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpenSession);
   }, []);
@@ -156,8 +156,6 @@ function App() {
                 <TransitionEditor />
               ) : view === 'history' ? (
                 <TakeHistoryView />
-              ) : view === 'sessions' ? (
-                <SessionsView />
               ) : view === 'sync' ? (
                 <SyncView />
               ) : view === 'styles' ? (

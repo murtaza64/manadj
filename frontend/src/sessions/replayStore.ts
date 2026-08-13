@@ -45,6 +45,13 @@ export async function startReplay(
   setState({ status: 'loading', sessionUuid, startT: plan.startT, lastStop: null });
   const driver = new SessionReplayDriver(plan, audio, {
     loadTrack,
+    // The DRIVER is authoritative for status — every transition is pushed
+    // here, so the store never infers 'playing' from a resolved promise
+    // (which raced a same-frame stop and left status stuck while audio
+    // ran on: the playhead-freezes-but-audio-continues desync).
+    onStatus: (status) => {
+      if (instance === driver) setState({ status });
+    },
     onStopped: (reason, cause) => {
       if (instance === driver) {
         instance = null;
@@ -55,8 +62,6 @@ export async function startReplay(
   });
   instance = driver;
   await driver.start();
-  // Still the active instance and not already stopped → rolling.
-  if (instance === driver) setState({ status: 'playing' });
 }
 
 /** Stop the active replay (UI stop button). No-op when idle. */

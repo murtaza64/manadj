@@ -94,6 +94,12 @@ export interface TimelineModel {
   overlaps: Span[];
   /** Every trackId that appeared in a load event. */
   trackIds: number[];
+  /** Distinct Tracks that became Master-audible during the Session (any
+   * audibility span overlapped that Track's tenure on its deck). Repeated
+   * audible plays count once; loaded-only, cue/PFL-only, and
+   * tenure-masked Tracks are absent (audibleSpans already exclude them).
+   * The Sessions-list "Tracks" count. */
+  audibleTrackIds: number[];
   eventCount: number;
 }
 
@@ -451,6 +457,20 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     ])
   ) as Record<CaptureDeck, DeckTimeline>;
 
+  // Distinct Master-audible Tracks (the Sessions-list "Tracks" count): a
+  // Track counts iff its tenure on a deck overlapped that deck's
+  // audibility (which already excludes cue/PFL, loaded-silent, kills, and
+  // tenure-masked stretches). One definition, reused — no divergence.
+  const audibleTrackIds = new Set<number>();
+  for (const ch of ALL_DECKS) {
+    for (const span of trackSpans[ch]) {
+      if (audibleTrackIds.has(span.trackId)) continue;
+      if (audible[ch].spans.some((a) => a.start < span.end && a.end > span.start)) {
+        audibleTrackIds.add(span.trackId);
+      }
+    }
+  }
+
   return {
     start,
     end,
@@ -460,6 +480,7 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     idle: idle.spans,
     overlaps: overlap.spans,
     trackIds: [...trackIds],
+    audibleTrackIds: [...audibleTrackIds],
     eventCount: events.length,
   };
 }

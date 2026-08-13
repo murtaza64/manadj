@@ -56,8 +56,9 @@ export function updateBrowseSession(patch: Partial<BrowseSession>): void {
  * with no selected Set, which falls back to All tracks, and a stored
  * 'playlist' whose playlist id is gone, which cannot be addressed.
  */
-export function restoredView(setSelected: boolean): ViewType {
+export function restoredView(setSelected: boolean, sessionSelected = false): ViewType {
   if (setSelected) return 'set';
+  if (sessionSelected) return 'session';
   if (session.view === 'set') return 'all';
   if (session.view === 'playlist' && session.playlistId === null) return 'all';
   return session.view;
