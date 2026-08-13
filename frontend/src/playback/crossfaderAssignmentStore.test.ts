@@ -3,6 +3,7 @@ import { Mixer } from './mixer';
 
 const STORAGE_KEY = 'manadj-crossfader-assignments';
 const POSITION_STORAGE_KEY = 'manadj-crossfader-position';
+const ENABLED_STORAGE_KEY = 'manadj-crossfader-enabled';
 
 function fakeStorage(initial: Record<string, string> = {}): Storage {
   const map = new Map(Object.entries(initial));
@@ -80,5 +81,23 @@ describe('Mixer crossfader position persistence', () => {
   it('falls back to center for invalid persisted positions', () => {
     vi.stubGlobal('localStorage', fakeStorage({ [POSITION_STORAGE_KEY]: 'wat' }));
     expect(new Mixer().getCrossfader()).toBe(0);
+  });
+});
+
+describe('Mixer crossfader enabled persistence', () => {
+  it('restores bypass state in a new Mixer', () => {
+    vi.stubGlobal('localStorage', fakeStorage());
+    const first = new Mixer();
+    first.engageAutomation();
+    first.setCrossfaderEnabled(false);
+
+    const restarted = new Mixer();
+    expect(restarted.getCrossfaderEnabled()).toBe(false);
+    expect(localStorage.getItem(ENABLED_STORAGE_KEY)).toBe('false');
+  });
+
+  it('defaults enabled when persisted state is absent or invalid', () => {
+    vi.stubGlobal('localStorage', fakeStorage({ [ENABLED_STORAGE_KEY]: 'wat' }));
+    expect(new Mixer().getCrossfaderEnabled()).toBe(true);
   });
 });
