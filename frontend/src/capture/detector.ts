@@ -349,6 +349,10 @@ export function reduceCapture(
   // Audibility edges — CESSATIONS FIRST: an event flipping both decks at
   // once (a crossfader flick) must anchor as a cut at the cessation, on
   // either incumbency, not ride whichever deck the loop visited first.
+  // PHASE-1 PAIR BOUNDARY (ADR 0032, sessions 09): this A/B loop is the
+  // pair-machine Take classifier, deliberately not the whole-Session log —
+  // C/D evidence is captured in full (recorder) and counted for the
+  // >2-audible self-gate above; only the HANDOVER verdict trades on A/B.
   const edges = (['A', 'B'] as CaptureChannel[])
     .map((ch) => ({ ch, audible: deckAudible(s, ch) }))
     .filter(({ ch, audible }) => audible !== s.decks[ch].audible)
