@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
 import type { Ref } from 'react';
-import { dragEdgeScrollDelta } from './dragScroll';
+import { DRAG_POINTER_STALE_MS, dragEdgeScrollDelta } from './dragScroll';
 import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
@@ -654,8 +654,6 @@ export default function Library({
   // Positional drops only when the pane shows actual Play order; under any
   // other sort the drop appends (and in-pane reorders are refused).
   const playlistPaneRef = useRef<HTMLDivElement>(null);
-  /** Previous dragover timestamp — feeds the time-normalized edge scroll. */
-  const lastDragOverTsRef = useRef(0);
   const [dropIndicator, setDropIndicator] = useState<{ index: number; y: number } | null>(null);
   const canPositionDrops = isPlayOrderSort(playlistSort);
   const playlistMemberIds = useMemo(
@@ -676,25 +674,90 @@ export default function Library({
     }));
   };
 
+  /** Drop indicator from a pointer position (viewport Y), against the
+   * pane's CURRENT scrollTop — called from dragover and from the edge
+   * scroll loop (the index under a stationary pointer changes while
+   * content slides beneath it). */
+  const updateDropIndicator = (clientY: number) => {
+    const pane = playlistPaneRef.current;
+    if (!pane) return;
+    const rects = paneRowRects(pane, playlistTracks.length);
+    const pointerY = clientY - pane.getBoundingClientRect().top + pane.scrollTop;
+    const index = canPositionDrops ? insertionIndexFromPointer(pointerY, rects) : rects.length;
+    setDropIndicator({ index, y: indicatorY(index, rects) });
+  };
+
+  // ── Edge auto-scroll (dragScroll.ts) ───────────────────────────────────
+  // A rAF loop driven by the LAST KNOWN drag pointer, not by dragover
+  // cadence: stationary dragover refires only ~every 350ms (a hand held at
+  // the edge barely scrolled), and once the pointer overshoots the pane the
+  // pane gets no dragover at all. A window-level dragover keeps the pointer
+  // fresh anywhere in the app, so dragging PAST the edge keeps scrolling
+  // (faster, per the overshoot ramp).
+  const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
+  /** Last pointer-update timestamp: the loop self-terminates when dragover
+   * goes quiet (drag ended off-window, missed dragend, …). */
+  const dragPointerTsRef = useRef(0);
+  const edgeScrollRafRef = useRef<number | null>(null);
+  const edgeScrollPrevTsRef = useRef(0);
+  /** Latest-render frame body (the rAF chain must see fresh closures). */
+  const edgeScrollFrameRef = useRef<(ts: number) => void>(() => {});
+
+  const onWindowDragOver = useCallback((e: DragEvent) => {
+    dragPointerRef.current = { x: e.clientX, y: e.clientY };
+    dragPointerTsRef.current = e.timeStamp;
+  }, []);
+
+  const stopEdgeScroll = useCallback(() => {
+    if (edgeScrollRafRef.current !== null) cancelAnimationFrame(edgeScrollRafRef.current);
+    edgeScrollRafRef.current = null;
+    dragPointerRef.current = null;
+    window.removeEventListener('dragover', onWindowDragOver);
+    window.removeEventListener('drop', stopEdgeScroll);
+    window.removeEventListener('dragend', stopEdgeScroll);
+  }, [onWindowDragOver]);
+  useEffect(() => stopEdgeScroll, [stopEdgeScroll]);
+
+  edgeScrollFrameRef.current = (ts: number) => {
+    const pane = playlistPaneRef.current;
+    const pt = dragPointerRef.current;
+    if (!pane || !pt || ts - dragPointerTsRef.current > DRAG_POINTER_STALE_MS) {
+      stopEdgeScroll();
+      return;
+    }
+    const elapsedMs = ts - edgeScrollPrevTsRef.current;
+    edgeScrollPrevTsRef.current = ts;
+    const rect = pane.getBoundingClientRect();
+    // Only while horizontally over the pane: in the split, the library
+    // pane sits beside it and must not drive its scroll.
+    const withinX = pt.x >= rect.left && pt.x <= rect.right;
+    const delta = withinX ? dragEdgeScrollDelta(pt.y, rect.top, rect.bottom, elapsedMs) : 0;
+    if (delta !== 0) {
+      pane.scrollTop += delta;
+      // Indicator only while a drop here is actually possible (pointer
+      // inside the pane); past the edge, dragleave has cleared it.
+      if (pt.y >= rect.top && pt.y <= rect.bottom) updateDropIndicator(pt.y);
+    }
+    edgeScrollRafRef.current = requestAnimationFrame((t) => edgeScrollFrameRef.current(t));
+  };
+
+  const ensureEdgeScrollLoop = () => {
+    if (edgeScrollRafRef.current !== null) return;
+    edgeScrollPrevTsRef.current = performance.now();
+    window.addEventListener('dragover', onWindowDragOver);
+    window.addEventListener('drop', stopEdgeScroll);
+    window.addEventListener('dragend', stopEdgeScroll);
+    edgeScrollRafRef.current = requestAnimationFrame((t) => edgeScrollFrameRef.current(t));
+  };
+
   const handlePlaylistPaneDragOver = (e: React.DragEvent) => {
     if (!isTrackDrag(e.dataTransfer)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    const pane = playlistPaneRef.current;
-    if (!pane) return;
-    // Edge auto-scroll: dragging near the pane's top/bottom scrolls it so
-    // off-screen rows are reachable (dragScroll.ts, time-normalized).
-    // Applied before the indicator math so the drop index reflects the
-    // new scrollTop.
-    const paneRect = pane.getBoundingClientRect();
-    const elapsedMs = e.timeStamp - lastDragOverTsRef.current;
-    lastDragOverTsRef.current = e.timeStamp;
-    const scrollDelta = dragEdgeScrollDelta(e.clientY, paneRect.top, paneRect.bottom, elapsedMs);
-    if (scrollDelta !== 0) pane.scrollTop += scrollDelta;
-    const rects = paneRowRects(pane, playlistTracks.length);
-    const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
-    const index = canPositionDrops ? insertionIndexFromPointer(pointerY, rects) : rects.length;
-    setDropIndicator({ index, y: indicatorY(index, rects) });
+    dragPointerRef.current = { x: e.clientX, y: e.clientY };
+    dragPointerTsRef.current = e.timeStamp;
+    ensureEdgeScrollLoop();
+    updateDropIndicator(e.clientY);
   };
 
   const handlePlaylistPaneDragLeave = (e: React.DragEvent) => {

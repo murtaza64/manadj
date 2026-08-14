@@ -10,8 +10,7 @@ import { CHANNEL_IDS } from '../playback/mixer';
 import { getColumnConfig } from './columnConfig';
 import { setTrackDragPayload, type TrackDragSource } from '../selection/trackDrag';
 import { LinkIcon } from '../links/LinkIcon';
-import { DECK_COLORS } from '../theme/deckColors';
-import { loadedWash } from '../sets/rowMarks';
+import { loadedStripShadow } from '../sets/rowMarks';
 import {
   parseRowEvidence,
   rowEvidenceTitle,
@@ -132,17 +131,13 @@ const TrackRow = memo(function TrackRow({
     loadedOn === 'none'
       ? []
       : (loadedOn.toUpperCase().split('') as ChannelId[]);
-  const wash = loadedWash(holdingDecks);
-  const loadedStyle: CSSProperties = wash
-    ? ({
-        '--loaded-wash': wash,
-        boxShadow:
-          holdingDecks.length === 1
-            ? `inset 3px 0 0 0 ${DECK_COLORS[holdingDecks[0]]}`
-            : `inset 3px 0 0 0 ${DECK_COLORS[holdingDecks[0]]}, inset -3px 0 0 0 ${
-                DECK_COLORS[holdingDecks[holdingDecks.length - 1]]
-              }`,
-      } as CSSProperties)
+  // Loaded mark: deck-color strip at the left edge (rowMarks.loadedStripShadow),
+  // carried as a CSS var the first cell's box-shadow reads (TrackRow.css) —
+  // the first cell is sticky, so the strip survives horizontal scroll. No
+  // background tint — the row's background belongs to hover/selection alone.
+  const strip = loadedStripShadow(holdingDecks);
+  const loadedStyle: CSSProperties = strip
+    ? ({ '--loaded-strip': strip } as CSSProperties)
     : {};
 
   // Helper to get cell style from column config
@@ -169,7 +164,7 @@ const TrackRow = memo(function TrackRow({
 
   return (
     <tr
-      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${loadedOn !== 'none' ? 'track-row-loaded' : ''} ${track.archived_at ? 'track-row-archived' : ''}`}
+      className={`track-row ${isSelected ? 'track-row-selected' : ''} ${track.archived_at ? 'track-row-archived' : ''}`}
       onClick={(e) => onSelect(track, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey })}
       onDoubleClick={() => onLoad(track)}
       data-track-id={track.id}
