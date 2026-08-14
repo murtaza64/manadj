@@ -34,32 +34,15 @@
   background: #2a2a3e !important;
 }
 
-/* Loaded identity wash from rowMarks.loadedWash: one generic path for all
-   A–D combinations. The second layer keeps sticky cells opaque.
-
-   The wash layer is viewport-FIXED: the row and each sticky cell paint
-   their backgrounds in their own boxes, so a scrolling multi-Deck
-   gradient would restart inside every pinned column. Fixed attachment
-   gives them one shared coordinate system — the gradient runs once,
-   continuously, across pinned and scrolled cells alike (and stays
-   aligned under horizontal scroll). The opaque under-layer keeps normal
-   attachment; it's a solid color either way. */
-.track-row-loaded,
-.track-row-loaded .sticky-col-cell {
-  background: var(--loaded-wash), var(--crust) !important;
-  background-attachment: fixed, scroll !important;
-}
-
-.track-row-loaded:hover,
-.track-row-loaded:hover .sticky-col-cell {
-  background: var(--loaded-wash), var(--mantle) !important;
-  background-attachment: fixed, scroll !important;
-}
-
-.track-row-selected.track-row-loaded,
-.track-row-selected.track-row-loaded .sticky-col-cell {
-  background: var(--loaded-wash), #242438 !important;
-  background-attachment: fixed, scroll !important;
+/* Loaded mark: NO background wash here — a low-alpha tint is ambiguous
+   with the selection background. The mark is a deck-color strip at the
+   row's left edge: the row sets --loaded-strip inline
+   (rowMarks.loadedStripShadow) and the FIRST cell renders it. The first
+   cell (order/key) is sticky, so the strip stays pinned at the left edge
+   under horizontal scroll; box-shadow is untouched by the !important
+   background rules above, so hover/selection can't wipe it. */
+.track-row > td:first-child {
+  box-shadow: var(--loaded-strip, none);
 }
 
 .track-cell {

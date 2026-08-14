@@ -24,6 +24,15 @@ import type { CaptureDeck, CaptureEvent } from '../capture/events';
 
 export const ALL_DECKS: CaptureDeck[] = ['A', 'B', 'C', 'D'];
 
+/** A seek landing within this of the extrapolated pre-seek position is a
+ * JOG scrub (rim-tick nudge), not a jump — it continues the trace without
+ * a marker/break, so a busy scrub reads as one smooth move (perf: a set
+ * with 10k+ jog seeks was rendering 10k markers + trace fragments). */
+const JOG_SEEK_MAX_S = 2;
+/** Minimum spacing between kept jog-trace samples (~20 Hz): rim ticks can
+ * fire many times per frame; decimating bounds the point count. */
+const JOG_DECIMATE_S = 0.05;
+
 export interface Span {
   start: number;
   end: number;
@@ -289,12 +298,21 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     if (tr && tr.length >= 2) traces[ch].push(tr);
     openTrace[ch] = null;
   };
-  const sampleTrace = (ch: CaptureDeck, t: number, playhead: number) => {
+  const sampleTrace = (ch: CaptureDeck, t: number, playhead: number, jog = false) => {
     let tr = openTrace[ch];
     if (tr && tr.length > 0) {
       const last = tr[tr.length - 1];
       const dt = t - last.t;
       const dp = playhead - last.playhead;
+      // Jog scrub: a smooth, possibly-reversing move. Skip the
+      // discontinuity check (it would shatter the scrub into fragments),
+      // and DECIMATE — a rim tick can fire many times a frame; keep at
+      // most ~20 Hz so a busy scrub is a handful of points, not thousands.
+      if (jog) {
+        if (dt < JOG_DECIMATE_S) return;
+        tr.push({ t, playhead });
+        return;
+      }
       // Discontinuity: jumped (seek/hot cue) or reversed or a long silence.
       if (dp < -0.75 || Math.abs(dp - dt) > Math.max(2, dt * 0.5) || dt > 4) {
         breakTrace(ch);
@@ -312,14 +330,24 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     // Pre-event playhead for the affected deck: seek-class gestures must
     // CLOSE the old trace at the jump instant (extrapolated), not at the
     // last tick — otherwise every jump leaves an up-to-1s waveform gap.
+    // preJump: the moving playhead just before a discontinuity, to close
+    // the outgoing trace at the jump instant (only meaningful while
+    // playing/previewing — a paused deck's trace is already closed).
     let preJump: number | null = null;
+    // jogRef: the position a seek is measured against to tell a jog scrub
+    // (tiny nudge) from a jump — valid even while paused (a paused scrub
+    // is common and must not emit thousands of markers).
+    let jogRef: number | null = null;
     if (
       e.kind === 'transport' &&
       (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue')
     ) {
       const d = s.decks[e.channel];
-      if (d.playing) {
+      if (d.playing || d.previewing) {
         preJump = d.playhead + (e.t - d.playheadAt) * (1 + d.pitch / 100);
+        jogRef = preJump;
+      } else {
+        jogRef = d.playhead;
       }
     }
 
@@ -366,22 +394,45 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
           gestures[e.channel].push({ t: e.t, action: 'cue', playhead: e.playhead });
         }
       } else {
-        // seek / jumpBeats / hotCue: a discontinuity gesture — mark it,
-        // close the old line AT the jump instant, start anew.
-        gestures[e.channel].push({
-          t: e.t,
-          action: e.action,
-          playhead: e.playhead,
-          detail: e.detail,
-        });
-        if (preJump !== null) sampleTrace(e.channel, e.t, preJump);
-        breakTrace(e.channel);
-        // Re-open for previewing decks too (sessions 11): a hot-cue stab's
-        // launch fires previewStart then its hotCue gesture — without this
-        // the gesture would sever the just-opened trace until the first
-        // tick (~1s leading gap in the stab's waveform).
-        if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
-          sampleTrace(e.channel, e.t, e.playhead);
+        // seek / jumpBeats / hotCue: a discontinuity gesture. BUT a jog
+        // scrub emits a continuous stream of tiny seeks (one per rim tick
+        // — thousands in a busy set); rendering a marker + trace break per
+        // tick shatters the lane into thousands of fragments and tanks the
+        // frame rate. A jog seek is a smooth move, not a jump: treat a
+        // SMALL seek as a trace continuation (no marker, no break). Only a
+        // genuine discontinuity — a jumpBeats/hotCue, or a seek that
+        // actually leaps — marks and breaks.
+        const isJog =
+          e.action === 'seek' &&
+          jogRef !== null &&
+          Math.abs(e.playhead - jogRef) <= JOG_SEEK_MAX_S;
+        if (isJog) {
+          if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
+            sampleTrace(e.channel, e.t, e.playhead, true);
+          }
+        } else {
+          gestures[e.channel].push({
+            t: e.t,
+            action: e.action,
+            playhead: e.playhead,
+            detail: e.detail,
+          });
+          // A gesture that lands where the playhead already is (a stab
+          // launch's hotCue at the just-opened previewStart position) is
+          // not a leap: don't close/reopen the trace around it (that would
+          // fragment the stab's waveform). Only a real jump breaks.
+          const leaps = preJump === null || Math.abs(e.playhead - preJump) > 0.01;
+          if (leaps) {
+            if (preJump !== null) sampleTrace(e.channel, e.t, preJump);
+            breakTrace(e.channel);
+            // Re-open for playing/previewing decks (sessions 11): the
+            // hot-cue stab launch fires previewStart then its hotCue
+            // gesture — without this the gesture would sever the
+            // just-opened trace until the first tick (leading gap).
+            if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
+              sampleTrace(e.channel, e.t, e.playhead);
+            }
+          }
         }
       }
     }
