@@ -744,6 +744,31 @@ describe('ten-minute silence split (sessions 11)', () => {
     r.recorder.dispose();
   });
 
+  it('conductor deck-ownership counts as inactivity even while decks audibly play', () => {
+    // The conductor drives the SHARED decks (ADR 0024): during its tenure
+    // the decks ARE Master-audible in the room — but tenure is
+    // non-performance, so the split clock runs anyway. This is the strong
+    // form of the tenure rule: not just true silence.
+    registerSurface('conductor', surface());
+    const r = rig();
+    r.recorder.start();
+    r.decks.A.load(1);
+    r.decks.A.play(); // human performance…
+    r.advance(5);
+    claimAudible('conductor', { silencePrevious: false }); // …pickup: decks adopted live
+    // Decks keep playing under conductor ownership the whole time.
+    r.advance(599);
+    expect(r.splits).toHaveLength(0);
+    r.advance(2);
+    expect(r.splits).toHaveLength(1);
+    // Release mid-play: audibility returns, the clock re-arms — no second
+    // split without another ten silent/owned minutes.
+    releaseAudible('conductor');
+    r.advance(1);
+    expect(r.splits).toHaveLength(1);
+    r.recorder.dispose();
+  });
+
   it('no engagement spans the boundary; a post-split blend is detected fresh with the new pair', () => {
     const r = rig();
     r.recorder.start();
