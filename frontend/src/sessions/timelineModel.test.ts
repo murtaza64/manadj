@@ -9,9 +9,11 @@ import type { CaptureEvent } from '../capture/events';
 import {
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  createStateIndex,
   deriveTimeline,
   gainAt,
   stateAt,
+  traceWindow,
   trackTimeAt,
 } from './timelineModel';
 
@@ -518,5 +520,116 @@ describe('jog scrub does not explode markers/traces (perf)', () => {
     const m = deriveTimeline(events);
     expect(m.decks.A.gestures.filter((g) => g.action === 'seek')).toHaveLength(1);
     expect(m.decks.A.traces.length).toBe(2);
+  });
+});
+
+describe('createStateIndex (checkpointed scrub, issue 13)', () => {
+  /** A synthetic multi-deck log big enough to cross several checkpoints:
+   * plays, fader moves, ticks, seeks, tenures, pitch — the audibility and
+   * extrapolation inputs stateAt reads. */
+  function bigLog(n: number): CaptureEvent[] {
+    const evs: CaptureEvent[] = [...seed(0)];
+    evs.push({ t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 });
+    evs.push({ t: 1.5, kind: 'load', channel: 'B', trackId: 9, bpm: 172 });
+    evs.push({ t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 });
+    for (let i = 0; i < n; i++) {
+      const t = 3 + i;
+      switch (i % 7) {
+        case 0:
+          evs.push({ t, kind: 'tick', playheads: { A: t - 2 } });
+          break;
+        case 1:
+          evs.push({ t, kind: 'control', control: 'fader', channel: 'B', value: (i % 10) / 10 });
+          break;
+        case 2:
+          evs.push({ t, kind: 'control', control: 'crossfader', channel: null, value: ((i % 20) - 10) / 10 });
+          break;
+        case 3:
+          evs.push({ t, kind: 'pitch', channel: 'A', value: ((i % 8) - 4) / 2 });
+          break;
+        case 4:
+          evs.push({ t, kind: 'transport', channel: 'B', action: i % 14 === 4 ? 'play' : 'pause', playhead: i });
+          break;
+        case 5:
+          if (i % 21 === 5) evs.push({ t, kind: 'tenure', edge: 'start', holder: 'conductor' });
+          else if (i % 21 === 12) evs.push({ t, kind: 'tenure', edge: 'end', holder: 'shared' });
+          else evs.push({ t, kind: 'tick', playheads: { A: t - 2, B: i } });
+          break;
+        default:
+          evs.push({ t, kind: 'transport', channel: 'A', action: 'seek', playhead: t } as CaptureEvent);
+          break;
+      }
+    }
+    return evs;
+  }
+
+  it('matches the naive stateAt exactly across checkpoint boundaries', () => {
+    const events = bigLog(3000);
+    const index = createStateIndex(events, 256); // several checkpoints
+    // Probe T values: before the log, on event instants, between events,
+    // straddling checkpoint boundaries, and past the end.
+    const probes = [-1, 0, 1.7, 2, 3, 100.5, 258, 259.2, 512, 513.5, 1000, 2047.3, 2500, 9999];
+    for (const t of probes) {
+      expect(index.at(t)).toEqual(stateAt(events, t));
+    }
+  });
+
+  it('a probe at every 37th event instant agrees (dense sweep)', () => {
+    const events = bigLog(1500);
+    const index = createStateIndex(events, 128);
+    for (let i = 0; i < events.length; i += 37) {
+      const t = events[i].t;
+      expect(index.at(t)).toEqual(stateAt(events, t));
+    }
+  });
+});
+
+describe('traceWindow (viewport culling, issue 13)', () => {
+  const trace = Array.from({ length: 100 }, (_, i) => ({ t: i * 2, playhead: i }));
+
+  it('returns the original array (no copy) when fully inside', () => {
+    expect(traceWindow(trace, -10, 500)).toBe(trace);
+  });
+
+  it('returns null when fully outside', () => {
+    expect(traceWindow(trace, 300, 400)).toBeNull();
+    expect(traceWindow(trace, -50, -1)).toBeNull();
+  });
+
+  it('slices to the window with one pad sample either side', () => {
+    const win = traceWindow(trace, 50, 60)!;
+    // Points at t=50..60 are indices 25..30; padded: 24..31.
+    expect(win[0].t).toBeLessThan(50);
+    expect(win[win.length - 1].t).toBeGreaterThan(60);
+    expect(win.map((p) => p.t)).toEqual([48, 50, 52, 54, 56, 58, 60, 62]);
+  });
+
+  it('clamps the pad at the trace edges', () => {
+    const head = traceWindow(trace, -5, 4)!;
+    expect(head[0].t).toBe(0);
+    expect(head[head.length - 1].t).toBe(6);
+    const tail = traceWindow(trace, 195, 500)!;
+    expect(tail[0].t).toBe(194);
+    expect(tail[tail.length - 1].t).toBe(198);
+  });
+
+  it('an empty trace is null', () => {
+    expect(traceWindow([], 0, 10)).toBeNull();
+  });
+});
+
+describe('maxPlayhead precompute (issue 13)', () => {
+  it('carries the largest trace playhead per deck; floor 1', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 3, kind: 'tick', playheads: { A: 11 } },
+      { t: 4, kind: 'tick', playheads: { A: 12.5 } },
+      { t: 5, kind: 'transport', channel: 'A', action: 'pause', playhead: 13 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.decks.A.maxPlayhead).toBe(13);
+    expect(m.decks.B.maxPlayhead).toBe(1); // no traces: the floor
   });
 });
