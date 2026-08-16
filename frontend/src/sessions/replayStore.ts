@@ -74,16 +74,14 @@ export function replayNowT(): number | null {
   return instance?.nowT() ?? null;
 }
 
-/** Space: toggle pause/resume on the active replay. */
+/** Space: toggle pause/resume on the active replay. The DRIVER pushes the
+ * resulting status (onStatus) — no direct setState here, because the
+ * driver refuses pause/resume mid-seek and a blind store write would
+ * desync the UI from the clock. */
 export function toggleReplayPause(): void {
   if (!instance || (state.status !== 'playing' && state.status !== 'paused')) return;
-  if (instance.isPaused()) {
-    instance.resumeReplay();
-    setState({ status: 'playing' });
-  } else {
-    instance.pauseReplay();
-    setState({ status: 'paused' });
-  }
+  if (instance.isPaused()) instance.resumeReplay();
+  else instance.pauseReplay();
 }
 
 /** Click-to-seek during playback: jump the active replay to a new plan. */

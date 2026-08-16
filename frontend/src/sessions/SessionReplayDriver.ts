@@ -101,6 +101,16 @@ export class SessionReplayDriver {
   /** Paused (space): session time freezes; decks that were rolling wait. */
   private pausedAtOffset: number | null = null;
   private pausedDecks: ChannelId[] = [];
+  /** A seekTo's async load is in flight. Pause/resume are refused during
+   * it: a pause landing between seekTo's pause-state snapshot and its
+   * completion left `pausedAtOffset` set under status 'playing' — a
+   * frozen playhead over rolling audio (the clock pins at the stale
+   * offset), recoverable only by a pause/resume cycle. */
+  private seeking = false;
+  /** Monotonic seek generation: a newer seekTo supersedes an older one's
+   * continuation (double-click while loading double-started the tick
+   * loop — two cue appliers per frame). */
+  private seekGen = 0;
   /** Per-deck phase anchors: expected trackTime = playhead +
    * (offset − anchor.offset) × rate. The continuous corrector holds every
    * playing deck to its anchor within PHASE_TOLERANCE_S — this is what
@@ -233,7 +243,7 @@ export class SessionReplayDriver {
   /** Space: freeze the session clock and park the rolling decks. The
    * surface stays claimed — pausing a replay is not a takeover. */
   pauseReplay(): void {
-    if (!this.active || this.pausedAtOffset !== null) return;
+    if (!this.active || this.seeking || this.pausedAtOffset !== null) return;
     cancelAnimationFrame(this.raf);
     this.pausedAtOffset = this.elapsed();
     this.pausedDecks = ALL_DECKS.filter((d) => this.engines[d].getSnapshot().playing);
@@ -245,7 +255,7 @@ export class SessionReplayDriver {
 
   /** Space again: re-anchor the clock and resume the parked decks. */
   resumeReplay(): void {
-    if (!this.active || this.pausedAtOffset === null) return;
+    if (!this.active || this.seeking || this.pausedAtOffset === null) return;
     this.anchorAudioTime = this.mixer.now() - this.pausedAtOffset;
     this.pausedAtOffset = null;
     this.self(() => {
@@ -263,6 +273,8 @@ export class SessionReplayDriver {
    */
   async seekTo(plan: ReplayPlan): Promise<void> {
     if (!this.active) return;
+    const gen = ++this.seekGen;
+    this.seeking = true;
     cancelAnimationFrame(this.raf);
     const wasPaused = this.pausedAtOffset !== null;
     this.pausedAtOffset = null;
@@ -272,39 +284,46 @@ export class SessionReplayDriver {
     });
     this.plan = plan;
     this.cueIndex = 0;
-    // Load anything the new seed needs that isn't already on its deck.
-    const needed = ALL_DECKS.filter((d) => {
-      const id = plan.seed.decks[d].trackId;
-      return id !== null && this.engines[d].getSnapshot().trackId !== id;
-    });
-    const results = await Promise.all(
-      needed.map(async (d) => {
-        const id = plan.seed.decks[d].trackId!;
-        this.loadRequested[d] = id;
-        const ok = await this.hooks.loadTrack(d, id);
-        return ok ? this.waitReady(d, id) : false;
-      })
-    );
-    if (!this.active) return; // displaced/taken over while loading
-    if (results.some((ok) => !ok)) {
-      this.teardown({ release: true });
-      this.fireStopped('load-failed');
-      return;
-    }
-    this.self(() => this.applySeed());
-    if (wasPaused) {
-      // Stay paused at the new moment; decks are seeded but parked.
-      this.pausedAtOffset = 0;
-      this.pausedDecks = ALL_DECKS.filter((d) => plan.seed.decks[d].playing);
-      this.self(() => {
-        for (const d of this.pausedDecks) this.engines[d].pause();
+    try {
+      // Load anything the new seed needs that isn't already on its deck.
+      const needed = ALL_DECKS.filter((d) => {
+        const id = plan.seed.decks[d].trackId;
+        return id !== null && this.engines[d].getSnapshot().trackId !== id;
       });
-      this.status('paused');
-      return;
+      const results = await Promise.all(
+        needed.map(async (d) => {
+          const id = plan.seed.decks[d].trackId!;
+          this.loadRequested[d] = id;
+          const ok = await this.hooks.loadTrack(d, id);
+          return ok ? this.waitReady(d, id) : false;
+        })
+      );
+      // Superseded by a newer seek: ITS continuation owns the restart —
+      // finishing here too double-started the tick loop.
+      if (gen !== this.seekGen) return;
+      if (!this.active) return; // displaced/taken over while loading
+      if (results.some((ok) => !ok)) {
+        this.teardown({ release: true });
+        this.fireStopped('load-failed');
+        return;
+      }
+      this.self(() => this.applySeed());
+      if (wasPaused) {
+        // Stay paused at the new moment; decks are seeded but parked.
+        this.pausedAtOffset = 0;
+        this.pausedDecks = ALL_DECKS.filter((d) => plan.seed.decks[d].playing);
+        this.self(() => {
+          for (const d of this.pausedDecks) this.engines[d].pause();
+        });
+        this.status('paused');
+        return;
+      }
+      this.anchorAudioTime = this.mixer.now();
+      this.status('playing');
+      this.raf = requestAnimationFrame(this.tick);
+    } finally {
+      if (gen === this.seekGen) this.seeking = false;
     }
-    this.anchorAudioTime = this.mixer.now();
-    this.status('playing');
-    this.raf = requestAnimationFrame(this.tick);
   }
 
   // ── Clock ──────────────────────────────────────────────────────────────

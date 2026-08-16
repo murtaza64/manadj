@@ -262,7 +262,11 @@ interface Rig {
   advance(dt: number): void;
 }
 
-function rig(plan: ReplayPlan, loadOk = true): Rig {
+function rig(
+  plan: ReplayPlan,
+  loadOk = true,
+  loader?: (engines: Record<ChannelId, FakeEngine>, deck: ChannelId, trackId: number) => Promise<boolean>
+): Rig {
   const clock = { t: 100 };
   const read = () => clock.t;
   const mixer = new FakeMixer(read);
@@ -278,6 +282,7 @@ function rig(plan: ReplayPlan, loadOk = true): Rig {
     { mixer: mixer as unknown as Mixer, engines: engines as unknown as Record<ChannelId, DeckEngine> },
     {
       loadTrack: async (deck, trackId) => {
+        if (loader) return loader(engines, deck, trackId);
         if (!loadOk) return false;
         engines[deck].finishLoad(trackId);
         return true;
@@ -569,6 +574,102 @@ describe('SessionReplayDriver — pause/resume/seek (04 iteration)', () => {
     expect(r.engines.A.playing).toBe(false);
     r.driver.resumeReplay();
     expect(r.engines.A.playing).toBe(true);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — pause/seek races (frozen-playhead fix)', () => {
+  /** Track 11 early, track 12 later — a seek across the load boundary
+   * must actually load, giving the race a window to land in. */
+  function twoTrackLog(): CaptureEvent[] {
+    return [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 20, kind: 'load', channel: 'A', trackId: 12, bpm: 170 },
+      { t: 21, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 22, kind: 'tick', playheads: { A: 1 } },
+      { t: 30, kind: 'tick', playheads: { A: 9 } },
+    ];
+  }
+
+  /** rig() whose loads of track 12 park until released — holds a seek
+   * in flight so races can be aimed into its window. */
+  function gatedRig(startAt: number) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((res) => {
+      release = res;
+    });
+    const r = rig(planFor(twoTrackLog(), startAt), true, async (engines, deck, trackId) => {
+      if (trackId === 12) await gate;
+      engines[deck].finishLoad(trackId);
+      return true;
+    });
+    return { ...r, release: () => release() };
+  }
+
+  it('a pause landing inside a seek load is refused — the clock never freezes under rolling audio', async () => {
+    const r = gatedRig(5);
+    await r.driver.start();
+    const seek = r.driver.seekTo(planFor(twoTrackLog(), 25));
+    await Promise.resolve(); // the seek is now parked on its load
+    // THE RACE: space during the load. Before the fix this set
+    // pausedAtOffset under the seek's stale wasPaused=false snapshot —
+    // status 'playing', decks rolling, nowT pinned forever.
+    r.driver.pauseReplay();
+    expect(r.driver.isPaused()).toBe(false); // refused mid-seek
+    r.release();
+    await seek;
+    // The seek completed PLAYING with a live clock.
+    expect(r.driver.isPaused()).toBe(false);
+    const t0 = r.driver.nowT();
+    expect(t0).toBeCloseTo(25, 1);
+    r.advance(1);
+    expect(r.driver.nowT()).toBeCloseTo(t0! + 1, 3);
+    // And a deliberate pause afterwards still works.
+    r.driver.pauseReplay();
+    expect(r.driver.isPaused()).toBe(true);
+    const frozen = r.driver.nowT();
+    r.advance(1);
+    expect(r.driver.nowT()).toBe(frozen);
+    r.driver.stop();
+  });
+
+  it('a resume landing inside a seek load is refused (no premature tick loop)', async () => {
+    const r = gatedRig(5);
+    await r.driver.start();
+    r.driver.pauseReplay();
+    const seek = r.driver.seekTo(planFor(twoTrackLog(), 25)); // seek-while-paused
+    await Promise.resolve();
+    r.driver.resumeReplay(); // space again, mid-load: must be inert
+    r.release();
+    await seek;
+    // The paused seek honored its wasPaused snapshot: parked at the new
+    // moment, clock frozen there.
+    expect(r.driver.isPaused()).toBe(true);
+    expect(r.driver.nowT()).toBeCloseTo(25, 3);
+    r.driver.resumeReplay();
+    expect(r.driver.isPaused()).toBe(false);
+    r.driver.stop();
+  });
+
+  it('a newer seek supersedes an older in-flight one: a single tick loop on the newest plan', async () => {
+    const r = gatedRig(5);
+    await r.driver.start();
+    r.pump(); // drain the start() frame
+    const seek1 = r.driver.seekTo(planFor(twoTrackLog(), 25)); // parks on track 12's load
+    await Promise.resolve();
+    rafQueue.splice(0); // both seeks canceled the loop: count fresh restarts
+    await r.driver.seekTo(planFor(twoTrackLog(), 6)); // track 11 already on deck — completes
+    expect(r.driver.nowT()).toBeCloseTo(6, 1);
+    expect(rafQueue.length).toBe(1); // seek 2's restart
+    r.release();
+    await seek1; // superseded: must NOT restart a second loop or re-seed
+    expect(r.driver.nowT()).toBeCloseTo(6, 1); // still the newest plan's moment
+    expect(rafQueue.length).toBe(1); // STILL one tick loop — no double restart
+    r.advance(0.1);
+    expect(rafQueue.length).toBe(1); // the one loop re-queued itself
     r.driver.stop();
   });
 });
