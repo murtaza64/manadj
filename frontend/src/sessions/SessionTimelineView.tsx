@@ -392,7 +392,10 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
       lastReplayTRef.current = null;
       setReplayT(null);
       if (last !== null) {
-        setSelection((sel) => (sel.kind === 'moment' ? { kind: 'moment', t: last } : sel));
+        // The anchor lands where playback stopped — including after a
+        // remount mid-replay (selection 'none'), so the next space/▶ has
+        // its moment. A selected Take keeps its selection.
+        setSelection((sel) => (sel.kind === 'take' ? sel : { kind: 'moment', t: last }));
       }
       return;
     }
@@ -595,28 +598,30 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
           {model ? ` · ${fmtDur(model.end - model.start)} · ${takes.length} takes` : ''}
         </span>
 
-        {/* Selection cluster: replay transport / take opener, inline. */}
-        {selection.kind === 'moment' ? (
-          replayHere && replay.status !== 'idle' ? (
-            <span className="stl-cluster">
-              {replay.status !== 'loading' ? (
-                <button className="stl-replay" onClick={toggleReplayPause}>
-                  {replay.status === 'paused' ? '▶' : '⏸'}
-                </button>
-              ) : null}
-              <button className="stl-replay stop" onClick={stopReplay}>
-                {replay.status === 'loading' ? 'loading…' : '■'}
+        {/* Replay transport: present whenever THIS session is rolling —
+            a remount mid-replay opens with selection 'none', and gating
+            the cluster on a moment selection left a moving playhead with
+            no pause/stop (the play-button-never-appears bug). The start
+            button still needs a selected moment to start FROM. */}
+        {replayHere ? (
+          <span className="stl-cluster">
+            {replay.status !== 'loading' ? (
+              <button className="stl-replay" onClick={toggleReplayPause}>
+                {replay.status === 'paused' ? '▶' : '⏸'}
               </button>
-            </span>
-          ) : (
-            <button
-              className="stl-replay"
-              title="Replay through the shared live decks from this moment — any manual gesture takes over"
-              onClick={() => replayFrom(selection.t)}
-            >
-              ▶ {fmtClock(selection.t)}
+            ) : null}
+            <button className="stl-replay stop" onClick={stopReplay}>
+              {replay.status === 'loading' ? 'loading…' : '■'}
             </button>
-          )
+          </span>
+        ) : selection.kind === 'moment' ? (
+          <button
+            className="stl-replay"
+            title="Replay through the shared live decks from this moment — any manual gesture takes over"
+            onClick={() => replayFrom(selection.t)}
+          >
+            ▶ {fmtClock(selection.t)}
+          </button>
         ) : null}
         {selection.kind === 'take' ? (
           <span className="stl-cluster">
