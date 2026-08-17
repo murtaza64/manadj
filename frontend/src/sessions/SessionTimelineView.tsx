@@ -33,11 +33,12 @@ import {
   ALL_DECKS,
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  collapseCandidates,
   createStateIndex,
   deriveTimeline,
   traceWindow,
 } from './timelineModel';
-import type { StateAtT, TimelineModel } from './timelineModel';
+import type { CollapseCandidate, StateAtT, TimelineModel } from './timelineModel';
 import { drawAudibilityArea, drawGridlines, drawStyledRuns, traceRuns } from './waveformLanes';
 import type { TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
@@ -127,7 +128,7 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
 
   const [collapseIdle, setCollapseIdle] = useState(true);
   const [thresholdS, setThresholdS] = useState(45);
-  const [expandedIdle, setExpandedIdle] = useState<Set<number>>(new Set());
+  const [expandedGaps, setExpandedGaps] = useState<Set<number>>(new Set());
   const [showTraces, setShowTraces] = useState(true);
   const [scrubT, setScrubT] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
@@ -179,19 +180,20 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
 
   // Collapse geometry pre-pass (pxPerSec-independent): what the fit zoom
   // and the axis both need.
+  // Collapse candidates: idle AND machine tenures (sessions 14) — one
+  // list, one toggle, one threshold.
+  const candidates = useMemo(() => (model ? collapseCandidates(model) : []), [model]);
   const collapseInfo = useMemo(() => {
     if (!model) return { visDur: 1, collapsedCount: 0 };
     const spans = collapseIdle
-      ? model.idle.filter(
-          (sp, i) => sp.end - sp.start >= thresholdS && !expandedIdle.has(i)
-        )
+      ? candidates.filter((sp, i) => sp.end - sp.start >= thresholdS && !expandedGaps.has(i))
       : [];
     const collapsedDur = spans.reduce((a, s) => a + (s.end - s.start), 0);
     return {
       visDur: Math.max(0.001, model.end - model.start - collapsedDur),
       collapsedCount: spans.length,
     };
-  }, [model, collapseIdle, thresholdS, expandedIdle]);
+  }, [model, candidates, collapseIdle, thresholdS, expandedGaps]);
 
   // ── Zoom/scroll (the editor-timeline idiom) ───────────────────────────
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -224,14 +226,14 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
   const axis = useMemo(
     () =>
       model
-        ? buildTimeAxis(model, { collapseIdle, thresholdS, expanded: expandedIdle, pxPerSec: effPx })
+        ? buildTimeAxis(model, { collapseIdle, thresholdS, expanded: expandedGaps, pxPerSec: effPx })
         : null,
-    [model, collapseIdle, thresholdS, expandedIdle, effPx]
+    [model, collapseIdle, thresholdS, expandedGaps, effPx]
   );
   const width = Math.max(viewportW, Math.ceil(axis?.totalPx ?? viewportW));
 
-  const zoomCtxRef = useRef({ model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedIdle });
-  zoomCtxRef.current = { model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedIdle };
+  const zoomCtxRef = useRef({ model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedGaps });
+  zoomCtxRef.current = { model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedGaps };
   const pendingZoomRef = useRef<{ factor: number; clientX: number } | null>(null);
   const wheelGestureRef = useRef<{ axis: 'pan' | 'zoom'; last: number } | null>(null);
   useEffect(() => {
@@ -259,7 +261,7 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
       const newAxis = buildTimeAxis(ctx.model, {
         collapseIdle: ctx.collapseIdle,
         thresholdS: ctx.thresholdS,
-        expanded: ctx.expandedIdle,
+        expanded: ctx.expandedGaps,
         pxPerSec: next,
       });
       const newW = Math.max(ctx.viewportW, Math.ceil(newAxis.totalPx));
@@ -554,9 +556,9 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
   // Stable scene callbacks (the scene is memoized — inline closures would
   // defeat it every render).
   const onTakeClick = useCallback((take: TakeRowWire) => setSelection({ kind: 'take', take }), []);
-  const onIdleToggle = useCallback(
+  const onGapToggle = useCallback(
     (idx: number) =>
-      setExpandedIdle((prev) => {
+      setExpandedGaps((prev) => {
         const next = new Set(prev);
         if (next.has(idx)) next.delete(idx);
         else next.add(idx);
@@ -648,7 +650,7 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
             checked={collapseIdle}
             onChange={(e) => setCollapseIdle(e.target.checked)}
           />
-          idle ≥
+          gaps ≥
         </label>
         <select
           value={thresholdS}
@@ -709,11 +711,12 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
                   trackNames={trackNames}
                   selectedTakeUuid={selection.kind === 'take' ? selection.take.uuid : null}
                   showTraces={showTraces}
+                  candidates={candidates}
                   collapseIdle={collapseIdle}
                   thresholdS={thresholdS}
-                  expandedIdle={expandedIdle}
+                  expandedGaps={expandedGaps}
                   onTakeClick={onTakeClick}
-                  onIdleToggle={onIdleToggle}
+                  onGapToggle={onGapToggle}
                 />
                 <SceneOverlay
                   model={model}
@@ -763,11 +766,14 @@ interface SceneProps {
   trackNames: Record<number, string>;
   selectedTakeUuid: string | null;
   showTraces: boolean;
+  /** Collapse candidates (idle + tenure, sessions 14) — indices key the
+   * expanded set. */
+  candidates: CollapseCandidate[];
   collapseIdle: boolean;
   thresholdS: number;
-  expandedIdle: ReadonlySet<number>;
+  expandedGaps: ReadonlySet<number>;
   onTakeClick(take: TakeRowWire): void;
-  onIdleToggle(idx: number): void;
+  onGapToggle(idx: number): void;
 }
 
 const TimelineScene = memo(function TimelineScene({
@@ -782,11 +788,12 @@ const TimelineScene = memo(function TimelineScene({
   trackNames,
   selectedTakeUuid,
   showTraces,
+  candidates,
   collapseIdle,
   thresholdS,
-  expandedIdle,
+  expandedGaps,
   onTakeClick,
-  onIdleToggle,
+  onGapToggle,
 }: SceneProps) {
   const X = (t: number) => axis.tToPx(t);
   const laneY = (deck: CaptureDeck) => laneYOf(deck, lanesTop, laneH);
@@ -810,12 +817,19 @@ const TimelineScene = memo(function TimelineScene({
     }
   }
 
-  // Expanded idle spans that could re-collapse (the toggle affordance).
+  // Expanded gaps (idle or tenure) that could re-collapse (the toggle
+  // affordance).
   const expandedSpans = collapseIdle
-    ? model.idle
+    ? candidates
         .map((sp, idx) => ({ sp, idx }))
-        .filter(({ sp, idx }) => sp.end - sp.start >= thresholdS && expandedIdle.has(idx))
+        .filter(({ sp, idx }) => sp.end - sp.start >= thresholdS && expandedGaps.has(idx))
     : [];
+
+  // Tenures the axis collapsed render as markers alone — the full rect +
+  // label would just bury the marker under a ≥14px block.
+  const collapsedTenureStarts = new Set(
+    axis.segments.filter((s) => s.collapsed && s.kind === 'tenure').map((s) => s.start)
+  );
 
   return (
     <g>
@@ -854,8 +868,9 @@ const TimelineScene = memo(function TimelineScene({
         />
       ))}
 
-      {/* Tenure holds. */}
+      {/* Tenure holds (collapsed ones are markers below, not rects). */}
       {model.tenures.map((sp, i) => {
+        if (collapsedTenureStarts.has(sp.start)) return null;
         const x0 = X(sp.start);
         const x1 = Math.max(X(sp.end), x0 + 14);
         if (x1 < viewX0 || x0 > viewX1) return null;
@@ -898,19 +913,22 @@ const TimelineScene = memo(function TimelineScene({
         );
       })}
 
-      {/* Collapsed idle markers (click to expand). */}
+      {/* Collapsed gap markers — idle or tenure — click to expand. */}
       {axis.segments
         .filter((s) => s.collapsed && s.px1 >= viewX0 && s.px0 <= viewX1)
         .map((seg) => {
-          const idx = model.idle.findIndex((sp) => sp.start === seg.start && sp.end === seg.end);
           const cx = (seg.px0 + seg.px1) / 2;
+          const label =
+            seg.kind === 'tenure'
+              ? `‖ ${fmtDur(seg.end - seg.start)} ${seg.holder} held`
+              : `‖ ${fmtDur(seg.end - seg.start)} idle`;
           return (
             <g
-              key={`idle-${seg.start}`}
-              className="stl-idle-marker"
+              key={`gap-${seg.start}`}
+              className={`stl-idle-marker${seg.kind === 'tenure' ? ' tenure' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
-                if (idx >= 0) onIdleToggle(idx);
+                if (seg.candidateIdx !== undefined) onGapToggle(seg.candidateIdx);
               }}
             >
               <rect
@@ -926,30 +944,31 @@ const TimelineScene = memo(function TimelineScene({
                 textAnchor="middle"
                 className="stl-idle-label"
               >
-                ‖ {fmtDur(seg.end - seg.start)} idle
+                {label}
               </text>
             </g>
           );
         })}
 
-      {/* Expanded idle: a re-collapse pill over the (now widened) stretch. */}
+      {/* Expanded gaps: a re-collapse pill over the (now widened) stretch. */}
       {expandedSpans.map(({ sp, idx }) => {
         const x0 = X(sp.start);
         const x1 = X(sp.end);
         if (x1 < viewX0 || x0 > viewX1) return null;
         const cx = (x0 + x1) / 2;
+        const what = sp.kind === 'tenure' ? `${sp.holder} held` : 'idle';
         return (
           <g
-            key={`idle-exp-${sp.start}`}
+            key={`gap-exp-${sp.start}`}
             className="stl-idle-collapse"
             onClick={(e) => {
               e.stopPropagation();
-              onIdleToggle(idx);
+              onGapToggle(idx);
             }}
           >
             <rect x={x0} y={lanesTop} width={x1 - x0} height={12} />
             <text x={cx} y={lanesTop + 10} textAnchor="middle">
-              ⇤ collapse {fmtDur(sp.end - sp.start)} idle ⇥
+              ⇤ collapse {fmtDur(sp.end - sp.start)} {what} ⇥
             </text>
           </g>
         );

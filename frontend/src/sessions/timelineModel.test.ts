@@ -9,6 +9,7 @@ import type { CaptureEvent } from '../capture/events';
 import {
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  collapseCandidates,
   createStateIndex,
   deriveTimeline,
   gainAt,
@@ -631,5 +632,77 @@ describe('maxPlayhead precompute (issue 13)', () => {
     const m = deriveTimeline(events);
     expect(m.decks.A.maxPlayhead).toBe(13);
     expect(m.decks.B.maxPlayhead).toBe(1); // no traces: the floor
+  });
+});
+
+describe('tenure collapse (sessions 14)', () => {
+  // Play → a 900s editor hold → play again, with a separate 500s idle
+  // stretch after: BOTH kinds are collapse candidates.
+  const events: CaptureEvent[] = [
+    ...seed(0),
+    { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+    { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+    { t: 100, kind: 'tenure', edge: 'start', holder: 'replay' },
+    { t: 1000, kind: 'tenure', edge: 'end', holder: 'shared' },
+    { t: 1100, kind: 'transport', channel: 'A', action: 'pause', playhead: 200 },
+    { t: 1600, kind: 'transport', channel: 'A', action: 'play', playhead: 200 },
+    { t: 1700, kind: 'transport', channel: 'A', action: 'pause', playhead: 300 },
+  ];
+  const m = deriveTimeline(events);
+
+  it('candidates carry both kinds, sorted, with holders on tenures', () => {
+    const c = collapseCandidates(m);
+    const tenure = c.find((sp) => sp.kind === 'tenure');
+    const idles = c.filter((sp) => sp.kind === 'idle');
+    expect(tenure).toMatchObject({ start: 100, end: 1000, holder: 'replay' });
+    expect(idles.some((sp) => sp.start === 1100 && sp.end === 1600)).toBe(true);
+    for (let i = 1; i < c.length; i++) expect(c[i].start).toBeGreaterThanOrEqual(c[i - 1].start);
+  });
+
+  it('a long tenure collapses to a fixed marker carrying kind/holder/candidateIdx', () => {
+    const axis = buildTimeAxis(m, { collapseIdle: true, thresholdS: 45, pxPerSec: 2 });
+    const tenureSeg = axis.segments.find((s) => s.collapsed && s.kind === 'tenure');
+    expect(tenureSeg).toBeDefined();
+    expect(tenureSeg!.start).toBe(100);
+    expect(tenureSeg!.end).toBe(1000);
+    expect(tenureSeg!.holder).toBe('replay');
+    expect(tenureSeg!.px1 - tenureSeg!.px0).toBe(COLLAPSED_MARKER_PX);
+    expect(tenureSeg!.candidateIdx).toBe(
+      collapseCandidates(m).findIndex((sp) => sp.kind === 'tenure')
+    );
+    // The idle stretch collapses too — same threshold, one control.
+    expect(axis.segments.filter((s) => s.collapsed)).toHaveLength(2);
+  });
+
+  it('expanding the tenure leaves the idle collapsed (stable mixed indexing)', () => {
+    const c = collapseCandidates(m);
+    const tenureIdx = c.findIndex((sp) => sp.kind === 'tenure');
+    const axis = buildTimeAxis(m, {
+      collapseIdle: true,
+      thresholdS: 45,
+      expanded: new Set([tenureIdx]),
+      pxPerSec: 2,
+    });
+    const collapsed = axis.segments.filter((s) => s.collapsed);
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0].kind).toBe('idle');
+    expect(collapsed[0].start).toBe(1100);
+  });
+
+  it('an open tenure at log end collapses too', () => {
+    const evs: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 10, kind: 'tenure', edge: 'start', holder: 'conductor' },
+      { t: 500, kind: 'tick', playheads: {} },
+    ];
+    const axis = buildTimeAxis(deriveTimeline(evs), {
+      collapseIdle: true,
+      thresholdS: 45,
+      pxPerSec: 2,
+    });
+    const seg = axis.segments.find((s) => s.collapsed && s.kind === 'tenure');
+    expect(seg).toMatchObject({ start: 10, end: 500, holder: 'conductor' });
   });
 });
