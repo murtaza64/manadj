@@ -5,8 +5,9 @@
  * timeline draws; graduated from the sessions-03 prototype:
  *
  * - per-Deck track spans (loads), playing spans (transport), audibility
- *   spans (capture/audibility — the detector's own definition, so the
- *   bands are what the detector heard), playhead traces (ticks +
+ *   spans (via the SHARED audibility reducer, capture/audibilityReducer —
+ *   the very reducer the detector runs, same params, so the bands are
+ *   what the detector heard by construction), playhead traces (ticks +
  *   transport, broken at discontinuities — these also map session time to
  *   track time for waveform rendering)
  * - tenure holds (a machine held the Audible surface: honest gaps;
@@ -17,11 +18,19 @@
  *   planner builds on the same reducer, sessions 05)
  */
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
-import { deckMasterGain, isDeckAudible } from '../capture/audibility';
+import {
+  ALL_DECKS,
+  applyEvent,
+  cloneAudibilityState,
+  deckGain,
+  initialAudibilityState,
+  maskedDeckAudible,
+} from '../capture/audibilityReducer';
+import type { AudibilityState } from '../capture/audibilityReducer';
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
-import type { CaptureDeck, CaptureEvent } from '../capture/events';
+import type { CaptureDeck, CaptureEvent, DetectorParams } from '../capture/events';
 
-export const ALL_DECKS: CaptureDeck[] = ['A', 'B', 'C', 'D'];
+export { ALL_DECKS };
 
 /** A seek landing within this of the extrapolated pre-seek position is a
  * JOG scrub (rim-tick nudge), not a jump — it continues the trace without
@@ -112,133 +121,13 @@ export interface TimelineModel {
   eventCount: number;
 }
 
-// ── Reducer state (all four decks; audibility inputs + playheads) ────────
-
-interface DeckState {
-  trackId: number | null;
-  playing: boolean;
-  /** A CUE stab in progress (previewStart..previewEnd, sessions 10): audio
-   * runs and its playhead rides the ticks, but `playing` never flips. */
-  previewing: boolean;
-  fader: number;
-  trim: number;
-  eq: { low: number; mid: number; high: number };
-  filter: number;
-  assignment: CrossfaderAssignment;
-  pitch: number;
-  /** Last known playhead (track seconds) and the capture time we knew it. */
-  playhead: number;
-  playheadAt: number;
-}
-
-interface ReducerState {
-  decks: Record<CaptureDeck, DeckState>;
-  crossfader: number;
-  crossfaderEnabled: boolean;
-  tenureHolder: string | null;
-}
-
-function freshDeck(assignment: CrossfaderAssignment): DeckState {
-  // Mixer channel-strip defaults — same as the detector's freshDeck.
-  return {
-    trackId: null,
-    playing: false,
-    previewing: false,
-    fader: 1,
-    trim: 0.5,
-    eq: { low: 0.5, mid: 0.5, high: 0.5 },
-    filter: 0,
-    assignment,
-    pitch: 0,
-    playhead: 0,
-    playheadAt: 0,
-  };
-}
-
-function initialState(): ReducerState {
-  return {
-    decks: {
-      A: freshDeck('left'),
-      B: freshDeck('right'),
-      C: freshDeck('left'),
-      D: freshDeck('right'),
-    },
-    crossfader: 0,
-    crossfaderEnabled: true,
-    tenureHolder: null,
-  };
-}
-
-function assignmentFromValue(value: number): CrossfaderAssignment {
-  return value < 0 ? 'left' : value > 0 ? 'right' : 'thru';
-}
-
-function mixerInputs(s: ReducerState) {
-  return { crossfader: s.crossfader, crossfaderEnabled: s.crossfaderEnabled };
-}
-
-/** Master-audible under the shared surface: a machine tenure displaces the
- * whole surface, so nothing is audible beneath it regardless of mixer math
- * (graduated decision — the detector gates identically). */
-function deckAudible(s: ReducerState, ch: CaptureDeck): boolean {
-  if (s.tenureHolder !== null) return false;
-  return isDeckAudible(s.decks[ch], mixerInputs(s), DEFAULT_DETECTOR_PARAMS);
-}
-
-function applyEvent(s: ReducerState, e: CaptureEvent): void {
-  switch (e.kind) {
-    case 'control': {
-      const d = e.channel ? s.decks[e.channel] : null;
-      if (e.control === 'fader' && d) d.fader = e.value;
-      else if (e.control === 'trim' && d) d.trim = e.value;
-      else if (e.control === 'eqLow' && d) d.eq = { ...d.eq, low: e.value };
-      else if (e.control === 'eqMid' && d) d.eq = { ...d.eq, mid: e.value };
-      else if (e.control === 'eqHigh' && d) d.eq = { ...d.eq, high: e.value };
-      else if (e.control === 'filter' && d) d.filter = e.value;
-      else if (e.control === 'crossfaderAssignment' && d)
-        d.assignment = assignmentFromValue(e.value);
-      else if (e.control === 'crossfader') s.crossfader = e.value;
-      else if (e.control === 'crossfaderEnabled') s.crossfaderEnabled = e.value !== 0;
-      break;
-    }
-    case 'transport': {
-      const d = s.decks[e.channel];
-      if (e.action === 'play') d.playing = true;
-      else if (e.action === 'pause' || e.action === 'cue') d.playing = false;
-      else if (e.action === 'previewStart') d.previewing = true;
-      else if (e.action === 'previewEnd') d.previewing = false;
-      d.playhead = e.playhead;
-      d.playheadAt = e.t;
-      break;
-    }
-    case 'pitch':
-      s.decks[e.channel].pitch = e.value;
-      break;
-    case 'load': {
-      const d = s.decks[e.channel];
-      d.trackId = e.trackId;
-      d.playing = false;
-      d.previewing = false;
-      d.playhead = 0;
-      d.playheadAt = e.t;
-      break;
-    }
-    case 'tick':
-      for (const ch of ALL_DECKS) {
-        const p = e.playheads[ch];
-        if (p !== undefined) {
-          s.decks[ch].playhead = p;
-          s.decks[ch].playheadAt = e.t;
-        }
-      }
-      break;
-    case 'tenure':
-      s.tenureHolder = e.edge === 'start' ? e.holder : null;
-      break;
-    default:
-      break;
-  }
-}
+// ── Reducer state ────────────────────────────────────────────────────────
+//
+// The event reducer over deck/mixer/tenure state is the SHARED audibility
+// reducer (capture/audibilityReducer.ts) — the same one the Handover
+// detector runs, so the bands drawn here are exactly what detection heard,
+// under the same params. This module only layers derivation (spans,
+// traces, gestures, the axis) on top.
 
 // ── Derivation ───────────────────────────────────────────────────────────
 
@@ -260,8 +149,16 @@ class SpanBuilder {
   }
 }
 
-export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
-  const s = initialState();
+/** Derive the whole timeline read model. `params` are the detector params
+ * the Session was captured under — audibility bands must be computed with
+ * the SAME thresholds detection ran with (today the recorder always
+ * captures under DEFAULT_DETECTOR_PARAMS; if per-Session tuning ever
+ * lands, the persisted params thread through here). */
+export function deriveTimeline(
+  events: CaptureEvent[],
+  params: DetectorParams = DEFAULT_DETECTOR_PARAMS
+): TimelineModel {
+  const s = initialAudibilityState(params);
   const start = events.length > 0 ? events[0].t : 0;
   const end = events.length > 0 ? events[events.length - 1].t : 0;
 
@@ -467,16 +364,19 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
       }
     }
 
-    // Boolean lanes, re-evaluated after every event.
+    // Boolean lanes, re-evaluated after every event. Audibility is the
+    // shared reducer's tenure-masked read: a machine tenure displaces the
+    // whole surface, so nothing is audible beneath it (the detector
+    // suspends identically — one gate, audibilityReducer.ts).
     let audibleCount = 0;
     for (const ch of ALL_DECKS) {
-      const a = deckAudible(s, ch);
+      const a = maskedDeckAudible(s, ch);
       if (a) audibleCount += 1;
       audible[ch].set(a, e.t);
       playing[ch].set(s.decks[ch].playing, e.t);
       // Audible-gain step series (the area-chart fill): the deck's Master
       // contribution, zero while silent or tenure-masked.
-      const gain = a ? deckMasterGain(s.decks[ch], mixerInputs(s)) : 0;
+      const gain = a ? deckGain(s, ch) : 0;
       if (gain !== lastGain[ch]) {
         gainSteps[ch].push({ t: e.t, gain });
         lastGain[ch] = gain;
@@ -586,8 +486,12 @@ export interface StateAtT {
 /** Reduce the log up to T. O(n) per call — fine for a one-shot lookup
  * (the replay planner); interactive scrubbing goes through
  * `createStateIndex`, which reduces only the tail past a checkpoint. */
-export function stateAt(events: CaptureEvent[], t: number): StateAtT {
-  const s = initialState();
+export function stateAt(
+  events: CaptureEvent[],
+  t: number,
+  params: DetectorParams = DEFAULT_DETECTOR_PARAMS
+): StateAtT {
+  const s = initialAudibilityState(params);
   let before = 0;
   for (const e of events) {
     if (e.t > t) break;
@@ -600,7 +504,7 @@ export function stateAt(events: CaptureEvent[], t: number): StateAtT {
 /** Reader-facing snapshot of a reduced state (shared by `stateAt` and the
  * checkpoint index — one derivation, no divergence). */
 function snapshotState(
-  s: ReducerState,
+  s: AudibilityState,
   t: number,
   before: number,
   total: number
@@ -619,8 +523,8 @@ function snapshotState(
         {
           trackId: d.trackId,
           playing: d.playing,
-          audible: deckAudible(s, ch),
-          gain: deckMasterGain(d, mixerInputs(s)),
+          audible: maskedDeckAudible(s, ch),
+          gain: deckGain(s, ch),
           playhead: Math.max(0, extrapolated),
           fader: d.fader,
           trim: d.trim,
@@ -650,17 +554,6 @@ function snapshotState(
  * log per mousemove. */
 const CHECKPOINT_EVERY = 2048;
 
-function cloneState(s: ReducerState): ReducerState {
-  return {
-    decks: Object.fromEntries(
-      ALL_DECKS.map((ch) => [ch, { ...s.decks[ch], eq: { ...s.decks[ch].eq } }])
-    ) as Record<CaptureDeck, DeckState>,
-    crossfader: s.crossfader,
-    crossfaderEnabled: s.crossfaderEnabled,
-    tenureHolder: s.tenureHolder,
-  };
-}
-
 export interface StateIndex {
   /** `stateAt` semantics, from the nearest checkpoint. */
   at(t: number): StateAtT;
@@ -671,15 +564,16 @@ export interface StateIndex {
  * (performance.now), which the upper-bound binary search relies on. */
 export function createStateIndex(
   events: CaptureEvent[],
-  checkpointEvery: number = CHECKPOINT_EVERY
+  checkpointEvery: number = CHECKPOINT_EVERY,
+  params: DetectorParams = DEFAULT_DETECTOR_PARAMS
 ): StateIndex {
   // checkpoints[k] = reducer state after events[0 .. k*checkpointEvery).
-  const checkpoints: ReducerState[] = [initialState()];
+  const checkpoints: AudibilityState[] = [initialAudibilityState(params)];
   {
-    const s = initialState();
+    const s = initialAudibilityState(params);
     for (let i = 0; i < events.length; i++) {
       applyEvent(s, events[i]);
-      if ((i + 1) % checkpointEvery === 0) checkpoints.push(cloneState(s));
+      if ((i + 1) % checkpointEvery === 0) checkpoints.push(cloneAudibilityState(s));
     }
   }
 
@@ -695,7 +589,7 @@ export function createStateIndex(
       }
       const before = lo;
       const ck = Math.min(checkpoints.length - 1, Math.floor(before / checkpointEvery));
-      const s = cloneState(checkpoints[ck]);
+      const s = cloneAudibilityState(checkpoints[ck]);
       for (let i = ck * checkpointEvery; i < before; i++) applyEvent(s, events[i]);
       return snapshotState(s, t, before, events.length);
     },
