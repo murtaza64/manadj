@@ -864,22 +864,24 @@ describe('SessionReplayDriver — status callbacks (playhead desync fix)', () =>
 
 describe('SessionReplayDriver — steady playback is left alone (jitter fix)', () => {
   it('small tick-vs-clock skew never triggers a corrective seek', async () => {
+    // A STEADY ~0.1s recorded-tick skew (wall-clock lag, constant): the
+    // stream the jitter fix protects. NOTE the original fixture here
+    // accidentally encoded GROWING drift (0.1s per tick) — that is real
+    // desync and the persistent-drift corrector now fixes it (see the
+    // deadband-regression suite); constant skew stays untouched.
     const events: CaptureEvent[] = [
       ...seedEvents(0),
       { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
       { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
-      // Recorded ticks lag the true clock by ~0.1s each (wall-clock skew).
       { t: 3, kind: 'tick', playheads: { A: 50.9 } },
-      { t: 4, kind: 'tick', playheads: { A: 51.8 } },
-      { t: 5, kind: 'tick', playheads: { A: 52.7 } },
-      { t: 6, kind: 'tick', playheads: { A: 53.6 } },
-      { t: 7, kind: 'tick', playheads: { A: 54.5 } },
+      { t: 4, kind: 'tick', playheads: { A: 51.9 } },
+      { t: 5, kind: 'tick', playheads: { A: 52.9 } },
+      { t: 6, kind: 'tick', playheads: { A: 53.9 } },
+      { t: 7, kind: 'tick', playheads: { A: 54.9 } },
     ];
     const r = rig(planFor(events, 2));
     await r.driver.start();
     const seedSeeks = r.engines.A.seeks.length;
-    // Advance across every tick; the engine plays at true rate. A skew of
-    // ~0.1-0.4s stays under the 0.5s resync threshold → zero seeks.
     for (let i = 0; i < 5; i++) r.advance(1.0);
     expect(r.engines.A.seeks.length).toBe(seedSeeks);
     r.driver.stop();
@@ -939,5 +941,73 @@ describe('SessionReplayDriver — trim playback (sessions 15)', () => {
     expect(r.stops).toEqual(['takeover']);
     // The human's own gesture wins: their trim value survives the sync.
     expect(r.mixer.channels.A.trim).toBe(0.8);
+  });
+});
+
+describe('SessionReplayDriver — persistent drift correction (deadband regression)', () => {
+  /** A log whose recorded playheads advance SLOWER than the replay engine
+   * will (0.96 track-sec per wall-sec): the original performer was riding
+   * pitch bends the log does not replay (clock-rate skew presents the
+   * same way, slower). Engine-vs-record drift grows ~0.04s per tick —
+   * real, persistent, and (pre-fix) parked forever in the sub-0.5s
+   * deadband: over a beat out at 174 BPM by t≈9. */
+  function driftLog(n = 30): CaptureEvent[] {
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= n; k++) {
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k * 0.96 } });
+    }
+    return evs;
+  }
+
+  it('accumulating drift is corrected before it reaches one beat', async () => {
+    const r = rig(planFor(driftLog(), 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    let maxDrift = 0;
+    for (let k = 1; k <= 20; k++) {
+      r.advance(1.0);
+      const recorded = 50 + k * 0.96;
+      maxDrift = Math.max(maxDrift, Math.abs(r.engines.A.getPlayhead() - recorded));
+    }
+    // Corrections fired (the deadband alone let drift sit at up to 0.5s —
+    // more than a beat at 174 BPM = 0.345s)…
+    expect(r.engines.A.seeks.length).toBeGreaterThan(seedSeeks);
+    // …and the deck never strayed a full beat from the log's trajectory.
+    expect(maxDrift).toBeLessThan(0.345);
+    r.driver.stop();
+  });
+
+  it('corrections are paced by the cooldown, not per-tick (no jitter relapse)', async () => {
+    const r = rig(planFor(driftLog(), 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    for (let k = 1; k <= 10; k++) r.advance(1.0);
+    const corrections = r.engines.A.seeks.length - seedSeeks;
+    expect(corrections).toBeGreaterThan(0);
+    expect(corrections).toBeLessThanOrEqual(5); // ≥2s apart over 10s
+    r.driver.stop();
+  });
+
+  it('one janky outlier tick never seeks (median, not sample)', async () => {
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= 12; k++) {
+      // Tick 6 is a 0.4s jank spike; every other tick is on-trajectory.
+      const spike = k === 6 ? -0.4 : 0;
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k + spike } });
+    }
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    for (let k = 1; k <= 10; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    r.driver.stop();
   });
 });
