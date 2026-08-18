@@ -57,12 +57,13 @@
 .perf-wave-row {
   position: relative;
   --wave-deck-color: var(--text);
+  --wave-deck-rgb: 255, 255, 255;
 }
 
-.perf-wave-row.deck-a { --wave-deck-color: var(--deck-a); }
-.perf-wave-row.deck-b { --wave-deck-color: var(--deck-b); }
-.perf-wave-row.deck-c { --wave-deck-color: var(--deck-c); }
-.perf-wave-row.deck-d { --wave-deck-color: var(--deck-d); }
+.perf-wave-row.deck-a { --wave-deck-color: var(--deck-a); --wave-deck-rgb: var(--deck-a-rgb); }
+.perf-wave-row.deck-b { --wave-deck-color: var(--deck-b); --wave-deck-rgb: var(--deck-b-rgb); }
+.perf-wave-row.deck-c { --wave-deck-color: var(--deck-c); --wave-deck-rgb: var(--deck-c-rgb); }
+.perf-wave-row.deck-d { --wave-deck-color: var(--deck-d); --wave-deck-rgb: var(--deck-d-rgb); }
 
 .perf-wave-row::before,
 .perf-wave-row::after {
@@ -83,8 +84,42 @@
 .perf-wave-row.focused::before,
 .perf-wave-row.focused::after { opacity: 1; }
 
+/* Control focus: frame the WHOLE waveform rectangle in the deck color —
+   the side bars alone were easy to miss. A dedicated overlay child (an
+   outline on the row paints in the row's own phase, i.e. UNDER the opaque
+   canvas); no filters over canvas layers. */
+.perf-wave-focus-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 2px solid var(--wave-deck-color);
+  pointer-events: none;
+}
+
 .perf-wave-row .waveform-container {
   transition: opacity 120ms ease;
+}
+
+/* Fader area fill (performance-mode 09): the timeline's audibility-fill
+   idiom live — a solid DECK-COLORED wash rising from the bottom edge, its
+   height the fader's audio-taper gain. Alpha in the background (not
+   element opacity) keeps the deck identity readable over the busy canvas.
+   Overlay, not background (the GL canvas paints opaque); alpha/opacity
+   ONLY over canvas layers (see the filter warning below). */
+.perf-wave-fader-fill {
+  position: absolute;
+  inset: 0 4px;
+  z-index: 3;
+  width: calc(100% - 8px);
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Machine tenure (Conductor / session replay): control focus means nothing
+   on the waveforms — no frame, no bright bars (the row drops .focused), and
+   no unfocused dim. Deck CONTROLS keep their focus treatment. */
+.perf-wave-row.machine .waveform-container {
+  opacity: 1;
 }
 
 /* De-emphasis is OPACITY ONLY — never `filter` (or `backdrop-filter`) over

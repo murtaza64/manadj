@@ -60,18 +60,22 @@ describe('columnModulation', () => {
     expect(columnModulation(c, 10).scale).toBe(0);
   });
 
-  it('trim scales with the dB curve, capped at 1 above nominal', () => {
+  it('trim scales with the dB curve; boosts saturate at 2× (mod-texture parity)', () => {
     const c = controls({
       trim: [
         { t: 0, gain: 0.5 },
         { t: 5, gain: 0.25 },
+        { t: 7, gain: 0.625 },
         { t: 9, gain: 1 },
       ],
     });
     // -12 dB relative to the -6 dB center: exact curve ratio.
     expect(columnModulation(c, 6).scale).toBeCloseTo(trimToGain(0.25) / trimToGain(0.5), 10);
-    // Boosted above nominal: capped — the waveform must not overflow.
-    expect(columnModulation(c, 10).scale).toBe(1);
+    // +3 dB over center: visible boost, exact curve ratio (> 1).
+    expect(columnModulation(c, 8).scale).toBeCloseTo(trimToGain(0.625) / trimToGain(0.5), 10);
+    // Full boost (+12 dB over center ≈ 4×): saturates at the 2× ceiling —
+    // the live deck waveform's mod-texture encoding limit, kept in lockstep.
+    expect(columnModulation(c, 10).scale).toBe(2);
   });
 
   it('falls back to strip defaults on empty / pre-first-step series', () => {

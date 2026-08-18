@@ -544,9 +544,9 @@ export function createStyledColumnRenderer(
 }
 
 /** The GL minimap's body dim (WaveformRendererV2 constructor: minimap mode
- * multiplies body brightness by 0.55 — markers stay full). The ladder
+ * multiplies body brightness by 0.65 — markers stay full). The ladder
  * renders the same minimap slot, so it dims identically. */
-export const MINIMAP_BRIGHTNESS = 0.55;
+export const MINIMAP_BRIGHTNESS = 0.65;
 
 /** Canvas background matching the shader's BG. */
 export const WAVE_BG_CSS = toCss(BG, 1);

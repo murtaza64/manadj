@@ -204,7 +204,9 @@ function controlAt(steps: GainStep[], t: number, dflt: number): number {
 /** The recorded mixer state at session time `t` as a column modulation:
  * EQ per band group through its real curve (a kill removes the band), and
  * fader (audio taper) × trim (dB curve) as a display-normalized height
- * scale, capped at 1 (a boosted strip must not overflow the lane).
+ * scale. Boosts above nominal fatten the body — the column pass clamps
+ * heights at the lane rail (meter-pinning), and the 2× saturation matches
+ * the live deck waveform's mod-texture ceiling (one look across surfaces).
  * Render-only — audibility definitions are untouched. */
 export function columnModulation(controls: DeckControlSteps, t: number): ColumnModulation {
   const fader = controlAt(controls.fader, t, DECK_CONTROL_DEFAULTS.fader);
@@ -216,7 +218,7 @@ export function columnModulation(controls: DeckControlSteps, t: number): ColumnM
       eqValueToGain(controlAt(controls.eqMid, t, DECK_CONTROL_DEFAULTS.eqMid)),
       eqValueToGain(controlAt(controls.eqHigh, t, DECK_CONTROL_DEFAULTS.eqHigh)),
     ],
-    scale: Math.min(1, gain / NOMINAL_STRIP_GAIN),
+    scale: Math.min(2, gain / NOMINAL_STRIP_GAIN),
   };
 }
 

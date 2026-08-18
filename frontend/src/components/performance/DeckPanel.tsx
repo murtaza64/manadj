@@ -36,7 +36,13 @@ import { HFader, Knob } from './MixerStrip';
 import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
-import { trackWindowSeconds } from '../../utils/waveformZoom';
+import { DECK_COLORS, hexToRgbTriplet } from '../../theme/deckColors';
+import { PLAY_MARKER_FRACTION, trackWindowSeconds } from '../../utils/waveformZoom';
+import { channelFaderToGain, trimToGain } from '../../playback/mixerMath';
+import { createStripHistory } from '../../performance/stripHistory';
+import type { StripValues } from '../../performance/stripHistory';
+import { eqValueToGain } from '../../playback/graph';
+import type { Mixer } from '../../playback/mixer';
 import { focusDeck, useControlFocus } from '../../performance/controlFocus';
 import { formatKeyDisplay } from '../../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../../utils/displayColors';
@@ -102,6 +108,60 @@ export function DeckWaveform({
   const loop = useDeckSnapshot((s) => s.loop);
 
   const transport = useScrubTransport();
+  const mixer = useMixer();
+
+  // Live mixer → waveform modulation (performance-mode 09, the sessions-19
+  // semantics applied live): EQ dims/removes its band group; trim scales
+  // (display-normalized to center, capped at 1). PRE-FADER by design — the
+  // fader renders as the area fill below, never as waveform height. The
+  // renderer resamples the modTex every frame, so this closure self-updates;
+  // channel states are replaced immutably, so the curve math is
+  // identity-cached and the per-sample cost is a reference check.
+  const modCacheRef = useRef<{
+    state: ReturnType<Mixer['getChannelState']> | null;
+    auto: ReturnType<Mixer['getAutomation']>;
+    value: StripValues;
+  }>({ state: null, auto: null, value: { gain: 1, low: 1, mid: 1, high: 1, fader: 1 } });
+  const liveStrip = useCallback(() => {
+    const cache = modCacheRef.current;
+    const ch = mixer.getChannelState(deck);
+    // EFFECTIVE strip: a machine tenure (Conductor / session replay) drives
+    // the automation overlay, not the human state (ADR 0022) — the waveform
+    // must show what's audible, whoever's hands are on the strip.
+    const auto = mixer.getAutomation(deck);
+    if (ch !== cache.state || auto !== cache.auto) {
+      cache.state = ch;
+      cache.auto = auto;
+      const eq = auto?.eq ?? ch.eq;
+      const trim = auto?.trim ?? ch.trim;
+      cache.value = {
+        // Real trim curve, center-normalized, UNCAPPED above neutral: a
+        // boost fattens the body (the shader clamps heights at the rail,
+        // like a meter pinning). The mod texture encodes up to 2× — a
+        // +12 dB trim reads as 2× (saturated), which is the honest ceiling.
+        gain: trimToGain(trim) / trimToGain(0.5),
+        low: eqValueToGain(eq.low),
+        mid: eqValueToGain(eq.mid),
+        high: eqValueToGain(eq.high),
+        // Raw fader position — the fill's input, never the waveform's.
+        fader: auto?.fader ?? ch.fader,
+      };
+    }
+    return cache.value;
+  }, [mixer, deck]);
+
+  // Past-preserving modulation: behind the playhead the waveform shows the
+  // strip as it WAS when that audio played (a per-frame recorder feeds a
+  // step series in track time); the frontier and beyond show the live
+  // strip. New track → fresh history.
+  const historyRef = useRef(createStripHistory());
+  useEffect(() => {
+    historyRef.current.clear();
+  }, [loadedTrack?.id]);
+  const modulation = useCallback(
+    (t: number) => historyRef.current.at(t, liveStrip()),
+    [liveStrip]
+  );
 
   // Effective-BPM zoom (performance-mode 06): the renderer consumes TRACK
   // seconds, so scale the shared wall-clock window by this deck's rate —
@@ -114,9 +174,74 @@ export function DeckWaveform({
   // still (the effective-BPM readout keeps bend; that one is for ears).
   const rate = useDeckSnapshot((s) => composeRate(s.pitchPercent, 0));
 
+  // Fader area fill (performance-mode 09): the timeline's audibility-fill
+  // idiom live, with the SAME history as the modulation — behind the
+  // playhead the fill shows the fader as it was when that audio played;
+  // ahead, the live fader. Drawn per column on a 2D canvas in the recorder
+  // loop (a single DOM bar can't vary along the window). Mirrors the GL
+  // renderer's view mapping: start = playhead − span × marker fraction.
+  const fillCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fillViewRef = useRef({ span: 0, hasTrack: false });
+  fillViewRef.current = {
+    span: trackWindowSeconds(visibleSeconds, rate),
+    hasTrack: loadedTrack !== null,
+  };
+  useEffect(() => {
+    let raf = 0;
+    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, 0.12)`;
+    const loop = () => {
+      const snap = engine.getSnapshot();
+      const playhead = engine.getPlayhead();
+      const live = liveStrip();
+      historyRef.current.record(playhead, snap.playing || snap.previewing, live);
+
+      const canvas = fillCanvasRef.current;
+      if (canvas) {
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        const ctx = canvas.getContext('2d');
+        if (ctx && w > 0 && h > 0) {
+          ctx.clearRect(0, 0, w, h);
+          ctx.fillStyle = fillCss;
+          const { span, hasTrack } = fillViewRef.current;
+          if (!hasTrack || span <= 0) {
+            const bar = channelFaderToGain(live.fader) * h;
+            ctx.fillRect(0, h - bar, w, bar);
+          } else {
+            const start = playhead - span * PLAY_MARKER_FRACTION;
+            const step = 2; // px per column — a translucent wash, not a plot
+            for (let x = 0; x < w; x += step) {
+              const t = start + ((x + step / 2) / w) * span;
+              if (t < 0 || t > snap.duration) continue;
+              const v = historyRef.current.at(t, live);
+              const bar = channelFaderToGain(v.fader) * h;
+              if (bar > 0) ctx.fillRect(x, h - bar, step, bar);
+            }
+          }
+        }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [engine, deck, liveStrip]);
+
+  // Machine tenure (Conductor / session replay): the control-focus
+  // indicators are meaningless on the waveforms while a machine holds the
+  // strips — drop the frame, the bright side bars, and the unfocused dim
+  // (deck CONTROLS keep theirs). The automation ghost doubles as the
+  // tenure signal (non-null = overlay engaged).
+  const automationGhost = useAutomationGhost(deck);
+  const machineHeld = automationGhost !== null;
+  const showFocus = focused && !machineHeld;
+
   return (
     <div
-      className={`perf-wave-row deck-${deck.toLowerCase()}${focused ? ' focused' : ''}`}
+      className={`perf-wave-row deck-${deck.toLowerCase()}${showFocus ? ' focused' : ''}${machineHeld ? ' machine' : ''}`}
     >
       <WebGLWaveform
         trackId={loadedTrack?.id ?? null}
@@ -128,7 +253,12 @@ export function DeckWaveform({
         beatjumpBeats={beatjumpBeats}
         visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
         onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
+        modulation={modulation}
       />
+      {/* Translucent overlay (the GL canvas is opaque — nothing shows
+          "behind" it); no filters over canvas layers (compositor leak). */}
+      <canvas ref={fillCanvasRef} className="perf-wave-fader-fill" />
+      {showFocus ? <div className="perf-wave-focus-frame" /> : null}
     </div>
   );
 }
