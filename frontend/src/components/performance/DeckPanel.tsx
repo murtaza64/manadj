@@ -484,6 +484,7 @@ function MixZone({ track }: { track: Track | null }) {
           value={channel.trim}
           onChange={(v) => mixer.setTrim(deck, v)}
           takeover={trimTakeover}
+          ghost={auto && auto.trim !== undefined ? auto.trim : null}
         />
         {eqKnob('low', 'LOW')}
         {eqKnob('mid', 'MID')}

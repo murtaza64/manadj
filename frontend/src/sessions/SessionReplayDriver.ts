@@ -126,12 +126,12 @@ export class SessionReplayDriver {
    * overlay lanes — never written to base during playback. */
   private recDecks: Record<
     ChannelId,
-    { fader: number; eq: { low: number; mid: number; high: number }; filter: number; assignment: CrossfaderAssignment }
+    { fader: number; trim: number; eq: { low: number; mid: number; high: number }; filter: number; assignment: CrossfaderAssignment }
   > = {
-    A: { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
-    B: { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
-    C: { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
-    D: { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
+    A: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
+    B: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
+    C: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
+    D: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
   };
   private recCrossfader = 0;
   private recCrossfaderEnabled = true;
@@ -380,6 +380,7 @@ export class SessionReplayDriver {
       const engine = this.engines[d];
       this.recDecks[d] = {
         fader: s.fader,
+        trim: s.trim,
         eq: { ...s.eq },
         filter: s.filter,
         assignment: s.assignment,
@@ -413,6 +414,7 @@ export class SessionReplayDriver {
       );
       const lane: AutomationChannelValues = {
         fader: Math.min(1, r.fader * Math.sqrt(xfGain)),
+        trim: r.trim,
         eq: { ...r.eq },
         filter: r.filter,
       };
@@ -451,10 +453,14 @@ export class SessionReplayDriver {
         const ch = cue.channel;
         const v = cue.value;
         // Overlay-owned params update the recorded state and recompose
-        // lanes. Trim/PFL/master/cue stay the LIVE user's (gain staging is
-        // not reproduced — Conductor parity); crossfader moves recompose
+        // lanes — including trim (sessions 15: trim is ridden as a
+        // performance control, so a replay without it is audibly wrong).
+        // PFL/master/cue stay the LIVE user's; crossfader moves recompose
         // every lane (its gain is folded in).
-        if (cue.control === 'fader' && ch) {
+        if (cue.control === 'trim' && ch) {
+          this.recDecks[ch].trim = v;
+          this.applyLanes([ch]);
+        } else if (cue.control === 'fader' && ch) {
           this.recDecks[ch].fader = v;
           this.applyLanes([ch]);
         } else if (cue.control === 'eqLow' && ch) {
@@ -707,6 +713,7 @@ export class SessionReplayDriver {
       const lane = this.lastLanes[d];
       if (!lane) continue;
       if (!skip(`${d}.fader`)) this.mixer.setFader(d, lane.fader);
+      if (!skip(`${d}.trim`) && lane.trim !== undefined) this.mixer.setTrim(d, lane.trim);
       if (!skip(`${d}.eqLow`)) this.mixer.setEq(d, 'low', lane.eq.low);
       if (!skip(`${d}.eqMid`)) this.mixer.setEq(d, 'mid', lane.eq.mid);
       if (!skip(`${d}.eqHigh`)) this.mixer.setEq(d, 'high', lane.eq.high);
