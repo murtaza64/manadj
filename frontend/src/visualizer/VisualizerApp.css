@@ -1,0 +1,82 @@
+/* Visualizer window (realtime-visualization 01). Pure black stage; chrome
+   floats over the canvas and auto-hides. Bright saturated accents. */
+
+.visualizer-root,
+.visualizer-root body,
+.visualizer-root #root {
+  height: 100%;
+  margin: 0;
+  background: #000;
+  overflow: hidden;
+}
+
+.visualizer {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  cursor: default;
+}
+
+.visualizer.chrome-hidden {
+  cursor: none;
+}
+
+.visualizer-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.visualizer-chrome {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.chrome-hidden .visualizer-chrome {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.visualizer-presets {
+  display: flex;
+  gap: 8px;
+}
+
+.visualizer-preset-btn,
+.visualizer-fullscreen-btn {
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid hsl(200, 100%, 45%);
+  color: hsl(200, 100%, 60%);
+  font: bold 13px ui-monospace, monospace;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.visualizer-preset-btn.active {
+  background: hsl(200, 100%, 50%);
+  color: #000;
+}
+
+.visualizer-preset-btn:hover,
+.visualizer-fullscreen-btn:hover {
+  border-color: hsl(200, 100%, 65%);
+}
+
+.visualizer-nosignal {
+  position: absolute;
+  bottom: 18px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: hsl(55, 100%, 55%);
+  font: 13px ui-monospace, monospace;
+  opacity: 0.85;
+  pointer-events: none;
+}

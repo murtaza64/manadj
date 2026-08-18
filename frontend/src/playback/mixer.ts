@@ -99,6 +99,15 @@ export interface ChannelLevelSample {
   clipped: boolean;
 }
 
+/** Master-bus spectrum snapshot (visualizer): per-bin magnitudes in dBFS
+ * from the visualizer analyser, plus what's needed to map bins to Hz. */
+export interface MasterSpectrum {
+  /** Analyser frequency data, dB per bin (length = fftSize / 2). */
+  magnitudesDb: Float32Array;
+  sampleRate: number;
+  fftSize: number;
+}
+
 /** Per-channel control state, [0,1] except filter [-1,1] and pfl (bool). */
 export interface ChannelState {
   trim: number;
@@ -310,6 +319,11 @@ export class Mixer {
   /** Independent pre-Master recording guard: monitor volume/boost must not
    * alter the recorded Mix. Recorder taps hang here across route changes. */
   private recordingCeiling: WaveShaperNode | null = null;
+  /** Master-bus spectrum tap for the visualizer (realtime-visualization 01):
+   * hangs off recordingCeiling — route-independent and pre-Master, so the
+   * visuals reflect program content, not monitor loudness. Pure sink. */
+  private visualizerAnalyser: AnalyserNode | null = null;
+  private visualizerBuffer: Float32Array<ArrayBuffer> | null = null;
   private cueGain: GainNode | null = null;
   private blendCueGain: GainNode | null = null;
   private blendMasterGain: GainNode | null = null;
@@ -424,11 +438,27 @@ export class Mixer {
       // deck; it must never be handed to the fake timer sink.
       attachSinkKeepalive(ctx);
 
+      // Visualizer spectrum tap (realtime-visualization 01). 2048 is the
+      // punch/resolution balance from the prior-art survey
+      // (docs/research/audio-visualizer-prior-art.md): the FFT window spans
+      // fftSize/sampleRate seconds, so 4096 @ 48 kHz smeared kick attacks
+      // across ~85 ms — 2048 halves that (~43 ms) while keeping ~23 Hz/bin
+      // (~9 bins under the 250 Hz crossover). No analyser smoothing — the
+      // browser EMA is FFT-block-rate-coupled; consumers own ballistics.
+      const visualizerAnalyser = ctx.createAnalyser();
+      visualizerAnalyser.fftSize = 2048;
+      visualizerAnalyser.smoothingTimeConstant = 0;
+      recordingCeiling.connect(visualizerAnalyser);
+
       this.ctx = ctx;
       this.strips = strips;
       this.masterGain = masterGain;
       this.masterOutput = masterOutput;
       this.recordingCeiling = recordingCeiling;
+      this.visualizerAnalyser = visualizerAnalyser;
+      this.visualizerBuffer = new Float32Array(
+        new ArrayBuffer((visualizerAnalyser.fftSize / 2) * 4)
+      );
       this.cueGain = cueGain;
       this.blendCueGain = blendCueGain;
       this.blendMasterGain = blendMasterGain;
@@ -624,6 +654,25 @@ export class Mixer {
     const live = this.liveGraph();
     if (!live) return { meanAbsolute: 0, clipped: false };
     return live.strips[channel].levelSample();
+  }
+
+  /**
+   * Master-bus spectrum snapshot (realtime-visualization 01), read off the
+   * visualizer analyser (post-program, pre-Master — route-independent).
+   * Reads the LIVE graph only (never force-creates a context, same rule as
+   * readChannelLevel); null with no graph, which the visualizer renders as
+   * silence. The returned buffer is reused across calls — consume it
+   * synchronously.
+   */
+  readMasterSpectrum(): MasterSpectrum | null {
+    const live = this.liveGraph();
+    if (!live || !this.visualizerAnalyser || !this.visualizerBuffer) return null;
+    this.visualizerAnalyser.getFloatFrequencyData(this.visualizerBuffer);
+    return {
+      magnitudesDb: this.visualizerBuffer,
+      sampleRate: live.ctx.sampleRate,
+      fftSize: this.visualizerAnalyser.fftSize,
+    };
   }
 
   /** The audio access a deck is constructed against. */

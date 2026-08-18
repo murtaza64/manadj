@@ -39,6 +39,22 @@ function QuantizeToggle() {
   );
 }
 
+/** Opens the visualizer window (realtime-visualization 01): a separate
+ * window rendering the master-bus 3-band visualization — fullscreen it on
+ * a second display for the HDMI projection setup. Named target: clicking
+ * again focuses the existing window instead of stacking duplicates. */
+function VisualizerButton() {
+  return (
+    <button
+      className="topbar-visualizer"
+      title="Open visualizer window"
+      onClick={() => window.open('/visualizer', 'manadj-visualizer', 'width=960,height=540')}
+    >
+      ✷
+    </button>
+  );
+}
+
 function MidiBadge() {
   const controllers = useSyncExternalStore(subscribeControllers, connectedControllers);
   const on = controllers.length > 0;
@@ -79,6 +95,7 @@ export function TopBar({
       <MidiBadge />
       <MasterRecorderControl />
       <TasksWidget />
+      <VisualizerButton />
       <QuantizeToggle />
       <AudioRoutingPicker />
       <AudioOwnershipChip mode={mode} onModeChange={onModeChange} />

@@ -194,6 +194,19 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
+  // Visualizer window (realtime-visualization 01): the renderer opens it
+  // via window.open('/visualizer', ...). Give it a normal native title bar
+  // (its page has no TopBar drag region) and never throttle it — it renders
+  // rAF visuals and may sit occluded behind the main window on one screen
+  // before being dragged to the projector.
+  win.webContents.setWindowOpenHandler(() => ({
+    action: "allow",
+    overrideBrowserWindowOptions: {
+      title: "manaDJ visualizer",
+      backgroundColor: "#000000",
+      webPreferences: { backgroundThrottling: false },
+    },
+  }));
   // Open maximized (desktop-shell 06 — zoomed, not macOS fullscreen). The
   // persisted NORMAL bounds spread in above and getNormalBounds() below
   // ignores the maximized state, so unmaximizing (double-click the TopBar)

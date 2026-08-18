@@ -6,6 +6,7 @@ import { queryClient } from './api/queryClient';
 const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
 const JogTuningPage = lazy(() => import('./midi/JogTuningPage'));
+const VisualizerApp = lazy(() => import('./visualizer/VisualizerApp'));
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
@@ -18,6 +19,7 @@ import { MidiControlRegistrar } from './components/MidiControlRegistrar';
 import { MidiFeedbackBridge } from './components/MidiFeedbackBridge';
 import { MidiLevelMeterBridge } from './components/MidiLevelMeterBridge';
 import { AudioRoutingBridge } from './components/AudioRoutingBridge';
+import { VisualizerBridge } from './components/VisualizerBridge';
 import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
@@ -128,6 +130,18 @@ function App() {
     );
   }
 
+  // The visualizer window (realtime-visualization 01): a standalone root —
+  // no DeckProvider, so it can never create a second AudioContext (ADR
+  // 0009). Band data arrives over the BroadcastChannel from the main
+  // window's VisualizerBridge.
+  if (window.location.pathname === '/visualizer') {
+    return (
+      <Suspense fallback={null}>
+        <VisualizerApp />
+      </Suspense>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -139,6 +153,9 @@ function App() {
         <MidiLevelMeterBridge />
         <AudioRoutingBridge />
         <AnalysisPendingBridge />
+        {/* Visualizer band feed (realtime-visualization 01): transmits only
+            while a visualizer window pings. */}
+        <VisualizerBridge />
         {/* Live re-plan (sets 24): plan-input subscription for the
             conducting Set — above the view switch, like the Conductor
             it feeds. */}
