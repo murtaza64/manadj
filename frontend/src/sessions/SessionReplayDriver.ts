@@ -111,7 +111,17 @@ const SEEK_MEDIAN_S = 0.2;
  * sources (start-latency stagger, keylock rate wander, unreplayed bends,
  * clock skew, estimator noise) drain continuously toward the shared log
  * reference — on every deck, so RELATIVE phase converges too. */
-const SERVO_MAX_BIAS = 0.01; // ±1% rate
+const SERVO_MAX_BIAS = 0.01; // ±1% rate (small errors — inaudible)
+/** Large disparities get an AGGRESSIVE cap (a firm DJ nudge): draining
+ * 0.15s at 1% took ~20s of audible half-sync — at 4% it's under 4s. */
+const SERVO_MAX_BIAS_HI = 0.04;
+const SERVO_HI_ERR_S = 0.1; // schedule up past this error
+/** Start snap: decks do NOT all start in the same instant (engine
+ * play/ramp latency differs per deck) — the first sync tick after a deck
+ * (re)starts SEEKS any stagger away instead of leaving the servo to drain
+ * it. A seek at playback start is not a mid-groove jump: nobody has an
+ * established phase yet. */
+const START_SNAP_S = 0.04;
 const SERVO_GAIN_PER_S = 0.1; // full bias at 0.1s error
 const SERVO_DEADBAND_S = 0.015; // no dither under estimator noise
 const ERR_EMA_ALPHA = 0.4;
@@ -176,6 +186,11 @@ export class SessionReplayDriver {
   /** Phase-servo state per deck (sessions 20): smoothed position error +
    * EMA-blended base rate. */
   private servo: Partial<Record<ChannelId, { errEma: number | null; rateEma: number }>> = {};
+  /** Decks that (re)started and have not been start-snapped yet. */
+  private unsettled: Partial<Record<ChannelId, boolean>> = {};
+  /** Live servo bias per deck (rate fraction; 0 in deadband) — the info
+   * chip's "actively syncing" indicator reads this via the store. */
+  private servoBias: Partial<Record<ChannelId, number>> = {};
   /** The RECORDED mixer state (what the night's log says), composed into
    * overlay lanes — never written to base during playback. */
   private recDecks: Record<
@@ -207,6 +222,11 @@ export class SessionReplayDriver {
     if (!this.active) return null;
     const offset = this.pausedAtOffset ?? this.elapsed();
     return this.plan.startT + Math.min(offset, this.plan.endT - this.plan.startT);
+  }
+
+  /** Live per-deck servo bias (rate fraction) — 0/absent when idle. */
+  getServoBias(): Partial<Record<ChannelId, number>> {
+    return this.servoBias;
   }
 
   isPaused(): boolean {
@@ -432,6 +452,11 @@ export class SessionReplayDriver {
     this.syncDrift = {};
     this.rateBuf = {};
     this.servo = {};
+    this.servoBias = {};
+    this.unsettled = {};
+    for (const d of ALL_DECKS) {
+      if (this.plan.seed.decks[d].playing) this.unsettled[d] = true;
+    }
     for (const d of ALL_DECKS) {
       const s = seed.decks[d];
       const engine = this.engines[d];
@@ -550,6 +575,7 @@ export class SessionReplayDriver {
         engine.play();
         this.syncDrift[cue.channel] = [];
         delete this.rateBuf[cue.channel];
+        this.unsettled[cue.channel] = true;
         const prev = this.anchors[cue.channel];
         this.anchors[cue.channel] = {
           offset: cue.offsetS,
@@ -663,12 +689,31 @@ export class SessionReplayDriver {
             delete this.rateBuf[d];
             const idleSv = this.servo[d];
             if (idleSv) idleSv.errEma = null;
+            this.servoBias[d] = 0;
             continue;
           }
           const sv = (this.servo[d] ??= {
             errEma: null,
             rateEma: 1 + snap.pitchPercent / 100,
           });
+          // Start snap (start-latency stagger): the deck just (re)started;
+          // its first truth sample reveals how late the engine actually
+          // began. Seek the stagger away NOW — the servo would audibly
+          // half-sync for many seconds over what one inaudible-at-start
+          // seek removes.
+          if (this.unsettled[d]) {
+            delete this.unsettled[d];
+            const stagger = this.engines[d].getPlayhead() - ph;
+            if (Math.abs(stagger) > START_SNAP_S && Math.abs(stagger) <= RESYNC_THRESHOLD_S) {
+              const engine = this.engines[d];
+              const target = engine.getPlayhead() - stagger;
+              this.self(() => engine.seek(target));
+              this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: sv.rateEma };
+              this.syncDrift[d] = [];
+              sv.errEma = null;
+              continue;
+            }
+          }
           // Base rate: blend linear window fits of the RECORDED trajectory
           // (engine seeks/pitch writes never invalidate these samples).
           const rb = (this.rateBuf[d] ??= []);
@@ -699,10 +744,14 @@ export class SessionReplayDriver {
             sv.errEma === null ? innovation : sv.errEma + ERR_EMA_ALPHA * (innovation - sv.errEma);
           // The servo: err ahead of the log → slow down; behind → speed up.
           const err = sv.errEma;
+          // Error-scheduled cap: large disparities converge FIRMLY (4%),
+          // small ones invisibly (1%).
+          const cap = Math.abs(err) > SERVO_HI_ERR_S ? SERVO_MAX_BIAS_HI : SERVO_MAX_BIAS;
           const bias =
             Math.abs(err) < SERVO_DEADBAND_S
               ? 0
-              : Math.max(-SERVO_MAX_BIAS, Math.min(SERVO_MAX_BIAS, -err * SERVO_GAIN_PER_S));
+              : Math.max(-cap, Math.min(cap, -err * SERVO_GAIN_PER_S * (cap / SERVO_MAX_BIAS)));
+          this.servoBias[d] = bias;
           const targetPitch = (sv.rateEma - 1) * 100 + bias * 100;
           if (Math.abs(targetPitch - snap.pitchPercent) > PITCH_APPLY_MIN_PCT) {
             const engine = this.engines[d];
