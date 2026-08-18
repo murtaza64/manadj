@@ -203,6 +203,12 @@
   color: var(--mauve);
 }
 
+.topbar-visualizer.on {
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--base);
+}
+
 /* Audio-ownership chip (sets 40): who owns the decks, always present in
    the same slot. Muted while the shared decks hold; the muted→colored
    flip is the takeover/stand-down signal. Fixed height/typography across

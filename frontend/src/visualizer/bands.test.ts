@@ -3,9 +3,11 @@ import {
   aggregateBands,
   aggregateMultiband,
   logBandEdges,
+  maxGroup,
   monstercatSpread,
   stepBands,
   stepLevels,
+  wavesSpread,
   BAND_ATTACK_S,
   BAND_DB_CEIL,
   BAND_DB_FLOOR,
@@ -139,6 +141,36 @@ describe('monstercatSpread', () => {
       expect(spread[i]).toBeGreaterThanOrEqual(input[i]);
     }
     expect(input).toEqual([0.9, 0.1, 0.8]);
+  });
+});
+
+describe('wavesSpread', () => {
+  it('gives a spike a parabolic skirt reaching zero at the drop distance', () => {
+    const spread = wavesSpread([0, 0, 1, 0, 0, 0, 0], 1 / 4);
+    expect(spread[2]).toBe(1);
+    expect(spread[1]).toBeCloseTo(0.75, 10); // 1 - (1/4)·1²
+    expect(spread[3]).toBeCloseTo(0.75, 10);
+    expect(spread[4]).toBeCloseTo(0, 10); // 1 - (1/4)·2²
+    expect(spread[5]).toBe(0); // negative skirt never lowers a bar
+  });
+
+  it('never lowers a bar and does not mutate the input', () => {
+    const input = [0.2, 0.9, 0.1];
+    const spread = wavesSpread(input);
+    for (let i = 0; i < input.length; i++) {
+      expect(spread[i]).toBeGreaterThanOrEqual(input[i]);
+    }
+    expect(input).toEqual([0.2, 0.9, 0.1]);
+  });
+});
+
+describe('maxGroup', () => {
+  it('takes the max of each run', () => {
+    expect(maxGroup([0.1, 0.5, 0.2, 0.9, 0.3, 0.1], 3)).toEqual([0.5, 0.9]);
+  });
+
+  it('keeps a short tail as its own group', () => {
+    expect(maxGroup([0.1, 0.2, 0.3, 0.8], 3)).toEqual([0.3, 0.8]);
   });
 });
 

@@ -1,22 +1,24 @@
 /**
  * "Spectrum" preset (realtime-visualization 01): eight geometric-band bars
- * (40 Hz → 16 kHz) in a full-saturation rainbow — red bass through violet
- * treble — with white gravity peak caps and cava's "monstercat" spatial
+ * (40 Hz → 16 kHz) in the waveform's band colors — red bass through green
+ * mids to blue treble (waveform/styles.ts ADDITIVE_COLORS) — with white gravity peak caps and cava's "monstercat" spatial
  * spread so a hit reads as a shape instead of an isolated spike. Prior art:
  * docs/research/audio-visualizer-prior-art.md.
  */
 
-import { monstercatSpread } from '../bands';
+import { maxGroup, monstercatSpread } from '../bands';
+import { bandRampRgb, cssRgb } from '../style';
 import type { PresetRenderer, VisualizerFrameData, VisualizerPreset } from './types';
+
+/** The wire ships 24 fine bands; this preset stays the 8-bar classic —
+ * geometric edges compose, so max-grouping triples is exact banding. */
+const GROUP_SIZE = 3;
 
 /** Kinematic cap fall, bar-height-fractions per second². */
 const PEAK_GRAVITY = 3.6;
 const PEAK_HOLD_S = 0.5;
 /** Monstercat spread factor (1.5–2; larger = tighter spread). */
 const SPREAD_FACTOR = 1.8;
-/** Rainbow: red (bass) → violet (treble). */
-const HUE_FROM = 0;
-const HUE_TO = 280;
 
 interface PeakCap {
   value: number;
@@ -36,7 +38,7 @@ class SpectrumRenderer implements PresetRenderer {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
 
-    const levels = monstercatSpread(frame.spectrum, SPREAD_FACTOR);
+    const levels = monstercatSpread(maxGroup(frame.spectrum, GROUP_SIZE), SPREAD_FACTOR);
     const count = levels.length;
     if (count === 0) return;
     while (this.peaks.length < count) {
@@ -55,17 +57,17 @@ class SpectrumRenderer implements PresetRenderer {
       const level = levels[i];
       const x = margin + i * (barWidth + gap);
       const barHeight = level * maxBarHeight;
-      const hue = HUE_FROM + ((HUE_TO - HUE_FROM) * i) / (count - 1);
+      const rgb = bandRampRgb(i / (count - 1));
 
       // Bar body: saturated vertical gradient, brighter toward the tip.
       if (barHeight > 0.5) {
         const gradient = ctx.createLinearGradient(0, baseY, 0, baseY - barHeight);
-        gradient.addColorStop(0, `hsl(${hue}, 100%, 38%)`);
-        gradient.addColorStop(1, `hsl(${hue}, 100%, ${50 + 18 * level}%)`);
+        gradient.addColorStop(0, cssRgb(rgb, 1, 0.55));
+        gradient.addColorStop(1, cssRgb(rgb, 1, 0.9 + 0.5 * level));
         ctx.fillStyle = gradient;
         ctx.fillRect(x, baseY - barHeight, barWidth, barHeight);
         // Hot tip line — reads as the bar "hitting".
-        ctx.fillStyle = `hsla(${hue}, 100%, 75%, ${0.4 + 0.6 * level})`;
+        ctx.fillStyle = cssRgb(rgb, 0.4 + 0.6 * level, 1.6);
         ctx.fillRect(x, baseY - barHeight, barWidth, Math.min(barHeight, capThickness));
       }
 

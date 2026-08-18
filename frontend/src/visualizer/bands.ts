@@ -183,6 +183,43 @@ export function monstercatSpread(levels: number[], factor = 1.8): number[] {
   return spread;
 }
 
+/**
+ * cava's "waves" spatial variant: neighbors get a parabolic skirt
+ * (`level - drop · distance²`) instead of the monstercat exponential —
+ * bars melt into a smooth mountain silhouette. Pure — returns a new array.
+ * With the default drop a full-scale spike reaches zero four bars out.
+ */
+export function wavesSpread(levels: number[], drop = 1 / 16): number[] {
+  const spread = levels.slice();
+  for (let z = 0; z < levels.length; z++) {
+    for (let m = 0; m < levels.length; m++) {
+      if (m === z) continue;
+      const de = Math.abs(z - m);
+      const skirt = levels[z] - drop * de * de;
+      if (skirt > spread[m]) spread[m] = skirt;
+    }
+  }
+  return spread;
+}
+
+/**
+ * Group a fine multiband array into coarser bands by taking the max of
+ * each run of `groupSize` (max = the punchier aggregation, per the
+ * prior-art survey). Geometric edges compose exactly: every 3rd edge of a
+ * 24-band geometric split IS the 8-band split.
+ */
+export function maxGroup(levels: number[], groupSize: number): number[] {
+  const grouped: number[] = [];
+  for (let i = 0; i < levels.length; i += groupSize) {
+    let max = 0;
+    for (let j = i; j < Math.min(i + groupSize, levels.length); j++) {
+      if (levels[j] > max) max = levels[j];
+    }
+    grouped.push(max);
+  }
+  return grouped;
+}
+
 function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }

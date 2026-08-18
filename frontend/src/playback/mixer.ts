@@ -108,6 +108,13 @@ export interface MasterSpectrum {
   fftSize: number;
 }
 
+/** Master-bus stereo time-domain snapshot (visualizer scope/goniometer). */
+export interface MasterWaveform {
+  left: Float32Array;
+  right: Float32Array;
+  sampleRate: number;
+}
+
 /** Per-channel control state, [0,1] except filter [-1,1] and pfl (bool). */
 export interface ChannelState {
   trim: number;
@@ -324,6 +331,13 @@ export class Mixer {
    * visuals reflect program content, not monitor loudness. Pure sink. */
   private visualizerAnalyser: AnalyserNode | null = null;
   private visualizerBuffer: Float32Array<ArrayBuffer> | null = null;
+  /** Stereo time-domain taps (visualizer scope/goniometer): a splitter off
+   * recordingCeiling feeding one analyser per side. Pure sinks. */
+  private visualizerWaveAnalysers: { left: AnalyserNode; right: AnalyserNode } | null = null;
+  private visualizerWaveBuffers: {
+    left: Float32Array<ArrayBuffer>;
+    right: Float32Array<ArrayBuffer>;
+  } | null = null;
   private cueGain: GainNode | null = null;
   private blendCueGain: GainNode | null = null;
   private blendMasterGain: GainNode | null = null;
@@ -450,6 +464,18 @@ export class Mixer {
       visualizerAnalyser.smoothingTimeConstant = 0;
       recordingCeiling.connect(visualizerAnalyser);
 
+      // Stereo time-domain taps for the scope/goniometer presets
+      // (realtime-visualization 02): the goniometer needs L and R
+      // separately (an AnalyserNode alone downmixes its input to mono).
+      const visualizerSplit = ctx.createChannelSplitter(2);
+      const visualizerWaveLeft = ctx.createAnalyser();
+      const visualizerWaveRight = ctx.createAnalyser();
+      visualizerWaveLeft.fftSize = 2048;
+      visualizerWaveRight.fftSize = 2048;
+      recordingCeiling.connect(visualizerSplit);
+      visualizerSplit.connect(visualizerWaveLeft, 0);
+      visualizerSplit.connect(visualizerWaveRight, 1);
+
       this.ctx = ctx;
       this.strips = strips;
       this.masterGain = masterGain;
@@ -459,6 +485,11 @@ export class Mixer {
       this.visualizerBuffer = new Float32Array(
         new ArrayBuffer((visualizerAnalyser.fftSize / 2) * 4)
       );
+      this.visualizerWaveAnalysers = { left: visualizerWaveLeft, right: visualizerWaveRight };
+      this.visualizerWaveBuffers = {
+        left: new Float32Array(new ArrayBuffer(visualizerWaveLeft.fftSize * 4)),
+        right: new Float32Array(new ArrayBuffer(visualizerWaveRight.fftSize * 4)),
+      };
       this.cueGain = cueGain;
       this.blendCueGain = blendCueGain;
       this.blendMasterGain = blendMasterGain;
@@ -672,6 +703,23 @@ export class Mixer {
       magnitudesDb: this.visualizerBuffer,
       sampleRate: live.ctx.sampleRate,
       fftSize: this.visualizerAnalyser.fftSize,
+    };
+  }
+
+  /**
+   * Master-bus stereo time-domain snapshot (realtime-visualization 02) for
+   * the scope/goniometer presets. Same live-graph-only and reused-buffer
+   * contract as readMasterSpectrum.
+   */
+  readMasterWaveform(): MasterWaveform | null {
+    const live = this.liveGraph();
+    if (!live || !this.visualizerWaveAnalysers || !this.visualizerWaveBuffers) return null;
+    this.visualizerWaveAnalysers.left.getFloatTimeDomainData(this.visualizerWaveBuffers.left);
+    this.visualizerWaveAnalysers.right.getFloatTimeDomainData(this.visualizerWaveBuffers.right);
+    return {
+      left: this.visualizerWaveBuffers.left,
+      right: this.visualizerWaveBuffers.right,
+      sampleRate: live.ctx.sampleRate,
     };
   }
 

@@ -1,6 +1,7 @@
 /**
  * "Nebula" preset (realtime-visualization 01): an additive radial scene in
- * bright, fully saturated color. Each band owns a visual element, so an EQ
+ * the waveform's band colors (low red core, mid green orbit, high blue
+ * sparks — waveform/styles.ts ADDITIVE_COLORS). Each band owns a visual element, so an EQ
  * kill on the mixer visibly collapses exactly one layer:
  *
  *   low  → the core: a pulsing radial bloom whose radius and brightness
@@ -15,6 +16,7 @@
  * to white-hot rather than muddying.
  */
 
+import { BAND_RGB, cssRgb } from '../style';
 import type { PresetRenderer, VisualizerFrameData, VisualizerPreset } from './types';
 
 const ORBITERS = 7;
@@ -59,9 +61,8 @@ class NebulaRenderer implements PresetRenderer {
     const coreRadius = unit * (0.06 + 0.3 * low * low + 0.06 * low);
     if (coreRadius > 1) {
       const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreRadius);
-      const coreHue = (baseHue + 330) % 360;
-      core.addColorStop(0, `hsla(${coreHue}, 100%, ${55 + 30 * low}%, ${0.55 + 0.45 * low})`);
-      core.addColorStop(0.55, `hsla(${coreHue}, 100%, 50%, ${0.35 * low})`);
+      core.addColorStop(0, cssRgb(BAND_RGB.low, 0.55 + 0.45 * low, 1 + 0.8 * low));
+      core.addColorStop(0.55, cssRgb(BAND_RGB.low, 0.35 * low));
       core.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
       ctx.fillStyle = core;
       ctx.beginPath();
@@ -79,9 +80,8 @@ class NebulaRenderer implements PresetRenderer {
       const reach = orbitReach * (1 + 0.15 * Math.sin(frame.time * 1.3 + i * 2.1));
       const x = cx + Math.cos(angle) * reach;
       const y = cy + Math.sin(angle) * reach * 0.72;
-      const hue = (baseHue + 120 + i * 12) % 360;
       const orb = ctx.createRadialGradient(x, y, 0, x, y, orbSize * 3);
-      orb.addColorStop(0, `hsla(${hue}, 100%, 60%, ${0.25 + 0.75 * mid})`);
+      orb.addColorStop(0, cssRgb(BAND_RGB.mid, 0.25 + 0.75 * mid, 0.9 + 0.4 * mid));
       orb.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
       ctx.fillStyle = orb;
       ctx.beginPath();
@@ -107,7 +107,7 @@ class NebulaRenderer implements PresetRenderer {
       spark.age += frame.dt;
       if (spark.age >= SPARK_LIFE_S) return false;
       const life = 1 - spark.age / SPARK_LIFE_S;
-      ctx.fillStyle = `hsla(${spark.hue}, 100%, ${60 + 35 * life}%, ${life})`;
+      ctx.fillStyle = cssRgb(BAND_RGB.high, life, 1 + life);
       ctx.beginPath();
       ctx.arc(spark.x, spark.y, spark.size * (1 + 2 * life), 0, Math.PI * 2);
       ctx.fill();

@@ -6,12 +6,10 @@
  */
 
 import type { BandLevels } from '../bands';
+import { BAND_RGB, cssRgb } from '../style';
 import type { PresetRenderer, VisualizerFrameData, VisualizerPreset } from './types';
 
 const SEGMENTS = 28;
-/** Segment color thresholds, as a fraction of the column. */
-const YELLOW_FROM = 0.6;
-const RED_FROM = 0.85;
 /** Peak-cap kinematic gravity, column-fractions per second² (prior art:
  * Winamp/audioMotion caps free-fall rather than decay — audioMotion's
  * default ≈3.5 screen-heights/s²). */
@@ -24,9 +22,11 @@ const LABELS: { key: keyof BandLevels; label: string }[] = [
   { key: 'high', label: 'HIGH' },
 ];
 
-function segmentColor(fraction: number, lit: boolean): string {
-  const hue = fraction >= RED_FROM ? 0 : fraction >= YELLOW_FROM ? 55 : 130;
-  return lit ? `hsl(${hue}, 100%, 50%)` : `hsla(${hue}, 100%, 50%, 0.12)`;
+function segmentColor(band: keyof BandLevels, fraction: number, lit: boolean): string {
+  // Waveform band identity: low red, mid green, high blue — segments
+  // brighten slightly toward the top of the column.
+  const rgb = BAND_RGB[band];
+  return lit ? cssRgb(rgb, 1, 0.8 + 0.5 * fraction) : cssRgb(rgb, 0.12);
 }
 
 class BarsRenderer implements PresetRenderer {
@@ -77,7 +77,7 @@ class BarsRenderer implements PresetRenderer {
       for (let s = 0; s < SEGMENTS; s++) {
         const fraction = (s + 0.5) / SEGMENTS;
         const y = top + columnHeight - (s + 1) * segmentHeight - s * segmentGap;
-        ctx.fillStyle = segmentColor(fraction, s < litCount);
+        ctx.fillStyle = segmentColor(key, fraction, s < litCount);
         ctx.fillRect(x, y, columnWidth, segmentHeight);
       }
 
@@ -92,7 +92,7 @@ class BarsRenderer implements PresetRenderer {
         }
       }
 
-      ctx.fillStyle = 'hsl(200, 100%, 60%)';
+      ctx.fillStyle = cssRgb(BAND_RGB[key], 0.9);
       ctx.font = `bold ${Math.max(14, labelBand * 0.5)}px ui-monospace, monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';

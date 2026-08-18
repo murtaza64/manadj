@@ -176,6 +176,10 @@ async function attach(win) {
   tryAttach();
 }
 
+// The visualizer child window, when open (realtime-visualization 02/03):
+// the sticky/fullscreen-on-display controls target it.
+let visualizerWindow = null;
+
 function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
@@ -207,6 +211,17 @@ function createWindow() {
       webPreferences: { backgroundThrottling: false },
     },
   }));
+  // Track the visualizer child window and make it sticky: floats above
+  // other windows and follows across Spaces (projector second-screen use).
+  win.webContents.on("did-create-window", (child, details) => {
+    if (details.frameName !== "manadj-visualizer") return;
+    visualizerWindow = child;
+    child.setAlwaysOnTop(true, "floating");
+    child.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    child.on("closed", () => {
+      if (visualizerWindow === child) visualizerWindow = null;
+    });
+  });
   // Open maximized (desktop-shell 06 — zoomed, not macOS fullscreen). The
   // persisted NORMAL bounds spread in above and getNormalBounds() below
   // ignores the maximized state, so unmaximizing (double-click the TopBar)

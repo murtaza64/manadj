@@ -46,7 +46,9 @@
 
 .visualizer-presets {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: calc(100% - 60px);
 }
 
 .visualizer-preset-btn,

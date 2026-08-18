@@ -44,6 +44,38 @@ Gathered for realtime-visualization 01 (v1 bars felt unresponsive).
   neighbors — `bars[m] = max(bars[m], bars[z] / factor^|z-m|)`,
   factor ≈ 1.5–2 — so a hit reads as a shape, not an isolated spike.
 
+## Vissonance (github.com/tariqksoliman/Vissonance) — visual style
+
+Three.js visualizer with seven presets (Iris, Barred, Fracture, HillFog,
+Silk, Siphon, Tricentric). Read for aesthetics rather than DSP:
+
+- **Loudness-driven global hue** (its signature): everything colors from
+  `h = 250 − loudness·k` — deep blue quiet → violet → magenta/red loud.
+  One coherent color story per frame beats static palettes.
+- **Depth**: perspective recession with depth-based brightness fade
+  (Iris's cone of spokes, Fracture's scrolling ribbon stack, Tricentric's
+  triangle tunnel, Siphon's interior tube).
+- **Scene motion ∝ energy**: camera roll / scroll speed rises with
+  loudness (`rotation += (avg/8192+1)² − 1`) — the frame breathes.
+- **Contrast exponents**: per-bar `pow(v/255, exp)` with exp 5 (bass) → 3
+  (treble) — heavy expansion that doubles as spectral tilt.
+- **Preset blending prior art**: butterchurn/Milkdrop "morphing" between
+  presets is render-both-and-blend over seconds, not parametric morphing.
+
+Applied: `visualizer/style.ts` (`energyOf`, `energyHue`) colors Radial,
+Mirror, Waves, Tunnel, Pulse, Trigon, Terrain, Siphon, Fracture, Silk;
+ports: Trigon ← Tricentric, Terrain ← HillFog, Fracture ← Fracture
+(mirrored floor/ceiling, loudness camera roll, gap closing), Siphon ←
+Siphon (tube of spectrum rings, INVERTED loudness breathing,
+complementary background), Silk ← Silk (band-driven drift trails, 4-way
+mirror; black stage instead of their white), Radial ← Iris
+(hub-breathing + outward fade); preset switches cross-morph additively
+over 0.8 s (VisualizerApp layer compositor). Band-identity presets
+(Bars, Spectrum, LED, Nebula) use the waveform's ADDITIVE_COLORS
+red/green/blue as low/mid/high. Plasma is the first WebGL preset
+(fullscreen fragment shader on a private GL canvas blitted into its
+layer; context-loss parking).
+
 ## Applied in manadj (visualizer/bands.ts)
 
 fftSize 2048, analyser smoothing 0; +4.5 dB/oct tilt referenced to 500 Hz
