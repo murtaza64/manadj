@@ -18,7 +18,7 @@ import { flushSync } from 'react-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { SessionRowWire, TakeRowWire } from '../api/client';
-import { DECK_COLORS, hsvGradientStops } from '../theme/deckColors';
+import { DECK_COLORS } from '../theme/deckColors';
 import { requestTakeReview } from '../capture/takeReview';
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
@@ -1069,17 +1069,13 @@ const TimelineScene = memo(function TimelineScene({
           <stop offset="12%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
           <stop offset="100%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
         </linearGradient>
-        {/* Take chip gradients: outgoing deck color → incoming deck color,
-            sampled along the HSV path (SVG's sRGB interpolation drags two
-            saturated deck colors through gray). */}
+        {/* Take chip gradients: outgoing deck color → incoming deck color. */}
         {gradientPairs.map((key) => {
           const [from, to] = key.split('-') as [CaptureDeck, CaptureDeck];
-          const stops = hsvGradientStops(DECK_COLORS[from], DECK_COLORS[to]);
           return (
             <linearGradient key={key} id={`stl-take-grad-${key}`} x1="0" y1="0" x2="1" y2="0">
-              {stops.map((c, i) => (
-                <stop key={i} offset={`${(i / (stops.length - 1)) * 100}%`} stopColor={c} />
-              ))}
+              <stop offset="0%" stopColor={DECK_COLORS[from]} />
+              <stop offset="100%" stopColor={DECK_COLORS[to]} />
             </linearGradient>
           );
         })}
