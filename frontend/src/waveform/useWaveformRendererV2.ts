@@ -48,6 +48,12 @@ interface Options {
    * motion alone would eventually wake it, but not on the first frame.
    * Ignored in `driven` mode. Defaults to false. */
   playing?: boolean;
+  /** Any-value wake (performance-hardening 01): an identity change marks
+   * the renderer dirty, repainting an idle frame immediately. For frame
+   * inputs the renderer can't see through its mutators — the live mixer
+   * channel state feeding `modulation` (performance-mode 09): a fader/EQ
+   * move on a PAUSED deck must retint the waveform now, not a poll later. */
+  wakeKey?: unknown;
 }
 
 export function useWaveformRendererV2({
@@ -65,6 +71,7 @@ export function useWaveformRendererV2({
   slot = 'full',
   active = true,
   playing = false,
+  wakeKey,
 }: Options) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WaveformRendererV2 | null>(null);
@@ -108,6 +115,11 @@ export function useWaveformRendererV2({
   useEffect(() => {
     if (!driven) rendererRef.current?.setPlaying(playing);
   }, [playing, driven, waveformData]);
+
+  // External wake (performance-hardening 01): repaint on wakeKey change.
+  useEffect(() => {
+    if (wakeKey !== undefined) rendererRef.current?.markDirty();
+  }, [wakeKey]);
 
   // Persisted Waveform style: applied live (also after re-init).
   useEffect(() => {

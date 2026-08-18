@@ -542,9 +542,11 @@ export class WaveformRendererV2 {
     this.config = config;
     this.isMinimap = config.isMinimapMode ?? false;
     this.anchor = this.isMinimap ? 'bottom' : (config.amplitudeAnchor ?? 'center');
-    // Minimap dims the body (legacy parity) so markers pop; markers stay full.
+    // Minimap dims the body (legacy parity) so markers pop; markers stay
+    // full. 0.55 → 0.65 (performance-mode 09 review): the unplayed body
+    // reads brighter while the played wash below carries the contrast.
     this.brightness =
-      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) * (this.isMinimap ? 0.55 : 1);
+      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) * (this.isMinimap ? 0.65 : 1);
     const gl = canvas.getContext('webgl2');
     if (!gl) throw new Error('WebGL 2 not supported');
     this.gl = gl;
@@ -1028,9 +1030,11 @@ export class WaveformRendererV2 {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE); // additive (legacy parity: rgb premultiplied)
 
-    // Played-portion dim (minimap, zoned-marks verdict): 0.35 black wash
-    // over the body left of the playhead. Draw order body → dim → marks,
-    // so every mark keeps full brightness in the played region. With the
+    // Played-portion dim (minimap, zoned-marks verdict): 0.55 black wash
+    // (0.35 → 0.55, performance-mode 09 review: with the brighter unplayed
+    // body the played side needed a deeper cut to read at a glance) over
+    // the body left of the playhead. Draw order body → dim → marks, so
+    // every mark keeps full brightness in the played region. With the
     // playhead inside an overlay region (active loop), the wash stops at
     // the region's left edge — about to replay, never "already heard".
     if (this.isMinimap && !opts.skipPlayhead) {
@@ -1046,7 +1050,7 @@ export class WaveformRendererV2 {
         // semi-transparent and let the page background composite through
         // (a gray wash instead of a darkening).
         gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
-        gl.uniform1f(uAlpha, 0.35);
+        gl.uniform1f(uAlpha, 0.55);
         this.drawTriangles(dimVerts, this.overlayVao!, this.overlayBuffer!);
         gl.uniform1f(uAlpha, 1);
         gl.blendFunc(gl.ONE, gl.ONE);

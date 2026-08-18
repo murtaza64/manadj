@@ -9,6 +9,7 @@ import { useHotCues } from '../hooks/useHotCues';
 import { useDrops } from '../hooks/useDrops';
 import type { PlaybackClock } from '../playback/clock';
 import type { LoopRegion } from '../playback/loop';
+import type { WaveformModulation } from '../waveform/WaveformRendererV2';
 import { PLAY_MARKER_FRACTION, stepVisibleSeconds } from '../utils/waveformZoom';
 import './Waveform.css';
 
@@ -53,6 +54,14 @@ interface WebGLWaveformProps {
    * render loop at 60fps and wakes it instantly at play. Defaults to false
    * (the loop then idles on paused, unchanged frames). */
   playing?: boolean;
+  /** Identity-change wake for frame inputs the renderer can't see (the
+   * mixer channel state feeding `modulation`) — performance-hardening 01. */
+  wakeKey?: unknown;
+  /** Per-column amplitude modulation (renderer passthrough): the editor
+   * feeds automation curves; the performance decks feed LIVE mixer state
+   * (performance-mode 09 — the modTex is resampled every frame, so a
+   * closure over the Mixer self-updates). */
+  modulation?: WaveformModulation | null;
 }
 
 export default function WebGLWaveform({
@@ -70,6 +79,8 @@ export default function WebGLWaveform({
   timeReadoutAnchor,
   timeReadoutOffset,
   playing = false,
+  wakeKey,
+  modulation = null,
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: beatgridData } = useBeatgridData(trackId);
@@ -99,6 +110,7 @@ export default function WebGLWaveform({
     dropMarks: drops,
     active: viewActive,
     playing,
+    wakeKey,
   });
 
   // Apply the shared time-zoom (also after re-init when new data lands).
@@ -107,6 +119,11 @@ export default function WebGLWaveform({
       rendererRef.current?.setVisibleSeconds(visibleSeconds);
     }
   }, [visibleSeconds, waveformData, rendererRef]);
+
+  // Modulation passthrough (also re-applied after re-init on new data).
+  useEffect(() => {
+    rendererRef.current?.setModulation(modulation);
+  }, [modulation, waveformData, rendererRef]);
 
   // Drag-to-scrub: REAL seeks per pointer move (silent — the deck pauses
   // for the drag's duration). The playhead is then always where the view
