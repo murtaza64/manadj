@@ -150,6 +150,9 @@ class FakeDeckSource implements CaptureDeckSource {
   pause(): void {
     this.mutate({ playing: false });
   }
+  setPitch(pitchPercent: number): void {
+    this.mutate({ pitchPercent });
+  }
   /** Mock playhead (sessions 10): ticks and transport events sample it. */
   private playhead = 0;
   /** Move the (mock) playhead so ticks and transport events sample it. */
@@ -995,6 +998,36 @@ describe('hot-cue stab capture (sessions 11)', () => {
       );
       expect(fed.some((e) => e.channel === d && e.action === 'previewEnd')).toBe(true);
     }
+    r.recorder.dispose();
+  });
+});
+
+describe('seed pitch (sessions 18)', () => {
+  it('the boot seed records every deck pitch — a pre-pitched deck is not silent', () => {
+    const r = rig();
+    r.decks.A.setPitch(2.4); // pitched BEFORE the recorder existed
+    r.recorder.start();
+    const pitches = r.logged.filter(
+      (e): e is Extract<CaptureEvent, { kind: 'pitch' | 'bend' }> => e.kind === 'pitch'
+    );
+    // One per deck, explicit even at 0.
+    expect(pitches.map((e) => [e.channel, e.value])).toEqual(
+      expect.arrayContaining([['A', 2.4], ['B', 0], ['C', 0], ['D', 0]])
+    );
+    r.recorder.dispose();
+  });
+
+  it('the re-seed after a machine tenure re-records pitch', () => {
+    const r = rig();
+    r.recorder.start();
+    claimAudible('editor');
+    r.decks.B.setPitch(-1.5); // moved while gated (dropped)
+    const before = r.logged.length;
+    releaseAudible('editor');
+    const pitches = r.logged
+      .slice(before)
+      .filter((e): e is Extract<CaptureEvent, { kind: 'pitch' | 'bend' }> => e.kind === 'pitch');
+    expect(pitches.some((e) => e.channel === 'B' && e.value === -1.5)).toBe(true);
     r.recorder.dispose();
   });
 });

@@ -247,6 +247,11 @@ export class CaptureRecorder {
           detail: snap.hotCuePreviewSlot ?? undefined,
         });
       }
+      // Pitch (sessions 18): a deck pitched BEFORE the seed records no
+      // pitch event otherwise — its ticks then advance at the pitched rate
+      // while replay seeds pitch 0 and drifts ~pitch% forever (the
+      // periodic-jump / jitter family's root cause). Always explicit.
+      this.feed({ t, kind: 'pitch', channel: ch, value: snap.pitchPercent });
     }
     this.lastCrossfader = this.mixer.getCrossfader();
     this.lastCrossfaderEnabled = this.mixer.getCrossfaderEnabled();

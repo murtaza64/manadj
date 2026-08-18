@@ -88,6 +88,23 @@ const CORRECTION_COOLDOWN_S = 2;
  * over this many ticks; one janky sample never seeks, a WINDOW agreeing on
  * drift past DRIFT_THRESHOLD_S does. */
 const DRIFT_WINDOW = 5;
+/** Rate inference (sessions 18): logs recorded before seed-pitch existed
+ * carry no pitch event for decks pitched pre-session — replay at nominal
+ * rate drifts ~pitch% forever and the corrector turns that into periodic
+ * audible jumps. Estimate each playing deck's TRUE rate from its recorded
+ * ticks and set the engine pitch to match: replay tempo becomes correct
+ * and the drift source disappears. */
+const RATE_WINDOW = 6;
+const RATE_MIN_SAMPLES = 4;
+/** Only adjust past this rate mismatch (0.3% ≈ 3ms/s — clock-skew scale
+ * stays untouched). */
+const RATE_ADJUST_MIN = 0.003;
+/** Samples must fit the endpoint line within this — a step offset is
+ * DRIFT for the median corrector, not a rate change. */
+const RATE_FIT_TOL_S = 0.06;
+/** Co-corrected decks skip negligible medians (a ~0 seek is a pointless
+ * ramp). */
+const COCORRECT_MIN_S = 0.02;
 /** Median drift past this corrects: well under a beat at any playable BPM
  * (one beat at 200 BPM = 0.3s), above the steady recorded-tick skew the
  * jitter fix exists for (~0.1s). */
@@ -142,6 +159,9 @@ export class SessionReplayDriver {
   private lastCorrection: Partial<Record<ChannelId, number>> = {};
   /** Recent sync-cue innovations per deck (DRIFT_WINDOW ring). */
   private syncDrift: Partial<Record<ChannelId, number[]>> = {};
+  /** Recorded (offset, playhead) samples per deck for rate inference
+   * (RATE_WINDOW ring) — reset on any recorded discontinuity. */
+  private rateBuf: Partial<Record<ChannelId, { off: number; ph: number }[]>> = {};
   /** The RECORDED mixer state (what the night's log says), composed into
    * overlay lanes — never written to base during playback. */
   private recDecks: Record<
@@ -396,6 +416,7 @@ export class SessionReplayDriver {
     this.anchors = {};
     this.lastCorrection = {};
     this.syncDrift = {};
+    this.rateBuf = {};
     for (const d of ALL_DECKS) {
       const s = seed.decks[d];
       const engine = this.engines[d];
@@ -512,6 +533,8 @@ export class SessionReplayDriver {
         const engine = this.engines[cue.channel];
         engine.seek(cue.playhead);
         engine.play();
+        this.syncDrift[cue.channel] = [];
+        delete this.rateBuf[cue.channel];
         const prev = this.anchors[cue.channel];
         this.anchors[cue.channel] = {
           offset: cue.offsetS,
@@ -525,10 +548,14 @@ export class SessionReplayDriver {
         engine.pause();
         engine.seek(cue.playhead);
         delete this.anchors[cue.channel];
+        this.syncDrift[cue.channel] = [];
+        delete this.rateBuf[cue.channel];
         break;
       }
       case 'seek': {
         this.engines[cue.channel].seek(cue.playhead);
+        this.syncDrift[cue.channel] = [];
+        delete this.rateBuf[cue.channel];
         const prev = this.anchors[cue.channel];
         if (prev) this.anchors[cue.channel] = { ...prev, offset: cue.offsetS, playhead: cue.playhead };
         break;
@@ -540,6 +567,8 @@ export class SessionReplayDriver {
         // runs uncorrected (they last seconds — drift is negligible).
         const engine = this.engines[cue.channel];
         engine.previewAt(cue.playhead);
+        this.syncDrift[cue.channel] = [];
+        delete this.rateBuf[cue.channel];
         const prev = this.anchors[cue.channel];
         this.anchors[cue.channel] = {
           offset: cue.offsetS,
@@ -554,10 +583,14 @@ export class SessionReplayDriver {
         // mid-window boundary: an already-open stab is skipped.
         this.engines[cue.channel].endPreview(cue.playhead);
         delete this.anchors[cue.channel];
+        this.syncDrift[cue.channel] = [];
+        delete this.rateBuf[cue.channel];
         break;
       }
       case 'pitch': {
         this.engines[cue.channel].setPitch(cue.value);
+        this.syncDrift[cue.channel] = [];
+        delete this.rateBuf[cue.channel];
         // Re-anchor at the expected position under the OLD rate, then run
         // at the new one (rate changes bend the expected-position line).
         const prev = this.anchors[cue.channel];
@@ -571,35 +604,75 @@ export class SessionReplayDriver {
         if (cue.trackId !== null) {
           this.loadRequested[cue.channel] = cue.trackId;
           delete this.anchors[cue.channel];
+          this.syncDrift[cue.channel] = [];
+          delete this.rateBuf[cue.channel];
           // Fire and forget — the played night's own timing gave the
           // decode time before the deck sounds; a slow load self-heals at
           // the next sync cue.
           void this.hooks.loadTrack(cue.channel, cue.trackId);
         }
         break;
-      case 'sync':
+      case 'sync': {
         // Ticks are the log's ~1 Hz truth samples, but captured on the
         // wall clock — a small steady skew from the live audio clock. Do
         // NOT re-anchor to every tick (that chased the skew and made the
-        // corrector re-seek each second — the jitter). Two tiers instead:
+        // corrector re-seek each second — the jitter). Three tiers:
+        //  - RATE inference (sessions 18): the recorded trajectory's slope
+        //    IS the deck's true rate — pitch-less legacy logs replay at
+        //    nominal otherwise and drift ~pitch% forever. Match the engine
+        //    pitch to the measured rate; the drift source disappears and
+        //    replay tempo becomes audibly correct.
         //  - GROSS divergence (> RESYNC_THRESHOLD_S): re-anchor now, the
         //    frame corrector seeks (a late load, a stalled decode).
-        //  - PERSISTENT drift: a DRIFT_WINDOW median of innovations past
-        //    DRIFT_THRESHOLD_S seeks once — real drift (accumulated bends
-        //    in the original set, engine rate imprecision) used to park in
-        //    the 0.35-0.5s deadband, audibly a beat+ out, forever.
+        //  - PERSISTENT drift: DRIFT_WINDOW median past DRIFT_THRESHOLD_S
+        //    corrects — ALL playing decks in the SAME frame (common-mode
+        //    drift corrected one deck at a time audibly broke the
+        //    beatmatch it was preserving).
+        const ticked: { d: ChannelId; ph: number }[] = [];
         for (const d of ALL_DECKS) {
           const ph = cue.playheads[d as CaptureDeck];
           if (ph === undefined) continue;
           const a = this.anchors[d];
           if (a === undefined) {
-            this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: 1 };
+            const pitch = this.engines[d].getSnapshot().pitchPercent;
+            this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: 1 + pitch / 100 };
             continue;
           }
           const snap = this.engines[d].getSnapshot();
           if (!snap.playing || snap.loadState !== 'ready') {
             this.syncDrift[d] = [];
+            delete this.rateBuf[d];
             continue;
+          }
+          // Rate inference over the RECORDED samples (engine seeks never
+          // invalidate these; recorded discontinuities reset the ring).
+          const rb = (this.rateBuf[d] ??= []);
+          rb.push({ off: cue.offsetS, ph });
+          if (rb.length > RATE_WINDOW) rb.shift();
+          if (rb.length >= RATE_MIN_SAMPLES) {
+            const first = rb[0];
+            const last = rb[rb.length - 1];
+            const dt = last.off - first.off;
+            if (dt > 0.5) {
+              const rateEst = (last.ph - first.ph) / dt;
+              const linear = rb.every(
+                (p) => Math.abs(p.ph - (first.ph + (p.off - first.off) * rateEst)) <= RATE_FIT_TOL_S
+              );
+              const engineRate = 1 + snap.pitchPercent / 100;
+              if (
+                linear &&
+                rateEst > 0.5 &&
+                rateEst < 2 &&
+                Math.abs(rateEst - engineRate) > RATE_ADJUST_MIN
+              ) {
+                const engine = this.engines[d];
+                this.self(() => engine.setPitch((rateEst - 1) * 100));
+                this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: rateEst };
+                this.syncDrift[d] = [];
+                delete this.rateBuf[d];
+                continue; // fresh basis — innovations restart next tick
+              }
+            }
           }
           const innovation = this.engines[d].getPlayhead() - ph;
           if (Math.abs(innovation) > RESYNC_THRESHOLD_S) {
@@ -610,21 +683,35 @@ export class SessionReplayDriver {
           const buf = (this.syncDrift[d] ??= []);
           buf.push(innovation);
           if (buf.length > DRIFT_WINDOW) buf.shift();
-          if (buf.length < DRIFT_WINDOW) continue;
-          const med = median(buf);
-          if (Math.abs(med) <= DRIFT_THRESHOLD_S) continue;
+          ticked.push({ d, ph });
+        }
+        // Coordinated drift correction: ANY deck's full-window median past
+        // the threshold (cooldown-gated) corrects EVERY full-window deck
+        // by its OWN median this same frame — relative phase rides through.
+        const trigger = ticked.some(({ d }) => {
+          const buf = this.syncDrift[d];
+          if (!buf || buf.length < DRIFT_WINDOW) return false;
+          if (Math.abs(median(buf)) <= DRIFT_THRESHOLD_S) return false;
           const last = this.lastCorrection[d];
-          if (last !== undefined && cue.offsetS - last < CORRECTION_COOLDOWN_S) continue;
-          this.lastCorrection[d] = cue.offsetS;
-          // Remove the MEDIAN drift (not this one sample's): trust the
-          // window, land on the log's trajectory, re-anchor there.
-          const target = this.engines[d].getPlayhead() - med;
-          this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: a.rate };
-          this.syncDrift[d] = [];
-          const engine = this.engines[d];
-          this.self(() => engine.seek(target));
+          return last === undefined || cue.offsetS - last >= CORRECTION_COOLDOWN_S;
+        });
+        if (trigger) {
+          for (const { d, ph } of ticked) {
+            const buf = this.syncDrift[d];
+            if (!buf || buf.length < DRIFT_WINDOW) continue;
+            const med = median(buf);
+            this.lastCorrection[d] = cue.offsetS;
+            this.syncDrift[d] = [];
+            const a = this.anchors[d]!;
+            this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: a.rate };
+            if (Math.abs(med) < COCORRECT_MIN_S) continue;
+            const engine = this.engines[d];
+            const target = engine.getPlayhead() - med;
+            this.self(() => engine.seek(target));
+          }
         }
         break;
+      }
     }
   }
 
