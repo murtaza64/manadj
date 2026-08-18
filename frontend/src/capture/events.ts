@@ -14,10 +14,12 @@
  */
 
 /**
- * The pair-machine channel: the phase-1 Handover detector and everything
- * downstream of a Take (its `init` snapshot, vectorization, the drafted
- * Transition) are an ordered A/B pair. A Take slice only ever contains A/B
- * events (ADR 0032 phase-1).
+ * The pair-machine ROLE channel: everything downstream of a Take (its
+ * `init` snapshot, vectorization, the drafted Transition) is an ordered
+ * pair addressed as 'A' = outgoing, 'B' = incoming — ROLES, not physical
+ * decks (ADR 0032; four-deck-performance 10/12). The detector relabels
+ * each Take slice into this frame at emit, whatever physical pair it came
+ * from; a Take slice only ever contains role-A/B events, by construction.
  */
 export type CaptureChannel = 'A' | 'B';
 
@@ -102,9 +104,11 @@ export type CaptureEvent =
   | { t: number; kind: 'tenure'; edge: 'start' | 'end'; holder: string }
   /** Synthetic slice head (never in the live stream): the detector stamps
    * the engagement-open state into every Take slice, so vectorization
-   * (issue 03) starts from known controls instead of assumed defaults —
-   * and knows which physical deck was the outgoing one. Always the A/B
-   * pair — a Take is a pair artifact (ADR 0032 phase-1). */
+   * (issue 03) starts from known controls instead of assumed defaults.
+   * ROLE-shaped since 4dp 10: `decks.A` is the outgoing deck's state,
+   * `decks.B` the incoming's, `outgoingChannel` always 'A';
+   * `physicalDecks` carries the true deck identities (absent on takes
+   * detected before 4dp 10). */
   | {
       t: number;
       kind: 'init';
@@ -112,6 +116,7 @@ export type CaptureEvent =
       decks: Record<CaptureChannel, InitDeckState>;
       crossfader: number;
       crossfaderEnabled: boolean;
+      physicalDecks?: { outgoing: CaptureDeck; incoming: CaptureDeck };
     };
 
 /** One deck's state at engagement open (init event). */
@@ -128,8 +133,10 @@ export interface InitDeckState {
 // ── Detection parameters (versioned — stamped on every Take) ────────────
 
 /** Bump whenever detection semantics or defaults change: old Takes stay
- * attributable to the detector that produced them (issue 05 tuning). */
-export const DETECTOR_VERSION = 1;
+ * attributable to the detector that produced them (issue 05 tuning).
+ * v2 (4dp 37 + 10): the >2-audible self-gate is gone and one pair machine
+ * runs per unordered physical pair, emitting role-relabeled slices. */
+export const DETECTOR_VERSION = 2;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a
@@ -164,10 +171,15 @@ export const DEFAULT_DETECTOR_PARAMS: DetectorParams = {
 // ── Detected Takes ───────────────────────────────────────────────────────
 
 /** A settled Handover, ready to persist. Times are on the capture clock;
- * the window is the engagement (glossary), the events its padded slice. */
+ * the window is the engagement (glossary), the events its padded slice —
+ * role-relabeled (outgoing='A', incoming='B'; 4dp 10). */
 export interface DetectedTake {
   outgoingTrackId: number;
   incomingTrackId: number;
+  /** The physical decks the Handover traded on (also stamped on the
+   * slice's init event, which is what persists). */
+  outgoingDeck: CaptureDeck;
+  incomingDeck: CaptureDeck;
   windowStartS: number;
   windowEndS: number;
   /** Crude v1 tiers: 0.9 blend / 0.7 hard cut / 0.5 mix ended mid-blend. */

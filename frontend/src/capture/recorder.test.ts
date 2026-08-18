@@ -278,10 +278,12 @@ describe('capture gate (ADR 0022)', () => {
     r.advance(2);
     r.mixer.setFader('A', 0);
     r.advance(HORIZON + 1);
-    // The pair machine is pairwise-local: the A→B blend settles despite C.
-    expect(r.takes).toHaveLength(1);
-    expect(r.takes[0].outgoingTrackId).toBe(1);
-    expect(r.takes[0].incomingTrackId).toBe(2);
+    // Pairwise-local machines (4dp 10/37): the A→B blend settles despite C
+    // — plus the liberal A→C sibling (C persisted through A's cessation).
+    expect(r.takes).toHaveLength(2);
+    const ab = r.takes.find((t) => t.incomingTrackId === 2)!;
+    expect(ab.outgoingTrackId).toBe(1);
+    expect(r.takes.some((t) => t.incomingTrackId === 3)).toBe(true);
     // And the log is whole — deck C's activity was NOT dropped (no deck-count
     // gating in the fed stream): its load and play both reached the sink.
     expect(

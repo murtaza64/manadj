@@ -185,7 +185,7 @@ describe('cross-cuts fold (dnb teases, double drops)', () => {
     s.at(10).play('B').fader('B', 1).at(13).fader('B', 0).advance(HORIZON + 2);
     const { state, takes } = run(s.events());
     expect(takes).toHaveLength(0);
-    expect(state.incumbent).toBe('A'); // A still owns the floor
+    expect(state.pairs.AB.incumbent).toBe('A'); // A still owns the floor
   });
 
   it('a tease that flows into the real mix is ONE Take including the tease', () => {
@@ -303,7 +303,7 @@ describe('what detection cannot see', () => {
     s.at(20).pause('A').advance(HORIZON + 1);
     const { state, takes } = run(s.events());
     expect(takes).toHaveLength(0);
-    expect(state.incumbent).toBeNull();
+    expect(state.pairs.AB.incumbent).toBeNull();
   });
 });
 
@@ -351,10 +351,16 @@ describe('the slice init head (vectorization input, issue 03)', () => {
     const head = takes[0].events[0];
     if (head.kind !== 'init') throw new Error('slice must start with init');
     expect(head.t).toBe(takes[0].windowStartS);
-    expect(head.outgoingChannel).toBe('B'); // deck-agnostic roles
-    expect(head.decks.B.trackId).toBe(2);
-    expect(head.decks.A.fader).toBe(1); // reflects the fade-in at open
+    // ROLE-shaped init (4dp 10): 'A' is always the outgoing role; the
+    // physical decks ride the stamp. This was a physical-B→A handover.
+    expect(head.outgoingChannel).toBe('A');
+    expect(head.physicalDecks).toEqual({ outgoing: 'B', incoming: 'A' });
+    expect(head.decks.A.trackId).toBe(2); // outgoing role = physical B's track
+    expect(head.decks.B.trackId).toBe(1); // incoming role = physical A's track
+    expect(head.decks.B.fader).toBe(1); // reflects the fade-in at open
     expect(head.crossfader).toBe(0);
+    expect(takes[0].outgoingDeck).toBe('B');
+    expect(takes[0].incomingDeck).toBe('A');
   });
 });
 
@@ -374,9 +380,12 @@ describe('the rolling log', () => {
 // behind the change: 101/102 real 3-audible stretches landed inside a
 // blend and destroyed its Take (docs/research/three-deck-mixing-reality.md).
 describe('third-deck audibility does not gate the pair machine (4dp 37)', () => {
-  it('emits the A→B Take with a third deck audible over the whole blend', () => {
-    // A incumbent, C audible throughout, B blends in and A fades out —
-    // the classic Handover, previously nuked by suspension.
+  it('emits the A→B Take with a third deck audible over the whole blend — plus the liberal A→C sibling', () => {
+    // A incumbent, C audible throughout, B blends in and A fades out.
+    // The AB machine settles A→B (previously nuked by suspension); the AC
+    // machine legitimately reads A-ceased-while-C-persisted as A→C too —
+    // the glossary Handover rule is per ordered pair, deliberately
+    // liberal. Grouping the siblings is 4dp 11.
     const s = script()
       .at(0)
       .load('A', 1)
@@ -389,9 +398,14 @@ describe('third-deck audibility does not gate the pair machine (4dp 37)', () => 
     s.at(10).play('B').fader('B', 1).advance(2); // A+B+C audible
     s.at(12).fader('A', 0).advance(HORIZON + 1);
     const { takes } = run(s.events());
-    expect(takes).toHaveLength(1);
-    expect(takes[0].outgoingTrackId).toBe(1);
-    expect(takes[0].incomingTrackId).toBe(2);
+    expect(takes).toHaveLength(2);
+    const ab = takes.find((t) => t.incomingTrackId === 2)!;
+    expect(ab.outgoingTrackId).toBe(1);
+    expect(ab.outgoingDeck).toBe('A');
+    expect(ab.incomingDeck).toBe('B');
+    const ac = takes.find((t) => t.incomingTrackId === 3)!;
+    expect(ac.outgoingTrackId).toBe(1);
+    expect(ac.incomingDeck).toBe('C');
   });
 
   it('a layer entering AND leaving mid-blend leaves the engagement intact', () => {
@@ -431,7 +445,7 @@ describe('third-deck audibility does not gate the pair machine (4dp 37)', () => 
     expect(state.suspended).toBe(false);
   });
 
-  it('a thru-routed audible third deck does not disturb the verdict either', () => {
+  it('a thru-routed audible third deck does not disturb the A→B verdict either', () => {
     const s = script()
       .at(0)
       .load('A', 1)
@@ -444,7 +458,9 @@ describe('third-deck audibility does not gate the pair machine (4dp 37)', () => 
       .advance(10);
     s.at(10).play('B').fader('B', 1).advance(2).at(12).fader('A', 0).advance(HORIZON + 1);
     const { takes } = run(s.events());
-    expect(takes).toHaveLength(1);
+    // A→B plus the liberal A→C sibling (C persisted through A's cessation).
+    expect(takes.some((t) => t.incomingTrackId === 2 && t.outgoingTrackId === 1)).toBe(true);
+    expect(takes).toHaveLength(2);
   });
 });
 
@@ -470,5 +486,113 @@ describe('tenure markers (ADR 0033)', () => {
     expect(takes).toHaveLength(1);
     expect(takes[0].outgoingTrackId).toBe(1);
     expect(takes[0].incomingTrackId).toBe(2);
+  });
+});
+
+// Per-pair machines beyond A/B (four-deck-performance 10): the D-era
+// patterns from docs/research/three-deck-mixing-reality.md.
+describe('pairwise machines across the four decks (4dp 10)', () => {
+  it('a clean B→D handover settles a Take with role-relabeled slice + physical stamp', () => {
+    const s = script()
+      .at(0)
+      .load('B', 5)
+      .load('D', 7)
+      .fader('D', 0)
+      .play('B')
+      .advance(10);
+    s.at(10).play('D').fader('D', 1).advance(2);
+    s.at(12).fader('B', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(5);
+    expect(takes[0].incomingTrackId).toBe(7);
+    expect(takes[0].outgoingDeck).toBe('B');
+    expect(takes[0].incomingDeck).toBe('D');
+    // The slice is role-shaped: only role channels A (=B) and B (=D).
+    const head = takes[0].events[0];
+    if (head.kind !== 'init') throw new Error('slice must start with init');
+    expect(head.physicalDecks).toEqual({ outgoing: 'B', incoming: 'D' });
+    expect(head.decks.A.trackId).toBe(5);
+    expect(head.decks.B.trackId).toBe(7);
+    for (const ev of takes[0].events) {
+      if ('channel' in ev && ev.channel !== null) {
+        expect(['A', 'B']).toContain(ev.channel);
+      }
+      if (ev.kind === 'tick') {
+        for (const ch of Object.keys(ev.playheads)) expect(['A', 'B']).toContain(ch);
+      }
+    }
+  });
+
+  it('a strict double-out (A+B → D) emits the liberal twin Takes A→D and B→D', () => {
+    const s = script()
+      .at(0)
+      .load('A', 1)
+      .load('B', 2)
+      .load('D', 7)
+      .fader('D', 0)
+      .play('A')
+      .play('B') // A + B both audible (the running double)
+      .advance(10);
+    s.at(10).play('D').fader('D', 1).advance(2); // D drops in
+    s.at(12).fader('A', 0).fader('B', 0).advance(HORIZON + 1); // both out
+    const { takes } = run(s.events());
+    const pairs = takes.map((t) => `${t.outgoingDeck}>${t.incomingDeck}`).sort();
+    expect(pairs).toContain('A>D');
+    expect(pairs).toContain('B>D');
+    for (const t of takes.filter((x) => x.incomingDeck === 'D')) {
+      expect(t.incomingTrackId).toBe(7);
+    }
+  });
+
+  it('a double collapsing back to its host emits nothing (the 76% case)', () => {
+    // A hosts; D layers in for 30s and fades back out; A plays on.
+    const s = script()
+      .at(0)
+      .load('A', 1)
+      .load('D', 7)
+      .fader('D', 0)
+      .play('A')
+      .advance(10);
+    s.at(10).play('D').fader('D', 1).advance(30);
+    s.at(40).fader('D', 0).advance(HORIZON + 2); // layer out; A persists
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(0);
+  });
+
+  it('a chained-double half-swap emits both ordered-pair verdicts (A→B and A→D)', () => {
+    // A+D running double; B drops in; A leaves — B+D double continues.
+    const s = script()
+      .at(0)
+      .load('A', 1)
+      .load('B', 2)
+      .load('D', 7)
+      .fader('B', 0)
+      .play('A')
+      .advance(5);
+    s.at(5).play('D').advance(20); // the A+D double (D default fader 1)
+    s.at(25).play('B').fader('B', 1).advance(2);
+    s.at(27).fader('A', 0).advance(HORIZON + 1); // half-swap: A out
+    const { takes } = run(s.events());
+    const pairs = takes.map((t) => `${t.outgoingDeck}>${t.incomingDeck}`).sort();
+    expect(pairs).toEqual(['A>B', 'A>D']);
+    const ad = takes.find((t) => t.incomingDeck === 'D')!;
+    expect(ad.outgoingTrackId).toBe(1);
+    expect(ad.incomingTrackId).toBe(7);
+  });
+
+  it('tenure suspends every pair machine', () => {
+    const s = script()
+      .at(0)
+      .load('B', 5)
+      .load('D', 7)
+      .fader('D', 0)
+      .play('B')
+      .advance(5);
+    s.at(5).tenure('start');
+    s.at(5).play('D').fader('D', 1).advance(2).at(7).fader('B', 0).advance(HORIZON + 1);
+    s.at(20).tenure('end');
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(0);
   });
 });
