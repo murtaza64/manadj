@@ -102,6 +102,14 @@ windows. So the gates are, in order of availability:
 22. As a developer, I want the CDJ-crash pitfalls encoded as tests (≥221-byte
     track rows, UTF-16LE alignment, rating as raw byte), so that regressions
     can't reach a booth.
+23. As a DJ, I want to import a foreign rekordbox USB into manadj — audio
+    files, playlists, hot cues, grids, keys — so that libraries prepared in
+    rekordbox (mine or another DJ's) become manadj tracks.
+24. As a DJ, I want imported tracks matched against my existing library by
+    file hash/name, so that importing a stick doesn't create duplicates.
+25. As a DJ, I want imported performance data marked with provenance and
+    never silently overwriting my own cues/grids, so that manadj stays the
+    source of truth.
 
 ## Implementation Decisions
 
@@ -170,6 +178,18 @@ windows. So the gates are, in order of availability:
   cheap, matches rekordbox's layout verbatim.
 - **UI**: device page — stick detection, playlist selection, sync button,
   task progress, verify report. Modeled after the existing sync views.
+- **Foreign-USB import**: explicit user action over the read layer. Audio
+  copied from `/Contents/` into the library through the normal Disk Import
+  path (which creates tracks and refreshes file facts); tracks matched
+  against the existing library by file hash then unique basename to avoid
+  duplicates. Mapping: PCO2/PCOB hot cues → hot cue slots (inverse cue-kind/
+  color mapping), first memory cue → main cue, PQTZ → beatgrid with origin
+  `imported`, rekordbox key → the 24-key authority, playlists → playlists
+  with play order. Positions corrected by the inverse decode offset. Foreign
+  data never silently overwrites existing manadj performance data: on
+  conflict, per-track skip-or-replace, defaulting to skip (manadj is source
+  of truth, ADR 0001); grid/key provenance recorded per the provenance
+  ladder (ADR 0024).
 
 ## Testing Decisions
 
@@ -196,11 +216,9 @@ windows. So the gates are, in order of availability:
 ## Out of Scope
 
 - OneLibrary / Device Library Plus (`exportLibrary.db`) writing.
-- Importing foreign rekordbox USBs into manadj (cues/grids/playlists →
-  manadj entities). The read layer lands; the import mapping is a separate
-  future PRD. Read-back is verification-only here.
 - Loops and memory cues as first-class manadj entities (no such entities;
-  memory cues exist only as hot-cue mirrors).
+  memory cues exist only as hot-cue mirrors; on import, only the first
+  memory cue survives, as the main cue).
 - Artwork export (no artwork entity; would need tag extraction — future).
 - `exportExt.pdb` My Tags from manadj Tags (noted as follow-up).
 - PSSI phrase analysis (manadj has structure analysis, but PSSI is
