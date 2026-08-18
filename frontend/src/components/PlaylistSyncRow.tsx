@@ -1,6 +1,6 @@
 import type { UnifiedPlaylist } from '../types';
-import type { PlaylistStatus } from './PlaylistStatusBadge';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
+import { playlistStatus } from './playlistStatus';
 import './PlaylistSyncRow.css';
 
 interface PlaylistSyncRowProps {
@@ -8,19 +8,8 @@ interface PlaylistSyncRowProps {
   onClick: (playlistName: string) => void;
 }
 
-function getPlaylistStatus(playlist: UnifiedPlaylist): PlaylistStatus {
-  const sources = [playlist.manadj, playlist.engine, playlist.rekordbox];
-  const nonNullSources = sources.filter(s => s !== null);
-
-  // Only one source = partial
-  if (nonNullSources.length === 1) return 'partial';
-
-  // Multiple sources - check if synced
-  return playlist.synced ? 'synced' : 'unsynced';
-}
-
 export function PlaylistSyncRow({ playlist, onClick }: PlaylistSyncRowProps) {
-  const status = getPlaylistStatus(playlist);
+  const status = playlistStatus(playlist);
 
   return (
     <tr

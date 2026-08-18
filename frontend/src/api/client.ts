@@ -10,6 +10,9 @@ import type {
   PlaylistTrackAddResult,
   UnifiedPlaylist,
   PlaylistSyncStats,
+  PlaylistExportTarget,
+  PlaylistFullExportPreview,
+  PlaylistFullExportReport,
   UnifiedTagView,
   TagSyncStats,
   TagSyncRequest,
@@ -684,6 +687,37 @@ export const api = {
       if (!res.ok) {
         const error = await res.json();
         throw new Error(detailToMessage(error.detail, 'Failed to sync playlist'));
+      }
+      return res.json();
+    },
+
+    exportPerformance: async (
+      playlistName: string,
+      targets: PlaylistExportTarget[],
+    ): Promise<PlaylistFullExportReport> => {
+      const encodedName = encodeURIComponent(playlistName);
+      const res = await fetch(`${API_BASE}/sync/export/playlists/${encodedName}/performance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to export playlist performance data'));
+      }
+      return res.json();
+    },
+
+    previewExportPerformance: async (
+      playlistName: string,
+    ): Promise<PlaylistFullExportPreview> => {
+      const encodedName = encodeURIComponent(playlistName);
+      const res = await fetch(
+        `${API_BASE}/sync/export/playlists/${encodedName}/performance/preview`,
+      );
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to preview playlist export'));
       }
       return res.json();
     },

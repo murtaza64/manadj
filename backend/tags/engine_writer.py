@@ -103,6 +103,66 @@ class EngineTagWriter:
 
         return stats
 
+    def sync_scoped_tag_assignments(self, track_ids: list[int]) -> None:
+        """Replace tag assignments for only the selected Library tracks.
+
+        Existing Engine assignments for every other track are preserved.
+        """
+        from enginedj.models.playlist_entity import PlaylistEntity
+
+        categories = get_tag_categories(self.manadj_session)
+        scoped_tracks = self.manadj_session.query(Track).filter(
+            Track.id.in_(track_ids), Track.is_active
+        ).all()
+        with self.engine_db.session_m_write() as edj_session:
+            edj_tracks = edj_session.query(EDJTrack).all()
+            edj_index = TrackIndex.build(edj_tracks, edj_path)
+            scoped_pairs = [
+                (track, edj_index.match(track.filename)) for track in scoped_tracks
+            ]
+            scoped_engine_ids = {
+                edj_track.id for _track, edj_track in scoped_pairs if edj_track is not None
+            }
+            info = edj_session.query(EDJInformation).first()
+            db_uuid = info.uuid if info else ""
+            root_id = self._find_or_create_root(
+                edj_session, db_uuid, False, False, TagSyncStats()
+            )
+
+            for category in categories:
+                for tag in get_tags_by_category(self.manadj_session, category.id):
+                    existing = find_playlist_by_title_and_parent(
+                        edj_session, tag.name, root_id
+                    )
+                    existing_tracks = []
+                    if existing is not None:
+                        existing_tracks = [
+                            entity.track
+                            for entity in (
+                                edj_session.query(PlaylistEntity)
+                                .filter(PlaylistEntity.listId == existing.id)
+                                .order_by(PlaylistEntity.id)
+                                .all()
+                            )
+                            if entity.track is not None
+                            and entity.track.id not in scoped_engine_ids
+                        ]
+                    tagged_ids = {tt.track_id for tt in tag.track_tags}
+                    desired = [
+                        edj_track
+                        for track, edj_track in scoped_pairs
+                        if edj_track is not None and track.id in tagged_ids
+                    ]
+                    if existing is None and not desired:
+                        continue
+                    create_or_update_playlist(
+                        edj_session,
+                        title=tag.name,
+                        parent_id=root_id,
+                        edj_tracks=[*existing_tracks, *desired],
+                        db_uuid=db_uuid,
+                    )
+
     def _export_energy_ratings(
         self,
         edj_session,

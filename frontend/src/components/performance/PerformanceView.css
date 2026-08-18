@@ -84,12 +84,17 @@
 .perf-wave-row.focused::after { opacity: 1; }
 
 .perf-wave-row .waveform-container {
-  transition: opacity 120ms ease, filter 120ms ease;
+  transition: opacity 120ms ease;
 }
 
+/* De-emphasis is OPACITY ONLY — never `filter` (or `backdrop-filter`) over
+   an element containing canvases. A CSS filter over canvas layers makes the
+   macOS compositor leak ~2 IOAccelerator VM regions/sec for the REST OF THE
+   DOCUMENT'S LIFE (sticky even after the filter is removed) until the
+   renderer dies at ~265k regions — the 1-7-day SIGTRAP crashes
+   (stability/01, slope-bisected in a lane; opacity measured clean). */
 .perf-wave-row:not(.focused) .waveform-container {
-  opacity: 0.72;
-  filter: saturate(0.6);
+  opacity: 0.6;
 }
 
 /* ── Mixer strip: X-FADER centered, MASTER on the right ───────── */

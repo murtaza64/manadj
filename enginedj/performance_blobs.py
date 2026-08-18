@@ -39,6 +39,11 @@ def q_uncompress(blob: bytes) -> bytes:
     return data
 
 
+def q_compress(data: bytes) -> bytes:
+    """Apply Qt's qCompress framing."""
+    return struct.pack(">I", len(data)) + zlib.compress(data)
+
+
 class _Reader:
     def __init__(self, data: bytes):
         self.data = data
@@ -69,6 +74,7 @@ class GridMarker:
     sample_offset: float
     beat_index: int
     beats_to_next: int
+    unknown: int = 0
 
 
 @dataclass
@@ -77,6 +83,8 @@ class BeatData:
     track_length_samples: float
     default_grid: list[GridMarker]
     adjusted_grid: list[GridMarker]
+    is_set: bool = True
+    tail: bytes = b""
 
 
 @dataclass
@@ -93,6 +101,15 @@ class QuickCues:
     main_cue_samples: float
     main_cue_overridden: bool
     default_cue_samples: float
+    slot_count: int = 8
+
+
+@dataclass
+class TrackData:
+    sample_rate: float
+    track_length_samples: int
+    key: int
+    loudness: list[float]
 
 
 def parse_beat_data(blob: bytes) -> BeatData:
@@ -116,13 +133,31 @@ def parse_beat_data(blob: bytes) -> BeatData:
             offset = float(r.read("<d"))
             index = int(r.read("<q"))
             beats_to_next = int(r.read("<I"))
-            r.read("<I")  # unknown field
-            markers.append(GridMarker(offset, index, beats_to_next))
+            unknown = int(r.read("<I"))
+            markers.append(GridMarker(offset, index, beats_to_next, unknown))
         return markers
 
     default_grid = read_grid()
     adjusted_grid = read_grid()
-    return BeatData(sample_rate, track_length, default_grid, adjusted_grid)
+    if r.remaining not in (0, 9):
+        raise BlobParseError(f"unexpected beat data tail ({r.remaining} bytes)")
+    tail = r.read_bytes(r.remaining)
+    return BeatData(sample_rate, track_length, default_grid, adjusted_grid, True, tail)
+
+
+def encode_beat_data(data: BeatData) -> bytes:
+    body = struct.pack(">ddB", data.sample_rate, data.track_length_samples, int(data.is_set))
+    for grid in (data.default_grid, data.adjusted_grid):
+        body += struct.pack(">q", len(grid))
+        for marker in grid:
+            body += struct.pack(
+                "<dqII",
+                marker.sample_offset,
+                marker.beat_index,
+                marker.beats_to_next,
+                marker.unknown,
+            )
+    return q_compress(body + data.tail)
 
 
 def parse_quick_cues(blob: bytes) -> QuickCues:
@@ -143,4 +178,43 @@ def parse_quick_cues(blob: bytes) -> QuickCues:
     main_cue = float(r.read(">d"))
     overridden = bool(r.read("B"))
     default_cue = float(r.read(">d"))
-    return QuickCues(cues, main_cue, overridden, default_cue)
+    return QuickCues(cues, main_cue, overridden, default_cue, count)
+
+
+def encode_quick_cues(data: QuickCues) -> bytes:
+    by_slot = {cue.slot: cue for cue in data.hot_cues}
+    body = struct.pack(">q", data.slot_count)
+    for slot in range(data.slot_count):
+        cue = by_slot.get(slot)
+        if cue is None:
+            label = b""
+            position = -1.0
+            color = bytes((255, 0, 0, 0))
+        else:
+            label = cue.label.encode("utf-8")
+            if len(label) > 255:
+                raise ValueError("Engine hot cue labels are limited to 255 UTF-8 bytes")
+            position = cue.sample_offset
+            rgb = cue.color_hex.removeprefix("#")
+            if len(rgb) != 6:
+                raise ValueError(f"invalid cue color {cue.color_hex!r}")
+            color = bytes.fromhex(f"ff{rgb}")
+        body += bytes((len(label),)) + label + struct.pack(">d", position) + color
+    body += struct.pack(">dB", data.main_cue_samples, int(data.main_cue_overridden))
+    body += struct.pack(">d", data.default_cue_samples)
+    return q_compress(body)
+
+
+def parse_track_data(blob: bytes) -> TrackData:
+    raw = q_uncompress(blob)
+    if len(raw) not in (44, 68):
+        raise BlobParseError(f"trackData length {len(raw)} not in (44, 68)")
+    sample_rate, length_samples, key = struct.unpack_from(">dQI", raw)
+    loudness = list(struct.unpack_from(f">{(len(raw) - 20) // 8}d", raw, 20))
+    return TrackData(sample_rate, length_samples, key, loudness)
+
+
+def encode_track_data(data: TrackData) -> bytes:
+    raw = struct.pack(">dQI", data.sample_rate, data.track_length_samples, data.key)
+    raw += struct.pack(f">{len(data.loudness)}d", *data.loudness)
+    return q_compress(raw)

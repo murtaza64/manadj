@@ -47,21 +47,3 @@
 .status-cell {
   padding: 4px 12px;
 }
-
-/* Status Badge */
-.status-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.status-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.status-label {
-  font-size: 13px;
-  color: var(--text);
-}

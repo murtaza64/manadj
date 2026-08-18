@@ -15,7 +15,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.tags.engine_writer import EngineTagWriter
+from backend.models import Tag, TagCategory, TrackTag
 from enginedj.base import Base as EngineBase
+from enginedj.models.playlist import Playlist
+from enginedj.models.playlist_entity import PlaylistEntity
 from enginedj.models.track import Track as EDJTrack
 
 
@@ -157,3 +160,36 @@ class TestEnergyRatingExport:
         assert energy_diverged()
         run_export(db, edb)
         assert not energy_diverged()
+
+
+def test_scoped_tags_leave_nonmember_assignments_untouched(db, make_track) -> None:
+    outside = make_track(filename="/m/outside.mp3")
+    inside = make_track(filename="/m/inside.mp3")
+    category = TagCategory(name="Genre")
+    db.add(category)
+    db.flush()
+    tag = Tag(category_id=category.id, name="Jungle")
+    db.add(tag)
+    db.flush()
+    db.add_all([
+        TrackTag(track_id=outside.id, tag_id=tag.id),
+        TrackTag(track_id=inside.id, tag_id=tag.id),
+    ])
+    db.commit()
+    edb = InMemoryEngineDB()
+    make_edj_track(edb, "/m/outside.mp3")
+    make_edj_track(edb, "/m/inside.mp3")
+    writer = EngineTagWriter(db, edb)
+    writer.sync_scoped_tag_assignments([outside.id, inside.id])
+
+    db.query(TrackTag).filter_by(track_id=inside.id, tag_id=tag.id).delete()
+    db.commit()
+    writer.sync_scoped_tag_assignments([inside.id])
+
+    with edb.session_m() as session:
+        playlist = session.query(Playlist).filter_by(title="Jungle").one()
+        filenames = {
+            entity.track.filename
+            for entity in session.query(PlaylistEntity).filter_by(listId=playlist.id).all()
+        }
+    assert filenames == {"outside.mp3"}
