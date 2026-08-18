@@ -117,7 +117,12 @@ interface ChannelShape {
   pfl: boolean;
 }
 
-type LaneShape = { fader: number; eq: { low: number; mid: number; high: number }; filter: number };
+type LaneShape = {
+  fader: number;
+  trim?: number;
+  eq: { low: number; mid: number; high: number };
+  filter: number;
+};
 
 class FakeMixer {
   /** The automation overlay (null = disengaged). Writes never notify. */
@@ -768,5 +773,85 @@ describe('SessionReplayDriver — status callbacks (playhead desync fix)', () =>
     expect(r.statuses.filter((s) => s === 'playing').length).toBeGreaterThanOrEqual(2);
     expect(r.driver.nowT()).not.toBeNull();
     r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — steady playback is left alone (jitter fix)', () => {
+  it('small tick-vs-clock skew never triggers a corrective seek', async () => {
+    const events: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      // Recorded ticks lag the true clock by ~0.1s each (wall-clock skew).
+      { t: 3, kind: 'tick', playheads: { A: 50.9 } },
+      { t: 4, kind: 'tick', playheads: { A: 51.8 } },
+      { t: 5, kind: 'tick', playheads: { A: 52.7 } },
+      { t: 6, kind: 'tick', playheads: { A: 53.6 } },
+      { t: 7, kind: 'tick', playheads: { A: 54.5 } },
+    ];
+    const r = rig(planFor(events, 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    // Advance across every tick; the engine plays at true rate. A skew of
+    // ~0.1-0.4s stays under the 0.5s resync threshold → zero seeks.
+    for (let i = 0; i < 5; i++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — trim playback (sessions 15)', () => {
+  /** A performance trim ride: play, then duck the trim, then restore. */
+  function trimRideLog(): CaptureEvent[] {
+    return [
+      ...seedEvents(0),
+      { t: 0.5, kind: 'control', control: 'trim', channel: 'A', value: 0.6 },
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 5, kind: 'control', control: 'trim', channel: 'A', value: 0.2 }, // the duck
+      { t: 7, kind: 'control', control: 'trim', channel: 'A', value: 0.6 }, // restore
+      { t: 9, kind: 'transport', channel: 'A', action: 'pause', playhead: 57 },
+      { t: 10, kind: 'tick', playheads: {} },
+    ];
+  }
+
+  it('seeds the recorded trim into the overlay lane; base trim stays live', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    r.mixer.channels.A = { ...r.mixer.channels.A, trim: 0.9 }; // the live user's staging
+    await r.driver.start();
+    expect(r.mixer.automation?.A?.trim).toBe(0.6); // recorded, on the lane
+    expect(r.mixer.channels.A.trim).toBe(0.9); // base untouched
+    r.driver.stop();
+  });
+
+  it('replays the trim duck and restore at their cue offsets', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    expect(r.mixer.automation?.A?.trim).toBe(0.6);
+    r.advance(2.5); // past t=5
+    expect(r.mixer.automation?.A?.trim).toBe(0.2); // the duck landed
+    r.advance(2); // past t=7
+    expect(r.mixer.automation?.A?.trim).toBe(0.6); // restored
+    r.driver.stop();
+  });
+
+  it('a takeover lands the lane trim in base — no gain jump', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    r.advance(2.5); // the duck (0.2) is the sounding trim
+    r.engines.A.humanPause(); // manual gesture → takeover
+    expect(r.stops).toEqual(['takeover']);
+    expect(r.mixer.channels.A.trim).toBe(0.2); // base synced to the sound
+    expect(audibleHolder()).toBe('shared');
+  });
+
+  it('a live trim move during replay is a takeover (unchanged semantics)', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    r.mixer.setTrim('A', 0.8); // human reaches for the knob
+    expect(r.stops).toEqual(['takeover']);
+    // The human's own gesture wins: their trim value survives the sync.
+    expect(r.mixer.channels.A.trim).toBe(0.8);
   });
 });
