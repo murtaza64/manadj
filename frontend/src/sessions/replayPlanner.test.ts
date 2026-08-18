@@ -238,3 +238,58 @@ describe('planReplay — four-deck parity (sessions 09)', () => {
     expect(sync).toMatchObject({ playheads: { C: 98.25, D: 35.5 } });
   });
 });
+
+describe('planReplay — stabs (sessions 12)', () => {
+  it('preview edges become preview cues, not seeks', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'C', trackId: 33, bpm: 140 },
+      { t: 10, kind: 'transport', channel: 'C', action: 'previewStart', playhead: 64, detail: 3 },
+      { t: 11, kind: 'tick', playheads: { C: 65 } },
+      { t: 12, kind: 'transport', channel: 'C', action: 'previewEnd', playhead: 64 },
+    ];
+    const res = planReplay(events, 5);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const previews = res.plan.cues.filter(
+      (c): c is Extract<ReplayCue, { kind: 'previewStart' | 'previewEnd' }> =>
+        c.kind === 'previewStart' || c.kind === 'previewEnd'
+    );
+    expect(previews).toEqual([
+      { offsetS: 5, kind: 'previewStart', channel: 'C', playhead: 64 },
+      { offsetS: 7, kind: 'previewEnd', channel: 'C', playhead: 64 },
+    ]);
+    // No seek cues were fabricated from the preview edges.
+    expect(res.plan.cues.filter((c) => c.kind === 'seek')).toEqual([]);
+  });
+
+  it('a stab-only window is audible (no nothing-loaded refusal)', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 10, kind: 'transport', channel: 'A', action: 'previewStart', playhead: 30 },
+      { t: 12, kind: 'transport', channel: 'A', action: 'previewEnd', playhead: 30 },
+    ];
+    const res = planReplay(events, 5);
+    expect(res.ok).toBe(true);
+  });
+
+  it('a window opening mid-stab carries only the dangling previewEnd (v1 skip boundary)', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 100 },
+      { t: 10, kind: 'transport', channel: 'B', action: 'previewStart', playhead: 30 },
+      { t: 14, kind: 'transport', channel: 'B', action: 'previewEnd', playhead: 30 },
+    ];
+    const res = planReplay(events, 12); // inside the stab
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const previews = res.plan.cues.filter(
+      (c) => c.kind === 'previewStart' || c.kind === 'previewEnd'
+    );
+    expect(previews).toEqual([{ offsetS: 2, kind: 'previewEnd', channel: 'B', playhead: 30 }]);
+    // The engine no-ops a release with no preview running — the stab is
+    // skipped, the deck stays as seeded.
+  });
+});

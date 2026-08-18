@@ -73,6 +73,9 @@ import {
 import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
+import { PlaylistFullExportModal } from './PlaylistFullExportModal';
+import { PlaylistStatusBadge } from './PlaylistStatusBadge';
+import { playlistStatus } from './playlistStatus';
 import {
   PLAY_ORDER_SORT,
   isPlayOrderSort,
@@ -137,6 +140,7 @@ export default function Library({
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(
     () => browseSession().playlistId
   );
+  const [playlistExportOpen, setPlaylistExportOpen] = useState(false);
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
     getSelectedSessionUuid()
@@ -367,6 +371,14 @@ export default function Library({
     enabled: selectedView === 'playlist' && selectedPlaylistId !== null,
     placeholderData: (previousData) => previousData,
   });
+  const { data: unifiedPlaylists } = useQuery({
+    queryKey: ['playlistSync'],
+    queryFn: api.playlistSync.getUnified,
+    enabled: selectedView === 'playlist' && selectedPlaylistId !== null,
+  });
+  const unifiedPlaylist = unifiedPlaylists?.find(
+    playlist => playlist.name === playlistData?.name
+  );
 
   // Playlist-view sort (playlist-editing 04): client-side and view-only —
   // it never rewrites Play order. Default (and reset on playlist switch)
@@ -1173,7 +1185,7 @@ export default function Library({
           overflow: 'hidden'
         }}>
           {/* Playlist header strip: name + split-view toggle (playlist view only) */}
-          {selectedView === 'playlist' && !browseOnly && (
+          {selectedView === 'playlist' && (
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -1182,26 +1194,44 @@ export default function Library({
               borderBottom: '1px solid var(--surface0)',
               background: 'var(--crust)',
             }}>
-              <span style={{ fontSize: '13px', color: 'var(--text)' }}>
-                {playlistData?.name ?? 'Playlist'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text)' }}>
+                  {playlistData?.name ?? 'Playlist'}
+                </span>
                 <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>
                   {playlistData?.tracks?.length ?? 0} tracks
                 </span>
-              </span>
-              <button
-                onClick={() => setIsSplitViewOpen((v) => !v)}
-                style={{
-                  padding: '2px 10px',
-                  background: splitView ? 'var(--blue)' : 'var(--surface0)',
-                  color: splitView ? 'var(--base)' : 'var(--text)',
-                  border: '1px solid var(--surface1)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                }}
-              >
-                Split view
-              </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {unifiedPlaylist && (
+                  <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
+                )}
+                <button
+                  className="playlist-export-submit"
+                  onClick={() => setPlaylistExportOpen(true)}
+                  disabled={!playlistData?.name}
+                  aria-label="Open playlist sync and export"
+                  style={{ padding: '2px 10px' }}
+                >
+                  Sync / Export
+                </button>
+                {!browseOnly && (
+                  <button
+                    onClick={() => setIsSplitViewOpen((v) => !v)}
+                    style={{
+                      padding: '2px 10px',
+                      background: splitView ? 'var(--blue)' : 'var(--surface0)',
+                      color: splitView ? 'var(--base)' : 'var(--text)',
+                      border: '1px solid var(--surface1)',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                    }}
+                  >
+                    Split view
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -1397,6 +1427,12 @@ export default function Library({
 
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
+      )}
+      {playlistExportOpen && playlistData?.name && (
+        <PlaylistFullExportModal
+          playlistName={playlistData.name}
+          onClose={() => setPlaylistExportOpen(false)}
+        />
       )}
     </div>
     </>

@@ -238,6 +238,51 @@ export interface SyncPlaylistRequest {
   dry_run: boolean;
 }
 
+export type PlaylistExportTarget = 'rekordbox' | 'engine';
+
+export interface PlaylistExportTrackReport {
+  track_id: number;
+  title: string | null;
+  status: 'exported' | 'skipped' | 'failed';
+  fields: Record<string, string>;
+  reason: string | null;
+}
+
+export interface PlaylistExportTargetReport {
+  target: PlaylistExportTarget;
+  status: 'exported' | 'partial' | 'failed';
+  playlist_created: boolean;
+  tracks_total: number;
+  tracks_exported: number;
+  tracks_skipped: number;
+  tracks_failed: number;
+  tracks: PlaylistExportTrackReport[];
+  error?: string;
+}
+
+export interface PlaylistFullExportReport {
+  playlist_name: string;
+  results: PlaylistExportTargetReport[];
+}
+
+export interface PlaylistExportTargetPreview {
+  target: PlaylistExportTarget;
+  available: boolean;
+  error?: string;
+  playlist_exists?: boolean;
+  tracks_total?: number;
+  tracks_matched?: number;
+  tracks_to_add?: number;
+  tracks_to_remove?: number;
+  tracks_moved?: number;
+  unmatched?: string[];
+}
+
+export interface PlaylistFullExportPreview {
+  playlist_name: string;
+  previews: PlaylistExportTargetPreview[];
+}
+
 export interface TrackDiscrepancy {
   filename: string;
   title?: string | null;

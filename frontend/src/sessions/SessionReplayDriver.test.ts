@@ -19,10 +19,13 @@ import type { ReplayStopReason } from './SessionReplayDriver';
 class FakeEngine {
   trackId: number | null = null;
   playing = false;
+  previewing = false;
   playhead = 0;
   playheadAt = 0;
   pitchPercent = 0;
   seeks: number[] = [];
+  /** Machine preview calls (sessions 12): what the driver executed. */
+  previews: ({ kind: 'start'; at: number } | { kind: 'end'; returnTo: number })[] = [];
   private subs = new Set<() => void>();
   private taps = new Set<() => void>();
   private readonly clock: () => number;
@@ -39,7 +42,7 @@ class FakeEngine {
       duration: 600,
       pitchPercent: this.pitchPercent,
       bendPercent: 0,
-      previewing: false,
+      previewing: this.previewing,
       hotCuePreviewSlot: null,
       keyLock: true,
     } as ReturnType<DeckEngine['getSnapshot']>;
@@ -73,6 +76,31 @@ class FakeEngine {
 
   setPitch(p: number): void {
     this.pitchPercent = p;
+    this.emit();
+  }
+
+  /** Machine-grade preview entry point (sessions 12) — real-engine
+   * semantics: no-op while playing or already previewing; release no-ops
+   * unless a preview runs (the mid-window skip boundary). */
+  previewAt(at: number): void {
+    if (this.playing || this.previewing) return;
+    this.previews.push({ kind: 'start', at });
+    this.previewing = true;
+    this.playhead = at;
+    this.playheadAt = this.clock();
+    this.emit();
+  }
+  endPreview(returnTo: number): void {
+    if (!this.previewing) return;
+    this.previews.push({ kind: 'end', returnTo });
+    this.previewing = false;
+    this.playhead = returnTo;
+    this.emit();
+  }
+
+  /** A HUMAN stab (outside any driver call): previewing flips. */
+  humanStab(): void {
+    this.previewing = true;
     this.emit();
   }
 
@@ -117,7 +145,12 @@ interface ChannelShape {
   pfl: boolean;
 }
 
-type LaneShape = { fader: number; eq: { low: number; mid: number; high: number }; filter: number };
+type LaneShape = {
+  fader: number;
+  trim?: number;
+  eq: { low: number; mid: number; high: number };
+  filter: number;
+};
 
 class FakeMixer {
   /** The automation overlay (null = disengaged). Writes never notify. */
@@ -714,6 +747,64 @@ describe('SessionReplayDriver — Conductor protocol parity', () => {
   });
 });
 
+describe('SessionReplayDriver — stab replay (sessions 12)', () => {
+  function stabLog(): CaptureEvent[] {
+    return [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 1.5, kind: 'load', channel: 'C', trackId: 33, bpm: 140 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 6, kind: 'transport', channel: 'C', action: 'previewStart', playhead: 64, detail: 3 },
+      { t: 7, kind: 'tick', playheads: { A: 55, C: 65 } },
+      { t: 8, kind: 'transport', channel: 'C', action: 'previewEnd', playhead: 64 },
+      { t: 10, kind: 'tick', playheads: { A: 58 } },
+    ];
+  }
+
+  it('executes a stab audibly on the original deck via the preview entry point', async () => {
+    const r = rig(planFor(stabLog(), 4));
+    await r.driver.start();
+    expect(r.engines.C.previews).toEqual([]);
+    // offset 2 (t=6): the stab launches on C — exact position, previewing.
+    r.advance(2.0);
+    expect(r.engines.C.previews).toEqual([{ kind: 'start', at: 64 }]);
+    expect(r.engines.C.previewing).toBe(true);
+    expect(r.engines.C.playing).toBe(false);
+    // offset 4 (t=8): released — stopped back at the recorded return.
+    r.advance(2.0);
+    expect(r.engines.C.previews).toEqual([
+      { kind: 'start', at: 64 },
+      { kind: 'end', returnTo: 64 },
+    ]);
+    expect(r.engines.C.previewing).toBe(false);
+    expect(r.engines.C.playhead).toBe(64);
+    // The driver's own preview gestures never tripped the watchers.
+    expect(r.stops).toEqual([]);
+    r.driver.stop();
+  });
+
+  it('a HUMAN stab mid-replay is a takeover (previewing flip outside self-ops)', async () => {
+    const r = rig(planFor(stabLog(), 4));
+    await r.driver.start();
+    r.engines.B.humanStab();
+    expect(r.stops).toEqual(['takeover']);
+    expect(audibleHolder()).toBe('shared');
+  });
+
+  it('a window opening mid-stab skips it (dangling previewEnd no-ops)', async () => {
+    const r = rig(planFor(stabLog(), 7)); // inside the stab
+    await r.driver.start();
+    // C seeds as a paused deck (previewing is not modeled in seeds — v1
+    // boundary); the dangling previewEnd cue at offset 1 no-ops.
+    r.advance(1.0);
+    expect(r.engines.C.previews).toEqual([]);
+    expect(r.engines.C.previewing).toBe(false);
+    expect(r.stops).toEqual([]);
+    r.driver.stop();
+  });
+});
+
 describe('SessionReplayDriver — status callbacks (playhead desync fix)', () => {
   function rigWithStatus(plan: ReplayPlan) {
     const clock = { t: 100 };
@@ -767,6 +858,156 @@ describe('SessionReplayDriver — status callbacks (playhead desync fix)', () =>
     expect(r.stops).toEqual([]);
     expect(r.statuses.filter((s) => s === 'playing').length).toBeGreaterThanOrEqual(2);
     expect(r.driver.nowT()).not.toBeNull();
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — steady playback is left alone (jitter fix)', () => {
+  it('small tick-vs-clock skew never triggers a corrective seek', async () => {
+    // A STEADY ~0.1s recorded-tick skew (wall-clock lag, constant): the
+    // stream the jitter fix protects. NOTE the original fixture here
+    // accidentally encoded GROWING drift (0.1s per tick) — that is real
+    // desync and the persistent-drift corrector now fixes it (see the
+    // deadband-regression suite); constant skew stays untouched.
+    const events: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 50.9 } },
+      { t: 4, kind: 'tick', playheads: { A: 51.9 } },
+      { t: 5, kind: 'tick', playheads: { A: 52.9 } },
+      { t: 6, kind: 'tick', playheads: { A: 53.9 } },
+      { t: 7, kind: 'tick', playheads: { A: 54.9 } },
+    ];
+    const r = rig(planFor(events, 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    for (let i = 0; i < 5; i++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — trim playback (sessions 15)', () => {
+  /** A performance trim ride: play, then duck the trim, then restore. */
+  function trimRideLog(): CaptureEvent[] {
+    return [
+      ...seedEvents(0),
+      { t: 0.5, kind: 'control', control: 'trim', channel: 'A', value: 0.6 },
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 5, kind: 'control', control: 'trim', channel: 'A', value: 0.2 }, // the duck
+      { t: 7, kind: 'control', control: 'trim', channel: 'A', value: 0.6 }, // restore
+      { t: 9, kind: 'transport', channel: 'A', action: 'pause', playhead: 57 },
+      { t: 10, kind: 'tick', playheads: {} },
+    ];
+  }
+
+  it('seeds the recorded trim into the overlay lane; base trim stays live', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    r.mixer.channels.A = { ...r.mixer.channels.A, trim: 0.9 }; // the live user's staging
+    await r.driver.start();
+    expect(r.mixer.automation?.A?.trim).toBe(0.6); // recorded, on the lane
+    expect(r.mixer.channels.A.trim).toBe(0.9); // base untouched
+    r.driver.stop();
+  });
+
+  it('replays the trim duck and restore at their cue offsets', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    expect(r.mixer.automation?.A?.trim).toBe(0.6);
+    r.advance(2.5); // past t=5
+    expect(r.mixer.automation?.A?.trim).toBe(0.2); // the duck landed
+    r.advance(2); // past t=7
+    expect(r.mixer.automation?.A?.trim).toBe(0.6); // restored
+    r.driver.stop();
+  });
+
+  it('a takeover lands the lane trim in base — no gain jump', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    r.advance(2.5); // the duck (0.2) is the sounding trim
+    r.engines.A.humanPause(); // manual gesture → takeover
+    expect(r.stops).toEqual(['takeover']);
+    expect(r.mixer.channels.A.trim).toBe(0.2); // base synced to the sound
+    expect(audibleHolder()).toBe('shared');
+  });
+
+  it('a live trim move during replay is a takeover (unchanged semantics)', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    r.mixer.setTrim('A', 0.8); // human reaches for the knob
+    expect(r.stops).toEqual(['takeover']);
+    // The human's own gesture wins: their trim value survives the sync.
+    expect(r.mixer.channels.A.trim).toBe(0.8);
+  });
+});
+
+describe('SessionReplayDriver — persistent drift correction (deadband regression)', () => {
+  /** A log whose recorded playheads advance SLOWER than the replay engine
+   * will (0.96 track-sec per wall-sec): the original performer was riding
+   * pitch bends the log does not replay (clock-rate skew presents the
+   * same way, slower). Engine-vs-record drift grows ~0.04s per tick —
+   * real, persistent, and (pre-fix) parked forever in the sub-0.5s
+   * deadband: over a beat out at 174 BPM by t≈9. */
+  function driftLog(n = 30): CaptureEvent[] {
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= n; k++) {
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k * 0.96 } });
+    }
+    return evs;
+  }
+
+  it('accumulating drift is corrected before it reaches one beat', async () => {
+    const r = rig(planFor(driftLog(), 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    let maxDrift = 0;
+    for (let k = 1; k <= 20; k++) {
+      r.advance(1.0);
+      const recorded = 50 + k * 0.96;
+      maxDrift = Math.max(maxDrift, Math.abs(r.engines.A.getPlayhead() - recorded));
+    }
+    // Corrections fired (the deadband alone let drift sit at up to 0.5s —
+    // more than a beat at 174 BPM = 0.345s)…
+    expect(r.engines.A.seeks.length).toBeGreaterThan(seedSeeks);
+    // …and the deck never strayed a full beat from the log's trajectory.
+    expect(maxDrift).toBeLessThan(0.345);
+    r.driver.stop();
+  });
+
+  it('corrections are paced by the cooldown, not per-tick (no jitter relapse)', async () => {
+    const r = rig(planFor(driftLog(), 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    for (let k = 1; k <= 10; k++) r.advance(1.0);
+    const corrections = r.engines.A.seeks.length - seedSeeks;
+    expect(corrections).toBeGreaterThan(0);
+    expect(corrections).toBeLessThanOrEqual(5); // ≥2s apart over 10s
+    r.driver.stop();
+  });
+
+  it('one janky outlier tick never seeks (median, not sample)', async () => {
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= 12; k++) {
+      // Tick 6 is a 0.4s jank spike; every other tick is on-trajectory.
+      const spike = k === 6 ? -0.4 : 0;
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k + spike } });
+    }
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    for (let k = 1; k <= 10; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks);
     r.driver.stop();
   });
 });

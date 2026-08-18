@@ -49,6 +49,11 @@ export type ReplayCue =
     }
   | { offsetS: number; kind: 'play' | 'pause'; channel: CaptureDeck; playhead: number }
   | { offsetS: number; kind: 'seek'; channel: CaptureDeck; playhead: number }
+  /** A stab (sessions 12): previewStart launches preview audio at
+   * `playhead`; previewEnd stops at its `playhead` (the recorded return
+   * position). Executed via the engine's machine-grade preview entry point
+   * — audible, quantize-free, cue points untouched. */
+  | { offsetS: number; kind: 'previewStart' | 'previewEnd'; channel: CaptureDeck; playhead: number }
   | { offsetS: number; kind: 'pitch'; channel: CaptureDeck; value: number }
   | { offsetS: number; kind: 'load'; channel: CaptureDeck; trackId: number | null }
   | { offsetS: number; kind: 'sync'; playheads: Partial<Record<CaptureDeck, number>> };
@@ -114,11 +119,15 @@ export function planReplay(events: CaptureEvent[], startT: number): PlanReplayRe
         break;
       case 'transport':
         // The log records post-action POSITIONS, not gestures: jumps and
-        // hot cues replay as seeks; cue = stop at the position.
+        // hot cues replay as seeks; cue = stop at the position. Stabs
+        // (previewStart/previewEnd, sessions 12) replay as audible previews
+        // through the engine's machine-grade entry point.
         if (e.action === 'play') {
           cues.push({ offsetS, kind: 'play', channel: e.channel, playhead: e.playhead });
         } else if (e.action === 'pause' || e.action === 'cue') {
           cues.push({ offsetS, kind: 'pause', channel: e.channel, playhead: e.playhead });
+        } else if (e.action === 'previewStart' || e.action === 'previewEnd') {
+          cues.push({ offsetS, kind: e.action, channel: e.channel, playhead: e.playhead });
         } else {
           cues.push({ offsetS, kind: 'seek', channel: e.channel, playhead: e.playhead });
         }
@@ -143,7 +152,8 @@ export function planReplay(events: CaptureEvent[], startT: number): PlanReplayRe
   const anythingToHear =
     trackIds.size > 0 &&
     (ALL_DECKS.some((ch) => seed.decks[ch].playing) ||
-      cues.some((c) => c.kind === 'play' || c.kind === 'load'));
+      // A stab-only window is audible too (sessions 12).
+      cues.some((c) => c.kind === 'play' || c.kind === 'load' || c.kind === 'previewStart'));
   if (!anythingToHear) return { ok: false, reason: 'nothing-loaded' };
 
   return {

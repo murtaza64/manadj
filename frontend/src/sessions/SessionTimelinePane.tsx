@@ -8,13 +8,14 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { SessionTimelineView } from './SessionTimelineView';
-import { consumeSessionFocusS } from './openSession';
+import { consumeSessionFocus } from './openSession';
+import type { SessionFocus } from './openSession';
 
 export function SessionTimelinePane({ sessionUuid }: { sessionUuid: string }) {
   const { data: rows } = useQuery({ queryKey: ['sessions'], queryFn: api.sessions.list });
-  // One-shot: the deep-link moment, read exactly once per pane mount
-  // (lazy initializer — never re-runs on re-render).
-  const [focusS] = useState<number | null>(() => consumeSessionFocusS());
+  // One-shot: the deep-link moment + zoom request, read exactly once per
+  // pane mount (lazy initializer — never re-runs on re-render).
+  const [focus] = useState<SessionFocus>(() => consumeSessionFocus());
 
   const session = rows?.find((r) => r.uuid === sessionUuid) ?? null;
   if (!session) {
@@ -24,5 +25,5 @@ export function SessionTimelinePane({ sessionUuid }: { sessionUuid: string }) {
       </div>
     );
   }
-  return <SessionTimelineView session={session} focusS={focusS} />;
+  return <SessionTimelineView session={session} focusS={focus.atS} focusSpanS={focus.spanS} />;
 }

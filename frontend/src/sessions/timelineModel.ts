@@ -746,11 +746,37 @@ export function traceWindow(
 
 // ── Piecewise time axis with idle collapse (pixel space) ────────────────
 
+/** A stretch the axis may collapse to a fixed marker: silence (idle) or a
+ * machine tenure (sessions 14 — a 4-hour replay hold stretches the axis
+ * exactly like 4 hours of silence). The two never overlap: idle is defined
+ * as no-audible-deck AND no-tenure. */
+export interface CollapseCandidate extends Span {
+  kind: 'idle' | 'tenure';
+  /** The holding surface, for tenure markers ("‖ 34m replay held"). */
+  holder?: string;
+}
+
+/** The axis's collapse-candidate list, sorted by start. Indices into THIS
+ * list are the stable keys of the expanded set. */
+export function collapseCandidates(model: TimelineModel): CollapseCandidate[] {
+  return [
+    ...model.idle.map((sp): CollapseCandidate => ({ start: sp.start, end: sp.end, kind: 'idle' })),
+    ...model.tenures.map(
+      (sp): CollapseCandidate => ({ start: sp.start, end: sp.end, kind: 'tenure', holder: sp.holder })
+    ),
+  ].sort((a, b) => a.start - b.start);
+}
+
 export interface AxisSegment extends Span {
   collapsed: boolean;
   /** Pixel extent within the total timeline width. */
   px0: number;
   px1: number;
+  /** Collapsed segments: what kind of stretch this marker stands for and
+   * its index into `collapseCandidates(model)` (the expand toggle key). */
+  kind?: 'idle' | 'tenure';
+  holder?: string;
+  candidateIdx?: number;
 }
 
 export interface TimeAxis {
@@ -785,19 +811,31 @@ export function buildTimeAxis(
   const { start, end } = model;
   const pxPerSec = Math.max(0.0001, opts.pxPerSec);
   const collapsible = opts.collapseIdle
-    ? model.idle.filter(
-        (sp, i) => sp.end - sp.start >= opts.thresholdS && !(opts.expanded?.has(i) ?? false)
-      )
+    ? collapseCandidates(model)
+        .map((sp, i) => ({ sp, i }))
+        .filter(
+          ({ sp, i }) => sp.end - sp.start >= opts.thresholdS && !(opts.expanded?.has(i) ?? false)
+        )
     : [];
 
   // Alternating segments over [start, end].
   const segments: AxisSegment[] = [];
   let cursor = start;
-  for (const sp of collapsible) {
+  for (const { sp, i } of collapsible) {
+    if (sp.start < cursor) continue; // defensive: candidates never overlap
     if (sp.start > cursor) {
       segments.push({ start: cursor, end: sp.start, collapsed: false, px0: 0, px1: 0 });
     }
-    segments.push({ start: sp.start, end: sp.end, collapsed: true, px0: 0, px1: 0 });
+    segments.push({
+      start: sp.start,
+      end: sp.end,
+      collapsed: true,
+      px0: 0,
+      px1: 0,
+      kind: sp.kind,
+      holder: sp.holder,
+      candidateIdx: i,
+    });
     cursor = sp.end;
   }
   if (end > cursor || segments.length === 0) {

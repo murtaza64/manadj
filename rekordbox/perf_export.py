@@ -267,6 +267,42 @@ class RekordboxPerfExporter:
             rb_local_synced=0,
         )
 
+    def export_maincue(self, filename: str, seconds: float | None) -> bool:
+        """Encode Main cue as a memory-only cue after hot-cue reconcile.
+
+        `export_hotcues(..., replace-all)` removes every stray memory row, so
+        callers run it first; this then adds exactly one non-twin memory cue.
+        Returns whether a row was added.
+        """
+        from pyrekordbox.db6.tables import DjmdCue
+
+        from rekordbox.cue_mapping import MEMORY_KIND
+        from rekordbox.decode_offset import manadj_seconds_to_rb_ms
+
+        ensure_rekordbox_closed()
+        if seconds is None:
+            return False
+        content = self._content_for(filename)
+        rb_ms = manadj_seconds_to_rb_ms(seconds, content.FolderPath)
+        existing = (
+            self._db.session.query(DjmdCue)
+            .filter(
+                DjmdCue.ContentID == content.ID,
+                DjmdCue.Kind == MEMORY_KIND,
+                DjmdCue.InMsec == rb_ms,
+                DjmdCue.rb_local_deleted == 0,
+            )
+            .first()
+        )
+        if existing is not None:
+            return False
+        snapshot_library(self._db_dir)
+        self._db.session.add(
+            self._new_cue_row(content, MEMORY_KIND, rb_ms, "Main cue", None)
+        )
+        self._db.commit(autoinc=True)
+        return True
+
     # -- beatgrid --------------------------------------------------------
 
     def export_beatgrid(
@@ -281,7 +317,7 @@ class RekordboxPerfExporter:
         from backend.beatgrid_utils import dominant_bpm
         from backend.sync_status.models import TempoChangeValue
 
-        from rekordbox.anlz_grid import generate_beats, read_pqtz, write_pqtz
+        from rekordbox.anlz_grid import generate_beats, write_pqtz
         from rekordbox.decode_offset import export_offset_ms
 
         ensure_rekordbox_closed()

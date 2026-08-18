@@ -336,6 +336,22 @@ class PlaylistSyncManager:
 
         return results
 
+    def match_tracks_to_target(
+        self, target: str, track_refs: list[TrackReference]
+    ) -> tuple[list, list[str]]:
+        """Match track references against one destination library (read-only).
+
+        Returns:
+            Tuple of (matched_tracks, unmatched_filenames)
+        """
+        if target == 'manadj':
+            return self._match_tracks_to_manadj(track_refs)
+        if target == 'engine':
+            return self._match_tracks_to_engine(track_refs)
+        if target == 'rekordbox':
+            return self._match_tracks_to_rekordbox(track_refs)
+        raise ValueError(f"Invalid target: {target}")
+
     # ========================================================================
     # Private Helper Methods
     # ========================================================================

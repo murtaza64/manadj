@@ -1,3 +1,5 @@
+import './PlaylistStatusBadge.css';
+
 export type PlaylistStatus = 'synced' | 'unsynced' | 'partial';
 
 interface PlaylistStatusBadgeProps {

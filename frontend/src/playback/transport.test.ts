@@ -981,3 +981,86 @@ describe('isAudioRunning', () => {
     expect(isAudioRunning(state({ hotCuePreviewSlot: 4 }))).toBe(true);
   });
 });
+
+// ── Machine-grade preview (stab replay, sessions 12) ──────────────────────
+
+describe('preview-launch', () => {
+  it('starts preview audio at exactly the given position', () => {
+    const s = state({ playhead: 3, cuePoint: 10 });
+    const [next, effects] = reduceTransport(s, { type: 'preview-launch', at: 42.5 });
+    expect(next.previewing).toBe(true);
+    expect(next.playing).toBe(false);
+    expect(next.playhead).toBe(42.5);
+    expect(effects).toEqual([{ type: 'start', at: 42.5 }]);
+  });
+
+  it('never touches the cue point', () => {
+    const s = state({ cuePoint: 10, playhead: 10 });
+    const [next] = reduceTransport(s, { type: 'preview-launch', at: 42.5 });
+    expect(next.cuePoint).toBe(10);
+  });
+
+  it('bypasses Quantize entirely (replay determinism)', () => {
+    // A live cue/hot-cue launch would quantize against the reference; the
+    // machine launch must land at the exact recorded position, immediately.
+    const ctx: TransportContext = {
+      ...quantized(),
+      launchReference: { beatTimes: [0.25, 0.75, 1.25], playhead: 0.5 },
+    };
+    const [next, effects] = reduceTransport(state(), { type: 'preview-launch', at: 42.5 }, ctx);
+    expect(next.previewing).toBe(true);
+    expect(effects).toEqual([{ type: 'start', at: 42.5 }]); // no delay, no snap
+  });
+
+  it('cancels an active loop (absolute relocation, hot-cue parity)', () => {
+    const s = state({ loop: { start: 8, end: 12, lengthBeats: 8 } });
+    const [next] = reduceTransport(s, { type: 'preview-launch', at: 42.5 });
+    expect(next.loop).toBeNull();
+  });
+
+  it('is a no-op while the deck is playing', () => {
+    const s = state({ playing: true, playhead: 5 });
+    const [next, effects] = reduceTransport(s, { type: 'preview-launch', at: 42.5 });
+    expect(next).toBe(s);
+    expect(effects).toEqual([]);
+  });
+
+  it('is a no-op while another preview is already running', () => {
+    const s = state({ previewing: true, playhead: 5 });
+    const [next, effects] = reduceTransport(s, { type: 'preview-launch', at: 42.5 });
+    expect(next).toBe(s);
+    expect(effects).toEqual([]);
+  });
+});
+
+describe('preview-release', () => {
+  it('stops at the recorded return position', () => {
+    const s = state({ previewing: true, playhead: 45.1 });
+    const [next, effects] = reduceTransport(s, { type: 'preview-release', returnTo: 42.5 });
+    expect(next.previewing).toBe(false);
+    expect(next.playhead).toBe(42.5);
+    expect(effects).toEqual([{ type: 'stop', at: 42.5 }]);
+  });
+
+  it('also releases a hot-cue preview (replay does not care which button was held)', () => {
+    const s = state({ hotCuePreviewSlot: 3, playhead: 66 });
+    const [next, effects] = reduceTransport(s, { type: 'preview-release', returnTo: 64 });
+    expect(next.hotCuePreviewSlot).toBeNull();
+    expect(effects).toEqual([{ type: 'stop', at: 64 }]);
+  });
+
+  it('is a no-op when no preview is running (mid-window boundary)', () => {
+    const s = state({ playhead: 5 });
+    const [next, effects] = reduceTransport(s, { type: 'preview-release', returnTo: 42.5 });
+    expect(next).toBe(s);
+    expect(effects).toEqual([]);
+  });
+
+  it('keeps the deck running if play landed during the preview', () => {
+    const s = state({ previewing: true, playing: true, playhead: 45 });
+    const [next, effects] = reduceTransport(s, { type: 'preview-release', returnTo: 42.5 });
+    expect(next.playing).toBe(true);
+    expect(next.previewing).toBe(false);
+    expect(effects).toEqual([]);
+  });
+});

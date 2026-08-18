@@ -164,6 +164,15 @@
   font-size: 11px;
   writing-mode: vertical-rl;
 }
+/* A collapsed TENURE marker keeps the tenure family's dashed look so the
+ * marker still reads as "a machine held the surface here". */
+.stl-idle-marker.tenure .stl-idle-rect {
+  stroke-dasharray: 5 4;
+  stroke: var(--overlay1, #7f849c);
+}
+.stl-idle-marker.tenure .stl-idle-label {
+  font-style: italic;
+}
 
 /* Take chips: green = the persisted-record family. */
 .stl-take-chip {
