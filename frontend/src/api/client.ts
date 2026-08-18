@@ -1224,7 +1224,8 @@ export const api = {
       return res.json();
     },
 
-    /** Close Sessions orphaned by a prior crash/reload before recording. */
+    /** Close Sessions orphaned by a prior crash/reload before recording;
+     * the backend also sweeps 100%-silent rows (sessions 11). */
     recover: async (): Promise<number> => {
       const res = await fetch(`${API_BASE}/sessions/recover`, { method: 'POST' });
       if (!res.ok) throw new Error(`Failed to recover sessions (${res.status})`);
@@ -1232,7 +1233,8 @@ export const api = {
       return body.closed;
     },
 
-    /** Open a Session on the first live event; the client mints the uuid. */
+    /** Open a Session on the first Master-audible instant (sessions 11);
+     * the client mints the uuid. */
     create: async (uuid: string, startedAt?: string): Promise<SessionRowWire> => {
       const res = await fetch(`${API_BASE}/sessions`, {
         method: 'POST',

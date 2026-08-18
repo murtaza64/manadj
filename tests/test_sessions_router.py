@@ -65,20 +65,61 @@ def test_duplicate_session_uuid_400(client):
     assert client.post("/api/sessions", json={"uuid": "s1"}).status_code == 400
 
 
-def test_recover_closes_orphaned_open_sessions_without_creating_one(client):
+AUDIBLE_EVENTS = [
+    {"t": 1.0, "kind": "load", "channel": "A", "trackId": 1, "bpm": 174.0},
+    {"t": 2.0, "kind": "transport", "channel": "A", "action": "play", "playhead": 0.0},
+]
+
+SILENT_EVENTS = [
+    {"t": 1.0, "kind": "load", "channel": "A", "trackId": 1, "bpm": 174.0},
+    {"t": 2.0, "kind": "control", "control": "fader", "channel": "A", "value": 0.8},
+    {"t": 3.0, "kind": "tick", "playheads": {}},
+]
+
+
+def test_recover_closes_audible_orphans_and_deletes_silent_ones(client):
+    """Crash recovery still closes stale open Sessions — but a row whose
+    stream was 100% silent (legacy activation on non-audible events, or
+    empty) is deleted, not closed (sessions 11)."""
     client.post("/api/sessions", json={"uuid": "empty"})
-    client.post("/api/sessions", json={"uuid": "with-events"})
-    client.post(
-        "/api/sessions/with-events/chunks",
-        json={"seq": 0, "events": [{"t": 1.0, "kind": "tick", "playheads": {}}]},
-    )
+    client.post("/api/sessions", json={"uuid": "silent"})
+    client.post("/api/sessions/silent/chunks", json={"seq": 0, "events": SILENT_EVENTS})
+    client.post("/api/sessions", json={"uuid": "with-audible"})
+    client.post("/api/sessions/with-audible/chunks", json={"seq": 0, "events": AUDIBLE_EVENTS})
 
     resp = client.post("/api/sessions/recover")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"closed": 2}
+    assert resp.json() == {"closed": 1, "deleted": 2}
     rows = client.get("/api/sessions").json()
-    assert len(rows) == 2
-    assert all(row["ended_at"] is not None for row in rows)
+    assert [r["uuid"] for r in rows] == ["with-audible"]
+    assert rows[0]["ended_at"] is not None
+
+
+def test_recover_sweeps_closed_legacy_silent_rows_too(client, db_session):
+    """No empty/silent history entry survives — even one a legacy path had
+    already closed cleanly (inserted directly: the new end path would have
+    deleted it)."""
+    import datetime
+    import json as jsonlib
+
+    from backend import models
+
+    legacy = models.Session(uuid="legacy-silent", ended_at=datetime.datetime(2026, 7, 15, 21, 0))
+    db_session.add(legacy)
+    db_session.commit()
+    db_session.add(
+        models.SessionChunk(session_id=legacy.id, seq=0, events_json=jsonlib.dumps(SILENT_EVENTS))
+    )
+    db_session.commit()
+    client.post("/api/sessions", json={"uuid": "kept"})
+    client.post("/api/sessions/kept/chunks", json={"seq": 0, "events": AUDIBLE_EVENTS})
+    client.patch("/api/sessions/kept/end", json={})
+
+    resp = client.post("/api/sessions/recover")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted"] == 1
+    rows = client.get("/api/sessions").json()
+    assert [r["uuid"] for r in rows] == ["kept"]
 
 
 def test_append_chunks_accumulate(client):
@@ -137,10 +178,52 @@ def test_duplicate_chunk_seq_400(client):
 
 def test_end_session(client):
     client.post("/api/sessions", json={"uuid": "s1"})
+    client.post("/api/sessions/s1/chunks", json={"seq": 0, "events": AUDIBLE_EVENTS})
     resp = client.patch("/api/sessions/s1/end", json={"ended_at": "2026-07-15T21:30:00"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["ended_at"] is not None
     assert client.get("/api/sessions").json()[0]["ended_at"] is not None
+
+
+def test_end_deletes_a_100_percent_silent_session(client):
+    """Clean shutdown (and the auto-split, which ends through the same
+    route) leaves no persisted Session whose stream was 100% silent
+    (sessions 11)."""
+    client.post("/api/sessions", json={"uuid": "silent"})
+    client.post("/api/sessions/silent/chunks", json={"seq": 0, "events": SILENT_EVENTS})
+    resp = client.patch("/api/sessions/silent/end", json={})
+    assert resp.status_code == 200, resp.text
+    assert client.get("/api/sessions").json() == []
+
+
+def test_end_deletes_an_empty_session(client):
+    client.post("/api/sessions", json={"uuid": "empty"})
+    assert client.patch("/api/sessions/empty/end", json={}).status_code == 200
+    assert client.get("/api/sessions").json() == []
+
+
+def test_split_persists_two_audible_sessions(client):
+    """The client-side ten-minute split as the router sees it: end the old
+    Session, then open a fresh one on the next audible instant — two rows
+    persist, both audible, seq restarting at 0 in the second."""
+    client.post("/api/sessions", json={"uuid": "night-1"})
+    client.post("/api/sessions/night-1/chunks", json={"seq": 0, "events": AUDIBLE_EVENTS})
+    # The observed idle tail stays in the OLD append-only log.
+    client.post(
+        "/api/sessions/night-1/chunks",
+        json={"seq": 1, "events": [{"t": 700.0, "kind": "tick", "playheads": {}}]},
+    )
+    client.patch("/api/sessions/night-1/end", json={})
+
+    client.post("/api/sessions", json={"uuid": "night-2"})
+    client.post("/api/sessions/night-2/chunks", json={"seq": 0, "events": AUDIBLE_EVENTS})
+    client.patch("/api/sessions/night-2/end", json={})
+
+    rows = client.get("/api/sessions").json()
+    assert sorted(r["uuid"] for r in rows) == ["night-1", "night-2"]
+    assert all(r["ended_at"] is not None for r in rows)
+    tail = client.get("/api/sessions/night-1").json()["events"]
+    assert tail[-1]["t"] == 700.0
 
 
 def test_end_unknown_session_404(client):

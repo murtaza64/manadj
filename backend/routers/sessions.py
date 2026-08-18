@@ -1,10 +1,16 @@
-"""Sessions: the persisted whole capture-event log (Sessions PRD, ADR 0033).
+"""Sessions: the persisted whole capture-event log (Sessions PRD, ADR 0033,
+amended sessions 11).
 
-One row per recorder lifetime, streamed to disk as append-only chunks
-(~5s flush). The write model is create + append + end + delete; the list
-returns headers only (no chunks) with a derived Take count. Chunks are
-opaque JSON arrays of the capture event vocabulary — the same posture as a
-Take's slice.
+One row per stretch of live performance — the client opens a row on the
+first Master-audible instant and splits after ten continuous minutes of
+silence — streamed to disk as append-only chunks (~5s flush). The write
+model is create + append + end + delete; the list returns headers only (no
+chunks) with a derived Take count. Chunks are opaque JSON arrays of the
+capture event vocabulary — the same posture as a Take's slice.
+
+No 100%-silent Session survives (sessions 11): ending a silent row deletes
+it (shutdown and the auto-split both end through that route), and recovery
+sweeps every silent row — open orphans and closed legacy rows alike.
 
 Deleting a Session cascades its chunks and NEVER touches a Take: Takes keep
 their own event slice and remain self-contained (ADR 0033). The Session id a
@@ -19,8 +25,21 @@ from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.database import get_db
+from backend.session_audibility import events_contain_audible
 
 router = APIRouter()
+
+
+def _is_silent(s: models.Session) -> bool:
+    """True when no instant of the Session's stream had a Master-audible
+    Deck (sessions 11) — chunk by chunk, short-circuiting on the first
+    audible instant, so real Sessions stop at their opening seconds."""
+
+    def _events():
+        for chunk in s.chunks:  # relationship order: seq
+            yield from json.loads(chunk.events_json)
+
+    return not events_contain_audible(_events())
 
 
 def _row(db: Session, s: models.Session) -> schemas.SessionRow:
@@ -67,23 +86,32 @@ def create_session(
 
 @router.post("/recover")
 def recover_open_sessions(db: Session = Depends(get_db)) -> dict:
-    """Close Sessions orphaned by a renderer crash/reload.
+    """Close Sessions orphaned by a renderer crash/reload; sweep silent rows.
 
     `ended_at IS NULL` means the end request never reached the backend, not
     necessarily that the recorder is still alive. Boot calls this before it
-    opens a new Session. Use the last persisted chunk time (or started_at for
-    an empty legacy row), so downtime is not counted as performance duration.
+    opens a new Session. Audible orphans close at the last persisted chunk
+    time, so downtime is not counted as performance duration. Any 100%-silent
+    row — an empty or silent orphan, or a closed legacy row from before
+    audible-only activation — is deleted instead (sessions 11): no
+    empty/silent history entry survives recovery.
     """
-    rows = db.query(models.Session).filter(models.Session.ended_at.is_(None)).all()
-    for s in rows:
-        last_chunk_at = (
-            db.query(func.max(models.SessionChunk.created_at))
-            .filter(models.SessionChunk.session_id == s.id)
-            .scalar()
-        )
-        s.ended_at = last_chunk_at or s.started_at
+    closed = 0
+    deleted = 0
+    for s in db.query(models.Session).all():
+        if _is_silent(s):
+            db.delete(s)
+            deleted += 1
+        elif s.ended_at is None:
+            last_chunk_at = (
+                db.query(func.max(models.SessionChunk.created_at))
+                .filter(models.SessionChunk.session_id == s.id)
+                .scalar()
+            )
+            s.ended_at = last_chunk_at or s.started_at
+            closed += 1
     db.commit()
-    return {"closed": len(rows)}
+    return {"closed": closed, "deleted": deleted}
 
 
 @router.get("/{uuid}", response_model=schemas.SessionDetail)
@@ -133,11 +161,19 @@ def append_chunk(
 def end_session(
     uuid: str, payload: schemas.SessionEndPatch, db: Session = Depends(get_db)
 ) -> schemas.SessionRow:
-    """Close a Session (recorder dispose / page-hide). Setting ended_at on an
-    already-ended Session just overwrites it — closing twice is harmless."""
+    """Close a Session (recorder dispose / page-hide / ten-minute split).
+    Setting ended_at on an already-ended Session just overwrites it —
+    closing twice is harmless. A 100%-silent Session is deleted instead of
+    closed (sessions 11): shutdown and the auto-split both end through
+    here, and neither may leave a silent history entry."""
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
+    if _is_silent(s):
+        header = _row(db, s)
+        db.delete(s)  # cascade drops the chunks; Takes are unrelated rows
+        db.commit()
+        return header
     s.ended_at = payload.ended_at if payload.ended_at is not None else func.now()
     db.commit()
     db.refresh(s)

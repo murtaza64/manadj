@@ -396,9 +396,10 @@ class TakePromotedPatch(BaseModel):
 
 
 class SessionCreate(BaseModel):
-    """Open a Session — one recorder lifetime. The client mints the uuid so
-    chunk appends can start immediately (fire-and-forget, no round-trip for
-    the id). `started_at` optional: the backend defaults to now."""
+    """Open a Session — one stretch of live performance, opened on the
+    first Master-audible instant (sessions 11). The client mints the uuid
+    so chunk appends can start immediately (fire-and-forget, no round-trip
+    for the id). `started_at` optional: the backend defaults to now."""
     uuid: str
     started_at: datetime | None = None
 

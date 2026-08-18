@@ -13,11 +13,15 @@
  *
  *  - `SessionSink` — the timer/I/O shell around the buffer, matching the
  *    take sink's fire-and-forget posture (ADR 0011): starts buffering on
- *    `start()`, opens the persisted Session on the first live event, appends
- *    drained chunks in `seq` order, and `end()`s on `stop()`. Synthetic
- *    boot/remount lifetimes therefore leave no empty Session rows. A dead
- *    backend loses a chunk (logged), capture keeps running; there is no
- *    retry queue. The Session uuid it holds stamps each Take.
+ *    `start()`, opens the persisted Session on the first Master-audible
+ *    instant (sessions 11 — never on silent setup: loads, cueing, control
+ *    moves, and tenures only buffer as context), appends drained chunks in
+ *    `seq` order, and `end()`s on `stop()`. Synthetic boot/remount and
+ *    silent-only lifetimes therefore leave no Session rows. `split()` ends
+ *    the Session at the ten-minute silence boundary and re-arms lazy
+ *    activation. A dead backend loses a chunk (logged), capture keeps
+ *    running; there is no retry queue. The Session uuid it holds stamps
+ *    each Take.
  */
 import { api } from '../api/client';
 import { queryClient } from '../api/queryClient';
@@ -87,7 +91,8 @@ export class SessionSink {
   }
 
   /** Begin buffering and the ~5s flush timer. The database row opens lazily
-   * on the first live event, not on a synthetic React boot/remount. */
+   * on the first Master-audible instant, not on a synthetic React
+   * boot/remount or silent setup (sessions 11). */
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -108,9 +113,12 @@ export class SessionSink {
       .catch((err) => console.error('session: create failed', err));
   }
 
-  /** Record one event. Seed snapshots and empty ticks pass
-   * `activatesSession=false`: they remain buffered as reconstruction context
-   * but do not create an empty row. The first live event opens the Session. */
+  /** Record one event. Anything observed while no Deck is Master-audible —
+   * seed snapshots, empty ticks, loads, cue preparation, control setup,
+   * tenure markers — passes `activatesSession=false` (the recorder derives
+   * the flag from the one audibility definition, sessions 11): it stays
+   * buffered as reconstruction context but never creates a row. The first
+   * Master-audible instant opens the Session. */
   record(event: CaptureEvent, activatesSession = true): void {
     if (!this.started) return;
     this.buffer.push(event);
@@ -132,18 +140,34 @@ export class SessionSink {
       .catch((err) => console.error('session: chunk append failed — tail lost', err));
   }
 
+  /**
+   * Ten-minute silence split (sessions 11): flush the observed idle tail
+   * into the current Session, end it, and go dormant — buffering and the
+   * flush timer keep running, no replacement row opens, and the next
+   * activating (Master-audible) event opens a fresh Session with a fresh
+   * uuid and the chunk seq restarting at 0. Returns whether a Session was
+   * actually open (a rowless split is a no-op — silence alone never
+   * created a row to close).
+   */
+  split(): boolean {
+    const uuid = this.uuid;
+    if (uuid === null) return false;
+    this.flush();
+    this.writes = this.writes
+      .then(() => api.sessions.end(uuid))
+      .then(() => void queryClient.invalidateQueries({ queryKey: ['sessions'] }))
+      .catch((err) => console.error('session: end failed', err));
+    this.uuid = null;
+    this.seq = 0;
+    return true;
+  }
+
   /** Close the Session: flush the tail, end it, stop the timer. Idempotent. */
   stop(): void {
     if (!this.started) return;
-    this.flush();
-    const uuid = this.uuid;
-    if (uuid !== null) {
-      this.writes = this.writes
-        .then(() => api.sessions.end(uuid))
-        .then(() => void queryClient.invalidateQueries({ queryKey: ['sessions'] }))
-        .catch((err) => console.error('session: end failed', err));
-    } else {
-      // A boot/remount that saw no live event is intentionally ephemeral.
+    if (!this.split()) {
+      // A lifetime that never became Master-audible is intentionally
+      // ephemeral — drop the buffered context, persist nothing.
       this.buffer.drain();
     }
     if (this.timer !== null) clearInterval(this.timer);

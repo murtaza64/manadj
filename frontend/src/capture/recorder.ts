@@ -26,8 +26,9 @@ import type { ChannelId, ChannelState } from '../playback/mixer';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
 import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import type { AudibleSurfaceId } from '../playback/audibleSurface';
-import { initialCaptureState, reduceCapture } from './detector';
+import { anyDeckAudible, initialCaptureState, reduceCapture } from './detector';
 import type { CaptureState } from './detector';
+import { SilenceSplitClock } from './sessionLifecycle';
 import type { CaptureControlId, CaptureEvent, DetectedTake } from './events';
 
 const TICK_MS = 1000;
@@ -78,18 +79,30 @@ export class CaptureRecorder {
    * recorder logs is streamed here beside the in-memory rolling log the
    * detector reads. Optional — tests that only exercise detection omit it. */
   private readonly onEvent?: (event: CaptureEvent, activatesSession: boolean) => void;
+  /** Ten-minute silence split (sessions 11): asked to close the current
+   * Session; answers whether one was actually open. Wired to
+   * `SessionSink.split()` — when it closed a row, the recorder resets its
+   * Session-scoped detector state and re-seeds, so no engagement,
+   * incumbent, or Take provenance spans the boundary. */
+  private readonly onSplit?: () => boolean;
+  /** The pure fake-clock seam (sessionLifecycle.ts): fed Master-audibility
+   * per event, plus per timer tick during machine tenures (no events ride
+   * the log then, but tenure IS inactivity). */
+  private silence: SilenceSplitClock | null = null;
   private seeding = false;
 
   constructor(
     mixer: CaptureMixerSource,
     engines: Record<ChannelId, CaptureDeckSource>,
     onTake: (take: DetectedTake) => void,
-    onEvent?: (event: CaptureEvent, activatesSession: boolean) => void
+    onEvent?: (event: CaptureEvent, activatesSession: boolean) => void,
+    onSplit?: () => boolean
   ) {
     this.mixer = mixer;
     this.engines = engines;
     this.onTake = onTake;
     this.onEvent = onEvent;
+    this.onSplit = onSplit;
     this.lastChannel = {
       A: mixer.getChannelState('A'),
       B: mixer.getChannelState('B'),
@@ -127,6 +140,7 @@ export class CaptureRecorder {
   }
 
   start(): void {
+    this.silence = new SilenceSplitClock(this.now());
     const holder = audibleHolder();
     this.surfaceGated = holder !== 'shared';
     this.unsubs.push(subscribeAudible((h) => this.setSurfaceHolder(h)));
@@ -271,22 +285,54 @@ export class CaptureRecorder {
    * surface gate — for tenure markers, which describe the hold itself and
    * must ride the log even while a machine holds the surface (ADR 0033). */
   private emitMarker(e: CaptureEvent): void {
+    const [next, takes] = reduceCapture(this.state, e);
+    this.state = next;
+    // Master-audibility (the one definition, capture/audibility.ts; a
+    // tenure is non-performance, so silent by definition) drives BOTH
+    // Session lifecycle edges (sessions 11):
+    //  - activation: a row opens only on a Master-audible instant. Loads,
+    //    cueing, control setup, tenure markers, and seed snapshots buffer
+    //    as reconstruction context and never create a row.
+    //  - the ten-minute split clock, fed below.
+    const audible = !next.tenureHeld && anyDeckAudible(next);
     // Persist beside the detector's rolling log (ADR 0033): the Session
     // records all four decks; the detector reads the same stream and
     // self-gates over >2-audible stretches / machine tenures.
-    const activatesSession =
-      !this.seeding &&
-      e.kind !== 'tenure' &&
-      e.kind !== 'init' &&
-      (e.kind !== 'tick' || Object.keys(e.playheads).length > 0);
-    this.onEvent?.(e, activatesSession);
-    const [next, takes] = reduceCapture(this.state, e);
-    this.state = next;
+    this.onEvent?.(e, !this.seeding && audible);
     for (const take of takes) this.onTake(take);
+    this.checkSilence(audible, e.t);
+  }
+
+  /** Advance the split clock; at ten continuous minutes of no
+   * Master-audible Deck, close the current Session and reset every piece
+   * of Session-scoped state (sessions 11). */
+  private checkSilence(audible: boolean, t: number): void {
+    if (!this.silence?.note(audible, t)) return;
+    // Close exactly one old Session (flush + end). If none was open —
+    // silence from boot, or already split — stay dormant untouched: the
+    // detector's state is not Session-scoped then.
+    if (!this.onSplit?.()) return;
+    // No engagement, incumbent, or Take provenance spans Sessions: fresh
+    // detector state, then current reality re-established as the NEXT
+    // Session's buffered context — mirroring boot exactly.
+    this.state = initialCaptureState();
+    if (this.surfaceGated) {
+      // Splitting mid-tenure: the next Session's context opens with the
+      // still-open hold marked (the boot-under-tenure path; the detector
+      // re-seeds itself on release).
+      this.emitMarker({ t: this.now(), kind: 'tenure', edge: 'start', holder: audibleHolder() });
+    } else {
+      this.seed();
+    }
   }
 
   private tick(): void {
-    if (this.surfaceGated) return;
+    if (this.surfaceGated) {
+      // No events ride the log during a machine tenure, but the tenure IS
+      // inactivity (sessions 11): the split clock advances on the timer.
+      this.checkSilence(false, this.now());
+      return;
+    }
     const playheads: Partial<Record<ChannelId, number>> = {};
     for (const ch of CHANNEL_IDS) {
       // A previewing deck (cue or hot-cue stab, ADR 0033) has a moving,

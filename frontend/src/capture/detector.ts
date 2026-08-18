@@ -149,6 +149,14 @@ function audibleDeckCount(s: CaptureState): number {
   return ALL_DECKS.filter((ch) => deckAudible(s, ch)).length;
 }
 
+/** Is ANY deck Master-audible right now? Recomputed live from the state's
+ * audibility inputs (not the cached `.audible` flags). The recorder reads
+ * this for the Session lifecycle (sessions 11): lazy activation on the
+ * first Master-audible instant and the ten-minute silence split. */
+export function anyDeckAudible(s: CaptureState): boolean {
+  return ALL_DECKS.some((ch) => deckAudible(s, ch));
+}
+
 /** Apply the raw event to deck/mixer state (audibility inputs only —
  * everything else just rides the log as evidence). */
 function assignmentFromValue(value: number): CrossfaderAssignment {

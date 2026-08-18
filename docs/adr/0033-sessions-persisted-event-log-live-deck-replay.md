@@ -1,11 +1,12 @@
 # Sessions: the whole performance event log persists; replay through the live decks
 
-Status: accepted (grill 2026-07-15)
+Status: accepted (grill 2026-07-15; boundary amended 2026-08-13, sessions 11)
 
 The "whole-session capture" ADR 0020 reserved as a separate future concept. The
 always-on capture tap's rolling log now persists in full as a **Session** (glossary):
-one per recorder lifetime, one capture clock, all four Decks unconditionally, streamed
-to the backend in append-only JSON chunks (~5s flush). A Session timeline is the
+one per stretch of live performance (amended — originally one per recorder lifetime;
+see the boundary decision below), one capture clock, all four Decks unconditionally,
+streamed to the backend in append-only JSON chunks (~5s flush). A Session timeline is the
 scrubbable lens over a night of playing — Takes drawn in place, the detector's
 rejected/missed verdicts renderable as ghosts, moments hand-cuttable into Takes —
 complementing the Transition history (the cross-Session index; the two deep-link).
@@ -40,6 +41,25 @@ Core decisions:
 - **Retroactive re-scans are explicit and suggest-only**: verdicts render as
   timeline ghosts; accepting one reuses the hand-cut path. No auto-materialization,
   no dedupe machinery, no auto-deletion (would-now-reject is a visual flag only).
+- **Ten continuous minutes with no Master-audible Deck end the Session**
+  (amended 2026-08-13, sessions 11 — replaces the original "no boundary
+  heuristics / one per recorder lifetime" decision, which left an app parked
+  overnight recording one giant Session). Audibility is the one shared
+  definition (playing, channel controls, crossfader routing, kill thresholds;
+  PFL and CUE-stab preview invisible); machine tenure is non-performance and
+  counts toward the ten minutes. The split flushes and closes exactly one row
+  (the observed idle tail stays in its append-only log; the timeline already
+  collapses idle), resets all Session-scoped recorder/detector state — no
+  engagement, incumbent, chunk sequence, or Take provenance spans Sessions —
+  then stays dormant. The next Session opens lazily.
+- **A Session row opens only on a Master-audible instant, and no 100%-silent
+  row survives** (same amendment). Loads, cueing, control setup, and tenure
+  markers buffer as reconstruction context but never create a row; the first
+  Master-audible instant activates persistence and keeps the buffered
+  pre-audibility context. Backend-side, ending a silent row deletes it
+  (shutdown and the split end through the same route) and recovery sweeps
+  every silent row, legacy ones included — enforced by a Python port of the
+  audibility definition kept in lockstep with the frontend seam.
 
 ## Considered options
 
@@ -57,8 +77,10 @@ Core decisions:
   Take uuids (ADR 0023), Observed counts persisted rows, fresh-take chips need live
   detection; eager Takes change nothing downstream while the timeline adds
   observability on top.
-- **Session boundary heuristics** (idle-split) — rejected: the viewer collapses idle;
-  the stored Session stays a dumb container.
+- **Session boundary heuristics** (idle-split) — originally rejected ("the viewer
+  collapses idle; the stored Session stays a dumb container"), reversed 2026-08-13
+  (sessions 11): the ten-minute silence split above is now the boundary. The viewer
+  still collapses whatever idle remains inside a Session.
 - **Binary event format** — rejected: post-compression savings are ~2× on tens of
   MB/year, paid for with schema machinery and the loss of the greppable tuning
   ground; Takes already store slices as opaque JSON.
@@ -74,3 +96,6 @@ Core decisions:
 - The Audible surface gains a tenure holder (Session replay) and the capture event
   vocabulary gains tenure markers; the recorder loses its deck-count gate.
 - `dig.md`'s planned "Take capture session" UUID column is the Session id.
+- (2026-08-13, sessions 11) A Sessions list entry now means "a stretch of live
+  performance", not "an app run": rows begin at the first Master-audible instant,
+  end at close or ten minutes of silence, and silent-only runs leave no row.

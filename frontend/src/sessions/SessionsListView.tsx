@@ -5,6 +5,7 @@
  * (issue 04), Take count, and a manual delete. Rows open the timeline;
  * deleting a Session never touches a Take.
  */
+import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { CaptureEvent } from '../capture/events';
@@ -35,16 +36,24 @@ function fmtDuration(startedAt: string, endedAt: string | null): string {
 /** The distinct Master-audible Track count for one Session, derived from
  * its whole event log through the SAME pure timeline model the timeline
  * uses (no divergent definition). Lazy + cached under the ['session',
- * uuid] key — opening the timeline afterwards is then free. */
-function SessionTracksCell({ uuid }: { uuid: string }) {
+ * uuid] key — opening the timeline afterwards is then free.
+ *
+ * Perf (issue 13): the derivation is MEMOIZED — this cell re-renders every
+ * ~5s while recording (the sink invalidates ['sessions']), and re-reducing
+ * every Session's full log per list render was an app-wide drag. An ended
+ * Session's log is immutable: never refetch its multi-MB payload. */
+function SessionTracksCell({ uuid, ended }: { uuid: string; ended: boolean }) {
   const { data } = useQuery({
     queryKey: ['session', uuid],
     queryFn: () => api.sessions.get(uuid),
-    staleTime: 60_000,
+    staleTime: ended ? Infinity : 60_000,
   });
-  if (data === undefined) return <span className="session-tracks-loading">…</span>;
-  const model = deriveTimeline(data.events as CaptureEvent[]);
-  return <>{model.audibleTrackIds.length}</>;
+  const count = useMemo(
+    () => (data === undefined ? null : deriveTimeline(data.events as CaptureEvent[]).audibleTrackIds.length),
+    [data]
+  );
+  if (count === null) return <span className="session-tracks-loading">…</span>;
+  return <>{count}</>;
 }
 
 export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }) {
@@ -91,7 +100,7 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
                   {fmtDuration(s.started_at, s.ended_at)}
                 </td>
                 <td className="session-tracks" title="Distinct Tracks that became audible">
-                  <SessionTracksCell uuid={s.uuid} />
+                  <SessionTracksCell uuid={s.uuid} ended={s.ended_at !== null} />
                 </td>
                 <td className="session-takes">{s.take_count}</td>
                 <td>

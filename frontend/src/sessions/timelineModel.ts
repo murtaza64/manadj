@@ -88,6 +88,9 @@ export interface DeckTimeline {
   loops: LoopSpan[];
   /** Step series (event-aligned) of audible Master gain; 0 = silent. */
   gainSteps: GainStep[];
+  /** Largest trace playhead (lane vertical scale) — precomputed here so
+   * the render path never flattens every trace point per frame. */
+  maxPlayhead: number;
 }
 
 export interface TimelineModel {
@@ -506,19 +509,28 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
   }
 
   const decks = Object.fromEntries(
-    ALL_DECKS.map((ch) => [
-      ch,
-      {
-        deck: ch,
-        trackSpans: trackSpans[ch],
-        playingSpans: playing[ch].spans,
-        audibleSpans: audible[ch].spans,
-        traces: traces[ch],
-        gestures: gestures[ch],
-        loops: loops[ch],
-        gainSteps: gainSteps[ch],
-      },
-    ])
+    ALL_DECKS.map((ch) => {
+      let maxPlayhead = 1;
+      for (const trace of traces[ch]) {
+        for (const p of trace) {
+          if (p.playhead > maxPlayhead) maxPlayhead = p.playhead;
+        }
+      }
+      return [
+        ch,
+        {
+          deck: ch,
+          trackSpans: trackSpans[ch],
+          playingSpans: playing[ch].spans,
+          audibleSpans: audible[ch].spans,
+          traces: traces[ch],
+          gestures: gestures[ch],
+          loops: loops[ch],
+          gainSteps: gainSteps[ch],
+          maxPlayhead,
+        },
+      ];
+    })
   ) as Record<CaptureDeck, DeckTimeline>;
 
   // Distinct Master-audible Tracks (the Sessions-list "Tracks" count): a
@@ -578,8 +590,9 @@ export interface StateAtT {
   eventsAfter: number;
 }
 
-/** Reduce the log up to T. O(n) per call — fine for scrubbing a few
- * thousand events; index by checkpoint if Sessions grow to hours. */
+/** Reduce the log up to T. O(n) per call — fine for a one-shot lookup
+ * (the replay planner); interactive scrubbing goes through
+ * `createStateIndex`, which reduces only the tail past a checkpoint. */
 export function stateAt(events: CaptureEvent[], t: number): StateAtT {
   const s = initialState();
   let before = 0;
@@ -588,6 +601,17 @@ export function stateAt(events: CaptureEvent[], t: number): StateAtT {
     applyEvent(s, e);
     before += 1;
   }
+  return snapshotState(s, t, before, events.length);
+}
+
+/** Reader-facing snapshot of a reduced state (shared by `stateAt` and the
+ * checkpoint index — one derivation, no divergence). */
+function snapshotState(
+  s: ReducerState,
+  t: number,
+  before: number,
+  total: number
+): StateAtT {
   const decks = Object.fromEntries(
     ALL_DECKS.map((ch) => {
       const d = s.decks[ch];
@@ -622,8 +646,102 @@ export function stateAt(events: CaptureEvent[], t: number): StateAtT {
     crossfaderEnabled: s.crossfaderEnabled,
     tenureHolder: s.tenureHolder,
     eventsBefore: before,
-    eventsAfter: events.length - before,
+    eventsAfter: total - before,
   };
+}
+
+// ── Checkpointed state index (scrub at O(checkpoint interval)) ──────────
+
+/** Checkpoint every this-many events: a 100k-event Session carries ~50
+ * checkpoints and a scrub reduces at most 2048 events instead of the whole
+ * log per mousemove. */
+const CHECKPOINT_EVERY = 2048;
+
+function cloneState(s: ReducerState): ReducerState {
+  return {
+    decks: Object.fromEntries(
+      ALL_DECKS.map((ch) => [ch, { ...s.decks[ch], eq: { ...s.decks[ch].eq } }])
+    ) as Record<CaptureDeck, DeckState>,
+    crossfader: s.crossfader,
+    crossfaderEnabled: s.crossfaderEnabled,
+    tenureHolder: s.tenureHolder,
+  };
+}
+
+export interface StateIndex {
+  /** `stateAt` semantics, from the nearest checkpoint. */
+  at(t: number): StateAtT;
+}
+
+/** Build once per log (O(n)); each `at()` is a binary search plus at most
+ * CHECKPOINT_EVERY event applications. Capture clocks are monotonic
+ * (performance.now), which the upper-bound binary search relies on. */
+export function createStateIndex(
+  events: CaptureEvent[],
+  checkpointEvery: number = CHECKPOINT_EVERY
+): StateIndex {
+  // checkpoints[k] = reducer state after events[0 .. k*checkpointEvery).
+  const checkpoints: ReducerState[] = [initialState()];
+  {
+    const s = initialState();
+    for (let i = 0; i < events.length; i++) {
+      applyEvent(s, events[i]);
+      if ((i + 1) % checkpointEvery === 0) checkpoints.push(cloneState(s));
+    }
+  }
+
+  return {
+    at(t: number): StateAtT {
+      // Upper bound: first index with events[idx].t > t.
+      let lo = 0;
+      let hi = events.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (events[mid].t <= t) lo = mid + 1;
+        else hi = mid;
+      }
+      const before = lo;
+      const ck = Math.min(checkpoints.length - 1, Math.floor(before / checkpointEvery));
+      const s = cloneState(checkpoints[ck]);
+      for (let i = ck * checkpointEvery; i < before; i++) applyEvent(s, events[i]);
+      return snapshotState(s, t, before, events.length);
+    },
+  };
+}
+
+// ── Viewport culling (the SVG scene renders only the visible window) ────
+
+/** The slice of a (time-sorted) trace intersecting [t0, t1], padded one
+ * sample either side so the polyline runs off both viewport edges instead
+ * of visibly starting inside them. Returns the original array when it is
+ * fully inside (no copy), null when fully outside. */
+export function traceWindow(
+  trace: PlayheadTrace,
+  t0: number,
+  t1: number
+): PlayheadTrace | null {
+  if (trace.length === 0) return null;
+  if (trace[trace.length - 1].t < t0 || trace[0].t > t1) return null;
+  if (trace[0].t >= t0 && trace[trace.length - 1].t <= t1) return trace;
+  // Lower bound: last index with t < t0 (start one sample before the window).
+  let lo = 0;
+  let hi = trace.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (trace[mid].t < t0) lo = mid;
+    else hi = mid - 1;
+  }
+  const from = lo;
+  // Upper bound: first index with t > t1 (end one sample past the window).
+  lo = 0;
+  hi = trace.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (trace[mid].t <= t1) lo = mid + 1;
+    else hi = mid;
+  }
+  const to = Math.min(trace.length - 1, lo);
+  return trace.slice(from, to + 1);
 }
 
 // ── Piecewise time axis with idle collapse (pixel space) ────────────────
