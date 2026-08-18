@@ -171,6 +171,7 @@ function openEngagement(s: CaptureState, m: PairMachine, key: PairKey, at: numbe
     eq: { ...d.eq },
     filter: d.filter,
     pitch: d.pitch,
+    assignment: d.assignment,
   });
   // ROLE-shaped init (ADR 0032 via 4dp 10/12): 'A' is the outgoing role,
   // 'B' the incoming, whatever the physical decks — which are stamped.

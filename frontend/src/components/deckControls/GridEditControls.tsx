@@ -10,6 +10,7 @@ import { nearestDownbeatOrdinal, nearestMark } from '../../meter/ladder';
 import { GridNudgeLeftIcon, GridNudgeRightIcon } from '../icons/GridIcons';
 import { AnchorIcon } from '../icons/AnchorIcon';
 import { DropAnchorIcon, ResetMarkDeleteIcon, ResetMarkIcon } from '../icons/MeterIcons';
+import { AnalyzeButton } from './AnalyzeButton';
 import './deckControls.css';
 
 /**
@@ -140,6 +141,9 @@ export function GridEditButtons({
       >
         <ResetMarkDeleteIcon />
       </button>
+      {/* Analyze rides the grid row (it PRODUCES the grid) — one home for
+          every mode, performance included. */}
+      <AnalyzeButton trackId={trackId} disabled={disabled} />
     </>
   );
 }

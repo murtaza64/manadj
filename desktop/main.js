@@ -176,6 +176,10 @@ async function attach(win) {
   tryAttach();
 }
 
+// The visualizer child window, when open (realtime-visualization 02/03):
+// the sticky/fullscreen-on-display controls target it.
+let visualizerWindow = null;
+
 function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
@@ -193,6 +197,30 @@ function createWindow() {
       // audio would keep playing while UI clocks and waveforms stall.
       backgroundThrottling: false,
     },
+  });
+  // Visualizer window (realtime-visualization 01): the renderer opens it
+  // via window.open('/visualizer', ...). Give it a normal native title bar
+  // (its page has no TopBar drag region) and never throttle it — it renders
+  // rAF visuals and may sit occluded behind the main window on one screen
+  // before being dragged to the projector.
+  win.webContents.setWindowOpenHandler(() => ({
+    action: "allow",
+    overrideBrowserWindowOptions: {
+      title: "manaDJ visualizer",
+      backgroundColor: "#000000",
+      webPreferences: { backgroundThrottling: false },
+    },
+  }));
+  // Track the visualizer child window and make it sticky: floats above
+  // other windows and follows across Spaces (projector second-screen use).
+  win.webContents.on("did-create-window", (child, details) => {
+    if (details.frameName !== "manadj-visualizer") return;
+    visualizerWindow = child;
+    child.setAlwaysOnTop(true, "floating");
+    child.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    child.on("closed", () => {
+      if (visualizerWindow === child) visualizerWindow = null;
+    });
   });
   // Open maximized (desktop-shell 06 — zoomed, not macOS fullscreen). The
   // persisted NORMAL bounds spread in above and getNormalBounds() below

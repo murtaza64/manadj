@@ -56,7 +56,11 @@ export interface WaveformStyle {
 
 export const DEFAULT_STYLE_ID = 'additive-rgb';
 
-const ADDITIVE_COLORS: [RGB, RGB, RGB] = [
+/** The canonical low/mid/high RGB identity (red/green/blue). Exported as
+ * the single source of truth for band coloring outside the waveform too
+ * (visualizer presets match the waveform's band language — same rationale
+ * as deckColors' TS-source-of-truth). */
+export const ADDITIVE_COLORS: [RGB, RGB, RGB] = [
   [1.0, 0.1, 0.1],
   [0.0, 1.0, 0.25],
   [0.2, 0.45, 1.0],

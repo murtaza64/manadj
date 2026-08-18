@@ -183,6 +183,32 @@
   color: var(--base);
 }
 
+/* Visualizer window opener (realtime-visualization 01): same square
+   1px-border language as the Quantize toggle. */
+.topbar-visualizer {
+  width: 24px;
+  padding: 3px 0;
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--overlay0);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.topbar-visualizer:hover {
+  border-color: var(--mauve);
+  color: var(--mauve);
+}
+
+.topbar-visualizer.on {
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--base);
+}
+
 /* Audio-ownership chip (sets 40): who owns the decks, always present in
    the same slot. Muted while the shared decks hold; the muted→colored
    flip is the takeover/stand-down signal. Fixed height/typography across

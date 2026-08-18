@@ -128,6 +128,10 @@ export interface InitDeckState {
   eq: { low: number; mid: number; high: number };
   filter: number;
   pitch: number;
+  /** The deck's crossfader side at open (4dp 39) — relabeled pairs sit on
+   * arbitrary sides, so lane composition can't assume A-left/B-right.
+   * Absent on takes detected before 4dp 39 (legacy default applies). */
+  assignment?: 'left' | 'thru' | 'right';
 }
 
 // ── Detection parameters (versioned — stamped on every Take) ────────────
