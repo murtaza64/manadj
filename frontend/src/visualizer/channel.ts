@@ -27,6 +27,15 @@ export interface VisualizerPing {
   type: 'ping';
   /** Active preset needs the stereo time-domain feed (scope/goniometer). */
   wantsWave?: boolean;
+  /** Active preset id — the laptop-side control modal mirrors it. */
+  presetId?: string;
+}
+
+/** Main window → viz: remote preset switch (realtime-visualization 03) —
+ * the projector-fullscreen window has no reachable chrome. */
+export interface VisualizerSetPreset {
+  type: 'set-preset';
+  presetId: string;
 }
 
 /** Beat lock from the dominant audible deck's beatgrid (ADR 0016: the grid
@@ -58,7 +67,7 @@ export interface VisualizerFrame {
   sentAt: number;
 }
 
-export type VisualizerMessage = VisualizerPing | VisualizerFrame;
+export type VisualizerMessage = VisualizerPing | VisualizerFrame | VisualizerSetPreset;
 
 /** URL the visualizer window opens at (App.tsx pathname branch). */
 export const VISUALIZER_PATH = '/visualizer';
