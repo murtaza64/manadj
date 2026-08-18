@@ -13,11 +13,12 @@ from typing import Callable
 import pytest
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from backend.database import apply_sqlite_pragmas
 from backend.acquisition.source import SourceItemData
 from backend.acquisition.supplier import (
     SupplierSearchResult,
@@ -39,6 +40,9 @@ def _make_engine() -> Engine:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # Apply the app's connect-time PRAGMAs (foreign_keys=ON etc.) so tests
+    # exercise the same connection posture as production (performance-hardening 03).
+    event.listen(engine, "connect", apply_sqlite_pragmas)
     with engine.connect() as connection:
         cfg = AlembicConfig(str(ALEMBIC_INI))
         cfg.attributes["connection"] = connection
