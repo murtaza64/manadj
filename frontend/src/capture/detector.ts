@@ -41,7 +41,7 @@ interface DeckCapture {
   eq: { low: number; mid: number; high: number };
   filter: number;
   /** This deck's crossfader side (Sessions PRD, ADR 0033: tracked for all
-   * four decks so the >2-audible self-gate is computed from the log). */
+   * four decks so the log alone reconstructs audibility). */
   assignment: CrossfaderAssignment;
   /** Varispeed percent (bends excluded — momentary by definition). */
   pitch: number;
@@ -54,19 +54,22 @@ export interface CaptureState {
   params: DetectorParams;
   /** Rolling event log (pruned; Take slices are cut from it). */
   log: CaptureEvent[];
-  /** All four decks (ADR 0033): the pair machine trades on A/B, but C/D
-   * audibility is tracked for the >2-audible self-gate. */
+  /** All four decks (ADR 0033): the pair machine trades on A/B; C/D state
+   * is tracked so the log alone reconstructs whole-surface audibility. */
   decks: Record<CaptureDeck, DeckCapture>;
   crossfader: number;
   crossfaderEnabled: boolean;
   /** A machine holds the shared surface (tenure marker; ADR 0033) — the
    * old recorder surface gate, now log-driven. */
   tenureHeld: boolean;
-  /** Verdicts suspended: tenure held OR more than two decks audible (ADR
-   * 0033). While suspended the log still grows — only the pair machine
-   * stands down; an in-flight engagement is discarded on entry and the
-   * incumbent re-established on exit. Derived each event from tenureHeld +
-   * the audible-deck count; stored to detect the entry/exit edges. */
+  /** Verdicts suspended: tenure held (ADR 0033). The old >2-audible branch
+   * is GONE (four-deck-performance 37): the pair machine's survivor rule is
+   * pairwise-local, so a third audible deck — a double, a layer — no longer
+   * discards the in-flight engagement (the data showed 101/102 real
+   * 3-audible stretches landing inside a blend and destroying its Take).
+   * While suspended the log still grows — only the pair machine stands
+   * down; an in-flight engagement is discarded on entry and the incumbent
+   * re-established on exit. */
   suspended: boolean;
   /** The audible-first deck — outgoing candidate. */
   incumbent: CaptureChannel | null;
@@ -144,11 +147,6 @@ function deckAudible(s: CaptureState, ch: CaptureDeck): boolean {
   );
 }
 
-/** How many decks are Master-audible right now (all four; ADR 0033). */
-function audibleDeckCount(s: CaptureState): number {
-  return ALL_DECKS.filter((ch) => deckAudible(s, ch)).length;
-}
-
 /** Is ANY deck Master-audible right now? Recomputed live from the state's
  * audibility inputs (not the cached `.audible` flags). The recorder reads
  * this for the Session lifecycle (sessions 11): lazy activation on the
@@ -184,11 +182,11 @@ function applyEvent(s: CaptureState, e: CaptureEvent): void {
       // PHASE-1 PREVIEW BOUNDARY (ADR 0033 cue-stab capture): previewStart/
       // previewEnd bracket a Master-audible CUE stab in the log, but the
       // phase-1 pair detector deliberately ignores them — a stab does NOT
-      // flip `playing`, count toward audibility/engagements, or trip the
-      // >2-audible self-gate. This keeps detection byte-identical to before
-      // preview evidence existed. Revisiting preview audibility semantics is
-      // a follow-up grill, not this issue. (seek/jumpBeats/hotCue likewise
-      // ride the log as evidence without touching detection state.)
+      // flip `playing` or count toward audibility/engagements. This keeps
+      // detection byte-identical to before preview evidence existed.
+      // Revisiting preview audibility semantics is a follow-up grill, not
+      // this issue. (seek/jumpBeats/hotCue likewise ride the log as
+      // evidence without touching detection state.)
       break;
     case 'load':
       s.decks[e.channel].trackId = e.trackId;
@@ -298,8 +296,8 @@ export function reduceCapture(
   // exactly as the surface gate did — the log keeps growing regardless.
   if (e.kind === 'tenure') s.tenureHeld = e.edge === 'start';
 
-  // Keep C/D audibility current for the >2-audible count (the pair machine
-  // ignores them; only the self-gate reads their audibility).
+  // Keep C/D audibility current (the pair machine ignores them; the
+  // Session lifecycle reads whole-deck audibility via anyDeckAudible).
   for (const ch of ['C', 'D'] as CaptureDeck[]) {
     const audible = deckAudible(s, ch);
     if (audible !== s.decks[ch].audible) {
@@ -308,12 +306,12 @@ export function reduceCapture(
     }
   }
 
-  // Suspension edge (tenure held OR >2 decks audible; ADR 0033). `audibleDeckCount`
-  // recomputes all four live, so it's correct before the A/B `.audible`
-  // fields are written by the edge loop below. Entering discards any
-  // in-flight engagement and clears incumbency; leaving re-establishes the
-  // incumbent from current A/B audibility (the recorder re-seeds in step).
-  const suspendedNow = s.tenureHeld || audibleDeckCount(s) > 2;
+  // Suspension edge — tenure only (four-deck-performance 37): a machine
+  // holding the surface blinds the pair machine; a third audible deck does
+  // NOT. Entering discards any in-flight engagement and clears incumbency;
+  // leaving re-establishes the incumbent from current A/B audibility (the
+  // recorder re-seeds in step).
+  const suspendedNow = s.tenureHeld;
   if (suspendedNow && !s.suspended) {
     dissolve(s);
     s.incumbent = null;
@@ -367,8 +365,8 @@ export function reduceCapture(
   // either incumbency, not ride whichever deck the loop visited first.
   // PHASE-1 PAIR BOUNDARY (ADR 0032, sessions 09): this A/B loop is the
   // pair-machine Take classifier, deliberately not the whole-Session log —
-  // C/D evidence is captured in full (recorder) and counted for the
-  // >2-audible self-gate above; only the HANDOVER verdict trades on A/B.
+  // C/D evidence is captured in full (recorder) but only the HANDOVER
+  // verdict trades on A/B (per-pair machines: four-deck-performance 10).
   const edges = (['A', 'B'] as CaptureChannel[])
     .map((ch) => ({ ch, audible: deckAudible(s, ch) }))
     .filter(({ ch, audible }) => audible !== s.decks[ch].audible)

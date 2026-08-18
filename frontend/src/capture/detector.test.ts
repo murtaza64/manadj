@@ -368,13 +368,15 @@ describe('the rolling log', () => {
   });
 });
 
-// The >2-audible suspension now lives here (ADR 0033): the detector
-// self-gates over stretches with more than two audible decks, while the
-// log keeps every deck's events for a later multi-deck detector.
-describe('>2-audible self-gate (ADR 0033)', () => {
-  it('emits no verdict while a third deck is audible over the blend', () => {
-    // A incumbent, C also audible (>2 will hold once B fades in), B blends
-    // in and A fades out — the classic Handover, but suspended.
+// The >2-audible self-gate is RETIRED (four-deck-performance 37): the pair
+// machine's survivor rule is pairwise-local, so a third audible deck — a
+// double, a layer — no longer discards the in-flight engagement. The data
+// behind the change: 101/102 real 3-audible stretches landed inside a
+// blend and destroyed its Take (docs/research/three-deck-mixing-reality.md).
+describe('third-deck audibility does not gate the pair machine (4dp 37)', () => {
+  it('emits the A→B Take with a third deck audible over the whole blend', () => {
+    // A incumbent, C audible throughout, B blends in and A fades out —
+    // the classic Handover, previously nuked by suspension.
     const s = script()
       .at(0)
       .load('A', 1)
@@ -382,66 +384,67 @@ describe('>2-audible self-gate (ADR 0033)', () => {
       .load('C', 3)
       .fader('B', 0)
       .play('A')
-      .play('C') // A + C audible (2)
+      .play('C') // A + C audible
       .advance(10);
-    s.at(10).play('B').fader('B', 1).advance(2); // A+B+C audible (3): suspended
-    s.at(12).fader('A', 0).advance(HORIZON + 1); // "handover" completes while suspended
-    const { takes } = run(s.events());
-    expect(takes).toHaveLength(0);
-  });
-
-  it('keeps every deck in the log even while suspended (log is whole)', () => {
-    const s = script()
-      .at(0)
-      .load('A', 1)
-      .load('B', 2)
-      .load('C', 3)
-      .play('A')
-      .play('B')
-      .play('C') // three audible → suspended, but all logged
-      .advance(2);
-    const { state } = run(s.events());
-    const loadedDecks = new Set(
-      state.log.filter((e) => e.kind === 'load').map((e) => (e as { channel: string }).channel)
-    );
-    expect(loadedDecks).toEqual(new Set(['A', 'B', 'C']));
-    expect(state.suspended).toBe(true);
-  });
-
-  it('resumes verdicts once back to two audible decks', () => {
-    // Three audible (suspended), then C stops → two audible → a clean A→B
-    // Handover after resume settles into a Take.
-    const s = script()
-      .at(0)
-      .load('A', 1)
-      .load('B', 2)
-      .load('C', 3)
-      .fader('B', 0)
-      .play('A')
-      .play('C')
-      .advance(5);
-    s.at(5).pause('C').advance(1); // back to A audible only: resumed
-    s.at(6).play('B').fader('B', 1).advance(2).at(8).fader('A', 0).advance(HORIZON + 1);
+    s.at(10).play('B').fader('B', 1).advance(2); // A+B+C audible
+    s.at(12).fader('A', 0).advance(HORIZON + 1);
     const { takes } = run(s.events());
     expect(takes).toHaveLength(1);
     expect(takes[0].outgoingTrackId).toBe(1);
     expect(takes[0].incomingTrackId).toBe(2);
   });
 
-  it('a deck routed thru (not on the crossfader) still counts as audible', () => {
-    // A and B on their crossfader halves, C routed thru — three audible.
+  it('a layer entering AND leaving mid-blend leaves the engagement intact', () => {
+    // The accent-over-blend case: C stabs in for 3s inside an A→B blend.
+    const s = script()
+      .at(0)
+      .load('A', 1)
+      .load('B', 2)
+      .load('C', 3)
+      .fader('B', 0)
+      .play('A')
+      .advance(10);
+    s.at(10).play('B').fader('B', 1).advance(2); // engagement opens
+    s.at(12).play('C').advance(3).at(15).pause('C'); // the layer
+    s.at(16).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(2);
+  });
+
+  it('keeps every deck in the log; three audible does not suspend', () => {
+    const s = script()
+      .at(0)
+      .load('A', 1)
+      .load('B', 2)
+      .load('C', 3)
+      .play('A')
+      .play('B')
+      .play('C')
+      .advance(2);
+    const { state } = run(s.events());
+    const loadedDecks = new Set(
+      state.log.filter((e) => e.kind === 'load').map((e) => (e as { channel: string }).channel)
+    );
+    expect(loadedDecks).toEqual(new Set(['A', 'B', 'C']));
+    expect(state.suspended).toBe(false);
+  });
+
+  it('a thru-routed audible third deck does not disturb the verdict either', () => {
     const s = script()
       .at(0)
       .load('A', 1)
       .load('B', 2)
       .load('C', 3)
       .assignment('C', 'thru')
+      .fader('B', 0)
       .play('A')
-      .play('B')
       .play('C')
-      .advance(2);
-    const { state } = run(s.events());
-    expect(state.suspended).toBe(true);
+      .advance(10);
+    s.at(10).play('B').fader('B', 1).advance(2).at(12).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
   });
 });
 
