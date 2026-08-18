@@ -4,13 +4,14 @@
  * Controller badge (top right — lit while a mapped controller is attached),
  * and the app-wide Quantize toggle (looping 01).
  */
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { connectedControllers, subscribeControllers } from '../midi/connectionStore';
 import { isQuantizeOn, setQuantize, subscribeQuantize } from '../playback/quantizeStore';
 import { AudioRoutingPicker } from './AudioRoutingPicker';
 import { AudioOwnershipChip } from './AudioOwnershipChip';
 import { TasksWidget } from './TasksWidget';
 import { MasterRecorderControl } from './MasterRecorderControl';
+import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles' | 'jog-tune';
@@ -35,6 +36,29 @@ function QuantizeToggle() {
       onClick={() => setQuantize(!on)}
     >
       Q
+    </button>
+  );
+}
+
+/** Visualizer window toggle (realtime-visualization 02): opens the
+ * separate visualizer window, focuses it when it's open but buried, and
+ * closes it when it already has focus. Lit while the window is open. */
+function VisualizerButton() {
+  const [open, setOpen] = useState(isVisualizerOpen());
+  useEffect(() => {
+    const timer = setInterval(() => setOpen(isVisualizerOpen()), 500);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <button
+      className={`topbar-visualizer${open ? ' on' : ''}`}
+      title={open ? 'Visualizer: focus (or close when focused)' : 'Open visualizer window'}
+      onClick={() => {
+        toggleVisualizer();
+        setOpen(isVisualizerOpen());
+      }}
+    >
+      ✷
     </button>
   );
 }
@@ -75,6 +99,7 @@ export function TopBar({
           </button>
         ))}
       </nav>
+      <VisualizerButton />
       <h1 className="topbar-title">{MODES.find((m) => m.id === mode)?.title}</h1>
       <MidiBadge />
       <MasterRecorderControl />
