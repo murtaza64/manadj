@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Track, Tag, GridAnalysisResponse } from '../types';
 import { getTagColor } from '../utils/colorUtils';
@@ -7,7 +7,6 @@ import EditableCell from './EditableCell';
 import EnergySquare from './EnergySquare';
 import WaveformMinimap from './WaveformMinimap';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
-import { useTrackAnalysisPending } from '../hooks/useAnalysisPending';
 import { BpmControl } from './deckControls/BpmControl';
 import { MusicIcon, PersonIcon, EnergyIcon, TagIcon, NeedleIcon, KeyIcon, SpeedIcon, SettingsIcon } from './icons';
 import TagManagementModal from './TagManagementModal';
@@ -37,7 +36,6 @@ export interface TagEditorHandle {
 
 const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate, onEnergyEditModeChange }, ref) => {
   const isDisabled = !track;
-  const queryClient = useQueryClient();
   // Beatgrid edits are playhead-dependent: they only apply when the track
   // being edited is the one on the Deck. Narrow selectors keep transport
   // events from re-rendering the editor.
@@ -67,13 +65,10 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
   }, [isEnergyEditMode, onEnergyEditModeChange]);
 
   // Analysis state
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   // Background analysis in flight for this track (import/sweep-enqueued —
   // analysis-curation 03): render the same running state as a manual click,
   // so a fresh import doesn't invite a redundant trigger. (Enqueue dedups
   // server-side; this makes that visible instead of discoverable.)
-  const backgroundAnalyzing = useTrackAnalysisPending(track?.id ?? null);
-  const analysisRunning = isAnalyzing || backgroundAnalyzing;
   // Grid diagnostics for the selected track (shows a past/fresh bail marker).
   // The key result no longer lives here — after a manual analysis task the
   // client refetches the Track and reads Track.key directly.
@@ -157,45 +152,6 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
   };
 
   // Handler for analyze button. Manual analysis now rides the task system
-  // (ADR 0003, task-system 01): enqueue one `manual` grid+key task and poll
-  // its state instead of blocking on a synchronous madmom request. Both
-  // sides write server-side (ADR 0024) — the grid path stores the analyzed
-  // Beatgrid + BPM projection (or bails), the key path stores Track.key with
-  // provenance "analyzed" (or detects nothing). The client only refetches
-  // once the task reaches `done`.
-  const handleAnalyze = async () => {
-    if (!track) return;
-    const trackId = track.id;
-
-    setIsAnalyzing(true);
-    try {
-      let status = await api.analyze.enqueue(trackId);
-      while (status && (status.state === 'pending' || status.state === 'running')) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        status = await api.analyze.status(trackId);
-      }
-
-      if (status?.state === 'failed') {
-        console.error('Analysis failed:', status.error);
-        return;
-      }
-
-      // Task done: refetch the grid diagnostics (shows a bail) and the track
-      // (BPM/key). Guard against the selection having moved on while the task
-      // ran — only apply results for the track we analyzed.
-      const gridResult = await api.analyze.getGrid(trackId).catch(() => undefined);
-      setAnalysisResults(prev =>
-        track?.id === trackId ? { ...prev, grid: gridResult } : prev
-      );
-      queryClient.invalidateQueries({ queryKey: ['beatgrid', trackId] });
-      queryClient.invalidateQueries({ queryKey: ['tracks'] });
-    } catch (error) {
-      console.error('Analysis failed:', error);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
   // Keyboard handler for tag edit mode
   useEffect(() => {
     if (!isTagEditMode) return;
@@ -376,25 +332,10 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 {track ? formatKeyDisplay(track.key) : '-'}
               </span>
             </div>
-            <button
-              onClick={handleAnalyze}
-              disabled={isDisabled || analysisRunning}
-              className="player-button"
-              style={{
-                color: 'var(--green)',
-                borderColor: 'var(--green)',
-                padding: '4px 8px',
-                minWidth: '32px',
-                fontSize: '12px',
-                height: '24px',
-                marginLeft: '4px',
-              }}
-              title={
-                analysisRunning ? 'Analysis in progress' : 'Analyze grid and key'
-              }
-            >
-              {analysisRunning ? '...' : 'A'}
-            </button>
+            {/* The analyze button moved into the beatgrid control row
+                (AnalyzeButton in GridEditButtons) — one home for every
+                mode, performance included. The bail marker stays: its
+                diagnostics state lives here. */}
             {analysisResults?.grid?.bailed && (
               <span
                 style={{ color: 'var(--red)', fontSize: '12px', fontWeight: 700 }}

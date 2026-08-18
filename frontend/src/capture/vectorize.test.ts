@@ -389,3 +389,124 @@ describe('breakpoint simplification', () => {
     expect(evalLane(tr.lanes.faderA!, 0.5)).toBeCloseTo(0.5, 1);
   });
 });
+
+// ── Mix-domain back-projection + beat-domain match bound (4dp 39) ────────
+// The field bug: Last Time → Tornado VIP, a 50s double. A ran at −0.702%,
+// B at −1.294% — a PERFECT match in mix domain (renormalized −0.596% ≡
+// required 174/175.04) — but wall-domain back-projection at the required
+// rate landed B's entry a full beat (0.345s) early.
+describe('mix-domain alignment (4dp 39)', () => {
+  const BPM_A = 174;
+  const BPM_B = 175.04;
+  const RATE_A = 1 - 0.702 / 100;
+  const RATE_B = 1 - 1.294 / 100;
+
+  function doublePitchedInput() {
+    // Window 100..150 (50s wall). A at 60s, B enters at 8s; both pitched
+    // from the init snapshot on; ticks ride the performed rates.
+    const decks = {
+      A: deck({ pitch: -0.702 }),
+      B: deck({ trackId: 2, pitch: -1.294 }),
+    };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 150; t += 5) {
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B }));
+    }
+    return { events, windowStartS: 100, windowEndS: 150 };
+  }
+
+  it('a match performed against a PITCHED outgoing renormalizes to tempoMatch', () => {
+    const draft = vectorizeTake(doublePitchedInput(), { bpmA: BPM_A, bpmB: BPM_B })!;
+    // Renormalized: RATE_B/RATE_A − 1 = −0.596% ≈ required — matched.
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+
+  it('back-projects the matched entry in MIX seconds — the entry lands true', () => {
+    const draft = vectorizeTake(doublePitchedInput(), { bpmA: BPM_A, bpmB: BPM_B })!;
+    // The performed entry: B was at 8s when the window opened. The old
+    // wall-domain projection put this at 8 − 0.345 (a beat early).
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+    // And the commit point stays exact: entry + durationSec × required
+    // must land on B's performed end position.
+    const durationSec = draft.transition.durationSec;
+    const modelEnd = draft.transition.bInSec + durationSec * (BPM_A / BPM_B);
+    expect(modelEnd).toBeCloseTo(8 + 50 * RATE_B, 1);
+  });
+
+  it('a sloppy match on a LONG window fails the beat-drift bound (no false match)', () => {
+    // B held 1.0% off the required rate: within the 1.5% pitch tolerance,
+    // but 0.5s of drift over 50s — force unmatched, keep the true entry.
+    const decks = { A: deck(), B: deck({ trackId: 2, pitch: 1.0 }) };
+    const rB = 1.01;
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 150; t += 5) {
+      events.push(tick(t, { A: 60 + (t - 100), B: 8 + (t - 100) * rB }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 150 },
+      { bpmA: 174, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(false);
+    // Unmatched = start-anchored: the performed entry survives.
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+  });
+
+  it('the same slop on a SHORT window still reads as matched (unchanged)', () => {
+    const decks = { A: deck(), B: deck({ trackId: 2, pitch: 1.0 }) };
+    const rB = 1.01;
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 104; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100), B: 8 + (t - 100) * rB }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 104 },
+      { bpmA: 174, bpmB: 174 }
+    )!;
+    // 1% × 4s = 0.04s drift < quarter-beat (0.086s): matched, as before.
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+});
+
+describe('assignment-aware fader lanes (4dp 39)', () => {
+  it('a right-side outgoing deck composes the RIGHT crossfader gain', () => {
+    // Relabeled pair: physical B→D, both on the crossfader's right half.
+    // Crossfader hard LEFT kills both; the old role-based composition
+    // gave role A (left) full gain instead.
+    const decks = {
+      A: deck({ assignment: 'right' }),
+      B: deck({ trackId: 2, assignment: 'right' }),
+    };
+    const events: CaptureEvent[] = [
+      init('A', 100, { decks }),
+      tick(100, { A: 60, B: 8 }),
+      control(110, 'crossfader', null, -1), // hard left: both roles killed
+    ];
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 120 },
+      { bpmA: 174, bpmB: 174 }
+    )!;
+    const faderA = draft.transition.lanes.faderA!;
+    // After the crossfader slam, role A's effective fader lane hits 0 —
+    // its deck sits on the right side.
+    expect(evalLane(faderA, 1)).toBeCloseTo(0, 2);
+  });
+
+  it('a thru-routed deck ignores the crossfader entirely', () => {
+    const decks = {
+      A: deck({ assignment: 'thru' }),
+      B: deck({ trackId: 2, assignment: 'right' }),
+    };
+    const events: CaptureEvent[] = [
+      init('A', 100, { decks }),
+      tick(100, { A: 60, B: 8 }),
+      control(110, 'crossfader', null, 1), // hard right: A unaffected (thru)
+    ];
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 120 },
+      { bpmA: 174, bpmB: 174 }
+    )!;
+    // faderA never moved: no lane emitted for it at all (untouched + at
+    // its resting default).
+    expect(draft.transition.lanes.faderA).toBeUndefined();
+  });
+});

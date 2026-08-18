@@ -107,12 +107,25 @@ export function vectorizeTake(
   const startSec = playheadAt(out, windowStartS);
   const durationSec = windowLen * rateAt(out, windowStartS);
 
-  // Static tempo-match from the settled incoming pitch (idealization).
+  // Static tempo-match from the settled incoming pitch (idealization),
+  // RENORMALIZED into the mix domain (4dp 39): the editor pins A at
+  // native, so the performance's B-vs-A rate ratio — not B's absolute
+  // pitch — is what must read as matched. A DJ who matched B to a PITCHED
+  // A (both decks −0.7%-ish) performed a perfect match that absolute
+  // comparison misses.
   const required =
     facts.bpmA && facts.bpmB ? (facts.bpmA / facts.bpmB - 1) * 100 : null;
+  const renormPct = (rateAt(inc, windowEndS) / rateAt(out, windowEndS) - 1) * 100;
+  // Beat-domain drift bound (4dp 39): a pitch-domain tolerance alone lets
+  // the accumulated back-projection error grow with the window — 1% over
+  // a 145-beat double is 1.5 beats. Match only when the residual drift
+  // over the whole window stays under a quarter-beat of B.
+  const driftBoundS = facts.bpmB ? 0.25 * (60 / facts.bpmB) : null;
   const tempoMatch =
     required !== null &&
-    Math.abs(pitchAt(inc, windowEndS) - required) <= TEMPO_MATCH_TOLERANCE_PERCENT;
+    driftBoundS !== null &&
+    Math.abs(renormPct - required) <= TEMPO_MATCH_TOLERANCE_PERCENT &&
+    (Math.abs(renormPct - required) / 100) * durationSec <= driftBoundS;
 
   // DISCRETE GESTURES → JUMP EVENTS (issue 04, ADR 0020's line): beat
   // jumps and hot-cue presses on the INCOMING deck are intentional
@@ -146,8 +159,20 @@ export function vectorizeTake(
   // being frozen out of it. Jump deltas are subtracted: the model adds
   // them back at their instants (bTrackTimeAt), so the anchor stays the
   // PRE-jump alignment.
-  const rateUsed = tempoMatch && required !== null ? 1 + required / 100 : rateAt(inc, windowEndS);
-  const bInSec = playheadAt(inc, windowEndS) - windowLen * rateUsed - jumpTotal;
+  //
+  // DOMAINS (4dp 39): the model's B advances per MIX second (mix time ≡
+  // A-track time, A native), so the matched back-projection spans
+  // `durationSec` (the window in A-track seconds) at the promoted
+  // bpmA/bpmB — NOT wall seconds. Getting this wrong under a pitched A
+  // put a full beat of entry error on a 145-beat double. The UNMATCHED
+  // branch back-projects at B's performed wall rate, which lands exactly
+  // on the performed entry position (start-anchored): with no match
+  // performed, there are no corrections to fold, and B's entry instant is
+  // the alignment the performance actually asserted.
+  const bInSec =
+    tempoMatch && required !== null
+      ? playheadAt(inc, windowEndS) - durationSec * (1 + required / 100) - jumpTotal
+      : playheadAt(inc, windowEndS) - windowLen * rateAt(inc, windowEndS) - jumpTotal;
 
   return {
     outgoingChannel: out,
@@ -231,7 +256,10 @@ function playheadStrictlyBefore(
 // ── Lane building ────────────────────────────────────────────────────────
 
 interface ControlState {
-  decks: Record<CaptureChannel, Pick<InitDeckState, 'fader' | 'eq' | 'filter'>>;
+  decks: Record<
+    CaptureChannel,
+    Pick<InitDeckState, 'fader' | 'eq' | 'filter'> & { assignment: 'left' | 'thru' | 'right' }
+  >;
   crossfader: number;
   crossfaderEnabled: boolean;
 }
@@ -247,18 +275,34 @@ function buildLanes(
 
   const state: ControlState = {
     decks: {
-      A: { fader: init.decks.A.fader, eq: { ...init.decks.A.eq }, filter: init.decks.A.filter },
-      B: { fader: init.decks.B.fader, eq: { ...init.decks.B.eq }, filter: init.decks.B.filter },
+      A: {
+        fader: init.decks.A.fader,
+        eq: { ...init.decks.A.eq },
+        filter: init.decks.A.filter,
+        // Legacy inits (pre-4dp-39) carried no assignment: those takes were
+        // physical A/B on their default sides — role A left, role B right.
+        assignment: init.decks.A.assignment ?? 'left',
+      },
+      B: {
+        fader: init.decks.B.fader,
+        eq: { ...init.decks.B.eq },
+        filter: init.decks.B.filter,
+        assignment: init.decks.B.assignment ?? 'right',
+      },
     },
     crossfader: init.crossfader,
     crossfaderEnabled: init.crossfaderEnabled,
   };
 
   // Effective fader-lane POSITION: position × √(crossfader gain) — squares
-  // back to gain × gain under the lane's quadratic fader taper.
+  // back to gain × gain under the lane's quadratic fader taper. The
+  // crossfader gain follows the deck's ASSIGNMENT (4dp 39): relabeled
+  // pairs sit on arbitrary sides; thru bypasses the crossfader.
   const faderY = (ch: CaptureChannel): number => {
     const xf = crossfaderGains(state.crossfaderEnabled ? state.crossfader : 0);
-    const gain = channelFaderToGain(state.decks[ch].fader) * (ch === 'A' ? xf.a : xf.b);
+    const side = state.decks[ch].assignment;
+    const xfGain = side === 'thru' ? 1 : side === 'left' ? xf.a : xf.b;
+    const gain = channelFaderToGain(state.decks[ch].fader) * xfGain;
     return Math.min(1, Math.sqrt(gain));
   };
   const laneValue = (id: LaneId): number => {
@@ -313,6 +357,10 @@ function buildLanes(
       if (e.control === 'crossfader') state.crossfader = e.value;
       else state.crossfaderEnabled = e.value !== 0;
       touched.push('faderA', 'faderB');
+    } else if (e.control === 'crossfaderAssignment' && ch) {
+      // Mid-window side flips re-route the deck's crossfader gain (4dp 39).
+      state.decks[ch].assignment = e.value < 0 ? 'left' : e.value > 0 ? 'right' : 'thru';
+      touched.push(`fader${role(ch)}` as LaneId);
     } else if (e.control === 'eqLow' && ch) {
       state.decks[ch].eq.low = e.value;
       touched.push(`eqLow${role(ch)}` as LaneId);

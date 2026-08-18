@@ -29,6 +29,8 @@ interface Options {
   beatjumpBeats?: number | null;
   /** Shaded overlay regions (looping 05), e.g. the active loop. */
   regions?: OverlayRegion[];
+  /** Possible-drop hypotheses (structure-analysis 02); absent/empty hides. */
+  dropMarks?: Array<{ time: number; strength: number }>;
   /** Driven mode: no self-running render loop — the caller's own motion
    * clock calls the returned `draw()` once per frame. */
   driven?: boolean;
@@ -47,6 +49,7 @@ export function useWaveformRendererV2({
   metricLadder,
   beatjumpBeats = null,
   regions,
+  dropMarks,
   driven = false,
   slot = 'full',
 }: Options) {
@@ -110,6 +113,10 @@ export function useWaveformRendererV2({
   useEffect(() => {
     if (regions) rendererRef.current?.setRegions(regions);
   }, [regions, waveformData]);
+
+  useEffect(() => {
+    rendererRef.current?.setDropMarks(dropMarks ?? []);
+  }, [dropMarks, waveformData]);
 
   useEffect(() => {
     rendererRef.current?.setBeatjumpGuides(beatjumpBeats);

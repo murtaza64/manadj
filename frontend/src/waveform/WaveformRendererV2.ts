@@ -499,6 +499,10 @@ export class WaveformRendererV2 {
   private cuePoint: number | null = null;
   /** Reset-mark positions (downbeat-resolved seconds, metric-ladder 02). */
   private resetMarks: number[] = [];
+  private dropMarks: Array<{ time: number; strength: number }> = [];
+  /** Per-mark beatline width multiplier (CSS px), lazily matched to the
+   * beat tier under each mark; null = recompute (marks or grid changed). */
+  private dropMarkWidthMul: number[] | null = null;
   /** Beatjump size (beats) for target guides; null hides them. */
   private beatjumpBeats: number | null = null;
   /** Plain-array view of beatTimes for beat-domain math (addBeats). */
@@ -581,6 +585,7 @@ export class WaveformRendererV2 {
     // otherwise keeps drawing stale lines — off-by-a-nudge).
     this.beatgridCache = null;
     this.beatTiers = matchBeatTiers(beatTimes, downbeatTimes, ladder?.tiers ?? null);
+    this.dropMarkWidthMul = null; // drop-line widths follow their beatlines
     this.tierBars = ladder?.tierBars ?? [1];
     this.ladder = ladder ?? null;
   }
@@ -589,6 +594,14 @@ export class WaveformRendererV2 {
    * clears. Drawn per frame like cues, so they translate with content. */
   public setResetMarks(times: number[]): void {
     this.resetMarks = times;
+  }
+
+  /** Possible-drop hypotheses (structure-analysis 02): analysis opinion,
+   * drawn as dashed red lines on the 2D overlay (dashed = visibly not a
+   * cue; the GL overlay pass only does solid rects). Empty clears. */
+  public setDropMarks(marks: Array<{ time: number; strength: number }>): void {
+    this.dropMarks = marks;
+    this.dropMarkWidthMul = null;
   }
 
   /** Beatjump target guides (beatjump-guides 01): the deck's jump size in
@@ -952,6 +965,7 @@ export class WaveformRendererV2 {
       } else {
         ctx.clearRect(0, 0, view.w, view.h);
       }
+      this.renderDropMarks(ctx, view); // under the badges: opinion < curation
       this.renderHotCueNumbers(ctx, view);
       if ((this.config.showTimeReadout ?? false) && !this.isMinimap) {
         this.renderTimeReadout(ctx, view);
@@ -1280,6 +1294,62 @@ export class WaveformRendererV2 {
       overlayCanvas.style.height = `${this.canvas.clientHeight}px`;
     }
     return this.overlayCtx;
+  }
+
+  /** Width multiplier per drop mark = the width of the beatline it sits on
+   * (marks land on downbeats): nearest beat's tier -> TIER_WIDTH, weak/no
+   * grid -> the 1px beat width. Cached; invalidated by setDropMarks and
+   * setBeatgrid. */
+  private dropWidthMultipliers(): number[] {
+    if (this.dropMarkWidthMul) return this.dropMarkWidthMul;
+    const beats = this.beatTimesPlain;
+    const tiers = this.beatTiers;
+    const maxStyle = TIER_WIDTH.length - 1;
+    this.dropMarkWidthMul = this.dropMarks.map((mark) => {
+      if (!beats || beats.length === 0 || !tiers) return 1;
+      let lo = 0;
+      let hi = beats.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (beats[mid] < mark.time) lo = mid + 1;
+        else hi = mid;
+      }
+      const i =
+        lo > 0 && Math.abs(beats[lo - 1] - mark.time) < Math.abs(beats[lo] - mark.time)
+          ? lo - 1
+          : lo;
+      const tier = tiers[i];
+      return tier < 0 ? 1 : TIER_WIDTH[Math.min(tier, maxStyle)];
+    });
+    return this.dropMarkWidthMul;
+  }
+
+  /** Dashed red verticals at possible drops (structure-analysis 02).
+   * Dashed + red = analysis opinion, visually distinct from every curated
+   * marker (solid cue poles, gold reset pennants). Opacity tracks detector
+   * strength so the likely first drop reads loudest. Each line takes the
+   * exact width and left-aligned geometry of the beatline under it, so the
+   * dashes read as "this gridline, flagged". */
+  private renderDropMarks(ctx: CanvasRenderingContext2D, view: FrameView): void {
+    if (this.dropMarks.length === 0) return;
+    const widths = this.dropWidthMultipliers();
+    ctx.save();
+    ctx.setLineDash([7 * view.dpr, 5 * view.dpr]);
+    for (let i = 0; i < this.dropMarks.length; i++) {
+      const mark = this.dropMarks[i];
+      const w = widths[i] * view.dpr;
+      // Beatlines are left-aligned rects at x (buildBeatgridVertices);
+      // stroke centered at x + w/2 covers the same pixels.
+      const x = this.timeToX(mark.time, view);
+      if (x + w < 0 || x >= view.w) continue;
+      ctx.lineWidth = w;
+      ctx.strokeStyle = `rgba(255, 32, 48, ${0.35 + 0.55 * mark.strength})`;
+      ctx.beginPath();
+      ctx.moveTo(x + w / 2, 0);
+      ctx.lineTo(x + w / 2, view.h);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   /** Numbered square FLAG attached to the pole's top right (bottom right

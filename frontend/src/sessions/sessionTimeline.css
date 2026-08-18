@@ -501,3 +501,24 @@
   white-space: nowrap;
   cursor: help;
 }
+
+/* Servo readout (sessions 20): replay actively nudging decks into phase. */
+.stl-servo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--green, #40c057);
+  animation: stl-servo-pulse 1s ease-in-out infinite;
+}
+.stl-servo-deck i {
+  font-style: normal;
+  font-weight: 600;
+  opacity: 0.85;
+  margin-left: 2px;
+}
+@keyframes stl-servo-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}

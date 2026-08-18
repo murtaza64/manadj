@@ -887,9 +887,13 @@ describe('SessionReplayDriver — steady playback is left alone (jitter fix)', (
     ];
     const r = rig(planFor(events, 2));
     await r.driver.start();
-    const seedSeeks = r.engines.A.seeks.length;
-    for (let i = 0; i < 5; i++) r.advance(1.0);
-    expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    // The FIRST tick may start-snap (an offset at t=0 is indistinguishable
+    // from start stagger, and snapping before any phase is established is
+    // free). The invariant this test protects: NO PERIODIC seeks after.
+    r.advance(1.0);
+    const afterSnap = r.engines.A.seeks.length;
+    for (let i = 0; i < 4; i++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(afterSnap);
     r.driver.stop();
   });
 });
@@ -1134,15 +1138,66 @@ describe('SessionReplayDriver — phase servo (sessions 20)', () => {
     r.driver.stop();
   });
 
-  it('the bias stays bounded (±1%) while draining', async () => {
-    const r = rig(planFor(offsetLog(0.15), 2));
+  it('the bias is error-scheduled: firm (≤4%) at large error, gentle (≤1%) small', async () => {
+    // 0.15s injected mid-play (past the start-snap window): large-error
+    // tier engages, drains fast, then hands off to the gentle tier.
+    const r = rig(planFor(offsetLog(0.15, 8), 2));
     await r.driver.start();
     let maxAbsPitch = 0;
+    let ticksOver = 0;
     for (let k = 1; k <= 30; k++) {
       r.advance(1.0);
-      maxAbsPitch = Math.max(maxAbsPitch, Math.abs(r.engines.A.pitchPercent));
+      const p = Math.abs(r.engines.A.pitchPercent);
+      maxAbsPitch = Math.max(maxAbsPitch, p);
+      if (p > 1.05) ticksOver += 1;
     }
-    expect(maxAbsPitch).toBeLessThanOrEqual(1.05); // base rate ~0 + bias ≤ 1%
+    expect(maxAbsPitch).toBeLessThanOrEqual(4.05); // firm tier cap
+    expect(ticksOver).toBeLessThanOrEqual(8); // …but only briefly
+    // Converged well inside the old 1%-only timeline.
+    const recorded = 50 + 30 - 0.15;
+    expect(Math.abs(r.engines.A.getPlayhead() - recorded)).toBeLessThan(0.03);
+    r.driver.stop();
+  });
+
+  it('start-latency stagger snaps at the FIRST tick — no salvo of correction', async () => {
+    // The offset exists from tick 1: exactly what a late engine start
+    // looks like. One inaudible-at-start seek, then locked — not 15s of
+    // audible half-sync.
+    const r = rig(planFor(offsetLog(0.12, 1), 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    r.advance(1.0); // first sync tick
+    expect(r.engines.A.seeks.length).toBe(seedSeeks + 1); // the snap
+    for (let k = 2; k <= 10; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks + 1); // and nothing else
+    const recorded = 50 + 10 - 0.12;
+    expect(Math.abs(r.engines.A.getPlayhead() - recorded)).toBeLessThan(0.03);
+    // Bias never had to engage meaningfully.
+    expect(Math.abs(r.engines.A.pitchPercent)).toBeLessThan(1.1);
+    r.driver.stop();
+  });
+
+  it('a replayed play cue re-arms the start snap for that deck', async () => {
+    // Deck pauses then plays again in the log; its restart stagger snaps.
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 4, kind: 'transport', channel: 'A', action: 'pause', playhead: 52 },
+      { t: 6, kind: 'transport', channel: 'A', action: 'play', playhead: 52 },
+      // Recorded trajectory shows the deck 0.1 behind the cue landing —
+      // restart stagger. Snap expected at the next tick.
+      { t: 7, kind: 'tick', playheads: { A: 52.9 } },
+      { t: 8, kind: 'tick', playheads: { A: 53.9 } },
+      { t: 9, kind: 'tick', playheads: { A: 54.9 } },
+      { t: 12, kind: 'tick', playheads: { A: 57.9 } },
+    ];
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    for (let k = 1; k <= 6; k++) r.advance(1.0); // now at t=8
+    // Locked to the recorded (staggered) trajectory.
+    expect(Math.abs(r.engines.A.getPlayhead() - 53.9)).toBeLessThan(0.05);
     r.driver.stop();
   });
 
