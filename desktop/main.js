@@ -204,6 +204,7 @@ function registerVisualizerIpc() {
     if (!display) return { ok: false, reason: "display not found" };
     const win = visualizerWindow;
     const enter = () => {
+      win.setAlwaysOnTop(false); // floating windows can't enter fullscreen
       win.setBounds(display.bounds);
       win.setFullScreen(true);
     };
@@ -214,6 +215,17 @@ function registerVisualizerIpc() {
       win.setFullScreen(false);
     } else {
       enter();
+    }
+    return { ok: true };
+  });
+  ipcMain.handle("visualizer:toggle-fullscreen", () => {
+    if (!visualizerWindow) return { ok: false, reason: "visualizer window not open" };
+    const win = visualizerWindow;
+    if (win.isFullScreen()) {
+      win.setFullScreen(false);
+    } else {
+      win.setAlwaysOnTop(false);
+      win.setFullScreen(true);
     }
     return { ok: true };
   });
@@ -261,7 +273,13 @@ function createWindow() {
     if (details.frameName !== "manadj-visualizer") return;
     visualizerWindow = child;
     child.setAlwaysOnTop(true, "floating");
-    child.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // NOT setVisibleOnAllWorkspaces({visibleOnFullScreen:true}): on macOS
+    // it transforms the app to an accessory — the Dock icon vanished —
+    // and it is incompatible with fullscreen (the broken ⛶). Sticky =
+    // always-on-top only.
+    // Native fullscreen needs a normal window level; restore float on exit.
+    child.on("enter-full-screen", () => child.setAlwaysOnTop(false));
+    child.on("leave-full-screen", () => child.setAlwaysOnTop(true, "floating"));
     child.on("closed", () => {
       if (visualizerWindow === child) visualizerWindow = null;
     });
