@@ -40,6 +40,7 @@ import {
 } from './timelineModel';
 import type { CollapseCandidate, StateAtT, TimelineModel } from './timelineModel';
 import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
+import { staggerRows } from './labelStagger';
 import { drawAudibilityArea, drawGridlines, drawStyledRuns, traceRuns } from './waveformLanes';
 import type { TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
@@ -1285,19 +1286,32 @@ function DeckLane({
         );
       })}
 
-      {/* Jump/cue gesture markers (sessions 04 iteration). */}
-      {dt.gestures.map((g, i) => {
-        if (g.t < tView0 || g.t > tView1) return null;
-        return (
+      {/* Jump/cue gesture markers (sessions 04 iteration), labels
+          staggered onto rows so a cluster (stab run, repeated jumps)
+          stays legible (sessions 21). Ticks keep the exact x. */}
+      {(() => {
+        const visible = dt.gestures
+          .map((g, i) => ({ g, i }))
+          .filter(({ g }) => g.t >= tView0 && g.t <= tView1);
+        // Label extent estimate: 10px font ≈ 6px/char + padding.
+        const items = visible.map(({ g }) => {
+          const x0 = X(g.t) + 2;
+          return { x0, x1: x0 + gestureLabel(g).length * 6 + 6 };
+        });
+        // Rows adapt to the lane height (40–84px): 2 rows at minimum
+        // height, up to 4 — deeper fans would wander into the waveform.
+        const maxRows = Math.max(2, Math.min(4, Math.floor((h - 24) / 10)));
+        const rows = staggerRows(items, maxRows);
+        return visible.map(({ g, i }, k) => (
           <g key={`ges-${i}`} className="stl-gesture">
             <title>{`${g.action}${g.detail !== undefined ? ` ${g.detail}` : ''} → ${fmtClock(g.playhead)}`}</title>
             <line x1={X(g.t)} y1={y + 16} x2={X(g.t)} y2={y + h - 4} stroke={color} className="stl-gesture-tick" />
-            <text x={X(g.t) + 2} y={y + 26} fill={color}>
+            <text x={X(g.t) + 2} y={y + 26 + rows[k] * 10} fill={color}>
               {gestureLabel(g)}
             </text>
           </g>
-        );
-      })}
+        ));
+      })()}
 
       {/* Held loops: a bracket bar along the lane top. */}
       {dt.loops.map((lp, i) => {
