@@ -569,7 +569,14 @@ class RekordboxAnlz(KaitaiStruct):
             if hasattr(self, '_m_mask'):
                 return self._m_mask
 
-            self._m_mask = struct.pack('19B', (203 + self.c), (225 + self.c), (238 + self.c), (250 + self.c), (229 + self.c), (238 + self.c), (173 + self.c), (238 + self.c), (233 + self.c), (210 + self.c), (233 + self.c), (235 + self.c), (225 + self.c), (233 + self.c), (243 + self.c), (232 + self.c), (233 + self.c), (244 + self.c), (225 + self.c))
+            # LOCAL PATCH (kaitai-struct-compiler 0.11 miscompiles the .as<s1>
+            # casts): mask bytes must wrap mod 256 or files with >52 phrase
+            # entries crash the parser with struct.error.
+            self._m_mask = struct.pack('19B', *(
+                (base + self.c) & 0xFF
+                for base in (203, 225, 238, 250, 229, 238, 173, 238, 233, 210,
+                             233, 235, 225, 233, 243, 232, 233, 244, 225)
+            ))
             return getattr(self, '_m_mask', None)
 
         @property
