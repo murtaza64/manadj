@@ -8,6 +8,7 @@ import { useHotCues } from '../hooks/useHotCues';
 import { useDrops } from '../hooks/useDrops';
 import type { PlaybackClock } from '../playback/clock';
 import type { LoopRegion } from '../playback/loop';
+import type { WaveformModulation } from '../waveform/WaveformRendererV2';
 import { PLAY_MARKER_FRACTION, stepVisibleSeconds } from '../utils/waveformZoom';
 import './Waveform.css';
 
@@ -48,6 +49,11 @@ interface WebGLWaveformProps {
   /** Time/bar readout placement (renderer config passthrough). */
   timeReadoutAnchor?: 'bottom-right' | 'top-left';
   timeReadoutOffset?: { x: number; y: number };
+  /** Per-column amplitude modulation (renderer passthrough): the editor
+   * feeds automation curves; the performance decks feed LIVE mixer state
+   * (performance-mode 09 — the modTex is resampled every frame, so a
+   * closure over the Mixer self-updates). */
+  modulation?: WaveformModulation | null;
 }
 
 export default function WebGLWaveform({
@@ -64,6 +70,7 @@ export default function WebGLWaveform({
   playMarkerFraction = PLAY_MARKER_FRACTION,
   timeReadoutAnchor,
   timeReadoutOffset,
+  modulation = null,
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: beatgridData } = useBeatgridData(trackId);
@@ -98,6 +105,11 @@ export default function WebGLWaveform({
       rendererRef.current?.setVisibleSeconds(visibleSeconds);
     }
   }, [visibleSeconds, waveformData, rendererRef]);
+
+  // Modulation passthrough (also re-applied after re-init on new data).
+  useEffect(() => {
+    rendererRef.current?.setModulation(modulation);
+  }, [modulation, waveformData, rendererRef]);
 
   // Drag-to-scrub: REAL seeks per pointer move (silent — the deck pauses
   // for the drag's duration). The playhead is then always where the view

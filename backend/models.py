@@ -2,7 +2,7 @@
 
 import json
 
-from sqlalchemy import Boolean, CheckConstraint, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index, and_, select
+from sqlalchemy import Boolean, CheckConstraint, Column, Integer, LargeBinary, String, Text, Float, ForeignKey, DateTime, Index, and_, select, text
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import backref, deferred, relationship, DeclarativeBase
 from sqlalchemy.sql import func
@@ -57,6 +57,22 @@ class Track(Base):
 
     # Relationships
     track_tags = relationship("TrackTag", back_populates="track", cascade="all, delete-orphan")
+
+    # Hot-path indexes (performance-hardening 03, migration 0031). Session/
+    # Take/Transition/Set lookups are already indexed — Track was the gap.
+    __table_args__ = (
+        # The is_active predicate (archived_at IS NULL) on every listing.
+        Index("ix_tracks_archived_at", "archived_at"),
+        # Default browse: active rows, newest-first (crud.get_tracks). Partial
+        # over the active rows only — covers the default listing exactly.
+        Index(
+            "ix_tracks_active_created_at",
+            "created_at",
+            sqlite_where=text("archived_at IS NULL"),
+        ),
+        # Follow mode's dyadic BPM-fold gate (crud.get_tracks:104-117).
+        Index("ix_tracks_bpm", "bpm"),
+    )
 
     @hybrid_property
     def needs_attention(self) -> bool:
