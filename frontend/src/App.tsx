@@ -23,6 +23,7 @@ import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_SESSION_EVENT } from './sessions/openSession';
+import { KeepAliveView } from './contexts/KeepAliveView';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
@@ -150,11 +151,24 @@ function App() {
           <div className="app-shell">
             <TopBar mode={view} onModeChange={setView} />
             <main className="app-main">
-              {view === 'performance' ? (
+              {/* The three DECK modes keep alive (perf-layout 09): they
+                  mount on first visit and then hide instead of unmounting,
+                  so zoom/scroll/panel state survives mode switches in
+                  every component at once. Config-ish pages stay
+                  conditional — remounting them is cheap and honest. */}
+              <KeepAliveView active={view === 'performance'}>
                 <PerformanceView />
-              ) : view === 'transition' ? (
+              </KeepAliveView>
+              <KeepAliveView active={view === 'transition'}>
                 <TransitionEditor />
-              ) : view === 'history' ? (
+              </KeepAliveView>
+              <KeepAliveView active={view === 'library'}>
+                {/* The library view is Deck A (performance-mode issue 02). */}
+                <DeckScope deck="A">
+                  <Library />
+                </DeckScope>
+              </KeepAliveView>
+              {view === 'history' ? (
                 <TakeHistoryView />
               ) : view === 'sync' ? (
                 <SyncView />
@@ -166,12 +180,7 @@ function App() {
                 <Suspense fallback={null}>
                   <JogTuningPage />
                 </Suspense>
-              ) : (
-                /* The library view is Deck A (performance-mode issue 02). */
-                <DeckScope deck="A">
-                  <Library />
-                </DeckScope>
-              )}
+              ) : null}
             </main>
           </div>
         </FilterProvider>

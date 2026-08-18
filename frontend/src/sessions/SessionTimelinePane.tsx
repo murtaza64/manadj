@@ -4,18 +4,24 @@
  * flex cell (the SetDetailPane posture — one flex:1 child, own scroll).
  * Consumes the one-shot deep-link focus moment on mount.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { SessionTimelineView } from './SessionTimelineView';
-import { consumeSessionFocus } from './openSession';
+import { OPEN_SESSION_EVENT, peekSessionFocus } from './openSession';
 import type { SessionFocus } from './openSession';
 
 export function SessionTimelinePane({ sessionUuid }: { sessionUuid: string }) {
   const { data: rows } = useQuery({ queryKey: ['sessions'], queryFn: api.sessions.list });
-  // One-shot: the deep-link moment + zoom request, read exactly once per
-  // pane mount (lazy initializer — never re-runs on re-render).
-  const [focus] = useState<SessionFocus>(() => consumeSessionFocus());
+  // Deep-link focus: peeked on mount AND re-peeked on every session-open
+  // request — keep-alive panes stay mounted, so a mount-only read would
+  // miss deep-links that arrive later (perf-layout 09).
+  const [focus, setFocus] = useState<SessionFocus>(() => peekSessionFocus());
+  useEffect(() => {
+    const onOpen = () => setFocus(peekSessionFocus());
+    window.addEventListener(OPEN_SESSION_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpen);
+  }, []);
 
   const session = rows?.find((r) => r.uuid === sessionUuid) ?? null;
   if (!session) {
@@ -25,5 +31,15 @@ export function SessionTimelinePane({ sessionUuid }: { sessionUuid: string }) {
       </div>
     );
   }
-  return <SessionTimelineView session={session} focusS={focus.atS} focusSpanS={focus.spanS} />;
+  // Keyed per session (sessions 21): a session switch is a fresh mount —
+  // state comes from the per-uuid store, never leaks across sessions.
+  return (
+    <SessionTimelineView
+      key={session.uuid}
+      session={session}
+      focusS={focus.atS}
+      focusSpanS={focus.spanS}
+      focusVersion={focus.version}
+    />
+  );
 }
