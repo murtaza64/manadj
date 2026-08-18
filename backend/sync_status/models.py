@@ -13,6 +13,15 @@ from typing import Literal
 SurfaceId = Literal["disk", "engine", "rekordbox"]
 SURFACE_IDS: tuple[SurfaceId, ...] = ("disk", "engine", "rekordbox")
 EXTERNAL_LIBRARY_IDS: tuple[SurfaceId, ...] = ("engine", "rekordbox")
+
+# The write-path endpoint vocabulary: the manadj Library plus the external
+# libraries it Exports to / External-Imports from. Distinct from SURFACE_IDS
+# (which is Disk-inclusive and Library-exclusive — the read matrix's columns):
+# the sync managers move track Collections between "manadj" and the external
+# libraries, never Disk. Single-homed here so the managers stop hardcoding the
+# triad.
+SyncEndpointId = Literal["manadj", "engine", "rekordbox"]
+SYNC_ENDPOINT_IDS: tuple[SyncEndpointId, ...] = ("manadj", *EXTERNAL_LIBRARY_IDS)
 FieldName = Literal[
     "title", "artist", "key", "bpm", "energy", "tags", "hotcues", "beatgrid", "maincue"
 ]

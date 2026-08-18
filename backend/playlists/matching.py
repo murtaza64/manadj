@@ -1,4 +1,11 @@
-"""Playlist name matching logic."""
+"""Playlist name matching logic.
+
+Match — bucketing items across sources by a key — is single-homed in
+``backend.sync_common.matching.match_by_key``. Playlists match on name
+(case-sensitive), so this is a thin binding of that engine to the playlist key.
+"""
+
+from backend.sync_common.matching import match_by_key
 
 from .models import PlaylistInfo
 
@@ -26,24 +33,12 @@ def match_playlists_by_name(
             ...
         }
     """
-    # Collect all unique playlist names across all sources
-    all_names = set()
-    for playlists in all_playlists.values():
-        for playlist in playlists:
-            all_names.add(playlist.name)
-
-    # Build lookup dictionaries for each source
-    manadj_by_name = {p.name: p for p in all_playlists.get('manadj', [])}
-    engine_by_name = {p.name: p for p in all_playlists.get('engine', [])}
-    rekordbox_by_name = {p.name: p for p in all_playlists.get('rekordbox', [])}
-
-    # Match playlists by name
-    matched = {}
-    for name in all_names:
-        matched[name] = {
-            'manadj': manadj_by_name.get(name),
-            'engine': engine_by_name.get(name),
-            'rekordbox': rekordbox_by_name.get(name),
+    buckets = match_by_key(all_playlists, key_of=lambda p: p.name)
+    return {
+        name: {
+            "manadj": bucket.get("manadj"),
+            "engine": bucket.get("engine"),
+            "rekordbox": bucket.get("rekordbox"),
         }
-
-    return matched
+        for name, bucket in buckets.items()
+    }

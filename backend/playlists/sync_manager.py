@@ -6,7 +6,8 @@ from .models import PlaylistInfo, UnifiedPlaylist, PlaylistSyncStats, TrackEntry
 from .comparison import are_playlists_equivalent
 from .matching import match_playlists_by_name
 from .manadj_reader import ManAdjPlaylistReader
-from backend.sync_common.matching import TrackIndex
+from backend.sync_common.matching import TrackIndex, in_sync
+from backend.sync_status.models import SYNC_ENDPOINT_IDS
 
 
 class PlaylistSyncManager:
@@ -50,7 +51,7 @@ class PlaylistSyncManager:
             Dictionary with keys 'manadj', 'engine', 'rekordbox' and
             lists of PlaylistInfo as values
         """
-        result = {'manadj': [], 'engine': [], 'rekordbox': []}
+        result: dict[str, list[PlaylistInfo]] = {sid: [] for sid in SYNC_ENDPOINT_IDS}
 
         # Always load manadj
         result['manadj'] = self.manadj_reader.get_all_playlists()
@@ -125,19 +126,10 @@ class PlaylistSyncManager:
         Returns:
             True if all non-None playlists have the same tracks in same order
         """
-        # Get non-None playlists
-        playlists = [p for p in sources.values() if p is not None]
-
-        if len(playlists) <= 1:
-            return True  # Nothing to compare or only one source
-
-        # Compare all playlists against the first one
-        base = playlists[0]
-        for playlist in playlists[1:]:
-            if not are_playlists_equivalent(base, playlist):
-                return False
-
-        return True
+        # Shared agreement predicate: all present sources equivalent (Diverged
+        # semantics = are_playlists_equivalent — same tracks, same order).
+        present = {sid: p for sid, p in sources.items() if p is not None}
+        return in_sync(present, equal=are_playlists_equivalent)
 
     def get_stats(self) -> PlaylistSyncStats:
         """Get loading statistics.
@@ -198,8 +190,8 @@ class PlaylistSyncManager:
         Returns:
             SyncResult with success status and details
         """
-        # Validate source and target
-        if source not in ('manadj', 'engine', 'rekordbox'):
+        # Validate source and target against the single-homed endpoint triad.
+        if source not in SYNC_ENDPOINT_IDS:
             return SyncResult(
                 target=target,
                 success=False,
@@ -209,7 +201,7 @@ class PlaylistSyncManager:
                 error=f"Invalid source: {source}"
             )
 
-        if target not in ('manadj', 'engine', 'rekordbox'):
+        if target not in SYNC_ENDPOINT_IDS:
             return SyncResult(
                 target=target,
                 success=False,
