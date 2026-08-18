@@ -71,7 +71,7 @@ export function chipTooltip(face: ChipFace, ctx: ChipContext): string {
     case 'audition':
       return 'Editor audition owns the decks. Space toggles the audition. Click to open the editor.';
     case 'replay':
-      return 'Session replay owns the decks. Any deck or mixer gesture takes over — the decks are yours as the replay left them, and capture resumes.';
+      return 'Session replay owns the decks. Any deck or mixer gesture takes over — the decks are yours as the replay left them, and capture resumes. Click to open the replayed Session at the playhead.';
     case 'decks':
       if (ctx.editorMounted) {
         return 'Manual decks. Space plays the editor audition (it will claim the decks).';

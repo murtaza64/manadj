@@ -11,6 +11,7 @@ export const OPEN_SESSION_EVENT = 'manadj:open-session';
 
 let selectedUuid: string | null = null;
 let pendingFocusS: number | null = null;
+let pendingSpanS: number | null = null;
 
 export function getSelectedSessionUuid(): string | null {
   return selectedUuid;
@@ -19,14 +20,21 @@ export function getSelectedSessionUuid(): string | null {
 /** Durable selection write (the Library's session pane authority). */
 export function selectSession(uuid: string | null): void {
   selectedUuid = uuid;
-  if (uuid === null) pendingFocusS = null;
+  if (uuid === null) {
+    pendingFocusS = null;
+    pendingSpanS = null;
+  }
 }
 
 export interface SessionMomentRequest {
   sessionUuid: string;
-  /** Capture-clock seconds to center on (a Take's window start, usually);
-   * null just opens the Session's timeline. */
+  /** Capture-clock seconds to center on (a Take's window start, the replay
+   * playhead); null just opens the Session's timeline. */
   atS: number | null;
+  /** Zoom request (sessions 16): show at most this many seconds around the
+   * moment — the timeline raises pxPerSec to viewportW/spanS (never below
+   * fit). Null keeps the current/fit zoom. */
+  spanS?: number | null;
 }
 
 /** REQUEST (history's "view in Session", ownership chip): select durably,
@@ -35,13 +43,20 @@ export interface SessionMomentRequest {
 export function requestSessionMoment(req: SessionMomentRequest): void {
   selectedUuid = req.sessionUuid;
   pendingFocusS = req.atS;
+  pendingSpanS = req.spanS ?? null;
   window.dispatchEvent(new CustomEvent(OPEN_SESSION_EVENT));
 }
 
-/** CONSUME (one-shot): the pending focus moment, cleared on read — the
- * timeline pane reads it once on mount (takeReview.ts idiom). */
-export function consumeSessionFocusS(): number | null {
-  const atS = pendingFocusS;
+export interface SessionFocus {
+  atS: number | null;
+  spanS: number | null;
+}
+
+/** CONSUME (one-shot): the pending focus moment + zoom request, cleared on
+ * read — the timeline pane reads it once on mount (takeReview.ts idiom). */
+export function consumeSessionFocus(): SessionFocus {
+  const focus = { atS: pendingFocusS, spanS: pendingSpanS };
   pendingFocusS = null;
-  return atS;
+  pendingSpanS = null;
+  return focus;
 }

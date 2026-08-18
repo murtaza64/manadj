@@ -102,12 +102,15 @@ interface Props {
   session: SessionRowWire;
   /** Deep-link: center on this capture-clock moment on open (history jump). */
   focusS?: number | null;
+  /** Deep-link zoom (sessions 16): show at most this many seconds around
+   * the focus moment (never zooms below fit; short sessions keep fit). */
+  focusSpanS?: number | null;
   /** Standalone-mode back affordance; embedded in the Library the sidebar
    * IS the navigation (Sets parity) and this is omitted. */
   onBack?: () => void;
 }
 
-export function SessionTimelineView({ session, focusS, onBack }: Props) {
+export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Props) {
   // Responsive vertical budget: lanes scale, chrome sheds when tight.
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootH, setRootH] = useState(900);
@@ -310,16 +313,26 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
      
   }, [hasModel]);
 
-  // Deep-link focus: drop the cursor + moment once, and scroll it into view.
+  // Deep-link focus: drop the cursor + moment once, and scroll it into
+  // view. A zoom request (sessions 16: at most focusSpanS seconds visible)
+  // applies FIRST and defers the scroll one render — centering must use
+  // the axis rebuilt at the new pxPerSec, not the fit axis.
   const focusedRef = useRef(false);
   useEffect(() => {
     if (focusedRef.current || focusS == null || !model || !axis) return;
+    if (focusSpanS != null) {
+      const target = Math.min(MAX_PX_PER_SEC, Math.max(fitPx, viewportW / focusSpanS));
+      if (Math.abs(axis.pxPerSec - target) > 1e-9 && target > fitPx) {
+        setPxPerSec(target);
+        return; // re-runs with the rebuilt axis
+      }
+    }
     focusedRef.current = true;
     setScrubT(focusS);
     setSelection({ kind: 'moment', t: focusS });
     const el = scrollRef.current;
     if (el) el.scrollLeft = Math.max(0, axis.tToPx(focusS) - el.clientWidth / 2);
-  }, [focusS, model, axis, width]);
+  }, [focusS, focusSpanS, model, axis, width, fitPx, viewportW]);
 
   // Checkpointed scrub lookups: hover fires per mousemove — reducing the
   // whole 100k-event log each time froze large Sessions (issue 13).

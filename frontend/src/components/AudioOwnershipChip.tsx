@@ -19,6 +19,8 @@ import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import { useConductorState } from '../sets/conductorStore';
 import { useSelectedSetId } from '../sets/setStore';
 import { requestSetNavigate } from '../sets/navigateToSet';
+import { requestSessionMoment } from '../sessions/openSession';
+import { replayNowT, replayState } from '../sessions/replayStore';
 import { chipTooltip, resolveChipFace } from './ownershipChip';
 import type { AppMode } from './TopBar';
 
@@ -50,7 +52,13 @@ export function AudioOwnershipChip({
     } else if (face.kind === 'audition') {
       onModeChange('transition');
     } else if (face.kind === 'replay') {
-      // Sessions live in the Library now (sessions 04 integration).
+      // Jump INTO the replay (sessions 16): the replayed Session's
+      // timeline, centered on the live playhead, at most 15 minutes
+      // visible. Sessions live in the Library (sessions 04 integration).
+      const uuid = replayState().sessionUuid;
+      if (uuid !== null) {
+        requestSessionMoment({ sessionUuid: uuid, atS: replayNowT(), spanS: 900 });
+      }
       onModeChange('library');
     }
     // DECKS: nothing to navigate to — the chip never touches audio.
