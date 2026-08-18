@@ -69,6 +69,8 @@ export function useSetBeatgridDownbeat() {
     onSuccess: (_data, variables) => {
       // Invalidate beatgrid query to trigger refetch
       queryClient.invalidateQueries({ queryKey: ['beatgrid', variables.trackId] });
+      // Drop hypotheses are grid-derived (structure-analysis 02).
+      queryClient.invalidateQueries({ queryKey: ['drops', variables.trackId] });
     },
   });
 }
@@ -90,6 +92,7 @@ export function useDropAnchor() {
       queryClient.setQueryData(['beatgrid', variables.trackId], data.beatgrid);
       queryClient.setQueryData(['metric-ladder', variables.trackId], data.metric_ladder);
       queryClient.invalidateQueries({ queryKey: ['hotcues'] });
+      queryClient.invalidateQueries({ queryKey: ['drops', variables.trackId] });
     },
   });
 }
@@ -106,6 +109,7 @@ export function useNudgeBeatgrid() {
     onSuccess: (_data, variables) => {
       // Invalidate beatgrid query to trigger refetch
       queryClient.invalidateQueries({ queryKey: ['beatgrid', variables.trackId] });
+      queryClient.invalidateQueries({ queryKey: ['drops', variables.trackId] });
     },
   });
 }

@@ -400,6 +400,18 @@ export const api = {
     },
   },
 
+  drops: {
+    /** Possible-drop hypotheses (structure-analysis 02): analysis opinion
+     * computed from blob + grid; empty drops while inputs are missing. */
+    get: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/drops/${trackId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch drops: ${response.statusText}`);
+      }
+      return response.json();
+    },
+  },
+
   beatgrids: {
     get: async (trackId: number) => {
       const response = await fetch(`${API_BASE}/beatgrids/${trackId}`);
