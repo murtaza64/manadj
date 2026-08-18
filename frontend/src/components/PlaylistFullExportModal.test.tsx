@@ -15,6 +15,10 @@ afterEach(() => {
 });
 
 it('exports to selected destinations and renders the report', async () => {
+  vi.spyOn(api.playlistSync, 'previewExportPerformance').mockResolvedValue({
+    playlist_name: 'Alien',
+    previews: [],
+  });
   vi.spyOn(api.playlistSync, 'exportPerformance').mockResolvedValue({
     playlist_name: 'Alien',
     results: [{
@@ -57,5 +61,57 @@ it('exports to selected destinations and renders the report', async () => {
   expect(host.textContent).toContain('1 exported, 1 failed');
   expect(host.textContent).toContain('Tracer');
   expect(host.textContent).toContain('failed: no ANLZ');
+  act(() => root.unmount());
+});
+
+it('previews the plan for each destination before exporting', async () => {
+  vi.spyOn(api.playlistSync, 'previewExportPerformance').mockResolvedValue({
+    playlist_name: 'Alien',
+    previews: [
+      {
+        target: 'rekordbox',
+        available: true,
+        playlist_exists: true,
+        tracks_total: 35,
+        tracks_matched: 33,
+        tracks_to_add: 3,
+        tracks_to_remove: 1,
+        tracks_moved: 4,
+        unmatched: ['ghost.flac', 'lost.flac'],
+      },
+      {
+        target: 'engine',
+        available: true,
+        playlist_exists: false,
+        tracks_total: 35,
+        tracks_matched: 35,
+        tracks_to_add: 35,
+        tracks_to_remove: 0,
+        tracks_moved: 0,
+        unmatched: [],
+      },
+    ],
+  });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  await act(async () => {
+    root.render(
+      <QueryClientProvider client={client}>
+        <PlaylistFullExportModal playlistName="Alien" onClose={() => undefined} />
+      </QueryClientProvider>,
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  expect(api.playlistSync.previewExportPerformance).toHaveBeenCalledWith('Alien');
+  expect(host.textContent).toContain('replaces playlist: adds 3, removes 1, moves 4');
+  expect(host.textContent).toContain('overwrites data for 33 tracks');
+  expect(host.textContent).toContain('2 unmatched');
+  expect(host.textContent).toContain('creates playlist (35 tracks)');
   act(() => root.unmount());
 });

@@ -87,3 +87,16 @@
 .take-delete:hover {
   color: #ff2d55;
 }
+
+/* "View in Session" jump (sessions 04): the timeline glyph, cyan accent. */
+.take-view-session {
+  background: none;
+  border: none;
+  color: var(--overlay0, #6c7086);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+}
+.take-view-session:hover {
+  color: #00e5ff;
+}

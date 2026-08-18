@@ -20,7 +20,7 @@
 import type { ChannelId } from './mixer';
 import type { JogProfile } from '../midi/jogCalibration';
 
-export type AudibleSurfaceId = 'shared' | 'editor' | 'conductor';
+export type AudibleSurfaceId = 'shared' | 'editor' | 'conductor' | 'replay';
 
 /** Transport-class gestures (the ones that can start audio). Absent
  * handlers mean the gesture has no meaning on that surface — dropped. */

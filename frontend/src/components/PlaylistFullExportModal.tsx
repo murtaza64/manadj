@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../api/client';
-import type { PlaylistExportTarget } from '../types';
+import type { PlaylistExportTarget, PlaylistExportTargetPreview } from '../types';
 import './PlaylistFullExportModal.css';
 
 
@@ -11,10 +11,49 @@ interface PlaylistFullExportModalProps {
   onClose: () => void;
 }
 
+function TargetPlan({ preview, loading }: {
+  preview: PlaylistExportTargetPreview | undefined;
+  loading: boolean;
+}) {
+  if (loading) return <span className="target-plan">computing plan...</span>;
+  if (!preview) return <span className="target-plan">plan unavailable</span>;
+  if (!preview.available) {
+    return <span className="target-plan plan-unavailable">unavailable: {preview.error}</span>;
+  }
+  const changes = [
+    ...(preview.tracks_to_add ? [`adds ${preview.tracks_to_add}`] : []),
+    ...(preview.tracks_to_remove ? [`removes ${preview.tracks_to_remove}`] : []),
+    ...(preview.tracks_moved ? [`moves ${preview.tracks_moved}`] : []),
+  ];
+  const membership = preview.playlist_exists
+    ? (changes.length > 0 ? `replaces playlist: ${changes.join(', ')}` : 'playlist already matches')
+    : `creates playlist (${preview.tracks_matched} tracks)`;
+  const unmatched = preview.unmatched ?? [];
+  return (
+    <span className="target-plan">
+      {membership}
+      {' · '}
+      overwrites data for {preview.tracks_matched} track{preview.tracks_matched === 1 ? '' : 's'}
+      {unmatched.length > 0 && (
+        <span className="plan-unmatched" title={unmatched.join('\n')}>
+          {' · '}{unmatched.length} unmatched
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function PlaylistFullExportModal({ playlistName, onClose }: PlaylistFullExportModalProps) {
   const [rekordbox, setRekordbox] = useState(true);
   const [engine, setEngine] = useState(true);
   const queryClient = useQueryClient();
+  const preview = useQuery({
+    queryKey: ['playlistSync', 'exportPreview', playlistName],
+    queryFn: () => api.playlistSync.previewExportPerformance(playlistName),
+  });
+  const previewFor = (target: PlaylistExportTarget) => (
+    preview.data?.previews.find(p => p.target === target)
+  );
   const mutation = useMutation({
     mutationFn: (targets: PlaylistExportTarget[]) => (
       api.playlistSync.exportPerformance(playlistName, targets)
@@ -58,7 +97,10 @@ export function PlaylistFullExportModal({ playlistName, onClose }: PlaylistFullE
               onChange={event => setRekordbox(event.target.checked)}
             />
             <span className="target-mark target-mark-rb" />
-            Rekordbox
+            <span className="target-info">
+              Rekordbox
+              <TargetPlan preview={previewFor('rekordbox')} loading={preview.isPending} />
+            </span>
           </label>
           <label>
             <input
@@ -68,7 +110,10 @@ export function PlaylistFullExportModal({ playlistName, onClose }: PlaylistFullE
               onChange={event => setEngine(event.target.checked)}
             />
             <span className="target-mark target-mark-engine" />
-            Engine DJ
+            <span className="target-info">
+              Engine DJ
+              <TargetPlan preview={previewFor('engine')} loading={preview.isPending} />
+            </span>
           </label>
         </fieldset>
 

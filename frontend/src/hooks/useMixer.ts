@@ -47,6 +47,7 @@ function sameAutomation(
   return (
     a.fader === b.fader &&
     a.filter === b.filter &&
+    a.trim === b.trim &&
     a.eq.low === b.eq.low &&
     a.eq.mid === b.eq.mid &&
     a.eq.high === b.eq.high
@@ -78,7 +79,7 @@ export function useAutomationGhost(channel: ChannelId): AutomationChannelValues 
       if (!sameAutomation(last, next)) {
         // Snapshot: the conductor replaces the stored object per tick, but
         // a copy keeps us honest if a writer ever mutates in place.
-        last = next && { fader: next.fader, filter: next.filter, eq: { ...next.eq } };
+        last = next && { fader: next.fader, filter: next.filter, trim: next.trim, eq: { ...next.eq } };
         setGhost(last);
       }
       schedule(next !== null);

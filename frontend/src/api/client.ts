@@ -11,6 +11,7 @@ import type {
   UnifiedPlaylist,
   PlaylistSyncStats,
   PlaylistExportTarget,
+  PlaylistFullExportPreview,
   PlaylistFullExportReport,
   UnifiedTagView,
   TagSyncStats,
@@ -706,6 +707,20 @@ export const api = {
       }
       return res.json();
     },
+
+    previewExportPerformance: async (
+      playlistName: string,
+    ): Promise<PlaylistFullExportPreview> => {
+      const encodedName = encodeURIComponent(playlistName);
+      const res = await fetch(
+        `${API_BASE}/sync/export/playlists/${encodedName}/performance/preview`,
+      );
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to preview playlist export'));
+      }
+      return res.json();
+    },
   },
 
   tagSync: {
@@ -1227,6 +1242,75 @@ export const api = {
     },
   },
 
+  sessions: {
+    /** The Sessions list, newest first — headers + Take count (ADR 0033). */
+    list: async (): Promise<SessionRowWire[]> => {
+      const res = await fetch(`${API_BASE}/sessions`);
+      if (!res.ok) throw new Error('Failed to fetch sessions');
+      return res.json();
+    },
+
+    /** One Session with its whole event log (chunks concatenated) — the
+     * timeline's read model (sessions 04). */
+    get: async (uuid: string): Promise<SessionDetailWire> => {
+      const res = await fetch(`${API_BASE}/sessions/${uuid}`);
+      if (!res.ok) throw new Error(`Failed to fetch session (${res.status})`);
+      return res.json();
+    },
+
+    /** Close Sessions orphaned by a prior crash/reload before recording;
+     * the backend also sweeps 100%-silent rows (sessions 11). */
+    recover: async (): Promise<number> => {
+      const res = await fetch(`${API_BASE}/sessions/recover`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Failed to recover sessions (${res.status})`);
+      const body: { closed: number } = await res.json();
+      return body.closed;
+    },
+
+    /** Open a Session on the first Master-audible instant (sessions 11);
+     * the client mints the uuid. */
+    create: async (uuid: string, startedAt?: string): Promise<SessionRowWire> => {
+      const res = await fetch(`${API_BASE}/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uuid, started_at: startedAt }),
+      });
+      if (!res.ok) throw new Error(`Failed to create session (${res.status})`);
+      return res.json();
+    },
+
+    /** Append one batch of capture events (~5s flush; ADR 0033). */
+    appendChunk: async (
+      uuid: string,
+      seq: number,
+      events: CaptureEventWire[]
+    ): Promise<SessionRowWire> => {
+      const res = await fetch(`${API_BASE}/sessions/${uuid}/chunks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seq, events }),
+      });
+      if (!res.ok) throw new Error(`Failed to append session chunk (${res.status})`);
+      return res.json();
+    },
+
+    /** Close a Session (recorder dispose / page-hide). */
+    end: async (uuid: string, endedAt?: string): Promise<SessionRowWire> => {
+      const res = await fetch(`${API_BASE}/sessions/${uuid}/end`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ended_at: endedAt }),
+      });
+      if (!res.ok) throw new Error(`Failed to end session (${res.status})`);
+      return res.json();
+    },
+
+    delete: async (uuid: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/sessions/${uuid}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete session (${res.status})`);
+    },
+  },
+
   sets: {
     /** All Sets, in sidebar order (sets 01). */
     list: async (): Promise<SetRowWire[]> => {
@@ -1310,6 +1394,10 @@ export interface TakeRowWire {
   confidence: number;
   detector_version: number;
   promoted_transition_uuid: string | null;
+  /** The Session this Take was born from (provenance, nullable; ADR 0033). */
+  session_uuid: string | null;
+  /** How the Take came to be: 'detected' or 'manual' (issue 06). */
+  origin: string;
 }
 
 export interface TakeDetailWire extends TakeRowWire {
@@ -1328,6 +1416,25 @@ export interface TakeCreateWire {
   confidence: number;
   detector_version: number;
   params: CaptureDetectorParams;
+  events: CaptureEventWire[];
+  /** The Session this Take was born from (nullable; ADR 0033). */
+  session_uuid?: string | null;
+  /** 'detected' (default) or 'manual' (hand-cut, issue 06). */
+  origin?: string;
+}
+
+// ── Session wire types (Sessions PRD, ADR 0033) ─────────────────────────
+
+export interface SessionRowWire {
+  uuid: string;
+  started_at: string;
+  ended_at: string | null;
+  take_count: number;
+}
+
+export interface SessionDetailWire extends SessionRowWire {
+  /** The whole event log, chunks concatenated in seq order. Opaque to the
+   * backend; this client reads it with the capture module's real types. */
   events: CaptureEventWire[];
 }
 

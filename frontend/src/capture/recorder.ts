@@ -24,12 +24,12 @@ import type { DeckSnapshot } from '../playback/DeckEngine';
 import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId, ChannelState } from '../playback/mixer';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
-import { channelCrossfaderGain, channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
-import { initialCaptureState, reduceCapture } from './detector';
+import type { AudibleSurfaceId } from '../playback/audibleSurface';
+import { anyDeckAudible, initialCaptureState, reduceCapture } from './detector';
 import type { CaptureState } from './detector';
-import { DEFAULT_DETECTOR_PARAMS } from './events';
-import type { CaptureChannel, CaptureControlId, CaptureEvent, DetectedTake } from './events';
+import { SilenceSplitClock } from './sessionLifecycle';
+import type { CaptureControlId, CaptureEvent, DetectedTake } from './events';
 
 const TICK_MS = 1000;
 
@@ -59,11 +59,14 @@ export class CaptureRecorder {
   private state: CaptureState = initialCaptureState();
   private unsubs: (() => void)[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
-  /** True while a non-shared surface holds audibility: drop everything. */
-  private gated = false;
+  /** True while a non-shared surface (a machine) holds audibility. The
+   * machine's own events are suppressed — the log records only that the
+   * surface was held (tenure markers), never what was played (ADR 0033).
+   * The >2-audible suspension is NOT here anymore: it moved into the
+   * detector, which self-gates while the log keeps all four decks. */
   private surfaceGated = false;
-  private multiDeckGated = false;
-  private lastChannel: Record<CaptureChannel, ChannelState>;
+  private lastChannel: Record<ChannelId, ChannelState>;
+  private lastAssignment: Record<ChannelId, CrossfaderAssignment>;
   private lastCrossfader: number;
   private lastCrossfaderEnabled: boolean;
   private lastMaster: number;
@@ -72,16 +75,46 @@ export class CaptureRecorder {
   private readonly mixer: CaptureMixerSource;
   private readonly engines: Record<ChannelId, CaptureDeckSource>;
   private readonly onTake: (take: DetectedTake) => void;
+  /** Session persistence sink (Sessions PRD, ADR 0033): every event the
+   * recorder logs is streamed here beside the in-memory rolling log the
+   * detector reads. Optional — tests that only exercise detection omit it. */
+  private readonly onEvent?: (event: CaptureEvent, activatesSession: boolean) => void;
+  /** Ten-minute silence split (sessions 11): asked to close the current
+   * Session; answers whether one was actually open. Wired to
+   * `SessionSink.split()` — when it closed a row, the recorder resets its
+   * Session-scoped detector state and re-seeds, so no engagement,
+   * incumbent, or Take provenance spans the boundary. */
+  private readonly onSplit?: () => boolean;
+  /** The pure fake-clock seam (sessionLifecycle.ts): fed Master-audibility
+   * per event, plus per timer tick during machine tenures (no events ride
+   * the log then, but tenure IS inactivity). */
+  private silence: SilenceSplitClock | null = null;
+  private seeding = false;
 
   constructor(
     mixer: CaptureMixerSource,
     engines: Record<ChannelId, CaptureDeckSource>,
-    onTake: (take: DetectedTake) => void
+    onTake: (take: DetectedTake) => void,
+    onEvent?: (event: CaptureEvent, activatesSession: boolean) => void,
+    onSplit?: () => boolean
   ) {
     this.mixer = mixer;
     this.engines = engines;
     this.onTake = onTake;
-    this.lastChannel = { A: mixer.getChannelState('A'), B: mixer.getChannelState('B') };
+    this.onEvent = onEvent;
+    this.onSplit = onSplit;
+    this.lastChannel = {
+      A: mixer.getChannelState('A'),
+      B: mixer.getChannelState('B'),
+      C: mixer.getChannelState('C'),
+      D: mixer.getChannelState('D'),
+    };
+    this.lastAssignment = {
+      A: mixer.getCrossfaderAssignment('A'),
+      B: mixer.getCrossfaderAssignment('B'),
+      C: mixer.getCrossfaderAssignment('C'),
+      D: mixer.getCrossfaderAssignment('D'),
+    };
     this.lastCrossfader = mixer.getCrossfader();
     this.lastCrossfaderEnabled = mixer.getCrossfaderEnabled();
     this.lastMaster = mixer.getMaster();
@@ -93,71 +126,68 @@ export class CaptureRecorder {
     };
   }
 
+  /** Encode a crossfader assignment as the control value (ADR 0033). */
+  private static assignmentValue(a: CrossfaderAssignment): number {
+    return a === 'left' ? -1 : a === 'right' ? 1 : 0;
+  }
+
+  /** Preview audio running (sessions 10/11): a main-cue stab (`previewing`)
+   * or a hot-cue stab (`hotCuePreviewSlot`). ONE derived flag — a stab is a
+   * stab regardless of which button is held, and mixed transitions
+   * (play-takeover during a hold) must emit a single edge pair. */
+  private static previewRunning(s: DeckSnapshot): boolean {
+    return s.previewing || s.hotCuePreviewSlot !== null;
+  }
+
   start(): void {
-    this.surfaceGated = audibleHolder() !== 'shared';
-    this.multiDeckGated = this.tooManyAudibleDecks();
-    this.gated = this.surfaceGated || this.multiDeckGated;
-    this.unsubs.push(subscribeAudible((holder) => this.setSurfaceGated(holder !== 'shared')));
+    this.silence = new SilenceSplitClock(this.now());
+    const holder = audibleHolder();
+    this.surfaceGated = holder !== 'shared';
+    this.unsubs.push(subscribeAudible((h) => this.setSurfaceHolder(h)));
     this.unsubs.push(this.mixer.subscribe(() => this.diffMixer()));
     for (const ch of CHANNEL_IDS) {
       this.unsubs.push(this.engines[ch].subscribe(() => this.diffDeck(ch)));
     }
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
+    // Detailed transport evidence (seek / jumpBeats / hotCue) for ALL FOUR
+    // Decks (sessions 09): these gestures leave no snapshot diff, so a
+    // handler is the only way they reach the Session log. C/D get exactly
+    // the same handler as A/B — the pair-only boundary is the detector's
+    // Take classification, never the whole-Session capture (ADR 0033).
+    // `ch` is a physical CaptureDeck: identity is preserved on the event.
+    for (const ch of CHANNEL_IDS) {
       this.engines[ch].setTransportEventHandler((e) =>
         this.feed({ t: this.now(), kind: 'transport', channel: ch, ...e })
       );
     }
-    if (!this.gated) this.seed();
-    this.timer = setInterval(() => this.tick(), TICK_MS);
-  }
-
-  /** Audibility flip (ADR 0022). Gaining the gate discards the in-flight
-   * engagement; losing it re-seeds the detector from current reality. */
-  private setSurfaceGated(gated: boolean): void {
-    this.surfaceGated = gated;
-    this.applyGate();
-  }
-
-  private updateMultiDeckGate(): void {
-    this.multiDeckGated = this.tooManyAudibleDecks();
-    this.applyGate();
-  }
-
-  private applyGate(): void {
-    const gated = this.surfaceGated || this.multiDeckGated;
-    if (gated === this.gated) return;
-    this.gated = gated;
-    if (gated) {
-      this.state = initialCaptureState();
+    if (this.surfaceGated) {
+      // Booting under a machine tenure: mark it open so the detector
+      // suspends until the surface returns (its own state seeds on release).
+      this.emitMarker({ t: this.now(), kind: 'tenure', edge: 'start', holder });
     } else {
       this.seed();
     }
+    this.timer = setInterval(() => this.tick(), TICK_MS);
   }
 
-  /** Phase-1 safety: the detector remains the existing A/B pair machine.
-   * A third Master-audible Deck discards and suspends the engagement until
-   * multi-Deck pair machines land in issue 10. */
-  private tooManyAudibleDecks(): boolean {
-    return CHANNEL_IDS.filter((deck) => this.deckAudible(deck)).length > 2;
-  }
-
-  private deckAudible(deck: ChannelId): boolean {
-    if (!this.engines[deck].getSnapshot().playing) return false;
-    const state = this.mixer.getChannelState(deck);
-    const { audibleGain, eqKillBelow, filterKillBeyond } = DEFAULT_DETECTOR_PARAMS;
-    if (
-      state.eq.low <= eqKillBelow &&
-      state.eq.mid <= eqKillBelow &&
-      state.eq.high <= eqKillBelow
-    ) {
-      return false;
+  /** Audibility handoff (ADR 0022, tenure markers ADR 0033). A machine
+   * claiming the surface opens a tenure (its events are suppressed, the log
+   * records only the hold); the surface returning closes it and re-seeds
+   * the detector from current reality. The >2-audible suspension is gone —
+   * the detector self-gates and the log stays whole. */
+  private setSurfaceHolder(holder: AudibleSurfaceId): void {
+    const gated = holder !== 'shared';
+    if (gated === this.surfaceGated) return;
+    if (gated) {
+      // Bracket the machine's tenure: the marker rides the log (it is not
+      // the machine's performance); the machine's own events are dropped
+      // at feed() while surfaceGated.
+      this.emitMarker({ t: this.now(), kind: 'tenure', edge: 'start', holder });
+      this.surfaceGated = true;
+    } else {
+      this.surfaceGated = false;
+      this.emitMarker({ t: this.now(), kind: 'tenure', edge: 'end', holder: 'shared' });
+      this.seed(); // re-establish reality after the machine let go
     }
-    if (Math.abs(state.filter) >= filterKillBeyond) return false;
-    const xfGain = channelCrossfaderGain(
-      this.mixer.getCrossfaderAssignment(deck),
-      this.mixer.getCrossfaderEnabled() ? this.mixer.getCrossfader() : 0
-    );
-    return trimToGain(state.trim) * channelFaderToGain(state.fader) * xfGain >= audibleGain;
   }
 
   /**
@@ -167,13 +197,24 @@ export class CaptureRecorder {
    * audibility (everything that moved while gated was dropped).
    */
   private seed(): void {
+    this.seeding = true;
     const t = this.now();
-    for (const ch of CHANNEL_IDS) this.lastDeck[ch] = this.engines[ch].getSnapshot();
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
+    // All four decks unconditionally (ADR 0033): controls, assignments,
+    // loaded tracks, running transports.
+    for (const ch of CHANNEL_IDS) {
       const c = this.mixer.getChannelState(ch);
       for (const [control, read] of CaptureRecorder.CHANNEL_CONTROLS) {
         this.feed({ t, kind: 'control', control, channel: ch, value: read(c) });
       }
+      const assignment = this.mixer.getCrossfaderAssignment(ch);
+      this.lastAssignment[ch] = assignment;
+      this.feed({
+        t,
+        kind: 'control',
+        control: 'crossfaderAssignment',
+        channel: ch,
+        value: CaptureRecorder.assignmentValue(assignment),
+      });
     }
     this.feed({ t, kind: 'control', control: 'crossfader', channel: null, value: this.mixer.getCrossfader() });
     this.feed({
@@ -184,7 +225,7 @@ export class CaptureRecorder {
       value: this.mixer.getCrossfaderEnabled() ? 1 : 0,
     });
     this.feed({ t, kind: 'control', control: 'master', channel: null, value: this.mixer.getMaster() });
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
+    for (const ch of CHANNEL_IDS) {
       const snap = this.engines[ch].getSnapshot();
       this.lastDeck[ch] = snap;
       this.lastChannel[ch] = this.mixer.getChannelState(ch);
@@ -194,16 +235,31 @@ export class CaptureRecorder {
       if (snap.playing) {
         this.feed({ t, kind: 'transport', channel: ch, action: 'play', playhead: this.engines[ch].getPlayhead() });
       }
+      if (CaptureRecorder.previewRunning(snap)) {
+        // A stab already held at seed time (boot/re-seed mid-hold, ADR
+        // 0033): open its bracket so the log/timeline see the running preview.
+        this.feed({
+          t,
+          kind: 'transport',
+          channel: ch,
+          action: 'previewStart',
+          playhead: this.engines[ch].getPlayhead(),
+          detail: snap.hotCuePreviewSlot ?? undefined,
+        });
+      }
     }
     this.lastCrossfader = this.mixer.getCrossfader();
     this.lastCrossfaderEnabled = this.mixer.getCrossfaderEnabled();
     this.lastMaster = this.mixer.getMaster();
+    this.seeding = false;
   }
 
   dispose(): void {
     for (const u of this.unsubs) u();
     this.unsubs = [];
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
+    // Clear the detailed transport handler on ALL FOUR Decks (sessions 09),
+    // matching start()'s four-Deck installation.
+    for (const ch of CHANNEL_IDS) {
       this.engines[ch].setTransportEventHandler(null);
     }
     if (this.timer !== null) clearInterval(this.timer);
@@ -217,17 +273,74 @@ export class CaptureRecorder {
   }
 
   private feed(e: CaptureEvent): void {
-    if (this.gated) return; // drop early, not at the sink (ADR 0022)
+    // Suppress a machine's own events while it holds the surface (ADR 0022):
+    // the log records the tenure, never the machine's performance. The
+    // >2-audible case no longer drops — the log is whole and the detector
+    // self-gates (ADR 0033).
+    if (this.surfaceGated) return;
+    this.emitMarker(e);
+  }
+
+  /** Push an event to the detector AND the Session sink, bypassing the
+   * surface gate — for tenure markers, which describe the hold itself and
+   * must ride the log even while a machine holds the surface (ADR 0033). */
+  private emitMarker(e: CaptureEvent): void {
     const [next, takes] = reduceCapture(this.state, e);
     this.state = next;
+    // Master-audibility (the one definition, capture/audibility.ts; a
+    // tenure is non-performance, so silent by definition) drives BOTH
+    // Session lifecycle edges (sessions 11):
+    //  - activation: a row opens only on a Master-audible instant. Loads,
+    //    cueing, control setup, tenure markers, and seed snapshots buffer
+    //    as reconstruction context and never create a row.
+    //  - the ten-minute split clock, fed below.
+    const audible = !next.tenureHeld && anyDeckAudible(next);
+    // Persist beside the detector's rolling log (ADR 0033): the Session
+    // records all four decks; the detector reads the same stream and
+    // self-gates over >2-audible stretches / machine tenures.
+    this.onEvent?.(e, !this.seeding && audible);
     for (const take of takes) this.onTake(take);
+    this.checkSilence(audible, e.t);
+  }
+
+  /** Advance the split clock; at ten continuous minutes of no
+   * Master-audible Deck, close the current Session and reset every piece
+   * of Session-scoped state (sessions 11). */
+  private checkSilence(audible: boolean, t: number): void {
+    if (!this.silence?.note(audible, t)) return;
+    // Close exactly one old Session (flush + end). If none was open —
+    // silence from boot, or already split — stay dormant untouched: the
+    // detector's state is not Session-scoped then.
+    if (!this.onSplit?.()) return;
+    // No engagement, incumbent, or Take provenance spans Sessions: fresh
+    // detector state, then current reality re-established as the NEXT
+    // Session's buffered context — mirroring boot exactly.
+    this.state = initialCaptureState();
+    if (this.surfaceGated) {
+      // Splitting mid-tenure: the next Session's context opens with the
+      // still-open hold marked (the boot-under-tenure path; the detector
+      // re-seeds itself on release).
+      this.emitMarker({ t: this.now(), kind: 'tenure', edge: 'start', holder: audibleHolder() });
+    } else {
+      this.seed();
+    }
   }
 
   private tick(): void {
-    if (this.gated) return;
-    const playheads: Partial<Record<CaptureChannel, number>> = {};
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
-      if (this.lastDeck[ch].playing) playheads[ch] = this.engines[ch].getPlayhead();
+    if (this.surfaceGated) {
+      // No events ride the log during a machine tenure, but the tenure IS
+      // inactivity (sessions 11): the split clock advances on the timer.
+      this.checkSilence(false, this.now());
+      return;
+    }
+    const playheads: Partial<Record<ChannelId, number>> = {};
+    for (const ch of CHANNEL_IDS) {
+      // A previewing deck (cue or hot-cue stab, ADR 0033) has a moving,
+      // audible playhead just like a playing one — sample it so the stab's
+      // motion rides the ~1 Hz ticks and the timeline can draw its trace.
+      if (this.lastDeck[ch].playing || CaptureRecorder.previewRunning(this.lastDeck[ch])) {
+        playheads[ch] = this.engines[ch].getPlayhead();
+      }
     }
     this.feed({ t: this.now(), kind: 'tick', playheads });
   }
@@ -247,16 +360,29 @@ export class CaptureRecorder {
   ];
 
   private diffMixer(): void {
-    this.updateMultiDeckGate();
     const t = this.now();
-    for (const ch of ['A', 'B'] as CaptureChannel[]) {
+    // All four channels (ADR 0033): the log is whole; the detector counts
+    // C/D audibility from these to self-gate.
+    for (const ch of CHANNEL_IDS) {
       const prev = this.lastChannel[ch];
       const cur = this.mixer.getChannelState(ch);
-      if (cur === prev) continue;
-      this.lastChannel[ch] = cur;
-      for (const [control, read] of CaptureRecorder.CHANNEL_CONTROLS) {
-        const value = read(cur);
-        if (value !== read(prev)) this.feed({ t, kind: 'control', control, channel: ch, value });
+      if (cur !== prev) {
+        this.lastChannel[ch] = cur;
+        for (const [control, read] of CaptureRecorder.CHANNEL_CONTROLS) {
+          const value = read(cur);
+          if (value !== read(prev)) this.feed({ t, kind: 'control', control, channel: ch, value });
+        }
+      }
+      const assignment = this.mixer.getCrossfaderAssignment(ch);
+      if (assignment !== this.lastAssignment[ch]) {
+        this.lastAssignment[ch] = assignment;
+        this.feed({
+          t,
+          kind: 'control',
+          control: 'crossfaderAssignment',
+          channel: ch,
+          value: CaptureRecorder.assignmentValue(assignment),
+        });
       }
     }
     const xf = this.mixer.getCrossfader();
@@ -282,8 +408,8 @@ export class CaptureRecorder {
     const cur = this.engines[ch].getSnapshot();
     if (cur === prev) return;
     this.lastDeck[ch] = cur;
-    this.updateMultiDeckGate();
-    if (ch !== 'A' && ch !== 'B') return;
+    // All four decks log their load/transport/pitch (ADR 0033): C/D activity
+    // is evidence and drives the detector's >2-audible self-gate.
     if (cur.trackId !== prev.trackId) {
       this.feed({ t, kind: 'load', channel: ch, trackId: cur.trackId, bpm: cur.bpm });
     }
@@ -294,6 +420,26 @@ export class CaptureRecorder {
         channel: ch,
         action: cur.playing ? 'play' : 'pause',
         playhead: this.engines[ch].getPlayhead(),
+      });
+    }
+    const prevPreview = CaptureRecorder.previewRunning(prev);
+    const curPreview = CaptureRecorder.previewRunning(cur);
+    if (curPreview !== prevPreview) {
+      // Stab (hold-to-preview, ADR 0033): audio runs and is Master-audible
+      // while a main-cue (`previewing`, sessions 10) or hot-cue
+      // (`hotCuePreviewSlot`, sessions 11) preview is held, but `playing`
+      // never flips. Log the stab as previewStart/previewEnd (with the
+      // moving playhead, which the ~1 Hz tick also samples) so the timeline
+      // can render it and replay can reproduce it. `detail` carries the hot
+      // cue slot on a hot-cue stab's start edge. The detector ignores both
+      // edges — preview is inert to detection v1 (deliberate; detector.ts).
+      this.feed({
+        t,
+        kind: 'transport',
+        channel: ch,
+        action: curPreview ? 'previewStart' : 'previewEnd',
+        playhead: this.engines[ch].getPlayhead(),
+        detail: curPreview ? (cur.hotCuePreviewSlot ?? undefined) : undefined,
       });
     }
     if (cur.pitchPercent !== prev.pitchPercent) {

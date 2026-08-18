@@ -61,6 +61,35 @@ class FakeEngine {
   }
 }
 
+class ClockedEngine extends FakeEngine {
+  private anchorTime = 0;
+  private readonly now: () => number;
+
+  constructor(now: () => number, initialPitch: number) {
+    super();
+    this.now = now;
+    this.pitches.push(initialPitch);
+  }
+
+  override getPlayhead(): number {
+    if (!this.playing) return this.playhead;
+    const rate = 1 + (this.pitches.at(-1) ?? 0) / 100;
+    return this.playhead + (this.now() - this.anchorTime) * rate;
+  }
+
+  override seek(t: number): void {
+    this.calls.push(`seek:${t.toFixed(2)}`);
+    this.playhead = t;
+    this.anchorTime = this.now();
+  }
+
+  override play(): void {
+    this.calls.push('play');
+    this.playing = true;
+    this.anchorTime = this.now();
+  }
+}
+
 function fakeMixer() {
   const automationWrites: string[] = [];
   const mixer = {
@@ -196,6 +225,33 @@ describe('steady state (chopb diagnosis, folded in per issue 25 notes)', () => {
     expect(engineA.calls.length).toBe(after.A);
     expect(engineB.calls.length).toBe(after.B);
     expect(player.isPlaying()).toBe(true);
+  });
+
+  it('a persisted Deck A pitch cannot cause periodic corrective seeks', () => {
+    const frames: (() => void)[] = [];
+    vi.stubGlobal('requestAnimationFrame', (fn: () => void) => {
+      frames.push(fn);
+      return 1;
+    });
+    let now = 0;
+    const engineA = new ClockedEngine(() => now, 4);
+    const engineB = new ClockedEngine(() => now, 0);
+    const mixer = {
+      now: () => now,
+      setAutomation: () => undefined,
+    } as unknown as Mixer;
+    const player = new MixPlayer(defaultMix(), {
+      mixer,
+      engineA: engineA as unknown as DeckEngine,
+      engineB: engineB as unknown as DeckEngine,
+    });
+
+    player.play();
+    const seeksAfterStart = engineA.calls.filter(call => call.startsWith('seek:')).length;
+    now = 4; // +4% would drift 160ms, crossing the 120ms hard-seek threshold.
+    frames.at(-1)?.();
+
+    expect(engineA.calls.filter(call => call.startsWith('seek:')).length).toBe(seeksAfterStart);
   });
 });
 

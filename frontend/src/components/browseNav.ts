@@ -37,7 +37,7 @@ export function moveBrowseArea(
 
 export type SidebarViewEntry = {
   kind: 'view';
-  view: Extract<ViewType, 'all' | 'unprocessed' | 'needs-attention' | 'archived'>;
+  view: Extract<ViewType, 'all' | 'unprocessed' | 'needs-attention' | 'archived' | 'session'>;
 };
 export type SidebarEntry =
   | SidebarViewEntry
@@ -49,6 +49,8 @@ const SPECIAL_VIEWS: SidebarViewEntry['view'][] = [
   'unprocessed',
   'needs-attention',
   'archived',
+  /* One Sessions ENTRY (sessions 04): the list opens in the main area. */
+  'session',
 ];
 
 /** All walkable sidebar rows, in the sidebar's visual order. */

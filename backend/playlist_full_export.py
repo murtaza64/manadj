@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 from typing import Protocol
 
@@ -298,6 +299,118 @@ class EnginePlaylistWriter:
         )
         fields["tags"] = "exported"
         return fields
+
+
+def compute_target_preview(
+    target: str,
+    source_names: list[str],
+    dest_names: list[str] | None,
+    unmatched: list[str],
+) -> dict:
+    """Pure preview of what an export would do to one destination playlist.
+
+    ``source_names`` is the manadj playlist's member filenames in play order;
+    ``dest_names`` the destination playlist's current filenames (None when the
+    playlist does not exist there); ``unmatched`` the source filenames absent
+    from the destination library (they will fail, not export).
+    """
+    unmatched_left = Counter(unmatched)
+    final: list[str] = []
+    for name in source_names:
+        if unmatched_left[name] > 0:
+            unmatched_left[name] -= 1
+            continue
+        final.append(name)
+    dest = dest_names or []
+    to_add = sum((Counter(final) - Counter(dest)).values())
+    to_remove = sum((Counter(dest) - Counter(final)).values())
+    common = Counter(final) & Counter(dest)
+
+    def kept_in_order(names: list[str]) -> list[str]:
+        budget = common.copy()
+        kept = []
+        for name in names:
+            if budget[name] > 0:
+                budget[name] -= 1
+                kept.append(name)
+        return kept
+
+    moved = sum(
+        1
+        for before, after in zip(kept_in_order(dest), kept_in_order(final))
+        if before != after
+    )
+    return {
+        "target": target,
+        "available": True,
+        "playlist_exists": dest_names is not None,
+        "tracks_total": len(source_names),
+        "tracks_matched": len(final),
+        "tracks_to_add": to_add,
+        "tracks_to_remove": to_remove,
+        "tracks_moved": moved,
+        "unmatched": unmatched,
+    }
+
+
+def preview_playlist_full_export(db: Session, playlist_name: str, targets: list[str]) -> dict:
+    """Read-only plan for a full playlist export: per destination, whether the
+    playlist gets created or replaced, membership/order deltas, and unmatched
+    tracks. Never connects for writing, snapshots, or requires apps closed."""
+    from backend.config import get_config
+    from backend.playlists.sync_manager import PlaylistSyncManager
+
+    config = get_config()
+    errors: dict[str, str] = {}
+    rb_db = None
+    engine_db = None
+    if "rekordbox" in targets:
+        if config.database.rekordbox_path:
+            try:
+                from rekordbox.connection import get_rekordbox_db
+
+                rb_db = get_rekordbox_db()
+            except Exception as error:
+                errors["rekordbox"] = str(error)
+        else:
+            errors["rekordbox"] = "rekordbox library is not configured"
+    if "engine" in targets:
+        if config.database.engine_dj_path:
+            try:
+                from enginedj.connection import EngineDJDatabase
+
+                engine_db = EngineDJDatabase(Path(config.database.engine_dj_path))
+            except Exception as error:
+                errors["engine"] = str(error)
+        else:
+            errors["engine"] = "engine library is not configured"
+
+    manager = PlaylistSyncManager(db, engine_db=engine_db, rb_db=rb_db)
+    playlists = manager.load_all_playlists()
+    source = next((p for p in playlists["manadj"] if p.name == playlist_name), None)
+    if source is None:
+        raise LookupError(f"Playlist '{playlist_name}' not found")
+
+    previews = []
+    for target in targets:
+        error = errors.get(target)
+        if error:
+            previews.append({"target": target, "available": False, "error": error})
+            continue
+        try:
+            _matched, unmatched = manager.match_tracks_to_target(target, source.tracks)
+            dest = next((p for p in playlists[target] if p.name == playlist_name), None)
+            previews.append(
+                compute_target_preview(
+                    target,
+                    [ref.filename for ref in source.tracks],
+                    [ref.filename for ref in dest.tracks] if dest else None,
+                    unmatched,
+                )
+            )
+        except Exception as error:
+            previews.append({"target": target, "available": False, "error": str(error)})
+    return {"playlist_name": playlist_name, "previews": previews}
 
 
 def build_playlist_full_export_service(db: Session):

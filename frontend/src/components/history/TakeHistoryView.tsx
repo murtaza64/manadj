@@ -9,6 +9,7 @@ import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import { requestTakeReview } from '../../capture/takeReview';
+import { requestSessionMoment } from '../../sessions/openSession';
 import { degradeDeletedPinsLocal } from '../../sets/setStore';
 import './takeHistory.css';
 
@@ -90,6 +91,7 @@ export function TakeHistoryView() {
               <th>Confidence</th>
               <th />
               <th />
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -123,6 +125,23 @@ export function TakeHistoryView() {
                 <td className="take-promoted">
                   {t.promoted_transition_uuid ? (
                     <span title="Promoted to the Transition library">★</span>
+                  ) : null}
+                </td>
+                <td>
+                  {t.session_uuid ? (
+                    <button
+                      className="take-view-session"
+                      title="View this moment on its Session's timeline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        requestSessionMoment({
+                          sessionUuid: t.session_uuid!,
+                          atS: t.window_start_s,
+                        });
+                      }}
+                    >
+                      ▦
+                    </button>
                   ) : null}
                 </td>
                 <td>

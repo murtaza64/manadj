@@ -30,6 +30,8 @@ def _row(t: models.Take) -> schemas.TakeRow:
         confidence=t.confidence,
         detector_version=t.detector_version,
         promoted_transition_uuid=t.promoted_transition_uuid,
+        session_uuid=t.session_uuid,
+        origin=t.origin,
     )
 
 
@@ -73,6 +75,8 @@ def create_take(payload: schemas.TakeCreate, db: Session = Depends(get_db)) -> s
         detector_version=payload.detector_version,
         params_json=json.dumps(payload.params),
         events_json=json.dumps(payload.events),
+        session_uuid=payload.session_uuid,
+        origin=payload.origin,
     )
     db.add(t)
     db.commit()

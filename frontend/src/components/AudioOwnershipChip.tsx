@@ -49,6 +49,9 @@ export function AudioOwnershipChip({
       onModeChange('library');
     } else if (face.kind === 'audition') {
       onModeChange('transition');
+    } else if (face.kind === 'replay') {
+      // Sessions live in the Library now (sessions 04 integration).
+      onModeChange('library');
     }
     // DECKS: nothing to navigate to — the chip never touches audio.
   };
@@ -71,6 +74,8 @@ export function AudioOwnershipChip({
         </>
       ) : face.kind === 'audition' ? (
         <span className="topbar-ownership-kind">AUDITION</span>
+      ) : face.kind === 'replay' ? (
+        <span className="topbar-ownership-kind">REPLAY</span>
       ) : (
         <span className="topbar-ownership-kind">DECKS</span>
       )}

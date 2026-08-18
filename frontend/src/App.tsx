@@ -22,6 +22,7 @@ import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
+import { OPEN_SESSION_EVENT } from './sessions/openSession';
 import { OPEN_TAKE_EVENT } from './capture/takeReview';
 import { OPEN_PAIR_EVENT } from './editor/openPair';
 import { ToastProvider } from './components/Toast';
@@ -108,6 +109,15 @@ function App() {
     const onOpenPair = () => setView('transition');
     window.addEventListener(OPEN_PAIR_EVENT, onOpenPair);
     return () => window.removeEventListener(OPEN_PAIR_EVENT, onOpenPair);
+  }, []);
+
+  // A Session-moment request (history's "view in Session", sessions 04)
+  // opens the Library — Sessions live there now (sidebar section + pane);
+  // the mounted Library consumes the selection from the session store.
+  useEffect(() => {
+    const onOpenSession = () => setView('library');
+    window.addEventListener(OPEN_SESSION_EVENT, onOpenSession);
+    return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpenSession);
   }, []);
 
   if (window.location.pathname === '/midi-inspect') {

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
 import type { Ref } from 'react';
-import { dragEdgeScrollDelta } from './dragScroll';
+import { DRAG_POINTER_STALE_MS, dragEdgeScrollDelta } from './dragScroll';
 import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import TrackList from './TrackList';
@@ -65,6 +65,13 @@ import { useToast } from './Toast';
 import { useAddTracksToPlaylist, useTrackMenuItems } from './useTrackMenuItems';
 import SetDetailPane from '../sets/SetDetailPane';
 import { getSelectedSetId, selectSet } from '../sets/setStore';
+import {
+  OPEN_SESSION_EVENT,
+  getSelectedSessionUuid,
+  selectSession,
+} from '../sessions/openSession';
+import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
+import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
 import { PlaylistFullExportModal } from './PlaylistFullExportModal';
 import { PlaylistStatusBadge } from './PlaylistStatusBadge';
@@ -128,13 +135,16 @@ export default function Library({
   // 27): mode switches remount this component, and the session must ride
   // through. A selected Set wins the seed (setStore is the Set authority).
   const [selectedView, setSelectedView] = useState<ViewType>(() =>
-    restoredView(getSelectedSetId() !== null)
+    restoredView(getSelectedSetId() !== null, getSelectedSessionUuid() !== null)
   );
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(
     () => browseSession().playlistId
   );
   const [playlistExportOpen, setPlaylistExportOpen] = useState(false);
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
+  const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
+    getSelectedSessionUuid()
+  );
   const [isEnergyEditMode, setIsEnergyEditMode] = useState(false);
   // Cross-view set navigation (sets 40, TopBar ownership chip): the store
   // already carries the selection; this nudges an ALREADY-mounted browse
@@ -148,6 +158,19 @@ export default function Library({
     };
     window.addEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
     return () => window.removeEventListener(NAVIGATE_SET_EVENT, onNavigateSet);
+  }, []);
+  // Session deep-link (sessions 04): same two-part shape as Sets — the
+  // store carries the selection; this nudges a mounted instance.
+  useEffect(() => {
+    const onOpenSession = () => {
+      const uuid = getSelectedSessionUuid();
+      if (uuid === null) return;
+      setSelectedView('session');
+      setSelectedSessionUuid(uuid);
+      selectSet(null);
+    };
+    window.addEventListener(OPEN_SESSION_EVENT, onOpenSession);
+    return () => window.removeEventListener(OPEN_SESSION_EVENT, onOpenSession);
   }, []);
   const queryClient = useQueryClient();
   const tagEditorRef = useRef<TagEditorHandle | null>(null);
@@ -643,8 +666,6 @@ export default function Library({
   // Positional drops only when the pane shows actual Play order; under any
   // other sort the drop appends (and in-pane reorders are refused).
   const playlistPaneRef = useRef<HTMLDivElement>(null);
-  /** Previous dragover timestamp — feeds the time-normalized edge scroll. */
-  const lastDragOverTsRef = useRef(0);
   const [dropIndicator, setDropIndicator] = useState<{ index: number; y: number } | null>(null);
   const canPositionDrops = isPlayOrderSort(playlistSort);
   const playlistMemberIds = useMemo(
@@ -665,25 +686,90 @@ export default function Library({
     }));
   };
 
+  /** Drop indicator from a pointer position (viewport Y), against the
+   * pane's CURRENT scrollTop — called from dragover and from the edge
+   * scroll loop (the index under a stationary pointer changes while
+   * content slides beneath it). */
+  const updateDropIndicator = (clientY: number) => {
+    const pane = playlistPaneRef.current;
+    if (!pane) return;
+    const rects = paneRowRects(pane, playlistTracks.length);
+    const pointerY = clientY - pane.getBoundingClientRect().top + pane.scrollTop;
+    const index = canPositionDrops ? insertionIndexFromPointer(pointerY, rects) : rects.length;
+    setDropIndicator({ index, y: indicatorY(index, rects) });
+  };
+
+  // ── Edge auto-scroll (dragScroll.ts) ───────────────────────────────────
+  // A rAF loop driven by the LAST KNOWN drag pointer, not by dragover
+  // cadence: stationary dragover refires only ~every 350ms (a hand held at
+  // the edge barely scrolled), and once the pointer overshoots the pane the
+  // pane gets no dragover at all. A window-level dragover keeps the pointer
+  // fresh anywhere in the app, so dragging PAST the edge keeps scrolling
+  // (faster, per the overshoot ramp).
+  const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
+  /** Last pointer-update timestamp: the loop self-terminates when dragover
+   * goes quiet (drag ended off-window, missed dragend, …). */
+  const dragPointerTsRef = useRef(0);
+  const edgeScrollRafRef = useRef<number | null>(null);
+  const edgeScrollPrevTsRef = useRef(0);
+  /** Latest-render frame body (the rAF chain must see fresh closures). */
+  const edgeScrollFrameRef = useRef<(ts: number) => void>(() => {});
+
+  const onWindowDragOver = useCallback((e: DragEvent) => {
+    dragPointerRef.current = { x: e.clientX, y: e.clientY };
+    dragPointerTsRef.current = e.timeStamp;
+  }, []);
+
+  const stopEdgeScroll = useCallback(() => {
+    if (edgeScrollRafRef.current !== null) cancelAnimationFrame(edgeScrollRafRef.current);
+    edgeScrollRafRef.current = null;
+    dragPointerRef.current = null;
+    window.removeEventListener('dragover', onWindowDragOver);
+    window.removeEventListener('drop', stopEdgeScroll);
+    window.removeEventListener('dragend', stopEdgeScroll);
+  }, [onWindowDragOver]);
+  useEffect(() => stopEdgeScroll, [stopEdgeScroll]);
+
+  edgeScrollFrameRef.current = (ts: number) => {
+    const pane = playlistPaneRef.current;
+    const pt = dragPointerRef.current;
+    if (!pane || !pt || ts - dragPointerTsRef.current > DRAG_POINTER_STALE_MS) {
+      stopEdgeScroll();
+      return;
+    }
+    const elapsedMs = ts - edgeScrollPrevTsRef.current;
+    edgeScrollPrevTsRef.current = ts;
+    const rect = pane.getBoundingClientRect();
+    // Only while horizontally over the pane: in the split, the library
+    // pane sits beside it and must not drive its scroll.
+    const withinX = pt.x >= rect.left && pt.x <= rect.right;
+    const delta = withinX ? dragEdgeScrollDelta(pt.y, rect.top, rect.bottom, elapsedMs) : 0;
+    if (delta !== 0) {
+      pane.scrollTop += delta;
+      // Indicator only while a drop here is actually possible (pointer
+      // inside the pane); past the edge, dragleave has cleared it.
+      if (pt.y >= rect.top && pt.y <= rect.bottom) updateDropIndicator(pt.y);
+    }
+    edgeScrollRafRef.current = requestAnimationFrame((t) => edgeScrollFrameRef.current(t));
+  };
+
+  const ensureEdgeScrollLoop = () => {
+    if (edgeScrollRafRef.current !== null) return;
+    edgeScrollPrevTsRef.current = performance.now();
+    window.addEventListener('dragover', onWindowDragOver);
+    window.addEventListener('drop', stopEdgeScroll);
+    window.addEventListener('dragend', stopEdgeScroll);
+    edgeScrollRafRef.current = requestAnimationFrame((t) => edgeScrollFrameRef.current(t));
+  };
+
   const handlePlaylistPaneDragOver = (e: React.DragEvent) => {
     if (!isTrackDrag(e.dataTransfer)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    const pane = playlistPaneRef.current;
-    if (!pane) return;
-    // Edge auto-scroll: dragging near the pane's top/bottom scrolls it so
-    // off-screen rows are reachable (dragScroll.ts, time-normalized).
-    // Applied before the indicator math so the drop index reflects the
-    // new scrollTop.
-    const paneRect = pane.getBoundingClientRect();
-    const elapsedMs = e.timeStamp - lastDragOverTsRef.current;
-    lastDragOverTsRef.current = e.timeStamp;
-    const scrollDelta = dragEdgeScrollDelta(e.clientY, paneRect.top, paneRect.bottom, elapsedMs);
-    if (scrollDelta !== 0) pane.scrollTop += scrollDelta;
-    const rects = paneRowRects(pane, playlistTracks.length);
-    const pointerY = e.clientY - pane.getBoundingClientRect().top + pane.scrollTop;
-    const index = canPositionDrops ? insertionIndexFromPointer(pointerY, rects) : rects.length;
-    setDropIndicator({ index, y: indicatorY(index, rects) });
+    dragPointerRef.current = { x: e.clientX, y: e.clientY };
+    dragPointerTsRef.current = e.timeStamp;
+    ensureEdgeScrollLoop();
+    updateDropIndicator(e.clientY);
   };
 
   const handlePlaylistPaneDragLeave = (e: React.DragEvent) => {
@@ -870,6 +956,7 @@ export default function Library({
     mainSelRef.current = mainSel;
   });
   const viewingSet = selectedView === 'set' && selectedSetId !== null;
+  const viewingSessionPane = selectedView === 'session';
 
   // ── Area/sidebar navigation routing (four-deck-performance 24) ─────────
   // One router serves the keyboard hub and the hardware surface: the
@@ -879,14 +966,20 @@ export default function Library({
     if (entry.kind === 'view') {
       setSelectedView(entry.view);
       selectSet(null);
+      // The Sessions ENTRY shows the list; re-clicking it while a
+      // timeline is open acts as "back to the list".
+      setSelectedSessionUuid(null);
+      selectSession(null);
     } else if (entry.kind === 'playlist') {
       setSelectedView('playlist');
       setSelectedPlaylistId(entry.id);
       selectSet(null);
+      selectSession(null);
     } else {
       setSelectedView('set');
       setSelectedSetId(entry.id);
       selectSet(entry.id);
+      selectSession(null);
     }
   };
   /** Focus the sidebar, seeding the cursor where the selection lives. */
@@ -989,6 +1082,7 @@ export default function Library({
 
   useEffect(() => {
     if (viewingSet) return; // the Set pane owns the browse surface
+    if (viewingSessionPane) return; // sessions own the main area; no hidden list grabs
     return registerBrowseSurface({
       navigate: (delta) => browseNavRef.current.navigate(delta),
       getSelectedTrack: () => mainSelRef.current.selectedTrack,
@@ -1000,7 +1094,7 @@ export default function Library({
       focusSidebar: () => browseNavRef.current.focusSidebar(),
       toggleSplitView: () => browseNavRef.current.toggleSplitView(),
     });
-  }, [viewingSet]);
+  }, [viewingSet, viewingSessionPane]);
 
   return (
     <>
@@ -1042,9 +1136,10 @@ export default function Library({
           borderBottom: '1px solid var(--surface0)'
         }}>
           <Player />
-          <div style={{
-            display: 'flex'
-          }}>
+          {/* Session pane open: the metadata editor hides entirely — its
+              content is readable from the deck rows, and the timeline
+              needs the vertical room (sessions 04 integration). */}
+          <div style={{ display: viewingSessionPane ? 'none' : 'flex' }}>
             {/* Loaded-track authority (issue 23): the panel edits the
                 loaded track; row selection only browses/loads. */}
             <TagEditor
@@ -1103,28 +1198,20 @@ export default function Library({
                 <span style={{ fontSize: '13px', color: 'var(--text)' }}>
                   {playlistData?.name ?? 'Playlist'}
                 </span>
-                {unifiedPlaylist && (
-                  <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
-                )}
                 <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>
                   {playlistData?.tracks?.length ?? 0} tracks
                 </span>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {unifiedPlaylist && (
+                  <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
+                )}
                 <button
+                  className="playlist-export-submit"
                   onClick={() => setPlaylistExportOpen(true)}
                   disabled={!playlistData?.name}
                   aria-label="Open playlist sync and export"
-                  style={{
-                    padding: '2px 10px',
-                    background: 'var(--yellow)',
-                    color: 'var(--base)',
-                    border: '1px solid var(--yellow)',
-                    borderRadius: '3px',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    fontWeight: 800,
-                  }}
+                  style={{ padding: '2px 10px' }}
                 >
                   Sync / Export
                 </button>
@@ -1148,7 +1235,20 @@ export default function Library({
             </div>
           )}
 
-          {selectedView === 'set' && selectedSetId !== null ? (
+          {selectedView === 'session' ? (
+            /* Sessions (sessions 04): the list in place of the track
+               table; a selected session swaps to its timeline. */
+            selectedSessionUuid !== null ? (
+              <SessionTimelinePane sessionUuid={selectedSessionUuid} />
+            ) : (
+              <SessionsListView
+                onOpen={(uuid) => {
+                  setSelectedSessionUuid(uuid);
+                  selectSession(uuid);
+                }}
+              />
+            )
+          ) : selectedView === 'set' && selectedSetId !== null ? (
             /* Set detail view (sets 01): replaces the track table. */
             <SetDetailPane setId={selectedSetId} onLoadToDeck={loadWithViewPolicy} />
           ) : splitView ? (

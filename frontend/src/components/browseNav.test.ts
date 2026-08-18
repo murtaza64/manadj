@@ -37,12 +37,13 @@ describe('browseAreas ring', () => {
 describe('sidebar entries and cursor', () => {
   const entries = sidebarEntries([10, 11], [7]);
 
-  it('mirrors the sidebar visual order: views, playlists, sets', () => {
+  it('mirrors the sidebar visual order: views (incl. Sessions), playlists, sets', () => {
     expect(entries.map(entryKey)).toEqual([
       'view:all',
       'view:unprocessed',
       'view:needs-attention',
       'view:archived',
+      'view:session',
       'playlist:10',
       'playlist:11',
       'set:7',
@@ -50,7 +51,7 @@ describe('sidebar entries and cursor', () => {
   });
 
   it('walks rows and clamps at the ends', () => {
-    expect(entryKey(moveCursor(entries, 'view:archived', 1)!)).toBe('playlist:10');
+    expect(entryKey(moveCursor(entries, 'view:archived', 1)!)).toBe('view:session');
     expect(entryKey(moveCursor(entries, 'set:7', 1)!)).toBe('set:7');
     expect(entryKey(moveCursor(entries, 'view:all', -1)!)).toBe('view:all');
   });
@@ -72,6 +73,8 @@ describe('sidebar entries and cursor', () => {
     expect(selectionEntryKey('playlist', 11, null)).toBe('playlist:11');
     expect(selectionEntryKey('playlist', null, null)).toBeNull();
     expect(selectionEntryKey('set', null, 7)).toBe('set:7');
+    // Sessions are ONE view entry (sessions 04): the list is the target.
+    expect(selectionEntryKey('session', null, null)).toBe('view:session');
   });
 });
 

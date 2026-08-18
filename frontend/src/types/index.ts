@@ -265,6 +265,24 @@ export interface PlaylistFullExportReport {
   results: PlaylistExportTargetReport[];
 }
 
+export interface PlaylistExportTargetPreview {
+  target: PlaylistExportTarget;
+  available: boolean;
+  error?: string;
+  playlist_exists?: boolean;
+  tracks_total?: number;
+  tracks_matched?: number;
+  tracks_to_add?: number;
+  tracks_to_remove?: number;
+  tracks_moved?: number;
+  unmatched?: string[];
+}
+
+export interface PlaylistFullExportPreview {
+  playlist_name: string;
+  previews: PlaylistExportTargetPreview[];
+}
+
 export interface TrackDiscrepancy {
   filename: string;
   title?: string | null;

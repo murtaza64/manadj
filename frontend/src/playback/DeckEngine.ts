@@ -507,6 +507,23 @@ export class DeckEngine {
     this.dispatch({ type: 'hot-cue-up', slot, time: timeSeconds });
   }
 
+  /** Machine-grade preview launch (session replay, sessions 12): start
+   * preview audio at exactly `seconds`. Bypasses Quantize and never touches
+   * the cue point — replay reproduces recorded timing and must not mutate
+   * performer state. No handler tap: replay runs under machine tenure and
+   * its gestures are not performance evidence. */
+  previewAt(seconds: number): void {
+    if (!this.buffer) return;
+    this.dispatch({ type: 'preview-launch', at: this.clampTime(seconds) });
+  }
+
+  /** Release a machine preview: stop at the recorded return position (the
+   * previewEnd event's playhead). No-op unless a preview is running. */
+  endPreview(returnTo: number): void {
+    if (!this.buffer) return;
+    this.dispatch({ type: 'preview-release', returnTo: this.clampTime(returnTo) });
+  }
+
   /** Paused-only memory-cue-style walk. Stops are position-sorted. */
   hotCueWalk(direction: 'prev' | 'next', stops: readonly number[]): void {
     if (!this.buffer) return;

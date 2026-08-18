@@ -14,7 +14,7 @@ import './PlaylistSidebar.css';
 import { createSetFromPlaylist } from '../sets/playlistFlows';
 import type { Playlist } from '../types';
 
-export type ViewType = 'all' | 'unprocessed' | 'needs-attention' | 'archived' | 'playlist' | 'set';
+export type ViewType = 'all' | 'unprocessed' | 'needs-attention' | 'archived' | 'playlist' | 'set' | 'session';
 
 /** Palette for "Change color ▸" — bright, fully saturated (repo preference). */
 const PLAYLIST_COLORS: Array<{ label: string; value: string }> = [
@@ -296,9 +296,20 @@ export default function PlaylistSidebar({
         data-entry-key="view:archived"
         onClick={() => onSelectView('archived')}
         className={rowClass('view:archived', selectedView === 'archived')}
-        style={{ color: 'var(--subtext0)', borderBottom: '1px solid var(--surface0)' }}
+        style={{ color: 'var(--subtext0)' }}
       >
         Archived
+      </div>
+
+      {/* Sessions (sessions 04): ONE entry — the list opens in the main
+          area (in place of the track list), a session opens its timeline. */}
+      <div
+        data-entry-key="view:session"
+        onClick={() => onSelectView('session')}
+        className={rowClass('view:session', selectedView === 'session')}
+        style={{ borderBottom: '1px solid var(--surface0)' }}
+      >
+        ▦ Sessions
       </div>
 
       {/* Playlist list */}
