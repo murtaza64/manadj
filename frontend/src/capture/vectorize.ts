@@ -40,7 +40,9 @@ const STEP_EPS = 0.002;
 const SIMPLIFY_EPS = 0.015;
 /** Constant-lane inclusion thresholds. */
 const VARIES_EPS = 0.005;
-const OFF_DEFAULT_EPS = 0.02;
+/** Exported for the editor's lane shading (mix-editor 39): "renders as
+ * neutral" and "vectorizes as untouched" must be the same epsilon. */
+export const OFF_DEFAULT_EPS = 0.02;
 /** Performed-vs-required pitch gap (percent) still reading as "matched". */
 const TEMPO_MATCH_TOLERANCE_PERCENT = 1.5;
 /** Discontinuities smaller than this are sample jitter, not gestures. */

@@ -1447,3 +1447,13 @@
     opacity: 0.35;
   }
 }
+
+/* Audibility-style gain fill over the deck waveforms (mix-editor 39):
+   content-space, pointer-transparent, above the opaque WebGL body but
+   below the block frames and jump markers. */
+.editor-gainfill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  pointer-events: none;
+}
