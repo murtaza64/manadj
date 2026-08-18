@@ -239,17 +239,6 @@
   color: var(--base);
 }
 
-/* Servo activity (sessions 20): replay is actively nudging deck rates
-   back into phase — pulses while corrections run, gone when locked. */
-.topbar-ownership-servo {
-  font-weight: 800;
-  animation: servo-pulse 1s ease-in-out infinite;
-}
-@keyframes servo-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
 .topbar-ownership-icon {
   font-size: 10px;
 }

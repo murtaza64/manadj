@@ -188,9 +188,9 @@ export class SessionReplayDriver {
   private servo: Partial<Record<ChannelId, { errEma: number | null; rateEma: number }>> = {};
   /** Decks that (re)started and have not been start-snapped yet. */
   private unsettled: Partial<Record<ChannelId, boolean>> = {};
-  /** Live servo bias per deck (rate fraction; 0 in deadband) — the info
-   * chip's "actively syncing" indicator reads this via the store. */
-  private servoBias: Partial<Record<ChannelId, number>> = {};
+  /** Live servo activity per deck (rate-bias fraction + smoothed error
+   * seconds) — the timeline info bar's readout polls this via the store. */
+  private servoActivity: Partial<Record<ChannelId, { bias: number; err: number }>> = {};
   /** The RECORDED mixer state (what the night's log says), composed into
    * overlay lanes — never written to base during playback. */
   private recDecks: Record<
@@ -224,9 +224,9 @@ export class SessionReplayDriver {
     return this.plan.startT + Math.min(offset, this.plan.endT - this.plan.startT);
   }
 
-  /** Live per-deck servo bias (rate fraction) — 0/absent when idle. */
-  getServoBias(): Partial<Record<ChannelId, number>> {
-    return this.servoBias;
+  /** Live per-deck servo activity — absent when idle. */
+  getServoActivity(): Partial<Record<ChannelId, { bias: number; err: number }>> {
+    return this.servoActivity;
   }
 
   isPaused(): boolean {
@@ -452,7 +452,7 @@ export class SessionReplayDriver {
     this.syncDrift = {};
     this.rateBuf = {};
     this.servo = {};
-    this.servoBias = {};
+    this.servoActivity = {};
     this.unsettled = {};
     for (const d of ALL_DECKS) {
       if (this.plan.seed.decks[d].playing) this.unsettled[d] = true;
@@ -689,7 +689,7 @@ export class SessionReplayDriver {
             delete this.rateBuf[d];
             const idleSv = this.servo[d];
             if (idleSv) idleSv.errEma = null;
-            this.servoBias[d] = 0;
+            delete this.servoActivity[d];
             continue;
           }
           const sv = (this.servo[d] ??= {
@@ -751,7 +751,7 @@ export class SessionReplayDriver {
             Math.abs(err) < SERVO_DEADBAND_S
               ? 0
               : Math.max(-cap, Math.min(cap, -err * SERVO_GAIN_PER_S * (cap / SERVO_MAX_BIAS)));
-          this.servoBias[d] = bias;
+          this.servoActivity[d] = { bias, err };
           const targetPitch = (sv.rateEma - 1) * 100 + bias * 100;
           if (Math.abs(targetPitch - snap.pitchPercent) > PITCH_APPLY_MIN_PCT) {
             const engine = this.engines[d];

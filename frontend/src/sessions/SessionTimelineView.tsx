@@ -43,8 +43,10 @@ import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
 import { drawAudibilityArea, drawGridlines, drawStyledRuns, traceRuns } from './waveformLanes';
 import type { TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
+import type { ServoDeckActivity } from './replayStore';
 import {
   replayNowT,
+  replayServoActivity,
   replayState,
   seekReplay,
   startReplay,
@@ -696,6 +698,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
         {/* Inline state readout: cursor (or selected moment) reconstruction. */}
         <InlineReadout state={scrubState ?? momentState} trackNames={trackNames} />
 
+        {/* Servo readout (sessions 20): which decks replay is nudging back
+            into phase, by how much, and how far off they are. */}
+        {replayHere ? <ServoReadout /> : null}
+
         <label>
           <input
             type="checkbox"
@@ -1332,6 +1338,36 @@ function DeckLane({
           })
         : null}
     </g>
+  );
+}
+
+/** Live servo readout (sessions 20): polls driver-owned activity at
+ * 500ms (the servo updates at ~1 Hz sync cues) and lists each actively
+ * nudged deck — signed nudge %% and the smoothed desync it is draining.
+ * Empty (and renders nothing) while the replay is phase-locked. */
+function ServoReadout() {
+  const [activity, setActivity] = useState<ServoDeckActivity[]>([]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActivity(replayServoActivity() ?? []);
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, []);
+  if (activity.length === 0) return null;
+  return (
+    <span className="stl-servo" title="Replay is nudging deck rates back into phase (a machine jog): signed rate nudge and the desync being drained">
+      ⇄
+      {activity.map((a) => (
+        <span key={a.deck} className="stl-servo-deck" style={{ color: DECK_COLORS[a.deck] }}>
+          {a.deck}
+          <i>
+            {a.biasPct > 0 ? '+' : ''}
+            {a.biasPct.toFixed(1)}% · {Math.round(Math.abs(a.errS) * 1000)}ms{' '}
+            {a.errS > 0 ? 'ahead' : 'behind'}
+          </i>
+        </span>
+      ))}
+    </span>
   );
 }
 

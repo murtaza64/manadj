@@ -12,7 +12,7 @@
  * click AUDITION → the editor. Never a transport control (settled — a
  * global pause in chrome re-scatters the transport 34 just gathered).
  */
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
@@ -20,7 +20,7 @@ import { useConductorState } from '../sets/conductorStore';
 import { useSelectedSetId } from '../sets/setStore';
 import { requestSetNavigate } from '../sets/navigateToSet';
 import { requestSessionMoment } from '../sessions/openSession';
-import { replayNowT, replayServoBias, replayState } from '../sessions/replayStore';
+import { replayNowT, replayState } from '../sessions/replayStore';
 import { chipTooltip, resolveChipFace } from './ownershipChip';
 import type { AppMode } from './TopBar';
 
@@ -38,22 +38,6 @@ export function AudioOwnershipChip({
   const { data: sets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
 
   const face = resolveChipFace(holder, conductor);
-
-  // Servo activity (sessions 20): while replay is actively nudging deck
-  // rates back into phase, the chip says so — polled at 500ms (the servo
-  // updates at ~1 Hz sync cues), value-gated, only while REPLAY shows.
-  const [servoPct, setServoPct] = useState(0);
-  useEffect(() => {
-    if (face.kind !== 'replay') return;
-    const timer = window.setInterval(() => {
-      const bias = replayServoBias();
-      setServoPct(bias !== null && bias > 0.001 ? bias * 100 : 0);
-    }, 500);
-    return () => {
-      window.clearInterval(timer);
-      setServoPct(0); // face changed away — drop the indicator
-    };
-  }, [face.kind]);
   const set = face.kind === 'set' ? sets.find((s) => s.id === face.setId) : undefined;
   const tooltip = chipTooltip(face, {
     setName: set?.name ?? null,
@@ -102,17 +86,7 @@ export function AudioOwnershipChip({
       ) : face.kind === 'audition' ? (
         <span className="topbar-ownership-kind">AUDITION</span>
       ) : face.kind === 'replay' ? (
-        <>
-          <span className="topbar-ownership-kind">REPLAY</span>
-          {servoPct > 0 ? (
-            <span
-              className="topbar-ownership-servo"
-              title={`Correcting phase: nudging deck rate by ${servoPct.toFixed(1)}%`}
-            >
-              ⇄
-            </span>
-          ) : null}
-        </>
+        <span className="topbar-ownership-kind">REPLAY</span>
       ) : (
         <span className="topbar-ownership-kind">DECKS</span>
       )}

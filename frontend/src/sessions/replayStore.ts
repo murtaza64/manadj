@@ -74,17 +74,28 @@ export function replayNowT(): number | null {
   return instance?.nowT() ?? null;
 }
 
-/** Largest live servo bias magnitude (rate fraction), or null when no
- * replay is rolling — the TopBar chip's "actively syncing" indicator
- * polls this (the replayNowT idiom: driver-owned truth, not store state). */
-export function replayServoBias(): number | null {
-  const biases = instance?.getServoBias();
-  if (!biases) return null;
-  let max = 0;
-  for (const v of Object.values(biases)) {
-    if (v !== undefined && Math.abs(v) > max) max = Math.abs(v);
+export interface ServoDeckActivity {
+  deck: 'A' | 'B' | 'C' | 'D';
+  /** Rate nudge, percent (signed: + = speeding up). */
+  biasPct: number;
+  /** Smoothed desync vs the log, seconds (signed: + = ahead). */
+  errS: number;
+}
+
+/** Live per-deck servo activity (actively-nudging decks only), or null
+ * when no replay is rolling — the timeline info bar's readout polls this
+ * (the replayNowT idiom: driver-owned truth, not store state). */
+export function replayServoActivity(): ServoDeckActivity[] | null {
+  const act = instance?.getServoActivity();
+  if (!act) return null;
+  const out: ServoDeckActivity[] = [];
+  for (const deck of ['A', 'B', 'C', 'D'] as const) {
+    const a = act[deck];
+    if (a && Math.abs(a.bias) > 0.001) {
+      out.push({ deck, biasPct: a.bias * 100, errS: a.err });
+    }
   }
-  return max;
+  return out;
 }
 
 /** Space: toggle pause/resume on the active replay. The DRIVER pushes the
