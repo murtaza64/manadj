@@ -53,6 +53,8 @@ export interface ReplayAudio {
   engines: Record<ChannelId, DeckEngine>;
 }
 
+export type ReplayLiveStatus = 'loading' | 'playing' | 'paused';
+
 export interface ReplayHooks {
   /** Resolve + load a track onto a shared deck (the provider's one Load
    * path). Resolves false when the track is missing from the library. */
@@ -62,14 +64,22 @@ export interface ReplayHooks {
    * design: the human's gesture wins), and the cause makes that
    * diagnosable instead of mysterious. */
   onStopped(reason: ReplayStopReason, cause?: string): void;
+  /** The DRIVER is authoritative for live status — it pushes every
+   * transition (loading→playing→paused→…) so the store never has to
+   * INFER status from a resolved promise (the source of the
+   * playhead-freezes-but-audio-continues desync). Optional for tests. */
+  onStatus?(status: ReplayLiveStatus): void;
 }
 
-/** Phase tolerance for the continuous corrector: past this, re-seek. Tight
- * enough to hold a beatmatch (~1/16 beat at 150 BPM), loose enough for
- * engine playhead-estimate noise. */
-const PHASE_TOLERANCE_S = 0.03;
+/** Gross-desync threshold: a correcting seek fires only past THIS drift —
+ * a genuine desync (a load that landed late, a stalled decode), never
+ * normal playback jitter. Kept well above the wall-clock↔audio-clock skew
+ * between the recorded ticks and live replay (which was making a 30 ms
+ * corrector re-seek every second: the "off-beat then snaps back" jitter).
+ * Once a deck is playing, it runs at the engine's true rate untouched. */
+const RESYNC_THRESHOLD_S = 0.5;
 /** Minimum spacing between corrective seeks per deck (no seek-thrash). */
-const CORRECTION_COOLDOWN_S = 0.8;
+const CORRECTION_COOLDOWN_S = 2;
 /** Seed loads must become ready within this budget. */
 const LOAD_TIMEOUT_MS = 20000;
 /** Natural end-of-track detection window (the Conductor's). */
@@ -94,6 +104,16 @@ export class SessionReplayDriver {
   /** Paused (space): session time freezes; decks that were rolling wait. */
   private pausedAtOffset: number | null = null;
   private pausedDecks: ChannelId[] = [];
+  /** A seekTo's async load is in flight. Pause/resume are refused during
+   * it: a pause landing between seekTo's pause-state snapshot and its
+   * completion left `pausedAtOffset` set under status 'playing' — a
+   * frozen playhead over rolling audio (the clock pins at the stale
+   * offset), recoverable only by a pause/resume cycle. */
+  private seeking = false;
+  /** Monotonic seek generation: a newer seekTo supersedes an older one's
+   * continuation (double-click while loading double-started the tick
+   * loop — two cue appliers per frame). */
+  private seekGen = 0;
   /** Per-deck phase anchors: expected trackTime = playhead +
    * (offset − anchor.offset) × rate. The continuous corrector holds every
    * playing deck to its anchor within PHASE_TOLERANCE_S — this is what
@@ -106,12 +126,12 @@ export class SessionReplayDriver {
    * overlay lanes — never written to base during playback. */
   private recDecks: Record<
     ChannelId,
-    { fader: number; eq: { low: number; mid: number; high: number }; filter: number; assignment: CrossfaderAssignment }
+    { fader: number; trim: number; eq: { low: number; mid: number; high: number }; filter: number; assignment: CrossfaderAssignment }
   > = {
-    A: { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
-    B: { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
-    C: { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
-    D: { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
+    A: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
+    B: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
+    C: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
+    D: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
   };
   private recCrossfader = 0;
   private recCrossfaderEnabled = true;
@@ -163,6 +183,7 @@ export class SessionReplayDriver {
       return;
     }
     this.active = true;
+    this.status('loading');
     // The Conductor's mixer protocol: own the fader/EQ/filter nodes via
     // the overlay; the user's base state stays theirs (and stays visible
     // under the ghost pointers).
@@ -207,6 +228,7 @@ export class SessionReplayDriver {
       ...ALL_DECKS.map((d) => this.watchEngine(d)),
       ...ALL_DECKS.map((d) => this.engines[d].addTransportEventListener(this.gestureTap(d)))
     );
+    this.status('playing');
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -224,24 +246,26 @@ export class SessionReplayDriver {
   /** Space: freeze the session clock and park the rolling decks. The
    * surface stays claimed — pausing a replay is not a takeover. */
   pauseReplay(): void {
-    if (!this.active || this.pausedAtOffset !== null) return;
+    if (!this.active || this.seeking || this.pausedAtOffset !== null) return;
     cancelAnimationFrame(this.raf);
     this.pausedAtOffset = this.elapsed();
     this.pausedDecks = ALL_DECKS.filter((d) => this.engines[d].getSnapshot().playing);
     this.self(() => {
       for (const d of this.pausedDecks) this.engines[d].pause();
     });
+    this.status('paused');
   }
 
   /** Space again: re-anchor the clock and resume the parked decks. */
   resumeReplay(): void {
-    if (!this.active || this.pausedAtOffset === null) return;
+    if (!this.active || this.seeking || this.pausedAtOffset === null) return;
     this.anchorAudioTime = this.mixer.now() - this.pausedAtOffset;
     this.pausedAtOffset = null;
     this.self(() => {
       for (const d of this.pausedDecks) this.engines[d].play();
     });
     this.pausedDecks = [];
+    this.status('playing');
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -252,6 +276,8 @@ export class SessionReplayDriver {
    */
   async seekTo(plan: ReplayPlan): Promise<void> {
     if (!this.active) return;
+    const gen = ++this.seekGen;
+    this.seeking = true;
     cancelAnimationFrame(this.raf);
     const wasPaused = this.pausedAtOffset !== null;
     this.pausedAtOffset = null;
@@ -261,37 +287,46 @@ export class SessionReplayDriver {
     });
     this.plan = plan;
     this.cueIndex = 0;
-    // Load anything the new seed needs that isn't already on its deck.
-    const needed = ALL_DECKS.filter((d) => {
-      const id = plan.seed.decks[d].trackId;
-      return id !== null && this.engines[d].getSnapshot().trackId !== id;
-    });
-    const results = await Promise.all(
-      needed.map(async (d) => {
-        const id = plan.seed.decks[d].trackId!;
-        this.loadRequested[d] = id;
-        const ok = await this.hooks.loadTrack(d, id);
-        return ok ? this.waitReady(d, id) : false;
-      })
-    );
-    if (!this.active) return; // displaced/taken over while loading
-    if (results.some((ok) => !ok)) {
-      this.teardown({ release: true });
-      this.fireStopped('load-failed');
-      return;
-    }
-    this.self(() => this.applySeed());
-    if (wasPaused) {
-      // Stay paused at the new moment; decks are seeded but parked.
-      this.pausedAtOffset = 0;
-      this.pausedDecks = ALL_DECKS.filter((d) => plan.seed.decks[d].playing);
-      this.self(() => {
-        for (const d of this.pausedDecks) this.engines[d].pause();
+    try {
+      // Load anything the new seed needs that isn't already on its deck.
+      const needed = ALL_DECKS.filter((d) => {
+        const id = plan.seed.decks[d].trackId;
+        return id !== null && this.engines[d].getSnapshot().trackId !== id;
       });
-      return;
+      const results = await Promise.all(
+        needed.map(async (d) => {
+          const id = plan.seed.decks[d].trackId!;
+          this.loadRequested[d] = id;
+          const ok = await this.hooks.loadTrack(d, id);
+          return ok ? this.waitReady(d, id) : false;
+        })
+      );
+      // Superseded by a newer seek: ITS continuation owns the restart —
+      // finishing here too double-started the tick loop.
+      if (gen !== this.seekGen) return;
+      if (!this.active) return; // displaced/taken over while loading
+      if (results.some((ok) => !ok)) {
+        this.teardown({ release: true });
+        this.fireStopped('load-failed');
+        return;
+      }
+      this.self(() => this.applySeed());
+      if (wasPaused) {
+        // Stay paused at the new moment; decks are seeded but parked.
+        this.pausedAtOffset = 0;
+        this.pausedDecks = ALL_DECKS.filter((d) => plan.seed.decks[d].playing);
+        this.self(() => {
+          for (const d of this.pausedDecks) this.engines[d].pause();
+        });
+        this.status('paused');
+        return;
+      }
+      this.anchorAudioTime = this.mixer.now();
+      this.status('playing');
+      this.raf = requestAnimationFrame(this.tick);
+    } finally {
+      if (gen === this.seekGen) this.seeking = false;
     }
-    this.anchorAudioTime = this.mixer.now();
-    this.raf = requestAnimationFrame(this.tick);
   }
 
   // ── Clock ──────────────────────────────────────────────────────────────
@@ -345,6 +380,7 @@ export class SessionReplayDriver {
       const engine = this.engines[d];
       this.recDecks[d] = {
         fader: s.fader,
+        trim: s.trim,
         eq: { ...s.eq },
         filter: s.filter,
         assignment: s.assignment,
@@ -378,6 +414,7 @@ export class SessionReplayDriver {
       );
       const lane: AutomationChannelValues = {
         fader: Math.min(1, r.fader * Math.sqrt(xfGain)),
+        trim: r.trim,
         eq: { ...r.eq },
         filter: r.filter,
       };
@@ -396,9 +433,13 @@ export class SessionReplayDriver {
       const engine = this.engines[d];
       const snap = engine.getSnapshot();
       if (!snap.playing || snap.loadState !== 'ready') continue;
+      // Where the deck SHOULD be, projected from its anchor at the deck's
+      // own rate. A seek only fires on a GROSS desync — normal engine
+      // playback jitter (and the recorded-tick↔audio-clock skew) never
+      // crosses this, so steady playback is left completely alone.
       const expected = a.playhead + (elapsed - a.offset) * a.rate;
       const drift = Math.abs(engine.getPlayhead() - expected);
-      if (drift <= PHASE_TOLERANCE_S) continue;
+      if (drift <= RESYNC_THRESHOLD_S) continue;
       const last = this.lastCorrection[d];
       if (last !== undefined && elapsed - last < CORRECTION_COOLDOWN_S) continue;
       this.lastCorrection[d] = elapsed;
@@ -412,10 +453,14 @@ export class SessionReplayDriver {
         const ch = cue.channel;
         const v = cue.value;
         // Overlay-owned params update the recorded state and recompose
-        // lanes. Trim/PFL/master/cue stay the LIVE user's (gain staging is
-        // not reproduced — Conductor parity); crossfader moves recompose
+        // lanes — including trim (sessions 15: trim is ridden as a
+        // performance control, so a replay without it is audibly wrong).
+        // PFL/master/cue stay the LIVE user's; crossfader moves recompose
         // every lane (its gain is folded in).
-        if (cue.control === 'fader' && ch) {
+        if (cue.control === 'trim' && ch) {
+          this.recDecks[ch].trim = v;
+          this.applyLanes([ch]);
+        } else if (cue.control === 'fader' && ch) {
           this.recDecks[ch].fader = v;
           this.applyLanes([ch]);
         } else if (cue.control === 'eqLow' && ch) {
@@ -512,13 +557,25 @@ export class SessionReplayDriver {
         }
         break;
       case 'sync':
-        // Ticks are the log's truth samples: re-anchor the phase corrector
-        // (it does the seeking, rate-aware, with tolerance + cooldown).
+        // Ticks are the log's ~1 Hz truth samples, but captured on the
+        // wall clock — a small steady skew from the live audio clock. Do
+        // NOT re-anchor to every tick (that chased the skew and made the
+        // corrector re-seek each second — the jitter). Only re-anchor when
+        // the engine has GROSSLY diverged from the log's own position (a
+        // real desync); otherwise let the deck keep playing untouched.
         for (const d of ALL_DECKS) {
           const ph = cue.playheads[d as CaptureDeck];
           if (ph === undefined) continue;
-          const prev = this.anchors[d];
-          this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: prev?.rate ?? 1 };
+          const a = this.anchors[d];
+          if (a === undefined) {
+            this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: 1 };
+            continue;
+          }
+          const snap = this.engines[d].getSnapshot();
+          if (!snap.playing || snap.loadState !== 'ready') continue;
+          if (Math.abs(this.engines[d].getPlayhead() - ph) > RESYNC_THRESHOLD_S) {
+            this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: a.rate };
+          }
         }
         break;
     }
@@ -679,6 +736,7 @@ export class SessionReplayDriver {
       const lane = this.lastLanes[d];
       if (!lane) continue;
       if (!skip(`${d}.fader`)) this.mixer.setFader(d, lane.fader);
+      if (!skip(`${d}.trim`) && lane.trim !== undefined) this.mixer.setTrim(d, lane.trim);
       if (!skip(`${d}.eqLow`)) this.mixer.setEq(d, 'low', lane.eq.low);
       if (!skip(`${d}.eqMid`)) this.mixer.setEq(d, 'mid', lane.eq.mid);
       if (!skip(`${d}.eqHigh`)) this.mixer.setEq(d, 'high', lane.eq.high);
@@ -713,5 +771,9 @@ export class SessionReplayDriver {
     if (this.stoppedFired) return;
     this.stoppedFired = true;
     this.hooks.onStopped(reason, cause);
+  }
+
+  private status(s: ReplayLiveStatus): void {
+    this.hooks.onStatus?.(s);
   }
 }

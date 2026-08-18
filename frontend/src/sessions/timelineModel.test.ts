@@ -9,9 +9,12 @@ import type { CaptureEvent } from '../capture/events';
 import {
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  collapseCandidates,
+  createStateIndex,
   deriveTimeline,
   gainAt,
   stateAt,
+  traceWindow,
   trackTimeAt,
 } from './timelineModel';
 
@@ -391,6 +394,64 @@ describe('cue-stab traces (sessions 10)', () => {
     expect(m.decks.A.traces).toEqual([]);
   });
 });
+describe('audibleTrackIds (distinct Master-audible Track count)', () => {
+  it('counts a Track that became audible; not one only loaded/silent', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 10, kind: 'transport', channel: 'A', action: 'pause', playhead: 8 },
+      // B loaded and even played, but fader down the whole time → silent.
+      { t: 3, kind: 'load', channel: 'B', trackId: 9, bpm: 172 },
+      { t: 4, kind: 'control', control: 'fader', channel: 'B', value: 0 },
+      { t: 5, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+      { t: 11, kind: 'transport', channel: 'B', action: 'pause', playhead: 6 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.audibleTrackIds).toEqual([7]);
+  });
+
+  it('repeated audible plays of the same Track count once', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 6, kind: 'transport', channel: 'A', action: 'pause', playhead: 4 },
+      // Same track brought back on deck C later.
+      { t: 8, kind: 'load', channel: 'C', trackId: 7, bpm: 174 },
+      { t: 9, kind: 'transport', channel: 'C', action: 'play', playhead: 0 },
+      { t: 14, kind: 'transport', channel: 'C', action: 'pause', playhead: 5 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.audibleTrackIds).toEqual([7]);
+  });
+
+  it('a Track only audible under a machine tenure does NOT count', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'tenure', edge: 'start', holder: 'editor' },
+      { t: 2, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 3, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 9, kind: 'transport', channel: 'A', action: 'pause', playhead: 6 },
+      { t: 10, kind: 'tenure', edge: 'end', holder: 'shared' },
+    ];
+    const m = deriveTimeline(events);
+    // Tenure masks audibility, so nothing counts.
+    expect(m.audibleTrackIds).toEqual([]);
+  });
+
+  it('counts every distinct audible Track across four decks', () => {
+    const evs: CaptureEvent[] = [...seed(0)];
+    (['A', 'B', 'C', 'D'] as const).forEach((ch, i) => {
+      const id = 10 + i;
+      evs.push({ t: 1 + i, kind: 'load', channel: ch, trackId: id, bpm: 174 });
+      evs.push({ t: 2 + i, kind: 'transport', channel: ch, action: 'play', playhead: 0 });
+      evs.push({ t: 20 + i, kind: 'transport', channel: ch, action: 'pause', playhead: 5 });
+    });
+    const m = deriveTimeline(evs);
+    expect(m.audibleTrackIds.sort((a, b) => a - b)).toEqual([10, 11, 12, 13]);
+  });
+});
 
 describe('hot-cue stab traces (sessions 11)', () => {
   it("the launch hotCue gesture does not sever the stab's trace (no leading gap)", () => {
@@ -422,5 +483,226 @@ describe('hot-cue stab traces (sessions 11)', () => {
     expect(m.decks.C.gestures.filter((g) => g.action === 'cue')).toEqual([]);
     // Still not a playing span.
     expect(m.decks.C.playingSpans).toEqual([]);
+  });
+});
+
+describe('jog scrub does not explode markers/traces (perf)', () => {
+  it('a stream of tiny seeks is one continuous trace, no markers', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 100 },
+    ];
+    // 200 rim-tick seeks nudging ±0.3s over 2s (a jog scrub).
+    let ph = 100;
+    for (let i = 0; i < 200; i++) {
+      ph += (i % 3 === 0 ? -0.2 : 0.25);
+      events.push({ t: 2 + (i + 1) * 0.01, kind: 'transport', channel: 'A', action: 'seek', playhead: ph });
+    }
+    events.push({ t: 5, kind: 'transport', channel: 'A', action: 'pause', playhead: ph });
+    const m = deriveTimeline(events);
+    // No jump markers for the scrub; the whole thing is ~one trace.
+    expect(m.decks.A.gestures.filter((g) => g.action === 'seek')).toEqual([]);
+    expect(m.decks.A.traces.length).toBeLessThanOrEqual(2);
+    // Decimated: far fewer points than seeks.
+    expect(m.decks.A.traces.flat().length).toBeLessThan(60);
+  });
+
+  it('a genuine leap-seek still marks and breaks', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 3, kind: 'tick', playheads: { A: 11 } },
+      { t: 4, kind: 'transport', channel: 'A', action: 'seek', playhead: 120 }, // leap
+      { t: 5, kind: 'tick', playheads: { A: 121 } },
+      { t: 6, kind: 'transport', channel: 'A', action: 'pause', playhead: 122 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.decks.A.gestures.filter((g) => g.action === 'seek')).toHaveLength(1);
+    expect(m.decks.A.traces.length).toBe(2);
+  });
+});
+
+describe('createStateIndex (checkpointed scrub, issue 13)', () => {
+  /** A synthetic multi-deck log big enough to cross several checkpoints:
+   * plays, fader moves, ticks, seeks, tenures, pitch — the audibility and
+   * extrapolation inputs stateAt reads. */
+  function bigLog(n: number): CaptureEvent[] {
+    const evs: CaptureEvent[] = [...seed(0)];
+    evs.push({ t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 });
+    evs.push({ t: 1.5, kind: 'load', channel: 'B', trackId: 9, bpm: 172 });
+    evs.push({ t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 });
+    for (let i = 0; i < n; i++) {
+      const t = 3 + i;
+      switch (i % 7) {
+        case 0:
+          evs.push({ t, kind: 'tick', playheads: { A: t - 2 } });
+          break;
+        case 1:
+          evs.push({ t, kind: 'control', control: 'fader', channel: 'B', value: (i % 10) / 10 });
+          break;
+        case 2:
+          evs.push({ t, kind: 'control', control: 'crossfader', channel: null, value: ((i % 20) - 10) / 10 });
+          break;
+        case 3:
+          evs.push({ t, kind: 'pitch', channel: 'A', value: ((i % 8) - 4) / 2 });
+          break;
+        case 4:
+          evs.push({ t, kind: 'transport', channel: 'B', action: i % 14 === 4 ? 'play' : 'pause', playhead: i });
+          break;
+        case 5:
+          if (i % 21 === 5) evs.push({ t, kind: 'tenure', edge: 'start', holder: 'conductor' });
+          else if (i % 21 === 12) evs.push({ t, kind: 'tenure', edge: 'end', holder: 'shared' });
+          else evs.push({ t, kind: 'tick', playheads: { A: t - 2, B: i } });
+          break;
+        default:
+          evs.push({ t, kind: 'transport', channel: 'A', action: 'seek', playhead: t } as CaptureEvent);
+          break;
+      }
+    }
+    return evs;
+  }
+
+  it('matches the naive stateAt exactly across checkpoint boundaries', () => {
+    const events = bigLog(3000);
+    const index = createStateIndex(events, 256); // several checkpoints
+    // Probe T values: before the log, on event instants, between events,
+    // straddling checkpoint boundaries, and past the end.
+    const probes = [-1, 0, 1.7, 2, 3, 100.5, 258, 259.2, 512, 513.5, 1000, 2047.3, 2500, 9999];
+    for (const t of probes) {
+      expect(index.at(t)).toEqual(stateAt(events, t));
+    }
+  });
+
+  it('a probe at every 37th event instant agrees (dense sweep)', () => {
+    const events = bigLog(1500);
+    const index = createStateIndex(events, 128);
+    for (let i = 0; i < events.length; i += 37) {
+      const t = events[i].t;
+      expect(index.at(t)).toEqual(stateAt(events, t));
+    }
+  });
+});
+
+describe('traceWindow (viewport culling, issue 13)', () => {
+  const trace = Array.from({ length: 100 }, (_, i) => ({ t: i * 2, playhead: i }));
+
+  it('returns the original array (no copy) when fully inside', () => {
+    expect(traceWindow(trace, -10, 500)).toBe(trace);
+  });
+
+  it('returns null when fully outside', () => {
+    expect(traceWindow(trace, 300, 400)).toBeNull();
+    expect(traceWindow(trace, -50, -1)).toBeNull();
+  });
+
+  it('slices to the window with one pad sample either side', () => {
+    const win = traceWindow(trace, 50, 60)!;
+    // Points at t=50..60 are indices 25..30; padded: 24..31.
+    expect(win[0].t).toBeLessThan(50);
+    expect(win[win.length - 1].t).toBeGreaterThan(60);
+    expect(win.map((p) => p.t)).toEqual([48, 50, 52, 54, 56, 58, 60, 62]);
+  });
+
+  it('clamps the pad at the trace edges', () => {
+    const head = traceWindow(trace, -5, 4)!;
+    expect(head[0].t).toBe(0);
+    expect(head[head.length - 1].t).toBe(6);
+    const tail = traceWindow(trace, 195, 500)!;
+    expect(tail[0].t).toBe(194);
+    expect(tail[tail.length - 1].t).toBe(198);
+  });
+
+  it('an empty trace is null', () => {
+    expect(traceWindow([], 0, 10)).toBeNull();
+  });
+});
+
+describe('maxPlayhead precompute (issue 13)', () => {
+  it('carries the largest trace playhead per deck; floor 1', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 10 },
+      { t: 3, kind: 'tick', playheads: { A: 11 } },
+      { t: 4, kind: 'tick', playheads: { A: 12.5 } },
+      { t: 5, kind: 'transport', channel: 'A', action: 'pause', playhead: 13 },
+    ];
+    const m = deriveTimeline(events);
+    expect(m.decks.A.maxPlayhead).toBe(13);
+    expect(m.decks.B.maxPlayhead).toBe(1); // no traces: the floor
+  });
+});
+
+describe('tenure collapse (sessions 14)', () => {
+  // Play → a 900s editor hold → play again, with a separate 500s idle
+  // stretch after: BOTH kinds are collapse candidates.
+  const events: CaptureEvent[] = [
+    ...seed(0),
+    { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+    { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+    { t: 100, kind: 'tenure', edge: 'start', holder: 'replay' },
+    { t: 1000, kind: 'tenure', edge: 'end', holder: 'shared' },
+    { t: 1100, kind: 'transport', channel: 'A', action: 'pause', playhead: 200 },
+    { t: 1600, kind: 'transport', channel: 'A', action: 'play', playhead: 200 },
+    { t: 1700, kind: 'transport', channel: 'A', action: 'pause', playhead: 300 },
+  ];
+  const m = deriveTimeline(events);
+
+  it('candidates carry both kinds, sorted, with holders on tenures', () => {
+    const c = collapseCandidates(m);
+    const tenure = c.find((sp) => sp.kind === 'tenure');
+    const idles = c.filter((sp) => sp.kind === 'idle');
+    expect(tenure).toMatchObject({ start: 100, end: 1000, holder: 'replay' });
+    expect(idles.some((sp) => sp.start === 1100 && sp.end === 1600)).toBe(true);
+    for (let i = 1; i < c.length; i++) expect(c[i].start).toBeGreaterThanOrEqual(c[i - 1].start);
+  });
+
+  it('a long tenure collapses to a fixed marker carrying kind/holder/candidateIdx', () => {
+    const axis = buildTimeAxis(m, { collapseIdle: true, thresholdS: 45, pxPerSec: 2 });
+    const tenureSeg = axis.segments.find((s) => s.collapsed && s.kind === 'tenure');
+    expect(tenureSeg).toBeDefined();
+    expect(tenureSeg!.start).toBe(100);
+    expect(tenureSeg!.end).toBe(1000);
+    expect(tenureSeg!.holder).toBe('replay');
+    expect(tenureSeg!.px1 - tenureSeg!.px0).toBe(COLLAPSED_MARKER_PX);
+    expect(tenureSeg!.candidateIdx).toBe(
+      collapseCandidates(m).findIndex((sp) => sp.kind === 'tenure')
+    );
+    // The idle stretch collapses too — same threshold, one control.
+    expect(axis.segments.filter((s) => s.collapsed)).toHaveLength(2);
+  });
+
+  it('expanding the tenure leaves the idle collapsed (stable mixed indexing)', () => {
+    const c = collapseCandidates(m);
+    const tenureIdx = c.findIndex((sp) => sp.kind === 'tenure');
+    const axis = buildTimeAxis(m, {
+      collapseIdle: true,
+      thresholdS: 45,
+      expanded: new Set([tenureIdx]),
+      pxPerSec: 2,
+    });
+    const collapsed = axis.segments.filter((s) => s.collapsed);
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0].kind).toBe('idle');
+    expect(collapsed[0].start).toBe(1100);
+  });
+
+  it('an open tenure at log end collapses too', () => {
+    const evs: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 10, kind: 'tenure', edge: 'start', holder: 'conductor' },
+      { t: 500, kind: 'tick', playheads: {} },
+    ];
+    const axis = buildTimeAxis(deriveTimeline(evs), {
+      collapseIdle: true,
+      thresholdS: 45,
+      pxPerSec: 2,
+    });
+    const seg = axis.segments.find((s) => s.collapsed && s.kind === 'tenure');
+    expect(seg).toMatchObject({ start: 10, end: 500, holder: 'conductor' });
   });
 });

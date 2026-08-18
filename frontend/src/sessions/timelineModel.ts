@@ -24,6 +24,15 @@ import type { CaptureDeck, CaptureEvent } from '../capture/events';
 
 export const ALL_DECKS: CaptureDeck[] = ['A', 'B', 'C', 'D'];
 
+/** A seek landing within this of the extrapolated pre-seek position is a
+ * JOG scrub (rim-tick nudge), not a jump — it continues the trace without
+ * a marker/break, so a busy scrub reads as one smooth move (perf: a set
+ * with 10k+ jog seeks was rendering 10k markers + trace fragments). */
+const JOG_SEEK_MAX_S = 2;
+/** Minimum spacing between kept jog-trace samples (~20 Hz): rim ticks can
+ * fire many times per frame; decimating bounds the point count. */
+const JOG_DECIMATE_S = 0.05;
+
 export interface Span {
   start: number;
   end: number;
@@ -79,6 +88,9 @@ export interface DeckTimeline {
   loops: LoopSpan[];
   /** Step series (event-aligned) of audible Master gain; 0 = silent. */
   gainSteps: GainStep[];
+  /** Largest trace playhead (lane vertical scale) — precomputed here so
+   * the render path never flattens every trace point per frame. */
+  maxPlayhead: number;
 }
 
 export interface TimelineModel {
@@ -94,6 +106,12 @@ export interface TimelineModel {
   overlaps: Span[];
   /** Every trackId that appeared in a load event. */
   trackIds: number[];
+  /** Distinct Tracks that became Master-audible during the Session (any
+   * audibility span overlapped that Track's tenure on its deck). Repeated
+   * audible plays count once; loaded-only, cue/PFL-only, and
+   * tenure-masked Tracks are absent (audibleSpans already exclude them).
+   * The Sessions-list "Tracks" count. */
+  audibleTrackIds: number[];
   eventCount: number;
 }
 
@@ -283,12 +301,21 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     if (tr && tr.length >= 2) traces[ch].push(tr);
     openTrace[ch] = null;
   };
-  const sampleTrace = (ch: CaptureDeck, t: number, playhead: number) => {
+  const sampleTrace = (ch: CaptureDeck, t: number, playhead: number, jog = false) => {
     let tr = openTrace[ch];
     if (tr && tr.length > 0) {
       const last = tr[tr.length - 1];
       const dt = t - last.t;
       const dp = playhead - last.playhead;
+      // Jog scrub: a smooth, possibly-reversing move. Skip the
+      // discontinuity check (it would shatter the scrub into fragments),
+      // and DECIMATE — a rim tick can fire many times a frame; keep at
+      // most ~20 Hz so a busy scrub is a handful of points, not thousands.
+      if (jog) {
+        if (dt < JOG_DECIMATE_S) return;
+        tr.push({ t, playhead });
+        return;
+      }
       // Discontinuity: jumped (seek/hot cue) or reversed or a long silence.
       if (dp < -0.75 || Math.abs(dp - dt) > Math.max(2, dt * 0.5) || dt > 4) {
         breakTrace(ch);
@@ -306,14 +333,24 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     // Pre-event playhead for the affected deck: seek-class gestures must
     // CLOSE the old trace at the jump instant (extrapolated), not at the
     // last tick — otherwise every jump leaves an up-to-1s waveform gap.
+    // preJump: the moving playhead just before a discontinuity, to close
+    // the outgoing trace at the jump instant (only meaningful while
+    // playing/previewing — a paused deck's trace is already closed).
     let preJump: number | null = null;
+    // jogRef: the position a seek is measured against to tell a jog scrub
+    // (tiny nudge) from a jump — valid even while paused (a paused scrub
+    // is common and must not emit thousands of markers).
+    let jogRef: number | null = null;
     if (
       e.kind === 'transport' &&
       (e.action === 'seek' || e.action === 'jumpBeats' || e.action === 'hotCue')
     ) {
       const d = s.decks[e.channel];
-      if (d.playing) {
+      if (d.playing || d.previewing) {
         preJump = d.playhead + (e.t - d.playheadAt) * (1 + d.pitch / 100);
+        jogRef = preJump;
+      } else {
+        jogRef = d.playhead;
       }
     }
 
@@ -360,22 +397,45 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
           gestures[e.channel].push({ t: e.t, action: 'cue', playhead: e.playhead });
         }
       } else {
-        // seek / jumpBeats / hotCue: a discontinuity gesture — mark it,
-        // close the old line AT the jump instant, start anew.
-        gestures[e.channel].push({
-          t: e.t,
-          action: e.action,
-          playhead: e.playhead,
-          detail: e.detail,
-        });
-        if (preJump !== null) sampleTrace(e.channel, e.t, preJump);
-        breakTrace(e.channel);
-        // Re-open for previewing decks too (sessions 11): a hot-cue stab's
-        // launch fires previewStart then its hotCue gesture — without this
-        // the gesture would sever the just-opened trace until the first
-        // tick (~1s leading gap in the stab's waveform).
-        if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
-          sampleTrace(e.channel, e.t, e.playhead);
+        // seek / jumpBeats / hotCue: a discontinuity gesture. BUT a jog
+        // scrub emits a continuous stream of tiny seeks (one per rim tick
+        // — thousands in a busy set); rendering a marker + trace break per
+        // tick shatters the lane into thousands of fragments and tanks the
+        // frame rate. A jog seek is a smooth move, not a jump: treat a
+        // SMALL seek as a trace continuation (no marker, no break). Only a
+        // genuine discontinuity — a jumpBeats/hotCue, or a seek that
+        // actually leaps — marks and breaks.
+        const isJog =
+          e.action === 'seek' &&
+          jogRef !== null &&
+          Math.abs(e.playhead - jogRef) <= JOG_SEEK_MAX_S;
+        if (isJog) {
+          if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
+            sampleTrace(e.channel, e.t, e.playhead, true);
+          }
+        } else {
+          gestures[e.channel].push({
+            t: e.t,
+            action: e.action,
+            playhead: e.playhead,
+            detail: e.detail,
+          });
+          // A gesture that lands where the playhead already is (a stab
+          // launch's hotCue at the just-opened previewStart position) is
+          // not a leap: don't close/reopen the trace around it (that would
+          // fragment the stab's waveform). Only a real jump breaks.
+          const leaps = preJump === null || Math.abs(e.playhead - preJump) > 0.01;
+          if (leaps) {
+            if (preJump !== null) sampleTrace(e.channel, e.t, preJump);
+            breakTrace(e.channel);
+            // Re-open for playing/previewing decks (sessions 11): the
+            // hot-cue stab launch fires previewStart then its hotCue
+            // gesture — without this the gesture would sever the
+            // just-opened trace until the first tick (leading gap).
+            if (s.decks[e.channel].playing || s.decks[e.channel].previewing) {
+              sampleTrace(e.channel, e.t, e.playhead);
+            }
+          }
         }
       }
     }
@@ -449,20 +509,43 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
   }
 
   const decks = Object.fromEntries(
-    ALL_DECKS.map((ch) => [
-      ch,
-      {
-        deck: ch,
-        trackSpans: trackSpans[ch],
-        playingSpans: playing[ch].spans,
-        audibleSpans: audible[ch].spans,
-        traces: traces[ch],
-        gestures: gestures[ch],
-        loops: loops[ch],
-        gainSteps: gainSteps[ch],
-      },
-    ])
+    ALL_DECKS.map((ch) => {
+      let maxPlayhead = 1;
+      for (const trace of traces[ch]) {
+        for (const p of trace) {
+          if (p.playhead > maxPlayhead) maxPlayhead = p.playhead;
+        }
+      }
+      return [
+        ch,
+        {
+          deck: ch,
+          trackSpans: trackSpans[ch],
+          playingSpans: playing[ch].spans,
+          audibleSpans: audible[ch].spans,
+          traces: traces[ch],
+          gestures: gestures[ch],
+          loops: loops[ch],
+          gainSteps: gainSteps[ch],
+          maxPlayhead,
+        },
+      ];
+    })
   ) as Record<CaptureDeck, DeckTimeline>;
+
+  // Distinct Master-audible Tracks (the Sessions-list "Tracks" count): a
+  // Track counts iff its tenure on a deck overlapped that deck's
+  // audibility (which already excludes cue/PFL, loaded-silent, kills, and
+  // tenure-masked stretches). One definition, reused — no divergence.
+  const audibleTrackIds = new Set<number>();
+  for (const ch of ALL_DECKS) {
+    for (const span of trackSpans[ch]) {
+      if (audibleTrackIds.has(span.trackId)) continue;
+      if (audible[ch].spans.some((a) => a.start < span.end && a.end > span.start)) {
+        audibleTrackIds.add(span.trackId);
+      }
+    }
+  }
 
   return {
     start,
@@ -473,6 +556,7 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     idle: idle.spans,
     overlaps: overlap.spans,
     trackIds: [...trackIds],
+    audibleTrackIds: [...audibleTrackIds],
     eventCount: events.length,
   };
 }
@@ -506,8 +590,9 @@ export interface StateAtT {
   eventsAfter: number;
 }
 
-/** Reduce the log up to T. O(n) per call — fine for scrubbing a few
- * thousand events; index by checkpoint if Sessions grow to hours. */
+/** Reduce the log up to T. O(n) per call — fine for a one-shot lookup
+ * (the replay planner); interactive scrubbing goes through
+ * `createStateIndex`, which reduces only the tail past a checkpoint. */
 export function stateAt(events: CaptureEvent[], t: number): StateAtT {
   const s = initialState();
   let before = 0;
@@ -516,6 +601,17 @@ export function stateAt(events: CaptureEvent[], t: number): StateAtT {
     applyEvent(s, e);
     before += 1;
   }
+  return snapshotState(s, t, before, events.length);
+}
+
+/** Reader-facing snapshot of a reduced state (shared by `stateAt` and the
+ * checkpoint index — one derivation, no divergence). */
+function snapshotState(
+  s: ReducerState,
+  t: number,
+  before: number,
+  total: number
+): StateAtT {
   const decks = Object.fromEntries(
     ALL_DECKS.map((ch) => {
       const d = s.decks[ch];
@@ -550,17 +646,137 @@ export function stateAt(events: CaptureEvent[], t: number): StateAtT {
     crossfaderEnabled: s.crossfaderEnabled,
     tenureHolder: s.tenureHolder,
     eventsBefore: before,
-    eventsAfter: events.length - before,
+    eventsAfter: total - before,
   };
 }
 
+// ── Checkpointed state index (scrub at O(checkpoint interval)) ──────────
+
+/** Checkpoint every this-many events: a 100k-event Session carries ~50
+ * checkpoints and a scrub reduces at most 2048 events instead of the whole
+ * log per mousemove. */
+const CHECKPOINT_EVERY = 2048;
+
+function cloneState(s: ReducerState): ReducerState {
+  return {
+    decks: Object.fromEntries(
+      ALL_DECKS.map((ch) => [ch, { ...s.decks[ch], eq: { ...s.decks[ch].eq } }])
+    ) as Record<CaptureDeck, DeckState>,
+    crossfader: s.crossfader,
+    crossfaderEnabled: s.crossfaderEnabled,
+    tenureHolder: s.tenureHolder,
+  };
+}
+
+export interface StateIndex {
+  /** `stateAt` semantics, from the nearest checkpoint. */
+  at(t: number): StateAtT;
+}
+
+/** Build once per log (O(n)); each `at()` is a binary search plus at most
+ * CHECKPOINT_EVERY event applications. Capture clocks are monotonic
+ * (performance.now), which the upper-bound binary search relies on. */
+export function createStateIndex(
+  events: CaptureEvent[],
+  checkpointEvery: number = CHECKPOINT_EVERY
+): StateIndex {
+  // checkpoints[k] = reducer state after events[0 .. k*checkpointEvery).
+  const checkpoints: ReducerState[] = [initialState()];
+  {
+    const s = initialState();
+    for (let i = 0; i < events.length; i++) {
+      applyEvent(s, events[i]);
+      if ((i + 1) % checkpointEvery === 0) checkpoints.push(cloneState(s));
+    }
+  }
+
+  return {
+    at(t: number): StateAtT {
+      // Upper bound: first index with events[idx].t > t.
+      let lo = 0;
+      let hi = events.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (events[mid].t <= t) lo = mid + 1;
+        else hi = mid;
+      }
+      const before = lo;
+      const ck = Math.min(checkpoints.length - 1, Math.floor(before / checkpointEvery));
+      const s = cloneState(checkpoints[ck]);
+      for (let i = ck * checkpointEvery; i < before; i++) applyEvent(s, events[i]);
+      return snapshotState(s, t, before, events.length);
+    },
+  };
+}
+
+// ── Viewport culling (the SVG scene renders only the visible window) ────
+
+/** The slice of a (time-sorted) trace intersecting [t0, t1], padded one
+ * sample either side so the polyline runs off both viewport edges instead
+ * of visibly starting inside them. Returns the original array when it is
+ * fully inside (no copy), null when fully outside. */
+export function traceWindow(
+  trace: PlayheadTrace,
+  t0: number,
+  t1: number
+): PlayheadTrace | null {
+  if (trace.length === 0) return null;
+  if (trace[trace.length - 1].t < t0 || trace[0].t > t1) return null;
+  if (trace[0].t >= t0 && trace[trace.length - 1].t <= t1) return trace;
+  // Lower bound: last index with t < t0 (start one sample before the window).
+  let lo = 0;
+  let hi = trace.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (trace[mid].t < t0) lo = mid;
+    else hi = mid - 1;
+  }
+  const from = lo;
+  // Upper bound: first index with t > t1 (end one sample past the window).
+  lo = 0;
+  hi = trace.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (trace[mid].t <= t1) lo = mid + 1;
+    else hi = mid;
+  }
+  const to = Math.min(trace.length - 1, lo);
+  return trace.slice(from, to + 1);
+}
+
 // ── Piecewise time axis with idle collapse (pixel space) ────────────────
+
+/** A stretch the axis may collapse to a fixed marker: silence (idle) or a
+ * machine tenure (sessions 14 — a 4-hour replay hold stretches the axis
+ * exactly like 4 hours of silence). The two never overlap: idle is defined
+ * as no-audible-deck AND no-tenure. */
+export interface CollapseCandidate extends Span {
+  kind: 'idle' | 'tenure';
+  /** The holding surface, for tenure markers ("‖ 34m replay held"). */
+  holder?: string;
+}
+
+/** The axis's collapse-candidate list, sorted by start. Indices into THIS
+ * list are the stable keys of the expanded set. */
+export function collapseCandidates(model: TimelineModel): CollapseCandidate[] {
+  return [
+    ...model.idle.map((sp): CollapseCandidate => ({ start: sp.start, end: sp.end, kind: 'idle' })),
+    ...model.tenures.map(
+      (sp): CollapseCandidate => ({ start: sp.start, end: sp.end, kind: 'tenure', holder: sp.holder })
+    ),
+  ].sort((a, b) => a.start - b.start);
+}
 
 export interface AxisSegment extends Span {
   collapsed: boolean;
   /** Pixel extent within the total timeline width. */
   px0: number;
   px1: number;
+  /** Collapsed segments: what kind of stretch this marker stands for and
+   * its index into `collapseCandidates(model)` (the expand toggle key). */
+  kind?: 'idle' | 'tenure';
+  holder?: string;
+  candidateIdx?: number;
 }
 
 export interface TimeAxis {
@@ -595,19 +811,31 @@ export function buildTimeAxis(
   const { start, end } = model;
   const pxPerSec = Math.max(0.0001, opts.pxPerSec);
   const collapsible = opts.collapseIdle
-    ? model.idle.filter(
-        (sp, i) => sp.end - sp.start >= opts.thresholdS && !(opts.expanded?.has(i) ?? false)
-      )
+    ? collapseCandidates(model)
+        .map((sp, i) => ({ sp, i }))
+        .filter(
+          ({ sp, i }) => sp.end - sp.start >= opts.thresholdS && !(opts.expanded?.has(i) ?? false)
+        )
     : [];
 
   // Alternating segments over [start, end].
   const segments: AxisSegment[] = [];
   let cursor = start;
-  for (const sp of collapsible) {
+  for (const { sp, i } of collapsible) {
+    if (sp.start < cursor) continue; // defensive: candidates never overlap
     if (sp.start > cursor) {
       segments.push({ start: cursor, end: sp.start, collapsed: false, px0: 0, px1: 0 });
     }
-    segments.push({ start: sp.start, end: sp.end, collapsed: true, px0: 0, px1: 0 });
+    segments.push({
+      start: sp.start,
+      end: sp.end,
+      collapsed: true,
+      px0: 0,
+      px1: 0,
+      kind: sp.kind,
+      holder: sp.holder,
+      candidateIdx: i,
+    });
     cursor = sp.end;
   }
   if (end > cursor || segments.length === 0) {

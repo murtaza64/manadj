@@ -1,12 +1,15 @@
 /**
  * Sessions list (Sessions PRD, ADR 0033): the persisted whole event logs —
- * "which nights did I play." Modest on purpose: newest-first rows with
- * start time, duration (open Sessions read as "live"), Take count, and a
- * manual delete. The future timeline (issue 04) opens from here; deleting
- * a Session never touches a Take (ADR 0033).
+ * "which nights did I play." Newest-first rows with start time, duration
+ * (open Sessions read as "live"), the distinct Master-audible Track count
+ * (issue 04), Take count, and a manual delete. Rows open the timeline;
+ * deleting a Session never touches a Take.
  */
+import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../api/client';
+import { api } from '../api/client';
+import type { CaptureEvent } from '../capture/events';
+import { deriveTimeline } from './timelineModel';
 import './sessionsList.css';
 
 function fmtWhen(iso: string): string {
@@ -28,6 +31,29 @@ function fmtDuration(startedAt: string, endedAt: string | null): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   return `${h}h${String(m).padStart(2, '0')}m`;
+}
+
+/** The distinct Master-audible Track count for one Session, derived from
+ * its whole event log through the SAME pure timeline model the timeline
+ * uses (no divergent definition). Lazy + cached under the ['session',
+ * uuid] key — opening the timeline afterwards is then free.
+ *
+ * Perf (issue 13): the derivation is MEMOIZED — this cell re-renders every
+ * ~5s while recording (the sink invalidates ['sessions']), and re-reducing
+ * every Session's full log per list render was an app-wide drag. An ended
+ * Session's log is immutable: never refetch its multi-MB payload. */
+function SessionTracksCell({ uuid, ended }: { uuid: string; ended: boolean }) {
+  const { data } = useQuery({
+    queryKey: ['session', uuid],
+    queryFn: () => api.sessions.get(uuid),
+    staleTime: ended ? Infinity : 60_000,
+  });
+  const count = useMemo(
+    () => (data === undefined ? null : deriveTimeline(data.events as CaptureEvent[]).audibleTrackIds.length),
+    [data]
+  );
+  if (count === null) return <span className="session-tracks-loading">…</span>;
+  return <>{count}</>;
 }
 
 export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }) {
@@ -56,6 +82,7 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
             <tr>
               <th>Started</th>
               <th>Duration</th>
+              <th>Tracks</th>
               <th>Takes</th>
               <th />
             </tr>
@@ -71,6 +98,9 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
                 <td className="session-when">{fmtWhen(s.started_at)}</td>
                 <td className={`session-duration${s.ended_at === null ? ' live' : ''}`}>
                   {fmtDuration(s.started_at, s.ended_at)}
+                </td>
+                <td className="session-tracks" title="Distinct Tracks that became audible">
+                  <SessionTracksCell uuid={s.uuid} ended={s.ended_at !== null} />
                 </td>
                 <td className="session-takes">{s.take_count}</td>
                 <td>

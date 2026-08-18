@@ -367,11 +367,13 @@ class TransitionTemplate(Base):
 
 
 class Session(Base):
-    """The persisted whole event log of one recorder lifetime (Sessions
-    PRD, ADR 0033).
+    """The persisted whole event log of one stretch of live performance
+    (Sessions PRD, ADR 0033, amended sessions 11).
 
-    One row per continuous run of the live performance surface — app start
-    to close, one capture clock, all four Decks. The events themselves live
+    One row per stretch of live performance: the client opens a row on the
+    first Master-audible instant and ends it at close or after ten
+    continuous minutes of silence (the auto-split); one capture clock, all
+    four Decks; no 100%-silent row survives. The events themselves live
     in `session_chunks` (append-only, streamed ~5s), keeping this row a thin
     header the Sessions list reads without touching the log. `ended_at` is
     nullable: an open Session (still recording, or an orphaned partial from

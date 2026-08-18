@@ -4,14 +4,15 @@
  * green marks the live/persisted-record family (as in sessionsList.css). */
 
 .session-timeline {
-  padding: 12px 20px 16px;
+  padding: 0;
   overflow-y: auto;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   background: var(--crust, #111);
   color: var(--text, #cdd6f4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
 }
 
 /* ── Controls row ── */
@@ -19,8 +20,10 @@
 .stl-controls {
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
+  gap: 12px;
+  flex-wrap: nowrap;
+  min-height: 26px;
+  padding: 3px 8px;
   font-size: var(--font-xs, 13px);
 }
 
@@ -79,7 +82,7 @@
 
 .stl-scroll {
   overflow-x: auto;
-  border: 1px solid var(--surface0, #313136);
+  border-top: 1px solid var(--surface0, #313136);
   background: var(--mantle, #181818);
 }
 
@@ -160,6 +163,15 @@
   fill: var(--overlay0, #6c7086);
   font-size: 11px;
   writing-mode: vertical-rl;
+}
+/* A collapsed TENURE marker keeps the tenure family's dashed look so the
+ * marker still reads as "a machine held the surface here". */
+.stl-idle-marker.tenure .stl-idle-rect {
+  stroke-dasharray: 5 4;
+  stroke: var(--overlay1, #7f849c);
+}
+.stl-idle-marker.tenure .stl-idle-label {
+  font-style: italic;
 }
 
 /* Take chips: green = the persisted-record family. */
@@ -251,8 +263,8 @@
   gap: 18px;
   border: 1px solid var(--surface0, #313136);
   background: var(--mantle, #181818);
-  padding: 10px 14px;
-  min-height: 148px;
+  padding: 8px 14px;
+  min-height: 110px;
   font-size: var(--font-xs, 13px);
 }
 .stl-panel-col {
@@ -295,9 +307,11 @@
   background: transparent;
   border: 1px solid #00e5ff;
   color: #00e5ff;
-  padding: 4px 10px;
+  padding: 1px 8px;
+  height: 22px;
+  line-height: 1;
   cursor: pointer;
-  font-size: var(--font-xs, 13px);
+  font-size: 12px;
 }
 .stl-open-editor:hover {
   background: rgba(0, 229, 255, 0.12);
@@ -353,9 +367,11 @@
   border: 1px solid var(--green, #5ed75e);
   color: var(--base, #1e1e1e);
   font-weight: 700;
-  padding: 5px 12px;
+  padding: 1px 8px;
+  height: 22px;
+  line-height: 1;
   cursor: pointer;
-  font-size: var(--font-xs, 13px);
+  font-size: 12px;
 }
 .stl-replay:hover {
   filter: brightness(1.1);
@@ -432,4 +448,68 @@
 .stl-transport-mark text {
   font-size: 9px;
   opacity: 0.75;
+}
+
+/* Load-event marker: the track's arrival, full lane height. */
+.stl-load-bar {
+  stroke-width: 1.5;
+  opacity: 0.7;
+}
+
+/* Compact host (Performance's embedded browse): shed chrome. */
+.stl-panel.compact {
+  min-height: 0;
+  padding: 6px 10px;
+}
+.stl-panel.compact .stl-readout td {
+  padding: 1px 6px 1px 0;
+}
+
+/* ── One-row chrome (panel eliminated) ── */
+
+.stl-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stl-inline-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--subtext0, #a6adc8);
+}
+.stl-inline-readout.dim {
+  color: var(--overlay0, #6c7086);
+}
+.stl-inline-readout b {
+  color: var(--text, #cdd6f4);
+  font-weight: 650;
+}
+.stl-inline-readout span i {
+  font-style: normal;
+  margin-left: 2px;
+  color: var(--subtext0, #a6adc8);
+}
+.stl-inline-readout span.silent {
+  opacity: 0.35;
+}
+.stl-inline-readout span.playing {
+  opacity: 0.65;
+}
+.stl-inline-readout em {
+  color: var(--overlay1, #7f849c);
+}
+.stl-hint {
+  color: var(--overlay0, #6c7086);
+  font-style: italic;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: help;
 }

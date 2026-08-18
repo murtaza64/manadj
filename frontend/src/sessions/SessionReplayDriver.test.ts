@@ -145,7 +145,12 @@ interface ChannelShape {
   pfl: boolean;
 }
 
-type LaneShape = { fader: number; eq: { low: number; mid: number; high: number }; filter: number };
+type LaneShape = {
+  fader: number;
+  trim?: number;
+  eq: { low: number; mid: number; high: number };
+  filter: number;
+};
 
 class FakeMixer {
   /** The automation overlay (null = disengaged). Writes never notify. */
@@ -290,7 +295,11 @@ interface Rig {
   advance(dt: number): void;
 }
 
-function rig(plan: ReplayPlan, loadOk = true): Rig {
+function rig(
+  plan: ReplayPlan,
+  loadOk = true,
+  loader?: (engines: Record<ChannelId, FakeEngine>, deck: ChannelId, trackId: number) => Promise<boolean>
+): Rig {
   const clock = { t: 100 };
   const read = () => clock.t;
   const mixer = new FakeMixer(read);
@@ -306,6 +315,7 @@ function rig(plan: ReplayPlan, loadOk = true): Rig {
     { mixer: mixer as unknown as Mixer, engines: engines as unknown as Record<ChannelId, DeckEngine> },
     {
       loadTrack: async (deck, trackId) => {
+        if (loader) return loader(engines, deck, trackId);
         if (!loadOk) return false;
         engines[deck].finishLoad(trackId);
         return true;
@@ -601,6 +611,102 @@ describe('SessionReplayDriver — pause/resume/seek (04 iteration)', () => {
   });
 });
 
+describe('SessionReplayDriver — pause/seek races (frozen-playhead fix)', () => {
+  /** Track 11 early, track 12 later — a seek across the load boundary
+   * must actually load, giving the race a window to land in. */
+  function twoTrackLog(): CaptureEvent[] {
+    return [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 20, kind: 'load', channel: 'A', trackId: 12, bpm: 170 },
+      { t: 21, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 22, kind: 'tick', playheads: { A: 1 } },
+      { t: 30, kind: 'tick', playheads: { A: 9 } },
+    ];
+  }
+
+  /** rig() whose loads of track 12 park until released — holds a seek
+   * in flight so races can be aimed into its window. */
+  function gatedRig(startAt: number) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((res) => {
+      release = res;
+    });
+    const r = rig(planFor(twoTrackLog(), startAt), true, async (engines, deck, trackId) => {
+      if (trackId === 12) await gate;
+      engines[deck].finishLoad(trackId);
+      return true;
+    });
+    return { ...r, release: () => release() };
+  }
+
+  it('a pause landing inside a seek load is refused — the clock never freezes under rolling audio', async () => {
+    const r = gatedRig(5);
+    await r.driver.start();
+    const seek = r.driver.seekTo(planFor(twoTrackLog(), 25));
+    await Promise.resolve(); // the seek is now parked on its load
+    // THE RACE: space during the load. Before the fix this set
+    // pausedAtOffset under the seek's stale wasPaused=false snapshot —
+    // status 'playing', decks rolling, nowT pinned forever.
+    r.driver.pauseReplay();
+    expect(r.driver.isPaused()).toBe(false); // refused mid-seek
+    r.release();
+    await seek;
+    // The seek completed PLAYING with a live clock.
+    expect(r.driver.isPaused()).toBe(false);
+    const t0 = r.driver.nowT();
+    expect(t0).toBeCloseTo(25, 1);
+    r.advance(1);
+    expect(r.driver.nowT()).toBeCloseTo(t0! + 1, 3);
+    // And a deliberate pause afterwards still works.
+    r.driver.pauseReplay();
+    expect(r.driver.isPaused()).toBe(true);
+    const frozen = r.driver.nowT();
+    r.advance(1);
+    expect(r.driver.nowT()).toBe(frozen);
+    r.driver.stop();
+  });
+
+  it('a resume landing inside a seek load is refused (no premature tick loop)', async () => {
+    const r = gatedRig(5);
+    await r.driver.start();
+    r.driver.pauseReplay();
+    const seek = r.driver.seekTo(planFor(twoTrackLog(), 25)); // seek-while-paused
+    await Promise.resolve();
+    r.driver.resumeReplay(); // space again, mid-load: must be inert
+    r.release();
+    await seek;
+    // The paused seek honored its wasPaused snapshot: parked at the new
+    // moment, clock frozen there.
+    expect(r.driver.isPaused()).toBe(true);
+    expect(r.driver.nowT()).toBeCloseTo(25, 3);
+    r.driver.resumeReplay();
+    expect(r.driver.isPaused()).toBe(false);
+    r.driver.stop();
+  });
+
+  it('a newer seek supersedes an older in-flight one: a single tick loop on the newest plan', async () => {
+    const r = gatedRig(5);
+    await r.driver.start();
+    r.pump(); // drain the start() frame
+    const seek1 = r.driver.seekTo(planFor(twoTrackLog(), 25)); // parks on track 12's load
+    await Promise.resolve();
+    rafQueue.splice(0); // both seeks canceled the loop: count fresh restarts
+    await r.driver.seekTo(planFor(twoTrackLog(), 6)); // track 11 already on deck — completes
+    expect(r.driver.nowT()).toBeCloseTo(6, 1);
+    expect(rafQueue.length).toBe(1); // seek 2's restart
+    r.release();
+    await seek1; // superseded: must NOT restart a second loop or re-seed
+    expect(r.driver.nowT()).toBeCloseTo(6, 1); // still the newest plan's moment
+    expect(rafQueue.length).toBe(1); // STILL one tick loop — no double restart
+    r.advance(0.1);
+    expect(rafQueue.length).toBe(1); // the one loop re-queued itself
+    r.driver.stop();
+  });
+});
+
 describe('SessionReplayDriver — Conductor protocol parity', () => {
   it('exposes lanes on ALL FOUR decks via getAutomation (the ghost display feed)', async () => {
     const r = rig(planFor(simpleLog(), 5));
@@ -696,5 +802,142 @@ describe('SessionReplayDriver — stab replay (sessions 12)', () => {
     expect(r.engines.C.previewing).toBe(false);
     expect(r.stops).toEqual([]);
     r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — status callbacks (playhead desync fix)', () => {
+  function rigWithStatus(plan: ReplayPlan) {
+    const clock = { t: 100 };
+    const read = () => clock.t;
+    const mixer = new FakeMixer(read);
+    const engines = {
+      A: new FakeEngine(read), B: new FakeEngine(read),
+      C: new FakeEngine(read), D: new FakeEngine(read),
+    };
+    const statuses: string[] = [];
+    const stops: ReplayStopReason[] = [];
+    const driver = new SessionReplayDriver(
+      plan,
+      { mixer: mixer as unknown as Mixer, engines: engines as unknown as Record<ChannelId, DeckEngine> },
+      {
+        loadTrack: async (deck, trackId) => { engines[deck].finishLoad(trackId); return true; },
+        onStopped: (r) => stops.push(r),
+        onStatus: (s) => statuses.push(s),
+      }
+    );
+    return { clock, mixer, engines, statuses, stops, driver,
+             advance: (dt: number) => { clock.t += dt; for (const cb of rafQueue.splice(0)) cb(); } };
+  }
+
+  it('pushes loading → playing on start, and never leaves status stale', async () => {
+    const r = rigWithStatus(planFor(simpleLog(), 5));
+    await r.driver.start();
+    expect(r.statuses).toEqual(['loading', 'playing']);
+    // The driver clock is live and authoritative while rolling.
+    expect(r.driver.nowT()).not.toBeNull();
+    r.driver.stop();
+    // Stop reports via onStopped (store maps to idle), not onStatus.
+    expect(r.stops).toEqual(['stopped']);
+    expect(r.driver.nowT()).toBeNull();
+  });
+
+  it('pushes paused/playing on pause/resume', async () => {
+    const r = rigWithStatus(planFor(simpleLog(), 5));
+    await r.driver.start();
+    r.driver.pauseReplay();
+    r.driver.resumeReplay();
+    expect(r.statuses).toEqual(['loading', 'playing', 'paused', 'playing']);
+    r.driver.stop();
+  });
+
+  it('seekTo keeps status coherent (playing→playing, no idle flap)', async () => {
+    const r = rigWithStatus(planFor(simpleLog(), 5));
+    await r.driver.start();
+    await r.driver.seekTo(planFor(simpleLog(), 2));
+    // No 'idle'/stop emitted; still rolling and reporting a clock.
+    expect(r.stops).toEqual([]);
+    expect(r.statuses.filter((s) => s === 'playing').length).toBeGreaterThanOrEqual(2);
+    expect(r.driver.nowT()).not.toBeNull();
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — steady playback is left alone (jitter fix)', () => {
+  it('small tick-vs-clock skew never triggers a corrective seek', async () => {
+    const events: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      // Recorded ticks lag the true clock by ~0.1s each (wall-clock skew).
+      { t: 3, kind: 'tick', playheads: { A: 50.9 } },
+      { t: 4, kind: 'tick', playheads: { A: 51.8 } },
+      { t: 5, kind: 'tick', playheads: { A: 52.7 } },
+      { t: 6, kind: 'tick', playheads: { A: 53.6 } },
+      { t: 7, kind: 'tick', playheads: { A: 54.5 } },
+    ];
+    const r = rig(planFor(events, 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    // Advance across every tick; the engine plays at true rate. A skew of
+    // ~0.1-0.4s stays under the 0.5s resync threshold → zero seeks.
+    for (let i = 0; i < 5; i++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — trim playback (sessions 15)', () => {
+  /** A performance trim ride: play, then duck the trim, then restore. */
+  function trimRideLog(): CaptureEvent[] {
+    return [
+      ...seedEvents(0),
+      { t: 0.5, kind: 'control', control: 'trim', channel: 'A', value: 0.6 },
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 5, kind: 'control', control: 'trim', channel: 'A', value: 0.2 }, // the duck
+      { t: 7, kind: 'control', control: 'trim', channel: 'A', value: 0.6 }, // restore
+      { t: 9, kind: 'transport', channel: 'A', action: 'pause', playhead: 57 },
+      { t: 10, kind: 'tick', playheads: {} },
+    ];
+  }
+
+  it('seeds the recorded trim into the overlay lane; base trim stays live', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    r.mixer.channels.A = { ...r.mixer.channels.A, trim: 0.9 }; // the live user's staging
+    await r.driver.start();
+    expect(r.mixer.automation?.A?.trim).toBe(0.6); // recorded, on the lane
+    expect(r.mixer.channels.A.trim).toBe(0.9); // base untouched
+    r.driver.stop();
+  });
+
+  it('replays the trim duck and restore at their cue offsets', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    expect(r.mixer.automation?.A?.trim).toBe(0.6);
+    r.advance(2.5); // past t=5
+    expect(r.mixer.automation?.A?.trim).toBe(0.2); // the duck landed
+    r.advance(2); // past t=7
+    expect(r.mixer.automation?.A?.trim).toBe(0.6); // restored
+    r.driver.stop();
+  });
+
+  it('a takeover lands the lane trim in base — no gain jump', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    r.advance(2.5); // the duck (0.2) is the sounding trim
+    r.engines.A.humanPause(); // manual gesture → takeover
+    expect(r.stops).toEqual(['takeover']);
+    expect(r.mixer.channels.A.trim).toBe(0.2); // base synced to the sound
+    expect(audibleHolder()).toBe('shared');
+  });
+
+  it('a live trim move during replay is a takeover (unchanged semantics)', async () => {
+    const r = rig(planFor(trimRideLog(), 3));
+    await r.driver.start();
+    r.mixer.setTrim('A', 0.8); // human reaches for the knob
+    expect(r.stops).toEqual(['takeover']);
+    // The human's own gesture wins: their trim value survives the sync.
+    expect(r.mixer.channels.A.trim).toBe(0.8);
   });
 });

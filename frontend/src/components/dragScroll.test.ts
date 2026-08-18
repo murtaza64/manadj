@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DRAG_EDGE_MAX_ELAPSED_MS,
   DRAG_EDGE_MAX_SPEED_PX_PER_S,
+  DRAG_EDGE_OVERSHOOT_RAMP_MAX,
   DRAG_EDGE_ZONE_PX,
   dragEdgeScrollDelta,
 } from './dragScroll';
@@ -52,14 +53,21 @@ describe('dragEdgeScrollDelta (playlist drag-reorder edge auto-scroll)', () => {
     expect(dragEdgeScrollDelta(TOP, TOP, BOTTOM, -5)).toBe(-0);
   });
 
-  it('clamps pointer overshoot beyond the pane to edge speed', () => {
-    expect(dragEdgeScrollDelta(TOP - 50, TOP, BOTTOM, DT)).toBeCloseTo(
-      -DRAG_EDGE_MAX_SPEED_PX_PER_S * (DT / 1000),
+  it('overshoot past the pane keeps accelerating on the same slope', () => {
+    // One zone-width past the edge = 2× edge speed.
+    expect(dragEdgeScrollDelta(TOP - DRAG_EDGE_ZONE_PX, TOP, BOTTOM, DT)).toBeCloseTo(
+      -2 * DRAG_EDGE_MAX_SPEED_PX_PER_S * (DT / 1000),
       9
     );
-    expect(dragEdgeScrollDelta(BOTTOM + 50, TOP, BOTTOM, DT)).toBeCloseTo(
-      DRAG_EDGE_MAX_SPEED_PX_PER_S * (DT / 1000),
+    expect(dragEdgeScrollDelta(BOTTOM + DRAG_EDGE_ZONE_PX, TOP, BOTTOM, DT)).toBeCloseTo(
+      2 * DRAG_EDGE_MAX_SPEED_PX_PER_S * (DT / 1000),
       9
     );
+  });
+
+  it('overshoot speed is capped at DRAG_EDGE_OVERSHOOT_RAMP_MAX×', () => {
+    const capSpeed = DRAG_EDGE_OVERSHOOT_RAMP_MAX * DRAG_EDGE_MAX_SPEED_PX_PER_S * (DT / 1000);
+    expect(dragEdgeScrollDelta(TOP - 10_000, TOP, BOTTOM, DT)).toBeCloseTo(-capSpeed, 9);
+    expect(dragEdgeScrollDelta(BOTTOM + 10_000, TOP, BOTTOM, DT)).toBeCloseTo(capSpeed, 9);
   });
 });

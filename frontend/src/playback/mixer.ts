@@ -110,15 +110,20 @@ export interface ChannelState {
 }
 
 /**
- * The per-channel controls the automation overlay owns (ADR 0022): the 10
- * lane-driven params — fader, 3-band EQ, sweep filter, per channel. Trim,
- * master, cue level/mix, and PFL are deliberately NOT here: they stay live
- * user controls during editor auditions.
+ * The per-channel controls the automation overlay owns (ADR 0022): the
+ * lane-driven params — fader, 3-band EQ, sweep filter, per channel, plus
+ * OPTIONAL trim (sessions 15: session replay reproduces recorded trim
+ * rides; a lane without trim leaves the live user's trim in charge —
+ * Conductor set playback stays gain-staging-neutral). Master, cue
+ * level/mix, and PFL are deliberately NOT here: they stay live user
+ * controls during machine tenures.
  */
 export interface AutomationChannelValues {
   fader: number;
   eq: Record<EqBand, number>;
   filter: number;
+  /** Absent = the base (live user) trim applies. */
+  trim?: number;
 }
 
 const FLAT_CHANNEL: ChannelState = {
@@ -531,6 +536,8 @@ export class Mixer {
         rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(st.eq[band]));
       }
       this.applyFilter(channel);
+      // Trim may have been lane-driven (sessions 15) — land base back.
+      rampGain(ctx, strips[channel].trimGain.gain, trimToGain(st.trim));
     }
     this.applyCrossfader(true);
   }
@@ -561,6 +568,7 @@ export class Mixer {
       console.warn('[Mixer] setAutomation while disengaged ignored (ADR 0022)');
       return;
     }
+    const prevTrim = this.automation[channel]?.trim;
     this.automation[channel] = values;
     const live = this.liveGraph();
     if (!live) return;
@@ -570,6 +578,13 @@ export class Mixer {
       rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(values.eq[band]));
     }
     this.applyFilterPosition(channel, values.filter);
+    // Trim rides the lane only when present (sessions 15). A lane that
+    // DROPS its trim (had one, now absent) hands the node back to base.
+    if (values.trim !== undefined) {
+      rampGain(ctx, strips[channel].trimGain.gain, trimToGain(values.trim));
+    } else if (prevTrim !== undefined) {
+      rampGain(ctx, strips[channel].trimGain.gain, trimToGain(this.channels[channel].trim));
+    }
   }
 
   /** The shared AudioContext (creating the graph if needed) — for
@@ -656,6 +671,11 @@ export class Mixer {
   setTrim(channel: ChannelId, value: number): void {
     this.channels[channel] = { ...this.channels[channel], trim: value };
     this.notify();
+    // Per-CHANNEL-LANE guard, not the overlay-wide one (sessions 15): a
+    // Conductor overlay carries no trim, and the live trim knob must keep
+    // working through a set. Only a lane that actually holds trim owns the
+    // node; base lands on disengage.
+    if (this.automation?.[channel]?.trim !== undefined) return;
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].trimGain.gain, trimToGain(value));
   }

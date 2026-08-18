@@ -2,7 +2,14 @@
  * playing → deck-neutral state. */
 import { describe, expect, it } from 'vitest';
 import { DECK_COLORS } from '../theme/deckColors';
-import { isRowPlaying, loadedDecks, loadedWash, type DeckOccupancyMap } from './rowMarks';
+import {
+  LOADED_STRIP_PX,
+  isRowPlaying,
+  loadedDecks,
+  loadedStripShadow,
+  loadedWash,
+  type DeckOccupancyMap,
+} from './rowMarks';
 
 const occ = (
   a: Partial<DeckOccupancyMap['A']> = {},
@@ -77,5 +84,24 @@ describe('loadedWash', () => {
 
   it('unloaded rows keep their ordinary background', () => {
     expect(loadedWash([])).toBeUndefined();
+  });
+});
+
+describe('loadedStripShadow (library table left-edge strip)', () => {
+  it('single deck: one strip in the holding deck color', () => {
+    expect(loadedStripShadow(['B'])).toBe(
+      `inset ${LOADED_STRIP_PX}px 0 0 0 ${DECK_COLORS.B}`
+    );
+  });
+
+  it('multi-deck: widening shadows in A→D order (earlier paints on top → adjacent segments)', () => {
+    expect(loadedStripShadow(['A', 'C'])).toBe(
+      `inset ${LOADED_STRIP_PX}px 0 0 0 ${DECK_COLORS.A}, ` +
+        `inset ${LOADED_STRIP_PX * 2}px 0 0 0 ${DECK_COLORS.C}`
+    );
+  });
+
+  it('unloaded rows carry no strip', () => {
+    expect(loadedStripShadow([])).toBeUndefined();
   });
 });

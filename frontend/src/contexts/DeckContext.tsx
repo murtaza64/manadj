@@ -118,23 +118,29 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   // settled Takes persist to the Transition history. Lives here because
   // the provider owns the shared surface and outlives every view switch.
   //
-  // A recorder lifetime is one Session (Sessions PRD, ADR 0033): the sink
-  // streams the whole event log to the backend as ~5s chunks and stamps
-  // every detected Take with the Session's uuid. page-hide flushes the tail
-  // so a kill costs seconds, not the Session.
+  // A Session is one stretch of live performance (Sessions PRD, ADR 0033,
+  // amended sessions 11): the sink streams the whole event log to the
+  // backend as ~5s chunks and stamps every detected Take with the Session's
+  // uuid. The row opens lazily on the first Master-audible instant — silent
+  // setup only buffers — and ten continuous minutes with no Master-audible
+  // Deck split it (the recorder calls sink.split(); the next audible
+  // instant opens a fresh row). page-hide flushes the tail so a kill costs
+  // seconds, not the Session.
   useEffect(() => {
     // StrictMode disposes the DeckEngines between its synthetic effect
     // mounts, clearing their subscribers. Create a fresh recorder on the
     // second mount so load/play events are subscribed again. The first
-    // SessionSink remains ephemeral because rows now open lazily on the
-    // first live event, so this does not recreate the duplicate-row bug.
+    // SessionSink remains ephemeral because rows open lazily on the first
+    // Master-audible instant, so this does not recreate the duplicate-row
+    // bug.
     const sink = new SessionSink();
     sink.start();
     const recorder = new CaptureRecorder(
       mixer,
       engines,
       (take) => persistTake(take, sink.currentSessionUuid),
-      (event, activatesSession) => sink.record(event, activatesSession)
+      (event, activatesSession) => sink.record(event, activatesSession),
+      () => sink.split()
     );
     recorder.start();
     const onHide = () => {
