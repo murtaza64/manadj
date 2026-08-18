@@ -34,6 +34,7 @@ def test_no_heavy_audio_deps_in_import_chain():
     # heavy deps inside candidate methods.
     import harness.analyzer  # noqa: F401
     import harness.corpus  # noqa: F401
+    import harness.drop_candidates  # noqa: F401
     import harness.fit  # noqa: F401
     import harness.grid_candidates  # noqa: F401
     import harness.grid_scoring  # noqa: F401
