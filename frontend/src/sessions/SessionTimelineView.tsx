@@ -41,6 +41,7 @@ import {
 import type { CollapseCandidate, StateAtT, TimelineModel } from './timelineModel';
 import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
 import { useViewActive } from '../contexts/viewActive';
+import { getTimelineViewState, patchTimelineViewState } from './timelineViewState';
 import { drawAudibilityArea, drawGridlines, drawStyledRuns, traceRuns } from './waveformLanes';
 import type { TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
@@ -138,13 +139,26 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     Math.min(LANE_H_MAX, Math.floor((rootH - 125) / 4))
   );
 
-  const [collapseIdle, setCollapseIdle] = useState(true);
-  const [thresholdS, setThresholdS] = useState(45);
-  const [expandedGaps, setExpandedGaps] = useState<Set<number>>(new Set());
-  const [showTraces, setShowTraces] = useState(true);
+  // View state is shared ACROSS instances via the per-uuid store
+  // (sessions 21): seeded here, written through on change, adopted on
+  // view activation (the other Library instance may have moved it).
+  const [collapseIdle, setCollapseIdle] = useState(
+    () => getTimelineViewState(session.uuid)?.collapseIdle ?? true
+  );
+  const [thresholdS, setThresholdS] = useState(
+    () => getTimelineViewState(session.uuid)?.thresholdS ?? 45
+  );
+  const [expandedGaps, setExpandedGaps] = useState<Set<number>>(
+    () => new Set(getTimelineViewState(session.uuid)?.expandedGaps ?? [])
+  );
+  const [showTraces, setShowTraces] = useState(
+    () => getTimelineViewState(session.uuid)?.showTraces ?? true
+  );
   const [scrubT, setScrubT] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
-  const [pxPerSec, setPxPerSec] = useState<number | null>(null); // null = fit
+  const [pxPerSec, setPxPerSec] = useState<number | null>(
+    () => getTimelineViewState(session.uuid)?.pxPerSec ?? null
+  ); // null = fit
 
   const { data: detail, error } = useQuery({
     queryKey: ['session', session.uuid],
@@ -339,6 +353,66 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     };
      
   }, [hasModel, setScrollLeft]);
+
+  // Write-through (sessions 21): every knob change lands in the shared
+  // store immediately, so the OTHER Library instance adopts it on its
+  // next activation. centerT (scroll) writes on deactivation only —
+  // per-frame scroll writes would be churn.
+  useEffect(() => {
+    patchTimelineViewState(session.uuid, {
+      pxPerSec,
+      collapseIdle,
+      thresholdS,
+      expandedGaps: [...expandedGaps],
+      showTraces,
+    });
+  }, [session.uuid, pxPerSec, collapseIdle, thresholdS, expandedGaps, showTraces]);
+  const centerRef = useRef<{ axis: typeof axis; scrollX: number; viewportW: number }>({
+    axis: null,
+    scrollX: 0,
+    viewportW,
+  });
+  centerRef.current = { axis, scrollX, viewportW };
+  const writeCenter = useCallback(
+    (uuid: string) => {
+      const c = centerRef.current;
+      if (c.axis) {
+        patchTimelineViewState(uuid, { centerT: c.axis.pxToT(c.scrollX + c.viewportW / 2) });
+      }
+    },
+    []
+  );
+  useEffect(() => {
+    const uuid = session.uuid;
+    return () => writeCenter(uuid); // unmount (session switch)
+  }, [session.uuid, writeCenter]);
+
+  // Adopt on activation (sessions 21): the view was hidden; the other
+  // instance may have moved zoom/scroll for this session. Also writes our
+  // center on DEactivation so the handoff is symmetric.
+  const wasActiveRef = useRef(viewActive);
+  useEffect(() => {
+    if (wasActiveRef.current === viewActive) return;
+    wasActiveRef.current = viewActive;
+    if (!viewActive) {
+      writeCenter(session.uuid);
+      return;
+    }
+    const saved = getTimelineViewState(session.uuid);
+    if (!saved) return;
+    setPxPerSec(saved.pxPerSec);
+    setCollapseIdle(saved.collapseIdle);
+    setThresholdS(saved.thresholdS);
+    setExpandedGaps(new Set(saved.expandedGaps));
+    setShowTraces(saved.showTraces);
+    if (saved.centerT != null) {
+      const el = scrollRef.current;
+      const c = centerRef.current;
+      if (el && c.axis) {
+        setScrollLeft(el, Math.max(0, c.axis.tToPx(saved.centerT) - el.clientWidth / 2));
+      }
+    }
+  }, [viewActive, session.uuid, writeCenter, setScrollLeft]);
 
   // Deep-link focus: drop the cursor + moment once, and scroll it into
   // view. A zoom request (sessions 16: at most focusSpanS seconds visible)

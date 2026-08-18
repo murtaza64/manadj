@@ -31,5 +31,15 @@ export function SessionTimelinePane({ sessionUuid }: { sessionUuid: string }) {
       </div>
     );
   }
-  return <SessionTimelineView session={session} focusS={focus.atS} focusSpanS={focus.spanS} />;
+  // Keyed per session (sessions 21): a session switch is a fresh mount —
+  // state comes from the per-uuid store, never leaks across sessions.
+  return (
+    <SessionTimelineView
+      key={session.uuid}
+      session={session}
+      focusS={focus.atS}
+      focusSpanS={focus.spanS}
+      focusVersion={focus.version}
+    />
+  );
 }
