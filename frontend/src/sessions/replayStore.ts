@@ -74,6 +74,19 @@ export function replayNowT(): number | null {
   return instance?.nowT() ?? null;
 }
 
+/** Largest live servo bias magnitude (rate fraction), or null when no
+ * replay is rolling — the TopBar chip's "actively syncing" indicator
+ * polls this (the replayNowT idiom: driver-owned truth, not store state). */
+export function replayServoBias(): number | null {
+  const biases = instance?.getServoBias();
+  if (!biases) return null;
+  let max = 0;
+  for (const v of Object.values(biases)) {
+    if (v !== undefined && Math.abs(v) > max) max = Math.abs(v);
+  }
+  return max;
+}
+
 /** Space: toggle pause/resume on the active replay. The DRIVER pushes the
  * resulting status (onStatus) — no direct setState here, because the
  * driver refuses pause/resume mid-seek and a blind store write would

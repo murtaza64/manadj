@@ -8,6 +8,9 @@
   background: rgba(0, 0, 0, 0.2);
 }
 
+/* Radial darkening, NOT backdrop-filter blur: any filter over the app's
+   canvas layers arms a permanent macOS compositor region leak that crashes
+   the renderer after days of uptime (stability/01). */
 .cof-modal-overlay::before {
   content: '';
   position: absolute;
@@ -15,17 +18,10 @@
   left: 0;
   right: 0;
   bottom: 0;
-  backdrop-filter: blur(12px);
-  mask-image: radial-gradient(
+  background: radial-gradient(
     circle at var(--blur-center-x, 50%) var(--blur-center-y, 50%),
-    black 0%,
-    black 200px,
-    transparent 600px
-  );
-  -webkit-mask-image: radial-gradient(
-    circle at var(--blur-center-x, 50%) var(--blur-center-y, 50%),
-    black 0%,
-    black 200px,
+    rgba(0, 0, 0, 0.55) 0%,
+    rgba(0, 0, 0, 0.55) 200px,
     transparent 600px
   );
 }

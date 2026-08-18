@@ -49,7 +49,10 @@ class FakeEngine {
   }
 
   getPlayhead(): number {
-    return this.playing ? this.playhead + (this.clock() - this.playheadAt) : this.playhead;
+    // Pitch-aware (sessions 18): the engine advances at its true rate, so
+    // rate-inference tests can assert drift actually stops.
+    const rate = 1 + this.pitchPercent / 100;
+    return this.playing ? this.playhead + (this.clock() - this.playheadAt) * rate : this.playhead;
   }
 
   seek(t: number): void {
@@ -75,6 +78,9 @@ class FakeEngine {
   }
 
   setPitch(p: number): void {
+    // Rebase before the rate flips (rates apply forward, not retroactively).
+    this.playhead = this.getPlayhead();
+    this.playheadAt = this.clock();
     this.pitchPercent = p;
     this.emit();
   }
@@ -881,9 +887,13 @@ describe('SessionReplayDriver — steady playback is left alone (jitter fix)', (
     ];
     const r = rig(planFor(events, 2));
     await r.driver.start();
-    const seedSeeks = r.engines.A.seeks.length;
-    for (let i = 0; i < 5; i++) r.advance(1.0);
-    expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    // The FIRST tick may start-snap (an offset at t=0 is indistinguishable
+    // from start stagger, and snapping before any phase is established is
+    // free). The invariant this test protects: NO PERIODIC seeks after.
+    r.advance(1.0);
+    const afterSnap = r.engines.A.seeks.length;
+    for (let i = 0; i < 4; i++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(afterSnap);
     r.driver.stop();
   });
 });
@@ -973,22 +983,24 @@ describe('SessionReplayDriver — persistent drift correction (deadband regressi
       const recorded = 50 + k * 0.96;
       maxDrift = Math.max(maxDrift, Math.abs(r.engines.A.getPlayhead() - recorded));
     }
-    // Corrections fired (the deadband alone let drift sit at up to 0.5s —
-    // more than a beat at 174 BPM = 0.345s)…
-    expect(r.engines.A.seeks.length).toBeGreaterThan(seedSeeks);
-    // …and the deck never strayed a full beat from the log's trajectory.
+    // The servo + rate blend keep the deck inside a beat at all times —
+    // and mostly WITHOUT seeks (sessions 20): at most the one mid-tier
+    // coordinated seek while the rate blend converges.
     expect(maxDrift).toBeLessThan(0.345);
+    expect(r.engines.A.seeks.length - seedSeeks).toBeLessThanOrEqual(2);
+    // Endgame: locked onto the log's trajectory.
+    const recorded = 50 + 20 * 0.96;
+    expect(Math.abs(r.engines.A.getPlayhead() - recorded)).toBeLessThan(0.1);
     r.driver.stop();
   });
 
-  it('corrections are paced by the cooldown, not per-tick (no jitter relapse)', async () => {
+  it('steady-state playback is seek-free (the servo does the work)', async () => {
     const r = rig(planFor(driftLog(), 2));
     await r.driver.start();
-    const seedSeeks = r.engines.A.seeks.length;
-    for (let k = 1; k <= 10; k++) r.advance(1.0);
-    const corrections = r.engines.A.seeks.length - seedSeeks;
-    expect(corrections).toBeGreaterThan(0);
-    expect(corrections).toBeLessThanOrEqual(5); // ≥2s apart over 10s
+    for (let k = 1; k <= 12; k++) r.advance(1.0); // converge
+    const seeks = r.engines.A.seeks.length;
+    for (let k = 1; k <= 15; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seeks); // zero in steady state
     r.driver.stop();
   });
 
@@ -1008,6 +1020,213 @@ describe('SessionReplayDriver — persistent drift correction (deadband regressi
     const seedSeeks = r.engines.A.seeks.length;
     for (let k = 1; k <= 10; k++) r.advance(1.0);
     expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — rate inference + coordinated correction (sessions 18)', () => {
+  /** A pitch-less legacy log: the deck was pitched +2% BEFORE the session,
+   * so no pitch event exists — recorded playheads advance at 1.02×. */
+  function pitchlessLog(n = 40): CaptureEvent[] {
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= n; k++) {
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k * 1.02 } });
+    }
+    return evs;
+  }
+
+  it('converges the engine pitch to the recorded rate and corrections cease', async () => {
+    const r = rig(planFor(pitchlessLog(), 2));
+    await r.driver.start();
+    expect(r.engines.A.pitchPercent).toBe(0); // seeded pitch-less
+    for (let k = 1; k <= 8; k++) r.advance(1.0);
+    // Rate inference matched the engine to the log's slope.
+    expect(r.engines.A.pitchPercent).toBeCloseTo(2, 0);
+    // With the rate matched, drift stops growing: NO corrective seeks
+    // over a long steady stretch.
+    const seeksAfterConverge = r.engines.A.seeks.length;
+    for (let k = 1; k <= 20; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seeksAfterConverge);
+    // And the deck tracks the recorded trajectory closely (28 advances).
+    expect(Math.abs(r.engines.A.getPlayhead() - (50 + 28 * 1.02))).toBeLessThan(0.2);
+    r.driver.stop();
+  });
+
+  it('a recorded pitch cue is not fought by inference', async () => {
+    // Pitch event at t=10 to +2%: ticks advance at 1.0 before, 1.02 after.
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= 8; k++) evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k } });
+    evs.push({ t: 10.5, kind: 'pitch', channel: 'A', value: 2 });
+    for (let k = 9; k <= 24; k++)
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 58.5 + (k - 8.5) * 1.02 } });
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    for (let k = 1; k <= 20; k++) r.advance(1.0);
+    // The cue set +2 and inference found no residual mismatch to fight.
+    expect(r.engines.A.pitchPercent).toBeCloseTo(2, 0);
+    r.driver.stop();
+  });
+
+  it('a common-mode step corrects BOTH decks in one frame — relative phase preserved', async () => {
+    // Two decks on-trajectory, then both recorded playheads step +0.25
+    // (common-mode). A step is not a rate (linear-fit reject): it must be
+    // drained by the coordinated median corrector, both decks together.
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 1.2, kind: 'load', channel: 'B', trackId: 12, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 2, kind: 'transport', channel: 'B', action: 'play', playhead: 80 },
+    ];
+    for (let k = 1; k <= 30; k++) {
+      const step = k >= 10 ? -0.25 : 0; // recorded falls behind → engine ahead
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k + step, B: 80 + k + step } });
+    }
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    const relBefore = r.engines.A.getPlayhead() - r.engines.B.getPlayhead();
+    let sawSameFrame = false;
+    for (let k = 1; k <= 25; k++) {
+      const a0 = r.engines.A.seeks.length;
+      const b0 = r.engines.B.seeks.length;
+      r.advance(1.0);
+      if (r.engines.A.seeks.length > a0 && r.engines.B.seeks.length > b0) sawSameFrame = true;
+    }
+    expect(sawSameFrame).toBe(true); // both corrected in one frame
+    // No spurious pitch change from the step (linear-fit reject).
+    expect(r.engines.A.pitchPercent).toBeCloseTo(0, 1);
+    // Relative phase across the whole episode is preserved.
+    const relAfter = r.engines.A.getPlayhead() - r.engines.B.getPlayhead();
+    expect(Math.abs(relAfter - relBefore)).toBeLessThan(0.05);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — phase servo (sessions 20)', () => {
+  /** On-trajectory ticks with a constant offset injected from tick `from`:
+   * recorded playheads fall back by `step` — the engine is suddenly ahead
+   * by `step`, the exact shape of start-latency stagger. */
+  function offsetLog(step: number, from = 5, n = 40, deck: 'A' | 'B' = 'A'): CaptureEvent[] {
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: deck, trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: deck, action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= n; k++) {
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { [deck]: 50 + k - (k >= from ? step : 0) } });
+    }
+    return evs;
+  }
+
+  it('a sub-seek-tier offset drains via rate bias — ZERO seeks', async () => {
+    const r = rig(planFor(offsetLog(0.08), 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    for (let k = 1; k <= 30; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks); // no jumps, ever
+    // The offset drained: engine back on the recorded trajectory.
+    const recorded = 50 + 30 - 0.08;
+    expect(Math.abs(r.engines.A.getPlayhead() - recorded)).toBeLessThan(0.03);
+    r.driver.stop();
+  });
+
+  it('the bias is error-scheduled: firm (≤4%) at large error, gentle (≤1%) small', async () => {
+    // 0.15s injected mid-play (past the start-snap window): large-error
+    // tier engages, drains fast, then hands off to the gentle tier.
+    const r = rig(planFor(offsetLog(0.15, 8), 2));
+    await r.driver.start();
+    let maxAbsPitch = 0;
+    let ticksOver = 0;
+    for (let k = 1; k <= 30; k++) {
+      r.advance(1.0);
+      const p = Math.abs(r.engines.A.pitchPercent);
+      maxAbsPitch = Math.max(maxAbsPitch, p);
+      if (p > 1.05) ticksOver += 1;
+    }
+    expect(maxAbsPitch).toBeLessThanOrEqual(4.05); // firm tier cap
+    expect(ticksOver).toBeLessThanOrEqual(8); // …but only briefly
+    // Converged well inside the old 1%-only timeline.
+    const recorded = 50 + 30 - 0.15;
+    expect(Math.abs(r.engines.A.getPlayhead() - recorded)).toBeLessThan(0.03);
+    r.driver.stop();
+  });
+
+  it('start-latency stagger snaps at the FIRST tick — no salvo of correction', async () => {
+    // The offset exists from tick 1: exactly what a late engine start
+    // looks like. One inaudible-at-start seek, then locked — not 15s of
+    // audible half-sync.
+    const r = rig(planFor(offsetLog(0.12, 1), 2));
+    await r.driver.start();
+    const seedSeeks = r.engines.A.seeks.length;
+    r.advance(1.0); // first sync tick
+    expect(r.engines.A.seeks.length).toBe(seedSeeks + 1); // the snap
+    for (let k = 2; k <= 10; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seedSeeks + 1); // and nothing else
+    const recorded = 50 + 10 - 0.12;
+    expect(Math.abs(r.engines.A.getPlayhead() - recorded)).toBeLessThan(0.03);
+    // Bias never had to engage meaningfully.
+    expect(Math.abs(r.engines.A.pitchPercent)).toBeLessThan(1.1);
+    r.driver.stop();
+  });
+
+  it('a replayed play cue re-arms the start snap for that deck', async () => {
+    // Deck pauses then plays again in the log; its restart stagger snaps.
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 3, kind: 'tick', playheads: { A: 51 } },
+      { t: 4, kind: 'transport', channel: 'A', action: 'pause', playhead: 52 },
+      { t: 6, kind: 'transport', channel: 'A', action: 'play', playhead: 52 },
+      // Recorded trajectory shows the deck 0.1 behind the cue landing —
+      // restart stagger. Snap expected at the next tick.
+      { t: 7, kind: 'tick', playheads: { A: 52.9 } },
+      { t: 8, kind: 'tick', playheads: { A: 53.9 } },
+      { t: 9, kind: 'tick', playheads: { A: 54.9 } },
+      { t: 12, kind: 'tick', playheads: { A: 57.9 } },
+    ];
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    for (let k = 1; k <= 6; k++) r.advance(1.0); // now at t=8
+    // Locked to the recorded (staggered) trajectory.
+    expect(Math.abs(r.engines.A.getPlayhead() - 53.9)).toBeLessThan(0.05);
+    r.driver.stop();
+  });
+
+  it('opposite offsets on two decks: relative phase converges, zero seeks', async () => {
+    // A ends up 0.08 ahead of its log, B 0.08 behind — 0.16 relative,
+    // audible, and (pre-servo) permanently under every seek threshold.
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 1.2, kind: 'load', channel: 'B', trackId: 12, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 2, kind: 'transport', channel: 'B', action: 'play', playhead: 80 },
+    ];
+    for (let k = 1; k <= 40; k++) {
+      const dA = k >= 5 ? 0.08 : 0;
+      const dB = k >= 5 ? -0.08 : 0;
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k - dA, B: 80 + k - dB } });
+    }
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    const seeksA = r.engines.A.seeks.length;
+    const seeksB = r.engines.B.seeks.length;
+    for (let k = 1; k <= 30; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seeksA);
+    expect(r.engines.B.seeks.length).toBe(seeksB);
+    // Both locked to their logs → locked to each other.
+    const relTruth = (50 + 30 - 0.08) - (80 + 30 + 0.08);
+    const rel = r.engines.A.getPlayhead() - r.engines.B.getPlayhead();
+    expect(Math.abs(rel - relTruth)).toBeLessThan(0.05);
     r.driver.stop();
   });
 });

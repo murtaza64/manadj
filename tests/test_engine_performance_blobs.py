@@ -13,8 +13,13 @@ import pytest
 
 from enginedj.performance_blobs import (
     BlobParseError,
+    encode_beat_data,
+    encode_quick_cues,
+    encode_track_data,
     parse_beat_data,
     parse_quick_cues,
+    parse_track_data,
+    q_compress as production_q_compress,
     q_uncompress,
 )
 
@@ -86,7 +91,7 @@ CONSTANT_GRID = [
 
 
 def test_q_uncompress_roundtrip() -> None:
-    assert q_uncompress(q_compress(b"hello world")) == b"hello world"
+    assert q_uncompress(production_q_compress(b"hello world")) == b"hello world"
 
 
 def test_q_uncompress_rejects_short_blob() -> None:
@@ -114,6 +119,11 @@ def test_parse_beat_data_constant_grid() -> None:
     assert first.beat_index == -4
     assert first.beats_to_next == 4
     assert first.sample_offset == pytest.approx(0.5 * 44100.0 - 4 * SPB_128)
+
+
+def test_beat_data_codec_roundtrips() -> None:
+    blob = build_beat_blob(default_grid=CONSTANT_GRID, adjusted_grid=CONSTANT_GRID)
+    assert q_uncompress(encode_beat_data(parse_beat_data(blob))) == q_uncompress(blob)
 
 
 def test_parse_beat_data_variable_grid() -> None:
@@ -179,6 +189,20 @@ def test_parse_quick_cues_main_cue_and_overridden_flag() -> None:
     assert cues.main_cue_samples == pytest.approx(44100.0 * 15)
     assert cues.main_cue_overridden is True
     assert cues.default_cue_samples == pytest.approx(44100.0)
+
+
+def test_quick_cues_codec_roundtrips() -> None:
+    blob = build_quick_cues_blob([
+        build_cue_slot("Drop", 44100.0 * 30, (255, 0, 128)),
+        *([EMPTY_SLOT] * 7),
+    ], main_cue_samples=44100.0 * 15, overridden=True)
+    assert q_uncompress(encode_quick_cues(parse_quick_cues(blob))) == q_uncompress(blob)
+
+
+def test_track_data_codec_roundtrips() -> None:
+    raw = struct.pack(">dQI3d", 44100.0, 44100 * 180, 7, -12.0, -9.0, -6.0)
+    blob = q_compress(raw)
+    assert q_uncompress(encode_track_data(parse_track_data(blob))) == raw
 
 
 def test_parse_quick_cues_not_overridden() -> None:

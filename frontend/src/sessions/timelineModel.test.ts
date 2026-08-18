@@ -94,7 +94,7 @@ describe('deriveTimeline', () => {
     ]);
   });
 
-  it('>2 audible decks open a suspended span', () => {
+  it('>2 audible decks still derive overlaps and per-deck spans (no suspended lane — 4dp 37)', () => {
     const events: CaptureEvent[] = [
       ...seed(0),
       { t: 1, kind: 'load', channel: 'A', trackId: 1, bpm: 174 },
@@ -107,7 +107,7 @@ describe('deriveTimeline', () => {
       { t: 20, kind: 'transport', channel: 'A', action: 'pause', playhead: 18 },
     ];
     const m = deriveTimeline(events);
-    expect(m.suspended).toEqual([{ start: 4, end: 9 }]);
+    expect(m.decks.C.audibleSpans).toEqual([{ start: 4, end: 9 }]);
     expect(m.overlaps.length).toBeGreaterThan(0);
     expect(m.trackIds.sort()).toEqual([1, 2, 3]);
   });

@@ -143,14 +143,6 @@
   font-style: italic;
 }
 
-.stl-suspended {
-  fill: var(--yellow, #f9e2af);
-  opacity: 0.08;
-  stroke: var(--yellow, #f9e2af);
-  stroke-width: 1;
-  stroke-dasharray: 2 3;
-}
-
 .stl-idle-marker {
   cursor: pointer;
 }
@@ -242,10 +234,6 @@
 .stl-swatch-tenure {
   background: rgba(255, 255, 255, 0.1);
   border: 1px dashed var(--overlay1, #7f849c);
-}
-.stl-swatch-suspended {
-  background: rgba(249, 226, 175, 0.12);
-  border: 1px dashed var(--yellow, #f9e2af);
 }
 .stl-swatch-take {
   background: #00ff6a;

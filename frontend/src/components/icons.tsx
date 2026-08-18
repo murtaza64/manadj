@@ -113,6 +113,16 @@ export const SlidersIcon = ({ width = 16, height = 16, opacity = 0.7, className 
   </svg>
 );
 
+/** Filter funnel as narrowing bars (playlist-editing 09: the per-playlist
+ * filter toggle) — the SlidersIcon's angular line style, which reads
+ * crisply at small sizes. currentColor so an engaged button recolors it. */
+export const FunnelIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
+  <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
+    <path d="M2.5 4h11M5 8h6M7 12h2"
+          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity={opacity}/>
+  </svg>
+);
+
 export const ArrowDownIcon = ({ width = 16, height = 16, opacity = 0.7, className }: IconProps) => (
   <svg width={width} height={height} viewBox="0 0 16 16" fill="none" className={className}>
     <path d="M8 1v12M8 13l-4-4M8 13l4-4"

@@ -207,6 +207,15 @@ class TestSweep:
 
         assert enqueue_missing_analysis(db) == 1
 
+    def test_archived_track_is_not_enqueued(self, db, make_track):
+        """Archived = out of the active Library (CONTEXT.md): the background
+        sweep never spends analysis on it. Manual Analyze remains the
+        explicit-intent path."""
+        from datetime import UTC, datetime
+
+        make_track(key=None, archived_at=datetime.now(UTC))
+        assert enqueue_missing_analysis(db) == 0
+
     def test_sweep_skips_already_queued(self, db, make_track):
         track = make_track(key=None)
         enqueue_analysis_task(db, track.id)
