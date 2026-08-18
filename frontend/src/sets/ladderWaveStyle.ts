@@ -397,9 +397,35 @@ export const PAINTABLE_STYLE_IDS = Object.keys(STYLE_PAINTERS);
 
 // ---------------------------------------------------------------- render
 
+/** Per-column mixer-state modulation (sessions 19): the Session timeline
+ * renders each column through the RECORDED channel strip — render-only,
+ * the audibility definitions are untouched. */
+export interface ColumnModulation {
+  /** Per-group (low/mid/high — the style's b1/b2 grouping) linear
+   * amplitude gain: the recorded EQ through its real curve. A kill (0)
+   * removes the matching color band. */
+  eq: [number, number, number];
+  /** Broadband height scale: fader × trim through the real gain curves,
+   * display-normalized so the nominal strip renders unmodified. */
+  scale: number;
+}
+
+/** Scale the 8 band amplitudes by the column's EQ-per-group and broadband
+ * gains — pre-groupAmps, so RMS/softLimit react to the scaled energy the
+ * way the audio path does. */
+function modulateBands(b: Float64Array, mod: ColumnModulation, params: StyleParams): void {
+  for (let i = 0; i < 8; i++) {
+    const eq = i < params.b1 ? mod.eq[0] : i < params.b2 ? mod.eq[1] : mod.eq[2];
+    b[i] *= eq * mod.scale;
+  }
+}
+
 /**
  * Interpret a style slot over one clip's track-time range as per-column
- * segment lists. `cols` columns spanning [t0, t1].
+ * segment lists. `cols` columns spanning [t0, t1]. `modulate`, when given,
+ * supplies each column's recorded mixer state (Session timeline lanes);
+ * the previous-peak seed and out-of-track peaks stay unmodulated — an
+ * accepted approximation (additive-ticks only, one column of error).
  */
 export function computeStyledColumns(
   data: DecodedWaveform,
@@ -409,6 +435,7 @@ export function computeStyledColumns(
   t1: number,
   cols: number,
   brightness = 1,
+  modulate?: (x: number) => ColumnModulation,
 ): StyledColumn[] {
   const style = getStyle(styleId);
   const painter = STYLE_PAINTERS[style.id] ?? STYLE_PAINTERS['additive-rgb'];
@@ -433,8 +460,10 @@ export function computeStyledColumns(
       out.push({ outOfTrack: true, segments: [] });
       continue;
     }
-    const p = clamp01(sampler.peakColumn(tc, tc + px) * params.master);
+    const mod = modulate ? modulate(x) : undefined;
+    const p = clamp01(sampler.peakColumn(tc, tc + px) * params.master * (mod ? mod.scale : 1));
     sampler.bands8Column(tc, tc + px, b);
+    if (mod) modulateBands(b, mod, params);
     const gRaw = sampler.groupAmps(b);
     const g: [number, number, number] = [clamp01(gRaw[0]), clamp01(gRaw[1]), clamp01(gRaw[2])];
 
@@ -443,9 +472,15 @@ export function computeStyledColumns(
     if (painter.wantsFlux) {
       const tMid = tc + px * 0.5;
       sampler.bands8Smooth(tMid, 0.03, px, gsScratch);
+      if (mod) modulateBands(gsScratch, mod, params);
       const gsRaw = sampler.groupAmps(gsScratch);
       gs = [gsRaw[0], gsRaw[1], gsRaw[2]];
-      flux = sampler.transientFlux(tMid, px) * params.gains[2] * params.master * 1.6;
+      flux =
+        sampler.transientFlux(tMid, px) *
+        params.gains[2] *
+        params.master *
+        1.6 *
+        (mod ? mod.scale : 1);
     }
 
     const ctx: ColumnCtx = { p, g, b, pPrev, gs, flux, colors, params };

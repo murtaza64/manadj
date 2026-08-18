@@ -13,10 +13,13 @@
  */
 import type { DecodedWaveform } from '../waveform/blob';
 import type { StyleParams } from '../waveform/styles';
+import type { ColumnModulation } from '../sets/ladderWaveStyle';
 import { computeStyledColumns } from '../sets/ladderWaveStyle';
 import { hexToRgbTriplet } from '../theme/deckColors';
-import type { DeckTimeline, GainStep, TimeAxis } from './timelineModel';
-import { gainAt } from './timelineModel';
+import { channelFaderToGain, trimToGain } from '../playback/mixerMath';
+import { eqValueToGain } from '../playback/graph';
+import type { DeckControlSteps, DeckTimeline, GainStep, TimeAxis } from './timelineModel';
+import { DECK_CONTROL_DEFAULTS, gainAt } from './timelineModel';
 
 export interface LaneGeometry {
   /** Full timeline width in CSS px (the x-coordinate space). */
@@ -101,8 +104,41 @@ export function drawAudibilityArea(
   ctx.fill();
 }
 
+/** The nominal channel strip's Master gain (fader full, trim center):
+ * the display normalizer — a deck played at defaults renders unmodulated,
+ * mirroring drawAudibilityArea's "trim-center nominal reads as full". */
+const NOMINAL_STRIP_GAIN = trimToGain(0.5) * channelFaderToGain(1);
+
+/** Control lookup with the strip default before the first step / on an
+ * empty series (defensive: deriveTimeline seeds every series at start). */
+function controlAt(steps: GainStep[], t: number, dflt: number): number {
+  if (steps.length === 0 || t < steps[0].t) return dflt;
+  return gainAt(steps, t);
+}
+
+/** The recorded mixer state at session time `t` as a column modulation:
+ * EQ per band group through its real curve (a kill removes the band), and
+ * fader (audio taper) × trim (dB curve) as a display-normalized height
+ * scale, capped at 1 (a boosted strip must not overflow the lane).
+ * Render-only — audibility definitions are untouched. */
+export function columnModulation(controls: DeckControlSteps, t: number): ColumnModulation {
+  const fader = controlAt(controls.fader, t, DECK_CONTROL_DEFAULTS.fader);
+  const trim = controlAt(controls.trim, t, DECK_CONTROL_DEFAULTS.trim);
+  const gain = channelFaderToGain(fader) * trimToGain(trim);
+  return {
+    eq: [
+      eqValueToGain(controlAt(controls.eqLow, t, DECK_CONTROL_DEFAULTS.eqLow)),
+      eqValueToGain(controlAt(controls.eqMid, t, DECK_CONTROL_DEFAULTS.eqMid)),
+      eqValueToGain(controlAt(controls.eqHigh, t, DECK_CONTROL_DEFAULTS.eqHigh)),
+    ],
+    scale: Math.min(1, gain / NOMINAL_STRIP_GAIN),
+  };
+}
+
 /** Full-color styled waveform for every constant-rate run of the deck's
- * traces, mirrored around the lane center (the editor's anchor). */
+ * traces, mirrored around the lane center (the editor's anchor). With
+ * `controls`, each column is modulated by the recorded mixer state at its
+ * session time (O(log n) step lookups — the gainAt precedent). */
 export function drawStyledRuns(
   ctx: CanvasRenderingContext2D,
   wave: DecodedWaveform,
@@ -110,7 +146,8 @@ export function drawStyledRuns(
   params: StyleParams,
   runs: TraceRun[],
   axis: TimeAxis,
-  geo: LaneGeometry
+  geo: LaneGeometry,
+  controls?: DeckControlSteps
 ): void {
   const midY = geo.yOffset + geo.height / 2;
   const halfH = geo.height / 2 - 2;
@@ -127,7 +164,10 @@ export function drawStyledRuns(
     const xStart = Math.round(cx0);
     const cols = Math.round(cx1) - xStart;
     if (cols <= 0) continue;
-    const columns = computeStyledColumns(wave, styleId, params, phA, phB, cols);
+    const modulate = controls
+      ? (x: number) => columnModulation(controls, axis.pxToT(xStart + x + 0.5))
+      : undefined;
+    const columns = computeStyledColumns(wave, styleId, params, phA, phB, cols, 1, modulate);
     for (let x = 0; x < cols; x++) {
       const col = columns[x];
       if (col.outOfTrack) continue;

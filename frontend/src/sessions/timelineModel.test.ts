@@ -112,11 +112,52 @@ describe('deriveTimeline', () => {
     expect(m.trackIds.sort()).toEqual([1, 2, 3]);
   });
 
+  it('per-control step series: seeded defaults, deduped moves (sessions 19)', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 5, kind: 'control', control: 'eqLow', channel: 'A', value: 0 },
+      { t: 6, kind: 'control', control: 'eqLow', channel: 'A', value: 0 }, // dup: no step
+      { t: 8, kind: 'control', control: 'fader', channel: 'A', value: 0.25 },
+      { t: 9, kind: 'control', control: 'trim', channel: 'A', value: 0.75 },
+      { t: 12, kind: 'control', control: 'eqLow', channel: 'A', value: 0.5 },
+      { t: 20, kind: 'transport', channel: 'A', action: 'pause', playhead: 18 },
+    ];
+    const m = deriveTimeline(events);
+    const cs = m.decks.A.controlSteps;
+    // Every series is seeded with the strip default at session start; the
+    // seed(0) control events match the defaults, so no duplicate steps.
+    expect(cs.eqLow).toEqual([
+      { t: 0, gain: 0.5 },
+      { t: 5, gain: 0 },
+      { t: 12, gain: 0.5 },
+    ]);
+    expect(cs.fader).toEqual([
+      { t: 0, gain: 1 },
+      { t: 8, gain: 0.25 },
+    ]);
+    expect(cs.trim).toEqual([
+      { t: 0, gain: 0.5 },
+      { t: 9, gain: 0.75 },
+    ]);
+    expect(cs.eqMid).toEqual([{ t: 0, gain: 0.5 }]);
+    expect(cs.eqHigh).toEqual([{ t: 0, gain: 0.5 }]);
+    // gainAt lookups over the series — the render path's idiom.
+    expect(gainAt(cs.eqLow, 4.9)).toBe(0.5);
+    expect(gainAt(cs.eqLow, 5)).toBe(0);
+    expect(gainAt(cs.eqLow, 11.9)).toBe(0);
+    expect(gainAt(cs.eqLow, 50)).toBe(0.5);
+    // Untouched deck: seed only.
+    expect(m.decks.B.controlSteps.fader).toEqual([{ t: 0, gain: 1 }]);
+  });
+
   it('an empty log derives an empty, zero-span model', () => {
     const m = deriveTimeline([]);
     expect(m.start).toBe(0);
     expect(m.end).toBe(0);
     expect(m.eventCount).toBe(0);
+    expect(m.decks.A.controlSteps.fader).toEqual([]);
     expect(m.decks.A.audibleSpans).toEqual([]);
   });
 });

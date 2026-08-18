@@ -581,12 +581,14 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
       const dt = model.decks[deck];
       // 1. Audibility area chart (behind).
       drawAudibilityArea(ctx, dt.gainSteps, axis, DECK_COLORS[deck], geo);
-      // 2. Full-color styled waveform per track span's runs.
+      // 2. Full-color styled waveform per track span's runs, modulated by
+      // the recorded mixer state (sessions 19: EQ kills drop their band,
+      // fader/trim shrink the waveform).
       for (const span of dt.trackSpans) {
         const wave = wavesByTrack[span.trackId];
         const spanRuns = runsByDeck[deck].filter((r) => r.t0 >= span.start && r.t1 <= span.end);
         if (wave) {
-          drawStyledRuns(ctx, wave, slot.styleId, slot.params, spanRuns, axis, geo);
+          drawStyledRuns(ctx, wave, slot.styleId, slot.params, spanRuns, axis, geo, dt.controlSteps);
           // 3. Beat gridlines over the waveform (jump/pitch-aware).
           const grid = gridsByTrack[span.trackId];
           if (grid?.data) {
