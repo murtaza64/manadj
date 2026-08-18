@@ -140,11 +140,13 @@ def latest_analysis_task(db: Session, track_id: int) -> Task | None:
 
 
 def enqueue_missing_analysis(db: Session) -> int:
-    """Startup sweep: enqueue every Track still missing analysis.
+    """Startup sweep: enqueue every active Track still missing analysis.
 
     Missing = the grid side was never analyzed (no diagnostics row) and
     isn't protected by the ladder, or the Track has no key at all. Bailed
     tracks have diagnostics — they are done, not missing (no retry storms).
+    Archived tracks are out of the active Library, so the sweep skips them
+    (manual Analyze still works — explicit intent).
     """
     has_diagnostics = exists().where(
         models.GridAnalysis.track_id == models.Track.id
@@ -158,10 +160,11 @@ def enqueue_missing_analysis(db: Session) -> int:
     rows = (
         db.query(models.Track.id)
         .filter(
+            models.Track.is_active,
             or_(
                 and_(~has_diagnostics, ~grid_protected),
                 models.Track.key.is_(None),
-            )
+            ),
         )
         .all()
     )
