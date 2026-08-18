@@ -828,6 +828,57 @@ export function buildTimeAxis(
   return { segments, tToPx, pxToT, totalPx, visibleDurationS, pxPerSec };
 }
 
+// ── Take → deck resolution (chip coloring) ───────────────────────────────
+
+/** A Take side resolved against the log: the deck and the track span
+ * (tenure) that carried it. */
+export interface TakeSpanRef {
+  deck: CaptureDeck;
+  start: number;
+  end: number;
+}
+
+interface TakeWindow {
+  a_track_id: number;
+  b_track_id: number;
+  window_start_s: number;
+  window_end_s: number;
+}
+
+/** The track spans a Take's outgoing (a) and incoming (b) Tracks occupied
+ * during its window — chip coloring + hover spotlight (sessions 22). A
+ * Track is matched by its tenure overlapping the window; null when the
+ * log doesn't show it (e.g. a manual Take against a truncated log). */
+export function takeSpanPair(
+  model: TimelineModel,
+  take: TakeWindow
+): { from: TakeSpanRef | null; to: TakeSpanRef | null } {
+  const find = (trackId: number): TakeSpanRef | null => {
+    for (const ch of ALL_DECKS) {
+      for (const span of model.decks[ch].trackSpans) {
+        if (
+          span.trackId === trackId &&
+          span.start < take.window_end_s &&
+          span.end > take.window_start_s
+        ) {
+          return { deck: ch, start: span.start, end: span.end };
+        }
+      }
+    }
+    return null;
+  };
+  return { from: find(take.a_track_id), to: find(take.b_track_id) };
+}
+
+/** Deck-only view of `takeSpanPair` (the chip gradient's endpoints). */
+export function takeDeckPair(
+  model: TimelineModel,
+  take: TakeWindow
+): { from: CaptureDeck | null; to: CaptureDeck | null } {
+  const pair = takeSpanPair(model, take);
+  return { from: pair.from?.deck ?? null, to: pair.to?.deck ?? null };
+}
+
 // ── Trace lookup (session time → track time; waveform mapping) ──────────
 
 /** The deck's audible Master gain at session time `t` (step lookup;

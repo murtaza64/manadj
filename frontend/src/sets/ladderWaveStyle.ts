@@ -420,6 +420,22 @@ function modulateBands(b: Float64Array, mod: ColumnModulation, params: StylePara
   }
 }
 
+/** A reusable column interpreter bound to one (blob, style, params):
+ * the sampler + scratch buffers are built ONCE and shared across `render`
+ * calls. The Session timeline draws one range per trace run — a jog-heavy
+ * set has thousands of visible runs at low zoom, and per-run sampler
+ * construction (closures + typed arrays) dominated the redraw
+ * (sessions 22). */
+export interface StyledColumnRenderer {
+  render(
+    t0: number,
+    t1: number,
+    cols: number,
+    brightness?: number,
+    modulate?: (x: number) => ColumnModulation,
+  ): StyledColumn[];
+}
+
 /**
  * Interpret a style slot over one clip's track-time range as per-column
  * segment lists. `cols` columns spanning [t0, t1]. `modulate`, when given,
@@ -437,73 +453,94 @@ export function computeStyledColumns(
   brightness = 1,
   modulate?: (x: number) => ColumnModulation,
 ): StyledColumn[] {
+  return createStyledColumnRenderer(data, styleId, params).render(t0, t1, cols, brightness, modulate);
+}
+
+/** Build the bound interpreter behind `computeStyledColumns` — same math,
+ * amortized setup. */
+export function createStyledColumnRenderer(
+  data: DecodedWaveform,
+  styleId: string,
+  params: StyleParams,
+): StyledColumnRenderer {
   const style = getStyle(styleId);
   const painter = STYLE_PAINTERS[style.id] ?? STYLE_PAINTERS['additive-rgb'];
   const colors = params.colors ?? style.defaultColors;
   const sampler = createSampler(data, params);
-  const px = Math.max(t1 - t0, 0.001) / cols;
   const b = new Float64Array(8);
   const gsScratch = new Float64Array(8);
 
-  const out: StyledColumn[] = [];
-  let pPrev = painter.wantsPrevPeak
-    ? clamp01(sampler.peakColumn(t0 - px, t0) * params.master)
-    : 0;
-  for (let x = 0; x < cols; x++) {
-    const tc = t0 + x * px;
-    if (tc < 0 || tc > data.duration) {
-      // Keep pPrev current across the gap (additive-ticks compares against
-      // the immediately preceding column, like the shader's t - px sample).
-      if (painter.wantsPrevPeak) {
-        pPrev = clamp01(sampler.peakColumn(tc, tc + px) * params.master);
+  const render = (
+    t0: number,
+    t1: number,
+    cols: number,
+    brightness = 1,
+    modulate?: (x: number) => ColumnModulation,
+  ): StyledColumn[] => {
+    const px = Math.max(t1 - t0, 0.001) / cols;
+
+    const out: StyledColumn[] = [];
+    let pPrev = painter.wantsPrevPeak
+      ? clamp01(sampler.peakColumn(t0 - px, t0) * params.master)
+      : 0;
+    for (let x = 0; x < cols; x++) {
+      const tc = t0 + x * px;
+      if (tc < 0 || tc > data.duration) {
+        // Keep pPrev current across the gap (additive-ticks compares against
+        // the immediately preceding column, like the shader's t - px sample).
+        if (painter.wantsPrevPeak) {
+          pPrev = clamp01(sampler.peakColumn(tc, tc + px) * params.master);
+        }
+        out.push({ outOfTrack: true, segments: [] });
+        continue;
       }
-      out.push({ outOfTrack: true, segments: [] });
-      continue;
-    }
-    const mod = modulate ? modulate(x) : undefined;
-    const p = clamp01(sampler.peakColumn(tc, tc + px) * params.master * (mod ? mod.scale : 1));
-    sampler.bands8Column(tc, tc + px, b);
-    if (mod) modulateBands(b, mod, params);
-    const gRaw = sampler.groupAmps(b);
-    const g: [number, number, number] = [clamp01(gRaw[0]), clamp01(gRaw[1]), clamp01(gRaw[2])];
+      const mod = modulate ? modulate(x) : undefined;
+      const p = clamp01(sampler.peakColumn(tc, tc + px) * params.master * (mod ? mod.scale : 1));
+      sampler.bands8Column(tc, tc + px, b);
+      if (mod) modulateBands(b, mod, params);
+      const gRaw = sampler.groupAmps(b);
+      const g: [number, number, number] = [clamp01(gRaw[0]), clamp01(gRaw[1]), clamp01(gRaw[2])];
 
-    let gs = g;
-    let flux = 0;
-    if (painter.wantsFlux) {
-      const tMid = tc + px * 0.5;
-      sampler.bands8Smooth(tMid, 0.03, px, gsScratch);
-      if (mod) modulateBands(gsScratch, mod, params);
-      const gsRaw = sampler.groupAmps(gsScratch);
-      gs = [gsRaw[0], gsRaw[1], gsRaw[2]];
-      flux =
-        sampler.transientFlux(tMid, px) *
-        params.gains[2] *
-        params.master *
-        1.6 *
-        (mod ? mod.scale : 1);
-    }
+      let gs = g;
+      let flux = 0;
+      if (painter.wantsFlux) {
+        const tMid = tc + px * 0.5;
+        sampler.bands8Smooth(tMid, 0.03, px, gsScratch);
+        if (mod) modulateBands(gsScratch, mod, params);
+        const gsRaw = sampler.groupAmps(gsScratch);
+        gs = [gsRaw[0], gsRaw[1], gsRaw[2]];
+        flux =
+          sampler.transientFlux(tMid, px) *
+          params.gains[2] *
+          params.master *
+          1.6 *
+          (mod ? mod.scale : 1);
+      }
 
-    const ctx: ColumnCtx = { p, g, b, pPrev, gs, flux, colors, params };
-    pPrev = p;
+      const ctx: ColumnCtx = { p, g, b, pPrev, gs, flux, colors, params };
+      pPrev = p;
 
-    // Piecewise-constant segments: evaluate the style at each interval's
-    // midpoint between its sorted height thresholds.
-    const cuts = painter
-      .cuts(ctx)
-      .map(clamp01)
-      .filter((v) => v > 1e-4)
-      .sort((a, z) => a - z);
-    const segments: WaveSegment[] = [];
-    let y = 0;
-    for (const cut of cuts) {
-      if (cut - y < 1e-5) continue;
-      const rgb = painter.color((y + cut) / 2, ctx);
-      if (!isBg(rgb)) segments.push({ y0: y, y1: cut, css: toCss(rgb, brightness) });
-      y = cut;
+      // Piecewise-constant segments: evaluate the style at each interval's
+      // midpoint between its sorted height thresholds.
+      const cuts = painter
+        .cuts(ctx)
+        .map(clamp01)
+        .filter((v) => v > 1e-4)
+        .sort((a, z) => a - z);
+      const segments: WaveSegment[] = [];
+      let y = 0;
+      for (const cut of cuts) {
+        if (cut - y < 1e-5) continue;
+        const rgb = painter.color((y + cut) / 2, ctx);
+        if (!isBg(rgb)) segments.push({ y0: y, y1: cut, css: toCss(rgb, brightness) });
+        y = cut;
+      }
+      out.push({ outOfTrack: false, segments });
     }
-    out.push({ outOfTrack: false, segments });
-  }
-  return out;
+    return out;
+  };
+
+  return { render };
 }
 
 /** The GL minimap's body dim (WaveformRendererV2 constructor: minimap mode

@@ -13,6 +13,7 @@
  * pause/resume replay. A moving playhead tracks session replay.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -36,12 +37,21 @@ import {
   collapseCandidates,
   createStateIndex,
   deriveTimeline,
+  takeDeckPair,
+  takeSpanPair,
   traceWindow,
 } from './timelineModel';
-import type { CollapseCandidate, StateAtT, TimelineModel } from './timelineModel';
+import type { CollapseCandidate, StateAtT, TakeSpanRef, TimeAxis, TimelineModel } from './timelineModel';
 import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
 import { staggerRows } from './labelStagger';
-import { drawAudibilityArea, drawGridlines, drawStyledRuns, traceRuns } from './waveformLanes';
+import {
+  createMonotonicTToPx,
+  drawAudibilityArea,
+  drawGridlines,
+  drawStyledRuns,
+  tracePolylinePoints,
+  traceRuns,
+} from './waveformLanes';
 import type { TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
 import {
@@ -69,6 +79,11 @@ const LANE_GAP = 6;
 const CHIP_STRIP_H = 30;
 const RULER_H = 22;
 const MAX_PX_PER_SEC = 60;
+/** Detail marks — gesture markers (◆N/↷N/▲/↕ labels + ticks) and take
+ * boundary whiskers — render only when the viewport shows at most this
+ * many (un-collapsed) seconds: zoomed way out they smear into noise and
+ * cost thousands of text/line nodes (sessions 22). Take chips stay. */
+const DETAIL_MARKS_MAX_VISIBLE_S = 600;
 /** Canvas draws this much beyond the viewport each side, so native
  * scrolling never outruns the painted window between re-centers. */
 const CANVAS_MARGIN = 400;
@@ -137,6 +152,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
   const [showTraces, setShowTraces] = useState(true);
   const [scrubT, setScrubT] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
+  // Hovered take chip (sessions 22): spotlight state lives HERE and renders
+  // in the per-frame overlay — the memoized scene must not re-render per
+  // hover, so it only receives the stable callback.
+  const [hoverTake, setHoverTake] = useState<TakeRowWire | null>(null);
   const [pxPerSec, setPxPerSec] = useState<number | null>(null); // null = fit
 
   const { data: detail, error } = useQuery({
@@ -254,6 +273,9 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
     [model, collapseIdle, thresholdS, expandedGaps, effPx]
   );
   const width = Math.max(viewportW, Math.ceil(axis?.totalPx ?? viewportW));
+  // A primitive that flips only when zoom crosses the 10-min line — the
+  // memoized scene re-renders exactly then (axis changes anyway).
+  const showDetailMarks = viewportW / effPx <= DETAIL_MARKS_MAX_VISIBLE_S;
 
   const zoomCtxRef = useRef({ model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedGaps });
   zoomCtxRef.current = { model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedGaps };
@@ -611,6 +633,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
   // Stable scene callbacks (the scene is memoized — inline closures would
   // defeat it every render).
   const onTakeClick = useCallback((take: TakeRowWire) => setSelection({ kind: 'take', take }), []);
+  const onTakeHover = useCallback((take: TakeRowWire | null) => setHoverTake(take), []);
   const onGapToggle = useCallback(
     (idx: number) =>
       setExpandedGaps((prev) => {
@@ -766,11 +789,13 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
                   trackNames={trackNames}
                   selectedTakeUuid={selection.kind === 'take' ? selection.take.uuid : null}
                   showTraces={showTraces}
+                  showDetailMarks={showDetailMarks}
                   candidates={candidates}
                   collapseIdle={collapseIdle}
                   thresholdS={thresholdS}
                   expandedGaps={expandedGaps}
                   onTakeClick={onTakeClick}
+                  onTakeHover={onTakeHover}
                   onGapToggle={onGapToggle}
                 />
                 <SceneOverlay
@@ -785,6 +810,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
                   replayT={replayHere ? replayT : null}
                   replayPaused={replay.status === 'paused'}
                   selection={selection}
+                  hoverTake={hoverTake}
                 />
               </svg>
             </div>
@@ -821,6 +847,7 @@ interface SceneProps {
   trackNames: Record<number, string>;
   selectedTakeUuid: string | null;
   showTraces: boolean;
+  showDetailMarks: boolean;
   /** Collapse candidates (idle + tenure, sessions 14) — indices key the
    * expanded set. */
   candidates: CollapseCandidate[];
@@ -828,6 +855,7 @@ interface SceneProps {
   thresholdS: number;
   expandedGaps: ReadonlySet<number>;
   onTakeClick(take: TakeRowWire): void;
+  onTakeHover(take: TakeRowWire | null): void;
   onGapToggle(idx: number): void;
 }
 
@@ -843,11 +871,13 @@ const TimelineScene = memo(function TimelineScene({
   trackNames,
   selectedTakeUuid,
   showTraces,
+  showDetailMarks,
   candidates,
   collapseIdle,
   thresholdS,
   expandedGaps,
   onTakeClick,
+  onTakeHover,
   onGapToggle,
 }: SceneProps) {
   const X = (t: number) => axis.tToPx(t);
@@ -886,6 +916,54 @@ const TimelineScene = memo(function TimelineScene({
     axis.segments.filter((s) => s.collapsed && s.kind === 'tenure').map((s) => s.start)
   );
 
+  // Take chip coloring (sessions 22): outgoing → incoming deck gradient.
+  // One def per deck pair in use; chips whose decks the log doesn't
+  // resolve keep the stylesheet's default fill.
+  const takePairs = takes.map((t) => takeDeckPair(model, t));
+
+  // Chip layout (sessions 22): overlapping chips share the strip height —
+  // clusters split into two half-height rows (the staggerRows idiom);
+  // isolated chips keep the full strip.
+  const chipLayout = (() => {
+    const order = takes
+      .map((_, i) => i)
+      .sort((a, b) => takes[a].window_start_s - takes[b].window_start_s);
+    const items = order.map((i) => {
+      const x0 = X(takes[i].window_start_s);
+      return { x0, x1: Math.max(X(takes[i].window_end_s), x0 + 12) };
+    });
+    const rows = staggerRows(items, 2);
+    // Mark every chip of a connected overlap cluster as height-sharing.
+    const shared = items.map(() => false);
+    let clusterStart = 0;
+    let clusterEnd = items.length > 0 ? items[0].x1 : 0;
+    const closeCluster = (k: number) => {
+      if (k - clusterStart > 1) for (let j = clusterStart; j < k; j++) shared[j] = true;
+    };
+    for (let k = 1; k < items.length; k++) {
+      if (items[k].x0 < clusterEnd) {
+        clusterEnd = Math.max(clusterEnd, items[k].x1);
+      } else {
+        closeCluster(k);
+        clusterStart = k;
+        clusterEnd = items[k].x1;
+      }
+    }
+    closeCluster(items.length);
+    const layout = new Array<{ row: number; shared: boolean }>(takes.length);
+    order.forEach((orig, k) => {
+      layout[orig] = { row: shared[k] ? rows[k] : 0, shared: shared[k] };
+    });
+    return layout;
+  })();
+  const gradientPairs = [
+    ...new Set(
+      takePairs
+        .filter((p): p is { from: CaptureDeck; to: CaptureDeck } => p.from !== null && p.to !== null)
+        .map((p) => `${p.from}-${p.to}`)
+    ),
+  ];
+
   return (
     <g>
       <defs>
@@ -897,6 +975,16 @@ const TimelineScene = memo(function TimelineScene({
           <stop offset="12%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
           <stop offset="100%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
         </linearGradient>
+        {/* Take chip gradients: outgoing deck color → incoming deck color. */}
+        {gradientPairs.map((key) => {
+          const [from, to] = key.split('-') as [CaptureDeck, CaptureDeck];
+          return (
+            <linearGradient key={key} id={`stl-take-grad-${key}`} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor={DECK_COLORS[from]} />
+              <stop offset="100%" stopColor={DECK_COLORS[to]} />
+            </linearGradient>
+          );
+        })}
       </defs>
       {ticks.map((t) => (
         <g key={`tick-${t}`}>
@@ -914,12 +1002,14 @@ const TimelineScene = memo(function TimelineScene({
           y={laneY(deck)}
           model={model}
           X={X}
+          axis={axis}
           viewX0={viewX0}
           viewX1={viewX1}
           tView0={tView0}
           tView1={tView1}
           h={laneH}
           showTraces={showTraces}
+          showDetailMarks={showDetailMarks}
         />
       ))}
 
@@ -1012,48 +1102,73 @@ const TimelineScene = memo(function TimelineScene({
         );
       })}
 
-      {/* Take chips. */}
-      {takes.map((t) => {
+      {/* Take chips (deck-pair gradient fill; boundary whiskers are
+          detail marks — hidden past the 10-min line, sessions 22). */}
+      {takes.map((t, ti) => {
         const x0 = X(t.window_start_s);
         const x1 = Math.max(X(t.window_end_s), x0 + 12);
         if (x1 < viewX0 || x0 > viewX1) return null;
         const label = `${trackNames[t.a_track_id] ?? t.a_track_id} → ${
           trackNames[t.b_track_id] ?? t.b_track_id
         }`;
+        const pair = takePairs[ti];
+        const grad =
+          pair.from !== null && pair.to !== null
+            ? `url(#stl-take-grad-${pair.from}-${pair.to})`
+            : null;
+        const { row, shared } = chipLayout[ti];
+        const chipH = shared ? (CHIP_STRIP_H - 6) / 2 : CHIP_STRIP_H - 6;
+        const chipY = RULER_H + 2 + row * chipH;
+        const textY = shared ? chipY + 9 : RULER_H + 17;
         return (
           <g
             key={t.uuid}
-            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}`}
+            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}${shared ? ' slim' : ''}`}
             onClick={(e) => {
               e.stopPropagation();
               onTakeClick(t);
             }}
+            onMouseEnter={() => onTakeHover(t)}
+            onMouseLeave={() => onTakeHover(null)}
           >
             <title>{`${label} · confidence ${t.confidence.toFixed(2)}`}</title>
-            <rect x={x0} y={RULER_H + 2} width={x1 - x0} height={CHIP_STRIP_H - 6} rx={5} />
+            <rect
+              x={x0}
+              y={chipY}
+              width={x1 - x0}
+              height={chipH}
+              rx={shared ? 4 : 5}
+              style={grad ? { fill: grad } : undefined}
+            />
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={RULER_H + 17}>
+              <text x={x0 + 5} y={textY}>
                 ● {label.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
             ) : (
-              <text x={x0 + 4} y={RULER_H + 17}>
+              <text x={x0 + 4} y={textY}>
                 ●
               </text>
             )}
-            <line
-              x1={x0}
-              y1={RULER_H + CHIP_STRIP_H - 4}
-              x2={x0}
-              y2={lanesBottom}
-              className="stl-take-whisker"
-            />
-            <line
-              x1={x1}
-              y1={RULER_H + CHIP_STRIP_H - 4}
-              x2={x1}
-              y2={lanesBottom}
-              className="stl-take-whisker"
-            />
+            {showDetailMarks ? (
+              <>
+                <line
+                  x1={x0}
+                  y1={RULER_H + CHIP_STRIP_H - 4}
+                  x2={x0}
+                  y2={lanesBottom}
+                  className="stl-take-whisker"
+                  style={pair.from !== null ? { stroke: DECK_COLORS[pair.from] } : undefined}
+                />
+                <line
+                  x1={x1}
+                  y1={RULER_H + CHIP_STRIP_H - 4}
+                  x2={x1}
+                  y2={lanesBottom}
+                  className="stl-take-whisker"
+                  style={pair.to !== null ? { stroke: DECK_COLORS[pair.to] } : undefined}
+                />
+              </>
+            ) : null}
           </g>
         );
       })}
@@ -1081,6 +1196,7 @@ function SceneOverlay({
   replayT,
   replayPaused,
   selection,
+  hoverTake,
 }: {
   model: TimelineModel;
   axis: ReturnType<typeof buildTimeAxis>;
@@ -1093,6 +1209,7 @@ function SceneOverlay({
   replayT: number | null;
   replayPaused: boolean;
   selection: Selection;
+  hoverTake: TakeRowWire | null;
 }) {
   const X = (t: number) => axis.tToPx(t);
   const lanesBottom = laneYOf('D', lanesTop, laneH) + laneH;
@@ -1130,17 +1247,28 @@ function SceneOverlay({
               const lx = covering
                 ? Math.max(anchor, Math.min(scrollX + 6, spanEnd - estW - 8))
                 : anchor;
+              // A long label must not poke out behind the NEXT load's
+              // label (sessions 22): truncate at the next span's start.
+              const next = model.decks[deck].trackSpans[i + 1];
+              const availPx = next ? X(next.start) - 8 - (lx + 3) : Infinity;
+              let shown = label;
+              if (estW > availPx) {
+                const maxChars = Math.floor(availPx / 6.4) - 1;
+                if (maxChars < 3) return null; // no room — the load bar still marks it
+                shown = `${label.slice(0, maxChars)}…`;
+              }
+              const shownW = shown.length * 6.4;
               return (
                 <g key={`trklabel-${i}`}>
                   <rect
                     x={lx - 12}
                     y={y + 3}
-                    width={estW + 18}
+                    width={shownW + 18}
                     height={14}
                     fill="url(#stl-label-fade)"
                   />
                   <text x={lx + 3} y={y + 14} className="stl-track-label" fill={color}>
-                    {label}
+                    {shown}
                   </text>
                 </g>
               );
@@ -1148,6 +1276,63 @@ function SceneOverlay({
           </g>
         );
       })}
+
+      {/* Take hover spotlight (sessions 22): dim every lane stretch that
+          is NOT the hovered Take's two tracks, and show its boundary
+          whiskers regardless of the detail-marks zoom gate. Lives here
+          (per-frame layer), so hovering never re-renders the scene. */}
+      {hoverTake
+        ? (() => {
+            const pair = takeSpanPair(model, hoverTake);
+            const spans = [pair.from, pair.to].filter((s): s is TakeSpanRef => s !== null);
+            const dims: ReactNode[] = [];
+            for (const deck of LANE_ORDER) {
+              const y = laneYOf(deck, lanesTop, laneH);
+              const mine = spans.filter((s) => s.deck === deck);
+              if (mine.length === 0) {
+                dims.push(
+                  <rect key={`dim-${deck}`} x={0} y={y} width={axis.totalPx} height={laneH} className="stl-hover-dim" />
+                );
+              } else {
+                const x0 = Math.min(...mine.map((s) => X(s.start)));
+                const x1 = Math.max(...mine.map((s) => X(s.end)));
+                if (x0 > 0) {
+                  dims.push(
+                    <rect key={`dim-${deck}-l`} x={0} y={y} width={x0} height={laneH} className="stl-hover-dim" />
+                  );
+                }
+                if (x1 < axis.totalPx) {
+                  dims.push(
+                    <rect key={`dim-${deck}-r`} x={x1} y={y} width={axis.totalPx - x1} height={laneH} className="stl-hover-dim" />
+                  );
+                }
+              }
+            }
+            const wx0 = X(hoverTake.window_start_s);
+            const wx1 = X(hoverTake.window_end_s);
+            return (
+              <g style={{ pointerEvents: 'none' }}>
+                {dims}
+                <line
+                  x1={wx0}
+                  y1={RULER_H + CHIP_STRIP_H - 4}
+                  x2={wx0}
+                  y2={lanesBottom}
+                  className="stl-take-whisker hover"
+                  style={pair.from ? { stroke: DECK_COLORS[pair.from.deck] } : undefined}
+                />
+                <line
+                  x1={wx1}
+                  y1={RULER_H + CHIP_STRIP_H - 4}
+                  x2={wx1}
+                  y2={lanesBottom}
+                  className="stl-take-whisker hover"
+                  style={pair.to ? { stroke: DECK_COLORS[pair.to.deck] } : undefined}
+                />
+              </g>
+            );
+          })()
+        : null}
 
       {/* Moment selection anchor — hidden while the replay head is the
           one cursor (it follows current time; clicks seek it). */}
@@ -1189,17 +1374,21 @@ function DeckLane({
   y,
   model,
   X,
+  axis,
   viewX0,
   viewX1,
   tView0,
   tView1,
   h,
   showTraces,
+  showDetailMarks,
 }: {
   deck: CaptureDeck;
   y: number;
   model: TimelineModel;
   X(t: number): number;
+  /** Monotonic-cursor lookups for the point-heavy paths (sessions 22). */
+  axis: TimeAxis;
   /** Quantized visible px window — everything outside is culled. */
   viewX0: number;
   viewX1: number;
@@ -1208,6 +1397,7 @@ function DeckLane({
   tView1: number;
   h: number;
   showTraces: boolean;
+  showDetailMarks: boolean;
 }) {
   const dt = model.decks[deck];
   const color = DECK_COLORS[deck];
@@ -1288,30 +1478,35 @@ function DeckLane({
 
       {/* Jump/cue gesture markers (sessions 04 iteration), labels
           staggered onto rows so a cluster (stab run, repeated jumps)
-          stays legible (sessions 21). Ticks keep the exact x. */}
-      {(() => {
-        const visible = dt.gestures
-          .map((g, i) => ({ g, i }))
-          .filter(({ g }) => g.t >= tView0 && g.t <= tView1);
-        // Label extent estimate: 10px font ≈ 6px/char + padding.
-        const items = visible.map(({ g }) => {
-          const x0 = X(g.t) + 2;
-          return { x0, x1: x0 + gestureLabel(g).length * 6 + 6 };
-        });
-        // Rows adapt to the lane height (40–84px): 2 rows at minimum
-        // height, up to 4 — deeper fans would wander into the waveform.
-        const maxRows = Math.max(2, Math.min(4, Math.floor((h - 24) / 10)));
-        const rows = staggerRows(items, maxRows);
-        return visible.map(({ g, i }, k) => (
-          <g key={`ges-${i}`} className="stl-gesture">
-            <title>{`${g.action}${g.detail !== undefined ? ` ${g.detail}` : ''} → ${fmtClock(g.playhead)}`}</title>
-            <line x1={X(g.t)} y1={y + 16} x2={X(g.t)} y2={y + h - 4} stroke={color} className="stl-gesture-tick" />
-            <text x={X(g.t) + 2} y={y + 26 + rows[k] * 10} fill={color}>
-              {gestureLabel(g)}
-            </text>
-          </g>
-        ));
-      })()}
+          stays legible (sessions 21). Ticks keep the exact x. Past ~10
+          visible minutes the markers hide entirely — labels AND ticks
+          (sessions 22): unreadable at that density, and thousands of
+          text/line nodes weighed the scene. */}
+      {showDetailMarks
+        ? (() => {
+            const visible = dt.gestures
+              .map((g, i) => ({ g, i }))
+              .filter(({ g }) => g.t >= tView0 && g.t <= tView1);
+            // Label extent estimate: 10px font ≈ 6px/char + padding.
+            const items = visible.map(({ g }) => {
+              const x0 = X(g.t) + 2;
+              return { x0, x1: x0 + gestureLabel(g).length * 6 + 6 };
+            });
+            // Rows adapt to the lane height (40–84px): 2 rows at minimum
+            // height, up to 4 — deeper fans would wander into the waveform.
+            const maxRows = Math.max(2, Math.min(4, Math.floor((h - 24) / 10)));
+            const rows = staggerRows(items, maxRows);
+            return visible.map(({ g, i }, k) => (
+              <g key={`ges-${i}`} className="stl-gesture">
+                <title>{`${g.action}${g.detail !== undefined ? ` ${g.detail}` : ''} → ${fmtClock(g.playhead)}`}</title>
+                <line x1={X(g.t)} y1={y + 16} x2={X(g.t)} y2={y + h - 4} stroke={color} className="stl-gesture-tick" />
+                <text x={X(g.t) + 2} y={y + 26 + rows[k] * 10} fill={color}>
+                  {gestureLabel(g)}
+                </text>
+              </g>
+            ));
+          })()
+        : null}
 
       {/* Held loops: a bracket bar along the lane top. */}
       {dt.loops.map((lp, i) => {
@@ -1329,8 +1524,9 @@ function DeckLane({
       })}
 
       {/* Playhead traces (position-in-track reading), sliced to the
-          window — a multi-hour trace is thousands of points, and the
-          polyline string was rebuilt whole per render. */}
+          window and decimated to pixel resolution (sessions 22) — at low
+          zoom the slice is the whole trace, and full-precision per-point
+          tToPx + stringification dominated the scene render. */}
       {showTraces
         ? dt.traces.map((trace, i) => {
             const win = traceWindow(trace, tView0, tView1);
@@ -1338,9 +1534,11 @@ function DeckLane({
             return (
               <polyline
                 key={`trace-${i}`}
-                points={win
-                  .map((p) => `${X(p.t)},${y + 18 + (1 - p.playhead / maxPlayhead) * (h - 24)}`)
-                  .join(' ')}
+                points={tracePolylinePoints(
+                  win,
+                  createMonotonicTToPx(axis),
+                  (ph) => y + 18 + (1 - ph / maxPlayhead) * (h - 24)
+                )}
                 className="stl-trace"
                 stroke={color}
               />

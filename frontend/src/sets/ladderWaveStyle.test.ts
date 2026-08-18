@@ -6,7 +6,11 @@ import { describe, expect, it } from 'vitest';
 import type { DecodedWaveform } from '../waveform/blob';
 import { buildLodPack } from '../waveform/blob';
 import { DEFAULT_PARAMS, STYLE_REGISTRY, type StyleParams } from '../waveform/styles';
-import { computeStyledColumns, PAINTABLE_STYLE_IDS } from './ladderWaveStyle';
+import {
+  computeStyledColumns,
+  createStyledColumnRenderer,
+  PAINTABLE_STYLE_IDS,
+} from './ladderWaveStyle';
 
 const SR = 44100;
 const PEAK_HOP = 128;
@@ -223,6 +227,23 @@ describe('computeStyledColumns', () => {
       expect(cols[0].segments).toHaveLength(3);
       expect(cols[9].segments).toHaveLength(2);
     });
+  });
+
+  // Reusable renderer (sessions 22): one sampler across many ranges.
+  it('a reused renderer matches fresh computeStyledColumns per range', () => {
+    for (const s of STYLE_REGISTRY) {
+      const renderer = createStyledColumnRenderer(wave, s.id, p);
+      const ranges: [number, number][] = [
+        [0.1, 0.4],
+        [0.4, 0.9],
+        [0.2, 0.3], // backward jump: no state may leak between calls
+      ];
+      for (const [t0, t1] of ranges) {
+        expect(renderer.render(t0, t1, 16)).toEqual(
+          computeStyledColumns(wave, s.id, p, t0, t1, 16),
+        );
+      }
+    }
   });
 
   it('every registry style renders without throwing and stays in-range', () => {

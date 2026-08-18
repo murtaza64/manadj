@@ -14,6 +14,7 @@ import {
   deriveTimeline,
   gainAt,
   stateAt,
+  takeDeckPair,
   traceWindow,
   trackTimeAt,
 } from './timelineModel';
@@ -150,6 +151,25 @@ describe('deriveTimeline', () => {
     expect(gainAt(cs.eqLow, 50)).toBe(0.5);
     // Untouched deck: seed only.
     expect(m.decks.B.controlSteps.fader).toEqual([{ t: 0, gain: 1 }]);
+  });
+
+  it('takeDeckPair resolves outgoing/incoming decks from track tenures', () => {
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+      { t: 5, kind: 'load', channel: 'B', trackId: 9, bpm: 172 },
+      { t: 6, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+      { t: 30, kind: 'transport', channel: 'A', action: 'pause', playhead: 28 },
+      { t: 40, kind: 'transport', channel: 'B', action: 'pause', playhead: 34 },
+    ];
+    const m = deriveTimeline(events);
+    const take = { a_track_id: 7, b_track_id: 9, window_start_s: 8, window_end_s: 25 };
+    expect(takeDeckPair(m, take)).toEqual({ from: 'A', to: 'B' });
+    // A track the log never shows in the window resolves to null.
+    expect(
+      takeDeckPair(m, { a_track_id: 99, b_track_id: 9, window_start_s: 8, window_end_s: 25 })
+    ).toEqual({ from: null, to: 'B' });
   });
 
   it('an empty log derives an empty, zero-span model', () => {
