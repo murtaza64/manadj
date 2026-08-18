@@ -58,6 +58,7 @@ class PdbTrack:
     disc_number: int
     play_count: int
     year: int
+    file_type: int  # MP3=1, M4A/AAC=4, FLAC=5, WAV=0x0b, AIFF=0x0c
     file_path: str | None
     filename: str | None
     analyze_path: str | None
@@ -171,6 +172,7 @@ def _track(row: Any) -> PdbTrack:
         disc_number=row.disc_number,
         play_count=row.play_count,
         year=row.year,
+        file_type=row._unnamed29,
         file_path=_text(row.file_path),
         filename=_text(row.filename),
         analyze_path=_text(row.analyze_path),

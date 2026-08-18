@@ -130,7 +130,7 @@ def adapt_track(row, data: bytes, base: int, stats) -> list[tuple[int, bytes]]:
         unknown26=row._unnamed26,
         color_id=row.color_id,
         rating=row.rating,
-        unknown29=row._unnamed29,
+        file_type=row._unnamed29,
         unknown30=row._unnamed30,
     )
     return [(0, encode_track_row(spec))]
