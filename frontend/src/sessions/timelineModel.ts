@@ -11,7 +11,6 @@
  *   track time for waveform rendering)
  * - tenure holds (a machine held the Audible surface: honest gaps;
  *   audibility is masked beneath them — the shared surface was displaced)
- * - suspended stretches (>2 decks audible: the detector self-gated)
  * - idle stretches (no audible deck, no tenure) → collapse candidates
  * - a piecewise time axis that collapses idle to fixed-width markers
  * - state reconstruction at an arbitrary T (the scrub readout; the replay
@@ -98,8 +97,6 @@ export interface TimelineModel {
   end: number;
   decks: Record<CaptureDeck, DeckTimeline>;
   tenures: TenureSpan[];
-  /** >2 decks Master-audible: the detector stood down over these. */
-  suspended: Span[];
   /** No audible deck AND no tenure hold — collapse candidates. */
   idle: Span[];
   /** ≥2 decks simultaneously audible (trading material). */
@@ -273,7 +270,6 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
 
   const audible = perDeck(() => new SpanBuilder());
   const playing = perDeck(() => new SpanBuilder());
-  const suspended = new SpanBuilder();
   const idle = new SpanBuilder();
   const overlap = new SpanBuilder();
 
@@ -486,7 +482,6 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
         lastGain[ch] = gain;
       }
     }
-    suspended.set(audibleCount > 2, e.t);
     overlap.set(audibleCount >= 2, e.t);
     idle.set(audibleCount === 0 && s.tenureHolder === null, e.t);
   }
@@ -501,7 +496,6 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     if (loop) loops[ch].push({ start: loop.since, end, region: loop.region, open: true });
     breakTrace(ch);
   }
-  suspended.close(end);
   overlap.close(end);
   idle.close(end);
   if (openTenure !== null) {
@@ -552,7 +546,6 @@ export function deriveTimeline(events: CaptureEvent[]): TimelineModel {
     end,
     decks,
     tenures,
-    suspended: suspended.spans,
     idle: idle.spans,
     overlaps: overlap.spans,
     trackIds: [...trackIds],

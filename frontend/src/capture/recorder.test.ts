@@ -266,7 +266,7 @@ describe('capture gate (ADR 0022)', () => {
     r.recorder.dispose();
   });
 
-  it('a third audible Deck suspends the verdict but the log stays whole (ADR 0033)', () => {
+  it('a third audible Deck no longer suspends the verdict; the log stays whole (4dp 37)', () => {
     const r = rig();
     r.recorder.start();
     r.decks.A.load(1);
@@ -281,9 +281,13 @@ describe('capture gate (ADR 0022)', () => {
     r.advance(2);
     r.mixer.setFader('A', 0);
     r.advance(HORIZON + 1);
-    // Detector self-gates over >2 audible: no Take.
-    expect(r.takes).toHaveLength(0);
-    // But the log is whole — deck C's activity was NOT dropped (no deck-count
+    // Pairwise-local machines (4dp 10/37): the A→B blend settles despite C
+    // — plus the liberal A→C sibling (C persisted through A's cessation).
+    expect(r.takes).toHaveLength(2);
+    const ab = r.takes.find((t) => t.incomingTrackId === 2)!;
+    expect(ab.outgoingTrackId).toBe(1);
+    expect(r.takes.some((t) => t.incomingTrackId === 3)).toBe(true);
+    // And the log is whole — deck C's activity was NOT dropped (no deck-count
     // gating in the fed stream): its load and play both reached the sink.
     expect(
       r.logged.some((e) => e.kind === 'load' && e.channel === 'C' && e.trackId === 3)

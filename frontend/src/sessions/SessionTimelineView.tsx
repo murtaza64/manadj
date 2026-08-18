@@ -948,23 +948,6 @@ const TimelineScene = memo(function TimelineScene({
         );
       })}
 
-      {/* Suspended (>2 audible). */}
-      {model.suspended.map((sp, i) => {
-        const x0 = X(sp.start);
-        const x1 = X(sp.end);
-        if (x1 < viewX0 || x0 > viewX1) return null;
-        return (
-          <rect
-            key={`susp-${i}`}
-            x={x0}
-            y={lanesTop}
-            width={Math.max(x1 - x0, 3)}
-            height={lanesBottom - lanesTop}
-            className="stl-suspended"
-          />
-        );
-      })}
-
       {/* Collapsed gap markers — idle or tenure — click to expand. */}
       {axis.segments
         .filter((s) => s.collapsed && s.px1 >= viewX0 && s.px0 <= viewX1)

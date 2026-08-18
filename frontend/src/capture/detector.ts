@@ -1,5 +1,6 @@
 /**
- * Handover detector (transition-takes 02) — pure, under vitest.
+ * Handover detector (transition-takes 02, pairwise: four-deck-performance
+ * 10) — pure, under vitest.
  *
  * A reducer over CaptureEvents (transport.ts house style): feed it the
  * shared surface's event stream and it emits DetectedTakes when a
@@ -16,6 +17,16 @@
  * - A tease where the incoming stays silent past the horizon while the
  *   outgoing plays on dissolves with no Take.
  *
+ * ONE pair machine runs per unordered physical deck pair (six machines,
+ * 4dp 10) — the glossary Handover rule applies per ordered pair,
+ * deliberately liberal: when more than two decks are audible, one moment
+ * may settle a Take on more than one pair (a chained double's half-swap
+ * legitimately emits A→B and A→D). Each machine sees only its own two
+ * decks; a third deck's audibility never gates a verdict (4dp 37).
+ * Emitted slices are RELABELED to roles — outgoing = 'A', incoming = 'B'
+ * (the editor/vectorization contract, ADR 0032) — with the physical decks
+ * stamped on the init event and the Take.
+ *
  * Settlement is time-driven: the ~1 Hz tick events advance the clock, so
  * the reducer never needs a timer.
  */
@@ -26,7 +37,6 @@ import {
   DETECTOR_VERSION,
 } from './events';
 import type {
-  CaptureChannel,
   CaptureDeck,
   CaptureEvent,
   DetectorParams,
@@ -41,7 +51,7 @@ interface DeckCapture {
   eq: { low: number; mid: number; high: number };
   filter: number;
   /** This deck's crossfader side (Sessions PRD, ADR 0033: tracked for all
-   * four decks so the >2-audible self-gate is computed from the log). */
+   * four decks so the log alone reconstructs audibility). */
   assignment: CrossfaderAssignment;
   /** Varispeed percent (bends excluded — momentary by definition). */
   pitch: number;
@@ -50,26 +60,22 @@ interface DeckCapture {
   since: number;
 }
 
-export interface CaptureState {
-  params: DetectorParams;
-  /** Rolling event log (pruned; Take slices are cut from it). */
-  log: CaptureEvent[];
-  /** All four decks (ADR 0033): the pair machine trades on A/B, but C/D
-   * audibility is tracked for the >2-audible self-gate. */
-  decks: Record<CaptureDeck, DeckCapture>;
-  crossfader: number;
-  crossfaderEnabled: boolean;
-  /** A machine holds the shared surface (tenure marker; ADR 0033) — the
-   * old recorder surface gate, now log-driven. */
-  tenureHeld: boolean;
-  /** Verdicts suspended: tenure held OR more than two decks audible (ADR
-   * 0033). While suspended the log still grows — only the pair machine
-   * stands down; an in-flight engagement is discarded on entry and the
-   * incumbent re-established on exit. Derived each event from tenureHeld +
-   * the audible-deck count; stored to detect the entry/exit edges. */
-  suspended: boolean;
-  /** The audible-first deck — outgoing candidate. */
-  incumbent: CaptureChannel | null;
+/** The six unordered physical pairs — one Handover machine each. */
+export const PAIR_KEYS = ['AB', 'AC', 'AD', 'BC', 'BD', 'CD'] as const;
+export type PairKey = (typeof PAIR_KEYS)[number];
+const PAIR_DECKS: Record<PairKey, [CaptureDeck, CaptureDeck]> = {
+  AB: ['A', 'B'],
+  AC: ['A', 'C'],
+  AD: ['A', 'D'],
+  BC: ['B', 'C'],
+  BD: ['B', 'D'],
+  CD: ['C', 'D'],
+};
+
+/** One pair's Handover machine — the phase-1 A/B state, per pair. */
+export interface PairMachine {
+  /** The audible-first deck of THIS pair — outgoing candidate. */
+  incumbent: CaptureDeck | null;
   /** Engagement start (first trading instant), null = not engaged. */
   engagedSince: number | null;
   /** Track pair snapshotted when the engagement opened. */
@@ -84,11 +90,31 @@ export interface CaptureState {
    * can't mis-attribute the outgoing Track. */
   outTrackAtCessation: number | null;
   /** Engagement-open snapshot, stamped into the Take slice as its `init`
-   * event (vectorization starts from known state, not defaults). */
+   * event — ROLE-shaped (outgoing='A', incoming='B') with the physical
+   * decks recorded on it. */
   openSnapshot: Extract<CaptureEvent, { kind: 'init' }> | null;
 }
 
-const OTHER: Record<CaptureChannel, CaptureChannel> = { A: 'B', B: 'A' };
+export interface CaptureState {
+  params: DetectorParams;
+  /** Rolling event log (pruned; Take slices are cut from it). */
+  log: CaptureEvent[];
+  /** All four decks (ADR 0033). */
+  decks: Record<CaptureDeck, DeckCapture>;
+  crossfader: number;
+  crossfaderEnabled: boolean;
+  /** A machine holds the shared surface (tenure marker; ADR 0033) — the
+   * old recorder surface gate, now log-driven. */
+  tenureHeld: boolean;
+  /** Verdicts suspended: tenure held ONLY (4dp 37 — a third audible deck
+   * never gates; the >2-audible branch is gone). While suspended the log
+   * still grows; every pair machine stands down, in-flight engagements
+   * are discarded on entry, incumbents re-established on exit. */
+  suspended: boolean;
+  /** The six pair machines (4dp 10). */
+  pairs: Record<PairKey, PairMachine>;
+}
+
 const ALL_DECKS: CaptureDeck[] = ['A', 'B', 'C', 'D'];
 
 function freshDeck(assignment: CrossfaderAssignment): DeckCapture {
@@ -104,6 +130,19 @@ function freshDeck(assignment: CrossfaderAssignment): DeckCapture {
     pitch: 0,
     audible: false,
     since: 0,
+  };
+}
+
+function freshMachine(): PairMachine {
+  return {
+    incumbent: null,
+    engagedSince: null,
+    outgoingTrackId: null,
+    incomingTrackId: null,
+    incomingSilentSince: null,
+    outSilentSince: null,
+    outTrackAtCessation: null,
+    openSnapshot: null,
   };
 }
 
@@ -123,14 +162,10 @@ export function initialCaptureState(params: DetectorParams = DEFAULT_DETECTOR_PA
     crossfaderEnabled: true,
     tenureHeld: false,
     suspended: false,
-    incumbent: null,
-    engagedSince: null,
-    outgoingTrackId: null,
-    incomingTrackId: null,
-    incomingSilentSince: null,
-    outSilentSince: null,
-    outTrackAtCessation: null,
-    openSnapshot: null,
+    pairs: Object.fromEntries(PAIR_KEYS.map((k) => [k, freshMachine()])) as Record<
+      PairKey,
+      PairMachine
+    >,
   };
 }
 
@@ -144,17 +179,18 @@ function deckAudible(s: CaptureState, ch: CaptureDeck): boolean {
   );
 }
 
-/** How many decks are Master-audible right now (all four; ADR 0033). */
-function audibleDeckCount(s: CaptureState): number {
-  return ALL_DECKS.filter((ch) => deckAudible(s, ch)).length;
-}
-
 /** Is ANY deck Master-audible right now? Recomputed live from the state's
  * audibility inputs (not the cached `.audible` flags). The recorder reads
  * this for the Session lifecycle (sessions 11): lazy activation on the
  * first Master-audible instant and the ten-minute silence split. */
 export function anyDeckAudible(s: CaptureState): boolean {
   return ALL_DECKS.some((ch) => deckAudible(s, ch));
+}
+
+/** The pair-mate of `ch` within `key`. */
+function mate(key: PairKey, ch: CaptureDeck): CaptureDeck {
+  const [x, y] = PAIR_DECKS[key];
+  return ch === x ? y : x;
 }
 
 /** Apply the raw event to deck/mixer state (audibility inputs only —
@@ -183,12 +219,12 @@ function applyEvent(s: CaptureState, e: CaptureEvent): void {
       else if (e.action === 'pause' || e.action === 'cue') s.decks[e.channel].playing = false;
       // PHASE-1 PREVIEW BOUNDARY (ADR 0033 cue-stab capture): previewStart/
       // previewEnd bracket a Master-audible CUE stab in the log, but the
-      // phase-1 pair detector deliberately ignores them — a stab does NOT
-      // flip `playing`, count toward audibility/engagements, or trip the
-      // >2-audible self-gate. This keeps detection byte-identical to before
-      // preview evidence existed. Revisiting preview audibility semantics is
-      // a follow-up grill, not this issue. (seek/jumpBeats/hotCue likewise
-      // ride the log as evidence without touching detection state.)
+      // pair detectors deliberately ignore them — a stab does NOT flip
+      // `playing` or count toward audibility/engagements. This keeps
+      // detection byte-identical to before preview evidence existed.
+      // Revisiting preview audibility semantics is a follow-up grill, not
+      // this issue. (seek/jumpBeats/hotCue likewise ride the log as
+      // evidence without touching detection state.)
       break;
     case 'load':
       s.decks[e.channel].trackId = e.trackId;
@@ -201,24 +237,25 @@ function applyEvent(s: CaptureState, e: CaptureEvent): void {
   }
 }
 
-function dissolve(s: CaptureState): void {
-  s.engagedSince = null;
-  s.outgoingTrackId = null;
-  s.incomingTrackId = null;
-  s.incomingSilentSince = null;
-  s.outSilentSince = null;
-  s.outTrackAtCessation = null;
-  s.openSnapshot = null;
+function dissolve(m: PairMachine): void {
+  m.engagedSince = null;
+  m.outgoingTrackId = null;
+  m.incomingTrackId = null;
+  m.incomingSilentSince = null;
+  m.outSilentSince = null;
+  m.outTrackAtCessation = null;
+  m.openSnapshot = null;
 }
 
-function openEngagement(s: CaptureState, at: number): void {
-  const inc = s.incumbent!;
-  s.engagedSince = at;
+function openEngagement(s: CaptureState, m: PairMachine, key: PairKey, at: number): void {
+  const outgoing = m.incumbent!;
+  const incoming = mate(key, outgoing);
+  m.engagedSince = at;
   // Hard-cut path: the incumbent already ceased — its Track was
   // snapshotted then, so a Load within the cut gap can't mis-attribute.
-  s.outgoingTrackId = s.outTrackAtCessation ?? s.decks[inc].trackId;
-  s.incomingTrackId = s.decks[OTHER[inc]].trackId;
-  s.incomingSilentSince = null;
+  m.outgoingTrackId = m.outTrackAtCessation ?? s.decks[outgoing].trackId;
+  m.incomingTrackId = s.decks[incoming].trackId;
+  m.incomingSilentSince = null;
   const snapDeck = (d: DeckCapture) => ({
     trackId: d.trackId,
     playing: d.playing,
@@ -228,28 +265,73 @@ function openEngagement(s: CaptureState, at: number): void {
     filter: d.filter,
     pitch: d.pitch,
   });
-  s.openSnapshot = {
+  // ROLE-shaped init (ADR 0032 via 4dp 10/12): 'A' is the outgoing role,
+  // 'B' the incoming, whatever the physical decks — which are stamped.
+  m.openSnapshot = {
     t: at,
     kind: 'init',
-    outgoingChannel: inc,
-    decks: { A: snapDeck(s.decks.A), B: snapDeck(s.decks.B) },
+    outgoingChannel: 'A',
+    decks: { A: snapDeck(s.decks[outgoing]), B: snapDeck(s.decks[incoming]) },
     crossfader: s.crossfader,
     crossfaderEnabled: s.crossfaderEnabled,
+    physicalDecks: { outgoing, incoming },
   };
 }
 
-function emitTake(s: CaptureState): DetectedTake | null {
-  if (s.outgoingTrackId === null || s.incomingTrackId === null) return null;
-  const windowStartS = s.engagedSince!;
-  const windowEndS = s.outSilentSince!;
-  const incoming = OTHER[s.incumbent!];
+/** Relabel one log event into a pair's ROLE frame (outgoing→'A',
+ * incoming→'B'); null = not this pair's evidence (another deck's event).
+ * Channel-less controls and tenure markers pass through; ticks keep only
+ * the pair's playheads. The emitted slice therefore honors the ADR 0032
+ * contract — a Take slice only ever contains role-A/B events. */
+function relabel(
+  ev: CaptureEvent,
+  outgoing: CaptureDeck,
+  incoming: CaptureDeck
+): CaptureEvent | null {
+  const role = (ch: CaptureDeck): CaptureDeck | null =>
+    ch === outgoing ? 'A' : ch === incoming ? 'B' : null;
+  switch (ev.kind) {
+    case 'control': {
+      if (ev.channel === null) return ev;
+      const r = role(ev.channel);
+      return r === null ? null : { ...ev, channel: r };
+    }
+    case 'transport':
+    case 'pitch':
+    case 'bend':
+    case 'loop':
+    case 'load': {
+      const r = role(ev.channel);
+      return r === null ? null : { ...ev, channel: r };
+    }
+    case 'tick': {
+      const playheads: Partial<Record<CaptureDeck, number>> = {};
+      const po = ev.playheads[outgoing];
+      const pi = ev.playheads[incoming];
+      if (po !== undefined) playheads.A = po;
+      if (pi !== undefined) playheads.B = pi;
+      return { ...ev, playheads };
+    }
+    default:
+      return ev; // tenure markers; init never rides the live log
+  }
+}
+
+function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake | null {
+  if (m.outgoingTrackId === null || m.incomingTrackId === null) return null;
+  const windowStartS = m.engagedSince!;
+  const windowEndS = m.outSilentSince!;
+  const outgoing = m.incumbent!;
+  const incoming = mate(key, outgoing);
   const overlap = windowEndS - windowStartS;
   const confidence = !s.decks[incoming].audible ? 0.5 : overlap < 1 ? 0.7 : 0.9;
   const lo = windowStartS - s.params.padS;
   const hi = windowEndS + s.params.padS;
   return {
-    outgoingTrackId: s.outgoingTrackId,
-    incomingTrackId: s.incomingTrackId,
+    outgoingTrackId: m.outgoingTrackId,
+    incomingTrackId: m.incomingTrackId,
+    outgoingDeck: outgoing,
+    incomingDeck: incoming,
     windowStartS,
     windowEndS,
     confidence,
@@ -262,22 +344,27 @@ function emitTake(s: CaptureState): DetectedTake | null {
     // reflects them, and that's safe: control events carry absolute values
     // (set, not delta), so replaying them over init is idempotent.
     events: [
-      ...(s.openSnapshot ? [s.openSnapshot] : []),
-      ...s.log.filter((ev) => ev.t >= lo && ev.t <= hi),
+      ...(m.openSnapshot ? [m.openSnapshot] : []),
+      ...s.log
+        .filter((ev) => ev.t >= lo && ev.t <= hi)
+        .map((ev) => relabel(ev, outgoing, incoming))
+        .filter((ev): ev is CaptureEvent => ev !== null),
     ],
   };
 }
 
 /**
- * Feed one event; returns the next state and any settled Takes (0 or 1).
+ * Feed one event; returns the next state and any settled Takes. With six
+ * pair machines one moment may settle several (deliberately liberal —
+ * glossary Handover).
  */
 export function reduceCapture(
   state: CaptureState,
   e: CaptureEvent
 ): [CaptureState, DetectedTake[]] {
   // The input state is never mutated: everything below works on this
-  // deck-deep clone (imperative onEdge/applyEvent helpers mutate the
-  // clone, not the caller's state — externally the reducer stays pure).
+  // deep clone (imperative onEdge/applyEvent helpers mutate the clone,
+  // not the caller's state — externally the reducer stays pure).
   const s: CaptureState = {
     ...state,
     decks: {
@@ -286,6 +373,9 @@ export function reduceCapture(
       C: { ...state.decks.C },
       D: { ...state.decks.D },
     },
+    pairs: Object.fromEntries(
+      PAIR_KEYS.map((k) => [k, { ...state.pairs[k] }])
+    ) as Record<PairKey, PairMachine>,
     log: [...state.log, e],
   };
   const takes: DetectedTake[] = [];
@@ -294,43 +384,47 @@ export function reduceCapture(
   applyEvent(s, e);
 
   // Tenure markers (ADR 0033) move the old recorder surface gate into the
-  // log: a machine holding the surface suspends the pair machine's verdicts
-  // exactly as the surface gate did — the log keeps growing regardless.
+  // log: a machine holding the surface suspends every pair machine's
+  // verdicts exactly as the surface gate did — the log grows regardless.
   if (e.kind === 'tenure') s.tenureHeld = e.edge === 'start';
 
-  // Keep C/D audibility current for the >2-audible count (the pair machine
-  // ignores them; only the self-gate reads their audibility).
-  for (const ch of ['C', 'D'] as CaptureDeck[]) {
-    const audible = deckAudible(s, ch);
-    if (audible !== s.decks[ch].audible) {
-      s.decks[ch].audible = audible;
-      s.decks[ch].since = now;
-    }
-  }
-
-  // Suspension edge (tenure held OR >2 decks audible; ADR 0033). `audibleDeckCount`
-  // recomputes all four live, so it's correct before the A/B `.audible`
-  // fields are written by the edge loop below. Entering discards any
-  // in-flight engagement and clears incumbency; leaving re-establishes the
-  // incumbent from current A/B audibility (the recorder re-seeds in step).
-  const suspendedNow = s.tenureHeld || audibleDeckCount(s) > 2;
+  // Suspension edge — tenure ONLY (4dp 37). Entering discards in-flight
+  // engagements and clears incumbency on every machine; leaving
+  // re-establishes each machine's incumbent from its own decks' current
+  // audibility (the recorder re-seeds in step).
+  const suspendedNow = s.tenureHeld;
   if (suspendedNow && !s.suspended) {
-    dissolve(s);
-    s.incumbent = null;
-    s.outSilentSince = null;
-    s.outTrackAtCessation = null;
-    s.incomingSilentSince = null;
+    for (const key of PAIR_KEYS) {
+      const m = s.pairs[key];
+      dissolve(m);
+      m.incumbent = null;
+    }
   } else if (!suspendedNow && s.suspended) {
-    // Re-seed: the audible-first A/B deck becomes incumbent (or nobody).
-    // No Handover spans the suspended gap.
-    s.decks.A.audible = deckAudible(s, 'A');
-    s.decks.B.audible = deckAudible(s, 'B');
-    s.incumbent = s.decks.A.audible ? 'A' : s.decks.B.audible ? 'B' : null;
+    for (const ch of ALL_DECKS) {
+      const audible = deckAudible(s, ch);
+      if (audible !== s.decks[ch].audible) {
+        s.decks[ch].audible = audible;
+        s.decks[ch].since = now;
+      }
+    }
+    for (const key of PAIR_KEYS) {
+      const [x, y] = PAIR_DECKS[key];
+      // No Handover spans the suspended gap: audible-first (or nobody).
+      s.pairs[key].incumbent = s.decks[x].audible ? x : s.decks[y].audible ? y : null;
+    }
   }
   s.suspended = suspendedNow;
 
   if (s.suspended) {
-    // Log grows (already pushed); pair machine stands down. Prune and return.
+    // Log grows (already pushed); machines stand down. Keep the deck
+    // audibility cache current so the exit re-seed reads reality.
+    for (const ch of ALL_DECKS) {
+      const audible = deckAudible(s, ch);
+      if (audible !== s.decks[ch].audible) {
+        s.decks[ch].audible = audible;
+        s.decks[ch].since = now;
+      }
+    }
     pruneLog(s, now);
     return [s, takes];
   }
@@ -344,65 +438,71 @@ export function reduceCapture(
   // - Otherwise → bail: abandoning a blend by loading fresh tracks is
   //   not a Handover; dissolve with no Take.
   // A Load onto a LIVE incumbent also resets incumbency — its audible run
-  // ended by replacement, not by mix-out. (A Load onto an already-ceased
-  // incumbent keeps the cut-gap defense: outTrackAtCessation still
-  // attributes the outgoing.)
+  // ended by replacement, not by mix-out. Applied per machine whose pair
+  // contains the loaded deck.
   if (e.kind === 'load') {
-    if (s.engagedSince !== null) {
-      if (s.outSilentSince !== null) {
-        const take = emitTake(s);
-        if (take) takes.push(take);
-        const incoming = OTHER[s.incumbent!];
-        s.incumbent = s.decks[incoming].audible ? incoming : null;
+    for (const key of PAIR_KEYS) {
+      if (!PAIR_DECKS[key].includes(e.channel)) continue;
+      const m = s.pairs[key];
+      if (m.engagedSince !== null) {
+        if (m.outSilentSince !== null) {
+          const take = emitTake(s, m, key);
+          if (take) takes.push(take);
+          const incoming = mate(key, m.incumbent!);
+          m.incumbent = s.decks[incoming].audible ? incoming : null;
+        }
+        dissolve(m);
       }
-      dissolve(s);
-    }
-    if (s.incumbent === e.channel && s.outSilentSince === null) {
-      s.incumbent = null;
+      if (m.incumbent === e.channel && m.outSilentSince === null) {
+        m.incumbent = null;
+      }
     }
   }
 
-  // Audibility edges — CESSATIONS FIRST: an event flipping both decks at
-  // once (a crossfader flick) must anchor as a cut at the cessation, on
-  // either incumbency, not ride whichever deck the loop visited first.
-  // PHASE-1 PAIR BOUNDARY (ADR 0032, sessions 09): this A/B loop is the
-  // pair-machine Take classifier, deliberately not the whole-Session log —
-  // C/D evidence is captured in full (recorder) and counted for the
-  // >2-audible self-gate above; only the HANDOVER verdict trades on A/B.
-  const edges = (['A', 'B'] as CaptureChannel[])
+  // Audibility edges — CESSATIONS FIRST: an event flipping both decks of
+  // a pair at once (a crossfader flick) must anchor as a cut at the
+  // cessation, on either incumbency, not ride whichever deck the loop
+  // visited first. Each edge feeds every machine whose pair contains the
+  // deck; the machines are pairwise-local (4dp 10/37).
+  const edges = ALL_DECKS
     .map((ch) => ({ ch, audible: deckAudible(s, ch) }))
     .filter(({ ch, audible }) => audible !== s.decks[ch].audible)
     .sort((a, b) => Number(a.audible) - Number(b.audible));
   for (const { ch, audible } of edges) {
     s.decks[ch].audible = audible;
     s.decks[ch].since = now;
-    onEdge(s, ch, audible, now);
-  }
-
-  // Time-driven settlement / dissolution.
-  if (s.outSilentSince !== null && now - s.outSilentSince >= s.params.settleHorizonS) {
-    if (s.engagedSince !== null) {
-      const take = emitTake(s);
-      if (take) takes.push(take);
-      // The incoming deck inherits incumbency (it may itself already be
-      // silent — then nobody is incumbent).
-      const incoming = OTHER[s.incumbent!];
-      s.incumbent = s.decks[incoming].audible ? incoming : null;
-      dissolve(s);
-    } else {
-      // Lone incumbent stopped and nothing came in: not a Handover.
-      s.incumbent = null;
-      s.outSilentSince = null;
-      s.outTrackAtCessation = null;
+    for (const key of PAIR_KEYS) {
+      if (PAIR_DECKS[key].includes(ch)) onEdge(s, key, ch, audible, now);
     }
   }
-  if (
-    s.engagedSince !== null &&
-    s.incomingSilentSince !== null &&
-    now - s.incomingSilentSince >= s.params.settleHorizonS
-  ) {
-    // Tease-and-bail: the outgoing survived; no Take.
-    dissolve(s);
+
+  // Time-driven settlement / dissolution, per machine.
+  for (const key of PAIR_KEYS) {
+    const m = s.pairs[key];
+    if (m.outSilentSince !== null && now - m.outSilentSince >= s.params.settleHorizonS) {
+      if (m.engagedSince !== null) {
+        const take = emitTake(s, m, key);
+        if (take) takes.push(take);
+        // The incoming deck inherits incumbency (it may itself already be
+        // silent — then nobody is incumbent).
+        const incoming = mate(key, m.incumbent!);
+        m.incumbent = s.decks[incoming].audible ? incoming : null;
+        dissolve(m);
+      } else {
+        // Lone incumbent stopped and nothing came in: not a Handover.
+        m.incumbent = null;
+        m.outSilentSince = null;
+        m.outTrackAtCessation = null;
+      }
+    }
+    if (
+      m.engagedSince !== null &&
+      m.incomingSilentSince !== null &&
+      now - m.incomingSilentSince >= s.params.settleHorizonS
+    ) {
+      // Tease-and-bail: the outgoing survived; no Take.
+      dissolve(m);
+    }
   }
 
   pruneLog(s, now);
@@ -410,57 +510,70 @@ export function reduceCapture(
   return [s, takes];
 }
 
-/** Prune the rolling log to the current retention horizon. */
+/** Prune the rolling log to the current retention horizon — the most
+ * retentive machine wins (an engaged pair pins its window's pad). */
 function pruneLog(s: CaptureState, now: number): void {
-  const keepFrom =
-    s.engagedSince !== null
-      ? s.engagedSince - s.params.padS
-      : (s.outSilentSince ?? now) - s.params.idleKeepS;
+  let keepFrom = Infinity;
+  for (const key of PAIR_KEYS) {
+    const m = s.pairs[key];
+    const need =
+      m.engagedSince !== null
+        ? m.engagedSince - s.params.padS
+        : (m.outSilentSince ?? now) - s.params.idleKeepS;
+    if (need < keepFrom) keepFrom = need;
+  }
   if (s.log.length > 0 && s.log[0].t < keepFrom) {
     s.log = s.log.filter((ev) => ev.t >= keepFrom);
   }
 }
 
-/** An audibility edge on one deck. */
-function onEdge(s: CaptureState, ch: CaptureChannel, audible: boolean, now: number): void {
-  if (s.incumbent === null) {
-    if (audible) s.incumbent = ch;
+/** An audibility edge on one deck, within one pair machine. */
+function onEdge(
+  s: CaptureState,
+  key: PairKey,
+  ch: CaptureDeck,
+  audible: boolean,
+  now: number
+): void {
+  const m = s.pairs[key];
+  if (m.incumbent === null) {
+    if (audible) m.incumbent = ch;
     return;
   }
 
-  const incumbent = s.incumbent;
+  const incumbent = m.incumbent;
   const isIncumbent = ch === incumbent;
 
   if (!isIncumbent) {
-    // The OTHER deck (incoming candidate).
+    // The pair-mate (incoming candidate).
     if (audible) {
-      if (s.engagedSince !== null) {
-        s.incomingSilentSince = null; // fold a tease gap
+      if (m.engagedSince !== null) {
+        m.incomingSilentSince = null; // fold a tease gap
       } else if (s.decks[incumbent].audible) {
-        openEngagement(s, now); // overlap onset
+        openEngagement(s, m, key, now); // overlap onset
       } else if (
-        s.outSilentSince !== null &&
-        now - s.outSilentSince <= s.params.cutGapMaxS
+        m.outSilentSince !== null &&
+        now - m.outSilentSince <= s.params.cutGapMaxS
       ) {
-        openEngagement(s, s.outSilentSince); // hard cut: window is the cut instant
+        openEngagement(s, m, key, m.outSilentSince); // hard cut: window is the cut instant
       } else {
         // Incumbent long gone: fresh incumbency, no Handover.
-        s.incumbent = ch;
-        s.outSilentSince = null;
-        s.outTrackAtCessation = null;
+        m.incumbent = ch;
+        m.outSilentSince = null;
+        m.outTrackAtCessation = null;
       }
-    } else if (s.engagedSince !== null && s.outSilentSince === null) {
-      s.incomingSilentSince = now; // tease clock (outgoing still here)
+    } else if (m.engagedSince !== null && m.outSilentSince === null) {
+      m.incomingSilentSince = now; // tease clock (outgoing still here)
     }
     return;
   }
 
   // The incumbent (outgoing candidate).
   if (!audible) {
-    s.outSilentSince = now;
-    s.outTrackAtCessation = s.decks[incumbent].trackId;
-  } else if (s.outSilentSince !== null) {
-    s.outSilentSince = null; // cross-cut fold / lone-incumbent return
-    s.outTrackAtCessation = null;
+    m.outSilentSince = now;
+    m.outTrackAtCessation = s.decks[incumbent].trackId;
+  } else if (m.outSilentSince !== null) {
+    m.outSilentSince = null; // cross-cut fold / lone-incumbent return
+    m.outTrackAtCessation = null;
   }
 }
