@@ -100,6 +100,12 @@ export function DeckWaveform({
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
+  // Any audibly-advancing state pins the waveform loop at 60fps and wakes it
+  // instantly at play (performance-hardening 01) — same set usePlayGuides
+  // treats as "moving".
+  const advancing = useDeckSnapshot(
+    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
+  );
 
   const transport = useScrubTransport();
 
@@ -126,6 +132,7 @@ export function DeckWaveform({
         transport={transport}
         dimmed={loadedTrack !== null && !ready}
         beatjumpBeats={beatjumpBeats}
+        playing={advancing}
         visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
         onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
       />
@@ -654,6 +661,10 @@ export function DeckPanel({
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
+  // Same advancing set as the full waveform (performance-hardening 01).
+  const advancing = useDeckSnapshot(
+    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
+  );
   const track = useDeckTrack();
 
   return (
@@ -674,6 +685,7 @@ export function DeckPanel({
             loop={loop}
             onSeek={(t) => ready && engine.seek(t)}
             dimmed={track !== null && !ready}
+            playing={advancing}
           />
           {/* Play guides at track scale (play-guides PRD): how far out is
               the press moment. Shows only while this Deck is outgoing. */}

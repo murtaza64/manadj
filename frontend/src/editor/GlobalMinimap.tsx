@@ -7,6 +7,7 @@
  * triangles, viewport rectangle (drag to pan), playhead. Click = seek.
  */
 import { useEffect, useRef } from 'react';
+import { useViewActive } from '../contexts/viewActive';
 import { DECK_COLORS, hexToRgbTriplet } from '../theme/deckColors';
 import { cueCssColor } from '../hotcues/palette';
 import { bContentSegments, bEndMixTime, bTrackTimeAt, laneValuesAt } from './mixModel';
@@ -14,6 +15,10 @@ import { MixPlayer } from './MixPlayer';
 import type { EditorMix } from './mixModel';
 import type { ThreeBandWaveform } from '../waveform/blob';
 import type { HotCue } from '../types';
+
+/** Idle-poll cadence when the mix is paused and nothing changed
+ * (performance-hardening 01) — the shared motion-clock idiom. */
+const IDLE_TICK_MS = 250;
 
 /**
  * Global minimap of the whole mix: A's waveform where only A is audible,
@@ -54,6 +59,13 @@ export function GlobalMinimap({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const baseRef = useRef<HTMLCanvasElement | null>(null);
   const drag = useRef<{ grabOffsetSec: number } | null>(null);
+  const viewActive = useViewActive();
+  // The base canvas is redrawn IN PLACE (same element), so the overlay's
+  // dirty key tracks a version counter, not the canvas identity.
+  const baseVersionRef = useRef(0);
+  // Pointer interactions (seek, viewport drag) pull an idle-parked loop
+  // forward so the first response frame is immediate, not a poll later.
+  const wakeRef = useRef<() => void>(() => {});
 
   // ── Base layer: waveforms + transition frame (debounced redraw) ──
   useEffect(() => {
@@ -155,49 +167,81 @@ export function GlobalMinimap({
           cueFlag((mixT / contentEnd) * w, 'bottom', cueCssColor(c.slot_number, c.color));
         }
       }
+      // New base pixels: bump the version and pull the idle overlay loop
+      // forward so they composite this frame (performance-hardening 01).
+      baseVersionRef.current++;
+      wakeRef.current();
     }, 100);
     return () => clearTimeout(timer);
   }, [mix, waveA, waveB, rateB, contentEnd, hotCuesA, hotCuesB]);
 
-  // ── Overlay layer: viewport rect + playhead (rAF) ──
+  // ── Overlay layer: viewport rect + playhead (dirty-keyed motion clock,
+  // performance-hardening 01): redraw only when the composited inputs
+  // changed (base version, viewport rect, playhead, canvas size); rAF while
+  // the mix plays or a drag pans, else a 250ms idle poll. Sleeps entirely
+  // while the editor view is hidden (the effect gates on viewActive and
+  // repaints immediately on re-activation). ──
   useEffect(() => {
+    if (!viewActive) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     let raf = 0;
+    let idleTimer = 0;
+    let lastDrawKey = '';
+    const schedule = (active: boolean) => {
+      if (active) raf = requestAnimationFrame(tick);
+      else idleTimer = window.setTimeout(tick, IDLE_TICK_MS);
+    };
     const tick = () => {
-      raf = requestAnimationFrame(tick);
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
-      if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
+      const drawKey =
+        `${baseVersionRef.current}:${getScrollPx()}:${getViewPx()}:` +
+        `${player.getMixTime()}:${w}x${h}:${dpr}`;
+      const didDraw = drawKey !== lastDrawKey;
+      if (didDraw) {
+        lastDrawKey = drawKey;
+        if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+          canvas.width = w * dpr;
+          canvas.height = h * dpr;
+        }
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+        if (baseRef.current) ctx.drawImage(baseRef.current, 0, 0, w, h);
+
+        const viewStart = getScrollPx() / pxPerSec;
+        const viewSec = getViewPx() / pxPerSec;
+        const vx = (viewStart / contentEnd) * w;
+        const vw = Math.min((viewSec / contentEnd) * w, w);
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(vx + 0.5, 0.5, vw - 1, h - 1);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillRect(vx, 0, vw, h);
+
+        const px = (player.getMixTime() / contentEnd) * w;
+        // Playhead in Deck A's color: mix time ≡ the outgoing (A) Track's
+        // time (CONTEXT.md: Sketch origin / Slide).
+        ctx.fillStyle = DECK_COLORS.A;
+        ctx.fillRect(px - 1, 0, 2, h);
       }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-      if (baseRef.current) ctx.drawImage(baseRef.current, 0, 0, w, h);
-
-      const viewStart = getScrollPx() / pxPerSec;
-      const viewSec = getViewPx() / pxPerSec;
-      const vx = (viewStart / contentEnd) * w;
-      const vw = Math.min((viewSec / contentEnd) * w, w);
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(vx + 0.5, 0.5, vw - 1, h - 1);
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      ctx.fillRect(vx, 0, vw, h);
-
-      const px = (player.getMixTime() / contentEnd) * w;
-      // Playhead in Deck A's color: mix time ≡ the outgoing (A) Track's
-      // time (CONTEXT.md: Sketch origin / Slide).
-      ctx.fillStyle = DECK_COLORS.A;
-      ctx.fillRect(px - 1, 0, 2, h);
+      schedule(player.isPlaying() || drag.current !== null || didDraw);
+    };
+    wakeRef.current = () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(idleTimer);
+      raf = requestAnimationFrame(tick);
     };
     tick();
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      wakeRef.current = () => {};
+      cancelAnimationFrame(raf);
+      window.clearTimeout(idleTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player, contentEnd, pxPerSec]);
+  }, [player, contentEnd, pxPerSec, viewActive]);
 
   const secAt = (e: React.PointerEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -219,11 +263,13 @@ export function GlobalMinimap({
           drag.current = null;
           player.seek(sec);
         }
+        wakeRef.current();
       }}
       onPointerMove={(e) => {
         if (!drag.current) return;
         const sec = secAt(e);
         setScrollPx((sec - drag.current.grabOffsetSec) * pxPerSec);
+        wakeRef.current();
       }}
       onPointerUp={() => (drag.current = null)}
       onPointerCancel={() => (drag.current = null)}

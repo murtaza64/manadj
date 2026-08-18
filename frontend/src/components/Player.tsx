@@ -20,6 +20,11 @@ export default function Player() {
   const loadError = useDeckSnapshot((s) => s.loadError);
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
+  // Audibly-advancing states pin the waveform loop at 60fps and wake it
+  // instantly at play (performance-hardening 01).
+  const advancing = useDeckSnapshot(
+    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
+  );
   const trackId = loadedTrack?.id ?? null;
 
   const scrubTransport = useScrubTransport();
@@ -36,6 +41,7 @@ export default function Player() {
           transport={scrubTransport}
           dimmed={trackId !== null && !ready}
           beatjumpBeats={beatjumpBeats}
+          playing={advancing}
           playMarkerFraction={0.35}
           timeReadoutAnchor="top-left"
           /* Docked at the transport overlay's bottom edge (panel bottom

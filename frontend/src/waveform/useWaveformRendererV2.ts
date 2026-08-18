@@ -37,6 +37,17 @@ interface Options {
   /** Which persisted Waveform style slot this surface renders with.
    * Defaults to 'full'; minimaps pass 'minimap'. */
   slot?: SlotName;
+  /** Whether the owning mode view is currently visible (performance-hardening
+   * 01): false sleeps the self-driven rAF loop entirely (keep-alive views
+   * stay mounted while hidden). Ignored in `driven` mode — the caller's
+   * motion clock owns scheduling. Defaults to true. */
+  active?: boolean;
+  /** Whether the deck is currently advancing (performance-hardening 01):
+   * true pins the loop at 60fps so playback is smooth, and a false→true flip
+   * wakes an idle-polling loop instantly (no ≤250ms hitch at play). Playhead
+   * motion alone would eventually wake it, but not on the first frame.
+   * Ignored in `driven` mode. Defaults to false. */
+  playing?: boolean;
 }
 
 export function useWaveformRendererV2({
@@ -52,6 +63,8 @@ export function useWaveformRendererV2({
   dropMarks,
   driven = false,
   slot = 'full',
+  active = true,
+  playing = false,
 }: Options) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WaveformRendererV2 | null>(null);
@@ -80,6 +93,21 @@ export function useWaveformRendererV2({
   const draw = useCallback(() => {
     rendererRef.current?.renderFrame(clock);
   }, [clock]);
+
+  // View-visibility gating (performance-hardening 01): sleep the self-driven
+  // loop while hidden. Only the self-running loop is gated — `driven`
+  // surfaces schedule through their caller. Re-applied after re-init
+  // (waveformData) so a fresh renderer inherits the current visibility.
+  useEffect(() => {
+    if (!driven) rendererRef.current?.setActive(active);
+  }, [active, driven, waveformData]);
+
+  // Playing gate (performance-hardening 01): pin the loop at 60fps while the
+  // deck advances; the false→true flip also wakes an idle-polling loop
+  // instantly (no play hitch). Re-applied after re-init.
+  useEffect(() => {
+    if (!driven) rendererRef.current?.setPlaying(playing);
+  }, [playing, driven, waveformData]);
 
   // Persisted Waveform style: applied live (also after re-init).
   useEffect(() => {

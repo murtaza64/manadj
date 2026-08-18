@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
+import { useViewActive } from '../contexts/viewActive';
 import { loopOverlayRegions } from '../waveform/loopOverlay';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useMetricLadderData } from '../hooks/useMetricLadderData';
@@ -48,6 +49,10 @@ interface WebGLWaveformProps {
   /** Time/bar readout placement (renderer config passthrough). */
   timeReadoutAnchor?: 'bottom-right' | 'top-left';
   timeReadoutOffset?: { x: number; y: number };
+  /** Whether the deck is advancing (performance-hardening 01): pins the
+   * render loop at 60fps and wakes it instantly at play. Defaults to false
+   * (the loop then idles on paused, unchanged frames). */
+  playing?: boolean;
 }
 
 export default function WebGLWaveform({
@@ -64,6 +69,7 @@ export default function WebGLWaveform({
   playMarkerFraction = PLAY_MARKER_FRACTION,
   timeReadoutAnchor,
   timeReadoutOffset,
+  playing = false,
 }: WebGLWaveformProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: beatgridData } = useBeatgridData(trackId);
@@ -72,6 +78,7 @@ export default function WebGLWaveform({
   // Possible drops (structure-analysis 02): fetch once blob + grid exist.
   const { drops } = useDrops(trackId, Boolean(waveformData && beatgridData));
   const regions = useMemo(() => loopOverlayRegions(loop), [loop]);
+  const viewActive = useViewActive();
 
   const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
     clock,
@@ -90,6 +97,8 @@ export default function WebGLWaveform({
     beatjumpBeats,
     regions,
     dropMarks: drops,
+    active: viewActive,
+    playing,
   });
 
   // Apply the shared time-zoom (also after re-init when new data lands).
@@ -131,6 +140,9 @@ export default function WebGLWaveform({
     const width = event.currentTarget.clientWidth || 1;
     const seconds = visibleSeconds ?? rendererRef.current.getVisibleSeconds();
     transport.seek(dragStartPlayhead.current - (dx / width) * seconds);
+    // Paused scrub: each seek wakes the idle loop so the drag paints at
+    // 60fps from the first move (performance-hardening 01).
+    rendererRef.current.markDirty();
   };
 
   const endDrag = (event: React.MouseEvent<HTMLCanvasElement>) => {
