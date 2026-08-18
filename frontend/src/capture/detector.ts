@@ -251,13 +251,51 @@ function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake |
     // Pre-window pad events ARE included (context); the init state already
     // reflects them, and that's safe: control events carry absolute values
     // (set, not delta), so replaying them over init is idempotent.
-    events: [
-      ...(m.openSnapshot ? [m.openSnapshot] : []),
-      ...s.log
-        .filter((ev) => ev.t >= lo && ev.t <= hi)
-        .map((ev) => relabel(ev, outgoing, incoming))
-        .filter((ev): ev is CaptureEvent => ev !== null),
-    ],
+    // Single pass over the log (capture spine 02): relabel yields fresh
+    // per-event copies, so the slice stays immutable evidence.
+    events: sliceTake(s.log, lo, hi, outgoing, incoming, m.openSnapshot),
+  };
+}
+
+/** Build a Take's role-relabeled event slice in one pass: the init head
+ * (if any), then every logged event in [lo, hi] that belongs to the pair,
+ * relabeled to A/B. relabel returns fresh copies, so the result is an
+ * immutable evidence slice (never aliases the rolling log). */
+function sliceTake(
+  log: CaptureEvent[],
+  lo: number,
+  hi: number,
+  outgoing: CaptureDeck,
+  incoming: CaptureDeck,
+  head: Extract<CaptureEvent, { kind: 'init' }> | null
+): CaptureEvent[] {
+  const events: CaptureEvent[] = [];
+  if (head) events.push(head);
+  for (const ev of log) {
+    if (ev.t < lo || ev.t > hi) continue;
+    const r = relabel(ev, outgoing, incoming);
+    if (r !== null) events.push(r);
+  }
+  return events;
+}
+
+/** Deep-clone the reducible state so a mutating reduce can't reach the
+ * caller's copy. The rolling `log` array is copied by reference-of-elements
+ * (events are immutable); everything the imperative helpers write —
+ * per-deck audibility cache, `eq`, pair machines — is cloned. */
+function cloneCaptureState(state: CaptureState): CaptureState {
+  return {
+    ...state,
+    decks: {
+      A: { ...state.decks.A, eq: { ...state.decks.A.eq } },
+      B: { ...state.decks.B, eq: { ...state.decks.B.eq } },
+      C: { ...state.decks.C, eq: { ...state.decks.C.eq } },
+      D: { ...state.decks.D, eq: { ...state.decks.D.eq } },
+    },
+    pairs: Object.fromEntries(
+      PAIR_KEYS.map((k) => [k, { ...state.pairs[k] }])
+    ) as Record<PairKey, PairMachine>,
+    log: [...state.log],
   };
 }
 
@@ -265,27 +303,47 @@ function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake |
  * Feed one event; returns the next state and any settled Takes. With six
  * pair machines one moment may settle several (deliberately liberal —
  * glossary Handover).
+ *
+ * PURE wrapper (the detector's tested seam): the input state is never
+ * mutated — it is cloned once, then reduced in place. The always-on
+ * recorder owns its state and skips the clone (`reduceCaptureInto` /
+ * `reduceCaptureBatch`, capture spine 02): the deep clone was ~6× the
+ * per-event cost during a busy passage (a crossfader ride).
  */
 export function reduceCapture(
   state: CaptureState,
   e: CaptureEvent
 ): [CaptureState, DetectedTake[]] {
-  // The input state is never mutated: everything below works on this
-  // deep clone (imperative onEdge/applyEvent helpers mutate the clone,
-  // not the caller's state — externally the reducer stays pure).
-  const s: CaptureState = {
-    ...state,
-    decks: {
-      A: { ...state.decks.A },
-      B: { ...state.decks.B },
-      C: { ...state.decks.C },
-      D: { ...state.decks.D },
-    },
-    pairs: Object.fromEntries(
-      PAIR_KEYS.map((k) => [k, { ...state.pairs[k] }])
-    ) as Record<PairKey, PairMachine>,
-    log: [...state.log, e],
-  };
+  const s = cloneCaptureState(state);
+  const takes = reduceCaptureInto(s, e);
+  return [s, takes];
+}
+
+/**
+ * Reduce a whole batch of events into `state` IN PLACE (capture spine 02):
+ * the recorder queues the events a single notify produced and reduces them
+ * in one pass over its owned state — no per-event clone, no O(n) log copy.
+ * Event timestamps are captured at enqueue, so ordering/clock are
+ * identical to the per-event path; settlement is time-driven off the ~1 Hz
+ * ticks regardless. Returns every Take the batch settled, in order.
+ */
+export function reduceCaptureBatch(state: CaptureState, events: CaptureEvent[]): DetectedTake[] {
+  const takes: DetectedTake[] = [];
+  for (const e of events) {
+    const emitted = reduceCaptureInto(state, e);
+    if (emitted.length > 0) takes.push(...emitted);
+  }
+  return takes;
+}
+
+/**
+ * The mutating reduce core: apply one event to `s` IN PLACE and return any
+ * settled Takes. The caller owns `s` (the recorder, or the pure wrapper's
+ * fresh clone) — the imperative onEdge/applyEvent helpers write straight
+ * to it.
+ */
+export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTake[] {
+  s.log.push(e);
   const takes: DetectedTake[] = [];
   const now = e.t;
 
@@ -338,7 +396,7 @@ export function reduceCapture(
       }
     }
     pruneLog(s, now);
-    return [s, takes];
+    return takes;
   }
 
   // A Load re-premises the deck: the track being traded no longer exists
@@ -419,11 +477,18 @@ export function reduceCapture(
 
   pruneLog(s, now);
 
-  return [s, takes];
+  return takes;
 }
 
 /** Prune the rolling log to the current retention horizon — the most
- * retentive machine wins (an engaged pair pins its window's pad). */
+ * retentive machine wins (an engaged pair pins its window's pad).
+ *
+ * Ring-buffer with an index horizon (capture spine 02): events are chrono-
+ * ordered, so the dead prefix is a contiguous run at the front. Count it
+ * and drop it with ONE in-place splice — no full `filter` copy per event
+ * (the O(n)→O(n²) hazard over a busy passage). Nothing is dropped on the
+ * common event (splice(0,0) is a no-op), so the steady-state cost is O(1).
+ * `s.log[0]` stays the first retained event, as the detector reads it. */
 function pruneLog(s: CaptureState, now: number): void {
   let keepFrom = Infinity;
   for (const key of PAIR_KEYS) {
@@ -434,9 +499,11 @@ function pruneLog(s: CaptureState, now: number): void {
         : (m.outSilentSince ?? now) - s.params.idleKeepS;
     if (need < keepFrom) keepFrom = need;
   }
-  if (s.log.length > 0 && s.log[0].t < keepFrom) {
-    s.log = s.log.filter((ev) => ev.t >= keepFrom);
-  }
+  const log = s.log;
+  if (log.length === 0 || log[0].t >= keepFrom) return;
+  let dead = 0;
+  while (dead < log.length && log[dead].t < keepFrom) dead++;
+  log.splice(0, dead);
 }
 
 /** An audibility edge on one deck, within one pair machine. */
