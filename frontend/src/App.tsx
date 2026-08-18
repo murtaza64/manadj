@@ -7,6 +7,7 @@ const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
 const JogTuningPage = lazy(() => import('./midi/JogTuningPage'));
 const VisualizerApp = lazy(() => import('./visualizer/VisualizerApp'));
+const ArenaApp = lazy(() => import('./visualizer/ArenaApp'));
 import Library from './components/Library';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
@@ -136,10 +137,11 @@ function App() {
   // 0009). Band data arrives over the BroadcastChannel from the main
   // window's VisualizerBridge.
   if (window.location.pathname === '/visualizer') {
+    // ?arena=1 → the genetic judging arena (realtime-visualization 06);
+    // same standalone rules: no DeckProvider, never an AudioContext.
+    const arena = new URLSearchParams(window.location.search).has('arena');
     return (
-      <Suspense fallback={null}>
-        <VisualizerApp />
-      </Suspense>
+      <Suspense fallback={null}>{arena ? <ArenaApp /> : <VisualizerApp />}</Suspense>
     );
   }
 

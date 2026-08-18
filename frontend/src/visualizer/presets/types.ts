@@ -27,6 +27,10 @@ export interface VisualizerFrameData {
   trend: EnergyTrend;
   /** Normalized spectral centroid (0 dark … 1 bright, 0.5 neutral). */
   centroid: number;
+  /** Spectral spread: how WIDE the sound is (0 narrow … 1 full-spectrum). */
+  spread: number;
+  /** Spectral flatness: tonal (0) vs noisy (1). */
+  flatness: number;
   /** Per-deck audible state (deck-aware presets); empty when unknown. */
   decks: DeckStateInfo[];
   /** Resolved values for the preset's declared params (id → value). */

@@ -9,6 +9,8 @@ import {
   aggregateMultiband,
   logBandEdges,
   spectralCentroid,
+  spectralFlatness,
+  spectralSpread,
   stepBands,
   stepImpulses,
   stepLevels,
@@ -20,6 +22,8 @@ import {
 import type { BandLevels, EnergyTrend, ImpulseState } from '../visualizer/bands';
 import { energyOf } from '../visualizer/style';
 import { beatPositionAt } from '../visualizer/beat';
+import { INITIAL_DOMINANCE, stepDominance } from '../visualizer/dominance';
+import type { DominanceState } from '../visualizer/dominance';
 import { deckMasterGain, isDeckAudible } from '../capture/audibility';
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import { meanAbsoluteToNormalized } from '../midi/levelMeter';
@@ -69,19 +73,27 @@ export function VisualizerBridge() {
     let lastFrameAt = 0;
     let disposed = false;
 
+    // Dominant audible deck with ~700ms windowed hysteresis (dominance.ts):
+    // instantaneous argmax flapped the beat/phase source during double drops
+    // and layered sections (human note 2026-08-18).
+    let dominance: DominanceState = INITIAL_DOMINANCE;
+    let lastDominanceAt = performance.now();
     const readBeat = (): BeatInfo | null => {
-      // Dominant audible deck: argmax channel level among running engines.
-      let best: (typeof decksRef.current)[keyof typeof decksRef.current] | null = null;
-      let bestLevel = -1;
-      for (const id of CHANNEL_IDS) {
-        const deck = decksRef.current[id];
-        if (!deck?.engine.isAudioRunning()) continue;
-        const level = mixer.readChannelLevel(id).meanAbsolute;
-        if (level > bestLevel) {
-          bestLevel = level;
-          best = deck;
-        }
-      }
+      const now = performance.now();
+      const dt = (now - lastDominanceAt) / 1000;
+      lastDominanceAt = now;
+      dominance = stepDominance(
+        dominance,
+        CHANNEL_IDS.map((id) => ({
+          id,
+          level: mixer.readChannelLevel(id).meanAbsolute,
+          eligible: decksRef.current[id]?.engine.isAudioRunning() ?? false,
+        })),
+        dt
+      );
+      const best = dominance.dominantId
+        ? decksRef.current[dominance.dominantId as (typeof CHANNEL_IDS)[number]]
+        : null;
       if (!best) return null;
       // asLaunchReference self-gates on audible + gridded (≥1 beat).
       const reference = best.engine.asLaunchReference();
@@ -230,6 +242,8 @@ export function VisualizerBridge() {
         impulse: impulseRef.current.impulse,
         trend: trendRef.current,
         centroid: spectralCentroid(spectrumRef.current),
+        spread: spectralSpread(spectrumRef.current),
+        flatness: spectralFlatness(spectrumRef.current),
         decks: readDecks(),
         sentAt: now,
       };

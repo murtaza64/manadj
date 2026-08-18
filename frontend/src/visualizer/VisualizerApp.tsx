@@ -8,6 +8,12 @@ import {
 } from './channel';
 import type { BeatInfo, DeckStateInfo, VisualizerMessage, VisualizerPing } from './channel';
 import { PRESETS, presetById } from './presets';
+import {
+  aliveCandidateListings,
+  ensureCandidate,
+  getCachedCandidate,
+  isCandidateId,
+} from './presets/gen';
 import type { PresetRenderer, VisualizerPreset } from './presets/types';
 import {
   getParamValues,
@@ -22,6 +28,15 @@ import './VisualizerApp.css';
 
 /** Band feed older than this renders as silence (main window gone/paused). */
 const STALE_MS = 1000;
+/** Genepool candidates surfaced in the switcher while the marathon runs
+ * (realtime-viz 06, human ask): alive manifest entries, best-rated first. */
+const GEN_LISTINGS = aliveCandidateListings();
+/** Resolve a preset id across both worlds: curated registry, or the gen
+ * candidate cache (null while a gen module is still loading). */
+function resolvePreset(id: string): VisualizerPreset | null {
+  if (isCandidateId(id)) return getCachedCandidate(id);
+  return presetById(id);
+}
 const SILENT_SPECTRUM = new Array<number>(SPECTRUM_BAND_COUNT).fill(0);
 /** Chrome (preset switcher etc.) hides after this much mouse stillness. */
 const CHROME_HIDE_MS = 2500;
@@ -101,6 +116,8 @@ export function VisualizerApp() {
     impulse: BandLevels;
     trend: EnergyTrend;
     centroid: number;
+    spread: number;
+    flatness: number;
     decks: DeckStateInfo[];
     receivedAt: number;
   }>({
@@ -111,6 +128,8 @@ export function VisualizerApp() {
     impulse: SILENT_BANDS,
     trend: INITIAL_TREND,
     centroid: 0.5,
+    spread: 0.5,
+    flatness: 0.5,
     decks: [],
     receivedAt: -Infinity,
   });
@@ -129,7 +148,8 @@ export function VisualizerApp() {
       localStorage.setItem('manadj-visualizer-hud', String(!v));
       return !v;
     });
-  const activePreset = presetById(presetId);
+  const [genTick, setGenTick] = useState(0);
+  const activePreset = resolvePreset(presetId) ?? presetById(presetId);
   const paramValues = useSyncExternalStore(subscribeParams, () => getParamValues(activePreset));
   const [stalled, setStalled] = useState(true);
 
@@ -144,10 +164,18 @@ export function VisualizerApp() {
   useEffect(() => {
     const layers = layersRef.current;
     if (layers.current?.preset.id === presetId) return;
+    const resolved = resolvePreset(presetId);
+    if (!resolved) {
+      // Gen candidate module not loaded yet: fetch it, then re-run.
+      void ensureCandidate(presetId).then((preset) => {
+        if (preset) setGenTick((t) => t + 1);
+      });
+      return;
+    }
     const canvas = canvasRef.current;
     const width = canvas?.width ?? 1;
     const height = canvas?.height ?? 1;
-    const next = makeLayer(presetById(presetId), width, height);
+    const next = makeLayer(resolved, width, height);
     if (!next) return;
     if (layers.current) {
       layers.outgoing = layers.current;
@@ -155,7 +183,7 @@ export function VisualizerApp() {
     }
     layers.current = next;
     window.dispatchEvent(new Event('resize'));
-  }, [presetId]);
+  }, [presetId, genTick]);
 
   // Band feed: ping so the main-window bridge transmits (declaring wave
   // needs); keep the latest frame in a ref — feed data must never be React
@@ -182,6 +210,8 @@ export function VisualizerApp() {
         impulse: event.data.impulse ?? SILENT_BANDS,
         trend: event.data.trend ?? INITIAL_TREND,
         centroid: event.data.centroid ?? 0.5,
+        spread: event.data.spread ?? 0.5,
+        flatness: event.data.flatness ?? 0.5,
         decks: event.data.decks ?? [],
         receivedAt: performance.now(),
       };
@@ -252,6 +282,8 @@ export function VisualizerApp() {
         impulse: fresh ? feedRef.current.impulse : SILENT_BANDS,
         trend: fresh ? feedRef.current.trend : INITIAL_TREND,
         centroid: fresh ? feedRef.current.centroid : 0.5,
+        spread: fresh ? feedRef.current.spread : 0.5,
+        flatness: fresh ? feedRef.current.flatness : 0.5,
         decks: fresh ? feedRef.current.decks : [],
         params: {},
         time: (now - startedAt) / 1000,
@@ -380,6 +412,16 @@ export function VisualizerApp() {
               onClick={() => setPresetId(preset.id)}
             >
               {preset.name}
+            </button>
+          ))}
+          {GEN_LISTINGS.map(({ id, rating }) => (
+            <button
+              key={id}
+              className={`visualizer-preset-btn gen${id === presetId ? ' active' : ''}`}
+              title={`genepool candidate — rating ${Math.round(rating)}`}
+              onClick={() => setPresetId(id)}
+            >
+              {id} <span className="visualizer-preset-rating">{Math.round(rating)}</span>
             </button>
           ))}
         </div>

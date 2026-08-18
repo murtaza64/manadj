@@ -1,12 +1,18 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { PRESETS, presetById } from '../visualizer/presets';
 import {
+  aliveCandidateListings,
+  ensureCandidate,
+  getCachedCandidate,
+  isCandidateId,
+} from '../visualizer/presets/gen';
+import {
   getVisualizerRemote,
   sendVisualizerParam,
   sendVisualizerPreset,
   subscribeVisualizerRemote,
 } from '../visualizer/remote';
-import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
+import { isVisualizerOpen, openArena, toggleVisualizer } from '../visualizer/windowControl';
 import './VisualizerControlModal.css';
 
 /**
@@ -22,12 +28,26 @@ import './VisualizerControlModal.css';
  * window reports params every 500 ms; without this, dragging snaps back
  * to the previous echo mid-gesture). */
 const LOCAL_EDIT_PRECEDENCE_MS = 1200;
+/** Genepool candidates in the switcher while the marathon runs (rt-viz 06). */
+const GEN_LISTINGS = aliveCandidateListings();
 
 export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
   const remote = useSyncExternalStore(subscribeVisualizerRemote, getVisualizerRemote);
   const [displays, setDisplays] = useState<VisualizerDisplayInfo[] | null>(null);
   const bridge = window.manadjVisualizer;
-  const activePreset = remote.presetId ? presetById(remote.presetId) : null;
+  const [genTick, setGenTick] = useState(0);
+  void genTick; // re-render trigger once a gen module resolves
+  const activePreset = remote.presetId
+    ? isCandidateId(remote.presetId)
+      ? getCachedCandidate(remote.presetId)
+      : presetById(remote.presetId)
+    : null;
+  // Gen preset params need the candidate module (async import, then cache).
+  useEffect(() => {
+    if (remote.presetId && isCandidateId(remote.presetId) && !getCachedCandidate(remote.presetId)) {
+      void ensureCandidate(remote.presetId).then(() => setGenTick((t) => t + 1));
+    }
+  }, [remote.presetId]);
   // Recently-dragged values take precedence over the ping echo.
   const localEdits = useRef<Record<string, { value: number; at: number }>>({});
   const [, forceRender] = useState(0);
@@ -75,6 +95,9 @@ export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
           <button className="vizmodal-btn" onClick={() => toggleVisualizer()}>
             {isVisualizerOpen() || remote.open ? 'Focus / close' : 'Open window'}
           </button>
+          <button className="vizmodal-btn" onClick={() => openArena()}>
+            Open arena
+          </button>
         </div>
 
         <h3>Preset</h3>
@@ -87,6 +110,20 @@ export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
               onClick={() => sendVisualizerPreset(preset.id)}
             >
               {preset.name}
+            </button>
+          ))}
+        </div>
+
+        <h3>Genepool (rating)</h3>
+        <div className="vizmodal-presets">
+          {GEN_LISTINGS.map(({ id, rating }) => (
+            <button
+              key={id}
+              className={`vizmodal-btn gen${id === remote.presetId ? ' active' : ''}`}
+              disabled={!remote.open}
+              onClick={() => sendVisualizerPreset(id)}
+            >
+              {id} · {Math.round(rating)}
             </button>
           ))}
         </div>

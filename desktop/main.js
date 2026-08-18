@@ -259,10 +259,10 @@ function createWindow() {
   // (its page has no TopBar drag region) and never throttle it — it renders
   // rAF visuals and may sit occluded behind the main window on one screen
   // before being dragged to the projector.
-  win.webContents.setWindowOpenHandler(() => ({
+  win.webContents.setWindowOpenHandler((details) => ({
     action: "allow",
     overrideBrowserWindowOptions: {
-      title: "manaDJ visualizer",
+      title: details.frameName === "manadj-arena" ? "manaDJ arena" : "manaDJ visualizer",
       backgroundColor: "#000000",
       // An explicit webPreferences override REPLACES the opener's inherited
       // webPreferences rather than merging — so preload must be re-stated

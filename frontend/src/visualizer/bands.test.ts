@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   aggregateBands,
   spectralCentroid,
+  spectralFlatness,
+  spectralSpread,
   stepImpulses,
   stepTrend,
   INITIAL_IMPULSE_STATE,
@@ -282,5 +284,21 @@ describe('spectralCentroid', () => {
   it('is neutral (0.5) for silence and for flat spectra', () => {
     expect(spectralCentroid([0, 0, 0, 0])).toBe(0.5);
     expect(spectralCentroid([0.5, 0.5, 0.5, 0.5, 0.5])).toBeCloseTo(0.5, 10);
+  });
+});
+
+describe('spectral shape (gen-2 tech)', () => {
+  it('spread: single-band energy is narrow, two poles are wide', () => {
+    const narrow = [0, 0, 1, 0, 0, 0, 0, 0];
+    const wide = [1, 0, 0, 0, 0, 0, 0, 1];
+    expect(spectralSpread(narrow)).toBeLessThan(0.1);
+    expect(spectralSpread(wide)).toBeGreaterThan(0.9);
+    expect(spectralSpread([0, 0, 0, 0])).toBe(0.5); // silence neutral
+  });
+
+  it('flatness: flat spectra read noisy, peaky spectra read tonal', () => {
+    expect(spectralFlatness([0.5, 0.5, 0.5, 0.5])).toBeGreaterThan(0.95);
+    expect(spectralFlatness([1, 0, 0, 0, 0, 0, 0, 0])).toBeLessThan(0.15);
+    expect(spectralFlatness([0, 0, 0, 0])).toBe(0.5); // silence neutral
   });
 });

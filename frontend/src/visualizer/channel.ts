@@ -114,6 +114,10 @@ export interface VisualizerFrame {
   trend?: EnergyTrend;
   /** Normalized spectral centroid (0 dark … 1 bright, 0.5 neutral). */
   centroid?: number;
+  /** Spectral spread (0 narrow/tonal-pole … 1 wide; 0.5 silence). */
+  spread?: number;
+  /** Spectral flatness (0 peaky/tonal … 1 noisy; 0.5 silence). */
+  flatness?: number;
   /** Per-deck audible state (A–D, fixed order). */
   decks?: DeckStateInfo[];
   /** Sender performance.now() — lets the renderer detect a stalled feed. */

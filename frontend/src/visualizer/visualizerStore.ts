@@ -86,11 +86,19 @@ export function getParamValues(preset: VisualizerPreset): Record<string, number>
 }
 
 export function setParamValue(presetId: string, paramId: string, value: number): void {
-  const preset = presetById(presetId);
-  const next = { ...getParamValues(preset), [paramId]: value };
-  paramCache.set(preset.id, next);
+  // Do NOT normalize through presetById: genepool candidates (arena) are
+  // not in the curated registry, and normalizing silently redirected their
+  // writes to PRESETS[0] — sliders "couldn't be dragged" because reads
+  // came back from the candidate's untouched cache entry. Operate on the
+  // given id; the cache entry was seeded by getParamValues(preset) when
+  // the candidate first rendered.
+  const curated = presetById(presetId);
+  const base =
+    paramCache.get(presetId) ?? (curated.id === presetId ? resolveParams(curated) : {});
+  const next = { ...base, [paramId]: value };
+  paramCache.set(presetId, next);
   try {
-    localStorage.setItem(PARAMS_KEY_PREFIX + preset.id, JSON.stringify(next));
+    localStorage.setItem(PARAMS_KEY_PREFIX + presetId, JSON.stringify(next));
   } catch {
     // persistence is best-effort
   }

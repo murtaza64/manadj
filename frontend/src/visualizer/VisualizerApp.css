@@ -66,6 +66,24 @@
   color: #000;
 }
 
+/* Genepool candidates in the switcher (marathon iteration view). */
+.visualizer-preset-btn.gen {
+  border-color: hsl(280, 100%, 55%);
+  color: hsl(280, 100%, 72%);
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.visualizer-preset-btn.gen.active {
+  background: hsl(280, 100%, 55%);
+  color: #000;
+}
+
+.visualizer-preset-rating {
+  opacity: 0.65;
+  font-weight: normal;
+}
+
 .visualizer-preset-btn:hover,
 .visualizer-fullscreen-btn:hover {
   border-color: hsl(200, 100%, 65%);

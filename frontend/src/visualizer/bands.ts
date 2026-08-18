@@ -320,6 +320,56 @@ export function spectralCentroid(levels: ArrayLike<number>): number {
   return weighted / sum / (levels.length - 1);
 }
 
+
+/**
+ * Normalized spectral SPREAD (realtime-visualization 06, gen-2 tech):
+ * standard deviation of the multiband distribution around its centroid,
+ * 0 = all energy in one band (a sine, a pure kick), ~1 = energy smeared
+ * across the whole spectrum (noise, full mixes). The "how wide is the
+ * sound" scalar — presets map it to palette breadth, geometry dispersion,
+ * blur, etc. Neutral 0.5 for silence.
+ */
+export function spectralSpread(levels: ArrayLike<number>): number {
+  let sum = 0;
+  let weighted = 0;
+  for (let i = 0; i < levels.length; i++) {
+    sum += levels[i];
+    weighted += levels[i] * i;
+  }
+  if (sum <= 1e-6 || levels.length < 2) return 0.5;
+  const centroid = weighted / sum;
+  let variance = 0;
+  for (let i = 0; i < levels.length; i++) {
+    variance += levels[i] * (i - centroid) * (i - centroid);
+  }
+  variance /= sum;
+  // Max possible std dev is (n-1)/2 (two poles); normalize against it.
+  const maxStd = (levels.length - 1) / 2;
+  return Math.min(1, Math.sqrt(variance) / maxStd);
+}
+
+/**
+ * Spectral FLATNESS over the multiband levels: geometric/arithmetic mean
+ * ratio. 1 = flat/noisy (hats, air, white-ish), 0 = peaky/tonal (a bass
+ * note, a lead). The "tonal vs noisy" scalar. Neutral 0.5 for silence.
+ */
+export function spectralFlatness(levels: ArrayLike<number>): number {
+  const n = levels.length;
+  if (n < 2) return 0.5;
+  let logSum = 0;
+  let sum = 0;
+  const eps = 1e-4;
+  for (let i = 0; i < n; i++) {
+    const v = Math.max(eps, levels[i]);
+    logSum += Math.log(v);
+    sum += v;
+  }
+  const arithmetic = sum / n;
+  if (arithmetic <= eps * 1.5) return 0.5; // silence: neutral
+  const geometric = Math.exp(logSum / n);
+  return Math.min(1, geometric / arithmetic);
+}
+
 function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }

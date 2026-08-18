@@ -42,8 +42,8 @@ interface Pipeline {
   gl: WebGLRenderingContext;
   program: WebGLProgram;
   copyProgram: WebGLProgram | null;
-  locations: Map<string, WebGLUniformLocation>;
-  copyLocations: Map<string, WebGLUniformLocation>;
+  locations: Map<string, UniformInfo>;
+  copyLocations: Map<string, UniformInfo>;
   textures: [WebGLTexture, WebGLTexture] | null;
   framebuffers: [WebGLFramebuffer, WebGLFramebuffer] | null;
   /** Index of the texture holding the PREVIOUS frame. */
@@ -82,18 +82,25 @@ function compileProgram(
   return program;
 }
 
+interface UniformInfo {
+  location: WebGLUniformLocation;
+  type: number;
+  /** Declared array length (1 for scalars/vecs). */
+  size: number;
+}
+
 function locationMap(
   gl: WebGLRenderingContext,
   program: WebGLProgram
-): Map<string, WebGLUniformLocation> {
-  const map = new Map<string, WebGLUniformLocation>();
+): Map<string, UniformInfo> {
+  const map = new Map<string, UniformInfo>();
   const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS) as number;
   for (let i = 0; i < count; i++) {
     const info = gl.getActiveUniform(program, i);
     if (!info) continue;
     const name = info.name.replace(/\[0\]$/, '');
     const location = gl.getUniformLocation(program, info.name);
-    if (location) map.set(name, location);
+    if (location) map.set(name, { location, type: info.type, size: info.size });
   }
   return map;
 }
@@ -185,15 +192,48 @@ class GlRenderer implements PresetRenderer {
     p.height = height;
   }
 
+  /** Uniforms already warned about (once per renderer, by name). */
+  private warned = new Set<string>();
+
+  /** Declaration-aware dispatch: the shader's declared type/size wins.
+   * Wrong-shaped values are coerced where sane and warned once —
+   * a candidate mistake must never spam GL_INVALID_OPERATION at 60 fps
+   * (glUniform1fv size-mismatch incident, gen-2). */
   private setUniform(
     gl: WebGLRenderingContext,
-    location: WebGLUniformLocation,
+    name: string,
+    info: UniformInfo,
     value: UniformValue
   ): void {
-    if (typeof value === 'number') gl.uniform1f(location, value);
-    else if (value instanceof Float32Array) gl.uniform1fv(location, value);
-    else if (value.length === 2) gl.uniform2f(location, value[0], value[1]);
-    else gl.uniform3f(location, value[0], value[1], value[2]);
+    const warn = (why: string) => {
+      if (this.warned.has(name)) return;
+      this.warned.add(name);
+      console.warn(`[glPreset] uniform ${name}: ${why}`);
+    };
+    const asArray = (v: UniformValue): ArrayLike<number> =>
+      typeof v === 'number' ? [v] : v;
+    if (info.type === gl.FLOAT) {
+      if (info.size === 1) {
+        const n = typeof value === 'number' ? value : (warn('array sent to scalar; using [0]'), asArray(value)[0] ?? 0);
+        gl.uniform1f(info.location, n);
+      } else {
+        const arr = asArray(value);
+        if (arr.length !== info.size) warn(`length ${arr.length} vs declared [${info.size}]; truncating/padding`);
+        const out = new Float32Array(info.size);
+        for (let i = 0; i < info.size; i++) out[i] = arr[i] ?? 0;
+        gl.uniform1fv(info.location, out);
+      }
+    } else if (info.type === gl.FLOAT_VEC2) {
+      const arr = asArray(value);
+      if (arr.length < 2) warn('needs 2 components');
+      gl.uniform2f(info.location, arr[0] ?? 0, arr[1] ?? 0);
+    } else if (info.type === gl.FLOAT_VEC3) {
+      const arr = asArray(value);
+      if (arr.length < 3) warn('needs 3 components');
+      gl.uniform3f(info.location, arr[0] ?? 0, arr[1] ?? 0, arr[2] ?? 0);
+    } else {
+      warn(`unsupported uniform type 0x${info.type.toString(16)}`);
+    }
   }
 
   render(
@@ -223,12 +263,12 @@ class GlRenderer implements PresetRenderer {
     gl.viewport(0, 0, width, height);
     gl.useProgram(p.program);
 
-    const resLocation = p.locations.get('u_res');
-    if (resLocation) gl.uniform2f(resLocation, width, height);
+    const resInfo = p.locations.get('u_res');
+    if (resInfo) gl.uniform2f(resInfo.location, width, height);
     const uniforms = this.spec.uniforms(frame);
     for (const [name, value] of Object.entries(uniforms)) {
-      const location = p.locations.get(name);
-      if (location) this.setUniform(gl, location, value);
+      const info = p.locations.get(name);
+      if (info) this.setUniform(gl, name, info, value);
     }
 
     if (this.spec.feedback && p.textures && p.framebuffers) {
@@ -237,8 +277,8 @@ class GlRenderer implements PresetRenderer {
       // Pass 1: render into `next`, sampling `prev` as u_prev.
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, p.textures[prev]);
-      const prevLocation = p.locations.get('u_prev');
-      if (prevLocation) gl.uniform1i(prevLocation, 0);
+      const prevInfo = p.locations.get('u_prev');
+      if (prevInfo) gl.uniform1i(prevInfo.location, 0);
       gl.bindFramebuffer(gl.FRAMEBUFFER, p.framebuffers[next]);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       // Pass 2: present `next` to the canvas.
@@ -246,9 +286,9 @@ class GlRenderer implements PresetRenderer {
       gl.useProgram(p.copyProgram);
       gl.bindTexture(gl.TEXTURE_2D, p.textures[next]);
       const copyRes = p.copyLocations.get('u_res');
-      if (copyRes) gl.uniform2f(copyRes, width, height);
+      if (copyRes) gl.uniform2f(copyRes.location, width, height);
       const copyPrev = p.copyLocations.get('u_prev');
-      if (copyPrev) gl.uniform1i(copyPrev, 0);
+      if (copyPrev) gl.uniform1i(copyPrev.location, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       p.prevIndex = next;
     } else {
