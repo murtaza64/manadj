@@ -186,6 +186,19 @@ class BeatgridData(BaseModel):
     downbeat_times: list[float]
 
 
+class DropHypothesis(BaseModel):
+    """One possible drop (structure-analysis 02): analysis opinion, not a cue."""
+    time: float  # seconds, on a downbeat
+    strength: float  # detector score, min-max normalized to [0, 1]
+
+
+class DropsResponse(BaseModel):
+    """Detected possible drops, ranked earliest-strong-first. Empty when the
+    track has no Waveform blob or no Beatgrid (never an error)."""
+    track_id: int
+    drops: list[DropHypothesis]
+
+
 class BeatgridResponse(BaseModel):
     """Full beatgrid API response.
 

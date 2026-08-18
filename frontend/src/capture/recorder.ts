@@ -26,7 +26,8 @@ import type { ChannelId, ChannelState } from '../playback/mixer';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
 import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import type { AudibleSurfaceId } from '../playback/audibleSurface';
-import { anyDeckAudible, initialCaptureState, reduceCapture } from './detector';
+import { masterAudible, surfaceDisplaced } from './audibilityReducer';
+import { initialCaptureState, reduceCapture } from './detector';
 import type { CaptureState } from './detector';
 import { SilenceSplitClock } from './sessionLifecycle';
 import type { CaptureControlId, CaptureEvent, DetectedTake } from './events';
@@ -142,7 +143,7 @@ export class CaptureRecorder {
   start(): void {
     this.silence = new SilenceSplitClock(this.now());
     const holder = audibleHolder();
-    this.surfaceGated = holder !== 'shared';
+    this.surfaceGated = surfaceDisplaced(holder);
     this.unsubs.push(subscribeAudible((h) => this.setSurfaceHolder(h)));
     this.unsubs.push(this.mixer.subscribe(() => this.diffMixer()));
     for (const ch of CHANNEL_IDS) {
@@ -175,7 +176,7 @@ export class CaptureRecorder {
    * the detector from current reality. The >2-audible suspension is gone —
    * the detector self-gates and the log stays whole. */
   private setSurfaceHolder(holder: AudibleSurfaceId): void {
-    const gated = holder !== 'shared';
+    const gated = surfaceDisplaced(holder);
     if (gated === this.surfaceGated) return;
     if (gated) {
       // Bracket the machine's tenure: the marker rides the log (it is not
@@ -247,6 +248,11 @@ export class CaptureRecorder {
           detail: snap.hotCuePreviewSlot ?? undefined,
         });
       }
+      // Pitch (sessions 18): a deck pitched BEFORE the seed records no
+      // pitch event otherwise — its ticks then advance at the pitched rate
+      // while replay seeds pitch 0 and drifts ~pitch% forever (the
+      // periodic-jump / jitter family's root cause). Always explicit.
+      this.feed({ t, kind: 'pitch', channel: ch, value: snap.pitchPercent });
     }
     this.lastCrossfader = this.mixer.getCrossfader();
     this.lastCrossfaderEnabled = this.mixer.getCrossfaderEnabled();
@@ -287,14 +293,14 @@ export class CaptureRecorder {
   private emitMarker(e: CaptureEvent): void {
     const [next, takes] = reduceCapture(this.state, e);
     this.state = next;
-    // Master-audibility (the one definition, capture/audibility.ts; a
-    // tenure is non-performance, so silent by definition) drives BOTH
+    // Master-audibility (the one definition, capture/audibilityReducer.ts;
+    // a tenure is non-performance, so silent by definition) drives BOTH
     // Session lifecycle edges (sessions 11):
     //  - activation: a row opens only on a Master-audible instant. Loads,
     //    cueing, control setup, tenure markers, and seed snapshots buffer
     //    as reconstruction context and never create a row.
     //  - the ten-minute split clock, fed below.
-    const audible = !next.tenureHeld && anyDeckAudible(next);
+    const audible = masterAudible(next);
     // Persist beside the detector's rolling log (ADR 0033): the Session
     // records all four decks; the detector reads the same stream and
     // self-gates over >2-audible stretches / machine tenures.

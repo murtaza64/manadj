@@ -24,6 +24,52 @@ def mem(row_id: str, ms: int, comment=None, color=-1):
     return SimpleNamespace(ID=row_id, Kind=0, InMsec=ms, Comment=comment, Color=color)
 
 
+def test_maincue_adds_memory_only_row_after_reconcile(monkeypatch, tmp_path):
+    from rekordbox import decode_offset
+    from rekordbox.perf_export import RekordboxPerfExporter
+
+    class Query:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return None
+
+    class FakeSession:
+        def __init__(self):
+            self.added = []
+
+        def query(self, model):
+            return Query()
+
+        def add(self, row):
+            self.added.append(row)
+
+    class FakeDB:
+        def __init__(self):
+            self.session = FakeSession()
+
+        def generate_unused_id(self, model):
+            return 99
+
+        def commit(self, autoinc=False):
+            pass
+
+    db = FakeDB()
+    exporter = RekordboxPerfExporter(db, tmp_path)
+    exporter._content_for = lambda filename: SimpleNamespace(
+        ID="7", UUID="content-uuid", FolderPath=filename
+    )
+    monkeypatch.setattr(decode_offset, "manadj_seconds_to_rb_ms", lambda seconds, path: 15000)
+    monkeypatch.setattr("rekordbox.perf_export.ensure_rekordbox_closed", lambda: None)
+    monkeypatch.setattr("rekordbox.perf_export.snapshot_library", lambda path: None)
+
+    assert exporter.export_maincue("/music/a.flac", 15.0) is True
+    assert db.session.added[0].Kind == 0
+    assert db.session.added[0].InMsec == 15000
+    assert db.session.added[0].Comment == "Main cue"
+
+
 # -- planner: add-only tier ----------------------------------------------------
 
 

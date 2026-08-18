@@ -10,6 +10,9 @@ import type {
   PlaylistTrackAddResult,
   UnifiedPlaylist,
   PlaylistSyncStats,
+  PlaylistExportTarget,
+  PlaylistFullExportPreview,
+  PlaylistFullExportReport,
   UnifiedTagView,
   TagSyncStats,
   TagSyncRequest,
@@ -400,6 +403,18 @@ export const api = {
     },
   },
 
+  drops: {
+    /** Possible-drop hypotheses (structure-analysis 02): analysis opinion
+     * computed from blob + grid; empty drops while inputs are missing. */
+    get: async (trackId: number) => {
+      const response = await fetch(`${API_BASE}/drops/${trackId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch drops: ${response.statusText}`);
+      }
+      return response.json();
+    },
+  },
+
   beatgrids: {
     get: async (trackId: number) => {
       const response = await fetch(`${API_BASE}/beatgrids/${trackId}`);
@@ -684,6 +699,37 @@ export const api = {
       if (!res.ok) {
         const error = await res.json();
         throw new Error(detailToMessage(error.detail, 'Failed to sync playlist'));
+      }
+      return res.json();
+    },
+
+    exportPerformance: async (
+      playlistName: string,
+      targets: PlaylistExportTarget[],
+    ): Promise<PlaylistFullExportReport> => {
+      const encodedName = encodeURIComponent(playlistName);
+      const res = await fetch(`${API_BASE}/sync/export/playlists/${encodedName}/performance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to export playlist performance data'));
+      }
+      return res.json();
+    },
+
+    previewExportPerformance: async (
+      playlistName: string,
+    ): Promise<PlaylistFullExportPreview> => {
+      const encodedName = encodeURIComponent(playlistName);
+      const res = await fetch(
+        `${API_BASE}/sync/export/playlists/${encodedName}/performance/preview`,
+      );
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detailToMessage(detail, 'Failed to preview playlist export'));
       }
       return res.json();
     },

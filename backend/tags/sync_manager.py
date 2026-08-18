@@ -2,6 +2,9 @@
 
 from sqlalchemy.orm import Session
 
+from backend.sync_common.matching import in_sync
+from backend.sync_status.models import SYNC_ENDPOINT_IDS
+
 from .models import TagStructure, UnifiedTagView, TagSyncStats
 from .comparison import match_tags_by_name
 from .manadj_reader import ManAdjTagReader
@@ -55,7 +58,7 @@ class TagSyncManager:
             Dictionary with keys 'manadj', 'engine', 'rekordbox' and
             TagStructure values (or None if not available)
         """
-        result = {'manadj': None, 'engine': None, 'rekordbox': None}
+        result: dict[str, TagStructure | None] = {sid: None for sid in SYNC_ENDPOINT_IDS}
 
         # Always load manadj
         result['manadj'] = self.manadj_reader.get_tag_structure()
@@ -109,6 +112,11 @@ class TagSyncManager:
         - It exists in manadj (required)
         - ALL other configured sources (Engine DJ, Rekordbox) exist AND have exact same track count
 
+        The presence gate (manadj required, each configured source required) is
+        tag-specific and stays here; the agreement core — do all present sources
+        hold the same value? — is the shared ``in_sync`` predicate, comparing
+        track counts.
+
         Args:
             sources: Dictionary with 'manadj', 'engine', 'rekordbox' keys
 
@@ -120,25 +128,19 @@ class TagSyncManager:
             # No manadj tag means not synced (manadj is source of truth)
             return False
 
-        # Check Engine DJ - must exist if configured
+        # Presence gate: each configured source must carry the tag.
+        present = {'manadj': manadj_tag}
         if self.engine_reader:
-            engine_tag = sources.get('engine')
-            if engine_tag is None:
-                # Engine DJ configured but tag doesn't exist there
+            if sources.get('engine') is None:
                 return False
-            if engine_tag.track_count != manadj_tag.track_count:
-                return False
-
-        # Check Rekordbox - must exist if configured
+            present['engine'] = sources['engine']
         if self.rb_reader:
-            rb_tag = sources.get('rekordbox')
-            if rb_tag is None:
-                # Rekordbox configured but tag doesn't exist there
+            if sources.get('rekordbox') is None:
                 return False
-            if rb_tag.track_count != manadj_tag.track_count:
-                return False
+            present['rekordbox'] = sources['rekordbox']
 
-        return True
+        # Agreement core (shared): all present sources hold the same track count.
+        return in_sync(present, equal=lambda a, b: a.track_count == b.track_count)
 
     def get_stats(self) -> TagSyncStats:
         """Get loading and comparison statistics.

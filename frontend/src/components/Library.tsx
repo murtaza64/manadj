@@ -73,6 +73,12 @@ import {
 import { SessionTimelinePane } from '../sessions/SessionTimelinePane';
 import { SessionsListView } from '../sessions/SessionsListView';
 import { NAVIGATE_SET_EVENT } from '../sets/navigateToSet';
+import { PlaylistFullExportModal } from './PlaylistFullExportModal';
+import { PlaylistStatusBadge } from './PlaylistStatusBadge';
+import { playlistStatus } from './playlistStatus';
+import { trackMatchesFilters } from './playlistFilter';
+import { togglePlaylistFilter, usePlaylistFilterEnabled } from './playlistFilterStore';
+import { FunnelIcon } from './icons';
 import {
   PLAY_ORDER_SORT,
   isPlayOrderSort,
@@ -137,6 +143,7 @@ export default function Library({
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(
     () => browseSession().playlistId
   );
+  const [playlistExportOpen, setPlaylistExportOpen] = useState(false);
   const [selectedSetId, setSelectedSetId] = useState<number | null>(() => getSelectedSetId());
   const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(() =>
     getSelectedSessionUuid()
@@ -367,6 +374,22 @@ export default function Library({
     enabled: selectedView === 'playlist' && selectedPlaylistId !== null,
     placeholderData: (previousData) => previousData,
   });
+  const { data: unifiedPlaylists } = useQuery({
+    queryKey: ['playlistSync'],
+    queryFn: api.playlistSync.getUnified,
+    enabled: selectedView === 'playlist' && selectedPlaylistId !== null,
+  });
+  const unifiedPlaylist = unifiedPlaylists?.find(
+    playlist => playlist.name === playlistData?.name
+  );
+
+  // Per-playlist filter toggle (playlist-editing 09): a playlist is a
+  // curated order, so it shows unfiltered by default; this playlist's
+  // toggle opts it into the GLOBAL filter params (client-side thinning —
+  // the playlist query fetches the full order regardless).
+  const playlistFilterOn = usePlaylistFilterEnabled(
+    selectedView === 'playlist' ? selectedPlaylistId : null
+  );
 
   // Playlist-view sort (playlist-editing 04): client-side and view-only —
   // it never rewrites Play order. Default (and reset on playlist switch)
@@ -568,6 +591,14 @@ export default function Library({
   // applies only outside edit mode — in the split, the FilterBar belongs
   // to the library pane.
   let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
+  // The per-playlist toggle applies the global params (playlist-editing
+  // 09); thinning is tracked so positional reorders can refuse — a drop
+  // index against a thinned list doesn't address the full Play order.
+  if (playlistFilterOn) {
+    playlistTracks = playlistTracks.filter((t: Track) => trackMatchesFilters(t, filters));
+  }
+  const playlistThinned =
+    playlistFilterOn && playlistTracks.length !== (playlistData?.tracks?.length ?? 0);
   if (followRefs.length > 0 && !splitView) {
     const { followed, rest } = partitionFollowedTracks(playlistTracks, followedTrackIds);
     const candidates = followCandidateIds
@@ -655,7 +686,7 @@ export default function Library({
   // other sort the drop appends (and in-pane reorders are refused).
   const playlistPaneRef = useRef<HTMLDivElement>(null);
   const [dropIndicator, setDropIndicator] = useState<{ index: number; y: number } | null>(null);
-  const canPositionDrops = isPlayOrderSort(playlistSort);
+  const canPositionDrops = isPlayOrderSort(playlistSort) && !playlistThinned;
   const playlistMemberIds = useMemo(
     () => new Set<number>((playlistData?.tracks ?? []).map((t: Track) => t.id)),
     [playlistData]
@@ -781,7 +812,7 @@ export default function Library({
     // no-op with a toast (PRD: adding a present track never moves it).
     if (readTrackDragSource(e.dataTransfer) === 'playlist-pane') {
       if (!canPositionDrops) {
-        showToast('Sort by # to reorder');
+        showToast(playlistThinned ? 'Clear filters to reorder' : 'Sort by # to reorder');
         return;
       }
       const orderIds = (playlistData?.tracks ?? []).map((t: Track) => t.id);
@@ -1173,7 +1204,7 @@ export default function Library({
           overflow: 'hidden'
         }}>
           {/* Playlist header strip: name + split-view toggle (playlist view only) */}
-          {selectedView === 'playlist' && !browseOnly && (
+          {selectedView === 'playlist' && (
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -1182,26 +1213,73 @@ export default function Library({
               borderBottom: '1px solid var(--surface0)',
               background: 'var(--crust)',
             }}>
-              <span style={{ fontSize: '13px', color: 'var(--text)' }}>
-                {playlistData?.name ?? 'Playlist'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Per-playlist filter toggle (playlist-editing 09):
+                    curated order shows whole by default; ON applies the
+                    global filter params and shows the FilterBar here.
+                    Square toggle in the app's engaged-fill vocabulary
+                    (topbar-quantize / FilterBar buttons): transparent
+                    rest with a quiet border, solid accent fill when on. */}
+                {selectedPlaylistId !== null && (
+                  <button
+                    onClick={() => togglePlaylistFilter(selectedPlaylistId)}
+                    aria-label="Toggle playlist filters"
+                    title="Filter this playlist with the global filters"
+                    style={{
+                      width: '22px',
+                      height: '22px',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: playlistFilterOn ? 'var(--blue)' : 'transparent',
+                      color: playlistFilterOn ? 'var(--base)' : 'var(--text)',
+                      border: playlistFilterOn
+                        ? '1px solid var(--blue)'
+                        : '1px solid var(--surface1)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <FunnelIcon width={14} height={14} opacity={1} />
+                  </button>
+                )}
+                <span style={{ fontSize: '13px', color: 'var(--text)' }}>
+                  {playlistData?.name ?? 'Playlist'}
+                </span>
                 <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>
                   {playlistData?.tracks?.length ?? 0} tracks
                 </span>
-              </span>
-              <button
-                onClick={() => setIsSplitViewOpen((v) => !v)}
-                style={{
-                  padding: '2px 10px',
-                  background: splitView ? 'var(--blue)' : 'var(--surface0)',
-                  color: splitView ? 'var(--base)' : 'var(--text)',
-                  border: '1px solid var(--surface1)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                }}
-              >
-                Split view
-              </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {unifiedPlaylist && (
+                  <PlaylistStatusBadge status={playlistStatus(unifiedPlaylist)} />
+                )}
+                <button
+                  className="playlist-export-submit"
+                  onClick={() => setPlaylistExportOpen(true)}
+                  disabled={!playlistData?.name}
+                  aria-label="Open playlist sync and export"
+                  style={{ padding: '2px 10px' }}
+                >
+                  Sync / Export
+                </button>
+                {!browseOnly && (
+                  <button
+                    onClick={() => setIsSplitViewOpen((v) => !v)}
+                    style={{
+                      padding: '2px 10px',
+                      background: splitView ? 'var(--blue)' : 'var(--surface0)',
+                      color: splitView ? 'var(--base)' : 'var(--text)',
+                      border: '1px solid var(--surface1)',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                    }}
+                  >
+                    Split view
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -1321,16 +1399,21 @@ export default function Library({
             </>
           ) : (
             <>
-              <FilterBar
-                totalTracks={totalTracks}
-                filteredCount={currentTracks.length}
-                loadedByDeck={{
-                  A: decks.A.loadedTrack,
-                  B: decks.B.loadedTrack,
-                  C: decks.C.loadedTrack,
-                  D: decks.D.loadedTrack,
-                }}
-              />
+              {/* In playlist view the FilterBar rides the per-playlist
+                  toggle (playlist-editing 09) — hidden while filtering
+                  is off there. Other views always filter. */}
+              {(selectedView !== 'playlist' || playlistFilterOn) && (
+                <FilterBar
+                  totalTracks={totalTracks}
+                  filteredCount={currentTracks.length}
+                  loadedByDeck={{
+                    A: decks.A.loadedTrack,
+                    B: decks.B.loadedTrack,
+                    C: decks.C.loadedTrack,
+                    D: decks.D.loadedTrack,
+                  }}
+                />
+              )}
 
               {/* Track table. In playlist view it is the playlist pane:
                   drag-reordering works without opening the split. */}
@@ -1397,6 +1480,12 @@ export default function Library({
 
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
+      )}
+      {playlistExportOpen && playlistData?.name && (
+        <PlaylistFullExportModal
+          playlistName={playlistData.name}
+          onClose={() => setPlaylistExportOpen(false)}
+        />
       )}
     </div>
     </>

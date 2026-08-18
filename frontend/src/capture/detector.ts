@@ -30,12 +30,15 @@
  * Settlement is time-driven: the ~1 Hz tick events advance the clock, so
  * the reducer never needs a timer.
  */
-import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
-import { isDeckAudible } from './audibility';
 import {
-  DEFAULT_DETECTOR_PARAMS,
-  DETECTOR_VERSION,
-} from './events';
+  ALL_DECKS,
+  applyEvent,
+  deckAudible,
+  initialAudibilityState,
+  tenureHeld,
+} from './audibilityReducer';
+import type { AudibilityState, ReducerDeckState } from './audibilityReducer';
+import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from './events';
 import type {
   CaptureDeck,
   CaptureEvent,
@@ -43,18 +46,9 @@ import type {
   DetectedTake,
 } from './events';
 
-interface DeckCapture {
-  trackId: number | null;
-  playing: boolean;
-  fader: number;
-  trim: number;
-  eq: { low: number; mid: number; high: number };
-  filter: number;
-  /** This deck's crossfader side (Sessions PRD, ADR 0033: tracked for all
-   * four decks so the log alone reconstructs audibility). */
-  assignment: CrossfaderAssignment;
-  /** Varispeed percent (bends excluded — momentary by definition). */
-  pitch: number;
+/** The shared reducer's deck state (audibilityReducer.ts) plus the
+ * detector's own audibility cache — the edge memory its machines key on. */
+interface DeckCapture extends ReducerDeckState {
   audible: boolean;
   /** Time of the last audibility flip. */
   since: number;
@@ -95,42 +89,24 @@ export interface PairMachine {
   openSnapshot: Extract<CaptureEvent, { kind: 'init' }> | null;
 }
 
-export interface CaptureState {
-  params: DetectorParams;
+/** The detector's state IS the shared audibility reducer's state (deck/
+ * mixer/tenure — audibilityReducer.ts) plus the verdict machinery layered
+ * on top: the rolling log, the per-deck audibility cache, suspension, and
+ * the six pair machines. */
+export interface CaptureState extends Omit<AudibilityState, 'decks'> {
   /** Rolling event log (pruned; Take slices are cut from it). */
   log: CaptureEvent[];
-  /** All four decks (ADR 0033). */
+  /** All four decks (ADR 0033), with the detector's audibility cache. */
   decks: Record<CaptureDeck, DeckCapture>;
-  crossfader: number;
-  crossfaderEnabled: boolean;
-  /** A machine holds the shared surface (tenure marker; ADR 0033) — the
-   * old recorder surface gate, now log-driven. */
-  tenureHeld: boolean;
   /** Verdicts suspended: tenure held ONLY (4dp 37 — a third audible deck
    * never gates; the >2-audible branch is gone). While suspended the log
    * still grows; every pair machine stands down, in-flight engagements
-   * are discarded on entry, incumbents re-established on exit. */
+   * are discarded on entry, incumbents re-established on exit. The rule
+   * itself (surfaceDisplaced) lives in audibilityReducer.ts — one
+   * definition for detector, timeline, and recorder. */
   suspended: boolean;
   /** The six pair machines (4dp 10). */
   pairs: Record<PairKey, PairMachine>;
-}
-
-const ALL_DECKS: CaptureDeck[] = ['A', 'B', 'C', 'D'];
-
-function freshDeck(assignment: CrossfaderAssignment): DeckCapture {
-  // Mixer channel-strip defaults: fader up, trim/EQ centered, filter off.
-  return {
-    trackId: null,
-    playing: false,
-    fader: 1,
-    trim: 0.5,
-    eq: { low: 0.5, mid: 0.5, high: 0.5 },
-    filter: 0,
-    assignment,
-    pitch: 0,
-    audible: false,
-    since: 0,
-  };
 }
 
 function freshMachine(): PairMachine {
@@ -147,20 +123,13 @@ function freshMachine(): PairMachine {
 }
 
 export function initialCaptureState(params: DetectorParams = DEFAULT_DETECTOR_PARAMS): CaptureState {
+  const base = initialAudibilityState(params);
   return {
-    params,
+    ...base,
     log: [],
-    // Default crossfader sides mirror the mixer (A/C left, B/D right); the
-    // recorder re-seeds the real assignments via crossfaderAssignment events.
-    decks: {
-      A: freshDeck('left'),
-      B: freshDeck('right'),
-      C: freshDeck('left'),
-      D: freshDeck('right'),
-    },
-    crossfader: 0,
-    crossfaderEnabled: true,
-    tenureHeld: false,
+    decks: Object.fromEntries(
+      ALL_DECKS.map((ch) => [ch, { ...base.decks[ch], audible: false, since: 0 }])
+    ) as Record<CaptureDeck, DeckCapture>,
     suspended: false,
     pairs: Object.fromEntries(PAIR_KEYS.map((k) => [k, freshMachine()])) as Record<
       PairKey,
@@ -169,72 +138,10 @@ export function initialCaptureState(params: DetectorParams = DEFAULT_DETECTOR_PA
   };
 }
 
-function deckAudible(s: CaptureState, ch: CaptureDeck): boolean {
-  // The one audibility definition, shared with the Session timeline
-  // (capture/audibility.ts, sessions 04).
-  return isDeckAudible(
-    s.decks[ch],
-    { crossfader: s.crossfader, crossfaderEnabled: s.crossfaderEnabled },
-    s.params
-  );
-}
-
-/** Is ANY deck Master-audible right now? Recomputed live from the state's
- * audibility inputs (not the cached `.audible` flags). The recorder reads
- * this for the Session lifecycle (sessions 11): lazy activation on the
- * first Master-audible instant and the ten-minute silence split. */
-export function anyDeckAudible(s: CaptureState): boolean {
-  return ALL_DECKS.some((ch) => deckAudible(s, ch));
-}
-
 /** The pair-mate of `ch` within `key`. */
 function mate(key: PairKey, ch: CaptureDeck): CaptureDeck {
   const [x, y] = PAIR_DECKS[key];
   return ch === x ? y : x;
-}
-
-/** Apply the raw event to deck/mixer state (audibility inputs only —
- * everything else just rides the log as evidence). */
-function assignmentFromValue(value: number): CrossfaderAssignment {
-  return value < 0 ? 'left' : value > 0 ? 'right' : 'thru';
-}
-
-function applyEvent(s: CaptureState, e: CaptureEvent): void {
-  switch (e.kind) {
-    case 'control': {
-      const d = e.channel ? s.decks[e.channel] : null;
-      if (e.control === 'fader' && d) d.fader = e.value;
-      else if (e.control === 'trim' && d) d.trim = e.value;
-      else if (e.control === 'eqLow' && d) d.eq = { ...d.eq, low: e.value };
-      else if (e.control === 'eqMid' && d) d.eq = { ...d.eq, mid: e.value };
-      else if (e.control === 'eqHigh' && d) d.eq = { ...d.eq, high: e.value };
-      else if (e.control === 'filter' && d) d.filter = e.value;
-      else if (e.control === 'crossfaderAssignment' && d) d.assignment = assignmentFromValue(e.value);
-      else if (e.control === 'crossfader') s.crossfader = e.value;
-      else if (e.control === 'crossfaderEnabled') s.crossfaderEnabled = e.value !== 0;
-      break;
-    }
-    case 'transport':
-      if (e.action === 'play') s.decks[e.channel].playing = true;
-      else if (e.action === 'pause' || e.action === 'cue') s.decks[e.channel].playing = false;
-      // PHASE-1 PREVIEW BOUNDARY (ADR 0033 cue-stab capture): previewStart/
-      // previewEnd bracket a Master-audible CUE stab in the log, but the
-      // pair detectors deliberately ignore them — a stab does NOT flip
-      // `playing` or count toward audibility/engagements. This keeps
-      // detection byte-identical to before preview evidence existed.
-      // Revisiting preview audibility semantics is a follow-up grill, not
-      // this issue. (seek/jumpBeats/hotCue likewise ride the log as
-      // evidence without touching detection state.)
-      break;
-    case 'load':
-      s.decks[e.channel].trackId = e.trackId;
-      break;
-    case 'pitch':
-      s.decks[e.channel].pitch = e.value;
-      break;
-    default:
-      break;
-  }
 }
 
 function dissolve(m: PairMachine): void {
@@ -381,18 +288,22 @@ export function reduceCapture(
   const takes: DetectedTake[] = [];
   const now = e.t;
 
+  // The shared audibility reducer (audibilityReducer.ts) applies the raw
+  // event to deck/mixer/tenure state. Tenure markers (ADR 0033) move the
+  // old recorder surface gate into the log: a machine holding the surface
+  // suspends every pair machine's verdicts exactly as the surface gate did
+  // — the log grows regardless. NOTE the phase-1 preview boundary holds:
+  // previewStart/previewEnd flip `previewing` only, which audibility
+  // ignores — a stab does NOT count toward audibility/engagements
+  // (deliberate; revisiting that is a follow-up grill, not this issue).
   applyEvent(s, e);
 
-  // Tenure markers (ADR 0033) move the old recorder surface gate into the
-  // log: a machine holding the surface suspends every pair machine's
-  // verdicts exactly as the surface gate did — the log grows regardless.
-  if (e.kind === 'tenure') s.tenureHeld = e.edge === 'start';
-
-  // Suspension edge — tenure ONLY (4dp 37). Entering discards in-flight
-  // engagements and clears incumbency on every machine; leaving
-  // re-establishes each machine's incumbent from its own decks' current
-  // audibility (the recorder re-seeds in step).
-  const suspendedNow = s.tenureHeld;
+  // Suspension edge — tenure ONLY (4dp 37; the one rule, shared with the
+  // timeline and recorder). Entering discards in-flight engagements and
+  // clears incumbency on every machine; leaving re-establishes each
+  // machine's incumbent from its own decks' current audibility (the
+  // recorder re-seeds in step).
+  const suspendedNow = tenureHeld(s);
   if (suspendedNow && !s.suspended) {
     for (const key of PAIR_KEYS) {
       const m = s.pairs[key];

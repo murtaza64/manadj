@@ -74,6 +74,30 @@ export function replayNowT(): number | null {
   return instance?.nowT() ?? null;
 }
 
+export interface ServoDeckActivity {
+  deck: 'A' | 'B' | 'C' | 'D';
+  /** Rate nudge, percent (signed: + = speeding up). */
+  biasPct: number;
+  /** Smoothed desync vs the log, seconds (signed: + = ahead). */
+  errS: number;
+}
+
+/** Live per-deck servo activity (actively-nudging decks only), or null
+ * when no replay is rolling — the timeline info bar's readout polls this
+ * (the replayNowT idiom: driver-owned truth, not store state). */
+export function replayServoActivity(): ServoDeckActivity[] | null {
+  const act = instance?.getServoActivity();
+  if (!act) return null;
+  const out: ServoDeckActivity[] = [];
+  for (const deck of ['A', 'B', 'C', 'D'] as const) {
+    const a = act[deck];
+    if (a && Math.abs(a.bias) > 0.001) {
+      out.push({ deck, biasPct: a.bias * 100, errS: a.err });
+    }
+  }
+  return out;
+}
+
 /** Space: toggle pause/resume on the active replay. The DRIVER pushes the
  * resulting status (onStatus) — no direct setState here, because the
  * driver refuses pause/resume mid-seek and a blind store write would
