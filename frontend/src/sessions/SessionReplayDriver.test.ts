@@ -49,7 +49,10 @@ class FakeEngine {
   }
 
   getPlayhead(): number {
-    return this.playing ? this.playhead + (this.clock() - this.playheadAt) : this.playhead;
+    // Pitch-aware (sessions 18): the engine advances at its true rate, so
+    // rate-inference tests can assert drift actually stops.
+    const rate = 1 + this.pitchPercent / 100;
+    return this.playing ? this.playhead + (this.clock() - this.playheadAt) * rate : this.playhead;
   }
 
   seek(t: number): void {
@@ -75,6 +78,9 @@ class FakeEngine {
   }
 
   setPitch(p: number): void {
+    // Rebase before the rate flips (rates apply forward, not retroactively).
+    this.playhead = this.getPlayhead();
+    this.playheadAt = this.clock();
     this.pitchPercent = p;
     this.emit();
   }
@@ -1008,6 +1014,92 @@ describe('SessionReplayDriver — persistent drift correction (deadband regressi
     const seedSeeks = r.engines.A.seeks.length;
     for (let k = 1; k <= 10; k++) r.advance(1.0);
     expect(r.engines.A.seeks.length).toBe(seedSeeks);
+    r.driver.stop();
+  });
+});
+
+describe('SessionReplayDriver — rate inference + coordinated correction (sessions 18)', () => {
+  /** A pitch-less legacy log: the deck was pitched +2% BEFORE the session,
+   * so no pitch event exists — recorded playheads advance at 1.02×. */
+  function pitchlessLog(n = 40): CaptureEvent[] {
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= n; k++) {
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k * 1.02 } });
+    }
+    return evs;
+  }
+
+  it('converges the engine pitch to the recorded rate and corrections cease', async () => {
+    const r = rig(planFor(pitchlessLog(), 2));
+    await r.driver.start();
+    expect(r.engines.A.pitchPercent).toBe(0); // seeded pitch-less
+    for (let k = 1; k <= 8; k++) r.advance(1.0);
+    // Rate inference matched the engine to the log's slope.
+    expect(r.engines.A.pitchPercent).toBeCloseTo(2, 0);
+    // With the rate matched, drift stops growing: NO corrective seeks
+    // over a long steady stretch.
+    const seeksAfterConverge = r.engines.A.seeks.length;
+    for (let k = 1; k <= 20; k++) r.advance(1.0);
+    expect(r.engines.A.seeks.length).toBe(seeksAfterConverge);
+    // And the deck tracks the recorded trajectory closely (28 advances).
+    expect(Math.abs(r.engines.A.getPlayhead() - (50 + 28 * 1.02))).toBeLessThan(0.2);
+    r.driver.stop();
+  });
+
+  it('a recorded pitch cue is not fought by inference', async () => {
+    // Pitch event at t=10 to +2%: ticks advance at 1.0 before, 1.02 after.
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+    ];
+    for (let k = 1; k <= 8; k++) evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k } });
+    evs.push({ t: 10.5, kind: 'pitch', channel: 'A', value: 2 });
+    for (let k = 9; k <= 24; k++)
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 58.5 + (k - 8.5) * 1.02 } });
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    for (let k = 1; k <= 20; k++) r.advance(1.0);
+    // The cue set +2 and inference found no residual mismatch to fight.
+    expect(r.engines.A.pitchPercent).toBeCloseTo(2, 0);
+    r.driver.stop();
+  });
+
+  it('a common-mode step corrects BOTH decks in one frame — relative phase preserved', async () => {
+    // Two decks on-trajectory, then both recorded playheads step +0.25
+    // (common-mode). A step is not a rate (linear-fit reject): it must be
+    // drained by the coordinated median corrector, both decks together.
+    const evs: CaptureEvent[] = [
+      ...seedEvents(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 11, bpm: 174 },
+      { t: 1.2, kind: 'load', channel: 'B', trackId: 12, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 50 },
+      { t: 2, kind: 'transport', channel: 'B', action: 'play', playhead: 80 },
+    ];
+    for (let k = 1; k <= 30; k++) {
+      const step = k >= 10 ? -0.25 : 0; // recorded falls behind → engine ahead
+      evs.push({ t: 2 + k, kind: 'tick', playheads: { A: 50 + k + step, B: 80 + k + step } });
+    }
+    const r = rig(planFor(evs, 2));
+    await r.driver.start();
+    const relBefore = r.engines.A.getPlayhead() - r.engines.B.getPlayhead();
+    let sawSameFrame = false;
+    for (let k = 1; k <= 25; k++) {
+      const a0 = r.engines.A.seeks.length;
+      const b0 = r.engines.B.seeks.length;
+      r.advance(1.0);
+      if (r.engines.A.seeks.length > a0 && r.engines.B.seeks.length > b0) sawSameFrame = true;
+    }
+    expect(sawSameFrame).toBe(true); // both corrected in one frame
+    // No spurious pitch change from the step (linear-fit reject).
+    expect(r.engines.A.pitchPercent).toBeCloseTo(0, 1);
+    // Relative phase across the whole episode is preserved.
+    const relAfter = r.engines.A.getPlayhead() - r.engines.B.getPlayhead();
+    expect(Math.abs(relAfter - relBefore)).toBeLessThan(0.05);
     r.driver.stop();
   });
 });
