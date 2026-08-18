@@ -1,7 +1,8 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { PRESETS } from '../visualizer/presets';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { PRESETS, presetById } from '../visualizer/presets';
 import {
   getVisualizerRemote,
+  sendVisualizerParam,
   sendVisualizerPreset,
   subscribeVisualizerRemote,
 } from '../visualizer/remote';
@@ -17,10 +18,30 @@ import './VisualizerControlModal.css';
  * window fullscreen onto a chosen display (HDMI flow). In a browser the
  * display section hides — drag + ⛶ remains the fallback.
  */
+/** How long a locally-dragged value outranks the ping echo (the viz
+ * window reports params every 500 ms; without this, dragging snaps back
+ * to the previous echo mid-gesture). */
+const LOCAL_EDIT_PRECEDENCE_MS = 1200;
+
 export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
   const remote = useSyncExternalStore(subscribeVisualizerRemote, getVisualizerRemote);
   const [displays, setDisplays] = useState<VisualizerDisplayInfo[] | null>(null);
   const bridge = window.manadjVisualizer;
+  const activePreset = remote.presetId ? presetById(remote.presetId) : null;
+  // Recently-dragged values take precedence over the ping echo.
+  const localEdits = useRef<Record<string, { value: number; at: number }>>({});
+  const [, forceRender] = useState(0);
+  const paramValue = (paramId: string, fallback: number): number => {
+    const local = localEdits.current[`${remote.presetId}:${paramId}`];
+    if (local && performance.now() - local.at < LOCAL_EDIT_PRECEDENCE_MS) return local.value;
+    return remote.params?.[paramId] ?? fallback;
+  };
+  const editParam = (paramId: string, value: number) => {
+    if (!remote.presetId) return;
+    localEdits.current[`${remote.presetId}:${paramId}`] = { value, at: performance.now() };
+    sendVisualizerParam(remote.presetId, paramId, value);
+    forceRender((n) => n + 1);
+  };
 
   // Displays: load on open and refresh while the modal is up (plugging in
   // the HDMI cable while the modal is open should just show the display).
@@ -69,6 +90,28 @@ export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
             </button>
           ))}
         </div>
+
+        {activePreset && (activePreset.params?.length ?? 0) > 0 && (
+          <>
+            <h3>Parameters — {activePreset.name}</h3>
+            <div className="vizmodal-params">
+              {activePreset.params!.map((param) => (
+                <label key={param.id} className="vizmodal-param">
+                  <span>{param.label}</span>
+                  <input
+                    type="range"
+                    min={param.min}
+                    max={param.max}
+                    step={param.step}
+                    disabled={!remote.open}
+                    value={paramValue(param.id, param.default)}
+                    onChange={(e) => editParam(param.id, Number(e.target.value))}
+                  />
+                </label>
+              ))}
+            </div>
+          </>
+        )}
 
         {bridge && (
           <>

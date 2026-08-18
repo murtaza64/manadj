@@ -6,6 +6,7 @@
  */
 
 import { DEFAULT_PRESET_ID, presetById } from './presets';
+import type { VisualizerPreset } from './presets/types';
 
 const STORAGE_KEY = 'manadj-visualizer-preset';
 
@@ -45,4 +46,69 @@ export function setPresetId(id: string): void {
   presetId = normalized;
   save(normalized);
   for (const listener of listeners) listener();
+}
+
+/**
+ * Per-preset parameter values (realtime-visualization 05): declared on the
+ * preset (PresetParam), persisted per preset, resolved with defaults.
+ * Cached objects are replaced on change so useSyncExternalStore consumers
+ * and the render loop get reference equality between changes.
+ */
+const PARAMS_KEY_PREFIX = 'manadj-visualizer-params:';
+const paramCache = new Map<string, Record<string, number>>();
+const paramListeners = new Set<() => void>();
+
+function resolveParams(preset: VisualizerPreset): Record<string, number> {
+  const values: Record<string, number> = {};
+  let stored: Record<string, unknown> = {};
+  try {
+    stored = JSON.parse(localStorage.getItem(PARAMS_KEY_PREFIX + preset.id) ?? '{}');
+  } catch {
+    // corrupted/absent: defaults
+  }
+  for (const param of preset.params ?? []) {
+    const raw = stored[param.id];
+    values[param.id] =
+      typeof raw === 'number' && Number.isFinite(raw)
+        ? Math.min(param.max, Math.max(param.min, raw))
+        : param.default;
+  }
+  return values;
+}
+
+export function getParamValues(preset: VisualizerPreset): Record<string, number> {
+  let values = paramCache.get(preset.id);
+  if (!values) {
+    values = resolveParams(preset);
+    paramCache.set(preset.id, values);
+  }
+  return values;
+}
+
+export function setParamValue(presetId: string, paramId: string, value: number): void {
+  const preset = presetById(presetId);
+  const next = { ...getParamValues(preset), [paramId]: value };
+  paramCache.set(preset.id, next);
+  try {
+    localStorage.setItem(PARAMS_KEY_PREFIX + preset.id, JSON.stringify(next));
+  } catch {
+    // persistence is best-effort
+  }
+  for (const listener of paramListeners) listener();
+}
+
+export function resetParams(presetId: string): void {
+  const preset = presetById(presetId);
+  paramCache.delete(preset.id);
+  try {
+    localStorage.removeItem(PARAMS_KEY_PREFIX + preset.id);
+  } catch {
+    // best-effort
+  }
+  for (const listener of paramListeners) listener();
+}
+
+export function subscribeParams(listener: () => void): () => void {
+  paramListeners.add(listener);
+  return () => paramListeners.delete(listener);
 }

@@ -41,13 +41,15 @@ class FractureRenderer implements PresetRenderer {
       this.history.unshift(wavesSpread(frame.spectrum, 1 / 32));
       if (this.history.length > ROWS) this.history.pop();
     }
-    this.roll += (0.04 + MAX_ROLL_RAD_PER_S * energy * energy) * frame.dt;
+    this.roll += (0.04 + MAX_ROLL_RAD_PER_S * energy * energy + 0.5 * frame.impulse.mid) * frame.dt;
     if (this.history.length === 0) return;
 
     const cx = width / 2;
     const cy = height / 2;
     // The jaws: floor/ceiling baselines close toward center when loud.
-    const gap = height * (0.46 - 0.34 * energy);
+    // Jaws: baseline closes with sustained energy; a kick SNAPS them
+    // (impulse) — a drop's first kick visibly bites (05).
+    const gap = height * (0.46 - 0.3 * energy) * (1 - 0.18 * frame.impulse.low);
     const ridgeHeight = height * 0.22;
     const diagonal = Math.hypot(width, height);
 
@@ -86,6 +88,12 @@ class FractureRenderer implements PresetRenderer {
         ctx.lineWidth = Math.max(1, height * 0.002 * (0.4 + 0.6 * nearness));
         ctx.lineJoin = 'round';
         ctx.stroke(path);
+        // Front ridges get a soft glow pass (05 polish).
+        if (r < 3) {
+          ctx.strokeStyle = `hsla(${hue}, 100%, 65%, ${0.18 * fade})`;
+          ctx.lineWidth = Math.max(3, height * 0.008 * nearness);
+          ctx.stroke(path);
+        }
       }
     }
 

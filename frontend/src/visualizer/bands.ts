@@ -220,6 +220,106 @@ export function maxGroup(levels: number[], groupSize: number): number[] {
   return grouped;
 }
 
+
+/**
+ * Per-band onset impulses (realtime-visualization 05): the TRANSIENT
+ * signal the smoothed levels erase. A slow reference envelope tracks the
+ * sustained level per band; the positive delta of the fast target above
+ * it is an onset (a kick, a snare, a hat), captured into a hit envelope
+ * with instant attack and fast decay. Sustained material (basslines,
+ * vocals, pads) sits near zero here while still driving the levels.
+ */
+
+/** Reference envelope time constant: what counts as "sustained". */
+export const IMPULSE_REF_S = 0.25;
+/** Hit envelope decay: how long a hit visibly rings. */
+export const IMPULSE_DECAY_S = 0.12;
+/** Onset gain: reference-to-target delta scaling into [0, 1]. */
+export const IMPULSE_GAIN = 2.5;
+
+export interface ImpulseState {
+  /** Slow reference envelope per band. */
+  reference: BandLevels;
+  /** Current hit envelopes per band. */
+  impulse: BandLevels;
+}
+
+export const INITIAL_IMPULSE_STATE: ImpulseState = {
+  reference: SILENT_BANDS,
+  impulse: SILENT_BANDS,
+};
+
+/** One impulse step against the RAW (unsmoothed) band targets. */
+export function stepImpulses(
+  state: ImpulseState,
+  target: BandLevels,
+  dt: number
+): ImpulseState {
+  const refAlpha = 1 - Math.exp(-Math.max(0, dt) / IMPULSE_REF_S);
+  const decay = Math.exp(-Math.max(0, dt) / IMPULSE_DECAY_S);
+  const step = (band: keyof BandLevels) => {
+    const onset = Math.min(1, Math.max(0, target[band] - state.reference[band]) * IMPULSE_GAIN);
+    return {
+      reference: state.reference[band] + (target[band] - state.reference[band]) * refAlpha,
+      impulse: Math.max(onset, state.impulse[band] * decay),
+    };
+  };
+  const low = step('low');
+  const mid = step('mid');
+  const high = step('high');
+  return {
+    reference: { low: low.reference, mid: mid.reference, high: high.reference },
+    impulse: { low: low.impulse, mid: mid.impulse, high: high.impulse },
+  };
+}
+
+/**
+ * Energy trend (realtime-visualization 05): a slow baseline (~6 s) plus
+ * "excitement" — sustained energy ABOVE the baseline, i.e. the drop
+ * signal. Rises over the first seconds of a drop, returns to zero in
+ * breakdowns; presets scale scene intensity with it instead of flicking
+ * per frame.
+ */
+export const TREND_S = 6;
+export const EXCITEMENT_GAIN = 3;
+
+export interface EnergyTrend {
+  /** Slow energy baseline in [0, 1]. */
+  slow: number;
+  /** Sustained energy above baseline, clamped to [0, 1]. */
+  excitement: number;
+}
+
+export const INITIAL_TREND: EnergyTrend = { slow: 0, excitement: 0 };
+
+export function stepTrend(previous: EnergyTrend, energy: number, dt: number): EnergyTrend {
+  const alpha = 1 - Math.exp(-Math.max(0, dt) / TREND_S);
+  const slow = previous.slow + (energy - previous.slow) * alpha;
+  return {
+    slow,
+    excitement: Math.min(1, Math.max(0, (energy - slow) * EXCITEMENT_GAIN)),
+  };
+}
+
+
+/**
+ * Normalized spectral centroid over the (log-spaced) multiband levels
+ * (realtime-visualization 05): 0 = all energy in the lowest band, 1 = all
+ * in the highest, 0.5 = neutral/silence. The realtime "harmonic content"
+ * scalar — dark bass passages sit low, bright harmonic material sits
+ * high; presets swing hue with it.
+ */
+export function spectralCentroid(levels: ArrayLike<number>): number {
+  let sum = 0;
+  let weighted = 0;
+  for (let i = 0; i < levels.length; i++) {
+    sum += levels[i];
+    weighted += levels[i] * i;
+  }
+  if (sum <= 1e-6 || levels.length < 2) return 0.5;
+  return weighted / sum / (levels.length - 1);
+}
+
 function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }

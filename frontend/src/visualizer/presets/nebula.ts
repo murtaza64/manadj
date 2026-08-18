@@ -58,7 +58,7 @@ class NebulaRenderer implements PresetRenderer {
     ctx.globalCompositeOperation = 'lighter';
 
     // --- Low: the core bloom.
-    const coreRadius = unit * (0.06 + 0.3 * low * low + 0.06 * low);
+    const coreRadius = unit * (0.06 + 0.28 * low * low + 0.05 * low + 0.09 * frame.impulse.low);
     if (coreRadius > 1) {
       const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreRadius);
       core.addColorStop(0, cssRgb(BAND_RGB.low, 0.55 + 0.45 * low, 1 + 0.8 * low));
@@ -90,7 +90,7 @@ class NebulaRenderer implements PresetRenderer {
     }
 
     // --- High: the sparks.
-    const wanted = SPARK_RATE * high * high * frame.dt;
+    const wanted = SPARK_RATE * (high * high + 2.5 * frame.impulse.high) * frame.dt;
     let spawn = Math.floor(wanted) + (Math.random() < wanted % 1 ? 1 : 0);
     while (spawn-- > 0 && this.sparks.length < MAX_SPARKS) {
       const angle = Math.random() * Math.PI * 2;

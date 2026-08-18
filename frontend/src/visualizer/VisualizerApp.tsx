@@ -1,15 +1,23 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { SILENT_BANDS } from './bands';
-import type { BandLevels } from './bands';
+import { INITIAL_TREND, SILENT_BANDS } from './bands';
+import type { BandLevels, EnergyTrend } from './bands';
 import {
   PING_INTERVAL_MS,
   SPECTRUM_BAND_COUNT,
   VISUALIZER_CHANNEL,
 } from './channel';
-import type { BeatInfo, VisualizerMessage, VisualizerPing } from './channel';
+import type { BeatInfo, DeckStateInfo, VisualizerMessage, VisualizerPing } from './channel';
 import { PRESETS, presetById } from './presets';
 import type { PresetRenderer, VisualizerPreset } from './presets/types';
-import { getPresetId, setPresetId, subscribePreset } from './visualizerStore';
+import {
+  getParamValues,
+  getPresetId,
+  setParamValue,
+  setPresetId,
+  subscribeParams,
+  subscribePreset,
+} from './visualizerStore';
+import { VisualizerHud } from './VisualizerHud';
 import './VisualizerApp.css';
 
 /** Band feed older than this renders as silence (main window gone/paused). */
@@ -29,13 +37,18 @@ const MORPH_S = 0.8;
  * instant" HDMI stutter). The canvas renders within the budget and CSS
  * upscales; at projection distance the difference is invisible. */
 const MAX_BACKING_PIXELS = 1920 * 1080;
+/** GL presets shade per pixel cheaply; give them ~1440p. */
+const MAX_BACKING_PIXELS_HIRES = 2560 * 1440;
 
 /** Canvas backing size for the current client size, within the budget. */
-function backingSize(canvas: HTMLCanvasElement): { width: number; height: number } {
+function backingSize(
+  canvas: HTMLCanvasElement,
+  budget = MAX_BACKING_PIXELS
+): { width: number; height: number } {
   const dpr = window.devicePixelRatio || 1;
   let width = Math.max(1, canvas.clientWidth * dpr);
   let height = Math.max(1, canvas.clientHeight * dpr);
-  const scale = Math.sqrt(MAX_BACKING_PIXELS / (width * height));
+  const scale = Math.sqrt(budget / (width * height));
   if (scale < 1) {
     width *= scale;
     height *= scale;
@@ -85,12 +98,20 @@ export function VisualizerApp() {
     spectrum: number[];
     wave: { left: Float32Array; right: Float32Array } | null;
     beat: BeatInfo | null;
+    impulse: BandLevels;
+    trend: EnergyTrend;
+    centroid: number;
+    decks: DeckStateInfo[];
     receivedAt: number;
   }>({
     bands: SILENT_BANDS,
     spectrum: SILENT_SPECTRUM,
     wave: null,
     beat: null,
+    impulse: SILENT_BANDS,
+    trend: INITIAL_TREND,
+    centroid: 0.5,
+    decks: [],
     receivedAt: -Infinity,
   });
   const presetId = useSyncExternalStore(subscribePreset, getPresetId);
@@ -100,6 +121,16 @@ export function VisualizerApp() {
     morphT: 1,
   });
   const [chromeVisible, setChromeVisible] = useState(true);
+  const [hudVisible, setHudVisible] = useState(
+    () => localStorage.getItem('manadj-visualizer-hud') === 'true'
+  );
+  const toggleHud = () =>
+    setHudVisible((v) => {
+      localStorage.setItem('manadj-visualizer-hud', String(!v));
+      return !v;
+    });
+  const activePreset = presetById(presetId);
+  const paramValues = useSyncExternalStore(subscribeParams, () => getParamValues(activePreset));
   const [stalled, setStalled] = useState(true);
 
   useEffect(() => {
@@ -123,6 +154,7 @@ export function VisualizerApp() {
       layers.morphT = 0;
     }
     layers.current = next;
+    window.dispatchEvent(new Event('resize'));
   }, [presetId]);
 
   // Band feed: ping so the main-window bridge transmits (declaring wave
@@ -136,12 +168,21 @@ export function VisualizerApp() {
         setPresetId(event.data.presetId);
         return;
       }
+      if (event.data?.type === 'set-param') {
+        // Remote tweak from the modal (05).
+        setParamValue(event.data.presetId, event.data.paramId, event.data.value);
+        return;
+      }
       if (event.data?.type !== 'bands') return;
       feedRef.current = {
         bands: event.data.bands,
         spectrum: event.data.spectrum ?? SILENT_SPECTRUM,
         wave: event.data.wave ?? null,
         beat: event.data.beat ?? null,
+        impulse: event.data.impulse ?? SILENT_BANDS,
+        trend: event.data.trend ?? INITIAL_TREND,
+        centroid: event.data.centroid ?? 0.5,
+        decks: event.data.decks ?? [],
         receivedAt: performance.now(),
       };
     };
@@ -153,6 +194,7 @@ export function VisualizerApp() {
           layers.current?.preset.wantsWave || layers.outgoing?.preset.wantsWave
         ),
         presetId: getPresetId(),
+        params: getParamValues(presetById(getPresetId())),
       };
       channel.postMessage(message);
     };
@@ -177,10 +219,14 @@ export function VisualizerApp() {
     if (!ctx) return;
 
     const resize = () => {
-      const { width, height } = backingSize(canvas);
+      const layers = layersRef.current;
+      const hiRes = !!(layers.current?.preset.hiRes || layers.outgoing?.preset.hiRes);
+      const { width, height } = backingSize(
+        canvas,
+        hiRes ? MAX_BACKING_PIXELS_HIRES : MAX_BACKING_PIXELS
+      );
       canvas.width = width;
       canvas.height = height;
-      const layers = layersRef.current;
       for (const layer of [layers.current, layers.outgoing]) {
         if (!layer) continue;
         layer.canvas.width = width;
@@ -203,6 +249,11 @@ export function VisualizerApp() {
         spectrum: fresh ? feedRef.current.spectrum : SILENT_SPECTRUM,
         wave: fresh ? feedRef.current.wave : null,
         beat: fresh ? feedRef.current.beat : null,
+        impulse: fresh ? feedRef.current.impulse : SILENT_BANDS,
+        trend: fresh ? feedRef.current.trend : INITIAL_TREND,
+        centroid: fresh ? feedRef.current.centroid : 0.5,
+        decks: fresh ? feedRef.current.decks : [],
+        params: {},
         time: (now - startedAt) / 1000,
         dt,
       };
@@ -218,14 +269,20 @@ export function VisualizerApp() {
           layers.current.canvas.width = width;
           layers.current.canvas.height = height;
         }
-        layers.current.renderer.render(layers.current.ctx, width, height, frame);
+        layers.current.renderer.render(layers.current.ctx, width, height, {
+          ...frame,
+          params: getParamValues(layers.current.preset),
+        });
       }
       if (layers.outgoing) {
         layers.morphT += dt / MORPH_S;
         if (layers.morphT >= 1) {
           layers.outgoing = null;
         } else {
-          layers.outgoing.renderer.render(layers.outgoing.ctx, width, height, frame);
+          layers.outgoing.renderer.render(layers.outgoing.ctx, width, height, {
+            ...frame,
+            params: getParamValues(layers.outgoing.preset),
+          });
         }
       }
 
@@ -278,7 +335,29 @@ export function VisualizerApp() {
     };
   }, []);
 
+  // Close keys: Escape (exits fullscreen first if active) and Cmd/Ctrl+W.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else window.close();
+      } else if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey) {
+        toggleHud();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        window.close();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const toggleFullscreen = () => {
+    const bridge = window.manadjVisualizer;
+    if (bridge) {
+      void bridge.toggleFullscreen();
+      return;
+    }
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen();
   };
@@ -286,6 +365,7 @@ export function VisualizerApp() {
   return (
     <div className={`visualizer${chromeVisible ? '' : ' chrome-hidden'}`}>
       <canvas ref={canvasRef} className="visualizer-canvas" />
+      {hudVisible && <VisualizerHud getSnapshot={() => feedRef.current} />}
       {stalled && (
         <div className="visualizer-nosignal">
           waiting for manaDJ audio — keep the main window open
@@ -305,12 +385,36 @@ export function VisualizerApp() {
         </div>
         <button
           className="visualizer-fullscreen-btn"
+          title="Debug HUD (h)"
+          onClick={toggleHud}
+        >
+          HUD
+        </button>
+        <button
+          className="visualizer-fullscreen-btn"
           title="Toggle fullscreen"
           onClick={toggleFullscreen}
         >
           ⛶
         </button>
       </div>
+      {(activePreset.params?.length ?? 0) > 0 && (
+        <div className="visualizer-params">
+          {activePreset.params!.map((param) => (
+            <label key={param.id} className="visualizer-param">
+              <span>{param.label}</span>
+              <input
+                type="range"
+                min={param.min}
+                max={param.max}
+                step={param.step}
+                value={paramValues[param.id] ?? param.default}
+                onChange={(e) => setParamValue(activePreset.id, param.id, Number(e.target.value))}
+              />
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

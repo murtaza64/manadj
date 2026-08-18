@@ -15,6 +15,9 @@ export interface BeatPosition {
   /** Whole beat within the bar, 0-based (0 = the downbeat, 0..beatsPerBar-1). */
   beatInBar: number;
   beatsPerBar: number;
+  /** Absolute bar index from the first downbeat (negative in lead-ins) —
+   * higher metric tiers derive from it (phrase = barIndex % 4, etc.). */
+  barIndex: number;
 }
 
 /**
@@ -54,6 +57,7 @@ export function beatPositionAt(
     barPhase: barPosition / beatsPerBar,
     beatInBar: Math.min(beatsPerBar - 1, Math.floor(barPosition)),
     beatsPerBar,
+    barIndex: Math.floor(fromOrigin / beatsPerBar),
   };
 }
 

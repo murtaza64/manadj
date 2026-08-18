@@ -8,23 +8,39 @@
  */
 
 import { PING_TIMEOUT_MS, VISUALIZER_CHANNEL } from './channel';
-import type { VisualizerMessage, VisualizerSetPreset } from './channel';
+import type { VisualizerMessage, VisualizerSetParam, VisualizerSetPreset } from './channel';
 
 export interface VisualizerRemoteState {
   /** A viz window pinged within the timeout. */
   open: boolean;
   /** The viz window's active preset (null while closed/unknown). */
   presetId: string | null;
+  /** The active preset's param values as last reported (null = unknown). */
+  params: Record<string, number> | null;
 }
 
-let state: VisualizerRemoteState = { open: false, presetId: null };
+let state: VisualizerRemoteState = { open: false, presetId: null, params: null };
 let lastPingAt = -Infinity;
 let channel: BroadcastChannel | null = null;
 let staleTimer: ReturnType<typeof setInterval> | null = null;
 const listeners = new Set<() => void>();
 
+function sameParams(a: Record<string, number> | null, b: Record<string, number> | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((k) => a[k] === b[k]);
+}
+
 function update(next: VisualizerRemoteState): void {
-  if (next.open === state.open && next.presetId === state.presetId) return;
+  if (
+    next.open === state.open &&
+    next.presetId === state.presetId &&
+    sameParams(next.params, state.params)
+  ) {
+    return;
+  }
   state = next;
   for (const listener of listeners) listener();
 }
@@ -35,11 +51,15 @@ function ensureChannel(): BroadcastChannel {
     channel.onmessage = (event: MessageEvent<VisualizerMessage>) => {
       if (event.data?.type !== 'ping') return;
       lastPingAt = performance.now();
-      update({ open: true, presetId: event.data.presetId ?? state.presetId });
+      update({
+        open: true,
+        presetId: event.data.presetId ?? state.presetId,
+        params: event.data.params ?? state.params,
+      });
     };
     staleTimer = setInterval(() => {
       if (state.open && performance.now() - lastPingAt > PING_TIMEOUT_MS) {
-        update({ open: false, presetId: null });
+        update({ open: false, presetId: null, params: null });
       }
     }, 500);
     void staleTimer;
@@ -60,5 +80,11 @@ export function getVisualizerRemote(): VisualizerRemoteState {
 /** Switch the viz window's preset from the laptop. */
 export function sendVisualizerPreset(presetId: string): void {
   const message: VisualizerSetPreset = { type: 'set-preset', presetId };
+  ensureChannel().postMessage(message);
+}
+
+/** Tweak a param on the viz window's preset from the laptop. */
+export function sendVisualizerParam(presetId: string, paramId: string, value: number): void {
+  const message: VisualizerSetParam = { type: 'set-param', presetId, paramId, value };
   ensureChannel().postMessage(message);
 }

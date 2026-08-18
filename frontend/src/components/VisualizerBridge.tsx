@@ -8,19 +8,28 @@ import {
   aggregateBands,
   aggregateMultiband,
   logBandEdges,
+  spectralCentroid,
   stepBands,
+  stepImpulses,
   stepLevels,
+  stepTrend,
+  INITIAL_IMPULSE_STATE,
+  INITIAL_TREND,
   SILENT_BANDS,
 } from '../visualizer/bands';
-import type { BandLevels } from '../visualizer/bands';
+import type { BandLevels, EnergyTrend, ImpulseState } from '../visualizer/bands';
+import { energyOf } from '../visualizer/style';
 import { beatPositionAt } from '../visualizer/beat';
+import { deckMasterGain, isDeckAudible } from '../capture/audibility';
+import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
+import { meanAbsoluteToNormalized } from '../midi/levelMeter';
 import {
   PING_TIMEOUT_MS,
   SPECTRUM_BAND_COUNT,
   VISUALIZER_CHANNEL,
   WAVE_POINTS,
 } from '../visualizer/channel';
-import type { BeatInfo, VisualizerFrame, VisualizerMessage } from '../visualizer/channel';
+import type { BeatInfo, DeckStateInfo, VisualizerFrame, VisualizerMessage } from '../visualizer/channel';
 
 /** Geometric 24-band edges, 40 Hz → 16 kHz (Rainmeter/cava construction). */
 const SPECTRUM_EDGES = logBandEdges(40, 16000, SPECTRUM_BAND_COUNT);
@@ -49,6 +58,8 @@ export function VisualizerBridge() {
   decksRef.current = decks;
   const bandsRef = useRef<BandLevels>(SILENT_BANDS);
   const spectrumRef = useRef<number[]>(SILENT_SPECTRUM);
+  const impulseRef = useRef<ImpulseState>(INITIAL_IMPULSE_STATE);
+  const trendRef = useRef<EnergyTrend>(INITIAL_TREND);
 
   useEffect(() => {
     const channel = new BroadcastChannel(VISUALIZER_CHANNEL);
@@ -90,6 +101,73 @@ export function VisualizerBridge() {
       return { ...position, bpm: snapshot.bpm };
     };
 
+    const readDecks = (): DeckStateInfo[] => {
+      const mixerInputs = {
+        crossfader: mixer.getCrossfader(),
+        crossfaderEnabled: mixer.getCrossfaderEnabled(),
+      };
+      return CHANNEL_IDS.map((id) => {
+        const deck = decksRef.current[id];
+        const playing = !!deck?.engine.isAudioRunning();
+        let level = 0;
+        if (playing) {
+          const state = mixer.getChannelState(id);
+          // While an automation overlay is engaged (editor audition /
+          // Conductor, ADR 0022), the AUDIBLE fader/EQ/filter are the
+          // overlay's, not base state — audibility must read what plays.
+          const automation = mixer.getAutomation(id);
+          const inputs = {
+            playing,
+            fader: automation?.fader ?? state.fader,
+            trim: automation?.trim ?? state.trim,
+            eq: automation?.eq ?? state.eq,
+            filter: automation?.filter ?? state.filter,
+            assignment: mixer.getCrossfaderAssignment(id),
+          };
+          // THE audibility definition (capture/audibility.ts) — its
+          // audibleGain threshold + kill checks reject headphone-preview
+          // decks whose fader isn't a true zero (a raw gain multiply
+          // leaked them in as ghost orbs).
+          if (isDeckAudible(inputs, mixerInputs, DEFAULT_DETECTOR_PARAMS)) {
+            const gain = deckMasterGain(inputs, mixerInputs);
+            level = meanAbsoluteToNormalized(mixer.readChannelLevel(id).meanAbsolute * gain);
+          }
+        }
+        const snapshot = deck?.engine.getSnapshot();
+        // Per-deck beat position: any running deck (asLaunchReference
+        // self-gates on running + gridded).
+        let beat: ReturnType<typeof beatPositionAt> = null;
+        if (playing && deck) {
+          const reference = deck.engine.asLaunchReference();
+          if (reference) {
+            const grid = snapshot?.trackId
+              ? queryClient.getQueryData<BeatgridResponse>(['beatgrid', snapshot.trackId])
+              : undefined;
+            beat = beatPositionAt(
+              reference.beatTimes,
+              grid?.data.downbeat_times ?? [],
+              reference.playhead
+            );
+          }
+        }
+        const state = mixer.getChannelState(id);
+        const automation = mixer.getAutomation(id);
+        return {
+          channel: id,
+          level,
+          playing,
+          trackId: snapshot?.trackId ?? null,
+          beatPhase: beat?.phase ?? null,
+          barPhase: beat?.barPhase ?? null,
+          beatInBar: beat?.beatInBar ?? null,
+          beatsPerBar: beat?.beatsPerBar ?? 4,
+          bpm: snapshot?.bpm ?? null,
+          eq: automation?.eq ?? state.eq,
+          fader: automation?.fader ?? state.fader,
+        };
+      });
+    };
+
     const readWave = (): { left: Float32Array; right: Float32Array } | null => {
       const waveform = mixer.readMasterWaveform();
       if (!waveform) return null;
@@ -112,6 +190,8 @@ export function VisualizerBridge() {
         // Feed went quiet: park until the next ping restarts the loop.
         bandsRef.current = SILENT_BANDS;
         spectrumRef.current = SILENT_SPECTRUM;
+        impulseRef.current = INITIAL_IMPULSE_STATE;
+        trendRef.current = INITIAL_TREND;
         return;
       }
       const dt = lastFrameAt > 0 ? (now - lastFrameAt) / 1000 : 1 / 60;
@@ -130,12 +210,20 @@ export function VisualizerBridge() {
         : SILENT_SPECTRUM;
       bandsRef.current = stepBands(bandsRef.current, bandTarget, dt);
       spectrumRef.current = stepLevels(spectrumRef.current, spectrumTarget, dt);
+      // Impulses run against the RAW targets — the smoothed levels have
+      // already eaten the transient the impulse detector needs.
+      impulseRef.current = stepImpulses(impulseRef.current, bandTarget, dt);
+      trendRef.current = stepTrend(trendRef.current, energyOf(bandTarget), dt);
       const frame: VisualizerFrame = {
         type: 'bands',
         bands: bandsRef.current,
         spectrum: spectrumRef.current,
         wave: wantsWave ? readWave() : null,
         beat: readBeat(),
+        impulse: impulseRef.current.impulse,
+        trend: trendRef.current,
+        centroid: spectralCentroid(spectrumRef.current),
+        decks: readDecks(),
         sentAt: now,
       };
       channel.postMessage(frame);

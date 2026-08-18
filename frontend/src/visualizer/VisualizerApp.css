@@ -82,3 +82,105 @@
   opacity: 0.85;
   pointer-events: none;
 }
+
+/* Param sliders (05): bottom-left, auto-hide with the chrome. */
+.visualizer-params {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid hsl(200, 100%, 30%);
+  padding: 8px 10px;
+}
+
+.chrome-hidden .visualizer-params {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.visualizer-param {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: hsl(200, 100%, 65%);
+  font: 11px ui-monospace, monospace;
+}
+
+.visualizer-param span {
+  width: 90px;
+  text-align: right;
+}
+
+.visualizer-param input[type='range'] {
+  width: 140px;
+  accent-color: hsl(200, 100%, 55%);
+}
+
+/* Debug HUD (05): top-right instrument panel, always readable, never
+   part of the show (independent of chrome auto-hide). */
+.visualizer-hud {
+  position: absolute;
+  top: 52px;
+  right: 14px;
+  width: 250px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid hsl(200, 100%, 28%);
+  padding: 8px 10px;
+  font: 10px ui-monospace, monospace;
+  color: hsl(200, 30%, 80%);
+  pointer-events: none;
+}
+
+.visualizer-hud.stale {
+  border-color: hsl(0, 100%, 40%);
+}
+
+.hud-section {
+  margin-bottom: 8px;
+}
+
+.hud-title {
+  color: hsl(200, 100%, 60%);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 3px;
+}
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+
+.hud-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.hud-bar-label {
+  width: 52px;
+  text-align: right;
+  opacity: 0.8;
+}
+
+.hud-bar-track {
+  flex: 1;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.hud-bar-fill {
+  height: 100%;
+}
+
+.hud-bar-value {
+  width: 30px;
+  opacity: 0.7;
+}

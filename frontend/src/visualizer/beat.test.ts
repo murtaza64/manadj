@@ -84,4 +84,11 @@ describe('beatPositionAt', () => {
   it('is null for an unusable grid', () => {
     expect(beatPositionAt([10], [10], 10.2)).toBeNull();
   });
+
+  it('counts absolute bars for phrase tiers', () => {
+    expect(beatPositionAt(GRID, DOWNBEATS, 10)!.barIndex).toBe(0);
+    expect(beatPositionAt(GRID, DOWNBEATS, 12)!.barIndex).toBe(1);
+    expect(beatPositionAt(GRID, DOWNBEATS, 18.5)!.barIndex).toBe(4); // phrase rollover
+    expect(beatPositionAt(GRID, DOWNBEATS, 9.4)!.barIndex).toBe(-1); // lead-in
+  });
 });

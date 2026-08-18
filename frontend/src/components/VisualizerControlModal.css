@@ -94,3 +94,31 @@
   opacity: 0.4;
   cursor: default;
 }
+
+.vizmodal-params {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vizmodal-param {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtext0);
+  font-size: 11px;
+}
+
+.vizmodal-param span {
+  width: 130px;
+  text-align: right;
+}
+
+.vizmodal-param input[type='range'] {
+  flex: 1;
+  accent-color: var(--mauve);
+}
+
+.vizmodal-param input[type='range']:disabled {
+  opacity: 0.4;
+}
