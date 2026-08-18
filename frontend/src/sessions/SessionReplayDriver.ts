@@ -96,19 +96,30 @@ const DRIFT_WINDOW = 5;
  * and the drift source disappears. */
 const RATE_WINDOW = 6;
 const RATE_MIN_SAMPLES = 4;
-/** Only adjust past this rate mismatch (0.3% ≈ 3ms/s — clock-skew scale
- * stays untouched). */
-const RATE_ADJUST_MIN = 0.003;
 /** Samples must fit the endpoint line within this — a step offset is
  * DRIFT for the median corrector, not a rate change. */
 const RATE_FIT_TOL_S = 0.06;
 /** Co-corrected decks skip negligible medians (a ~0 seek is a pointless
  * ramp). */
 const COCORRECT_MIN_S = 0.02;
-/** Median drift past this corrects: well under a beat at any playable BPM
- * (one beat at 200 BPM = 0.3s), above the steady recorded-tick skew the
- * jitter fix exists for (~0.1s). */
-const DRIFT_THRESHOLD_S = 0.15;
+/** Coordinated SEEK tier (sessions 20): only a persistent median past
+ * this still seeks — a late load's landing error, drained fast. Everything
+ * smaller is the servo's job (inaudible rate bias, no jumps). */
+const SEEK_MEDIAN_S = 0.2;
+/** Phase servo (sessions 20): position error maps to a bounded micro-rate
+ * bias — the mechanical analog of a DJ nudge. All the irreducible error
+ * sources (start-latency stagger, keylock rate wander, unreplayed bends,
+ * clock skew, estimator noise) drain continuously toward the shared log
+ * reference — on every deck, so RELATIVE phase converges too. */
+const SERVO_MAX_BIAS = 0.01; // ±1% rate
+const SERVO_GAIN_PER_S = 0.1; // full bias at 0.1s error
+const SERVO_DEADBAND_S = 0.015; // no dither under estimator noise
+const ERR_EMA_ALPHA = 0.4;
+/** Base-rate blending (replaces stepped inference adjustments — the steps
+ * wobbled decks independently and froze position errors in). */
+const RATE_EMA_ALPHA = 0.3;
+/** Skip setPitch churn below this delta (percent points). */
+const PITCH_APPLY_MIN_PCT = 0.02;
 
 function median(xs: readonly number[]): number {
   const s = [...xs].sort((a, b) => a - b);
@@ -162,6 +173,9 @@ export class SessionReplayDriver {
   /** Recorded (offset, playhead) samples per deck for rate inference
    * (RATE_WINDOW ring) — reset on any recorded discontinuity. */
   private rateBuf: Partial<Record<ChannelId, { off: number; ph: number }[]>> = {};
+  /** Phase-servo state per deck (sessions 20): smoothed position error +
+   * EMA-blended base rate. */
+  private servo: Partial<Record<ChannelId, { errEma: number | null; rateEma: number }>> = {};
   /** The RECORDED mixer state (what the night's log says), composed into
    * overlay lanes — never written to base during playback. */
   private recDecks: Record<
@@ -417,6 +431,7 @@ export class SessionReplayDriver {
     this.lastCorrection = {};
     this.syncDrift = {};
     this.rateBuf = {};
+    this.servo = {};
     for (const d of ALL_DECKS) {
       const s = seed.decks[d];
       const engine = this.engines[d];
@@ -591,6 +606,11 @@ export class SessionReplayDriver {
         this.engines[cue.channel].setPitch(cue.value);
         this.syncDrift[cue.channel] = [];
         delete this.rateBuf[cue.channel];
+        const sv = this.servo[cue.channel];
+        if (sv) {
+          sv.rateEma = 1 + cue.value / 100; // the cue IS the new base rate
+          sv.errEma = null;
+        }
         // Re-anchor at the expected position under the OLD rate, then run
         // at the new one (rate changes bend the expected-position line).
         const prev = this.anchors[cue.channel];
@@ -606,6 +626,7 @@ export class SessionReplayDriver {
           delete this.anchors[cue.channel];
           this.syncDrift[cue.channel] = [];
           delete this.rateBuf[cue.channel];
+          delete this.servo[cue.channel];
           // Fire and forget — the played night's own timing gave the
           // decode time before the deck sounds; a slow load self-heals at
           // the next sync cue.
@@ -613,21 +634,19 @@ export class SessionReplayDriver {
         }
         break;
       case 'sync': {
-        // Ticks are the log's ~1 Hz truth samples, but captured on the
-        // wall clock — a small steady skew from the live audio clock. Do
-        // NOT re-anchor to every tick (that chased the skew and made the
-        // corrector re-seek each second — the jitter). Three tiers:
-        //  - RATE inference (sessions 18): the recorded trajectory's slope
-        //    IS the deck's true rate — pitch-less legacy logs replay at
-        //    nominal otherwise and drift ~pitch% forever. Match the engine
-        //    pitch to the measured rate; the drift source disappears and
-        //    replay tempo becomes audibly correct.
-        //  - GROSS divergence (> RESYNC_THRESHOLD_S): re-anchor now, the
-        //    frame corrector seeks (a late load, a stalled decode).
-        //  - PERSISTENT drift: DRIFT_WINDOW median past DRIFT_THRESHOLD_S
-        //    corrects — ALL playing decks in the SAME frame (common-mode
-        //    drift corrected one deck at a time audibly broke the
-        //    beatmatch it was preserving).
+        // Ticks are the log's ~1 Hz truth samples. Three tiers (sessions
+        // 18 + 20):
+        //  - SERVO: EMA'd position error → bounded micro-rate bias on top
+        //    of an EMA-blended base rate. Inaudible, continuous, drains
+        //    every irreducible error source (start stagger, keylock rate
+        //    wander, unreplayed bends, clock skew, estimator noise) on
+        //    every deck toward the SHARED log reference — relative phase
+        //    converges as a consequence. No seeks, no jumps.
+        //  - COORDINATED SEEK: a persistent median past SEEK_MEDIAN_S (a
+        //    late load landed far off) seeks ALL full-window decks in the
+        //    same frame.
+        //  - GROSS (> RESYNC_THRESHOLD_S): re-anchor; the frame corrector
+        //    seeks (a stalled decode).
         const ticked: { d: ChannelId; ph: number }[] = [];
         for (const d of ALL_DECKS) {
           const ph = cue.playheads[d as CaptureDeck];
@@ -642,10 +661,16 @@ export class SessionReplayDriver {
           if (!snap.playing || snap.loadState !== 'ready') {
             this.syncDrift[d] = [];
             delete this.rateBuf[d];
+            const idleSv = this.servo[d];
+            if (idleSv) idleSv.errEma = null;
             continue;
           }
-          // Rate inference over the RECORDED samples (engine seeks never
-          // invalidate these; recorded discontinuities reset the ring).
+          const sv = (this.servo[d] ??= {
+            errEma: null,
+            rateEma: 1 + snap.pitchPercent / 100,
+          });
+          // Base rate: blend linear window fits of the RECORDED trajectory
+          // (engine seeks/pitch writes never invalidate these samples).
           const rb = (this.rateBuf[d] ??= []);
           rb.push({ off: cue.offsetS, ph });
           if (rb.length > RATE_WINDOW) rb.shift();
@@ -654,56 +679,61 @@ export class SessionReplayDriver {
             const last = rb[rb.length - 1];
             const dt = last.off - first.off;
             if (dt > 0.5) {
-              const rateEst = (last.ph - first.ph) / dt;
+              const est = (last.ph - first.ph) / dt;
               const linear = rb.every(
-                (p) => Math.abs(p.ph - (first.ph + (p.off - first.off) * rateEst)) <= RATE_FIT_TOL_S
+                (p) => Math.abs(p.ph - (first.ph + (p.off - first.off) * est)) <= RATE_FIT_TOL_S
               );
-              const engineRate = 1 + snap.pitchPercent / 100;
-              if (
-                linear &&
-                rateEst > 0.5 &&
-                rateEst < 2 &&
-                Math.abs(rateEst - engineRate) > RATE_ADJUST_MIN
-              ) {
-                const engine = this.engines[d];
-                this.self(() => engine.setPitch((rateEst - 1) * 100));
-                this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: rateEst };
-                this.syncDrift[d] = [];
-                delete this.rateBuf[d];
-                continue; // fresh basis — innovations restart next tick
+              if (linear && est > 0.5 && est < 2) {
+                sv.rateEma += RATE_EMA_ALPHA * (est - sv.rateEma);
               }
             }
           }
           const innovation = this.engines[d].getPlayhead() - ph;
           if (Math.abs(innovation) > RESYNC_THRESHOLD_S) {
-            this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: a.rate };
+            this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: sv.rateEma };
             this.syncDrift[d] = [];
+            sv.errEma = null;
             continue;
           }
+          sv.errEma =
+            sv.errEma === null ? innovation : sv.errEma + ERR_EMA_ALPHA * (innovation - sv.errEma);
+          // The servo: err ahead of the log → slow down; behind → speed up.
+          const err = sv.errEma;
+          const bias =
+            Math.abs(err) < SERVO_DEADBAND_S
+              ? 0
+              : Math.max(-SERVO_MAX_BIAS, Math.min(SERVO_MAX_BIAS, -err * SERVO_GAIN_PER_S));
+          const targetPitch = (sv.rateEma - 1) * 100 + bias * 100;
+          if (Math.abs(targetPitch - snap.pitchPercent) > PITCH_APPLY_MIN_PCT) {
+            const engine = this.engines[d];
+            this.self(() => engine.setPitch(targetPitch));
+          }
+          // Anchors just feed the gross check now: track the log's truth.
+          this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: sv.rateEma };
           const buf = (this.syncDrift[d] ??= []);
           buf.push(innovation);
           if (buf.length > DRIFT_WINDOW) buf.shift();
           ticked.push({ d, ph });
         }
-        // Coordinated drift correction: ANY deck's full-window median past
-        // the threshold (cooldown-gated) corrects EVERY full-window deck
-        // by its OWN median this same frame — relative phase rides through.
+        // Coordinated seek tier: ANY full-window median past SEEK_MEDIAN_S
+        // (cooldown-gated) seeks EVERY full-window deck by its own median
+        // this same frame — relative phase rides through.
         const trigger = ticked.some(({ d }) => {
           const buf = this.syncDrift[d];
           if (!buf || buf.length < DRIFT_WINDOW) return false;
-          if (Math.abs(median(buf)) <= DRIFT_THRESHOLD_S) return false;
+          if (Math.abs(median(buf)) <= SEEK_MEDIAN_S) return false;
           const last = this.lastCorrection[d];
           return last === undefined || cue.offsetS - last >= CORRECTION_COOLDOWN_S;
         });
         if (trigger) {
-          for (const { d, ph } of ticked) {
+          for (const { d } of ticked) {
             const buf = this.syncDrift[d];
             if (!buf || buf.length < DRIFT_WINDOW) continue;
             const med = median(buf);
             this.lastCorrection[d] = cue.offsetS;
             this.syncDrift[d] = [];
-            const a = this.anchors[d]!;
-            this.anchors[d] = { offset: cue.offsetS, playhead: ph, rate: a.rate };
+            const sv = this.servo[d];
+            if (sv) sv.errEma = null;
             if (Math.abs(med) < COCORRECT_MIN_S) continue;
             const engine = this.engines[d];
             const target = engine.getPlayhead() - med;
