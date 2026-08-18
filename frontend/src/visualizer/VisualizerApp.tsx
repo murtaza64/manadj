@@ -22,6 +22,27 @@ const CHROME_HIDE_MS = 2500;
  * parametric morphing. */
 const MORPH_S = 0.8;
 
+/** Backing-store pixel budget (~1080p-class). Fullscreen on a 4K HDMI
+ * display, an unbounded retina canvas is ~8-16 MP of additive full-canvas
+ * compositing per frame — enough GPU/compositor load to starve the
+ * MAIN window's audio output into underrun loops (the "chops on one
+ * instant" HDMI stutter). The canvas renders within the budget and CSS
+ * upscales; at projection distance the difference is invisible. */
+const MAX_BACKING_PIXELS = 1920 * 1080;
+
+/** Canvas backing size for the current client size, within the budget. */
+function backingSize(canvas: HTMLCanvasElement): { width: number; height: number } {
+  const dpr = window.devicePixelRatio || 1;
+  let width = Math.max(1, canvas.clientWidth * dpr);
+  let height = Math.max(1, canvas.clientHeight * dpr);
+  const scale = Math.sqrt(MAX_BACKING_PIXELS / (width * height));
+  if (scale < 1) {
+    width *= scale;
+    height *= scale;
+  }
+  return { width: Math.round(width), height: Math.round(height) };
+}
+
 /** A live renderer with its own layer canvas: presets own their layer's
  * persistence (phosphor washes, feedback buffers), the compositor never
  * clears layers — only the visible canvas. */
@@ -110,6 +131,11 @@ export function VisualizerApp() {
   useEffect(() => {
     const channel = new BroadcastChannel(VISUALIZER_CHANNEL);
     channel.onmessage = (event: MessageEvent<VisualizerMessage>) => {
+      if (event.data?.type === 'set-preset') {
+        // Remote switch from the main window's control modal (03).
+        setPresetId(event.data.presetId);
+        return;
+      }
       if (event.data?.type !== 'bands') return;
       feedRef.current = {
         bands: event.data.bands,
@@ -126,6 +152,7 @@ export function VisualizerApp() {
         wantsWave: !!(
           layers.current?.preset.wantsWave || layers.outgoing?.preset.wantsWave
         ),
+        presetId: getPresetId(),
       };
       channel.postMessage(message);
     };
@@ -150,9 +177,7 @@ export function VisualizerApp() {
     if (!ctx) return;
 
     const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const width = Math.round(canvas.clientWidth * dpr);
-      const height = Math.round(canvas.clientHeight * dpr);
+      const { width, height } = backingSize(canvas);
       canvas.width = width;
       canvas.height = height;
       const layers = layersRef.current;

@@ -1,5 +1,11 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+contextBridge.exposeInMainWorld("manadjVisualizer", {
+  displays: () => ipcRenderer.invoke("visualizer:displays"),
+  fullscreenOn: (displayId) => ipcRenderer.invoke("visualizer:fullscreen", displayId),
+  windowed: () => ipcRenderer.invoke("visualizer:windowed"),
+});
+
 contextBridge.exposeInMainWorld("manadjRecording", {
   start: (meta) => ipcRenderer.invoke("recording:start", meta),
   // Electron transfer lists accept MessagePorts, not ArrayBuffers. PCM

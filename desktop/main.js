@@ -3,7 +3,7 @@
 // Attaches to an already-running manadj (`make dev`); owns no processes or
 // state. See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
 
-const { app, BrowserWindow, dialog, ipcMain, net, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, screen, session } = require("electron");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -180,6 +180,50 @@ async function attach(win) {
 // the sticky/fullscreen-on-display controls target it.
 let visualizerWindow = null;
 
+// Display targeting (realtime-visualization 03): the laptop-side control
+// modal lists displays and sends the visualizer fullscreen onto one (the
+// HDMI projector flow — no touching the projector window itself).
+function registerVisualizerIpc() {
+  ipcMain.handle("visualizer:displays", () => {
+    const primary = screen.getPrimaryDisplay();
+    const bounds = visualizerWindow?.getBounds() ?? null;
+    const currentId = bounds ? screen.getDisplayMatching(bounds).id : null;
+    return screen.getAllDisplays().map((display, i) => ({
+      id: display.id,
+      label: display.label || `Display ${i + 1}`,
+      width: display.size.width,
+      height: display.size.height,
+      primary: display.id === primary.id,
+      current: display.id === currentId,
+      fullscreen: !!visualizerWindow?.isFullScreen() && display.id === currentId,
+    }));
+  });
+  ipcMain.handle("visualizer:fullscreen", (_event, displayId) => {
+    if (!visualizerWindow) return { ok: false, reason: "visualizer window not open" };
+    const display = screen.getAllDisplays().find((d) => d.id === displayId);
+    if (!display) return { ok: false, reason: "display not found" };
+    const win = visualizerWindow;
+    const enter = () => {
+      win.setBounds(display.bounds);
+      win.setFullScreen(true);
+    };
+    if (win.isFullScreen()) {
+      // macOS animates fullscreen transitions; moving displays requires
+      // leaving first and re-entering once the leave settles.
+      win.once("leave-full-screen", () => setTimeout(enter, 150));
+      win.setFullScreen(false);
+    } else {
+      enter();
+    }
+    return { ok: true };
+  });
+  ipcMain.handle("visualizer:windowed", () => {
+    if (!visualizerWindow) return { ok: false, reason: "visualizer window not open" };
+    visualizerWindow.setFullScreen(false);
+    return { ok: true };
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
@@ -279,6 +323,7 @@ app.whenReady().then(() => {
   assertChannelLabels();
   const disposeRecordingIpc = registerRecordingIpc({ app, dialog, ipcMain });
   app.once("before-quit", disposeRecordingIpc);
+  registerVisualizerIpc();
   createWindow();
 });
 
