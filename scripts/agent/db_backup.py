@@ -66,9 +66,25 @@ def _backups() -> list[tuple[float, Path]]:
     return sorted(out)
 
 
+# WAL sidecars (performance-hardening 03): the DB runs in WAL mode, so a
+# committed-but-not-yet-checkpointed transaction lives in `-wal`, not the main
+# file. Cloning the main file alone can lose (or, worse, half-copy) that data.
+# Copy all present sidecars atomically-enough: a lone extra `-wal` next to a
+# main file is self-recovering on next open; a missing one is not.
+_WAL_SUFFIXES = ("-wal", "-shm")
+
+
 def _clone(src: Path, dest: Path) -> None:
+    """APFS-clone `src` and its WAL sidecars to `dest` (+ matching suffixes)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["cp", "-c", str(src), str(dest)], check=True)
+    for suffix in _WAL_SUFFIXES:
+        sidecar = src.with_name(src.name + suffix)
+        if sidecar.exists():
+            subprocess.run(
+                ["cp", "-c", str(sidecar), str(dest.with_name(dest.name + suffix))],
+                check=True,
+            )
 
 
 def backup(force: bool = False, quiet: bool = False) -> Path | None:
