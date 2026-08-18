@@ -19,6 +19,8 @@ import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import { useConductorState } from '../sets/conductorStore';
 import { useSelectedSetId } from '../sets/setStore';
 import { requestSetNavigate } from '../sets/navigateToSet';
+import { requestSessionMoment } from '../sessions/openSession';
+import { replayNowT, replayState } from '../sessions/replayStore';
 import { chipTooltip, resolveChipFace } from './ownershipChip';
 import type { AppMode } from './TopBar';
 
@@ -50,8 +52,17 @@ export function AudioOwnershipChip({
     } else if (face.kind === 'audition') {
       onModeChange('transition');
     } else if (face.kind === 'replay') {
-      // Sessions live in the Library now (sessions 04 integration).
-      onModeChange('library');
+      // Jump INTO the replay (sessions 16): the replayed Session's
+      // timeline, centered on the live playhead, at most 15 minutes
+      // visible — in the PERFORMANCE view, whose embedded browse consumes
+      // the same session request (replay is a decks activity; the decks
+      // stay on screen). onModeChange runs after the event dispatch, so
+      // it overrides App's library default for history jumps.
+      const uuid = replayState().sessionUuid;
+      if (uuid !== null) {
+        requestSessionMoment({ sessionUuid: uuid, atS: replayNowT(), spanS: 900 });
+      }
+      onModeChange('performance');
     }
     // DECKS: nothing to navigate to — the chip never touches audio.
   };

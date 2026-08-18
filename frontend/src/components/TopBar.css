@@ -230,6 +230,15 @@
   color: var(--base);
 }
 
+/* REPLAY is an ACTIVE state (sessions 16) — the machine is performing on
+   the decks right now; green like a playing set, click = jump to the
+   replayed Session's playhead. */
+.topbar-ownership.replay {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--base);
+}
+
 .topbar-ownership-icon {
   font-size: 10px;
 }

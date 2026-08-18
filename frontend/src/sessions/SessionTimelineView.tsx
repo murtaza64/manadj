@@ -39,6 +39,7 @@ import {
   traceWindow,
 } from './timelineModel';
 import type { CollapseCandidate, StateAtT, TimelineModel } from './timelineModel';
+import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
 import { drawAudibilityArea, drawGridlines, drawStyledRuns, traceRuns } from './waveformLanes';
 import type { TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
@@ -102,12 +103,15 @@ interface Props {
   session: SessionRowWire;
   /** Deep-link: center on this capture-clock moment on open (history jump). */
   focusS?: number | null;
+  /** Deep-link zoom (sessions 16): show at most this many seconds around
+   * the focus moment (never zooms below fit; short sessions keep fit). */
+  focusSpanS?: number | null;
   /** Standalone-mode back affordance; embedded in the Library the sidebar
    * IS the navigation (Sets parity) and this is omitted. */
   onBack?: () => void;
 }
 
-export function SessionTimelineView({ session, focusS, onBack }: Props) {
+export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Props) {
   // Responsive vertical budget: lanes scale, chrome sheds when tight.
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootH, setRootH] = useState(900);
@@ -200,6 +204,16 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
   const [viewportW, setViewportW] = useState(1180);
   const hasModel = model !== null;
   const [scrollX, setScrollX] = useState(0);
+  // Follow-scroll bookkeeping (sessions 17): scrolls WE issue (follow,
+  // zoom, deep-link) are announced here so the onScroll handler can tell
+  // them from the user's — a manual scroll disarms following until
+  // REARM_AFTER_MS passes without another one (or a new replay starts).
+  const programmaticScrollRef = useRef(-1);
+  const lastManualScrollAtRef = useRef(-Infinity);
+  const setScrollLeft = useCallback((el: HTMLDivElement, value: number) => {
+    programmaticScrollRef.current = value;
+    el.scrollLeft = value;
+  }, []);
   useEffect(() => {
     // Re-attach once the timeline actually renders (the scroll container
     // is inside the model-gated branch — a mount-only effect sees null).
@@ -210,7 +224,15 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
     setViewportW(el.clientWidth);
     // Synchronous scroll tracking: sticky labels/areas repaint the same
     // frame (the old rAF throttle made them visibly trail the scroll).
-    const onScroll = () => setScrollX(el.scrollLeft);
+    const onScroll = () => {
+      // Anything off our announced position is the human's hand (wheel
+      // pan, scrollbar, trackpad momentum): disarm follow for the re-arm
+      // window; every further manual scroll refreshes it (sessions 17).
+      if (Math.abs(el.scrollLeft - programmaticScrollRef.current) > 1.5) {
+        lastManualScrollAtRef.current = performance.now();
+      }
+      setScrollX(el.scrollLeft);
+    };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       ro.disconnect();
@@ -277,7 +299,7 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
         setPxPerSec(next);
         setScrollX(newScroll);
       });
-      el.scrollLeft = newScroll;
+      setScrollLeft(el, newScroll); // zoom scroll is ours, not a disarm
     };
     const handler = (e: WheelEvent) => {
       e.preventDefault();
@@ -308,18 +330,28 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
       if (raf) cancelAnimationFrame(raf);
     };
      
-  }, [hasModel]);
+  }, [hasModel, setScrollLeft]);
 
-  // Deep-link focus: drop the cursor + moment once, and scroll it into view.
+  // Deep-link focus: drop the cursor + moment once, and scroll it into
+  // view. A zoom request (sessions 16: at most focusSpanS seconds visible)
+  // applies FIRST and defers the scroll one render — centering must use
+  // the axis rebuilt at the new pxPerSec, not the fit axis.
   const focusedRef = useRef(false);
   useEffect(() => {
     if (focusedRef.current || focusS == null || !model || !axis) return;
+    if (focusSpanS != null) {
+      const target = Math.min(MAX_PX_PER_SEC, Math.max(fitPx, viewportW / focusSpanS));
+      if (Math.abs(axis.pxPerSec - target) > 1e-9 && target > fitPx) {
+        setPxPerSec(target);
+        return; // re-runs with the rebuilt axis
+      }
+    }
     focusedRef.current = true;
     setScrubT(focusS);
     setSelection({ kind: 'moment', t: focusS });
     const el = scrollRef.current;
-    if (el) el.scrollLeft = Math.max(0, axis.tToPx(focusS) - el.clientWidth / 2);
-  }, [focusS, model, axis, width]);
+    if (el) setScrollLeft(el, Math.max(0, axis.tToPx(focusS) - el.clientWidth / 2));
+  }, [focusS, focusSpanS, model, axis, width, fitPx, viewportW, setScrollLeft]);
 
   // Checkpointed scrub lookups: hover fires per mousemove — reducing the
   // whole 100k-event log each time froze large Sessions (issue 13).
@@ -388,6 +420,26 @@ export function SessionTimelineView({ session, focusS, onBack }: Props) {
   // playback ends (stop/takeover/ended) the anchor lands where it stopped.
   const [replayT, setReplayT] = useState<number | null>(null);
   const lastReplayTRef = useRef<number | null>(null);
+  // A fresh replay re-arms follow-scroll immediately (sessions 17).
+  useEffect(() => {
+    if (replayHere) lastManualScrollAtRef.current = -Infinity;
+  }, [replayHere]);
+  // Follow the rolling playhead: pinned at the zone edge while it rides
+  // the last 20% of the viewport — paused for REARM_AFTER_MS after a
+  // manual scroll, then back on duty.
+  useEffect(() => {
+    if (replayT === null || !axis) return;
+    if (performance.now() - lastManualScrollAtRef.current < REARM_AFTER_MS) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = followScrollTarget(
+      axis.tToPx(replayT),
+      el.scrollLeft,
+      el.clientWidth,
+      el.scrollWidth
+    );
+    if (target !== null) setScrollLeft(el, target);
+  }, [replayT, axis, setScrollLeft]);
   useEffect(() => {
     if (!replayHere) {
       const last = lastReplayTRef.current;
