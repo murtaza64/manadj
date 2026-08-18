@@ -67,6 +67,15 @@ def test_sweep_enqueues_only_tracks_missing_waveform_data(db, make_track, audio_
     assert enqueue_missing_waveforms(db) == 0
 
 
+def test_sweep_skips_archived_tracks(db, make_track):
+    """Archived = out of the active Library (CONTEXT.md): the background
+    sweep never spends generation on it."""
+    from datetime import UTC, datetime
+
+    make_track(archived_at=datetime.now(UTC))
+    assert enqueue_missing_waveforms(db) == 0
+
+
 def test_create_track_enqueues_generation(db):
     from backend import crud, schemas
 

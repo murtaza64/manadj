@@ -80,11 +80,19 @@ def enqueue_waveform_task(db: Session, track_id: int) -> Task | None:
 
 
 def enqueue_missing_waveforms(db: Session) -> int:
-    """Startup sweep: enqueue every Track lacking Waveform data. Returns count."""
+    """Startup sweep: enqueue every active Track lacking Waveform data.
+
+    Archived tracks are out of the active Library, so the sweep skips them
+    (like the analysis sweep); unarchiving puts a waveform-less track back
+    in reach of the next sweep. Returns count.
+    """
     rows = (
         db.query(models.Track.id)
         .outerjoin(models.Waveform, models.Waveform.track_id == models.Track.id)
-        .filter(or_(models.Waveform.id.is_(None), models.Waveform.data_blob.is_(None)))
+        .filter(
+            models.Track.is_active,
+            or_(models.Waveform.id.is_(None), models.Waveform.data_blob.is_(None)),
+        )
         .all()
     )
     enqueued = 0
