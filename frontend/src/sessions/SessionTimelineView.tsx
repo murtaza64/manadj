@@ -43,6 +43,8 @@ import {
 } from './timelineModel';
 import type { CollapseCandidate, StateAtT, TakeSpanRef, TimeAxis, TimelineModel } from './timelineModel';
 import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
+import { useViewActive } from '../contexts/viewActive';
+import { getTimelineViewState, patchTimelineViewState } from './timelineViewState';
 import { staggerRows } from './labelStagger';
 import {
   createMonotonicTToPx,
@@ -54,8 +56,10 @@ import {
 } from './waveformLanes';
 import type { TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
+import type { ServoDeckActivity } from './replayStore';
 import {
   replayNowT,
+  replayServoActivity,
   replayState,
   seekReplay,
   startReplay,
@@ -122,12 +126,17 @@ interface Props {
   /** Deep-link zoom (sessions 16): show at most this many seconds around
    * the focus moment (never zooms below fit; short sessions keep fit). */
   focusSpanS?: number | null;
+  /** Bumps per deep-link request (perf-layout 09): a kept-alive view must
+   * re-apply focus when a NEW request arrives, not only on mount. */
+  focusVersion?: number;
   /** Standalone-mode back affordance; embedded in the Library the sidebar
    * IS the navigation (Sets parity) and this is omitted. */
   onBack?: () => void;
 }
 
-export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Props) {
+export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion, onBack }: Props) {
+  // Keep-alive (perf-layout 09): sleep the per-frame work while hidden.
+  const viewActive = useViewActive();
   // Responsive vertical budget: lanes scale, chrome sheds when tight.
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootH, setRootH] = useState(900);
@@ -146,17 +155,30 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
     Math.min(LANE_H_MAX, Math.floor((rootH - 125) / 4))
   );
 
-  const [collapseIdle, setCollapseIdle] = useState(true);
-  const [thresholdS, setThresholdS] = useState(45);
-  const [expandedGaps, setExpandedGaps] = useState<Set<number>>(new Set());
-  const [showTraces, setShowTraces] = useState(true);
+  // View state is shared ACROSS instances via the per-uuid store
+  // (sessions 21): seeded here, written through on change, adopted on
+  // view activation (the other Library instance may have moved it).
+  const [collapseIdle, setCollapseIdle] = useState(
+    () => getTimelineViewState(session.uuid)?.collapseIdle ?? true
+  );
+  const [thresholdS, setThresholdS] = useState(
+    () => getTimelineViewState(session.uuid)?.thresholdS ?? 45
+  );
+  const [expandedGaps, setExpandedGaps] = useState<Set<number>>(
+    () => new Set(getTimelineViewState(session.uuid)?.expandedGaps ?? [])
+  );
+  const [showTraces, setShowTraces] = useState(
+    () => getTimelineViewState(session.uuid)?.showTraces ?? true
+  );
   const [scrubT, setScrubT] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
   // Hovered take chip (sessions 22): spotlight state lives HERE and renders
   // in the per-frame overlay — the memoized scene must not re-render per
   // hover, so it only receives the stable callback.
   const [hoverTake, setHoverTake] = useState<TakeRowWire | null>(null);
-  const [pxPerSec, setPxPerSec] = useState<number | null>(null); // null = fit
+  const [pxPerSec, setPxPerSec] = useState<number | null>(
+    () => getTimelineViewState(session.uuid)?.pxPerSec ?? null
+  ); // null = fit
 
   const { data: detail, error } = useQuery({
     queryKey: ['session', session.uuid],
@@ -355,12 +377,77 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
      
   }, [hasModel, setScrollLeft]);
 
+  // Write-through (sessions 21): every knob change lands in the shared
+  // store immediately, so the OTHER Library instance adopts it on its
+  // next activation. centerT (scroll) writes on deactivation only —
+  // per-frame scroll writes would be churn.
+  useEffect(() => {
+    patchTimelineViewState(session.uuid, {
+      pxPerSec,
+      collapseIdle,
+      thresholdS,
+      expandedGaps: [...expandedGaps],
+      showTraces,
+    });
+  }, [session.uuid, pxPerSec, collapseIdle, thresholdS, expandedGaps, showTraces]);
+  const centerRef = useRef<{ axis: typeof axis; scrollX: number; viewportW: number }>({
+    axis: null,
+    scrollX: 0,
+    viewportW,
+  });
+  centerRef.current = { axis, scrollX, viewportW };
+  const writeCenter = useCallback(
+    (uuid: string) => {
+      const c = centerRef.current;
+      if (c.axis) {
+        patchTimelineViewState(uuid, { centerT: c.axis.pxToT(c.scrollX + c.viewportW / 2) });
+      }
+    },
+    []
+  );
+  useEffect(() => {
+    const uuid = session.uuid;
+    return () => writeCenter(uuid); // unmount (session switch)
+  }, [session.uuid, writeCenter]);
+
+  // Adopt on activation (sessions 21): the view was hidden; the other
+  // instance may have moved zoom/scroll for this session. Also writes our
+  // center on DEactivation so the handoff is symmetric.
+  const wasActiveRef = useRef(viewActive);
+  useEffect(() => {
+    if (wasActiveRef.current === viewActive) return;
+    wasActiveRef.current = viewActive;
+    if (!viewActive) {
+      writeCenter(session.uuid);
+      return;
+    }
+    const saved = getTimelineViewState(session.uuid);
+    if (!saved) return;
+    setPxPerSec(saved.pxPerSec);
+    setCollapseIdle(saved.collapseIdle);
+    setThresholdS(saved.thresholdS);
+    setExpandedGaps(new Set(saved.expandedGaps));
+    setShowTraces(saved.showTraces);
+    if (saved.centerT != null) {
+      const el = scrollRef.current;
+      const c = centerRef.current;
+      if (el && c.axis) {
+        setScrollLeft(el, Math.max(0, c.axis.tToPx(saved.centerT) - el.clientWidth / 2));
+      }
+    }
+  }, [viewActive, session.uuid, writeCenter, setScrollLeft]);
+
   // Deep-link focus: drop the cursor + moment once, and scroll it into
   // view. A zoom request (sessions 16: at most focusSpanS seconds visible)
   // applies FIRST and defers the scroll one render — centering must use
   // the axis rebuilt at the new pxPerSec, not the fit axis.
   const focusedRef = useRef(false);
+  const focusVersionRef = useRef(focusVersion);
   useEffect(() => {
+    if (focusVersionRef.current !== focusVersion) {
+      focusVersionRef.current = focusVersion;
+      focusedRef.current = false; // a NEW deep-link re-arms the focus
+    }
     if (focusedRef.current || focusS == null || !model || !axis) return;
     if (focusSpanS != null) {
       const target = Math.min(MAX_PX_PER_SEC, Math.max(fitPx, viewportW / focusSpanS));
@@ -374,7 +461,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
     setSelection({ kind: 'moment', t: focusS });
     const el = scrollRef.current;
     if (el) setScrollLeft(el, Math.max(0, axis.tToPx(focusS) - el.clientWidth / 2));
-  }, [focusS, focusSpanS, model, axis, width, fitPx, viewportW, setScrollLeft]);
+  }, [focusS, focusSpanS, focusVersion, model, axis, width, fitPx, viewportW, setScrollLeft]);
 
   // Checkpointed scrub lookups: hover fires per mousemove — reducing the
   // whole 100k-event log each time froze large Sessions (issue 13).
@@ -464,6 +551,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
     if (target !== null) setScrollLeft(el, target);
   }, [replayT, axis, setScrollLeft]);
   useEffect(() => {
+    if (!viewActive) return; // hidden view: no per-frame playhead work
     if (!replayHere) {
       const last = lastReplayTRef.current;
       lastReplayTRef.current = null;
@@ -491,7 +579,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [replayHere]);
+  }, [replayHere, viewActive]);
 
   // Space: pause/resume while rolling; START playback from the selected
   // moment when idle (view-scoped, like the editor's space).
@@ -721,6 +809,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, onBack }: Pro
 
         {/* Inline state readout: cursor (or selected moment) reconstruction. */}
         <InlineReadout state={scrubState ?? momentState} trackNames={trackNames} />
+
+        {/* Servo readout (sessions 20): which decks replay is nudging back
+            into phase, by how much, and how far off they are. */}
+        {replayHere && viewActive ? <ServoReadout /> : null}
 
         <label>
           <input
@@ -1546,6 +1638,36 @@ function DeckLane({
           })
         : null}
     </g>
+  );
+}
+
+/** Live servo readout (sessions 20): polls driver-owned activity at
+ * 500ms (the servo updates at ~1 Hz sync cues) and lists each actively
+ * nudged deck — signed nudge %% and the smoothed desync it is draining.
+ * Empty (and renders nothing) while the replay is phase-locked. */
+function ServoReadout() {
+  const [activity, setActivity] = useState<ServoDeckActivity[]>([]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActivity(replayServoActivity() ?? []);
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, []);
+  if (activity.length === 0) return null;
+  return (
+    <span className="stl-servo" title="Replay is nudging deck rates back into phase (a machine jog): signed rate nudge and the desync being drained">
+      ⇄
+      {activity.map((a) => (
+        <span key={a.deck} className="stl-servo-deck" style={{ color: DECK_COLORS[a.deck] }}>
+          {a.deck}
+          <i>
+            {a.biasPct > 0 ? '+' : ''}
+            {a.biasPct.toFixed(1)}% · {Math.round(Math.abs(a.errS) * 1000)}ms{' '}
+            {a.errS > 0 ? 'ahead' : 'behind'}
+          </i>
+        </span>
+      ))}
+    </span>
   );
 }
 

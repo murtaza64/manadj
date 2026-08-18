@@ -5,6 +5,7 @@ import { loopOverlayRegions } from '../waveform/loopOverlay';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { useMetricLadderData } from '../hooks/useMetricLadderData';
 import { useHotCues } from '../hooks/useHotCues';
+import { useDrops } from '../hooks/useDrops';
 import type { PlaybackClock } from '../playback/clock';
 import type { LoopRegion } from '../playback/loop';
 import { PLAY_MARKER_FRACTION, stepVisibleSeconds } from '../utils/waveformZoom';
@@ -68,6 +69,8 @@ export default function WebGLWaveform({
   const { data: beatgridData } = useBeatgridData(trackId);
   const { data: metricLadder } = useMetricLadderData(trackId);
   const { data: hotCues = [] } = useHotCues(trackId);
+  // Possible drops (structure-analysis 02): fetch once blob + grid exist.
+  const { drops } = useDrops(trackId, Boolean(waveformData && beatgridData));
   const regions = useMemo(() => loopOverlayRegions(loop), [loop]);
 
   const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
@@ -86,6 +89,7 @@ export default function WebGLWaveform({
     metricLadder: metricLadder ?? null,
     beatjumpBeats,
     regions,
+    dropMarks: drops,
   });
 
   // Apply the shared time-zoom (also after re-init when new data lands).

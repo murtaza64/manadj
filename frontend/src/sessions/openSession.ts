@@ -44,19 +44,24 @@ export function requestSessionMoment(req: SessionMomentRequest): void {
   selectedUuid = req.sessionUuid;
   pendingFocusS = req.atS;
   pendingSpanS = req.spanS ?? null;
+  focusVersion += 1;
   window.dispatchEvent(new CustomEvent(OPEN_SESSION_EVENT));
 }
 
 export interface SessionFocus {
   atS: number | null;
   spanS: number | null;
+  /** Bumps on every request — panes re-apply focus when it changes.
+   * (Keep-alive views, perf-layout 09: BOTH Library instances can be
+   * mounted at once, so a clearing one-shot consume would race them; a
+   * peek + version lets every mounted pane apply the same moment.) */
+  version: number;
 }
 
-/** CONSUME (one-shot): the pending focus moment + zoom request, cleared on
- * read — the timeline pane reads it once on mount (takeReview.ts idiom). */
-export function consumeSessionFocus(): SessionFocus {
-  const focus = { atS: pendingFocusS, spanS: pendingSpanS };
-  pendingFocusS = null;
-  pendingSpanS = null;
-  return focus;
+let focusVersion = 0;
+
+/** PEEK (non-clearing): the latest focus request. Panes track `version`
+ * and re-center whenever it bumps — on mount AND while staying mounted. */
+export function peekSessionFocus(): SessionFocus {
+  return { atS: pendingFocusS, spanS: pendingSpanS, version: focusVersion };
 }
