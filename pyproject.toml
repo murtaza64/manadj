@@ -9,6 +9,7 @@ dependencies = [
     "beatnet>=1.1.1",
     "essentia>=2.1b6.dev1389",
     "fastapi>=0.122.0",
+    "kaitaistruct>=0.11",
     "librosa>=0.11.0",
     "madmom",
     "matplotlib>=3.10.7",
