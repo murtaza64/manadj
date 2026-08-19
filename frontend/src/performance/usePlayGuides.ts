@@ -10,6 +10,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useDecks } from '../hooks/useDeck';
+import { useViewActive } from '../contexts/viewActive';
 import { initTransitionStore, snapshotPairStore } from '../editor/pairStore';
 import { computePlayGuides } from './playGuideModel';
 import type { GuideDeck, PlayGuideFrame } from './playGuideModel';
@@ -63,10 +64,14 @@ export function usePlayGuides(): PlayGuideFrame[] {
   const engineB = decks.B.engine;
   const engineC = decks.C.engine;
   const engineD = decks.D.engine;
+  const viewActive = useViewActive();
   const [frames, setFrames] = useState<PlayGuideFrame[]>(EMPTY_FRAMES);
 
   useEffect(() => {
     void initTransitionStore();
+    // Hidden mode view (performance-hardening 01): schedule nothing — the
+    // effect re-runs on re-activation and recomputes immediately.
+    if (!viewActive) return;
     let raf = 0;
     let idleTimer = 0;
     let lastSig = '';
@@ -94,7 +99,7 @@ export function usePlayGuides(): PlayGuideFrame[] {
       cancelAnimationFrame(raf);
       window.clearTimeout(idleTimer);
     };
-  }, [engineA, engineB, engineC, engineD]);
+  }, [engineA, engineB, engineC, engineD, viewActive]);
 
   return frames;
 }

@@ -17,6 +17,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { useDecks } from '../hooks/useDeck';
+import { useViewActive } from '../contexts/viewActive';
 import { usePlayGuides } from './usePlayGuides';
 import { guideScreenFraction } from './playGuideModel';
 import { composeRate } from '../playback/tempo';
@@ -35,6 +36,10 @@ export const PLAY_MARKER_FRACTION = 0.25;
  * cleanly instead of popping at the edge). */
 const VISIBLE_SLACK = 0.02;
 
+/** Idle-poll cadence when no outgoing deck advances (performance-hardening
+ * 01) — the shared motion-clock idiom (usePlayGuides, DawTimeline). */
+const IDLE_TICK_MS = 250;
+
 function formatPitch(percent: number): string {
   return `${percent >= 0 ? '+' : ''}${percent.toFixed(1)}%`;
 }
@@ -42,6 +47,7 @@ function formatPitch(percent: number): string {
 export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number }) {
   const { A, B, C, D } = useDecks();
   const frames = usePlayGuides();
+  const viewActive = useViewActive();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
@@ -58,13 +64,32 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
   const engineB = B.engine;
   const engineC = C.engine;
   const engineD = D.engine;
+  // Idle-gated positioning loop (performance-hardening 01): schedules
+  // NOTHING with zero guides or a hidden view (the effect gates on both, so
+  // frames arriving / re-activation restart it and paint immediately); with
+  // guides up it runs rAF only while an outgoing Deck advances or the
+  // computed positions changed (paused seek/zoom), else a 250ms idle poll.
+  // Depending on `frames` (identity changes only on content change — the
+  // signature gate) restarts the loop when the guide LIST changes, so a new
+  // guide is positioned on its first painted frame, not an idle poll later.
   useEffect(() => {
+    if (frames.length === 0 || !viewActive) return;
     let raf = 0;
+    let idleTimer = 0;
+    let lastKey = '';
+    const schedule = (active: boolean) => {
+      if (active) raf = requestAnimationFrame(tick);
+      else idleTimer = window.setTimeout(tick, IDLE_TICK_MS);
+    };
     const tick = () => {
-      raf = requestAnimationFrame(tick);
       const container = containerRef.current;
-      if (!container) return;
+      if (!container) {
+        schedule(false);
+        return;
+      }
       const width = container.clientWidth;
+      let anyAdvancing = false;
+      let key = `${width}:${visibleRef.current}`;
       // Each direction projects on ITS outgoing Deck's timeline (both-paused
       // shows two directions at once — issue 01).
       for (const frame of framesRef.current) {
@@ -77,14 +102,22 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
                 ? engineC
                 : engineD;
         const snapshot = engine.getSnapshot();
+        // Same "advancing" set as usePlayGuides — anything that moves the
+        // outgoing playhead keeps the loop at 60fps.
+        anyAdvancing ||=
+          snapshot.playing ||
+          snapshot.pendingPlay ||
+          snapshot.previewing ||
+          snapshot.hotCuePreviewSlot !== null;
         // Pitch only, like the zoom scaling — a momentary bend must not
         // wobble the marker (performance-mode 06 reasoning).
         const rate = composeRate(snapshot.pitchPercent, 0);
         const windowSeconds = trackWindowSeconds(visibleRef.current, rate);
         const playhead = engine.getPlayhead();
+        key += `|${frame.outgoing}:${playhead}:${rate}`;
         for (const guide of frame.guides) {
-          const key = `${frame.outgoing}>${frame.incoming}:${guide.uuid}`;
-          const node = itemRefs.current.get(key);
+          const guideKey = `${frame.outgoing}>${frame.incoming}:${guide.uuid}`;
+          const node = itemRefs.current.get(guideKey);
           if (!node) continue;
           const frac = guideScreenFraction(
             guide.aTime,
@@ -100,10 +133,16 @@ export function PlayGuideOverlay({ visibleSeconds }: { visibleSeconds: number })
           node.style.transform = `translateX(${frac * width}px)`;
         }
       }
+      const changed = key !== lastKey;
+      lastKey = key;
+      schedule(anyAdvancing || changed);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [engineA, engineB, engineC, engineD]);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(idleTimer);
+    };
+  }, [engineA, engineB, engineC, engineD, frames, viewActive]);
 
   if (frames.length === 0) return null;
 

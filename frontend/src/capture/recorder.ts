@@ -22,12 +22,12 @@
  */
 import type { DeckSnapshot } from '../playback/DeckEngine';
 import { CHANNEL_IDS } from '../playback/mixer';
-import type { ChannelId, ChannelState } from '../playback/mixer';
+import type { ChannelId, ChannelState, MixerChange } from '../playback/mixer';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
 import { audibleHolder, subscribeAudible } from '../playback/audibleSurface';
 import type { AudibleSurfaceId } from '../playback/audibleSurface';
 import { masterAudible, surfaceDisplaced } from './audibilityReducer';
-import { initialCaptureState, reduceCapture } from './detector';
+import { initialCaptureState, reduceCaptureInto } from './detector';
 import type { CaptureState } from './detector';
 import { SilenceSplitClock } from './sessionLifecycle';
 import type { CaptureControlId, CaptureEvent, DetectedTake } from './events';
@@ -41,7 +41,9 @@ export interface CaptureMixerSource {
   getCrossfaderAssignment(channel: ChannelId): CrossfaderAssignment;
   getCrossfaderEnabled(): boolean;
   getMaster(): number;
-  subscribe(listener: () => void): () => void;
+  /** The changed-control hint is optional (capture spine 02): a hint-less
+   * notify (test fakes, graph revival) diffs the whole surface. */
+  subscribe(listener: (changed?: MixerChange) => void): () => void;
 }
 
 /** What the recorder reads from a Deck's engine. */
@@ -145,7 +147,7 @@ export class CaptureRecorder {
     const holder = audibleHolder();
     this.surfaceGated = surfaceDisplaced(holder);
     this.unsubs.push(subscribeAudible((h) => this.setSurfaceHolder(h)));
-    this.unsubs.push(this.mixer.subscribe(() => this.diffMixer()));
+    this.unsubs.push(this.mixer.subscribe((changed) => this.diffMixer(changed)));
     for (const ch of CHANNEL_IDS) {
       this.unsubs.push(this.engines[ch].subscribe(() => this.diffDeck(ch)));
     }
@@ -291,8 +293,11 @@ export class CaptureRecorder {
    * surface gate — for tenure markers, which describe the hold itself and
    * must ride the log even while a machine holds the surface (ADR 0033). */
   private emitMarker(e: CaptureEvent): void {
-    const [next, takes] = reduceCapture(this.state, e);
-    this.state = next;
+    // The recorder owns the sole reference to the detector's capture state,
+    // so it reduces IN PLACE (capture spine 02) — no per-event deep clone,
+    // no O(n) log copy. Per-event side effects (Session persist, activation,
+    // the split clock, settled Takes) still fire in stream order below.
+    const takes = reduceCaptureInto(this.state, e);
     // Master-audibility (the one definition, capture/audibilityReducer.ts;
     // a tenure is non-performance, so silent by definition) drives BOTH
     // Session lifecycle edges (sessions 11):
@@ -300,7 +305,7 @@ export class CaptureRecorder {
     //    cueing, control setup, tenure markers, and seed snapshots buffer
     //    as reconstruction context and never create a row.
     //  - the ten-minute split clock, fed below.
-    const audible = masterAudible(next);
+    const audible = masterAudible(this.state);
     // Persist beside the detector's rolling log (ADR 0033): the Session
     // records all four decks; the detector reads the same stream and
     // self-gates over >2-audible stretches / machine tenures.
@@ -365,46 +370,62 @@ export class CaptureRecorder {
     ['pfl', (c) => (c.pfl ? 1 : 0)],
   ];
 
-  private diffMixer(): void {
+  private diffMixer(changed?: MixerChange): void {
+    // Cue level/mix and output routing are not captured state — nothing to
+    // diff (the full diff below would find no change either).
+    if (changed === 'cue' || changed === 'routing') return;
     const t = this.now();
-    // All four channels (ADR 0033): the log is whole; the detector counts
-    // C/D audibility from these to self-gate.
-    for (const ch of CHANNEL_IDS) {
-      const prev = this.lastChannel[ch];
-      const cur = this.mixer.getChannelState(ch);
-      if (cur !== prev) {
-        this.lastChannel[ch] = cur;
-        for (const [control, read] of CaptureRecorder.CHANNEL_CONTROLS) {
-          const value = read(cur);
-          if (value !== read(prev)) this.feed({ t, kind: 'control', control, channel: ch, value });
+    // Channel-scoped notify (capture spine 02): diff ONLY the touched
+    // channel. A hint-less notify still diffs the whole surface — all four
+    // channels (ADR 0033): the log is whole; the detector counts C/D
+    // audibility from these to self-gate.
+    const isChannel =
+      changed === 'A' || changed === 'B' || changed === 'C' || changed === 'D';
+    if (isChannel || changed === undefined) {
+      const channels: readonly ChannelId[] = isChannel ? [changed] : CHANNEL_IDS;
+      for (const ch of channels) {
+        const prev = this.lastChannel[ch];
+        const cur = this.mixer.getChannelState(ch);
+        if (cur !== prev) {
+          this.lastChannel[ch] = cur;
+          for (const [control, read] of CaptureRecorder.CHANNEL_CONTROLS) {
+            const value = read(cur);
+            if (value !== read(prev)) this.feed({ t, kind: 'control', control, channel: ch, value });
+          }
+        }
+        const assignment = this.mixer.getCrossfaderAssignment(ch);
+        if (assignment !== this.lastAssignment[ch]) {
+          this.lastAssignment[ch] = assignment;
+          this.feed({
+            t,
+            kind: 'control',
+            control: 'crossfaderAssignment',
+            channel: ch,
+            value: CaptureRecorder.assignmentValue(assignment),
+          });
         }
       }
-      const assignment = this.mixer.getCrossfaderAssignment(ch);
-      if (assignment !== this.lastAssignment[ch]) {
-        this.lastAssignment[ch] = assignment;
-        this.feed({
-          t,
-          kind: 'control',
-          control: 'crossfaderAssignment',
-          channel: ch,
-          value: CaptureRecorder.assignmentValue(assignment),
-        });
+    }
+    if (changed === undefined || changed === 'crossfader') {
+      const xf = this.mixer.getCrossfader();
+      if (xf !== this.lastCrossfader) {
+        this.lastCrossfader = xf;
+        this.feed({ t, kind: 'control', control: 'crossfader', channel: null, value: xf });
       }
     }
-    const xf = this.mixer.getCrossfader();
-    if (xf !== this.lastCrossfader) {
-      this.lastCrossfader = xf;
-      this.feed({ t, kind: 'control', control: 'crossfader', channel: null, value: xf });
+    if (changed === undefined || changed === 'crossfaderEnabled') {
+      const xfOn = this.mixer.getCrossfaderEnabled();
+      if (xfOn !== this.lastCrossfaderEnabled) {
+        this.lastCrossfaderEnabled = xfOn;
+        this.feed({ t, kind: 'control', control: 'crossfaderEnabled', channel: null, value: xfOn ? 1 : 0 });
+      }
     }
-    const xfOn = this.mixer.getCrossfaderEnabled();
-    if (xfOn !== this.lastCrossfaderEnabled) {
-      this.lastCrossfaderEnabled = xfOn;
-      this.feed({ t, kind: 'control', control: 'crossfaderEnabled', channel: null, value: xfOn ? 1 : 0 });
-    }
-    const master = this.mixer.getMaster();
-    if (master !== this.lastMaster) {
-      this.lastMaster = master;
-      this.feed({ t, kind: 'control', control: 'master', channel: null, value: master });
+    if (changed === undefined || changed === 'master') {
+      const master = this.mixer.getMaster();
+      if (master !== this.lastMaster) {
+        this.lastMaster = master;
+        this.feed({ t, kind: 'control', control: 'master', channel: null, value: master });
+      }
     }
   }
 

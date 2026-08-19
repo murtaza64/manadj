@@ -17,6 +17,7 @@ interface VisualizerDisplayBridge {
   displays(): Promise<VisualizerDisplayInfo[]>;
   fullscreenOn(displayId: number): Promise<{ ok: boolean; reason?: string }>;
   windowed(): Promise<{ ok: boolean; reason?: string }>;
+  toggleFullscreen(): Promise<{ ok: boolean; reason?: string }>;
 }
 
 interface Window {

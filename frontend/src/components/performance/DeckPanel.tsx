@@ -22,6 +22,7 @@ import { useAutomationGhost, useMixer, useMixerValue } from '../../hooks/useMixe
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey } from '../../midi/takeoverFeedback';
 import { useScrubTransport } from '../../hooks/useScrubTransport';
+import { useViewActive } from '../../contexts/viewActive';
 import WebGLWaveform from '../WebGLWaveform';
 import WaveformMinimap from '../WaveformMinimap';
 import TagPill from '../TagPill';
@@ -106,9 +107,21 @@ export function DeckWaveform({
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
+  // Any audibly-advancing state pins the waveform loop at 60fps and wakes it
+  // instantly at play (performance-hardening 01) — same set usePlayGuides
+  // treats as "moving".
+  const advancing = useDeckSnapshot(
+    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
+  );
 
   const transport = useScrubTransport();
   const mixer = useMixer();
+  const viewActive = useViewActive();
+  // The deck's channel state (replaced immutably on every mixer move):
+  // wakes the idle waveform loop so a PAUSED deck retints instantly on
+  // fader/EQ moves, and restarts the fill recorder loop below
+  // (performance-hardening 01 × performance-mode 09).
+  const channelState = useMixerValue((m) => m.getChannelState(deck));
 
   // Live mixer → waveform modulation (performance-mode 09, the sessions-19
   // semantics applied live): EQ dims/removes its band group; trim scales
@@ -186,49 +199,73 @@ export function DeckWaveform({
     span: trackWindowSeconds(visibleSeconds, rate),
     hasTrack: loadedTrack !== null,
   };
+  // Idle-gated like the GL loops (performance-hardening 01): rAF only while
+  // the deck advances or the drawn inputs changed; 250ms poll when paused
+  // and unchanged; nothing at all while the view is hidden. Restarting on
+  // channelState keeps paused fader moves instant (history recording is
+  // paused-safe: record() writes nothing while not playing).
   useEffect(() => {
+    if (!viewActive) return;
     let raf = 0;
+    let idleTimer = 0;
+    let lastDrawKey = '';
     const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, 0.12)`;
+    const schedule = (active: boolean) => {
+      if (active) raf = requestAnimationFrame(loop);
+      else idleTimer = window.setTimeout(loop, 250);
+    };
     const loop = () => {
       const snap = engine.getSnapshot();
       const playhead = engine.getPlayhead();
       const live = liveStrip();
-      historyRef.current.record(playhead, snap.playing || snap.previewing, live);
+      const advancing = snap.playing || snap.previewing;
+      historyRef.current.record(playhead, advancing, live);
 
       const canvas = fillCanvasRef.current;
+      let didDraw = false;
       if (canvas) {
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
-        if (canvas.width !== w || canvas.height !== h) {
-          canvas.width = w;
-          canvas.height = h;
-        }
-        const ctx = canvas.getContext('2d');
-        if (ctx && w > 0 && h > 0) {
-          ctx.clearRect(0, 0, w, h);
-          ctx.fillStyle = fillCss;
-          const { span, hasTrack } = fillViewRef.current;
-          if (!hasTrack || span <= 0) {
-            const bar = channelFaderToGain(live.fader) * h;
-            ctx.fillRect(0, h - bar, w, bar);
-          } else {
-            const start = playhead - span * PLAY_MARKER_FRACTION;
-            const step = 2; // px per column — a translucent wash, not a plot
-            for (let x = 0; x < w; x += step) {
-              const t = start + ((x + step / 2) / w) * span;
-              if (t < 0 || t > snap.duration) continue;
-              const v = historyRef.current.at(t, live);
-              const bar = channelFaderToGain(v.fader) * h;
-              if (bar > 0) ctx.fillRect(x, h - bar, step, bar);
+        const { span, hasTrack } = fillViewRef.current;
+        const drawKey =
+          `${playhead}:${span}:${hasTrack}:${w}x${h}:` +
+          `${live.gain}:${live.low}:${live.mid}:${live.high}:${live.fader}`;
+        didDraw = drawKey !== lastDrawKey;
+        if (didDraw) {
+          lastDrawKey = drawKey;
+          if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+          }
+          const ctx = canvas.getContext('2d');
+          if (ctx && w > 0 && h > 0) {
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = fillCss;
+            if (!hasTrack || span <= 0) {
+              const bar = channelFaderToGain(live.fader) * h;
+              ctx.fillRect(0, h - bar, w, bar);
+            } else {
+              const start = playhead - span * PLAY_MARKER_FRACTION;
+              const step = 2; // px per column — a translucent wash, not a plot
+              for (let x = 0; x < w; x += step) {
+                const t = start + ((x + step / 2) / w) * span;
+                if (t < 0 || t > snap.duration) continue;
+                const v = historyRef.current.at(t, live);
+                const bar = channelFaderToGain(v.fader) * h;
+                if (bar > 0) ctx.fillRect(x, h - bar, step, bar);
+              }
             }
           }
         }
       }
-      raf = requestAnimationFrame(loop);
+      schedule(advancing || didDraw);
     };
     raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [engine, deck, liveStrip]);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(idleTimer);
+    };
+  }, [engine, deck, liveStrip, viewActive, channelState]);
 
   // Machine tenure (Conductor / session replay): the control-focus
   // indicators are meaningless on the waveforms while a machine holds the
@@ -251,6 +288,8 @@ export function DeckWaveform({
         transport={transport}
         dimmed={loadedTrack !== null && !ready}
         beatjumpBeats={beatjumpBeats}
+        playing={advancing}
+        wakeKey={channelState}
         visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
         onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
         modulation={modulation}
@@ -785,6 +824,10 @@ export function DeckPanel({
   const ready = useDeckReady();
   const cuePoint = useDeckSnapshot((s) => s.cuePoint);
   const loop = useDeckSnapshot((s) => s.loop);
+  // Same advancing set as the full waveform (performance-hardening 01).
+  const advancing = useDeckSnapshot(
+    (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
+  );
   const track = useDeckTrack();
 
   return (
@@ -805,6 +848,7 @@ export function DeckPanel({
             loop={loop}
             onSeek={(t) => ready && engine.seek(t)}
             dimmed={track !== null && !ready}
+            playing={advancing}
           />
           {/* Play guides at track scale (play-guides PRD): how far out is
               the press moment. Shows only while this Deck is outgoing. */}

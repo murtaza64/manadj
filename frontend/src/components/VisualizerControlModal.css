@@ -90,7 +90,65 @@
   color: var(--base);
 }
 
+.vizmodal-btn.gen {
+  font-size: 11px;
+  font-weight: 400;
+  padding: 3px 7px;
+}
+
+/* Genepool list: 100-candidate pool needs search + a height cap. */
+.vizmodal-gen-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+}
+
+.vizmodal-gen-search:focus {
+  outline: none;
+  border-color: var(--mauve);
+}
+
+.vizmodal-genlist {
+  max-height: 180px;
+  overflow-y: auto;
+  align-content: flex-start;
+}
+
 .vizmodal-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.vizmodal-params {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vizmodal-param {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtext0);
+  font-size: 11px;
+}
+
+.vizmodal-param span {
+  width: 130px;
+  text-align: right;
+}
+
+.vizmodal-param input[type='range'] {
+  flex: 1;
+  accent-color: var(--mauve);
+}
+
+.vizmodal-param input[type='range']:disabled {
+  opacity: 0.4;
 }

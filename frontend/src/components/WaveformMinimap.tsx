@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
+import { useViewActive } from '../contexts/viewActive';
 import { loopOverlayRegions } from '../waveform/loopOverlay';
 import { useHotCues } from '../hooks/useHotCues';
 import type { PlaybackClock } from '../playback/clock';
@@ -20,6 +21,9 @@ interface WaveformMinimapProps {
   /** Optional beat/downbeat ticks (useful at DAW-style zoom levels). */
   beatgrid?: BeatgridData | null;
   className?: string;
+  /** Whether the deck is advancing (performance-hardening 01): pins the loop
+   * at 60fps and wakes it instantly at play. Defaults to false. */
+  playing?: boolean;
 }
 
 export default function WaveformMinimap({
@@ -31,10 +35,12 @@ export default function WaveformMinimap({
   dimmed = false,
   beatgrid = null,
   className,
+  playing = false,
 }: WaveformMinimapProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: hotCues = [] } = useHotCues(trackId);
   const regions = useMemo(() => loopOverlayRegions(loop), [loop]);
+  const viewActive = useViewActive();
 
   const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
     clock,
@@ -47,12 +53,17 @@ export default function WaveformMinimap({
     beatgrid,
     regions,
     slot: 'minimap',
+    active: viewActive,
+    playing,
   });
 
   const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const seekTime = rendererRef.current?.handleClick(event.nativeEvent);
     if (seekTime !== undefined) {
       onSeek(seekTime);
+      // Paused seek: wake the idle loop so the playhead repaints this frame
+      // (performance-hardening 01).
+      rendererRef.current?.markDirty();
     }
   };
 

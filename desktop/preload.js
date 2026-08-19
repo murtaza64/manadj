@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("manadjVisualizer", {
   displays: () => ipcRenderer.invoke("visualizer:displays"),
   fullscreenOn: (displayId) => ipcRenderer.invoke("visualizer:fullscreen", displayId),
   windowed: () => ipcRenderer.invoke("visualizer:windowed"),
+  toggleFullscreen: () => ipcRenderer.invoke("visualizer:toggle-fullscreen"),
 });
 
 contextBridge.exposeInMainWorld("manadjRecording", {

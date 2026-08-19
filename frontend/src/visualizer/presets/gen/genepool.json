@@ -1,0 +1,2568 @@
+{
+ "generation": 9,
+ "candidates": {
+  "g00-voyage": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated Voyage baseline",
+   "rating": 1044.4,
+   "status": "alive",
+   "wins": 3,
+   "losses": 0,
+   "approvals": 6,
+   "rejections": 0,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g00-nova": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated Nova baseline",
+   "rating": 974.1,
+   "status": "alive",
+   "wins": 2,
+   "losses": 4,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g00-tunnel": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated Tunnel baseline",
+   "rating": 1013.2,
+   "status": "alive",
+   "wins": 2,
+   "losses": 1,
+   "approvals": 6,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g01-tunnel-dust": {
+   "generation": 1,
+   "parents": [
+    "g00-tunnel"
+   ],
+   "kind": "tweak",
+   "brief": "Keep Tunnel's warp-feedback flight + wobbling ring exactly as it feels. Add a THIN mid-driven dust haze in the walls (vo\u2026",
+   "rating": 1016.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 4,
+   "rejections": 0,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g01-voyage-ember": {
+   "generation": 1,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Voyage with the ember palette as identity: darker overall, coal-red core, dust reduced ~40% and strictly mid-gated, kick\u2026",
+   "rating": 985.5,
+   "status": "alive",
+   "wins": 1,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g01-warp-nebula": {
+   "generation": 1,
+   "parents": [
+    "g00-tunnel",
+    "g00-voyage"
+   ],
+   "kind": "combine",
+   "brief": "Tunnel's differential-rotation feedback flight carrying Voyage's dust-space: nebula walls that shear into spirals, high-\u2026",
+   "rating": 1032.0,
+   "status": "alive",
+   "wins": 3,
+   "losses": 1,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g01-nova-bloom": {
+   "generation": 1,
+   "parents": [
+    "g00-nova"
+   ],
+   "kind": "tweak",
+   "brief": "Nova rescue (rating 961). Diagnosis: medium too static, shells too subtle. Make shells the hero \u2014 bright expanding rings\u2026",
+   "rating": 982.6,
+   "status": "alive",
+   "notes": [
+    "needs to be less bright all the time"
+   ],
+   "wins": 1,
+   "losses": 2,
+   "approvals": 4,
+   "rejections": 0,
+   "oppCount": 6
+  },
+  "g01-strobe-lattice": {
+   "generation": 1,
+   "parents": [],
+   "kind": "novel",
+   "brief": "NOVEL. Beat-locked strobe lattice: sparse geometric grid (triangles/hex) flashing structure on beats, quarter-rotating p\u2026",
+   "rating": 1000.7,
+   "status": "alive",
+   "notes": [
+    "a little less nausea, more responsiveness to phrase/eq?"
+   ],
+   "wins": 2,
+   "losses": 2,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 4
+  },
+  "g01-ink-vortex": {
+   "generation": 1,
+   "parents": [],
+   "kind": "novel",
+   "brief": "NOVEL. Liquid ink in a slow vortex: GL feedback advection (curl around center), bands as three ink colors injected at di\u2026",
+   "rating": 1012.4,
+   "status": "alive",
+   "wins": 3,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 6,
+   "notes": []
+  },
+  "g01-odyssey": {
+   "generation": 1,
+   "parents": [],
+   "kind": "seed",
+   "brief": "Odyssey (human-built phrase-genome evolution) enters as breeding stock",
+   "rating": 1018.1,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 4,
+   "rejections": 0,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g01-odyssey-drift": {
+   "generation": 1,
+   "parents": [
+    "g01-odyssey"
+   ],
+   "kind": "tweak",
+   "brief": "Odyssey tweak: keep the phrase-genome engine intact; push the CALM side \u2014 slower default motion, longer persistence, ome\u2026",
+   "rating": 1015.9,
+   "status": "alive",
+   "wins": 2,
+   "losses": 1,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g01-odyssey-decks": {
+   "generation": 1,
+   "parents": [
+    "g01-odyssey"
+   ],
+   "kind": "combine",
+   "brief": "Odyssey engine \u00d7 DECK AWARENESS (read orbit.ts for the deck-state patterns): the galaxy's palette follows the AUDIBLE DE\u2026",
+   "rating": 983.9,
+   "status": "alive",
+   "wins": 1,
+   "losses": 2,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g00-bars": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated bars baseline",
+   "rating": 968.7,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g00-spectrum": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated spectrum baseline",
+   "rating": 969.5,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 2,
+   "notes": []
+  },
+  "g00-led": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated led baseline",
+   "rating": 984.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 2,
+   "notes": []
+  },
+  "g00-mirror": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated mirror baseline",
+   "rating": 998.5,
+   "status": "alive",
+   "wins": 3,
+   "losses": 3,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g00-waves": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated waves baseline",
+   "rating": 1000.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 1,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g00-radial": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated radial baseline",
+   "rating": 1000.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 1,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g00-terrain": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated terrain baseline",
+   "rating": 937.6,
+   "status": "alive",
+   "wins": 1,
+   "losses": 5,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g00-fracture": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated fracture baseline",
+   "rating": 968.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 1,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g00-trigon": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated trigon baseline",
+   "rating": 984.7,
+   "status": "dead",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 4,
+   "rejections": 1,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g00-siphon": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated siphon baseline",
+   "rating": 968.7,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g00-plasma": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated plasma baseline",
+   "rating": 985.5,
+   "status": "alive",
+   "wins": 1,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g00-aurora": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated aurora baseline",
+   "rating": 984.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 2,
+   "notes": []
+  },
+  "g00-strata": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated strata baseline",
+   "rating": 969.5,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 2,
+   "notes": []
+  },
+  "g00-orbit": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated orbit baseline",
+   "rating": 1000.0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 5,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g00-quad": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated quad baseline",
+   "rating": 1015.3,
+   "status": "alive",
+   "wins": 3,
+   "losses": 2,
+   "approvals": 1,
+   "rejections": 2,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g00-ladder": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated ladder baseline",
+   "rating": 1032.0,
+   "status": "alive",
+   "wins": 2,
+   "losses": 0,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g00-pulse": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated pulse baseline",
+   "rating": 1015.3,
+   "status": "alive",
+   "wins": 2,
+   "losses": 1,
+   "approvals": 4,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g00-silk": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated silk baseline",
+   "rating": 1030.6,
+   "status": "dead",
+   "wins": 2,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 1,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g00-nebula": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated nebula baseline",
+   "rating": 1000.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 2,
+   "oppCount": 2,
+   "notes": []
+  },
+  "g00-scope": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated scope baseline",
+   "rating": 1000.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 1,
+   "notes": []
+  },
+  "g00-gonio": {
+   "generation": 0,
+   "parents": [],
+   "kind": "seed",
+   "brief": "curated gonio baseline",
+   "rating": 1000.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 2,
+   "oppCount": 2,
+   "notes": []
+  },
+  "g02-lattice-flow": {
+   "generation": 2,
+   "parents": [
+    "g01-strobe-lattice"
+   ],
+   "kind": "tweak",
+   "brief": "HUMAN NOTE on the parent: 'a little less nausea, more responsiveness to phrase/eq?'. Fix both: (1) motion sickness \u2014 slo\u2026",
+   "rating": 952.0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 3,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 6,
+   "notes": []
+  },
+  "g02-materia": {
+   "generation": 2,
+   "parents": [],
+   "kind": "novel",
+   "brief": "NOVEL \u2014 the spectral-material study. One central organic form whose MATERIAL is the spectral shape: tonal+narrow (flatne\u2026",
+   "rating": 1061.8,
+   "status": "alive",
+   "wins": 4,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g02-ink-shape": {
+   "generation": 2,
+   "parents": [
+    "g01-ink-vortex"
+   ],
+   "kind": "tweak",
+   "brief": "Ink-vortex won its matchup \u2014 deepen it with spectral shape: FLATNESS = viscosity (tonal = thick, slow, laminar swirls; n\u2026",
+   "rating": 984.1,
+   "status": "alive",
+   "wins": 2,
+   "losses": 3,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g02-mirror-ladder": {
+   "generation": 2,
+   "parents": [
+    "g00-mirror",
+    "g00-ladder"
+   ],
+   "kind": "combine",
+   "brief": "CROSSOVER of two winners: Mirror's center-out mirrored bars carrying Ladder's metric theatre \u2014 bars quarter-rotate aroun\u2026",
+   "rating": 1016.0,
+   "status": "alive",
+   "notes": [
+    "i like how this one tells a story, i would love a complete 16-bar story for another preset..."
+   ],
+   "wins": 1,
+   "losses": 0,
+   "approvals": 5,
+   "rejections": 0,
+   "oppCount": 6
+  },
+  "g02-plasma-theatre": {
+   "generation": 2,
+   "parents": [
+    "g00-plasma"
+   ],
+   "kind": "tweak",
+   "brief": "Plasma with SECTION THEATRE: the kaleidoscope fold count/mirror phase is a REGIME that jumps dramatically at 16-bar sect\u2026",
+   "rating": 924.5,
+   "status": "alive",
+   "wins": 0,
+   "losses": 5,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 2,
+   "notes": []
+  },
+  "g02-voyage-prime": {
+   "generation": 2,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "THE LEADER (1079) \u2014 refine, do not disturb. Keep everything; add three subtle layers: (1) in-phrase evolution (dust swel\u2026",
+   "rating": 1047.2,
+   "status": "alive",
+   "wins": 3,
+   "losses": 0,
+   "approvals": 5,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g02-voyage-embercalm": {
+   "generation": 2,
+   "parents": [
+    "voyage"
+   ],
+   "kind": "tweak",
+   "brief": "voyage settings mutant: ember palette, low dust, calm speed, long trails",
+   "rating": 984.0,
+   "status": "alive",
+   "notes": [
+    "can we do something different with the spinning tri-segment ring next time"
+   ],
+   "wins": 1,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4
+  },
+  "g02-voyage-solarhot": {
+   "generation": 2,
+   "parents": [
+    "voyage"
+   ],
+   "kind": "tweak",
+   "brief": "voyage settings mutant: solar palette, fast flight, dense stars",
+   "rating": 1027.7,
+   "status": "alive",
+   "wins": 3,
+   "losses": 1,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g02-odyssey-wild": {
+   "generation": 2,
+   "parents": [
+    "odyssey"
+   ],
+   "kind": "tweak",
+   "brief": "odyssey settings mutant: high mutation chaos, energetic",
+   "rating": 985.5,
+   "status": "alive",
+   "wins": 1,
+   "losses": 2,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g02-odyssey-deep": {
+   "generation": 2,
+   "parents": [
+    "odyssey"
+   ],
+   "kind": "tweak",
+   "brief": "odyssey settings mutant: rare mutations, deep and slow",
+   "rating": 1000.7,
+   "status": "alive",
+   "wins": 1,
+   "losses": 1,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g02-tunnel-dream": {
+   "generation": 2,
+   "parents": [
+    "tunnel"
+   ],
+   "kind": "tweak",
+   "brief": "tunnel settings mutant: very long trails, gentle zoom (dreamy)",
+   "rating": 1061.8,
+   "status": "alive",
+   "wins": 4,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g02-tunnel-punch": {
+   "generation": 2,
+   "parents": [
+    "tunnel"
+   ],
+   "kind": "tweak",
+   "brief": "tunnel settings mutant: short trails, hard zoom (aggressive)",
+   "rating": 1016.0,
+   "status": "alive",
+   "wins": 2,
+   "losses": 1,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g02-lattice-dense": {
+   "generation": 2,
+   "parents": [
+    "g01-strobe-lattice"
+   ],
+   "kind": "tweak",
+   "brief": "strobe-lattice settings mutant: dense grid, long ghosts, softer strobe",
+   "rating": 968.0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 4,
+   "rejections": 0,
+   "oppCount": 6,
+   "notes": []
+  },
+  "g02-ink-molasses": {
+   "generation": 2,
+   "parents": [
+    "g01-ink-vortex"
+   ],
+   "kind": "tweak",
+   "brief": "ink-vortex settings mutant: thick slow molasses",
+   "rating": 984.1,
+   "status": "alive",
+   "wins": 1,
+   "losses": 2,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 6,
+   "notes": []
+  },
+  "g02-julia": {
+   "generation": 2,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "song-genome family: DIRECTION: FRACTAL. A Julia/Kali-set field whose complex parameter C IS the song genome (seed scalar\u2026",
+   "rating": 968.7,
+   "status": "alive",
+   "notes": [
+    "is blank much of the time"
+   ],
+   "wins": 1,
+   "losses": 3,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 6
+  },
+  "g02-monolith": {
+   "generation": 2,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "song-genome family: DIRECTION: ARCHITECTURE. A monumental structure (columns/monolith slabs/cathedral silhouettes \u2014 2.5D\u2026",
+   "rating": 953.4,
+   "status": "dead",
+   "notes": [
+    "needs work but interesting"
+   ],
+   "wins": 0,
+   "losses": 3,
+   "approvals": 2,
+   "rejections": 1,
+   "oppCount": 5
+  },
+  "g02-verdant": {
+   "generation": 2,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "song-genome family: DIRECTION: ORGANIC GROWTH. A living flora/coral system: the song genome picks the species (branching\u2026",
+   "rating": 1000.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 4,
+   "rejections": 1,
+   "oppCount": 3,
+   "notes": []
+  },
+  "g03-julia-lumen": {
+   "generation": 3,
+   "parents": [
+    "g02-julia"
+   ],
+   "kind": "tweak",
+   "brief": "FIX the human note: 'is blank much of the time'. Root causes to kill: C wandering into sparse/escape regions and unlit e\u2026",
+   "rating": 1012.4,
+   "status": "alive",
+   "notes": [
+    "wayyy too fast but cool ideas"
+   ],
+   "wins": 3,
+   "losses": 2,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 5
+  },
+  "g03-monolith-lux": {
+   "generation": 3,
+   "parents": [
+    "g02-monolith"
+   ],
+   "kind": "tweak",
+   "brief": "The human: 'needs work but interesting'. Iterate for LEGIBILITY and SPECTACLE: clearer silhouettes (stronger rim/sky con\u2026",
+   "rating": 940.3,
+   "status": "alive",
+   "notes": [
+    "the smoke is really bad"
+   ],
+   "wins": 0,
+   "losses": 4,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5
+  },
+  "g03-solar-crown": {
+   "generation": 3,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Voyage reimagined hot (the solarhot settings mutant beat real candidates 3x \u2014 bake its tuning: solar palette leaning, sp\u2026",
+   "rating": 1060.4,
+   "status": "alive",
+   "wins": 4,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g03-materia-deep": {
+   "generation": 3,
+   "parents": [
+    "g02-materia"
+   ],
+   "kind": "tweak",
+   "brief": "Materia is winning (1037, beat monolith + lattice-flow) \u2014 deepen it: add the song-genome trackId seed (structure family \u2026",
+   "rating": 1072.4,
+   "status": "alive",
+   "wins": 5,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g03-analyzer-cathedral": {
+   "generation": 3,
+   "parents": [],
+   "kind": "novel",
+   "brief": "NOVEL, in the mirror-ladder spirit (classic visualizer form x our full tech \u2014 the human explicitly wants 'more of that e\u2026",
+   "rating": 940.8,
+   "status": "dead",
+   "wins": 0,
+   "losses": 4,
+   "approvals": 1,
+   "rejections": 1,
+   "oppCount": 6,
+   "notes": []
+  },
+  "g03-scope-ribbon": {
+   "generation": 3,
+   "parents": [],
+   "kind": "novel",
+   "brief": "NOVEL reimagining of the oscilloscope (wantsWave: true): the live waveform as a LUMINOUS RIBBON flying through dark spac\u2026",
+   "rating": 955.0,
+   "status": "dead",
+   "notes": [
+    "not very responsive to music"
+   ],
+   "wins": 0,
+   "losses": 3,
+   "approvals": 2,
+   "rejections": 1,
+   "oppCount": 3
+  },
+  "g03-echo-field": {
+   "generation": 3,
+   "parents": [],
+   "kind": "novel",
+   "brief": "NOVEL from research (docs/research/vj-generative-effect-vocabulary.md, Delay-Line Echo Field): a feedback field where DE\u2026",
+   "rating": 1003.6,
+   "status": "alive",
+   "notes": [
+    "background rings are too bright to see dots well"
+   ],
+   "wins": 2,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5
+  },
+  "g03-charge-bloom": {
+   "generation": 3,
+   "parents": [],
+   "kind": "novel",
+   "brief": "NOVEL from research (Hodgin Magnetosphere lineage): 24 spectrum bins as CHARGED PARTICLES \u2014 each bin a Gaussian charge w\u2026",
+   "rating": 1015.1,
+   "status": "alive",
+   "notes": [
+    "not very responsive to music"
+   ],
+   "wins": 2,
+   "losses": 1,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4
+  },
+  "g04-story": {
+   "generation": 4,
+   "parents": [
+    "g02-mirror-ladder"
+   ],
+   "kind": "novel",
+   "brief": "THE CENTERPIECE \u2014 human note on mirror-ladder: 'i like how this one tells a story, i would love a complete 16-bar story \u2026",
+   "rating": 952.7,
+   "status": "dead",
+   "wins": 0,
+   "losses": 3,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g04-materia-arc": {
+   "generation": 4,
+   "parents": [
+    "g03-materia-deep"
+   ],
+   "kind": "tweak",
+   "brief": "materia-deep is #3 (1074) \u2014 variant with a full dynamic-range arc: at low energy the form shrinks to a minimal seed-crys\u2026",
+   "rating": 1047.3,
+   "status": "alive",
+   "wins": 3,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g04-julia-glacial": {
+   "generation": 4,
+   "parents": [
+    "g03-julia-lumen"
+   ],
+   "kind": "tweak",
+   "brief": "Human note: 'wayyy too fast but cool ideas'. Slow EVERYTHING 3-4x: cadence, zoom breathing, C drift. Replace continuous \u2026",
+   "rating": 1000.0,
+   "status": "alive",
+   "wins": 2,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g04-nova-ember": {
+   "generation": 4,
+   "parents": [
+    "g01-nova-bloom"
+   ],
+   "kind": "tweak",
+   "brief": "Human note: 'needs to be less bright all the time'. Dark baseline: quiet sections sit at embers (10-20% brightness, spar\u2026",
+   "rating": 984.1,
+   "status": "alive",
+   "wins": 2,
+   "losses": 3,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g04-charge-pulse": {
+   "generation": 4,
+   "parents": [
+    "g03-charge-bloom"
+   ],
+   "kind": "tweak",
+   "brief": "Pair note: 'not very responsive to music'. Make every charge ANSWER: per-bin punchy attack ballistics (instant rise on b\u2026",
+   "rating": 1000.0,
+   "status": "alive",
+   "wins": 2,
+   "losses": 2,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g04-echo-ink": {
+   "generation": 4,
+   "parents": [
+    "g03-echo-field"
+   ],
+   "kind": "tweak",
+   "brief": "Human note: 'background rings are too bright to see dots well'. Fix the contrast hierarchy: region rings become faint gu\u2026",
+   "rating": 954.2,
+   "status": "dead",
+   "wins": 0,
+   "losses": 3,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 4,
+   "notes": [
+    "too much red glow"
+   ]
+  },
+  "g04-tunnel-saga": {
+   "generation": 4,
+   "parents": [
+    "g02-tunnel-dream",
+    "g02-tunnel-punch"
+   ],
+   "kind": "combine",
+   "brief": "Merge the two surviving tunnel mutants (1068/1050) via the 16-bar arc: the tunnel's CHARACTER evolves across each sectio\u2026",
+   "rating": 1047.3,
+   "status": "alive",
+   "wins": 3,
+   "losses": 0,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 6,
+   "notes": []
+  },
+  "g04-voyage-crown": {
+   "generation": 4,
+   "parents": [
+    "g02-voyage-prime",
+    "g03-solar-crown"
+   ],
+   "kind": "combine",
+   "brief": "Cross two strong voyage children: prime's refinements (phrase dust-swell, spread\u2192disk breadth, flatness\u2192nebula texture) \u2026",
+   "rating": 1015.2,
+   "status": "alive",
+   "wins": 3,
+   "losses": 2,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-odyssey-shards": {
+   "generation": 5,
+   "parents": [
+    "g01-odyssey"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: dust powder -> glass shards (snare/hat mid/high-gated angular refractive slivers); kick ripple/core untouched.",
+   "rating": 984.7,
+   "status": "alive",
+   "wins": 1,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-odyssey-poly": {
+   "generation": 5,
+   "parents": [
+    "g01-odyssey"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: core glow -> tumbling wireframe polyhedron; kick facet-flash, complexity rides max(drop,energy), section morph tetra->octa->icosa.",
+   "rating": 982.5,
+   "status": "alive",
+   "wins": 2,
+   "losses": 3,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-odyssey-cracks": {
+   "generation": 5,
+   "parents": [
+    "g01-odyssey"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: kick shockwave rings -> screen-space glass cracks from a travel point, heal by next downbeat; drop = full fracture healing over a phrase (refraction only).",
+   "rating": 1030.5,
+   "status": "alive",
+   "wins": 3,
+   "losses": 1,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g05-voyage-deckmix": {
+   "generation": 5,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: palette engine -> deck-mix colors; transition travels scene color outgoing->incoming deck, EQ/doubles shift the blend.",
+   "rating": 1048.1,
+   "status": "alive",
+   "wins": 3,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-voyage-ribbon": {
+   "generation": 5,
+   "parents": [
+    "g00-voyage",
+    "g01-ink-vortex"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: ember dust medium -> live-waveform filament ribbon (wantsWave), advected by the parent flow; kick stays solid, ribbon lit by passing ripple.",
+   "rating": 985.5,
+   "status": "alive",
+   "wins": 2,
+   "losses": 3,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "notes": []
+  },
+  "g05-voyage-cracks": {
+   "generation": 5,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: shockwave rings -> screen-space cracks from ripple travel point; drop = full-field refractive fracture; buildup warms crack glow.",
+   "rating": 1030.5,
+   "status": "alive",
+   "wins": 4,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-materia-shards": {
+   "generation": 5,
+   "parents": [
+    "g03-materia-deep",
+    "g02-materia"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: snare powder -> glass shards cracked from the 24-band relief at the loudest region; material-inheriting (flatness), settle back into relief.",
+   "rating": 1062.5,
+   "status": "alive",
+   "wins": 4,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-materia-mercury": {
+   "generation": 5,
+   "parents": [
+    "g03-materia-deep",
+    "g02-materia"
+   ],
+   "kind": "tweak",
+   "brief": "Visual-element change: relief material -> liquid mercury; flatness=viscosity (chrome ridges<->boiling droplets), spread=ripple dispersion; palette-tinted, never grayscale.",
+   "rating": 1032.0,
+   "status": "alive",
+   "wins": 2,
+   "losses": 0,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-tunnel-deckmix": {
+   "generation": 5,
+   "parents": [
+    "g02-tunnel-dream",
+    "g02-tunnel-punch"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: palette engine -> deck-mix colors; incoming deck hue born at far end travels toward viewer with level/fader; EQ kills mute bands, doubles interleave rings.",
+   "rating": 1031.9,
+   "status": "alive",
+   "wins": 2,
+   "losses": 0,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-tunnel-shatter": {
+   "generation": 5,
+   "parents": [
+    "g02-tunnel-dream",
+    "g02-tunnel-punch"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: tunnel walls -> tempered-glass panes (Voronoi); kick crack pulse, drop shatters oncoming section + camera flies through shards, re-forms over next phrase (refraction, no flash).",
+   "rating": 984.8,
+   "status": "alive",
+   "wins": 1,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-prime-poly": {
+   "generation": 5,
+   "parents": [
+    "g02-voyage-prime",
+    "g03-solar-crown"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: spinning tri-segment ring -> wireframe polyhedron horizon (second answer to the ring note); kick facet flash, 2.5s edge charge, section morphs.",
+   "rating": 999.3,
+   "status": "alive",
+   "wins": 1,
+   "losses": 1,
+   "approvals": 2,
+   "rejections": 1,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g05-prime-embers": {
+   "generation": 5,
+   "parents": [
+    "g02-voyage-prime",
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Element swap: core glow -> drifting ember field with earned brightness (traveling kick ripple lights what it passes); snare gusts scatter, drops ignite the field.",
+   "rating": 1030.5,
+   "status": "alive",
+   "wins": 3,
+   "losses": 1,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 5,
+   "notes": []
+  },
+  "g06-voyage-seasons": {
+   "generation": 6,
+   "parents": [
+    "g00-voyage",
+    "g02-voyage-prime"
+   ],
+   "kind": "tweak",
+   "brief": "Palette = the phrase/section instrument: in-phrase seasonal drift, drastic complementary regime jump at section boundaries via traveling color front (<1 bar). Geometry/luminance = parent.",
+   "rating": 1030.5,
+   "status": "alive",
+   "wins": 2,
+   "losses": 0,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 5,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "focal:center",
+    "motion:orbital-drift",
+    "material:ember",
+    "temporal:phrase-palette",
+    "signals:ladder,beat,trend"
+   ],
+   "notes": []
+  },
+  "g06-tectonic": {
+   "generation": 6,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Sol concept Tectonic Mix: two deck-owned continental plates meet at a crossfader-positioned seam; band identity = terrain scale; EQ erases terrain scales; drop = rift rupture; sections rotate collision axis. Snare = glowing fissures (no dust).",
+   "rating": 984.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 1,
+   "rejections": 1,
+   "oppCount": 3,
+   "tags": [
+    "topology:lateral-split",
+    "render:heightfield",
+    "focal:seam",
+    "motion:compression",
+    "material:rock",
+    "temporal:section-regime",
+    "signals:decks,fader,eq,impulse"
+   ],
+   "notes": []
+  },
+  "g06-loom": {
+   "generation": 6,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Sol concept Kinetic Loom: 24 bands as warp threads (lows cords, mids ribbons, highs filaments) on a diagonal; spectrum drives tension/curvature not brightness; kick yanks the frame; sections change weave topology.",
+   "rating": 969.5,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 2,
+   "oppCount": 3,
+   "tags": [
+    "topology:diagonal-lattice",
+    "render:sdf-lines",
+    "focal:none",
+    "motion:tension",
+    "material:fiber",
+    "temporal:phrase-motif",
+    "signals:spectrum24,impulse,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g06-orrery": {
+   "generation": 6,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Sol concept Neon Orrery: off-center connected gear train; bpm-rational periods; phrase winds a mainspring; kick = clutch advance; sections release + rebuild symmetry. Snare = gear-mesh glints (no dust).",
+   "rating": 1030.5,
+   "status": "alive",
+   "wins": 2,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:mechanism",
+    "render:neon-sdf",
+    "focal:off-center-hub",
+    "motion:rotational-locked",
+    "material:metal",
+    "temporal:spring-wind",
+    "signals:bpm,beatphase,ladder,spectrum24"
+   ],
+   "notes": [
+    "cool idea, needs parameter tuning, a little too fast right now to see anything"
+   ]
+  },
+  "g06-paper": {
+   "generation": 6,
+   "parents": [
+    "g02-mirror-ladder",
+    "g04-story"
+   ],
+   "kind": "novel",
+   "brief": "Sol concept Cut-Paper Theatre: g04-story's narrative premise retested in layered-silhouette language (dark cutouts vs saturated backlight); one action per phrase, 16-bar chapters; highs = perforations; curtain-wipe sections.",
+   "rating": 970.2,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 3,
+   "tags": [
+    "topology:stage-layers",
+    "render:silhouette",
+    "focal:lateral",
+    "motion:staged",
+    "material:paper-light",
+    "temporal:five-act",
+    "signals:ladder,genome,impulse"
+   ],
+   "notes": []
+  },
+  "g06-foundry": {
+   "generation": 6,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Sol concept Liquid Equalizer Foundry: band identity = material phase (ingots/streams/sparks+vapor) pouring into an off-center mold; deck EQ = feed valves; drop opens a persistent evolving cast; sections recast.",
+   "rating": 969.5,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 1,
+   "rejections": 1,
+   "oppCount": 4,
+   "tags": [
+    "topology:gravity-vertical",
+    "render:emissive-fluid",
+    "focal:low-third-mold",
+    "motion:pour",
+    "material:molten-metal",
+    "temporal:section-recast",
+    "signals:eq,decks,spectrum24,flatness"
+   ],
+   "notes": []
+  },
+  "g06-calligraphy": {
+   "generation": 6,
+   "parents": [
+    "g05-voyage-ribbon"
+   ],
+   "kind": "novel",
+   "brief": "Sol concept Stereo Calligraphy: stereo waveform as two braided calligraphic strokes on a rotating diagonal; correlation braids, divergence opens space; phrase composes, drop = one heavy stroke; page-wash sections. wantsWave. Waveform-fossil rescue.",
+   "rating": 985.5,
+   "status": "alive",
+   "wins": 1,
+   "losses": 2,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 5,
+   "tags": [
+    "topology:diagonal-stroke",
+    "render:feedback-ink",
+    "focal:none",
+    "motion:gesture",
+    "material:ink",
+    "temporal:composition",
+    "signals:wave,impulse,ladder"
+   ],
+   "notes": []
+  },
+  "g06-negative": {
+   "generation": 6,
+   "parents": [
+    "g02-monolith",
+    "g03-monolith-lux"
+   ],
+   "kind": "novel",
+   "brief": "Sol concept Cathedral of Negative Space: architecture as darkness carved from a saturated emission volume; off-center vanishing point; bounded camera; buildup lights windows, drop opens the roof; plan topology per section. Architecture-fossil rescue, no smoke.",
+   "rating": 984.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 3,
+   "oppCount": 4,
+   "tags": [
+    "topology:perspective-nave",
+    "render:raymarch-volume",
+    "focal:off-center-vanishing",
+    "motion:processional-bounded",
+    "material:dark-stone-light",
+    "temporal:plan-topology",
+    "signals:spectrum24,bpm,ladder"
+   ],
+   "notes": []
+  },
+  "g06-pinball": {
+   "generation": 6,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Sol concept Shadow Pinball: trackId-genome board, beat-phase ballistic ball lands ON beats, kick = launch/flipper, phrase unlocks lanes, drop = multiball, sections fold the playfield. Highs = local score lamps (no dust).",
+   "rating": 969.4,
+   "status": "dead",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 3,
+   "tags": [
+    "topology:tilted-table",
+    "render:neon-sdf",
+    "focal:vertical-asymmetric",
+    "motion:ballistic-causal",
+    "material:machine",
+    "temporal:mode-unlock",
+    "signals:beatphase,ladder,spectrum24,genome"
+   ],
+   "notes": [
+    "blank?"
+   ]
+  },
+  "g06-nursery": {
+   "generation": 6,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Human ask (celestial, no dust): FBM emission nebula; kicks ignite protostar cores with traveling illumination fronts; highs = iridescent rim shimmer + magnetic filaments; section = supernova palette-regime recolor.",
+   "rating": 1045.1,
+   "status": "alive",
+   "wins": 4,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 5,
+   "tags": [
+    "topology:volume-field",
+    "render:fbm-raymarch",
+    "focal:off-axis-pillars",
+    "motion:convection",
+    "material:gas",
+    "temporal:stellar-lifecycle",
+    "signals:impulse,bands,ladder,centroid,spread"
+   ],
+   "notes": []
+  },
+  "g06-aurora-veil": {
+   "generation": 6,
+   "parents": [
+    "g00-aurora"
+   ],
+   "kind": "novel",
+   "brief": "Celestial + fossil rescue of winless g00-aurora (concept-vs-execution rule): band-owned diagonal aurora curtains, kick = hem slam traveling front, highs = corona rays/shimmer, section = substorm collapse + palette regime + new diagonal.",
+   "rating": 1000,
+   "status": "dead",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 3,
+   "oppCount": 2,
+   "tags": [
+    "topology:diagonal-curtains",
+    "render:ridged-sine",
+    "focal:off-center-sky",
+    "motion:curtain-dance",
+    "material:plasma",
+    "temporal:substorm",
+    "signals:bands,impulse,ladder,doubles"
+   ],
+   "notes": []
+  },
+  "g07-seasons-nebula": {
+   "generation": 7,
+   "parents": [
+    "g06-voyage-seasons"
+   ],
+   "kind": "tweak",
+   "brief": "Color variation: seasons engine with CELESTIAL palette banks (nebula teal/magenta, violet+gold star-forge, ice void, dying sun) + drop luminous surge + kick crest/trough contrast.",
+   "rating": 1045.9,
+   "status": "alive",
+   "wins": 3,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "focal:center",
+    "motion:orbital-drift",
+    "material:gas",
+    "temporal:phrase-palette",
+    "signals:ladder,beat,trend"
+   ],
+   "notes": []
+  },
+  "g07-seasons-neon": {
+   "generation": 7,
+   "parents": [
+    "g06-voyage-seasons"
+   ],
+   "kind": "tweak",
+   "brief": "Color variation: seasons engine with CLUB NEON banks (cyan/magenta, acid/UV, pink/blue, amber/teal), deeper blacks, kick = thin neon edge-light front, drop = two-purest-hues slam easing over the phrase.",
+   "rating": 1046.5,
+   "status": "alive",
+   "wins": 3,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "focal:center",
+    "motion:orbital-drift",
+    "material:neon",
+    "temporal:phrase-palette",
+    "signals:ladder,beat,trend"
+   ],
+   "notes": []
+  },
+  "g07-voyage-inferno": {
+   "generation": 7,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Color variation: committed molten identity (char floor, crimson undertow, molten orange, white-gold peaks); kick = magma surge front; snare = spark arcs (no dust); drop = whole field molten.",
+   "rating": 984.0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "focal:center",
+    "motion:orbital-drift",
+    "material:magma",
+    "temporal:regime",
+    "signals:bands,impulse,trend"
+   ],
+   "notes": []
+  },
+  "g07-materia-jewel": {
+   "generation": 7,
+   "parents": [
+    "g03-materia-deep"
+   ],
+   "kind": "tweak",
+   "brief": "Color variation of the leader: one gem family per section (emerald/sapphire/amethyst/amber), recrystallization sweep at boundaries, traveling facet fire, kick wake fire-flash, drop = internal luminosity.",
+   "rating": 984.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 1,
+   "rejections": 1,
+   "oppCount": 3,
+   "tags": [
+    "topology:relief",
+    "render:spectrum-sculpture",
+    "focal:center",
+    "motion:growth",
+    "material:gemstone",
+    "temporal:section-gem",
+    "signals:spectrum24,flatness,ladder"
+   ],
+   "notes": []
+  },
+  "g07-odyssey-nursery": {
+   "generation": 7,
+   "parents": [
+    "g01-odyssey",
+    "g06-nursery"
+   ],
+   "kind": "combine",
+   "brief": "Remix: odyssey phrase/section theatre skeleton x nursery FBM gas medium (cores/pillars/filaments, no dust); section = supernova + pillar topology change; kick ripple = core illumination front.",
+   "rating": 971.6,
+   "status": "alive",
+   "wins": 1,
+   "losses": 3,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:volume-field",
+    "render:fbm-feedback",
+    "focal:off-axis",
+    "motion:convection-warp",
+    "material:gas",
+    "temporal:phrase-theatre",
+    "signals:impulse,bands,ladder,centroid,spread"
+   ],
+   "notes": []
+  },
+  "g07-odyssey-embers": {
+   "generation": 7,
+   "parents": [
+    "g01-odyssey",
+    "g05-prime-embers"
+   ],
+   "kind": "combine",
+   "brief": "Remix: odyssey skeleton x prime-embers earned-brightness ember field; section = drift topology reorganization (convergent/sheared/vortical); drop = field ignition + biggest transformation.",
+   "rating": 1014.6,
+   "status": "alive",
+   "wins": 2,
+   "losses": 1,
+   "approvals": 1,
+   "rejections": 1,
+   "oppCount": 5,
+   "tags": [
+    "topology:field",
+    "render:feedback-embers",
+    "focal:center",
+    "motion:drift-warp",
+    "material:ember",
+    "temporal:phrase-theatre",
+    "signals:impulse,bands,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g07-voyage-prism": {
+   "generation": 7,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Color-system fix (human note: palette never changed the dust): ALL hardcoded element colors (stars, LOW, charge ring, coal, streak, shockwave) rewired to the palette; 4 distinct banks incl. green/teal + violet/pink; complementary shock edge; drop saturation ride.",
+   "rating": 1015.3,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 2,
+   "oppCount": 4,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "focal:center",
+    "motion:orbital-drift",
+    "material:ember",
+    "temporal:regime",
+    "signals:bands,impulse,trend"
+   ],
+   "notes": [
+    "orchestrator: resurrected \u2014 kill predated its forced-choice win (event-order artifact)",
+    "has potential but far too bright to see anything at high energy"
+   ]
+  },
+  "g07-voyage-gravity": {
+   "generation": 7,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Alternative bass interpretation (human ask): bass = spacetime curvature (orbit contraction, lensing, horizon bow); kick = 200ms elastic gravity fold with geodesic star smear; heavy-bass vs dropout regimes; drop = max gravity + polar escape jets.",
+   "rating": 971.5,
+   "status": "alive",
+   "wins": 1,
+   "losses": 3,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "focal:center",
+    "motion:gravitational",
+    "material:ember",
+    "temporal:regime",
+    "signals:bands.low,impulse.low,ladder,trend"
+   ],
+   "notes": []
+  },
+  "g07-orrery-calm": {
+   "generation": 7,
+   "parents": [
+    "g06-orrery"
+   ],
+   "kind": "tweak",
+   "brief": "Note-driven ('too fast to see anything'): 3.7x slower bpm-rational rotation, 2-3 larger stages, slower recoil/rebuild, deeper background + brighter edge-light; drop restores old full speed.",
+   "rating": 953.5,
+   "status": "alive",
+   "wins": 0,
+   "losses": 3,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:mechanism",
+    "render:neon-sdf",
+    "focal:off-center-hub",
+    "motion:rotational-locked",
+    "material:metal",
+    "temporal:spring-wind",
+    "signals:bpm,beatphase,ladder,spectrum24"
+   ],
+   "notes": [
+    "even this seems way too fast most of the time to see whats going on"
+   ]
+  },
+  "g07-crt": {
+   "generation": 7,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Human ask: CRT broadcast monitor \u2014 scanlines, phosphor triads, barrel distortion; 4-program genome channel lineup; kick = beam slam + barrel pump; bass = vertical-hold sag; buildup = VHS tracking stress; drop/section = channel-change glitch into new program+palette.",
+   "rating": 1031.3,
+   "status": "alive",
+   "wins": 2,
+   "losses": 0,
+   "approvals": 3,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:screen",
+    "render:crt-pipeline",
+    "focal:full-frame",
+    "motion:broadcast",
+    "material:phosphor",
+    "temporal:channel-change",
+    "signals:impulse,bands,ladder,genome,trend"
+   ],
+   "notes": []
+  },
+  "g07-hypno": {
+   "generation": 7,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Human ask: hypnotic spirals (~/spiral-vr math) \u2014 beat-locked log-spiral field, kick = elastic twist surge + zoom yank, bass = band contrast depth, section = family change (spiral/double/checker/pinwheel/mandala), drop = counter-rotating moire at max contrast. Flicker capped 2.4Hz + Nyquist gray-out.",
+   "rating": 1000.7,
+   "status": "alive",
+   "wins": 1,
+   "losses": 1,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:radial-pattern",
+    "render:analytic-bands",
+    "focal:center",
+    "motion:rotation-locked",
+    "material:ink",
+    "temporal:family-morph",
+    "signals:beatphase,bpm,impulse,bands.low,ladder"
+   ],
+   "notes": [
+    "changing speed based on energy is jarring, keep speed relatively consistent and modulate some other param with energy (maybe glow?) or smoothed i like the phase changes, maybe add palette changes as a more frequent bpm-aligned movement? and maybe color switching (a<->b) on beat?"
+   ]
+  },
+  "g07-voyage-hardcut": {
+   "generation": 7,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Human ask (quantization insight): discrete look tuple (palette bank, arm count 2/3/5/7, ring/streak/lens/star tier, rotation dir) HARD CUTS on phrase downbeats, genome-sequenced; section = distant look stride; drop-on-boundary = slam.",
+   "rating": 1059.7,
+   "status": "alive",
+   "wins": 4,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "focal:center",
+    "motion:orbital-drift",
+    "material:ember",
+    "temporal:quantized-cuts",
+    "signals:ladder,genome,beatphase,trend"
+   ],
+   "notes": []
+  },
+  "g07-mirror-metric": {
+   "generation": 7,
+   "parents": [
+    "g02-mirror-ladder"
+   ],
+   "kind": "tweak",
+   "brief": "Mirror-ladder style: mirrored edifice builds bar-by-bar (foundation/pillars/span/crown), phrase = ignite + hard cut to empty stage, skyline accumulates, section = skyline inversion; kick slams elements into place.",
+   "rating": 923.5,
+   "status": "alive",
+   "wins": 0,
+   "losses": 5,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 4,
+   "tags": [
+    "topology:stage-vertical",
+    "render:canvas-mirrored",
+    "focal:center-stage",
+    "motion:construction",
+    "material:architecture",
+    "temporal:bar-build",
+    "signals:ladder,beatphase,impulse,genome"
+   ],
+   "notes": [
+    "not sure what the idea is here"
+   ]
+  },
+  "g07-mirror-strata": {
+   "generation": 7,
+   "parents": [
+    "g02-mirror-ladder"
+   ],
+   "kind": "novel",
+   "brief": "Mirror-ladder style: four nested strata each owned by a metric tier (beat kernel / bar frame / phrase scene / section world), each hard-cutting only on its own boundary; drop = all strata cut at once; motion continuous between cuts.",
+   "rating": 984.7,
+   "status": "alive",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 4,
+   "rejections": 0,
+   "oppCount": 3,
+   "tags": [
+    "topology:nested-strata",
+    "render:canvas-mirrored",
+    "focal:nested-center",
+    "motion:tiered",
+    "material:light",
+    "temporal:tier-cuts",
+    "signals:ladder,beatphase,impulse,genome"
+   ],
+   "notes": []
+  },
+  "g07-materia-metric": {
+   "generation": 7,
+   "parents": [
+    "g03-materia-deep",
+    "g04-materia-arc"
+   ],
+   "kind": "tweak",
+   "brief": "Materia + metric evolution: relief assembles in bar-quantized strata (hard steps), phrase = material+palette bank hard cut (glass/obsidian/opal/basalt-lava), section = tectonic clear; EQ kills stay continuous against quantized growth.",
+   "rating": 1045.1,
+   "status": "alive",
+   "wins": 3,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 3,
+   "tags": [
+    "topology:relief",
+    "render:spectrum-sculpture",
+    "focal:center",
+    "motion:quantized-growth",
+    "material:multi-bank",
+    "temporal:bar-build-cuts",
+    "signals:spectrum24,ladder,beatphase,flatness,impulse"
+   ],
+   "notes": []
+  },
+  "g08-hypno-pulse": {
+   "generation": 8,
+   "parents": [
+    "g07-hypno"
+   ],
+   "kind": "tweak",
+   "brief": "Note-driven: constant speed, energy->glow, bar-stepped palette pairs, A/B chroma swap per beat (luma-equalized).",
+   "rating": 1016.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 2,
+   "tags": [
+    "topology:radial-pattern",
+    "render:analytic-bands",
+    "temporal:beat-swap",
+    "signals:beatphase,ladder,trend"
+   ],
+   "notes": [
+    "both are still awkwardly jittering, motion doesnt feel smooth"
+   ]
+  },
+  "g08-hypno-eq": {
+   "generation": 8,
+   "parents": [
+    "g07-hypno"
+   ],
+   "kind": "tweak",
+   "brief": "Spectrum map on hypno: lows=contrast+twist, mids=band-A hue, highs=band-B edge crispness; each EQ knob independently legible.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 2,
+   "rejections": 0,
+   "oppCount": 2,
+   "tags": [
+    "topology:radial-pattern",
+    "render:analytic-bands",
+    "temporal:beat-swap",
+    "signals:bands,eq,beatphase,ladder"
+   ],
+   "notes": [
+    "both are still awkwardly jittering, motion doesnt feel smooth"
+   ]
+  },
+  "g08-crt-eq": {
+   "generation": 8,
+   "parents": [
+    "g07-crt"
+   ],
+   "kind": "tweak",
+   "brief": "EQ split on the tube: lows=stability/hum, mids=program color, highs=phosphor/scanline detail; beat = raster comb step.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:screen",
+    "render:crt-pipeline",
+    "temporal:channel-change",
+    "signals:eq,bands,beatphase,ladder"
+   ],
+   "notes": []
+  },
+  "g08-crt-beat": {
+   "generation": 8,
+   "parents": [
+    "g07-crt"
+   ],
+   "kind": "tweak",
+   "brief": "Beat grammar: stop-motion program frames per beat, bar=tracking jump, phrase=intermission, drop=fluid motion + channel change; kick=freeze-punch.",
+   "rating": 1000.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 2,
+   "tags": [
+    "topology:screen",
+    "render:crt-pipeline",
+    "temporal:stop-motion",
+    "signals:beatphase,ladder,impulse"
+   ],
+   "notes": []
+  },
+  "g08-orrery-tick": {
+   "generation": 8,
+   "parents": [
+    "g07-orrery-calm",
+    "g06-orrery"
+   ],
+   "kind": "tweak",
+   "brief": "Radical fix for 'spinning sooo fast': escapement clock \u2014 static gears tick one tooth per beat/bar/phrase/section; drop = clock runs free. (Post-fix: analytic spring, NaN firewalls, clamped feedback.)",
+   "rating": 968.7,
+   "status": "alive",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 2,
+   "tags": [
+    "topology:mechanism",
+    "render:neon-sdf",
+    "temporal:tick-hierarchy",
+    "signals:beatphase,ladder,impulse"
+   ],
+   "notes": []
+  },
+  "g08-voyage-beatgate": {
+   "generation": 8,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Beat-gated structure: lit lane sector advances per beat, segmented ring charges to the downbeat; alt-high=crystalline glints, alt-mid=lane width.",
+   "rating": 1016.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "temporal:beat-gate",
+    "signals:beatphase,ladder,bands"
+   ],
+   "notes": []
+  },
+  "g08-voyage-eqsplit": {
+   "generation": 8,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Strict EQ split: lows=geometry scale/warp, mids=color of everything, highs=detail density; deck EQ knobs sweep one property each.",
+   "rating": 984.0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "temporal:regime",
+    "signals:eq,bands,decks"
+   ],
+   "notes": []
+  },
+  "g08-odyssey-beat": {
+   "generation": 8,
+   "parents": [
+    "g01-odyssey"
+   ],
+   "kind": "tweak",
+   "brief": "Beat pose strikes (quantized camera micro-steps), mids=warp topology (not dust), highs=ring sparkle; drop releases poses into continuous motion.",
+   "rating": 1016.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 2,
+   "tags": [
+    "topology:field",
+    "render:feedback-warp",
+    "temporal:pose-strike",
+    "signals:beatphase,ladder,bands"
+   ],
+   "notes": []
+  },
+  "g08-hardcut-beat": {
+   "generation": 8,
+   "parents": [
+    "g07-voyage-hardcut"
+   ],
+   "kind": "tweak",
+   "brief": "Winner extended down the ladder: phrase=full look cut, bar=one minor element, beat=accent A/B chroma flip; cut size proportional to tier.",
+   "rating": 1016.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "temporal:quantized-cascade",
+    "signals:ladder,beatphase,genome"
+   ],
+   "notes": []
+  },
+  "g08-materia-eqmap": {
+   "generation": 8,
+   "parents": [
+    "g03-materia-deep"
+   ],
+   "kind": "tweak",
+   "brief": "Leader + strict global EQ split (lows=relief mass, mids=surface color, highs=micro-texture) layered over parent per-region kills; beat=light-direction notch.",
+   "rating": 1016.0,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:relief",
+    "render:spectrum-sculpture",
+    "temporal:regime",
+    "signals:spectrum24,eq,beatphase"
+   ],
+   "notes": []
+  },
+  "g08-materia-beat": {
+   "generation": 8,
+   "parents": [
+    "g03-materia-deep",
+    "g07-materia-metric"
+   ],
+   "kind": "tweak",
+   "brief": "Beat facet-stamp advances around the relief (bar position readable), bar=rotation notch, phrase=material bank hard cut; kick slams the lit wedge.",
+   "rating": 984.0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:relief",
+    "render:spectrum-sculpture",
+    "temporal:beat-stamp",
+    "signals:beatphase,ladder,spectrum24"
+   ],
+   "notes": []
+  },
+  "g08-shards-storm": {
+   "generation": 8,
+   "parents": [
+    "g05-materia-shards"
+   ],
+   "kind": "tweak",
+   "brief": "Beat-scheduled shard volleys: high-band energy chooses subdivision density (highs pick the RHYTHM); drop = continuous storm.",
+   "rating": 1015.3,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 2,
+   "tags": [
+    "topology:relief",
+    "render:spectrum-sculpture",
+    "temporal:volley-schedule",
+    "signals:beatphase,bands.high,ladder,spectrum24"
+   ],
+   "notes": []
+  },
+  "g08-solar-beat": {
+   "generation": 8,
+   "parents": [
+    "g03-solar-crown"
+   ],
+   "kind": "tweak",
+   "brief": "Riser + beat grid: prominences erupt per beat around the crown, mids color magnetic field lines, highs=corona granularity, bar=rotation notch; drop=all longitudes erupt.",
+   "rating": 1032.0,
+   "status": "alive",
+   "wins": 2,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 2,
+   "tags": [
+    "topology:field",
+    "render:feedback-starfield",
+    "temporal:beat-grid",
+    "signals:beatphase,ladder,bands"
+   ],
+   "notes": []
+  },
+  "g08-tunnel-eq": {
+   "generation": 8,
+   "parents": [
+    "g02-tunnel-dream",
+    "g04-tunnel-saga"
+   ],
+   "kind": "tweak",
+   "brief": "EQ split: lows=tunnel geometry/speed, mids=wall color, highs=texture detail; beat=runway ring lights advancing down the tunnel.",
+   "rating": 968.7,
+   "status": "alive",
+   "wins": 0,
+   "losses": 2,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 2,
+   "tags": [
+    "topology:tunnel",
+    "render:canvas-feedback",
+    "temporal:runway",
+    "signals:eq,bands,beatphase,ladder"
+   ],
+   "notes": []
+  },
+  "g08-tunnel-beat": {
+   "generation": 8,
+   "parents": [
+    "g02-tunnel-dream"
+   ],
+   "kind": "tweak",
+   "brief": "Beat-lurch locomotion (kick IS movement), bar=segment snap, phrase=junction branch turn, section=material regime; drop=continuous rush.",
+   "rating": 984.0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:tunnel",
+    "render:canvas-feedback",
+    "temporal:lurch",
+    "signals:beatphase,ladder,impulse.low"
+   ],
+   "notes": []
+  },
+  "g08-strata-eq": {
+   "generation": 8,
+   "parents": [
+    "g07-mirror-strata"
+   ],
+   "kind": "tweak",
+   "brief": "Liked novel + band ownership aligned with tiers: lows own beat kernel, mids own frame/scene color, highs own seams/stars; EQ kills strip one stratum's property.",
+   "rating": 984.0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:nested-strata",
+    "render:canvas-mirrored",
+    "temporal:tier-cuts",
+    "signals:eq,bands,ladder,beatphase"
+   ],
+   "notes": []
+  },
+  "g08-voyage-blobs": {
+   "generation": 8,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "MEDIUM REPLACEMENT: dust -> 12 liquid metaballs (smooth-min, rim light); lows=volume/viscosity, mids=color duos (teal/orange +2), highs=tension shimmer; drop=merge-then-shatter.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:field",
+    "render:metaball-sdf",
+    "material:liquid",
+    "temporal:regime",
+    "signals:bands,impulse,beatphase"
+   ],
+   "notes": []
+  },
+  "g08-voyage-flock": {
+   "generation": 8,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "MEDIUM REPLACEMENT: dust -> 224 discrete flocking darts (16 squadrons); lows=cohesion, mids=color duos (violet/gold +2), highs=wingtip glints; kick ripple scatters, drop=murmuration frenzy.",
+   "rating": 1015.3,
+   "status": "alive",
+   "wins": 1,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 2,
+   "tags": [
+    "topology:field",
+    "render:boid-swarm",
+    "material:discrete",
+    "temporal:formation",
+    "signals:bands,impulse,beatphase,ladder"
+   ],
+   "notes": [
+    "orchestrator: resurrected \u2014 rejection predated its forced-choice win (event-order artifact)"
+   ]
+  },
+  "g08-voyage-plates": {
+   "generation": 8,
+   "parents": [
+    "g00-voyage",
+    "g05-tunnel-shatter"
+   ],
+   "kind": "tweak",
+   "brief": "MEDIUM REPLACEMENT: dust -> rigid voronoi plates in orbital shells, specular tilt flashes; lows=plate size, mids=tint duos (emerald/magenta +2), highs=edge glints; drop=align-then-explode.",
+   "rating": 984.0,
+   "status": "dead",
+   "wins": 0,
+   "losses": 1,
+   "approvals": 0,
+   "rejections": 1,
+   "oppCount": 2,
+   "tags": [
+    "topology:field",
+    "render:voronoi-rigid",
+    "material:crystal",
+    "temporal:regime",
+    "signals:bands,impulse,beatphase,ladder"
+   ],
+   "notes": []
+  },
+  "g08-odyssey-ink": {
+   "generation": 8,
+   "parents": [
+    "g01-odyssey",
+    "g01-ink-vortex"
+   ],
+   "kind": "tweak",
+   "brief": "MEDIUM REPLACEMENT: odyssey medium -> thick opaque billowing ink (steep density snap, sharp edges); kick=negative-space clearing punch; section=ink/light inversion; duo-chrome palettes (crimson/cyan +2).",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 1,
+   "rejections": 0,
+   "oppCount": 1,
+   "tags": [
+    "topology:field",
+    "render:feedback-ink",
+    "material:opaque-ink",
+    "temporal:phrase-theatre",
+    "signals:bands,impulse,beatphase,ladder"
+   ],
+   "notes": []
+  },
+  "g08-chameleon": {
+   "generation": 8,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Human tonality idea (derived in-preset from flatness + impulse density, ~750ms window): colorful painterly aurora when melodic, monotone kinetic strokes when percussive; traveling desaturation/flood front on regime change.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "topology:field",
+    "render:dual-regime",
+    "material:light",
+    "temporal:tonality-regime",
+    "signals:flatness,impulse,bands,ladder,centroid"
+   ],
+   "notes": [
+    "orchestrator 2026-08-18: REVISED IN PLACE (v2) \u2014 human: tonal pole was single-color/boring, percussive should pop via warp/shake. Now: tonal = 5 hue-family curtains (span floored 0.35 turn, kick = new-hue bloom, drop = chromatic explosion); percussive = achromatic warp slam/shear/tear/shake kinetics; front kept."
+   ]
+  },
+  "g09-prism-lumen": {
+   "generation": 9,
+   "parents": [
+    "g07-voyage-prism"
+   ],
+   "kind": "tweak",
+   "brief": "Note fix ('too bright at high energy'): energy drives color travel + saturation, never luminance; grade can only hold/darken; spectral palette (centroid hue, spread span, 1-flatness sat) replaces fixed banks.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:feedback-starfield",
+    "temporal:spectral-continuous",
+    "signals:centroid,spread,flatness"
+   ],
+   "notes": []
+  },
+  "g09-hypno-glide": {
+   "generation": 9,
+   "parents": [
+    "g08-hypno-pulse",
+    "g08-hypno-eq"
+   ],
+   "kind": "tweak",
+   "brief": "Jitter fix: rotation integrates 2s-smoothed bpm (never beat.phase); beat-edge detector fires A/B swap; spectral pair (A=centroid hue, B=complement, sat=1-flatness); bar steps = hue offsets.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:analytic-bands",
+    "temporal:beat-swap",
+    "signals:bpm,centroid,flatness"
+   ],
+   "notes": []
+  },
+  "g09-materia-chroma": {
+   "generation": 9,
+   "parents": [
+    "g03-materia-deep"
+   ],
+   "kind": "tweak",
+   "brief": "The spectrum paints the sculpture: each of 24 bands owns a fixed hue (lows warm->highs cool); region color = band hue, loudness = sat+luminosity; kick = luminance-only wave.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:spectrum-sculpture",
+    "temporal:continuous",
+    "signals:spectrum24,eq"
+   ],
+   "notes": []
+  },
+  "g09-shards-prism": {
+   "generation": 9,
+   "parents": [
+    "g05-materia-shards"
+   ],
+   "kind": "tweak",
+   "brief": "Prismatic shards: tinted by eruption region's band hue + chromatic dispersion; near-monochrome stone surface for contrast; drop = 24-blade full-spectrum fan in frequency order.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:spectrum-sculpture",
+    "temporal:volley",
+    "signals:spectrum24,eq"
+   ],
+   "notes": []
+  },
+  "g09-seasons-spectra": {
+   "generation": 9,
+   "parents": [
+    "g07-seasons-neon",
+    "g07-seasons-nebula"
+   ],
+   "kind": "tweak",
+   "brief": "Music chooses the regime: windowed section stats (centroid/spread/flatness/energy) classify into character -> bank (8 pooled character-tagged banks); front's rim previews incoming hues in the final bar.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:feedback-starfield",
+    "temporal:section-classified",
+    "signals:centroid,spread,flatness,ladder"
+   ],
+   "notes": []
+  },
+  "g09-hardcut-listen": {
+   "generation": 9,
+   "parents": [
+    "g07-voyage-hardcut"
+   ],
+   "kind": "tweak",
+   "brief": "Music picks the phrase bank: previous phrase's centroid tercile x flatness half -> 6 luminance-parity banks (deterministic); structure cuts stay genome-driven.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:feedback-starfield",
+    "temporal:quantized-cuts",
+    "signals:centroid,flatness,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g09-solar-spectra": {
+   "generation": 9,
+   "parents": [
+    "g08-solar-beat"
+   ],
+   "kind": "tweak",
+   "brief": "Stellar-class color: body hue = slow centroid (amber->white-blue); each prominence takes the loudest low/mid region's hue at eruption; field sat = 1-flatness; corona breadth = spread.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:feedback-starfield",
+    "temporal:beat-grid",
+    "signals:centroid,spectrum24,flatness,spread"
+   ],
+   "notes": []
+  },
+  "g09-tunnel-chroma": {
+   "generation": 9,
+   "parents": [
+    "g02-tunnel-dream"
+   ],
+   "kind": "tweak",
+   "brief": "Depth = frequency: 24 band-hued ring depths (lows near, highs at vanishing point), loudness = that depth's sat/glow; EQ kill = gray dead zone; kick = depth-ward luminance pulse.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:canvas-feedback",
+    "temporal:continuous",
+    "signals:spectrum24,eq,centroid"
+   ],
+   "notes": []
+  },
+  "g09-nursery-spectra": {
+   "generation": 9,
+   "parents": [
+    "g06-nursery"
+   ],
+   "kind": "tweak",
+   "brief": "Gas hue family = slow centroid, breadth = spread, sat = 1-flatness; ignitions flare in-family; supernova recolors to the section mean's spectral complement.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:fbm-raymarch",
+    "temporal:stellar-lifecycle",
+    "signals:centroid,spread,flatness,ladder"
+   ],
+   "notes": []
+  },
+  "g09-organ": {
+   "generation": 9,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Color organ: 24 diagonal frequency-ordered hue ribbons (loudness = width/luminosity/flow); kick = one transverse wave; phrase = weave cut; section = hue-wheel notch; drop = full-spectrum braid river.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:sdf-ribbons",
+    "topology:diagonal",
+    "temporal:tier-cuts",
+    "signals:spectrum24,impulse,beatphase,ladder"
+   ],
+   "notes": []
+  }
+ },
+ "foldedThrough": 1787111100.863421,
+ "eloSemantics": "v2: forced-choice only moves rating (K=32/400); both_good/both_bad are approval/rejection labels; both_bad kills winless candidates"
+}

@@ -80,6 +80,22 @@ import { samplePeakCeilingCurve } from './gainStaging';
 export const CHANNEL_IDS = ['A', 'B', 'C', 'D'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
+/**
+ * What a notify touched (capture spine 02): a channel id names that
+ * channel's ChannelState or crossfader-assignment; the string tags name a
+ * channel-less global. `undefined` = unknown/everything (graph revival,
+ * routing) — subscribers must then diff the whole surface. Channel-scoped
+ * subscribers (recorder, Conductor/Replay watchers) diff only the touched
+ * channel, skipping the per-channel loop for a single fader/EQ move.
+ */
+export type MixerChange =
+  | ChannelId
+  | 'crossfader'
+  | 'crossfaderEnabled'
+  | 'master'
+  | 'cue'
+  | 'routing';
+
 /** What a deck needs from the audio layer: a live context and its channel input. */
 export interface DeckAudioPort {
   ensureAudio(): { ctx: AudioContext; input: AudioNode };
@@ -352,7 +368,7 @@ export class Mixer {
   /** Serializes async routing applies — concurrent setSinkId/wiring
    * interleavings must not tear the output graph. */
   private routingChain: Promise<void> = Promise.resolve();
-  private listeners = new Set<() => void>();
+  private listeners = new Set<(changed?: MixerChange) => void>();
 
   // Control state survives graph rebuilds (StrictMode revival).
   private channels: Record<ChannelId, ChannelState> = {
@@ -739,14 +755,18 @@ export class Mixer {
    * subscribe so hardware moves repaint them. Fires after every setter;
    * channel states are replaced immutably, so snapshot selectors can rely
    * on reference/primitive equality.
+   *
+   * Listeners get the changed-control hint (capture spine 02): the touched
+   * channel or global tag, `undefined` = diff everything. Hint-blind
+   * subscribers (useSyncExternalStore repaints) just ignore the argument.
    */
-  subscribe(listener: () => void): () => void {
+  subscribe(listener: (changed?: MixerChange) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private notify(): void {
-    for (const listener of this.listeners) listener();
+  private notify(changed?: MixerChange): void {
+    for (const listener of this.listeners) listener(changed);
   }
 
   getChannelState(channel: ChannelId): ChannelState {
@@ -767,7 +787,7 @@ export class Mixer {
 
   setTrim(channel: ChannelId, value: number): void {
     this.channels[channel] = { ...this.channels[channel], trim: value };
-    this.notify();
+    this.notify(channel);
     // Per-CHANNEL-LANE guard, not the overlay-wide one (sessions 15): a
     // Conductor overlay carries no trim, and the live trim knob must keep
     // working through a set. Only a lane that actually holds trim owns the
@@ -781,7 +801,7 @@ export class Mixer {
   setEq(channel: ChannelId, band: EqBand, value: number): void {
     const ch = this.channels[channel];
     this.channels[channel] = { ...ch, eq: { ...ch.eq, [band]: value } };
-    this.notify();
+    this.notify(channel);
     if (this.automation) return; // overlay owns the node; lands on disengage
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(value));
@@ -790,7 +810,7 @@ export class Mixer {
   /** position in [-1, 1]: negative = LPF, positive = HPF, center = bypass. */
   setFilter(channel: ChannelId, position: number): void {
     this.channels[channel] = { ...this.channels[channel], filter: position };
-    this.notify();
+    this.notify(channel);
     if (this.automation) return; // overlay owns the node; lands on disengage
     this.ensure();
     this.applyFilter(channel);
@@ -798,7 +818,7 @@ export class Mixer {
 
   setFader(channel: ChannelId, value: number): void {
     this.channels[channel] = { ...this.channels[channel], fader: value };
-    this.notify();
+    this.notify(channel);
     if (this.automation) return; // overlay owns the node; lands on disengage
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(value));
@@ -808,7 +828,7 @@ export class Mixer {
   setCrossfader(position: number): void {
     this.crossfader = position;
     saveCrossfaderPosition(position);
-    this.notify();
+    this.notify('crossfader');
     if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();
     this.applyCrossfader(true);
@@ -818,7 +838,7 @@ export class Mixer {
     if (this.crossfaderAssignments[channel] === assignment) return;
     this.crossfaderAssignments = { ...this.crossfaderAssignments, [channel]: assignment };
     saveCrossfaderAssignments(this.crossfaderAssignments);
-    this.notify();
+    this.notify(channel);
     if (this.automation) return; // pinned neutral; assignment lands on disengage
     this.ensure();
     this.applyCrossfader(true);
@@ -831,7 +851,7 @@ export class Mixer {
   setCrossfaderEnabled(enabled: boolean): void {
     this.crossfaderEnabled = enabled;
     saveCrossfaderEnabled(enabled);
-    this.notify();
+    this.notify('crossfaderEnabled');
     if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();
     this.applyCrossfader(true);
@@ -839,7 +859,7 @@ export class Mixer {
 
   setMaster(value: number): void {
     this.master = value;
-    this.notify();
+    this.notify('master');
     const { ctx } = this.ensure();
     if (this.masterGain) rampGain(ctx, this.masterGain.gain, masterValueToGain(value));
   }
@@ -927,7 +947,7 @@ export class Mixer {
       cuePairInMain = null;
       this.cueSinkId = null;
       this.cuePair = null;
-      this.notify();
+      this.notify('routing');
     }
 
     if (plan.masterPairInMain || cuePairInMain) {
@@ -974,7 +994,7 @@ export class Mixer {
         this.cueBridge?.stop();
         this.cueSinkId = null;
         this.cuePair = null;
-        this.notify();
+        this.notify('routing');
       }
     } else {
       this.cueBridge?.stop();
@@ -987,7 +1007,7 @@ export class Mixer {
    * Any channels may be cued together (they sum). */
   setPfl(channel: ChannelId, on: boolean): void {
     this.channels[channel] = { ...this.channels[channel], pfl: on };
-    this.notify();
+    this.notify(channel);
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].pflGain.gain, on ? 1 : 0);
   }
@@ -1003,7 +1023,7 @@ export class Mixer {
   /** Cue bus volume (the headphone-level knob), 0..1. */
   setCueLevel(value: number): void {
     this.cueLevel = value;
-    this.notify();
+    this.notify('cue');
     const { ctx } = this.ensure();
     if (this.cueGain) rampGain(ctx, this.cueGain.gain, cueLevelToGain(value));
   }
@@ -1016,7 +1036,7 @@ export class Mixer {
    * before the bridge so the headphones stay sample-aligned (ADR 0017). */
   setCueMix(value: number): void {
     this.cueMix = value;
-    this.notify();
+    this.notify('cue');
     const { ctx } = this.ensure();
     const { cue, master } = cueMixGains(value);
     if (this.blendCueGain) rampGain(ctx, this.blendCueGain.gain, cue);
@@ -1042,7 +1062,7 @@ export class Mixer {
       this.cueSinkId = null;
       this.cuePair = null;
       if (ctx && ctx.state !== 'closed') await this.applyOutputRouting();
-      this.notify();
+      this.notify('routing');
       return;
     }
     this.ensure();
@@ -1060,7 +1080,7 @@ export class Mixer {
       this.cuePair = null;
       throw err;
     } finally {
-      this.notify();
+      this.notify('routing');
     }
   }
 

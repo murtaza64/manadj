@@ -204,6 +204,7 @@ function registerVisualizerIpc() {
     if (!display) return { ok: false, reason: "display not found" };
     const win = visualizerWindow;
     const enter = () => {
+      win.setAlwaysOnTop(false); // floating windows can't enter fullscreen
       win.setBounds(display.bounds);
       win.setFullScreen(true);
     };
@@ -214,6 +215,17 @@ function registerVisualizerIpc() {
       win.setFullScreen(false);
     } else {
       enter();
+    }
+    return { ok: true };
+  });
+  ipcMain.handle("visualizer:toggle-fullscreen", () => {
+    if (!visualizerWindow) return { ok: false, reason: "visualizer window not open" };
+    const win = visualizerWindow;
+    if (win.isFullScreen()) {
+      win.setFullScreen(false);
+    } else {
+      win.setAlwaysOnTop(false);
+      win.setFullScreen(true);
     }
     return { ok: true };
   });
@@ -247,12 +259,20 @@ function createWindow() {
   // (its page has no TopBar drag region) and never throttle it — it renders
   // rAF visuals and may sit occluded behind the main window on one screen
   // before being dragged to the projector.
-  win.webContents.setWindowOpenHandler(() => ({
+  win.webContents.setWindowOpenHandler((details) => ({
     action: "allow",
     overrideBrowserWindowOptions: {
-      title: "manaDJ visualizer",
+      title: details.frameName === "manadj-arena" ? "manaDJ arena" : "manaDJ visualizer",
       backgroundColor: "#000000",
-      webPreferences: { backgroundThrottling: false },
+      // An explicit webPreferences override REPLACES the opener's inherited
+      // webPreferences rather than merging — so preload must be re-stated
+      // here or the child window has no manadjVisualizer bridge (its ⛶ then
+      // falls back to the HTML fullscreen API, which no-ops on this
+      // always-on-top floating window). realtime-visualization 07.
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        backgroundThrottling: false,
+      },
     },
   }));
   // Track the visualizer child window and make it sticky: floats above
@@ -261,7 +281,13 @@ function createWindow() {
     if (details.frameName !== "manadj-visualizer") return;
     visualizerWindow = child;
     child.setAlwaysOnTop(true, "floating");
-    child.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // NOT setVisibleOnAllWorkspaces({visibleOnFullScreen:true}): on macOS
+    // it transforms the app to an accessory — the Dock icon vanished —
+    // and it is incompatible with fullscreen (the broken ⛶). Sticky =
+    // always-on-top only.
+    // Native fullscreen needs a normal window level; restore float on exit.
+    child.on("enter-full-screen", () => child.setAlwaysOnTop(false));
+    child.on("leave-full-screen", () => child.setAlwaysOnTop(true, "floating"));
     child.on("closed", () => {
       if (visualizerWindow === child) visualizerWindow = null;
     });

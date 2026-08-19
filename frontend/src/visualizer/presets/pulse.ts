@@ -52,7 +52,15 @@ class PulseRenderer implements PresetRenderer {
     const cx = width / 2;
     const cy = height / 2;
     const unit = Math.min(width, height);
-    const hue = energyHue(energy, frame.time * 8);
+    // Harmonic color (05): the spectral centroid swings the hue — dark
+    // bass-heavy passages sit one side of the energy sweep, bright
+    // harmonic material the other. Rings keep the hue of their spawn
+    // moment, so a fill's palette trails through the scene.
+    const harmonic = frame.params.harmonic ?? 0.6;
+    const hue = energyHue(energy, frame.time * 8 + (frame.centroid - 0.5) * 160 * harmonic);
+    // Section intensity (05): drops push it toward 1, breakdowns toward
+    // the floor — the whole scene breathes with the track, not the frame.
+    const intensity = 0.35 + 0.65 * frame.trend.excitement;
 
     // Beat-edge detection: phase wrap = a new beat. Fallback: rising bass
     // through the threshold.
@@ -67,10 +75,12 @@ class PulseRenderer implements PresetRenderer {
     this.prevLow = low;
     const isDownbeat = !!beat && beat.beatInBar === 0;
     if (onBeat && this.rings.length < MAX_RINGS) {
+      // Ring punch rides the kick TRANSIENT, not the bass level — a beat
+      // with an actual kick hits harder than a quantized silent beat.
       this.rings.push({
         age: 0,
         hue: (hue + 40) % 360,
-        strength: (isDownbeat ? 0.75 : 0.35) + 0.4 * low,
+        strength: ((isDownbeat ? 0.7 : 0.3) + 0.5 * frame.impulse.low + 0.2 * low) * intensity,
         downbeat: isDownbeat,
       });
     }
@@ -78,7 +88,7 @@ class PulseRenderer implements PresetRenderer {
     // Background: a flash that decays over the beat, strongest on the 1.
     const flashWeight = beat ? (beat.beatInBar === 0 ? 1 : 0.55) : 1;
     const decay = (beat ? Math.pow(1 - beat.phase, 2) : low * low) * flashWeight;
-    ctx.fillStyle = `hsl(${hue}, 100%, ${3 + 10 * decay}%)`;
+    ctx.fillStyle = `hsl(${hue}, 100%, ${2 + 3 * frame.trend.slow + 9 * decay * intensity}%)`;
     ctx.fillRect(0, 0, width, height);
 
     ctx.globalCompositeOperation = 'lighter';
@@ -89,7 +99,8 @@ class PulseRenderer implements PresetRenderer {
       if (ring.age >= RING_LIFE_S) return false;
       const life = 1 - ring.age / RING_LIFE_S;
       const size = ring.downbeat ? 1.35 : 1;
-      const radius = unit * (0.12 + ring.age * RING_SPEED_UNITS_PER_S * size);
+      const speed = RING_SPEED_UNITS_PER_S * (0.6 + 0.8 * intensity) * (frame.params.ringSpeed ?? 1);
+      const radius = unit * (0.12 + ring.age * speed * size);
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.strokeStyle = `hsla(${ring.hue}, 100%, ${ring.downbeat ? 68 : 60}%, ${
@@ -104,17 +115,24 @@ class PulseRenderer implements PresetRenderer {
     // each beat (full rotation per bar), pumping on the beat.
     const sides = beat?.beatsPerBar ?? 4;
     if (beat) {
+      // Rotation character follows section intensity (walkthrough
+      // feedback: quarter-turn snaps at low energy read as more hype than
+      // the track): calm = smooth continuous spin, drops = crisp per-beat
+      // snaps onto the bar slots.
+      this.rotation += frame.dt * 0.25 * (1 - intensity);
       const target = (beat.beatInBar / sides) * Math.PI * 2;
-      // Shortest-path ease onto the slot — the turn reads as a snap.
       let delta = target - (this.rotation % (Math.PI * 2));
       if (delta > Math.PI) delta -= Math.PI * 2;
       if (delta < -Math.PI) delta += Math.PI * 2;
-      this.rotation += delta * Math.min(1, frame.dt * SNAP_RATE);
+      this.rotation += delta * Math.min(1, frame.dt * SNAP_RATE) * intensity;
     } else {
       this.rotation += frame.dt * 0.3;
     }
     const snap = beat ? Math.pow(1 - beat.phase, 3) * flashWeight : decay;
-    const radius = unit * (0.1 + 0.08 * snap + 0.05 * low);
+    // Pump depth follows intensity too: near-steady square in calm
+    // sections, full per-beat breathing through a drop.
+    const pump = snap * (0.2 + 0.8 * intensity) * (frame.params.pump ?? 1);
+    const radius = unit * (0.1 + 0.07 * pump + 0.05 * low + 0.04 * frame.impulse.low);
     ctx.beginPath();
     for (let i = 0; i <= sides; i++) {
       const angle = -Math.PI / 2 + (i / sides) * Math.PI * 2 + this.rotation;
@@ -125,11 +143,18 @@ class PulseRenderer implements PresetRenderer {
       else ctx.lineTo(x, y);
     }
     ctx.closePath();
-    ctx.strokeStyle = `hsl(${hue}, 100%, ${50 + 40 * snap}%)`;
+    ctx.strokeStyle = `hsl(${hue}, 100%, ${50 + 40 * pump}%)`;
     ctx.lineWidth = Math.max(2, unit * 0.006);
     ctx.stroke();
-    ctx.fillStyle = `hsla(${hue}, 100%, 55%, ${0.15 + 0.35 * snap})`;
+    ctx.fillStyle = `hsla(${hue}, 100%, 55%, ${0.15 + 0.35 * pump})`;
     ctx.fill();
+    // Snare flash (05): mid transients blink a white edge — snares read
+    // against sustained vocals/pads which barely move the impulse.
+    if (frame.impulse.mid > 0.05) {
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.85 * frame.impulse.mid})`;
+      ctx.lineWidth = Math.max(1.5, unit * 0.003 + unit * 0.006 * frame.impulse.mid);
+      ctx.stroke();
+    }
 
     // Bar arc: sweeps the whole bar with a tick per beat — the "locked"
     // tell, now counting the 4. High energy brightens it.
@@ -165,5 +190,10 @@ class PulseRenderer implements PresetRenderer {
 export const pulsePreset: VisualizerPreset = {
   id: 'pulse',
   name: 'Pulse',
+  params: [
+    { id: 'harmonic', label: 'harmonic color', min: 0, max: 1.5, step: 0.05, default: 0.6 },
+    { id: 'ringSpeed', label: 'ring speed', min: 0.4, max: 2, step: 0.05, default: 1 },
+    { id: 'pump', label: 'pump depth', min: 0, max: 1.5, step: 0.05, default: 1 },
+  ],
   create: () => new PulseRenderer(),
 };
