@@ -30,6 +30,17 @@ agent breeds. Design decisions: issue
 1. `GET /api/ga/state` (or read the files). Fold events newer than the
    manifest's `foldedThrough` timestamp (Elo semantics v2, human-approved
    2026-08-18; full log refolded once at adoption):
+   - SOLO REVIEW (primary judging mode since 2026-08-18, human ask):
+     `type: solo` events — `target` + `outcome: like|dislike|neutral` +
+     `paramsA` snapshot — recorded from the MAIN viz window during
+     normal DJ use (hotkeys g/b/m, t note, n next; auto-cycle mode `c`:
+     45s timer or 16-beats-after-drop; scheduler = least-reviewed
+     first). Fold: like → `approvals`+1, dislike → `rejections`+1,
+     neutral → seen only. Death: dislikes kill a candidate only when it
+     has ≥2 rejections and zero approvals AND zero forced-choice wins
+     (solo verdicts are cheaper than arena both_bad — one bad first
+     impression must not kill). Head-to-head arena votes still fold per
+     the rules below when the human uses the arena.
    - Only FORCED-CHOICE outcomes (`a`/`b`) move rating: Elo K=32,
      expected score standard logistic (400).
    - `both_good`/`both_bad` are absolute labels: increment `approvals`/
@@ -53,6 +64,19 @@ agent breeds. Design decisions: issue
 4. Verify: `npm run build` (tsc catches contract violations); update the
    manifest (new entries, `generation` bump, `foldedThrough`); commit the
    lane change. Tell the human the arena is restocked.
+
+## In-place refinement (human-approved 2026-08-18)
+
+When feedback on a candidate is EXECUTION feedback (too bright, too
+fast, jittery, washed out, "didn't achieve its own brief"), refine the
+candidate IN PLACE — same file, same id, same rating history — and
+append an orchestrator note to its manifest entry recording the revision
+(date + what changed). Breeding a new gNN child is for CONCEPT changes
+(different idea, different parentage) or when the human asks for
+variants. Rationale: ratings and notes accumulate on the id; a rename
+resets the evidence. Precedents: orrery-tick NaN fix, chameleon v2
+(tonal pole = multi-hue color does the work, percussive pole =
+achromatic warp/shake/tear kinetics).
 
 ## Tech coverage (marathon rule)
 
@@ -220,9 +244,13 @@ Weave.
   round before pairwise voting.
 - Pre-arena calibration pass (auto-reject blank frames, quiet-state
   glare, camera-velocity nausea, plateau collapse) before human votes.
-- Parameter genotype: breed winning slider snapshots as tuned-default
-  variants (A/B default vs tuned) — tunnel-dream suggests tuning can
-  beat source mutation.
+- ~~Parameter genotype~~ ADOPTED 2026-08-18 (human ask): each solo-flow
+  load presents jittered param values (soloReview.ts sampleParamValues:
+  15% full-range exploratory, else gaussian around file defaults,
+  σ=0.22·range); verdicts snapshot the shown values. FOLD PROCEDURE:
+  for a candidate with ≥3 liked solo samples, move its FILE defaults
+  (in-place refinement) toward the like-weighted mean of sampled values,
+  ignoring dislike samples; note the retune in the manifest entry.
 - Multi-stimulus judging (quiet/tonal, noisy buildup, drop plateau,
   sparse/vocal, transition) instead of the single reference loop.
 

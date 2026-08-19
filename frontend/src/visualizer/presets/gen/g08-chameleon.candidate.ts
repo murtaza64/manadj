@@ -4,52 +4,62 @@
  * Human idea (verbatim brief): a preset that is "colorful when sounds are
  * melodic and more monotone and kinetic when sounds are more percussive".
  * The scene has two poles and a CONTINUOUS blend between them (never a hard
- * flip; crossfades ride 500ms+), plus a traveling desaturation/flood FRONT
- * that makes the transition itself the showpiece.
+ * flip; crossfades ride 500ms+), plus a traveling FRONT that makes the
+ * transition itself the showpiece.
  *
- * TONALITY DERIVATION (in-preset, no new seam):
+ * Human verdict on the prior version (verbatim): "i think chameleon didnt
+ * achieve the goal of 'more colorful the more tonal the audio is', almost
+ * always its just a single color (and pretty boring when in that state). in
+ * the percussive state, we should use extensive warp, distortion, shake,
+ * other effects that are less chromatic to make it pop; in tonal sections
+ * color should do most of the work."
+ *
+ * The rework rebuilds BOTH poles around that verdict:
+ *   - TONAL: color does ALL the work. A multi-hue painterly field with a
+ *     HARD guarantee that 3-4 distinct hue families are on screen at once
+ *     (per-curtain hue offsets spanning >=0.35 of the color wheel, widened
+ *     by spectral spread, never collapsing). Aurora curtains drift at
+ *     different rates; hue travels across the frame (spatial gradient +
+ *     temporal drift). Kicks BLOOM A NEW HUE into the field (color IS the
+ *     kick response here). Drops are a chromatic explosion (hue diversity +
+ *     saturation surge; luminance stays floored — no flash).
+ *   - PERCUSSIVE: near-achromatic (one desaturated tint + black/white) but
+ *     KINETIC through screen-space GEOMETRY, not color. Kick = radial WARP
+ *     SLAM (displacement pump + 1-frame shake offset, decays ~150ms). Heavy
+ *     bass = continuous feedback shear/warp turbulence. Snare = a hard
+ *     diagonal displacement TEAR (the image rips and heals — a warp seam,
+ *     not a drawn line). Buildup = accelerating shake/warp. Drop = maximum
+ *     distortion frenzy (zoom pump + rotational judder + tearing) riding
+ *     max(drop, energy). All displacement — no luminance flashes, photosafe
+ *     by construction. The energy color carries at the tonal pole is carried
+ *     by MOTION here.
+ *
+ * TONALITY DERIVATION (unchanged in-preset, no new seam):
  *   flatness ALREADY SHIPS (spectral flatness: 0 tonal .. 1 noisy). We take
  *   tonalRaw = 1 - flatness, EMA-smoothed over ~750ms. Then we REDUCE it by
  *   a rolling percussive-transient density: impulse.low/mid onsets are
  *   counted in a ~1s ring window (a hit registers on the RISING edge, so a
  *   sustained level does not inflate the count), normalized to a 0..1
- *   density. Even when flatness momentarily dips, a busy kick/snare pattern
- *   pulls the pole percussive. tonality = clamp(tonalEMA - density*w), then
- *   a SECOND slow slew (~0.6s) so the visual pole never snaps — u_tonal.
- *     u_tonal -> 1 : TONAL / MELODIC pole (painterly, colorful).
- *     u_tonal -> 0 : PERCUSSIVE pole (monotone, kinetic).
+ *   density. tonality = clamp(tonalEMA - density*w), then a SECOND slow slew
+ *   (~0.6s) so the visual pole never snaps — u_tonal.
+ *     u_tonal -> 1 : TONAL / MELODIC pole (multi-hue painterly).
+ *     u_tonal -> 0 : PERCUSSIVE pole (monotone, warp-kinetic).
  *
- * TONAL POLE (painterly): layered aurora curtains — nimitz-style stacked
- * sine ridges modulated by triangle-value noise, a rich multi-hue palette
- * (wide-phase cosine, centroid biases the hue family) blooming and drifting
- * softly. Bands ride shape: low swells the lower curtains, mid the mid
- * ridges, high sprinkles luminous shimmer along the crests. Feedback trails
- * are soft and chroma-preserving (aurora washes).
+ * TRANSITION (kept): a radial FRONT radius (u_front) chases the target pole;
+ * pixels inside the front already belong to the new pole. Flooding to tonal
+ * = COLOR floods in along the front; draining to percussive = color drains
+ * while WARP energy visibly rises (the front carries a warp swell).
  *
- * PERCUSSIVE POLE (kinetic, monotone): color drains to ONE hue + black/
- * white (deliberate exception to the saturated-color rule — the monotone IS
- * the point). Hard geometric strokes: a rotating fan of sharp radial spokes
- * whose motion carries the energy color no longer does. Every kick = a solid
- * white strike / expanding hard ring; every snare = a diagonal slash across
- * the field. Motion is snappy (higher advection speed, sharper edges, less
- * blur).
- *
- * TRANSITION (the showpiece): a radial FRONT radius (u_front) chases the
- * target pole. Pixels inside the front already belong to the new pole; the
- * boundary is a bright flood line (color floods outward when going tonal,
- * desaturation front sweeps outward when going percussive). So the character
- * change reads as a travelling wave, not a global fade.
- *
- * Kick = solid strike in BOTH regimes (bigger/harder at the percussive
- * pole). Drop rides max(drop, energy): tonal pole = chromatic bloom surge;
- * percussive pole = monochrome kinetic frenzy (spokes multiply + accelerate).
  * Section boundary (ladderBarIndex ?? barIndex, %16) re-rolls the monotone
- * hue AND the tonal palette family.
+ * tint AND the tonal palette family. Photosafe fullscreen-flash rate limiting
+ * retained (but at the percussive pole the flash is disabled — motion, not
+ * light, carries the kick there).
  *
- * Engine idioms reused (voyage/materia): unsharp feedback tap (anti-mush),
- * chroma-preserving soft knee (never per-channel clamp), per-axis seed
- * mixing in hashes, traveling kick ripple that LIGHTS what it passes,
- * bass-weighted smoothed drop, photosafe fullscreen-flash rate limiting.
+ * Feedback contraction (docs/visualizer-ga.md): whole-field grades capped at
+ * min(x, 0.99); drop/buildup drama lives in the (1 - decay)-bounded FRESH
+ * injection; transient accents are enveloped or (1 - decay)-normalized so no
+ * constant additive term accumulates to 1/(1-decay). Chroma-preserving soft
+ * knee only (never per-channel clamp).
  */
 
 import { createGlRenderer } from '../glPreset';
@@ -63,26 +73,33 @@ uniform float u_time;
 uniform float u_low;
 uniform float u_mid;
 uniform float u_high;
-uniform float u_kick;        // impulse.low, solid strike (both poles)
-uniform float u_snare;       // impulse.mid, slash at percussive pole
-uniform float u_hat;         // impulse.high, crest shimmer at tonal pole
+uniform float u_kick;        // impulse.low
+uniform float u_snare;       // impulse.mid (diagonal warp tear at perc pole)
+uniform float u_hat;         // impulse.high (crest shimmer at tonal pole)
 uniform float u_tonal;       // 0 percussive/monotone .. 1 tonal/painterly (slewed)
-uniform float u_front;       // travelling front radius 0..~1.6 (chases pole change)
+uniform float u_front;       // travelling front radius 0..~1.7 (chases pole change)
 uniform float u_frontDir;    // +1 flooding to tonal, -1 draining to percussive
 uniform float u_centroid;    // tonal-pole hue bias
+uniform float u_spread;      // spectral spread -> tonal-pole hue BREADTH
 uniform float u_drop;        // bass-weighted excitement (smoothed)
 uniform float u_buildup;     // excitement without bass (smoothed)
 uniform float u_energy;      // sustained loudness (rides drop plateaus)
 uniform float u_decay;
 uniform float u_seed;
-uniform float u_monoHue;     // percussive-pole single hue (re-rolled per section)
+uniform float u_monoHue;     // percussive-pole single tint (re-rolled per section)
 uniform float u_paletteSeed; // tonal-pole palette family (re-rolled per section)
 uniform float u_section;     // section-boundary pulse 0..1 (decays)
-uniform float u_rippleAge;   // seconds since last strong kick
-uniform float u_rippleAmp;   // that kick's strength
-uniform float u_spin;        // percussive-pole spoke rotation phase
+uniform float u_hueBloom;    // kick hue-bloom STRENGTH at tonal pole (0..1, decays)
+uniform float u_hueBloomHue; // the NEW hue that bloom injects (0..1, distinct from palette)
+uniform float u_hueBloomAge; // seconds since that hue bloom fired
+uniform float u_warpSlam;    // kick warp-slam envelope at perc pole (0..1, decays ~150ms)
+uniform float u_shake;       // shake/judder intensity at perc pole (buildup-accelerated)
+uniform vec2  u_shakeOff;    // 1-frame screen-space shake offset (perc pole)
+uniform float u_tear;        // snare diagonal displacement-tear envelope (perc pole)
+uniform float u_tearAng;     // that tear's diagonal angle
 uniform float u_drift;       // tonal-pole aurora drift phase
-uniform float u_flash;       // rate-limited fullscreen flash envelope (photosafe)
+uniform float u_spin;        // perc-pole rotational-judder phase
+uniform float u_flash;       // rate-limited fullscreen flash envelope (photosafe, tonal-gated)
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -114,22 +131,23 @@ float fbm(vec2 p) {
 }
 
 // Wide-phase multi-hue cosine palette — the tonal pole's colorful family.
-// centroid + paletteSeed shift the family so different sections/timbres get
-// distinct rich chords, and the phase span makes color TRAVEL across space.
-vec3 auroraPalette(float t, float bias, float pseed) {
+// 'spanScale' widens the effective color-wheel travel per unit of t, so a
+// small spatial t-range still spans many hue families (this is the multi-hue
+// guarantee's per-sample half). Saturated, bright (theme, not pastel).
+vec3 auroraPalette(float t, float bias, float pseed, float spanScale) {
   vec3 phase = vec3(0.0, 0.33, 0.67) + pseed;
-  vec3 col = 0.5 + 0.5 * cos(6.28318 * (vec3(0.95, 1.05, 0.85) * t + phase + bias));
-  // Push saturation up — bright, fully saturated (theme, not pastel).
+  vec3 col = 0.5 + 0.5 * cos(6.28318 * (vec3(0.95, 1.05, 0.85) * t * spanScale + phase + bias));
   float mn = min(col.r, min(col.g, col.b));
-  return mix(vec3(dot(col, vec3(0.333))), col, 1.35) - mn * 0.15;
+  return mix(vec3(dot(col, vec3(0.333))), col, 1.4) - mn * 0.15;
 }
 
-// Single-hue monotone color for the percussive pole (hue + black/white only).
+// Single-hue monotone TINT for the percussive pole (hue + black/white only).
+// Highlights lean only PARTWAY to white so the pole never reads as white.
 vec3 monoColor(float lum, float hue) {
   vec3 tint = 0.5 + 0.5 * cos(6.28318 * (vec3(1.0) * hue + vec3(0.0, 0.33, 0.67)));
-  // Highlights lean only PARTWAY to white (cap 0.3) — full-white highlights
-  // made the whole percussive pole read as a white field (human note).
-  tint = mix(tint, vec3(1.0), 0.3 * pow(clamp(lum, 0.0, 1.0), 2.0));
+  // Desaturate the tint itself: near-achromatic, one desaturated tint.
+  tint = mix(vec3(0.72), tint, 0.5);
+  tint = mix(tint, vec3(1.0), 0.28 * pow(clamp(lum, 0.0, 1.0), 2.0));
   return tint * clamp(lum, 0.0, 1.0);
 }
 
@@ -143,49 +161,67 @@ void main() {
   vec2 px = 1.0 / u_res;
   vec2 dir = r > 1e-4 ? c / r : vec2(0.0);
 
-  // ---- Local pole via the TRAVELLING FRONT.
-  // The front is a moving radius. When flooding to tonal (frontDir +1),
-  // pixels INSIDE the front are already tonal; when draining to percussive
-  // (frontDir -1), pixels inside the front are already percussive. Outside
-  // still holds the old pole, so the character change sweeps as a wave.
+  // ---- Local pole via the TRAVELLING FRONT (kept).
   float frontEdge = 0.045 + 0.03 * u_energy;
   float inside = smoothstep(u_front + frontEdge, u_front - frontEdge, r);
-  // Local tonality: base pole is u_tonal; the region the front has crossed
-  // is pulled toward the NEW pole (frontDir picks which).
   float localTonal = u_tonal;
   float crossed = (u_frontDir > 0.0) ? inside : (1.0 - inside);
-  // frontActive gauges how far a transition is mid-flight (front not resting).
   float frontActive = smoothstep(0.02, 0.2, u_front) * smoothstep(1.7, 1.3, u_front);
   localTonal = mix(localTonal, (u_frontDir > 0.0) ? 1.0 : 0.0, crossed * frontActive);
   localTonal = clamp(localTonal, 0.0, 1.0);
-  // The flood/desat line itself: a bright rim on the moving boundary.
   float frontLine = exp(-pow((r - u_front) * 22.0, 2.0)) * frontActive;
+  float percW = 1.0 - localTonal;
 
-  // ---- Advection / warp of the accumulated field. Painterly (tonal) = slow
-  // curling drift; kinetic (percussive) = fast, snappy, straighter push.
-  float warpSpeed = mix(1.1, 0.14, localTonal);
-  float curl = mix(0.4, 1.0, localTonal); // tonal curls more, percussive shears
-  vec2 flowP = c * mix(6.0, 2.6, localTonal) + u_drift * curl;
-  vec2 flow = (vec2(fbm(flowP), fbm(flowP + vec2(7.3, 2.1))) - 0.5)
-    * mix(0.004, 0.012, localTonal) * (1.0 + 0.6 * u_mid);
-  // Percussive shear: a rotational push tied to the spoke spin — motion
-  // carries the energy. Fades out as we go tonal.
-  float shear = (1.0 - localTonal) * (0.006 + 0.02 * u_energy + 0.03 * u_drop);
-  vec2 shearV = vec2(-dir.y, dir.x) * shear * sin(u_spin * 0.5);
+  // ================================================================
+  // SCREEN-SPACE WARP / DISTORTION (the percussive pole's whole voice).
+  // Every displacement below is gated by percW so the tonal pole stays a
+  // calm painterly drift. All are DISPLACEMENTS of the feedback sample point
+  // (or the shake offset) — never luminance flashes -> photosafe.
+  // ================================================================
 
-  // Traveling kick pressure wave — solid front that LIGHTS what it passes,
-  // in BOTH poles (bigger/harder at percussive pole).
-  float kickReach = mix(0.9, 1.25, 1.0 - localTonal);
-  float waveFront = 0.06 + u_rippleAge * kickReach;
-  float rippleWave = exp(-pow((r - waveFront) * mix(9.0, 13.0, 1.0 - localTonal), 2.0))
-    * exp(-u_rippleAge * 2.3) * u_rippleAmp;
-  vec2 ripple = dir * rippleWave * mix(0.03, 0.05, 1.0 - localTonal);
+  // Painterly drift (tonal): slow curling advection so aurora washes travel.
+  vec2 flowP = c * mix(2.6, 2.6, localTonal) + u_drift;
+  vec2 driftFlow = (vec2(fbm(flowP), fbm(flowP + vec2(7.3, 2.1))) - 0.5)
+    * 0.006 * localTonal * (1.0 + 0.5 * u_mid);
 
-  vec2 src = (c + flow + shearV + ripple) / vec2(aspect, 1.0) + 0.5;
+  // Kick WARP SLAM: a radial displacement pump — the field is punched
+  // outward then relaxes (decays ~150ms via u_warpSlam). Enveloped, so it
+  // returns to zero (no accumulation). Perc-pole only.
+  float slamProfile = exp(-pow((r - 0.05 - u_warpSlam * 0.4) * 5.0, 2.0));
+  vec2 warpSlam = dir * u_warpSlam * (0.06 + 0.05 * slamProfile) * percW;
 
-  // Sample previous frame. Tonal keeps soft chromatic drift (aurora wash);
-  // percussive sharpens hard (kinetic, less mush) via the unsharp tap.
-  vec2 ab = dir * (0.001 + 0.004 * u_drop) * localTonal / vec2(aspect, 1.0);
+  // Heavy-bass feedback SHEAR turbulence: continuous rotational + fbm warp
+  // while low band is present. Perc-pole only, scaled by energy/bass.
+  float bassTurb = percW * (0.008 + 0.03 * u_low + 0.02 * u_energy);
+  vec2 tang = vec2(-dir.y, dir.x);
+  vec2 shear = tang * bassTurb * (sin(r * 9.0 - u_spin * 1.7) + 0.6 * fbm(c * 3.5 + u_spin * 0.3));
+
+  // Snare diagonal TEAR: a hard displacement seam along a diagonal — pixels
+  // on one side jump, so the image RIPS and heals (enveloped by u_tear).
+  vec2 tearN = vec2(cos(u_tearAng), sin(u_tearAng));   // seam normal
+  vec2 tearT = vec2(-tearN.y, tearN.x);                // slip direction
+  float sd = dot(c, tearN);
+  float seam = smoothstep(0.16, 0.0, abs(sd));          // near the seam line
+  float slipSide = sign(sd);
+  vec2 tear = tearT * seam * slipSide * u_tear * 0.09 * percW;
+
+  // Drop distortion FRENZY: zoom pump + rotational judder, riding
+  // max(drop, energy). Zoom scales the sample about center; judder rotates.
+  float frenzy = percW * max(u_drop, u_energy);
+  float zoomPump = 1.0 + frenzy * 0.10 * sin(u_spin * 3.0 + r * 4.0) + u_warpSlam * 0.05 * percW;
+  float judder = frenzy * 0.06 * sin(u_spin * 5.0 + r * 7.0);
+  float cj = cos(judder), sj = sin(judder);
+  vec2 cJud = vec2(cj * c.x - sj * c.y, sj * c.x + cj * c.y) * zoomPump;
+
+  // Compose the sample point. Tonal keeps a gentle chromatic drift; perc
+  // stacks slam + shear + tear + frenzy. Shake offset is added in UV below.
+  vec2 warped = cJud + driftFlow + warpSlam + shear + tear;
+  vec2 src = warped / vec2(aspect, 1.0) + 0.5 + u_shakeOff * percW;
+
+  // Chromatic-aberration split scales with warp intensity (perc) AND drop
+  // bloom (tonal) — small, decorative.
+  float abAmt = (0.001 + 0.004 * u_drop) * localTonal + (0.002 + 0.01 * (u_warpSlam + frenzy)) * percW;
+  vec2 ab = dir * abAmt / vec2(aspect, 1.0);
   vec3 sampled = vec3(
     texture2D(u_prev, src + ab).r,
     texture2D(u_prev, src).g,
@@ -195,124 +231,123 @@ void main() {
     + texture2D(u_prev, src - vec2(px.x, 0.0)).rgb
     + texture2D(u_prev, src + vec2(0.0, px.y)).rgb
     + texture2D(u_prev, src - vec2(0.0, px.y)).rgb) * 0.25;
-  float sharp = mix(1.5, 1.15, localTonal); // percussive sharper, tonal softer
+  float sharp = mix(1.55, 1.15, localTonal); // percussive sharper, tonal softer
   vec3 field = max(vec3(0.0), sampled * sharp - blur * (sharp - 1.0)) * u_decay;
 
   vec3 fresh = vec3(0.0);
+  // Hue bias/breadth: centroid biases the family; spread WIDENS the phase
+  // span; the multi-hue guarantee floors the span at >= 0.35 turn.
   float hueBias = (u_centroid - 0.5) * 0.6 + u_paletteSeed;
+  float spanScale = max(0.35, 0.35 + 0.9 * u_spread) + 0.5 * u_drop; // wheel turns per unit t
 
-  // ================= TONAL POLE — aurora curtains =================
-  // Layered sine ridges (nimitz idiom): stacked bands ripple across the
-  // frame, each a luminous curtain; triangle-noise breaks them so they read
-  // organic. Low band swells lower curtains, mid the mid, high shimmers the
-  // crests. Colorful, saturated, softly drifting.
+  // ================= TONAL POLE — multi-hue aurora curtains =================
+  // MULTI-HUE GUARANTEE: five curtains, each fed a DIFFERENT base hue offset
+  // (band = i/4 spans 0..1 of the wheel) times spanScale (>=0.35 turn). So at
+  // least 3-4 hue families are simultaneously on screen no matter the input.
+  // Color travels: the palette t = hueOffset + spatial(x) + temporal(drift).
   float tonalW = localTonal;
   if (tonalW > 0.001) {
     vec3 aur = vec3(0.0);
     float yy = c.y;
+    // Each curtain drifts at a DIFFERENT rate (i-scaled) -> layered parallax.
     for (int i = 0; i < 5; i++) {
       float fi = float(i);
-      float band = fi / 4.0;                         // 0..1 vertical band id
+      float band = fi / 4.0;                         // 0..1 curtain id + hue slot
       float bandLevel = mix(u_low, u_high, band) + 0.5 * u_mid;
-      // ridge: a horizontal sine curtain warped by triangle noise + fbm.
-      float rn = tri(c.x * (1.5 + fi * 0.6) + u_drift * (0.3 + 0.1 * fi) + fi * 1.7)
-        + 0.6 * fbm(c * (2.0 + fi) + u_drift * 0.5 + fi * 3.1);
-      float ridgeY = (band - 0.5) * 1.05 + 0.18 * sin(c.x * 2.0 + u_drift + fi) + 0.12 * (rn - 0.7);
+      float dph = u_drift * (0.25 + 0.22 * fi);      // per-curtain drift rate
+      float rn = tri(c.x * (1.5 + fi * 0.6) + dph + fi * 1.7)
+        + 0.6 * fbm(c * (2.0 + fi) + dph * 0.5 + fi * 3.1);
+      float ridgeY = (band - 0.5) * 1.05 + 0.18 * sin(c.x * 2.0 + dph + fi) + 0.12 * (rn - 0.7);
       float curtain = exp(-pow((yy - ridgeY) * (7.0 - 2.5 * bandLevel), 2.0));
-      // color travels with x + band + drift so it is never one flat hue.
-      float pt = c.x * 0.5 + band * 0.7 + u_drift * 0.06 + fbm(c * 3.0 + u_drift * 0.2) * 0.4;
-      vec3 col = auroraPalette(pt, hueBias, u_paletteSeed);
+      // Distinct hue family per curtain (band offset) + spatial + temporal
+      // travel. spanScale forces wide hue coverage; band forces separation.
+      float pt = band + c.x * 0.28 + dph * 0.05 + fbm(c * 3.0 + dph * 0.2) * 0.22;
+      vec3 col = auroraPalette(pt, hueBias + band, u_paletteSeed, spanScale);
       aur += col * curtain * (0.35 + 1.3 * bandLevel) * (0.7 + 0.6 * u_drop);
     }
-    // High-band crest shimmer: luminous sparkle riding the curtains (hat).
+    // High-band crest shimmer (hat): luminous iridescence riding the crests,
+    // itself multi-hued via spanScale.
     float shimmer = pow(fbm(c * 22.0 + u_drift * 2.0 + u_seed), 3.0);
-    aur += auroraPalette(c.x * 0.6 + u_drift * 0.1, hueBias, u_paletteSeed)
+    aur += auroraPalette(c.x * 0.6 + u_drift * 0.1, hueBias + 0.5, u_paletteSeed, spanScale)
       * shimmer * (0.3 + 1.5 * u_hat) * (0.5 + 0.5 * u_high);
-    // Chromatic bloom surge on the drop — the whole sky blooms.
-    aur *= 1.0 + 1.1 * u_drop;
+    // KICK HUE BLOOM: color IS the kick response here. A kick injects a brand
+    // NEW hue as an expanding chromatic ring that floods the field — the
+    // fresh hue is offset by u_hueBloom so it does NOT match the current
+    // palette. Enveloped by age -> returns to zero.
+    float bloomR = 0.05 + u_hueBloomAge * 0.9;
+    float bloomRing = exp(-pow((r - bloomR) * 4.0, 2.0)) * exp(-u_hueBloomAge * 2.2);
+    vec3 bloomCol = auroraPalette(u_hueBloomHue * 2.7 + c.x * 0.3, hueBias + u_hueBloomHue, u_paletteSeed, spanScale);
+    aur += bloomCol * bloomRing * u_hueBloom * 1.6;
+    // Drop = chromatic EXPLOSION: saturation surge + more hue diversity
+    // (spanScale already lifted by drop). Luminance stays comparable (the
+    // multiply is on fresh, not the persistent field).
+    aur *= 1.0 + 1.2 * u_drop;
     fresh += aur * tonalW * (1.0 - u_decay) * 2.4;
   }
 
-  // ================= PERCUSSIVE POLE — kinetic monotone =================
-  // Hard geometric strokes: a rotating fan of sharp radial spokes. Snappy,
-  // one hue + black/white. Motion (spin, count) carries the energy.
-  float percW = 1.0 - localTonal;
+  // ================= PERCUSSIVE POLE — near-achromatic texture ==============
+  // No spokes/slashes (those were color/geometry drawn ON TOP). The pole's
+  // BODY is a quiet desaturated texture; ALL the punch comes from the warp/
+  // shear/tear/frenzy displacement above acting on the feedback field. We
+  // inject only a faint textured substrate to have something for the warp to
+  // grip, plus tear/slam EDGE highlights (monotone, enveloped).
   if (percW > 0.001) {
-    float spokes = floor(mix(6.0, 16.0, u_energy) + 4.0 * u_drop);
-    float a2 = ang + u_spin;
-    // hard-edged spokes (no soft falloff — kinetic, geometric).
-    float spoke = step(0.62, abs(sin(a2 * spokes * 0.5)));
-    // sharpen further: only bright near a radial band that pulses outward.
-    float ringPos = fract(u_spin * 0.15 + r * 1.4 - u_energy * 0.3);
-    float radialBar = step(0.72, abs(sin((r * mix(10.0, 22.0, u_energy) - u_spin * 2.0))));
-    float stroke = max(spoke * (0.5 + 0.5 * radialBar), radialBar * 0.6);
-    float lum = stroke * (0.4 + 1.4 * u_energy + 1.2 * u_drop) * smoothstep(1.3, 0.1, r);
-    vec3 mono = monoColor(lum, u_monoHue);
-    fresh += mono * percW * (1.0 - u_decay) * 2.2;
+    // Faint marbled substrate driven by bass turbulence — desaturated tint.
+    float grain = fbm(c * 5.0 + u_spin * 0.2 + vec2(0.0, u_drift * 0.3));
+    float body = smoothstep(0.35, 0.9, grain) * (0.18 + 0.5 * u_energy + 0.4 * u_low);
+    body *= smoothstep(1.35, 0.15, r);
+    fresh += monoColor(body, u_monoHue) * percW * (1.0 - u_decay) * 1.7;
 
-    // Snare SLASH: a hard diagonal bar cutting across the field.
-    if (u_snare > 0.04) {
-      float slashAng = u_seed * 3.14159 + 0.8;
-      vec2 sd = vec2(cos(slashAng), sin(slashAng));
-      float d = abs(dot(c, vec2(-sd.y, sd.x)));
-      float slash = smoothstep(0.03, 0.0, d) * smoothstep(1.2, 0.2, abs(dot(c, sd)));
-      fresh += monoColor(0.9, u_monoHue) * slash * u_snare * percW * 1.8;
-    }
+    // Warp-slam EDGE glow: the punched shell reads as a monotone shockwave
+    // rim (motion made visible), enveloped by u_warpSlam.
+    float slamRim = exp(-pow((r - 0.05 - u_warpSlam * 0.5) * 6.0, 2.0)) * u_warpSlam;
+    fresh += monoColor(0.85, u_monoHue) * slamRim * percW * 1.4;
+
+    // Snare TEAR highlight: the seam itself flashes a thin monotone line as
+    // the image rips (enveloped by u_tear) — reinforces the displacement.
+    float tearGlow = smoothstep(0.05, 0.0, abs(sd)) * u_tear
+      * smoothstep(1.2, 0.15, abs(dot(c, tearT)));
+    fresh += monoColor(0.9, u_monoHue) * tearGlow * percW * 1.5;
   }
 
-  // ================= KICK STRIKE — solid, BOTH poles =================
-  // A solid central strike + the kick pressure wave that lights the field.
-  // Bigger/harder at the percussive pole (the human ask: every kick visible).
-  float strikeR = mix(0.14, 0.26, percW);
-  float strike = exp(-pow(r / strikeR, 2.0) * (7.0 - 3.0 * u_kick));
-  vec3 strikeCol = mix(
-    auroraPalette(0.4 + t * 0.03, hueBias, u_paletteSeed) * vec3(1.1, 1.0, 0.95),
-    monoColor(1.0, u_monoHue),
-    percW
-  );
-  strikeCol = mix(strikeCol, vec3(1.0), 0.2 * percW); // percussive kick leans (not flashes) toward white
-  // Kick-enveloped ONLY: the old constant 0.5 base injected into the
-  // persistent field every frame with no (1-decay) normalization and
-  // accumulated into a blown-out white core (human: "way too white").
-  fresh += strikeCol * strike * (1.8 * u_kick + 0.3 * (1.0 - u_decay)) * (0.7 + 0.6 * u_energy);
-  // Ripple lights what it passes (voyage idiom), colored by the local pole.
-  vec3 rippleCol = mix(monoColor(0.85, u_monoHue), auroraPalette(0.6, hueBias, u_paletteSeed), localTonal);
-  fresh += rippleCol * rippleWave * (0.8 + 0.5 * percW) * (1.0 - 0.5 * u_decay);
-
-  // ================= TRANSITION FRONT — flood / desaturation line =======
-  // The moving boundary glows: flooding to tonal it is a colored flood line;
-  // draining to percussive it is a white desaturation front.
-  vec3 frontCol = mix(monoColor(0.9, u_monoHue), auroraPalette(0.5 + t * 0.05, hueBias, u_paletteSeed),
+  // ================= TRANSITION FRONT — flood / warp-swell line ===========
+  // Flooding to tonal: a COLORED flood line (color floods in). Draining to
+  // percussive: a monotone line carrying a warp swell (color drains, motion
+  // rises — the front's warp already ramped via u_shake on the JS side).
+  vec3 frontCol = mix(monoColor(0.9, u_monoHue),
+    auroraPalette(0.5 + t * 0.05 + c.x * 0.3, hueBias, u_paletteSeed, spanScale),
     step(0.0, u_frontDir));
   fresh += frontCol * frontLine * (1.1 + 0.7 * u_energy) * (1.0 - 0.5 * u_decay);
 
   // Section pulse: a gentle radial swell announcing the re-roll (both poles).
   float sec = exp(-pow((r - u_section * 0.7) * 4.0, 2.0)) * u_section;
-  fresh += mix(monoColor(0.85, u_monoHue), auroraPalette(t * 0.04, hueBias, u_paletteSeed), localTonal)
+  fresh += mix(monoColor(0.85, u_monoHue),
+    auroraPalette(t * 0.04 + c.x * 0.4, hueBias, u_paletteSeed, spanScale), localTonal)
     * sec * (1.0 + u_drop) * (1.0 - 0.5 * u_decay);
 
   // Inject fresh at (1 - decay); ride max(drop, energy) so sustained states
-  // hold through a drop's plateau (excitement is a transition-only signal).
+  // hold through a drop's plateau.
   float sustain = max(u_drop, u_energy);
   field += fresh * (0.55 + 0.9 * sustain);
 
   // ---- SATURATION / VALUE grade by local pole (the core of the idea).
-  // Toward the percussive pole, drain chroma toward a single-hue monotone.
+  // Toward the percussive pole, drain chroma toward the single desaturated
+  // tint. Toward tonal, PUSH saturation (color does the work).
   float luma = dot(field, vec3(0.299, 0.587, 0.114));
   vec3 monoTarget = monoColor(clamp(luma * 1.05, 0.0, 1.0), u_monoHue);
-  // localTonal=1 keep painterly color; localTonal=0 collapse to monotone.
   field = mix(monoTarget, field, localTonal);
-  // Slight extra saturation at the tonal pole (bright, fully saturated).
-  vec3 g = vec3(luma);
-  field = mix(field, mix(g, field, 1.25), 0.25 * localTonal);
+  vec3 gg = vec3(luma);
+  // Extra saturation at the tonal pole — stronger than before so 3-4 hue
+  // families stay vivid rather than greying toward a single average.
+  field = mix(field, mix(gg, field, 1.5), 0.4 * localTonal);
 
-  // Buildups tense-but-alive (never eerily still); drops bloom. Capped < 1:
-  // field is the persistent feedback state — a sustained >1 multiplier
-  // compounds to a blown-out frame (same washout class as materia-beat).
+  // Buildups tense-but-alive; drops bloom. Capped < 1 (feedback contraction):
+  // the persistent field never gets a sustained >1 multiplier.
   field *= min(0.78 + 0.36 * sustain - 0.04 * u_buildup + 0.06 * u_buildup * (0.5 + 0.5 * sin(t * 8.0)), 0.99);
 
-  // Photosafe fullscreen flash (rate-limited on the JS side): gentle, capped.
-  field += vec3(0.09) * u_flash;
+  // Photosafe fullscreen flash (rate-limited on JS side) — GATED to the tonal
+  // pole only (at the percussive pole, motion carries the kick, not light).
+  field += vec3(0.09) * u_flash * localTonal;
 
   // Chroma-preserving soft knee (NEVER per-channel clamp).
   float m = max(field.r, max(field.g, field.b));
@@ -332,8 +367,7 @@ export const g08ChameleonPreset: VisualizerPreset = {
   params: [
     { id: 'tonalBias', label: 'tonality bias (perc↔tonal)', min: -0.5, max: 0.5, step: 0.02, default: 0 },
     { id: 'percWeight', label: 'transient weight', min: 0, max: 1.5, step: 0.05, default: 0.8 },
-    { id: 'persistence', label: 'persistence', min: 0.5, max: 2, step: 0.05, default: 1 },
-    { id: 'kinetics', label: 'kinetic speed', min: 0.3, max: 2, step: 0.05, default: 1 },
+    { id: 'warpGain', label: 'warp gain (percussive)', min: 0.4, max: 2, step: 0.05, default: 1 },
     { id: 'colorGain', label: 'color gain (tonal)', min: 0.4, max: 2, step: 0.05, default: 1 },
   ],
   create: () => {
@@ -342,12 +376,12 @@ export const g08ChameleonPreset: VisualizerPreset = {
     let tonalEMA = 0.5; // ~750ms EMA of (1 - flatness)
     let tonality = 0.5; // after transient-density reduction + second slew (u_tonal)
     // Rolling impulse-density ring (~1s), rising-edge counted.
-    const HITS = 24; // ring slots; oldest expires by timestamp
+    const HITS = 24;
     const hitTimes: number[] = [];
     let prevKick = 0;
     let prevSnare = 0;
     // Travelling front.
-    let front = 0; // 0 = rested; sweeps to ~1.6 when a transition fires
+    let front = 0;
     let frontDir = 1;
     let lastPoleTarget = 0.5;
     // Smoothed dynamics.
@@ -355,17 +389,27 @@ export const g08ChameleonPreset: VisualizerPreset = {
     let smoothBuildup = 0;
     let smoothEnergy = 0;
     // Motion phases.
-    let spin = 0;
-    let drift = 0;
+    let spin = 0;   // percussive-pole judder/turbulence phase
+    let drift = 0;  // tonal-pole aurora drift phase
     // Section.
     let lastSectionIndex = -1;
     let section = 0;
     let monoHue = Math.random();
     let paletteSeed = Math.random();
-    // Kick ripple.
-    let rippleAge = 999;
-    let rippleAmp = 0;
-    // Photosafe flash rate limiter (≤3 fullscreen flashes/sec).
+    // Tonal-pole kick hue bloom (a NEW hue floods on each kick).
+    let hueBloom = 0;      // strength, decays
+    let hueBloomAge = 999; // seconds since fired
+    let hueBloomVal = Math.random();
+    // Percussive-pole warp slam (radial displacement pump, ~150ms decay).
+    let warpSlam = 0;
+    // Shake / judder (accelerates through buildups) + 1-frame shake offset.
+    let shake = 0;
+    let shakeX = 0;
+    let shakeY = 0;
+    // Snare diagonal displacement tear.
+    let tear = 0;
+    let tearAng = 0;
+    // Photosafe flash rate limiter (≤3 fullscreen flashes/sec, tonal-gated).
     let flash = 0;
     let lastFlashTime = -10;
 
@@ -378,8 +422,7 @@ export const g08ChameleonPreset: VisualizerPreset = {
 
         const tonalBias = frame.params.tonalBias ?? 0;
         const percWeight = frame.params.percWeight ?? 0.8;
-        const persistence = frame.params.persistence ?? 1;
-        const kinetics = frame.params.kinetics ?? 1;
+        const warpGain = frame.params.warpGain ?? 1;
         const colorGain = frame.params.colorGain ?? 1;
 
         // --- TONALITY: EMA(~750ms) of (1 - flatness).
@@ -387,34 +430,25 @@ export const g08ChameleonPreset: VisualizerPreset = {
         const tonalRaw = 1 - frame.flatness;
         tonalEMA += (tonalRaw - tonalEMA) * emaAlpha;
 
-        // --- Rolling percussive-transient density (~1s window). Count kick
-        // (impulse.low) and snare (impulse.mid) onsets on the RISING edge so
-        // sustained levels do not inflate the count.
+        // --- Rolling percussive-transient density (~1s window), rising-edge.
         const kick = frame.impulse.low;
         const snare = frame.impulse.mid;
         if (kick > 0.32 && prevKick <= 0.32) hitTimes.push(frame.time);
         if (snare > 0.28 && prevSnare <= 0.28) hitTimes.push(frame.time);
         prevKick = kick;
         prevSnare = snare;
-        // Expire hits older than 1s; cap ring length.
         while (hitTimes.length && frame.time - hitTimes[0] > 1.0) hitTimes.shift();
         while (hitTimes.length > HITS) hitTimes.shift();
-        // Density 0..1: ~6 transients/sec saturates to "very percussive".
         const density = Math.min(1, hitTimes.length / 6);
 
-        // tonality target = smoothed tonal minus transient density (weighted),
-        // plus manual bias. Busy transients pull the pole percussive even if
-        // flatness dipped.
         const tonalTarget = Math.min(
           1,
           Math.max(0, tonalEMA - density * percWeight * 0.7 + tonalBias)
         );
-        // Second slow slew so the visual pole never snaps (~0.6s).
+        // Second slow slew (~0.6s) so the visual pole never snaps.
         tonality += (tonalTarget - tonality) * (1 - Math.exp(-dt / 0.6));
 
-        // --- TRAVELLING FRONT: when the pole target crosses meaningfully,
-        // launch a front that sweeps the new pole across the frame (500ms+).
-        // We compare the (slewed) tonality to the pole it last committed to.
+        // --- TRAVELLING FRONT (kept): launches a sweep on a pole crossing.
         if (front < 0.02) {
           const delta = tonality - lastPoleTarget;
           if (Math.abs(delta) > 0.14) {
@@ -426,8 +460,7 @@ export const g08ChameleonPreset: VisualizerPreset = {
           }
         }
         if (front >= 0.02 || front === 0.001) {
-          // Sweep across the frame in ~0.7s (well over the 500ms floor).
-          front += dt / 0.7;
+          front += dt / 0.7; // sweep across the frame in ~0.7s (>500ms floor)
           if (front > 1.7) {
             front = 0;
             lastPoleTarget = tonality;
@@ -445,15 +478,16 @@ export const g08ChameleonPreset: VisualizerPreset = {
         );
         smoothEnergy += (energyTarget - smoothEnergy) * (1 - Math.exp(-dt / 0.5));
 
-        // --- Motion phases. Percussive pole spins fast (kinetic); tonal
-        // pole drifts slow (painterly). BPM-locked when gridded.
+        // --- Motion phases. Percussive pole judders/turbulates FAST; tonal
+        // pole drifts SLOW. BPM-locked when gridded.
         const beatHz = frame.beat?.bpm ? frame.beat.bpm / 60 : 2.0;
-        const spinSpeed = (0.4 + 2.4 * (1 - tonality)) * kinetics * (0.6 + 0.8 * beatHz / 2);
-        spin += dt * spinSpeed * (1 + 1.5 * smoothDrop);
+        const percActivity = 1 - tonality;
+        const spinSpeed = (0.6 + 3.2 * percActivity) * warpGain * (0.6 + 0.8 * beatHz / 2);
+        spin += dt * spinSpeed * (1 + 1.8 * smoothDrop);
         drift += dt * (0.12 + 0.5 * tonality) * (0.7 + 0.5 * smoothDrop);
 
         // --- Section boundary (ladderBarIndex ?? barIndex, %16): re-roll the
-        // monotone hue AND the tonal palette family; fire a decaying pulse.
+        // monotone tint AND the tonal palette family; fire a decaying pulse.
         let sectionIndex = lastSectionIndex;
         if (frame.beat) {
           const barOrdinal = frame.beat.ladderBarIndex ?? frame.beat.barIndex;
@@ -467,26 +501,64 @@ export const g08ChameleonPreset: VisualizerPreset = {
         lastSectionIndex = sectionIndex;
         section = Math.max(0, section - dt / 1.0);
 
-        // --- Kick ripple retrigger (solid strike, both poles).
-        rippleAge += dt;
-        if (kick > 0.35 && rippleAge > 0.11) {
-          rippleAge = 0;
-          rippleAmp = Math.min(1, kick * 1.25);
+        // --- TONAL-POLE kick HUE BLOOM: on a kick, inject a brand-NEW hue
+        // (offset from the current palette) that floods the field. Color IS
+        // the kick response at the tonal pole. Envelope returns to zero.
+        hueBloomAge += dt;
+        if (kick > 0.35 && hueBloomAge > 0.1) {
+          hueBloomAge = 0;
+          // New hue distinct from the current family (golden-ratio hop).
+          hueBloomVal = (hueBloomVal + 0.38 + 0.24 * Math.random()) % 1;
+          hueBloom = Math.min(1, kick * 1.2) * tonality; // only meaningful when tonal
+        }
+        hueBloom = Math.max(0, hueBloom - dt / 0.45);
+
+        // --- PERCUSSIVE-POLE warp SLAM: kick punches a radial displacement
+        // pump, decaying ~150ms. Scaled by warpGain and the percussive pole.
+        warpSlam = Math.max(0, warpSlam - dt / 0.15);
+        if (kick > 0.3) {
+          warpSlam = Math.max(warpSlam, Math.min(1, kick * 1.3) * percActivity * warpGain);
         }
 
-        // --- Photosafe flash: a small fullscreen lift on strong kicks,
-        // rate-limited to ≤3/sec, never saturated-red (white lift only).
+        // --- SHAKE / JUDDER: 1-frame screen-space shake offset. Baseline
+        // rides bass turbulence + energy; ACCELERATES through buildups; peaks
+        // in the drop frenzy. Percussive-pole scaled. Enveloped each frame.
+        const shakeTarget =
+          percActivity *
+          warpGain *
+          (0.15 * frame.bands.low +
+            0.3 * smoothBuildup + // buildups accelerate the shake
+            0.5 * smoothDrop +
+            0.2 * smoothEnergy +
+            0.6 * warpSlam);
+        // Snappy attack, quick release.
+        shake += (shakeTarget - shake) * (1 - Math.exp(-dt / 0.05));
+        // Fresh random offset per frame (the "1-frame shake"), amplitude=shake.
+        shakeX = (Math.random() * 2 - 1) * shake * 0.03;
+        shakeY = (Math.random() * 2 - 1) * shake * 0.03;
+
+        // --- SNARE diagonal displacement TEAR: the image rips along a fresh
+        // diagonal and heals. Percussive-pole. Envelope returns to zero.
+        tear = Math.max(0, tear - dt / 0.14);
+        if (snare > 0.3 && percActivity > 0.2) {
+          tear = Math.max(tear, Math.min(1, snare * 1.2) * percActivity * warpGain);
+          tearAng = Math.random() * Math.PI; // fresh diagonal each rip
+        }
+
+        // --- Photosafe flash: small fullscreen lift on strong kicks, rate-
+        // limited to ≤3/sec. GATED to the tonal pole in the shader (motion
+        // carries the kick at the percussive pole).
         flash = Math.max(0, flash - dt / 0.12);
         if (kick > 0.5 && frame.time - lastFlashTime > 0.34) {
           flash = Math.min(0.5, kick * 0.5);
           lastFlashTime = frame.time;
         }
 
-        // --- Energy-tied decay; percussive pole clears faster (kinetic,
-        // snappy) so hard strokes do not smear into mush.
+        // --- Energy-tied decay; percussive pole clears faster so warp does
+        // not smear into mush.
         const baseDecay =
-          0.985 - 0.01 * smoothEnergy - 0.006 * smoothBuildup - 0.02 * (1 - tonality);
-        const decay = Math.min(0.996, 1 - (1 - baseDecay) / persistence);
+          0.985 - 0.01 * smoothEnergy - 0.006 * smoothBuildup - 0.022 * percActivity;
+        const decay = Math.min(0.996, 1 - (1 - baseDecay));
 
         return {
           u_time: frame.time,
@@ -500,6 +572,7 @@ export const g08ChameleonPreset: VisualizerPreset = {
           u_front: front,
           u_frontDir: frontDir,
           u_centroid: frame.centroid,
+          u_spread: frame.spread,
           u_drop: smoothDrop,
           u_buildup: smoothBuildup,
           u_energy: smoothEnergy,
@@ -508,10 +581,16 @@ export const g08ChameleonPreset: VisualizerPreset = {
           u_monoHue: monoHue,
           u_paletteSeed: paletteSeed * colorGain,
           u_section: Math.max(0, Math.min(1, section)),
-          u_rippleAge: rippleAge,
-          u_rippleAmp: rippleAmp,
-          u_spin: spin,
+          u_hueBloom: hueBloom,
+          u_hueBloomHue: hueBloomVal,
+          u_hueBloomAge: hueBloomAge,
+          u_warpSlam: warpSlam,
+          u_shake: shake,
+          u_shakeOff: [shakeX, shakeY],
+          u_tear: tear,
+          u_tearAng: tearAng,
           u_drift: drift,
+          u_spin: spin,
           u_flash: flash,
         };
       },

@@ -15,6 +15,15 @@ import {
   isCandidateId,
 } from './presets/gen';
 import type { PresetRenderer, VisualizerPreset } from './presets/types';
+import { BACKEND_URL } from '../api/client';
+import {
+  countSoloReviews,
+  INITIAL_CYCLE,
+  nextCandidateId,
+  sampleParamValues,
+  stepCycle,
+} from './soloReview';
+import type { CycleMode, CycleState, SoloVerdict } from './soloReview';
 import {
   getParamValues,
   getPresetId,
@@ -74,6 +83,28 @@ const QUALITY_LABELS: Record<RenderQuality, string> = {
   uhd: '4K',
   native: 'max',
 };
+
+/** Solo review (rt-viz 06): rate the CURRENT candidate while DJing.
+ * g like · b dislike · m neutral · t note · n next · c auto-cycle mode. */
+const CYCLE_MODES: CycleMode[] = ['off', 'timer', 'drop'];
+const CYCLE_LABELS: Record<CycleMode, string> = {
+  off: 'cycle off',
+  timer: 'cycle 45s',
+  drop: 'cycle post-drop',
+};
+const CYCLE_KEY = 'manadj-visualizer-cycle';
+
+async function postGaEvent(event: Record<string, unknown>): Promise<void> {
+  try {
+    await fetch(`${BACKEND_URL}/api/ga/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(event),
+    });
+  } catch {
+    // review capture is best-effort; never disturb the render loop
+  }
+}
 
 /** Canvas backing size for the current client size, within the budget. */
 function backingSize(
@@ -171,6 +202,22 @@ export function VisualizerApp() {
   const [genTick, setGenTick] = useState(0);
   const [genFilter, setGenFilter] = useState('');
   const quality = useSyncExternalStore(subscribeQuality, getRenderQuality);
+  // ---- Solo review state (rt-viz 06): counts + toast + auto-cycle.
+  const soloCountsRef = useRef<Record<string, number>>({});
+  const cycleRef = useRef<CycleState>({ ...INITIAL_CYCLE, lastAdvanceAt: performance.now() });
+  const [cycleMode, setCycleMode] = useState<CycleMode>(() => {
+    const stored = localStorage.getItem(CYCLE_KEY);
+    return CYCLE_MODES.includes(stored as CycleMode) ? (stored as CycleMode) : 'off';
+  });
+  const cycleModeRef = useRef(cycleMode);
+  cycleModeRef.current = cycleMode;
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const showToast = (text: string) => {
+    setToast(text);
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2200);
+  };
   // Quality change → recompute backing sizes (the render loop's resize
   // handler reads the store directly).
   useEffect(() => {
@@ -415,6 +462,124 @@ export function VisualizerApp() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // ---- Solo review: seed counts from the event log (once per window).
+  useEffect(() => {
+    let disposed = false;
+    void fetch(`${BACKEND_URL}/api/ga/state`)
+      .then((r) => r.json())
+      .then((s: { events?: { type?: string; target?: string }[] }) => {
+        if (!disposed && s.events) soloCountsRef.current = countSoloReviews(s.events);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  // ---- Solo review actions + hotkeys (g/b/m/t/n/c). Store getters keep
+  // these closure-safe; registered once.
+  const advanceRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const advance = () => {
+      const id = nextCandidateId(
+        GEN_LISTINGS,
+        soloCountsRef.current,
+        getPresetId()
+      );
+      if (id) {
+        setPresetId(id);
+        cycleRef.current.lastAdvanceAt = performance.now();
+        // Parameter-genotype exploration: each solo-flow load presents a
+        // different tuning; the verdict snapshot records what was shown.
+        void ensureCandidate(id).then((preset) => {
+          if (!preset?.params || getPresetId() !== id) return;
+          const sampled = sampleParamValues(
+            preset.params.map((p) => ({
+              id: p.id,
+              min: p.min,
+              max: p.max,
+              step: p.step,
+              default: p.default,
+            }))
+          );
+          for (const [paramId, value] of Object.entries(sampled)) {
+            setParamValue(id, paramId, value);
+          }
+        });
+      }
+    };
+    advanceRef.current = advance;
+    const verdict = (outcome: SoloVerdict) => {
+      const id = getPresetId();
+      if (!isCandidateId(id)) {
+        showToast(`${id} is curated — verdicts target genepool candidates`);
+        return;
+      }
+      const preset = resolvePreset(id);
+      void postGaEvent({
+        type: 'solo',
+        target: id,
+        outcome,
+        paramsA: preset ? getParamValues(preset) : undefined,
+      });
+      soloCountsRef.current[id] = (soloCountsRef.current[id] ?? 0) + 1;
+      showToast(`${outcome === 'like' ? '👍' : outcome === 'dislike' ? '👎' : '·'} ${outcome} — ${id}`);
+      advance();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      const k = e.key.toLowerCase();
+      if (k === 'g') verdict('like');
+      else if (k === 'b') verdict('dislike');
+      else if (k === 'm') verdict('neutral');
+      else if (k === 'n') {
+        advance();
+        showToast(`→ ${getPresetId()}`);
+      } else if (k === 't') {
+        const id = getPresetId();
+        const text = window.prompt(`note for ${id}:`);
+        if (text) {
+          void postGaEvent({ type: 'note', target: id, text });
+          showToast(`noted — ${id}`);
+        }
+      } else if (k === 'c') {
+        setCycleMode((prev) => {
+          const next = CYCLE_MODES[(CYCLE_MODES.indexOf(prev) + 1) % CYCLE_MODES.length];
+          localStorage.setItem(CYCLE_KEY, next);
+          return next;
+        });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- Auto-cycle: timer / N-beats-after-drop stepper (soloReview.ts).
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const mode = cycleModeRef.current;
+      if (mode === 'off') return;
+      const feed = feedRef.current;
+      const { state, advance } = stepCycle(
+        cycleRef.current,
+        mode,
+        performance.now(),
+        feed.trend.excitement,
+        feed.beat?.bpm ?? null
+      );
+      cycleRef.current = state;
+      if (advance) {
+        advanceRef.current();
+        showToast(`⟳ ${getPresetId()}`);
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const toggleFullscreen = () => {
     const bridge = window.manadjVisualizer;
     if (bridge) {
@@ -432,6 +597,12 @@ export function VisualizerApp() {
       {stalled && (
         <div className="visualizer-nosignal">
           waiting for manaDJ audio — keep the main window open
+        </div>
+      )}
+      {toast && <div className="visualizer-toast">{toast}</div>}
+      {chromeVisible && (
+        <div className="visualizer-solo-legend">
+          {presetId} · g like · b dislike · m meh · t note · n next · c {CYCLE_LABELS[cycleMode]}
         </div>
       )}
       <div className="visualizer-chrome">
@@ -471,6 +642,19 @@ export function VisualizerApp() {
           </div>
         </div>
         </div>
+        <button
+          className={`visualizer-preset-btn cycle${cycleMode !== 'off' ? ' active' : ''}`}
+          title="Auto-cycle candidates (c): off → every 45s → 16 beats after each drop"
+          onClick={() =>
+            setCycleMode((prev) => {
+              const next = CYCLE_MODES[(CYCLE_MODES.indexOf(prev) + 1) % CYCLE_MODES.length];
+              localStorage.setItem(CYCLE_KEY, next);
+              return next;
+            })
+          }
+        >
+          {CYCLE_LABELS[cycleMode]}
+        </button>
         <div className="visualizer-quality" title="Render quality (backing-store budget; auto = audio-safe default)">
           {RENDER_QUALITIES.map((q: RenderQuality) => (
             <button
