@@ -118,6 +118,19 @@ shared files themselves.
   mixing in hashes, traveling kick ripple that LIGHTS what it passes,
   charged horizon ring (2.5 s decay), localized (not broad) lens swirl.
 
+## Feedback contraction rule (all briefs with feedback buffers)
+
+The feedback field must stay CONTRACTIVE: never multiply the persistent
+field by a sustained factor > 1 (drop/swell-scaled grades compound
+frame-over-frame until the soft knee pegs the whole screen — the
+chameleon-white / materia-beat-pink washouts). Cap any whole-field grade
+at min(x, 0.99); put drop/buildup drama in the FRESH injection scaling,
+which is bounded by (1 - decay). Related: transient accents added every
+frame need either an envelope that returns to zero or (1 - decay)
+normalization — a constant additive term accumulates to 1/(1-decay).
+Keep bank/palette mean luminance comparable across banks (a 2x-brighter
+bank reads as a periodic washout when cuts land on it).
+
 ## Hard safety rule (all briefs, non-negotiable)
 
 Photosensitivity floor (WCAG 2.3.1): no more than 3 full-field luminance
