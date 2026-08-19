@@ -348,12 +348,17 @@ export const odysseyPreset: VisualizerPreset = {
           flash = Math.max(flash, 0.25 * chaos);
         }
 
+        // Ladder-correct bar ordinal (respects Reset marks, rt-viz 08) —
+        // phrase/section boundaries land on the ladder, not first-downbeat
+        // modular arithmetic. Falls back to the raw count without a ladder.
+        const tierBar = beat ? beat.ladderBarIndex ?? beat.barIndex : null;
+
         // Genome mutations at boundaries.
-        if (beat && beat.barIndex !== null) {
-          if (prevBarIndex !== null && beat.barIndex !== prevBarIndex) {
+        if (beat && tierBar !== null) {
+          if (prevBarIndex !== null && tierBar !== prevBarIndex) {
             barWaveAge = 0;
-            const phraseBoundary = ((beat.barIndex % 4) + 4) % 4 === 0;
-            const sectionBoundary = ((beat.barIndex % 16) + 16) % 16 === 0;
+            const phraseBoundary = ((tierBar % 4) + 4) % 4 === 0;
+            const sectionBoundary = ((tierBar % 16) + 16) % 16 === 0;
             if (phraseBoundary) {
               paletteTarget = (paletteTarget + 1) % 4;
               armIndex = (armIndex + 1) % ARM_CYCLE.length;
@@ -374,7 +379,7 @@ export const odysseyPreset: VisualizerPreset = {
               flash = Math.min(1.4, 1 * chaos);
             }
           }
-          prevBarIndex = beat.barIndex;
+          prevBarIndex = tierBar;
         } else {
           prevBarIndex = null;
         }
@@ -400,8 +405,8 @@ export const odysseyPreset: VisualizerPreset = {
         const w0 = Math.max(0, 1 - Math.abs(modeCurrent));
         const w1 = Math.max(0, 1 - Math.abs(modeCurrent - 1));
         const w2 = Math.max(0, 1 - Math.abs(modeCurrent - 2));
-        const phraseNow = beat && beat.barIndex !== null
-          ? ((((beat.barIndex % 4) + 4) % 4) + beat.barPhase) / 4 : 0;
+        const phraseNow = beat && tierBar !== null
+          ? ((((tierBar % 4) + 4) % 4) + beat.barPhase) / 4 : 0;
         const zoomFlight =
           1 +
           (0.08 + 0.7 * lift + 3.6 * frame.impulse.low * (0.5 + 0.5 * lift)) *
@@ -412,8 +417,8 @@ export const odysseyPreset: VisualizerPreset = {
 
         // Phrase/section phases.
         const phrase = phraseNow;
-        const section = beat && beat.barIndex !== null
-          ? ((((beat.barIndex % 16) + 16) % 16) + beat.barPhase) / 16 : 0;
+        const section = beat && tierBar !== null
+          ? ((((tierBar % 16) + 16) % 16) + beat.barPhase) / 16 : 0;
 
         return {
           u_time: frame.time,

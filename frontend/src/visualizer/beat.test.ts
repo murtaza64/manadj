@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { beatPhaseAt, beatPositionAt } from './beat';
+import type { BeatgridData } from '../types';
+import { beatPhaseAt, beatPositionAt, ladderBarIndexAt } from './beat';
 
 // A steady 120 BPM grid: beats every 0.5 s from t = 10.
 const GRID = Array.from({ length: 32 }, (_, i) => 10 + i * 0.5);
@@ -90,5 +91,114 @@ describe('beatPositionAt', () => {
     expect(beatPositionAt(GRID, DOWNBEATS, 12)!.barIndex).toBe(1);
     expect(beatPositionAt(GRID, DOWNBEATS, 18.5)!.barIndex).toBe(4); // phrase rollover
     expect(beatPositionAt(GRID, DOWNBEATS, 9.4)!.barIndex).toBe(-1); // lead-in
+  });
+
+  it('leaves ladderBarIndex null without a grid argument (fallback to barIndex)', () => {
+    const pos = beatPositionAt(GRID, DOWNBEATS, 14)!;
+    expect(pos.barIndex).toBe(2);
+    expect(pos.ladderBarIndex).toBeNull();
+  });
+});
+
+// A steady 120 BPM 4/4 grid, 40 bars from t = 0 (0.5 s per beat, 2 s per bar).
+// Constructed the way the backend serves it so resolveLadder can consume it.
+function grid40(): BeatgridData {
+  const beat_times: number[] = [];
+  const downbeat_times: number[] = [];
+  for (let i = 0; i < 160; i++) {
+    const t = i * 0.5;
+    beat_times.push(t);
+    if (i % 4 === 0) downbeat_times.push(t);
+  }
+  return {
+    tempo_changes: [
+      {
+        start_time: 0,
+        bpm: 120,
+        time_signature_num: 4,
+        time_signature_den: 4,
+        bar_position: 1,
+      },
+    ],
+    beat_times,
+    downbeat_times,
+  };
+}
+
+const barSec = 2; // 120 BPM, 4/4
+
+describe('ladderBarIndexAt (reset-mark-correct bar ordinal)', () => {
+  it('is null without a grid', () => {
+    expect(ladderBarIndexAt(null, null, 5)).toBeNull();
+  });
+
+  it('is null before the first downbeat (no bar to count yet)', () => {
+    const grid = grid40();
+    // Push the first downbeat late so t=0 sits before it.
+    grid.downbeat_times = grid.downbeat_times.filter((d) => d >= 2);
+    expect(ladderBarIndexAt(grid, null, 0.5)).toBeNull();
+  });
+
+  it('matches the raw bar count on the default (no-mark) ladder', () => {
+    const grid = grid40();
+    expect(ladderBarIndexAt(grid, null, 0)).toBe(0);
+    expect(ladderBarIndexAt(grid, null, barSec * 5 + 0.3)).toBe(5);
+    expect(ladderBarIndexAt(grid, null, barSec * 17)).toBe(17);
+  });
+
+  it('restarts the count at a Reset mark — phrase/section re-anchor', () => {
+    // Mark at bar 20 (the anchor): bars 0..19 count backward into it, bar 20
+    // restarts at 0. The pre-anchor region peels 4 + 16, so bar 16 reads 0.
+    const grid = grid40();
+    const marks = { reset_marks: [20 * barSec] };
+    expect(ladderBarIndexAt(grid, marks, 20 * barSec)).toBe(0); // anchor = fresh section
+    expect(ladderBarIndexAt(grid, marks, 21 * barSec + 0.4)).toBe(1);
+    expect(ladderBarIndexAt(grid, marks, 36 * barSec)).toBe(16); // one section past the anchor
+    // Pre-anchor: the 16-bar group peels back to bar 4, so bar 4 reads 0.
+    expect(ladderBarIndexAt(grid, marks, 4 * barSec)).toBe(0);
+    expect(ladderBarIndexAt(grid, marks, 19 * barSec)).toBe(15);
+  });
+
+  it('a mid-track reset shifts phrase/section boundaries off the raw grid', () => {
+    // Two marks: anchor at bar 8, reset at bar 20. Between them counting is
+    // forward from the reset — bar 20 is section boundary 0, not raw 20 % 16.
+    const grid = grid40();
+    const marks = { reset_marks: [8 * barSec, 20 * barSec] };
+    // Raw grid: bar 20 % 16 === 4 (mid-section). Ladder: fresh section (0).
+    const raw = beatPositionAt(grid.beat_times, grid.downbeat_times, 20 * barSec)!;
+    expect(((raw.barIndex % 16) + 16) % 16).toBe(4);
+    expect(ladderBarIndexAt(grid, marks, 20 * barSec)).toBe(0);
+    // The phrase tier (%4) also re-aligns at the reset.
+    expect(ladderBarIndexAt(grid, marks, 21 * barSec) ?? 0).toBe(1);
+  });
+
+  it('resolves marks to the nearest downbeat (off-grid mark seconds)', () => {
+    const grid = grid40();
+    const marks = { reset_marks: [20 * barSec + 0.3] }; // 0.3 s past bar 20's downbeat
+    expect(ladderBarIndexAt(grid, marks, 20 * barSec)).toBe(0);
+  });
+});
+
+describe('beatPositionAt with a ladder', () => {
+  it('fills ladderBarIndex from the resolver when grid + marks are passed', () => {
+    const grid = grid40();
+    const marks = { reset_marks: [20 * barSec] };
+    const pos = beatPositionAt(
+      grid.beat_times,
+      grid.downbeat_times,
+      21 * barSec + 0.2,
+      grid,
+      marks,
+    )!;
+    // barIndex stays the raw first-downbeat count; ladderBarIndex re-anchors.
+    expect(pos.barIndex).toBe(21);
+    expect(pos.ladderBarIndex).toBe(1);
+  });
+
+  it('agrees with the raw count on the default ladder', () => {
+    const grid = grid40();
+    const pos = beatPositionAt(grid.beat_times, grid.downbeat_times, 17 * barSec, grid, null)!;
+    expect(pos.barIndex).toBe(17);
+    expect(pos.ladderBarIndex).toBe(17);
   });
 });
