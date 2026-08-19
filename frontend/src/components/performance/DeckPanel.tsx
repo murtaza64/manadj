@@ -254,6 +254,7 @@ export function DeckWaveform({
         visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
         onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
         modulation={modulation}
+        modulationSplit
       />
       {/* Translucent overlay (the GL canvas is opaque — nothing shows
           "behind" it); no filters over canvas layers (compositor leak). */}

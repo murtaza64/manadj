@@ -218,6 +218,8 @@ uniform vec3 u_colorHigh;
 uniform int u_anchor;      // 0 center, 1 top, 2 bottom
 uniform float u_brightness; // body colors only; markers are a separate pass
 uniform float u_modEnabled;
+uniform float u_modSplit;  // 1 = split lobes (see BODY_MAIN split comment)
+uniform float u_modPlayheadT; // split mode: track-sec boundary of the played past
 uniform float u_modStart;  // track-seconds range covered by u_modTex
 uniform float u_modSpan;
 in vec2 v_uv;
@@ -365,7 +367,10 @@ void main() {
   float b[8];
   bands8Column(t0, t0 + px, b);
   vec3 g = groupAmps(b);
-  if (u_modEnabled > 0.5) {
+  // Split mode (performance-mode 10): AHEAD of the playhead the TOP lobe
+  // shows the live strip and the bottom lobe ground truth; BEHIND it both
+  // lobes show what was actually heard (the history-fed modulation).
+  if (u_modEnabled > 0.5 && (u_modSplit < 0.5 || v_uv.y > 0.5 || t0 < u_modPlayheadT)) {
     vec4 m = texture(u_modTex, vec2((t0 - u_modStart) / u_modSpan, 0.5)) * float(${MOD_RANGE});
     g *= m.rgb * m.a;
     p *= m.a;
@@ -483,6 +488,7 @@ export class WaveformRendererV2 {
 
   // Modulation (transition-editor rows).
   private modulation: WaveformModulation | null = null;
+  private modSplit = false;
   private modTex: WebGLTexture | null = null;
   private modScratch = new Uint8Array(MOD_TEX_WIDTH * 4);
 
@@ -616,6 +622,13 @@ export class WaveformRendererV2 {
   /** Per-column automation modulation (editor rows); null clears. */
   public setModulation(fn: WaveformModulation | null): void {
     this.modulation = fn;
+  }
+
+  /** Split mode (performance-mode 10): modulation reshapes only the TOP
+   * lobe of the mirrored body; the bottom lobe stays ground truth. Only
+   * meaningful with the center anchor. */
+  public setModulationSplit(on: boolean): void {
+    this.modSplit = on;
   }
 
   /**
@@ -784,6 +797,8 @@ export class WaveformRendererV2 {
     // Modulation texture (sampled fresh each frame: window and automation
     // both move; 1024 callback samples is well within frame budget).
     gl.uniform1f(u('u_modEnabled'), this.modulation ? 1 : 0);
+    gl.uniform1f(u('u_modSplit'), this.modulation && this.modSplit ? 1 : 0);
+    gl.uniform1f(u('u_modPlayheadT'), view.playhead);
     if (this.modulation) {
       this.uploadModulation(view, modAffine);
       gl.activeTexture(gl.TEXTURE3);
