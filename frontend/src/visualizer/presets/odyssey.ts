@@ -31,7 +31,9 @@ uniform sampler2D u_prev;
 uniform vec2 u_res;
 uniform float u_time;
 uniform float u_low;
+uniform float u_lowSlow;     // motion-grade low: gravity-wave phase rate (erratic-motion law)
 uniform float u_mid;
+uniform float u_midSlow;     // motion-grade mid: churn/warp rate (erratic-motion law)
 uniform float u_high;
 uniform float u_kick;
 uniform float u_snare;
@@ -149,7 +151,7 @@ void main() {
   vec2 churn = (vec2(
     fbm(c * 2.6 + t * 0.12),
     fbm(c * 2.6 + vec2(7.7, 3.1) - t * 0.09)
-  ) - 0.5) * (0.002 + 0.018 * u_mid + 0.012 * u_buildup + 0.006 * u_phrase + 0.006 * anticipation);
+  ) - 0.5) * (0.002 + 0.018 * u_midSlow + 0.012 * u_buildup + 0.006 * u_phrase + 0.006 * anticipation);  // motion: slow bands (erratic-motion law)
   float waveFront = 0.16 + u_rippleAge * 0.9;
   float rippleWave = exp(-pow((r - waveFront) * 9.0, 2.0)) * exp(-u_rippleAge * 2.4) * u_rippleAmp;
   vec2 ripple = dirW * rippleWave * 0.035;
@@ -191,7 +193,8 @@ void main() {
   vec3 coal = vec3(0.55, 0.07, 0.04);
   float heart = exp(-rc * rc * (260.0 - 130.0 * u_kick));
   fresh += mix(coal, vec3(1.0, 0.8, 0.7), 0.5 * u_kick) * heart * (0.5 + 1.2 * u_low + 1.4 * u_kick);
-  float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;
+  // motion: slow bands (erratic-motion law) — gravity-wave travel rate
+  float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_lowSlow)) * 0.5 + 0.5;
   fresh += mix(coal, vec3(0.9, 0.25, 0.12), 0.5) * pow(gravity, 4.0) * exp(-r * 5.0)
     * u_low * (0.5 + 0.8 * u_kick);
   // Charged horizon ring (evolution: brightens through the phrase).
@@ -316,6 +319,9 @@ export const odysseyPreset: VisualizerPreset = {
         const dt = lastTime > 0 ? Math.min(0.1, Math.max(0, frame.time - lastTime)) : 1 / 60;
         lastTime = frame.time;
         const energy = energyOf(frame.bands);
+        // motion: slow bands (erratic-motion law)
+        const motion = frame.bandsSlow ?? frame.bands;
+        const energyMotion = energyOf(motion);
         const beat = frame.beat;
         const chaos = frame.params.chaos ?? 1;
 
@@ -325,7 +331,10 @@ export const odysseyPreset: VisualizerPreset = {
         smoothDrop += (frame.trend.excitement * lowPresence - smoothDrop) * alpha;
         smoothBuildup += (frame.trend.excitement * (1 - lowPresence) - smoothBuildup) * alpha;
         const sustained = Math.min(1, energy * 1.4);
-        const lift = Math.max(smoothDrop, 0.7 * sustained);
+        // motion: slow bands (erratic-motion law) — cruise speed rides slow
+        // energy; instantaneous `sustained` still drives brightness/spawns.
+        const sustainedMotion = Math.min(1, energyMotion * 1.4);
+        const lift = Math.max(smoothDrop, 0.7 * sustainedMotion);
 
         // DROP-AWARE genome: a landing drop forces the most energetic
         // scene NOW (flight mode, hot palette jump, wide horizon, big
@@ -411,9 +420,11 @@ export const odysseyPreset: VisualizerPreset = {
           1 +
           (0.08 + 0.7 * lift + 3.6 * frame.impulse.low * (0.5 + 0.5 * lift)) *
             (0.85 + 0.3 * phraseNow) * speed * dt;
-        const zoomCollapse = 1 - (0.04 + 0.25 * energy) * speed * dt + 2.2 * frame.impulse.low * speed * dt * 0.5;
+        // motion: slow bands (erratic-motion law) — collapse infall speed
+        const zoomCollapse = 1 - (0.04 + 0.25 * energyMotion) * speed * dt + 2.2 * frame.impulse.low * speed * dt * 0.5;
         const zoomOrbit = 1 + 0.5 * frame.impulse.low * speed * dt;
-        const rotBase = (0.05 + 0.5 * frame.bands.mid + 0.25 * sustained) * speed * dt;
+        // motion: slow bands (erratic-motion law) — differential rotation rate
+        const rotBase = (0.05 + 0.5 * motion.mid + 0.25 * sustainedMotion) * speed * dt;
 
         // Phrase/section phases.
         const phrase = phraseNow;
@@ -423,7 +434,9 @@ export const odysseyPreset: VisualizerPreset = {
         return {
           u_time: frame.time,
           u_low: frame.bands.low,
+          u_lowSlow: motion.low, // motion: slow bands (erratic-motion law)
           u_mid: frame.bands.mid,
+          u_midSlow: motion.mid, // motion: slow bands (erratic-motion law)
           u_high: frame.bands.high,
           u_kick: frame.impulse.low,
           u_snare: frame.impulse.mid,

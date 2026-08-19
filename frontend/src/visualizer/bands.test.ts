@@ -14,6 +14,7 @@ import {
   monstercatSpread,
   stepBands,
   stepLevels,
+  stepSlowBands,
   wavesSpread,
   BAND_ATTACK_S,
   BAND_DB_CEIL,
@@ -300,5 +301,30 @@ describe('spectral shape (gen-2 tech)', () => {
     expect(spectralFlatness([0.5, 0.5, 0.5, 0.5])).toBeGreaterThan(0.95);
     expect(spectralFlatness([1, 0, 0, 0, 0, 0, 0, 0])).toBeLessThan(0.15);
     expect(spectralFlatness([0, 0, 0, 0])).toBe(0.5); // silence neutral
+  });
+});
+
+describe('stepSlowBands', () => {
+  it('rises much slower than stepBands (motion-grade smoothing)', () => {
+    const target = { low: 1, mid: 1, high: 1 };
+    const silent = { low: 0, mid: 0, high: 0 };
+    const fast = stepBands(silent, target, 1 / 60);
+    const slow = stepSlowBands(silent, target, 1 / 60);
+    expect(slow.low).toBeLessThan(fast.low * 0.1);
+    expect(slow.low).toBeGreaterThan(0);
+  });
+
+  it('releases slower than it attacks', () => {
+    const one = { low: 1, mid: 1, high: 1 };
+    const zero = { low: 0, mid: 0, high: 0 };
+    const up = stepSlowBands(zero, one, 0.35).low; // one attack tau
+    const down = 1 - stepSlowBands(one, zero, 0.35).low; // same dt on release
+    expect(up).toBeGreaterThan(down);
+  });
+
+  it('converges to the target', () => {
+    let s = { low: 0, mid: 0, high: 0 };
+    for (let i = 0; i < 600; i++) s = stepSlowBands(s, { low: 1, mid: 1, high: 1 }, 1 / 60);
+    expect(s.low).toBeGreaterThan(0.99);
   });
 });

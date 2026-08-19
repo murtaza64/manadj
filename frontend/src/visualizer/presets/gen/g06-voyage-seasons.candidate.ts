@@ -50,6 +50,7 @@ const FRAGMENT =
   'uniform float u_kick;\n' +
   'uniform float u_snare;\n' +
   'uniform float u_centroid;\n' +
+  'uniform float u_specHue;   // slow-tracked centroid (~1s EMA): dust hue follows spectral content\n' +
   'uniform float u_drop;\n' +
   'uniform float u_buildup;\n' +
   'uniform float u_zoom;\n' +
@@ -170,7 +171,10 @@ const FRAGMENT =
   '  float on = step(gate - 0.09 * u_spawn, hash(sc * 1.618 + 9.7));\n' +
   '  float size = (0.5 + 1.5 * hash(sc.yx * 2.113)) * sizeScale;\n' +
   '  float bright = 0.4 + 0.6 * hash(sc + 17.9);\n' +
-  '  vec3 tint = mix(vec3(0.65, 0.78, 1.0), vec3(1.0, 0.85, 0.6), hash(sc.yx + 29.3));\n' +
+  '  // Star tint samples the OWN season palette at each star hash phase (wide\n' +
+  '  // span, spectral-hue biased) instead of a fixed cool/warm ramp. Luminance\n' +
+  '  // unchanged (starShape * on * bright * gain).\n' +
+  '  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02 + u_specHue * 0.5);\n' +
   '  return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;\n' +
   '}\n' +
   '\n' +
@@ -232,23 +236,34 @@ const FRAGMENT =
   '  float corona = exp(-rc * (7.0 - 3.0 * u_low));\n' +
   '  float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;\n' +
   '  float gravityGain = u_low * (0.5 + 0.8 * u_kick);\n' +
-  '  fresh += mix(vec3(0.55, 0.07, 0.04), LOW, 0.5)\n' +
+  '  // Gravity ripple color: a slice of the OWN season palette (spectral-hue\n' +
+  '  // biased) instead of a fixed ember/LOW mix. Gain unchanged.\n' +
+  '  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);\n' +
+  '  fresh += gravityColor\n' +
   '    * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;\n' +
   '  float arcJitter = volt * (0.012 + 0.05 * u_kick + 0.022 * u_low);\n' +
   '  float ringGlow = exp(-pow((r - horizon - arcJitter) * 52.0, 2.0));\n' +
   '  float ringCore = exp(-pow((r - horizon - arcJitter) * 210.0, 2.0));\n' +
   '  float bassOn = smoothstep(0.06, 0.3, u_low);\n' +
-  '  vec3 chargeColor = mix(vec3(0.9, 0.2, 0.1), vec3(1.0, 0.75, 0.4), clamp(u_charge, 0.0, 1.0));\n' +
+  '  // Ring color: a season palette slice (spectral-hue biased) charging toward\n' +
+  '  // a wide phase offset then white-hot at high charge. Palette supplies hue;\n' +
+  '  // the charge->white ramp and gains preserve luminance.\n' +
+  '  vec3 chargeColor = mix(palette(0.02 + u_specHue * 0.5), palette(0.12 + u_specHue * 0.5), clamp(u_charge, 0.0, 1.0));\n' +
   '  chargeColor = mix(chargeColor, vec3(1.0, 0.97, 0.92), clamp(u_charge - 0.6, 0.0, 0.4) * 2.5);\n' +
   '  fresh += chargeColor * ringGlow * (0.12 + 0.6 * u_low + 1.1 * u_kick + 0.5 * u_charge);\n' +
   '  fresh += mix(chargeColor, vec3(1.0), 0.5 * u_kick) * ringCore\n' +
   '    * (0.3 + 1.3 * bassOn + 2.4 * u_kick + 0.8 * u_charge);\n' +
-  '  vec3 coal = vec3(0.55, 0.07, 0.04);\n' +
+  '  // Coal heart: a deep, low-luma slice of the OWN season palette (spectral-hue\n' +
+  '  // biased) instead of a fixed dark red. Kept dark (0.55 floor); gains/kick-\n' +
+  '  // whiten preserve luminance.\n' +
+  '  vec3 coal = palette(0.0 + u_specHue * 0.5) * 0.55;\n' +
   '  fresh += mix(coal, vec3(1.0, 0.8, 0.7), 0.5 * u_kick) * heart * (0.5 + 1.2 * u_low + 1.4 * u_kick);\n' +
   '  fresh += mix(coal, LOW, 0.4) * corona * (0.1 + 0.6 * u_low + 0.35 * u_kick);\n' +
   '  float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);\n' +
   '  float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));\n' +
-  '  fresh += mix(vec3(0.6, 0.75, 1.0), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);\n' +
+  '  // Streak: both ends sample the OWN season palette (a wide phase offset for\n' +
+  '  // the cool end, spectral-hue biased) instead of a fixed steel-blue.\n' +
+  '  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);\n' +
   '  // The disk: spiral lanes + clouds in the SEASON palette (front-swept).\n' +
   '  float breadth = mix(2.6, 1.15, clamp(u_spread, 0.0, 1.0));\n' +
   '  float bandGain = mix(1.35, 0.85, clamp(u_spread, 0.0, 1.0));\n' +
@@ -256,7 +271,9 @@ const FRAGMENT =
   '  float lanes = pow(0.5 + 0.5 * arm, 3.0) * smoothstep(0.06, 0.2, r) * exp(-r * breadth) * bandGain;\n' +
   '  float cloudField = fbm(vec2(ang * 2.2 + r * 3.0 - t * 0.15, r * 5.0 + t * 0.06));\n' +
   '  float cloud = pow(cloudField, 2.4);\n' +
-  '  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4);\n' +
+  '  // SPECTRAL DUST TINT: the disk palette phase is biased by the slow-tracked\n' +
+  '  // centroid (u_specHue, ~1s EMA) so dust hue follows spectral content.\n' +
+  '  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);\n' +
   '  float reverb = 1.0 + 2.6 * rippleWave;\n' +
   '  float midGate = smoothstep(0.04, 0.3, u_mid);\n' +
   '  float phraseSwell = 1.0 + 0.22 * u_phrase;\n' +
@@ -267,7 +284,7 @@ const FRAGMENT =
   '  float shimmer = 0.6 + 0.4 * sin(t * 13.0 + wisp * 24.0);\n' +
   '  float silky = mix(4.0, 2.4, clamp(u_flatness, 0.0, 1.0));\n' +
   '  float grain = mix(1.0, 0.55 + 0.9 * hash(gl_FragCoord.xy + fract(t) * 53.0), clamp(u_flatness, 0.0, 1.0));\n' +
-  '  vec3 electric = mix(vec3(0.4, 0.9, 1.0), palette(0.6 + t * 0.03), 0.65);\n' +
+  '  vec3 electric = mix(palette(0.85 + u_specHue * 0.5), palette(0.6 + t * 0.03 + u_specHue * 0.5), 0.65);\n' +
   '  fresh += electric * pow(wisp, silky) * shimmer * grain * smoothstep(0.12, 0.5, r)\n' +
   '    * (0.08 + 1.7 * u_high) * u_dust * reverb;\n' +
   '  sky += fresh * (1.0 - u_decay) * (3.2 + 1.6 * u_sustain);\n' +
@@ -284,7 +301,9 @@ const FRAGMENT =
   '    float ringR = 0.1 + 0.05 * u_kick;\n' +
   '    float shock = exp(-pow((r - ringR) * 38.0, 2.0))\n' +
   '      + 0.6 * exp(-pow((r - ringR * 1.7) * 30.0, 2.0));\n' +
-  '    sky += mix(LOW, vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);\n' +
+  '    // Shockwave hue from the OWN season palette (spectral-hue biased) mixed\n' +
+  '    // toward a warm-white accent. Kick gain / drop scaling unchanged (luminance identical).\n' +
+  '    sky += mix(palette(0.05 + u_specHue * 0.5), vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);\n' +
   '    sky *= 1.0 + 0.1 * u_kick;\n' +
   '  }\n' +
   '  if (u_snare > 0.03) {\n' +
@@ -357,6 +376,9 @@ const g06VoyageSeasons: VisualizerPreset = {
     let phrase = 0;
     let smoothSpread = 0;
     let smoothFlatness = 0;
+    // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase so
+    // dust hue follows spectral content without jerking on transients.
+    let slowCentroid = 0.5;
 
     // --- g06 SEASON STATE MACHINE ---------------------------------------
     // The LIVE (incoming) season is what the field currently wears; the
@@ -385,6 +407,8 @@ const g06VoyageSeasons: VisualizerPreset = {
         const dt = lastTime > 0 ? Math.min(0.1, Math.max(0, frame.time - lastTime)) : 1 / 60;
         lastTime = frame.time;
         const energy = energyOf(frame.bands);
+        // motion: slow bands (erratic-motion law)
+        const slow = frame.bandsSlow ?? frame.bands;
         const speed = frame.params.speed ?? 1;
         const persistence = frame.params.persistence ?? 1;
         const seasonDrift = frame.params.seasonDrift ?? 1;
@@ -494,6 +518,8 @@ const g06VoyageSeasons: VisualizerPreset = {
 
         smoothSpread += ((frame.spread ?? 0) - smoothSpread) * (1 - Math.exp(-dt / 0.4));
         smoothFlatness += ((frame.flatness ?? 0) - smoothFlatness) * (1 - Math.exp(-dt / 0.4));
+        // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
+        slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
 
         return {
           u_time: frame.time,
@@ -503,10 +529,12 @@ const g06VoyageSeasons: VisualizerPreset = {
           u_kick: frame.impulse.low,
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
+          u_specHue: slowCentroid,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,
-          u_rotStep: (0.05 + 0.5 * frame.bands.mid + 0.5 * buildup + 0.25 * sustained) * speed * dt,
+          // rotation RATE on slow bands (erratic-motion law)
+          u_rotStep: (0.05 + 0.5 * slow.mid + 0.5 * buildup + 0.25 * sustained) * speed * dt,
           u_decay: Math.min(0.998, 1 - (1 - baseDecay) / persistence),
           u_seed: Math.floor(frame.time * 20),
           u_rippleAge: rippleAge,

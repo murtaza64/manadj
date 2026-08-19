@@ -25,6 +25,10 @@ export interface VisualizerFrameData {
   impulse: BandLevels;
   /** Slow energy baseline + drop excitement. */
   trend: EnergyTrend;
+  /** Motion-grade slow bands (~350/700ms): drive VELOCITY/rate terms with
+   * these (`frame.bandsSlow ?? frame.bands`) — instantaneous bands are for
+   * brightness/impulse response, not speed (erratic-motion law, kit). */
+  bandsSlow?: BandLevels;
   /** Normalized spectral centroid (0 dark … 1 bright, 0.5 neutral). */
   centroid: number;
   /** Spectral spread: how WIDE the sound is (0 narrow … 1 full-spectrum). */

@@ -111,7 +111,9 @@ class TunnelChromaRenderer implements PresetRenderer {
     frame: VisualizerFrameData
   ): void {
     const bufferCtx = this.ensureBuffer(width, height);
-    const { low, mid, high } = frame.bands;
+    const { mid, high } = frame.bands;
+    // motion: slow bands (erratic-motion law)
+    const slow = frame.bandsSlow ?? frame.bands;
     const cx = width / 2;
     const cy = height / 2;
     const unit = Math.min(width, height);
@@ -152,9 +154,13 @@ class TunnelChromaRenderer implements PresetRenderer {
     let zoom = 1;
     if (this.buffer && bufferCtx) {
       // Kick lunge (parent grammar): the transient throws you forward.
+      // Travel speed rides slow bands; the kick lunge stays instantaneous.
+      // motion: slow bands (erratic-motion law)
       const zoomAmount = frame.params.zoom ?? 0.65;
-      zoom = 1 + (0.3 + 1.4 * low * low + 3.5 * frame.impulse.low) * zoomAmount * dt;
-      this.rotation = (0.1 + 1.2 * mid + 1.8 * frame.impulse.mid) * dt;
+      zoom = 1 + (0.3 + 1.4 * slow.low * slow.low + 3.5 * frame.impulse.low) * zoomAmount * dt;
+      // Rotation RATE on slow bands; impulse.mid accent stays instantaneous.
+      // motion: slow bands (erratic-motion law)
+      this.rotation = (0.1 + 1.2 * slow.mid + 1.8 * frame.impulse.mid) * dt;
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(this.rotation);
@@ -245,7 +251,8 @@ class TunnelChromaRenderer implements PresetRenderer {
         const angle = (i / segs) * Math.PI * 2;
         const rr =
           radius +
-          Math.sin(angle * 4 + frame.time * (2 + 3 * low)) * wob +
+          // wall undulation RATE on slow bands (erratic-motion law)
+          Math.sin(angle * 4 + frame.time * (2 + 3 * slow.low)) * wob +
           Math.sin(angle * fineFreq + frame.time * 4) * wob * 0.3;
         const x = cx + Math.cos(angle) * rr;
         const y = cy + Math.sin(angle) * rr;

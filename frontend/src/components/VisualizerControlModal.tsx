@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { PRESETS, presetById } from '../visualizer/presets';
+import { presetById } from '../visualizer/presets';
 import {
   aliveCandidateListings,
   ensureCandidate,
@@ -101,39 +101,25 @@ export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <h3>Preset</h3>
-        <div className="vizmodal-presets">
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              className={`vizmodal-btn${preset.id === remote.presetId ? ' active' : ''}`}
-              disabled={!remote.open}
-              onClick={() => sendVisualizerPreset(preset.id)}
-            >
-              {preset.name}
-            </button>
-          ))}
-        </div>
-
-        <h3>Genepool (rating)</h3>
+        <h3>Presets (score)</h3>
         <input
           className="vizmodal-gen-search"
           type="search"
-          placeholder={`filter ${GEN_LISTINGS.length} candidates…`}
+          placeholder={`filter ${GEN_LISTINGS.length} presets…`}
           value={genFilter}
           onChange={(e) => setGenFilter(e.target.value)}
         />
         <div className="vizmodal-presets vizmodal-genlist">
           {GEN_LISTINGS.filter(({ id }) =>
             id.toLowerCase().includes(genFilter.trim().toLowerCase())
-          ).map(({ id, rating }) => (
+          ).map(({ id, score }) => (
             <button
               key={id}
               className={`vizmodal-btn gen${id === remote.presetId ? ' active' : ''}`}
               disabled={!remote.open}
               onClick={() => sendVisualizerPreset(id)}
             >
-              {id} · {Math.round(rating)}
+              {id} · {score >= 0 ? `+${score}` : score}
             </button>
           ))}
         </div>

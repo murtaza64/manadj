@@ -13,6 +13,7 @@ import {
   spectralSpread,
   stepBands,
   stepImpulses,
+  stepSlowBands,
   stepLevels,
   stepTrend,
   INITIAL_IMPULSE_STATE,
@@ -61,6 +62,7 @@ export function VisualizerBridge() {
   const decksRef = useRef(decks);
   decksRef.current = decks;
   const bandsRef = useRef<BandLevels>(SILENT_BANDS);
+  const slowBandsRef = useRef<BandLevels>(SILENT_BANDS);
   const spectrumRef = useRef<number[]>(SILENT_SPECTRUM);
   const impulseRef = useRef<ImpulseState>(INITIAL_IMPULSE_STATE);
   const trendRef = useRef<EnergyTrend>(INITIAL_TREND);
@@ -208,6 +210,7 @@ export function VisualizerBridge() {
       if (now - lastPingAt > PING_TIMEOUT_MS) {
         // Feed went quiet: park until the next ping restarts the loop.
         bandsRef.current = SILENT_BANDS;
+        slowBandsRef.current = SILENT_BANDS;
         spectrumRef.current = SILENT_SPECTRUM;
         impulseRef.current = INITIAL_IMPULSE_STATE;
         trendRef.current = INITIAL_TREND;
@@ -228,6 +231,9 @@ export function VisualizerBridge() {
           )
         : SILENT_SPECTRUM;
       bandsRef.current = stepBands(bandsRef.current, bandTarget, dt);
+      // Motion-grade slow bands (rt-viz 06 erratic-motion note): velocity
+      // terms in presets ride these instead of the 8ms-attack bands.
+      slowBandsRef.current = stepSlowBands(slowBandsRef.current, bandTarget, dt);
       spectrumRef.current = stepLevels(spectrumRef.current, spectrumTarget, dt);
       // Impulses run against the RAW targets — the smoothed levels have
       // already eaten the transient the impulse detector needs.
@@ -236,6 +242,7 @@ export function VisualizerBridge() {
       const frame: VisualizerFrame = {
         type: 'bands',
         bands: bandsRef.current,
+        bandsSlow: slowBandsRef.current,
         spectrum: spectrumRef.current,
         wave: wantsWave ? readWave() : null,
         beat: readBeat(),

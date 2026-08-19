@@ -7,7 +7,7 @@ import {
   VISUALIZER_CHANNEL,
 } from './channel';
 import type { BeatInfo, DeckStateInfo, VisualizerMessage, VisualizerPing } from './channel';
-import { PRESETS, presetById } from './presets';
+import { presetById } from './presets';
 import {
   aliveCandidateListings,
   ensureCandidate,
@@ -171,7 +171,9 @@ export function VisualizerApp() {
     flatness: number;
     decks: DeckStateInfo[];
     receivedAt: number;
+    bandsSlow: BandLevels;
   }>({
+    bandsSlow: SILENT_BANDS,
     bands: SILENT_BANDS,
     spectrum: SILENT_SPECTRUM,
     wave: null,
@@ -287,6 +289,7 @@ export function VisualizerApp() {
         centroid: event.data.centroid ?? 0.5,
         spread: event.data.spread ?? 0.5,
         flatness: event.data.flatness ?? 0.5,
+        bandsSlow: event.data.bandsSlow ?? event.data.bands,
         decks: event.data.decks ?? [],
         receivedAt: performance.now(),
       };
@@ -355,6 +358,7 @@ export function VisualizerApp() {
       const fresh = now - feedRef.current.receivedAt <= STALE_MS;
       const frame = {
         bands: fresh ? feedRef.current.bands : SILENT_BANDS,
+        bandsSlow: fresh ? feedRef.current.bandsSlow : SILENT_BANDS,
         spectrum: fresh ? feedRef.current.spectrum : SILENT_SPECTRUM,
         wave: fresh ? feedRef.current.wave : null,
         beat: fresh ? feedRef.current.beat : null,
@@ -631,36 +635,30 @@ export function VisualizerApp() {
       )}
       <div className="visualizer-chrome">
         <div className="visualizer-chrome-left">
-        <div className="visualizer-presets">
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              className={`visualizer-preset-btn${preset.id === presetId ? ' active' : ''}`}
-              onClick={() => setPresetId(preset.id)}
-            >
-              {preset.name}
-            </button>
-          ))}
-        </div>
+        {/* All presets are equal (2026-08-18): one score-sorted list; the
+            curated set is present as its g00-* seeds. */}
         <div className="visualizer-genpanel">
           <input
             className="visualizer-gen-search"
             type="search"
-            placeholder={`filter ${GEN_LISTINGS.length} candidates…`}
+            placeholder={`filter ${GEN_LISTINGS.length} presets…`}
             value={genFilter}
             onChange={(e) => setGenFilter(e.target.value)}
           />
           <div className="visualizer-genlist">
             {GEN_LISTINGS.filter(({ id }) =>
               id.toLowerCase().includes(genFilter.trim().toLowerCase())
-            ).map(({ id, rating }) => (
+            ).map(({ id, score }) => (
               <button
                 key={id}
                 className={`visualizer-preset-btn gen${id === presetId ? ' active' : ''}`}
-                title={`genepool candidate — rating ${Math.round(rating)}`}
+                title={`score ${score >= 0 ? '+' : ''}${score}`}
                 onClick={() => setPresetId(id)}
               >
-                {id} <span className="visualizer-preset-rating">{Math.round(rating)}</span>
+                {id}{' '}
+                <span className="visualizer-preset-rating">
+                  {score >= 0 ? `+${score}` : score}
+                </span>
               </button>
             ))}
           </div>

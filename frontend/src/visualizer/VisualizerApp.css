@@ -88,7 +88,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  max-height: 26vh;
+  /* Two rows max (human: the list ate half the screen), scroll for the rest. */
+  max-height: 56px;
   overflow-y: auto;
   align-content: flex-start;
 }

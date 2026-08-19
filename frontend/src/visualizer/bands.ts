@@ -165,6 +165,28 @@ function stepLevel(previous: number, target: number, dt: number): number {
   return previous + (target - previous) * alpha;
 }
 
+/** Slow band smoothing for MOTION (rt-viz 06, "erratic motion" note):
+ * velocity/rate terms driven by the 8ms-attack `bands` jerk with every
+ * transient. `bandsSlow` chases the same targets with ~350ms attack /
+ * ~700ms release — speeds glide while displacement effects stay punchy. */
+export const BAND_SLOW_ATTACK_S = 0.35;
+export const BAND_SLOW_RELEASE_S = 0.7;
+
+/** stepBands with the slow (motion-grade) time constants. */
+export function stepSlowBands(previous: BandLevels, target: BandLevels, dt: number): BandLevels {
+  return {
+    low: stepSlowLevel(previous.low, target.low, dt),
+    mid: stepSlowLevel(previous.mid, target.mid, dt),
+    high: stepSlowLevel(previous.high, target.high, dt),
+  };
+}
+
+function stepSlowLevel(previous: number, target: number, dt: number): number {
+  const tau = target > previous ? BAND_SLOW_ATTACK_S : BAND_SLOW_RELEASE_S;
+  const alpha = 1 - Math.exp(-Math.max(0, dt) / tau);
+  return previous + (target - previous) * alpha;
+}
+
 /**
  * The "monstercat" spatial filter (cava, Rainmeter skins): every bar lifts
  * its neighbors to `level / factor^distance`, so a transient reads as a

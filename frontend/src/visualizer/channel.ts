@@ -102,6 +102,11 @@ export interface VisualizerFrame {
   type: 'bands';
   /** Isolator-aligned low/mid/high (bars, nebula, tunnel drive). */
   bands: BandLevels;
+  /** Motion-grade slow bands (~350ms attack / ~700ms release): velocity and
+   * rate terms should ride these, never the 8ms-attack `bands` (rt-viz 06
+   * erratic-motion note). Optional/additive; absent means fall back to
+   * `bands`. */
+  bandsSlow?: BandLevels;
   /** SPECTRUM_BAND_COUNT geometric bands, 40 Hz → 16 kHz. */
   spectrum: number[];
   /** Stereo time-domain snapshot — only while the ping wants it. */

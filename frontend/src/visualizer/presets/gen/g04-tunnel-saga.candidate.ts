@@ -115,6 +115,8 @@ class TunnelSagaRenderer implements PresetRenderer {
   ): void {
     const bufferCtx = this.ensureBuffer(width, height);
     const { low, mid, high } = frame.bands;
+    // motion: slow bands (erratic-motion law)
+    const slow = frame.bandsSlow ?? frame.bands;
     const cx = width / 2;
     const cy = height / 2;
     const unit = Math.min(width, height);
@@ -147,15 +149,19 @@ class TunnelSagaRenderer implements PresetRenderer {
     if (this.buffer && bufferCtx) {
       const kick = frame.impulse.low;
       // Punch character lunges harder per kick; dream drifts. Zoom rate
-      // climbs with the chapter AND the drop drive.
+      // climbs with the chapter AND the drop drive. Travel speed on slow
+      // bands; kick lunge stays on the instantaneous impulse (a punch).
+      // motion: slow bands (erratic-motion law)
       const zoom =
         1 +
-        (0.28 + 1.4 * low * low + (2.6 + 2.4 * hardness) * kick) *
+        (0.28 + 1.4 * slow.low * slow.low + (2.6 + 2.4 * hardness) * kick) *
           zoomDrive *
           frame.dt;
       // Rotation sharpens with the chapter — dreamy slow twist → punchy spin.
+      // Rotation RATE on slow bands; impulse.mid accent stays instantaneous.
+      // motion: slow bands (erratic-motion law)
       this.rotation =
-        (0.08 + (0.9 + 0.9 * hardness) * mid + (1.4 + 1.4 * hardness) * frame.impulse.mid) *
+        (0.08 + (0.9 + 0.9 * hardness) * slow.mid + (1.4 + 1.4 * hardness) * frame.impulse.mid) *
         frame.dt;
       ctx.save();
       ctx.translate(cx, cy);

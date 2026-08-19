@@ -41,6 +41,7 @@ uniform vec2 u_res;
 uniform float u_time;
 uniform float u_low;
 uniform float u_mid;
+uniform float u_midSlow;    // motion-grade mid: gas convection rate (erratic-motion law)
 uniform float u_high;
 uniform float u_kick;
 uniform float u_snare;
@@ -162,7 +163,8 @@ void main() {
     fbm(c * 1.6 + vec2(0.0, t * 0.18)),
     fbm(c * 1.6 + vec2(5.2, 3.1) - t * 0.14)
   ) - 0.5;
-  float convection = (0.25 + 0.9 * u_mid + 0.4 * u_sustain);
+  // motion: slow bands (erratic-motion law) — gas convection rate
+  float convection = (0.25 + 0.9 * u_midSlow + 0.4 * u_sustain);
   vec2 gp = c * compress + warp * convection * 0.55;
 
   // Layer A: broad shells of gas.
@@ -345,6 +347,8 @@ const candidate: VisualizerPreset = {
         const dt = lastTime > 0 ? Math.min(0.1, Math.max(0, frame.time - lastTime)) : 1 / 60;
         lastTime = frame.time;
         const energy = energyOf(bands);
+        // motion: slow bands (erratic-motion law)
+        const motion = frame.bandsSlow ?? bands;
 
         // Bass-weighted smoothed DROP signal (trend has no drop field):
         // excitement gated by bass presence, ~0.35 s smoothing. Buildup =
@@ -430,6 +434,7 @@ const candidate: VisualizerPreset = {
           u_time: frame.time,
           u_low: bands.low,
           u_mid: bands.mid,
+          u_midSlow: motion.mid, // motion: slow bands (erratic-motion law)
           u_high: bands.high,
           u_kick: impulse.low,
           u_snare: impulse.mid,

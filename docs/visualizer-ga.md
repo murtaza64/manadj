@@ -50,6 +50,11 @@ agent breeds. Design decisions: issue
      promotion. Attach notes to their candidates (`pair:` notes to both).
    - Manifest per-candidate tallies: `wins/losses/approvals/rejections/
      oppCount` (distinct opponents — parenthood floor is oppCount ≥ 3).
+   - SCORING v3 (human-approved 2026-08-18, thumbs-native): `score =
+     (wins + approvals) - (losses + rejections)` — the primary ranking;
+     legacy Elo `rating` is retained only as a tiebreaker. ALL presets
+     are equal: the curated set participates as its g00-* seeds, there
+     is no first-class tier; the switcher shows one score-sorted list.
 2. Choose the next generation's mix (default, adjust with judgment):
    ~40% **tweak** (single parent, small: "keep everything, fix X" — mine
    the notes), ~30% **combine** (two parents' liked elements), ~30%
@@ -131,6 +136,12 @@ shared files themselves.
   Kali-fold starfields, iq FBM volumetric clouds/nebulae, nimitz-style
   aurora curtains (layered sine ridges + triangle-noise), raymarched
   emission volumes, gravitational-lens distortion.
+- FLAT APPETITE (human, 2026-08-18, gen-10): the strong presets are all
+  glowy/spacey (swirling fluids, particles, additive haze). Wanted: FLAT
+  design — solid matte fills, hard edges, committed 3-5 color schemes,
+  motion by transforms and color swaps, flat-shaded polygon depth
+  (Vissonance tradition: Iris/Barred/HillFog/Tricentric). Less noisy ≠
+  static: pops, flips, wipes, scheme swaps encouraged.
 - Human appetite (2026-08-18, gen-7): CRT aesthetics (scanlines, phosphor
   triads, barrel distortion, channel-glitch transitions) and HYPNOTIC
   SPIRALS — reference implementation `~/spiral-vr/generate.py` (log-spiral
@@ -141,6 +152,18 @@ shared files themselves.
   chroma-preserving soft knee (never per-channel clamp), per-axis seed
   mixing in hashes, traveling kick ripple that LIGHTS what it passes,
   charged horizon ring (2.5 s decay), localized (not broad) lens swirl.
+
+## Motion smoothness rule (all briefs, 2026-08-18)
+
+VELOCITY and rate terms must never ride instantaneous levels — the
+8ms-attack bands jerk with every transient and read as erratic motion
+(human note; the hypno jitter was the same class). Frames now ship
+`bandsSlow` (~350ms attack / ~700ms release): use
+`frame.bandsSlow ?? frame.bands` for anything that moves — rotation
+rates, travel speed, zoom, churn, flow — and keep instantaneous
+`bands`/`impulse` for brightness, displacement punches, and spawns.
+Local smoothing (τ ≥ 0.3s) is fine where a different constant is
+needed; per-frame speed discontinuities are the failure.
 
 ## Feedback contraction rule (all briefs with feedback buffers)
 

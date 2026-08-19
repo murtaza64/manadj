@@ -39,6 +39,7 @@ uniform vec2 u_res;
 uniform float u_time;
 uniform float u_low;
 uniform float u_mid;
+uniform float u_midSlow;    // motion: slow bands (erratic-motion law) — churn advection rate
 uniform float u_high;
 uniform float u_kick;
 uniform float u_snare;
@@ -153,7 +154,7 @@ void main() {
   vec2 churn = (vec2(
     fbm(c * churnScale + u_flow + t * churnSpeed),
     fbm(c * churnScale + vec2(9.1, 4.7) - u_flow - t * churnSpeed)
-  ) - 0.5) * mix(0.006, 0.02, mat) * (0.3 + 1.4 * rng) * (1.0 + 0.7 * u_mid);
+  ) - 0.5) * mix(0.006, 0.02, mat) * (0.3 + 1.4 * rng) * (1.0 + 0.7 * u_midSlow); // motion: slow bands (erratic-motion law)
 
   // Localized lens swirl inside the core radius — glass refraction hint.
   float core = 0.16 + 0.12 * u_low + 0.05 * u_swell;
@@ -533,6 +534,8 @@ export const g04MateriaArcPreset: VisualizerPreset = {
           u_time: frame.time,
           u_low: frame.bands.low,
           u_mid: frame.bands.mid,
+          // motion: slow bands (erratic-motion law) — churn advection rate
+          u_midSlow: (frame.bandsSlow ?? frame.bands).mid,
           u_high: frame.bands.high,
           u_kick: frame.impulse.low,
           u_snare: frame.impulse.mid,

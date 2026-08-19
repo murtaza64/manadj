@@ -35,11 +35,14 @@ uniform sampler2D u_prev;
 uniform vec2 u_res;
 uniform float u_time;
 uniform float u_low;
+uniform float u_lowSlow;     // motion-grade low: gravity-wave phase rate (erratic-motion law)
 uniform float u_mid;
+uniform float u_midSlow;    // motion-grade mid: churn/warp rate (erratic-motion law)
 uniform float u_high;
 uniform float u_kick;
 uniform float u_snare;
 uniform float u_centroid;  // harmonic content: palette phase
+uniform float u_specHue;   // slow-tracked centroid (~1s EMA): dust hue follows spectral content
 uniform float u_drop;      // excitement WITH bass
 uniform float u_buildup;   // excitement WITHOUT bass
 uniform float u_zoom;
@@ -122,7 +125,10 @@ vec3 starScatter(vec2 c, float density, float sizeScale, float gate, float gain)
   float on = step(gate - 0.09 * u_spawn, hash(sc * 1.618 + 9.7));
   float size = (0.5 + 1.5 * hash(sc.yx * 2.113)) * sizeScale;
   float bright = 0.4 + 0.6 * hash(sc + 17.9);
-  vec3 tint = mix(vec3(0.65, 0.78, 1.0), vec3(1.0, 0.85, 0.6), hash(sc.yx + 29.3));
+  // Star tint samples the traveling palette at each star's own hash phase
+  // (wide span) so the scatter picks up spectral color instead of a fixed
+  // cool/warm ramp. Luminance is unchanged (starShape * on * bright * gain).
+  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02);
   return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;
 }
 
@@ -147,7 +153,7 @@ void main() {
   vec2 churn = (vec2(
     fbm(c * 2.6 + t * 0.12),
     fbm(c * 2.6 + vec2(7.7, 3.1) - t * 0.09)
-  ) - 0.5) * (0.002 + 0.018 * u_mid + 0.012 * u_buildup);
+  ) - 0.5) * (0.002 + 0.018 * u_midSlow + 0.012 * u_buildup);  // motion: slow bands (erratic-motion law)
   float waveFront = 0.16 + u_rippleAge * 0.9;
   float rippleWave = exp(-pow((r - waveFront) * 9.0, 2.0)) * exp(-u_rippleAge * 2.4) * u_rippleAmp;
   vec2 ripple = dirW * rippleWave * 0.035;
@@ -198,9 +204,13 @@ void main() {
   float corona = exp(-rc * (7.0 - 3.0 * u_low));
   // Gravity waves: concentric rings breathing out of the core with the
   // bassline itself (not just kicks) — sustained lows keep the center alive.
-  float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;
+  // motion: slow bands (erratic-motion law) — gravity-wave travel rate
+  float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_lowSlow)) * 0.5 + 0.5;
   float gravityGain = u_low * (0.5 + 0.8 * u_kick);
-  fresh += mix(vec3(0.55, 0.07, 0.04), LOW, 0.5)
+  // Gravity ripple color: a warm slice of the traveling palette, biased by
+  // the spectral hue, replacing the fixed ember/LOW mix. Gain unchanged.
+  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);
+  fresh += gravityColor
     * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;
   // The event horizon ring: a wide ember glow + a thin white-hot arc,
   // both jittering with the voltage field — THE bass element. Interior is
@@ -212,21 +222,28 @@ void main() {
   float ringGlow = exp(-pow((r - horizon - arcJitter) * 52.0, 2.0));
   float ringCore = exp(-pow((r - horizon - arcJitter) * 210.0, 2.0));
   float bassOn = smoothstep(0.06, 0.3, u_low);
-  vec3 chargeColor = mix(vec3(0.9, 0.2, 0.1), vec3(1.0, 0.75, 0.4), clamp(u_charge, 0.0, 1.0));
+  // Ring color: a warm palette slice (spectral-hue biased) charges toward a
+  // warmer palette accent, then to white-hot at high charge. The palette
+  // supplies the hue; the charge→white ramp and gains preserve luminance.
+  vec3 chargeColor = mix(palette(0.02 + u_specHue * 0.5), palette(0.12 + u_specHue * 0.5), clamp(u_charge, 0.0, 1.0));
   chargeColor = mix(chargeColor, vec3(1.0, 0.97, 0.92), clamp(u_charge - 0.6, 0.0, 0.4) * 2.5);
   fresh += chargeColor * ringGlow * (0.12 + 0.6 * u_low + 1.1 * u_kick + 0.5 * u_charge);
   fresh += mix(chargeColor, vec3(1.0), 0.5 * u_kick) * ringCore
     * (0.3 + 1.3 * bassOn + 2.4 * u_kick + 0.8 * u_charge);
-  // The center is DARK RED regardless of palette — a coal heart that only
-  // whitens under a kick; the bright palettes live in the outer dust.
-  vec3 coal = vec3(0.55, 0.07, 0.04);
+  // Coal heart: a deep, low-luma slice of the traveling palette (spectral-hue
+  // biased) instead of a fixed dark red — it still whitens under a kick and
+  // the outer corona rides LOW. Kept dark (palette floor) so it reads as coal;
+  // gains/kick-whiten preserve luminance.
+  vec3 coal = palette(0.0 + u_specHue * 0.5) * 0.55;
   fresh += mix(coal, vec3(1.0, 0.8, 0.7), 0.5 * u_kick) * heart * (0.5 + 1.2 * u_low + 1.4 * u_kick);
   fresh += mix(coal, LOW, 0.4) * corona * (0.1 + 0.6 * u_low + 0.35 * u_kick);
   // Radial dimmer keeps the middle dark so dust/stars read against it.
   float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);
-  // Anamorphic lens streak across the core — the spacey money shot.
+  // Anamorphic lens streak across the core — the spacey money shot. Both
+  // ends of the mix now sample the traveling palette (a wide phase offset for
+  // the cool end, spectral-hue biased) instead of a fixed steel-blue.
   float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));
-  fresh += mix(vec3(0.6, 0.75, 1.0), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);
+  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);
   // The disk: spiral lanes + clouds in the TRAVELING palette.
   float arm = sin(ang * 2.0 + log(r + 0.06) * 5.0 - u_armPhase + 0.5 * u_mid * sin(ang * 3.0 + r * 6.0 + t * 0.7));
   float lanes = pow(0.5 + 0.5 * arm, 3.0) * smoothstep(0.06, 0.2, r) * exp(-r * 1.8);
@@ -235,7 +252,10 @@ void main() {
   // Wide phase span + spatial drift: the old 0.7·cloudField span sampled
   // under half a palette period (and blend positions average cosines
   // flatter still) — dust came out monochrome at many slider stops.
-  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4);
+  // SPECTRAL DUST TINT: the dust/disk palette phase is biased by the
+  // slow-tracked centroid (u_specHue, ~1s EMA) so dust hue follows spectral
+  // content — brighter spectra push the disk color across the wheel.
+  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);
   // Kick reverberation: the traveling wavefront LIGHTS the dust it passes
   // through (displacement alone read as subtle; this makes it audible).
   float reverb = 1.0 + 2.6 * rippleWave;
@@ -265,7 +285,10 @@ void main() {
     float ringR = 0.1 + 0.05 * u_kick;
     float shock = exp(-pow((r - ringR) * 38.0, 2.0))
       + 0.6 * exp(-pow((r - ringR * 1.7) * 30.0, 2.0));
-    sky += mix(LOW, vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);
+    // Shockwave hue from the traveling palette (spectral-hue biased) mixed
+    // toward a warm-white accent, replacing the fixed LOW->warm ramp. Kick
+    // gain / drop scaling unchanged (luminance identical).
+    sky += mix(palette(0.05 + u_specHue * 0.5), vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);
     // Whole-frame punch: a brief lift so the kick lands everywhere.
     sky *= 1.0 + 0.1 * u_kick;
   }
@@ -318,6 +341,9 @@ export const voyagePreset: VisualizerPreset = {
     let smoothDrop = 0;
     let smoothBuildup = 0;
     let charge = 0;
+    // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase
+    // so dust hue follows spectral content without jerking on transients.
+    let slowCentroid = 0.5;
     return createGlRenderer({
       fragment: FRAGMENT,
       feedback: true,
@@ -325,6 +351,9 @@ export const voyagePreset: VisualizerPreset = {
         const dt = lastTime > 0 ? Math.min(0.1, Math.max(0, frame.time - lastTime)) : 1 / 60;
         lastTime = frame.time;
         const energy = energyOf(frame.bands);
+        // motion: slow bands (erratic-motion law)
+        const motion = frame.bandsSlow ?? frame.bands;
+        const energyMotion = energyOf(motion);
         const speed = frame.params.speed ?? 1;
         const persistence = frame.params.persistence ?? 1;
         // Excitement split by bass presence: with lows = the drop, without
@@ -339,10 +368,14 @@ export const voyagePreset: VisualizerPreset = {
         const drop = smoothDrop;
         const buildup = smoothBuildup;
         const sustained = Math.min(1, energy * 1.4);
+        // motion: slow bands (erratic-motion law) — cruise speed rides the
+        // slow energy so travel/rotation don't jerk with each transient;
+        // the instantaneous `sustained` still drives brightness/spawns.
+        const sustainedMotion = Math.min(1, energyMotion * 1.4);
         // Drops fly outward; buildups COLLAPSE inward (zoom < 1).
         // Cruise rides sustained loudness too — a drop's PLATEAU must fly,
         // not just its first seconds (excitement fades into the baseline).
-        const lift = Math.max(drop, 0.7 * sustained);
+        const lift = Math.max(drop, 0.7 * sustainedMotion);
         const zoom =
           1 +
           (0.08 + 0.7 * lift + 3.6 * frame.impulse.low * (0.5 + 0.5 * lift)) * speed * dt -
@@ -363,18 +396,24 @@ export const voyagePreset: VisualizerPreset = {
         // Gentle with energy: the old -0.018·energy ate stars 2.5× faster
         // exactly when drops should be dense (buildups still drain extra).
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
+        // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
+        slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
         return {
           u_time: frame.time,
           u_low: frame.bands.low,
+          u_lowSlow: motion.low, // motion: slow bands (erratic-motion law)
           u_mid: frame.bands.mid,
+          u_midSlow: motion.mid, // motion: slow bands (erratic-motion law)
           u_high: frame.bands.high,
           u_kick: frame.impulse.low,
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
+          u_specHue: slowCentroid,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,
-          u_rotStep: (0.05 + 0.5 * frame.bands.mid + 0.5 * buildup + 0.25 * sustained) * speed * dt,
+          // motion: slow bands (erratic-motion law) — differential rotation rate
+          u_rotStep: (0.05 + 0.5 * motion.mid + 0.5 * buildup + 0.25 * sustainedMotion) * speed * dt,
           u_decay: Math.min(0.998, 1 - (1 - baseDecay) / persistence),
           u_seed: Math.floor(frame.time * 20),
           u_rippleAge: rippleAge,

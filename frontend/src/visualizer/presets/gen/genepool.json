@@ -1,5 +1,5 @@
 {
- "generation": 9,
+ "generation": 10,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -13,7 +13,8 @@
    "approvals": 6,
    "rejections": 0,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 9
   },
   "g00-nova": {
    "generation": 0,
@@ -27,7 +28,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": -1
   },
   "g00-tunnel": {
    "generation": 0,
@@ -41,7 +43,8 @@
    "approvals": 6,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 7
   },
   "g01-tunnel-dust": {
    "generation": 1,
@@ -57,7 +60,8 @@
    "approvals": 4,
    "rejections": 0,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g01-voyage-ember": {
    "generation": 1,
@@ -73,7 +77,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g01-warp-nebula": {
    "generation": 1,
@@ -90,7 +95,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 4
   },
   "g01-nova-bloom": {
    "generation": 1,
@@ -108,7 +114,8 @@
    "losses": 2,
    "approvals": 4,
    "rejections": 0,
-   "oppCount": 6
+   "oppCount": 6,
+   "score": 3
   },
   "g01-strobe-lattice": {
    "generation": 1,
@@ -124,7 +131,8 @@
    "losses": 2,
    "approvals": 1,
    "rejections": 0,
-   "oppCount": 4
+   "oppCount": 4,
+   "score": 1
   },
   "g01-ink-vortex": {
    "generation": 1,
@@ -138,7 +146,9 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 6,
-   "notes": []
+   "notes": [],
+   "score": 3,
+   "seen": 1
   },
   "g01-odyssey": {
    "generation": 1,
@@ -152,7 +162,8 @@
    "approvals": 4,
    "rejections": 0,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g01-odyssey-drift": {
    "generation": 1,
@@ -168,7 +179,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 4
   },
   "g01-odyssey-decks": {
    "generation": 1,
@@ -184,7 +196,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 2
   },
   "g00-bars": {
    "generation": 0,
@@ -198,7 +211,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": -3
   },
   "g00-spectrum": {
    "generation": 0,
@@ -212,7 +226,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 2,
-   "notes": []
+   "notes": [],
+   "score": -3
   },
   "g00-led": {
    "generation": 0,
@@ -226,7 +241,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 2,
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g00-mirror": {
    "generation": 0,
@@ -240,7 +256,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g00-waves": {
    "generation": 0,
@@ -254,7 +271,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 3
   },
   "g00-radial": {
    "generation": 0,
@@ -268,7 +286,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 3
   },
   "g00-terrain": {
    "generation": 0,
@@ -282,7 +301,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": -3
   },
   "g00-fracture": {
    "generation": 0,
@@ -296,7 +316,8 @@
    "approvals": 2,
    "rejections": 1,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": -1
   },
   "g00-trigon": {
    "generation": 0,
@@ -310,7 +331,8 @@
    "approvals": 4,
    "rejections": 1,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 2
   },
   "g00-siphon": {
    "generation": 0,
@@ -324,7 +346,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": -3
   },
   "g00-plasma": {
    "generation": 0,
@@ -338,7 +361,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g00-aurora": {
    "generation": 0,
@@ -352,7 +376,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 2,
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g00-strata": {
    "generation": 0,
@@ -366,7 +391,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 2,
-   "notes": []
+   "notes": [],
+   "score": -3
   },
   "g00-orbit": {
    "generation": 0,
@@ -380,7 +406,9 @@
    "approvals": 5,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 5,
+   "seen": 1
   },
   "g00-quad": {
    "generation": 0,
@@ -394,7 +422,8 @@
    "approvals": 1,
    "rejections": 2,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 0
   },
   "g00-ladder": {
    "generation": 0,
@@ -408,7 +437,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g00-pulse": {
    "generation": 0,
@@ -422,7 +452,8 @@
    "approvals": 4,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g00-silk": {
    "generation": 0,
@@ -436,7 +467,8 @@
    "approvals": 2,
    "rejections": 1,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 3
   },
   "g00-nebula": {
    "generation": 0,
@@ -450,7 +482,8 @@
    "approvals": 0,
    "rejections": 2,
    "oppCount": 2,
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g00-scope": {
    "generation": 0,
@@ -464,7 +497,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 1,
-   "notes": []
+   "notes": [],
+   "score": -1
   },
   "g00-gonio": {
    "generation": 0,
@@ -478,7 +512,8 @@
    "approvals": 0,
    "rejections": 2,
    "oppCount": 2,
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g02-lattice-flow": {
    "generation": 2,
@@ -494,7 +529,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 6,
-   "notes": []
+   "notes": [],
+   "score": 0
   },
   "g02-materia": {
    "generation": 2,
@@ -508,7 +544,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g02-ink-shape": {
    "generation": 2,
@@ -524,7 +561,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g02-mirror-ladder": {
    "generation": 2,
@@ -543,7 +581,8 @@
    "losses": 0,
    "approvals": 5,
    "rejections": 0,
-   "oppCount": 6
+   "oppCount": 6,
+   "score": 6
   },
   "g02-plasma-theatre": {
    "generation": 2,
@@ -559,7 +598,8 @@
    "approvals": 0,
    "rejections": 0,
    "oppCount": 2,
-   "notes": []
+   "notes": [],
+   "score": -5
   },
   "g02-voyage-prime": {
    "generation": 2,
@@ -575,7 +615,9 @@
    "approvals": 5,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 8,
+   "seen": 1
   },
   "g02-voyage-embercalm": {
    "generation": 2,
@@ -593,7 +635,8 @@
    "losses": 2,
    "approvals": 2,
    "rejections": 0,
-   "oppCount": 4
+   "oppCount": 4,
+   "score": 1
   },
   "g02-voyage-solarhot": {
    "generation": 2,
@@ -609,7 +652,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g02-odyssey-wild": {
    "generation": 2,
@@ -625,7 +669,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 2
   },
   "g02-odyssey-deep": {
    "generation": 2,
@@ -641,7 +686,9 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 3,
+   "seen": 1
   },
   "g02-tunnel-dream": {
    "generation": 2,
@@ -657,7 +704,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g02-tunnel-punch": {
    "generation": 2,
@@ -673,7 +721,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 4
   },
   "g02-lattice-dense": {
    "generation": 2,
@@ -689,7 +738,11 @@
    "approvals": 4,
    "rejections": 0,
    "oppCount": 6,
-   "notes": []
+   "notes": [
+    "theres potential but not usable as is"
+   ],
+   "score": 2,
+   "seen": 1
   },
   "g02-ink-molasses": {
    "generation": 2,
@@ -705,7 +758,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 6,
-   "notes": []
+   "notes": [],
+   "score": 2
   },
   "g02-julia": {
    "generation": 2,
@@ -721,9 +775,20 @@
    ],
    "wins": 1,
    "losses": 3,
-   "approvals": 2,
+   "approvals": 3,
    "rejections": 0,
-   "oppCount": 6
+   "oppCount": 6,
+   "score": 1,
+   "seen": 1,
+   "likedParams": [
+    {
+     "zoomRange": 0.6000000000000001,
+     "trapDetail": 1.25,
+     "persistence": 0.65,
+     "cadence": 0.2,
+     "saturation": 1.2000000000000002
+    }
+   ]
   },
   "g02-monolith": {
    "generation": 2,
@@ -741,7 +806,8 @@
    "losses": 3,
    "approvals": 2,
    "rejections": 1,
-   "oppCount": 5
+   "oppCount": 5,
+   "score": -2
   },
   "g02-verdant": {
    "generation": 2,
@@ -757,7 +823,8 @@
    "approvals": 4,
    "rejections": 1,
    "oppCount": 3,
-   "notes": []
+   "notes": [],
+   "score": 3
   },
   "g03-julia-lumen": {
    "generation": 3,
@@ -769,13 +836,15 @@
    "rating": 1012.4,
    "status": "alive",
    "notes": [
-    "wayyy too fast but cool ideas"
+    "wayyy too fast but cool ideas",
+    "really cool idea still, just too fast to read as musical"
    ],
    "wins": 3,
    "losses": 2,
    "approvals": 1,
    "rejections": 0,
-   "oppCount": 5
+   "oppCount": 5,
+   "score": 2
   },
   "g03-monolith-lux": {
    "generation": 3,
@@ -793,7 +862,8 @@
    "losses": 4,
    "approvals": 2,
    "rejections": 0,
-   "oppCount": 5
+   "oppCount": 5,
+   "score": -2
   },
   "g03-solar-crown": {
    "generation": 3,
@@ -809,7 +879,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 6
   },
   "g03-materia-deep": {
    "generation": 3,
@@ -825,7 +896,8 @@
    "approvals": 0,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g03-analyzer-cathedral": {
    "generation": 3,
@@ -839,7 +911,8 @@
    "approvals": 1,
    "rejections": 1,
    "oppCount": 6,
-   "notes": []
+   "notes": [],
+   "score": -4
   },
   "g03-scope-ribbon": {
    "generation": 3,
@@ -855,7 +928,8 @@
    "losses": 3,
    "approvals": 2,
    "rejections": 1,
-   "oppCount": 3
+   "oppCount": 3,
+   "score": -2
   },
   "g03-echo-field": {
    "generation": 3,
@@ -871,7 +945,8 @@
    "losses": 2,
    "approvals": 2,
    "rejections": 0,
-   "oppCount": 5
+   "oppCount": 5,
+   "score": 2
   },
   "g03-charge-bloom": {
    "generation": 3,
@@ -887,7 +962,8 @@
    "losses": 1,
    "approvals": 3,
    "rejections": 0,
-   "oppCount": 4
+   "oppCount": 4,
+   "score": 4
   },
   "g04-story": {
    "generation": 4,
@@ -903,7 +979,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": -4
   },
   "g04-materia-arc": {
    "generation": 4,
@@ -919,7 +996,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g04-julia-glacial": {
    "generation": 4,
@@ -935,7 +1013,8 @@
    "approvals": 0,
    "rejections": 1,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": -1
   },
   "g04-nova-ember": {
    "generation": 4,
@@ -951,7 +1030,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 0
   },
   "g04-charge-pulse": {
    "generation": 4,
@@ -967,7 +1047,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g04-echo-ink": {
    "generation": 4,
@@ -985,7 +1066,8 @@
    "oppCount": 4,
    "notes": [
     "too much red glow"
-   ]
+   ],
+   "score": -4
   },
   "g04-tunnel-saga": {
    "generation": 4,
@@ -1002,7 +1084,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 6,
-   "notes": []
+   "notes": [],
+   "score": 6
   },
   "g04-voyage-crown": {
    "generation": 4,
@@ -1019,7 +1102,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 2
   },
   "g05-odyssey-shards": {
    "generation": 5,
@@ -1035,7 +1119,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g05-odyssey-poly": {
    "generation": 5,
@@ -1051,7 +1136,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 0
   },
   "g05-odyssey-cracks": {
    "generation": 5,
@@ -1067,7 +1153,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 3
   },
   "g05-voyage-deckmix": {
    "generation": 5,
@@ -1083,7 +1170,9 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 5,
+   "seen": 1
   },
   "g05-voyage-ribbon": {
    "generation": 5,
@@ -1100,7 +1189,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 4,
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g05-voyage-cracks": {
    "generation": 5,
@@ -1116,7 +1206,9 @@
    "approvals": 0,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 2,
+   "seen": 1
   },
   "g05-materia-shards": {
    "generation": 5,
@@ -1133,7 +1225,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 6
   },
   "g05-materia-mercury": {
    "generation": 5,
@@ -1150,7 +1243,8 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g05-tunnel-deckmix": {
    "generation": 5,
@@ -1167,7 +1261,9 @@
    "approvals": 3,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 5,
+   "seen": 1
   },
   "g05-tunnel-shatter": {
    "generation": 5,
@@ -1184,7 +1280,8 @@
    "approvals": 2,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g05-prime-poly": {
    "generation": 5,
@@ -1198,10 +1295,21 @@
    "status": "alive",
    "wins": 1,
    "losses": 1,
-   "approvals": 2,
+   "approvals": 3,
    "rejections": 1,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 2,
+   "seen": 1,
+   "likedParams": [
+    {
+     "stars": 1.1,
+     "dust": 1.4500000000000002,
+     "palette": 0.05,
+     "persistence": 1.05,
+     "speed": 1.05
+    }
+   ]
   },
   "g05-prime-embers": {
    "generation": 5,
@@ -1218,7 +1326,8 @@
    "approvals": 1,
    "rejections": 0,
    "oppCount": 5,
-   "notes": []
+   "notes": [],
+   "score": 3
   },
   "g06-voyage-seasons": {
    "generation": 6,
@@ -1244,7 +1353,8 @@
     "temporal:phrase-palette",
     "signals:ladder,beat,trend"
    ],
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g06-tectonic": {
    "generation": 6,
@@ -1267,7 +1377,8 @@
     "temporal:section-regime",
     "signals:decks,fader,eq,impulse"
    ],
-   "notes": []
+   "notes": [],
+   "score": -1
   },
   "g06-loom": {
    "generation": 6,
@@ -1290,7 +1401,8 @@
     "temporal:phrase-motif",
     "signals:spectrum24,impulse,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "score": -4
   },
   "g06-orrery": {
    "generation": 6,
@@ -1315,7 +1427,8 @@
    ],
    "notes": [
     "cool idea, needs parameter tuning, a little too fast right now to see anything"
-   ]
+   ],
+   "score": 4
   },
   "g06-paper": {
    "generation": 6,
@@ -1341,7 +1454,8 @@
     "temporal:five-act",
     "signals:ladder,genome,impulse"
    ],
-   "notes": []
+   "notes": [],
+   "score": -3
   },
   "g06-foundry": {
    "generation": 6,
@@ -1364,7 +1478,8 @@
     "temporal:section-recast",
     "signals:eq,decks,spectrum24,flatness"
    ],
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g06-calligraphy": {
    "generation": 6,
@@ -1389,7 +1504,8 @@
     "temporal:composition",
     "signals:wave,impulse,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g06-negative": {
    "generation": 6,
@@ -1415,7 +1531,8 @@
     "temporal:plan-topology",
     "signals:spectrum24,bpm,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "score": -4
   },
   "g06-pinball": {
    "generation": 6,
@@ -1440,7 +1557,8 @@
    ],
    "notes": [
     "blank?"
-   ]
+   ],
+   "score": -3
   },
   "g06-nursery": {
    "generation": 6,
@@ -1463,7 +1581,9 @@
     "temporal:stellar-lifecycle",
     "signals:impulse,bands,ladder,centroid,spread"
    ],
-   "notes": []
+   "notes": [],
+   "score": 3,
+   "seen": 1
   },
   "g06-aurora-veil": {
    "generation": 6,
@@ -1488,7 +1608,8 @@
     "temporal:substorm",
     "signals:bands,impulse,ladder,doubles"
    ],
-   "notes": []
+   "notes": [],
+   "score": -3
   },
   "g07-seasons-nebula": {
    "generation": 7,
@@ -1513,7 +1634,8 @@
     "temporal:phrase-palette",
     "signals:ladder,beat,trend"
    ],
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g07-seasons-neon": {
    "generation": 7,
@@ -1526,7 +1648,7 @@
    "status": "alive",
    "wins": 3,
    "losses": 0,
-   "approvals": 2,
+   "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
    "tags": [
@@ -1538,7 +1660,19 @@
     "temporal:phrase-palette",
     "signals:ladder,beat,trend"
    ],
-   "notes": []
+   "notes": [],
+   "score": 6,
+   "seen": 1,
+   "likedParams": [
+    {
+     "stars": 1.5,
+     "dust": 0.5,
+     "seasonDrift": 1.05,
+     "sweepSpeed": 2.0,
+     "persistence": 1.3,
+     "speed": 0.8500000000000001
+    }
+   ]
   },
   "g07-voyage-inferno": {
    "generation": 7,
@@ -1563,7 +1697,11 @@
     "temporal:regime",
     "signals:bands,impulse,trend"
    ],
-   "notes": []
+   "notes": [
+    "could use more black, more effects of kicks/bass on the field of red"
+   ],
+   "score": 2,
+   "seen": 1
   },
   "g07-materia-jewel": {
    "generation": 7,
@@ -1588,7 +1726,8 @@
     "temporal:section-gem",
     "signals:spectrum24,flatness,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "score": -1
   },
   "g07-odyssey-nursery": {
    "generation": 7,
@@ -1614,7 +1753,8 @@
     "temporal:phrase-theatre",
     "signals:impulse,bands,ladder,centroid,spread"
    ],
-   "notes": []
+   "notes": [],
+   "score": 0
   },
   "g07-odyssey-embers": {
    "generation": 7,
@@ -1640,7 +1780,8 @@
     "temporal:phrase-theatre",
     "signals:impulse,bands,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g07-voyage-prism": {
    "generation": 7,
@@ -1654,7 +1795,7 @@
    "wins": 1,
    "losses": 0,
    "approvals": 1,
-   "rejections": 2,
+   "rejections": 3,
    "oppCount": 4,
    "tags": [
     "topology:field",
@@ -1667,8 +1808,11 @@
    ],
    "notes": [
     "orchestrator: resurrected \u2014 kill predated its forced-choice win (event-order artifact)",
-    "has potential but far too bright to see anything at high energy"
-   ]
+    "has potential but far too bright to see anything at high energy",
+    "too green"
+   ],
+   "score": -1,
+   "seen": 1
   },
   "g07-voyage-gravity": {
    "generation": 7,
@@ -1693,7 +1837,8 @@
     "temporal:regime",
     "signals:bands.low,impulse.low,ladder,trend"
    ],
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g07-orrery-calm": {
    "generation": 7,
@@ -1720,7 +1865,8 @@
    ],
    "notes": [
     "even this seems way too fast most of the time to see whats going on"
-   ]
+   ],
+   "score": -1
   },
   "g07-crt": {
    "generation": 7,
@@ -1743,7 +1889,8 @@
     "temporal:channel-change",
     "signals:impulse,bands,ladder,genome,trend"
    ],
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g07-hypno": {
    "generation": 7,
@@ -1768,7 +1915,8 @@
    ],
    "notes": [
     "changing speed based on energy is jarring, keep speed relatively consistent and modulate some other param with energy (maybe glow?) or smoothed i like the phase changes, maybe add palette changes as a more frequent bpm-aligned movement? and maybe color switching (a<->b) on beat?"
-   ]
+   ],
+   "score": 2
   },
   "g07-voyage-hardcut": {
    "generation": 7,
@@ -1793,7 +1941,8 @@
     "temporal:quantized-cuts",
     "signals:ladder,genome,beatphase,trend"
    ],
-   "notes": []
+   "notes": [],
+   "score": 5
   },
   "g07-mirror-metric": {
    "generation": 7,
@@ -1820,7 +1969,8 @@
    ],
    "notes": [
     "not sure what the idea is here"
-   ]
+   ],
+   "score": -5
   },
   "g07-mirror-strata": {
    "generation": 7,
@@ -1845,7 +1995,8 @@
     "temporal:tier-cuts",
     "signals:ladder,beatphase,impulse,genome"
    ],
-   "notes": []
+   "notes": [],
+   "score": 3
   },
   "g07-materia-metric": {
    "generation": 7,
@@ -1859,7 +2010,7 @@
    "status": "alive",
    "wins": 3,
    "losses": 0,
-   "approvals": 2,
+   "approvals": 3,
    "rejections": 0,
    "oppCount": 3,
    "tags": [
@@ -1871,7 +2022,21 @@
     "temporal:bar-build-cuts",
     "signals:spectrum24,ladder,beatphase,flatness,impulse"
    ],
-   "notes": []
+   "notes": [
+    "changes one tier too frequent, try to change every 8 bars (minor change) or 16 bars (major change). this preset is BEAUTIFUL, i want more from this direction"
+   ],
+   "score": 6,
+   "seen": 1,
+   "likedParams": [
+    {
+     "material": -0.06,
+     "sculpt": 0.7000000000000001,
+     "grain": 0.6000000000000001,
+     "glass": 1.0,
+     "persistence": 1.05,
+     "cutStrength": 0.5
+    }
+   ]
   },
   "g08-hypno-pulse": {
    "generation": 8,
@@ -1895,7 +2060,8 @@
    ],
    "notes": [
     "both are still awkwardly jittering, motion doesnt feel smooth"
-   ]
+   ],
+   "score": 2
   },
   "g08-hypno-eq": {
    "generation": 8,
@@ -1919,7 +2085,8 @@
    ],
    "notes": [
     "both are still awkwardly jittering, motion doesnt feel smooth"
-   ]
+   ],
+   "score": 2
   },
   "g08-crt-eq": {
    "generation": 8,
@@ -1932,7 +2099,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 1,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 1,
    "tags": [
@@ -1941,7 +2108,21 @@
     "temporal:channel-change",
     "signals:eq,bands,beatphase,ladder"
    ],
-   "notes": []
+   "notes": [
+    "motion a bit erratic",
+    "motion a little erratic"
+   ],
+   "score": 2,
+   "seen": 1,
+   "likedParams": [
+    {
+     "curvature": 0.21,
+     "persistence": 1.05,
+     "eqDrive": 1.75,
+     "glitchiness": 1.4000000000000001,
+     "warmth": 0.15000000000000002
+    }
+   ]
   },
   "g08-crt-beat": {
    "generation": 8,
@@ -1963,7 +2144,8 @@
     "temporal:stop-motion",
     "signals:beatphase,ladder,impulse"
    ],
-   "notes": []
+   "notes": [],
+   "score": 0
   },
   "g08-orrery-tick": {
    "generation": 8,
@@ -1986,7 +2168,8 @@
     "temporal:tick-hierarchy",
     "signals:beatphase,ladder,impulse"
    ],
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g08-voyage-beatgate": {
    "generation": 8,
@@ -1999,7 +2182,7 @@
    "status": "alive",
    "wins": 1,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 1,
    "tags": [
@@ -2008,7 +2191,18 @@
     "temporal:beat-gate",
     "signals:beatphase,ladder,bands"
    ],
-   "notes": []
+   "notes": [],
+   "score": 2,
+   "seen": 1,
+   "likedParams": [
+    {
+     "glints": 1.2000000000000002,
+     "dust": 0.45,
+     "palette": 1.0,
+     "persistence": 1.05,
+     "speed": 0.65
+    }
+   ]
   },
   "g08-voyage-eqsplit": {
    "generation": 8,
@@ -2030,7 +2224,8 @@
     "temporal:regime",
     "signals:eq,bands,decks"
    ],
-   "notes": []
+   "notes": [],
+   "score": -1
   },
   "g08-odyssey-beat": {
    "generation": 8,
@@ -2052,7 +2247,8 @@
     "temporal:pose-strike",
     "signals:beatphase,ladder,bands"
    ],
-   "notes": []
+   "notes": [],
+   "score": 2
   },
   "g08-hardcut-beat": {
    "generation": 8,
@@ -2074,7 +2270,8 @@
     "temporal:quantized-cascade",
     "signals:ladder,beatphase,genome"
    ],
-   "notes": []
+   "notes": [],
+   "score": 2
   },
   "g08-materia-eqmap": {
    "generation": 8,
@@ -2096,7 +2293,8 @@
     "temporal:regime",
     "signals:spectrum24,eq,beatphase"
    ],
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g08-materia-beat": {
    "generation": 8,
@@ -2119,7 +2317,8 @@
     "temporal:beat-stamp",
     "signals:beatphase,ladder,spectrum24"
    ],
-   "notes": []
+   "notes": [],
+   "score": -1
   },
   "g08-shards-storm": {
    "generation": 8,
@@ -2141,7 +2340,8 @@
     "temporal:volley-schedule",
     "signals:beatphase,bands.high,ladder,spectrum24"
    ],
-   "notes": []
+   "notes": [],
+   "score": 2
   },
   "g08-solar-beat": {
    "generation": 8,
@@ -2163,7 +2363,9 @@
     "temporal:beat-grid",
     "signals:beatphase,ladder,bands"
    ],
-   "notes": []
+   "notes": [],
+   "score": 2,
+   "seen": 1
   },
   "g08-tunnel-eq": {
    "generation": 8,
@@ -2186,7 +2388,8 @@
     "temporal:runway",
     "signals:eq,bands,beatphase,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g08-tunnel-beat": {
    "generation": 8,
@@ -2199,7 +2402,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 1,
-   "approvals": 1,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 1,
    "tags": [
@@ -2208,7 +2411,18 @@
     "temporal:lurch",
     "signals:beatphase,ladder,impulse.low"
    ],
-   "notes": []
+   "notes": [
+    "there is a bug in tunnel class--outer ring is smaller than viewport, so i can sometimes see past erdges of rectangle to the black bg",
+    "could be a little less white"
+   ],
+   "score": 1,
+   "seen": 1,
+   "likedParams": [
+    {
+     "lurch": 1.0,
+     "trail": 0.9400000000000001
+    }
+   ]
   },
   "g08-strata-eq": {
    "generation": 8,
@@ -2230,7 +2444,9 @@
     "temporal:tier-cuts",
     "signals:eq,bands,ladder,beatphase"
    ],
-   "notes": []
+   "notes": [],
+   "score": -1,
+   "seen": 1
   },
   "g08-voyage-blobs": {
    "generation": 8,
@@ -2253,7 +2469,8 @@
     "temporal:regime",
     "signals:bands,impulse,beatphase"
    ],
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g08-voyage-flock": {
    "generation": 8,
@@ -2267,7 +2484,7 @@
    "wins": 1,
    "losses": 0,
    "approvals": 0,
-   "rejections": 1,
+   "rejections": 2,
    "oppCount": 2,
    "tags": [
     "topology:field",
@@ -2278,7 +2495,9 @@
    ],
    "notes": [
     "orchestrator: resurrected \u2014 rejection predated its forced-choice win (event-order artifact)"
-   ]
+   ],
+   "score": -1,
+   "seen": 1
   },
   "g08-voyage-plates": {
    "generation": 8,
@@ -2302,7 +2521,8 @@
     "temporal:regime",
     "signals:bands,impulse,beatphase,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "score": -2
   },
   "g08-odyssey-ink": {
    "generation": 8,
@@ -2326,7 +2546,8 @@
     "temporal:phrase-theatre",
     "signals:bands,impulse,beatphase,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "score": 1
   },
   "g08-chameleon": {
    "generation": 8,
@@ -2349,7 +2570,9 @@
    ],
    "notes": [
     "orchestrator 2026-08-18: REVISED IN PLACE (v2) \u2014 human: tonal pole was single-color/boring, percussive should pop via warp/shake. Now: tonal = 5 hue-family curtains (span floored 0.35 turn, kick = new-hue bloom, drop = chromatic explosion); percussive = achromatic warp slam/shear/tear/shake kinetics; front kept."
-   ]
+   ],
+   "score": 0,
+   "seen": 1
   },
   "g09-prism-lumen": {
    "generation": 9,
@@ -2362,7 +2585,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2370,7 +2593,18 @@
     "temporal:spectral-continuous",
     "signals:centroid,spread,flatness"
    ],
-   "notes": []
+   "notes": [],
+   "score": 1,
+   "seen": 1,
+   "likedParams": [
+    {
+     "stars": 1.0,
+     "dust": 1.0,
+     "hue": 0.06,
+     "persistence": 1.0,
+     "speed": 1.0
+    }
+   ]
   },
   "g09-hypno-glide": {
    "generation": 9,
@@ -2392,7 +2626,11 @@
     "temporal:beat-swap",
     "signals:bpm,centroid,flatness"
    ],
-   "notes": []
+   "notes": [
+    "there is like a \"seam\" where some versions of the spiral \"open up\" from, which doesnt look good. still some jittery motion"
+   ],
+   "score": 0,
+   "seen": 1
   },
   "g09-materia-chroma": {
    "generation": 9,
@@ -2405,7 +2643,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2413,7 +2651,19 @@
     "temporal:continuous",
     "signals:spectrum24,eq"
    ],
-   "notes": []
+   "notes": [],
+   "score": 1,
+   "seen": 1,
+   "likedParams": [
+    {
+     "material": 0.0,
+     "sculpt": 1.0,
+     "grain": 1.0,
+     "glass": 1.0,
+     "persistence": 1.0,
+     "growth": 1.0
+    }
+   ]
   },
   "g09-shards-prism": {
    "generation": 9,
@@ -2426,7 +2676,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2434,7 +2684,22 @@
     "temporal:volley",
     "signals:spectrum24,eq"
    ],
-   "notes": []
+   "notes": [
+    "very cool colors and patterns! could be cool with spectrum reactiveness (more tonality = more colors?)"
+   ],
+   "score": 1,
+   "seen": 1,
+   "likedParams": [
+    {
+     "material": 0.0,
+     "sculpt": 1.0,
+     "grain": 1.0,
+     "glass": 1.0,
+     "shards": 1.0,
+     "persistence": 1.0,
+     "growth": 1.0
+    }
+   ]
   },
   "g09-seasons-spectra": {
    "generation": 9,
@@ -2448,7 +2713,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2456,7 +2721,19 @@
     "temporal:section-classified",
     "signals:centroid,spread,flatness,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "score": 1,
+   "seen": 1,
+   "likedParams": [
+    {
+     "stars": 1.0,
+     "dust": 0.3,
+     "seasonDrift": 1.0,
+     "sweepSpeed": 1.0,
+     "persistence": 1.0,
+     "speed": 1.0
+    }
+   ]
   },
   "g09-hardcut-listen": {
    "generation": 9,
@@ -2469,7 +2746,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 3,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2477,7 +2754,34 @@
     "temporal:quantized-cuts",
     "signals:centroid,flatness,ladder,genome"
    ],
-   "notes": []
+   "notes": [
+    "this is really cool. i wish the red and blue \"dust\" was a little more dynamic in color (in general for the voyage family)"
+   ],
+   "score": 3,
+   "seen": 3,
+   "likedParams": [
+    {
+     "stars": 1.0,
+     "dust": 1.0,
+     "persistence": 1.0,
+     "speed": 1.0,
+     "cutStrength": 1.0
+    },
+    {
+     "stars": 1.0,
+     "dust": 1.0,
+     "persistence": 1.0,
+     "speed": 1.0,
+     "cutStrength": 1.65
+    },
+    {
+     "stars": 1.0,
+     "dust": 1.0,
+     "persistence": 1.0,
+     "speed": 1.0,
+     "cutStrength": 1.65
+    }
+   ]
   },
   "g09-solar-spectra": {
    "generation": 9,
@@ -2498,7 +2802,9 @@
     "temporal:beat-grid",
     "signals:centroid,spectrum24,flatness,spread"
    ],
-   "notes": []
+   "notes": [],
+   "score": 0,
+   "seen": 1
   },
   "g09-tunnel-chroma": {
    "generation": 9,
@@ -2512,14 +2818,19 @@
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "render:canvas-feedback",
     "temporal:continuous",
     "signals:spectrum24,eq,centroid"
    ],
-   "notes": []
+   "notes": [
+    "just pure white",
+    "also still has the border bug (can see outer box)"
+   ],
+   "score": -1,
+   "seen": 1
   },
   "g09-nursery-spectra": {
    "generation": 9,
@@ -2540,7 +2851,11 @@
     "temporal:stellar-lifecycle",
     "signals:centroid,spread,flatness,ladder"
    ],
-   "notes": []
+   "notes": [
+    "too bright"
+   ],
+   "score": 0,
+   "seen": 1
   },
   "g09-organ": {
    "generation": 9,
@@ -2560,9 +2875,140 @@
     "temporal:tier-cuts",
     "signals:spectrum24,impulse,beatphase,ladder"
    ],
+   "notes": [
+    "nice idea, in practice its just always green and red, very little blue. green quite overpowering during drops/high energy sections"
+   ],
+   "score": 0,
+   "seen": 1
+  },
+  "g10-iris-flat": {
+   "generation": 10,
+   "parents": [],
+   "kind": "novel",
+   "brief": "FLAT wave (Vissonance Iris): 24 solid matte wedge petals, flat 4-color schemes swapped per section; kick = aperture pop, drop = full extension + scheme inversion.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:canvas-flat",
+    "topology:radial-petals",
+    "temporal:scheme-swap",
+    "signals:spectrum24,bandsSlow,ladder"
+   ],
+   "notes": []
+  },
+  "g10-barred": {
+   "generation": 10,
+   "parents": [],
+   "kind": "novel",
+   "brief": "FLAT wave (Vissonance Barred): perspective floor grid of flat-3D bars, beat-row history scrolling to the horizon; kick = row slam; drop = double scroll + scheme invert.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:canvas-flat3d",
+    "topology:perspective-grid",
+    "temporal:beat-rows",
+    "signals:spectrum24,bandsSlow,ladder"
+   ],
+   "notes": []
+  },
+  "g10-tricentric": {
+   "generation": 10,
+   "parents": [],
+   "kind": "novel",
+   "brief": "FLAT wave (Vissonance Tricentric): concentric flat polygon tunnel, off-center vanishing point; bar = sides cycle; drop = 2Hz chroma-only solid/outline alternation.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:canvas-flat",
+    "topology:concentric-tunnel",
+    "temporal:quantized",
+    "signals:bandsSlow,ladder,impulse"
+   ],
+   "notes": []
+  },
+  "g10-poster": {
+   "generation": 10,
+   "parents": [],
+   "kind": "novel",
+   "brief": "FLAT wave (Swiss/Memphis poster): 3-6 solid geometric actors, genome layouts, phrase recomposition, section scheme swaps; kick = actor pop, snare = color swap.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:canvas-flat",
+    "topology:composition",
+    "temporal:layout-cuts",
+    "signals:bandsSlow,impulse,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g10-vitrail": {
+   "generation": 10,
+   "parents": [],
+   "kind": "novel",
+   "brief": "FLAT x TONALITY (chameleon idea #3): stained-glass voronoi window \u2014 tonal = pane color variety in harmonic waves; percussive = stone tones + kinetic lattice fracture; pane-by-pane recoloring front.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:canvas-flat",
+    "topology:voronoi-window",
+    "temporal:tonality-regime",
+    "signals:flatness,impulse,spread,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g10-hillfog": {
+   "generation": 10,
+   "parents": [],
+   "kind": "novel",
+   "brief": "FLAT wave (Vissonance HillFog): layered flat dusk hills, front ridge = live spectrum, back layers = history; phrase = time-of-day stop, drop = sky flip + double scroll.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:canvas-flat",
+    "topology:layered-landscape",
+    "temporal:time-of-day",
+    "signals:spectrum24,bandsSlow,ladder,genome"
+   ],
    "notes": []
   }
  },
- "foldedThrough": 1787111100.863421,
- "eloSemantics": "v2: forced-choice only moves rating (K=32/400); both_good/both_bad are approval/rejection labels; both_bad kills winless candidates"
+ "foldedThrough": 1787119153.4091032,
+ "eloSemantics": "v2: forced-choice only moves rating (K=32/400); both_good/both_bad are approval/rejection labels; both_bad kills winless candidates",
+ "scoring": "v3: score = (wins + approvals) - (losses + rejections); approvals/rejections include solo likes/dislikes; elo rating retained as legacy tiebreaker"
 }

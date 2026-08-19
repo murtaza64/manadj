@@ -63,6 +63,7 @@ uniform float u_high;
 uniform float u_kick;
 uniform float u_snare;
 uniform float u_centroid;  // harmonic content: palette phase
+uniform float u_specHue;   // slow-tracked centroid (~1s EMA): dust hue follows spectral content
 uniform float u_drop;      // excitement WITH bass
 uniform float u_buildup;   // excitement WITHOUT bass
 uniform float u_zoom;
@@ -162,7 +163,10 @@ vec3 starScatter(vec2 c, float density, float sizeScale, float gate, float gain)
   float on = step(gate - 0.09 * u_spawn, hash(sc * 1.618 + 9.7));
   float size = (0.5 + 1.5 * hash(sc.yx * 2.113)) * sizeScale;
   float bright = 0.4 + 0.6 * hash(sc + 17.9);
-  vec3 tint = mix(vec3(0.65, 0.78, 1.0), vec3(1.0, 0.85, 0.6), hash(sc.yx + 29.3));
+  // Star tint samples the OWN music-chosen bank palette at each star's hash
+  // phase (wide span, spectral-hue biased) instead of a fixed cool/warm ramp.
+  // Luminance unchanged (starShape * on * bright * gain).
+  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02 + u_specHue * 0.5);
   return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;
 }
 
@@ -226,26 +230,36 @@ void main() {
   float corona = exp(-rc * (7.0 - 3.0 * u_low));
   float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;
   float gravityGain = u_low * (0.5 + 0.8 * u_kick);
-  fresh += mix(vec3(0.55, 0.07, 0.04), LOW, 0.5)
+  // Gravity ripple color: a warm slice of the OWN bank palette (spectral-hue
+  // biased) instead of a fixed ember/LOW mix. Gain unchanged.
+  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);
+  fresh += gravityColor
     * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;
   // The event-horizon ring — GATED by the look's discrete ringOn.
   float arcJitter = volt * (0.012 + 0.05 * u_kick + 0.022 * u_low);
   float ringGlow = exp(-pow((r - horizon - arcJitter) * 52.0, 2.0));
   float ringCore = exp(-pow((r - horizon - arcJitter) * 210.0, 2.0));
   float bassOn = smoothstep(0.06, 0.3, u_low);
-  vec3 chargeColor = mix(vec3(0.9, 0.2, 0.1), vec3(1.0, 0.75, 0.4), clamp(u_charge, 0.0, 1.0));
+  // Ring color: a warm bank-palette slice (spectral-hue biased) charging toward
+  // a warmer accent then white-hot at high charge. Palette supplies hue; the
+  // charge->white ramp and gains preserve luminance.
+  vec3 chargeColor = mix(palette(0.02 + u_specHue * 0.5), palette(0.12 + u_specHue * 0.5), clamp(u_charge, 0.0, 1.0));
   chargeColor = mix(chargeColor, vec3(1.0, 0.97, 0.92), clamp(u_charge - 0.6, 0.0, 0.4) * 2.5);
   fresh += chargeColor * ringGlow * (0.12 + 0.6 * u_low + 1.1 * u_kick + 0.5 * u_charge) * u_ringOn;
   fresh += mix(chargeColor, vec3(1.0), 0.5 * u_kick) * ringCore
     * (0.3 + 1.3 * bassOn + 2.4 * u_kick + 0.8 * u_charge) * u_ringOn;
-  // Coal heart (always present — bass identity).
-  vec3 coal = vec3(0.55, 0.07, 0.04);
+  // Coal heart (always present — bass identity): a deep, low-luma slice of the
+  // OWN bank palette (spectral-hue biased) instead of a fixed dark red. Kept
+  // dark (0.55 floor); gains/kick-whiten preserve luminance.
+  vec3 coal = palette(0.0 + u_specHue * 0.5) * 0.55;
   fresh += mix(coal, vec3(1.0, 0.8, 0.7), 0.5 * u_kick) * heart * (0.5 + 1.2 * u_low + 1.4 * u_kick);
   fresh += mix(coal, LOW, 0.4) * corona * (0.1 + 0.6 * u_low + 0.35 * u_kick);
   float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);
-  // Anamorphic lens streak — GATED by the look's discrete streakOn.
+  // Anamorphic lens streak — GATED by the look's discrete streakOn. Both ends
+  // sample the OWN palette (a wide phase offset for the cool end, spectral-hue
+  // biased) instead of a fixed steel-blue.
   float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));
-  fresh += mix(vec3(0.6, 0.75, 1.0), palette(t * 0.02), 0.65) * streak
+  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak
     * (0.25 + 1.2 * u_low + 0.8 * u_kick) * u_streakOn;
   // The disk: spiral lanes — the ARM COUNT is the look's integer u_arms
   // (2/3/5/7). It never interpolates: a phrase cut snaps to a new polygon.
@@ -253,7 +267,9 @@ void main() {
   float lanes = pow(0.5 + 0.5 * arm, 3.0) * smoothstep(0.06, 0.2, r) * exp(-r * 1.8);
   float cloudField = fbm(vec2(ang * 2.2 + r * 3.0 - t * 0.15, r * 5.0 + t * 0.06));
   float cloud = pow(cloudField, 2.4);
-  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4);
+  // SPECTRAL DUST TINT: the disk palette phase is biased by the slow-tracked
+  // centroid (u_specHue, ~1s EMA) so dust hue follows spectral content.
+  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);
   float reverb = 1.0 + 2.6 * rippleWave;
   float midGate = smoothstep(0.04, 0.3, u_mid);
   fresh += diskColor * lanes * (0.1 + 1.2 * u_mid) * (0.5 + cloud) * u_dust * centerDim * midGate * reverb;
@@ -261,7 +277,7 @@ void main() {
   // High nebula.
   float wisp = fbm(vec2(ang * 6.0 - t * 0.5, r * 10.0 + t * 0.25));
   float shimmer = 0.6 + 0.4 * sin(t * 13.0 + wisp * 24.0);
-  vec3 electric = mix(vec3(0.4, 0.9, 1.0), palette(0.6 + t * 0.03), 0.65);
+  vec3 electric = mix(palette(0.85 + u_specHue * 0.5), palette(0.6 + t * 0.03 + u_specHue * 0.5), 0.65);
   fresh += electric * pow(wisp, 3.2) * shimmer * smoothstep(0.12, 0.5, r)
     * (0.08 + 1.7 * u_high) * u_dust * reverb;
   sky += fresh * (1.0 - u_decay) * (3.2 + 1.6 * u_sustain);
@@ -278,7 +294,9 @@ void main() {
     float ringR = 0.1 + 0.05 * u_kick;
     float shock = exp(-pow((r - ringR) * 38.0, 2.0))
       + 0.6 * exp(-pow((r - ringR * 1.7) * 30.0, 2.0));
-    sky += mix(LOW, vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);
+    // Shockwave hue from the OWN bank palette (spectral-hue biased) mixed toward
+    // a warm-white accent. Kick gain / drop scaling unchanged (luminance identical).
+    sky += mix(palette(0.05 + u_specHue * 0.5), vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);
     sky *= 1.0 + 0.1 * u_kick;
   }
   if (u_snare > 0.03) {
@@ -437,6 +455,9 @@ export const g09HardcutListenPreset: VisualizerPreset = {
     let smoothDrop = 0;
     let smoothBuildup = 0;
     let charge = 0;
+    // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase so
+    // dust hue follows spectral content without jerking on transients.
+    let slowCentroid = 0.5;
 
     // --- QUANTIZED look grammar state (STRUCTURE is genome-driven).
     let seedKey: number | null = null;
@@ -462,6 +483,8 @@ export const g09HardcutListenPreset: VisualizerPreset = {
         const dt = lastTime > 0 ? Math.min(0.1, Math.max(0, frame.time - lastTime)) : 1 / 60;
         lastTime = frame.time;
         const energy = energyOf(frame.bands);
+        // motion: slow bands (erratic-motion law)
+        const slow = frame.bandsSlow ?? frame.bands;
         const speed = frame.params.speed ?? 1;
         const persistence = frame.params.persistence ?? 1;
         const cutStrength = frame.params.cutStrength ?? 1;
@@ -560,6 +583,8 @@ export const g09HardcutListenPreset: VisualizerPreset = {
           (0.08 + 0.7 * lift + 3.6 * frame.impulse.low * (0.5 + 0.5 * lift)) * speed * dt -
           0.3 * buildup * dt;
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
+        // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
+        slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
 
         const tierGain = 0.35 + 0.55 * current.starTier;
 
@@ -571,11 +596,13 @@ export const g09HardcutListenPreset: VisualizerPreset = {
           u_kick: frame.impulse.low,
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
+          u_specHue: slowCentroid,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,
+          // rotation RATE on slow bands (erratic-motion law)
           u_rotStep:
-            (0.05 + 0.5 * frame.bands.mid + 0.5 * buildup + 0.25 * sustained) *
+            (0.05 + 0.5 * slow.mid + 0.5 * buildup + 0.25 * sustained) *
             speed *
             dt *
             current.rotDir,

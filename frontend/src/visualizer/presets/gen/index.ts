@@ -12,7 +12,7 @@ import type { VisualizerPreset } from '../types';
 const modules = import.meta.glob<{ default: VisualizerPreset }>('./*.candidate.ts');
 
 interface GenManifest {
-  candidates: Record<string, { rating: number; status: string }>;
+  candidates: Record<string, { rating: number; status: string; score?: number }>;
 }
 const manifestModules = import.meta.glob('./genepool.json', { eager: true }) as Record<
   string,
@@ -30,19 +30,23 @@ export function candidateIds(): string[] {
 export interface CandidateListing {
   id: string;
   rating: number;
+  /** Thumbs-native score (v3): (wins+approvals) - (losses+rejections). */
+  score: number;
 }
 
 /**
- * Alive candidates (manifest status), best-rated first — the "show the whole
- * genepool in the app while we iterate" view (human ask, 2026-08-18). Dead
- * fossils keep their files but stay out of the switcher.
+ * Alive presets, best score first (thumbs-native v3; legacy Elo rating is
+ * the tiebreaker). ALL presets are equal now (human, 2026-08-18): the
+ * curated set lives here as its g00-* seeds — there is no separate
+ * first-class tier. Dead fossils keep their files but stay out of the
+ * switcher.
  */
 export function aliveCandidateListings(): CandidateListing[] {
   const available = new Set(candidateIds());
   return Object.entries(manifest.candidates)
     .filter(([id, c]) => c.status === 'alive' && available.has(id))
-    .map(([id, c]) => ({ id, rating: c.rating }))
-    .sort((a, b) => b.rating - a.rating || a.id.localeCompare(b.id));
+    .map(([id, c]) => ({ id, rating: c.rating, score: c.score ?? 0 }))
+    .sort((a, b) => b.score - a.score || b.rating - a.rating || a.id.localeCompare(b.id));
 }
 
 /** Post-load cache so synchronous render paths (layer building, param UIs)
