@@ -1,5 +1,5 @@
 {
- "generation": 11,
+ "generation": 12,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -3164,6 +3164,242 @@
     "repr:inverted-bands",
     "render:canvas",
     "signals:bandsSlow,impulse,centroid,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g12-voyage-menagerie": {
+   "generation": 12,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Dust diversity: three species \u2014 LOW cinders (ballistic, ignite in the ripple), MID silk streamers (advected ribbons), HIGH glass midges (darting specks); distinct hues, EQ kill removes its species.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "dust:species",
+    "render:gl-feedback",
+    "signals:bands,impulse,eq,specHue"
+   ],
+   "notes": []
+  },
+  "g12-materia-spores": {
+   "generation": 12,
+   "parents": [
+    "g03-materia-deep"
+   ],
+   "kind": "tweak",
+   "brief": "Dust diversity on the leader: snare spores (emit->drift->settle lifecycle), low magma droplets, high static filings over loud regions; spectral tempPalette hues.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "dust:species",
+    "render:gl-sculpture",
+    "signals:spectrum24,impulse,flatness"
+   ],
+   "notes": []
+  },
+  "g12-tunnel-swarm": {
+   "generation": 12,
+   "parents": [
+    "g02-tunnel-dream"
+   ],
+   "kind": "tweak",
+   "brief": "Wall-hugging firefly swarm (160 discrete), depth=frequency banding with per-depth hues; kick lurch surge, snare spiral detachment, drop incandescence.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "dust:swarm",
+    "render:canvas-feedback",
+    "signals:bands,impulse,bandsSlow"
+   ],
+   "notes": []
+  },
+  "g12-hardcut-tonal": {
+   "generation": 12,
+   "parents": [
+    "g09-hardcut-listen"
+   ],
+   "kind": "tweak",
+   "brief": "Tonality axis on the winner: tonal = wide multi-hue banks + 250ms crossfade cuts; percussive = monochrome banks + single-frame cuts + beat accent-flip cascade.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:tonality",
+    "render:gl-feedback",
+    "signals:flatness,impulse,ladder"
+   ],
+   "notes": []
+  },
+  "g12-solar-storms": {
+   "generation": 12,
+   "parents": [
+    "g08-solar-beat",
+    "g09-solar-spectra"
+   ],
+   "kind": "tweak",
+   "brief": "Mids = polar aurora sheets (extent/dance on bandsSlow.mid), highs = corona static micro-arcs; EQ kills collapse each; beat eruptions stay.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:mid-high",
+    "render:gl-feedback",
+    "signals:bandsSlow,eq,beatphase"
+   ],
+   "notes": []
+  },
+  "g12-shards-tonal": {
+   "generation": 12,
+   "parents": [
+    "g09-shards-prism"
+   ],
+   "kind": "tweak",
+   "brief": "Human's idea: tonality -> shard color budget {1,2,4,8,24} latched per bar; percussive = monochrome steel shards, tonal = full spectrum fan.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:tonality",
+    "render:gl-sculpture",
+    "signals:flatness,spectrum24,ladder"
+   ],
+   "notes": []
+  },
+  "g12-nursery-beat": {
+   "generation": 12,
+   "parents": [
+    "g06-nursery",
+    "g09-nursery-spectra"
+   ],
+   "kind": "tweak",
+   "brief": "Constellation sequencer: one protostar ignition per beat forming a genome figure across the phrase, lines connect on downbeats; snare = one shooting star.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:beat-grid",
+    "render:gl-volume",
+    "signals:beatphase,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g12-warehouse": {
+   "generation": 12,
+   "parents": [],
+   "kind": "novel",
+   "brief": "TECHNO: near-black warehouse, one industrial light bar slams to new stations on kicks (constant lit-edge budget = photosafe); buildup = light starving; drop = strobe-walk <=2/s.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "style:techno-mono",
+    "render:canvas-flat",
+    "signals:impulse,bandsSlow,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g12-blackout": {
+   "generation": 12,
+   "parents": [],
+   "kind": "novel",
+   "brief": "TECHNO: near-black; kick = one small white figure flash (<=2/s, <20% area) leaving decaying outline afterimages; drop = parity-alternating pulse-fills (luminance-constant).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "style:techno-mono",
+    "render:canvas-flat",
+    "signals:impulse,bandsSlow,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g12-scanline": {
+   "generation": 12,
+   "parents": [],
+   "kind": "novel",
+   "brief": "TECHNO: seismograph scanline sweeps a black field drawing the spectrum as terrain (<=8 phosphor traces); kick = staircase fracture; drop = 4 counter-sweeping lines; section = axis rotate.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "style:techno-mono",
+    "render:canvas-flat",
+    "signals:spectrum24,bandsSlow,impulse,ladder"
+   ],
+   "notes": []
+  },
+  "g12-strobe-column": {
+   "generation": 12,
+   "parents": [],
+   "kind": "novel",
+   "brief": "TECHNO: gray colonnade, beat-sequenced pair-inversions (luminance-paired = photosafe strobe feel); kick = colonnade strides one column; drop = region-partitioned double-time + accent flood.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "style:techno-mono",
+    "render:canvas-flat",
+    "signals:beatphase,bandsSlow,ladder,genome"
    ],
    "notes": []
   }
