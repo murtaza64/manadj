@@ -61,6 +61,16 @@ export interface BeatInfo {
   beatsPerBar: number;
   /** Absolute bar index from the first downbeat (phrase tiers derive). */
   barIndex: number;
+  /**
+   * LADDER-CORRECT bar ordinal (realtime-visualization 08): the bar's
+   * position within its governing metric-ladder segment (restarts at each
+   * Reset mark / the Ladder anchor — ADRs 0029/0030), resolved through the
+   * one canonical resolver (meter/ladder.ts). Phrase (%4) and section (%16)
+   * tiers derive from THIS, so rollovers land on the ladder's boundaries,
+   * not first-downbeat modular arithmetic. Null (fall back to barIndex)
+   * without a metric ladder — no grid, before the first downbeat, or a
+   * stale main window that never sends the field. */
+  ladderBarIndex?: number | null;
   bpm: number | null;
 }
 

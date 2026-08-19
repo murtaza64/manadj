@@ -48,12 +48,13 @@ export function VisualizerHud({ getSnapshot }: { getSnapshot: () => HudSnapshot 
   const lowPresence = Math.min(1, Math.max(0, (bands.low - 0.2) / 0.5));
   const drop = trend.excitement * lowPresence;
   const buildup = trend.excitement * (1 - lowPresence);
+  // Phrase/section derive from the ladder-correct bar ordinal (respects
+  // Reset marks, rt-viz 08); fall back to the raw first-downbeat count.
+  const tierBar = beat ? beat.ladderBarIndex ?? beat.barIndex : null;
   const phrase =
-    beat && beat.barIndex !== null ? ((((beat.barIndex % 4) + 4) % 4) + beat.barPhase) / 4 : null;
+    beat && tierBar !== null ? ((((tierBar % 4) + 4) % 4) + beat.barPhase) / 4 : null;
   const section =
-    beat && beat.barIndex !== null
-      ? ((((beat.barIndex % 16) + 16) % 16) + beat.barPhase) / 16
-      : null;
+    beat && tierBar !== null ? ((((tierBar % 16) + 16) % 16) + beat.barPhase) / 16 : null;
 
   return (
     <div className={`visualizer-hud${stale ? ' stale' : ''}`}>
@@ -64,7 +65,8 @@ export function VisualizerHud({ getSnapshot }: { getSnapshot: () => HudSnapshot 
             <div className="hud-row">
               <span>{beat.bpm ? `${beat.bpm.toFixed(1)} bpm` : '— bpm'}</span>
               <span>
-                bar {beat.barIndex} · beat {beat.beatInBar + 1}/{beat.beatsPerBar}
+                bar {tierBar !== null ? (tierBar % 16) + 1 : beat.barIndex}/16 · beat{' '}
+                {beat.beatInBar + 1}/{beat.beatsPerBar}
               </span>
             </div>
             <Bar value={beat.phase} color="hsl(200,100%,55%)" label="beat" />

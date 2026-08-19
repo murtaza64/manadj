@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useMixer } from '../hooks/useMixer';
 import { useDecks } from '../hooks/useDeck';
 import { CHANNEL_IDS } from '../playback/mixer';
-import type { BeatgridResponse } from '../types';
+import type { BeatgridResponse, MetricLadderResponse } from '../types';
 import {
   aggregateBands,
   aggregateMultiband,
@@ -87,15 +87,22 @@ export function VisualizerBridge() {
       const reference = best.engine.asLaunchReference();
       if (!reference) return null;
       // Downbeats come from the beatgrid query cache (warmed on deck load);
-      // beatPositionAt assumes 4/4 from the first beat without them.
+      // beatPositionAt assumes 4/4 from the first beat without them. The
+      // metric-ladder cache (marks) rides alongside — passing both lets the
+      // resolver hand back a Reset-mark-correct bar ordinal (rt-viz 08).
       const snapshot = best.engine.getSnapshot();
       const grid = snapshot.trackId
         ? queryClient.getQueryData<BeatgridResponse>(['beatgrid', snapshot.trackId])
         : undefined;
+      const ladder = snapshot.trackId
+        ? queryClient.getQueryData<MetricLadderResponse>(['metric-ladder', snapshot.trackId])
+        : undefined;
       const position = beatPositionAt(
         reference.beatTimes,
         grid?.data.downbeat_times ?? [],
-        reference.playhead
+        reference.playhead,
+        grid?.data ?? null,
+        ladder ?? null
       );
       if (position === null) return null;
       return { ...position, bpm: snapshot.bpm };

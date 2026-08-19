@@ -264,7 +264,15 @@ function createWindow() {
     overrideBrowserWindowOptions: {
       title: "manaDJ visualizer",
       backgroundColor: "#000000",
-      webPreferences: { backgroundThrottling: false },
+      // An explicit webPreferences override REPLACES the opener's inherited
+      // webPreferences rather than merging — so preload must be re-stated
+      // here or the child window has no manadjVisualizer bridge (its ⛶ then
+      // falls back to the HTML fullscreen API, which no-ops on this
+      // always-on-top floating window). realtime-visualization 07.
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        backgroundThrottling: false,
+      },
     },
   }));
   // Track the visualizer child window and make it sticky: floats above

@@ -53,8 +53,9 @@ class LadderRenderer implements PresetRenderer {
     const unit = Math.min(width, height);
     const hue = energyHue(energy, this.hueJump + (frame.centroid - 0.5) * 80);
 
-    // Tier phases from the absolute bar index.
-    const barIndex = beat?.barIndex ?? null;
+    // Tier phases from the ladder-correct bar ordinal (respects Reset marks,
+    // rt-viz 08) — falls back to the raw first-downbeat count when no ladder.
+    const barIndex = beat ? beat.ladderBarIndex ?? beat.barIndex : null;
     const phrasePhase =
       beat && barIndex !== null ? ((((barIndex % 4) + 4) % 4) + beat.barPhase) / 4 : null;
     const sectionPhase =
