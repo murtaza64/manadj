@@ -50,6 +50,7 @@ uniform float u_flow;       // liquid inner-flow phase
 uniform float u_swell;      // sustained loudness, form size
 uniform float u_grain;      // sand-grain gain slider
 uniform float u_glass;      // glass-caustic gain slider
+uniform float u_specHue;    // spectral hue anchor (JS ~1s EMA of centroid) 0..1
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -77,14 +78,28 @@ float fbm(vec2 p) {
   return v;
 }
 
-// Temperature palette: cold indigo/teal at low centroid, hot amber/white
-// at high — a wide-phase cosine so the material's tint TRAVELS with the
-// surface field rather than reading as one flat hue.
+vec3 hsv2rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+
+// Temperature palette: cold<->hot MATERIAL identity still rides centroid, but
+// the two endpoint HUE FAMILIES are now derived from spectral content
+// (u_specHue) instead of a hardcoded blue<->red axis. COLD = cool family
+// (teal/blue/violet), HOT = its warm complement. Per-endpoint lightness and
+// the traveling wobble are preserved (chroma-only change) so the tint still
+// TRAVELS with the surface field rather than reading as one flat hue.
 vec3 tempPalette(float t, float temp) {
-  vec3 cold = vec3(0.18, 0.5, 0.95) + vec3(0.2, 0.35, 0.3)
+  float coldHue = 0.5 + 0.25 * (u_specHue - 0.5);
+  float hotHue = fract(coldHue - 0.5);
+  vec3 coldRip = vec3(0.2, 0.35, 0.3)
     * cos(6.28318 * (vec3(0.9, 1.0, 0.8) * t + vec3(0.55, 0.42, 0.3)));
-  vec3 hot = vec3(1.0, 0.62, 0.18) + vec3(0.4, 0.35, 0.2)
+  vec3 hotRip = vec3(0.4, 0.35, 0.2)
     * cos(6.28318 * (vec3(1.0, 0.9, 0.7) * t + vec3(0.0, 0.1, 0.2)));
+  float coldV = clamp(0.7 + (coldRip.r + coldRip.g + coldRip.b) * 0.33, 0.0, 1.3);
+  float hotV = clamp(0.72 + (hotRip.r + hotRip.g + hotRip.b) * 0.33, 0.0, 1.3);
+  vec3 cold = hsv2rgb(vec3(coldHue, 0.82, coldV));
+  vec3 hot = hsv2rgb(vec3(hotHue, 0.88, hotV));
   return mix(cold, hot, clamp(temp, 0.0, 1.0));
 }
 
@@ -216,7 +231,7 @@ void main() {
   if (u_snare > 0.03) {
     float sarc = exp(-pow((r - formR * 1.15) * 26.0, 2.0))
       * pow(0.5 + 0.5 * sin(ang * 4.0 + u_seed), 2.0);
-    field += mix(vec3(0.8, 0.9, 1.0), tempPalette(0.3, temp), 0.5) * sarc * u_snare * 0.8;
+    field += mix(tempPalette(0.15, temp), tempPalette(0.3, temp), 0.5) * sarc * u_snare * 0.8;
   }
 
   // Whole-frame kick punch — the low-end lands everywhere, solid.
@@ -260,6 +275,7 @@ export const g02MateriaPreset: VisualizerPreset = {
     let smoothDrop = 0;
     let smoothBuildup = 0;
     let smoothSwell = 0;
+    let smoothSpecHue = 0.5;
     let section = 0;
     let flip = 0;
     let lastPhraseIndex = -1;
@@ -289,6 +305,11 @@ export const g02MateriaPreset: VisualizerPreset = {
         smoothBuildup += (frame.trend.excitement * (1 - lowPresence) - smoothBuildup) * smoothAlpha;
         const swellTarget = Math.min(1, (frame.bands.low + frame.bands.mid) * 0.7 + smoothDrop * 0.4);
         smoothSwell += (swellTarget - smoothSwell) * (1 - Math.exp(-dt / 0.5));
+
+        // Spectral hue anchor: ~1s EMA of centroid. Feeds the tempPalette
+        // endpoints so the cold<->hot axis is a spectral cool/warm pair, not
+        // a hardcoded blue<->red interference axis.
+        smoothSpecHue += (frame.centroid - smoothSpecHue) * (1 - Math.exp(-dt / 1.0));
 
         // Inner-flow phase: BPM-locked when gridded (one turn per 8 beats),
         // slow drift otherwise. Slower for glass, faster for sand.
@@ -353,6 +374,7 @@ export const g02MateriaPreset: VisualizerPreset = {
           u_swell: smoothSwell,
           u_grain: frame.params.grain ?? 1,
           u_glass: frame.params.glass ?? 1,
+          u_specHue: smoothSpecHue,
         };
       },
     });

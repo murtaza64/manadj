@@ -117,6 +117,11 @@ class TunnelChromaRenderer implements PresetRenderer {
     const cx = width / 2;
     const cy = height / 2;
     const unit = Math.min(width, height);
+    // BUGFIX (human: "can see outer box"): coverage must reference the full
+    // canvas DIAGONAL (sqrt(w^2+h^2)/2), not the min dimension, so the mouth
+    // ring reaches the corners at every aspect ratio instead of leaving a
+    // black border.
+    const diag = Math.sqrt(width * width + height * height) / 2;
     const dt = frame.dt;
 
     // --- Global drives ---------------------------------------------------
@@ -165,9 +170,14 @@ class TunnelChromaRenderer implements PresetRenderer {
       ctx.translate(cx, cy);
       ctx.rotate(this.rotation);
       ctx.scale(zoom, zoom);
-      // CONTRACTION RULE: trail alpha stays < 1 (persistent field never
-      // multiplied by a sustained factor > 1).
-      ctx.globalAlpha = Math.min(0.99, 0.9 + 0.095 * (frame.params.trail ?? 0.92));
+      // CONTRACTION RULE (docs/visualizer-ga.md feedback-contraction): the
+      // trail alpha alone was < 1, but with 24 additive `lighter` band rings
+      // stamped every frame the steady state is (per-frame injection)/(1-alpha)
+      // — at alpha ~0.987 that is ~80x and the whole frame pegged to WHITE
+      // (human: "just pure white"). BUGFIX: widen the contraction margin —
+      // cap the trail alpha well below 1 (<= 0.955, so 1-alpha >= 0.045) so the
+      // additive rings reach a COLORED steady state instead of washing out.
+      ctx.globalAlpha = Math.min(0.955, 0.86 + 0.09 * (frame.params.trail ?? 0.92));
       ctx.drawImage(this.buffer, -cx, -cy);
       ctx.restore();
       ctx.globalAlpha = 1;
@@ -198,7 +208,10 @@ class TunnelChromaRenderer implements PresetRenderer {
     ctx.globalCompositeOperation = 'lighter';
     const bands = SPECTRUM_BAND_COUNT;
     // Mouth radius (lows) large; vanishing radius (highs) small.
-    const rMouth = unit * 0.34;
+    // BUGFIX (human: "can see outer box"): the mouth ring (band 0) now sits
+    // just PAST the corners (1.04 * diag) so the outermost ring always covers
+    // the full viewport; the vanishing radius still collapses to a point.
+    const rMouth = diag * 1.04;
     const rVanish = unit * 0.03;
     const wobble = unit * 0.02 * (0.4 + 0.6 * mid);
     // Global saturation lift on drops (fresh geometry only — bounded, not a
@@ -231,14 +244,20 @@ class TunnelChromaRenderer implements PresetRenderer {
       );
 
       // Glow = loudness -> lightness + line weight (soft-knee ceiling).
-      const baseL = 30 + 34 * level + 6 * this.drive;
+      // BUGFIX (human: "just pure white"): every ring is an additive `lighter`
+      // injection into the feedback trail; lower the per-frame lightness (base
+      // 30 -> 20, level gain 34 -> 26, kick pulse 34 -> 24) and the ceiling
+      // (82 -> 62) so the contractive steady state settles to a COLORED tunnel
+      // rather than accumulating to white. Chroma-preserving: only lightness
+      // drops, hue/sat untouched.
+      const baseL = 20 + 26 * level + 5 * this.drive;
       // Kick pulse: a moving luminance band brightens rings near its depth.
       let pulseL = 0;
       if (this.kickPulseDepth >= 0) {
         const d = Math.abs(depth - this.kickPulseDepth);
-        pulseL = Math.exp(-(d * d) * 90) * this.kickPulseAmp * 34;
+        pulseL = Math.exp(-(d * d) * 90) * this.kickPulseAmp * 24;
       }
-      const lightness = Math.min(82, baseL + pulseL); // soft ceiling, no clamp
+      const lightness = Math.min(62, baseL + pulseL); // soft ceiling, no clamp
 
       // Wall wobble: bass corrugation on the ring (smeared into walls by
       // feedback). Slight fine detail from highs on the far rings.

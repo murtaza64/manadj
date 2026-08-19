@@ -1,5 +1,5 @@
 {
- "generation": 10,
+ "generation": 11,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -22,13 +22,15 @@
    "kind": "seed",
    "brief": "curated Nova baseline",
    "rating": 974.1,
-   "status": "alive",
+   "status": "dead",
    "wins": 2,
    "losses": 4,
    "approvals": 1,
    "rejections": 0,
    "oppCount": 3,
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -1"
+   ],
    "score": -1
   },
   "g00-tunnel": {
@@ -295,13 +297,15 @@
    "kind": "seed",
    "brief": "curated terrain baseline",
    "rating": 937.6,
-   "status": "alive",
+   "status": "dead",
    "wins": 1,
    "losses": 5,
    "approvals": 1,
    "rejections": 0,
    "oppCount": 5,
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -3"
+   ],
    "score": -3
   },
   "g00-fracture": {
@@ -592,13 +596,15 @@
    "kind": "tweak",
    "brief": "Plasma with SECTION THEATRE: the kaleidoscope fold count/mirror phase is a REGIME that jumps dramatically at 16-bar sect\u2026",
    "rating": 924.5,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 5,
    "approvals": 0,
    "rejections": 0,
    "oppCount": 2,
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -5, never recovered"
+   ],
    "score": -5
   },
   "g02-voyage-prime": {
@@ -627,9 +633,10 @@
    "kind": "tweak",
    "brief": "voyage settings mutant: ember palette, low dust, calm speed, long trails",
    "rating": 984.0,
-   "status": "alive",
+   "status": "dead",
    "notes": [
-    "can we do something different with the spinning tri-segment ring next time"
+    "can we do something different with the spinning tri-segment ring next time",
+    "orchestrator 2026-08-19: consolidated: settings mutant folded into voyage line"
    ],
    "wins": 1,
    "losses": 2,
@@ -646,13 +653,15 @@
    "kind": "tweak",
    "brief": "voyage settings mutant: solar palette, fast flight, dense stars",
    "rating": 1027.7,
-   "status": "alive",
+   "status": "dead",
    "wins": 3,
    "losses": 1,
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: consolidated: settings mutant folded into voyage line (tuning raidable in fossil)"
+   ],
    "score": 5
   },
   "g02-odyssey-wild": {
@@ -663,13 +672,15 @@
    "kind": "tweak",
    "brief": "odyssey settings mutant: high mutation chaos, energetic",
    "rating": 985.5,
-   "status": "alive",
+   "status": "dead",
    "wins": 1,
    "losses": 2,
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: consolidated: settings mutant folded into odyssey line"
+   ],
    "score": 2
   },
   "g02-odyssey-deep": {
@@ -680,13 +691,15 @@
    "kind": "tweak",
    "brief": "odyssey settings mutant: rare mutations, deep and slow",
    "rating": 1000.7,
-   "status": "alive",
+   "status": "dead",
    "wins": 1,
    "losses": 1,
    "approvals": 3,
    "rejections": 0,
    "oppCount": 4,
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: consolidated: settings mutant folded into odyssey line"
+   ],
    "score": 3,
    "seen": 1
   },
@@ -715,13 +728,15 @@
    "kind": "tweak",
    "brief": "tunnel settings mutant: short trails, hard zoom (aggressive)",
    "rating": 1016.0,
-   "status": "alive",
+   "status": "dead",
    "wins": 2,
    "losses": 1,
    "approvals": 3,
    "rejections": 0,
    "oppCount": 5,
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: consolidated: settings mutant folded into tunnel line (punch kick raidable)"
+   ],
    "score": 4
   },
   "g02-lattice-dense": {
@@ -732,14 +747,15 @@
    "kind": "tweak",
    "brief": "strobe-lattice settings mutant: dense grid, long ghosts, softer strobe",
    "rating": 968.0,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 2,
    "approvals": 4,
    "rejections": 0,
    "oppCount": 6,
    "notes": [
-    "theres potential but not usable as is"
+    "theres potential but not usable as is",
+    "orchestrator 2026-08-19: cut: \"potential but not usable as is\""
    ],
    "score": 2,
    "seen": 1
@@ -834,10 +850,11 @@
    "kind": "tweak",
    "brief": "FIX the human note: 'is blank much of the time'. Root causes to kill: C wandering into sparse/escape regions and unlit e\u2026",
    "rating": 1012.4,
-   "status": "alive",
+   "status": "dead",
    "notes": [
     "wayyy too fast but cool ideas",
-    "really cool idea still, just too fast to read as musical"
+    "really cool idea still, just too fast to read as musical",
+    "orchestrator 2026-08-19: cut: \"too fast to read as musical\" (2 rescues spent)"
    ],
    "wins": 3,
    "losses": 2,
@@ -854,9 +871,10 @@
    "kind": "tweak",
    "brief": "The human: 'needs work but interesting'. Iterate for LEGIBILITY and SPECTACLE: clearer silhouettes (stronger rim/sky con\u2026",
    "rating": 940.3,
-   "status": "alive",
+   "status": "dead",
    "notes": [
-    "the smoke is really bad"
+    "the smoke is really bad",
+    "orchestrator 2026-08-19: cut: -2, \"the smoke is really bad\""
    ],
    "wins": 0,
    "losses": 4,
@@ -1007,13 +1025,15 @@
    "kind": "tweak",
    "brief": "Human note: 'wayyy too fast but cool ideas'. Slow EVERYTHING 3-4x: cadence, zoom breathing, C drift. Replace continuous \u2026",
    "rating": 1000.0,
-   "status": "alive",
+   "status": "dead",
    "wins": 2,
    "losses": 2,
    "approvals": 0,
    "rejections": 1,
    "oppCount": 4,
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -1"
+   ],
    "score": -1
   },
   "g04-nova-ember": {
@@ -1338,7 +1358,7 @@
    "kind": "tweak",
    "brief": "Palette = the phrase/section instrument: in-phrase seasonal drift, drastic complementary regime jump at section boundaries via traveling color front (<1 bar). Geometry/luminance = parent.",
    "rating": 1030.5,
-   "status": "alive",
+   "status": "dead",
    "wins": 2,
    "losses": 0,
    "approvals": 3,
@@ -1353,7 +1373,9 @@
     "temporal:phrase-palette",
     "signals:ladder,beat,trend"
    ],
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: consolidated: superseded by seasons-spectra/neon"
+   ],
    "score": 5
   },
   "g06-tectonic": {
@@ -1619,7 +1641,7 @@
    "kind": "tweak",
    "brief": "Color variation: seasons engine with CELESTIAL palette banks (nebula teal/magenta, violet+gold star-forge, ice void, dying sun) + drop luminous surge + kick crest/trough contrast.",
    "rating": 1045.9,
-   "status": "alive",
+   "status": "dead",
    "wins": 3,
    "losses": 0,
    "approvals": 2,
@@ -1634,7 +1656,9 @@
     "temporal:phrase-palette",
     "signals:ladder,beat,trend"
    ],
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: consolidated: seasons line keeps seasons-spectra (music-chooses) + seasons-neon (bank aesthetic)"
+   ],
    "score": 5
   },
   "g07-seasons-neon": {
@@ -1791,7 +1815,7 @@
    "kind": "tweak",
    "brief": "Color-system fix (human note: palette never changed the dust): ALL hardcoded element colors (stars, LOW, charge ring, coal, streak, shockwave) rewired to the palette; 4 distinct banks incl. green/teal + violet/pink; complementary shock edge; drop saturation ride.",
    "rating": 1015.3,
-   "status": "alive",
+   "status": "dead",
    "wins": 1,
    "losses": 0,
    "approvals": 1,
@@ -1809,7 +1833,8 @@
    "notes": [
     "orchestrator: resurrected \u2014 kill predated its forced-choice win (event-order artifact)",
     "has potential but far too bright to see anything at high energy",
-    "too green"
+    "too green",
+    "orchestrator 2026-08-19: consolidated: superseded by g09-prism-lumen (\"too green\" noted)"
    ],
    "score": -1,
    "seen": 1
@@ -1822,7 +1847,7 @@
    "kind": "tweak",
    "brief": "Alternative bass interpretation (human ask): bass = spacetime curvature (orbit contraction, lensing, horizon bow); kick = 200ms elastic gravity fold with geodesic star smear; heavy-bass vs dropout regimes; drop = max gravity + polar escape jets.",
    "rating": 971.5,
-   "status": "alive",
+   "status": "dead",
    "wins": 1,
    "losses": 3,
    "approvals": 0,
@@ -1837,7 +1862,9 @@
     "temporal:regime",
     "signals:bands.low,impulse.low,ladder,trend"
    ],
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -2 (0/3)"
+   ],
    "score": -2
   },
   "g07-orrery-calm": {
@@ -1848,7 +1875,7 @@
    "kind": "tweak",
    "brief": "Note-driven ('too fast to see anything'): 3.7x slower bpm-rational rotation, 2-3 larger stages, slower recoil/rebuild, deeper background + brighter edge-light; drop restores old full speed.",
    "rating": 953.5,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 3,
    "approvals": 2,
@@ -1864,7 +1891,8 @@
     "signals:bpm,beatphase,ladder,spectrum24"
    ],
    "notes": [
-    "even this seems way too fast most of the time to see whats going on"
+    "even this seems way too fast most of the time to see whats going on",
+    "orchestrator 2026-08-19: cut: -1, superseded escapement attempts"
    ],
    "score": -1
   },
@@ -1952,7 +1980,7 @@
    "kind": "tweak",
    "brief": "Mirror-ladder style: mirrored edifice builds bar-by-bar (foundation/pillars/span/crown), phrase = ignite + hard cut to empty stage, skyline accumulates, section = skyline inversion; kick slams elements into place.",
    "rating": 923.5,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 5,
    "approvals": 0,
@@ -1968,7 +1996,8 @@
     "signals:ladder,beatphase,impulse,genome"
    ],
    "notes": [
-    "not sure what the idea is here"
+    "not sure what the idea is here",
+    "orchestrator 2026-08-19: cut: -5, \"not sure what the idea is\""
    ],
    "score": -5
   },
@@ -2156,7 +2185,7 @@
    "kind": "tweak",
    "brief": "Radical fix for 'spinning sooo fast': escapement clock \u2014 static gears tick one tooth per beat/bar/phrase/section; drop = clock runs free. (Post-fix: analytic spring, NaN firewalls, clamped feedback.)",
    "rating": 968.7,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 2,
    "approvals": 0,
@@ -2168,7 +2197,9 @@
     "temporal:tick-hierarchy",
     "signals:beatphase,ladder,impulse"
    ],
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -2, orrery line 3 strikes (concept survives in g06-orrery)"
+   ],
    "score": -2
   },
   "g08-voyage-beatgate": {
@@ -2212,7 +2243,7 @@
    "kind": "tweak",
    "brief": "Strict EQ split: lows=geometry scale/warp, mids=color of everything, highs=detail density; deck EQ knobs sweep one property each.",
    "rating": 984.0,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 1,
    "approvals": 0,
@@ -2224,7 +2255,9 @@
     "temporal:regime",
     "signals:eq,bands,decks"
    ],
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -1"
+   ],
    "score": -1
   },
   "g08-odyssey-beat": {
@@ -2305,7 +2338,7 @@
    "kind": "tweak",
    "brief": "Beat facet-stamp advances around the relief (bar position readable), bar=rotation notch, phrase=material bank hard cut; kick slams the lit wedge.",
    "rating": 984.0,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 1,
    "approvals": 0,
@@ -2317,7 +2350,9 @@
     "temporal:beat-stamp",
     "signals:beatphase,ladder,spectrum24"
    ],
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -1 (washout history)"
+   ],
    "score": -1
   },
   "g08-shards-storm": {
@@ -2376,7 +2411,7 @@
    "kind": "tweak",
    "brief": "EQ split: lows=tunnel geometry/speed, mids=wall color, highs=texture detail; beat=runway ring lights advancing down the tunnel.",
    "rating": 968.7,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 2,
    "approvals": 0,
@@ -2388,7 +2423,9 @@
     "temporal:runway",
     "signals:eq,bands,beatphase,ladder"
    ],
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -2"
+   ],
    "score": -2
   },
   "g08-tunnel-beat": {
@@ -2432,7 +2469,7 @@
    "kind": "tweak",
    "brief": "Liked novel + band ownership aligned with tiers: lows own beat kernel, mids own frame/scene color, highs own seams/stars; EQ kills strip one stratum's property.",
    "rating": 984.0,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 1,
    "approvals": 0,
@@ -2444,7 +2481,9 @@
     "temporal:tier-cuts",
     "signals:eq,bands,ladder,beatphase"
    ],
-   "notes": [],
+   "notes": [
+    "orchestrator 2026-08-19: cut: -1"
+   ],
    "score": -1,
    "seen": 1
   },
@@ -2480,7 +2519,7 @@
    "kind": "tweak",
    "brief": "MEDIUM REPLACEMENT: dust -> 224 discrete flocking darts (16 squadrons); lows=cohesion, mids=color duos (violet/gold +2), highs=wingtip glints; kick ripple scatters, drop=murmuration frenzy.",
    "rating": 1015.3,
-   "status": "alive",
+   "status": "dead",
    "wins": 1,
    "losses": 0,
    "approvals": 0,
@@ -2494,7 +2533,8 @@
     "signals:bands,impulse,beatphase,ladder"
    ],
    "notes": [
-    "orchestrator: resurrected \u2014 rejection predated its forced-choice win (event-order artifact)"
+    "orchestrator: resurrected \u2014 rejection predated its forced-choice win (event-order artifact)",
+    "orchestrator 2026-08-19: cut: -1"
    ],
    "score": -1,
    "seen": 1
@@ -3004,6 +3044,126 @@
     "topology:layered-landscape",
     "temporal:time-of-day",
     "signals:spectrum24,bandsSlow,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g11-piston": {
+   "generation": 11,
+   "parents": [],
+   "kind": "novel",
+   "brief": "New BASS representation: WEIGHT \u2014 a massive press compresses the scene (squash-and-stretch), kick = stamp with elastic recovery; mids = buckling struts; highs = contact-seam glints.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:bass-weight",
+    "render:gl",
+    "signals:bandsSlow,impulse,ladder"
+   ],
+   "notes": []
+  },
+  "g11-tide": {
+   "generation": 11,
+   "parents": [],
+   "kind": "novel",
+   "brief": "New BASS representation: MASS \u2014 tide level rises/falls revealing/submerging genome rocks; kick = traveling breaker; buildup = drawback; highs = <=16 spray glints.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:bass-mass",
+    "render:canvas",
+    "signals:bandsSlow,impulse,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g11-shadow": {
+   "generation": 11,
+   "parents": [],
+   "kind": "novel",
+   "brief": "New PULSE representation: LIGHT \u2014 kick teleports the single light source (all shadows snap), bass = light height (shadow length); drop = beat-locked light walk at constant total luminance.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:pulse-light",
+    "render:canvas-flat",
+    "signals:impulse,bandsSlow,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g11-inhale": {
+   "generation": 11,
+   "parents": [],
+   "kind": "novel",
+   "brief": "New PULSE representation: BREATH \u2014 kick = sharp inhale (expansion attack, inverted), bass = lung volume, buildup = held breath, drop = beat-locked hyperventilation; mids = airflow ribbons (wantsWave).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:pulse-breath",
+    "render:canvas-flat",
+    "signals:bandsSlow,impulse,wave,ladder"
+   ],
+   "notes": []
+  },
+  "g11-crowd": {
+   "generation": 11,
+   "parents": [],
+   "kind": "novel",
+   "brief": "New PULSE representation: CROWD \u2014 rows of flat figures jump on kicks with back-propagating stagger; mids = sway waves; highs = <=4 camera flashes; drop = mosh.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:pulse-crowd",
+    "render:canvas-flat",
+    "signals:impulse,bandsSlow,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g11-frost": {
+   "generation": 11,
+   "parents": [],
+   "kind": "novel",
+   "brief": "INVERTED band roles: highs = dendritic frost growth, bass = thermal mass melting it, kick = thermal-shock crack; drop flavor by centroid (flash-freeze vs melt-out).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "repr:inverted-bands",
+    "render:canvas",
+    "signals:bandsSlow,impulse,centroid,ladder,genome"
    ],
    "notes": []
   }

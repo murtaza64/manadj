@@ -10,18 +10,20 @@
  * ease the metric growth — the quantization IS the aesthetic:
  *
  *   METRIC GROWTH GRAMMAR (the sculpture ASSEMBLES in bar-quantized steps):
- *     A phrase is 4 bars. Each bar adds one STRATUM to the 24-band relief:
+ *     A phrase is 8 bars (retimed — see the human note by PHRASE_BARS). The
+ *     first four bars each add one STRATUM to the 24-band relief:
  *       bar 0 : CORE          (the low lobes only — bare skeleton)
  *       bar 1 : EXPANSION      (mid shelves reveal)
  *       bar 2 : EXPANSION      (upper-mid shelves reveal)
  *       bar 3 : CREST          (fine high stipple + crest highlight)
+ *       bars 4-7 : the completed sculpture HOLDS until the phrase cut.
  *     The stratum count STEPS ON the bar line — hard, no ease (u_strata is an
  *     integer 0..3 the shader reads directly; each band's reveal is a step()
  *     against u_strata, so a whole shelf of relief pops in on the downbeat).
  *
- *   PHRASE BOUNDARY = MATERIAL HARD CUT. The completed sculpture cuts to a
- *   new MATERIAL BANK + PALETTE on the exact downbeat (`ladderBarIndex ??
- *   barIndex`) — one frame, no crossfade:
+ *   PHRASE BOUNDARY = MATERIAL HARD CUT (the MINOR change, every 8 bars). The
+ *   completed sculpture cuts to a new MATERIAL BANK + PALETTE on the exact
+ *   downbeat (`ladderBarIndex ?? barIndex`) — one frame, no crossfade:
  *       0 GLASS        cold blue caustics, crisp, chromatic
  *       1 OBSIDIAN     near-black volcanic sheen, hard specular
  *       2 OPAL         iridescent pastel-free rainbow shimmer
@@ -29,7 +31,7 @@
  *     Each bank is a genuinely distinct hue family (bright, saturated). Then
  *     the strata reset to 0 and the sculpture regrows.
  *
- *   SECTION BOUNDARY = TECTONIC CLEAR. Every 16 bars the accumulated
+ *   SECTION BOUNDARY = TECTONIC CLEAR (the MAJOR change, every 16 bars). The accumulated
  *   sculpture FRACTURES and subsides (fast, solid — a radial fold + collapse),
  *   a new epoch begins on a DISTANT material bank (bank stride, bigger delta).
  *
@@ -44,8 +46,9 @@
  *
  * Song genome (trackId, pattern g02-julia / materia-deep): base symmetry,
  * material lean, ripple/palette scalars, stable per song. Chroma-preserving
- * soft knee. Photosensitivity floor respected: cuts are ≤1 per 4 bars, no
- * saturated-red strobe, moderate luminance steps. u_spectrum EXACTLY [24].
+ * soft knee. Photosensitivity floor respected: cuts are ≤1 per 8 bars (phrase
+ * retime), no saturated-red strobe, moderate luminance steps. u_spectrum
+ * EXACTLY [24].
  */
 
 import { createGlRenderer } from '../glPreset';
@@ -95,6 +98,7 @@ uniform float u_matCut;     // 0..1 fresh material-cut flash (decays, photosafe)
 uniform float u_fracture;   // 0..1 section tectonic fracture/subside (decays)
 uniform float u_dropFull;   // 0..1 drop-on-boundary full-relief luminosity
 uniform float u_urgency;    // buildup assembly urgency (faster within-step motion)
+uniform float u_specHue;    // spectral hue anchor (JS ~1s EMA of centroid) 0..1
 uniform float u_spectrum[24];
 
 float hash(vec2 p) {
@@ -159,6 +163,29 @@ float sculpt(float ang, float r, float t) {
   return disp;
 }
 
+// HSV round-trip for a value-preserving hue rotation. Used to re-anchor the
+// material banks' hue families to spectral content (u_specHue) so the palette
+// is not a hardcoded blue<->red axis. Value (brightness) is untouched, so the
+// change is chroma-only.
+vec3 rgb2hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  float e = 1.0e-10;
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+vec3 hsv2rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+// Rotate a color's hue by the spectral anchor (chroma-only: value preserved).
+vec3 specAnchor(vec3 col) {
+  vec3 h = rgb2hsv(col);
+  h.x = fract(h.x + (u_specHue - 0.5));
+  return hsv2rgb(h);
+}
+
 // ---- MATERIAL BANKS (hue families; HARD CUT per phrase). Bright, saturated
 // (repo dislikes pastels). Each returns a base color from a field coordinate.
 vec3 matGlass(float f, float temp) {
@@ -194,6 +221,9 @@ vec3 material(float f, float temp) {
   c = b > 0.5 ? matObsidian(f, temp) : c;
   c = b > 1.5 ? matOpal(f, temp) : c;
   c = b > 2.5 ? matLava(f, temp) : c;
+  // Re-anchor the bank hue family to spectral content (chroma only) so the
+  // banks are not a fixed blue<->red axis feeding red/blue feedback dust.
+  c = specAnchor(c);
   c *= 1.0 + 0.3 * u_matCut; // the fresh-cut flash brightens (moderate).
   return c;
 }
@@ -316,7 +346,7 @@ void main() {
   fresh += mix(matCol, vec3(1.0, 0.9, 0.8), 0.4) * fracShell * (1.0 + crackNet) * (1.2 + 1.0 * u_drop);
 
   // MATERIAL-CUT flash: a brief, moderate expanding shell marking the phrase
-  // hard cut to the new material (rate-limited ≤1 per 4 bars — photosafe).
+  // hard cut to the new material (rate-limited ≤1 per 8-bar phrase — photosafe).
   float cutR = 0.08 + (1.0 - u_matCut) * 0.45;
   float cutShell = exp(-pow((r - cutR) * 6.0, 2.0)) * u_matCut;
   fresh += matCol * cutShell * 1.3;
@@ -355,9 +385,16 @@ void main() {
 }
 `;
 
-const PHRASE_BARS = 4;
+// RETIME (human note "changes one tier too frequent, try to change every 8
+// bars (minor change) or 16 bars (major change)"): the PHRASE material/palette
+// cut (the minor change) moves from every 4 bars to every 8. The SECTION
+// tectonic clear (the major change) stays at 16. Strata still step per bar and
+// assemble the sculpture over the first STRATA bars, then hold until the 8-bar
+// phrase cut.
+const PHRASE_BARS = 8;
 const SECTION_BARS = 16;
-/** Strata assembled per phrase: bar 0 core .. bar 3 crest. */
+/** Strata assembled over the first STRATA bars of a phrase: bar 0 core .. bar 3
+ *  crest, then the completed sculpture holds until the 8-bar phrase cut. */
 const STRATA = 4;
 /** Material banks: glass / obsidian / opal / basalt-lava. */
 const MATERIAL_BANKS = 4;
@@ -414,6 +451,7 @@ export const g07MateriaMetricPreset: VisualizerPreset = {
     let smoothDrop = 0;
     let smoothBuildup = 0;
     let smoothSwell = 0;
+    let smoothSpecHue = 0.5;
     let section = 0;
     let flip = 0;
     // Song genome + rebirth.
@@ -472,6 +510,10 @@ export const g07MateriaMetricPreset: VisualizerPreset = {
           (frame.bands.low + frame.bands.mid + frame.bands.high) / 2
         );
         const sustained = Math.min(1, energyNow * 1.4);
+
+        // Spectral hue anchor: ~1s EMA of centroid; re-anchors the material
+        // banks' hue family so the palette is not a fixed blue<->red axis.
+        smoothSpecHue += (frame.centroid - smoothSpecHue) * (1 - Math.exp(-dt / 1.0));
 
         // Inner-flow phase: BPM-locked when gridded, slow drift otherwise.
         const flowSpeed = frame.beat?.bpm ? ((frame.beat.bpm / 60) * Math.PI * 2) / 8 : 0.35;
@@ -638,6 +680,7 @@ export const g07MateriaMetricPreset: VisualizerPreset = {
           u_fracture: Math.min(1, fracture),
           u_dropFull: Math.min(1, dropFull),
           u_urgency: Math.min(1, smoothBuildup),
+          u_specHue: smoothSpecHue,
           u_spectrum: spectrum,
         };
       },

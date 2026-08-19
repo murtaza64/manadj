@@ -126,6 +126,12 @@ class TunnelBeatRenderer implements PresetRenderer {
     const cx = width / 2;
     const cy = height / 2;
     const unit = Math.min(width, height);
+    // BUGFIX (human: "outer ring is smaller than viewport, so i can sometimes
+    // see past edges"): coverage must be measured against the full canvas
+    // DIAGONAL (sqrt(w^2+h^2)/2), not the min dimension — at wide/tall aspect
+    // ratios the corners sit outside a min-dim circle and the mouth ring left
+    // gaps to the edge. `diag` is the radius that reaches the corners.
+    const diag = Math.sqrt(width * width + height * height) / 2;
 
     // Smoothed drop drive — continuous-rush floor rides max(drop, energy)
     // so it holds through a drop plateau.
@@ -233,6 +239,8 @@ class TunnelBeatRenderer implements PresetRenderer {
     const sat = this.regimeSat;
 
     // --- Fresh geometry: segment-textured wall ring ---------------------
+    // The receding wall ring near the vanishing point; the feedback zoom grows
+    // it outward frame-over-frame to build the tunnel depth.
     const radius = unit * (0.1 + 0.15 * low);
     // Wall corrugation frequency/phase is the current bar's genome segment;
     // the lurch momentarily deepens the wobble (the walls flex on the snap).
@@ -253,9 +261,34 @@ class TunnelBeatRenderer implements PresetRenderer {
     ctx.closePath();
     // Ring lightness: soft-knee ceiling (chroma preserved), kicked on the
     // lurch (localized pulse, photosafe), harder in harder regimes.
-    const wallL = 40 + 26 * low + 18 * hardness * lurchShape * kick;
-    ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${Math.min(84, wallL)}%)`;
+    // BUGFIX (human: "could be a little less white"): deepened the base tone
+    // and lowered the lightness ceiling a notch (84 -> 76, base 40 -> 32,
+    // kick gain 18 -> 14) so the wall keeps its hue instead of washing white.
+    const wallL = 32 + 24 * low + 14 * hardness * lurchShape * kick;
+    ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${Math.min(76, wallL)}%)`;
     ctx.lineWidth = Math.max(2, unit * (0.003 + lerp(0.016, 0.007, hardness) + 0.012 * lurchShape * low));
+    ctx.stroke();
+
+    // --- Mouth wall: full-viewport coverage ring ------------------------
+    // BUGFIX (human: "outer ring is smaller than viewport, so i can sometimes
+    // see past edges"): every frame stamp a dim wall just PAST the corners
+    // (>= 1.02 * diag) so the outermost geometry always covers the full canvas
+    // at any aspect ratio, even when the feedback zoom stalls between lurches.
+    // Kept low-lightness (a deep mouth rim, not a bright hoop) to avoid glare.
+    const mouthR = diag * (1.03 + 0.06 * low);
+    ctx.beginPath();
+    for (let i = 0; i <= segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const seg = Math.sin(angle * this.segFreq + this.segPhase) * (diag * 0.02);
+      const r = mouthR + seg;
+      const x = cx + Math.cos(angle) * r;
+      const y = cy + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${Math.min(40, 18 + 16 * low)}%)`;
+    ctx.lineWidth = Math.max(unit * 0.04, diag * 0.08);
     ctx.stroke();
 
     // --- SNARE = wall glint ripple --------------------------------------
@@ -266,7 +299,7 @@ class TunnelBeatRenderer implements PresetRenderer {
       const gr = radius * (1.15 + 0.25 * (1 - this.glint));
       ctx.beginPath();
       ctx.arc(cx, cy, gr, 0, Math.PI * 2);
-      ctx.strokeStyle = `hsl(${(hue + 40) % 360}, ${sat}%, ${Math.min(85, 45 + 35 * this.glint)}%)`;
+      ctx.strokeStyle = `hsl(${(hue + 40) % 360}, ${sat}%, ${Math.min(74, 40 + 30 * this.glint)}%)`;
       ctx.lineWidth = Math.max(1.5, unit * 0.005 * this.glint);
       ctx.stroke();
     }
@@ -285,7 +318,7 @@ class TunnelBeatRenderer implements PresetRenderer {
         ctx.beginPath();
         ctx.moveTo(-radius * 1.3, 0);
         ctx.lineTo(radius * 1.3, 0);
-        ctx.strokeStyle = `hsl(${(hue + 180) % 360}, ${sat}%, ${Math.min(80, 40 + 30 * lurchShape)}%)`;
+        ctx.strokeStyle = `hsl(${(hue + 180) % 360}, ${sat}%, ${Math.min(70, 36 + 26 * lurchShape)}%)`;
         ctx.lineWidth = Math.max(1.5, unit * 0.004 * lurchShape);
         ctx.stroke();
         ctx.restore();
@@ -302,7 +335,7 @@ class TunnelBeatRenderer implements PresetRenderer {
       const angle = Math.random() * Math.PI * 2;
       const distance = radius * (0.9 + Math.random() * 0.4);
       const size = unit * (0.0015 + 0.0032 * Math.random());
-      ctx.fillStyle = `hsl(${(hue + 150 + Math.random() * 60) % 360}, ${Math.max(60, sat)}%, 76%)`;
+      ctx.fillStyle = `hsl(${(hue + 150 + Math.random() * 60) % 360}, ${Math.max(60, sat)}%, 68%)`;
       ctx.beginPath();
       ctx.arc(
         cx + Math.cos(angle) * distance,

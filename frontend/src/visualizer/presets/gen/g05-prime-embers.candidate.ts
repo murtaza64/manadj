@@ -41,6 +41,7 @@ const FRAGMENT =
   'uniform float u_kick;\n' +
   'uniform float u_snare;\n' +
   'uniform float u_centroid;\n' +
+  'uniform float u_specHue;   // slow-tracked centroid (~1s EMA): dust hue follows spectral content\n' +
   'uniform float u_drop;\n' +
   'uniform float u_buildup;\n' +
   'uniform float u_zoom;\n' +
@@ -173,7 +174,8 @@ const FRAGMENT =
   '  float on = step(gate - 0.09 * u_spawn, hash(sc * 1.618 + 9.7));\n' +
   '  float size = (0.5 + 1.5 * hash(sc.yx * 2.113)) * sizeScale;\n' +
   '  float bright = 0.4 + 0.6 * hash(sc + 17.9);\n' +
-  '  vec3 tint = mix(vec3(0.65, 0.78, 1.0), vec3(1.0, 0.85, 0.6), hash(sc.yx + 29.3));\n' +
+  '  // Star tint samples the traveling palette at each star own hash phase.\n' +
+  '  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02);\n' +
   '  return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;\n' +
   '}\n' +
   '\n' +
@@ -252,7 +254,9 @@ const FRAGMENT =
   '  // bassline itself (not just kicks) — sustained lows keep the center alive.\n' +
   '  float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;\n' +
   '  float gravityGain = u_low * (0.5 + 0.8 * u_kick);\n' +
-  '  fresh += mix(vec3(0.55, 0.07, 0.04), LOW, 0.5)\n' +
+  '  // Gravity ripple color: a spectral-hue-biased warm palette slice.\n' +
+  '  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);\n' +
+  '  fresh += gravityColor\n' +
   '    * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;\n' +
   '  // The event horizon ring: a wide ember glow + a thin white-hot arc,\n' +
   '  // both jittering with the voltage field — THE bass element. Interior is\n' +
@@ -264,7 +268,7 @@ const FRAGMENT =
   '  float ringGlow = exp(-pow((r - horizon - arcJitter) * 52.0, 2.0));\n' +
   '  float ringCore = exp(-pow((r - horizon - arcJitter) * 210.0, 2.0));\n' +
   '  float bassOn = smoothstep(0.06, 0.3, u_low);\n' +
-  '  vec3 chargeColor = mix(vec3(0.9, 0.2, 0.1), vec3(1.0, 0.75, 0.4), clamp(u_charge, 0.0, 1.0));\n' +
+  '  vec3 chargeColor = mix(palette(0.02 + u_specHue * 0.5), palette(0.12 + u_specHue * 0.5), clamp(u_charge, 0.0, 1.0));\n' +
   '  chargeColor = mix(chargeColor, vec3(1.0, 0.97, 0.92), clamp(u_charge - 0.6, 0.0, 0.4) * 2.5);\n' +
   '  fresh += chargeColor * ringGlow * (0.12 + 0.6 * u_low + 1.1 * u_kick + 0.5 * u_charge);\n' +
   '  fresh += mix(chargeColor, vec3(1.0), 0.5 * u_kick) * ringCore\n' +
@@ -286,7 +290,7 @@ const FRAGMENT =
   '  float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);\n' +
   '  // Anamorphic lens streak across the core — the spacey money shot.\n' +
   '  float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));\n' +
-  '  fresh += mix(vec3(0.6, 0.75, 1.0), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);\n' +
+  '  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);\n' +
   '  // The disk: spiral lanes + clouds in the TRAVELING palette.\n' +
   '  // spread controls disk BREADTH — a narrow sound concentrates the lanes\n' +
   '  // into a tight bright band (steeper radial falloff), a wide sound spreads\n' +
@@ -300,7 +304,7 @@ const FRAGMENT =
   '  // Wide phase span + spatial drift: the old 0.7·cloudField span sampled\n' +
   '  // under half a palette period (and blend positions average cosines\n' +
   '  // flatter still) — dust came out monochrome at many slider stops.\n' +
-  '  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4);\n' +
+  '  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);\n' +
   '  // Kick reverberation: the traveling wavefront LIGHTS the dust it passes\n' +
   '  // through (displacement alone read as subtle; this makes it audible).\n' +
   '  float reverb = 1.0 + 2.6 * rippleWave;\n' +
@@ -317,7 +321,9 @@ const FRAGMENT =
   '  float shimmer = 0.6 + 0.4 * sin(t * 13.0 + wisp * 24.0);\n' +
   '  float silky = mix(4.0, 2.4, clamp(u_flatness, 0.0, 1.0));\n' +
   '  float grain = mix(1.0, 0.55 + 0.9 * hash(gl_FragCoord.xy + fract(t) * 53.0), clamp(u_flatness, 0.0, 1.0));\n' +
-  '  vec3 electric = mix(vec3(0.4, 0.9, 1.0), palette(0.6 + t * 0.03), 0.65);\n' +
+  '  // DISTINCT DUST HUE: high nebula samples the palette at +0.35 phase from\n' +
+  '  // the mid dust so the bands read as different dust kinds.\n' +
+  '  vec3 electric = palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);\n' +
   '  fresh += electric * pow(wisp, silky) * shimmer * grain * smoothstep(0.12, 0.5, r)\n' +
   '    * (0.08 + 1.7 * u_high) * u_dust * reverb;\n' +
   '  sky += fresh * (1.0 - u_decay) * (3.2 + 1.6 * u_sustain);\n' +
@@ -336,7 +342,7 @@ const FRAGMENT =
   '    float ringR = 0.1 + 0.05 * u_kick;\n' +
   '    float shock = exp(-pow((r - ringR) * 38.0, 2.0))\n' +
   '      + 0.6 * exp(-pow((r - ringR * 1.7) * 30.0, 2.0));\n' +
-  '    sky += mix(LOW, vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);\n' +
+  '    sky += mix(palette(0.05 + u_specHue * 0.5), vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);\n' +
   '    // Whole-frame punch: a brief lift so the kick lands everywhere.\n' +
   '    sky *= 1.0 + 0.1 * u_kick;\n' +
   '  }\n' +
@@ -400,6 +406,8 @@ const g05PrimeEmbers: VisualizerPreset = {
     // `emberScatter` is a fast-decaying snare gust that jostles the embers.
     let emberDrift = 0;
     let emberScatter = 0;
+    // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase.
+    let slowCentroid = 0.5;
     return createGlRenderer({
       fragment: FRAGMENT,
       feedback: true,
@@ -473,6 +481,8 @@ const g05PrimeEmbers: VisualizerPreset = {
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
         // Whole-field ignition rides max(drop, energy).
         const ignite = Math.min(1, Math.max(drop, energy));
+        // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
+        slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
         return {
           u_time: frame.time,
           u_low: frame.bands.low,
@@ -481,6 +491,7 @@ const g05PrimeEmbers: VisualizerPreset = {
           u_kick: frame.impulse.low,
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
+          u_specHue: slowCentroid,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,

@@ -76,6 +76,7 @@ uniform float u_high;
 uniform float u_kick;
 uniform float u_snare;
 uniform float u_centroid;  // harmonic content: palette phase
+uniform float u_specHue;   // slow-tracked centroid (~1s EMA): dust hue follows spectral content
 uniform float u_drop;      // excitement WITH bass
 uniform float u_buildup;   // excitement WITHOUT bass
 uniform float u_zoom;
@@ -162,7 +163,8 @@ vec3 starScatter(vec2 c, float density, float sizeScale, float gate, float gain)
   float on = step(gate - 0.09 * u_spawn, hash(sc * 1.618 + 9.7));
   float size = (0.5 + 1.5 * hash(sc.yx * 2.113)) * sizeScale;
   float bright = 0.4 + 0.6 * hash(sc + 17.9);
-  vec3 tint = mix(vec3(0.65, 0.78, 1.0), vec3(1.0, 0.85, 0.6), hash(sc.yx + 29.3));
+  // Star tint samples the traveling palette at each star own hash phase.
+  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02);
   return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;
 }
 
@@ -234,7 +236,9 @@ void main() {
   float corona = exp(-rc * (7.0 - 3.0 * u_low));
   float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;
   float gravityGain = u_low * (0.5 + 0.8 * u_kick);
-  fresh += mix(vec3(0.55, 0.07, 0.04), LOW, 0.5)
+  // Gravity ripple color: a spectral-hue-biased warm palette slice.
+  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);
+  fresh += gravityColor
     * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;
 
   // ---- THE SEGMENTED CHARGING RING. The horizon ring is split into bpb
@@ -246,7 +250,7 @@ void main() {
   float ringGlow = exp(-pow((r - horizon - arcJitter) * 52.0, 2.0));
   float ringCore = exp(-pow((r - horizon - arcJitter) * 210.0, 2.0));
   float bassOn = smoothstep(0.06, 0.3, u_low);
-  vec3 chargeColor = mix(vec3(0.9, 0.2, 0.1), vec3(1.0, 0.75, 0.4), clamp(u_charge, 0.0, 1.0));
+  vec3 chargeColor = mix(palette(0.02 + u_specHue * 0.5), palette(0.12 + u_specHue * 0.5), clamp(u_charge, 0.0, 1.0));
   chargeColor = mix(chargeColor, vec3(1.0, 0.97, 0.92), clamp(u_charge - 0.6, 0.0, 0.4) * 2.5);
   // Which segment does this pixel's angle belong to (0..bpb-1)?
   float segIndexF = floor(angTurn * bpb);
@@ -266,13 +270,15 @@ void main() {
     * (0.3 + 1.3 * bassOn + 2.4 * u_kick + 0.8 * u_charge) * ringAmt;
 
   // Coal heart (bass identity, always present).
-  vec3 coal = vec3(0.55, 0.07, 0.04);
+  // Coal heart: a deep, low-luma slice of the traveling palette (spectral-hue
+  // biased) instead of a fixed dark red — still whitens under a kick.
+  vec3 coal = palette(0.0 + u_specHue * 0.5) * 0.55;
   fresh += mix(coal, vec3(1.0, 0.8, 0.7), 0.5 * u_kick) * heart * (0.5 + 1.2 * u_low + 1.4 * u_kick);
   fresh += mix(coal, LOW, 0.4) * corona * (0.1 + 0.6 * u_low + 0.35 * u_kick);
   float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);
   // Anamorphic lens streak.
   float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));
-  fresh += mix(vec3(0.6, 0.75, 1.0), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);
+  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);
 
   // ---- THE LIT LANE SECTOR (runway lights). The disk is divided into bpb
   // angular sectors; one advances with the beat (u_sectorPos). A smooth cosine
@@ -299,7 +305,7 @@ void main() {
   float lanes = pow(0.5 + 0.5 * arm, lanePow) * smoothstep(0.06, 0.2, r) * exp(-r * 1.8);
   float cloudField = fbm(vec2(ang * 2.2 + r * 3.0 - t * 0.15, r * 5.0 + t * 0.06));
   float cloud = pow(cloudField, 2.4);
-  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4);
+  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);
   float reverb = 1.0 + 2.6 * rippleWave;
   // Lanes now depend on the sector gate (structural beat gating), and their
   // amount rides a modest dust gain (no longer the mid — the mid is width).
@@ -314,7 +320,9 @@ void main() {
   float laneEdge = pow(0.5 + 0.5 * arm, 8.0); // sharpen to the lane crest
   vec3 glint = starScatter(c * 1.7 + 31.7, 26.0, 1.2, 0.965, u_glint)
     * laneEdge * smoothstep(0.08, 0.5, r) * sectorGate * centerDim;
-  fresh += mix(vec3(0.7, 0.9, 1.0), palette(0.55 + t * 0.03), 0.4) * glint * reverb;
+  // DISTINCT DUST HUE: the crystalline glints (alt-high) sample the palette at
+  // +0.35 phase from the mid dust so the high band reads as a different kind.
+  fresh += palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8) * glint * reverb;
 
   sky += fresh * (1.0 - u_decay) * (3.2 + 1.6 * u_sustain);
 
@@ -323,7 +331,7 @@ void main() {
     float ringR = 0.1 + 0.05 * u_kick;
     float shock = exp(-pow((r - ringR) * 38.0, 2.0))
       + 0.6 * exp(-pow((r - ringR * 1.7) * 30.0, 2.0));
-    sky += mix(LOW, vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);
+    sky += mix(palette(0.05 + u_specHue * 0.5), vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);
     // Sector slam: a SOLID localized lift on the currently-lit sector only
     // (kicks are solid, localized — NOT a fullscreen flash; photosafe).
     float slamBand = smoothstep(0.08, 0.22, r) * exp(-r * 1.6);
@@ -387,6 +395,8 @@ export const g08VoyageBeatgatePreset: VisualizerPreset = {
     let sectorSlam = 0; // kick slam on the lit sector, decays
     let gridFill = 0; // drop: light every sector/segment, smoothed
     let lastBeatInBar = -1;
+    // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase.
+    let slowCentroid = 0.5;
 
     return createGlRenderer({
       fragment: FRAGMENT,
@@ -479,6 +489,8 @@ export const g08VoyageBeatgatePreset: VisualizerPreset = {
           (0.08 + 0.7 * lift + 3.6 * frame.impulse.low * (0.5 + 0.5 * lift)) * speed * dt -
           0.3 * buildup * dt;
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
+        // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
+        slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
 
         return {
           u_time: frame.time,
@@ -488,6 +500,7 @@ export const g08VoyageBeatgatePreset: VisualizerPreset = {
           u_kick: frame.impulse.low,
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
+          u_specHue: slowCentroid,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,

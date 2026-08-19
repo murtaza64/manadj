@@ -45,6 +45,20 @@
  *  color base changes on musical time, not per-frame flicker; the discrete
  *  moves (bar step, beat swap) land on musical boundaries.
  *
+ * REFINEMENT (human note, in place): "there is like a 'seam' where some
+ * versions of the spiral 'open up' from, which doesnt look good. still some
+ * jitter". Two fixes:
+ *  - SEAM: the seam is the atan2 branch cut at u = +/-pi. sin(arms*u) only
+ *    tiles 2*pi when arms is an INTEGER; the old per-frame morph swept a
+ *    FRACTIONAL arm count through the cut → the discontinuity the spiral
+ *    "opens up" from. Arms is now always the family integer, and family arm
+ *    changes CROSSFADE two integer-arm fields (u_armsPrev -> u_arms, u_armMix)
+ *    rather than interpolating the count. Twist (radial log-r term) stays
+ *    continuous — it never touches the branch cut.
+ *  - REMAINING JITTER: the pre-drop anticipation term recomputed the twist
+ *    target from RAW barPhase every frame; that ramp is now glided (tau
+ *    0.30 s >= 250 ms) so no per-frame rate discontinuity survives.
+ *
  * PHOTOSAFETY (kept intact from the parents): flicker-capped clock, analytic
  * Nyquist gray-out, no black/white or saturated-red pairs, equal-luma
  * endpoints (the A/B swap is a pure chroma exchange).
@@ -66,7 +80,9 @@ uniform vec2 u_res;
 uniform float u_time;
 uniform float u_phase;      // INTEGRATED rotation phase (radians), constant vel
 uniform float u_zoomPhase;  // integrated inward zoom phase (log-r shift)
-uniform float u_arms;       // angular band count (family + phrase drift)
+uniform float u_arms;       // INTEGER angular band count (current target)
+uniform float u_armsPrev;   // INTEGER angular band count (previous, during a crossfade)
+uniform float u_armMix;     // 0..1 crossfade PREV->current integer-arm field
 uniform float u_twist;      // radial band density (family + phrase drift)
 uniform float u_fu;         // family: angular term enable/weight
 uniform float u_fv;         // family: radial term enable/weight
@@ -146,6 +162,31 @@ float layer(float u, float v, float r, float fuw, float fvw, float rot, float px
   return clamp(sin(base + rot) / width, -1.0, 1.0);
 }
 
+// FIX (human note "there is like a 'seam' where some versions of the spiral
+// 'open up' from"): the seam is the atan2 branch cut at u = +/-pi. The angular
+// term sin(arms*u + ...) only tiles 2*pi cleanly when arms is an INTEGER; a
+// fractional arm count (the old per-frame morph interpolated it) leaves a
+// discontinuity at the cut — the place the spiral "opens up" from. Arms is now
+// always an integer host-side; when the target integer changes we CROSSFADE two
+// integer-arm fields (u_armsPrev -> u_arms via u_armMix) instead of sweeping a
+// fractional count through the seam. Twist (the radial log-r term) stays
+// continuous — it is angle-smooth and never hits the branch cut.
+float bandFor(float arms, float u, float v, float r, float pxScale, out float ampMin) {
+  float amp1;
+  float rot1 = mix(u_phase, 0.0, u_mandala);
+  float e1 = layer(u, v, r, u_fu * arms, u_fv * u_twist, rot1, pxScale, amp1);
+  float band = e1 * amp1;
+  ampMin = amp1;
+  if (u_mode2 > 0.5) {
+    float amp2;
+    float rot2 = u_phase * u_rate2;
+    float e2 = layer(u, v, r, u_fu2 * arms, u_fv2 * u_twist, rot2, pxScale, amp2);
+    band *= e2 * amp2;
+    ampMin = min(ampMin, amp2);
+  }
+  return band;
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_res;
   float aspect = u_res.x / u_res.y;
@@ -157,21 +198,18 @@ void main() {
 
   float pxScale = 2.0 / u_res.y;
 
-  float fuw = u_fu * u_arms;
-  float fvw = u_fv * u_twist;
-
-  float amp1;
-  float rot1 = mix(u_phase, 0.0, u_mandala);
-  float e1 = layer(u, v, r, fuw, fvw, rot1, pxScale, amp1);
-  float band = e1 * amp1;
-  float ampMin = amp1;
-
-  if (u_mode2 > 0.5) {
-    float amp2;
-    float rot2 = u_phase * u_rate2;
-    float e2 = layer(u, v, r, u_fu2 * u_arms, u_fv2 * u_twist, rot2, pxScale, amp2);
-    band *= e2 * amp2;
-    ampMin = min(ampMin, amp2);
+  // Two INTEGER-arm fields, crossfaded — never a fractional arm count through
+  // the branch cut (no seam). When u_armMix == 1 (settled) only the current
+  // integer field contributes.
+  float ampA;
+  float bandA = bandFor(u_arms, u, v, r, pxScale, ampA);
+  float band = bandA;
+  float ampMin = ampA;
+  if (u_armMix < 0.999) {
+    float ampB;
+    float bandB = bandFor(u_armsPrev, u, v, r, pxScale, ampB);
+    band = mix(bandB, bandA, u_armMix);
+    ampMin = mix(ampB, ampA, u_armMix);
   }
 
   float bv = band * 0.5 + 0.5;
@@ -284,7 +322,12 @@ const g09HypnoGlidePreset: VisualizerPreset = {
     let slowFlatness = 0.5;
     // Family selection + morph.
     let familyIndex = 0;
+    // ARM COUNT is ALWAYS an integer (seam fix). curArms = current target
+    // integer; prevArms = the integer we are crossfading FROM; armMix ramps
+    // 0->1 over the transition. Twist stays continuous (radial term, no seam).
     let curArms = FAMILIES[0].arms;
+    let prevArms = FAMILIES[0].arms;
+    let armMix = 1;
     let curTwist = FAMILIES[0].twist;
     let lastSection = -1;
     // Per-bar hue-offset stepping + per-beat A/B swap (integer state).
@@ -293,6 +336,8 @@ const g09HypnoGlidePreset: VisualizerPreset = {
     let offsetShift = 0; // section rotates which offsets come up
     let lastBeatInBar = -1;
     let swap = 0; // 0/1 toggled each whole beat (beat-edge detector)
+    // Glided pre-drop anticipation ramp (jitter fix — never rides raw barPhase).
+    let antic = 0;
 
     return createGlRenderer({
       fragment: FRAGMENT,
@@ -361,16 +406,31 @@ const g09HypnoGlidePreset: VisualizerPreset = {
           lastBeatInBar = beatInBar;
         }
 
-        // --- Phrase drift: arms/twist wander slowly within the family, then
-        // ease toward the family base.
+        // --- Phrase drift: TWIST wanders continuously (radial term — smooth,
+        // no seam), eased toward the family base. ARMS is quantized to the
+        // family integer and never interpolated.
         const density = frame.params.density ?? 1;
-        const anticipation = phraseBar === 3 ? barPhase : 0;
-        const targetArms = targetFamily.arms;
+        // FIX (jitter): the pre-drop anticipation term rode the RAW barPhase,
+        // which recomputes the twist target from an unsmoothed input every frame
+        // — a per-frame rate wobble. Glide the anticipation ramp itself (tau
+        // 0.30 s >= 250 ms) so the twist target changes smoothly.
+        const anticipationTarget = phraseBar === 3 ? barPhase : 0;
+        antic += (anticipationTarget - antic) * (1 - Math.exp(-dt / 0.3));
+        const targetArmsInt = Math.max(1, Math.round(targetFamily.arms));
         const targetTwist =
-          targetFamily.twist * density * (1 + 0.12 * anticipation + 0.15 * smoothBuildup);
+          targetFamily.twist * density * (1 + 0.12 * antic + 0.15 * smoothBuildup);
         const morphAlpha = 1 - Math.exp(-dt / 2.0);
-        curArms += (targetArms - curArms) * morphAlpha;
         curTwist += (targetTwist - curTwist) * morphAlpha;
+
+        // ARM-COUNT CROSSFADE: when the target integer arm count changes, start
+        // a crossfade from the current integer field to the new one (tau 0.6 s)
+        // instead of sweeping a fractional count through the branch-cut seam.
+        if (targetArmsInt !== curArms) {
+          prevArms = curArms;
+          curArms = targetArmsInt;
+          armMix = 0;
+        }
+        armMix = Math.min(1, armMix + dt / 0.6);
 
         // --- Kick twist surge: instant attack, elastic (spring) recovery.
         const kick = frame.impulse.low;
@@ -438,6 +498,8 @@ const g09HypnoGlidePreset: VisualizerPreset = {
           u_phase: phase,
           u_zoomPhase: zoomPhase,
           u_arms: curArms,
+          u_armsPrev: prevArms,
+          u_armMix: armMix,
           u_twist: surgeTwist,
           u_fu: targetFamily.fu,
           u_fv: targetFamily.fv,

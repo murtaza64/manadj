@@ -21,6 +21,20 @@
  * Photosensitivity (WCAG 2.3.1): the palette is hot but transitions are
  * smooth; the whole-frame kick lift is rate-limited and small, and there is
  * no saturated-red fullscreen flashing.
+ *
+ * REFINEMENT (human note "could use more black, more effects of kicks/bass on
+ * the field of red", in place):
+ *   - DEEPER CHAR FLOOR: the resting whole-field grade is pulled from 0.70 to
+ *     0.46 base so far more of the frame is char-black at rest; energy + bass
+ *     earn the brightness back (see the final grade).
+ *   - KICK = MAGMA FISSURES: each kick opens a fresh network of solid glowing
+ *     crack lines across the dark field (fissureField), propagating outward and
+ *     COOLING from white-gold to crimson as they heal (age decay). A bass/kick
+ *     effect on the char field, not powder.
+ *   - HEAVY BASS = EMBER-BED SEETHE: a slow large-scale heave of the whole
+ *     field, displacement riding bandsSlow.low (u_seethe) — the molten bed
+ *     visibly seethes under sustained bass (motion-smooth, not per-transient).
+ *   Molten palette identity unchanged (all colors still route through magma()).
  */
 
 import { ADDITIVE_COLORS } from '../../../waveform/styles';
@@ -57,6 +71,12 @@ uniform float u_dust;
 uniform float u_palette;    // committed: only a subtle heat bias
 uniform float u_charge;
 uniform float u_spawnSnare;
+// --- REFINEMENT (human note "more black, more effects of kicks/bass on the
+// field of red"): kick magma FISSURES + heavy-bass ember-bed SEETHE.
+uniform float u_fissureAge;   // seconds since the last kick opened a fissure
+uniform float u_fissureAmp;   // that kick's strength (drives crack brightness)
+uniform float u_fissureSeed;  // per-kick seed so each crack network is new
+uniform float u_seethe;       // bandsSlow.low ember-bed heave amount (0..1)
 
 const vec3 LOW = ${rgb(ADDITIVE_COLORS[0])};
 const vec3 HIGH = ${rgb(ADDITIVE_COLORS[2])};
@@ -119,6 +139,27 @@ vec3 palette(float t) {
   return magma(heat);
 }
 
+// MAGMA FISSURE field (kick response): a network of solid glowing cracks that
+// OPEN across the dark char field on a kick and then COOL/HEAL as they age.
+// Built from a couple of angularly-gated ridge lines (thin, sharp) seeded per
+// kick so each crack network is new. The crack GROWS outward from the core
+// (front radius tracks age) and its glow cools from white-gold to crimson as
+// it heals. Solid lines (not powder) — this is a bass/kick effect on the dark
+// field, per the human note.
+float fissureField(vec2 c, float r, float ang, float age, float seed) {
+  // Wandering crack lines: sharp ridges in angle, jittered by fbm so they read
+  // as jagged fractures rather than clean spokes.
+  float jag = (fbm(vec2(ang * 3.0 + seed, r * 6.0)) - 0.5) * 1.4;
+  float a = ang + jag;
+  float lines = pow(0.5 + 0.5 * sin(a * 5.0 + seed * 6.28318), 40.0)
+    + 0.7 * pow(0.5 + 0.5 * sin(a * 8.0 - seed * 3.1), 40.0);
+  // The fracture opens outward: only lit inside a growing front, fading at the
+  // leading edge so cracks propagate rather than appear whole.
+  float front = 0.06 + age * 1.1;
+  float grow = smoothstep(front, front - 0.35, r) * smoothstep(0.02, 0.1, r);
+  return lines * grow;
+}
+
 float starShape(vec2 f, float size) {
   float d2 = dot(f, f);
   float core = exp(-d2 * 1100.0 / size);
@@ -156,7 +197,15 @@ void main() {
   float dsn = sin(drag);
   w = mat2(dcs, -dsn, dsn, dcs) * w;
   vec2 lensPull = dirW * lens * 0.055;
-  vec2 src = (w + churn + ripple + lensPull) / vec2(aspect, 1.0) + 0.5;
+  // EMBER-BED SEETHE (heavy bass): a slow, large-scale heave of the whole
+  // field, displacement riding bandsSlow.low (u_seethe) so the molten bed
+  // visibly seethes/heaves under sustained bass — motion-smooth (slow bands),
+  // not a per-transient jerk. Low spatial frequency = a bed swell, not churn.
+  vec2 seethe = vec2(
+    sin(c.y * 5.0 + t * 0.9) + 0.6 * sin(c.x * 3.0 - t * 0.6),
+    sin(c.x * 5.5 - t * 0.8) + 0.6 * sin(c.y * 3.5 + t * 0.7)
+  ) * u_seethe * 0.02;
+  vec2 src = (w + churn + ripple + lensPull + seethe) / vec2(aspect, 1.0) + 0.5;
 
   vec2 ab = dirW * (0.0012 + 0.004 * u_drop + 0.003 * u_kick + 0.01 * rippleWave)
     / vec2(aspect, 1.0);
@@ -206,6 +255,15 @@ void main() {
   // the white-gold flare.
   fresh += magma(0.08 + 0.8 * u_kick) * heart * (0.5 + 1.2 * u_low + 1.4 * u_kick);
   fresh += magma(0.22 + 0.3 * u_low) * corona * (0.1 + 0.6 * u_low + 0.35 * u_kick);
+
+  // MAGMA FISSURES (kick = cracks opening across the dark field). Solid glowing
+  // lines; the glow COOLS from white-gold at the moment of the strike to a deep
+  // crimson as the crack heals (exp decay on age). Gated on the kick fissure
+  // amp so it reads as a bass/kick event on the char field, not ambient.
+  float fissure = fissureField(c, r, ang, u_fissureAge, u_fissureSeed);
+  float fissureHeal = exp(-u_fissureAge * 1.8);            // cools/heals over ~0.55s
+  float fissureHeat = 0.85 - 0.55 * (1.0 - fissureHeal);  // white-gold -> crimson
+  fresh += magma(fissureHeat) * fissure * u_fissureAmp * fissureHeal * 2.2;
 
   float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);
 
@@ -287,9 +345,13 @@ void main() {
   // Molten grade: the whole frame leans into the palette hue.
   vec3 grade = magma(0.40 + 0.25 * lift);
   sky = mix(sky, sky * (0.4 + grade * 1.5), 0.24);
-  // DROP blooms molten (rides max(drop, energy)); buildups dim slightly but
-  // stay alive (the horizon rise above keeps them tense, not still).
-  sky *= 0.70 + 0.48 * lift - 0.05 * u_buildup;
+  // DEEPER CHAR FLOOR (human note "could use more black"): the resting field
+  // is pulled darker (0.70 -> 0.46 base) so a much larger fraction of the frame
+  // is char-black at rest; ENERGY (drop/sustain via lift) + BASS earn the
+  // brightness back. Bass presence lifts the floor so kicks/bass light the dark
+  // field (per "more effects of kicks/bass on the field of red").
+  float bassLift = smoothstep(0.05, 0.4, u_low) * 0.30 + 0.5 * u_kick;
+  sky *= 0.46 + 0.55 * lift + bassLift - 0.05 * u_buildup;
   float m = max(sky.r, max(sky.g, sky.b));
   if (m > 0.8) {
     sky *= (0.8 + 0.2 * (1.0 - exp(-(m - 0.8) * 3.0))) / m;
@@ -317,6 +379,14 @@ export const voyageInfernoPreset: VisualizerPreset = {
     let smoothDrop = 0;
     let smoothBuildup = 0;
     let charge = 0;
+    // Kick fissures (human note: kick = magma cracks opening across the dark
+    // field, cool/heal). Own age/amp/seed, distinct from the ripple wavefront.
+    let fissureAge = 999;
+    let fissureAmp = 0;
+    let fissureSeed = 0;
+    // Ember-bed seethe rides bandsSlow.low (motion smoothness — sustained bass
+    // heave, not a per-transient jerk).
+    let seethe = 0;
     return createGlRenderer({
       fragment: FRAGMENT,
       feedback: true,
@@ -345,6 +415,17 @@ export const voyageInfernoPreset: VisualizerPreset = {
           rippleAge = 0;
           rippleAmp = Math.min(1, frame.impulse.low * 1.2);
         }
+        // KICK FISSURE: a kick opens a fresh crack network (new seed each time)
+        // across the dark char field; it then cools/heals shader-side via age.
+        fissureAge += dt;
+        if (frame.impulse.low > 0.35 && fissureAge > 0.18) {
+          fissureAge = 0;
+          fissureAmp = Math.min(1, frame.impulse.low * 1.3);
+          fissureSeed = Math.random();
+        }
+        // EMBER-BED SEETHE: heave amount rides bandsSlow.low (motion-smooth).
+        const slowLow = (frame.bandsSlow ?? frame.bands).low;
+        seethe += (slowLow - seethe) * (1 - Math.exp(-dt / 0.35));
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
         return {
           u_time: frame.time,
@@ -367,6 +448,10 @@ export const voyageInfernoPreset: VisualizerPreset = {
           u_charge: charge,
           u_dust: frame.params.dust ?? 1,
           u_palette: frame.params.palette ?? 1,
+          u_fissureAge: fissureAge,
+          u_fissureAmp: fissureAmp,
+          u_fissureSeed: fissureSeed,
+          u_seethe: Math.min(1, seethe),
           u_spawn:
             ((Math.min(1, 1.15 * frame.impulse.high + 0.2 * frame.bands.high) *
               (frame.params.stars ?? 1) *

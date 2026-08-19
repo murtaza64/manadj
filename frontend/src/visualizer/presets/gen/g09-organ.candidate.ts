@@ -28,6 +28,20 @@
  *     max(drop, energy); buildup = ribbons TAUTEN + compress toward the
  *     diagonal axis.
  *
+ * REFINEMENT (human note, in place): "in practice its just always green and
+ * red, very little blue. green quite overpowering during drops". Three fixes,
+ * see the tagged comments below:
+ *   1. HUE WHEEL rotated onto the golden-ratio conjugate (bandHue) so adjacent
+ *      bands own distant hues — a cluster of loud (low/mid) bands or a drop now
+ *      lights a full rainbow, not one red->green region. This scatter also caps
+ *      any single hue family's width share: energy-dense contiguous bands can
+ *      no longer share a hue neighbourhood, so no one family can flood the frame.
+ *   2. PER-RIBBON PROMINENCE normalization (spectrum fill): log-compressed band
+ *      scaling + a per-band adaptive ceiling so quiet high (blue/violet) bands
+ *      still read instead of being swamped by the loud low/mid ones.
+ *   3. GRADE scattered onto the same golden wheel so the whole-field tint isn't
+ *      pinned to the red->green arc either.
+ *
  * Dark floor, saturated ribbons, NO dust, non-centered (diagonal composition).
  * Persistence via feedback with a chroma-preserving soft knee; contractive
  * (whole-field field*decay with decay < 1, drama in the fresh injection
@@ -91,11 +105,18 @@ float specAt(int idx) {
   return v;
 }
 
-// The permanent hue a band owns: the full wheel walked across 24 bands,
-// frequency-ordered, plus the section rotation notch. Band identity is fixed;
-// only the whole wheel spins on a section boundary.
+// FIX (human note "just always green and red, very little blue"): the old
+// linear wheel (hue = fb / 24) put the energy-dense low/mid bands in the
+// red->green arc (hue 0..0.5) and left blue/violet (hue ~0.6..0.8) on the
+// high bands, which are rarely loud — so a typical spectrum lit only red+green
+// and a drop lit one region. Now the hue owned by a band is scattered by the
+// GOLDEN-RATIO CONJUGATE (0.618...): fb * phi mod 1 gives adjacent bands
+// maximally-distant hues, so any cluster of loud bands (low/mid energy, a
+// drop) spreads across the FULL wheel instead of piling into one family.
+// Band identity is still permanent; only the section notch spins the whole set.
+const float PHI_CONJ = 0.6180339887; // golden-ratio conjugate
 float bandHue(float fb) {
-  return fract(fb / NBANDS + u_hueOffset);
+  return fract(fb * PHI_CONJ + u_hueOffset);
 }
 
 // Diagonal coordinate system. s = distance ALONG the diagonal (0..1 corner to
@@ -210,7 +231,11 @@ void main() {
 
   // Grade: lean the running color toward the centroid-biased wheel position so
   // the section recolor reads across the field; keep a dim-but-alive floor.
-  vec3 grade = hsv2rgb(fract(u_centroid * 0.3 + u_hueOffset), 0.85, 1.0);
+  // FIX (green/red dominance): scatter the centroid onto the golden wheel too
+  // (map the centroid band onto the same PHI_CONJ distribution as the ribbons)
+  // so the whole-field grade is not pinned to the red->green arc either.
+  float centroidBand = clamp(u_centroid, 0.0, 1.0) * (NBANDS - 1.0);
+  vec3 grade = hsv2rgb(fract(centroidBand * PHI_CONJ + u_hueOffset), 0.85, 1.0);
   field = mix(field, field * (0.5 + grade * 1.3), 0.18);
   field *= 0.82 + 0.4 * max(u_drop, 0.45 * u_energy) + 0.1 * u_buildup;
 
@@ -255,6 +280,14 @@ const candidate: VisualizerPreset = {
     // Drop braid.
     let braid = 0;
     const spectrum = new Float32Array(SPECTRUM_BANDS);
+    // FIX (human note "just always green and red, very little blue"): a running
+    // per-band adaptive ceiling. Low/mid bands carry most spectral energy, so a
+    // raw spectrum makes their (red/green) ribbons blaze while the quiet high
+    // (blue/violet) ribbons never read. Each band's prominence is normalized
+    // against its OWN slowly-tracked ceiling so a quiet-but-present high band
+    // reads as loud on ITS ribbon — the blue end lights up. Seed at a floor so
+    // silent bands don't blow up to full.
+    const bandCeil = new Float32Array(SPECTRUM_BANDS).fill(0.15);
 
     return createGlRenderer({
       fragment: FRAGMENT,
@@ -281,15 +314,32 @@ const candidate: VisualizerPreset = {
 
         // Fill the 24-band spectrum buffer (EXACTLY length 24; clamp source).
         // Also find the loudest mid/high band for the snare whip target.
+        // FIX (green/red dominance): PER-RIBBON PROMINENCE NORMALIZATION.
+        //   (a) log/compressed band scaling — spectral energy is heavily tilted
+        //       toward the low/mid, so a linear map lets those ribbons dominate;
+        //       log1p compression flattens the tilt so mids/highs read.
+        //   (b) per-band ADAPTIVE GAIN — divide by each band's own running
+        //       ceiling (fast attack, slow release) so a quiet-but-present high
+        //       band still reads loud on its (blue/violet) ribbon.
+        // The snare-whip target still tracks the loudest RAW mid/high band (the
+        // whip should fire on real energy, not normalized prominence).
         const src = frame.spectrum;
         let snareBand = 12;
         let snareMax = -1;
+        const ceilAtkA = 1 - Math.exp(-dt / 0.08); // fast catch of new peaks
+        const ceilRelA = 1 - Math.exp(-dt / 4.0); // slow ceiling decay
         for (let i = 0; i < SPECTRUM_BANDS; i++) {
-          const v = i < src.length ? src[i] : 0;
-          const cv = Math.min(1, Math.max(0, v));
-          spectrum[i] = cv;
-          if (i >= 8 && cv > snareMax) {
-            snareMax = cv;
+          const raw = Math.min(1, Math.max(0, i < src.length ? src[i] : 0));
+          // (a) log compression (log1p, normalized so 1 -> 1).
+          const comp = Math.log1p(raw * 6) / Math.log1p(6);
+          // (b) adaptive per-band ceiling.
+          if (comp > bandCeil[i]) bandCeil[i] += (comp - bandCeil[i]) * ceilAtkA;
+          else bandCeil[i] += (comp - bandCeil[i]) * ceilRelA;
+          bandCeil[i] = Math.max(0.12, bandCeil[i]); // floor: silence stays dim
+          const prom = Math.min(1, comp / bandCeil[i]);
+          spectrum[i] = prom;
+          if (i >= 8 && raw > snareMax) {
+            snareMax = raw;
             snareBand = i;
           }
         }

@@ -192,7 +192,10 @@ void main() {
     + t * 0.015;
   vec3 gasColor = gasPalette(palT);
   // Dark-sky floor: gas reads against near-black, brightens with energy.
-  float gasGain = 0.10 + 0.9 * u_mid + 0.5 * u_sustain + 0.35 * u_drop;
+  // BUGFIX (human: "too bright"): lowered the gas luminance envelope (base
+  // 0.10 -> 0.05, mid 0.9 -> 0.6, sustain 0.5 -> 0.35, drop 0.35 -> 0.25) so
+  // the dark-sky floor is restored; chroma (gasColor) is untouched.
+  float gasGain = 0.05 + 0.6 * u_mid + 0.35 * u_sustain + 0.25 * u_drop;
   col += gasColor * gas * gasGain;
 
   // ---- IRIDESCENT RIM SHIMMER (HIGH): the gradient magnitude of the gas
@@ -247,13 +250,16 @@ void main() {
     float bloom = exp(-dist * (10.0 - 4.0 * ignite));
     vec3 coreHue = mix(LOW, vec3(1.0, 0.95, 0.85), 0.4 + 0.6 * ignite);
     coreHue = mix(coreHue, familyHue, 0.45);
-    col += coreHue * hot * (0.6 + 1.6 * ignite);
-    col += mix(coreHue, familyHue, 0.5) * bloom * (0.15 + 0.7 * ignite);
+    // BUGFIX (human: "too bright"): lowered ignition gains (hot 0.6+1.6 ->
+    // 0.4+1.1, bloom 0.15+0.7 -> 0.10+0.5, front x1.3 -> x0.9) so the cores
+    // read against a dark sky again; chroma of the cores is untouched.
+    col += coreHue * hot * (0.4 + 1.1 * ignite);
+    col += mix(coreHue, familyHue, 0.5) * bloom * (0.10 + 0.5 * ignite);
     // Traveling illumination front: a spherical shell expanding from the
     // core, lighting gas it passes. exp decay in age + amplitude.
     float frontR = 0.02 + fr.x * 0.85;
     float front = exp(-pow((dist - frontR) * 8.0, 2.0)) * exp(-fr.x * 2.2) * fr.y;
-    col += mix(familyHue, gasColor, 0.6) * front * (0.5 + 2.0 * gas) * 1.3;
+    col += mix(familyHue, gasColor, 0.6) * front * (0.5 + 2.0 * gas) * 0.9;
   }
 
   // ---- SUPERNOVA (section boundary): a shell shockwave from u_novaPos.

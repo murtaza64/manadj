@@ -33,6 +33,7 @@ uniform float u_high;
 uniform float u_kick;
 uniform float u_snare;
 uniform float u_centroid;
+uniform float u_specHue;   // slow-tracked centroid (~1s EMA): dust hue follows spectral content
 uniform float u_excite;
 uniform float u_zoom;
 uniform float u_rotStep;
@@ -133,7 +134,9 @@ void main() {
   // NEBULA WALLS: the tunnel is made of dust.
   float wall = fbm(vec2(ang * 2.2 + log(r + 0.06) * 3.0 - t * 0.15, r * 6.0 + t * 0.06));
   float cloud = pow(wall, 2.4);
-  vec3 dustColor = palette(wall * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4);
+  // SPECTRAL DUST TINT: the wall palette phase is biased by the slow-tracked
+  // centroid (u_specHue) so dust hue follows spectral content.
+  vec3 dustColor = palette(wall * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);
   float midGate = smoothstep(0.03, 0.3, u_mid);
   fresh += dustColor * cloud * smoothstep(0.05, 0.6, r) * (0.1 + 1.2 * u_mid)
     * u_dust * midGate * reverb;
@@ -141,7 +144,9 @@ void main() {
   // ELECTRIC HIGH NEBULA: finer, counter-rotating, shimmering.
   float wisp = fbm(vec2(ang * 6.0 + t * 0.5, r * 11.0 - t * 0.25));
   float shimmer = 0.6 + 0.4 * sin(t * 13.0 + wisp * 24.0);
-  vec3 electric = mix(vec3(0.4, 0.9, 1.0), palette(0.6 + t * 0.03), 0.6);
+  // DISTINCT DUST HUE: the high nebula samples the palette at +0.35 phase from
+  // the mid wall so the bands read as different dust kinds.
+  vec3 electric = palette(0.35 + wall * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);
   fresh += electric * pow(wisp, 3.2) * shimmer * smoothstep(0.1, 0.6, r)
     * (0.08 + 1.7 * u_high) * u_dust * reverb;
 
@@ -152,7 +157,7 @@ void main() {
     + 0.015 * u_kick * sin(ang * 11.0 - t * 5.0);
   float ringGlow = exp(-pow((r - mouth - wobble) * 26.0, 2.0));
   float ringCore = exp(-pow((r - mouth - wobble) * 120.0, 2.0));
-  vec3 chargeColor = mix(vec3(0.9, 0.35, 0.15), vec3(1.0, 0.75, 0.4), clamp(u_charge, 0.0, 1.0));
+  vec3 chargeColor = mix(palette(0.02 + u_specHue * 0.5), palette(0.12 + u_specHue * 0.5), clamp(u_charge, 0.0, 1.0));
   chargeColor = mix(chargeColor, vec3(1.0, 0.97, 0.92), clamp(u_charge - 0.6, 0.0, 0.4) * 2.5);
   float emit = mix(0.25 + 0.9 * u_low, u_beatPulse, u_grid);
   fresh += chargeColor * ringGlow * emit * (0.4 + 0.6 * u_charge);
@@ -172,7 +177,7 @@ void main() {
     float ringR = 0.12 + 0.05 * u_kick;
     float shock = exp(-pow((r - ringR) * 34.0, 2.0))
       + 0.6 * exp(-pow((r - ringR * 1.7) * 28.0, 2.0));
-    sky += mix(LOW, vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.1 + 0.8 * u_excite);
+    sky += mix(palette(0.05 + u_specHue * 0.5), vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.1 + 0.8 * u_excite);
     sky *= 1.0 + 0.1 * u_kick;
   }
   if (u_snare > 0.03) {
@@ -213,6 +218,8 @@ const candidate: VisualizerPreset = {
     let smoothExcite = 0;
     let beatPulse = 0;
     let prevPhase: number | null = null;
+    // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase.
+    let slowCentroid = 0.5;
     return createGlRenderer({
       fragment: FRAGMENT,
       feedback: true,
@@ -255,6 +262,8 @@ const candidate: VisualizerPreset = {
         beatPulse *= Math.exp(-dt / 0.12);
 
         const baseDecay = 0.992 - 0.008 * energy - 0.006 * smoothExcite;
+        // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
+        slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
 
         return {
           u_time: frame.time,
@@ -264,6 +273,7 @@ const candidate: VisualizerPreset = {
           u_kick: impulse.low,
           u_snare: impulse.mid,
           u_centroid: frame.centroid,
+          u_specHue: slowCentroid,
           u_excite: smoothExcite,
           u_zoom: zoom,
           u_rotStep: (0.08 + 1.0 * bands.mid + 1.4 * impulse.mid) * spin * dt,

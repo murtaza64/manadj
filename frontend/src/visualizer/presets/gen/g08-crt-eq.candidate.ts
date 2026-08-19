@@ -47,6 +47,15 @@
  * Assigned tech: bands (isolator EQ split — the STAR), impulses, ladder
  * tiers (channel schedule + per-beat comb), beat phase/beatInBar (grid-quant
  * comb), trend split, trackId genome.
+ *
+ * REFINEMENT (human note "motion a bit erratic" x2, in place): the
+ * program-content MOTION rates (plasma flow, bar roll, starburst spoke/ring
+ * spin) rode the 8ms-attack instantaneous mid and jerked every transient. They
+ * now ride bandsSlow.mid (u_midMotion, motion smoothness law); content COLOR
+ * and warp-amplitude terms keep instantaneous mid. The hum-bar strength and
+ * the baseline jitter/stability driver are smoothed with a >=300ms low
+ * (motion-smoothness). The beam slam and snare tears keep their punchy
+ * instantaneous envelopes.
  */
 
 import { energyOf } from '../../style';
@@ -63,6 +72,7 @@ uniform vec2 u_res;
 uniform float u_time;
 uniform float u_low;
 uniform float u_mid;
+uniform float u_midMotion;   // bandsSlow.mid — program-content MOTION rates only
 uniform float u_high;
 uniform float u_kick;        // impulse.low
 uniform float u_slam;        // SMOOTHED beam-slam envelope (sub-3Hz)
@@ -132,8 +142,10 @@ vec3 palette(float t) {
 // --- The four programs: bold, saturated, high-contrast, always moving. ---
 
 // 0: interference plasma — overlapping wave fronts, mids ripple them.
+// FIX (human note "motion a bit erratic"): the flow RATE rides bandsSlow.mid
+// (u_midMotion, motion smoothness law), not the 8ms-attack instantaneous mid.
 vec3 progPlasma(vec2 uv) {
-  float t = u_time * (0.6 + 1.2 * u_mid) + u_phrase;
+  float t = u_time * (0.6 + 1.2 * u_midMotion) + u_phrase;
   float a = sin((uv.x * 8.0 + t) + sin(uv.y * 6.0 - t * 0.7));
   float b = sin((uv.y * 9.0 - t * 0.9) + sin(uv.x * 7.0 + t * 0.5));
   float f = (a + b) * 0.5;
@@ -144,7 +156,9 @@ vec3 progPlasma(vec2 uv) {
 // 1: rolling color bars gone feral — SMPTE bars that warp and roll with
 // mids/highs (rolls slowly so the vertical alternation stays well sub-3Hz).
 vec3 progBars(vec2 uv) {
-  float roll = u_time * (0.15 + 0.35 * u_mid) + u_phrase * 0.5;
+  // FIX (motion erratic): the roll RATE rides bandsSlow.mid; the warp
+  // AMPLITUDE keeps instantaneous mid (a displacement pop, not a rate).
+  float roll = u_time * (0.15 + 0.35 * u_midMotion) + u_phrase * 0.5;
   float warp = 0.12 * sin(uv.y * 5.0 + u_time * 1.3) * (0.5 + u_mid);
   float x = fract(uv.x + warp + 0.05 * sin(roll + uv.y * 3.0));
   float bar = floor(x * 7.0) / 7.0;
@@ -165,8 +179,9 @@ vec3 progStarburst(vec2 uv) {
   vec2 p = uv - 0.5;
   float ang = atan(p.y, p.x);
   float rad = length(p);
-  float spokes = 0.5 + 0.5 * sin(ang * 12.0 + u_time * (1.0 + 2.0 * u_mid) + u_phrase);
-  float rings = 0.5 + 0.5 * sin(rad * 30.0 - u_time * 3.0 * (0.5 + u_mid));
+  // FIX (motion erratic): spoke + ring rotation RATES ride bandsSlow.mid.
+  float spokes = 0.5 + 0.5 * sin(ang * 12.0 + u_time * (1.0 + 2.0 * u_midMotion) + u_phrase);
+  float rings = 0.5 + 0.5 * sin(rad * 30.0 - u_time * 3.0 * (0.5 + u_midMotion));
   float v = spokes * (0.5 + 0.5 * rings) * exp(-rad * 1.2);
   return palette(0.15 + v) * (0.5 + 1.5 * v);
 }
@@ -418,6 +433,11 @@ const g08CrtEqPreset: VisualizerPreset = {
     // LOWS: smoothed low level, stability, hum bar crawl.
     let smoothLow = 0;
     let humPhase = 0;
+    // FIX (human note "motion a bit erratic" x2): dedicated >=300ms-smoothed
+    // low driver for the MOTION drivers (hum-bar strength + baseline jitter
+    // amount) so those slow drifts don't jerk with 8ms-attack transients. Beam
+    // slam / tears keep their own punchy (instantaneous) envelopes.
+    let motionLow = 0;
     // MIDS: smoothed hue offset (EQ mid sweep repaints — eased so a sweep
     // reads as a continuous repaint, not a jump).
     let hueOffset = 0;
@@ -527,8 +547,16 @@ const g08CrtEqPreset: VisualizerPreset = {
         const lowAlpha = 1 - Math.exp(-dt / 0.25);
         smoothLow += (frame.bands.low - smoothLow) * lowAlpha;
         const lowDrive = Math.min(1, smoothLow * eqDrive);
+        // >=300ms-smoothed low for the erratic MOTION drivers (hum-bar strength,
+        // baseline jitter) — motion-smoothness law.
+        const bandsSlowLow = (frame.bandsSlow ?? frame.bands).low;
+        motionLow += (bandsSlowLow - motionLow) * (1 - Math.exp(-dt / 0.3));
+        const motionLowDrive = Math.min(1, motionLow * eqDrive);
         // Bass kill => stability ~1 (eerily clean). Heavy bass => ~0 (chaos).
         const stability = 1 - lowDrive;
+        // The jitter/stability MOTION axis rides the >=300ms low so the baseline
+        // shake glides; the beam slam/tears stay punchy on their own envelopes.
+        const motionStability = 1 - motionLowDrive;
         // Beam brightness floor rides lows (a hotter tube under heavy bass).
         const beamFloor = 0.4 + 0.6 * lowDrive;
         // Vertical-hold tension: heavy bass sags; springs back. Gated by lows
@@ -540,8 +568,10 @@ const g08CrtEqPreset: VisualizerPreset = {
         vhold += vholdVel * dt;
         vhold *= 1 - stability * 0.15; // stability bleeds the sag toward 0
         // Hum bar crawls slowly UP (sub-3Hz), only visible under heavy bass.
+        // FIX (motion erratic): strength rides the >=300ms low so the bar
+        // fades in/out smoothly instead of flickering with transients.
         humPhase = (humPhase + dt * 0.18) % 1;
-        const humAmt = lowDrive;
+        const humAmt = motionLowDrive;
 
         // --- MIDS: PROGRAM CONTENT COLOR. Mid spectral content (level +
         // centroid within the mids) walks the palette hue; the mid EQ sweep
@@ -584,6 +614,7 @@ const g08CrtEqPreset: VisualizerPreset = {
           u_time: frame.time,
           u_low: frame.bands.low,
           u_mid: midTarget,
+          u_midMotion: Math.min(1, (frame.bandsSlow ?? frame.bands).mid * eqDrive),
           u_high: highTarget,
           u_kick: kick,
           u_slam: slam,
@@ -606,7 +637,9 @@ const g08CrtEqPreset: VisualizerPreset = {
           u_barrel: curvature - 0.12 + barrel,
           u_phrase: phrasePhase + barPhase * 0.2,
           // --- EQ split uniforms ---
-          u_stability: stability,
+          // Jitter (the erratic motion axis) rides the >=300ms-smoothed low;
+          // the beam floor / vhold gating below keep the sharper 0.25s low.
+          u_stability: motionStability,
           u_humPhase: humPhase,
           u_humAmt: humAmt,
           u_beamFloor: beamFloor,

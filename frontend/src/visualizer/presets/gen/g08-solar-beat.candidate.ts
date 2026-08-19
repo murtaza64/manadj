@@ -55,6 +55,7 @@ const FRAGMENT = [
   'uniform float u_kick;',
   'uniform float u_snare;',
   'uniform float u_centroid;',
+  'uniform float u_specHue;',
   'uniform float u_drop;',
   'uniform float u_buildup;',
   'uniform float u_zoom;',
@@ -149,7 +150,7 @@ const FRAGMENT = [
   '  float on = step(gate - 0.09 * u_spawn, hash(sc * 1.618 + 9.7));',
   '  float size = (0.5 + 1.5 * hash(sc.yx * 2.113)) * sizeScale;',
   '  float bright = 0.4 + 0.6 * hash(sc + 17.9);',
-  '  vec3 tint = mix(vec3(0.65, 0.78, 1.0), vec3(1.0, 0.85, 0.6), hash(sc.yx + 29.3));',
+  '  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02);',
   '  return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;',
   '}',
   '',
@@ -216,7 +217,8 @@ const FRAGMENT = [
   '  float coronaBody = exp(-rc * (7.0 - 3.0 * u_low));',
   '  float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;',
   '  float gravityGain = u_low * (0.5 + 0.8 * u_kick);',
-  '  fresh += mix(vec3(0.55, 0.07, 0.04), LOW, 0.5)',
+  '  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);',
+  '  fresh += gravityColor',
   '    * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;',
   '',
   // ===== MAGNETIC FIELD LINES (alt-mid: hue tracks mids; buildup tightens) =====
@@ -303,28 +305,28 @@ const FRAGMENT = [
   '  fresh += coronaColor * coronaBand * pow(streamers, 2.0) * coronaGain;',
   '',
   // Coal heart + corona body (voyage, kept — bass solid).
-  '  vec3 coal = vec3(0.55, 0.07, 0.04);',
+  '  vec3 coal = palette(0.0 + u_specHue * 0.5) * 0.55;',
   '  fresh += mix(coal, vec3(1.0, 0.8, 0.7), 0.5 * u_kick) * heart * (0.5 + 1.2 * u_low + 1.4 * u_kick);',
   '  fresh += mix(coal, LOW, 0.4) * coronaBody * (0.1 + 0.6 * u_low + 0.35 * u_kick);',
   '  float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);',
   '  float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));',
-  '  fresh += mix(vec3(0.6, 0.75, 1.0), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);',
+  '  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);',
   '',
   // Spiral dust disk (voyage engine, unchanged).
   '  float arm = sin(ang * 2.0 + log(r + 0.06) * 5.0 - u_armPhase + 0.5 * u_mid * sin(ang * 3.0 + r * 6.0 + t * 0.7));',
   '  float lanes = pow(0.5 + 0.5 * arm, 3.0) * smoothstep(0.06, 0.2, r) * exp(-r * 1.8);',
   '  float cloudField = fbm(vec2(ang * 2.2 + r * 3.0 - t * 0.15, r * 5.0 + t * 0.06));',
   '  float cloud = pow(cloudField, 2.4);',
-  '  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4);',
+  '  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);',
   '  float reverb = 1.0 + 2.6 * rippleWave;',
   '  float midGate = smoothstep(0.04, 0.3, u_mid);',
   '  fresh += diskColor * lanes * (0.1 + 1.2 * u_mid) * (0.5 + cloud) * u_dust * centerDim * midGate * reverb;',
   '  fresh += diskColor * cloud * exp(-r * 2.4) * u_mid * 0.45 * u_dust * centerDim * midGate * reverb;',
   '',
-  // High nebula (voyage engine, unchanged).
+  // High nebula: distinct dust hue (+0.35 phase from the mid dust).
   '  float wisp = fbm(vec2(ang * 6.0 - t * 0.5, r * 10.0 + t * 0.25));',
   '  float shimmer = 0.6 + 0.4 * sin(t * 13.0 + wisp * 24.0);',
-  '  vec3 electric = mix(vec3(0.4, 0.9, 1.0), palette(0.6 + t * 0.03), 0.65);',
+  '  vec3 electric = palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);',
   '  fresh += electric * pow(wisp, 3.2) * shimmer * smoothstep(0.12, 0.5, r)',
   '    * (0.08 + 1.7 * u_high) * u_dust * reverb;',
   '  sky += fresh * (1.0 - u_decay) * (3.2 + 1.6 * u_sustain);',
@@ -341,7 +343,7 @@ const FRAGMENT = [
   '    float ringR = 0.1 + 0.05 * u_kick;',
   '    float shock = exp(-pow((r - ringR) * 38.0, 2.0))',
   '      + 0.6 * exp(-pow((r - ringR * 1.7) * 30.0, 2.0));',
-  '    sky += mix(LOW, vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);',
+  '    sky += mix(palette(0.05 + u_specHue * 0.5), vec3(1.0, 0.9, 0.8), 0.5) * shock * u_kick * (1.15 + 0.8 * u_drop);',
   '    sky *= 1.0 + 0.1 * u_kick;',
   '  }',
   '  if (u_snare > 0.03) {',
@@ -406,6 +408,8 @@ export const g08SolarBeatPreset: VisualizerPreset = {
     let smoothShimmer = 0;   // highs -> corona shimmer granularity
     let dropErupt = 0;       // rate-limited all-longitude eruption env
     let freeBeatPhase = 0;   // free-running beat clock without a grid
+    // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase.
+    let slowCentroid = 0.5;
     return createGlRenderer({
       fragment: FRAGMENT,
       feedback: true,
@@ -512,6 +516,8 @@ export const g08SolarBeatPreset: VisualizerPreset = {
         dropErupt += (dropTarget - dropErupt) * dropAlpha;
 
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
+        // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
+        slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
         return {
           u_time: frame.time,
           u_low: frame.bands.low,
@@ -520,6 +526,7 @@ export const g08SolarBeatPreset: VisualizerPreset = {
           u_kick: frame.impulse.low,
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
+          u_specHue: slowCentroid,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,
