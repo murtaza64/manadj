@@ -187,6 +187,11 @@
 .stl-take-chip.slim text {
   font-size: 9px;
 }
+/* 3-4-row clusters: chips are 6-8px tall — no room for text (the hover
+   title carries the label). */
+.stl-take-chip.micro text {
+  display: none;
+}
 .stl-take-whisker {
   stroke: #00ff6a;
   stroke-width: 1;

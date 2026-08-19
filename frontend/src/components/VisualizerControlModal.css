@@ -1,0 +1,154 @@
+/* Visualizer control modal (realtime-visualization 03). Library design
+   language: square 1px-border bold buttons, catppuccin vars. */
+
+.vizmodal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.vizmodal {
+  margin-top: 60px;
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  padding: 14px;
+  color: var(--text);
+}
+
+.vizmodal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.vizmodal-header h2 {
+  font-size: 14px;
+  margin: 0;
+  flex: 1;
+}
+
+.vizmodal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--overlay0);
+}
+
+.vizmodal-dot.on {
+  background: var(--green);
+}
+
+.vizmodal-close {
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--subtext0);
+  width: 22px;
+  cursor: pointer;
+}
+
+.vizmodal h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--subtext0);
+  margin: 12px 0 6px;
+}
+
+.vizmodal-row,
+.vizmodal-presets,
+.vizmodal-displays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vizmodal-btn {
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--subtext0);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.vizmodal-btn:hover:not(:disabled) {
+  border-color: var(--mauve);
+  color: var(--mauve);
+}
+
+.vizmodal-btn.active {
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--base);
+}
+
+.vizmodal-btn.gen {
+  font-size: 11px;
+  font-weight: 400;
+  padding: 3px 7px;
+}
+
+/* Genepool list: 100-candidate pool needs search + a height cap. */
+.vizmodal-gen-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid var(--overlay0);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+}
+
+.vizmodal-gen-search:focus {
+  outline: none;
+  border-color: var(--mauve);
+}
+
+.vizmodal-genlist {
+  max-height: 180px;
+  overflow-y: auto;
+  align-content: flex-start;
+}
+
+.vizmodal-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.vizmodal-params {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vizmodal-param {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtext0);
+  font-size: 11px;
+}
+
+.vizmodal-param span {
+  width: 130px;
+  text-align: right;
+}
+
+.vizmodal-param input[type='range'] {
+  flex: 1;
+  accent-color: var(--mauve);
+}
+
+.vizmodal-param input[type='range']:disabled {
+  opacity: 0.4;
+}

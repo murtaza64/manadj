@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateBands,
+  spectralCentroid,
+  spectralFlatness,
+  spectralSpread,
+  stepImpulses,
+  stepTrend,
+  INITIAL_IMPULSE_STATE,
+  INITIAL_TREND,
   aggregateMultiband,
   logBandEdges,
   maxGroup,
@@ -204,5 +211,94 @@ describe('ballistics', () => {
     expect(stepped[0]).toBeGreaterThan(0.8); // fast attack
     expect(stepped[1]).toBeGreaterThan(0.4); // slow release
     expect(stepped[2]).toBeGreaterThan(0.8); // missing prev treated as 0
+  });
+});
+
+describe('stepImpulses', () => {
+  const DT = 1 / 60;
+  const hit = { low: 0.9, mid: 0, high: 0 };
+  const rest = { low: 0.1, mid: 0, high: 0 };
+
+  it('fires on an onset and stays quiet for sustained material', () => {
+    // Sustain: feed a constant level until the reference catches up.
+    let state = INITIAL_IMPULSE_STATE;
+    for (let i = 0; i < 120; i++) state = stepImpulses(state, hit, DT);
+    expect(state.impulse.low).toBeLessThan(0.15); // sustained ≈ quiet
+    // Now a fresh hit from a low reference fires hard.
+    let kicked = INITIAL_IMPULSE_STATE;
+    for (let i = 0; i < 60; i++) kicked = stepImpulses(kicked, rest, DT);
+    kicked = stepImpulses(kicked, hit, DT);
+    expect(kicked.impulse.low).toBeGreaterThan(0.8);
+  });
+
+  it('decays quickly after the hit', () => {
+    let state = INITIAL_IMPULSE_STATE;
+    for (let i = 0; i < 60; i++) state = stepImpulses(state, rest, DT);
+    state = stepImpulses(state, hit, DT);
+    const peak = state.impulse.low;
+    for (let i = 0; i < 30; i++) state = stepImpulses(state, rest, DT); // 0.5 s
+    expect(state.impulse.low).toBeLessThan(peak * 0.05);
+  });
+
+  it('keeps bands independent (a kick is not a snare)', () => {
+    let state = INITIAL_IMPULSE_STATE;
+    state = stepImpulses(state, { low: 0.9, mid: 0, high: 0 }, DT);
+    expect(state.impulse.low).toBeGreaterThan(0.5);
+    expect(state.impulse.mid).toBe(0);
+    expect(state.impulse.high).toBe(0);
+  });
+});
+
+describe('stepTrend', () => {
+  const DT = 1 / 60;
+
+  it('excitement rises on sustained energy above the baseline (a drop)', () => {
+    let trend = INITIAL_TREND;
+    for (let i = 0; i < 60; i++) trend = stepTrend(trend, 0.15, DT); // intro
+    trend = stepTrend(trend, 0.8, DT); // the drop lands
+    expect(trend.excitement).toBeGreaterThan(0.9);
+  });
+
+  it('returns to calm as the baseline absorbs the new level', () => {
+    let trend = INITIAL_TREND;
+    for (let i = 0; i < 60 * 60; i++) trend = stepTrend(trend, 0.8, DT); // long plateau
+    expect(trend.slow).toBeCloseTo(0.8, 1);
+    expect(trend.excitement).toBeLessThan(0.15);
+  });
+
+  it('breakdowns read as zero excitement', () => {
+    let trend = { slow: 0.7, excitement: 1 };
+    trend = stepTrend(trend, 0.1, DT); // energy falls below baseline
+    expect(trend.excitement).toBe(0);
+  });
+});
+
+describe('spectralCentroid', () => {
+  it('reads bass-only content low and treble-only high', () => {
+    const low = [1, 0.8, 0, 0, 0, 0, 0, 0];
+    const high = [0, 0, 0, 0, 0, 0, 0.8, 1];
+    expect(spectralCentroid(low)).toBeLessThan(0.15);
+    expect(spectralCentroid(high)).toBeGreaterThan(0.85);
+  });
+
+  it('is neutral (0.5) for silence and for flat spectra', () => {
+    expect(spectralCentroid([0, 0, 0, 0])).toBe(0.5);
+    expect(spectralCentroid([0.5, 0.5, 0.5, 0.5, 0.5])).toBeCloseTo(0.5, 10);
+  });
+});
+
+describe('spectral shape (gen-2 tech)', () => {
+  it('spread: single-band energy is narrow, two poles are wide', () => {
+    const narrow = [0, 0, 1, 0, 0, 0, 0, 0];
+    const wide = [1, 0, 0, 0, 0, 0, 0, 1];
+    expect(spectralSpread(narrow)).toBeLessThan(0.1);
+    expect(spectralSpread(wide)).toBeGreaterThan(0.9);
+    expect(spectralSpread([0, 0, 0, 0])).toBe(0.5); // silence neutral
+  });
+
+  it('flatness: flat spectra read noisy, peaky spectra read tonal', () => {
+    expect(spectralFlatness([0.5, 0.5, 0.5, 0.5])).toBeGreaterThan(0.95);
+    expect(spectralFlatness([1, 0, 0, 0, 0, 0, 0, 0])).toBeLessThan(0.15);
+    expect(spectralFlatness([0, 0, 0, 0])).toBe(0.5); // silence neutral
   });
 });

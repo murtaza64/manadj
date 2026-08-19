@@ -1,19 +1,47 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { SILENT_BANDS } from './bands';
-import type { BandLevels } from './bands';
+import { INITIAL_TREND, SILENT_BANDS } from './bands';
+import type { BandLevels, EnergyTrend } from './bands';
 import {
   PING_INTERVAL_MS,
   SPECTRUM_BAND_COUNT,
   VISUALIZER_CHANNEL,
 } from './channel';
-import type { BeatInfo, VisualizerMessage, VisualizerPing } from './channel';
+import type { BeatInfo, DeckStateInfo, VisualizerMessage, VisualizerPing } from './channel';
 import { PRESETS, presetById } from './presets';
+import {
+  aliveCandidateListings,
+  ensureCandidate,
+  getCachedCandidate,
+  isCandidateId,
+} from './presets/gen';
 import type { PresetRenderer, VisualizerPreset } from './presets/types';
-import { getPresetId, setPresetId, subscribePreset } from './visualizerStore';
+import {
+  getParamValues,
+  getPresetId,
+  getRenderQuality,
+  RENDER_QUALITIES,
+  setParamValue,
+  setPresetId,
+  setRenderQuality,
+  subscribeParams,
+  subscribePreset,
+  subscribeQuality,
+} from './visualizerStore';
+import type { RenderQuality } from './visualizerStore';
+import { VisualizerHud } from './VisualizerHud';
 import './VisualizerApp.css';
 
 /** Band feed older than this renders as silence (main window gone/paused). */
 const STALE_MS = 1000;
+/** Genepool candidates surfaced in the switcher while the marathon runs
+ * (realtime-viz 06, human ask): alive manifest entries, best-rated first. */
+const GEN_LISTINGS = aliveCandidateListings();
+/** Resolve a preset id across both worlds: curated registry, or the gen
+ * candidate cache (null while a gen module is still loading). */
+function resolvePreset(id: string): VisualizerPreset | null {
+  if (isCandidateId(id)) return getCachedCandidate(id);
+  return presetById(id);
+}
 const SILENT_SPECTRUM = new Array<number>(SPECTRUM_BAND_COUNT).fill(0);
 /** Chrome (preset switcher etc.) hides after this much mouse stillness. */
 const CHROME_HIDE_MS = 2500;
@@ -21,6 +49,47 @@ const CHROME_HIDE_MS = 2500;
  * the Milkdrop/butterchurn blending model (render both, blend), not
  * parametric morphing. */
 const MORPH_S = 0.8;
+
+/** Backing-store pixel budget (~1080p-class). Fullscreen on a 4K HDMI
+ * display, an unbounded retina canvas is ~8-16 MP of additive full-canvas
+ * compositing per frame — enough GPU/compositor load to starve the
+ * MAIN window's audio output into underrun loops (the "chops on one
+ * instant" HDMI stutter). The canvas renders within the budget and CSS
+ * upscales; at projection distance the difference is invisible. */
+const MAX_BACKING_PIXELS = 1920 * 1080;
+/** GL presets shade per pixel cheaply; give them ~1440p. */
+const MAX_BACKING_PIXELS_HIRES = 2560 * 1440;
+/** Explicit quality tiers (opt-in upgrade past the audio-safe auto budget;
+ * 'native' = full clientSize × devicePixelRatio, no cap). */
+const QUALITY_BUDGETS: Record<Exclude<RenderQuality, 'auto'>, number> = {
+  hd: 1920 * 1080,
+  qhd: 2560 * 1440,
+  uhd: 3840 * 2160,
+  native: Infinity,
+};
+const QUALITY_LABELS: Record<RenderQuality, string> = {
+  auto: 'auto',
+  hd: '1080',
+  qhd: '1440',
+  uhd: '4K',
+  native: 'max',
+};
+
+/** Canvas backing size for the current client size, within the budget. */
+function backingSize(
+  canvas: HTMLCanvasElement,
+  budget = MAX_BACKING_PIXELS
+): { width: number; height: number } {
+  const dpr = window.devicePixelRatio || 1;
+  let width = Math.max(1, canvas.clientWidth * dpr);
+  let height = Math.max(1, canvas.clientHeight * dpr);
+  const scale = Math.sqrt(budget / (width * height));
+  if (scale < 1) {
+    width *= scale;
+    height *= scale;
+  }
+  return { width: Math.round(width), height: Math.round(height) };
+}
 
 /** A live renderer with its own layer canvas: presets own their layer's
  * persistence (phosphor washes, feedback buffers), the compositor never
@@ -64,12 +133,24 @@ export function VisualizerApp() {
     spectrum: number[];
     wave: { left: Float32Array; right: Float32Array } | null;
     beat: BeatInfo | null;
+    impulse: BandLevels;
+    trend: EnergyTrend;
+    centroid: number;
+    spread: number;
+    flatness: number;
+    decks: DeckStateInfo[];
     receivedAt: number;
   }>({
     bands: SILENT_BANDS,
     spectrum: SILENT_SPECTRUM,
     wave: null,
     beat: null,
+    impulse: SILENT_BANDS,
+    trend: INITIAL_TREND,
+    centroid: 0.5,
+    spread: 0.5,
+    flatness: 0.5,
+    decks: [],
     receivedAt: -Infinity,
   });
   const presetId = useSyncExternalStore(subscribePreset, getPresetId);
@@ -79,6 +160,24 @@ export function VisualizerApp() {
     morphT: 1,
   });
   const [chromeVisible, setChromeVisible] = useState(true);
+  const [hudVisible, setHudVisible] = useState(
+    () => localStorage.getItem('manadj-visualizer-hud') === 'true'
+  );
+  const toggleHud = () =>
+    setHudVisible((v) => {
+      localStorage.setItem('manadj-visualizer-hud', String(!v));
+      return !v;
+    });
+  const [genTick, setGenTick] = useState(0);
+  const [genFilter, setGenFilter] = useState('');
+  const quality = useSyncExternalStore(subscribeQuality, getRenderQuality);
+  // Quality change → recompute backing sizes (the render loop's resize
+  // handler reads the store directly).
+  useEffect(() => {
+    window.dispatchEvent(new Event('resize'));
+  }, [quality]);
+  const activePreset = resolvePreset(presetId) ?? presetById(presetId);
+  const paramValues = useSyncExternalStore(subscribeParams, () => getParamValues(activePreset));
   const [stalled, setStalled] = useState(true);
 
   useEffect(() => {
@@ -92,17 +191,26 @@ export function VisualizerApp() {
   useEffect(() => {
     const layers = layersRef.current;
     if (layers.current?.preset.id === presetId) return;
+    const resolved = resolvePreset(presetId);
+    if (!resolved) {
+      // Gen candidate module not loaded yet: fetch it, then re-run.
+      void ensureCandidate(presetId).then((preset) => {
+        if (preset) setGenTick((t) => t + 1);
+      });
+      return;
+    }
     const canvas = canvasRef.current;
     const width = canvas?.width ?? 1;
     const height = canvas?.height ?? 1;
-    const next = makeLayer(presetById(presetId), width, height);
+    const next = makeLayer(resolved, width, height);
     if (!next) return;
     if (layers.current) {
       layers.outgoing = layers.current;
       layers.morphT = 0;
     }
     layers.current = next;
-  }, [presetId]);
+    window.dispatchEvent(new Event('resize'));
+  }, [presetId, genTick]);
 
   // Band feed: ping so the main-window bridge transmits (declaring wave
   // needs); keep the latest frame in a ref — feed data must never be React
@@ -110,12 +218,28 @@ export function VisualizerApp() {
   useEffect(() => {
     const channel = new BroadcastChannel(VISUALIZER_CHANNEL);
     channel.onmessage = (event: MessageEvent<VisualizerMessage>) => {
+      if (event.data?.type === 'set-preset') {
+        // Remote switch from the main window's control modal (03).
+        setPresetId(event.data.presetId);
+        return;
+      }
+      if (event.data?.type === 'set-param') {
+        // Remote tweak from the modal (05).
+        setParamValue(event.data.presetId, event.data.paramId, event.data.value);
+        return;
+      }
       if (event.data?.type !== 'bands') return;
       feedRef.current = {
         bands: event.data.bands,
         spectrum: event.data.spectrum ?? SILENT_SPECTRUM,
         wave: event.data.wave ?? null,
         beat: event.data.beat ?? null,
+        impulse: event.data.impulse ?? SILENT_BANDS,
+        trend: event.data.trend ?? INITIAL_TREND,
+        centroid: event.data.centroid ?? 0.5,
+        spread: event.data.spread ?? 0.5,
+        flatness: event.data.flatness ?? 0.5,
+        decks: event.data.decks ?? [],
         receivedAt: performance.now(),
       };
     };
@@ -126,6 +250,8 @@ export function VisualizerApp() {
         wantsWave: !!(
           layers.current?.preset.wantsWave || layers.outgoing?.preset.wantsWave
         ),
+        presetId: getPresetId(),
+        params: getParamValues(presetById(getPresetId())),
       };
       channel.postMessage(message);
     };
@@ -150,12 +276,18 @@ export function VisualizerApp() {
     if (!ctx) return;
 
     const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const width = Math.round(canvas.clientWidth * dpr);
-      const height = Math.round(canvas.clientHeight * dpr);
+      const layers = layersRef.current;
+      const hiRes = !!(layers.current?.preset.hiRes || layers.outgoing?.preset.hiRes);
+      const q = getRenderQuality();
+      const budget =
+        q === 'auto'
+          ? hiRes
+            ? MAX_BACKING_PIXELS_HIRES
+            : MAX_BACKING_PIXELS
+          : QUALITY_BUDGETS[q];
+      const { width, height } = backingSize(canvas, budget);
       canvas.width = width;
       canvas.height = height;
-      const layers = layersRef.current;
       for (const layer of [layers.current, layers.outgoing]) {
         if (!layer) continue;
         layer.canvas.width = width;
@@ -178,6 +310,13 @@ export function VisualizerApp() {
         spectrum: fresh ? feedRef.current.spectrum : SILENT_SPECTRUM,
         wave: fresh ? feedRef.current.wave : null,
         beat: fresh ? feedRef.current.beat : null,
+        impulse: fresh ? feedRef.current.impulse : SILENT_BANDS,
+        trend: fresh ? feedRef.current.trend : INITIAL_TREND,
+        centroid: fresh ? feedRef.current.centroid : 0.5,
+        spread: fresh ? feedRef.current.spread : 0.5,
+        flatness: fresh ? feedRef.current.flatness : 0.5,
+        decks: fresh ? feedRef.current.decks : [],
+        params: {},
         time: (now - startedAt) / 1000,
         dt,
       };
@@ -193,14 +332,20 @@ export function VisualizerApp() {
           layers.current.canvas.width = width;
           layers.current.canvas.height = height;
         }
-        layers.current.renderer.render(layers.current.ctx, width, height, frame);
+        layers.current.renderer.render(layers.current.ctx, width, height, {
+          ...frame,
+          params: getParamValues(layers.current.preset),
+        });
       }
       if (layers.outgoing) {
         layers.morphT += dt / MORPH_S;
         if (layers.morphT >= 1) {
           layers.outgoing = null;
         } else {
-          layers.outgoing.renderer.render(layers.outgoing.ctx, width, height, frame);
+          layers.outgoing.renderer.render(layers.outgoing.ctx, width, height, {
+            ...frame,
+            params: getParamValues(layers.outgoing.preset),
+          });
         }
       }
 
@@ -253,7 +398,29 @@ export function VisualizerApp() {
     };
   }, []);
 
+  // Close keys: Escape (exits fullscreen first if active) and Cmd/Ctrl+W.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else window.close();
+      } else if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey) {
+        toggleHud();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        window.close();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const toggleFullscreen = () => {
+    const bridge = window.manadjVisualizer;
+    if (bridge) {
+      void bridge.toggleFullscreen();
+      return;
+    }
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen();
   };
@@ -261,12 +428,14 @@ export function VisualizerApp() {
   return (
     <div className={`visualizer${chromeVisible ? '' : ' chrome-hidden'}`}>
       <canvas ref={canvasRef} className="visualizer-canvas" />
+      {hudVisible && <VisualizerHud getSnapshot={() => feedRef.current} />}
       {stalled && (
         <div className="visualizer-nosignal">
           waiting for manaDJ audio — keep the main window open
         </div>
       )}
       <div className="visualizer-chrome">
+        <div className="visualizer-chrome-left">
         <div className="visualizer-presets">
           {PRESETS.map((preset) => (
             <button
@@ -278,6 +447,48 @@ export function VisualizerApp() {
             </button>
           ))}
         </div>
+        <div className="visualizer-genpanel">
+          <input
+            className="visualizer-gen-search"
+            type="search"
+            placeholder={`filter ${GEN_LISTINGS.length} candidates…`}
+            value={genFilter}
+            onChange={(e) => setGenFilter(e.target.value)}
+          />
+          <div className="visualizer-genlist">
+            {GEN_LISTINGS.filter(({ id }) =>
+              id.toLowerCase().includes(genFilter.trim().toLowerCase())
+            ).map(({ id, rating }) => (
+              <button
+                key={id}
+                className={`visualizer-preset-btn gen${id === presetId ? ' active' : ''}`}
+                title={`genepool candidate — rating ${Math.round(rating)}`}
+                onClick={() => setPresetId(id)}
+              >
+                {id} <span className="visualizer-preset-rating">{Math.round(rating)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        </div>
+        <div className="visualizer-quality" title="Render quality (backing-store budget; auto = audio-safe default)">
+          {RENDER_QUALITIES.map((q: RenderQuality) => (
+            <button
+              key={q}
+              className={`visualizer-preset-btn quality${q === quality ? ' active' : ''}`}
+              onClick={() => setRenderQuality(q)}
+            >
+              {QUALITY_LABELS[q]}
+            </button>
+          ))}
+        </div>
+        <button
+          className="visualizer-fullscreen-btn"
+          title="Debug HUD (h)"
+          onClick={toggleHud}
+        >
+          HUD
+        </button>
         <button
           className="visualizer-fullscreen-btn"
           title="Toggle fullscreen"
@@ -286,6 +497,23 @@ export function VisualizerApp() {
           ⛶
         </button>
       </div>
+      {(activePreset.params?.length ?? 0) > 0 && (
+        <div className="visualizer-params">
+          {activePreset.params!.map((param) => (
+            <label key={param.id} className="visualizer-param">
+              <span>{param.label}</span>
+              <input
+                type="range"
+                min={param.min}
+                max={param.max}
+                step={param.step}
+                value={paramValues[param.id] ?? param.default}
+                onChange={(e) => setParamValue(activePreset.id, param.id, Number(e.target.value))}
+              />
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

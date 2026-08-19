@@ -14,6 +14,7 @@ import { DeckContext, DeckRegistryContext } from '../hooks/useDeck';
 import type { DeckContextValue } from '../hooks/useDeck';
 import { useDeckBeatgridSync } from '../hooks/useDeckBeatgridSync';
 import { useDeckBpmSync } from '../hooks/useDeckBpmSync';
+import { useDeckMetricLadderSync } from '../hooks/useMetricLadderData';
 import { MixerContext } from '../hooks/useMixer';
 import { api } from '../api/client';
 import { initFollowPlaybackBridge } from '../follow/followPlaybackBridge';
@@ -228,6 +229,12 @@ export function DeckProvider({ children }: { children: ReactNode }) {
   useDeckBpmSync(engines.B, loadedTracks.B?.id ?? null);
   useDeckBpmSync(engines.C, loadedTracks.C?.id ?? null);
   useDeckBpmSync(engines.D, loadedTracks.D?.id ?? null);
+  // Keep each Deck's Reset marks warm so the visualizer's phrase/section
+  // tiers stay ladder-correct with no editor surface open (rt-viz 08).
+  useDeckMetricLadderSync(loadedTracks.A?.id ?? null);
+  useDeckMetricLadderSync(loadedTracks.B?.id ?? null);
+  useDeckMetricLadderSync(loadedTracks.C?.id ?? null);
+  useDeckMetricLadderSync(loadedTracks.D?.id ?? null);
 
   // ── Loaded-Deck persistence ────────────────────────────────────────────
   // The shared Decks ARE "what's loaded on A–D" across every mode — the

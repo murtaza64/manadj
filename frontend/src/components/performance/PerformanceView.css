@@ -115,13 +115,6 @@
   pointer-events: none;
 }
 
-/* Machine tenure (Conductor / session replay): control focus means nothing
-   on the waveforms — no frame, no bright bars (the row drops .focused), and
-   no unfocused dim. Deck CONTROLS keep their focus treatment. */
-.perf-wave-row.machine .waveform-container {
-  opacity: 1;
-}
-
 /* De-emphasis is OPACITY ONLY — never `filter` (or `backdrop-filter`) over
    an element containing canvases. A CSS filter over canvas layers makes the
    macOS compositor leak ~2 IOAccelerator VM regions/sec for the REST OF THE
@@ -130,6 +123,16 @@
    (stability/01, slope-bisected in a lane; opacity measured clean). */
 .perf-wave-row:not(.focused) .waveform-container {
   opacity: 0.6;
+}
+
+/* Machine tenure (Conductor / session replay): control focus means nothing
+   on the waveforms — no frame, no bright bars (the row drops .focused), and
+   NO unfocused dim: every deck renders at full brightness. Must WIN over
+   the :not(.focused) de-emphasis above (after it + higher specificity —
+   it originally sat before at equal specificity, dimming everything during
+   controlled playback). Deck CONTROLS keep their focus treatment. */
+.perf-wave-row.machine:not(.focused) .waveform-container {
+  opacity: 1;
 }
 
 /* ── Mixer strip: X-FADER centered, MASTER on the right ───────── */

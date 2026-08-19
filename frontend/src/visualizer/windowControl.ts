@@ -35,3 +35,11 @@ export function toggleVisualizer(): void {
     vizWindow.focus();
   }
 }
+
+/** Open the genetic arena (realtime-visualization 06) as a sibling window.
+ * Must be opened FROM the app window: BroadcastChannel is browser-engine
+ * scoped, so an arena tab in an external browser can't hear an Electron
+ * main window's bridge. */
+export function openArena(): void {
+  window.open('/visualizer?arena=1', 'manadj-arena', 'width=1280,height=600');
+}

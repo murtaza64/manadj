@@ -1,100 +1,119 @@
 /**
- * "Siphon" preset (realtime-visualization 02): inside a tube of spectrum
- * rings flying past the viewer — a canvas-2D port of Vissonance's Siphon.
- * Each ring is a snapshot of the spectrum wrapped into a closed radial
- * polygon; rings spawn deep in the tube and accelerate outward with the
- * energy (their `position += f(loudness)·loudness`). Two signature
- * Siphon moves kept: the INVERTED breathing — the whole tube contracts
- * as the track gets louder (`scale = 1 − loudness`) — and the background
- * tinted the COMPLEMENT of the trace hue (kept dark for the black stage).
+ * "Siphon" preset (realtime-visualization 02/05): inside a spectrum tube —
+ * rebuilt as a WebGL fragment shader (the canvas ring port read flat).
+ * Classic procedural tunnel coordinates (angle, 1/radius) with the
+ * 24-band spectrum wrapped around the wall: each angular segment's wall
+ * displaces and glows with its band. Vissonance Siphon signatures kept:
+ * INVERTED breathing (energy tightens the tube), depth fog, and the
+ * complementary rim tint. Kicks (low impulse) flash the tunnel mouth;
+ * flight speed rides the energy trend, so drops physically accelerate.
  */
 
+import { SPECTRUM_BAND_COUNT } from '../channel';
 import { energyHue, energyOf } from '../style';
-import type { PresetRenderer, VisualizerFrameData, VisualizerPreset } from './types';
+import { createGlRenderer } from './glPreset';
+import type { VisualizerPreset } from './types';
 
-/** New ring when the innermost has grown past this radius fraction. */
-const SPAWN_AT = 0.09;
-const START_RADIUS = 0.055;
-/** Radial growth: rings accelerate outward with energy (loudness²·k). */
-const MIN_GROW_PER_S = 0.25;
-const MAX_GROW_PER_S = 2.4;
-const MAX_RINGS = 22;
+const FRAGMENT = `
+precision highp float;
+uniform vec2 u_res;
+uniform float u_time;
+uniform float u_z;        // accumulated flight depth
+uniform float u_energy;
+uniform float u_low;
+uniform float u_kick;     // low impulse
+uniform float u_hue;      // energy hue, degrees
+uniform float u_spectrum[${SPECTRUM_BAND_COUNT}];
 
-interface Ring {
-  /** Radius as a fraction of the unit dimension. */
-  radius: number;
-  levels: number[];
-  hue: number;
+const float PI = 3.141592653589793;
+const float BANDS = ${SPECTRUM_BAND_COUNT}.0;
+
+vec3 hsl2rgb(float h, float s, float l) {
+  float c = (1.0 - abs(2.0 * l - 1.0)) * s;
+  float hp = mod(h / 60.0, 6.0);
+  float x = c * (1.0 - abs(mod(hp, 2.0) - 1.0));
+  vec3 rgb = hp < 1.0 ? vec3(c, x, 0.0) : hp < 2.0 ? vec3(x, c, 0.0)
+    : hp < 3.0 ? vec3(0.0, c, x) : hp < 4.0 ? vec3(0.0, x, c)
+    : hp < 5.0 ? vec3(x, 0.0, c) : vec3(c, 0.0, x);
+  return rgb + (l - c * 0.5);
 }
 
-class SiphonRenderer implements PresetRenderer {
-  private rings: Ring[] = [];
-
-  render(
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    height: number,
-    frame: VisualizerFrameData
-  ): void {
-    const energy = energyOf(frame.bands);
-    const hue = energyHue(energy);
-
-    // Siphon's complementary background, darkened for the black stage.
-    ctx.fillStyle = `hsl(${(hue + 180) % 360}, 100%, ${3 + 5 * energy}%)`;
-    ctx.fillRect(0, 0, width, height);
-
-    const cx = width / 2;
-    const cy = height / 2;
-    // Inverted breathing: loud = the tube tightens around you.
-    const unit = Math.min(width, height) * (1.15 - 0.45 * energy);
-
-    // Grow rings outward; retire the ones that flew past.
-    const growth = (MIN_GROW_PER_S + (MAX_GROW_PER_S - MIN_GROW_PER_S) * energy * energy)
-      * frame.dt;
-    for (const ring of this.rings) ring.radius *= 1 + growth * (1 + ring.radius * 2.2);
-    this.rings = this.rings.filter((ring) => ring.radius < 1.6);
-
-    // Spawn a fresh spectrum ring once the newest has cleared the mouth.
-    const newest = this.rings[this.rings.length - 1];
-    if ((!newest || newest.radius > SPAWN_AT) && this.rings.length < MAX_RINGS) {
-      this.rings.push({
-        radius: START_RADIUS,
-        levels: frame.spectrum.slice(),
-        hue,
-      });
-    }
-
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.lineJoin = 'round';
-    for (const ring of this.rings) {
-      const points = ring.levels.length * 2;
-      const base = ring.radius * unit;
-      // Nearness: how far down the tube (0 deep → 1 at the viewer).
-      const nearness = Math.min(1, ring.radius / 1.1);
-      ctx.beginPath();
-      for (let p = 0; p <= points; p++) {
-        const i = p % points;
-        const band = i < ring.levels.length ? i : points - 1 - i;
-        const bulge = 1 + ring.levels[band] * 0.4;
-        const angle = -Math.PI / 2 + (i / points) * Math.PI * 2;
-        const r = base * bulge;
-        const x = cx + Math.cos(angle) * r;
-        const y = cy + Math.sin(angle) * r * 0.82;
-        if (p === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      const alpha = nearness < 0.12 ? nearness / 0.12 : 1 - Math.max(0, (nearness - 0.75) / 0.25);
-      ctx.strokeStyle = `hsla(${ring.hue}, 100%, ${40 + 35 * nearness}%, ${alpha})`;
-      ctx.lineWidth = Math.max(1, unit * 0.0045 * (0.3 + nearness * 1.6));
-      ctx.stroke();
-    }
-    ctx.globalCompositeOperation = 'source-over';
+float bandAt(float i) {
+  // Constant-index loop lookup (GLSL ES 1.0 has no dynamic array index).
+  float v = 0.0;
+  for (int k = 0; k < ${SPECTRUM_BAND_COUNT}; k++) {
+    if (float(k) == i) v = u_spectrum[k];
   }
+  return v;
 }
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy * 2.0 - u_res) / min(u_res.x, u_res.y);
+  // Inverted breathing: loud tightens the tube around you.
+  uv *= 1.0 + 0.5 * u_energy;
+  float r = length(uv);
+  float angle = atan(uv.y, uv.x);
+
+  // Tunnel coordinates: depth ~ 1/r, flying along +z.
+  float depth = 0.35 / max(r, 1e-4) + u_z;
+  // Gentle drift so the tube bends instead of staring down a pipe.
+  angle += 0.35 * sin(depth * 0.22 + u_time * 0.15);
+
+  // The spectrum wraps the wall: band by angle (mirrored), sub-glow by
+  // how close this wall cell's ring is.
+  float half_ = mod(angle / PI + 2.0, 2.0);           // 0..2
+  float mirrored = half_ < 1.0 ? half_ : 2.0 - half_;  // 0..1, mirrored
+  float bandIndex = floor(mirrored * (BANDS - 1.0) + 0.5);
+  float level = bandAt(bandIndex);
+
+  // Rings along the tube; each band bulges its wall cells inward.
+  float ring = fract(depth * 0.5);
+  float ringGlow = pow(1.0 - abs(ring - 0.5) * 2.0, 6.0 + 10.0 * (1.0 - level));
+  float segEdge = pow(abs(fract(mirrored * (BANDS - 1.0)) - 0.5) * 2.0, 8.0);
+
+  // Depth fog: far is dark.
+  float fog = exp(-0.16 * (depth - u_z));
+
+  float wall = ringGlow * (0.15 + 1.5 * level) + segEdge * 0.08 * level;
+  vec3 base = hsl2rgb(u_hue, 1.0, 0.28 + 0.3 * level);
+  vec3 rim = hsl2rgb(mod(u_hue + 180.0, 360.0), 1.0, 0.5);
+  vec3 col = base * wall * fog;
+  // Complementary rim breathing at the mouth.
+  col += rim * pow(max(0.0, 1.0 - r), 3.0) * (0.12 + 0.5 * u_low);
+  // Kick flash: the whole mouth blinks white on a low transient.
+  col += vec3(1.0) * pow(max(0.0, 1.0 - r), 2.0) * u_kick * 0.7;
+
+  gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
+}
+`;
 
 export const siphonPreset: VisualizerPreset = {
   id: 'siphon',
+  hiRes: true,
   name: 'Siphon',
-  create: () => new SiphonRenderer(),
+  create: () => {
+    // Flight depth integrates energy-trend speed (drops accelerate).
+    let z = 0;
+    let lastTime = 0;
+    const spectrum = new Float32Array(SPECTRUM_BAND_COUNT);
+    return createGlRenderer({
+      fragment: FRAGMENT,
+      uniforms: (frame) => {
+        const dt = lastTime > 0 ? Math.max(0, frame.time - lastTime) : 1 / 60;
+        lastTime = frame.time;
+        const energy = energyOf(frame.bands);
+        z += dt * (0.6 + 2.4 * frame.trend.excitement + 1.2 * energy);
+        spectrum.set(frame.spectrum.slice(0, SPECTRUM_BAND_COUNT));
+        return {
+          u_time: frame.time,
+          u_z: z,
+          u_energy: energy,
+          u_low: frame.bands.low,
+          u_kick: frame.impulse.low,
+          u_hue: energyHue(energy),
+          u_spectrum: spectrum,
+        };
+      },
+    });
+  },
 };

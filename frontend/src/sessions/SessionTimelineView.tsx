@@ -1013,9 +1013,12 @@ const TimelineScene = memo(function TimelineScene({
   // resolve keep the stylesheet's default fill.
   const takePairs = takes.map((t) => takeDeckPair(model, t));
 
-  // Chip layout (sessions 22): overlapping chips share the strip height —
-  // clusters split into two half-height rows (the staggerRows idiom);
-  // isolated chips keep the full strip.
+  // Chip layout (sessions 22): overlapping chips share the strip height.
+  // Up to FOUR rows (2 rows capped dense stretches at overlap — the third
+  // concurrent chip landed on an occupied row); each connected overlap
+  // cluster shrinks only as much as IT needs (rows = max row used within
+  // the cluster), so a lone pair keeps half-height chips while a 4-deep
+  // pile drops to quarter height. Isolated chips keep the full strip.
   const chipLayout = (() => {
     const order = takes
       .map((_, i) => i)
@@ -1024,13 +1027,16 @@ const TimelineScene = memo(function TimelineScene({
       const x0 = X(takes[i].window_start_s);
       return { x0, x1: Math.max(X(takes[i].window_end_s), x0 + 12) };
     });
-    const rows = staggerRows(items, 2);
-    // Mark every chip of a connected overlap cluster as height-sharing.
-    const shared = items.map(() => false);
+    const rows = staggerRows(items, 4);
+    const layout = new Array<{ row: number; rows: number }>(takes.length);
     let clusterStart = 0;
     let clusterEnd = items.length > 0 ? items[0].x1 : 0;
     const closeCluster = (k: number) => {
-      if (k - clusterStart > 1) for (let j = clusterStart; j < k; j++) shared[j] = true;
+      let rowsNeeded = 1;
+      for (let j = clusterStart; j < k; j++) rowsNeeded = Math.max(rowsNeeded, rows[j] + 1);
+      for (let j = clusterStart; j < k; j++) {
+        layout[order[j]] = { row: rows[j], rows: rowsNeeded };
+      }
     };
     for (let k = 1; k < items.length; k++) {
       if (items[k].x0 < clusterEnd) {
@@ -1042,10 +1048,6 @@ const TimelineScene = memo(function TimelineScene({
       }
     }
     closeCluster(items.length);
-    const layout = new Array<{ row: number; shared: boolean }>(takes.length);
-    order.forEach((orig, k) => {
-      layout[orig] = { row: shared[k] ? rows[k] : 0, shared: shared[k] };
-    });
     return layout;
   })();
   const gradientPairs = [
@@ -1208,14 +1210,17 @@ const TimelineScene = memo(function TimelineScene({
           pair.from !== null && pair.to !== null
             ? `url(#stl-take-grad-${pair.from}-${pair.to})`
             : null;
-        const { row, shared } = chipLayout[ti];
-        const chipH = shared ? (CHIP_STRIP_H - 6) / 2 : CHIP_STRIP_H - 6;
+        const { row, rows } = chipLayout[ti];
+        const chipH = (CHIP_STRIP_H - 6) / rows;
         const chipY = RULER_H + 2 + row * chipH;
-        const textY = shared ? chipY + 9 : RULER_H + 17;
+        const textY = chipY + chipH / 2 + 3;
+        // 2 rows: smaller text; 3-4 rows: chips too thin for text at all
+        // (the hover title still carries the label).
+        const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         return (
           <g
             key={t.uuid}
-            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}${shared ? ' slim' : ''}`}
+            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}${sizeClass}`}
             onClick={(e) => {
               e.stopPropagation();
               onTakeClick(t);
@@ -1229,7 +1234,7 @@ const TimelineScene = memo(function TimelineScene({
               y={chipY}
               width={x1 - x0}
               height={chipH}
-              rx={shared ? 4 : 5}
+              rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
               style={grad ? { fill: grad } : undefined}
             />
             {x1 - x0 > 90 ? (
