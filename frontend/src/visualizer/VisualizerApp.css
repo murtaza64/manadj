@@ -44,11 +44,53 @@
   pointer-events: none;
 }
 
+.visualizer-chrome {
+  align-items: flex-start;
+}
+
+.visualizer-chrome-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: calc(100% - 140px);
+  min-width: 0;
+}
+
 .visualizer-presets {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  max-width: calc(100% - 60px);
+}
+
+/* Genepool panel: ~100 candidates need search + a height cap. */
+.visualizer-genpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.visualizer-gen-search {
+  align-self: flex-start;
+  width: 260px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid hsl(280, 100%, 45%);
+  color: hsl(280, 100%, 75%);
+  font: 12px ui-monospace, monospace;
+  padding: 5px 8px;
+}
+
+.visualizer-gen-search:focus {
+  outline: none;
+  border-color: hsl(280, 100%, 65%);
+}
+
+.visualizer-genlist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 26vh;
+  overflow-y: auto;
+  align-content: flex-start;
 }
 
 .visualizer-preset-btn,

@@ -6,15 +6,24 @@
  */
 
 import { DEFAULT_PRESET_ID, presetById } from './presets';
+import { isCandidateId } from './presets/gen';
 import type { VisualizerPreset } from './presets/types';
 
 const STORAGE_KEY = 'manadj-visualizer-preset';
 
+/** Genepool candidate ids are first-class preset ids (rt-viz 06): they must
+ * NOT be normalized through the curated registry — that collapsed every gen
+ * chip to PRESETS[0] (the "chips select the default preset" bug, same family
+ * as the param snap-back). */
+function normalizeId(id: string): string {
+  return isCandidateId(id) ? id : presetById(id).id;
+}
+
 function load(): string {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    // Normalize unknown/stale ids to a real preset.
-    return stored ? presetById(stored).id : DEFAULT_PRESET_ID;
+    // Normalize unknown/stale ids to a real preset (gen ids pass through).
+    return stored ? normalizeId(stored) : DEFAULT_PRESET_ID;
   } catch {
     return DEFAULT_PRESET_ID;
   }
@@ -41,7 +50,7 @@ export function getPresetId(): string {
 }
 
 export function setPresetId(id: string): void {
-  const normalized = presetById(id).id;
+  const normalized = normalizeId(id);
   if (normalized === presetId) return;
   presetId = normalized;
   save(normalized);
@@ -106,10 +115,10 @@ export function setParamValue(presetId: string, paramId: string, value: number):
 }
 
 export function resetParams(presetId: string): void {
-  const preset = presetById(presetId);
-  paramCache.delete(preset.id);
+  const id = normalizeId(presetId);
+  paramCache.delete(id);
   try {
-    localStorage.removeItem(PARAMS_KEY_PREFIX + preset.id);
+    localStorage.removeItem(PARAMS_KEY_PREFIX + id);
   } catch {
     // best-effort
   }

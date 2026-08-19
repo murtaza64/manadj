@@ -149,6 +149,7 @@ export function VisualizerApp() {
       return !v;
     });
   const [genTick, setGenTick] = useState(0);
+  const [genFilter, setGenFilter] = useState('');
   const activePreset = resolvePreset(presetId) ?? presetById(presetId);
   const paramValues = useSyncExternalStore(subscribeParams, () => getParamValues(activePreset));
   const [stalled, setStalled] = useState(true);
@@ -404,6 +405,7 @@ export function VisualizerApp() {
         </div>
       )}
       <div className="visualizer-chrome">
+        <div className="visualizer-chrome-left">
         <div className="visualizer-presets">
           {PRESETS.map((preset) => (
             <button
@@ -414,16 +416,30 @@ export function VisualizerApp() {
               {preset.name}
             </button>
           ))}
-          {GEN_LISTINGS.map(({ id, rating }) => (
-            <button
-              key={id}
-              className={`visualizer-preset-btn gen${id === presetId ? ' active' : ''}`}
-              title={`genepool candidate — rating ${Math.round(rating)}`}
-              onClick={() => setPresetId(id)}
-            >
-              {id} <span className="visualizer-preset-rating">{Math.round(rating)}</span>
-            </button>
-          ))}
+        </div>
+        <div className="visualizer-genpanel">
+          <input
+            className="visualizer-gen-search"
+            type="search"
+            placeholder={`filter ${GEN_LISTINGS.length} candidates…`}
+            value={genFilter}
+            onChange={(e) => setGenFilter(e.target.value)}
+          />
+          <div className="visualizer-genlist">
+            {GEN_LISTINGS.filter(({ id }) =>
+              id.toLowerCase().includes(genFilter.trim().toLowerCase())
+            ).map(({ id, rating }) => (
+              <button
+                key={id}
+                className={`visualizer-preset-btn gen${id === presetId ? ' active' : ''}`}
+                title={`genepool candidate — rating ${Math.round(rating)}`}
+                onClick={() => setPresetId(id)}
+              >
+                {id} <span className="visualizer-preset-rating">{Math.round(rating)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
         </div>
         <button
           className="visualizer-fullscreen-btn"
