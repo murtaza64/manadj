@@ -35,6 +35,7 @@ export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
   const remote = useSyncExternalStore(subscribeVisualizerRemote, getVisualizerRemote);
   const [displays, setDisplays] = useState<VisualizerDisplayInfo[] | null>(null);
   const bridge = window.manadjVisualizer;
+  const [genFilter, setGenFilter] = useState('');
   const [genTick, setGenTick] = useState(0);
   void genTick; // re-render trigger once a gen module resolves
   const activePreset = remote.presetId
@@ -115,8 +116,17 @@ export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <h3>Genepool (rating)</h3>
-        <div className="vizmodal-presets">
-          {GEN_LISTINGS.map(({ id, rating }) => (
+        <input
+          className="vizmodal-gen-search"
+          type="search"
+          placeholder={`filter ${GEN_LISTINGS.length} candidates…`}
+          value={genFilter}
+          onChange={(e) => setGenFilter(e.target.value)}
+        />
+        <div className="vizmodal-presets vizmodal-genlist">
+          {GEN_LISTINGS.filter(({ id }) =>
+            id.toLowerCase().includes(genFilter.trim().toLowerCase())
+          ).map(({ id, rating }) => (
             <button
               key={id}
               className={`vizmodal-btn gen${id === remote.presetId ? ' active' : ''}`}
