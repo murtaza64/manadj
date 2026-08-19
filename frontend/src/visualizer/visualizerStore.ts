@@ -129,3 +129,47 @@ export function subscribeParams(listener: () => void): () => void {
   paramListeners.add(listener);
   return () => paramListeners.delete(listener);
 }
+
+/**
+ * Render quality (realtime-viz 06, "blurry on 4K/retina"): backing-store
+ * pixel budget. 'auto' keeps the audio-safe default (1080p, 1440p for hiRes
+ * presets — unbounded retina canvases starved HDMI audio into underruns);
+ * the explicit tiers are an opt-in upgrade for setups that can take it.
+ */
+export type RenderQuality = 'auto' | 'hd' | 'qhd' | 'uhd' | 'native';
+export const RENDER_QUALITIES: RenderQuality[] = ['auto', 'hd', 'qhd', 'uhd', 'native'];
+const QUALITY_KEY = 'manadj-visualizer-quality';
+
+function loadQuality(): RenderQuality {
+  try {
+    const stored = localStorage.getItem(QUALITY_KEY);
+    return (RENDER_QUALITIES as string[]).includes(stored ?? '')
+      ? (stored as RenderQuality)
+      : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+let renderQuality: RenderQuality = loadQuality();
+const qualityListeners = new Set<() => void>();
+
+export function getRenderQuality(): RenderQuality {
+  return renderQuality;
+}
+
+export function setRenderQuality(quality: RenderQuality): void {
+  if (quality === renderQuality) return;
+  renderQuality = quality;
+  try {
+    localStorage.setItem(QUALITY_KEY, quality);
+  } catch {
+    // best-effort
+  }
+  for (const listener of qualityListeners) listener();
+}
+
+export function subscribeQuality(listener: () => void): () => void {
+  qualityListeners.add(listener);
+  return () => qualityListeners.delete(listener);
+}

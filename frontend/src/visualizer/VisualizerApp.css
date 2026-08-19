@@ -126,6 +126,26 @@
   font-weight: normal;
 }
 
+/* Render-quality picker (chrome, next to HUD). */
+.visualizer-quality {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+.visualizer-preset-btn.quality {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-color: hsl(140, 90%, 45%);
+  color: hsl(140, 90%, 65%);
+}
+
+.visualizer-preset-btn.quality.active {
+  background: hsl(140, 90%, 45%);
+  color: #000;
+}
+
 .visualizer-preset-btn:hover,
 .visualizer-fullscreen-btn:hover {
   border-color: hsl(200, 100%, 65%);

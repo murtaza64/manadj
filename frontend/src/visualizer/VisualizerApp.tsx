@@ -18,11 +18,16 @@ import type { PresetRenderer, VisualizerPreset } from './presets/types';
 import {
   getParamValues,
   getPresetId,
+  getRenderQuality,
+  RENDER_QUALITIES,
   setParamValue,
   setPresetId,
+  setRenderQuality,
   subscribeParams,
   subscribePreset,
+  subscribeQuality,
 } from './visualizerStore';
+import type { RenderQuality } from './visualizerStore';
 import { VisualizerHud } from './VisualizerHud';
 import './VisualizerApp.css';
 
@@ -54,6 +59,21 @@ const MORPH_S = 0.8;
 const MAX_BACKING_PIXELS = 1920 * 1080;
 /** GL presets shade per pixel cheaply; give them ~1440p. */
 const MAX_BACKING_PIXELS_HIRES = 2560 * 1440;
+/** Explicit quality tiers (opt-in upgrade past the audio-safe auto budget;
+ * 'native' = full clientSize × devicePixelRatio, no cap). */
+const QUALITY_BUDGETS: Record<Exclude<RenderQuality, 'auto'>, number> = {
+  hd: 1920 * 1080,
+  qhd: 2560 * 1440,
+  uhd: 3840 * 2160,
+  native: Infinity,
+};
+const QUALITY_LABELS: Record<RenderQuality, string> = {
+  auto: 'auto',
+  hd: '1080',
+  qhd: '1440',
+  uhd: '4K',
+  native: 'max',
+};
 
 /** Canvas backing size for the current client size, within the budget. */
 function backingSize(
@@ -150,6 +170,12 @@ export function VisualizerApp() {
     });
   const [genTick, setGenTick] = useState(0);
   const [genFilter, setGenFilter] = useState('');
+  const quality = useSyncExternalStore(subscribeQuality, getRenderQuality);
+  // Quality change → recompute backing sizes (the render loop's resize
+  // handler reads the store directly).
+  useEffect(() => {
+    window.dispatchEvent(new Event('resize'));
+  }, [quality]);
   const activePreset = resolvePreset(presetId) ?? presetById(presetId);
   const paramValues = useSyncExternalStore(subscribeParams, () => getParamValues(activePreset));
   const [stalled, setStalled] = useState(true);
@@ -252,10 +278,14 @@ export function VisualizerApp() {
     const resize = () => {
       const layers = layersRef.current;
       const hiRes = !!(layers.current?.preset.hiRes || layers.outgoing?.preset.hiRes);
-      const { width, height } = backingSize(
-        canvas,
-        hiRes ? MAX_BACKING_PIXELS_HIRES : MAX_BACKING_PIXELS
-      );
+      const q = getRenderQuality();
+      const budget =
+        q === 'auto'
+          ? hiRes
+            ? MAX_BACKING_PIXELS_HIRES
+            : MAX_BACKING_PIXELS
+          : QUALITY_BUDGETS[q];
+      const { width, height } = backingSize(canvas, budget);
       canvas.width = width;
       canvas.height = height;
       for (const layer of [layers.current, layers.outgoing]) {
@@ -440,6 +470,17 @@ export function VisualizerApp() {
             ))}
           </div>
         </div>
+        </div>
+        <div className="visualizer-quality" title="Render quality (backing-store budget; auto = audio-safe default)">
+          {RENDER_QUALITIES.map((q: RenderQuality) => (
+            <button
+              key={q}
+              className={`visualizer-preset-btn quality${q === quality ? ' active' : ''}`}
+              onClick={() => setRenderQuality(q)}
+            >
+              {QUALITY_LABELS[q]}
+            </button>
+          ))}
         </div>
         <button
           className="visualizer-fullscreen-btn"
