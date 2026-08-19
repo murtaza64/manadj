@@ -644,7 +644,7 @@ export function VisualizerApp() {
         </div>
         <button
           className={`visualizer-preset-btn cycle${cycleMode !== 'off' ? ' active' : ''}`}
-          title="Auto-cycle candidates (c): off → every 45s → 16 beats after each drop"
+          title="Auto-cycle candidates (c): off → every 45s → 128 beats after each drop"
           onClick={() =>
             setCycleMode((prev) => {
               const next = CYCLE_MODES[(CYCLE_MODES.indexOf(prev) + 1) % CYCLE_MODES.length];

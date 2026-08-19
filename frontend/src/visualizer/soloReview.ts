@@ -136,7 +136,7 @@ export function stepCycle(
   opts: CycleOptions = {}
 ): { state: CycleState; advance: boolean } {
   const periodS = opts.periodS ?? 45;
-  const beatsAfterDrop = opts.beatsAfterDrop ?? 16;
+  const beatsAfterDrop = opts.beatsAfterDrop ?? 128;
   const dropThreshold = opts.dropThreshold ?? 0.55;
   const refractoryS = opts.refractoryS ?? 20;
 

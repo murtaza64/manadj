@@ -34,7 +34,7 @@ agent breeds. Design decisions: issue
      `type: solo` events — `target` + `outcome: like|dislike|neutral` +
      `paramsA` snapshot — recorded from the MAIN viz window during
      normal DJ use (hotkeys g/b/m, t note, n next; auto-cycle mode `c`:
-     45s timer or 16-beats-after-drop; scheduler = least-reviewed
+     45s timer or 128-beats-after-drop; scheduler = least-reviewed
      first). Fold: like → `approvals`+1, dislike → `rejections`+1,
      neutral → seen only. Death: dislikes kill a candidate only when it
      has ≥2 rejections and zero approvals AND zero forced-choice wins

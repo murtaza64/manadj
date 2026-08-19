@@ -93,26 +93,27 @@ describe('stepCycle', () => {
   });
 
   it('drop mode advances N beats after a rising edge', () => {
-    // 128 bpm → 16 beats = 7500ms.
+    // 128 bpm → 128 beats = 60000ms.
     let r = stepCycle(INITIAL_CYCLE, 'drop', 1000, 0.2, 128);
     expect(r.advance).toBe(false);
     r = stepCycle(r.state, 'drop', 2000, 0.8, 128); // rising edge, arm
     expect(r.advance).toBe(false);
-    expect(r.state.dueAt).toBe(2000 + 7500);
-    r = stepCycle(r.state, 'drop', 9000, 0.8, 128); // sustained, not due yet
+    expect(r.state.dueAt).toBe(2000 + 60000);
+    r = stepCycle(r.state, 'drop', 61_000, 0.8, 128); // sustained, not due yet
     expect(r.advance).toBe(false);
-    r = stepCycle(r.state, 'drop', 9501, 0.8, 128);
+    r = stepCycle(r.state, 'drop', 62_001, 0.8, 128);
     expect(r.advance).toBe(true);
     expect(r.state.dueAt).toBeNull();
   });
 
-  it('refractory ignores immediate re-triggers', () => {
+  it('a new edge while a schedule is pending does not re-arm', () => {
     let r = stepCycle(INITIAL_CYCLE, 'drop', 1000, 0.8, 128); // edge, arm
-    r = stepCycle(r.state, 'drop', 8501, 0.8, 128); // fires
+    const due = r.state.dueAt;
+    // dip + fresh edge mid-flight: pending dueAt is untouched
+    r = stepCycle(r.state, 'drop', 30_000, 0.2, 128);
+    r = stepCycle(r.state, 'drop', 30_500, 0.8, 128);
+    expect(r.state.dueAt).toBe(due);
+    r = stepCycle(r.state, 'drop', 61_001, 0.8, 128); // fires on schedule
     expect(r.advance).toBe(true);
-    // dip + new edge inside refractory (20s from 1000): no re-arm
-    r = stepCycle(r.state, 'drop', 9000, 0.2, 128);
-    r = stepCycle(r.state, 'drop', 9500, 0.8, 128);
-    expect(r.state.dueAt).toBeNull();
   });
 });
