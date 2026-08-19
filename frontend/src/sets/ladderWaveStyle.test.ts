@@ -6,7 +6,11 @@ import { describe, expect, it } from 'vitest';
 import type { DecodedWaveform } from '../waveform/blob';
 import { buildLodPack } from '../waveform/blob';
 import { DEFAULT_PARAMS, STYLE_REGISTRY, type StyleParams } from '../waveform/styles';
-import { computeStyledColumns, PAINTABLE_STYLE_IDS } from './ladderWaveStyle';
+import {
+  computeStyledColumns,
+  createStyledColumnRenderer,
+  PAINTABLE_STYLE_IDS,
+} from './ladderWaveStyle';
 
 const SR = 44100;
 const PEAK_HOP = 128;
@@ -179,6 +183,67 @@ describe('computeStyledColumns', () => {
     const silent = makeWaveform(200, [0, 0, 0, 0, 0, 0, 0, 0], 0);
     const cols = computeStyledColumns(silent, 'additive-rgb', p, 0.3, 0.9, 10);
     expect(cols[5].segments).toHaveLength(0);
+  });
+
+  // Mixer-state modulation (sessions 19): render-only per-column scaling.
+  describe('modulation', () => {
+    const flat = { eq: [1, 1, 1] as [number, number, number], scale: 1 };
+
+    it('identity modulation changes nothing', () => {
+      const plain = computeStyledColumns(wave, 'additive-rgb', p, 0.3, 0.9, 10);
+      const modded = computeStyledColumns(wave, 'additive-rgb', p, 0.3, 0.9, 10, 1, () => flat);
+      expect(modded).toEqual(plain);
+    });
+
+    it('an EQ low kill removes the low group band', () => {
+      const cols = computeStyledColumns(wave, 'additive-rgb', p, 0.3, 0.9, 10, 1, () => ({
+        eq: [0, 1, 1],
+        scale: 1,
+      }));
+      const segs = cols[5].segments;
+      // Only mid + high cuts survive; the tallest (low) band is gone.
+      expect(segs).toHaveLength(2);
+      expect(segs[1].y1).toBeCloseTo(gMid, 5);
+      // Bottom segment: mid + high colors only — the low group's red is
+      // absent (unmodulated bottom is clamped white).
+      expect(parseCss(segs[0].css)[0]).toBeLessThan(100);
+    });
+
+    it('scale shrinks group heights and the peak silhouette', () => {
+      const half = { eq: [1, 1, 1] as [number, number, number], scale: 0.5 };
+      const cols = computeStyledColumns(wave, 'additive-rgb', p, 0.3, 0.9, 10, 1, () => half);
+      // Below the soft knee the scaling is exact.
+      expect(cols[5].segments[2].y1).toBeCloseTo(gLow * 0.5, 5);
+      const layered = computeStyledColumns(wave, 'layered-opaque', p, 0.3, 0.9, 10, 1, () => half);
+      const segs = layered[5].segments;
+      // Full-scale peaks (1.0) scale straight to 0.5.
+      expect(segs[segs.length - 1].y1).toBeCloseTo(0.5, 5);
+    });
+
+    it('modulation is per column (x-indexed)', () => {
+      const cols = computeStyledColumns(wave, 'additive-rgb', p, 0.3, 0.9, 10, 1, (x) =>
+        x >= 5 ? { eq: [0, 1, 1], scale: 1 } : flat,
+      );
+      expect(cols[0].segments).toHaveLength(3);
+      expect(cols[9].segments).toHaveLength(2);
+    });
+  });
+
+  // Reusable renderer (sessions 22): one sampler across many ranges.
+  it('a reused renderer matches fresh computeStyledColumns per range', () => {
+    for (const s of STYLE_REGISTRY) {
+      const renderer = createStyledColumnRenderer(wave, s.id, p);
+      const ranges: [number, number][] = [
+        [0.1, 0.4],
+        [0.4, 0.9],
+        [0.2, 0.3], // backward jump: no state may leak between calls
+      ];
+      for (const [t0, t1] of ranges) {
+        expect(renderer.render(t0, t1, 16)).toEqual(
+          computeStyledColumns(wave, s.id, p, t0, t1, 16),
+        );
+      }
+    }
   });
 
   it('every registry style renders without throwing and stays in-range', () => {

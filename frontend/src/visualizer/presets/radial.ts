@@ -35,7 +35,7 @@ class RadialRenderer implements PresetRenderer {
 
     const bands = frame.spectrum;
     const spokes = bands.length * 2;
-    const hubRadius = unit * (0.1 + 0.06 * energy + 0.045 * low);
+    const hubRadius = unit * (0.1 + 0.06 * energy + 0.035 * low + 0.05 * frame.impulse.low);
     const maxLength = unit * 0.32;
     const spokeWidth = ((Math.PI * 2) / spokes) * 0.7;
 

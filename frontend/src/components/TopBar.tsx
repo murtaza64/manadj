@@ -12,6 +12,7 @@ import { AudioOwnershipChip } from './AudioOwnershipChip';
 import { TasksWidget } from './TasksWidget';
 import { MasterRecorderControl } from './MasterRecorderControl';
 import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl';
+import { VisualizerControlModal } from './VisualizerControlModal';
 import './TopBar.css';
 
 export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles' | 'jog-tune';
@@ -45,21 +46,32 @@ function QuantizeToggle() {
  * closes it when it already has focus. Lit while the window is open. */
 function VisualizerButton() {
   const [open, setOpen] = useState(isVisualizerOpen());
+  const [modal, setModal] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setOpen(isVisualizerOpen()), 500);
     return () => clearInterval(timer);
   }, []);
   return (
-    <button
-      className={`topbar-visualizer${open ? ' on' : ''}`}
-      title={open ? 'Visualizer: focus (or close when focused)' : 'Open visualizer window'}
-      onClick={() => {
-        toggleVisualizer();
-        setOpen(isVisualizerOpen());
-      }}
-    >
-      ✷
-    </button>
+    <span className="topbar-visualizer-cluster">
+      <button
+        className={`topbar-visualizer${open ? ' on' : ''}`}
+        title={open ? 'Visualizer: focus (or close when focused)' : 'Open visualizer window'}
+        onClick={() => {
+          toggleVisualizer();
+          setOpen(isVisualizerOpen());
+        }}
+      >
+        ✷
+      </button>
+      <button
+        className="topbar-visualizer-caret"
+        title="Visualizer controls (presets, display)"
+        onClick={() => setModal(true)}
+      >
+        ▾
+      </button>
+      {modal && <VisualizerControlModal onClose={() => setModal(false)} />}
+    </span>
   );
 }
 

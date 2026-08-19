@@ -26,6 +26,17 @@ export function useMetricLadderData(trackId: number | null) {
 }
 
 /**
+ * Keep a loaded Deck's `['metric-ladder', id]` cache warm — the sibling of
+ * useDeckBeatgridSync. Without an editor surface open, only this observer
+ * populates the Reset marks the VisualizerBridge reads for a ladder-correct
+ * bar/phrase index (realtime-visualization 08). Result is unused here (the
+ * bridge reads the same cache key); the hook exists purely to fetch.
+ */
+export function useDeckMetricLadderSync(trackId: number | null): void {
+  useQuery<MetricLadderResponse>(metricLadderQueryOptions(trackId));
+}
+
+/**
  * Full-state Reset-mark upsert: each authoring gesture sends the complete
  * mark list (add = list + new mark, delete = list − nearest). One gesture,
  * one PUT — the inverse gesture is its undo.

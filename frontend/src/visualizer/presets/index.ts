@@ -10,6 +10,14 @@ import { trigonPreset } from './trigon';
 import { siphonPreset } from './siphon';
 import { tunnelPreset } from './tunnel';
 import { plasmaPreset } from './plasma';
+import { auroraPreset } from './aurora';
+import { strataPreset } from './strata';
+import { voyagePreset } from './voyage';
+import { novaPreset } from './nova';
+import { odysseyPreset } from './odyssey';
+import { orbitPreset } from './orbit';
+import { quadPreset } from './quad';
+import { ladderPreset } from './ladder';
 import { pulsePreset } from './pulse';
 import { silkPreset } from './silk';
 import { nebulaPreset } from './nebula';
@@ -32,6 +40,14 @@ export const PRESETS: VisualizerPreset[] = [
   siphonPreset,
   tunnelPreset,
   plasmaPreset,
+  auroraPreset,
+  strataPreset,
+  voyagePreset,
+  novaPreset,
+  odysseyPreset,
+  orbitPreset,
+  quadPreset,
+  ladderPreset,
   pulsePreset,
   silkPreset,
   nebulaPreset,

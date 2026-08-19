@@ -12,9 +12,6 @@ import { energyHue, energyOf } from '../style';
 import type { PresetRenderer, VisualizerFrameData, VisualizerPreset } from './types';
 
 const SPARKS_PER_S = 160;
-/** Feedback decay per frame — < 1 so history fades to black, not white. */
-const FEEDBACK_ALPHA = 0.965;
-
 class TunnelRenderer implements PresetRenderer {
   private buffer: HTMLCanvasElement | null = null;
   private bufferCtx: CanvasRenderingContext2D | null = null;
@@ -49,13 +46,15 @@ class TunnelRenderer implements PresetRenderer {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
     if (this.buffer && bufferCtx) {
-      const zoom = 1 + (0.35 + 2.2 * low * low) * frame.dt;
-      this.rotation = (0.1 + 1.4 * mid) * frame.dt;
+      // Kick lunge (05): the transient, not the level, throws you forward.
+      const zoomAmount = frame.params.zoom ?? 1;
+      const zoom = 1 + (0.3 + 1.4 * low * low + 3.5 * frame.impulse.low) * zoomAmount * frame.dt;
+      this.rotation = (0.1 + 1.2 * mid + 1.8 * frame.impulse.mid) * frame.dt;
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(this.rotation);
       ctx.scale(zoom, zoom);
-      ctx.globalAlpha = FEEDBACK_ALPHA;
+      ctx.globalAlpha = 0.9 + 0.095 * (frame.params.trail ?? 0.68);
       ctx.drawImage(this.buffer, -cx, -cy);
       ctx.restore();
       ctx.globalAlpha = 1;
@@ -113,5 +112,9 @@ class TunnelRenderer implements PresetRenderer {
 export const tunnelPreset: VisualizerPreset = {
   id: 'tunnel',
   name: 'Tunnel',
+  params: [
+    { id: 'trail', label: 'trail length', min: 0, max: 1, step: 0.02, default: 0.68 },
+    { id: 'zoom', label: 'zoom drive', min: 0.3, max: 2.5, step: 0.05, default: 1 },
+  ],
   create: () => new TunnelRenderer(),
 };
