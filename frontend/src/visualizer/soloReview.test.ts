@@ -27,16 +27,28 @@ describe('countSoloReviews', () => {
 });
 
 describe('nextCandidateId', () => {
-  it('picks the least-reviewed candidate', () => {
+  it('picks from the least-reviewed tier only', () => {
     expect(nextCandidateId(LISTINGS, { a: 2, b: 0, c: 1 }, null)).toBe('b');
   });
 
-  it('breaks count ties by higher rating', () => {
-    expect(nextCandidateId(LISTINGS, {}, null)).toBe('c');
+  it('picks randomly within a count tie (rng-driven)', () => {
+    expect(nextCandidateId(LISTINGS, {}, null, () => 0)).toBe('a');
+    expect(nextCandidateId(LISTINGS, {}, null, () => 0.99)).toBe('c');
+  });
+
+  it('covers the whole tier across draws (not a fixed descent)', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      const id = nextCandidateId(LISTINGS, {}, null);
+      if (id) seen.add(id);
+    }
+    expect(seen.size).toBeGreaterThan(1);
   });
 
   it('never returns the current candidate when others exist', () => {
-    expect(nextCandidateId(LISTINGS, {}, 'c')).toBe('a');
+    for (let i = 0; i < 20; i++) {
+      expect(nextCandidateId(LISTINGS, {}, 'c')).not.toBe('c');
+    }
   });
 
   it('returns the only candidate even if current', () => {

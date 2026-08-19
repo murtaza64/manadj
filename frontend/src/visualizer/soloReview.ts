@@ -29,27 +29,24 @@ export function countSoloReviews(
 }
 
 /**
- * Next candidate: fewest solo reviews first (selection pressure spreads
- * across the pool), ties broken by higher rating (see the good ones
- * sooner), never the current one unless it is the only candidate.
+ * Next candidate: uniformly RANDOM among the least-reviewed tier
+ * (deterministic descent down the list was predictable — human note).
+ * Selection pressure still spreads across the pool via the count floor;
+ * never the current candidate unless it is the only one.
  */
 export function nextCandidateId(
   listings: SoloListing[],
   counts: Record<string, number>,
-  currentId: string | null
+  currentId: string | null,
+  rng: () => number = Math.random
 ): string | null {
   const pool = listings.filter((l) => l.id !== currentId);
   const from = pool.length > 0 ? pool : listings;
-  let best: SoloListing | null = null;
-  let bestCount = Infinity;
-  for (const l of from) {
-    const c = counts[l.id] ?? 0;
-    if (c < bestCount || (c === bestCount && best !== null && l.rating > best.rating)) {
-      best = l;
-      bestCount = c;
-    }
-  }
-  return best?.id ?? null;
+  if (from.length === 0) return null;
+  let minCount = Infinity;
+  for (const l of from) minCount = Math.min(minCount, counts[l.id] ?? 0);
+  const tier = from.filter((l) => (counts[l.id] ?? 0) === minCount);
+  return tier[Math.min(tier.length - 1, Math.floor(rng() * tier.length))].id;
 }
 
 /** One tunable param declaration (mirrors PresetParam's numeric fields). */
