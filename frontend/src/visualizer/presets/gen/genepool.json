@@ -1,5 +1,5 @@
 {
- "generation": 8,
+ "generation": 9,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -2350,6 +2350,217 @@
    "notes": [
     "orchestrator 2026-08-18: REVISED IN PLACE (v2) \u2014 human: tonal pole was single-color/boring, percussive should pop via warp/shake. Now: tonal = 5 hue-family curtains (span floored 0.35 turn, kick = new-hue bloom, drop = chromatic explosion); percussive = achromatic warp slam/shear/tear/shake kinetics; front kept."
    ]
+  },
+  "g09-prism-lumen": {
+   "generation": 9,
+   "parents": [
+    "g07-voyage-prism"
+   ],
+   "kind": "tweak",
+   "brief": "Note fix ('too bright at high energy'): energy drives color travel + saturation, never luminance; grade can only hold/darken; spectral palette (centroid hue, spread span, 1-flatness sat) replaces fixed banks.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:feedback-starfield",
+    "temporal:spectral-continuous",
+    "signals:centroid,spread,flatness"
+   ],
+   "notes": []
+  },
+  "g09-hypno-glide": {
+   "generation": 9,
+   "parents": [
+    "g08-hypno-pulse",
+    "g08-hypno-eq"
+   ],
+   "kind": "tweak",
+   "brief": "Jitter fix: rotation integrates 2s-smoothed bpm (never beat.phase); beat-edge detector fires A/B swap; spectral pair (A=centroid hue, B=complement, sat=1-flatness); bar steps = hue offsets.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:analytic-bands",
+    "temporal:beat-swap",
+    "signals:bpm,centroid,flatness"
+   ],
+   "notes": []
+  },
+  "g09-materia-chroma": {
+   "generation": 9,
+   "parents": [
+    "g03-materia-deep"
+   ],
+   "kind": "tweak",
+   "brief": "The spectrum paints the sculpture: each of 24 bands owns a fixed hue (lows warm->highs cool); region color = band hue, loudness = sat+luminosity; kick = luminance-only wave.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:spectrum-sculpture",
+    "temporal:continuous",
+    "signals:spectrum24,eq"
+   ],
+   "notes": []
+  },
+  "g09-shards-prism": {
+   "generation": 9,
+   "parents": [
+    "g05-materia-shards"
+   ],
+   "kind": "tweak",
+   "brief": "Prismatic shards: tinted by eruption region's band hue + chromatic dispersion; near-monochrome stone surface for contrast; drop = 24-blade full-spectrum fan in frequency order.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:spectrum-sculpture",
+    "temporal:volley",
+    "signals:spectrum24,eq"
+   ],
+   "notes": []
+  },
+  "g09-seasons-spectra": {
+   "generation": 9,
+   "parents": [
+    "g07-seasons-neon",
+    "g07-seasons-nebula"
+   ],
+   "kind": "tweak",
+   "brief": "Music chooses the regime: windowed section stats (centroid/spread/flatness/energy) classify into character -> bank (8 pooled character-tagged banks); front's rim previews incoming hues in the final bar.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:feedback-starfield",
+    "temporal:section-classified",
+    "signals:centroid,spread,flatness,ladder"
+   ],
+   "notes": []
+  },
+  "g09-hardcut-listen": {
+   "generation": 9,
+   "parents": [
+    "g07-voyage-hardcut"
+   ],
+   "kind": "tweak",
+   "brief": "Music picks the phrase bank: previous phrase's centroid tercile x flatness half -> 6 luminance-parity banks (deterministic); structure cuts stay genome-driven.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:feedback-starfield",
+    "temporal:quantized-cuts",
+    "signals:centroid,flatness,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g09-solar-spectra": {
+   "generation": 9,
+   "parents": [
+    "g08-solar-beat"
+   ],
+   "kind": "tweak",
+   "brief": "Stellar-class color: body hue = slow centroid (amber->white-blue); each prominence takes the loudest low/mid region's hue at eruption; field sat = 1-flatness; corona breadth = spread.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:feedback-starfield",
+    "temporal:beat-grid",
+    "signals:centroid,spectrum24,flatness,spread"
+   ],
+   "notes": []
+  },
+  "g09-tunnel-chroma": {
+   "generation": 9,
+   "parents": [
+    "g02-tunnel-dream"
+   ],
+   "kind": "tweak",
+   "brief": "Depth = frequency: 24 band-hued ring depths (lows near, highs at vanishing point), loudness = that depth's sat/glow; EQ kill = gray dead zone; kick = depth-ward luminance pulse.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:canvas-feedback",
+    "temporal:continuous",
+    "signals:spectrum24,eq,centroid"
+   ],
+   "notes": []
+  },
+  "g09-nursery-spectra": {
+   "generation": 9,
+   "parents": [
+    "g06-nursery"
+   ],
+   "kind": "tweak",
+   "brief": "Gas hue family = slow centroid, breadth = spread, sat = 1-flatness; ignitions flare in-family; supernova recolors to the section mean's spectral complement.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:fbm-raymarch",
+    "temporal:stellar-lifecycle",
+    "signals:centroid,spread,flatness,ladder"
+   ],
+   "notes": []
+  },
+  "g09-organ": {
+   "generation": 9,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Color organ: 24 diagonal frequency-ordered hue ribbons (loudness = width/luminosity/flow); kick = one transverse wave; phrase = weave cut; section = hue-wheel notch; drop = full-spectrum braid river.",
+   "rating": 1000,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "render:sdf-ribbons",
+    "topology:diagonal",
+    "temporal:tier-cuts",
+    "signals:spectrum24,impulse,beatphase,ladder"
+   ],
+   "notes": []
   }
  },
  "foldedThrough": 1787111100.863421,
