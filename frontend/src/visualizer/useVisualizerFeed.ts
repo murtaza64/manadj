@@ -13,6 +13,7 @@ import { PING_INTERVAL_MS, SPECTRUM_BAND_COUNT, VISUALIZER_CHANNEL } from './cha
 import type {
   BeatInfo,
   DeckStateInfo,
+  VisualizerFrame,
   VisualizerMessage,
   VisualizerPing,
 } from './channel';
@@ -24,6 +25,8 @@ export const STALE_MS = 1000;
 export interface FeedState {
   bands: BandLevels;
   bandsSlow: BandLevels;
+  regime: NonNullable<VisualizerFrame['regime']> | null;
+  dominantChannel: 'A' | 'B' | 'C' | 'D' | null;
   spectrum: number[];
   wave: { left: Float32Array; right: Float32Array } | null;
   beat: BeatInfo | null;
@@ -39,6 +42,8 @@ export interface FeedState {
 export const SILENT_FEED: FeedState = {
   bands: SILENT_BANDS,
   bandsSlow: SILENT_BANDS,
+  regime: null,
+  dominantChannel: null,
   spectrum: SILENT_SPECTRUM,
   wave: null,
   beat: null,
@@ -70,6 +75,8 @@ export function useVisualizerFeed(options: {
       feedRef.current = {
         bands: event.data.bands,
         bandsSlow: event.data.bandsSlow ?? event.data.bands,
+        regime: event.data.regime ?? null,
+        dominantChannel: event.data.dominantChannel ?? null,
         spectrum: event.data.spectrum ?? SILENT_SPECTRUM,
         wave: event.data.wave ?? null,
         beat: event.data.beat ?? null,

@@ -362,9 +362,13 @@ export const g06FoundryPreset: VisualizerPreset = {
         const energy = Math.min(1, frame.bands.low * 0.5 + frame.bands.mid * 0.3 + frame.bands.high * 0.2);
 
         // ---- Dominant audible deck: EQ = feed valves; spectrum = mold ribs.
-        let dom: (typeof frame.decks)[number] | null = null;
-        for (const d of frame.decks) {
-          if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
+        let dom: (typeof frame.decks)[number] | null =
+          frame.decks.find((d) => d.channel === frame.dominantChannel) ?? null;
+        if (dom === null) {
+          for (const d of frame.decks) {
+            if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+          }
         }
         const targetLow = valveGate(dom?.eq.low ?? 0.5);
         const targetMid = valveGate(dom?.eq.mid ?? 0.5);

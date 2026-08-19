@@ -117,6 +117,15 @@ export interface VisualizerFrame {
   impulse?: BandLevels;
   /** Slow energy baseline + drop excitement. */
   trend?: EnergyTrend;
+  /** Musical regime decomposition (rt-viz 09): buildup / dropTransition /
+   * sustained / breakdown + dropAgeS. Additive; absent on old senders. */
+  regime?: {
+    buildup: number;
+    dropTransition: number;
+    sustained: number;
+    breakdown: number;
+    dropAgeS: number;
+  };
   /** Normalized spectral centroid (0 dark … 1 bright, 0.5 neutral). */
   centroid?: number;
   /** Spectral spread (0 narrow/tonal-pole … 1 wide; 0.5 silence). */
@@ -125,6 +134,11 @@ export interface VisualizerFrame {
   flatness?: number;
   /** Per-deck audible state (A–D, fixed order). */
   decks?: DeckStateInfo[];
+  /** The SMOOTHED dominant channel (dominance.ts: ~700ms EMA + hysteresis).
+   * Presets must prefer this over per-frame argmax of deck levels — the
+   * raw argmax flaps during layering and jitters genome/EQ selection
+   * (rt-viz, human note 2026-08-19). Null when nothing is audible. */
+  dominantChannel?: 'A' | 'B' | 'C' | 'D' | null;
   /** Sender performance.now() — lets the renderer detect a stalled feed. */
   sentAt: number;
 }

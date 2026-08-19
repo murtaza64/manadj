@@ -30,6 +30,16 @@
 import { createGlRenderer } from '../glPreset';
 import type { VisualizerPreset } from '../types';
 
+// DUST FIX v3: deterministic per-track hue anchor. Bit-mix folded to [0,1) so
+// different track ids land on genuinely different hues.
+const splitmix01 = (n: number): number => {
+  let x = (Math.floor(Math.abs(n)) + 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 0x735a2d97) >>> 0;
+  x = (x ^ (x >>> 15)) >>> 0;
+  return x / 4294967296;
+};
+
 const SPECTRUM_BANDS = 24;
 
 const FRAGMENT = `
@@ -70,6 +80,7 @@ uniform float u_tease;      // ARC: last-bar preview of a pending stage change 0
 uniform float u_teaseDir;   // ARC: +1 upgrade pending, -1 shed pending, 0 none
 uniform float u_stageStep;  // ARC: fresh-commit surge 0..1 (decays)
 uniform float u_specHue;    // spectral hue anchor (JS ~1s EMA of centroid) 0..1
+uniform float u_hueAnchor;  // DUST FIX v3: per-song genome hue anchor 0..1 (full wheel)
 uniform float u_spectrum[24];
 
 float hash(vec2 p) {
@@ -136,7 +147,10 @@ vec3 hsv2rgb(vec3 c) {
 // the traveling wobble are preserved (chroma-only change) so the tint still
 // TRAVELS with the surface field.
 vec3 tempPalette(float t, float temp) {
-  float coldHue = 0.5 + 0.25 * (u_specHue - 0.5);
+  // DUST FIX v3: full-wheel cold/hot FAMILIES. The per-song anchor picks
+  // the cold family; +0.8*(specHue-0.5) travels it with spectral content;
+  // hot stays the complement. Different songs = different cold/hot pair.
+  float coldHue = fract(u_hueAnchor + (u_specHue - 0.5) * 0.8 + 0.5);
   float hotHue = fract(coldHue - 0.5);
   vec3 coldRip = vec3(0.2, 0.35, 0.3)
     * cos(6.28318 * (vec3(0.9, 1.0, 0.8) * t + vec3(0.55, 0.42, 0.3)));
@@ -358,6 +372,12 @@ export const g04MateriaArcPreset: VisualizerPreset = {
     let smoothBuildup = 0;
     let smoothSwell = 0;
     let smoothSpecHue = 0.5;
+    // DUST FIX v3: per-song hue anchor (splitmix of dominant deck trackId),
+    // eased over ~2s so track changes sweep the full wheel; the GLSL adds the
+    // slow spectral travel around it, so different songs get different families.
+    let hueAnchor = 0;
+    let hueAnchorTarget = 0;
+    let lastAnchorTrack: number | null = null;
     let section = 0;
     let flip = 0;
     let lastPhraseIndex = -1;
@@ -396,9 +416,13 @@ export const g04MateriaArcPreset: VisualizerPreset = {
         const smoothAlpha = 1 - Math.exp(-dt / 0.3);
 
         // Dominant audible deck = highest master-audible level.
-        let dom: (typeof frame.decks)[number] | null = null;
-        for (const d of frame.decks) {
-          if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
+        let dom: (typeof frame.decks)[number] | null =
+          frame.decks.find((d) => d.channel === frame.dominantChannel) ?? null;
+        if (dom === null) {
+          for (const d of frame.decks) {
+            if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+          }
         }
 
         // MATERIAL = spectral shape, nudged by the genome's material lean.
@@ -418,6 +442,21 @@ export const g04MateriaArcPreset: VisualizerPreset = {
         // Spectral hue anchor: ~1s EMA of centroid; feeds tempPalette so the
         // cold<->hot axis is a spectral cool/warm pair, not blue<->red.
         smoothSpecHue += (frame.centroid - smoothSpecHue) * (1 - Math.exp(-dt / 1.0));
+        // DUST FIX v3: dominant deck = argmax audible level; its trackId anchors
+        // a stable per-song hue family, eased over ~2s.
+        let domTrack: number | null = null;
+        let domLevel = -1;
+        for (const dk of frame.decks) {
+          if (dk.level > domLevel) {
+            domLevel = dk.level;
+            domTrack = dk.trackId;
+          }
+        }
+        if (domTrack !== null && domTrack !== lastAnchorTrack) {
+          lastAnchorTrack = domTrack;
+          hueAnchorTarget = splitmix01(domTrack);
+        }
+        hueAnchor += (hueAnchorTarget - hueAnchor) * (1 - Math.exp(-dt / 2.0));
 
         // Inner-flow phase: BPM-locked when gridded, slow drift otherwise.
         const flowSpeed = frame.beat?.bpm
@@ -587,6 +626,7 @@ export const g04MateriaArcPreset: VisualizerPreset = {
           u_teaseDir: teaseDir,
           u_stageStep: ease(stageStep),
           u_specHue: smoothSpecHue,
+          u_hueAnchor: hueAnchor,
           u_spectrum: spectrum,
         };
       },

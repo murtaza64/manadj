@@ -54,9 +54,12 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /** Dominant audible deck (highest master-audible level) — its EQ knobs gate
  * the spectrum thirds for the dead-zone effect. */
-function dominantDeck(decks: DeckStateInfo[]): DeckStateInfo | null {
+function dominantDeck(frame: VisualizerFrameData): DeckStateInfo | null {
+  // dominant: smoothed frame.dominantChannel (layering jitter fix)
+  const dom = frame.decks.find((d) => d.channel === frame.dominantChannel);
+  if (dom) return dom;
   let best: DeckStateInfo | null = null;
-  for (const d of decks) {
+  for (const d of frame.decks) {
     if (!d.playing) continue;
     if (!best || d.level > best.level) best = d;
   }
@@ -143,7 +146,7 @@ class TunnelChromaRenderer implements PresetRenderer {
     }
 
     // EQ kill gates from the dominant audible deck (eased).
-    const dom = dominantDeck(frame.decks);
+    const dom = dominantDeck(frame);
     const tgtLow = eqGate(dom?.eq.low ?? 0.5);
     const tgtMid = eqGate(dom?.eq.mid ?? 0.5);
     const tgtHigh = eqGate(dom?.eq.high ?? 0.5);

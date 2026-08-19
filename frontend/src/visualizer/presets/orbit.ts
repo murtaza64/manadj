@@ -186,7 +186,10 @@ class OrbitRenderer implements PresetRenderer {
     // Beat rings from the dominant body (both when doubles).
     if (frame.beat) {
       if (this.prevBeatPhase !== null && frame.beat.phase < this.prevBeatPhase && ranked.length > 0) {
-        const emitters = doubles ? [ranked[0], ranked[1]] : [ranked[0]];
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
+        const domBody =
+          active.find((d) => d.channel === frame.dominantChannel) ?? ranked[0];
+        const emitters = doubles ? [ranked[0], ranked[1]] : [domBody];
         for (const deck of emitters) {
           const pos = positions.get(deck.channel);
           if (!pos) continue;
