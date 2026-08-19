@@ -1,0 +1,3 @@
+{"at": 1787098477.88188, "type": "error", "target": "g00-tunnel", "text": "InvalidStateError: CanvasRenderingContext2D.drawImage: Passed-in canvas is empty"}
+{"at": 1787098477.881948, "type": "vote", "a": "g00-tunnel", "b": "g00-voyage", "outcome": "b"}
+{"at": 1787098477.897778, "type": "vote", "a": "g00-voyage", "b": "g00-nova", "outcome": "a"}
