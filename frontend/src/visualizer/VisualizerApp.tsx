@@ -212,6 +212,7 @@ export function VisualizerApp() {
   const cycleModeRef = useRef(cycleMode);
   cycleModeRef.current = cycleMode;
   const [toast, setToast] = useState<string | null>(null);
+  const [noteFor, setNoteFor] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
   const showToast = (text: string) => {
     setToast(text);
@@ -523,8 +524,8 @@ export function VisualizerApp() {
         paramsA: preset ? getParamValues(preset) : undefined,
       });
       soloCountsRef.current[id] = (soloCountsRef.current[id] ?? 0) + 1;
+      // Verdicts do NOT auto-advance (human: keep watching until I move on).
       showToast(`${outcome === 'like' ? '👍' : outcome === 'dislike' ? '👎' : '·'} ${outcome} — ${id}`);
-      advance();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -534,16 +535,12 @@ export function VisualizerApp() {
       if (k === 'g') verdict('like');
       else if (k === 'b') verdict('dislike');
       else if (k === 'm') verdict('neutral');
-      else if (k === 'n') {
-        advance();
-        showToast(`→ ${getPresetId()}`);
-      } else if (k === 't') {
-        const id = getPresetId();
-        const text = window.prompt(`note for ${id}:`);
-        if (text) {
-          void postGaEvent({ type: 'note', target: id, text });
-          showToast(`noted — ${id}`);
-        }
+      else if (k === 'n') advance();
+      else if (k === 't') {
+        // Inline note input — window.prompt is a no-op in the Electron
+        // renderer (the "t key doesn't work" bug).
+        e.preventDefault();
+        setNoteFor(getPresetId());
       } else if (k === 'c') {
         setCycleMode((prev) => {
           const next = CYCLE_MODES[(CYCLE_MODES.indexOf(prev) + 1) % CYCLE_MODES.length];
@@ -556,6 +553,16 @@ export function VisualizerApp() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- Any preset change → toast the new preset's name (chip, n, cycle).
+  const prevPresetRef = useRef(presetId);
+  useEffect(() => {
+    if (prevPresetRef.current !== presetId) {
+      prevPresetRef.current = presetId;
+      showToast(`▶ ${presetId}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetId]);
 
   // ---- Auto-cycle: timer / N-beats-after-drop stepper (soloReview.ts).
   useEffect(() => {
@@ -571,10 +578,7 @@ export function VisualizerApp() {
         feed.beat?.bpm ?? null
       );
       cycleRef.current = state;
-      if (advance) {
-        advanceRef.current();
-        showToast(`⟳ ${getPresetId()}`);
-      }
+      if (advance) advanceRef.current();
     }, 250);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -600,6 +604,26 @@ export function VisualizerApp() {
         </div>
       )}
       {toast && <div className="visualizer-toast">{toast}</div>}
+      {noteFor && (
+        <div className="visualizer-note">
+          <span>note — {noteFor}</span>
+          <input
+            autoFocus
+            type="text"
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                const text = (e.target as HTMLInputElement).value.trim();
+                if (text) {
+                  void postGaEvent({ type: 'note', target: noteFor, text });
+                  showToast(`noted — ${noteFor}`);
+                }
+                setNoteFor(null);
+              } else if (e.key === 'Escape') setNoteFor(null);
+            }}
+          />
+        </div>
+      )}
       {chromeVisible && (
         <div className="visualizer-solo-legend">
           {presetId} · g like · b dislike · m meh · t note · n next · c {CYCLE_LABELS[cycleMode]}
