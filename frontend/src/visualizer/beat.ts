@@ -14,7 +14,7 @@
 
 import type { BeatgridData } from '../types';
 import { beatIndexAt } from '../editor/beatReadout';
-import { resolveLadder, type PersistedLadder } from '../meter/ladder';
+import { resolveLadder, type LadderProjection, type PersistedLadder } from '../meter/ladder';
 
 export interface BeatPosition {
   /** Phase within the current beat: 0 = on the beat, 0.5 = the offbeat. */
@@ -89,13 +89,27 @@ export function beatPositionAt(
  * the editor's playhead bar readout). Null when the ladder is undefined
  * (gridless) or the playhead is before the first downbeat. Pure.
  */
+// Single-entry memo: the bridge calls this once per animation frame with
+// the SAME react-query cache objects (staleTime Infinity — replaced only on
+// invalidation), so resolve once per (grid, marks) identity, not per frame.
+// A dominant-deck switch mid-transition is just a different key: miss, one
+// resolve, then steady-state hits on the new deck.
+let memoGrid: BeatgridData | null = null;
+let memoPersisted: PersistedLadder | null = null;
+let memoProj: LadderProjection | null = null;
+
 export function ladderBarIndexAt(
   grid: BeatgridData | null,
   persisted: PersistedLadder | null,
   t: number
 ): number | null {
   if (!grid) return null;
-  const proj = resolveLadder(grid, persisted);
+  if (grid !== memoGrid || persisted !== memoPersisted) {
+    memoGrid = grid;
+    memoPersisted = persisted;
+    memoProj = resolveLadder(grid, persisted);
+  }
+  const proj = memoProj;
   if (!proj) return null;
   const downbeats = grid.downbeat_times;
   const ordinal = currentDownbeatOrdinal(downbeats, t);

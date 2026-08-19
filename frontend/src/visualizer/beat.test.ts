@@ -177,6 +177,25 @@ describe('ladderBarIndexAt (reset-mark-correct bar ordinal)', () => {
     const marks = { reset_marks: [20 * barSec + 0.3] }; // 0.3 s past bar 20's downbeat
     expect(ladderBarIndexAt(grid, marks, 20 * barSec)).toBe(0);
   });
+
+  it('stays per-track correct across alternating reads (dominant-deck switch)', () => {
+    // Two decks, different tracks, different marks: the bridge flips which
+    // (grid, marks) pair it reads when the dominant audible deck changes —
+    // interleaved reads must each answer from their OWN ladder (also
+    // exercises the single-entry memo's key change on every flip).
+    const gridA = grid40();
+    const marksA = { reset_marks: [20 * barSec] }; // A: reset at bar 20
+    const gridB = grid40();
+    const marksB = { reset_marks: [10 * barSec] }; // B: reset at bar 10
+    for (let i = 0; i < 3; i++) {
+      expect(ladderBarIndexAt(gridA, marksA, 21 * barSec)).toBe(1); // 1 past A's mark
+      expect(ladderBarIndexAt(gridB, marksB, 21 * barSec)).toBe(11); // 11 past B's mark
+    }
+    // Same grid object, marks arriving late (cold cache -> fetch lands):
+    // the persisted-ref change must bust the memo, not reuse the default.
+    expect(ladderBarIndexAt(gridA, null, 21 * barSec)).toBe(21);
+    expect(ladderBarIndexAt(gridA, marksA, 21 * barSec)).toBe(1);
+  });
 });
 
 describe('beatPositionAt with a ladder', () => {
