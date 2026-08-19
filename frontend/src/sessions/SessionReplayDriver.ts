@@ -873,49 +873,79 @@ export class SessionReplayDriver {
   }
 
   private watchMixer(): () => void {
-    const read = () => ({
-      channels: ALL_DECKS.map((d) => this.mixer.getChannelState(d)),
+    // Primitive last-values, updated in place (capture spine 02): no
+    // snapshot-array allocation per notify; the changed-channel hint scopes
+    // the diff to the touched channel. Last-values track reality even while
+    // gated (selfOps/inactive) — only the takeover is gated.
+    const readCh = (d: CaptureDeck) => {
+      const c = this.mixer.getChannelState(d);
+      return {
+        fader: c.fader,
+        trim: c.trim,
+        filter: c.filter,
+        pfl: c.pfl,
+        eqLow: c.eq.low,
+        eqMid: c.eq.mid,
+        eqHigh: c.eq.high,
+      };
+    };
+    const last = {
+      A: readCh('A'),
+      B: readCh('B'),
+      C: readCh('C'),
+      D: readCh('D'),
       crossfader: this.mixer.getCrossfader(),
       crossfaderEnabled: this.mixer.getCrossfaderEnabled(),
       master: this.mixer.getMaster(),
-    });
-    let prev = read();
-    return this.mixer.subscribe(() => {
-      const cur = read();
-      const before = prev;
-      prev = cur;
-      if (this.selfOps > 0 || !this.active) return;
+    };
+    return this.mixer.subscribe((changed) => {
       // Replay never writes base state during playback (overlay only) —
       // any base notify is a human hand. Field-level diff names the
       // trigger and builds the touched set the base-sync spares.
       const touched = new Set<string>();
       let cause: string | null = null;
-      for (let i = 0; i < ALL_DECKS.length; i++) {
-        const a = before.channels[i];
-        const b = cur.channels[i];
-        if (a === b) continue;
-        const d = ALL_DECKS[i];
-        if (a.fader !== b.fader) touched.add(`${d}.fader`);
-        if (a.trim !== b.trim) touched.add(`${d}.trim`);
-        if (a.filter !== b.filter) touched.add(`${d}.filter`);
-        if (a.pfl !== b.pfl) touched.add(`${d}.pfl`);
-        if (a.eq.low !== b.eq.low) touched.add(`${d}.eqLow`);
-        if (a.eq.mid !== b.eq.mid) touched.add(`${d}.eqMid`);
-        if (a.eq.high !== b.eq.high) touched.add(`${d}.eqHigh`);
+      const diffCh = (d: CaptureDeck): void => {
+        const c = this.mixer.getChannelState(d);
+        const l = last[d];
+        if (c.fader !== l.fader) touched.add(`${d}.fader`);
+        if (c.trim !== l.trim) touched.add(`${d}.trim`);
+        if (c.filter !== l.filter) touched.add(`${d}.filter`);
+        if (c.pfl !== l.pfl) touched.add(`${d}.pfl`);
+        if (c.eq.low !== l.eqLow) touched.add(`${d}.eqLow`);
+        if (c.eq.mid !== l.eqMid) touched.add(`${d}.eqMid`);
+        if (c.eq.high !== l.eqHigh) touched.add(`${d}.eqHigh`);
         if (!cause && touched.size > 0) cause = `${d} ${[...touched][0].split('.')[1]}`;
+        last[d] = readCh(d);
+      };
+      const all = changed === undefined;
+      for (const d of ALL_DECKS) {
+        if (all || changed === d) diffCh(d);
       }
-      if (cur.crossfader !== before.crossfader) {
-        touched.add('crossfader');
-        cause ??= 'crossfader';
+      if (all || changed === 'crossfader') {
+        const xf = this.mixer.getCrossfader();
+        if (xf !== last.crossfader) {
+          touched.add('crossfader');
+          cause ??= 'crossfader';
+        }
+        last.crossfader = xf;
       }
-      if (cur.crossfaderEnabled !== before.crossfaderEnabled) {
-        touched.add('crossfaderEnabled');
-        cause ??= 'crossfader enable';
+      if (all || changed === 'crossfaderEnabled') {
+        const on = this.mixer.getCrossfaderEnabled();
+        if (on !== last.crossfaderEnabled) {
+          touched.add('crossfaderEnabled');
+          cause ??= 'crossfader enable';
+        }
+        last.crossfaderEnabled = on;
       }
-      if (cur.master !== before.master) {
-        touched.add('master');
-        cause ??= 'master';
+      if (all || changed === 'master') {
+        const master = this.mixer.getMaster();
+        if (master !== last.master) {
+          touched.add('master');
+          cause ??= 'master';
+        }
+        last.master = master;
       }
+      if (this.selfOps > 0 || !this.active) return;
       if (cause) this.takeover(cause, touched);
     });
   }

@@ -582,39 +582,65 @@ export class Conductor {
   }
 
   private watchMixer(): () => void {
-    const read = () => ({
-      a: this.mixer.getChannelState('A'),
-      b: this.mixer.getChannelState('B'),
+    // Primitive last-values, updated in place (capture spine 02): no
+    // snapshot object allocation per notify, and the changed-channel hint
+    // scopes the diff to the touched channel. Last-values track reality
+    // even while gated (selfOps/inactive) — only the takeover is gated.
+    const readCh = (ch: 'A' | 'B') => {
+      const c = this.mixer.getChannelState(ch);
+      return {
+        fader: c.fader,
+        eqLow: c.eq.low,
+        eqMid: c.eq.mid,
+        eqHigh: c.eq.high,
+        filter: c.filter,
+        trim: c.trim,
+        pfl: c.pfl,
+      };
+    };
+    const last = {
+      A: readCh('A'),
+      B: readCh('B'),
       crossfader: this.mixer.getCrossfader(),
       crossfaderEnabled: this.mixer.getCrossfaderEnabled(),
       master: this.mixer.getMaster(),
-    });
-    let prev = read();
-    return this.mixer.subscribe(() => {
-      const cur = read();
-      const before = prev;
-      prev = cur;
-      if (this.selfOps > 0 || !this.active) return;
+    };
+    return this.mixer.subscribe((changed) => {
       // The Conductor writes only setAutomation (never notifies), so any
       // changed base state is a human hand. Field-level diff: the touched
       // fields keep the user's values through the takeover base-sync.
       const touched = new Set<string>();
-      for (const [ch, b, c] of [
-        ['A', before.a, cur.a],
-        ['B', before.b, cur.b],
-      ] as const) {
-        if (b === c) continue;
-        if (b.fader !== c.fader) touched.add(`${ch}.fader`);
-        if (b.eq.low !== c.eq.low) touched.add(`${ch}.eqLow`);
-        if (b.eq.mid !== c.eq.mid) touched.add(`${ch}.eqMid`);
-        if (b.eq.high !== c.eq.high) touched.add(`${ch}.eqHigh`);
-        if (b.filter !== c.filter) touched.add(`${ch}.filter`);
-        if (b.trim !== c.trim) touched.add(`${ch}.trim`);
-        if (b.pfl !== c.pfl) touched.add(`${ch}.pfl`);
+      const diffCh = (ch: 'A' | 'B'): void => {
+        const c = this.mixer.getChannelState(ch);
+        const l = last[ch];
+        if (c.fader !== l.fader) touched.add(`${ch}.fader`);
+        if (c.eq.low !== l.eqLow) touched.add(`${ch}.eqLow`);
+        if (c.eq.mid !== l.eqMid) touched.add(`${ch}.eqMid`);
+        if (c.eq.high !== l.eqHigh) touched.add(`${ch}.eqHigh`);
+        if (c.filter !== l.filter) touched.add(`${ch}.filter`);
+        if (c.trim !== l.trim) touched.add(`${ch}.trim`);
+        if (c.pfl !== l.pfl) touched.add(`${ch}.pfl`);
+        last[ch] = readCh(ch);
+      };
+      const all = changed === undefined;
+      if (all || changed === 'A') diffCh('A');
+      if (all || changed === 'B') diffCh('B');
+      if (all || changed === 'crossfader') {
+        const xf = this.mixer.getCrossfader();
+        if (xf !== last.crossfader) touched.add('crossfader');
+        last.crossfader = xf;
       }
-      if (before.crossfader !== cur.crossfader) touched.add('crossfader');
-      if (before.crossfaderEnabled !== cur.crossfaderEnabled) touched.add('crossfaderEnabled');
-      if (before.master !== cur.master) touched.add('master');
+      if (all || changed === 'crossfaderEnabled') {
+        const on = this.mixer.getCrossfaderEnabled();
+        if (on !== last.crossfaderEnabled) touched.add('crossfaderEnabled');
+        last.crossfaderEnabled = on;
+      }
+      if (all || changed === 'master') {
+        const master = this.mixer.getMaster();
+        if (master !== last.master) touched.add('master');
+        last.master = master;
+      }
+      if (this.selfOps > 0 || !this.active) return;
       if (touched.size > 0) this.takeover(touched);
     });
   }
