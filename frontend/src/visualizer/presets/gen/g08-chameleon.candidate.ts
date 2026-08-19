@@ -127,9 +127,10 @@ vec3 auroraPalette(float t, float bias, float pseed) {
 // Single-hue monotone color for the percussive pole (hue + black/white only).
 vec3 monoColor(float lum, float hue) {
   vec3 tint = 0.5 + 0.5 * cos(6.28318 * (vec3(1.0) * hue + vec3(0.0, 0.33, 0.67)));
-  // Lean toward white in highlights, black in shadow: monotone with value
-  // range, one chroma axis. Value carries the energy, not color.
-  return mix(vec3(0.0), mix(tint, vec3(1.0), pow(lum, 1.6)), clamp(lum * 1.2, 0.0, 1.0));
+  // Highlights lean only PARTWAY to white (cap 0.3) — full-white highlights
+  // made the whole percussive pole read as a white field (human note).
+  tint = mix(tint, vec3(1.0), 0.3 * pow(clamp(lum, 0.0, 1.0), 2.0));
+  return tint * clamp(lum, 0.0, 1.0);
 }
 
 void main() {
@@ -229,7 +230,7 @@ void main() {
       * shimmer * (0.3 + 1.5 * u_hat) * (0.5 + 0.5 * u_high);
     // Chromatic bloom surge on the drop — the whole sky blooms.
     aur *= 1.0 + 1.1 * u_drop;
-    fresh += aur * tonalW * (1.0 - u_decay) * 3.4;
+    fresh += aur * tonalW * (1.0 - u_decay) * 2.4;
   }
 
   // ================= PERCUSSIVE POLE — kinetic monotone =================
@@ -247,7 +248,7 @@ void main() {
     float stroke = max(spoke * (0.5 + 0.5 * radialBar), radialBar * 0.6);
     float lum = stroke * (0.4 + 1.4 * u_energy + 1.2 * u_drop) * smoothstep(1.3, 0.1, r);
     vec3 mono = monoColor(lum, u_monoHue);
-    fresh += mono * percW * (1.0 - u_decay) * 3.0;
+    fresh += mono * percW * (1.0 - u_decay) * 2.2;
 
     // Snare SLASH: a hard diagonal bar cutting across the field.
     if (u_snare > 0.04) {
@@ -255,7 +256,7 @@ void main() {
       vec2 sd = vec2(cos(slashAng), sin(slashAng));
       float d = abs(dot(c, vec2(-sd.y, sd.x)));
       float slash = smoothstep(0.03, 0.0, d) * smoothstep(1.2, 0.2, abs(dot(c, sd)));
-      fresh += monoColor(1.0, u_monoHue) * slash * u_snare * percW * 2.4;
+      fresh += monoColor(0.9, u_monoHue) * slash * u_snare * percW * 1.8;
     }
   }
 
@@ -269,23 +270,26 @@ void main() {
     monoColor(1.0, u_monoHue),
     percW
   );
-  strikeCol = mix(strikeCol, vec3(1.0), 0.4 * percW); // percussive kick flashes toward white
-  fresh += strikeCol * strike * (0.5 + 2.2 * u_kick) * (0.7 + 0.6 * u_energy);
+  strikeCol = mix(strikeCol, vec3(1.0), 0.2 * percW); // percussive kick leans (not flashes) toward white
+  // Kick-enveloped ONLY: the old constant 0.5 base injected into the
+  // persistent field every frame with no (1-decay) normalization and
+  // accumulated into a blown-out white core (human: "way too white").
+  fresh += strikeCol * strike * (1.8 * u_kick + 0.3 * (1.0 - u_decay)) * (0.7 + 0.6 * u_energy);
   // Ripple lights what it passes (voyage idiom), colored by the local pole.
-  vec3 rippleCol = mix(monoColor(1.0, u_monoHue), auroraPalette(0.6, hueBias, u_paletteSeed), localTonal);
-  fresh += rippleCol * rippleWave * (1.2 + 0.8 * percW);
+  vec3 rippleCol = mix(monoColor(0.85, u_monoHue), auroraPalette(0.6, hueBias, u_paletteSeed), localTonal);
+  fresh += rippleCol * rippleWave * (0.8 + 0.5 * percW) * (1.0 - 0.5 * u_decay);
 
   // ================= TRANSITION FRONT — flood / desaturation line =======
   // The moving boundary glows: flooding to tonal it is a colored flood line;
   // draining to percussive it is a white desaturation front.
-  vec3 frontCol = mix(monoColor(1.0, u_monoHue), auroraPalette(0.5 + t * 0.05, hueBias, u_paletteSeed),
+  vec3 frontCol = mix(monoColor(0.9, u_monoHue), auroraPalette(0.5 + t * 0.05, hueBias, u_paletteSeed),
     step(0.0, u_frontDir));
-  fresh += frontCol * frontLine * (1.6 + 1.0 * u_energy);
+  fresh += frontCol * frontLine * (1.1 + 0.7 * u_energy) * (1.0 - 0.5 * u_decay);
 
   // Section pulse: a gentle radial swell announcing the re-roll (both poles).
   float sec = exp(-pow((r - u_section * 0.7) * 4.0, 2.0)) * u_section;
-  fresh += mix(monoColor(1.0, u_monoHue), auroraPalette(t * 0.04, hueBias, u_paletteSeed), localTonal)
-    * sec * (1.0 + u_drop);
+  fresh += mix(monoColor(0.85, u_monoHue), auroraPalette(t * 0.04, hueBias, u_paletteSeed), localTonal)
+    * sec * (1.0 + u_drop) * (1.0 - 0.5 * u_decay);
 
   // Inject fresh at (1 - decay); ride max(drop, energy) so sustained states
   // hold through a drop's plateau (excitement is a transition-only signal).
@@ -295,18 +299,20 @@ void main() {
   // ---- SATURATION / VALUE grade by local pole (the core of the idea).
   // Toward the percussive pole, drain chroma toward a single-hue monotone.
   float luma = dot(field, vec3(0.299, 0.587, 0.114));
-  vec3 monoTarget = monoColor(clamp(luma * 1.3, 0.0, 1.0), u_monoHue);
+  vec3 monoTarget = monoColor(clamp(luma * 1.05, 0.0, 1.0), u_monoHue);
   // localTonal=1 keep painterly color; localTonal=0 collapse to monotone.
   field = mix(monoTarget, field, localTonal);
   // Slight extra saturation at the tonal pole (bright, fully saturated).
   vec3 g = vec3(luma);
   field = mix(field, mix(g, field, 1.25), 0.25 * localTonal);
 
-  // Buildups tense-but-alive (never eerily still); drops bloom.
-  field *= 0.78 + 0.36 * sustain - 0.04 * u_buildup + 0.06 * u_buildup * (0.5 + 0.5 * sin(t * 8.0));
+  // Buildups tense-but-alive (never eerily still); drops bloom. Capped < 1:
+  // field is the persistent feedback state — a sustained >1 multiplier
+  // compounds to a blown-out frame (same washout class as materia-beat).
+  field *= min(0.78 + 0.36 * sustain - 0.04 * u_buildup + 0.06 * u_buildup * (0.5 + 0.5 * sin(t * 8.0)), 0.99);
 
   // Photosafe fullscreen flash (rate-limited on the JS side): gentle, capped.
-  field += vec3(0.16) * u_flash;
+  field += vec3(0.09) * u_flash;
 
   // Chroma-preserving soft knee (NEVER per-channel clamp).
   float m = max(field.r, max(field.g, field.b));

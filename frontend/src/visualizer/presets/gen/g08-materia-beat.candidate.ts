@@ -150,7 +150,10 @@ vec3 matObsidian(float f, float temp) {
   return sheen * (0.25 + 0.9 * pow(f, 2.0)) + vec3(0.05, 0.02, 0.08);
 }
 vec3 matOpal(float f, float temp) {
-  return vec3(0.5) + vec3(0.5, 0.5, 0.5)
+  // Darker base than the naive 0.5+0.5cos rainbow: opal's mean luminance was
+  // ~2x the other banks', so opal phrases pumped the feedback loop into the
+  // knee and washed the frame pink (human note).
+  return vec3(0.18) + vec3(0.42, 0.4, 0.44)
     * cos(6.28318 * (vec3(1.0, 1.0, 1.0) * (f * 2.0) + vec3(0.0, 0.33, 0.67)));
 }
 vec3 matLava(float f, float temp) {
@@ -328,11 +331,15 @@ void main() {
   // Inject fresh at (1 - decay); buildups tense-but-alive, drops bloom.
   field += fresh * (1.0 - u_decay) * (3.0 + 1.6 * u_swell + 1.0 * u_drop + 1.2 * u_allLit);
 
-  // Whole-frame kick + bar punch — the low-end lands everywhere, solid.
-  field *= 1.0 + 0.1 * u_kick + 0.05 * u_bar;
-
-  // Buildups saturate + energize; the palette cut adds a moderate lift.
-  field *= 0.78 + 0.42 * max(u_drop, u_swell) + 0.12 * u_buildup + 0.28 * u_matCut;
+  // Whole-frame grade. CRITICAL: field is the PERSISTENT feedback state —
+  // any sustained multiplier > 1 compounds exponentially frame-over-frame
+  // until the soft knee pegs the whole screen (the periodic pink washout,
+  // human note: worst on the bright opal bank during drop plateaus/cuts).
+  // Cap the grade below 1 so the loop stays contractive; drop/cut drama
+  // still arrives through the fresh-injection scaling above.
+  float lift = 0.78 + 0.42 * max(u_drop, u_swell) + 0.12 * u_buildup + 0.28 * u_matCut;
+  lift *= 1.0 + 0.1 * u_kick + 0.05 * u_bar;
+  field *= min(lift, 0.99);
 
   // Chroma-preserving soft knee (never per-channel clamp).
   float m = max(field.r, max(field.g, field.b));
