@@ -1,5 +1,5 @@
 {
- "generation": 12,
+ "generation": 13,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -1659,7 +1659,8 @@
    "notes": [
     "orchestrator 2026-08-19: consolidated: seasons line keeps seasons-spectra (music-chooses) + seasons-neon (bank aesthetic)"
    ],
-   "score": 5
+   "score": 5,
+   "seen": 1
   },
   "g07-seasons-neon": {
    "generation": 7,
@@ -1725,7 +1726,7 @@
     "could use more black, more effects of kicks/bass on the field of red"
    ],
    "score": 2,
-   "seen": 1
+   "seen": 2
   },
   "g07-materia-jewel": {
    "generation": 7,
@@ -2327,7 +2328,8 @@
     "signals:spectrum24,eq,beatphase"
    ],
    "notes": [],
-   "score": 1
+   "score": 1,
+   "seen": 1
   },
   "g08-materia-beat": {
    "generation": 8,
@@ -3402,9 +3404,169 @@
     "signals:beatphase,bandsSlow,ladder,genome"
    ],
    "notes": []
+  },
+  "g13-galvanic": {
+   "generation": 13,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Creative/physics: dielectric breakdown \u2014 bass charges two rails, kick fires a fractal lightning bolt across the gap; drop = rate-limited storm; phrase = polarity flip.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "territory:physics",
+    "render:gl-feedback",
+    "signals:impulse,bands,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g13-chladni": {
+   "generation": 13,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Creative/physics: Chladni plate cymatics \u2014 sand piles on nodal lines of (m,n) standing waves; kick snaps mode m (hard re-topology); drop = high-order + sand/plate inversion.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "territory:physics",
+    "render:canvas-flat",
+    "signals:impulse,bandsSlow,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g13-skyline": {
+   "generation": 13,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Creative/urban: night city \u2014 buildings = spectrum columns, windows = quantized light grid, elevator steps per beat, traffic marches integer cells; drop = city blaze.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "territory:urban",
+    "render:canvas-flat",
+    "signals:spectrum24,bandsSlow,impulse,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g13-signal-box": {
+   "generation": 13,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Creative/urban: railway interlocking \u2014 kick throws points, beat advances the train one cell, mids step signal aspects, flip-dot board spells the spectrum; drop = all-clear blaze.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "territory:urban",
+    "render:canvas-flat",
+    "signals:bandsSlow,impulse,spectrum24,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g13-phyllotaxis": {
+   "generation": 13,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Creative/math: golden-angle seed head grown to the beat (integer count blooms), snare = parastichy turn, bar = polygon sides cycle; drop = growth ceiling lift.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "territory:math",
+    "render:canvas-flat",
+    "signals:impulse,bandsSlow,centroid,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g13-truchet": {
+   "generation": 13,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Creative/math: Truchet tiling automaton \u2014 kick flips a block, snare a row, hats scattered cells, beat = marching flip-wave; section = full reshuffle.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "territory:math",
+    "render:canvas-flat",
+    "signals:impulse,bandsSlow,eq,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g13-anglerfish": {
+   "generation": 13,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Creative/living: deep-sea predation \u2014 lure throbs on bass, spectrum shoal drawn by phototaxis, beat-locked strikes eat the densest cluster; tonality = shoal cohesion; drop = feeding frenzy.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "territory:living",
+    "render:canvas",
+    "signals:bands,impulse,centroid,flatness,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g13-lantern": {
+   "generation": 13,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Creative/living: lighthouse \u2014 beam optic clicks facet-stations per beat, ships arrive on the bar grid and light lanterns when caught, kick = beacon flash (<=2/s); drop = storm.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "territory:living",
+    "render:canvas",
+    "signals:bandsSlow,impulse,spectrum24,ladder,genome"
+   ],
+   "notes": []
   }
  },
- "foldedThrough": 1787119153.4091032,
+ "foldedThrough": 1787119972.208045,
  "eloSemantics": "v2: forced-choice only moves rating (K=32/400); both_good/both_bad are approval/rejection labels; both_bad kills winless candidates",
  "scoring": "v3: score = (wins + approvals) - (losses + rejections); approvals/rejections include solo likes/dislikes; elo rating retained as legacy tiebreaker"
 }
