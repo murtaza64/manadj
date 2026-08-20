@@ -1,0 +1,403 @@
+/**
+ * g14-tunnel-verses (gen-14 COMBINE: g04-tunnel-saga × g07-voyage-hardcut).
+ *
+ * Falsifiable question (brief): do the two winning ideas COMPOSE — a tunnel
+ * whose IDENTITY hard-cuts each phrase while its INTENSITY rides saga's
+ * continuous chapter arc — or do the cuts fight the journey?
+ *
+ * From g04-tunnel-saga (score 6): the Canvas-2D warp-feedback engine and
+ * the 16-bar chapter arc — dream (long trails, gentle zoom, soft wide
+ * wobble) climbing to punch (short trails, hard zoom, tight crisp ring),
+ * drops overriding to full punch, buildups accelerating the climb.
+ *
+ * From g07-voyage-hardcut (score 5, 4/0): the QUANTIZED LOOK grammar.
+ * SMOOTH INTERPOLATION BETWEEN DISCRETE STRUCTURES READS AS MUSH — the
+ * tunnel's identity is a discrete LOOK TUPLE that HARD-CUTS on phrase
+ * downbeats (one frame, no ease), sequenced by a trackId genome:
+ *
+ *   mouthSides     0 = circle, or 3/4/5/6 — a polygon tunnel mouth; the
+ *                  polygon number NEVER interpolates (the original human
+ *                  complaint that birthed the grammar).
+ *   paletteBank    4 committed hue centers (ember 25° / magenta 315° /
+ *                  teal 175° / violet 265°), ±35° energy sweep around the
+ *                  center — bright, saturated, luminance-comparable.
+ *   rotDir         -1/+1 spin direction.
+ *   sparkTier      0/1/2 sparkle density tier.
+ *   innerOrnament  0/1 counter-rotating inner echo ring.
+ *
+ * Phrase (4 bars via beat.ladderBarIndex ?? barIndex) steps the sequence;
+ * SECTION (16 bars) strides to a distant look + FORCES a bank change so
+ * section cuts land bigger. Gridless: hold the look (no boundaries to cut
+ * on). Same song ⇒ same look sequence. A drop landing ON a boundary stamps
+ * one full-size ring burst into the feedback (localized, ≤1 per phrase —
+ * photosafe) and slams the chapter to punch. The final beat before a cut
+ * TIGHTENS the mouth slightly (anticipation, no flash).
+ *
+ * Carries the FULLBLEED fix (tunnel-class bug: rotation exposed the buffer
+ * corners — cover-factor floor on the warp scale). Whites capped (~72%
+ * ring lightness). Motion rates ride frame.bandsSlow ?? frame.bands
+ * (erratic-motion law); the kick lunge stays on instantaneous impulse.low.
+ */
+
+import { energyOf } from '../../style';
+import type {
+  PresetRenderer,
+  VisualizerFrameData,
+  VisualizerPreset,
+} from '../types';
+
+/** Dream endpoint (g02-tunnel-dream defaults). */
+const DREAM_TRAIL = 0.92;
+const DREAM_ZOOM = 0.65;
+/** Punch endpoint (g02-tunnel-punch defaults). */
+const PUNCH_TRAIL = 0.42;
+const PUNCH_ZOOM = 1.8;
+
+const BARS_PER_SECTION = 16;
+const PHRASE_BARS = 4;
+const SPARKS_PER_S = 200;
+
+/** Committed hue centers: ember / magenta / teal / violet. Luminance-
+ * comparable, fully saturated (this repo dislikes pastels). */
+const BANK_HUES = [25, 315, 175, 265] as const;
+const MOUTH_CHOICES = [0, 3, 4, 5, 6] as const; // 0 = circle
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+const smooth = (t: number) => t * t * (3 - 2 * t);
+
+/** splitmix32-style avalanche → a generator of stable [0,1) scalars. */
+function splitmix(key: number): () => number {
+  let state = (key >>> 0) + 0x9e3779b9;
+  return () => {
+    state = (state + 0x9e3779b9) >>> 0;
+    let z = state;
+    z = Math.imul(z ^ (z >>> 16), 0x21f0aaad) >>> 0;
+    z = Math.imul(z ^ (z >>> 15), 0x735a2d97) >>> 0;
+    z = (z ^ (z >>> 15)) >>> 0;
+    return z / 4294967296;
+  };
+}
+
+/** A single discrete LOOK — nothing here interpolates; it is CUT to whole. */
+interface Look {
+  mouthSides: number; // 0 (circle) or 3/4/5/6
+  paletteBank: number; // 0..3 index into BANK_HUES
+  rotDir: number; // -1/+1
+  sparkTier: number; // 0/1/2
+  innerOrnament: number; // 0/1
+}
+
+function lookAt(seed: number, index: number, forceBankAway: number | null): Look {
+  const next = splitmix(((Math.round(seed) | 0) ^ Math.imul(index | 0, 0x9e3779b9)) >>> 0);
+  const look: Look = {
+    mouthSides: MOUTH_CHOICES[Math.floor(next() * MOUTH_CHOICES.length)],
+    paletteBank: Math.floor(next() * BANK_HUES.length),
+    rotDir: next() > 0.5 ? 1 : -1,
+    sparkTier: Math.floor(next() * 3),
+    innerOrnament: next() > 0.45 ? 1 : 0,
+  };
+  if (forceBankAway !== null && look.paletteBank === forceBankAway) {
+    // Section cut: FORCE a different bank so section cuts land bigger.
+    look.paletteBank = (look.paletteBank + 1 + Math.floor(next() * 3)) % BANK_HUES.length;
+  }
+  return look;
+}
+
+/** Dominant audible deck's trackId (highest master-audible level). */
+function dominantTrackId(frame: VisualizerFrameData): number | null {
+  let best: number | null = null;
+  let bestLevel = -1;
+  for (const deck of frame.decks) {
+    if (!deck.playing || deck.trackId == null) continue;
+    if (deck.level > bestLevel) {
+      bestLevel = deck.level;
+      best = deck.trackId;
+    }
+  }
+  return best;
+}
+
+/** Radius multiplier of a regular n-gon at angle a (1 for the circle). */
+function mouthShape(sides: number, a: number): number {
+  if (sides < 3) return 1;
+  const seg = (Math.PI * 2) / sides;
+  const local = ((a % seg) + seg) % seg;
+  return Math.cos(Math.PI / sides) / Math.cos(local - Math.PI / sides);
+}
+
+class TunnelVersesRenderer implements PresetRenderer {
+  private buffer: HTMLCanvasElement | null = null;
+  private bufferCtx: CanvasRenderingContext2D | null = null;
+  private rotation = 0;
+  private mouthSpin = 0;
+  private chapter = 0;
+  private drive = 0;
+
+  // --- Quantized look grammar state.
+  private seedKey: number | null = null;
+  private lookIndex = 0;
+  private current: Look = lookAt(1, 0, null);
+  private lastPhraseIndex: number | null = null;
+  private lastSectionIndex: number | null = null;
+  private burst = 0; // decaying drop-on-boundary ring burst
+  private lastBurstPhrase = -999; // rate limit: ≤1 per phrase
+
+  private ensureBuffer(width: number, height: number): CanvasRenderingContext2D | null {
+    if (!this.buffer || this.buffer.width !== width || this.buffer.height !== height) {
+      this.buffer = document.createElement('canvas');
+      this.buffer.width = width;
+      this.buffer.height = height;
+      this.bufferCtx = this.buffer.getContext('2d');
+    }
+    return this.bufferCtx;
+  }
+
+  /** Saga's section-arc chapter target (within-phrase continuity). */
+  private chapterTarget(frame: VisualizerFrameData): number {
+    const { trend, bands } = frame;
+    const energy = energyOf(bands);
+    const intensity = Math.max(trend.excitement, energy);
+
+    let arc: number;
+    if (frame.beat) {
+      const tierBar = frame.beat.ladderBarIndex ?? frame.beat.barIndex;
+      const barInSection =
+        ((tierBar % BARS_PER_SECTION) + BARS_PER_SECTION) % BARS_PER_SECTION;
+      const pos = (barInSection + frame.beat.barPhase) / BARS_PER_SECTION;
+      arc = pos < 0.5 ? pos * 0.4 : 0.2 + smooth((pos - 0.5) * 2) * 0.8;
+    } else {
+      const cycle = (frame.time % 24) / 24;
+      arc = smooth(cycle < 0.5 ? cycle * 2 : (1 - cycle) * 2);
+    }
+
+    const accelerated = arc * (1 + 1.1 * trend.excitement);
+    return clamp01(Math.max(accelerated, intensity * intensity));
+  }
+
+  render(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    frame: VisualizerFrameData
+  ): void {
+    const bufferCtx = this.ensureBuffer(width, height);
+    const { low, mid, high } = frame.bands;
+    // motion: slow bands (erratic-motion law)
+    const slow = frame.bandsSlow ?? frame.bands;
+    const cx = width / 2;
+    const cy = height / 2;
+    const unit = Math.min(width, height);
+    const cutStrength = frame.params.cutStrength ?? 1;
+
+    // --- Identity: dominant trackId seeds the look sequence.
+    const trackId = dominantTrackId(frame);
+    const key =
+      trackId != null
+        ? trackId
+        : Math.round((frame.centroid * 331 + frame.spread * 271 + frame.flatness * 197) * 101);
+    if (this.seedKey == null || key !== this.seedKey) {
+      this.seedKey = key;
+      const tb0 = frame.beat ? (frame.beat.ladderBarIndex ?? frame.beat.barIndex) : 0;
+      this.lookIndex = Math.floor(tb0 / PHRASE_BARS);
+      this.current = lookAt(this.seedKey, this.lookIndex, null);
+    }
+
+    // Chapter (saga) + drive smoothing.
+    const chapterAlpha = 1 - Math.exp(-frame.dt / 0.5);
+    this.chapter += (this.chapterTarget(frame) - this.chapter) * chapterAlpha;
+    const driveTarget = Math.max(frame.trend.excitement, energyOf(frame.bands));
+    this.drive += (driveTarget - this.drive) * (1 - Math.exp(-frame.dt / 0.35));
+
+    // --- CUT TIMING (hardcut): ladder tier primary; one-frame snaps.
+    const tierBar = frame.beat ? (frame.beat.ladderBarIndex ?? frame.beat.barIndex) : null;
+    const barPhase = frame.beat ? frame.beat.barPhase : 0;
+    let precut = 0;
+    if (tierBar !== null) {
+      const phraseIndex = Math.floor(tierBar / PHRASE_BARS);
+      const sectionIndex = Math.floor(tierBar / BARS_PER_SECTION);
+      if (this.lastPhraseIndex !== null && phraseIndex !== this.lastPhraseIndex) {
+        const sectionCut =
+          this.lastSectionIndex !== null && sectionIndex !== this.lastSectionIndex;
+        if (sectionCut) {
+          // Section: STRIDE to a distant look + force a bank change.
+          this.lookIndex += 3 + (Math.abs(sectionIndex) % 3);
+          this.current = lookAt(this.seedKey, this.lookIndex, this.current.paletteBank);
+        } else {
+          this.lookIndex += 1;
+          this.current = lookAt(this.seedKey, this.lookIndex, null);
+        }
+        // DROP-ON-BOUNDARY: burst + chapter slam (≤1 per phrase — photosafe).
+        const landing = Math.max(this.drive, frame.trend.excitement);
+        if (landing > 0.3 && phraseIndex - this.lastBurstPhrase >= 1) {
+          this.burst = Math.min(1, landing) * cutStrength;
+          this.chapter = Math.max(this.chapter, 0.95);
+          this.lastBurstPhrase = phraseIndex;
+        }
+      }
+      this.lastPhraseIndex = phraseIndex;
+      this.lastSectionIndex = sectionIndex;
+      // Anticipation: the final beat of the phrase TIGHTENS the mouth.
+      const barInPhrase = ((tierBar % PHRASE_BARS) + PHRASE_BARS) % PHRASE_BARS;
+      if (barInPhrase === PHRASE_BARS - 1) {
+        precut = Math.max(0, (barPhase - 0.75) / 0.25) * cutStrength;
+      }
+    } else {
+      this.lastPhraseIndex = null;
+      this.lastSectionIndex = null;
+    }
+    this.burst = Math.max(0, this.burst - frame.dt / 0.45);
+
+    const look = this.current;
+    const chapter = this.chapter;
+    const hardness = chapter;
+    const trailBase = frame.params.trail ?? 1;
+    const zoomParam = frame.params.zoom ?? 1;
+    const trail = lerp(DREAM_TRAIL, PUNCH_TRAIL, chapter) * trailBase;
+    const zoomDrive = lerp(DREAM_ZOOM, PUNCH_ZOOM, chapter) * zoomParam;
+
+    // --- Warp the previous frame in (saga engine + fullbleed fix).
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
+    if (this.buffer && bufferCtx) {
+      const kick = frame.impulse.low;
+      // motion: slow bands (erratic-motion law); kick lunge is the impulse.
+      const zoom =
+        1 +
+        (0.28 + 1.4 * slow.low * slow.low + (2.6 + 2.4 * hardness) * kick) *
+          zoomDrive *
+          frame.dt;
+      // Spin direction is the look's DISCRETE rotDir (cut, never eased).
+      // motion: slow bands (erratic-motion law)
+      this.rotation =
+        (0.08 + (0.9 + 0.9 * hardness) * slow.mid + (1.4 + 1.4 * hardness) * frame.impulse.mid) *
+        frame.dt *
+        look.rotDir;
+      // FULLBLEED (tunnel-class bug): cover-factor floor so the rotated
+      // buffer always covers the viewport — no visible corner leak.
+      const a = Math.abs(this.rotation);
+      const ratio = Math.max(width, height) / Math.min(width, height);
+      const coverScale = Math.cos(a) + ratio * Math.sin(a);
+      const effectiveZoom = Math.max(zoom, coverScale * 1.001);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(this.rotation);
+      ctx.scale(effectiveZoom, effectiveZoom);
+      ctx.globalAlpha = 0.88 + 0.11 * clamp01(trail);
+      ctx.drawImage(this.buffer, -cx, -cy);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    // --- Fresh geometry: the QUANTIZED mouth (polygon or circle — snaps on
+    // the cut) in the look's committed bank hue with an energy sweep.
+    ctx.globalCompositeOperation = 'lighter';
+    const energy = energyOf(frame.bands);
+    const bankHue = BANK_HUES[look.paletteBank];
+    const hue = (bankHue + (energy - 0.5) * 70 + 360) % 360;
+    // Anticipation tightens the mouth slightly (tension, no flash).
+    const radius = unit * (0.1 + 0.16 * low) * (1 - 0.12 * precut);
+    const wobble = unit * (0.008 + 0.03 * (1 - hardness)) * mid;
+    // Mouth spin: the polygon slowly turns (rate on slow bands).
+    this.mouthSpin += frame.dt * (0.15 + 0.6 * slow.mid) * look.rotDir;
+    const ripple = 6 + 4 * hardness;
+    const lightness = Math.min(72, 40 + 26 * low + 14 * hardness * frame.impulse.low);
+    ctx.beginPath();
+    const segments = 96;
+    for (let i = 0; i <= segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const shape = mouthShape(look.mouthSides, angle - this.mouthSpin);
+      const r =
+        radius * shape + Math.sin(angle * ripple + frame.time * (3 + 2 * hardness)) * wobble;
+      const x = cx + Math.cos(angle) * r;
+      const y = cy + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = `hsl(${hue}, 100%, ${lightness}%)`;
+    ctx.lineWidth = Math.max(2, unit * (0.003 + lerp(0.016, 0.008, hardness) + 0.01 * low));
+    ctx.stroke();
+
+    // Inner ornament (discrete on/off): a counter-rotating echo of the
+    // mouth at 60% radius — localized, photosafe.
+    if (look.innerOrnament === 1) {
+      ctx.beginPath();
+      for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const shape = mouthShape(look.mouthSides, angle + this.mouthSpin * 1.7);
+        const r = radius * 0.6 * shape;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = `hsl(${(hue + 40) % 360}, 100%, ${Math.min(66, 46 + 16 * frame.impulse.low)}%)`;
+      ctx.lineWidth = Math.max(1.5, unit * 0.0035);
+      ctx.stroke();
+    }
+
+    // DROP-ON-BOUNDARY BURST: the NEW mouth stamped once at full size into
+    // the feedback (decays over ~0.45 s; ≤1 per phrase — photosafe).
+    if (this.burst > 0.01) {
+      ctx.beginPath();
+      for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const shape = mouthShape(look.mouthSides, angle - this.mouthSpin);
+        const r = radius * (1.5 + 1.2 * (1 - this.burst)) * shape;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = `hsl(${hue}, 100%, ${Math.min(70, 70 * this.burst)}%)`;
+      ctx.lineWidth = Math.max(2, unit * 0.008 * this.burst);
+      ctx.stroke();
+    }
+
+    // Sparkles — density stepped by the DISCRETE spark tier (cut, not eased).
+    const tierGain = 0.4 + 0.55 * look.sparkTier;
+    const density = (1 + 0.8 * hardness + 0.6 * this.drive) * tierGain;
+    const wanted = SPARKS_PER_S * density * high * high * frame.dt;
+    let spawn = Math.floor(wanted) + (Math.random() < wanted % 1 ? 1 : 0);
+    while (spawn-- > 0) {
+      const angle = Math.random() * Math.PI * 2;
+      const shape = mouthShape(look.mouthSides, angle - this.mouthSpin);
+      const distance = radius * shape * (0.9 + Math.random() * 0.4);
+      const size = unit * (0.0015 + 0.0035 * Math.random());
+      ctx.fillStyle = `hsl(${(hue + 180 + Math.random() * 40) % 360}, 100%, 65%)`;
+      ctx.beginPath();
+      ctx.arc(
+        cx + Math.cos(angle) * distance,
+        cy + Math.sin(angle) * distance,
+        size,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Snapshot for the next warp.
+    if (bufferCtx && this.buffer) {
+      bufferCtx.clearRect(0, 0, width, height);
+      bufferCtx.drawImage(ctx.canvas, 0, 0);
+    }
+  }
+}
+
+const candidate: VisualizerPreset = {
+  id: 'g14-tunnel-verses',
+  name: 'g14 tunnel-verses',
+  params: [
+    { id: 'trail', label: 'trail length', min: 0.4, max: 1.4, step: 0.02, default: 1 },
+    { id: 'zoom', label: 'zoom drive', min: 0.3, max: 2, step: 0.05, default: 1 },
+    { id: 'cutStrength', label: 'cut drama', min: 0, max: 2, step: 0.05, default: 1 },
+  ],
+  create: () => new TunnelVersesRenderer(),
+};
+
+export default candidate;
