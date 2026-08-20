@@ -28,7 +28,7 @@ process docs in docs/agents/):
 
 - Your writes outside your lane are permission-denied by design, not by accident.
   Denials are signals, not obstacles — do not route around them with bash tricks.
-  The whitelisted exceptions: the sidecar (issue tracker, handoffs, lane records)
+  The whitelisted exceptions: the sidecar (handoffs, lane records)
   and dotfiles process docs.
 - The real DB (~/manadj/data) is out of reach entirely: reads and writes are
   denied, and a write-guard plugin backstops the denial. Never target it with
@@ -36,9 +36,12 @@ process docs in docs/agents/):
   clones only until your change lands.
 - Destructive tests target decoy files only — never a real asset, regardless of
   what gates supposedly protect it.
-- Use es issue for claims/flips/comments; flip Status: only on issues your lane owns.
+- Tracker is GitHub Issues on murtaza64/manadj, raw gh per
+  ~/dotfiles/docs/tracker-ops/gh.md: claim = agent:<lane> label + session
+  comment; mutate labels/state only on issues your lane claimed. es issue is
+  dead here; so is the tombstoned sidecar issues/ dir.
 - Describe your working change as you implement; one change per issue.
-- Park feature work at ready-for-human with a Walkthrough (URL/command, 3-5 steps,
+- Park feature work with the parked label + a Walkthrough (URL/command, 3-5 steps,
   expected result) — printed in your final output AND commented on the issue.
 - Landing: bugfixes/incidental maintenance/docs auto-land via
   uv run scripts/agent/land.py after verification; feature work lands only on

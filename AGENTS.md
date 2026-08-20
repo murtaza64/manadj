@@ -12,24 +12,25 @@ this project does NOT prefer pastel colors as per my global theme, instead prefe
 
 manadj is a single-repo editspace (ADR 0028): the repo at `~/manadj` is the
 default workspace; the embedded sidecar `~/manadj/.editspace/` (own jj repo,
-gitignored) holds the issue tracker, handoffs, and lanes. Canonical mechanics:
-`~/dotfiles/docs/editspace-lanes.md` — this file and `docs/agents/` state only
-manadj's divergences and domain layer. Coordinate via `es` (`es issue`,
-`es lane create`, `es agent spawn/resume`, `es wait`, `es lanes`).
+gitignored) holds handoffs, lanes, and tombstoned tracker history. Canonical
+mechanics: `~/dotfiles/docs/editspace-lanes.md` — this file and `docs/agents/`
+state only manadj's divergences and domain layer. Coordinate via `es`
+(`es lane create`, `es agent spawn/resume`, `es wait`, `es lanes`).
 
 ### Issue tracker
 
-Issues live in the sidecar: `.editspace/issues/<feature-slug>/<NN>-<slug>.md`.
-Claim atomically via `es issue claim`; comments via `es issue comment`; status
-flips by direct edit of your own issues' `Status:` line, then
-`jj -R ~/manadj/.editspace commit`. PRDs/ADRs/CONTEXT stay in the repo
+**GitHub Issues on `murtaza64/manadj`** — raw `gh`/`gh api` per
+`~/dotfiles/docs/tracker-ops/gh.md` (claims = `agent:<lane>` labels, markers,
+native blocked-by, frontier query). `es issue` has no gh backend; do not use
+it. The old sidecar tracker (`.editspace/issues/`) is tombstoned — never file
+there; mapping in its README. PRDs/ADRs/CONTEXT stay in the repo
 (`docs/prds/`, `docs/adr/`, `CONTEXT.md`). See `docs/agents/issue-tracker.md`.
 
 ### Version control
 
 This repo uses jj. One jj change per issue; change description =
-`<feature-slug>: <issue-file-stem>`, e.g.
-`soundcloud-acquisition: 01-investigate-likes-scanning`.
+`<feature-slug>: <issue>`, e.g. `sets: #47 session-to-set gaps` (gh-era) or
+`soundcloud-acquisition: 01-investigate-likes-scanning` (pre-migration).
 
 ### Parallel work (multiple agents)
 
@@ -73,7 +74,7 @@ Alembic (see `docs/adr/0005-alembic-migrations.md`). Generate revisions with `uv
 
 ### Triage labels
 
-Default vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), recorded as `Status:` lines in issue files. See `docs/agents/triage-labels.md`.
+gh label state per `~/dotfiles/docs/tracker-ops/gh.md`: who-acts-next markers (`ready-for-agent`, `needs-human`, `needs-info`, `flagged`, `parked`), untriaged = open with no marker, abandonment via close-not-planned + reason label. Role mapping: `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
