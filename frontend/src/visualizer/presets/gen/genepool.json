@@ -1,5 +1,5 @@
 {
- "generation": 13,
+ "generation": 14,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -3562,6 +3562,338 @@
     "territory:living",
     "render:canvas",
     "signals:bandsSlow,impulse,spectrum24,ladder,genome"
+   ],
+   "notes": []
+  },
+  "g14-julia-largo": {
+   "generation": 14,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Resurrection (fable5): Julia 4th attempt \u2014 slow, phrase-locked C on bar boundaries, always dense (orbit-trap floor).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-lattice-lucid": {
+   "generation": 14,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Resurrection (fable5): the dense-lattice idea rebuilt legibly (fossils strobe-lattice/lattice-dense).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-facade": {
+   "generation": 14,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Resurrection (fable5): architecture 4th attempt \u2014 no smoke, no bright columns, bounded camera.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-gesture": {
+   "generation": 14,
+   "parents": [
+    "g06-calligraphy"
+   ],
+   "kind": "novel",
+   "brief": "Resurrection (fable5): responsive waveform-gesture (wantsWave) \u2014 kicks/mids/highs visibly own the motion vocabulary.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-causal-pinball": {
+   "generation": 14,
+   "parents": [
+    "g06-pinball"
+   ],
+   "kind": "novel",
+   "brief": "Resurrection (sol): always-visible pinball board, legible ball->bumper causality, beat-ballistic timing (never blank).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-visible-metric": {
+   "generation": 14,
+   "parents": [
+    "g02-mirror-ladder",
+    "g07-mirror-metric"
+   ],
+   "kind": "novel",
+   "brief": "Resurrection (sol): bar-by-bar construction made legible \u2014 the build must read without explanation.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-monument-orrery": {
+   "generation": 14,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Resurrection (sol): mechanism 5th attempt \u2014 nearly-still monumental machinery, each motion an event.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-strata-mass": {
+   "generation": 14,
+   "parents": [
+    "g06-tectonic",
+    "g06-foundry"
+   ],
+   "kind": "novel",
+   "brief": "Resurrection (sol): landscape-mass \u2014 band identity by terrain scale, legible + dramatic.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-voyage-comets": {
+   "generation": 14,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "tweak",
+   "brief": "Breeding (fable5): medium replacement on the champion \u2014 comet bodies with persistent tails on the black-hole skeleton.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-hardcut-dye": {
+   "generation": 14,
+   "parents": [
+    "g09-hardcut-listen"
+   ],
+   "kind": "tweak",
+   "brief": "Breeding (fable5): dust color dynamism on the music-chooses-the-bank hardcut line.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-saga-fullbleed": {
+   "generation": 14,
+   "parents": [
+    "g04-tunnel-saga"
+   ],
+   "kind": "tweak",
+   "brief": "Breeding (fable5): tunnel-saga with the tunnel-class viewport-coverage bugfix + glare trim.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-tunnel-verses": {
+   "generation": 14,
+   "parents": [
+    "g04-tunnel-saga",
+    "g07-voyage-hardcut"
+   ],
+   "kind": "combine",
+   "brief": "Breeding (fable5): quantized look-cuts x tunnel chapter arc.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-materia-wheel": {
+   "generation": 14,
+   "parents": [
+    "g07-materia-metric"
+   ],
+   "kind": "tweak",
+   "brief": "Breeding (sol): quantized spectrum sculpture on the full-wheel spectral hue anchor.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-mirror-storyboard": {
+   "generation": 14,
+   "parents": [
+    "g02-mirror-ladder"
+   ],
+   "kind": "tweak",
+   "brief": "Breeding (sol): mirror-ladder storytelling extended into a storyboard grammar.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-season-crown": {
+   "generation": 14,
+   "parents": [
+    "g07-seasons-neon",
+    "g03-solar-crown"
+   ],
+   "kind": "combine",
+   "brief": "Breeding (sol): seasons section regimes x solar-crown kick prominences/polarity.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen14"
+   ],
+   "notes": []
+  },
+  "g14-crt-breeding": {
+   "generation": 14,
+   "parents": [
+    "g07-crt"
+   ],
+   "kind": "novel",
+   "brief": "Breeding (sol): wilder clean-room breeder on the CRT channel-program grammar.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen14"
    ],
    "notes": []
   }

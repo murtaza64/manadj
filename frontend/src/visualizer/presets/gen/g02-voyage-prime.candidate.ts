@@ -204,7 +204,7 @@ const FRAGMENT =
   '  // fringe fix: hue-steerable fringes -- rotate the field to the anchor\n' +
   '  // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can\n' +
   '  // go slightly negative) so the unsharp feedback loop stays stable.\n' +
-  '  float fringeRot = u_hueRot;\n' +
+  '  float fringeRot = 0.0;\n' + // CLASSIC red/blue fluid (human: keep some presets classic)
   '  vec3 tapA = texture2D(u_prev, src + ab).rgb;\n' +
   '  vec3 tapC = texture2D(u_prev, src).rgb;\n' +
   '  vec3 tapB = texture2D(u_prev, src - ab).rgb;\n' +

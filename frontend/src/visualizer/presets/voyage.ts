@@ -207,7 +207,7 @@ void main() {
   // fringe fix: hue-steerable fringes -- rotate the field to the anchor
   // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can
   // go slightly negative) so the unsharp feedback loop stays stable.
-  float fringeRot = u_hueRot;
+  float fringeRot = 0.0; // CLASSIC red/blue aberration fluid (human: keep some presets classic)
   vec3 tapA = texture2D(u_prev, src + ab).rgb;
   vec3 tapC = texture2D(u_prev, src).rgb;
   vec3 tapB = texture2D(u_prev, src - ab).rgb;
