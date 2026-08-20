@@ -1,5 +1,5 @@
 Candidate: g15-ferrofluid-litany   Kind: combine
-Parents: g05-materia-mercury (tinted liquid metal), g12-chladni (standing-wave material response)
+Parents: g05-materia-mercury (tinted liquid metal), g13-chladni (standing-wave material response)
 Human notes in play: materia-mercury +5; pressure waves should light what they cross.
 Question: Can bass physically raise a chrome ferrofluid crown while every spectral band owns a stable magnetic spike?
 Invariants: wet black chrome, saturated reflected light, no powder; bass changes mass, not particle count; kick pressure rings rake highlights across spikes.

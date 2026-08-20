@@ -83,7 +83,7 @@ void main() {
   float curvature = abs(membrane(p + e.xy) + membrane(p - e.xy) + membrane(p + e.yx) + membrane(p - e.yx) - 4.0 * h);
   float web = pow(clamp(curvature * 24.0, 0.0, 1.0), mix(2.7, 1.2, u_flatness));
   float fold = pow(clamp(abs(dot(normalize(grad + vec2(0.001)), normalize(vec2(-0.4, 0.9)))), 0.0, 1.0), 10.0);
-  float sheet = 0.18 + web * (0.9 + u_high) + fold * (0.3 + u_mid);
+  float sheet = web * (0.75 + u_high) + fold * (0.22 + u_mid * 0.7);
   vec3 causticA = hsv(fract(u_hue + h * 0.12 + u_phrase * 0.08), 0.96, 1.0);
   vec3 causticB = hsv(fract(u_hue + 0.42 - h * 0.08), 0.92, 1.0);
   vec3 fresh = mix(causticA, causticB, smoothstep(-0.2, 0.2, h)) * sheet;
@@ -93,7 +93,7 @@ void main() {
   float sectionFold = exp(-pow((p.x + sin(p.y * 7.0) * 0.12 - (u_section - 0.5) * 1.8) * 10.0, 2.0));
   fresh += causticB * sectionFold * u_section * 1.3;
 
-  float injection = (1.0 - u_decay) * (2.4 + u_drop * 1.5 + u_buildup * 0.7);
+  float injection = (1.0 - u_decay) * (1.5 + u_drop * 1.3 + u_buildup * 0.6);
   field += fresh * injection;
   field *= 1.0 + u_kick * 0.06;
   float m = max(field.r, max(field.g, field.b));

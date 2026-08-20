@@ -508,6 +508,9 @@ export function VisualizerApp() {
       if (id) {
         setPresetId(id);
         cycleRef.current.lastAdvanceAt = performance.now();
+        // Local exposure bump: skipping with `n` counts as having seen it,
+        // so this session cycles through unseen presets without repeats.
+        soloCountsRef.current[id] = (soloCountsRef.current[id] ?? 0) + 1;
         // Parameter-genotype exploration: each solo-flow load presents a
         // different tuning; the verdict snapshot records what was shown.
         void ensureCandidate(id).then((preset) => {
