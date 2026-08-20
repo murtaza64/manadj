@@ -286,9 +286,13 @@ const candidate: VisualizerPreset = {
         const smoothAlpha = 1 - Math.exp(-dt / 0.35);
 
         // Dominant audible deck (for the motif seed).
-        let dom: (typeof frame.decks)[number] | null = null;
-        for (const d of frame.decks) {
-          if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
+        let dom: (typeof frame.decks)[number] | null =
+          frame.decks.find((d) => d.channel === frame.dominantChannel) ?? null;
+        if (dom === null) {
+          for (const d of frame.decks) {
+            if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+          }
         }
 
         // Bass-weighted, smoothed drop signal (trend has no drop field).

@@ -29,6 +29,16 @@ import type { BeatInfo } from '../../channel';
 import { createGlRenderer } from '../glPreset';
 import type { VisualizerPreset } from '../types';
 
+// DUST FIX v3: deterministic per-track hue anchor. Bit-mix folded to [0,1) so
+// different track ids land on genuinely different hues.
+const splitmix01 = (n: number): number => {
+  let x = (Math.floor(Math.abs(n)) + 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 0x735a2d97) >>> 0;
+  x = (x ^ (x >>> 15)) >>> 0;
+  return x / 4294967296;
+};
+
 const rgb = (c: readonly [number, number, number]) =>
   'vec3(' + c[0].toFixed(3) + ', ' + c[1].toFixed(3) + ', ' + c[2].toFixed(3) + ')';
 
@@ -59,6 +69,7 @@ const FRAGMENT =
   'uniform float u_palette;\n' +
   'uniform float u_charge;\n' +
   'uniform float u_spawnSnare;\n' +
+  'uniform float u_hueRot;   // DUST FIX v3: per-song hue anchor + slow travel, TURNS 0..1\n' +
   'uniform float u_phrase;    // in-phrase swell 0..1, released on downbeats\n' +
   'uniform float u_spread;    // spectral spread -> disk breadth\n' +
   'uniform float u_flatness;  // spectral flatness -> nebula texture\n' +
@@ -123,6 +134,22 @@ const FRAGMENT =
   '  return core + halo + spikes;\n' +
   '}\n' +
   '\n' +
+  '// DUST FIX v3: value-preserving hue ROTATION (YIQ chroma plane). rot in\n' +
+  '// TURNS; luminance (Y) untouched so gains are unchanged. Negatives clamped.\n' +
+  'vec3 hueRotate(vec3 c, float rot) {\n' +
+  '  float y = dot(c, vec3(0.299, 0.587, 0.114));\n' +
+  '  float i = dot(c, vec3(0.596, -0.274, -0.322));\n' +
+  '  float q = dot(c, vec3(0.211, -0.523, 0.312));\n' +
+  '  float h = atan(q, i) + rot * 6.28318;\n' +
+  '  float chroma = sqrt(i * i + q * q);\n' +
+  '  i = chroma * cos(h);\n' +
+  '  q = chroma * sin(h);\n' +
+  '  return max(vec3(0.0), vec3(\n' +
+  '    y + 0.956 * i + 0.621 * q,\n' +
+  '    y - 0.272 * i - 0.647 * q,\n' +
+  '    y - 1.106 * i - 1.703 * q\n' +
+  '  ));\n' +
+  '}\n' +
   'vec3 starScatter(vec2 c, float density, float sizeScale, float gate, float gain) {\n' +
   '  vec2 q = c * density;\n' +
   '  vec2 cell = floor(q);\n' +
@@ -135,7 +162,7 @@ const FRAGMENT =
   '  float size = (0.5 + 1.5 * hash(sc.yx * 2.113)) * sizeScale;\n' +
   '  float bright = 0.4 + 0.6 * hash(sc + 17.9);\n' +
   '  // Star tint samples the traveling palette at each star own hash phase.\n' +
-  '  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02);\n' +
+  '  vec3 tint = hueRotate(palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02), u_hueRot);\n' +
   '  return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;\n' +
   '}\n' +
   '\n' +
@@ -217,7 +244,7 @@ const FRAGMENT =
   '  float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;\n' +
   '  float gravityGain = u_low * (0.5 + 0.8 * u_kick);\n' +
   '  // Gravity ripple color: a spectral-hue-biased warm palette slice.\n' +
-  '  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);\n' +
+  '  vec3 gravityColor = hueRotate(palette(0.05 + t * 0.015 + u_specHue * 0.5), u_hueRot);\n' +
   '  fresh += gravityColor\n' +
   '    * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;\n' +
   '\n' +
@@ -276,7 +303,7 @@ const FRAGMENT =
   '  float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);\n' +
   '  // Anamorphic lens streak across the core — the spacey money shot.\n' +
   '  float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));\n' +
-  '  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);\n' +
+  '  fresh += hueRotate(mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65), u_hueRot) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);\n' +
   '  // The disk: spiral lanes + clouds in the TRAVELING palette.\n' +
   '  // spread controls disk BREADTH — a narrow sound concentrates the lanes\n' +
   '  // into a tight bright band (steeper radial falloff), a wide sound spreads\n' +
@@ -290,7 +317,7 @@ const FRAGMENT =
   '  // Wide phase span + spatial drift: the old 0.7·cloudField span sampled\n' +
   '  // under half a palette period (and blend positions average cosines\n' +
   '  // flatter still) — dust came out monochrome at many slider stops.\n' +
-  '  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);\n' +
+  '  vec3 diskColor = hueRotate(palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8), u_hueRot);\n' +
   '  // Kick reverberation: the traveling wavefront LIGHTS the dust it passes\n' +
   '  // through (displacement alone read as subtle; this makes it audible).\n' +
   '  float reverb = 1.0 + 2.6 * rippleWave;\n' +
@@ -309,7 +336,7 @@ const FRAGMENT =
   '  float grain = mix(1.0, 0.55 + 0.9 * hash(gl_FragCoord.xy + fract(t) * 53.0), clamp(u_flatness, 0.0, 1.0));\n' +
   '  // DISTINCT DUST HUE: high nebula samples the palette at +0.35 phase from\n' +
   '  // the mid dust so the bands read as different dust kinds.\n' +
-  '  vec3 electric = palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);\n' +
+  '  vec3 electric = hueRotate(palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8), u_hueRot);\n' +
   '  fresh += electric * pow(wisp, silky) * shimmer * grain * smoothstep(0.12, 0.5, r)\n' +
   '    * (0.08 + 1.7 * u_high) * u_dust * reverb;\n' +
   '  sky += fresh * (1.0 - u_decay) * (3.2 + 1.6 * u_sustain);\n' +
@@ -399,6 +426,11 @@ const g05PrimePoly: VisualizerPreset = {
     let morph = 0;
     // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase.
     let slowCentroid = 0.5;
+    // DUST FIX v3: per-song hue anchor (splitmix of dominant deck trackId),
+    // eased over ~2s so track changes sweep; centroid EMA supplies the travel.
+    let hueAnchor = 0;
+    let hueAnchorTarget = 0;
+    let lastAnchorTrack: number | null = null;
     return createGlRenderer({
       fragment: FRAGMENT,
       feedback: true,
@@ -483,6 +515,22 @@ const g05PrimePoly: VisualizerPreset = {
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
         // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
         slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
+        // DUST FIX v3: dominant deck = argmax audible level; its trackId anchors
+        // a stable per-song hue, eased over ~2s; centroid EMA supplies travel.
+        let domTrack: number | null = null;
+        let domLevel = -1;
+        for (const d of frame.decks) {
+          if (d.level > domLevel) {
+            domLevel = d.level;
+            domTrack = d.trackId;
+          }
+        }
+        if (domTrack !== null && domTrack !== lastAnchorTrack) {
+          lastAnchorTrack = domTrack;
+          hueAnchorTarget = splitmix01(domTrack);
+        }
+        hueAnchor += (hueAnchorTarget - hueAnchor) * (1 - Math.exp(-dt / 2.0));
+        const hueRot = (((hueAnchor + (slowCentroid - 0.5) * 0.8) % 1) + 1) % 1;
         return {
           u_time: frame.time,
           u_low: frame.bands.low,
@@ -492,6 +540,7 @@ const g05PrimePoly: VisualizerPreset = {
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
           u_specHue: slowCentroid,
+          u_hueRot: hueRot,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,
