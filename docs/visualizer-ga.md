@@ -60,12 +60,18 @@ agent breeds. Design decisions: issue
    the notes), ~30% **combine** (two parents' liked elements), ~30%
    **novel** (fresh idea, may raid any fossil for parts). 4–8 candidates
    per generation; parents = highest-rated alive, weighted sampling.
-3. Write one brief per candidate (template below), then generate:
-   spawn agents across models for diversity (GPT 5.6 sol, opus 5,
-   opus 4.8, fable 5 — `es agent spawn --model …`, or in-session
-   subagents when model variety isn't needed). The agent reads the brief +
-   parents' source and writes ONE `.candidate.ts` file. It must not touch
-   anything else.
+3. Write one brief per candidate (template below), then generate.
+   MODEL POLICY (human, 2026-08-19): generation agents run as FULL
+   sessions via `es agent spawn --model …` on FRONTIER models only —
+   `anthropic/claude-fable-5` and `nano-gpt/openai/gpt-5.6-sol`. Do NOT
+   use in-session Task subagents for generation (they ran on opus for
+   gens 5-13 and produced buggier/uglier candidates). In-session
+   subagents (fable 5) remain fine for explore/mechanical-sweep tasks.
+   The agent reads the brief + parents' source and writes its
+   `.candidate.ts` file(s). It must not touch anything else; spawned
+   generation sessions write candidates+briefs ONLY (never the manifest —
+   the orchestrator folds entries after their lanes land, keeping
+   genepool.json conflict-free).
 4. Verify: `npm run build` (tsc catches contract violations); update the
    manifest (new entries, `generation` bump, `foldedThrough`); commit the
    lane change. Tell the human the arena is restocked.

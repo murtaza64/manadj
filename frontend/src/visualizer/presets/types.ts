@@ -29,6 +29,16 @@ export interface VisualizerFrameData {
    * these (`frame.bandsSlow ?? frame.bands`) — instantaneous bands are for
    * brightness/impulse response, not speed (erratic-motion law, kit). */
   bandsSlow?: BandLevels;
+  /** Shared regime decomposition (rt-viz 09): prefer `frame.regime` over
+   * private trend.excitement heuristics. buildup/dropTransition/sustained/
+   * breakdown in [0,1] + dropAgeS seconds since the last drop landing. */
+  regime?: {
+    buildup: number;
+    dropTransition: number;
+    sustained: number;
+    breakdown: number;
+    dropAgeS: number;
+  } | null;
   /** Normalized spectral centroid (0 dark … 1 bright, 0.5 neutral). */
   centroid: number;
   /** Spectral spread: how WIDE the sound is (0 narrow … 1 full-spectrum). */
@@ -37,6 +47,11 @@ export interface VisualizerFrameData {
   flatness: number;
   /** Per-deck audible state (deck-aware presets); empty when unknown. */
   decks: DeckStateInfo[];
+  /** Smoothed dominant channel (~700ms hysteresis). LAW: derive genome
+   * trackId / dominant-deck EQ from THIS (find the matching deck in
+   * `decks`), never from per-frame level argmax — argmax flaps during
+   * layering (visual jitter, human note 2026-08-19). */
+  dominantChannel?: 'A' | 'B' | 'C' | 'D' | null;
   /** Resolved values for the preset's declared params (id → value). */
   params: Record<string, number>;
   /** Seconds since the renderer started. */

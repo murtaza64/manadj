@@ -401,12 +401,18 @@ const g02VerdantPreset: VisualizerPreset = {
         }
 
         // --- DETERMINISTIC SEED: dominant audible deck's trackId. ---
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
         let dominantTrackId: number | null = null;
-        let bestLevel = 0;
-        for (const deck of frame.decks) {
-          if (deck.playing && deck.level > bestLevel && deck.trackId !== null) {
-            bestLevel = deck.level;
-            dominantTrackId = deck.trackId;
+        const domDeck = frame.decks.find((d) => d.channel === frame.dominantChannel);
+        if (domDeck && domDeck.trackId != null) {
+          dominantTrackId = domDeck.trackId;
+        } else {
+          let bestLevel = 0;
+          for (const deck of frame.decks) {
+            if (deck.playing && deck.level > bestLevel && deck.trackId !== null) {
+              bestLevel = deck.level;
+              dominantTrackId = deck.trackId;
+            }
           }
         }
 

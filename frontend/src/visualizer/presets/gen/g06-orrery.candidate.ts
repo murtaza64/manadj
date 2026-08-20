@@ -374,6 +374,9 @@ function buildMechanism(key: number): Mechanism {
 
 /** Dominant audible deck's trackId (highest level); null when unknown. */
 function dominantTrackId(frame: VisualizerFrameData): number | null {
+  // dominant: smoothed frame.dominantChannel (layering jitter fix)
+  const dom = frame.decks.find((d) => d.channel === frame.dominantChannel);
+  if (dom && dom.trackId != null) return dom.trackId;
   let best: number | null = null;
   let bestLevel = -1;
   for (const deck of frame.decks) {

@@ -80,6 +80,9 @@ function splitmix(key: number): () => number {
 }
 
 function dominantTrackId(frame: VisualizerFrameData): number | null {
+  // dominant: smoothed frame.dominantChannel (layering jitter fix)
+  const dom = frame.decks.find((d) => d.channel === frame.dominantChannel);
+  if (dom && dom.trackId != null) return dom.trackId;
   let best: number | null = null;
   let bestLevel = -1;
   for (const deck of frame.decks) {
@@ -94,10 +97,13 @@ function dominantTrackId(frame: VisualizerFrameData): number | null {
 
 /** Dominant audible deck (highest master-audible level); null when unknown —
  * the band-ownership EQ knobs are read off THIS deck. */
-function dominantDeck(decks: DeckStateInfo[]): DeckStateInfo | null {
+function dominantDeck(frame: VisualizerFrameData): DeckStateInfo | null {
+  // dominant: smoothed frame.dominantChannel (layering jitter fix)
+  const dom = frame.decks.find((d) => d.channel === frame.dominantChannel);
+  if (dom) return dom;
   let best: DeckStateInfo | null = null;
   let bestLevel = -1;
-  for (const deck of decks) {
+  for (const deck of frame.decks) {
     if (!deck.playing) continue;
     if (deck.level > bestLevel) {
       bestLevel = deck.level;
@@ -231,7 +237,7 @@ class StrataEqRenderer implements PresetRenderer {
     }
 
     // --- BAND OWNERSHIP: dominant deck EQ knobs → smoothed presences --------
-    const dom = dominantDeck(frame.decks);
+    const dom = dominantDeck(frame);
     const targetLow = dom ? eqPresence(dom.eq.low) : 1;
     const targetMid = dom ? eqPresence(dom.eq.mid) : 1;
     const targetHigh = dom ? eqPresence(dom.eq.high) : 1;
