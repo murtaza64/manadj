@@ -55,6 +55,17 @@ import { energyOf } from '../../style';
 import { createGlRenderer } from '../glPreset';
 import type { PresetParam, VisualizerFrameData, VisualizerPreset } from '../types';
 
+// fringe fix: deterministic per-track hue anchor (dust-v3 idiom). splitmix64
+// style bit mix folded to [0,1) so track ids land on distinct hues.
+const splitmix01 = (n: number): number => {
+  let x = (Math.floor(Math.abs(n)) + 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 0x735a2d97) >>> 0;
+  x = (x ^ (x >>> 15)) >>> 0;
+  return x / 4294967296;
+};
+
+
 // --- GLSL --------------------------------------------------------------
 // No backticks inside this string. MAX_ITER is a compile-time constant so
 // the iteration loop is ES-1.0-legal; per-pixel early exit rides an `alive`
@@ -129,6 +140,25 @@ vec3 saturate(vec3 c, float amt) {
   return mix(vec3(l), c, amt);
 }
 
+uniform float u_hueRot; // fringe fix: per-song hue anchor + slow spectral travel, TURNS 0..1
+
+// fringe fix: value-preserving hue ROTATION in YIQ chroma-plane (dust-v3
+// idiom). rot is in TURNS; luminance (Y) is untouched by construction.
+vec3 hueRotate(vec3 c, float rot) {
+  float y = dot(c, vec3(0.299, 0.587, 0.114));
+  float i = dot(c, vec3(0.596, -0.274, -0.322));
+  float q = dot(c, vec3(0.211, -0.523, 0.312));
+  float h = atan(q, i) + rot * 6.28318;
+  float chroma = sqrt(i * i + q * q);
+  i = chroma * cos(h);
+  q = chroma * sin(h);
+  return max(vec3(0.0), vec3(
+    y + 0.956 * i + 0.621 * q,
+    y - 0.272 * i - 0.647 * q,
+    y - 1.106 * i - 1.703 * q
+  ));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_res;
   float aspect = u_res.x / u_res.y;
@@ -147,11 +177,19 @@ void main() {
   // Radial chromatic split, wider through the drop / rebirth shock.
   vec2 rdir = length(p) > 1e-4 ? normalize(p) : vec2(0.0);
   vec2 ab = rdir * (0.0009 + 0.004 * u_drop + 0.006 * u_rebirth) / vec2(aspect, 1.0);
-  vec3 fed = vec3(
-    texture2D(u_prev, src + ab).r,
-    texture2D(u_prev, src).g,
-    texture2D(u_prev, src - ab).b
-  );
+  ab *= u_sat; // fringe amount rides the dust param (human note)
+  // fringe fix: hue-steerable fringes -- rotate the field to the anchor
+  // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can
+  // go slightly negative) so the unsharp feedback loop stays stable.
+  float fringeRot = u_hueRot;
+  vec3 tapA = texture2D(u_prev, src + ab).rgb;
+  vec3 tapC = texture2D(u_prev, src).rgb;
+  vec3 tapB = texture2D(u_prev, src - ab).rgb;
+  vec3 fed = max(vec3(0.0), hueRotate(vec3(
+    hueRotate(tapA, -fringeRot).r,
+    hueRotate(tapC, -fringeRot).g,
+    hueRotate(tapB, -fringeRot).b
+  ), fringeRot));
   vec3 blur = (texture2D(u_prev, src + vec2(pix.x, 0.0)).rgb
     + texture2D(u_prev, src - vec2(pix.x, 0.0)).rgb
     + texture2D(u_prev, src + vec2(0.0, pix.y)).rgb
@@ -384,6 +422,11 @@ const g02JuliaPreset: VisualizerPreset = {
   hiRes: true,
   params,
   create: () => {
+    // fringe fix: per-song hue anchor state (dust-v3 idiom) for u_hueRot.
+    let fringeCentroid = 0.5;
+    let fringeAnchor = 0;
+    let fringeAnchorTarget = 0;
+    let fringeAnchorTrack: number | null = null;
     let lastTime = 0;
     // Slow-stat EMAs (tau ~15 s).
     let emaCentroid = 0.5;
@@ -527,7 +570,26 @@ const g02JuliaPreset: VisualizerPreset = {
 
         void statsPrimed;
 
+        // fringe fix: per-song hue anchor (splitmix of the dominant deck
+        // trackId, ~2s eased) + slow spectral travel -- steers the feedback
+        // fringe hue (see hueRotate in the fragment).
+        fringeCentroid += (frame.centroid - fringeCentroid) * (1 - Math.exp(-dt / 1.0));
+        let fringeDomTrack: number | null = null;
+        let fringeDomLevel = -1;
+        for (const d of frame.decks) {
+          if (d.level > fringeDomLevel) {
+            fringeDomLevel = d.level;
+            fringeDomTrack = d.trackId;
+          }
+        }
+        if (fringeDomTrack !== null && fringeDomTrack !== fringeAnchorTrack) {
+          fringeAnchorTrack = fringeDomTrack;
+          fringeAnchorTarget = splitmix01(fringeDomTrack);
+        }
+        fringeAnchor += (fringeAnchorTarget - fringeAnchor) * (1 - Math.exp(-dt / 2.0));
+        const fringeHueRot = (((fringeAnchor + (fringeCentroid - 0.5) * 0.8) % 1) + 1) % 1;
         return {
+          u_hueRot: fringeHueRot,
           u_time: frame.time,
           u_low: frame.bands.low,
           u_mid: frame.bands.mid,

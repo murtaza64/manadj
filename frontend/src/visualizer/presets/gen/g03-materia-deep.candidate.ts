@@ -165,6 +165,23 @@ vec3 tempPalette(float t, float temp) {
   return mix(cold, hot, clamp(temp, 0.0, 1.0));
 }
 
+// fringe fix: value-preserving hue ROTATION in YIQ chroma-plane (dust-v3
+// idiom). rot is in TURNS; luminance (Y) is untouched by construction.
+vec3 hueRotate(vec3 c, float rot) {
+  float y = dot(c, vec3(0.299, 0.587, 0.114));
+  float i = dot(c, vec3(0.596, -0.274, -0.322));
+  float q = dot(c, vec3(0.211, -0.523, 0.312));
+  float h = atan(q, i) + rot * 6.28318;
+  float chroma = sqrt(i * i + q * q);
+  i = chroma * cos(h);
+  q = chroma * sin(h);
+  return max(vec3(0.0), vec3(
+    y + 0.956 * i + 0.621 * q,
+    y - 0.272 * i - 0.647 * q,
+    y - 1.106 * i - 1.703 * q
+  ));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_res;
   float aspect = u_res.x / u_res.y;
@@ -204,11 +221,19 @@ void main() {
   // Sample previous frame. Glass chromatic split; sand dry. Unsharp tap.
   vec2 ab = dir * (0.0016 + 0.006 * u_drop + 0.01 * rippleWave) * (1.0 - mat)
     / vec2(aspect, 1.0);
-  vec3 sampled = vec3(
-    texture2D(u_prev, src + ab).r,
-    texture2D(u_prev, src).g,
-    texture2D(u_prev, src - ab).b
-  );
+  ab *= u_glass; // fringe amount rides the dust param (human note)
+  // fringe fix: hue-steerable fringes -- rotate the field to the anchor
+  // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can
+  // go slightly negative) so the unsharp feedback loop stays stable.
+  float fringeRot = u_hueAnchor + (u_specHue - 0.5) * 0.8;
+  vec3 tapA = texture2D(u_prev, src + ab).rgb;
+  vec3 tapC = texture2D(u_prev, src).rgb;
+  vec3 tapB = texture2D(u_prev, src - ab).rgb;
+  vec3 sampled = max(vec3(0.0), hueRotate(vec3(
+    hueRotate(tapA, -fringeRot).r,
+    hueRotate(tapC, -fringeRot).g,
+    hueRotate(tapB, -fringeRot).b
+  ), fringeRot));
   vec3 blur = (texture2D(u_prev, src + vec2(px.x, 0.0)).rgb
     + texture2D(u_prev, src - vec2(px.x, 0.0)).rgb
     + texture2D(u_prev, src + vec2(0.0, px.y)).rgb

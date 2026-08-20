@@ -278,11 +278,19 @@ const FRAGMENT =
   '  // Chromatic aberration.\n' +
   '  vec2 ab = dirW * (0.0012 + 0.004 * u_drop + 0.003 * u_kick + 0.01 * rippleWave)\n' +
   '    / vec2(aspect, 1.0);\n' +
-  '  vec3 sampled = vec3(\n' +
-  '    texture2D(u_prev, src + ab).r,\n' +
-  '    texture2D(u_prev, src).g,\n' +
-  '    texture2D(u_prev, src - ab).b\n' +
-  '  );\n' +
+  '  ab *= u_dust; // fringe amount rides the dust param (human note)\n' +
+  '  // fringe fix: hue-steerable fringes -- rotate the field to the anchor\n' +
+  '  // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can\n' +
+  '  // go slightly negative) so the unsharp feedback loop stays stable.\n' +
+  '  float fringeRot = u_hueRot;\n' +
+  '  vec3 tapA = texture2D(u_prev, src + ab).rgb;\n' +
+  '  vec3 tapC = texture2D(u_prev, src).rgb;\n' +
+  '  vec3 tapB = texture2D(u_prev, src - ab).rgb;\n' +
+  '  vec3 sampled = max(vec3(0.0), hueRotate(vec3(\n' +
+  '    hueRotate(tapA, -fringeRot).r,\n' +
+  '    hueRotate(tapC, -fringeRot).g,\n' +
+  '    hueRotate(tapB, -fringeRot).b\n' +
+  '  ), fringeRot));\n' +
   '  vec3 blur = (texture2D(u_prev, src + vec2(px.x, 0.0)).rgb\n' +
   '    + texture2D(u_prev, src - vec2(px.x, 0.0)).rgb\n' +
   '    + texture2D(u_prev, src + vec2(0.0, px.y)).rgb\n' +
