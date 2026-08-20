@@ -1,5 +1,5 @@
 {
- "generation": 14,
+ "generation": 15,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -3894,6 +3894,166 @@
    "tags": [
     "model:gpt5.6-sol",
     "gen14"
+   ],
+   "notes": []
+  },
+  "g15-schlieren-rose": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX wildcard (sol): schlieren \u2014 refractive index gradients made visible; feedback-space glass.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-cathedral-rays": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX wildcard (sol): volumetric stained-glass light shafts.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-anamorphic-bloom": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX wildcard (sol): cinematic bokeh + anamorphic lens flares.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-holo-foil": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX wildcard (sol): 24-band diffraction foil sheet (holographic).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-prism-suture": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX material/light (sol): birefringent spectral crystal.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-ferrofluid-litany": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX material/light (sol): 24-band magnetic chrome ferrofluid crown.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-opal-pressure": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX material/light (sol): waveform-edged subsurface opal.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-caustic-diaphragm": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX material/light (sol): contractive feedback liquid-glass caustics.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
    ],
    "notes": []
   }
