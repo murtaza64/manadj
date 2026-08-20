@@ -1,0 +1,10 @@
+Candidate: g16-reeded-glass   Kind: novel
+Parents: none; architectural fluted-glass optics study (technique kin to g15 material/optics round, mechanism disjoint)
+Human notes in play: g15 material/optics work loved; material identity; "aberration fluid" chromatic love — here dispersion is ANALYTIC refraction, not feedback.
+Falsifiable question: Can a sheet of vertical fluted glass make a hidden luminous scene MORE beautiful than showing it directly — slicing, doubling, and dispersing it into rib-locked chromatic strips?
+Invariants: two strict layers — a hidden scene (three band-owned luminous bodies + 24 spectral color columns) seen only THROUGH the glass; refraction is the half-cylinder rib profile's true gradient; chromatic dispersion at rib shoulders; dark rib seams stay hard; no feedback.
+Degrees of freedom: rib frequency, dispersion strength, frost (flatness-driven).
+Assigned tech: bands + bandsSlow (body brightness vs drift speed), 24-band spectrum (scene columns), impulse.low (traveling pressure bulge that brightens what it refracts), impulse.mid (rib-phase ripple), centroid (scene hue tilt), spread (palette breadth), flatness (frost), regime, ladderBarIndex sections (rib angle re-lay), dominantChannel + trackId genome (hue triad, rib count).
+Anti-resemblance: no emboss/normal-lit foil (g15-holo-foil), no feedback advection or hue-rotated trails (schlieren-rose, caustic-diaphragm), no crystal facets (prism-suture), no stained-glass panes (vitrail), no bokeh discs (anamorphic-bloom).
+Instruction: Build the hidden scene first — deep ground, three slow orbiting luminous bodies owned by low/mid/high, 24 soft spectral columns — then refract it through analytic reeded glass: per-rib parabolic profile, R/G/B sampled at three refraction strengths, caustic brightening where the profile focuses, hard dark seams between ribs. Kicks send one circular pressure bulge across the sheet; snares ripple the rib phase horizontally; sections re-lay the ribs at a new angle.
+Contract: default-export VisualizerPreset; self-contained GL via createGlRenderer; GLSL ES 1.0; photosafe; bright saturated colors.
