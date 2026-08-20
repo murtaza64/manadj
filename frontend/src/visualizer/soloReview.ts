@@ -17,13 +17,26 @@ export interface SoloListing {
   rating: number;
 }
 
-/** Count solo reviews per candidate from the event log. */
+/**
+ * Count ALL judgment exposure per candidate from the event log: solo
+ * verdicts AND head-to-head vote participation. Counting only solo events
+ * made ~everything look never-reviewed (the pre-solo arena history counted
+ * for nothing), so the least-reviewed tier was the whole pool and new
+ * candidates didn't stand out (human note, 2026-08-19).
+ */
 export function countSoloReviews(
-  events: { type?: string; target?: string }[]
+  events: { type?: string; target?: string; a?: string; b?: string }[]
 ): Record<string, number> {
   const counts: Record<string, number> = {};
+  const bump = (id?: string) => {
+    if (id) counts[id] = (counts[id] ?? 0) + 1;
+  };
   for (const e of events) {
-    if (e.type === 'solo' && e.target) counts[e.target] = (counts[e.target] ?? 0) + 1;
+    if (e.type === 'solo') bump(e.target);
+    else if (e.type === 'vote') {
+      bump(e.a);
+      bump(e.b);
+    }
   }
   return counts;
 }
