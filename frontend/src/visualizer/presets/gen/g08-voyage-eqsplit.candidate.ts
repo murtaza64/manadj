@@ -340,6 +340,9 @@ const params: PresetParam[] = [
 
 /** Dominant audible deck (highest master-audible level); null when unknown. */
 function dominantDeck(frame: VisualizerFrameData) {
+  // dominant: smoothed frame.dominantChannel (layering jitter fix)
+  const smoothed = frame.decks.find((d) => d.channel === frame.dominantChannel);
+  if (smoothed) return smoothed;
   let best: (typeof frame.decks)[number] | null = null;
   let bestLevel = -1;
   for (const deck of frame.decks) {

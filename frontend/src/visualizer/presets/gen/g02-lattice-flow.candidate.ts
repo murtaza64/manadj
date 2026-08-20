@@ -37,7 +37,7 @@
 import { energyOf, energyHue } from '../../style';
 import type { BeatInfo, DeckStateInfo } from '../../channel';
 import { createGlRenderer } from '../glPreset';
-import type { VisualizerPreset } from '../types';
+import type { VisualizerPreset, VisualizerFrameData } from '../types';
 
 const FRAGMENT = `
 precision highp float;
@@ -210,9 +210,12 @@ function hash1(n: number): number {
 }
 
 /** Dominant audible deck = highest Master-audible level (EQ source). */
-function dominantDeck(decks: DeckStateInfo[]): DeckStateInfo | null {
+function dominantDeck(frame: VisualizerFrameData): DeckStateInfo | null {
+  // dominant: smoothed frame.dominantChannel (layering jitter fix)
+  const dom = frame.decks.find((d) => d.channel === frame.dominantChannel);
+  if (dom) return dom;
   let best: DeckStateInfo | null = null;
-  for (const d of decks) {
+  for (const d of frame.decks) {
     if (!best || d.level > best.level) best = d;
   }
   return best;
@@ -313,7 +316,7 @@ const g02LatticeFlowPreset: VisualizerPreset = {
         shock = Math.max(0, shock - dt * 1.3);
 
         // Dominant deck EQ → strut families (eased). Flat (0.5) fallback.
-        const dom = dominantDeck(frame.decks);
+        const dom = dominantDeck(frame);
         const targetLow = dom ? dom.eq.low : 0.5;
         const targetMid = dom ? dom.eq.mid : 0.5;
         const targetHigh = dom ? dom.eq.high : 0.5;

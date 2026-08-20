@@ -598,9 +598,13 @@ export const g12SolarStormsPreset: VisualizerPreset = {
 
         // --- EQ kills (dominant deck). Mid kill collapses sheets; high kill
         // smooths the corona.
-        let dom: (typeof frame.decks)[number] | null = null;
-        for (const d of frame.decks) {
-          if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
+        let dom: (typeof frame.decks)[number] | null =
+          frame.decks.find((d) => d.channel === frame.dominantChannel) ?? null;
+        if (dom === null) {
+          for (const d of frame.decks) {
+            if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+          }
         }
         const eqAlpha = 1 - Math.exp(-dt / 0.15);
         eqMid += ((dom?.eq.mid ?? 0.5) - eqMid) * eqAlpha;

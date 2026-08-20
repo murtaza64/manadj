@@ -435,9 +435,13 @@ export const g08MateriaBeatPreset: VisualizerPreset = {
         const smoothAlpha = 1 - Math.exp(-dt / 0.3);
 
         // Dominant audible deck = highest master-audible level.
-        let dom: (typeof frame.decks)[number] | null = null;
-        for (const d of frame.decks) {
-          if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
+        let dom: (typeof frame.decks)[number] | null =
+          frame.decks.find((d) => d.channel === frame.dominantChannel) ?? null;
+        if (dom === null) {
+          for (const d of frame.decks) {
+            if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+          }
         }
 
         // MATERIAL surface feel = spectral shape, nudged by the genome lean.

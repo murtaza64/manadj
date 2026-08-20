@@ -6,7 +6,13 @@ import {
   SPECTRUM_BAND_COUNT,
   VISUALIZER_CHANNEL,
 } from './channel';
-import type { BeatInfo, DeckStateInfo, VisualizerMessage, VisualizerPing } from './channel';
+import type {
+  BeatInfo,
+  DeckStateInfo,
+  VisualizerFrame,
+  VisualizerMessage,
+  VisualizerPing,
+} from './channel';
 import { presetById } from './presets';
 import {
   aliveCandidateListings,
@@ -172,8 +178,12 @@ export function VisualizerApp() {
     decks: DeckStateInfo[];
     receivedAt: number;
     bandsSlow: BandLevels;
+    regime: NonNullable<VisualizerFrame['regime']> | null;
+    dominantChannel: 'A' | 'B' | 'C' | 'D' | null;
   }>({
     bandsSlow: SILENT_BANDS,
+    regime: null,
+    dominantChannel: null,
     bands: SILENT_BANDS,
     spectrum: SILENT_SPECTRUM,
     wave: null,
@@ -290,6 +300,8 @@ export function VisualizerApp() {
         spread: event.data.spread ?? 0.5,
         flatness: event.data.flatness ?? 0.5,
         bandsSlow: event.data.bandsSlow ?? event.data.bands,
+        regime: event.data.regime ?? null,
+        dominantChannel: event.data.dominantChannel ?? null,
         decks: event.data.decks ?? [],
         receivedAt: performance.now(),
       };
@@ -359,6 +371,8 @@ export function VisualizerApp() {
       const frame = {
         bands: fresh ? feedRef.current.bands : SILENT_BANDS,
         bandsSlow: fresh ? feedRef.current.bandsSlow : SILENT_BANDS,
+        regime: fresh ? feedRef.current.regime : null,
+        dominantChannel: fresh ? feedRef.current.dominantChannel : null,
         spectrum: fresh ? feedRef.current.spectrum : SILENT_SPECTRUM,
         wave: fresh ? feedRef.current.wave : null,
         beat: fresh ? feedRef.current.beat : null,

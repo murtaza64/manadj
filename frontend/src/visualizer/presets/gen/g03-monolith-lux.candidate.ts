@@ -541,9 +541,14 @@ const g03MonolithLux: VisualizerPreset = {
         const dt = lastTime > 0 ? Math.min(0.1, Math.max(0, frame.time - lastTime)) : 1 / 60;
         lastTime = frame.time;
 
-        let dom = null as null | (typeof frame.decks)[number];
-        for (const d of frame.decks) {
-          if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
+        let dom =
+          (frame.decks.find((d) => d.channel === frame.dominantChannel) ??
+            null) as null | (typeof frame.decks)[number];
+        if (dom === null) {
+          for (const d of frame.decks) {
+            if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+          }
         }
         const trackId = dom?.trackId ?? null;
 
