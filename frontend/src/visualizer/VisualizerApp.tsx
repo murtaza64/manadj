@@ -13,7 +13,7 @@ import type {
   VisualizerMessage,
   VisualizerPing,
 } from './channel';
-import { presetById } from './presets';
+import { DEFAULT_PRESET_ID, presetById } from './presets';
 import {
   aliveCandidateListings,
   ensureCandidate,
@@ -390,6 +390,29 @@ export function VisualizerApp() {
       const layers = layersRef.current;
       const width = canvas.width;
       const height = canvas.height;
+      // CRASH GUARD (human note: hillfog threw and "everything is black from
+      // then on EVEN if i change presets"): an uncaught throw here used to
+      // kill the rAF chain permanently. Render each layer in a try/catch —
+      // a crashing preset gets an error event (fold marks it dead), is
+      // dropped, and the window falls back to the default preset; the loop
+      // itself must never die.
+      const renderGuarded = (layer: Layer): boolean => {
+        try {
+          layer.renderer.render(layer.ctx, width, height, {
+            ...frame,
+            params: getParamValues(layer.preset),
+          });
+          return true;
+        } catch (error) {
+          console.warn(`[visualizer] preset ${layer.preset.id} crashed`, error);
+          void postGaEvent({
+            type: 'error',
+            target: layer.preset.id,
+            text: String(error),
+          });
+          return false;
+        }
+      };
       if (layers.current) {
         if (
           layers.current.canvas.width !== width ||
@@ -398,20 +421,19 @@ export function VisualizerApp() {
           layers.current.canvas.width = width;
           layers.current.canvas.height = height;
         }
-        layers.current.renderer.render(layers.current.ctx, width, height, {
-          ...frame,
-          params: getParamValues(layers.current.preset),
-        });
+        if (!renderGuarded(layers.current)) {
+          const crashedId = layers.current.preset.id;
+          layers.current = null;
+          showToast(`💥 ${crashedId} crashed — reported + falling back`);
+          setPresetId(DEFAULT_PRESET_ID);
+        }
       }
       if (layers.outgoing) {
         layers.morphT += dt / MORPH_S;
         if (layers.morphT >= 1) {
           layers.outgoing = null;
-        } else {
-          layers.outgoing.renderer.render(layers.outgoing.ctx, width, height, {
-            ...frame,
-            params: getParamValues(layers.outgoing.preset),
-          });
+        } else if (!renderGuarded(layers.outgoing)) {
+          layers.outgoing = null;
         }
       }
 
@@ -423,11 +445,13 @@ export function VisualizerApp() {
       ctx.fillRect(0, 0, width, height);
       const blend = ease(layers.morphT);
       ctx.globalCompositeOperation = layers.outgoing ? 'lighter' : 'source-over';
-      if (layers.outgoing) {
+      // drawImage throws on a zero-size canvas (the old arena resize race) —
+      // guard both blits so a degenerate layer can't kill the loop either.
+      if (layers.outgoing && layers.outgoing.canvas.width > 0 && layers.outgoing.canvas.height > 0) {
         ctx.globalAlpha = 1 - blend;
         ctx.drawImage(layers.outgoing.canvas, 0, 0);
       }
-      if (layers.current) {
+      if (layers.current && layers.current.canvas.width > 0 && layers.current.canvas.height > 0) {
         ctx.globalAlpha = layers.outgoing ? blend : 1;
         ctx.drawImage(layers.current.canvas, 0, 0);
       }
