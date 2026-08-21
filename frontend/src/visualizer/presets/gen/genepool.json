@@ -2627,7 +2627,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 1,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2636,8 +2636,8 @@
     "signals:centroid,spread,flatness"
    ],
    "notes": [],
-   "score": 1,
-   "seen": 1,
+   "score": 2,
+   "seen": 2,
    "likedParams": [
     {
      "stars": 1.0,
@@ -2645,6 +2645,13 @@
      "hue": 0.06,
      "persistence": 1.0,
      "speed": 1.0
+    },
+    {
+     "stars": 1.3,
+     "dust": 0.6000000000000001,
+     "hue": 0.12,
+     "persistence": 1.0,
+     "speed": 0.35000000000000003
     }
    ]
   },
@@ -2984,7 +2991,8 @@
     "temporal:quantized",
     "signals:bandsSlow,ladder,impulse"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g10-poster": {
    "generation": 10,
@@ -3035,7 +3043,7 @@
    "brief": "FLAT wave (Vissonance HillFog): layered flat dusk hills, front ridge = live spectrum, back layers = history; phrase = time-of-day stop, drop = sky flip + double scroll.",
    "rating": 1000,
    "score": 0,
-   "status": "alive",
+   "status": "dead",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
@@ -3047,7 +3055,9 @@
     "temporal:time-of-day",
     "signals:spectrum24,bandsSlow,ladder,genome"
    ],
-   "notes": []
+   "notes": [
+    "orchestrator 2026-08-21: CUT (human: crashes the render loop, blacked out the window) \u2014 the crash guard now contains this failure class, but the preset is retired"
+   ]
   },
   "g11-piston": {
    "generation": 11,
@@ -3095,19 +3105,20 @@
    "kind": "novel",
    "brief": "New PULSE representation: LIGHT \u2014 kick teleports the single light source (all shadows snap), bass = light height (shadow length); drop = beat-locked light walk at constant total luminance.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "repr:pulse-light",
     "render:canvas-flat",
     "signals:impulse,bandsSlow,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g11-inhale": {
    "generation": 11,
@@ -3135,19 +3146,20 @@
    "kind": "novel",
    "brief": "New PULSE representation: CROWD \u2014 rows of flat figures jump on kicks with back-propagating stagger; mids = sway waves; highs = <=4 camera flashes; drop = mosh.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "repr:pulse-crowd",
     "render:canvas-flat",
     "signals:impulse,bandsSlow,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g11-frost": {
    "generation": 11,
@@ -3199,11 +3211,11 @@
    "kind": "tweak",
    "brief": "Dust diversity on the leader: snare spores (emit->drift->settle lifecycle), low magma droplets, high static filings over loud regions; spectral tempPalette hues.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -3211,7 +3223,17 @@
     "render:gl-sculpture",
     "signals:spectrum24,impulse,flatness"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "material": -0.12,
+     "sculpt": 1.55,
+     "species": 1.4500000000000002,
+     "persistence": 1.75,
+     "growth": 0.7000000000000001
+    }
+   ]
   },
   "g12-tunnel-swarm": {
    "generation": 12,
@@ -3243,11 +3265,11 @@
    "kind": "tweak",
    "brief": "Tonality axis on the winner: tonal = wide multi-hue banks + 250ms crossfade cuts; percussive = monochrome banks + single-frame cuts + beat accent-flip cascade.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -3255,7 +3277,17 @@
     "render:gl-feedback",
     "signals:flatness,impulse,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "dust": 1.1500000000000001,
+     "persistence": 1.75,
+     "speed": 0.2,
+     "tonalBias": -0.2,
+     "cutStrength": 1.55
+    }
+   ]
   },
   "g12-solar-storms": {
    "generation": 12,
@@ -3431,11 +3463,11 @@
    "kind": "novel",
    "brief": "Creative/physics: Chladni plate cymatics \u2014 sand piles on nodal lines of (m,n) standing waves; kick snaps mode m (hard re-topology); drop = high-order + sand/plate inversion.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -3443,7 +3475,16 @@
     "render:canvas-flat",
     "signals:impulse,bandsSlow,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "grid": 0.85,
+     "sand": 0.8500000000000001,
+     "modeBase": 2.0,
+     "tremor": 0.55
+    }
+   ]
   },
   "g13-skyline": {
    "generation": 13,
@@ -3551,19 +3592,20 @@
    "kind": "novel",
    "brief": "Creative/living: lighthouse \u2014 beam optic clicks facet-stations per beat, ships arrive on the bar grid and light lanterns when caught, kick = beacon flash (<=2/s); drop = storm.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "territory:living",
     "render:canvas",
     "signals:bandsSlow,impulse,spectrum24,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g14-julia-largo": {
    "generation": 14,
@@ -3582,7 +3624,10 @@
     "model:fable5",
     "gen14"
    ],
-   "notes": []
+   "notes": [
+    "more reactivity/motion"
+   ],
+   "seen": 1
   },
   "g14-lattice-lucid": {
    "generation": 14,
@@ -3609,18 +3654,19 @@
    "kind": "novel",
    "brief": "Resurrection (fable5): architecture 4th attempt \u2014 no smoke, no bright columns, bounded camera.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:fable5",
     "gen14"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g14-gesture": {
    "generation": 14,
@@ -3630,18 +3676,33 @@
    "kind": "novel",
    "brief": "Resurrection (fable5): responsive waveform-gesture (wantsWave) \u2014 kicks/mids/highs visibly own the motion vocabulary.",
    "rating": 1000,
-   "score": 0,
+   "score": 2,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
     "model:fable5",
     "gen14"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 2,
+   "likedParams": [
+    {
+     "amp": 1.9500000000000002,
+     "weight": 1.15,
+     "trails": 1.35,
+     "slam": 0.4
+    },
+    {
+     "amp": 1.9500000000000002,
+     "weight": 1.15,
+     "trails": 1.35,
+     "slam": 0.4
+    }
+   ]
   },
   "g14-causal-pinball": {
    "generation": 14,
@@ -3662,7 +3723,8 @@
     "model:gpt5.6-sol",
     "gen14"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g14-visible-metric": {
    "generation": 14,
@@ -3735,18 +3797,26 @@
    "kind": "tweak",
    "brief": "Breeding (fable5): medium replacement on the champion \u2014 comet bodies with persistent tails on the black-hole skeleton.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
     "model:fable5",
     "gen14"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "swarm": 0.95,
+     "trails": 0.9,
+     "speed": 1.1500000000000001
+    }
+   ]
   },
   "g14-hardcut-dye": {
    "generation": 14,
@@ -3841,18 +3911,25 @@
    "kind": "tweak",
    "brief": "Breeding (sol): mirror-ladder storytelling extended into a storyboard grammar.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen14"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "scale": 1.2,
+     "fold": 0.8500000000000001
+    }
+   ]
   },
   "g14-season-crown": {
    "generation": 14,
@@ -3884,18 +3961,26 @@
    "kind": "novel",
    "brief": "Breeding (sol): wilder clean-room breeder on the CRT channel-program grammar.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen14"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "pixel": 1.0,
+     "scanlines": 1.0,
+     "motion": 1.0
+    }
+   ]
   },
   "g15-schlieren-rose": {
    "generation": 15,
@@ -3943,19 +4028,20 @@
    "kind": "novel",
    "brief": "VFX wildcard (sol): cinematic bokeh + anamorphic lens flares.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g15-holo-foil": {
    "generation": 15,
@@ -4066,11 +4152,11 @@
    "kind": "novel",
    "brief": "VFX fluids (fable5): suminagashi paper-marbling ink rings.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4078,7 +4164,16 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "rake": 0.9,
+     "rings": 87.0,
+     "drift": 0.65,
+     "persistence": 1.35
+    }
+   ]
   },
   "g15-ferrofluid": {
    "generation": 15,
@@ -4260,7 +4355,10 @@
     "gen16",
     "quadrants"
    ],
-   "notes": []
+   "notes": [
+    "i dont like the layering, looks too busy"
+   ],
+   "seen": 1
   },
   "g16-role-relay": {
    "generation": 16,
@@ -4288,11 +4386,11 @@
    "kind": "novel",
    "brief": "Reactive quadrants (sol): split-flap mosaic exposing all sensing channels via a cheap cell vocabulary.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4300,7 +4398,17 @@
     "gen16",
     "quadrants"
    ],
-   "notes": []
+   "notes": [
+    "improve visual flair"
+   ],
+   "seen": 1,
+   "likedParams": [
+    {
+     "gap": 0.08,
+     "flipDepth": 0.9000000000000001,
+     "rotation": 1.5
+    }
+   ]
   },
   "g16-signal-in-signal": {
    "generation": 16,
@@ -4308,11 +4416,11 @@
    "kind": "novel",
    "brief": "Reactive quadrants (sol): picture-in-picture hierarchy \u2014 nested frames make musical hierarchy visible.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4320,7 +4428,17 @@
     "gen16",
     "quadrants"
    ],
-   "notes": []
+   "notes": [
+    "aspect ratio seems wrong"
+   ],
+   "seen": 1,
+   "likedParams": [
+    {
+     "depth": 1.4000000000000001,
+     "border": 0.04,
+     "iris": 1.1
+    }
+   ]
   },
   "g16-bubble-chamber": {
    "generation": 16,
@@ -4340,7 +4458,10 @@
     "gen16",
     "vfx"
    ],
-   "notes": []
+   "notes": [
+    "a little boring, looks low res"
+   ],
+   "seen": 1
   },
   "g16-event-horizon": {
    "generation": 16,
@@ -4380,7 +4501,10 @@
     "gen16",
     "vfx"
    ],
-   "notes": []
+   "notes": [
+    "remove discontinuous jitterry motion"
+   ],
+   "seen": 1
   },
   "g16-sequin-surge": {
    "generation": 16,
@@ -4485,7 +4609,7 @@
    "notes": []
   }
  },
- "foldedThrough": 1787119972.208045,
+ "foldedThrough": 1787286000.265342,
  "eloSemantics": "v2: forced-choice only moves rating (K=32/400); both_good/both_bad are approval/rejection labels; both_bad kills winless candidates",
  "scoring": "v3: score = (wins + approvals) - (losses + rejections); approvals/rejections include solo likes/dislikes; elo rating retained as legacy tiebreaker"
 }
