@@ -91,6 +91,12 @@ const DETAIL_MARKS_MAX_VISIBLE_S = 600;
 /** Canvas draws this much beyond the viewport each side, so native
  * scrolling never outruns the painted window between re-centers. */
 const CANVAS_MARGIN = 400;
+/** Zoom gestures BLIT the last full waveform paint (per-axis-segment
+ * drawImage) instead of re-interpreting the waveform per wheel frame —
+ * at low zoom a full CPU repaint spans the whole session × 4 lanes and
+ * blocked every frame of the gesture (this issue). The real repaint
+ * runs once, this long after the last zoom wheel event. */
+const ZOOM_REPAINT_SETTLE_MS = 160;
 
 // ── Formatting ──────────────────────────────────────────────────────────
 
@@ -303,6 +309,22 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
   zoomCtxRef.current = { model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedGaps };
   const pendingZoomRef = useRef<{ factor: number; clientX: number } | null>(null);
   const wheelGestureRef = useRef<{ axis: 'pan' | 'zoom'; last: number } | null>(null);
+  // Zoom-gesture blit state: the last FULL canvas paint plus the axis it
+  // was painted under. While `zoomBlitUntilRef` is in the future the
+  // canvas effect remaps this snapshot instead of repainting; the settle
+  // timer then forces one real repaint (paintEpoch) iff any blit ran.
+  const paintSnapshotRef = useRef<{
+    canvas: HTMLCanvasElement;
+    x0: number;
+    winW: number;
+    dpr: number;
+    svgH: number;
+    segments: TimeAxis['segments'];
+  } | null>(null);
+  const zoomBlitUntilRef = useRef(0);
+  const blitDirtyRef = useRef(false);
+  const settleTimerRef = useRef(0);
+  const [paintEpoch, setPaintEpoch] = useState(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -367,12 +389,22 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
         factor: (pending?.factor ?? 1) * Math.pow(1.0015, -e.deltaY * unit),
         clientX: e.clientX,
       };
+      // Gesture in flight: the canvas blits until the wheel goes quiet,
+      // then one real repaint (only if a blit actually painted — a zoom
+      // pinned at the fit floor never dirtied the canvas).
+      zoomBlitUntilRef.current = now + ZOOM_REPAINT_SETTLE_MS + 80;
+      window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = window.setTimeout(() => {
+        zoomBlitUntilRef.current = 0;
+        if (blitDirtyRef.current) setPaintEpoch((v) => v + 1);
+      }, ZOOM_REPAINT_SETTLE_MS);
       if (!raf) raf = requestAnimationFrame(applyZoom);
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => {
       el.removeEventListener('wheel', handler);
       if (raf) cancelAnimationFrame(raf);
+      window.clearTimeout(settleTimerRef.current);
     };
      
   }, [hasModel, setScrollLeft]);
@@ -645,11 +677,19 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, gridsReadyKey]);
 
+  // Zoom-adaptive run decimation (this issue): at low zoom a jog/pitch-
+  // heavy session cut into thousands of SUB-PIXEL runs, and the per-run
+  // fixed cost made every canvas repaint a main-thread stall. Thin trace
+  // samples to ~¾px of session time before run-cutting — position error
+  // stays sub-pixel by construction. Quantized to powers of two so the
+  // memo only recomputes when zoom crosses a bucket, not per wheel frame.
+  const runMinDtSRaw = 0.75 / effPx;
+  const runMinDtS = runMinDtSRaw <= 1 ? 0 : 2 ** Math.floor(Math.log2(runMinDtSRaw));
   const runsByDeck = useMemo(() => {
     const out = {} as Record<CaptureDeck, TraceRun[]>;
-    for (const d of ALL_DECKS) out[d] = model ? traceRuns(model.decks[d]) : [];
+    for (const d of ALL_DECKS) out[d] = model ? traceRuns(model.decks[d], undefined, runMinDtS) : [];
     return out;
-  }, [model]);
+  }, [model, runMinDtS]);
 
   const slot = useStyleSlot('full');
 
@@ -687,6 +727,47 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, winW, svgH);
     ctx.translate(-x0, 0); // helpers draw in timeline coordinates
+    // Zoom gesture in flight: remap the last full paint through the new
+    // axis instead of re-interpreting the waveform. The axis is piecewise
+    // linear, so a per-segment drawImage is exact in position (waveform
+    // detail stretches until the settle repaint) — GPU-cheap where the
+    // full paint was a per-frame main-thread stall at low zoom.
+    const snap = paintSnapshotRef.current;
+    if (
+      performance.now() < zoomBlitUntilRef.current &&
+      snap !== null &&
+      snap.svgH === svgH &&
+      snap.segments.length === axis.segments.length
+    ) {
+      blitDirtyRef.current = true;
+      for (let i = 0; i < axis.segments.length; i++) {
+        const os = snap.segments[i];
+        const ns = axis.segments[i];
+        // The slice of this segment the snapshot actually painted…
+        const o0 = Math.max(os.px0, snap.x0);
+        const o1 = Math.min(os.px1, snap.x0 + snap.winW);
+        if (o1 <= o0) continue;
+        // …mapped linearly into the new axis' px space.
+        const ow = os.px1 - os.px0;
+        const f0 = ow > 0 ? (o0 - os.px0) / ow : 0;
+        const f1 = ow > 0 ? (o1 - os.px0) / ow : 1;
+        const n0 = ns.px0 + f0 * (ns.px1 - ns.px0);
+        const n1 = ns.px0 + f1 * (ns.px1 - ns.px0);
+        if (n1 <= n0 || n1 <= x0 || n0 >= x1) continue;
+        ctx.drawImage(
+          snap.canvas,
+          (o0 - snap.x0) * snap.dpr,
+          0,
+          (o1 - o0) * snap.dpr,
+          snap.svgH * snap.dpr,
+          n0,
+          0,
+          n1 - n0,
+          svgH
+        );
+      }
+      return;
+    }
     for (const deck of LANE_ORDER) {
       const geo = { width, yOffset: laneY(deck), height: laneH, x0, x1 };
       const dt = model.decks[deck];
@@ -715,8 +796,15 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
         }
       }
     }
+    // Snapshot the full paint for the next zoom gesture's blits.
+    const snapCanvas = snap?.canvas ?? document.createElement('canvas');
+    snapCanvas.width = canvas.width;
+    snapCanvas.height = canvas.height;
+    snapCanvas.getContext('2d')?.drawImage(canvas, 0, 0);
+    paintSnapshotRef.current = { canvas: snapCanvas, x0, winW, dpr, svgH, segments: axis.segments };
+    blitDirtyRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, runsByDeck, slot]);
+  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, runsByDeck, slot, paintEpoch]);
 
   // Stable scene callbacks (the scene is memoized — inline closures would
   // defeat it every render).

@@ -122,12 +122,35 @@ export interface TraceRun {
   ph1: number;
 }
 
+/** Thin a trace to samples ≥ `minDtS` apart (endpoints always kept).
+ * Runs are RENDER units: at low zoom, jog/pitch wiggles between samples
+ * closer than a pixel cut the trace into thousands of sub-pixel runs,
+ * and the per-run fixed cost dominated every repaint (this issue). Any
+ * position error this introduces is bounded by the decimation step —
+ * sub-pixel at the zoom that chose it. */
+function decimateTrace(
+  trace: { t: number; playhead: number }[],
+  minDtS: number
+): { t: number; playhead: number }[] {
+  if (minDtS <= 0 || trace.length < 3) return trace;
+  const out = [trace[0]];
+  const last = trace.length - 1;
+  for (let i = 1; i < last; i++) {
+    if (trace[i].t - out[out.length - 1].t >= minDtS) out.push(trace[i]);
+  }
+  out.push(trace[last]);
+  return out;
+}
+
 /** Cut traces into constant-rate runs (rate changes at pitch moves; the
  * ~1 Hz samples make same-rate stretches long). Tolerance is generous —
- * a run is a RENDER unit, not evidence. */
-export function traceRuns(deck: DeckTimeline, rateTolerance = 0.04): TraceRun[] {
+ * a run is a RENDER unit, not evidence. `minDtS` pre-decimates each
+ * trace to that sample spacing (zoom-adaptive callers pass ~¾px of
+ * session time) so sub-pixel rate wiggles can't multiply run count. */
+export function traceRuns(deck: DeckTimeline, rateTolerance = 0.04, minDtS = 0): TraceRun[] {
   const runs: TraceRun[] = [];
-  for (const trace of deck.traces) {
+  for (const rawTrace of deck.traces) {
+    const trace = decimateTrace(rawTrace, minDtS);
     if (trace.length < 2) continue;
     let start = 0;
     let rate: number | null = null;
@@ -244,9 +267,13 @@ export function drawStyledRuns(
   // their columns advance left→right).
   const renderer = createStyledColumnRenderer(wave, styleId, params);
   const pxToT = controls ? createMonotonicPxToT(axis) : null;
+  // Run endpoints advance in time — a monotonic cursor instead of
+  // `axis.tToPx`'s per-call linear segment scan (O(runs × segments)
+  // dominated low-zoom repaints alongside per-run setup).
+  const tToPx = createMonotonicTToPx(axis);
   for (const run of runs) {
-    const rx0 = axis.tToPx(run.t0);
-    const rx1 = axis.tToPx(run.t1);
+    const rx0 = tToPx(run.t0);
+    const rx1 = tToPx(run.t1);
     if (rx1 <= rx0) continue;
     // Clip the run to the visible window, track range proportionally.
     const cx0 = Math.max(rx0, geo.x0);
@@ -289,9 +316,10 @@ export function drawGridlines(
   geo: LaneGeometry
 ): void {
   const downbeats = new Set(downbeatTimes);
+  const tToPx = createMonotonicTToPx(axis);
   for (const run of runs) {
-    const x0 = axis.tToPx(run.t0);
-    const x1 = axis.tToPx(run.t1);
+    const x0 = tToPx(run.t0);
+    const x1 = tToPx(run.t1);
     const phSpan = run.ph1 - run.ph0;
     if (phSpan <= 0 || x1 <= x0) continue;
     const pxPerTrackSec = (x1 - x0) / phSpan;
