@@ -48,6 +48,7 @@ import { getTimelineViewState, patchTimelineViewState } from './timelineViewStat
 import { staggerRows } from './labelStagger';
 import {
   createMonotonicTToPx,
+  decimatePlayheadTrace,
   drawAudibilityArea,
   drawGridlines,
   drawStyledRuns,
@@ -691,6 +692,22 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     return out;
   }, [model, runMinDtS]);
 
+  // Scene copies of the traces, thinned to the SAME zoom bucket (this
+  // issue, part 2): the trace polylines walked every raw sample per scene
+  // render — at low zoom that's the whole multi-hour trace × 4 decks on
+  // every zoom frame / scroll-quantum crossing. Points that can't move
+  // ≥1px horizontally are dropped up front; a seek that jumps the lane
+  // vertically (≥ ~1px of playhead scale) always survives.
+  const sceneTracesByDeck = useMemo(() => {
+    const out = {} as Record<CaptureDeck, { t: number; playhead: number }[][]>;
+    for (const d of ALL_DECKS) {
+      const dt = model?.decks[d];
+      const minPh = dt && dt.maxPlayhead > 0 ? dt.maxPlayhead / Math.max(1, laneH - 24) : Infinity;
+      out[d] = dt ? dt.traces.map((tr) => decimatePlayheadTrace(tr, runMinDtS, minPh)) : [];
+    }
+    return out;
+  }, [model, runMinDtS, laneH]);
+
   const slot = useStyleSlot('full');
 
   const svgH = RULER_H + CHIP_STRIP_H + 4 * (laneH + LANE_GAP);
@@ -968,6 +985,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   takes={takes}
                   trackNames={trackNames}
                   selectedTakeUuid={selection.kind === 'take' ? selection.take.uuid : null}
+                  tracesByDeck={sceneTracesByDeck}
                   showTraces={showTraces}
                   showDetailMarks={showDetailMarks}
                   candidates={candidates}
@@ -1026,6 +1044,9 @@ interface SceneProps {
   takes: TakeRowWire[];
   trackNames: Record<number, string>;
   selectedTakeUuid: string | null;
+  /** Zoom-bucket-decimated traces for the polylines (identity changes
+   * only when the bucket does — not per zoom frame). */
+  tracesByDeck: Record<CaptureDeck, { t: number; playhead: number }[][]>;
   showTraces: boolean;
   showDetailMarks: boolean;
   /** Collapse candidates (idle + tenure, sessions 14) — indices key the
@@ -1050,6 +1071,7 @@ const TimelineScene = memo(function TimelineScene({
   takes,
   trackNames,
   selectedTakeUuid,
+  tracesByDeck,
   showTraces,
   showDetailMarks,
   candidates,
@@ -1190,6 +1212,7 @@ const TimelineScene = memo(function TimelineScene({
           tView0={tView0}
           tView1={tView1}
           h={laneH}
+          traces={tracesByDeck[deck]}
           showTraces={showTraces}
           showDetailMarks={showDetailMarks}
         />
@@ -1565,6 +1588,7 @@ function DeckLane({
   tView0,
   tView1,
   h,
+  traces,
   showTraces,
   showDetailMarks,
 }: {
@@ -1581,6 +1605,8 @@ function DeckLane({
   tView0: number;
   tView1: number;
   h: number;
+  /** Zoom-bucket-decimated traces (parent memo) for the polylines. */
+  traces: { t: number; playhead: number }[][];
   showTraces: boolean;
   showDetailMarks: boolean;
 }) {
@@ -1644,22 +1670,27 @@ function DeckLane({
         );
       })}
 
-      {/* Play/pause markers at the playing-span boundaries. */}
-      {dt.playingSpans.map((sp, i) => {
-        const x0 = X(sp.start);
-        const x1 = X(sp.end);
-        if (x1 < viewX0 || x0 > viewX1) return null;
-        return (
-          <g key={`pp-${i}`} className="stl-transport-mark">
-            <text x={x0 + 1} y={y + h - 8} fill={color}>
-              ▶
-            </text>
-            <text x={x1 + 1} y={y + h - 8} fill={color}>
-              ▪
-            </text>
-          </g>
-        );
-      })}
+      {/* Play/pause markers at the playing-span boundaries. Detail-gated
+          (this issue): past ~10 visible minutes they're overlapping glyph
+          confetti, and hundreds of <text> nodes made every low-zoom scene
+          render/paint expensive. */}
+      {showDetailMarks
+        ? dt.playingSpans.map((sp, i) => {
+            const x0 = X(sp.start);
+            const x1 = X(sp.end);
+            if (x1 < viewX0 || x0 > viewX1) return null;
+            return (
+              <g key={`pp-${i}`} className="stl-transport-mark">
+                <text x={x0 + 1} y={y + h - 8} fill={color}>
+                  ▶
+                </text>
+                <text x={x1 + 1} y={y + h - 8} fill={color}>
+                  ▪
+                </text>
+              </g>
+            );
+          })
+        : null}
 
       {/* Jump/cue gesture markers (sessions 04 iteration), labels
           staggered onto rows so a cluster (stab run, repeated jumps)
@@ -1693,27 +1724,32 @@ function DeckLane({
           })()
         : null}
 
-      {/* Held loops: a bracket bar along the lane top. */}
-      {dt.loops.map((lp, i) => {
-        const x0 = X(lp.start);
-        const x1 = Math.max(X(lp.end), x0 + 4);
-        if (x1 < viewX0 || x0 > viewX1) return null;
-        return (
-          <g key={`loop-${i}`} className="stl-loop" >
-            <title>{`loop ${fmtClock(lp.region.start)}–${fmtClock(lp.region.end)}${lp.open ? ' (unreleased)' : ''}`}</title>
-            <line x1={x0} y1={y + 18} x2={x1} y2={y + 18} stroke={color} />
-            <line x1={x0} y1={y + 18} x2={x0} y2={y + 23} stroke={color} />
-            <line x1={x1} y1={y + 18} x2={x1} y2={y + 23} stroke={color} />
-          </g>
-        );
-      })}
+      {/* Held loops: a bracket bar along the lane top. Detail-gated with
+          the other marks — sub-4px brackets at overview zoom are noise. */}
+      {showDetailMarks
+        ? dt.loops.map((lp, i) => {
+            const x0 = X(lp.start);
+            const x1 = Math.max(X(lp.end), x0 + 4);
+            if (x1 < viewX0 || x0 > viewX1) return null;
+            return (
+              <g key={`loop-${i}`} className="stl-loop" >
+                <title>{`loop ${fmtClock(lp.region.start)}–${fmtClock(lp.region.end)}${lp.open ? ' (unreleased)' : ''}`}</title>
+                <line x1={x0} y1={y + 18} x2={x1} y2={y + 18} stroke={color} />
+                <line x1={x0} y1={y + 18} x2={x0} y2={y + 23} stroke={color} />
+                <line x1={x1} y1={y + 18} x2={x1} y2={y + 23} stroke={color} />
+              </g>
+            );
+          })
+        : null}
 
       {/* Playhead traces (position-in-track reading), sliced to the
           window and decimated to pixel resolution (sessions 22) — at low
           zoom the slice is the whole trace, and full-precision per-point
-          tToPx + stringification dominated the scene render. */}
+          tToPx + stringification dominated the scene render. The traces
+          arrive pre-thinned to the zoom bucket (this issue), so a scene
+          render walks ~px-resolution points, not every raw sample. */}
       {showTraces
-        ? dt.traces.map((trace, i) => {
+        ? traces.map((trace, i) => {
             const win = traceWindow(trace, tView0, tView1);
             if (!win) return null;
             return (

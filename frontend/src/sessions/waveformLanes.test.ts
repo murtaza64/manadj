@@ -11,8 +11,10 @@ import type { DeckControlSteps } from './timelineModel';
 import { buildTimeAxis, deriveTimeline } from './timelineModel';
 import {
   columnModulation,
+  createColumnModulator,
   createMonotonicPxToT,
   createMonotonicTToPx,
+  decimatePlayheadTrace,
   tracePolylinePoints,
   traceRuns,
 } from './waveformLanes';
@@ -170,6 +172,53 @@ describe('traceRuns decimation', () => {
       { t: 1, playhead: 1 },
     ]);
     expect(traceRuns(deck, undefined, 30)).toEqual([{ t0: 0, t1: 1, ph0: 0, ph1: 1 }]);
+  });
+
+  it('a seek inside the decimation window survives (minPh)', () => {
+    // Steady playback, then a big seek at t=10, then steady again.
+    const trace: { t: number; playhead: number }[] = [];
+    for (let i = 0; i <= 20; i++) {
+      trace.push({ t: i, playhead: i < 10 ? i : i + 120 });
+    }
+    const thin = decimatePlayheadTrace(trace, 30, 60);
+    // Endpoints + the seek landing point survive.
+    expect(thin[0]).toEqual({ t: 0, playhead: 0 });
+    expect(thin.some((p) => p.playhead >= 130 && p.t <= 11)).toBe(true);
+    // Without minPh the seek would vanish into one straight run.
+    expect(decimatePlayheadTrace(trace, 30)).toHaveLength(2);
+  });
+});
+
+describe('createColumnModulator', () => {
+  it('agrees with columnModulation over a monotonic sweep and after rewind', () => {
+    const c = controls({
+      fader: [
+        { t: 0, gain: 1 },
+        { t: 5, gain: 0.5 },
+        { t: 9, gain: 0 },
+      ],
+      eqLow: [
+        { t: 0, gain: 0.5 },
+        { t: 6, gain: 0 },
+      ],
+      trim: [
+        { t: 0, gain: 0.5 },
+        { t: 7, gain: 1 },
+      ],
+    });
+    const mod = createColumnModulator(c);
+    for (let t = -1; t <= 12; t += 0.25) {
+      expect(mod(t)).toEqual(columnModulation(c, t));
+    }
+    // Defensive rewind: a backward step still matches.
+    expect(mod(2)).toEqual(columnModulation(c, 2));
+  });
+
+  it('empty series fall back to strip defaults', () => {
+    const empty = { fader: [], trim: [], eqLow: [], eqMid: [], eqHigh: [] };
+    const mod = createColumnModulator(empty);
+    expect(mod(5)).toEqual(columnModulation(empty, 5));
+    expect(mod(5).eq).toEqual([1, 1, 1]);
   });
 });
 
