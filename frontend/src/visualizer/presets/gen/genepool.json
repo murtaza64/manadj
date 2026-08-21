@@ -2692,7 +2692,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 1,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2701,8 +2701,8 @@
     "signals:spectrum24,eq"
    ],
    "notes": [],
-   "score": 1,
-   "seen": 1,
+   "score": 2,
+   "seen": 2,
    "likedParams": [
     {
      "material": 0.0,
@@ -2711,6 +2711,14 @@
      "glass": 1.0,
      "persistence": 1.0,
      "growth": 1.0
+    },
+    {
+     "material": 0.24,
+     "sculpt": 0.7000000000000001,
+     "grain": 1.25,
+     "glass": 0.8,
+     "persistence": 1.05,
+     "growth": 0.25
     }
    ]
   },
@@ -2725,7 +2733,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 1,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2736,8 +2744,8 @@
    "notes": [
     "very cool colors and patterns! could be cool with spectrum reactiveness (more tonality = more colors?)"
    ],
-   "score": 1,
-   "seen": 1,
+   "score": 2,
+   "seen": 2,
    "likedParams": [
     {
      "material": 0.0,
@@ -2747,6 +2755,15 @@
      "shards": 1.0,
      "persistence": 1.0,
      "growth": 1.0
+    },
+    {
+     "material": 0.20000000000000007,
+     "sculpt": 0.8,
+     "grain": 1.05,
+     "glass": 2.0,
+     "shards": 1.25,
+     "persistence": 0.5,
+     "growth": 1.05
     }
    ]
   },
@@ -2892,7 +2909,7 @@
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -2903,8 +2920,16 @@
    "notes": [
     "too bright"
    ],
-   "score": 0,
-   "seen": 1
+   "score": 1,
+   "seen": 2,
+   "likedParams": [
+    {
+     "density": 1.8,
+     "filaments": 0.8,
+     "drift": 0.65,
+     "glow": 0.5
+    }
+   ]
   },
   "g09-organ": {
    "generation": 9,
@@ -3243,11 +3268,11 @@
    "kind": "tweak",
    "brief": "Wall-hugging firefly swarm (160 discrete), depth=frequency banding with per-depth hues; kick lurch surge, snare spiral detachment, drop incandescence.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -3255,7 +3280,15 @@
     "render:canvas-feedback",
     "signals:bands,impulse,bandsSlow"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "trail": 0.56,
+     "zoom": 1.05,
+     "density": 1.25
+    }
+   ]
   },
   "g12-hardcut-tonal": {
    "generation": 12,
@@ -3890,18 +3923,19 @@
    "kind": "tweak",
    "brief": "Breeding (sol): quantized spectrum sculpture on the full-wheel spectral hue anchor.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen14"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g14-mirror-storyboard": {
    "generation": 14,
@@ -3988,11 +4022,11 @@
    "kind": "novel",
    "brief": "VFX wildcard (sol): schlieren \u2014 refractive index gradients made visible; feedback-space glass.",
    "rating": 1000,
-   "score": 0,
+   "score": 3,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 3,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4000,7 +4034,25 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 3,
+   "likedParams": [
+    {
+     "fringe": 1.0,
+     "memory": 1.0,
+     "relief": 1.0
+    },
+    {
+     "fringe": 1.0,
+     "memory": 1.0,
+     "relief": 1.0
+    },
+    {
+     "fringe": 1.0,
+     "memory": 1.0,
+     "relief": 1.0
+    }
+   ]
   },
   "g15-cathedral-rays": {
    "generation": 15,
@@ -4020,7 +4072,8 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g15-anamorphic-bloom": {
    "generation": 15,
@@ -4049,11 +4102,11 @@
    "kind": "novel",
    "brief": "VFX wildcard (sol): 24-band diffraction foil sheet (holographic).",
    "rating": 1000,
-   "score": 0,
+   "score": 2,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4061,7 +4114,20 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [
+    "jittery"
+   ],
+   "seen": 2,
+   "likedParams": [
+    {
+     "emboss": 1.0,
+     "diffraction": 1.0
+    },
+    {
+     "emboss": 1.0,
+     "diffraction": 1.0
+    }
+   ]
   },
   "g15-prism-suture": {
    "generation": 15,
@@ -4081,7 +4147,8 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g15-ferrofluid-litany": {
    "generation": 15,
@@ -4101,7 +4168,8 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g15-opal-pressure": {
    "generation": 15,
@@ -4121,7 +4189,8 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g15-caustic-diaphragm": {
    "generation": 15,
@@ -4129,11 +4198,11 @@
    "kind": "novel",
    "brief": "VFX material/light (sol): contractive feedback liquid-glass caustics.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4141,7 +4210,15 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "tension": 1.0,
+     "dispersion": 1.0,
+     "persistence": 1.0
+    }
+   ]
   },
   "g15-suminagashi": {
    "generation": 15,
@@ -4184,11 +4261,11 @@
    "kind": "novel",
    "brief": "VFX fluids (fable5): spiked ferrofluid pool (distinct from sol's ferrofluid-litany crown).",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4196,7 +4273,18 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [
+    "more different patterns"
+   ],
+   "seen": 1,
+   "likedParams": [
+    {
+     "height": 1.0,
+     "iri": 1.0,
+     "orbit": 1.0,
+     "relief": 1.0
+    }
+   ]
   },
   "g15-lava-lens": {
    "generation": 15,
@@ -4218,7 +4306,9 @@
     "gen15",
     "vfx"
    ],
-   "notes": []
+   "notes": [
+    "lava disappears offscreen quickly"
+   ]
   },
   "g15-kelvin-ink": {
    "generation": 15,
@@ -4252,11 +4342,11 @@
    "kind": "novel",
    "brief": "Fluid choreography (fable5): per-band shear voices \u2014 the aberration fluid played like an organ; EQ kills silence a voice.",
    "rating": 1000,
-   "score": 0,
+   "score": 2,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4264,7 +4354,22 @@
     "gen16",
     "fluid-choreo"
    ],
-   "notes": []
+   "notes": [
+    "good fluid variation, maybe less of it or a little lower opacity?"
+   ],
+   "seen": 2,
+   "likedParams": [
+    {
+     "fluid": 1.0,
+     "memory": 1.0,
+     "palette": 0.25
+    },
+    {
+     "fluid": 1.9,
+     "memory": 0.8,
+     "palette": 0.75
+    }
+   ]
   },
   "g16-spring-tide": {
    "generation": 16,
@@ -4274,11 +4379,11 @@
    "kind": "novel",
    "brief": "Fluid choreography (fable5): phrase-swelling fluid amount with boundary blooms; drop surge, breakdown drain.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4286,7 +4391,15 @@
     "gen16",
     "fluid-choreo"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "fluid": 1.0,
+     "memory": 1.0,
+     "palette": 0.5
+    }
+   ]
   },
   "g16-solvent": {
    "generation": 16,
@@ -4297,11 +4410,11 @@
    "kind": "novel",
    "brief": "Fluid choreography (fable5): fluid as solvent dissolving crisp geometry musically, re-crystallizing at boundaries.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4309,7 +4422,15 @@
     "gen16",
     "fluid-choreo"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "fluid": 1.0,
+     "drain": 1.0,
+     "palette": 0.3
+    }
+   ]
   },
   "g16-weather-fronts": {
    "generation": 16,
@@ -4320,11 +4441,11 @@
    "kind": "novel",
    "brief": "Fluid choreography (fable5): section-tier fluid regimes as weather fronts (character jumps on the metric grid).",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4332,7 +4453,15 @@
     "gen16",
     "fluid-choreo"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "fluid": 1.2,
+     "memory": 1.0,
+     "palette": 0.45
+    }
+   ]
   },
   "g16-signal-quadrants": {
    "generation": 16,
@@ -4366,19 +4495,20 @@
    "kind": "novel",
    "brief": "Reactive quadrants (sol): broadcast control desk \u2014 panels swap reactive roles on section boundaries.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen16",
     "quadrants"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g16-flip-matrix": {
    "generation": 16,
@@ -4481,7 +4611,8 @@
     "gen16",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g16-reeded-glass": {
    "generation": 16,
@@ -4512,11 +4643,11 @@
    "kind": "novel",
    "brief": "VFX r2 (fable5): kinetic sequin/paillette wall \u2014 material flips catching light.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4524,7 +4655,15 @@
     "gen16",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "density": 40.0,
+     "glint": 1.0,
+     "waveWidth": 1.0
+    }
+   ]
   },
   "g16-cytoplasm-scan": {
    "generation": 16,
@@ -4544,7 +4683,8 @@
     "gen16",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g16-fire-calligraphy": {
    "generation": 16,
@@ -4554,11 +4694,11 @@
    "kind": "novel",
    "brief": "VFX r2 (sol): long-exposure fire writing on phase-stable waveform plumbing.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4566,7 +4706,15 @@
     "gen16",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "memory": 1.0,
+     "curl": 1.0,
+     "temperature": 0.7
+    }
+   ]
   },
   "g16-neon-radiograph": {
    "generation": 16,
@@ -4586,7 +4734,10 @@
     "gen16",
     "vfx"
    ],
-   "notes": []
+   "notes": [
+    "blurry"
+   ],
+   "seen": 1
   },
   "g16-polarized-nematic": {
    "generation": 16,
@@ -4606,10 +4757,11 @@
     "gen16",
     "vfx"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   }
  },
- "foldedThrough": 1787286000.265342,
+ "foldedThrough": 1787287006.362029,
  "eloSemantics": "v2: forced-choice only moves rating (K=32/400); both_good/both_bad are approval/rejection labels; both_bad kills winless candidates",
  "scoring": "v3: score = (wins + approvals) - (losses + rejections); approvals/rejections include solo likes/dislikes; elo rating retained as legacy tiebreaker"
 }
