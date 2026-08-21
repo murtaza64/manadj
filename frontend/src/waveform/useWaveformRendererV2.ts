@@ -54,6 +54,14 @@ interface Options {
    * channel state feeding `modulation` (performance-mode 09): a fader/EQ
    * move on a PAUSED deck must retint the waveform now, not a poll later. */
   wakeKey?: unknown;
+  /** Event-driven wake (#155): subscribe `markDirty` to a push channel for
+   * playhead mutations the loop can't anticipate — the deck's transport
+   * gesture stream (`DeckEngine.addTransportEventListener`). Paused MIDI jog
+   * seeks arrive sparser than 60fps, so without a per-seek wake the loop
+   * re-parks on its 250ms idle poll between ticks and scrubbing jitters at
+   * poll cadence. Returns an unsubscribe; must be referentially stable
+   * (useCallback) or the effect churns. Ignored in `driven` mode. */
+  subscribeWake?: (cb: () => void) => () => void;
 }
 
 export function useWaveformRendererV2({
@@ -72,6 +80,7 @@ export function useWaveformRendererV2({
   active = true,
   playing = false,
   wakeKey,
+  subscribeWake,
 }: Options) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WaveformRendererV2 | null>(null);
@@ -120,6 +129,15 @@ export function useWaveformRendererV2({
   useEffect(() => {
     if (wakeKey !== undefined) rendererRef.current?.markDirty();
   }, [wakeKey]);
+
+  // Push-channel wake (#155): every event on the subscribed stream (e.g. a
+  // paused jog seek's transport gesture) pulls an idle-parked loop forward
+  // to the next frame. Re-subscribed after re-init (waveformData) so a
+  // fresh renderer is covered.
+  useEffect(() => {
+    if (driven || !subscribeWake) return;
+    return subscribeWake(() => rendererRef.current?.markDirty());
+  }, [subscribeWake, driven, waveformData]);
 
   // Persisted Waveform style: applied live (also after re-init).
   useEffect(() => {
