@@ -20,7 +20,7 @@ orchestration, reporting vocabulary). This doc states only what manadj does
    with trunk by merging it into your lane at issue boundaries.
 3. **Auto-land policy** (canon parks everything): bugfixes, incidental
    maintenance, and the docs fast-path auto-land after agent-owned
-   verification; feature work and tracked refactors park (`ready-for-human` +
+   verification; feature work and tracked refactors park (`parked` label +
    Walkthrough + running lane app) and land only on human approval. Unsure →
    park. **Sneak fix**: an auto-land-eligible fix with no tracker artifact —
    description `<area>: <symptom> → <fix> (sneak)` is the whole record.

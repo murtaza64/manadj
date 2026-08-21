@@ -14,15 +14,16 @@ const LISTINGS = [
 ];
 
 describe('countSoloReviews', () => {
-  it('counts only solo events by target', () => {
+  it('counts solo verdicts and vote participation as exposure', () => {
     const counts = countSoloReviews([
       { type: 'solo', target: 'a' },
       { type: 'solo', target: 'a' },
-      { type: 'vote', target: 'a' },
+      { type: 'vote', a: 'a', b: 'c' },
       { type: 'solo', target: 'b' },
+      { type: 'note', target: 'b' },
       { type: 'solo' },
     ]);
-    expect(counts).toEqual({ a: 2, b: 1 });
+    expect(counts).toEqual({ a: 3, b: 1, c: 1 });
   });
 });
 

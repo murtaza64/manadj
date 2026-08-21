@@ -1,5 +1,5 @@
 {
- "generation": 14,
+ "generation": 16,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -3894,6 +3894,593 @@
    "tags": [
     "model:gpt5.6-sol",
     "gen14"
+   ],
+   "notes": []
+  },
+  "g15-schlieren-rose": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX wildcard (sol): schlieren \u2014 refractive index gradients made visible; feedback-space glass.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-cathedral-rays": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX wildcard (sol): volumetric stained-glass light shafts.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-anamorphic-bloom": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX wildcard (sol): cinematic bokeh + anamorphic lens flares.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-holo-foil": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX wildcard (sol): 24-band diffraction foil sheet (holographic).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-prism-suture": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX material/light (sol): birefringent spectral crystal.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-ferrofluid-litany": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX material/light (sol): 24-band magnetic chrome ferrofluid crown.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-opal-pressure": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX material/light (sol): waveform-edged subsurface opal.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-caustic-diaphragm": {
+   "generation": 15,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX material/light (sol): contractive feedback liquid-glass caustics.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-suminagashi": {
+   "generation": 15,
+   "parents": [
+    "g01-ink-vortex",
+    "g08-odyssey-ink"
+   ],
+   "kind": "novel",
+   "brief": "VFX fluids (fable5): suminagashi paper-marbling ink rings.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-ferrofluid": {
+   "generation": 15,
+   "parents": [
+    "g03-materia-deep",
+    "g05-materia-mercury"
+   ],
+   "kind": "novel",
+   "brief": "VFX fluids (fable5): spiked ferrofluid pool (distinct from sol's ferrofluid-litany crown).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-lava-lens": {
+   "generation": 15,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "VFX fluids (fable5): molten lava lobes as moving lenses over the aberration fluid.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-kelvin-ink": {
+   "generation": 15,
+   "parents": [
+    "g01-ink-vortex",
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "VFX fluids (fable5): Kelvin-Helmholtz shear-instability ink billows.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g16-shear-organ": {
+   "generation": 16,
+   "parents": [
+    "g00-voyage",
+    "g15-schlieren-rose"
+   ],
+   "kind": "novel",
+   "brief": "Fluid choreography (fable5): per-band shear voices \u2014 the aberration fluid played like an organ; EQ kills silence a voice.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen16",
+    "fluid-choreo"
+   ],
+   "notes": []
+  },
+  "g16-spring-tide": {
+   "generation": 16,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "Fluid choreography (fable5): phrase-swelling fluid amount with boundary blooms; drop surge, breakdown drain.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen16",
+    "fluid-choreo"
+   ],
+   "notes": []
+  },
+  "g16-solvent": {
+   "generation": 16,
+   "parents": [
+    "g00-voyage",
+    "g00-tunnel"
+   ],
+   "kind": "novel",
+   "brief": "Fluid choreography (fable5): fluid as solvent dissolving crisp geometry musically, re-crystallizing at boundaries.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen16",
+    "fluid-choreo"
+   ],
+   "notes": []
+  },
+  "g16-weather-fronts": {
+   "generation": 16,
+   "parents": [
+    "g00-voyage",
+    "g07-materia-metric"
+   ],
+   "kind": "novel",
+   "brief": "Fluid choreography (fable5): section-tier fluid regimes as weather fronts (character jumps on the metric grid).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen16",
+    "fluid-choreo"
+   ],
+   "notes": []
+  },
+  "g16-signal-quadrants": {
+   "generation": 16,
+   "parents": [
+    "g07-crt",
+    "g14-crt-breeding"
+   ],
+   "kind": "novel",
+   "brief": "Reactive quadrants (sol): the human's idea \u2014 four panels each owning one reactive axis (metric/bass/energy/tonality); drops merge panels, quiet separates.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen16",
+    "quadrants"
+   ],
+   "notes": []
+  },
+  "g16-role-relay": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Reactive quadrants (sol): broadcast control desk \u2014 panels swap reactive roles on section boundaries.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen16",
+    "quadrants"
+   ],
+   "notes": []
+  },
+  "g16-flip-matrix": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Reactive quadrants (sol): split-flap mosaic exposing all sensing channels via a cheap cell vocabulary.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen16",
+    "quadrants"
+   ],
+   "notes": []
+  },
+  "g16-signal-in-signal": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Reactive quadrants (sol): picture-in-picture hierarchy \u2014 nested frames make musical hierarchy visible.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen16",
+    "quadrants"
+   ],
+   "notes": []
+  },
+  "g16-bubble-chamber": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX r2 (fable5): particle-physics bubble-chamber photography \u2014 spiraling ion tracks on kicks.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen16",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g16-event-horizon": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX r2 (fable5): gravitational-lens distortion / event horizon (celestial appetite, kit raid list).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen16",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g16-reeded-glass": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX r2 (fable5): architectural fluted/reeded glass optics.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen16",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g16-sequin-surge": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX r2 (fable5): kinetic sequin/paillette wall \u2014 material flips catching light.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen16",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g16-cytoplasm-scan": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX r2 (sol): scanning-electron-microscope material study.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen16",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g16-fire-calligraphy": {
+   "generation": 16,
+   "parents": [
+    "g14-gesture"
+   ],
+   "kind": "novel",
+   "brief": "VFX r2 (sol): long-exposure fire writing on phase-stable waveform plumbing.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen16",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g16-neon-radiograph": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX r2 (sol): radiography/double-exposure \u2014 solid low-end response, section theatre.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen16",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g16-polarized-nematic": {
+   "generation": 16,
+   "parents": [],
+   "kind": "novel",
+   "brief": "VFX r2 (sol): crossed-polarizer liquid-crystal microscopy.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen16",
+    "vfx"
    ],
    "notes": []
   }
