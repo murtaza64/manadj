@@ -44,6 +44,12 @@
   pointer-events: none;
 }
 
+/* The cursor disappears with the controls (projector hygiene). */
+.visualizer.chrome-hidden,
+.visualizer.chrome-hidden * {
+  cursor: none;
+}
+
 .visualizer-chrome {
   align-items: flex-start;
 }
