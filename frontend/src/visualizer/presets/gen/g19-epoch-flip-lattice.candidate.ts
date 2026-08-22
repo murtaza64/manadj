@@ -10,7 +10,6 @@ uniform float u_cells;
 uniform float u_epoch;
 uniform float u_hue;
 uniform float u_low;
-uniform float u_mid;
 uniform float u_high;
 uniform float u_kick;
 uniform float u_drive;
@@ -79,14 +78,19 @@ const preset: VisualizerPreset = {
         const section = Math.floor(bar / 16);
         const epochStep = ((section % 4) + 4) % 4;
         const epoch = epochStep / 3;
+        const dominant = frame.decks.find((deck) => deck.channel === frame.dominantChannel);
+        const audibleIds = frame.decks.filter((deck) => deck.level > .08 && deck.trackId !== null).map((deck) => deck.trackId);
+        const doubles = new Set(audibleIds).size < audibleIds.length ? 1 : 0;
+        const deckState = dominant
+          ? dominant.level * .1 + dominant.fader * .04 + (dominant.eq.high - dominant.eq.low) * .05 + doubles * .08
+          : 0;
         return {
           u_motion: motion,
           u_mode: ((section % 4) + 4) % 4,
           u_cells: (5 + epochStep * 4) * (frame.params.density ?? 1),
           u_epoch: epoch,
-          u_hue: seedOf(frame),
+          u_hue: seedOf(frame) + deckState,
           u_low: frame.bands.low,
-          u_mid: frame.bands.mid,
           u_high: frame.bands.high,
           u_kick: frame.impulse.low,
           u_drive: Math.max(frame.regime?.sustained ?? 0, slow.low * .6 + slow.mid * .4),

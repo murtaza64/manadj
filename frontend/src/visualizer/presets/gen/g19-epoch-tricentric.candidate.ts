@@ -33,7 +33,8 @@ class EpochTricentricRenderer implements PresetRenderer {
     for (let i = ringCount - 1; i >= 0; i--) {
       const depth = mod(i + this.advance, ringCount) / ringCount;
       const radius = unit * (.025 + depth * depth * .68) * (1 + kick * .07);
-      const shear = mode === 2 ? 1.5 : mode === 3 ? .62 : 1;
+      const shearBase = mode === 2 ? 1.5 : mode === 3 ? .62 : 1;
+      const shear = shearBase * (.9 + frame.spread * .2);
       const cx = width * ax + (width * .5 - width * ax) * depth * .6;
       const cy = height * ay + (height * .5 - height * ay) * depth * .6;
       const color = COLORS[mod(i + section + Math.floor(epoch * 4), COLORS.length)];
@@ -52,7 +53,7 @@ class EpochTricentricRenderer implements PresetRenderer {
         ctx.fill();
       }
       ctx.strokeStyle = invert ? '#111329' : color;
-      ctx.lineWidth = Math.max(1.5, unit * (.003 + slow.mid * .008));
+      ctx.lineWidth = Math.max(1.5, unit * (.003 + slow.mid * .006 + frame.flatness * .003));
       ctx.stroke();
     }
   }

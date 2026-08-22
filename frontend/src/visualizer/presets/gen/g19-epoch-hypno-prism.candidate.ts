@@ -73,13 +73,18 @@ const preset: VisualizerPreset = {
   create: () => {
     let phase = 0;
     let zoom = 0;
+    let smoothBpm = 120;
+    let slowCentroid = .5;
     return createGlRenderer({
       fragment: FRAGMENT,
       uniforms: (frame) => {
         const dt = Math.min(.1, Math.max(0, frame.dt));
         const slow = frame.bandsSlow ?? frame.bands;
         const speed = frame.params.speed ?? .8;
-        phase += dt * speed * (.18 + slow.mid * .28);
+        const bpm = frame.beat?.bpm;
+        if (bpm && bpm > 0) smoothBpm += (bpm - smoothBpm) * (1 - Math.exp(-dt / 2));
+        slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt));
+        phase += dt * speed * (smoothBpm / 120) * (.18 + slow.mid * .28);
         zoom += dt * speed * (.025 + slow.low * .035);
         const bar = frame.beat?.ladderBarIndex ?? frame.beat?.barIndex ?? Math.floor(frame.time / 2);
         const section = Math.floor(bar / 16);
@@ -93,11 +98,11 @@ const preset: VisualizerPreset = {
           u_arms: Math.round((3 + epoch * 9) * density),
           u_twist: (5 + epoch * 12) * density,
           u_epoch: epoch,
-          u_hue: seedOf(frame),
+          u_hue: seedOf(frame) + slowCentroid * .16,
           u_low: frame.bands.low,
           u_kick: frame.impulse.low,
           u_snare: Math.min(1, frame.impulse.mid + frame.impulse.high * .45),
-          u_drive: Math.max(frame.regime?.sustained ?? 0, slow.low * .7 + slow.mid * .3),
+          u_drive: Math.max(frame.regime?.sustained ?? 0, frame.trend.slow, frame.trend.excitement),
           u_soft: frame.params.softness ?? .3,
         };
       },

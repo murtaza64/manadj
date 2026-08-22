@@ -162,12 +162,23 @@ export function stepCycle(
     }
     return { state: next, advance: false };
   }
-  // drop mode: rising edge arms a delayed advance N beats out.
+  // drop mode: a rising edge arms a delayed advance N beats out. If ANOTHER
+  // drop lands before that window ends, advance IMMEDIATELY at the new drop
+  // (human note: resetting/ignoring meant drop-to-drop sections never
+  // advanced) — the refractory only guards against the same drop refiring.
   const rising = excitement >= dropThreshold && state.prevExcitement < dropThreshold;
-  if (rising && nowMs >= state.armedAfter && state.dueAt === null) {
-    const beatMs = 60000 / (bpm && bpm > 40 ? bpm : 128);
-    next.dueAt = nowMs + beatsAfterDrop * beatMs;
-    next.armedAfter = nowMs + refractoryS * 1000;
+  if (rising && nowMs >= state.armedAfter) {
+    if (state.dueAt === null) {
+      const beatMs = 60000 / (bpm && bpm > 40 ? bpm : 128);
+      next.dueAt = nowMs + beatsAfterDrop * beatMs;
+      next.armedAfter = nowMs + refractoryS * 1000;
+    } else {
+      // Second drop inside the pending window: cut to the next preset NOW.
+      next.dueAt = null;
+      next.lastAdvanceAt = nowMs;
+      next.armedAfter = nowMs + refractoryS * 1000;
+      return { state: next, advance: true };
+    }
   }
   if (next.dueAt !== null && nowMs >= next.dueAt) {
     next.dueAt = null;

@@ -3,6 +3,10 @@
 Candidate: `g19-epoch-tricentric`  
 Kind: tweak  
 Parents: `g10-tricentric` (flat polygon depth), `g10-barred` (bold section inversion)
+Human notes: "focus on meter and long evolution"; immediate section contrast; abstract geometry only.
+Instruction: Reproject a flat polygon tunnel each section while depth and order accumulate for 128 bars.
+Contract: Default-export `VisualizerPreset`; self-contained Canvas 2D.
+Hard rules: bright saturated flat colors; `bandsSlow` motion; photosafe; no protocol or bridge changes.
 
 Question: Can a polygon tunnel travel for 128 bars through visibly increasing depth while section cuts completely recompose its projection?
 
@@ -10,3 +14,4 @@ Question: Can a polygon tunnel travel for 128 bars through visibly increasing de
 - Across eight sections, increase ring count 9 to 23, polygon order, and solid-fill frequency; reset at 128 bars.
 - Advance and rotation rates use `bandsSlow`; kick is a bounded depth pop.
 - Flat saturated geometry only. No glow, feedback, particles, or depicted environment.
+- Assigned tech: bands/impulses, spread/flatness, beat/ladder tiers.

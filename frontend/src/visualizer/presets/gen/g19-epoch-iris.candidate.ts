@@ -28,6 +28,13 @@ class EpochIrisRenderer implements PresetRenderer {
     const palette = PALETTES[mod(section + Math.floor(progress * 3), PALETTES.length)];
     const beatPhase = frame.beat?.phase ?? mod(frame.time * .5, 1);
     const pulse = 1 + frame.impulse.low * .15 + (1 - beatPhase) * .035;
+    let waveLift = 0;
+    if (frame.wave) {
+      for (let i = 0; i < frame.wave.left.length; i += 16) {
+        waveLift += Math.abs(frame.wave.left[i] - frame.wave.right[i]);
+      }
+      waveLift = Math.min(1, waveLift / Math.max(1, frame.wave.left.length / 16));
+    }
     const unit = Math.min(width, height) * (frame.params.scale ?? 1);
     const cx = width / 2;
     const cy = height / 2;
@@ -42,7 +49,7 @@ class EpochIrisRenderer implements PresetRenderer {
       const a1 = (i + .82) / count * TAU;
       const band = frame.spectrum[i % 24] ?? 0;
       const inner = unit * (.055 + progress * .075);
-      const baseOuter = unit * (.22 + band * .20) * pulse;
+      const baseOuter = unit * (.22 + band * .20 + waveLift * .035) * pulse;
       const outer = mode === 2 ? baseOuter * (i % 2 === 0 ? 1 : .52) : baseOuter;
       ctx.fillStyle = palette[1 + mod(i + mode, 3)];
       if (mode === 1) {
@@ -91,6 +98,7 @@ class EpochIrisRenderer implements PresetRenderer {
 const preset: VisualizerPreset = {
   id: 'g19-epoch-iris',
   name: 'g19 epoch iris',
+  wantsWave: true,
   params: [{ id: 'scale', label: 'iris scale', min: .65, max: 1.35, step: .05, default: 1 }],
   create: () => new EpochIrisRenderer(),
 };
