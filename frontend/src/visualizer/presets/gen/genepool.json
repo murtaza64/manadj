@@ -4873,11 +4873,11 @@
    "kind": "combine",
    "brief": "THE MONOLITH (gh #77, fable5): hour-scale conductor hosting curated phase engines; hypermeter schedule (2-4 sections/phase), regime-driven buildup riser overlay + drop-landing phase cuts, doubles blend, breakdown calm; max 2 live sub-renderers.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4886,7 +4886,15 @@
     "conductor",
     "flagship"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "hold": 1.0,
+     "fade": 4.0,
+     "riser": 1.0
+    }
+   ]
   },
   "g18-advent": {
    "generation": 18,
@@ -4894,11 +4902,11 @@
    "kind": "novel",
    "brief": "Meter instrument (fable5): advent-calendar grid \u2014 one door opens per bar, phrase completes a row, section completes the calendar.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4906,7 +4914,14 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "bevel": 0.5,
+     "ornamentDetail": 0.6
+    }
+   ]
   },
   "g18-countdown": {
    "generation": 18,
@@ -4914,11 +4929,11 @@
    "kind": "novel",
    "brief": "Meter instrument (fable5): flat countdown architecture \u2014 the scene counts 4-3-2-1 into every phrase.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4926,7 +4941,15 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "stripeEnergy": 0.5,
+     "joltStrength": 0.6,
+     "armedSpan": 160.0
+    }
+   ]
   },
   "g18-landing-stairs": {
    "generation": 18,
@@ -4946,7 +4969,8 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g18-manuscript": {
    "generation": 18,
@@ -4956,11 +4980,11 @@
    "kind": "novel",
    "brief": "Meter instrument (fable5): illuminated manuscript \u2014 notation written bar by bar, page turns on sections.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4968,7 +4992,15 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "inkThreshold": 0.48,
+     "penGlow": 0.6,
+     "turnDrama": 0.6
+    }
+   ]
   },
   "g18-materia-lifecycle": {
    "generation": 18,
@@ -4991,7 +5023,8 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g18-materia-rings": {
    "generation": 18,
@@ -5014,7 +5047,8 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g18-meter-pendulum": {
    "generation": 18,
@@ -5022,19 +5056,20 @@
    "kind": "novel",
    "brief": "Beat-phase (sol): phase-locked pendulum sculpture \u2014 pose at beat.phase=0 is sacred; swing leans and arrives on-beat.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g18-mirror-scaffold": {
    "generation": 18,
@@ -5045,19 +5080,20 @@
    "kind": "tweak",
    "brief": "Meter breeding (sol): mirrored scaffold that completes construction exactly at section boundaries.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g18-offbeat-relay": {
    "generation": 18,
@@ -5065,19 +5101,20 @@
    "kind": "novel",
    "brief": "Beat-phase (sol): syncopation diagram \u2014 on-beat and off-beat visual voices in dialogue; the off-beat voice deliberately plays the gaps.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g18-pocket-court": {
    "generation": 18,
@@ -5085,19 +5122,20 @@
    "kind": "novel",
    "brief": "Beat-phase (sol): flat choreography court \u2014 dancers lean into the beat, arrive exactly, relax after (clap-along test).",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g18-tally-foundry": {
    "generation": 18,
@@ -5143,7 +5181,8 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g18-tunnel-gates": {
    "generation": 18,
@@ -5154,11 +5193,11 @@
    "kind": "tweak",
    "brief": "Meter breeding (fable5): saga chapter arc with meter-readable gates \u2014 one gate per bar, phrase gates larger, section = portal.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -5166,7 +5205,15 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "trail": 1.0,
+     "zoom": 1.0,
+     "cutStrength": 1.0
+    }
+   ]
   },
   "g18-voyage-cascade": {
    "generation": 18,
@@ -5177,11 +5224,11 @@
    "kind": "tweak",
    "brief": "Meter breeding (fable5): deeper cut hierarchy on the hardcut winner \u2014 beat/bar/phrase/section each owning a proportional change.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -5189,7 +5236,17 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "stars": 1.0,
+     "dust": 1.0,
+     "persistence": 1.0,
+     "speed": 1.0,
+     "cutStrength": 1.0
+    }
+   ]
   },
   "g18-voyage-countdown": {
    "generation": 18,
@@ -5199,11 +5256,11 @@
    "kind": "tweak",
    "brief": "Meter breeding (fable5): hardcut with a visible bar-countdown anticipation grammar into every phrase cut.",
    "rating": 1000,
-   "score": 0,
+   "score": 1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 0,
+   "approvals": 1,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -5211,7 +5268,17 @@
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1,
+   "likedParams": [
+    {
+     "stars": 1.0,
+     "dust": 1.0,
+     "persistence": 1.0,
+     "speed": 1.0,
+     "cutStrength": 1.0
+    }
+   ]
   },
   "g18-wallclimb": {
    "generation": 18,
@@ -5219,22 +5286,23 @@
    "kind": "novel",
    "brief": "Meter instrument (fable5): a climber ascending a 16-bar wall \u2014 one hold per bar, ledge per phrase, summit per section; drop = the leap.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:fable5",
     "gen18",
     "meter"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   }
  },
- "foldedThrough": 1787416662.719554,
+ "foldedThrough": 1787418010.132071,
  "eloSemantics": "v2: forced-choice only moves rating (K=32/400); both_good/both_bad are approval/rejection labels; both_bad kills winless candidates",
  "scoring": "v3: score = (wins + approvals) - (losses + rejections); approvals/rejections include solo likes/dislikes; elo rating retained as legacy tiebreaker"
 }
