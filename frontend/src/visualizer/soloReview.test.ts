@@ -4,6 +4,7 @@ import {
   INITIAL_CYCLE,
   nextCandidateId,
   sampleParamValues,
+  skipAdjustment,
   stepCycle,
 } from './soloReview';
 
@@ -88,6 +89,15 @@ describe('sampleParamValues', () => {
     let call = 0;
     const rng = () => (call++ === 0 ? 0.9 : 1);
     expect(sampleParamValues(params, rng).x).toBe(1);
+  });
+});
+
+describe('skipAdjustment', () => {
+  it('tiers by watch time: quick skip worst, long watch mildly positive', () => {
+    expect(skipAdjustment(3)).toBe(-0.5);
+    expect(skipAdjustment(20)).toBe(-0.25);
+    expect(skipAdjustment(60)).toBe(0);
+    expect(skipAdjustment(300)).toBe(0.25);
   });
 });
 

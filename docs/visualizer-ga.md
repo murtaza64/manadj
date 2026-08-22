@@ -55,6 +55,13 @@ agent breeds. Design decisions: issue
      legacy Elo `rating` is retained only as a tiebreaker. ALL presets
      are equal: the curated set participates as its g00-* seeds, there
      is no first-class tier; the switcher shows one score-sorted list.
+   - SKIP/WATCH-TIME evidence (human-approved 2026-08-22): manual `n`
+     skips emit `type: skip` events with `watchedS`. Fold each through
+     skipAdjustment (soloReview.ts): <10s → −0.5, <45s → −0.25,
+     <120s → 0, ≥120s → +0.25; accumulate into the candidate's
+     `skipAdj` (clamped to [−3, +3]) and add it to `score`. Not as
+     strong as a verdict; auto-cycle rotations carry no signal. More
+     watch time = better.
 2. Choose the next generation's mix (default, adjust with judgment):
    ~40% **tweak** (single parent, small: "keep everything, fix X" — mine
    the notes), ~30% **combine** (two parents' liked elements), ~30%

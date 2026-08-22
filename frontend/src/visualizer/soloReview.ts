@@ -103,6 +103,19 @@ export function sampleParamValues(
   return values;
 }
 
+/**
+ * Score adjustment for a MANUAL skip, weighted by watch time (human,
+ * 2026-08-22: "more watch time = better"; a skip is "not as bad as a
+ * manual 'bad' but still counts against"). Quick skip = half a dislike;
+ * a long watch before skipping is mild positive evidence.
+ */
+export function skipAdjustment(watchedS: number): number {
+  if (watchedS < 10) return -0.5;
+  if (watchedS < 45) return -0.25;
+  if (watchedS < 120) return 0;
+  return 0.25;
+}
+
 export type CycleMode = 'off' | 'timer' | 'drop';
 
 export interface CycleState {

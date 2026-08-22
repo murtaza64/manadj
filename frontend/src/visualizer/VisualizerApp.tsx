@@ -522,6 +522,9 @@ export function VisualizerApp() {
   // ---- Solo review actions + hotkeys (g/b/m/t/n/c). Store getters keep
   // these closure-safe; registered once.
   const advanceRef = useRef<() => void>(() => {});
+  // Watch-time tracking (human, 2026-08-22): manual skips are quality
+  // evidence, weighted by how long the preset was watched.
+  const watchStartRef = useRef(performance.now());
   useEffect(() => {
     const advance = () => {
       const id = nextCandidateId(
@@ -580,7 +583,18 @@ export function VisualizerApp() {
       if (k === 'g') verdict('like');
       else if (k === 'b') verdict('dislike');
       else if (k === 'm') verdict('neutral');
-      else if (k === 'n') advance();
+      else if (k === 'n') {
+        // Manual skip = judgment: log the outgoing preset's watch time.
+        const outgoing = getPresetId();
+        if (isCandidateId(outgoing)) {
+          void postGaEvent({
+            type: 'skip',
+            target: outgoing,
+            watchedS: Math.round((performance.now() - watchStartRef.current) / 100) / 10,
+          });
+        }
+        advance();
+      }
       else if (k === 't') {
         // Inline note input — window.prompt is a no-op in the Electron
         // renderer (the "t key doesn't work" bug).
@@ -604,6 +618,7 @@ export function VisualizerApp() {
   useEffect(() => {
     if (prevPresetRef.current !== presetId) {
       prevPresetRef.current = presetId;
+      watchStartRef.current = performance.now();
       showToast(`▶ ${presetId}`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
