@@ -1,5 +1,5 @@
 {
- "generation": 16,
+ "generation": 18,
  "candidates": {
   "g00-voyage": {
    "generation": 0,
@@ -2982,12 +2982,12 @@
    "kind": "novel",
    "brief": "FLAT wave (Vissonance Barred): perspective floor grid of flat-3D bars, beat-row history scrolling to the horizon; kick = row slam; drop = double scroll + scheme invert.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "render:canvas-flat3d",
@@ -2995,7 +2995,8 @@
     "temporal:beat-rows",
     "signals:spectrum24,bandsSlow,ladder"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g10-tricentric": {
    "generation": 10,
@@ -3046,12 +3047,12 @@
    "kind": "novel",
    "brief": "FLAT x TONALITY (chameleon idea #3): stained-glass voronoi window \u2014 tonal = pane color variety in harmonic waves; percussive = stone tones + kinetic lattice fracture; pane-by-pane recoloring front.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "render:canvas-flat",
@@ -3059,7 +3060,8 @@
     "temporal:tonality-regime",
     "signals:flatness,impulse,spread,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g10-hillfog": {
    "generation": 10,
@@ -3171,6 +3173,27 @@
    "kind": "novel",
    "brief": "New PULSE representation: CROWD \u2014 rows of flat figures jump on kicks with back-propagating stagger; mids = sway waves; highs = <=4 camera flashes; drop = mosh.",
    "rating": 1000,
+   "score": -2,
+   "status": "dead",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 2,
+   "oppCount": 0,
+   "tags": [
+    "repr:pulse-crowd",
+    "render:canvas-flat",
+    "signals:impulse,bandsSlow,ladder,genome"
+   ],
+   "notes": [],
+   "seen": 2
+  },
+  "g11-frost": {
+   "generation": 11,
+   "parents": [],
+   "kind": "novel",
+   "brief": "INVERTED band roles: highs = dendritic frost growth, bass = thermal mass melting it, kick = thermal-shock crack; drop flavor by centroid (flash-freeze vs melt-out).",
+   "rating": 1000,
    "score": -1,
    "status": "alive",
    "wins": 0,
@@ -3179,32 +3202,12 @@
    "rejections": 1,
    "oppCount": 0,
    "tags": [
-    "repr:pulse-crowd",
-    "render:canvas-flat",
-    "signals:impulse,bandsSlow,ladder,genome"
-   ],
-   "notes": [],
-   "seen": 1
-  },
-  "g11-frost": {
-   "generation": 11,
-   "parents": [],
-   "kind": "novel",
-   "brief": "INVERTED band roles: highs = dendritic frost growth, bass = thermal mass melting it, kick = thermal-shock crack; drop flavor by centroid (flash-freeze vs melt-out).",
-   "rating": 1000,
-   "score": 0,
-   "status": "alive",
-   "wins": 0,
-   "losses": 0,
-   "approvals": 0,
-   "rejections": 0,
-   "oppCount": 0,
-   "tags": [
     "repr:inverted-bands",
     "render:canvas",
     "signals:bandsSlow,impulse,centroid,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g12-voyage-menagerie": {
    "generation": 12,
@@ -3456,19 +3459,20 @@
    "kind": "novel",
    "brief": "TECHNO: gray colonnade, beat-sequenced pair-inversions (luminance-paired = photosafe strobe feel); kick = colonnade strides one column; drop = region-partitioned double-time + accent flood.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "style:techno-mono",
     "render:canvas-flat",
     "signals:beatphase,bandsSlow,ladder,genome"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g13-galvanic": {
    "generation": 13,
@@ -3787,18 +3791,19 @@
    "kind": "novel",
    "brief": "Resurrection (sol): mechanism 5th attempt \u2014 nearly-still monumental machinery, each motion an event.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
     "gen14"
    ],
-   "notes": []
+   "notes": [],
+   "seen": 1
   },
   "g14-strata-mass": {
    "generation": 14,
@@ -4379,11 +4384,11 @@
    "kind": "novel",
    "brief": "Fluid choreography (fable5): phrase-swelling fluid amount with boundary blooms; drop surge, breakdown drain.",
    "rating": 1000,
-   "score": 1,
+   "score": 2,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 1,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4392,12 +4397,17 @@
     "fluid-choreo"
    ],
    "notes": [],
-   "seen": 1,
+   "seen": 2,
    "likedParams": [
     {
      "fluid": 1.0,
      "memory": 1.0,
      "palette": 0.5
+    },
+    {
+     "fluid": 0.35000000000000003,
+     "memory": 1.25,
+     "palette": 1.05
     }
    ]
   },
@@ -4410,11 +4420,11 @@
    "kind": "novel",
    "brief": "Fluid choreography (fable5): fluid as solvent dissolving crisp geometry musically, re-crystallizing at boundaries.",
    "rating": 1000,
-   "score": 1,
+   "score": 2,
    "status": "alive",
    "wins": 0,
    "losses": 0,
-   "approvals": 1,
+   "approvals": 2,
    "rejections": 0,
    "oppCount": 0,
    "tags": [
@@ -4423,12 +4433,17 @@
     "fluid-choreo"
    ],
    "notes": [],
-   "seen": 1,
+   "seen": 2,
    "likedParams": [
     {
      "fluid": 1.0,
      "drain": 1.0,
      "palette": 0.3
+    },
+    {
+     "fluid": 0.7,
+     "drain": 0.8500000000000001,
+     "palette": 0.55
     }
    ]
   },
@@ -4546,12 +4561,12 @@
    "kind": "novel",
    "brief": "Reactive quadrants (sol): picture-in-picture hierarchy \u2014 nested frames make musical hierarchy visible.",
    "rating": 1000,
-   "score": 1,
+   "score": 0,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 1,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:gpt5.6-sol",
@@ -4561,7 +4576,7 @@
    "notes": [
     "aspect ratio seems wrong"
    ],
-   "seen": 1,
+   "seen": 2,
    "likedParams": [
     {
      "depth": 1.4000000000000001,
@@ -4576,12 +4591,12 @@
    "kind": "novel",
    "brief": "VFX r2 (fable5): particle-physics bubble-chamber photography \u2014 spiraling ion tracks on kicks.",
    "rating": 1000,
-   "score": 0,
+   "score": -1,
    "status": "alive",
    "wins": 0,
    "losses": 0,
    "approvals": 0,
-   "rejections": 0,
+   "rejections": 1,
    "oppCount": 0,
    "tags": [
     "model:fable5",
@@ -4591,7 +4606,7 @@
    "notes": [
     "a little boring, looks low res"
    ],
-   "seen": 1
+   "seen": 2
   },
   "g16-event-horizon": {
    "generation": 16,
@@ -4759,9 +4774,467 @@
    ],
    "notes": [],
    "seen": 1
+  },
+  "g15-droste": {
+   "generation": 15,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "VFX feedback-optics (fable5): Droste recursive-zoom spiral in the resample loop.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-rosette": {
+   "generation": 15,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "VFX feedback-optics (fable5): kaleidoscopic rosette taps.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-schlieren": {
+   "generation": 15,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "VFX feedback-optics (fable5): schlieren refraction in feedback space (distinct from sol's schlieren-rose).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g15-steelwool": {
+   "generation": 15,
+   "parents": [
+    "g00-voyage"
+   ],
+   "kind": "novel",
+   "brief": "VFX feedback-optics (fable5): steel-wool long-exposure spark spins.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen15",
+    "vfx"
+   ],
+   "notes": []
+  },
+  "g17-monolith": {
+   "generation": 17,
+   "parents": [
+    "g00-voyage",
+    "g03-materia-deep",
+    "g04-tunnel-saga"
+   ],
+   "kind": "combine",
+   "brief": "THE MONOLITH (gh #77, fable5): hour-scale conductor hosting curated phase engines; hypermeter schedule (2-4 sections/phase), regime-driven buildup riser overlay + drop-landing phase cuts, doubles blend, breakdown calm; max 2 live sub-renderers.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen17",
+    "conductor",
+    "flagship"
+   ],
+   "notes": []
+  },
+  "g18-advent": {
+   "generation": 18,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Meter instrument (fable5): advent-calendar grid \u2014 one door opens per bar, phrase completes a row, section completes the calendar.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-countdown": {
+   "generation": 18,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Meter instrument (fable5): flat countdown architecture \u2014 the scene counts 4-3-2-1 into every phrase.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-landing-stairs": {
+   "generation": 18,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Beat-phase (sol): typographic staircase \u2014 motion leans into the beat and lands exactly on it.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-manuscript": {
+   "generation": 18,
+   "parents": [
+    "g02-mirror-ladder"
+   ],
+   "kind": "novel",
+   "brief": "Meter instrument (fable5): illuminated manuscript \u2014 notation written bar by bar, page turns on sections.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-materia-lifecycle": {
+   "generation": 18,
+   "parents": [
+    "g07-materia-metric",
+    "g14-mirror-storyboard"
+   ],
+   "kind": "tweak",
+   "brief": "Meter breeding (sol): 32-bar material lifecycle \u2014 born/grown/weathered/reborn on hypermeter milestones (8/16-bar law).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-materia-rings": {
+   "generation": 18,
+   "parents": [
+    "g14-materia-wheel",
+    "g07-materia-metric"
+   ],
+   "kind": "tweak",
+   "brief": "Meter breeding (sol): growth rings \u2014 one ring per bar on the spectral wheel, section = ring harvest.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-meter-pendulum": {
+   "generation": 18,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Beat-phase (sol): phase-locked pendulum sculpture \u2014 pose at beat.phase=0 is sacred; swing leans and arrives on-beat.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-mirror-scaffold": {
+   "generation": 18,
+   "parents": [
+    "g02-mirror-ladder",
+    "g14-mirror-storyboard"
+   ],
+   "kind": "tweak",
+   "brief": "Meter breeding (sol): mirrored scaffold that completes construction exactly at section boundaries.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-offbeat-relay": {
+   "generation": 18,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Beat-phase (sol): syncopation diagram \u2014 on-beat and off-beat visual voices in dialogue; the off-beat voice deliberately plays the gaps.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-pocket-court": {
+   "generation": 18,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Beat-phase (sol): flat choreography court \u2014 dancers lean into the beat, arrive exactly, relax after (clap-along test).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-tally-foundry": {
+   "generation": 18,
+   "parents": [
+    "g07-materia-metric",
+    "g14-visible-metric"
+   ],
+   "kind": "tweak",
+   "brief": "Meter breeding (sol): physical tally notation cast in material, 8/16-bar law honored.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:gpt5.6-sol",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-tunnel-dials": {
+   "generation": 18,
+   "parents": [
+    "g14-tunnel-verses",
+    "g08-voyage-beatgate"
+   ],
+   "kind": "tweak",
+   "brief": "Meter breeding (fable5): tunnel with nested time-scale dials that TICK (beat/bar/phrase/section events, never spins).",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-tunnel-gates": {
+   "generation": 18,
+   "parents": [
+    "g04-tunnel-saga",
+    "g14-tunnel-verses"
+   ],
+   "kind": "tweak",
+   "brief": "Meter breeding (fable5): saga chapter arc with meter-readable gates \u2014 one gate per bar, phrase gates larger, section = portal.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-voyage-cascade": {
+   "generation": 18,
+   "parents": [
+    "g07-voyage-hardcut",
+    "g08-voyage-beatgate"
+   ],
+   "kind": "tweak",
+   "brief": "Meter breeding (fable5): deeper cut hierarchy on the hardcut winner \u2014 beat/bar/phrase/section each owning a proportional change.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-voyage-countdown": {
+   "generation": 18,
+   "parents": [
+    "g07-voyage-hardcut"
+   ],
+   "kind": "tweak",
+   "brief": "Meter breeding (fable5): hardcut with a visible bar-countdown anticipation grammar into every phrase cut.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
+  },
+  "g18-wallclimb": {
+   "generation": 18,
+   "parents": [],
+   "kind": "novel",
+   "brief": "Meter instrument (fable5): a climber ascending a 16-bar wall \u2014 one hold per bar, ledge per phrase, summit per section; drop = the leap.",
+   "rating": 1000,
+   "score": 0,
+   "status": "alive",
+   "wins": 0,
+   "losses": 0,
+   "approvals": 0,
+   "rejections": 0,
+   "oppCount": 0,
+   "tags": [
+    "model:fable5",
+    "gen18",
+    "meter"
+   ],
+   "notes": []
   }
  },
- "foldedThrough": 1787287006.362029,
+ "foldedThrough": 1787416662.719554,
  "eloSemantics": "v2: forced-choice only moves rating (K=32/400); both_good/both_bad are approval/rejection labels; both_bad kills winless candidates",
  "scoring": "v3: score = (wins + approvals) - (losses + rejections); approvals/rejections include solo likes/dislikes; elo rating retained as legacy tiebreaker"
 }
