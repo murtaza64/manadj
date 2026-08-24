@@ -447,6 +447,29 @@ class SessionDetail(SessionRow):
     events: list[dict]
 
 
+class RoutineCandidateRow(BaseModel):
+    """A miner-suggested Routine span (ADR 0035, routines 157). `cast` is
+    entry-ordered track ids (slot order); the window is capture-clock
+    seconds on the owning Session; `entry_offsets` gives each slot's entry
+    as seconds from window start (slot 0 = 0.0)."""
+    uuid: str
+    session_uuid: str
+    cast: list[int]
+    window_start_s: float
+    window_end_s: float
+    entry_offsets: list[float]
+    evidence: dict[str, int]
+    miner_version: int
+    created_at: datetime | None = None
+
+
+class RoutineCandidateQuery(BaseModel):
+    """Cast-prefix query (the pin picker's "Routines available" hint):
+    `track_ids` is the Set's upcoming entries in order, starting with the
+    adjacency's outgoing track."""
+    track_ids: list[int]
+
+
 # Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)
 
 

@@ -25,9 +25,19 @@ from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.database import get_db
+from backend.routine_miner_tasks import enqueue_routine_mine
 from backend.session_audibility import events_contain_audible
 
 router = APIRouter()
+
+
+def _drop_routine_candidates(db: Session, session_uuid: str) -> None:
+    """Suggestion rows die with their Session (routines 157): a candidate
+    span without its timeline is meaningless — unlike Takes, which are
+    self-contained evidence and survive."""
+    db.query(models.RoutineCandidate).filter(
+        models.RoutineCandidate.session_uuid == session_uuid
+    ).delete()
 
 
 def _is_silent(s: models.Session) -> bool:
@@ -100,6 +110,7 @@ def recover_open_sessions(db: Session = Depends(get_db)) -> dict:
     deleted = 0
     for s in db.query(models.Session).all():
         if _is_silent(s):
+            _drop_routine_candidates(db, s.uuid)
             db.delete(s)
             deleted += 1
         elif s.ended_at is None:
@@ -110,6 +121,8 @@ def recover_open_sessions(db: Session = Depends(get_db)) -> dict:
             )
             s.ended_at = last_chunk_at or s.started_at
             closed += 1
+            # A recovered close is a close: mine it (routines 157).
+            enqueue_routine_mine(db, s.uuid)
     db.commit()
     return {"closed": closed, "deleted": deleted}
 
@@ -171,11 +184,14 @@ def end_session(
         raise HTTPException(status_code=404, detail="session not found")
     if _is_silent(s):
         header = _row(db, s)
+        _drop_routine_candidates(db, s.uuid)
         db.delete(s)  # cascade drops the chunks; Takes are unrelated rows
         db.commit()
         return header
     s.ended_at = payload.ended_at if payload.ended_at is not None else func.now()
     db.commit()
+    # An ended Session is minable: enqueue the Routine miner (routines 157).
+    enqueue_routine_mine(db, s.uuid)
     db.refresh(s)
     return _row(db, s)
 
@@ -187,6 +203,7 @@ def delete_session(uuid: str, db: Session = Depends(get_db)) -> dict:
     s = db.query(models.Session).filter(models.Session.uuid == uuid).first()
     if s is None:
         raise HTTPException(status_code=404, detail="session not found")
+    _drop_routine_candidates(db, s.uuid)
     db.delete(s)  # ORM cascade drops the chunks; Takes are unrelated rows
     db.commit()
     return {"ok": True}
