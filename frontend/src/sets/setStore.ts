@@ -22,6 +22,7 @@ import { api } from '../api/client';
 import { EMPTY_SELECTION, prune, type Selection } from '../selection/selectionModel';
 import type { AdjacencyPin } from './adjacency';
 import { reconcileOrderChange, type DormantPin } from './dormancy';
+import { getRoutineCast, setRoutineCast } from './routineCasts';
 
 export interface SetEntryLocal {
   trackId: number;
@@ -145,7 +146,7 @@ async function doLoad(setId: number): Promise<void> {
     const entries: SetEntryLocal[] = detail.entries.map((e) => ({
       trackId: e.track_id,
       pin:
-        e.pin_kind === 'transition' || e.pin_kind === 'take'
+        e.pin_kind === 'transition' || e.pin_kind === 'take' || e.pin_kind === 'routine'
           ? { kind: e.pin_kind, uuid: e.pin_uuid! }
           : e.pin_kind === 'hardcut'
             ? { kind: 'hardcut' }
@@ -166,7 +167,8 @@ async function doLoad(setId: number): Promise<void> {
     const normalized = reconcileOrderChange(
       entries,
       dormant,
-      entries.map((e) => e.trackId)
+      entries.map((e) => e.trackId),
+      getRoutineCast
     );
     setSetStateLocal(setId, normalized.entries, normalized.dormant);
   } catch (err) {
@@ -273,7 +275,8 @@ function applyOrderChange(setId: number, newTrackIds: number[]): void {
   const { entries: next, dormant } = reconcileOrderChange(
     entries,
     currentDormant(setId),
-    newTrackIds
+    newTrackIds,
+    getRoutineCast
   );
   replaceSetEntries(setId, next, dormant);
 }
@@ -340,6 +343,56 @@ export function setAdjacencyPins(
     }),
     currentDormant(setId).filter((d) => !pinnedPairs.has(`${d.aTrackId}|${d.bTrackId}`))
   );
+}
+
+/** Pin a Routine on the adjacency its first cast track heads (sets 160,
+ * ADR 0035). The displaced pin — if any — is SHADOWED: stored as the
+ * head pair's Dormant memory, restored on unpin/Dormant. Covered
+ * adjacencies' pins stay in the entries untouched (shadowed at read
+ * time by routineCoverage). The cast primes the cache so dormancy
+ * reconciliation can evaluate boundary+membership liveness. */
+export function pinRoutine(
+  setId: number,
+  headTrackId: number,
+  routineUuid: string,
+  cast: readonly number[]
+): void {
+  const entries = snapshot.entriesBySet[setId];
+  if (!entries) return;
+  setRoutineCast(routineUuid, cast);
+  const headIndex = entries.findIndex((e) => e.trackId === headTrackId);
+  const nextTrackId = headIndex >= 0 ? entries[headIndex + 1]?.trackId : undefined;
+  if (headIndex < 0 || nextTrackId === undefined) return;
+  const displaced = entries[headIndex].pin;
+  const dormant = currentDormant(setId).filter(
+    (d) => !(d.aTrackId === headTrackId && d.bTrackId === nextTrackId)
+  );
+  if (displaced !== null && displaced.kind !== 'routine') {
+    // The shadow: a fresh displacement overwrites an older memory.
+    dormant.push({ aTrackId: headTrackId, bTrackId: nextTrackId, pin: displaced });
+  }
+  const next = entries.map((e) =>
+    e.trackId === headTrackId ? { ...e, pin: { kind: 'routine' as const, uuid: routineUuid } } : e
+  );
+  replaceSetEntries(setId, next, dormant);
+}
+
+/** Unpin a Routine: the head adjacency's shadowed pin (its Dormant
+ * memory) restores immediately — run the order-preserving reconcile so
+ * the restore rule is the same one reorder uses (sets 160). */
+export function unpinRoutine(setId: number, headTrackId: number): void {
+  const entries = snapshot.entriesBySet[setId];
+  if (!entries) return;
+  const cleared = entries.map((e) =>
+    e.trackId === headTrackId && e.pin?.kind === 'routine' ? { ...e, pin: null } : e
+  );
+  const { entries: next, dormant } = reconcileOrderChange(
+    cleared,
+    currentDormant(setId),
+    cleared.map((e) => e.trackId),
+    getRoutineCast
+  );
+  replaceSetEntries(setId, next, dormant);
 }
 
 /** Remove Tracks in one order change (the row ✕; sets 18's
@@ -422,7 +475,10 @@ export function repointTakePinsLocal(takeUuid: string, transitionUuid: string): 
  * Local-only — the deletion endpoint already handled its rows
  * server-side; without this mirror a later wholesale PUT from a loaded
  * Set would write the dangling reference back. */
-export function degradeDeletedPinsLocal(kind: 'transition' | 'take', uuid: string): void {
+export function degradeDeletedPinsLocal(
+  kind: 'transition' | 'take' | 'routine',
+  uuid: string
+): void {
   let changed = false;
   const entriesBySet = { ...snapshot.entriesBySet };
   for (const [setId, entries] of Object.entries(entriesBySet)) {

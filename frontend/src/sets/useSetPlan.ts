@@ -28,6 +28,7 @@ import {
 } from '../editor/pairStore';
 import type { HotCue, Track } from '../types';
 import { resolvePlanPins } from './adjacency';
+import { getRoutineCast, primeRoutineCasts } from './routineCasts';
 
 /** Hot Cue 1 in track seconds, null when slot 1 is unset — THE home of
  * the cue-slot convention's "slot 1 = first buildup" lookup (the plan's
@@ -123,6 +124,23 @@ export function useSetPlanParts(
     e.pin?.kind === 'take' ? [e.pin.uuid] : []
   );
   const takeUuidsKey = takeUuids.join(',');
+
+  // Routine pins (sets 160): coverage needs the casts — fetch the
+  // Routine list (metadata only) exactly when a routine pin is in play,
+  // and prime the module cache dormancy reconciliation reads.
+  const routineUuidsKey = (entries ?? [])
+    .flatMap((e) => (e.pin?.kind === 'routine' ? [e.pin.uuid] : []))
+    .join(',');
+  const routinesNeeded = routineUuidsKey.length > 0;
+  const { data: routineRows, isLoading: routinesQueryLoading } = useQuery({
+    queryKey: ['routines'],
+    queryFn: api.routines.list,
+    enabled: routinesNeeded,
+  });
+  const routinesLoading = routinesNeeded && routinesQueryLoading;
+  useEffect(() => {
+    if (routineRows) primeRoutineCasts(routineRows);
+  }, [routineRows]);
   const takeQueries = useQueries({
     queries: takeUuids.map((uuid) => ({
       queryKey: ['take', uuid],
@@ -149,7 +167,7 @@ export function useSetPlanParts(
 
   const input = useMemo<PlanInput | undefined>(() => {
     if (!entries || entries.length === 0) return undefined;
-    if (!transitionsReady || takesLoading || hotCuesLoading) return undefined;
+    if (!transitionsReady || takesLoading || hotCuesLoading || routinesLoading) return undefined;
     if (!trackMap || entries.some((e) => !trackMap.has(e.trackId))) return undefined;
 
     const tracks: PlanInput['tracks'] = {};
@@ -166,13 +184,19 @@ export function useSetPlanParts(
     // (via ConductorPlanFeed), and practice all play the same choice the
     // badges show. Pins pass through untouched; PlanInput's shape is
     // unchanged (replan grafting keeps matching pins by uuid).
-    const resolved = resolvePlanPins(entries, (a, b) =>
-      (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
-        uuid: it.uuid,
-        name: it.name,
-        favorite: it.favorite,
-        updatedAtMs: it.updatedAtMs,
-      }))
+    const resolved = resolvePlanPins(
+      entries,
+      (a, b) =>
+        (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
+          uuid: it.uuid,
+          name: it.name,
+          favorite: it.favorite,
+          updatedAtMs: it.updatedAtMs,
+        })),
+      // Routine coverage (sets 160): fresh rows first, cache fallback —
+      // covered interior adjacencies plan as hard cuts; the head is the
+      // hard-cut placeholder until replay (sets #159).
+      (uuid) => routineRows?.find((r) => r.uuid === uuid)?.cast ?? getRoutineCast(uuid)
     );
 
     // Full Transition payloads for each adjacency's ordered pair, keyed by
@@ -217,8 +241,11 @@ export function useSetPlanParts(
     transitionsReady,
     takesLoading,
     hotCuesLoading,
+    routinesLoading,
+    routineRows,
     hotCue1Signature,
     takeUuidsKey,
+    routineUuidsKey,
     tempo?.policy,
     tempo?.setTempoBpm,
     tempoReturnSecPerPercent,

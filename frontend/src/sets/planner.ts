@@ -209,7 +209,11 @@ export function fmtSec(s: number): string {
  * Take pins through the vectorizer), or null → hard cut. Entries arrive
  * already library-resolved (sets 26, `resolvePlanPins` upstream): a null
  * pin here means a genuinely evidence-less adjacency, and an explicit
- * Hard-cut pin falls through to null — both cut. */
+ * Hard-cut pin falls through to null — both cut. A Routine pin ALSO
+ * falls through to null for now — the hard-cut PLACEHOLDER (sets 160):
+ * slot-remapped, beat-rebased replay is sets #159's; until then the
+ * covered span plans as hard cuts (resolvePlanPins already hard-cut the
+ * covered interior adjacencies). */
 function resolvePin(
   pin: AdjacencyPin | null,
   input: PlanInput,

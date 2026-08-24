@@ -515,3 +515,61 @@ def test_delete_set_drops_its_dormant_pins(client, db_session, make_track):
     put_state(client, s["id"], [{"track_id": t1.id}], [dormant_item(t1.id, t2.id)])
     assert client.delete(f"/api/sets/{s['id']}").status_code == 204
     assert db_session.query(models.SetDormantPin).count() == 0
+
+
+# ── Routine pins (sets 160, ADR 0035) ───────────────────────────────────
+# A Routine pins on the adjacency leaving its first cast track; the wire
+# stores kind + uuid like transition/take (coverage/shadowing are
+# client-side). Routine Dormant memories are keyed by BOUNDARY tracks.
+
+
+def test_routine_pin_round_trips(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [
+            {"track_id": t1.id, "pin_kind": "routine", "pin_uuid": "r-1"},
+            {"track_id": t2.id},
+        ]},
+    )
+    assert resp.status_code == 200, resp.text
+    entries = client.get(f"/api/sets/{s['id']}").json()["entries"]
+    assert entries[0]["pin_kind"] == "routine"
+    assert entries[0]["pin_uuid"] == "r-1"
+
+
+def test_routine_pin_requires_uuid(client, make_track):
+    t1 = make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [{"track_id": t1.id, "pin_kind": "routine"}]},
+    )
+    assert resp.status_code == 422
+
+
+def test_routine_dormant_pin_round_trips(client, make_track):
+    t1, t2, t3 = make_track(), make_track(), make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={
+            "items": [{"track_id": t1.id}, {"track_id": t2.id}],
+            # Keyed by the routine's BOUNDARY tracks (entry, exit) — the
+            # exit (t3) may sit outside the current entries entirely.
+            "dormant": [
+                {
+                    "a_track_id": t1.id,
+                    "b_track_id": t3.id,
+                    "pin_kind": "routine",
+                    "pin_uuid": "r-1",
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    dormant = client.get(f"/api/sets/{s['id']}").json()["dormant"]
+    assert dormant == [
+        {"a_track_id": t1.id, "b_track_id": t3.id, "pin_kind": "routine", "pin_uuid": "r-1"}
+    ]

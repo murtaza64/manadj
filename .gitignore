@@ -8,6 +8,7 @@ waveform_tests/
 .claude/
 node_modules/
 .lane-app/
+.lane-tmp/
 
 .editspace/
 .scratch/

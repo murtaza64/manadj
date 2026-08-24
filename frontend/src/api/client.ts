@@ -1264,6 +1264,20 @@ export const api = {
       if (!res.ok) throw new Error(`Failed to fetch routine candidates (${res.status})`);
       return res.json();
     },
+
+    /** Cast-prefix match (routines 157): candidates whose cast covers
+     * exactly the given ordered list's next len(cast) entries, entering
+     * on the first and exiting at the last — the pin picker's lowest
+     * trust tier (sets 160). Strongest evidence first. */
+    query: async (trackIds: number[]): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-candidates/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_ids: trackIds }),
+      });
+      if (!res.ok) throw new Error(`Failed to query routine candidates (${res.status})`);
+      return res.json();
+    },
   },
 
   routineTakes: {
@@ -1607,24 +1621,26 @@ export interface SetRowWire {
 export interface SetEntryItemWire {
   track_id: number;
   /** Adjacency pin (sets 02): kind and uuid travel together for
-   * transition/take; a Hard-cut pin (sets 26) carries no uuid. */
-  pin_kind?: 'transition' | 'take' | 'hardcut' | null;
+   * transition/take/routine (sets 160); a Hard-cut pin (sets 26)
+   * carries no uuid. */
+  pin_kind?: 'transition' | 'take' | 'hardcut' | 'routine' | null;
   pin_uuid?: string | null;
 }
 
 export interface SetEntryRowWire {
   track_id: number;
   position: number;
-  pin_kind: 'transition' | 'take' | 'hardcut' | null;
+  pin_kind: 'transition' | 'take' | 'hardcut' | 'routine' | null;
   pin_uuid: string | null;
 }
 
 /** A Dormant pin (sets 07): a broken pin remembered per ORDERED track
- * pair, per Set — same shape on PUT and GET. */
+ * pair, per Set — same shape on PUT and GET. A routine memory (sets
+ * 160) is keyed by its BOUNDARY tracks (entry, exit). */
 export interface SetDormantPinWire {
   a_track_id: number;
   b_track_id: number;
-  pin_kind: 'transition' | 'take' | 'hardcut';
+  pin_kind: 'transition' | 'take' | 'hardcut' | 'routine';
   pin_uuid: string | null;
 }
 

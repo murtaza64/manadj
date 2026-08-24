@@ -12,6 +12,10 @@
  * and the orthogonal Unresolved ("will hard-cut") and Unpracticed
  * badges. Auto-fill (per-adjacency and set-wide) proposes Transitions
  * only; the manual pin picker also lists the pair's Takes (ADR 0023).
+ * Takes also arrive in bulk via Resolve from evidence (sets #163): a
+ * previewed, one-confirm gesture pinning the best Take on every
+ * Unresolved adjacency — the confirmed bulk gesture is itself the
+ * explicit act ADR 0023 requires (glossary amendment 2026-08-24).
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -44,7 +48,7 @@ import {
 import { registerBrowseSurface } from '../midi/controlRegistry';
 import type { SelectMods } from '../components/TrackRow';
 import { useToast } from '../components/Toast';
-import ContextMenu, { useContextMenuState, type MenuItem } from '../components/ContextMenu';
+import ContextMenu, { useContextMenuState } from '../components/ContextMenu';
 import EnergySquare from '../components/EnergySquare';
 import { useTrackMenuItems } from '../components/useTrackMenuItems';
 import type { ChannelId } from '../playback/mixer';
@@ -66,11 +70,18 @@ import {
 import { practiceCuePositions } from './practice';
 import {
   adjacencyView,
+  resolveFromEvidence,
   resolveTransition,
+  routineCoverage,
+  routineOfferable,
   type AdjacencyPin,
+  type RoutineCoverage,
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
+import PinPickerPanel, { ROUTINE_COLOR } from './PinPickerPanel';
+import { getRoutineCast, primeRoutineCasts } from './routineCasts';
+import ResolveFromEvidenceModal from './ResolveFromEvidenceModal';
 import {
   previewAdjacencyFutures,
   reconcileOrderChange,
@@ -137,11 +148,13 @@ import {
   getSetScroll,
   getSetSelection,
   insertTrackIntoSet,
+  pinRoutine,
   removeTracksFromSet,
   reorderSetEntries,
   setAdjacencyPin,
   setAdjacencyPins,
   setSetScroll,
+  unpinRoutine,
   setSetSelection,
   useSetDormantPins,
   useSetEntries,
@@ -174,7 +187,11 @@ function buildPairEvidence(
   }));
   const pairTakes: TakeEvidence[] = takes
     .filter((t) => t.a_track_id === a && t.b_track_id === b)
-    .map((t) => ({ uuid: t.uuid, detectedAt: t.detected_at }));
+    .map((t) => ({
+      uuid: t.uuid,
+      detectedAt: t.detected_at,
+      windowS: t.window_end_s - t.window_start_s,
+    }));
   return { transitions, takes: pairTakes };
 }
 
@@ -217,6 +234,27 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const takesRef = useRef(takes);
   takesRef.current = takes;
 
+  // ── Routines (sets 160, ADR 0035) ────────────────────────────────────
+  // Saved Routines + Routine Takes: coverage (cast bracket, shadowing),
+  // the per-adjacency "routine available" hint, and the picker's top two
+  // trust tiers. Casts prime the module cache dormancy reconciliation
+  // reads (reorder liveness is boundary + membership, setStore).
+  const { data: routineRows = [] } = useQuery({
+    queryKey: ['routines'],
+    queryFn: api.routines.list,
+  });
+  const { data: routineTakeRows = [] } = useQuery({
+    queryKey: ['routine-takes'],
+    queryFn: api.routineTakes.list,
+  });
+  useEffect(() => {
+    primeRoutineCasts(routineRows);
+  }, [routineRows]);
+  const castOf = useCallback(
+    (uuid: string) => routineRows.find((r) => r.uuid === uuid)?.cast ?? getRoutineCast(uuid),
+    [routineRows]
+  );
+
   // Adjacency click-through (sets 09): route by RESOLVED pin kind — a
   // Transition (pinned or auto-resolved, sets 26) opens the editor with
   // that Transition selected, a Take pin opens the existing Take-review
@@ -234,6 +272,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         bTrackId
       );
       const view = adjacencyView(pin, transitions, pairTakes);
+      if (view.status === 'routine') return; // no editor yet (sets #159 owns replay/review)
       if (view.status === 'take') {
         requestTakeReview(view.take!.uuid);
         return;
@@ -251,11 +290,19 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // auto-resolved choice as a pin — playback already plays these; pinning
   // detaches them from the library's evolution. Existing pins are never
   // overwritten.
+  // Coverage over the COMMITTED entries (sets 160): the bulk gestures
+  // (auto-fill, Resolve from evidence) skip Routine-covered adjacencies
+  // — the Routine owns those handovers; shadowed pins stay shadowed.
+  const entryCoverage = useMemo(
+    () => routineCoverage(entries ?? [], castOf),
+    [entries, castOf]
+  );
+
   const autoFillable = useMemo(() => {
     const fillable = new Map<number, AdjacencyPin>();
     if (entries) {
       for (let i = 0; i < entries.length - 1; i++) {
-        if (entries[i].pin !== null) continue;
+        if (entries[i].pin !== null || entryCoverage[i]) continue;
         const { transitions } = buildPairEvidence(
           pairStore,
           takes,
@@ -267,7 +314,25 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       }
     }
     return fillable;
-  }, [entries, pairStore, takes]);
+  }, [entries, entryCoverage, pairStore, takes]);
+
+  // Resolve from evidence (sets #163): the bulk best-Take proposal for
+  // every Unresolved adjacency — previewed in a modal, applied by ONE
+  // confirm through setAdjacencyPins (the same primitive auto-fill
+  // uses). Pairs that auto-resolve to a Transition are skipped (saved
+  // Transitions win — freezing those stays auto-fill's job); existing
+  // pins untouched. The confirmed bulk gesture is the explicit act
+  // ADR 0023 requires (glossary amendment 2026-08-24).
+  const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
+  const evidenceProposal = useMemo(
+    () =>
+      resolveFromEvidence(
+        entries ?? [],
+        (a, b) => buildPairEvidence(pairStore, takes, a, b),
+        castOf
+      ),
+    [entries, pairStore, takes, castOf]
+  );
 
   // Track metadata for the entry rows (batch-by-Promise.all pattern, as in
   // TakeHistoryView's labels query). Keyed under the ['tracks'] prefix so
@@ -343,6 +408,51 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // Displayed order for the stable suggest-insert handler (issue 42).
   const displayEntriesRef = useRef(displayEntries);
   displayEntriesRef.current = displayEntries;
+
+  // Routine coverage over the DISPLAYED order (sets 160): drives the cast
+  // bracket (covered rows dim under a magenta bracket, interior adjacency
+  // rows collapse away, the exit row is marked) and the head's routine
+  // pin row. Interior reorder is free (dormancy keys on boundaries +
+  // membership), so a live drag inside the bracket keeps the coverage.
+  const coverage = useMemo(
+    () => routineCoverage(displayEntries ?? [], castOf),
+    [displayEntries, castOf]
+  );
+  // Per ENTRY index: its role inside a cast bracket (null = uncovered).
+  const castMarks = useMemo(() => {
+    const marks: ('cast' | 'exit' | null)[] = new Array(displayEntries?.length ?? 0).fill(null);
+    for (const cov of coverage) {
+      if (!cov) continue;
+      for (let j = cov.headIndex + 1; j <= cov.lastEntryIndex && j < marks.length; j++) {
+        marks[j] = j === cov.lastEntryIndex ? 'exit' : 'cast';
+      }
+    }
+    return marks;
+  }, [coverage, displayEntries]);
+  // Per adjacency index: offerable saved Routines + unpromoted Routine
+  // Takes at that head (the quiet "routine available" hint — candidates
+  // stay picker-only, lowest trust).
+  const routineOfferCounts = useMemo(() => {
+    if (!displayEntries) return undefined;
+    const ids = displayEntries.map((e) => e.trackId);
+    return displayEntries.map((_, i) => {
+      if (i >= displayEntries.length - 1) return 0;
+      return (
+        routineRows.filter((r) => routineOfferable(ids, i, r.cast)).length +
+        routineTakeRows.filter(
+          (rt) => rt.promoted_routine_uuid === null && routineOfferable(ids, i, rt.cast)
+        ).length
+      );
+    });
+  }, [displayEntries, routineRows, routineTakeRows]);
+
+  // Pin picker (sets 160, prototype variant P): ONE panel at pane level;
+  // rows open it by adjacency index (identity-stable for the row memo).
+  const [picker, setPicker] = useState<{ index: number; x: number; y: number } | null>(null);
+  const openPicker = useCallback(
+    (index: number, x: number, y: number) => setPicker({ index, x, y }),
+    []
+  );
 
   // Per-adjacency derived props, memoized (issue 42): fresh objects and
   // filtered arrays per render would defeat the adjacency-row memo —
@@ -1067,6 +1177,28 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           >
             Auto-fill {autoFillable.size > 0 ? `(${autoFillable.size})` : ''}
           </button>
+          {/* Resolve from evidence (sets #163): opens the preview modal;
+              nothing pins until its one confirm. Enabled whenever the
+              gesture has anything to say (Takes to pin OR hard-cuts to
+              list). */}
+          <button
+            className="btn"
+            onClick={() => setEvidenceModalOpen(true)}
+            disabled={evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0}
+            title={
+              evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0
+                ? 'Every adjacency is pinned or auto-resolves to a Transition'
+                : 'Preview pinning the best Take on every Unresolved adjacency (one confirm; chop-Takes flagged, remaining hard-cuts listed)'
+            }
+            style={
+              evidenceProposal.rows.length > 0
+                ? { borderColor: 'var(--mauve)', color: 'var(--mauve)' }
+                : undefined
+            }
+          >
+            Resolve from evidence{' '}
+            {evidenceProposal.rows.length > 0 ? `(${evidenceProposal.rows.length})` : ''}
+          </button>
           {/* The header Suggest button moved into the list as the
               trailing suggest row (sets 36): append is an insert at the
               terminal gap, so it gets the gap affordance. */}
@@ -1149,8 +1281,25 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             // Both tracks' metadata present — gates the affordances that
             // need the pair (practice, suggest-insert), as before.
             const pairReady = !!(track && next && trackMap?.has(next.trackId));
+            const cov = coverage[i] ?? null;
+            const mark = castMarks[i];
             return (
-              <div key={entry.trackId}>
+              <div
+                key={entry.trackId}
+                // Cast bracket (sets 160): covered entries dim under the
+                // routine family's magenta bracket; drag stays live —
+                // interior reorder is free (dormancy keys on boundaries
+                // + membership only).
+                style={
+                  mark
+                    ? {
+                        borderLeft: `3px solid ${ROUTINE_COLOR}`,
+                        background: 'rgba(255, 0, 200, 0.04)',
+                        opacity: 0.75,
+                      }
+                    : undefined
+                }
+              >
                 <SetTrackRow
                   index={i}
                   trackId={entry.trackId}
@@ -1160,6 +1309,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   occupancy={occupancy}
                   selected={selectedIds.has(entry.trackId)}
                   dragging={dragIds?.includes(entry.trackId) ?? false}
+                  castMark={mark}
                   onSelect={handleRowSelect}
                   onDragStart={handleRowDragStart}
                   onDragEnd={handleRowDragEnd}
@@ -1167,30 +1317,46 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   onRemove={handleRemoveRow}
                   onContextMenu={track ? handleRowContextMenu : undefined}
                 />
-                {next && (
-                  <AdjacencyRow
-                    aTrackId={entry.trackId}
-                    bTrackId={next.trackId}
-                    index={i}
-                    pin={entry.pin}
-                    planned={displayPlan?.adjacencies[i]}
-                    future={previewOrder ? (previewFutures?.[i] ?? null) : null}
-                    decks={decksByAdj?.[i]}
-                    evidence={evidenceList?.[i] ?? EMPTY_EVIDENCE}
-                    warnings={warningsByAdj?.[i]}
-                    onPin={handlePin}
-                    onOpenEditor={openAdjacencyEditor}
-                    onPractice={pairReady ? practiceAdjacency : undefined}
-                    freshTake={freshTakeChip(
-                      freshTakes,
-                      entry.trackId,
-                      next.trackId,
-                      entry.pin?.uuid ?? null
-                    )}
-                    onPinFreshTake={handlePinFreshTake}
-                    onSuggestInsert={pairReady ? handleSuggestInsert : undefined}
-                  />
-                )}
+                {next &&
+                  (cov && cov.headIndex !== i ? null : cov ? ( // covered interior: collapsed
+                    <RoutinePinRow
+                      index={i}
+                      label={routineRowLabel(cov, routineRows, (id) =>
+                        trackMap?.get(id)?.title || `Track ${id}`
+                      )}
+                      coversCount={cov.cast.length - 1}
+                      exitLabel={
+                        trackMap?.get(cov.cast[cov.cast.length - 1])?.title ||
+                        `Track ${cov.cast[cov.cast.length - 1]}`
+                      }
+                      onOpenPicker={openPicker}
+                    />
+                  ) : (
+                    <AdjacencyRow
+                      aTrackId={entry.trackId}
+                      bTrackId={next.trackId}
+                      index={i}
+                      pin={entry.pin}
+                      planned={displayPlan?.adjacencies[i]}
+                      future={previewOrder ? (previewFutures?.[i] ?? null) : null}
+                      decks={decksByAdj?.[i]}
+                      evidence={evidenceList?.[i] ?? EMPTY_EVIDENCE}
+                      warnings={warningsByAdj?.[i]}
+                      routineOffer={routineOfferCounts?.[i] ?? 0}
+                      onPin={handlePin}
+                      onOpenPicker={openPicker}
+                      onOpenEditor={openAdjacencyEditor}
+                      onPractice={pairReady ? practiceAdjacency : undefined}
+                      freshTake={freshTakeChip(
+                        freshTakes,
+                        entry.trackId,
+                        next.trackId,
+                        entry.pin?.uuid ?? null
+                      )}
+                      onPinFreshTake={handlePinFreshTake}
+                      onSuggestInsert={pairReady ? handleSuggestInsert : undefined}
+                    />
+                  ))}
               </div>
             );
           })
@@ -1266,6 +1432,66 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
+
+      {/* Pin picker (sets 160, prototype variant P): one panel, opened
+          per adjacency — Routine tiers (saved > Routine Take >
+          unconfirmed candidate), Transitions, Takes, Hard cut. */}
+      {picker &&
+        displayEntries &&
+        (() => {
+          const head = displayEntries[picker.index];
+          const nextEntry = displayEntries[picker.index + 1];
+          if (!head || !nextEntry) return null;
+          return (
+            <PinPickerPanel
+              x={picker.x}
+              y={picker.y}
+              aTrackId={head.trackId}
+              bTrackId={nextEntry.trackId}
+              pin={head.pin}
+              transitions={evidenceList?.[picker.index]?.transitions ?? []}
+              takes={evidenceList?.[picker.index]?.takes ?? []}
+              upcomingTrackIds={displayEntries.slice(picker.index).map((e) => e.trackId)}
+              trackLabel={(id) => trackMap?.get(id)?.title || `Track ${id}`}
+              onPin={(pin) => {
+                if (head.pin?.kind === 'routine' && pin === null) {
+                  // Unpin the Routine: the head's shadowed pin restores
+                  // and the covered adjacencies wake (sets 160).
+                  unpinRoutine(setId, head.trackId);
+                } else {
+                  setAdjacencyPin(setId, head.trackId, pin);
+                }
+              }}
+              onPinRoutine={(uuid, cast) => pinRoutine(setId, head.trackId, uuid, cast)}
+              onClose={() => setPicker(null)}
+            />
+          );
+        })()}
+
+      {/* Resolve from evidence (sets #163): preview diff, one confirm. */}
+      {evidenceModalOpen && (
+        <ResolveFromEvidenceModal
+          preview={evidenceProposal}
+          trackLabel={(id) => trackMap?.get(id)?.title || `Track ${id}`}
+          onConfirm={() => {
+            setAdjacencyPins(setId, evidenceProposal.pins);
+            setEvidenceModalOpen(false);
+            const chops = evidenceProposal.rows.filter((r) => r.chop).length;
+            showToast(
+              `Pinned ${evidenceProposal.pins.size} take${
+                evidenceProposal.pins.size === 1 ? '' : 's'
+              }${chops > 0 ? ` (${chops} chop-flagged)` : ''}${
+                evidenceProposal.hardCuts.length > 0
+                  ? ` — ${evidenceProposal.hardCuts.length} hard-cut${
+                      evidenceProposal.hardCuts.length === 1 ? '' : 's'
+                    } remain`
+                  : ''
+              }`
+            );
+          }}
+          onClose={() => setEvidenceModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1309,6 +1535,17 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
       text: `● take · ${date} (unpromoted)`,
       style: { color: 'var(--mauve)' },
       title: 'Pin a transition or take for this handover',
+    };
+  }
+  if (view.status === 'routine') {
+    // Reachable only while the pin's cast is unknown or no longer the
+    // next-n entries here (a live routine renders its own row) —
+    // reconciliation retires stale pins on the next order change.
+    return {
+      text: '◆ routine (not offerable here)',
+      style: { color: ROUTINE_COLOR, opacity: 0.7 },
+      title:
+        "A Routine is pinned here but its cast is not this Set's next n entries (or its metadata has not loaded) — it plans as a hard cut. Click to change",
     };
   }
   if (view.status === 'hardcut') {
@@ -1379,7 +1616,9 @@ const AdjacencyRow = memo(function AdjacencyRow({
   decks,
   evidence,
   warnings,
+  routineOffer,
   onPin,
+  onOpenPicker,
   onOpenEditor,
   onPractice,
   freshTake,
@@ -1408,7 +1647,13 @@ const AdjacencyRow = memo(function AdjacencyRow({
   evidence: { transitions: TransitionEvidence[]; takes: TakeEvidence[] };
   /** This adjacency's plan degeneracies (sets 06), if any. */
   warnings?: PlanWarning[];
+  /** Offerable saved Routines + Routine Takes at this head (sets 160) —
+   * the quiet "routine available" hint (candidates stay picker-only). */
+  routineOffer: number;
   onPin: (aTrackId: number, pin: AdjacencyPin | null) => void;
+  /** Open the pane-level pin picker panel for this adjacency (sets 160,
+   * prototype variant P — replaces the old flat ContextMenu picker). */
+  onOpenPicker: (index: number, x: number, y: number) => void;
   /** Click-through (sets 09): open this adjacency in the Transition
    * editor (pin-kind routing lives with the caller). */
   onOpenEditor: (aTrackId: number, bTrackId: number, pin: AdjacencyPin | null) => void;
@@ -1423,42 +1668,14 @@ const AdjacencyRow = memo(function AdjacencyRow({
    * the pair's track metadata is still loading. */
   onSuggestInsert?: (insertIndex: number, x: number, y: number) => void;
 }) {
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const view = adjacencyView(pin, evidence.transitions, evidence.takes);
   const chip = pinChip(view);
 
-  // Manual pin picker: the pair's Transitions AND Takes (Takes are never
-  // auto-filled — pinning one is always this explicit act, ADR 0023),
-  // plus the explicit Hard-cut pin (sets 26 — the way to keep a
-  // deliberate cut now that unresolved auto-resolves).
-  const pickerItems: MenuItem[] = [
-    ...evidence.transitions.map((t) => ({
-      label: `${t.favorite ? '★ ' : ''}${t.name}${pin?.uuid === t.uuid ? ' ✓' : ''}`,
-      onSelect: () => onPin(aTrackId, { kind: 'transition', uuid: t.uuid }),
-    })),
-    ...evidence.takes.map((t, i) => ({
-      label: `Take · ${new Date(t.detectedAt).toLocaleString()}${pin?.uuid === t.uuid ? ' ✓' : ''}`,
-      separatorBefore: i === 0 && evidence.transitions.length > 0,
-      onSelect: () => onPin(aTrackId, { kind: 'take', uuid: t.uuid }),
-    })),
-    ...(evidence.transitions.length === 0 && evidence.takes.length === 0
-      ? [{ label: 'No transitions or takes for this pair', disabled: true }]
-      : []),
-    {
-      label: `✕ Hard cut — play no transition${pin?.kind === 'hardcut' ? ' ✓' : ''}`,
-      separatorBefore: true,
-      onSelect: () => onPin(aTrackId, { kind: 'hardcut' }),
-    },
-    ...(pin !== null
-      ? [
-          {
-            label: 'Unpin (auto-resolve from the library)',
-            danger: true,
-            onSelect: () => onPin(aTrackId, null),
-          },
-        ]
-      : []),
-  ];
+  // The manual pin picker is the pane-level PinPickerPanel now (sets
+  // 160, prototype variant P): the pair's Transitions AND Takes (never
+  // auto-filled — ADR 0023; the carve-outs are the picker, the fresh-
+  // Take offer, and Resolve from evidence, sets #163), the offerable
+  // Routine tiers, the explicit Hard-cut pin, and Unpin.
 
   // Left-gutter geometry: the chips start at the same x as the track-row
   // titles — driven by the shared column grid (sets 31, rowColumns.ts;
@@ -1509,14 +1726,14 @@ const AdjacencyRow = memo(function AdjacencyRow({
           )}
         </span>
 
-        {/* Pin chip — click opens the manual pin picker. Unresolved
+        {/* Pin chip — click opens the pin picker panel. Unresolved
             turns the chip's text red + bold (sets 20, softened in the
             22 follow-up): the one hard-cut signal. */}
         <button
           className="set-chip-btn"
           onClick={(e) => {
             e.stopPropagation();
-            setMenuPos({ x: e.clientX, y: e.clientY });
+            onOpenPicker(index, e.clientX, e.clientY);
           }}
           title={chip.title}
           style={{
@@ -1599,16 +1816,18 @@ const AdjacencyRow = memo(function AdjacencyRow({
         {/* Take-available indicator (26 review follow-up): a cut is about
             to play while the pair HAS recorded Takes — the one evidence
             resolution deliberately ignores (Takes never auto-resolve,
-            ADR 0023), so surface the manual option. Click opens the pin
-            picker, where the Takes are listed. Quiet when a Transition
-            plays (the counts cell already says "· N tk"), and the fresh-
-            take offer below outranks it (one mauve chip at a time). */}
+            ADR 0023; they arrive only by choice — this picker, or the
+            Set-level Resolve-from-evidence confirm, sets #163), so
+            surface the manual option. Click opens the pin picker, where
+            the Takes are listed. Quiet when a Transition plays (the
+            counts cell already says "· N tk"), and the fresh-take offer
+            below outranks it (one mauve chip at a time). */}
         {view.status === 'unresolved' && view.counts.takes > 0 && !freshTake && (
           <button
             className="set-chip-btn"
             onClick={(e) => {
               e.stopPropagation();
-              setMenuPos({ x: e.clientX, y: e.clientY });
+              onOpenPicker(index, e.clientX, e.clientY);
             }}
             title={`This pair has ${view.counts.takes} recorded Take${
               view.counts.takes === 1 ? '' : 's'
@@ -1618,6 +1837,24 @@ const AdjacencyRow = memo(function AdjacencyRow({
             {view.counts.takes === 1
               ? '● take available — pin?'
               : `● ${view.counts.takes} takes available — pin?`}
+          </button>
+        )}
+
+        {/* Routine available (sets 160): a saved Routine or Routine Take
+            whose cast is exactly this Set's next n entries — quiet hint;
+            the picker carries the tiers (unconfirmed candidates surface
+            only there, lowest trust). */}
+        {routineOffer > 0 && view.status !== 'routine' && (
+          <button
+            className="set-chip-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenPicker(index, e.clientX, e.clientY);
+            }}
+            title={`${routineOffer} Routine${routineOffer === 1 ? '' : 's'} offerable here — the cast matches this Set's next entries. Open the picker to pin one`}
+            style={{ borderColor: ROUTINE_COLOR, color: ROUTINE_COLOR, fontWeight: 600 }}
+          >
+            ◆ routine available
           </button>
         )}
 
@@ -1678,15 +1915,77 @@ const AdjacencyRow = memo(function AdjacencyRow({
         </span>
         <span style={{ width: `${ADJ_TIME_SPACER_W}px`, flexShrink: 0 }} />
       </div>
-      {menuPos && (
-        <ContextMenu
-          x={menuPos.x}
-          y={menuPos.y}
-          items={pickerItems}
-          onClose={() => setMenuPos(null)}
-        />
-      )}
     </>
+  );
+});
+
+/** Label for a pinned Routine's row: its name when named, else the
+ * boundary tracks (entry → exit). */
+function routineRowLabel(
+  cov: RoutineCoverage,
+  routineRows: readonly { uuid: string; name: string | null }[],
+  trackLabel: (trackId: number) => string
+): string {
+  const name = routineRows.find((r) => r.uuid === cov.uuid)?.name;
+  if (name?.trim()) return name;
+  return `${trackLabel(cov.cast[0])} → … → ${trackLabel(cov.cast[cov.cast.length - 1])}`;
+}
+
+/** The routine pin's row (sets 160): replaces the head adjacency's row
+ * while the Routine is live. The covered entries below render inside
+ * the cast bracket (dimmed, exit marked); interior adjacency rows are
+ * collapsed. Click opens the picker (switch/unpin); there is no editor
+ * click-through — replay/review is sets #159. Memoized like its sibling
+ * rows (issue 42): primitive props + identity-stable callbacks. */
+const RoutinePinRow = memo(function RoutinePinRow({
+  index,
+  label,
+  coversCount,
+  exitLabel,
+  onOpenPicker,
+}: {
+  /** This adjacency's index in the displayed order. */
+  index: number;
+  label: string;
+  /** Adjacencies the Routine covers (n − 1). */
+  coversCount: number;
+  exitLabel: string;
+  onOpenPicker: (index: number, x: number, y: number) => void;
+}) {
+  return (
+    <div
+      data-set-adjacency-row
+      className="set-adjacency-row"
+      style={{
+        gap: `${ADJ_ROW_GAP}px`,
+        padding: `2px ${ROW_PAD_X}px 2px ${ADJ_PAD_LEFT}px`,
+        backgroundImage: `linear-gradient(90deg, rgba(255, 0, 200, 0.10), transparent 65%)`,
+      }}
+    >
+      <span style={{ width: `${ADJ_GUTTER_W}px`, flexShrink: 0 }} />
+      <button
+        className="set-chip-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenPicker(index, e.clientX, e.clientY);
+        }}
+        title={`Pinned Routine — covers the next ${coversCount} adjacencies; the cast plays as recorded and exits with ${exitLabel} playing. Interior reorder is free; breaking a boundary or the cast sends it Dormant (covered pins wake). Click to switch or unpin`}
+        style={{ color: ROUTINE_COLOR, fontWeight: 800 }}
+      >
+        ▾ ◆ ROUTINE {label}
+      </button>
+      <span style={{ color: 'var(--subtext0)' }}>
+        covers {coversCount} adjacencies · exits with {exitLabel}
+      </span>
+      <span
+        title="Routine playback is not planned yet — the covered span plans as hard cuts until slot-remapped replay lands (sets #159)"
+        style={{ color: 'var(--yellow)', fontWeight: 700, cursor: 'help' }}
+      >
+        ⚠ plays as hard cut (replay pending)
+      </span>
+      <span style={{ marginLeft: 'auto' }} />
+      <span style={{ width: `${ADJ_TIME_SPACER_W}px`, flexShrink: 0 }} />
+    </div>
   );
 });
 
@@ -1704,6 +2003,7 @@ const SetTrackRow = memo(function SetTrackRow({
   occupancy,
   selected,
   dragging,
+  castMark,
   onSelect,
   onDragStart,
   onDragEnd,
@@ -1732,6 +2032,11 @@ const SetTrackRow = memo(function SetTrackRow({
    * wherever it currently displays (its hypothetical slot mid-preview,
    * its committed one when the pointer is back over it). */
   dragging: boolean;
+  /** Covered by a pinned Routine (sets 160): 'cast' for interior cast
+   * members, 'exit' for the boundary track the Routine exits with —
+   * a small magenta chip beside the title (the bracket itself is the
+   * wrapper's). Null when uncovered. */
+  castMark: 'cast' | 'exit' | null;
   /** Selection gestures (sets 18): plain / shift-range / cmd-toggle. */
   onSelect: (trackId: number, mods: { shift: boolean; toggle: boolean }) => void;
   /** Row drag lifecycle (sets 07): the pane sets the drag payload and
@@ -1882,6 +2187,25 @@ const SetTrackRow = memo(function SetTrackRow({
           <span style={{ color: 'var(--subtext0)', marginLeft: '8px' }}>{track.artist}</span>
         )}
         {track?.archived_at != null && <ArchivedTrackRowMark />}
+        {castMark && (
+          <span
+            title={
+              castMark === 'exit'
+                ? 'Routine exit — sounding as the Routine ends; the next adjacency plays off this track'
+                : 'Routine cast member — enters per the recorded choreography (interior Set order is presentational; reorder freely)'
+            }
+            style={{
+              marginLeft: '8px',
+              padding: '0 5px',
+              fontSize: '10px',
+              fontWeight: 800,
+              color: ROUTINE_COLOR,
+              border: `1px solid ${ROUTINE_COLOR}`,
+            }}
+          >
+            {castMark === 'exit' ? 'exit ⤴' : 'cast'}
+          </span>
+        )}
       </span>
       {/* NEVER AUDIBLE (sets 19): the badge carries the signal; both
           time cells go blank (rowColumns blanks them). */}
