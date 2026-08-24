@@ -405,6 +405,10 @@ class Session(Base):
     uuid = Column(String, nullable=False)
     started_at = Column(DateTime, nullable=False, default=func.now())
     ended_at = Column(DateTime, nullable=True)
+    # Routine-miner currency marker (routines 157): the MINER_VERSION whose
+    # suggestion rows this Session currently carries. NULL = never mined;
+    # != routine_miner.MINER_VERSION = stale, the startup sweep re-enqueues.
+    routine_miner_version = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -443,6 +447,51 @@ class SessionChunk(Base):
     __table_args__ = (
         Index("idx_session_chunks_session", "session_id"),
         Index("idx_session_chunks_session_seq", "session_id", "seq", unique=True),
+    )
+
+
+class RoutineCandidate(Base):
+    """A miner-suggested Routine span on a Session's timeline (ADR 0035,
+    routines 157).
+
+    Suggestion, not evidence: the miner marks candidate spans and a human
+    confirms one into a Routine Take — rows here count for nothing until
+    confirmed. Recomputable at will: rows are keyed by `miner_version` and
+    a version bump invalidates + re-mines (the Session carries the
+    currency marker). `cast_json` is the entry-ordered cast (track ids,
+    slot order); `entry_offsets_json` gives each slot's entry as seconds
+    from `window_start_s` (slot 0 is always 0.0); the window is
+    capture-clock seconds on the owning Session. `session_uuid` matches
+    the Take posture (provenance string, not FK), but unlike Takes these
+    rows die with their Session — a suggestion without its timeline is
+    meaningless. No track FKs: casts live in JSON, and stale suggestions
+    simply stop matching.
+
+    `entry_track_id`/`exit_track_id` denormalize the boundary tracks for
+    the cast-prefix query (the pin picker's "Routines available" hint:
+    match candidates whose cast covers the Set's next-n entries, entering
+    and exiting on the right tracks).
+    """
+
+    __tablename__ = "routine_candidates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    session_uuid = Column(String, nullable=False)
+    entry_track_id = Column(Integer, nullable=False)
+    exit_track_id = Column(Integer, nullable=False)
+    cast_json = Column(Text, nullable=False)  # JSON list of track ids, entry order
+    window_start_s = Column(Float, nullable=False)  # capture-clock seconds
+    window_end_s = Column(Float, nullable=False)
+    entry_offsets_json = Column(Text, nullable=False)  # JSON list, per slot
+    evidence_json = Column(Text, nullable=False)  # {"returns": n, "triples": n}
+    miner_version = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        Index("idx_routine_candidates_uuid", "uuid", unique=True),
+        Index("idx_routine_candidates_session", "session_uuid"),
+        Index("idx_routine_candidates_entry", "entry_track_id"),
     )
 
 

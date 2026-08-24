@@ -83,6 +83,20 @@ export interface PairMachine {
    * snapshots this, so a Load onto the stopped deck within the cut gap
    * can't mis-attribute the outgoing Track. */
   outTrackAtCessation: number | null;
+  /** For a zero-overlap hard cut ONLY: the incoming's audibility onset. A
+   * cut engages AT the outgoing's cessation (so overlap is zero and the
+   * naive window collapses); the incoming arrives shortly after within the
+   * cut gap. The Take window then spans the cut ramp — cessation → this
+   * onset — instead of degenerating to a single instant (issue #138 defect
+   * 1; Take 960 was window_start == window_end). null for overlap
+   * engagements, whose window end is the outgoing's own final cessation. */
+  cutIncomingOnset: number | null;
+  /** The last (outgoing, incoming, windowEnd) this machine emitted — the
+   * per-engagement dedup guard (issue #138 defect 2). One physical pair
+   * flickering across the settle horizon must not settle the SAME ordered
+   * pair twice; a re-emit whose window end lands within `settleHorizonS` of
+   * the previous one is the same Handover and is suppressed. */
+  lastEmit: { outgoingTrackId: number; incomingTrackId: number; windowEndS: number } | null;
   /** Engagement-open snapshot, stamped into the Take slice as its `init`
    * event — ROLE-shaped (outgoing='A', incoming='B') with the physical
    * decks recorded on it. */
@@ -118,7 +132,9 @@ function freshMachine(): PairMachine {
     incomingSilentSince: null,
     outSilentSince: null,
     outTrackAtCessation: null,
+    cutIncomingOnset: null,
     openSnapshot: null,
+    lastEmit: null,
   };
 }
 
@@ -151,10 +167,19 @@ function dissolve(m: PairMachine): void {
   m.incomingSilentSince = null;
   m.outSilentSince = null;
   m.outTrackAtCessation = null;
+  m.cutIncomingOnset = null;
   m.openSnapshot = null;
+  // NOTE: lastEmit deliberately survives a dissolve — it guards the NEXT
+  // engagement (a flicker re-opening the same ordered pair; issue #138).
 }
 
-function openEngagement(s: CaptureState, m: PairMachine, key: PairKey, at: number): void {
+function openEngagement(
+  s: CaptureState,
+  m: PairMachine,
+  key: PairKey,
+  at: number,
+  cutIncomingOnset: number | null = null
+): void {
   const outgoing = m.incumbent!;
   const incoming = mate(key, outgoing);
   m.engagedSince = at;
@@ -163,6 +188,9 @@ function openEngagement(s: CaptureState, m: PairMachine, key: PairKey, at: numbe
   m.outgoingTrackId = m.outTrackAtCessation ?? s.decks[outgoing].trackId;
   m.incomingTrackId = s.decks[incoming].trackId;
   m.incomingSilentSince = null;
+  // A cut engages AT the outgoing's cessation; remember the incoming's
+  // onset so the Take window spans the cut ramp, not one instant (#138).
+  m.cutIncomingOnset = cutIncomingOnset;
   const snapDeck = (d: DeckCapture) => ({
     trackId: d.trackId,
     playing: d.playing,
@@ -228,13 +256,38 @@ function relabel(
 function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake | null {
   if (m.outgoingTrackId === null || m.incomingTrackId === null) return null;
   const windowStartS = m.engagedSince!;
-  const windowEndS = m.outSilentSince!;
+  // A zero-overlap hard cut engages at the outgoing's cessation, so the
+  // outgoing's own silence instant (outSilentSince) equals the window
+  // start — degenerate. The window then spans the cut ramp: cessation →
+  // the incoming's onset (#138 defect 1). An overlap engagement keeps the
+  // outgoing's final cessation as its end (the glossary window: the
+  // contiguous period the two tracks trade, ending at the outgoing's
+  // cessation).
+  const windowEndS =
+    m.cutIncomingOnset !== null ? Math.max(m.outSilentSince!, m.cutIncomingOnset) : m.outSilentSince!;
   const outgoing = m.incumbent!;
   const incoming = mate(key, outgoing);
   const overlap = windowEndS - windowStartS;
+  // One engagement, at most one Take per ordered pair (#138 defect 2): a
+  // physical pair can flicker across the settle horizon and re-open the
+  // same ordered pair; a re-emit whose window end lands within the settle
+  // horizon of the previous emit is the same Handover, suppressed.
+  if (
+    m.lastEmit !== null &&
+    m.lastEmit.outgoingTrackId === m.outgoingTrackId &&
+    m.lastEmit.incomingTrackId === m.incomingTrackId &&
+    windowEndS - m.lastEmit.windowEndS <= s.params.settleHorizonS
+  ) {
+    return null;
+  }
   const confidence = !s.decks[incoming].audible ? 0.5 : overlap < 1 ? 0.7 : 0.9;
   const lo = windowStartS - s.params.padS;
   const hi = windowEndS + s.params.padS;
+  m.lastEmit = {
+    outgoingTrackId: m.outgoingTrackId,
+    incomingTrackId: m.incomingTrackId,
+    windowEndS,
+  };
   return {
     outgoingTrackId: m.outgoingTrackId,
     incomingTrackId: m.incomingTrackId,
@@ -534,7 +587,10 @@ function onEdge(
         m.outSilentSince !== null &&
         now - m.outSilentSince <= s.params.cutGapMaxS
       ) {
-        openEngagement(s, m, key, m.outSilentSince); // hard cut: window is the cut instant
+        // Hard cut: engage AT the cessation (window start), and record the
+        // incoming's onset (window end) so the slice spans the cut ramp
+        // instead of collapsing to a single instant (#138 defect 1).
+        openEngagement(s, m, key, m.outSilentSince, now);
       } else {
         // Incumbent long gone: fresh incumbency, no Handover.
         m.incumbent = ch;
