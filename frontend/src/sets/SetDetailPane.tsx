@@ -117,6 +117,7 @@ import {
   fmtInTime,
   fmtOverlapTime,
   fmtPlayTime,
+  fmtTrimDb,
   IN_TIME_COL_W,
   INDEX_COL_W,
   KEY_COL_W,
@@ -126,6 +127,9 @@ import {
   ROW_ACCENT_W,
   ROW_GAP,
   ROW_PAD_X,
+  TRIM_COL_W,
+  trimOffsetDb,
+  trimOffsetFromDb,
   type BpmDeltaRef,
 } from './rowColumns';
 import {
@@ -147,6 +151,7 @@ import {
   reorderSetEntries,
   setAdjacencyPin,
   setAdjacencyPins,
+  setEntryTrim,
   setSetScroll,
   setSetSelection,
   useSetDormantPins,
@@ -769,6 +774,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     (trackId: number) => removeTracksFromSet(setId, [trackId]),
     [setId]
   );
+  const handleTrimChange = useCallback(
+    (trackId: number, trim: number, commit: boolean) =>
+      setEntryTrim(setId, trackId, trim, { commit }),
+    [setId]
+  );
   const handlePin = useCallback(
     (aTrackId: number, pin: AdjacencyPin | null) => setAdjacencyPin(setId, aTrackId, pin),
     [setId]
@@ -1206,11 +1216,13 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   occupancy={occupancy}
                   selected={selectedIds.has(entry.trackId)}
                   dragging={dragIds?.includes(entry.trackId) ?? false}
+                  trim={entry.trim ?? 0}
                   onSelect={handleRowSelect}
                   onDragStart={handleRowDragStart}
                   onDragEnd={handleRowDragEnd}
                   onPlayFrom={plan ? playFromEntry : undefined}
                   onRemove={handleRemoveRow}
+                  onTrimChange={handleTrimChange}
                   onContextMenu={track ? handleRowContextMenu : undefined}
                 />
                 {next && (
@@ -1765,6 +1777,118 @@ const AdjacencyRow = memo(function AdjacencyRow({
   );
 });
 
+/** Trim drag sensitivity (sets #164): dB per pixel of vertical travel —
+ * the knob's ±12 dB spans ~160px. */
+const TRIM_DRAG_DB_PER_PX = 0.15;
+
+/**
+ * Compact per-entry trim control (sets #164): the entry's trim offset in
+ * dB, editable in place. Drag ↕ streams local updates (one wholesale PUT
+ * on release); the hover-revealed ⟲ (or a double-click) resets to
+ * neutral. The value is an OFFSET from neutral — track Autogain composes
+ * with it when it lands (ADR 0034) — applied by the Conductor for the
+ * entry's deck tenure; a live trim-knob move still takes over.
+ */
+const TrimCell = memo(function TrimCell({
+  trackId,
+  trim,
+  onTrimChange,
+}: {
+  trackId: number;
+  trim: number;
+  onTrimChange: (trackId: number, trim: number, commit: boolean) => void;
+}) {
+  const drag = useRef<{ pointerId: number; startY: number; startTrim: number; moved: boolean } | null>(null);
+  const neutral = trim === 0;
+  const valueAt = (clientY: number): number => {
+    const d = drag.current!;
+    return trimOffsetFromDb(trimOffsetDb(d.startTrim) + (d.startY - clientY) * TRIM_DRAG_DB_PER_PX);
+  };
+  return (
+    <span
+      className="set-trim-cell"
+      style={{
+        width: `${TRIM_COL_W + 14}px`,
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: '2px',
+      }}
+      // Never a selection click, never a row drag (the row is draggable;
+      // dragstart bubbles here first and is cancelled).
+      onClick={(e) => e.stopPropagation()}
+      onDragStart={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
+      <button
+        className="set-glyph-btn set-row-reveal"
+        onClick={(e) => {
+          e.stopPropagation();
+          onTrimChange(trackId, 0, true);
+        }}
+        title="Reset trim to neutral"
+        style={{
+          width: '12px',
+          padding: 0,
+          fontSize: '11px',
+          color: 'var(--subtext0)',
+          ...(neutral ? { visibility: 'hidden' as const } : undefined),
+        }}
+      >
+        ⟲
+      </button>
+      <span
+        title={`Entry trim ${fmtTrimDb(trim)} dB — offset from neutral, applied while this entry plays. Drag ↕ to adjust; double-click resets.`}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onTrimChange(trackId, 0, true);
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          drag.current = { pointerId: e.pointerId, startY: e.clientY, startTrim: trim, moved: false };
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (!d || e.pointerId !== d.pointerId) return;
+          if (!d.moved && Math.abs(e.clientY - d.startY) < 3) return; // a click never nudges
+          d.moved = true;
+          onTrimChange(trackId, valueAt(e.clientY), false);
+        }}
+        onPointerUp={(e) => {
+          const d = drag.current;
+          if (!d || e.pointerId !== d.pointerId) return;
+          drag.current = null;
+          if (d.moved) onTrimChange(trackId, valueAt(e.clientY), true);
+        }}
+        onPointerCancel={(e) => {
+          const d = drag.current;
+          if (!d || e.pointerId !== d.pointerId) return;
+          drag.current = null;
+          // Land whatever the stream last wrote — never leave an
+          // uncommitted local value dangling.
+          if (d.moved) onTrimChange(trackId, valueAt(e.clientY), true);
+        }}
+        style={{
+          ...cellStyle(TRIM_COL_W),
+          textAlign: 'right',
+          cursor: 'ns-resize',
+          userSelect: 'none',
+          touchAction: 'none',
+          color: neutral ? 'var(--surface2)' : 'var(--yellow)',
+          fontWeight: neutral ? 400 : 600,
+        }}
+      >
+        {fmtTrimDb(trim)}
+      </span>
+    </span>
+  );
+});
+
 /** Memoized (issue 42): ~88 of these sit in a big set, and a selection
  * click paid one full row-stack render (~80 ms) before the memo. The
  * TrackRow contract: identity-stable callbacks (parameterized by
@@ -1779,11 +1903,13 @@ const SetTrackRow = memo(function SetTrackRow({
   occupancy,
   selected,
   dragging,
+  trim,
   onSelect,
   onDragStart,
   onDragEnd,
   onPlayFrom,
   onRemove,
+  onTrimChange,
   onContextMenu,
 }: {
   index: number;
@@ -1813,9 +1939,14 @@ const SetTrackRow = memo(function SetTrackRow({
    * tracks the dragged ids for the ladder's live preview. */
   onDragStart: (e: React.DragEvent, trackId: number) => void;
   onDragEnd: () => void;
+  /** The entry's trim offset (sets #164): knob units from neutral. */
+  trim: number;
   /** Row play button: start Set playback at this row's planned entry. */
   onPlayFrom: ((index: number) => void) | undefined;
   onRemove: (trackId: number) => void;
+  /** Trim edits (sets #164): `commit: false` streams a drag locally,
+   * `true` lands the wholesale PUT (drag release / reset). */
+  onTrimChange: (trackId: number, trim: number, commit: boolean) => void;
   /** Right-click: the universal track menu (sets 17); absent while the
    * row's track metadata is still loading. */
   onContextMenu?: (e: React.MouseEvent, track: Track) => void;
@@ -1961,6 +2092,8 @@ const SetTrackRow = memo(function SetTrackRow({
       {/* NEVER AUDIBLE (sets 19): the badge carries the signal; both
           time cells go blank (rowColumns blanks them). */}
       <NeverAudibleBadge planned={planned} />
+      {/* Per-entry trim (sets #164): drag ↕ adjusts, ⟲ resets. */}
+      <TrimCell trackId={trackId} trim={trim} onTrimChange={onTrimChange} />
       {/* Play-time column (sets 31): the audible span over the track
           length ("in" sits left, beside the play order). */}
       <span

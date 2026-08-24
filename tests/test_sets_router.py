@@ -515,3 +515,69 @@ def test_delete_set_drops_its_dormant_pins(client, db_session, make_track):
     put_state(client, s["id"], [{"track_id": t1.id}], [dormant_item(t1.id, t2.id)])
     assert client.delete(f"/api/sets/{s['id']}").status_code == 204
     assert db_session.query(models.SetDormantPin).count() == 0
+
+
+# ── Per-entry trim (sets #164) ──────────────────────────────────────────
+# Trim is an OFFSET from neutral in mixer-knob units (0 = neutral,
+# ±0.5 spans the knob), never an absolute level — track Autogain
+# (ADR 0034) composes with it when it lands.
+
+
+def test_trim_defaults_neutral(client, make_track):
+    t1 = make_track()
+    s = make_set(client)
+    resp = put_entries(client, s["id"], [t1.id])
+    assert resp.status_code == 200
+    assert resp.json()["entries"][0]["trim"] == 0.0
+    detail = client.get(f"/api/sets/{s['id']}").json()
+    assert detail["entries"][0]["trim"] == 0.0
+
+
+def test_trim_round_trips(client, make_track):
+    t1, t2 = make_track(), make_track()
+    s = make_set(client)
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [
+            {"track_id": t1.id, "trim": 0.125},
+            {"track_id": t2.id, "trim": -0.25},
+        ]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert [e["trim"] for e in resp.json()["entries"]] == [0.125, -0.25]
+    detail = client.get(f"/api/sets/{s['id']}").json()
+    assert [e["trim"] for e in detail["entries"]] == [0.125, -0.25]
+
+
+def test_trim_updates_existing_row(client, db_session, make_track):
+    """Reconcile-by-track_id mutates the existing row's trim in place —
+    the entry row keeps its id (ADR 0011 idempotence)."""
+    t1 = make_track()
+    s = make_set(client)
+    put_entries(client, s["id"], [t1.id])
+    row_id = db_session.query(models.SetEntry).one().id
+
+    resp = client.put(
+        f"/api/sets/{s['id']}/entries",
+        json={"items": [{"track_id": t1.id, "trim": 0.3}]},
+    )
+    assert resp.status_code == 200
+    row = db_session.query(models.SetEntry).one()
+    assert row.id == row_id
+    assert row.trim == 0.3
+
+    # An omitted trim writes the neutral default back (wholesale replace:
+    # the payload IS the state, absent = neutral).
+    put_entries(client, s["id"], [t1.id])
+    assert db_session.query(models.SetEntry).one().trim == 0.0
+
+
+def test_trim_out_of_range_422(client, make_track):
+    t1 = make_track()
+    s = make_set(client)
+    for bad in (0.75, -0.75):
+        resp = client.put(
+            f"/api/sets/{s['id']}/entries",
+            json={"items": [{"track_id": t1.id, "trim": bad}]},
+        )
+        assert resp.status_code == 422

@@ -24,6 +24,7 @@
  *   the delta scale is green→yellow→orange→red, no deck hues.
  */
 import type { CSSProperties } from 'react';
+import { TRIM_DB_PER_UNIT } from '../playback/mixerMath';
 import {
   fmtSec,
   isNeverAudible,
@@ -58,6 +59,9 @@ export const ENERGY_COL_W = 22;
 export const IN_TIME_COL_W = 40;
 /** "play" column — the audible span as `play/total` ("12:34/12:34"). */
 export const PLAY_TIME_COL_W = 76;
+/** Trim column (sets #164) — the entry's trim offset in dB ("−12.0" is
+ * the widest), drag-editable; sits in the right band before play-time. */
+export const TRIM_COL_W = 38;
 /** ✕ remove glyph column. */
 export const REMOVE_COL_W = 24;
 
@@ -177,6 +181,27 @@ export function fmtPlayTime(
 ): string {
   if (!planned || !durationSec || isNeverAudible(planned)) return '';
   return `${fmtSec(Math.max(planned.exitSec - planned.entrySec, 0))}/${fmtSec(durationSec)}`;
+}
+
+// ── Trim cell (sets #164) ────────────────────────────────────────────────
+
+/** Trim offset (knob units, 0 = neutral) → its dB reading. */
+export function trimOffsetDb(trim: number): number {
+  return trim * TRIM_DB_PER_UNIT;
+}
+
+/** dB reading → trim offset in knob units (the drag writes dB). */
+export function trimOffsetFromDb(db: number): number {
+  return db / TRIM_DB_PER_UNIT;
+}
+
+/** Trim cell text: the offset in dB, signed when non-neutral ("+2.4",
+ * "−12.0"); neutral reads "0.0" (rendered dim by the cell). */
+export function fmtTrimDb(trim: number): string {
+  const db = trimOffsetDb(trim);
+  const rounded = Math.round(db * 10) / 10;
+  if (rounded === 0) return '0.0';
+  return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)}`;
 }
 
 /** Overlap cell (sets 32): how long the handover overlaps — the planned

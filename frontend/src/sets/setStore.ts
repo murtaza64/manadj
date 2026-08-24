@@ -30,6 +30,11 @@ export interface SetEntryLocal {
    * entry. Stable — only explicit user acts (pin/unpin/auto-fill accept)
    * change it; saving new Transitions for the pair never does. */
   pin: AdjacencyPin | null;
+  /** Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+   * units (0/absent = neutral, ±0.5 spans the knob). Offset, never an
+   * absolute level — track Autogain composes with it when it lands
+   * (ADR 0034). The Conductor applies it for the entry's deck tenure. */
+  trim?: number;
 }
 
 interface SetStoreSnapshot {
@@ -150,6 +155,7 @@ async function doLoad(setId: number): Promise<void> {
           : e.pin_kind === 'hardcut'
             ? { kind: 'hardcut' }
             : null,
+      trim: e.trim ?? 0,
     }));
     const dormant: DormantPin[] = (detail.dormant ?? []).map((d) => ({
       aTrackId: d.a_track_id,
@@ -242,6 +248,7 @@ async function pushSetState(
         track_id: e.trackId,
         pin_kind: e.pin?.kind ?? null,
         pin_uuid: e.pin?.uuid ?? null,
+        trim: e.trim ?? 0,
       })),
       dormant.map((d) => ({
         a_track_id: d.aTrackId,
@@ -340,6 +347,24 @@ export function setAdjacencyPins(
     }),
     currentDormant(setId).filter((d) => !pinnedPairs.has(`${d.aTrackId}|${d.bTrackId}`))
   );
+}
+
+/** Set an entry's trim offset (sets #164): 0 = neutral, ±0.5 spans the
+ * knob (clamped). Optimistic like every entry mutation; `commit: false`
+ * updates the local snapshot only — a drag streams local updates and
+ * commits once on release (one wholesale PUT, not one per pointermove). */
+export function setEntryTrim(
+  setId: number,
+  trackId: number,
+  trim: number,
+  opts: { commit?: boolean } = {}
+): void {
+  const entries = snapshot.entriesBySet[setId];
+  if (!entries) return;
+  const clamped = Math.max(-0.5, Math.min(0.5, trim));
+  const next = entries.map((e) => (e.trackId === trackId ? { ...e, trim: clamped } : e));
+  if (opts.commit === false) setSetStateLocal(setId, next, currentDormant(setId));
+  else replaceSetEntries(setId, next);
 }
 
 /** Remove Tracks in one order change (the row ✕; sets 18's

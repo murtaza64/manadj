@@ -57,6 +57,13 @@ const NATURAL_END_TOLERANCE_S = 0.05;
 
 const lerp = (a: number, b: number, p: number): number => a + (b - a) * p;
 
+/** Trim is OPTIONAL on a lane (absent = the live user's trim rules):
+ * lerp when both ends carry it, hold the defined end otherwise — a
+ * pickup ramp whose start lanes adopted the base trim converges onto an
+ * entry-trim target without a step (sets #164). */
+const lerpOptional = (a: number | undefined, b: number | undefined, p: number) =>
+  a === undefined ? b : b === undefined ? a : lerp(a, b, p);
+
 const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAutomation => ({
   fader: lerp(from.fader, to.fader, p),
   eq: {
@@ -65,17 +72,23 @@ const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAut
     high: lerp(from.eq.high, to.eq.high, p),
   },
   filter: lerp(from.filter, to.filter, p),
+  trim: lerpOptional(from.trim, to.trim, p),
 });
 
 const LANE_EPS = 1e-3;
 type PlanDeck = PlannedEntry['deck'];
+
+/** Presence differing counts (absent = base trim rules — a real change). */
+const trimDiffers = (a: number | undefined, b: number | undefined): boolean =>
+  a === undefined || b === undefined ? a !== b : Math.abs(a - b) > LANE_EPS;
 
 const laneDiffers = (a: PlanAutomation, b: PlanAutomation): boolean =>
   Math.abs(a.fader - b.fader) > LANE_EPS ||
   Math.abs(a.eq.low - b.eq.low) > LANE_EPS ||
   Math.abs(a.eq.mid - b.eq.mid) > LANE_EPS ||
   Math.abs(a.eq.high - b.eq.high) > LANE_EPS ||
-  Math.abs(a.filter - b.filter) > LANE_EPS;
+  Math.abs(a.filter - b.filter) > LANE_EPS ||
+  trimDiffers(a.trim, b.trim);
 
 const lanesDiffer = (
   a: Record<PlanDeck, PlanAutomation>,
@@ -510,6 +523,10 @@ export class Conductor {
         if (!skip(`${ch}.eqMid`)) this.mixer.setEq(ch, 'mid', lanes[ch].eq.mid);
         if (!skip(`${ch}.eqHigh`)) this.mixer.setEq(ch, 'high', lanes[ch].eq.high);
         if (!skip(`${ch}.filter`)) this.mixer.setFilter(ch, lanes[ch].filter);
+        // A lane WITHOUT trim never owned the node — the base (live)
+        // trim is already the sounding value (sets #164).
+        const trim = lanes[ch].trim;
+        if (trim !== undefined && !skip(`${ch}.trim`)) this.mixer.setTrim(ch, trim);
       }
     }
     if (!skip('crossfader')) this.mixer.setCrossfader(0);

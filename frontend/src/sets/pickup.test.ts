@@ -411,7 +411,14 @@ describe('pickupStartLanes (the convergence ramp start)', () => {
       },
     });
     const lanes = pickupStartLanes(s);
-    expect(lanes.A).toEqual({ fader: 0.8, eq: { low: 0.4, mid: 0.5, high: 0.6 }, filter: 0.2 });
+    // Trim rides along (sets #164): engaging reproduces the sounding
+    // trim, then the ramp converges onto the plan's entry trim.
+    expect(lanes.A).toEqual({
+      fader: 0.8,
+      eq: { low: 0.4, mid: 0.5, high: 0.6 },
+      filter: 0.2,
+      trim: 0.5,
+    });
   });
 
   it('folds the crossfader gain into the fader (value·√xf preserves gain)', () => {

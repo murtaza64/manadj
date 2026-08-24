@@ -17,6 +17,7 @@ import {
   plannerTrackFacts,
   planStateAt,
   trackEffectiveBpm,
+  withEntryTrim,
   type PlanInput,
 } from './planner';
 
@@ -1010,5 +1011,75 @@ describe('BPM authority (bpm-authority bugfix, ADR 0016)', () => {
     // Set tempo defaults to Raskal's effective 174 → Kambi pitches to it.
     expect(plan.entries[0].rate).toBeCloseTo(1);
     expect(plan.entries[1].rate).toBeCloseTo(174 / 172, 5);
+  });
+});
+
+describe('per-entry trim (sets #164)', () => {
+  // Same two-track fixture as the planStateAt suite (window mix 60..80),
+  // with trims: outgoing +0.1 (≈ +2.4 dB), incoming −0.2 (≈ −4.8 dB).
+  const lanes: Transition['lanes'] = {
+    faderA: [
+      { x: 0, y: 1 },
+      { x: 1, y: 0 },
+    ],
+  };
+  const trimmedPlan = (trimA: number | undefined, trimB: number | undefined) =>
+    planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' }, trim: trimA },
+          { trackId: 2, pin: null, trim: trimB },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100) },
+        transitionsByUuid: { t1: tr({ lanes }) },
+      })
+    );
+
+  it('carries the offset onto PlannedEntry (absent = neutral 0)', () => {
+    const plan = trimmedPlan(0.1, undefined);
+    expect(plan.entries[0].trim).toBe(0.1);
+    expect(plan.entries[1].trim).toBe(0);
+  });
+
+  it('neutral entries put NO trim on the lanes — the live knob rules', () => {
+    const s = planStateAt(trimmedPlan(undefined, undefined), 20);
+    expect(s.lanes.A.trim).toBeUndefined();
+    expect(s.lanes.B.trim).toBeUndefined();
+  });
+
+  it('solo stretch: the playing deck sounds neutral + offset; the upcoming deck holds its own from load', () => {
+    const s = planStateAt(trimmedPlan(0.1, -0.2), 20);
+    // Occupancy starts at the upcoming entry: deck B's trim is already in
+    // place when the Conductor loads it — before its window begins.
+    expect(s.lanes.A.trim).toBeCloseTo(0.6);
+    expect(s.lanes.B.trim).toBeCloseTo(0.3);
+  });
+
+  it('inside the window each deck keeps its own entry offset (no artifact trim lanes yet)', () => {
+    const s = planStateAt(trimmedPlan(0.1, -0.2), 70);
+    expect(s.lanes.A.trim).toBeCloseTo(0.6);
+    expect(s.lanes.B.trim).toBeCloseTo(0.3);
+  });
+
+  it('after the handover the incoming deck still carries its offset', () => {
+    const s = planStateAt(trimmedPlan(0.1, -0.2), 90);
+    expect(s.lanes.B.trim).toBeCloseTo(0.3);
+  });
+
+  it('clamps neutral + offset to the knob', () => {
+    const s = planStateAt(trimmedPlan(0.5, -0.5), 20);
+    expect(s.lanes.A.trim).toBe(1);
+    expect(s.lanes.B.trim).toBe(0);
+  });
+
+  it('withEntryTrim: artifact-recorded trim wins during its window; the offset is the baseline elsewhere', () => {
+    const artifact = { fader: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, trim: 0.9 };
+    // A lane already carrying trim is artifact-recorded — untouched.
+    expect(withEntryTrim(artifact, 0.2)).toBe(artifact);
+    // A bare lane takes neutral + offset.
+    const bare = { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0 };
+    expect(withEntryTrim(bare, 0.2).trim).toBeCloseTo(0.7);
+    // Neutral offset leaves the lane alone (identity — no trim key).
+    expect(withEntryTrim(bare, 0)).toBe(bare);
   });
 });

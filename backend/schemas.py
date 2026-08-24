@@ -500,6 +500,10 @@ class SetEntryItem(BaseModel):
     track_id: int
     pin_kind: str | None = Field(default=None, pattern=r"^(transition|take|hardcut)$")
     pin_uuid: str | None = None
+    # Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+    # units (0 = neutral, ±0.5 spans the knob) — composes with track
+    # Autogain when that lands (ADR 0034), never an absolute level.
+    trim: float = Field(default=0.0, ge=-0.5, le=0.5)
 
     @model_validator(mode="after")
     def _pin_fields_travel_together(self) -> "SetEntryItem":
@@ -547,6 +551,7 @@ class SetEntryRow(BaseModel):
     position: int
     pin_kind: str | None
     pin_uuid: str | None
+    trim: float
 
     model_config = ConfigDict(from_attributes=True)
 

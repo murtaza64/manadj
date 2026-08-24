@@ -625,6 +625,12 @@ class SetEntry(Base):
     position = Column(Integer, nullable=False)
     pin_kind = Column(String, nullable=True)  # "transition" | "take" | "hardcut" | NULL
     pin_uuid = Column(String, nullable=True)  # NULL for hardcut (references nothing)
+    # Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+    # units (0 = neutral; ±0.5 spans the knob), never an absolute level —
+    # track Autogain (#35–#40, ADR 0034) composes with it when it lands
+    # (effective knob = autogain + offset), so its arrival changes nothing
+    # here. The Conductor applies it at Deck load for the entry's tenure.
+    trim = Column(Float, nullable=False, default=0.0, server_default=text("0"))
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

@@ -22,10 +22,14 @@
 import type { AdjacencyPin } from './adjacency';
 
 /** An ordered Set entry as dormancy sees it: the track plus the pin of
- * the adjacency it heads (structurally `SetEntryLocal`). */
+ * the adjacency it heads (structurally `SetEntryLocal`). Trim (sets
+ * #164) is per-TRACK entry state, not adjacency state — the reconcile
+ * carries it along untouched (dormancy is a pin rule only). */
 export interface OrderedEntry {
   trackId: number;
   pin: AdjacencyPin | null;
+  /** Trim offset from neutral (sets #164); absent = neutral. */
+  trim?: number;
 }
 
 /** A Set's memory of a broken pin, keyed by the ORDERED track pair. */
@@ -63,7 +67,13 @@ export function reconcileOrderChange(
   const dormantByPair = new Map<string, DormantPin>();
   for (const d of oldDormant) dormantByPair.set(key(d.aTrackId, d.bTrackId), d);
 
-  const entries: OrderedEntry[] = newTrackIds.map((trackId) => ({ trackId, pin: null }));
+  // Entry state that is not pin state (trim) rides with its track.
+  const oldByTrackId = new Map(oldEntries.map((e) => [e.trackId, e]));
+  const entries: OrderedEntry[] = newTrackIds.map((trackId) => ({
+    trackId,
+    pin: null,
+    trim: oldByTrackId.get(trackId)?.trim,
+  }));
   for (let i = 0; i < entries.length - 1; i++) {
     const k = key(entries[i].trackId, entries[i + 1].trackId);
     const kept = oldPairPins.get(k);

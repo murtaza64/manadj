@@ -1471,6 +1471,10 @@ export interface SetEntryItemWire {
    * transition/take; a Hard-cut pin (sets 26) carries no uuid. */
   pin_kind?: 'transition' | 'take' | 'hardcut' | null;
   pin_uuid?: string | null;
+  /** Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+   * units (0 = neutral, ±0.5 spans the knob) — composes with track
+   * Autogain when that lands (ADR 0034). Absent = neutral. */
+  trim?: number;
 }
 
 export interface SetEntryRowWire {
@@ -1478,6 +1482,8 @@ export interface SetEntryRowWire {
   position: number;
   pin_kind: 'transition' | 'take' | 'hardcut' | null;
   pin_uuid: string | null;
+  /** Trim offset from neutral, knob units (sets #164). */
+  trim: number;
 }
 
 /** A Dormant pin (sets 07): a broken pin remembered per ORDERED track

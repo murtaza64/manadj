@@ -40,6 +40,7 @@ import {
   laneValuesAt,
   tempoMatchPitch,
 } from '../editor/mixModel';
+import { TRIM_NEUTRAL } from '../playback/mixerMath';
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { Track } from '../types';
 import type { AdjacencyPin } from './adjacency';
@@ -87,7 +88,10 @@ export const DEFAULT_GRACE_HEADROOM_SEC = 5;
 export const DEFAULT_GRACE_FADE_SEC = 2;
 
 export interface PlanInput {
-  entries: { trackId: number; pin: AdjacencyPin | null }[];
+  /** Trim (sets #164) is an OFFSET from neutral in mixer-knob units
+   * (0/absent = neutral) — offset, never absolute, so track Autogain
+   * composes when it lands (ADR 0034). */
+  entries: { trackId: number; pin: AdjacencyPin | null; trim?: number }[];
   /** Facts per track id. Every entry's track must be present. */
   tracks: Record<number, PlannerTrackFacts>;
   /** Full Transition payloads per uuid (the pair store's `data`). */
@@ -165,6 +169,10 @@ export interface PlannedEntry {
   /** The audible span on the mix axis. */
   entryMixSec: number;
   exitMixSec: number;
+  /** Per-entry trim offset from neutral, knob units (sets #164; 0 =
+   * neutral). Applied to the deck's lanes for this entry's tenure —
+   * artifact-recorded trim wins during its window (withEntryTrim). */
+  trim: number;
   /** Present when the planner truncated this entry's tail (sets 14). */
   graceFade?: GraceFade;
 }
@@ -317,6 +325,7 @@ export function planSet(input: PlanInput): SetPlan {
         exitSec: facts.durationSec,
         entryMixSec,
         exitMixSec: toMix(facts.durationSec),
+        trim: input.entries[i].trim ?? 0,
       });
       break;
     }
@@ -338,6 +347,7 @@ export function planSet(input: PlanInput): SetPlan {
         exitSec: facts.durationSec,
         entryMixSec,
         exitMixSec: cutMix,
+        trim: input.entries[i].trim ?? 0,
       });
       adjacencies.push({
         kind: 'hardcut',
@@ -445,6 +455,7 @@ export function planSet(input: PlanInput): SetPlan {
       exitSec,
       entryMixSec,
       exitMixSec: toMix(exitSec),
+      trim: input.entries[i].trim ?? 0,
     });
     adjacencies.push({
       kind,
@@ -619,6 +630,12 @@ export interface PlanAutomation {
   fader: number;
   eq: { low: number; mid: number; high: number };
   filter: number;
+  /** Absolute trim knob position (0..1); ABSENT = the live user's trim
+   * rules (the mixer overlay's optional-trim contract, sessions 15).
+   * Carried when the deck's entry holds a non-neutral trim offset
+   * (sets #164), or by future artifact-recorded trim lanes — which win
+   * during their window (withEntryTrim). */
+  trim?: number;
 }
 
 export interface PlanState {
@@ -643,6 +660,19 @@ const soloLanes = (fader: number): PlanAutomation => ({
   eq: { low: 0.5, mid: 0.5, high: 0.5 },
   filter: 0,
 });
+
+/**
+ * Overlay an entry's trim offset (sets #164) onto a deck's lanes: a lane
+ * ALREADY carrying trim is artifact-recorded (vectorized trim lanes,
+ * future Routine spans) and wins during its window untouched; the entry
+ * offset is the baseline everywhere else — applied as neutral + offset,
+ * clamped to the knob. Offset-from-neutral on purpose: track Autogain
+ * (ADR 0034) will replace the neutral term, not fight the offset.
+ */
+export function withEntryTrim(lane: PlanAutomation, trimOffset: number): PlanAutomation {
+  if (trimOffset === 0 || lane.trim !== undefined) return lane;
+  return { ...lane, trim: Math.max(0, Math.min(1, TRIM_NEUTRAL + trimOffset)) };
+}
 
 /** The adjacency whose window contains t (zero-width hard cuts never
  * match); the LATEST wins if a degenerate plan overlaps windows. */
@@ -786,6 +816,17 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
     for (const deck of ['A', 'B'] as const) {
       if (state.decks[deck].playing) state.lanes[deck] = soloLanes(1);
     }
+  }
+
+  // Entry trim (sets #164): the deck OCCUPANT's trim offset rides its
+  // lanes for the whole tenure — occupancy starts at the upcoming entry,
+  // so the trim is in place from the Conductor's Deck load, before the
+  // entry's window begins. Artifact-recorded trim (a window lane already
+  // carrying trim) wins during its span (withEntryTrim).
+  for (const deck of ['A', 'B'] as const) {
+    const idx = state.decks[deck].entryIndex;
+    if (idx === null) continue;
+    state.lanes[deck] = withEntryTrim(state.lanes[deck], plan.entries[idx].trim);
   }
 
   // Grace fade (sets 14): inside the synthesized fade, the dying entry's

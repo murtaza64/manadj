@@ -440,6 +440,10 @@ export function pickupStartLanes(snap: PickupSnapshot): Record<PlanDeck, PlanAut
       fader: c.fader * Math.sqrt(xfGain(snap, ch)),
       eq: { ...c.eq },
       filter: c.filter,
+      // Adopt the live trim (sets #164): engaging is inaudible, and the
+      // ramp converges onto the plan's entry trim (or hands the node
+      // back to base at ramp end when the plan carries none).
+      trim: c.trim,
     };
   };
   return { A: lane('A'), B: lane('B') };
