@@ -432,11 +432,18 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const conductorAudio = useCallback(
     () => ({
       mixer: mixerRef.current,
-      engines: { A: decksRef.current.A.engine, B: decksRef.current.B.engine },
+      // All four engines: a plan with Routines allocates cast slots
+      // across A→B→C→D (routines 159).
+      engines: {
+        A: decksRef.current.A.engine,
+        B: decksRef.current.B.engine,
+        C: decksRef.current.C.engine,
+        D: decksRef.current.D.engine,
+      },
     }),
     []
   );
-  const loadTrackOnDeck = useCallback((deck: 'A' | 'B', trackId: number) => {
+  const loadTrackOnDeck = useCallback((deck: ChannelId, trackId: number) => {
     // The deck provider's one Load path (ADR 0022); the pane's track
     // map usually already holds the row.
     const known = trackMapRef.current?.get(trackId);
@@ -1363,6 +1370,10 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'grace-fade': 'overlap: previous track fades early',
   'grace-floor': 'overlap pileup',
   'entry-after-exit': 'never audible',
+  'routine-invalid': 'routine pin skipped',
+  'routine-window-collision': 'routine window collides',
+  'routine-deck-overflow': 'routine out of decks',
+  'routine-global-controls-dropped': 'routine crossfader dropped',
 };
 
 /** Memoized (issue 42): ~87 of these sit in a big set, and a selection

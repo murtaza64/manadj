@@ -174,7 +174,7 @@ function harness() {
       audio,
       (deck, trackId) => {
         loads.push(`${deck}:${trackId}`);
-        engines[deck].trackId = trackId;
+        engines[deck as 'A' | 'B'].trackId = trackId;
       },
       { rampSec: 1.5 }
     );

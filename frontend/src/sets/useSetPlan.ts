@@ -77,6 +77,79 @@ import {
 import { useSetSettings } from './setSettings';
 import type { SetEntryLocal } from './setStore';
 
+/**
+ * DEV SEAM — Routine replay before the pin plumbing lands (routines 159;
+ * TEMPORARY, replaced by #160's routine-pin resolution at the e2e merge).
+ * Gated OFF by default: `localStorage.setItem('manadj.devRoutineReplay',
+ * '1')` feeds every saved Routine whose cast matches consecutive Set
+ * entries into the plan's routines channel, so replay is audible and
+ * reviewable end-to-end. Deliberately NOT pin semantics: no picker, no
+ * dormancy — first cast match wins.
+ */
+function useDevRoutineReplay(
+  entries: SetEntryLocal[] | undefined
+): PlanInput['routines'] | undefined {
+  const enabled =
+    typeof localStorage !== 'undefined' &&
+    localStorage.getItem('manadj.devRoutineReplay') === '1';
+  const { data: rows } = useQuery({
+    queryKey: ['routines'],
+    enabled: enabled && (entries?.length ?? 0) > 0,
+    staleTime: 30_000,
+    queryFn: () => api.routines.list(),
+  });
+  const matches = useMemo(() => {
+    if (!enabled || !rows || !entries) return [];
+    const out: { startEntryIndex: number; uuid: string }[] = [];
+    const claimed = new Set<number>();
+    for (const row of rows) {
+      const n = row.cast.length;
+      for (let i = 0; i + n <= entries.length; i++) {
+        if (claimed.has(i)) continue;
+        if (row.cast.every((tid, k) => entries[i + k].trackId === tid)) {
+          out.push({ startEntryIndex: i, uuid: row.uuid });
+          claimed.add(i);
+          break;
+        }
+      }
+    }
+    return out.sort((a, b) => a.startEntryIndex - b.startEntryIndex);
+  }, [enabled, rows, entries]);
+  const detailQueries = useQueries({
+    queries: matches.map((m) => ({
+      queryKey: ['routine', m.uuid],
+      queryFn: () => api.routines.get(m.uuid),
+      staleTime: Infinity,
+      retry: false,
+    })),
+  });
+  // Stable identity: recompute only when a fetch lands (plan identity
+  // feeds useMemo chains downstream).
+  const dataKey = matches
+    .map((m, i) => `${m.uuid}@${m.startEntryIndex}:${detailQueries[i]?.data ? 1 : 0}`)
+    .join(',');
+  return useMemo(() => {
+    if (!enabled || matches.length === 0) return undefined;
+    const out: NonNullable<PlanInput['routines']> = [];
+    matches.forEach((m, i) => {
+      const d = detailQueries[i]?.data;
+      if (!d) return; // still loading / failed → the pinless plan stands
+      out.push({
+        startEntryIndex: m.startEntryIndex,
+        routine: {
+          cast: d.cast,
+          entryOffsetsBeats: d.entry_offsets_beats,
+          entryPositions: d.entry_positions,
+          durationBeats: d.duration_beats,
+          events: d.events,
+        },
+      });
+    });
+    return out.length > 0 ? out : undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, dataKey]);
+}
+
 export function useSetPlan(
   entries: SetEntryLocal[] | undefined,
   trackMap: Map<number, Track> | undefined,
@@ -104,6 +177,7 @@ export function useSetPlanParts(
 ): { input: PlanInput | undefined; plan: SetPlan | undefined } {
   const { tempoReturnSecPerPercent, graceHeadroomSec, graceFadeSec } = useSetSettings();
   const pairStore = useSyncExternalStore(subscribePairStore, snapshotPairStore);
+  const devRoutines = useDevRoutineReplay(entries);
 
   // Never plan against an unloaded pair store: pinned Transitions would
   // transiently degrade to hard cuts — and a "Play set" pressed in that
@@ -208,6 +282,7 @@ export function useSetPlanParts(
       takesByUuid,
       tempo: tempoInput,
       grace: { headroomSec: graceHeadroomSec, fadeSec: graceFadeSec },
+      routines: devRoutines,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -224,6 +299,7 @@ export function useSetPlanParts(
     tempoReturnSecPerPercent,
     graceHeadroomSec,
     graceFadeSec,
+    devRoutines,
   ]);
   const plan = useMemo(() => (input ? planSet(input) : undefined), [input]);
   return { input, plan };

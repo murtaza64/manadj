@@ -27,7 +27,9 @@ import { audibleHolder, type AudibleSurfaceId } from '../playback/audibleSurface
 import { channelFaderToGain, crossfaderGains, trimToGain } from '../playback/mixerMath';
 import type { PlanAutomation, PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
 
-type PlanDeck = PlannedEntry['deck'];
+/** The pair-machine decks: Pickup adopts the shared A/B pair (a Routine's
+ * C/D allocations are Conductor territory — routines 159). */
+type PlanDeck = 'A' | 'B';
 
 /** Default alignment tolerance for the two-deck blend case: the
  * Conductor's drift tolerance (issue 16). Tunable — but raising it past
@@ -420,11 +422,22 @@ function twoDeckPickup(
 
 // ── Execution helpers (pure; the runtime applies them) ──────────────────
 
-/** Mirror a plan's physical deck assignment (A↔B). planStateAt derives
- * decks and lanes from entry.deck alone, so this transform is complete. */
+/** Mirror a plan's physical deck assignment (A↔B; a Routine's C/D
+ * allocations stay put). planStateAt derives decks and lanes from
+ * entry.deck and the routine slots' decks, so this transform is
+ * complete. */
 export function flipPlanDecks(plan: SetPlan): SetPlan {
-  const flip = (d: PlannedEntry['deck']): PlannedEntry['deck'] => (d === 'A' ? 'B' : 'A');
-  return { ...plan, entries: plan.entries.map((e) => ({ ...e, deck: flip(e.deck) })) };
+  const flip = (d: PlannedEntry['deck']): PlannedEntry['deck'] =>
+    d === 'A' ? 'B' : d === 'B' ? 'A' : d;
+  return {
+    ...plan,
+    entries: plan.entries.map((e) => ({ ...e, deck: flip(e.deck) })),
+    routines: plan.routines.map((r) => ({
+      ...r,
+      slots: r.slots.map((s) => ({ ...s, deck: s.deck === null ? null : flip(s.deck) })),
+      exit: { ...r.exit, deck: flip(r.exit.deck) },
+    })),
+  };
 }
 
 /**

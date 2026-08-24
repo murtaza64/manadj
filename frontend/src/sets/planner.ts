@@ -43,6 +43,19 @@ import {
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { Track } from '../types';
 import type { AdjacencyPin } from './adjacency';
+import {
+  buildPlannedRoutine,
+  routineSlotStateAt,
+  slotLanesAt,
+  traceStateAt,
+  type PlannedRoutine,
+  type RoutinePlanInput,
+} from './routinePlan';
+
+/** Physical decks a plan may drive. Ping-pong entries live on A/B; a
+ * Routine's cast slots allocate across all four (routines 159). */
+export type PlanDeck = 'A' | 'B' | 'C' | 'D';
+export const PLAN_DECKS: readonly PlanDeck[] = ['A', 'B', 'C', 'D'];
 
 export interface PlannerTrackFacts {
   durationSec: number;
@@ -98,6 +111,12 @@ export interface PlanInput {
   tempo?: TempoPolicyInput;
   /** Grace fade tunables (sets 14); absent = the defaults above. */
   grace?: { headroomSec?: number; fadeSec?: number };
+  /** Pinned Routines, resolved upstream (routines 159): each plays its
+   * promoted recording over the n cast entries starting at
+   * `startEntryIndex`, covering the n−1 adjacencies between them. THE
+   * RoutinePlanInput seam — #160's pin plumbing feeds it at the e2e
+   * merge; tests feed it directly. */
+  routines?: { startEntryIndex: number; routine: RoutinePlanInput }[];
 }
 
 interface PlannedAdjacencyBase {
@@ -125,6 +144,10 @@ interface PlannedAdjacencyBase {
    * to native, completing here. === mixEndSec when there is no ramp
    * (hard cuts, native windows, Fixed policy, zero runway). */
   tempoReturnEndSec: number;
+  /** The incoming's track position at mixEndSec, for adjacencies with no
+   * authored window to derive it from (routine adjacencies only): the
+   * Tempo return quadratic eases from here (routines 159). */
+  incomingTrackSecAtWindowEnd?: number;
 }
 
 /** hardcut covers no applicable Transition: nothing to resolve, an
@@ -133,7 +156,12 @@ interface PlannedAdjacencyBase {
  * (idealized for Takes). */
 export type PlannedAdjacency =
   | (PlannedAdjacencyBase & { kind: 'hardcut'; transition?: undefined })
-  | (PlannedAdjacencyBase & { kind: 'transition' | 'take'; transition: Transition });
+  | (PlannedAdjacencyBase & { kind: 'transition' | 'take'; transition: Transition })
+  /** Covered by a pinned Routine (routines 159): the recording plays this
+   * handover; plan.routines[routineIndex] carries the replay. The LAST
+   * covered adjacency spans to the Routine's end and carries the exit
+   * slot's Tempo return. */
+  | (PlannedAdjacencyBase & { kind: 'routine'; transition?: undefined; routineIndex: number });
 
 /** A planner-synthesized early exit (sets 14): the entry's tail was
  * truncated to free its deck for a colliding window, with a fade-out
@@ -152,7 +180,7 @@ export interface GraceFade {
 
 export interface PlannedEntry {
   trackId: number;
-  deck: 'A' | 'B';
+  deck: PlanDeck;
   /** Mix time where this track's time 0 sits at its solo `rate` — its
    * solo-stretch anchor (valid after its entry window and Tempo return
    * end): trackTime = (mix − mixOffsetSec) · rate. */
@@ -182,7 +210,11 @@ export interface PlanWarning {
     | 'pitch-clamped'
     | 'grace-fade'
     | 'grace-floor'
-    | 'entry-after-exit';
+    | 'entry-after-exit'
+    | 'routine-invalid'
+    | 'routine-window-collision'
+    | 'routine-deck-overflow'
+    | 'routine-global-controls-dropped';
   message: string;
   adjacencyIndex?: number;
   entryIndex?: number;
@@ -191,6 +223,9 @@ export interface PlanWarning {
 export interface SetPlan {
   entries: PlannedEntry[];
   adjacencies: PlannedAdjacency[];
+  /** Pinned Routine replays (routines 159), in mix order. Covered
+   * adjacencies point in by routineIndex. */
+  routines: PlannedRoutine[];
   /** Mix length: the last track's exit instant. */
   totalSec: number;
   /** Non-fatal degeneracies (overlapping windows, insufficient Tempo
@@ -232,9 +267,10 @@ function resolvePin(
 export function planSet(input: PlanInput): SetPlan {
   const entries: PlannedEntry[] = [];
   const adjacencies: PlannedAdjacency[] = [];
+  const routines: PlannedRoutine[] = [];
   const warnings: PlanWarning[] = [];
   if (input.entries.length === 0) {
-    return { entries, adjacencies, totalSec: 0, warnings };
+    return { entries, adjacencies, routines, totalSec: 0, warnings };
   }
 
   const tempo: TempoPolicyInput = input.tempo ?? { policy: 'riding' };
@@ -289,6 +325,67 @@ export function planSet(input: PlanInput): SetPlan {
     return resolvePin(e.pin, input, factsOf(e.trackId).bpm, factsOf(next.trackId).bpm);
   });
 
+  // Pinned Routines (routines 159), validated: the cast must BE the next
+  // n entries in Set order (offerability, ADR 0035) with every cast track
+  // carrying a BPM (the beat-domain clock needs a target rate). Invalid
+  // ones plan as if unpinned — library/beatgrid decay never corrupts a
+  // Set, same doctrine as dangling pins.
+  const routineByStart = new Map<number, RoutinePlanInput>();
+  for (const { startEntryIndex, routine } of input.routines ?? []) {
+    const n = routine.cast.length;
+    const invalid = (msg: string) =>
+      warnings.push({
+        severity: 'warning',
+        kind: 'routine-invalid',
+        adjacencyIndex: startEntryIndex,
+        message: `routine pin skipped: ${msg}`,
+      });
+    if (n < 3) {
+      invalid('n ≥ 3 — a 2-cast routine is a Transition (ADR 0035)');
+      continue;
+    }
+    if (
+      routine.entryOffsetsBeats.length !== n ||
+      routine.entryPositions.length !== n ||
+      startEntryIndex < 0 ||
+      startEntryIndex + n > input.entries.length
+    ) {
+      invalid('cast does not fit the Set at its pinned position');
+      continue;
+    }
+    const castMatches = routine.cast.every(
+      (tid, k) => input.entries[startEntryIndex + k].trackId === tid
+    );
+    if (!castMatches) {
+      invalid('cast no longer matches the next entries in Set order');
+      continue;
+    }
+    if (routine.cast.some((tid) => !factsOf(tid).bpm)) {
+      invalid('a cast track has no BPM — the beat-domain clock cannot scale');
+      continue;
+    }
+    const overlaps = [...routineByStart.entries()].some(
+      ([start, r]) => startEntryIndex > start && startEntryIndex < start + r.cast.length - 1
+    );
+    if (overlaps) {
+      invalid('overlaps another pinned routine mid-span');
+      continue;
+    }
+    routineByStart.set(startEntryIndex, routine);
+  }
+
+  /** The incoming entry's next boundary in ITS OWN track time — where a
+   * Tempo return ramp must complete by: its next window start, a routine
+   * window start when a Routine pins there, else its end. */
+  const nextBoundaryTrackSec = (entryIdx: number): number => {
+    const routine = routineByStart.get(entryIdx);
+    if (routine) return Math.max(0, routine.entryPositions[0]);
+    return (
+      resolvedPins[entryIdx]?.transition.startSec ??
+      factsOf(input.entries[entryIdx].trackId).durationSec
+    );
+  };
+
   // Walk the chain accumulating each track's mix anchor (time 0's mix
   // instant at its solo rate). The first track opens the set from its
   // very beginning (cues are performance markers, not set boundaries):
@@ -296,6 +393,12 @@ export function planSet(input: PlanInput): SetPlan {
   let mixOffset = 0;
   let entrySec = 0;
   let entryMixSec = 0;
+  // Deck assignment: alternate within A/B ("the first of A→B not equal
+  // to the previous entry's deck" — exactly ping-pong parity when no
+  // Routine intervenes). A Routine allocates its interior slots across
+  // A→B→C→D and forces its exit slot's deck onto the exit entry.
+  let prevDeck: PlanDeck = 'B';
+  let forcedDeck: PlanDeck | null = null;
 
   for (let i = 0; i < input.entries.length; i++) {
     const { trackId } = input.entries[i];
@@ -303,8 +406,133 @@ export function planSet(input: PlanInput): SetPlan {
     const rate = rates[i];
     /** Entry i's track time → global mix time (solo-rate mapping). */
     const toMix = (t: number) => mixOffset + t / rate;
-    const deck: 'A' | 'B' = i % 2 === 0 ? 'A' : 'B';
+    const deck: PlanDeck = forcedDeck ?? (prevDeck === 'A' ? 'B' : 'A');
+    forcedDeck = null;
+    prevDeck = deck;
     const next = input.entries[i + 1];
+
+    // ── Routine span (routines 159) ─────────────────────────────────────
+    const pinnedRoutine = routineByStart.get(i);
+    if (pinnedRoutine && next) {
+      const n = pinnedRoutine.cast.length;
+      // The window opens where the recording's slot-0 entry mark sits on
+      // this entry's own timeline: the sounding deck is ADOPTED there.
+      const mixStartSec = toMix(Math.max(0, pinnedRoutine.entryPositions[0]));
+      const prevAdj = adjacencies[adjacencies.length - 1];
+      if (mixStartSec < entryMixSec || (prevAdj && mixStartSec < prevAdj.tempoReturnEndSec)) {
+        warnings.push({
+          severity: 'warning',
+          kind: 'routine-window-collision',
+          adjacencyIndex: i,
+          message:
+            'routine window opens before the entry track settles (inside its own entry window or Tempo return) — replay timing is approximate there',
+        });
+      }
+      // Replay tempo: the Set tempo under Fixed; slot 0's native BPM
+      // under Riding (the entry track solos at native rate — adopting it
+      // IS the pitch anchor).
+      const targetBpm = setTempo ?? factsOf(pinnedRoutine.cast[0]).bpm!;
+      const prevEntry = entries[entries.length - 1];
+      const { routine: planned, warnings: buildWarnings } = buildPlannedRoutine(pinnedRoutine, {
+        startEntryIndex: i,
+        mixStartSec,
+        targetBpm,
+        adoptedDeck: deck,
+        busy: prevEntry ? [{ deck: prevEntry.deck, untilMixSec: prevEntry.exitMixSec }] : [],
+        trackBpms: pinnedRoutine.cast.map((tid) => factsOf(tid).bpm!),
+      });
+      routines.push(planned);
+      const routineIndex = routines.length - 1;
+      for (const w of buildWarnings) {
+        warnings.push({ ...w, adjacencyIndex: i });
+      }
+
+      // Slot 0 = this entry, adopted: audible until the Routine end (its
+      // recorded fade lives in the replay lanes).
+      const slot0End = traceStateAt(planned.slots[0].trace, pinnedRoutine.durationBeats);
+      entries.push({
+        trackId,
+        deck,
+        mixOffsetSec: mixOffset,
+        rate,
+        entrySec,
+        exitSec: Math.max(0, slot0End.pos),
+        entryMixSec,
+        exitMixSec: planned.mixEndSec,
+      });
+
+      // Covered adjacencies + interior entries. The last covered
+      // adjacency spans to the Routine end and carries the exit slot's
+      // Tempo return (Riding eases the pitched exit back to native).
+      const exitIdx = i + n - 1;
+      const exit = planned.exit;
+      const exitRate = 1 + exit.pitchPercent / 100;
+      let exitTempoReturnEndSec = planned.mixEndSec;
+      let exitMixOffset: number;
+      if (tempo.policy === 'riding' && exit.pitchPercent !== 0) {
+        const secPerPercent = tempo.returnSecPerPercent ?? DEFAULT_TEMPO_RETURN_SEC_PER_PERCENT;
+        const desired = Math.abs(exit.pitchPercent) * secPerPercent;
+        const boundary =
+          exitIdx + 1 < input.entries.length
+            ? nextBoundaryTrackSec(exitIdx)
+            : factsOf(input.entries[exitIdx].trackId).durationSec;
+        const dMax = Math.max(0, (2 * (boundary - exit.trackSecAtEnd)) / (1 + exitRate));
+        const d = Math.min(desired, dMax);
+        if (d < desired) {
+          warnings.push({
+            severity: 'warning',
+            kind: 'insufficient-runway',
+            adjacencyIndex: exitIdx - 1,
+            message: `solo stretch too short for the Tempo return — ramp clamped from ${desired.toFixed(1)}s to ${d.toFixed(1)}s`,
+          });
+        }
+        exitTempoReturnEndSec = planned.mixEndSec + d;
+        exitMixOffset = exitTempoReturnEndSec - (exit.trackSecAtEnd + (d * (exitRate + 1)) / 2);
+      } else {
+        exitMixOffset = planned.mixEndSec - exit.trackSecAtEnd / rates[exitIdx];
+      }
+
+      for (let k = 0; k < n - 1; k++) {
+        const incoming = planned.slots[k + 1];
+        const isLast = k === n - 2;
+        adjacencies.push({
+          kind: 'routine',
+          routineIndex,
+          rateIncoming: 1 + incoming.basePitchPercent / 100,
+          pitchIncomingPercent: incoming.basePitchPercent,
+          rateOutgoing: 1,
+          mixStartSec: incoming.entryMixSec,
+          mixEndSec: isLast ? planned.mixEndSec : incoming.entryMixSec,
+          tempoReturnEndSec: isLast ? exitTempoReturnEndSec : incoming.entryMixSec,
+          incomingTrackSecAtWindowEnd: isLast ? exit.trackSecAtEnd : undefined,
+        });
+        if (!isLast) {
+          const slotRate = 1 + incoming.basePitchPercent / 100;
+          const interiorEnd = traceStateAt(incoming.trace, pinnedRoutine.durationBeats);
+          entries.push({
+            trackId: incoming.trackId,
+            deck: incoming.deck ?? 'A',
+            mixOffsetSec: incoming.entryMixSec - Math.max(0, incoming.entryTrackSec) / slotRate,
+            rate: slotRate,
+            entrySec: Math.max(0, incoming.entryTrackSec),
+            exitSec: Math.max(0, interiorEnd.pos),
+            entryMixSec: incoming.entryMixSec,
+            exitMixSec: planned.mixEndSec,
+          });
+        }
+      }
+
+      // Continue the walk AT the exit entry: it keeps sounding on the
+      // exit slot's deck, anchored so its track time continues seamlessly
+      // from the recording's final position.
+      mixOffset = exitMixOffset;
+      entrySec = Math.max(0, pinnedRoutine.entryPositions[n - 1]);
+      entryMixSec = planned.slots[n - 1].entryMixSec;
+      forcedDeck = exit.deck;
+      prevDeck = exit.deck;
+      i = exitIdx - 1; // the for-increment lands on the exit entry
+      continue;
+    }
 
     if (!next) {
       // Last track: plays to its end; the set stops there.
@@ -416,8 +644,7 @@ export function planSet(input: PlanInput): SetPlan {
     if (tempo.policy === 'riding' && pitchIncoming !== 0) {
       const secPerPercent = tempo.returnSecPerPercent ?? DEFAULT_TEMPO_RETURN_SEC_PER_PERCENT;
       const desired = Math.abs(pitchIncoming) * secPerPercent;
-      const nextBoundary =
-        resolvedPins[i + 1]?.transition.startSec ?? nextFacts.durationSec;
+      const nextBoundary = nextBoundaryTrackSec(i + 1);
       const dMax = Math.max(0, (2 * (nextBoundary - bAtWindowEnd)) / (1 + rateB));
       const d = Math.min(desired, dMax);
       if (d < desired) {
@@ -476,7 +703,7 @@ export function planSet(input: PlanInput): SetPlan {
   flagEntriesAfterExit(entries, adjacencies, warnings);
 
   const last = entries[entries.length - 1];
-  return { entries, adjacencies, totalSec: Math.max(0, last.exitMixSec), warnings };
+  return { entries, adjacencies, routines, totalSec: Math.max(0, last.exitMixSec), warnings };
 }
 
 /** True when a planned entry never becomes audible: it enters at/after
@@ -538,6 +765,17 @@ function applyGraceFades(
 
   for (let j = 1; j < adjacencies.length; j++) {
     const victim = entries[j - 1];
+    // Routine spans manage their own decks (allocation, routines 159):
+    // never truncate into or out of one; and with Routines in the plan
+    // the parity assumption (j+1 and j−1 share a deck) no longer holds —
+    // only a REAL deck collision fades.
+    if (
+      adjacencies[j].kind === 'routine' ||
+      adjacencies[j - 1].kind === 'routine' ||
+      entries[j + 1]?.deck !== victim.deck
+    ) {
+      continue;
+    }
     const needMix = adjacencies[j].mixStartSec - headroom;
     if (victim.exitMixSec <= needMix) continue;
 
@@ -622,8 +860,8 @@ export interface PlanAutomation {
 }
 
 export interface PlanState {
-  decks: Record<'A' | 'B', PlanDeckState>;
-  lanes: Record<'A' | 'B', PlanAutomation>;
+  decks: Record<PlanDeck, PlanDeckState>;
+  lanes: Record<PlanDeck, PlanAutomation>;
   /** The latest entry whose audible span has begun (row highlight). */
   activeEntryIndex: number;
   /** Past the last exit: everything stopped. */
@@ -649,13 +887,13 @@ const soloLanes = (fader: number): PlanAutomation => ({
 function windowAt(plan: SetPlan, t: number): number | null {
   let found: number | null = null;
   plan.adjacencies.forEach((adj, i) => {
-    if (adj.kind !== 'hardcut' && t >= adj.mixStartSec && t < adj.mixEndSec) found = i;
+    if (isWindowed(adj) && t >= adj.mixStartSec && t < adj.mixEndSec) found = i;
   });
   return found;
 }
 
 function isWindowed(adj: PlannedAdjacency): adj is WindowedAdjacency {
-  return adj.kind !== 'hardcut';
+  return adj.kind === 'transition' || adj.kind === 'take';
 }
 
 /** A planned adjacency that executes a window (not a hard cut). */
@@ -679,7 +917,26 @@ function playingTrackTimeAt(
 ): { trackTime: number; pitchPercent: number } {
   const entry = entries[idx];
   const entryAdj = idx > 0 ? adjacencies[idx - 1] : undefined;
-  const windowed = entryAdj && entryAdj.kind !== 'hardcut' ? entryAdj : null;
+  // A Routine exit entry (routines 159): past the Routine end it may
+  // still be easing back to native (Riding) — the same quadratic as a
+  // window's Tempo return, anchored on the recording's final position.
+  if (
+    entryAdj &&
+    entryAdj.kind === 'routine' &&
+    entryAdj.incomingTrackSecAtWindowEnd !== undefined &&
+    mixTime < entryAdj.tempoReturnEndSec &&
+    entryAdj.tempoReturnEndSec > entryAdj.mixEndSec
+  ) {
+    const d = entryAdj.tempoReturnEndSec - entryAdj.mixEndSec;
+    const tau = mixTime - entryAdj.mixEndSec;
+    const r = entryAdj.rateIncoming;
+    const b = entryAdj.incomingTrackSecAtWindowEnd;
+    return {
+      trackTime: b + r * tau + ((1 - r) * tau * tau) / (2 * d),
+      pitchPercent: entryAdj.pitchIncomingPercent * (1 - tau / d),
+    };
+  }
+  const windowed = entryAdj && isWindowed(entryAdj) ? entryAdj : null;
   if (windowed && mixTime < windowed.mixEndSec) {
     return {
       trackTime: Math.max(
@@ -713,14 +970,14 @@ function playingTrackTimeAt(
 
 export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
   const state: PlanState = {
-    decks: { A: { ...IDLE_DECK }, B: { ...IDLE_DECK } },
-    lanes: { A: soloLanes(0), B: soloLanes(0) },
+    decks: { A: { ...IDLE_DECK }, B: { ...IDLE_DECK }, C: { ...IDLE_DECK }, D: { ...IDLE_DECK } },
+    lanes: { A: soloLanes(0), B: soloLanes(0), C: soloLanes(0), D: soloLanes(0) },
     activeEntryIndex: 0,
     done: plan.entries.length === 0 || mixTime >= plan.totalSec,
   };
   if (plan.entries.length === 0) return state;
 
-  for (const deck of ['A', 'B'] as const) {
+  for (const deck of PLAN_DECKS) {
     // Occupant: the active entry on this deck, else the next upcoming one,
     // else the last finished one.
     let active: number | null = null;
@@ -783,7 +1040,7 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
       filter: v.filterB * 2 - 1,
     };
   } else {
-    for (const deck of ['A', 'B'] as const) {
+    for (const deck of PLAN_DECKS) {
       if (state.decks[deck].playing) state.lanes[deck] = soloLanes(1);
     }
   }
@@ -791,7 +1048,7 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
   // Grace fade (sets 14): inside the synthesized fade, the dying entry's
   // fader ramps from its authored value at the fade start to 0 at the
   // truncated exit — REPLACING the authored tail on that deck.
-  for (const deck of ['A', 'B'] as const) {
+  for (const deck of PLAN_DECKS) {
     const d = state.decks[deck];
     if (!d.playing || d.entryIndex === null) continue;
     const entry = plan.entries[d.entryIndex];
@@ -802,6 +1059,30 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
       ...state.lanes[deck],
       fader: g.fadeStartValue * Math.max(0, 1 - (mixTime - g.fadeStartMixSec) / span),
     };
+  }
+
+  // Routine replay override (routines 159): inside a Routine's mix span
+  // the recording is THE authority for its slots' decks — positions from
+  // the beat-domain playhead traces, pitch re-anchored to the target
+  // tempo, mixer lanes from the recorded slot events. Other decks (and
+  // everything outside the span) keep the generic verdicts above.
+  if (!state.done) {
+    const routine = plan.routines.find((r) => mixTime >= r.mixStartSec && mixTime < r.mixEndSec);
+    if (routine) {
+      const beat = (mixTime - routine.mixStartSec) / routine.secPerBeat;
+      for (const slot of routine.slots) {
+        if (slot.deck === null) continue;
+        const s = routineSlotStateAt(routine, slot, mixTime);
+        state.decks[slot.deck] = {
+          entryIndex: routine.startEntryIndex + slot.slot,
+          trackId: slot.trackId,
+          trackTime: s.trackTime,
+          playing: s.playing,
+          pitchPercent: s.pitchPercent,
+        };
+        state.lanes[slot.deck] = slotLanesAt(slot, beat);
+      }
+    }
   }
   return state;
 }
@@ -816,6 +1097,13 @@ export function jumpCrossed(plan: SetPlan, t0: number, t1: number): boolean {
     for (const j of adj.transition.jumps) {
       // Authored instant startSec + x·duration, mapped onto the mix axis.
       const tj = adj.mixStartSec + (j.x * adj.transition.durationSec) / adj.rateOutgoing;
+      if (tj > t0 && tj <= t1) return true;
+    }
+  }
+  // Routine trace discontinuities (recorded seeks/beat jumps/loop wraps)
+  // apply position deltas discontinuously, exactly like authored jumps.
+  for (const r of plan.routines) {
+    for (const tj of r.jumpMixSecs) {
       if (tj > t0 && tj <= t1) return true;
     }
   }

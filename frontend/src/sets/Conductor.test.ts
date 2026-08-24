@@ -250,8 +250,8 @@ function makeConductor(
         loads.push({ deck, trackId });
         // emittingLoads models the real async flow: the engine emits its
         // trackId change outside any conductor call (self-guard blind).
-        if (opts.emittingLoads) engines[deck].loadForeign(trackId);
-        else engines[deck].trackId = trackId;
+        if (opts.emittingLoads) engines[deck as 'A' | 'B'].loadForeign(trackId);
+        else engines[deck as 'A' | 'B'].trackId = trackId;
       },
       onStopped: (reason) => stopped.push(reason),
     }
