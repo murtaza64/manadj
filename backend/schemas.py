@@ -470,6 +470,74 @@ class RoutineCandidateQuery(BaseModel):
     track_ids: list[int]
 
 
+# Routine Take + Routine Schemas (ADR 0035, routines 158)
+
+
+class RoutineTakeCreate(BaseModel):
+    """Confirm a candidate span into a Routine Take (with boundary trim).
+
+    The client sends the FINAL window (trimmed on the Session timeline)
+    plus the effective cast and per-slot entry offsets (seconds from the
+    trimmed window start; slot 0 = 0.0). n ≥ 3 is enforced here — a
+    2-cast confirm is a hand-cut Take and routes to POST /api/takes.
+    `origin_candidate_uuid` is provenance only (candidate uuids dangle
+    after a re-mine)."""
+    uuid: str
+    session_uuid: str
+    window_start_s: float
+    window_end_s: float
+    cast: list[int]
+    entry_offsets: list[float]
+    origin_candidate_uuid: str | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "RoutineTakeCreate":
+        if len(self.cast) < 3:
+            raise ValueError(
+                "n >= 3 — a 2-cast routine is a Transition; cut a hand-cut Take instead (ADR 0035)"
+            )
+        if len(self.entry_offsets) != len(self.cast):
+            raise ValueError("entry_offsets must match the cast, slot for slot")
+        if self.window_end_s <= self.window_start_s:
+            raise ValueError("empty window")
+        return self
+
+
+class RoutineTakeRow(BaseModel):
+    """Transition-history metadata for a Routine Take."""
+    uuid: str
+    session_uuid: str
+    cast: list[int]
+    window_start_s: float
+    window_end_s: float
+    entry_offsets: list[float]
+    origin_candidate_uuid: str | None = None
+    promoted_routine_uuid: str | None = None
+    confirmed_at: datetime
+
+
+class RoutineRow(BaseModel):
+    """A saved Routine — list metadata (no event payload)."""
+    uuid: str
+    name: str | None = None
+    cast: list[int]
+    entry_offsets_beats: list[float]
+    entry_positions: list[float]
+    duration_beats: float
+    origin_take_uuid: str | None = None
+    created_at: datetime | None = None
+
+
+class RoutineDetail(RoutineRow):
+    """One Routine with its slot-addressed, beat-domain event replay."""
+    events: list[dict]
+
+
+class RoutinePatch(BaseModel):
+    """Rename a Routine (the only mutable field pre-editor)."""
+    name: str | None = None
+
+
 # Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)
 
 

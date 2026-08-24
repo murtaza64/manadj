@@ -88,6 +88,47 @@
   color: #ff2d55;
 }
 
+/* Kin grouping (routines 158): one header row per engagement identity —
+   the ordered pair (Takes) or the ordered cast (Routine Takes). */
+.take-kin-header td {
+  color: #ccc;
+  font-weight: 650;
+  font-size: 12px;
+  padding-top: 14px;
+  border-bottom: 1px solid #26263a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 0;
+}
+.take-kin-count {
+  color: #777;
+  font-weight: 400;
+}
+
+/* Routine Take rows: magenta = the routine family (ADR 0035). */
+.take-row.routine:hover td {
+  background: rgba(255, 0, 200, 0.06);
+}
+.take-routine-badge {
+  color: #ff00c8;
+  font-weight: 700;
+}
+.take-promote {
+  background: none;
+  border: 1px solid #ff00c8;
+  border-radius: 4px;
+  color: #ff00c8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 6px;
+}
+.take-promote:hover {
+  background: #ff00c8;
+  color: #1c0316;
+}
+
 /* "View in Session" jump (sessions 04): the timeline glyph, cyan accent. */
 .take-view-session {
   background: none;

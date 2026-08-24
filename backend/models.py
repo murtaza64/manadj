@@ -558,6 +558,93 @@ class Take(Base):
     )
 
 
+class RoutineTake(Base):
+    """A hand-confirmed span of a Session — deck-literal, unreviewed
+    evidence (ADR 0035, routines 158).
+
+    The captured sibling of a Routine, minted only by a human confirming a
+    miner-suggested candidate on the Session timeline (suggestion-first: no
+    liberal auto-minting). Unlike a Take, the event slice is a REFERENCE
+    (`session_uuid` + window on the capture clock), not a copy — the span is
+    read from the Session's chunks at promotion/replay time. The row itself
+    survives Session deletion (it is confirmed evidence and lives in the
+    Transition history), but loses replay/promotion once its timeline is
+    gone. `cast_json` is the entry-ordered cast (track ids = slot order,
+    n ≥ 3 enforced at confirm — a 2-cast confirm is a hand-cut Take);
+    `entry_offsets_json` gives each slot's entry as seconds from
+    `window_start_s` (slot 0 = 0.0). `origin_candidate_uuid` is provenance
+    only — candidate rows are recomputable and their uuids dangle after a
+    re-mine. `promoted_routine_uuid` mirrors Take.promoted_transition_uuid:
+    promotion never mutates the raw confirm (evidence doctrine).
+
+    `entry_track_id`/`exit_track_id` denormalize the boundary tracks for
+    cast-prefix queries (pin-picker parity with routine_candidates).
+    """
+
+    __tablename__ = "routine_takes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    session_uuid = Column(String, nullable=False)
+    entry_track_id = Column(Integer, nullable=False)
+    exit_track_id = Column(Integer, nullable=False)
+    cast_json = Column(Text, nullable=False)  # JSON list of track ids, entry order
+    window_start_s = Column(Float, nullable=False)  # capture-clock seconds
+    window_end_s = Column(Float, nullable=False)
+    entry_offsets_json = Column(Text, nullable=False)  # JSON list, per slot, seconds
+    origin_candidate_uuid = Column(String, nullable=True)
+    promoted_routine_uuid = Column(String, nullable=True)
+    confirmed_at = Column(DateTime, nullable=False, default=func.now())
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_routine_takes_uuid", "uuid", unique=True),
+        Index("idx_routine_takes_session", "session_uuid"),
+        Index("idx_routine_takes_entry", "entry_track_id"),
+    )
+
+
+class Routine(Base):
+    """A saved n-track choreography (ADR 0035; CONTEXT.md "Routine").
+
+    Promoted mechanically from a Routine Take: events re-addressed from
+    physical Decks to entry-ordered CAST SLOTS (slot 0 = entry track,
+    slot n−1 = exit track), and the clock rebased from capture seconds to
+    beats via the cast Tracks' Beatgrids — so the Routine replays under any
+    Set tempo policy. No gesture idealization (v1 is slot-remapped,
+    beat-rebased raw replay; lane vectorization arrives with the Routine
+    editor). `events_json` is the slot-addressed, beat-domain event list
+    (each event carries `beat` + `slot`; global controls carry slot null);
+    `entry_offsets_beats_json` gives each slot's entry in beats from
+    Routine start; `entry_positions_json` gives each slot's track position
+    (track-seconds) at its entry — together with the events this makes the
+    Routine self-contained for replay. `origin_take_uuid` is provenance
+    (the raw Routine Take stays untouched — evidence doctrine).
+    """
+
+    __tablename__ = "routines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, nullable=False)
+    name = Column(String, nullable=True)
+    entry_track_id = Column(Integer, nullable=False)
+    exit_track_id = Column(Integer, nullable=False)
+    cast_json = Column(Text, nullable=False)  # JSON list of track ids, slot order
+    entry_offsets_beats_json = Column(Text, nullable=False)  # JSON list, per slot
+    entry_positions_json = Column(Text, nullable=False)  # JSON list, track-seconds
+    duration_beats = Column(Float, nullable=False)
+    events_json = Column(Text, nullable=False)  # slot-addressed, beat-domain (opaque)
+    origin_take_uuid = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_routines_uuid", "uuid", unique=True),
+        Index("idx_routines_entry", "entry_track_id"),
+    )
+
+
 class HotCue(Base):
     __tablename__ = "hotcues"
 
