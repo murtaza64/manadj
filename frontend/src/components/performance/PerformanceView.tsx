@@ -38,6 +38,7 @@ import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
 import { PERFORMANCE_WAVEFORM_ORDER } from './waveformOrder';
 import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
 import { toggleControlFocus, useControlFocus } from '../../performance/controlFocus';
+import { isPerfSectionShown, subscribePerfSections } from '../../performance/perfSectionsStore';
 import './PerformanceView.css';
 
 const LOCK_HINT_MS = 1500;
@@ -45,6 +46,10 @@ const LOCK_HINT_MS = 1500;
 /** Keyboard-hint visibility, persisted; read once (same idiom as ?view=). */
 const HINTS_STORAGE_KEY = 'perf-kbd-hints';
 const initialHintsOn = localStorage.getItem(HINTS_STORAGE_KEY) !== 'off';
+
+/** Stable snapshots for the section-visibility subscriptions (gh#68). */
+const wavesShownSnapshot = () => isPerfSectionShown('waveforms');
+const decksShownSnapshot = () => isPerfSectionShown('decks');
 
 /** True while a Load onto this deck must be refused (audible or about to be). */
 function isDeckLocked(engine: DeckEngine): boolean {
@@ -190,6 +195,14 @@ export function PerformanceView() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [tryLoad]);
 
+  // Section visibility (perf-layout 12 / gh#68): hide-don't-unmount —
+  // display:none only, so engines, zoom state and canvases stay alive
+  // (audio/transport untouched; KeepAliveView precedent). Subscribing at
+  // view level is fine here: toggles are rare, explicit clicks — unlike
+  // the per-tick zoom/lock state that must not re-render the view.
+  const wavesShown = useSyncExternalStore(subscribePerfSections, wavesShownSnapshot);
+  const decksShown = useSyncExternalStore(subscribePerfSections, decksShownSnapshot);
+
   // On-control keyboard hints — togglable from the mixer strip, persisted.
   const [hintsOn, setHintsOn] = useState(initialHintsOn);
   const toggleHints = () => {
@@ -202,9 +215,9 @@ export function PerformanceView() {
     <div ref={rootRef} className={`perf-root${hintsOn ? '' : ' kbd-hints-off'}`}>
       {/* Performance surface — content-sized; the library gets the rest */}
       <div className="perf-surface">
-        <PerfWaves />
+        <PerfWaves hidden={!wavesShown} />
         <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
-        <div className="perf-decks">
+        <div className="perf-decks" style={decksShown ? undefined : { display: 'none' }}>
           {/* Six-pair Linking (four-deck-performance 19): the four
               adjacent pairs ride the grid's shared edges; the diagonals
               live on the mixer strip (DiagonalPairLinks). */}
@@ -262,10 +275,12 @@ export function PerformanceView() {
  * the zoom stutter the library view never had (its zoom is
  * renderer-local and touches no React state at all).
  */
-function PerfWaves() {
+function PerfWaves({ hidden }: { hidden?: boolean }) {
   const [visibleSeconds, setVisibleSeconds] = useState(DEFAULT_VISIBLE_SECONDS);
   return (
-    <div className="perf-waves">
+    // Hidden = display:none (topbar section toggle, gh#68); stays mounted
+    // so the shared zoom survives a hide/show round-trip.
+    <div className="perf-waves" style={hidden ? { display: 'none' } : undefined}>
       {PERFORMANCE_WAVEFORM_ORDER.map((deck) => (
         <DeckScope key={deck} deck={deck}>
           <DeckWaveform

@@ -22,6 +22,7 @@ import {
 import type { ChannelId } from '../../playback/mixer';
 import { CROSSFADER_ASSIGNMENTS } from '../../playback/crossfaderAssignmentStore';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
+import { PerfSectionToggles } from './PerfSectionToggles';
 
 /** Vertical drag distance (px) that sweeps a knob end to end. */
 const KNOB_DRAG_RANGE_PX = 150;
@@ -323,27 +324,10 @@ export function MixerStrip({
             KBD
           </button>
         )}
-        <HFader
-          label="CUE MIX"
-          min={0}
-          max={1}
-          value={cueMix}
-          defaultValue={CUE_MIX_DEFAULT}
-          onChange={(v) => mixer.setCueMix(v)}
-          title="Headphone blend: cue only ← → master only (double-click = cue only)"
-          takeover={cueMixTakeover}
-        />
-        <HFader
-          label="PHONES"
-          min={0}
-          max={1}
-          value={cueLevel}
-          defaultValue={CUE_LEVEL_DEFAULT}
-          fill
-          onChange={(v) => mixer.setCueLevel(v)}
-          title="Headphone (cue) level"
-          takeover={cueLevelTakeover}
-        />
+        {/* Waveform/deck section toggles (perf-layout 12 / gh#68): the
+            strip never hides, so they stay reachable when everything
+            around it is collapsed. */}
+        <PerfSectionToggles />
       </div>
       <div className="perf-strip-slot wide">
         <button
@@ -393,6 +377,29 @@ export function MixerStrip({
         <DiagonalPairLinks />
       </div>
       <div className="perf-strip-slot">
+        {/* All volume faders together on the right: headphone blend/level,
+            then MASTER. */}
+        <HFader
+          label="CUE MIX"
+          min={0}
+          max={1}
+          value={cueMix}
+          defaultValue={CUE_MIX_DEFAULT}
+          onChange={(v) => mixer.setCueMix(v)}
+          title="Headphone blend: cue only ← → master only (double-click = cue only)"
+          takeover={cueMixTakeover}
+        />
+        <HFader
+          label="PHONES"
+          min={0}
+          max={1}
+          value={cueLevel}
+          defaultValue={CUE_LEVEL_DEFAULT}
+          fill
+          onChange={(v) => mixer.setCueLevel(v)}
+          title="Headphone (cue) level"
+          takeover={cueLevelTakeover}
+        />
         <HFader
           label="MASTER"
           min={0}
