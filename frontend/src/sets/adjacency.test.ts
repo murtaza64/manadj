@@ -4,15 +4,22 @@
  * literals — never recomputed through the code under test.
  */
 import { describe, expect, it } from 'vitest';
-import { adjacencyView, resolvePlanPins, resolveTransition } from './adjacency';
+import {
+  adjacencyView,
+  isChopTake,
+  resolveFromEvidence,
+  resolvePlanPins,
+  resolveTake,
+  resolveTransition,
+} from './adjacency';
 import type { AdjacencyPin, TakeEvidence, TransitionEvidence } from './adjacency';
 
 function tr(uuid: string, over: Partial<TransitionEvidence> = {}): TransitionEvidence {
   return { uuid, name: `Transition ${uuid}`, favorite: false, ...over };
 }
 
-function tk(uuid: string): TakeEvidence {
-  return { uuid, detectedAt: '2026-07-05T12:00:00' };
+function tk(uuid: string, over: Partial<TakeEvidence> = {}): TakeEvidence {
+  return { uuid, detectedAt: '2026-07-05T12:00:00', ...over };
 }
 
 describe('resolveTransition (sets 26: favorite first, else most recently edited)', () => {
@@ -59,6 +66,155 @@ describe('resolveTransition (sets 26: favorite first, else most recently edited)
 
   it('resolves nothing when the pair has no Transitions (the only remaining cut-by-default)', () => {
     expect(resolveTransition([])).toBeNull();
+  });
+});
+
+describe('isChopTake (sets #163: sub-2s windows are fader chops)', () => {
+  it('flags a sub-2s window', () => {
+    expect(isChopTake(tk('a', { windowS: 0.4 }))).toBe(true);
+    expect(isChopTake(tk('a', { windowS: 1.99 }))).toBe(true);
+  });
+
+  it('does not flag a 2s-or-longer window', () => {
+    expect(isChopTake(tk('a', { windowS: 2 }))).toBe(false);
+    expect(isChopTake(tk('a', { windowS: 32 }))).toBe(false);
+  });
+
+  it('never flags an unknown window (treated as full-length)', () => {
+    expect(isChopTake(tk('a'))).toBe(false);
+  });
+});
+
+describe('resolveTake (sets #163: best Take for the bulk gesture)', () => {
+  it('picks the most recent detection', () => {
+    const picked = resolveTake([
+      tk('a', { detectedAt: '2026-07-01T12:00:00', windowS: 10 }),
+      tk('b', { detectedAt: '2026-07-03T12:00:00', windowS: 10 }),
+      tk('c', { detectedAt: '2026-07-02T12:00:00', windowS: 10 }),
+    ]);
+    expect(picked?.uuid).toBe('b');
+  });
+
+  it('full-length Takes outrank chop-Takes, even more recent ones', () => {
+    const picked = resolveTake([
+      tk('full', { detectedAt: '2026-07-01T12:00:00', windowS: 12 }),
+      tk('chop', { detectedAt: '2026-07-09T12:00:00', windowS: 0.4 }),
+    ]);
+    expect(picked?.uuid).toBe('full');
+  });
+
+  it('resolves the best chop-Take when only chops exist', () => {
+    const picked = resolveTake([
+      tk('c1', { detectedAt: '2026-07-01T12:00:00', windowS: 0.3 }),
+      tk('c2', { detectedAt: '2026-07-02T12:00:00', windowS: 0.5 }),
+    ]);
+    expect(picked?.uuid).toBe('c2');
+  });
+
+  it('breaks detection-time ties toward the later sibling (append order = capture order)', () => {
+    expect(resolveTake([tk('a'), tk('b')])?.uuid).toBe('b');
+  });
+
+  it('resolves nothing when the pair has no Takes', () => {
+    expect(resolveTake([])).toBeNull();
+  });
+});
+
+describe('resolveFromEvidence (sets #163: the previewed bulk gesture)', () => {
+  const NONE = { transitions: [], takes: [] };
+
+  it('proposes the best Take on an Unresolved adjacency with Takes and no Transitions', () => {
+    const out = resolveFromEvidence(
+      [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+      ],
+      () => ({ transitions: [], takes: [tk('t1', { windowS: 10 })] })
+    );
+    expect(out.pins.get(1)).toEqual({ kind: 'take', uuid: 't1' });
+    expect(out.rows).toEqual([
+      {
+        headTrackId: 1,
+        aTrackId: 1,
+        bTrackId: 2,
+        take: tk('t1', { windowS: 10 }),
+        chop: false,
+      },
+    ]);
+    expect(out.hardCuts).toEqual([]);
+  });
+
+  it('skips a pair whose Transitions auto-resolve (saved Transitions win — auto-fill unchanged)', () => {
+    const out = resolveFromEvidence(
+      [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+      ],
+      () => ({ transitions: [tr('x')], takes: [tk('t1', { windowS: 10 })] })
+    );
+    expect(out.pins.size).toBe(0);
+    expect(out.rows).toEqual([]);
+    expect(out.hardCuts).toEqual([]);
+  });
+
+  it('never touches an existing pin — any kind, even dangling', () => {
+    const out = resolveFromEvidence(
+      [
+        { trackId: 1, pin: { kind: 'take', uuid: 'kept' } as AdjacencyPin },
+        { trackId: 2, pin: { kind: 'hardcut' } as AdjacencyPin },
+        { trackId: 3, pin: { kind: 'transition', uuid: 'dangling' } as AdjacencyPin },
+        { trackId: 4, pin: null },
+      ],
+      () => ({ transitions: [], takes: [tk('t1', { windowS: 10 })] })
+    );
+    expect(out.pins.size).toBe(0);
+    expect(out.rows).toEqual([]);
+  });
+
+  it('flags a chop-Take proposal (pinned but marked)', () => {
+    const out = resolveFromEvidence(
+      [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+      ],
+      () => ({ transitions: [], takes: [tk('c1', { windowS: 0.4 })] })
+    );
+    expect(out.pins.get(1)).toEqual({ kind: 'take', uuid: 'c1' });
+    expect(out.rows[0].chop).toBe(true);
+  });
+
+  it('lists an evidence-less Unresolved adjacency as a remaining hard-cut', () => {
+    const out = resolveFromEvidence(
+      [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+      ],
+      () => NONE
+    );
+    expect(out.pins.size).toBe(0);
+    expect(out.hardCuts).toEqual([{ aTrackId: 1, bTrackId: 2 }]);
+  });
+
+  it('walks adjacencies in Set order and keys pins by head track id', () => {
+    const evidence: Record<string, { transitions: TransitionEvidence[]; takes: TakeEvidence[] }> = {
+      '1:2': { transitions: [], takes: [tk('t12', { windowS: 8 })] },
+      '2:3': { transitions: [tr('x')], takes: [] },
+      '3:4': { transitions: [], takes: [tk('t34', { windowS: 0.5 })] },
+      '4:5': { transitions: [], takes: [] },
+    };
+    const out = resolveFromEvidence(
+      [1, 2, 3, 4, 5].map((trackId) => ({ trackId, pin: null })),
+      (a, b) => evidence[`${a}:${b}`] ?? NONE
+    );
+    expect([...out.pins.keys()]).toEqual([1, 3]);
+    expect(out.rows.map((r) => r.take.uuid)).toEqual(['t12', 't34']);
+    expect(out.rows.map((r) => r.chop)).toEqual([false, true]);
+    expect(out.hardCuts).toEqual([{ aTrackId: 4, bTrackId: 5 }]);
+  });
+
+  it('an empty or single-entry Set proposes nothing (no adjacencies)', () => {
+    expect(resolveFromEvidence([], () => NONE).rows).toEqual([]);
+    expect(resolveFromEvidence([{ trackId: 1, pin: null }], () => NONE).hardCuts).toEqual([]);
   });
 });
 

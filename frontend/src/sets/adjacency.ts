@@ -28,7 +28,13 @@
  *
  * Auto-fill's remaining role (sets 26) is freezing: bulk-pinning the
  * auto-resolved choices. Takes are never auto-filled — pinning one is
- * always a manual act.
+ * always a deliberate act naming that evidence. Since the glossary
+ * amendment of 2026-08-24 that act may be bulk: the Set-level "Resolve
+ * from evidence" gesture (sets #163) previews and, on one confirm, pins
+ * the best Take on every Unresolved adjacency — the confirmed bulk
+ * gesture IS the explicit act ADR 0023 requires; what the doctrine
+ * forbids is Takes arriving without the user choosing them, not pins
+ * arriving one at a time.
  */
 
 export type AdjacencyPin =
@@ -50,6 +56,9 @@ export interface TransitionEvidence {
 export interface TakeEvidence {
   uuid: string;
   detectedAt: string;
+  /** Take window length in seconds (capture clock) — chop classification.
+   * Absent = unknown, treated as full-length. */
+  windowS?: number;
 }
 
 export interface AdjacencyView {
@@ -119,6 +128,106 @@ export function resolvePlanPins<E extends { trackId: number; pin: AdjacencyPin |
     const resolved = resolveTransition(evidence);
     return { ...entry, pin: resolved ? { kind: 'transition' as const, uuid: resolved.uuid } : null };
   });
+}
+
+/** Windows under this are chop-Takes: near-instant fader cuts the
+ * detector still stamps as Takes (map #114's real-data finding — real
+ * cuts produce sub-second windows). Resolve from evidence pins them,
+ * but flagged for review. */
+export const CHOP_TAKE_MAX_S = 2;
+
+/** A chop-Take: a sub-2s window — likely a fader chop, not a blend.
+ * Unknown windows count as full-length (never flag blind). */
+export function isChopTake(take: TakeEvidence): boolean {
+  return take.windowS !== undefined && take.windowS < CHOP_TAKE_MAX_S;
+}
+
+/** The pair's best Take (Resolve from evidence, sets #163): full-length
+ * Takes outrank chop-Takes; within a class the most recent detection
+ * wins, ties toward the later sibling (append order = capture order —
+ * the same tiebreak idiom as `resolveTransition`). Null only when the
+ * pair has no Takes. */
+export function resolveTake(takes: readonly TakeEvidence[]): TakeEvidence | null {
+  const pool = takes.some((t) => !isChopTake(t)) ? takes.filter((t) => !isChopTake(t)) : takes;
+  let best: TakeEvidence | null = null;
+  for (const t of pool) {
+    // `>=` breaks ties toward the later sibling; an unparseable stamp
+    // (NaN) never beats a real one but a NaN-only pool still resolves.
+    if (best === null || !(Date.parse(t.detectedAt) < Date.parse(best.detectedAt))) {
+      best = t;
+    }
+  }
+  return best;
+}
+
+/** One adjacency's fate under Resolve from evidence (preview rows). */
+export interface EvidenceResolutionRow {
+  /** The entry heading the adjacency — `setAdjacencyPins`' key. */
+  headTrackId: number;
+  aTrackId: number;
+  bTrackId: number;
+  take: TakeEvidence;
+  /** Pinned but flagged: a sub-2s window (likely a fader chop). */
+  chop: boolean;
+}
+
+export interface EvidenceResolution {
+  /** headTrackId → Take pin, shaped for `setAdjacencyPins`. */
+  pins: Map<number, AdjacencyPin>;
+  /** The adjacencies gaining a Take pin, in Set order. */
+  rows: EvidenceResolutionRow[];
+  /** Unresolved adjacencies with no evidence at all — these remain
+   * hard-cuts after the gesture (the preview lists them). */
+  hardCuts: { aTrackId: number; bTrackId: number }[];
+}
+
+/**
+ * Resolve from evidence (sets #163; glossary amendment 2026-08-24): the
+ * pure computation behind the Set-level bulk gesture. For every
+ * Unresolved adjacency (nothing pinned):
+ *
+ * - a pair with saved Transitions is SKIPPED — plan-time resolution
+ *   already plays its best Transition (saved Transitions win; freezing
+ *   them stays auto-fill's job);
+ * - a pair with Takes proposes its best Take (`resolveTake`) — chop-
+ *   Takes (sub-2s windows) proposed but flagged;
+ * - a pair with no evidence lands in `hardCuts` (still cuts after).
+ *
+ * Pinned adjacencies — including dangling pins — are never touched.
+ * The result is a PREVIEW: nothing applies until the user confirms,
+ * which is what makes the bulk pin an explicit act under ADR 0023.
+ */
+export function resolveFromEvidence<E extends { trackId: number; pin: AdjacencyPin | null }>(
+  entries: readonly E[],
+  evidenceFor: (
+    aTrackId: number,
+    bTrackId: number
+  ) => { transitions: readonly TransitionEvidence[]; takes: readonly TakeEvidence[] }
+): EvidenceResolution {
+  const pins = new Map<number, AdjacencyPin>();
+  const rows: EvidenceResolutionRow[] = [];
+  const hardCuts: { aTrackId: number; bTrackId: number }[] = [];
+  for (let i = 0; i < entries.length - 1; i++) {
+    const entry = entries[i];
+    if (entry.pin !== null) continue;
+    const bTrackId = entries[i + 1].trackId;
+    const { transitions, takes } = evidenceFor(entry.trackId, bTrackId);
+    if (resolveTransition(transitions)) continue; // a Transition plays
+    const take = resolveTake(takes);
+    if (take) {
+      pins.set(entry.trackId, { kind: 'take', uuid: take.uuid });
+      rows.push({
+        headTrackId: entry.trackId,
+        aTrackId: entry.trackId,
+        bTrackId,
+        take,
+        chop: isChopTake(take),
+      });
+    } else {
+      hardCuts.push({ aTrackId: entry.trackId, bTrackId });
+    }
+  }
+  return { pins, rows, hardCuts };
 }
 
 /** Resolve one adjacency's pin against the pair's evidence — the badge/

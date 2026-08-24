@@ -12,6 +12,10 @@
  * and the orthogonal Unresolved ("will hard-cut") and Unpracticed
  * badges. Auto-fill (per-adjacency and set-wide) proposes Transitions
  * only; the manual pin picker also lists the pair's Takes (ADR 0023).
+ * Takes also arrive in bulk via Resolve from evidence (sets #163): a
+ * previewed, one-confirm gesture pinning the best Take on every
+ * Unresolved adjacency — the confirmed bulk gesture is itself the
+ * explicit act ADR 0023 requires (glossary amendment 2026-08-24).
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -66,11 +70,13 @@ import {
 import { practiceCuePositions } from './practice';
 import {
   adjacencyView,
+  resolveFromEvidence,
   resolveTransition,
   type AdjacencyPin,
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
+import ResolveFromEvidenceModal from './ResolveFromEvidenceModal';
 import {
   previewAdjacencyFutures,
   reconcileOrderChange,
@@ -174,7 +180,11 @@ function buildPairEvidence(
   }));
   const pairTakes: TakeEvidence[] = takes
     .filter((t) => t.a_track_id === a && t.b_track_id === b)
-    .map((t) => ({ uuid: t.uuid, detectedAt: t.detected_at }));
+    .map((t) => ({
+      uuid: t.uuid,
+      detectedAt: t.detected_at,
+      windowS: t.window_end_s - t.window_start_s,
+    }));
   return { transitions, takes: pairTakes };
 }
 
@@ -268,6 +278,20 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
     }
     return fillable;
   }, [entries, pairStore, takes]);
+
+  // Resolve from evidence (sets #163): the bulk best-Take proposal for
+  // every Unresolved adjacency — previewed in a modal, applied by ONE
+  // confirm through setAdjacencyPins (the same primitive auto-fill
+  // uses). Pairs that auto-resolve to a Transition are skipped (saved
+  // Transitions win — freezing those stays auto-fill's job); existing
+  // pins untouched. The confirmed bulk gesture is the explicit act
+  // ADR 0023 requires (glossary amendment 2026-08-24).
+  const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
+  const evidenceProposal = useMemo(
+    () =>
+      resolveFromEvidence(entries ?? [], (a, b) => buildPairEvidence(pairStore, takes, a, b)),
+    [entries, pairStore, takes]
+  );
 
   // Track metadata for the entry rows (batch-by-Promise.all pattern, as in
   // TakeHistoryView's labels query). Keyed under the ['tracks'] prefix so
@@ -1067,6 +1091,28 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
           >
             Auto-fill {autoFillable.size > 0 ? `(${autoFillable.size})` : ''}
           </button>
+          {/* Resolve from evidence (sets #163): opens the preview modal;
+              nothing pins until its one confirm. Enabled whenever the
+              gesture has anything to say (Takes to pin OR hard-cuts to
+              list). */}
+          <button
+            className="btn"
+            onClick={() => setEvidenceModalOpen(true)}
+            disabled={evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0}
+            title={
+              evidenceProposal.rows.length === 0 && evidenceProposal.hardCuts.length === 0
+                ? 'Every adjacency is pinned or auto-resolves to a Transition'
+                : 'Preview pinning the best Take on every Unresolved adjacency (one confirm; chop-Takes flagged, remaining hard-cuts listed)'
+            }
+            style={
+              evidenceProposal.rows.length > 0
+                ? { borderColor: 'var(--mauve)', color: 'var(--mauve)' }
+                : undefined
+            }
+          >
+            Resolve from evidence{' '}
+            {evidenceProposal.rows.length > 0 ? `(${evidenceProposal.rows.length})` : ''}
+          </button>
           {/* The header Suggest button moved into the list as the
               trailing suggest row (sets 36): append is an insert at the
               terminal gap, so it gets the gap affordance. */}
@@ -1266,6 +1312,31 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
       {rowMenu && (
         <ContextMenu x={rowMenu.x} y={rowMenu.y} items={rowMenuItems} onClose={closeRowMenu} />
       )}
+
+      {/* Resolve from evidence (sets #163): preview diff, one confirm. */}
+      {evidenceModalOpen && (
+        <ResolveFromEvidenceModal
+          preview={evidenceProposal}
+          trackLabel={(id) => trackMap?.get(id)?.title || `Track ${id}`}
+          onConfirm={() => {
+            setAdjacencyPins(setId, evidenceProposal.pins);
+            setEvidenceModalOpen(false);
+            const chops = evidenceProposal.rows.filter((r) => r.chop).length;
+            showToast(
+              `Pinned ${evidenceProposal.pins.size} take${
+                evidenceProposal.pins.size === 1 ? '' : 's'
+              }${chops > 0 ? ` (${chops} chop-flagged)` : ''}${
+                evidenceProposal.hardCuts.length > 0
+                  ? ` — ${evidenceProposal.hardCuts.length} hard-cut${
+                      evidenceProposal.hardCuts.length === 1 ? '' : 's'
+                    } remain`
+                  : ''
+              }`
+            );
+          }}
+          onClose={() => setEvidenceModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1428,7 +1499,9 @@ const AdjacencyRow = memo(function AdjacencyRow({
   const chip = pinChip(view);
 
   // Manual pin picker: the pair's Transitions AND Takes (Takes are never
-  // auto-filled — pinning one is always this explicit act, ADR 0023),
+  // auto-filled — pinning one is always a deliberate act, ADR 0023;
+  // since the 2026-08-24 carve-out that act is this picker OR the
+  // Set-level previewed Resolve-from-evidence confirm, sets #163),
   // plus the explicit Hard-cut pin (sets 26 — the way to keep a
   // deliberate cut now that unresolved auto-resolves).
   const pickerItems: MenuItem[] = [
@@ -1599,10 +1672,12 @@ const AdjacencyRow = memo(function AdjacencyRow({
         {/* Take-available indicator (26 review follow-up): a cut is about
             to play while the pair HAS recorded Takes — the one evidence
             resolution deliberately ignores (Takes never auto-resolve,
-            ADR 0023), so surface the manual option. Click opens the pin
-            picker, where the Takes are listed. Quiet when a Transition
-            plays (the counts cell already says "· N tk"), and the fresh-
-            take offer below outranks it (one mauve chip at a time). */}
+            ADR 0023; they arrive only by choice — this picker, or the
+            Set-level Resolve-from-evidence confirm, sets #163), so
+            surface the manual option. Click opens the pin picker, where
+            the Takes are listed. Quiet when a Transition plays (the
+            counts cell already says "· N tk"), and the fresh-take offer
+            below outranks it (one mauve chip at a time). */}
         {view.status === 'unresolved' && view.counts.takes > 0 && !freshTake && (
           <button
             className="set-chip-btn"
