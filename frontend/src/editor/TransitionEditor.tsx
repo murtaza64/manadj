@@ -15,10 +15,9 @@ import { useHotCueSlots } from '../hooks/useHotCueActions';
 import { useHotCues } from '../hooks/useHotCues';
 import { JogController } from '../midi/jog';
 import { getJogCalibration } from '../midi/jogCalibrationStore';
-import Library from '../components/Library';
-import type { LibraryBrowseHandle } from '../components/Library';
+import { registerBrowseHost, sharedBrowseHandle } from '../components/browseHost';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
-import { DeckScope } from '../contexts/DeckContext';
+import { useViewActive } from '../contexts/viewActive';
 import { useDecks } from '../hooks/useDeck';
 import {
   claimAudible,
@@ -696,25 +695,20 @@ function TransitionEditorInner() {
     return () => window.removeEventListener(OPEN_PAIR_EVENT, consume);
   }, [openPair]);
 
-  // Selection/navigation handle into the embedded library panel.
-  const libraryRef = useRef<LibraryBrowseHandle>(null);
+  // Keep-alive: the editor stays mounted while hidden — its document keys
+  // drive the SHARED browse panel (gh#165), so they bind only while this
+  // view is the visible one.
+  const viewActive = useViewActive();
 
-  // Memoized element: the editor re-renders on every player/engine emit
-  // (transport, loads) — a stable element identity lets React skip the
-  // embedded library table on those renders (issue 10: re-diffing the
-  // table right as a deck started was visible as playback-start jitter).
-  const browsePanel = useMemo(
-    () => (
-      <DeckScope deck="A">
-        <Library
-          browseOnly
-          onLoadToDeck={(deck, track) => {
-            if (deck === 'A' || deck === 'B') assignTrack(deck, track);
-          }}
-          browseRef={libraryRef}
-        />
-      </DeckScope>
-    ),
+  // This editor's load policy for the shared browse panel: row buttons /
+  // double-click assign onto the editor's A/B session sides only.
+  useEffect(
+    () =>
+      registerBrowseHost('transition', {
+        onLoadToDeck: (deck, track) => {
+          if (deck === 'A' || deck === 'B') assignTrack(deck, track);
+        },
+      }),
     [assignTrack]
   );
 
@@ -724,8 +718,10 @@ function TransitionEditorInner() {
 
   // Keyboard: space = editor play/pause (capture + stopPropagation so no
   // other surface sees it); table keys match the Performance view — ↑/↓
-  // browse, ← / → load selection to A / B, Enter loads A.
+  // browse, ← / → load selection to A / B, Enter loads A. Bound only while
+  // this view is visible (shared browse handle; hidden copies stay inert).
   useEffect(() => {
+    if (!viewActive) return;
     const onKey = (e: KeyboardEvent) => {
       if (isGuardedKeyEvent(e)) return;
       // The editor's selects (saved-Transition dropdown) keep their
@@ -740,18 +736,18 @@ function TransitionEditorInner() {
         case 'ArrowDown':
         case 'ArrowUp':
           e.preventDefault();
-          libraryRef.current?.navigate(e.key === 'ArrowDown' ? 1 : -1);
+          sharedBrowseHandle.current?.navigate(e.key === 'ArrowDown' ? 1 : -1);
           break;
         case 'ArrowLeft':
         case 'ArrowRight': {
           e.preventDefault();
-          const sel = libraryRef.current?.getSelectedTrack();
+          const sel = sharedBrowseHandle.current?.getSelectedTrack();
           if (sel) assignTrack(e.key === 'ArrowLeft' ? 'A' : 'B', sel);
           break;
         }
         case 'Enter': {
           if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') break;
-          const sel = libraryRef.current?.getSelectedTrack();
+          const sel = sharedBrowseHandle.current?.getSelectedTrack();
           if (sel) assignTrack('A', sel);
           break;
         }
@@ -760,7 +756,7 @@ function TransitionEditorInner() {
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player, auditionTogglePlay]);
+  }, [player, auditionTogglePlay, viewActive]);
 
   const snapA = player.engineA.getSnapshot();
   const snapB = player.engineB.getSnapshot();
@@ -772,7 +768,8 @@ function TransitionEditorInner() {
 
   return (
     <div className="editor-root">
-      {/* Top panel: the transition editor (sibling of Library / Performance) */}
+      {/* The transition-editor TOP PANEL; the browse surface below is the
+          shared App-level BrowsePanel (gh#165). */}
       <div className="editor-top">
         <div className="editor-arranger">
           <DawTimeline
@@ -852,10 +849,6 @@ function TransitionEditorInner() {
         </div>
       </div>
 
-      {/* Bottom panel: the shared library browse surface (scoped to deck
-          A). Load affordances match the Performance view: hover row
-          buttons, double-click → A, arrow keys. */}
-      <div className="editor-library">{browsePanel}</div>
     </div>
   );
 }

@@ -25,11 +25,18 @@ function keepsNormalCursor(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(NORMAL_CURSOR_SELECTOR) !== null;
 }
 
-/** Performance-view-only cursor policy: controller activity hides; intent restores. */
-export function useMidiCursorSuppression(rootRef: RefObject<HTMLElement | null>): void {
+/** Performance-view-only cursor policy: controller activity hides; intent
+ * restores. `enabled` gates the whole policy — the keep-alive Performance
+ * view stays mounted while hidden, and since the suppression now blankets
+ * the app surface via :has() (gh#165), a hidden view must never arm it. */
+export function useMidiCursorSuppression(
+  rootRef: RefObject<HTMLElement | null>,
+  enabled = true
+): void {
   const stateRef = useRef<CursorSuppressionState>(initialCursorSuppressionState);
 
   useEffect(() => {
+    if (!enabled) return;
     const hide = () => rootRef.current?.classList.add(HIDDEN_CLASS);
 
     return subscribeMidiActivity(() => {
@@ -37,9 +44,10 @@ export function useMidiCursorSuppression(rootRef: RefObject<HTMLElement | null>)
       stateRef.current = hideCursorForMidi(stateRef.current);
       hide();
     });
-  }, [rootRef]);
+  }, [rootRef, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     const revealNow = () => {
       stateRef.current = revealCursor(stateRef.current);
       rootRef.current?.classList.remove(HIDDEN_CLASS);
@@ -64,5 +72,5 @@ export function useMidiCursorSuppression(rootRef: RefObject<HTMLElement | null>)
       rootRef.current?.classList.remove(HIDDEN_CLASS);
       stateRef.current = initialCursorSuppressionState;
     };
-  }, [rootRef]);
+  }, [rootRef, enabled]);
 }
