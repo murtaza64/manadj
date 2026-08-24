@@ -589,7 +589,9 @@ export default function Library({
 
   // Playlist list, in the view-only playlist sort. The Follow filter
   // applies only outside edit mode — in the split, the FilterBar belongs
-  // to the library pane.
+  // to the library pane — and only while the per-playlist filter toggle
+  // shows the FilterBar (#156): Follow's controls live there, so a hidden
+  // bar must not leave the list silently match-reordered.
   let playlistTracks = sortPlaylistTracks(playlistData?.tracks || [], playlistSort);
   // The per-playlist toggle applies the global params (playlist-editing
   // 09); thinning is tracked so positional reorders can refuse — a drop
@@ -599,7 +601,7 @@ export default function Library({
   }
   const playlistThinned =
     playlistFilterOn && playlistTracks.length !== (playlistData?.tracks?.length ?? 0);
-  if (followRefs.length > 0 && !splitView) {
+  if (followRefs.length > 0 && !splitView && playlistFilterOn) {
     const { followed, rest } = partitionFollowedTracks(playlistTracks, followedTrackIds);
     const candidates = followCandidateIds
       ? rest.filter((t: Track) => followCandidateIds.has(t.id))
@@ -641,6 +643,11 @@ export default function Library({
         return rank.known !== null ? null : rank.score;
       }
     : undefined;
+
+  // Follow decorations ride the same gate as the ordering (#156): the main
+  // table in playlist view drops them while the FilterBar (and with it the
+  // Follow controls) is hidden. Library views always decorate.
+  const followInMain = selectedView !== 'playlist' || playlistFilterOn;
 
   // ── Selection machinery: one instance per pane ─────────────────────────
   // 'main' is the single always-present table (playlist or library,
@@ -1463,11 +1470,11 @@ export default function Library({
                   transitionMarks={transitionMarks}
                   links={links}
                   deckIds={deckIds}
-                  groupLabelFor={followGroupLabel}
-                  scoreFor={followScoreFor}
+                  groupLabelFor={followInMain ? followGroupLabel : undefined}
+                  scoreFor={followInMain ? followScoreFor : undefined}
                   scoreSorted={followScoreSort}
                   onScoreSort={() => setFollowScoreSort(true)}
-                  matchSignalsFor={followMatchSignals}
+                  matchSignalsFor={followInMain ? followMatchSignals : undefined}
                   sortColumn={selectedView === 'playlist' ? playlistSort.column : filters.sortColumn}
                   sortDirection={selectedView === 'playlist' ? playlistSort.direction : filters.sortDirection}
                   onSort={handleSort}
