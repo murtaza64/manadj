@@ -68,6 +68,9 @@ function splitmix(key: number): () => number {
 }
 
 function dominantTrackId(frame: VisualizerFrameData): number | null {
+  // dominant: smoothed frame.dominantChannel (layering jitter fix)
+  const dom = frame.decks.find((d) => d.channel === frame.dominantChannel);
+  if (dom && dom.trackId != null) return dom.trackId;
   let best: number | null = null;
   let bestLevel = -1;
   for (const deck of frame.decks) {
@@ -451,7 +454,13 @@ class HillFogRenderer implements PresetRenderer {
       const ridge = li === 0 ? this.smoothRidge : this.history[histIdx];
       // Recession: further layers sit higher on screen and shorter amplitude.
       const t = li / (LAYERS - 1);
-      const baseY = horizon + (height - horizon) * (0.15 + 0.85 * t);
+      // BUGFIX (human: "hillfog is still bugged"): recession was inverted —
+      // far layers sat LOWEST and the front polygon (which fills to the
+      // bottom edge, drawn last) covered every other layer, killing the
+      // parallax entirely. Far ridgelines belong near the horizon; the front
+      // ridge belongs at the bottom so nearer hills correctly overlap
+      // farther ones.
+      const baseY = horizon + (height - horizon) * (0.15 + 0.85 * (1 - t));
       const amp = 0.16 * (1 - 0.35 * t);
       // Layer color: front-most uses layers[0] (darkest silhouette), back
       // layers fade toward the sky bottom (atmospheric recession, flat mix).

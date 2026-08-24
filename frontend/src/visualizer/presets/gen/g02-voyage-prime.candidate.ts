@@ -22,6 +22,16 @@ import type { VisualizerPreset } from '../types';
 const rgb = (c: readonly [number, number, number]) =>
   'vec3(' + c[0].toFixed(3) + ', ' + c[1].toFixed(3) + ', ' + c[2].toFixed(3) + ')';
 
+// DUST FIX v3: deterministic per-track hue anchor. Bit-mix folded to [0,1) so
+// different track ids land on genuinely different hues.
+const splitmix01 = (n: number): number => {
+  let x = (Math.floor(Math.abs(n)) + 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 0x735a2d97) >>> 0;
+  x = (x ^ (x >>> 15)) >>> 0;
+  return x / 4294967296;
+};
+
 const FRAGMENT =
   'precision highp float;\n' +
   'uniform sampler2D u_prev;\n' +
@@ -53,9 +63,27 @@ const FRAGMENT =
   'uniform float u_phrase;    // in-phrase swell 0..1, released on downbeats\n' +
   'uniform float u_spread;    // spectral spread -> disk breadth\n' +
   'uniform float u_flatness;  // spectral flatness -> nebula texture\n' +
+  'uniform float u_hueRot;    // DUST FIX v3: per-song hue anchor + slow travel, TURNS 0..1\n' +
   '\n' +
   'const vec3 LOW = ' + rgb(ADDITIVE_COLORS[0]) + ';\n' +
   'const vec3 HIGH = ' + rgb(ADDITIVE_COLORS[2]) + ';\n' +
+  '\n' +
+  '// DUST FIX v3: value-preserving hue ROTATION (YIQ chroma plane). rot in\n' +
+  '// TURNS; luminance (Y) untouched so gains are unchanged. Negatives clamped.\n' +
+  'vec3 hueRotate(vec3 c, float rot) {\n' +
+  '  float y = dot(c, vec3(0.299, 0.587, 0.114));\n' +
+  '  float i = dot(c, vec3(0.596, -0.274, -0.322));\n' +
+  '  float q = dot(c, vec3(0.211, -0.523, 0.312));\n' +
+  '  float h = atan(q, i) + rot * 6.28318;\n' +
+  '  float chroma = sqrt(i * i + q * q);\n' +
+  '  i = chroma * cos(h);\n' +
+  '  q = chroma * sin(h);\n' +
+  '  return max(vec3(0.0), vec3(\n' +
+  '    y + 0.956 * i + 0.621 * q,\n' +
+  '    y - 0.272 * i - 0.647 * q,\n' +
+  '    y - 1.106 * i - 1.703 * q\n' +
+  '  ));\n' +
+  '}\n' +
   '\n' +
   'float hash(vec2 p) {\n' +
   '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);\n' +
@@ -124,7 +152,7 @@ const FRAGMENT =
   '  // (wide span) so the scatter picks up spectral color instead of a fixed\n' +
   '  // cool/warm ramp. Luminance unchanged.\n' +
   '  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02);\n' +
-  '  return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;\n' +
+  '  return hueRotate(mix(tint, HIGH, 0.2), u_hueRot) * starShape(f, size) * on * bright * gain;\n' +
   '}\n' +
   '\n' +
   'void main() {\n' +
@@ -172,11 +200,19 @@ const FRAGMENT =
   '  // and blowing out along the ripple wavefront.\n' +
   '  vec2 ab = dirW * (0.0012 + 0.004 * u_drop + 0.003 * u_kick + 0.01 * rippleWave)\n' +
   '    / vec2(aspect, 1.0);\n' +
-  '  vec3 sampled = vec3(\n' +
-  '    texture2D(u_prev, src + ab).r,\n' +
-  '    texture2D(u_prev, src).g,\n' +
-  '    texture2D(u_prev, src - ab).b\n' +
-  '  );\n' +
+  '  ab *= u_dust; // fringe amount rides the dust param (human note)\n' +
+  '  // fringe fix: hue-steerable fringes -- rotate the field to the anchor\n' +
+  '  // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can\n' +
+  '  // go slightly negative) so the unsharp feedback loop stays stable.\n' +
+  '  float fringeRot = 0.0;\n' + // CLASSIC red/blue fluid (human: keep some presets classic)
+  '  vec3 tapA = texture2D(u_prev, src + ab).rgb;\n' +
+  '  vec3 tapC = texture2D(u_prev, src).rgb;\n' +
+  '  vec3 tapB = texture2D(u_prev, src - ab).rgb;\n' +
+  '  vec3 sampled = max(vec3(0.0), hueRotate(vec3(\n' +
+  '    hueRotate(tapA, -fringeRot).r,\n' +
+  '    hueRotate(tapC, -fringeRot).g,\n' +
+  '    hueRotate(tapB, -fringeRot).b\n' +
+  '  ), fringeRot));\n' +
   '  // Unsharp: the anti-mush pass — boost against a 4-tap blur so stars\n' +
   '  // and arms stay crisp through endless resampling.\n' +
   '  vec3 blur = (texture2D(u_prev, src + vec2(px.x, 0.0)).rgb\n' +
@@ -206,7 +242,7 @@ const FRAGMENT =
   '  float gravityGain = u_low * (0.5 + 0.8 * u_kick);\n' +
   '  // Gravity ripple color: a warm slice of the traveling palette, biased by\n' +
   '  // the spectral hue, replacing the fixed ember/LOW mix. Gain unchanged.\n' +
-  '  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);\n' +
+  '  vec3 gravityColor = hueRotate(palette(0.05 + t * 0.015 + u_specHue * 0.5), u_hueRot);\n' +
   '  fresh += gravityColor\n' +
   '    * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;\n' +
   '  // The event horizon ring: a wide ember glow + a thin white-hot arc,\n' +
@@ -233,7 +269,7 @@ const FRAGMENT =
   '  float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);\n' +
   '  // Anamorphic lens streak across the core — the spacey money shot.\n' +
   '  float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));\n' +
-  '  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);\n' +
+  '  fresh += hueRotate(mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65), u_hueRot) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);\n' +
   '  // The disk: spiral lanes + clouds in the TRAVELING palette.\n' +
   '  // g02: spread controls disk BREADTH — a narrow sound concentrates the\n' +
   '  // lanes into a tight bright band (steeper radial falloff), a wide sound\n' +
@@ -249,7 +285,7 @@ const FRAGMENT =
   '  // flatter still) — dust came out monochrome at many slider stops.\n' +
   '  // SPECTRAL DUST TINT: the dust palette phase is biased by the slow-tracked\n' +
   '  // centroid (u_specHue) so dust hue follows spectral content.\n' +
-  '  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);\n' +
+  '  vec3 diskColor = hueRotate(palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8), u_hueRot);\n' +
   '  // Kick reverberation: the traveling wavefront LIGHTS the dust it passes\n' +
   '  // through (displacement alone read as subtle; this makes it audible).\n' +
   '  float reverb = 1.0 + 2.6 * rippleWave;\n' +
@@ -269,7 +305,7 @@ const FRAGMENT =
   '  // DISTINCT DUST HUE: the high nebula samples the palette at +0.35 phase\n' +
   '  // from the mid dust (biased by u_specHue) so the bands read as different\n' +
   '  // dust kinds, not one red/blue wash.\n' +
-  '  vec3 electric = palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);\n' +
+  '  vec3 electric = hueRotate(palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8), u_hueRot);\n' +
   '  fresh += electric * pow(wisp, silky) * shimmer * grain * smoothstep(0.12, 0.5, r)\n' +
   '    * (0.08 + 1.7 * u_high) * u_dust * reverb;\n' +
   '  sky += fresh * (1.0 - u_decay) * (3.2 + 1.6 * u_sustain);\n' +
@@ -349,6 +385,11 @@ const g02VoyagePrime: VisualizerPreset = {
     let smoothFlatness = 0;
     // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase.
     let slowCentroid = 0.5;
+    // DUST FIX v3: per-song hue anchor (splitmix of dominant deck trackId),
+    // eased over ~2s so track changes sweep; centroid EMA supplies the travel.
+    let hueAnchor = 0;
+    let hueAnchorTarget = 0;
+    let lastAnchorTrack: number | null = null;
     return createGlRenderer({
       fragment: FRAGMENT,
       feedback: true,
@@ -419,6 +460,22 @@ const g02VoyagePrime: VisualizerPreset = {
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
         // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
         slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
+        // DUST FIX v3: dominant deck = argmax audible level; its trackId anchors
+        // a stable per-song hue, eased over ~2s; centroid EMA supplies travel.
+        let domTrack: number | null = null;
+        let domLevel = -1;
+        for (const d of frame.decks) {
+          if (d.level > domLevel) {
+            domLevel = d.level;
+            domTrack = d.trackId;
+          }
+        }
+        if (domTrack !== null && domTrack !== lastAnchorTrack) {
+          lastAnchorTrack = domTrack;
+          hueAnchorTarget = splitmix01(domTrack);
+        }
+        hueAnchor += (hueAnchorTarget - hueAnchor) * (1 - Math.exp(-dt / 2.0));
+        const hueRot = (((hueAnchor + (slowCentroid - 0.5) * 0.8) % 1) + 1) % 1;
         return {
           u_time: frame.time,
           u_low: frame.bands.low,
@@ -428,6 +485,7 @@ const g02VoyagePrime: VisualizerPreset = {
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
           u_specHue: slowCentroid,
+          u_hueRot: hueRot,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,

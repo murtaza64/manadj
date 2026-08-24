@@ -485,9 +485,14 @@ const g02Monolith: VisualizerPreset = {
         lastTime = frame.time;
 
         // Dominant audible deck = highest master-audible level.
-        let dom = null as null | (typeof frame.decks)[number];
-        for (const d of frame.decks) {
-          if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+        // dominant: smoothed frame.dominantChannel (layering jitter fix)
+        let dom =
+          (frame.decks.find((d) => d.channel === frame.dominantChannel) ??
+            null) as null | (typeof frame.decks)[number];
+        if (dom === null) {
+          for (const d of frame.decks) {
+            if (d.playing && (dom === null || d.level > dom.level)) dom = d;
+          }
         }
         const trackId = dom?.trackId ?? null;
 

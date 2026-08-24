@@ -54,6 +54,16 @@
 import { createGlRenderer } from '../glPreset';
 import type { PresetParam, VisualizerFrameData, VisualizerPreset } from '../types';
 
+// DUST FIX v3: deterministic per-track hue anchor. Bit-mix folded to [0,1) so
+// different track ids land on genuinely different hues.
+const splitmix01 = (n: number): number => {
+  let x = (Math.floor(Math.abs(n)) + 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 0x735a2d97) >>> 0;
+  x = (x ^ (x >>> 15)) >>> 0;
+  return x / 4294967296;
+};
+
 const SPECTRUM_BANDS = 24;
 
 // No backticks inside this GLSL string (GLSL ES 1.0).
@@ -99,6 +109,7 @@ uniform float u_fracture;   // 0..1 section tectonic fracture/subside (decays)
 uniform float u_dropFull;   // 0..1 drop-on-boundary full-relief luminosity
 uniform float u_urgency;    // buildup assembly urgency (faster within-step motion)
 uniform float u_specHue;    // spectral hue anchor (JS ~1s EMA of centroid) 0..1
+uniform float u_hueAnchor;  // DUST FIX v3: per-song genome hue anchor 0..1 (full wheel)
 uniform float u_spectrum[24];
 
 float hash(vec2 p) {
@@ -182,7 +193,9 @@ vec3 hsv2rgb(vec3 c) {
 // Rotate a color's hue by the spectral anchor (chroma-only: value preserved).
 vec3 specAnchor(vec3 col) {
   vec3 h = rgb2hsv(col);
-  h.x = fract(h.x + (u_specHue - 0.5));
+  // DUST FIX v3: full-wheel per-song anchor + widened spectral travel, so
+  // different songs land the bank family on genuinely different hues.
+  h.x = fract(h.x + u_hueAnchor + (u_specHue - 0.5) * 0.8);
   return hsv2rgb(h);
 }
 
@@ -228,6 +241,23 @@ vec3 material(float f, float temp) {
   return c;
 }
 
+// fringe fix: value-preserving hue ROTATION in YIQ chroma-plane (dust-v3
+// idiom). rot is in TURNS; luminance (Y) is untouched by construction.
+vec3 hueRotate(vec3 c, float rot) {
+  float y = dot(c, vec3(0.299, 0.587, 0.114));
+  float i = dot(c, vec3(0.596, -0.274, -0.322));
+  float q = dot(c, vec3(0.211, -0.523, 0.312));
+  float h = atan(q, i) + rot * 6.28318;
+  float chroma = sqrt(i * i + q * q);
+  i = chroma * cos(h);
+  q = chroma * sin(h);
+  return max(vec3(0.0), vec3(
+    y + 0.956 * i + 0.621 * q,
+    y - 0.272 * i - 0.647 * q,
+    y - 1.106 * i - 1.703 * q
+  ));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_res;
   float aspect = u_res.x / u_res.y;
@@ -269,11 +299,19 @@ void main() {
   // Sample previous frame. Glass chromatic split; sand dry. Unsharp tap.
   vec2 ab = dir * (0.0016 + 0.006 * u_drop + 0.01 * rippleWave + 0.006 * u_matCut) * (1.0 - mat)
     / vec2(aspect, 1.0);
-  vec3 sampled = vec3(
-    texture2D(u_prev, src + ab).r,
-    texture2D(u_prev, src).g,
-    texture2D(u_prev, src - ab).b
-  );
+  ab *= u_glass; // fringe amount rides the dust param (human note)
+  // fringe fix: hue-steerable fringes -- rotate the field to the anchor
+  // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can
+  // go slightly negative) so the unsharp feedback loop stays stable.
+  float fringeRot = u_hueAnchor + (u_specHue - 0.5) * 0.8;
+  vec3 tapA = texture2D(u_prev, src + ab).rgb;
+  vec3 tapC = texture2D(u_prev, src).rgb;
+  vec3 tapB = texture2D(u_prev, src - ab).rgb;
+  vec3 sampled = max(vec3(0.0), hueRotate(vec3(
+    hueRotate(tapA, -fringeRot).r,
+    hueRotate(tapC, -fringeRot).g,
+    hueRotate(tapB, -fringeRot).b
+  ), fringeRot));
   vec3 blur = (texture2D(u_prev, src + vec2(px.x, 0.0)).rgb
     + texture2D(u_prev, src - vec2(px.x, 0.0)).rgb
     + texture2D(u_prev, src + vec2(0.0, px.y)).rgb
@@ -430,6 +468,9 @@ function genomeOf(seed: number): [number, number, number, number] {
 
 /** Dominant audible deck (highest master-audible level); null when unknown. */
 function dominantDeck(frame: VisualizerFrameData): VisualizerFrameData['decks'][number] | null {
+  // dominant: smoothed frame.dominantChannel (layering jitter fix)
+  const smoothed = frame.decks.find((d) => d.channel === frame.dominantChannel);
+  if (smoothed) return smoothed;
   let dom: VisualizerFrameData['decks'][number] | null = null;
   for (const d of frame.decks) {
     if (d.playing && (dom === null || d.level > dom.level)) dom = d;
@@ -452,6 +493,11 @@ export const g07MateriaMetricPreset: VisualizerPreset = {
     let smoothBuildup = 0;
     let smoothSwell = 0;
     let smoothSpecHue = 0.5;
+    // DUST FIX v3: per-song hue anchor (splitmix of dominant deck trackId),
+    // eased over ~2s so track changes sweep the full wheel; GLSL adds travel.
+    let hueAnchor = 0;
+    let hueAnchorTarget = 0;
+    let lastAnchorTrack: number | null = null;
     let section = 0;
     let flip = 0;
     // Song genome + rebirth.
@@ -514,6 +560,21 @@ export const g07MateriaMetricPreset: VisualizerPreset = {
         // Spectral hue anchor: ~1s EMA of centroid; re-anchors the material
         // banks' hue family so the palette is not a fixed blue<->red axis.
         smoothSpecHue += (frame.centroid - smoothSpecHue) * (1 - Math.exp(-dt / 1.0));
+        // DUST FIX v3: dominant deck = argmax audible level; its trackId anchors
+        // a stable per-song hue family, eased over ~2s.
+        let domTrack: number | null = null;
+        let domLevel = -1;
+        for (const dk of frame.decks) {
+          if (dk.level > domLevel) {
+            domLevel = dk.level;
+            domTrack = dk.trackId;
+          }
+        }
+        if (domTrack !== null && domTrack !== lastAnchorTrack) {
+          lastAnchorTrack = domTrack;
+          hueAnchorTarget = splitmix01(domTrack);
+        }
+        hueAnchor += (hueAnchorTarget - hueAnchor) * (1 - Math.exp(-dt / 2.0));
 
         // Inner-flow phase: BPM-locked when gridded, slow drift otherwise.
         const flowSpeed = frame.beat?.bpm ? ((frame.beat.bpm / 60) * Math.PI * 2) / 8 : 0.35;
@@ -681,6 +742,7 @@ export const g07MateriaMetricPreset: VisualizerPreset = {
           u_dropFull: Math.min(1, dropFull),
           u_urgency: Math.min(1, smoothBuildup),
           u_specHue: smoothSpecHue,
+          u_hueAnchor: hueAnchor,
           u_spectrum: spectrum,
         };
       },

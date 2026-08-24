@@ -25,6 +25,8 @@ import { energyOf } from '../visualizer/style';
 import { beatPositionAt } from '../visualizer/beat';
 import { INITIAL_DOMINANCE, stepDominance } from '../visualizer/dominance';
 import type { DominanceState } from '../visualizer/dominance';
+import { INITIAL_REGIME, regimeSignal, stepRegime } from '../visualizer/regime';
+import type { RegimeState } from '../visualizer/regime';
 import { deckMasterGain, isDeckAudible } from '../capture/audibility';
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
 import { meanAbsoluteToNormalized } from '../midi/levelMeter';
@@ -63,6 +65,7 @@ export function VisualizerBridge() {
   decksRef.current = decks;
   const bandsRef = useRef<BandLevels>(SILENT_BANDS);
   const slowBandsRef = useRef<BandLevels>(SILENT_BANDS);
+  const regimeRef = useRef<RegimeState>(INITIAL_REGIME);
   const spectrumRef = useRef<number[]>(SILENT_SPECTRUM);
   const impulseRef = useRef<ImpulseState>(INITIAL_IMPULSE_STATE);
   const trendRef = useRef<EnergyTrend>(INITIAL_TREND);
@@ -214,6 +217,7 @@ export function VisualizerBridge() {
         spectrumRef.current = SILENT_SPECTRUM;
         impulseRef.current = INITIAL_IMPULSE_STATE;
         trendRef.current = INITIAL_TREND;
+        regimeRef.current = INITIAL_REGIME;
         return;
       }
       const dt = lastFrameAt > 0 ? (now - lastFrameAt) / 1000 : 1 / 60;
@@ -239,10 +243,15 @@ export function VisualizerBridge() {
       // already eaten the transient the impulse detector needs.
       impulseRef.current = stepImpulses(impulseRef.current, bandTarget, dt);
       trendRef.current = stepTrend(trendRef.current, energyOf(bandTarget), dt);
+      // Regime decomposition runs on the RAW targets (rt-viz 09) — the
+      // detector does its own multi-timescale smoothing.
+      regimeRef.current = stepRegime(regimeRef.current, bandTarget, dt);
       const frame: VisualizerFrame = {
         type: 'bands',
         bands: bandsRef.current,
         bandsSlow: slowBandsRef.current,
+        regime: regimeSignal(regimeRef.current),
+        dominantChannel: (dominance.dominantId as 'A' | 'B' | 'C' | 'D' | null) ?? null,
         spectrum: spectrumRef.current,
         wave: wantsWave ? readWave() : null,
         beat: readBeat(),

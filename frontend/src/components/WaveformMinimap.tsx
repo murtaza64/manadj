@@ -24,6 +24,10 @@ interface WaveformMinimapProps {
   /** Whether the deck is advancing (performance-hardening 01): pins the loop
    * at 60fps and wakes it instantly at play. Defaults to false. */
   playing?: boolean;
+  /** Event-driven wake (#155): the deck's transport gesture stream, so
+   * paused seeks (MIDI jog, beatjump, hot cues) repaint on the next frame
+   * instead of the 250ms idle poll. Must be stable. */
+  subscribeWake?: (cb: () => void) => () => void;
 }
 
 export default function WaveformMinimap({
@@ -36,6 +40,7 @@ export default function WaveformMinimap({
   beatgrid = null,
   className,
   playing = false,
+  subscribeWake,
 }: WaveformMinimapProps) {
   const { data: waveformData, isLoading, error: fetchError } = useWaveformBlob(trackId);
   const { data: hotCues = [] } = useHotCues(trackId);
@@ -55,6 +60,7 @@ export default function WaveformMinimap({
     slot: 'minimap',
     active: viewActive,
     playing,
+    subscribeWake,
   });
 
   const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {

@@ -61,6 +61,16 @@ import { energyOf } from '../../style';
 import { createGlRenderer } from '../glPreset';
 import type { PresetParam, VisualizerPreset } from '../types';
 
+// DUST FIX v3: deterministic per-track hue anchor. Bit-mix folded to [0,1) so
+// different track ids land on genuinely different hues.
+const splitmix01 = (n: number): number => {
+  let x = (Math.floor(Math.abs(n)) + 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 0x735a2d97) >>> 0;
+  x = (x ^ (x >>> 15)) >>> 0;
+  return x / 4294967296;
+};
+
 const rgb = (c: readonly [number, number, number]) =>
   'vec3(' + c[0].toFixed(3) + ', ' + c[1].toFixed(3) + ', ' + c[2].toFixed(3) + ')';
 
@@ -92,6 +102,7 @@ uniform float u_dust;       // disk cloud / fine-dust gain
 uniform float u_palette;    // palette blend 0..3
 uniform float u_charge;     // bass-ring charge (accumulated kick energy)
 uniform float u_spawnSnare; // snare-driven star burst gain
+uniform float u_hueRot;   // DUST FIX v3: per-song hue anchor + slow travel, TURNS 0..1
 // --- BEAT-GRID structural gating.
 uniform float u_beatsPerBar;   // sectors / ring segments in the bar (>=1)
 uniform float u_sectorPos;     // continuous lit-sector center, 0..beatsPerBar
@@ -154,6 +165,23 @@ float starShape(vec2 f, float size) {
   return core + halo + spikes;
 }
 
+// DUST FIX v3: value-preserving hue ROTATION (YIQ chroma plane). rot in TURNS;
+// luminance (Y) untouched so gains are unchanged. Negatives clamped.
+vec3 hueRotate(vec3 c, float rot) {
+  float y = dot(c, vec3(0.299, 0.587, 0.114));
+  float i = dot(c, vec3(0.596, -0.274, -0.322));
+  float q = dot(c, vec3(0.211, -0.523, 0.312));
+  float h = atan(q, i) + rot * 6.28318;
+  float chroma = sqrt(i * i + q * q);
+  i = chroma * cos(h);
+  q = chroma * sin(h);
+  return max(vec3(0.0), vec3(
+    y + 0.956 * i + 0.621 * q,
+    y - 0.272 * i - 0.647 * q,
+    y - 1.106 * i - 1.703 * q
+  ));
+}
+
 vec3 starScatter(vec2 c, float density, float sizeScale, float gate, float gain) {
   vec2 q = c * density;
   vec2 cell = floor(q);
@@ -164,7 +192,7 @@ vec3 starScatter(vec2 c, float density, float sizeScale, float gate, float gain)
   float size = (0.5 + 1.5 * hash(sc.yx * 2.113)) * sizeScale;
   float bright = 0.4 + 0.6 * hash(sc + 17.9);
   // Star tint samples the traveling palette at each star own hash phase.
-  vec3 tint = palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02);
+  vec3 tint = hueRotate(palette(hash(sc.yx + 29.3) * 1.6 + u_time * 0.02), u_hueRot);
   return mix(tint, HIGH, 0.2) * starShape(f, size) * on * bright * gain;
 }
 
@@ -212,11 +240,19 @@ void main() {
   // Chromatic aberration.
   vec2 ab = dirW * (0.0012 + 0.004 * u_drop + 0.003 * u_kick + 0.01 * rippleWave)
     / vec2(aspect, 1.0);
-  vec3 sampled = vec3(
-    texture2D(u_prev, src + ab).r,
-    texture2D(u_prev, src).g,
-    texture2D(u_prev, src - ab).b
-  );
+  ab *= u_dust; // fringe amount rides the dust param (human note)
+  // fringe fix: hue-steerable fringes -- rotate the field to the anchor
+  // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can
+  // go slightly negative) so the unsharp feedback loop stays stable.
+  float fringeRot = u_hueRot;
+  vec3 tapA = texture2D(u_prev, src + ab).rgb;
+  vec3 tapC = texture2D(u_prev, src).rgb;
+  vec3 tapB = texture2D(u_prev, src - ab).rgb;
+  vec3 sampled = max(vec3(0.0), hueRotate(vec3(
+    hueRotate(tapA, -fringeRot).r,
+    hueRotate(tapC, -fringeRot).g,
+    hueRotate(tapB, -fringeRot).b
+  ), fringeRot));
   // Unsharp anti-mush tap.
   vec3 blur = (texture2D(u_prev, src + vec2(px.x, 0.0)).rgb
     + texture2D(u_prev, src - vec2(px.x, 0.0)).rgb
@@ -237,7 +273,7 @@ void main() {
   float gravity = sin(rc * 46.0 - t * (3.0 + 9.0 * u_low)) * 0.5 + 0.5;
   float gravityGain = u_low * (0.5 + 0.8 * u_kick);
   // Gravity ripple color: a spectral-hue-biased warm palette slice.
-  vec3 gravityColor = palette(0.05 + t * 0.015 + u_specHue * 0.5);
+  vec3 gravityColor = hueRotate(palette(0.05 + t * 0.015 + u_specHue * 0.5), u_hueRot);
   fresh += gravityColor
     * pow(gravity, 4.0) * exp(-r * 5.0) * gravityGain;
 
@@ -278,7 +314,7 @@ void main() {
   float centerDim = smoothstep(horizon * 0.45, horizon * 1.2, r);
   // Anamorphic lens streak.
   float streak = exp(-abs(c.y) * 110.0) * exp(-abs(c.x) * (4.5 - 1.5 * u_drop));
-  fresh += mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);
+  fresh += hueRotate(mix(palette(0.7 + u_specHue * 0.5), palette(t * 0.02), 0.65), u_hueRot) * streak * (0.25 + 1.2 * u_low + 0.8 * u_kick);
 
   // ---- THE LIT LANE SECTOR (runway lights). The disk is divided into bpb
   // angular sectors; one advances with the beat (u_sectorPos). A smooth cosine
@@ -305,7 +341,7 @@ void main() {
   float lanes = pow(0.5 + 0.5 * arm, lanePow) * smoothstep(0.06, 0.2, r) * exp(-r * 1.8);
   float cloudField = fbm(vec2(ang * 2.2 + r * 3.0 - t * 0.15, r * 5.0 + t * 0.06));
   float cloud = pow(cloudField, 2.4);
-  vec3 diskColor = palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);
+  vec3 diskColor = hueRotate(palette(cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8), u_hueRot);
   float reverb = 1.0 + 2.6 * rippleWave;
   // Lanes now depend on the sector gate (structural beat gating), and their
   // amount rides a modest dust gain (no longer the mid — the mid is width).
@@ -322,7 +358,7 @@ void main() {
     * laneEdge * smoothstep(0.08, 0.5, r) * sectorGate * centerDim;
   // DISTINCT DUST HUE: the crystalline glints (alt-high) sample the palette at
   // +0.35 phase from the mid dust so the high band reads as a different kind.
-  fresh += palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8) * glint * reverb;
+  fresh += hueRotate(palette(0.35 + cloudField * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8), u_hueRot) * glint * reverb;
 
   sky += fresh * (1.0 - u_decay) * (3.2 + 1.6 * u_sustain);
 
@@ -397,6 +433,11 @@ export const g08VoyageBeatgatePreset: VisualizerPreset = {
     let lastBeatInBar = -1;
     // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase.
     let slowCentroid = 0.5;
+    // DUST FIX v3: per-song hue anchor (splitmix of dominant deck trackId),
+    // eased over ~2s so track changes sweep; centroid EMA supplies the travel.
+    let hueAnchor = 0;
+    let hueAnchorTarget = 0;
+    let lastAnchorTrack: number | null = null;
 
     return createGlRenderer({
       fragment: FRAGMENT,
@@ -491,6 +532,22 @@ export const g08VoyageBeatgatePreset: VisualizerPreset = {
         const baseDecay = 0.992 - 0.008 * energy - 0.008 * buildup;
         // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
         slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
+        // DUST FIX v3: dominant deck = argmax audible level; its trackId anchors
+        // a stable per-song hue, eased over ~2s; centroid EMA supplies travel.
+        let domTrack: number | null = null;
+        let domLevel = -1;
+        for (const d of frame.decks) {
+          if (d.level > domLevel) {
+            domLevel = d.level;
+            domTrack = d.trackId;
+          }
+        }
+        if (domTrack !== null && domTrack !== lastAnchorTrack) {
+          lastAnchorTrack = domTrack;
+          hueAnchorTarget = splitmix01(domTrack);
+        }
+        hueAnchor += (hueAnchorTarget - hueAnchor) * (1 - Math.exp(-dt / 2.0));
+        const hueRot = (((hueAnchor + (slowCentroid - 0.5) * 0.8) % 1) + 1) % 1;
 
         return {
           u_time: frame.time,
@@ -501,6 +558,7 @@ export const g08VoyageBeatgatePreset: VisualizerPreset = {
           u_snare: frame.impulse.mid,
           u_centroid: frame.centroid,
           u_specHue: slowCentroid,
+          u_hueRot: hueRot,
           u_drop: drop,
           u_buildup: buildup,
           u_zoom: zoom,

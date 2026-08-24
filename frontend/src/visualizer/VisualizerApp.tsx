@@ -6,8 +6,14 @@ import {
   SPECTRUM_BAND_COUNT,
   VISUALIZER_CHANNEL,
 } from './channel';
-import type { BeatInfo, DeckStateInfo, VisualizerMessage, VisualizerPing } from './channel';
-import { presetById } from './presets';
+import type {
+  BeatInfo,
+  DeckStateInfo,
+  VisualizerFrame,
+  VisualizerMessage,
+  VisualizerPing,
+} from './channel';
+import { DEFAULT_PRESET_ID, presetById } from './presets';
 import {
   aliveCandidateListings,
   ensureCandidate,
@@ -172,8 +178,12 @@ export function VisualizerApp() {
     decks: DeckStateInfo[];
     receivedAt: number;
     bandsSlow: BandLevels;
+    regime: NonNullable<VisualizerFrame['regime']> | null;
+    dominantChannel: 'A' | 'B' | 'C' | 'D' | null;
   }>({
     bandsSlow: SILENT_BANDS,
+    regime: null,
+    dominantChannel: null,
     bands: SILENT_BANDS,
     spectrum: SILENT_SPECTRUM,
     wave: null,
@@ -290,6 +300,8 @@ export function VisualizerApp() {
         spread: event.data.spread ?? 0.5,
         flatness: event.data.flatness ?? 0.5,
         bandsSlow: event.data.bandsSlow ?? event.data.bands,
+        regime: event.data.regime ?? null,
+        dominantChannel: event.data.dominantChannel ?? null,
         decks: event.data.decks ?? [],
         receivedAt: performance.now(),
       };
@@ -359,6 +371,8 @@ export function VisualizerApp() {
       const frame = {
         bands: fresh ? feedRef.current.bands : SILENT_BANDS,
         bandsSlow: fresh ? feedRef.current.bandsSlow : SILENT_BANDS,
+        regime: fresh ? feedRef.current.regime : null,
+        dominantChannel: fresh ? feedRef.current.dominantChannel : null,
         spectrum: fresh ? feedRef.current.spectrum : SILENT_SPECTRUM,
         wave: fresh ? feedRef.current.wave : null,
         beat: fresh ? feedRef.current.beat : null,
@@ -376,6 +390,29 @@ export function VisualizerApp() {
       const layers = layersRef.current;
       const width = canvas.width;
       const height = canvas.height;
+      // CRASH GUARD (human note: hillfog threw and "everything is black from
+      // then on EVEN if i change presets"): an uncaught throw here used to
+      // kill the rAF chain permanently. Render each layer in a try/catch —
+      // a crashing preset gets an error event (fold marks it dead), is
+      // dropped, and the window falls back to the default preset; the loop
+      // itself must never die.
+      const renderGuarded = (layer: Layer): boolean => {
+        try {
+          layer.renderer.render(layer.ctx, width, height, {
+            ...frame,
+            params: getParamValues(layer.preset),
+          });
+          return true;
+        } catch (error) {
+          console.warn(`[visualizer] preset ${layer.preset.id} crashed`, error);
+          void postGaEvent({
+            type: 'error',
+            target: layer.preset.id,
+            text: String(error),
+          });
+          return false;
+        }
+      };
       if (layers.current) {
         if (
           layers.current.canvas.width !== width ||
@@ -384,20 +421,19 @@ export function VisualizerApp() {
           layers.current.canvas.width = width;
           layers.current.canvas.height = height;
         }
-        layers.current.renderer.render(layers.current.ctx, width, height, {
-          ...frame,
-          params: getParamValues(layers.current.preset),
-        });
+        if (!renderGuarded(layers.current)) {
+          const crashedId = layers.current.preset.id;
+          layers.current = null;
+          showToast(`💥 ${crashedId} crashed — reported + falling back`);
+          setPresetId(DEFAULT_PRESET_ID);
+        }
       }
       if (layers.outgoing) {
         layers.morphT += dt / MORPH_S;
         if (layers.morphT >= 1) {
           layers.outgoing = null;
-        } else {
-          layers.outgoing.renderer.render(layers.outgoing.ctx, width, height, {
-            ...frame,
-            params: getParamValues(layers.outgoing.preset),
-          });
+        } else if (!renderGuarded(layers.outgoing)) {
+          layers.outgoing = null;
         }
       }
 
@@ -409,11 +445,13 @@ export function VisualizerApp() {
       ctx.fillRect(0, 0, width, height);
       const blend = ease(layers.morphT);
       ctx.globalCompositeOperation = layers.outgoing ? 'lighter' : 'source-over';
-      if (layers.outgoing) {
+      // drawImage throws on a zero-size canvas (the old arena resize race) —
+      // guard both blits so a degenerate layer can't kill the loop either.
+      if (layers.outgoing && layers.outgoing.canvas.width > 0 && layers.outgoing.canvas.height > 0) {
         ctx.globalAlpha = 1 - blend;
         ctx.drawImage(layers.outgoing.canvas, 0, 0);
       }
-      if (layers.current) {
+      if (layers.current && layers.current.canvas.width > 0 && layers.current.canvas.height > 0) {
         ctx.globalAlpha = layers.outgoing ? blend : 1;
         ctx.drawImage(layers.current.canvas, 0, 0);
       }
@@ -484,6 +522,9 @@ export function VisualizerApp() {
   // ---- Solo review actions + hotkeys (g/b/m/t/n/c). Store getters keep
   // these closure-safe; registered once.
   const advanceRef = useRef<() => void>(() => {});
+  // Watch-time tracking (human, 2026-08-22): manual skips are quality
+  // evidence, weighted by how long the preset was watched.
+  const watchStartRef = useRef(performance.now());
   useEffect(() => {
     const advance = () => {
       const id = nextCandidateId(
@@ -494,6 +535,9 @@ export function VisualizerApp() {
       if (id) {
         setPresetId(id);
         cycleRef.current.lastAdvanceAt = performance.now();
+        // Local exposure bump: skipping with `n` counts as having seen it,
+        // so this session cycles through unseen presets without repeats.
+        soloCountsRef.current[id] = (soloCountsRef.current[id] ?? 0) + 1;
         // Parameter-genotype exploration: each solo-flow load presents a
         // different tuning; the verdict snapshot records what was shown.
         void ensureCandidate(id).then((preset) => {
@@ -539,7 +583,18 @@ export function VisualizerApp() {
       if (k === 'g') verdict('like');
       else if (k === 'b') verdict('dislike');
       else if (k === 'm') verdict('neutral');
-      else if (k === 'n') advance();
+      else if (k === 'n') {
+        // Manual skip = judgment: log the outgoing preset's watch time.
+        const outgoing = getPresetId();
+        if (isCandidateId(outgoing)) {
+          void postGaEvent({
+            type: 'skip',
+            target: outgoing,
+            watchedS: Math.round((performance.now() - watchStartRef.current) / 100) / 10,
+          });
+        }
+        advance();
+      }
       else if (k === 't') {
         // Inline note input — window.prompt is a no-op in the Electron
         // renderer (the "t key doesn't work" bug).
@@ -563,6 +618,7 @@ export function VisualizerApp() {
   useEffect(() => {
     if (prevPresetRef.current !== presetId) {
       prevPresetRef.current = presetId;
+      watchStartRef.current = performance.now();
       showToast(`▶ ${presetId}`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,0 +1,9 @@
+Candidate: g18-voyage-countdown   Kind: tweak
+Parents: g07-voyage-hardcut (quantized look grammar, hard phrase/section cuts, anticipation precut — the gen-7 winner)
+Human notes in play: "more focus on meter"; handoff direction "bar-countdown anticipation grammars (the scene visibly counts 4-3-2-1 into each phrase)".
+Falsifiable question: does an EXPLICIT visible countdown into each phrase cut — orbital beacons extinguishing one per bar (4-3-2-1), then beat pips counting down the final bar — build more anticipation than the parent's implicit last-beat charge alone?
+Invariants: four orbital beacons at fixed compass-diagonal stations; lit count = bars REMAINING in the phrase (all four relight ON the cut — the relight is part of the cut's punch); extinguishing is a hard snap on the bar downbeat (discrete, never eased); dead beacons keep a faint ember so the count stays readable as N-of-4; final bar only: beat pips near the horizon ring count remaining beats down, extinguishing per whole beat; parent's precut charge, look cuts, section strides, drop-on-boundary slam all kept verbatim.
+Degrees of freedom: beacon radius/size, ember floor level, pip placement, countdown gain vs the parent's precut.
+Assigned tech: beat.ladderBarIndex ?? barIndex (bar/phrase tiers), beat.beatInBar + beat.barPhase (final-bar pips), trackId genome via frame.dominantChannel, bandsSlow motion, per-band impulses (kick pulses lit beacons — solid response).
+Anti-resemblance: no runway sector gating (g18-voyage-cascade territory), no gates (g18-tunnel-gates), no dials (g18-tunnel-dials); the countdown is the ONLY new structure.
+Contract: default-export VisualizerPreset; self-contained GL via createGlRenderer; GLSL ES 1.0, no backticks; contractive feedback; chroma-preserving soft knee; localized beacon/pip luminance only (photosafe — no full-field envelope from the countdown); bright saturated colors; cuts ≤1 per 4 bars.

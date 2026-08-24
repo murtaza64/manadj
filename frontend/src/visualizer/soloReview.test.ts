@@ -4,6 +4,7 @@ import {
   INITIAL_CYCLE,
   nextCandidateId,
   sampleParamValues,
+  skipAdjustment,
   stepCycle,
 } from './soloReview';
 
@@ -14,15 +15,16 @@ const LISTINGS = [
 ];
 
 describe('countSoloReviews', () => {
-  it('counts only solo events by target', () => {
+  it('counts solo verdicts and vote participation as exposure', () => {
     const counts = countSoloReviews([
       { type: 'solo', target: 'a' },
       { type: 'solo', target: 'a' },
-      { type: 'vote', target: 'a' },
+      { type: 'vote', a: 'a', b: 'c' },
       { type: 'solo', target: 'b' },
+      { type: 'note', target: 'b' },
       { type: 'solo' },
     ]);
-    expect(counts).toEqual({ a: 2, b: 1 });
+    expect(counts).toEqual({ a: 3, b: 1, c: 1 });
   });
 });
 
@@ -90,6 +92,15 @@ describe('sampleParamValues', () => {
   });
 });
 
+describe('skipAdjustment', () => {
+  it('tiers by watch time: quick skip worst, long watch mildly positive', () => {
+    expect(skipAdjustment(3)).toBe(-0.5);
+    expect(skipAdjustment(20)).toBe(-0.25);
+    expect(skipAdjustment(60)).toBe(0);
+    expect(skipAdjustment(300)).toBe(0.25);
+  });
+});
+
 describe('stepCycle', () => {
   it('off never advances', () => {
     const { advance } = stepCycle(INITIAL_CYCLE, 'off', 10_000_000, 1, 128);
@@ -118,14 +129,23 @@ describe('stepCycle', () => {
     expect(r.state.dueAt).toBeNull();
   });
 
-  it('a new edge while a schedule is pending does not re-arm', () => {
-    let r = stepCycle(INITIAL_CYCLE, 'drop', 1000, 0.8, 128); // edge, arm
-    const due = r.state.dueAt;
-    // dip + fresh edge mid-flight: pending dueAt is untouched
+  it('a second drop inside the pending window advances immediately', () => {
+    let r = stepCycle(INITIAL_CYCLE, 'drop', 1000, 0.8, 128); // edge, arm (due at 61s)
+    expect(r.state.dueAt).not.toBeNull();
+    // dip + a fresh drop mid-window (past refractory): cut NOW, not at 61s
     r = stepCycle(r.state, 'drop', 30_000, 0.2, 128);
     r = stepCycle(r.state, 'drop', 30_500, 0.8, 128);
-    expect(r.state.dueAt).toBe(due);
-    r = stepCycle(r.state, 'drop', 61_001, 0.8, 128); // fires on schedule
     expect(r.advance).toBe(true);
+    expect(r.state.dueAt).toBeNull();
+  });
+
+  it('the same drop cannot refire inside the refractory', () => {
+    let r = stepCycle(INITIAL_CYCLE, 'drop', 1000, 0.8, 128); // edge, arm
+    const due = r.state.dueAt;
+    // dip + edge again within the 20s refractory: pending schedule untouched
+    r = stepCycle(r.state, 'drop', 5_000, 0.2, 128);
+    r = stepCycle(r.state, 'drop', 5_500, 0.8, 128);
+    expect(r.advance).toBe(false);
+    expect(r.state.dueAt).toBe(due);
   });
 });

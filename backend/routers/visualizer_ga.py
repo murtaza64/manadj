@@ -46,6 +46,9 @@ class ArenaEvent(BaseModel):
     # preferred tuning of each candidate).
     paramsA: dict[str, float] | None = None
     paramsB: dict[str, float] | None = None
+    # skip events (type "skip"): seconds the preset was watched before the
+    # human manually advanced — watch time is quality evidence.
+    watchedS: float | None = None
 
 
 @router.get("/state")

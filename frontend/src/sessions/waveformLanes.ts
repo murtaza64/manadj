@@ -122,12 +122,45 @@ export interface TraceRun {
   ph1: number;
 }
 
+/** Thin a trace to samples ≥ `minDtS` apart (endpoints always kept).
+ * Runs and scene polylines are RENDER units: at low zoom, jog/pitch
+ * wiggles between samples closer than a pixel cut the trace into
+ * thousands of sub-pixel runs (and polyline points), and the per-point
+ * fixed cost dominated every repaint/scene render. Any position error
+ * this introduces is bounded by the decimation step — sub-pixel at the
+ * zoom that chose it. `minPh` keeps big playhead moves (seeks) that
+ * happen INSIDE a decimation window: a point also survives when its
+ * playhead is ≥ minPh from the last kept one. */
+export function decimatePlayheadTrace(
+  trace: { t: number; playhead: number }[],
+  minDtS: number,
+  minPh = Infinity
+): { t: number; playhead: number }[] {
+  if (minDtS <= 0 || trace.length < 3) return trace;
+  const out = [trace[0]];
+  const last = trace.length - 1;
+  for (let i = 1; i < last; i++) {
+    const kept = out[out.length - 1];
+    if (trace[i].t - kept.t >= minDtS || Math.abs(trace[i].playhead - kept.playhead) >= minPh) {
+      out.push(trace[i]);
+    }
+  }
+  out.push(trace[last]);
+  return out;
+}
+
 /** Cut traces into constant-rate runs (rate changes at pitch moves; the
  * ~1 Hz samples make same-rate stretches long). Tolerance is generous —
- * a run is a RENDER unit, not evidence. */
-export function traceRuns(deck: DeckTimeline, rateTolerance = 0.04): TraceRun[] {
+ * a run is a RENDER unit, not evidence. `minDtS` pre-decimates each
+ * trace to that sample spacing (zoom-adaptive callers pass ~¾px of
+ * session time) so sub-pixel rate wiggles can't multiply run count. */
+export function traceRuns(deck: DeckTimeline, rateTolerance = 0.04, minDtS = 0): TraceRun[] {
   const runs: TraceRun[] = [];
-  for (const trace of deck.traces) {
+  for (const rawTrace of deck.traces) {
+    // minPh = minDtS: a seek ≥ the decimation step moves the waveform a
+    // visible amount at this zoom (px-per-track-sec ≈ px-per-session-sec
+    // at rate ~1) and must stay a run cut, not get averaged away.
+    const trace = decimatePlayheadTrace(rawTrace, minDtS, minDtS);
     if (trace.length < 2) continue;
     let start = 0;
     let rate: number | null = null;
@@ -201,6 +234,37 @@ function controlAt(steps: GainStep[], t: number, dflt: number): number {
   return gainAt(steps, t);
 }
 
+/** Amortized step-lookup cursor for MONOTONICALLY increasing `t` — the
+ * `controlAt` twin of `createMonotonicPxToT`. `columnModulation` did six
+ * binary searches per column; across a full-session-wide window that was
+ * a visible slice of every low-zoom repaint. Defensive rewind keeps it
+ * correct if a caller steps backward. */
+function createControlCursor(steps: GainStep[], dflt: number): (t: number) => number {
+  let i = -1; // last step with steps[i].t <= t (-1 = before the first)
+  return (t: number): number => {
+    while (i >= 0 && steps[i].t > t) i--;
+    while (i + 1 < steps.length && steps[i + 1].t <= t) i++;
+    return i >= 0 ? steps[i].gain : dflt;
+  };
+}
+
+/** Bound, cursor-backed `columnModulation` for time-increasing callers
+ * (the column render pass). Same math, amortized O(1) lookups. */
+export function createColumnModulator(controls: DeckControlSteps): (t: number) => ColumnModulation {
+  const fader = createControlCursor(controls.fader, DECK_CONTROL_DEFAULTS.fader);
+  const trim = createControlCursor(controls.trim, DECK_CONTROL_DEFAULTS.trim);
+  const eqLow = createControlCursor(controls.eqLow, DECK_CONTROL_DEFAULTS.eqLow);
+  const eqMid = createControlCursor(controls.eqMid, DECK_CONTROL_DEFAULTS.eqMid);
+  const eqHigh = createControlCursor(controls.eqHigh, DECK_CONTROL_DEFAULTS.eqHigh);
+  return (t: number): ColumnModulation => {
+    const gain = channelFaderToGain(fader(t)) * trimToGain(trim(t));
+    return {
+      eq: [eqValueToGain(eqLow(t)), eqValueToGain(eqMid(t)), eqValueToGain(eqHigh(t))],
+      scale: Math.min(2, gain / NOMINAL_STRIP_GAIN),
+    };
+  };
+}
+
 /** The recorded mixer state at session time `t` as a column modulation:
  * EQ per band group through its real curve (a kill removes the band), and
  * fader (audio taper) × trim (dB curve) as a display-normalized height
@@ -244,9 +308,14 @@ export function drawStyledRuns(
   // their columns advance left→right).
   const renderer = createStyledColumnRenderer(wave, styleId, params);
   const pxToT = controls ? createMonotonicPxToT(axis) : null;
+  const modAt = controls ? createColumnModulator(controls) : null;
+  // Run endpoints advance in time — a monotonic cursor instead of
+  // `axis.tToPx`'s per-call linear segment scan (O(runs × segments)
+  // dominated low-zoom repaints alongside per-run setup).
+  const tToPx = createMonotonicTToPx(axis);
   for (const run of runs) {
-    const rx0 = axis.tToPx(run.t0);
-    const rx1 = axis.tToPx(run.t1);
+    const rx0 = tToPx(run.t0);
+    const rx1 = tToPx(run.t1);
     if (rx1 <= rx0) continue;
     // Clip the run to the visible window, track range proportionally.
     const cx0 = Math.max(rx0, geo.x0);
@@ -258,8 +327,8 @@ export function drawStyledRuns(
     const cols = Math.round(cx1) - xStart;
     if (cols <= 0) continue;
     const modulate =
-      controls && pxToT
-        ? (x: number) => columnModulation(controls, pxToT(xStart + x + 0.5))
+      modAt && pxToT
+        ? (x: number) => modAt(pxToT(xStart + x + 0.5))
         : undefined;
     const columns = renderer.render(phA, phB, cols, 1, modulate);
     for (let x = 0; x < cols; x++) {
@@ -289,9 +358,10 @@ export function drawGridlines(
   geo: LaneGeometry
 ): void {
   const downbeats = new Set(downbeatTimes);
+  const tToPx = createMonotonicTToPx(axis);
   for (const run of runs) {
-    const x0 = axis.tToPx(run.t0);
-    const x1 = axis.tToPx(run.t1);
+    const x0 = tToPx(run.t0);
+    const x1 = tToPx(run.t1);
     const phSpan = run.ph1 - run.ph0;
     if (phSpan <= 0 || x1 <= x0) continue;
     const pxPerTrackSec = (x1 - x0) / phSpan;

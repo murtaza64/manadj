@@ -19,6 +19,16 @@ import { energyOf } from '../../style';
 import { createGlRenderer } from '../glPreset';
 import type { VisualizerPreset } from '../types';
 
+// DUST FIX v3: deterministic per-track hue anchor. Bit-mix folded to [0,1) so
+// different track ids land on genuinely different hues.
+const splitmix01 = (n: number): number => {
+  let x = (Math.floor(Math.abs(n)) + 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 0x735a2d97) >>> 0;
+  x = (x ^ (x >>> 15)) >>> 0;
+  return x / 4294967296;
+};
+
 const rgb = (c: readonly [number, number, number]) =>
   `vec3(${c[0].toFixed(3)}, ${c[1].toFixed(3)}, ${c[2].toFixed(3)})`;
 
@@ -47,6 +57,7 @@ uniform float u_rippleAmp;
 uniform float u_charge;
 uniform float u_beatPulse;
 uniform float u_grid;
+uniform float u_hueRot;   // DUST FIX v3: per-song hue anchor + slow travel, TURNS 0..1
 
 const vec3 LOW = ${rgb(ADDITIVE_COLORS[0])};
 
@@ -89,6 +100,23 @@ vec3 palette(float t) {
   return c + vec3(0.10, -0.02, -0.05) * u_excite;
 }
 
+// DUST FIX v3: value-preserving hue ROTATION (YIQ chroma plane). rot in TURNS;
+// luminance (Y) untouched so gains are unchanged. Negatives clamped.
+vec3 hueRotate(vec3 c, float rot) {
+  float y = dot(c, vec3(0.299, 0.587, 0.114));
+  float i = dot(c, vec3(0.596, -0.274, -0.322));
+  float q = dot(c, vec3(0.211, -0.523, 0.312));
+  float h = atan(q, i) + rot * 6.28318;
+  float chroma = sqrt(i * i + q * q);
+  i = chroma * cos(h);
+  q = chroma * sin(h);
+  return max(vec3(0.0), vec3(
+    y + 0.956 * i + 0.621 * q,
+    y - 0.272 * i - 0.647 * q,
+    y - 1.106 * i - 1.703 * q
+  ));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_res;
   float aspect = u_res.x / u_res.y;
@@ -116,11 +144,19 @@ void main() {
 
   vec2 ab = dirW * (0.0012 + 0.004 * u_excite + 0.003 * u_kick + 0.01 * rippleWave)
     / vec2(aspect, 1.0);
-  vec3 sampled = vec3(
-    texture2D(u_prev, src + ab).r,
-    texture2D(u_prev, src).g,
-    texture2D(u_prev, src - ab).b
-  );
+  ab *= u_dust; // fringe amount rides the dust param (human note)
+  // fringe fix: hue-steerable fringes -- rotate the field to the anchor
+  // frame, split channels there, rotate back. Clamped >= 0 (hueRotate can
+  // go slightly negative) so the unsharp feedback loop stays stable.
+  float fringeRot = u_hueRot;
+  vec3 tapA = texture2D(u_prev, src + ab).rgb;
+  vec3 tapC = texture2D(u_prev, src).rgb;
+  vec3 tapB = texture2D(u_prev, src - ab).rgb;
+  vec3 sampled = max(vec3(0.0), hueRotate(vec3(
+    hueRotate(tapA, -fringeRot).r,
+    hueRotate(tapC, -fringeRot).g,
+    hueRotate(tapB, -fringeRot).b
+  ), fringeRot));
   vec3 blur = (texture2D(u_prev, src + vec2(px.x, 0.0)).rgb
     + texture2D(u_prev, src - vec2(px.x, 0.0)).rgb
     + texture2D(u_prev, src + vec2(0.0, px.y)).rgb
@@ -136,7 +172,7 @@ void main() {
   float cloud = pow(wall, 2.4);
   // SPECTRAL DUST TINT: the wall palette phase is biased by the slow-tracked
   // centroid (u_specHue) so dust hue follows spectral content.
-  vec3 dustColor = palette(wall * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);
+  vec3 dustColor = hueRotate(palette(wall * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8), u_hueRot);
   float midGate = smoothstep(0.03, 0.3, u_mid);
   fresh += dustColor * cloud * smoothstep(0.05, 0.6, r) * (0.1 + 1.2 * u_mid)
     * u_dust * midGate * reverb;
@@ -146,7 +182,7 @@ void main() {
   float shimmer = 0.6 + 0.4 * sin(t * 13.0 + wisp * 24.0);
   // DISTINCT DUST HUE: the high nebula samples the palette at +0.35 phase from
   // the mid wall so the bands read as different dust kinds.
-  vec3 electric = palette(0.35 + wall * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8);
+  vec3 electric = hueRotate(palette(0.35 + wall * 1.5 + r * 0.35 + ang * 0.1 + t * 0.012 + u_centroid * 0.4 + u_specHue * 0.8), u_hueRot);
   fresh += electric * pow(wisp, 3.2) * shimmer * smoothstep(0.1, 0.6, r)
     * (0.08 + 1.7 * u_high) * u_dust * reverb;
 
@@ -220,6 +256,11 @@ const candidate: VisualizerPreset = {
     let prevPhase: number | null = null;
     // Slow-tracked centroid (~1s EMA): biases the dust/element palette phase.
     let slowCentroid = 0.5;
+    // DUST FIX v3: per-song hue anchor (splitmix of dominant deck trackId),
+    // eased over ~2s so track changes sweep; centroid EMA supplies the travel.
+    let hueAnchor = 0;
+    let hueAnchorTarget = 0;
+    let lastAnchorTrack: number | null = null;
     return createGlRenderer({
       fragment: FRAGMENT,
       feedback: true,
@@ -264,6 +305,22 @@ const candidate: VisualizerPreset = {
         const baseDecay = 0.992 - 0.008 * energy - 0.006 * smoothExcite;
         // ~1s EMA of the centroid -> spectral dust hue bias (u_specHue).
         slowCentroid += (frame.centroid - slowCentroid) * (1 - Math.exp(-dt / 1.0));
+        // DUST FIX v3: dominant deck = argmax audible level; its trackId anchors
+        // a stable per-song hue, eased over ~2s; centroid EMA supplies travel.
+        let domTrack: number | null = null;
+        let domLevel = -1;
+        for (const d of frame.decks) {
+          if (d.level > domLevel) {
+            domLevel = d.level;
+            domTrack = d.trackId;
+          }
+        }
+        if (domTrack !== null && domTrack !== lastAnchorTrack) {
+          lastAnchorTrack = domTrack;
+          hueAnchorTarget = splitmix01(domTrack);
+        }
+        hueAnchor += (hueAnchorTarget - hueAnchor) * (1 - Math.exp(-dt / 2.0));
+        const hueRot = (((hueAnchor + (slowCentroid - 0.5) * 0.8) % 1) + 1) % 1;
 
         return {
           u_time: frame.time,
@@ -274,6 +331,7 @@ const candidate: VisualizerPreset = {
           u_snare: impulse.mid,
           u_centroid: frame.centroid,
           u_specHue: slowCentroid,
+          u_hueRot: hueRot,
           u_excite: smoothExcite,
           u_zoom: zoom,
           u_rotStep: (0.08 + 1.0 * bands.mid + 1.4 * impulse.mid) * spin * dt,

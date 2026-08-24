@@ -11,10 +11,14 @@ import type { DeckControlSteps } from './timelineModel';
 import { buildTimeAxis, deriveTimeline } from './timelineModel';
 import {
   columnModulation,
+  createColumnModulator,
   createMonotonicPxToT,
   createMonotonicTToPx,
+  decimatePlayheadTrace,
   tracePolylinePoints,
+  traceRuns,
 } from './waveformLanes';
+import type { DeckTimeline } from './timelineModel';
 
 const controls = (patch: Partial<DeckControlSteps> = {}): DeckControlSteps => ({
   fader: [{ t: 0, gain: 1 }],
@@ -126,6 +130,95 @@ describe('createMonotonicPxToT / createMonotonicTToPx', () => {
     const cursor = createMonotonicPxToT(axis);
     cursor(axis.totalPx - 1);
     expect(cursor(1)).toBeCloseTo(axis.pxToT(1), 9);
+  });
+});
+
+// ── Zoom-adaptive run decimation (low-zoom repaint stalls) ───────────────
+
+const deckWithTrace = (trace: { t: number; playhead: number }[]): DeckTimeline =>
+  ({ traces: [trace] }) as unknown as DeckTimeline;
+
+describe('traceRuns decimation', () => {
+  /** 1 Hz samples whose rate wiggles ±0.1 every second — a jog-heavy
+   * trace that cuts into one run PER SAMPLE at the default tolerance. */
+  const jitteryTrace = () => {
+    const trace: { t: number; playhead: number }[] = [{ t: 0, playhead: 0 }];
+    for (let i = 1; i <= 100; i++) {
+      trace.push({ t: i, playhead: trace[i - 1].playhead + (i % 2 === 0 ? 1.1 : 0.9) });
+    }
+    return trace;
+  };
+
+  it('minDtS collapses sub-sample rate wiggles into few runs', () => {
+    const deck = deckWithTrace(jitteryTrace());
+    const fine = traceRuns(deck);
+    const coarse = traceRuns(deck, undefined, 8);
+    expect(fine.length).toBeGreaterThan(50);
+    expect(coarse.length).toBeLessThan(fine.length / 5);
+    // Endpoints survive decimation exactly.
+    expect(coarse[0].t0).toBe(0);
+    expect(coarse[coarse.length - 1].t1).toBe(100);
+    expect(coarse[coarse.length - 1].ph1).toBeCloseTo(100, 9);
+  });
+
+  it('minDtS = 0 is the identity (default behavior unchanged)', () => {
+    const deck = deckWithTrace(jitteryTrace());
+    expect(traceRuns(deck, undefined, 0)).toEqual(traceRuns(deck));
+  });
+
+  it('short traces pass through untouched', () => {
+    const deck = deckWithTrace([
+      { t: 0, playhead: 0 },
+      { t: 1, playhead: 1 },
+    ]);
+    expect(traceRuns(deck, undefined, 30)).toEqual([{ t0: 0, t1: 1, ph0: 0, ph1: 1 }]);
+  });
+
+  it('a seek inside the decimation window survives (minPh)', () => {
+    // Steady playback, then a big seek at t=10, then steady again.
+    const trace: { t: number; playhead: number }[] = [];
+    for (let i = 0; i <= 20; i++) {
+      trace.push({ t: i, playhead: i < 10 ? i : i + 120 });
+    }
+    const thin = decimatePlayheadTrace(trace, 30, 60);
+    // Endpoints + the seek landing point survive.
+    expect(thin[0]).toEqual({ t: 0, playhead: 0 });
+    expect(thin.some((p) => p.playhead >= 130 && p.t <= 11)).toBe(true);
+    // Without minPh the seek would vanish into one straight run.
+    expect(decimatePlayheadTrace(trace, 30)).toHaveLength(2);
+  });
+});
+
+describe('createColumnModulator', () => {
+  it('agrees with columnModulation over a monotonic sweep and after rewind', () => {
+    const c = controls({
+      fader: [
+        { t: 0, gain: 1 },
+        { t: 5, gain: 0.5 },
+        { t: 9, gain: 0 },
+      ],
+      eqLow: [
+        { t: 0, gain: 0.5 },
+        { t: 6, gain: 0 },
+      ],
+      trim: [
+        { t: 0, gain: 0.5 },
+        { t: 7, gain: 1 },
+      ],
+    });
+    const mod = createColumnModulator(c);
+    for (let t = -1; t <= 12; t += 0.25) {
+      expect(mod(t)).toEqual(columnModulation(c, t));
+    }
+    // Defensive rewind: a backward step still matches.
+    expect(mod(2)).toEqual(columnModulation(c, 2));
+  });
+
+  it('empty series fall back to strip defaults', () => {
+    const empty = { fader: [], trim: [], eqLow: [], eqMid: [], eqHigh: [] };
+    const mod = createColumnModulator(empty);
+    expect(mod(5)).toEqual(columnModulation(empty, 5));
+    expect(mod(5).eq).toEqual([1, 1, 1]);
   });
 });
 
