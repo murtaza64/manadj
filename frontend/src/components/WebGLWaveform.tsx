@@ -57,6 +57,10 @@ interface WebGLWaveformProps {
   /** Identity-change wake for frame inputs the renderer can't see (the
    * mixer channel state feeding `modulation`) — performance-hardening 01. */
   wakeKey?: unknown;
+  /** Event-driven wake (#155): the deck's transport gesture stream, so
+   * paused seeks from ANY producer (MIDI jog, beatjump, hot cues) repaint
+   * on the next frame instead of the 250ms idle poll. Must be stable. */
+  subscribeWake?: (cb: () => void) => () => void;
   /** Per-column amplitude modulation (renderer passthrough): the editor
    * feeds automation curves; the performance decks feed LIVE mixer state
    * (performance-mode 09 — the modTex is resampled every frame, so a
@@ -83,6 +87,7 @@ export default function WebGLWaveform({
   timeReadoutOffset,
   playing = false,
   wakeKey,
+  subscribeWake,
   modulation = null,
   modulationSplit = false,
 }: WebGLWaveformProps) {
@@ -115,6 +120,7 @@ export default function WebGLWaveform({
     active: viewActive,
     playing,
     wakeKey,
+    subscribeWake,
   });
 
   // Apply the shared time-zoom (also after re-init when new data lands).

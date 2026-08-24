@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import WebGLWaveform from './WebGLWaveform';
 import { useDeck, useDeckReady, useDeckSnapshot } from '../hooks/useDeck';
 import { useScrubTransport } from '../hooks/useScrubTransport';
@@ -28,6 +29,12 @@ export default function Player() {
   const trackId = loadedTrack?.id ?? null;
 
   const scrubTransport = useScrubTransport();
+  // Per-gesture wake (#155): paused seeks (keyboard beatjump, hot cues, MIDI
+  // jog) repaint on the next frame instead of the 250ms idle poll.
+  const subscribeWake = useCallback(
+    (cb: () => void) => engine.addTransportEventListener(cb),
+    [engine],
+  );
 
   return (
     <>
@@ -42,6 +49,7 @@ export default function Player() {
           dimmed={trackId !== null && !ready}
           beatjumpBeats={beatjumpBeats}
           playing={advancing}
+          subscribeWake={subscribeWake}
           playMarkerFraction={0.35}
           timeReadoutAnchor="top-left"
           /* Docked at the transport overlay's bottom edge (panel bottom

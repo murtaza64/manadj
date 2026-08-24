@@ -123,6 +123,15 @@ export function DeckWaveform({
   // (performance-hardening 01 × performance-mode 09).
   const channelState = useMixerValue((m) => m.getChannelState(deck));
 
+  // Per-gesture wake (#155): every transport gesture — notably paused MIDI
+  // jog seeks, which arrive sparser than 60fps — pulls an idle-parked
+  // render loop forward to the next frame. Without this the loop re-parks
+  // on its 250ms poll between jog ticks and paused scrubbing jitters.
+  const subscribeWake = useCallback(
+    (cb: () => void) => engine.addTransportEventListener(cb),
+    [engine],
+  );
+
   // Live mixer → waveform modulation (performance-mode 09, the sessions-19
   // semantics applied live): EQ dims/removes its band group; trim scales
   // (display-normalized to center, capped at 1). PRE-FADER by design — the
@@ -290,6 +299,7 @@ export function DeckWaveform({
         beatjumpBeats={beatjumpBeats}
         playing={advancing}
         wakeKey={channelState}
+        subscribeWake={subscribeWake}
         visibleSeconds={trackWindowSeconds(visibleSeconds, rate)}
         onVisibleSecondsChange={(seconds) => onVisibleSecondsChange(seconds / rate)}
         modulation={modulation}
@@ -829,6 +839,12 @@ export function DeckPanel({
     (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
   );
   const track = useDeckTrack();
+  // Per-gesture wake (#155): paused seeks repaint the minimap playhead on
+  // the next frame instead of the 250ms idle poll.
+  const subscribeWake = useCallback(
+    (cb: () => void) => engine.addTransportEventListener(cb),
+    [engine],
+  );
 
   return (
     <section
@@ -849,6 +865,7 @@ export function DeckPanel({
             onSeek={(t) => ready && engine.seek(t)}
             dimmed={track !== null && !ready}
             playing={advancing}
+            subscribeWake={subscribeWake}
           />
           {/* Play guides at track scale (play-guides PRD): how far out is
               the press moment. Shows only while this Deck is outgoing. */}
