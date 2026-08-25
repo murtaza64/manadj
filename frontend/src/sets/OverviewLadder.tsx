@@ -645,7 +645,10 @@ function ClipTitle({
  * mirrored-lane layout wins over the style's own anchor); hot cues use the
  * deck minimaps' zoned mark — a 2px full-height pole flying a 5×5 square
  * flag — with the flag on the OUTER (title-side) edge, keeping the center
- * line clean. */
+ * line clean. Cue marks are DOM overlays, NOT canvas pixels (issue 172):
+ * during a zoom gesture the stale bitmap is CSS-stretched until the
+ * settle redraw, so anything in it stretches too — DOM marks ride the
+ * width change by % position while keeping fixed pixel geometry. */
 function LadderWave({
   trackId,
   height,
@@ -669,8 +672,9 @@ function LadderWave({
   const { data } = useWaveformBlob(trackId);
   const wave: DecodedWaveform | null = data ?? null;
   const ref = useRef<HTMLCanvasElement>(null);
-  const cueKey = cues.map((c) => `${c.t}:${c.color}`).join('|');
   const slot = useStyleSlot('minimap');
+  const [t0, t1] = range;
+  const span = Math.max(t1 - t0, 0.001);
 
   useEffect(() => {
     // Rasterizing is the expensive part — it runs through the clip-draw
@@ -699,10 +703,6 @@ function LadderWave({
       ctx.clearRect(0, 0, wDraw, h);
       if (!wave) return;
 
-      const [t0, t1] = range;
-      const span = Math.max(t1 - t0, 0.001);
-      const xAt = (t: number) => ((t - t0) / span) * wDraw;
-
       drawStyledWave(ctx, wave, slot.styleId, slot.params, {
         width: wDraw,
         height: h,
@@ -710,21 +710,56 @@ function LadderWave({
         range,
         brightness: MINIMAP_BRIGHTNESS,
       });
-
-      for (const c of cues) {
-        const x = xAt(c.t);
-        if (x < -6 * os || x > wDraw + 6 * os) continue;
-        // The minimap's zoned cue mark (WaveformRendererV2.pushHotCues,
-        // minimap branch): 2px full-height pole + 5×5 square flag off its
-        // right, flag on the title side: top for 'up', bottom for 'down'.
-        // Horizontal sizes scale by os so they DISPLAY at minimap size.
-        ctx.fillStyle = c.color;
-        ctx.fillRect(x - os, 0, 2 * os, h);
-        ctx.fillRect(x + os, dir === 'up' ? 0 : h - 5, 5 * os, 5);
-      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wave, height, dir, range[0], range[1], cueKey, redrawKey, slot]);
+  }, [wave, height, dir, range[0], range[1], redrawKey, slot]);
 
-  return <canvas ref={ref} style={{ width: '100%', height, display: 'block', flex: 'none' }} />;
+  return (
+    <div style={{ position: 'relative', height, flex: 'none' }}>
+      <canvas ref={ref} style={{ width: '100%', height, display: 'block' }} />
+      {/* The minimap's zoned cue mark (WaveformRendererV2.pushHotCues,
+          minimap branch): 2px full-height pole + 5×5 square flag off its
+          right, flag on the title side: top for 'up', bottom for 'down'.
+          %-positioned DOM so the mark tracks zoom continuously at fixed
+          pixel size (the clip's overflow:hidden trims edge marks). */}
+      {cues.map((c, i) => {
+        const frac = (c.t - t0) / span;
+        if (frac < 0 || frac > 1) return null;
+        return (
+          <div
+            key={`${c.t}-${i}`}
+            style={{
+              position: 'absolute',
+              left: `${frac * 100}%`,
+              top: 0,
+              bottom: 0,
+              pointerEvents: 'none',
+            }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                left: -1,
+                top: 0,
+                bottom: 0,
+                width: 2,
+                background: c.color,
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                left: 1,
+                width: 5,
+                height: 5,
+                top: dir === 'up' ? 0 : undefined,
+                bottom: dir === 'up' ? undefined : 0,
+                background: c.color,
+              }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
 }
