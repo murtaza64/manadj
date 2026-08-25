@@ -40,7 +40,7 @@ import {
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { Mixer } from '../playback/mixer';
 import {
-  jumpCrossed,
+  jumpCrossedDecks,
   planStateAt,
   PLAN_DECKS,
   type PlanAutomation,
@@ -52,11 +52,33 @@ import { soundingWindowAt, soundingWindowKey } from './replan';
 
 const DRIFT_TOLERANCE_S = 0.12;
 
+// ── Phase servo (#161 finding 4) ───────────────────────────────────────
+// Sub-seek drift corrects by riding the deck's rate a touch — a DJ's
+// nudge — never by re-seeking: audible playhead jumps are reserved for
+// recorded jumps (hard syncs) and gross desync. Below the deadband the
+// playhead estimate's own noise rules; above it the nudge burns drift at
+// NUDGE_GAIN %/s-of-drift, capped at an inaudible ±MAX_NUDGE_PERCENT.
+/** |drift| under this is estimate noise — leave the deck alone. */
+const NUDGE_DEADBAND_S = 0.02;
+/** Corrective pitch percent per second of drift (0.06s → 0.75%). */
+const NUDGE_GAIN_PERCENT_PER_S = 12.5;
+/** Nudge ceiling — beyond what this can hold, drift grows to the seek. */
+const MAX_NUDGE_PERCENT = 0.75;
+/** Gross desync: give up nudging and re-seek (also every hard sync). */
+const SEEK_TOLERANCE_S = 0.25;
+
 /** How close to the decoded duration a self-parked playhead must sit to
  * count as the worklet running off the buffer (natural end). */
 const NATURAL_END_TOLERANCE_S = 0.05;
 
 const lerp = (a: number, b: number, p: number): number => a + (b - a) * p;
+
+/** Trim is OPTIONAL on a lane (absent = the live user's trim rules):
+ * lerp when both ends carry it, hold the defined end otherwise — a
+ * pickup ramp whose start lanes adopted the base trim converges onto an
+ * entry-trim target without a step (sets #164). */
+const lerpOptional = (a: number | undefined, b: number | undefined, p: number) =>
+  a === undefined ? b : b === undefined ? a : lerp(a, b, p);
 
 const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAutomation => ({
   fader: lerp(from.fader, to.fader, p),
@@ -66,16 +88,22 @@ const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAut
     high: lerp(from.eq.high, to.eq.high, p),
   },
   filter: lerp(from.filter, to.filter, p),
+  trim: lerpOptional(from.trim, to.trim, p),
 });
 
 const LANE_EPS = 1e-3;
+
+/** Presence differing counts (absent = base trim rules — a real change). */
+const trimDiffers = (a: number | undefined, b: number | undefined): boolean =>
+  a === undefined || b === undefined ? a !== b : Math.abs(a - b) > LANE_EPS;
 
 const laneDiffers = (a: PlanAutomation, b: PlanAutomation): boolean =>
   Math.abs(a.fader - b.fader) > LANE_EPS ||
   Math.abs(a.eq.low - b.eq.low) > LANE_EPS ||
   Math.abs(a.eq.mid - b.eq.mid) > LANE_EPS ||
   Math.abs(a.eq.high - b.eq.high) > LANE_EPS ||
-  Math.abs(a.filter - b.filter) > LANE_EPS;
+  Math.abs(a.filter - b.filter) > LANE_EPS ||
+  trimDiffers(a.trim, b.trim);
 
 const lanesDiffer = (
   a: Record<PlanDeck, PlanAutomation>,
@@ -552,6 +580,10 @@ export class Conductor {
         if (!skip(`${ch}.eqMid`)) this.mixer.setEq(ch, 'mid', lanes[ch].eq.mid);
         if (!skip(`${ch}.eqHigh`)) this.mixer.setEq(ch, 'high', lanes[ch].eq.high);
         if (!skip(`${ch}.filter`)) this.mixer.setFilter(ch, lanes[ch].filter);
+        // A lane WITHOUT trim never owned the node — the base (live)
+        // trim is already the sounding value (sets #164).
+        const trim = lanes[ch].trim;
+        if (trim !== undefined && !skip(`${ch}.trim`)) this.mixer.setTrim(ch, trim);
       }
     }
     if (!skip('crossfader')) this.mixer.setCrossfader(0);
@@ -739,8 +771,11 @@ export class Conductor {
         !this.engine(d).getSnapshot().playing &&
         !this.audioExhausted(d, state.decks[d].trackTime)
     );
-    const hard =
-      this.pendingHardSync || joining || jumpCrossed(this.plan, this.lastTickT, t);
+    // Hard syncs are deck-scoped for jumps (#161): a recorded jump seeks
+    // ONLY the jumping deck; joins/seeks still hard-sync every deck (the
+    // flam-cancel start rule above).
+    const hardAll = this.pendingHardSync || joining;
+    const jumped = hardAll ? [] : jumpCrossedDecks(this.plan, this.lastTickT, t);
     this.pendingHardSync = false;
     this.lastTickT = t;
     // Pickup convergence (sets 16): while the ramp runs, every mixer
@@ -756,7 +791,7 @@ export class Conductor {
       : state.lanes;
     this.self(() => {
       for (const deck of this.driven) {
-        if (ready[deck]) this.syncDeck(deck, state, hard, p);
+        if (ready[deck]) this.syncDeck(deck, state, hardAll || jumped.includes(deck), p);
       }
       for (const deck of this.driven) this.mixer.setAutomation(deck, lanes[deck]);
     });
@@ -882,17 +917,31 @@ export class Conductor {
     // hold the park (silence, as planned-ish) instead of restarting it
     // into an instant re-'ended' every tick.
     if (this.audioExhausted(deck, target.trackTime)) return;
-    engine.setPitch(ramping ? lerp(startPitch, target.pitchPercent, rampP) : target.pitchPercent);
     if (!snap.playing) {
+      engine.setPitch(ramping ? lerp(startPitch, target.pitchPercent, rampP) : target.pitchPercent);
       engine.seek(target.trackTime);
       engine.play();
       return;
     }
-    if (ramping) return; // anchor: untouched while converging
-    const drift = engine.getPlayhead() - target.trackTime;
-    if (hard || Math.abs(drift) > DRIFT_TOLERANCE_S) {
-      engine.seek(target.trackTime);
+    if (ramping) {
+      engine.setPitch(lerp(startPitch, target.pitchPercent, rampP));
+      return; // anchor: untouched while converging
     }
+    // Phase servo (#161 finding 4): hard syncs (joins, recorded jumps)
+    // and gross desync re-seek; everything else corrects by a rate nudge
+    // folded into the planned pitch — beatmatch holds, no audible jumps.
+    const drift = engine.getPlayhead() - target.trackTime;
+    if (hard || Math.abs(drift) > SEEK_TOLERANCE_S) {
+      engine.seek(target.trackTime);
+      engine.setPitch(target.pitchPercent);
+      return;
+    }
+    const nudge =
+      Math.abs(drift) <= NUDGE_DEADBAND_S
+        ? 0
+        : -Math.sign(drift) *
+          Math.min(MAX_NUDGE_PERCENT, Math.abs(drift) * NUDGE_GAIN_PERCENT_PER_S);
+    engine.setPitch(target.pitchPercent + nudge);
   }
 
   // ── Internals ────────────────────────────────────────────────────────

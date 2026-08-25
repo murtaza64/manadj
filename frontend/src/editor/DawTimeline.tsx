@@ -42,6 +42,7 @@ import { beatPeriodSec } from './templateModel';
 import { downbeatLadderMap } from '../meter/ladder';
 import { useMetricLadderData } from '../hooks/useMetricLadderData';
 import type { PlaybackClock } from '../playback/clock';
+import { channelFaderToGain } from '../playback/mixerMath';
 import type { BeatgridData } from '../types';
 
 /** Zoom-in ceiling. At 240 px/s a 128 BPM beat spans ~112px — enough room
@@ -57,6 +58,61 @@ const MOD_LUT_N = 2048;
 const NO_SELECTION: number[] = [];
 
 /** First index with arr[i] >= v (arr ascending). */
+/** Audibility-style gain fill behind a deck waveform row (mix-editor 39):
+ * the session timeline's area-chart language — deck color at 0.16 alpha,
+ * column height = the fader lane's effective gain — applied to the
+ * transition window. Anchored at the row's OUTER edge, growing toward the
+ * seam like the waveform peaks. Content-space positioned, so it scrolls
+ * and zooms with the content transform; redraws only on lane/zoom
+ * changes. Bitmap width capped like the lane canvases. */
+function GainFill({
+  points,
+  color,
+  leftPx,
+  widthPx,
+  anchor,
+}: {
+  points: LanePoint[];
+  color: string;
+  leftPx: number;
+  widthPx: number;
+  anchor: 'top' | 'bottom';
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const w = Math.max(widthPx, 4);
+    const h = canvas.clientHeight;
+    if (h === 0) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 8192 / Math.max(w, 1));
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const cH = color.replace('#', '');
+    const rgb = `${parseInt(cH.slice(0, 2), 16)},${parseInt(cH.slice(2, 4), 16)},${parseInt(cH.slice(4, 6), 16)}`;
+    ctx.fillStyle = `rgba(${rgb},0.16)`;
+    ctx.beginPath();
+    for (let x = 0; x < w; x += 1) {
+      const gain = channelFaderToGain(evalLane(points, x / w));
+      if (gain <= 0) continue;
+      const gh = Math.min(1, gain) * h;
+      ctx.rect(x, anchor === 'top' ? 0 : h - gh, 1, gh);
+    }
+    ctx.fill();
+  }, [points, widthPx, color, anchor]);
+  return (
+    <canvas
+      ref={ref}
+      className="editor-gainfill"
+      style={{ left: leftPx, width: Math.max(widthPx, 4) }}
+    />
+  );
+}
+
 function lowerBound(arr: number[], v: number): number {
   let lo = 0;
   let hi = arr.length;
@@ -422,6 +478,10 @@ export function DawTimeline({
     modelVersionRef.current++;
   }, [mix, rateB, waveA, waveB, hotCuesA, hotCuesB, beatgridA, beatgridB, viewW]);
 
+  /** Kicks the motion loop off its idle timeout onto the rAF clock — set by
+   * the tick effect, called by input handlers (wheel pan/zoom, row grabs). */
+  const wakeTickRef = useRef<() => void>(() => {});
+
   // Per-frame, single motion clock: read the scrollbar strip's position once
   // and apply it to EVERYTHING horizontal — content transform, canvas
   // counter-transforms, display windows, playhead. Native scrolling of the
@@ -436,10 +496,22 @@ export function DawTimeline({
     let perfLast = performance.now();
     let raf = 0;
     let idleTimer = 0;
+    let onRafClock = true;
     let lastDrawKey = '';
     const schedule = (active: boolean) => {
+      onRafClock = active;
       if (active) raf = requestAnimationFrame(tick);
       else idleTimer = window.setTimeout(tick, IDLE_TICK_MS);
+    };
+    // Input wake-up: the idle loop polls at IDLE_TICK_MS, and input handlers
+    // only accumulate into refs — without this, the FIRST wheel of a gesture
+    // waited out the idle timeout (up to 250ms) before anything moved: the
+    // start-of-scroll/zoom stutter. Inputs call wake() to jump the loop back
+    // onto the rAF clock for the next frame.
+    wakeTickRef.current = () => {
+      if (onRafClock) return;
+      window.clearTimeout(idleTimer);
+      schedule(true);
     };
     const tick = () => {
       const t0 = perf ? performance.now() : 0;
@@ -585,6 +657,7 @@ export function DawTimeline({
     };
     tick();
     return () => {
+      wakeTickRef.current = () => {};
       cancelAnimationFrame(raf);
       window.clearTimeout(idleTimer);
     };
@@ -673,15 +746,18 @@ export function DawTimeline({
       wheelGestureRef.current = { axis, last: now };
       if (axis === 'pan') {
         scrollPxRef.current = Math.max(0, scrollPxRef.current + e.deltaX * unit);
-        return;
+      } else {
+        // Continuous exponential zoom: proportional for fine trackpad deltas
+        // and ~1.16x per mouse-wheel notch (1.0015^100).
+        const pending = pendingZoomRef.current;
+        pendingZoomRef.current = {
+          factor: (pending?.factor ?? 1) * Math.pow(1.0015, -e.deltaY * unit),
+          clientX: e.clientX,
+        };
       }
-      // Continuous exponential zoom: proportional for fine trackpad deltas
-      // and ~1.16x per mouse-wheel notch (1.0015^100).
-      const pending = pendingZoomRef.current;
-      pendingZoomRef.current = {
-        factor: (pending?.factor ?? 1) * Math.pow(1.0015, -e.deltaY * unit),
-        clientX: e.clientX,
-      };
+      // Jump the loop off its idle timeout NOW — the first frame of a
+      // gesture must not wait out IDLE_TICK_MS.
+      wakeTickRef.current();
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
@@ -716,6 +792,8 @@ export function DawTimeline({
 
   const onRowPointerDown = (row: 'A' | 'B') => (e: React.PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
+    wakeTickRef.current(); // same idle-latency hole as the wheel path
+
     const sec = secAtClientX(e.clientX);
     const zone = zoneAt(e.clientX, row);
     if (zone === 'seek') {
@@ -1132,6 +1210,15 @@ export function DawTimeline({
               <canvas ref={rendA.canvasRef} />
             </div>
             {trackAId !== null && durA > 0 && (
+              <GainFill
+                points={lanePoints(tr.lanes, 'faderA', tr.durationSec)}
+                color={LANE_COLORS.faderA}
+                leftPx={tr.startSec * pxPerSec}
+                widthPx={tr.durationSec * pxPerSec}
+                anchor="top"
+              />
+            )}
+            {trackAId !== null && durA > 0 && (
               <div className="editor-blockframe a" style={{ left: 0, width: aEnd * pxPerSec }} />
             )}
             {/* A goes silent at the transition end: grey the tail. */}
@@ -1155,6 +1242,15 @@ export function DawTimeline({
             <div ref={waveWrapBRef} className="editor-wavecanvas" style={{ width: viewW }}>
               <canvas ref={rendB.canvasRef} />
             </div>
+            {trackBId !== null && durB > 0 && (
+              <GainFill
+                points={lanePoints(tr.lanes, 'faderB', tr.durationSec)}
+                color={LANE_COLORS.faderB}
+                leftPx={tr.startSec * pxPerSec}
+                widthPx={tr.durationSec * pxPerSec}
+                anchor="bottom"
+              />
+            )}
             {/* Piecewise footprint (transition-takes 06): one frame per
                 audible segment — a jump past B's end truncates, a jump
                 below zero leaves an unframed gap. */}

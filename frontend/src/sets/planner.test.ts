@@ -17,6 +17,7 @@ import {
   plannerTrackFacts,
   planStateAt,
   trackEffectiveBpm,
+  withEntryTrim,
   type PlanInput,
 } from './planner';
 
@@ -286,6 +287,29 @@ describe('pinned Transition windows', () => {
     expect(b.entryMixSec).toBeCloseTo(64);
   });
 
+  it('parks the incoming when a Jump throws it below its track start (#161)', () => {
+    // The adjacency sibling of the Routine negative-lead rule. A lead
+    // BEFORE the entry is already covered by entry deferral; the live
+    // case is a mid-window backward Jump landing below 0: the entry is
+    // ACTIVE, the raw plan position negative — the old clamp reported a
+    // "playing" target pinned at 0 and the Conductor re-seeked the deck
+    // to 0 every tick until the recording climbed back above 0.
+    // Window mix 60..80, bInSec 1; at x=0.5 (mix 70, B≈11) jump −15 →
+    // B at −4, recovering to 0 by mix 74.
+    const plan = planSet(twoTracks(tr({ bInSec: 1, jumps: [{ x: 0.5, deltaSec: -15 }] })));
+    const inDeck = plan.entries[1].deck;
+    // Before the jump: rolling normally.
+    expect(planStateAt(plan, 69).decks[inDeck].playing).toBe(true);
+    // Below zero (mix 72, position −2): PARKED at 0, not playing.
+    const below = planStateAt(plan, 72);
+    expect(below.decks[inDeck].playing).toBe(false);
+    expect(below.decks[inDeck].trackTime).toBe(0);
+    // Recovered (mix 75, position +1): rolling again.
+    const after = planStateAt(plan, 75);
+    expect(after.decks[inDeck].playing).toBe(true);
+    expect(after.decks[inDeck].trackTime).toBeCloseTo(1, 1);
+  });
+
   it('tempo-matches the incoming during the window and snaps to native after', () => {
     // returnSecPerPercent 0 = instant snap; Tempo return ramps have their
     // own suite below (sets 06).
@@ -390,6 +414,60 @@ describe('Take pins (plan-time vectorization)', () => {
     // Same downstream math as a saved Transition.
     expect(adj.mixStartSec).toBeCloseTo(60);
     expect(plan.entries[1].mixOffsetSec).toBeCloseTo(52);
+  });
+
+  it('phase assertion (sets 166): planned B rides the performed alignment', () => {
+    // A damaged pre-sessions-18 slice: both decks pitched BEFORE the
+    // recorder seeded (init pitch 0/0 — a lie), beatmatched live at an
+    // elevated tempo. The playhead samples carry the true rates; the
+    // planned B-deck phase must match the performed alignment across the
+    // window — at the open AND at the commit point — within a hard
+    // tolerance (well under half a beat at 174 BPM = 0.17s).
+    const RATE_A = 1.0172;
+    const RATE_B = 1.023;
+    const events: CaptureEvent[] = [
+      {
+        t: 100,
+        kind: 'init',
+        outgoingChannel: 'A',
+        decks: {
+          A: { trackId: 1, playing: true, fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pitch: 0 },
+          B: { trackId: 2, playing: true, fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pitch: 0 },
+        },
+        crossfader: 0,
+        crossfaderEnabled: true,
+      },
+    ];
+    for (let t = 100; t <= 160; t += 1) {
+      events.push({
+        t,
+        kind: 'tick',
+        playheads: { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B },
+      });
+    }
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'take', uuid: 'tk166' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(200, null, 175), 2: facts(300, null, 174) },
+        takesByUuid: { tk166: { events, windowStartS: 100, windowEndS: 160 } },
+      })
+    );
+    const [adj] = plan.adjacencies;
+    expect(adj.kind).toBe('take');
+    expect(adj.transition!.tempoMatch).toBe(true);
+    const TOL = 0.15;
+    // Window open: B sits at the transition's authored alignment — the
+    // performed entry position.
+    const atOpen = planStateAt(plan, adj.mixStartSec + 1e-6);
+    expect(Math.abs(atOpen.decks.B.trackTime - adj.transition!.bInSec)).toBeLessThan(1e-4);
+    expect(Math.abs(atOpen.decks.B.trackTime - 8)).toBeLessThan(TOL);
+    // Commit point: B lands where the performance actually left it.
+    const performedEnd = 8 + 60 * RATE_B;
+    const atEnd = planStateAt(plan, adj.mixEndSec - 1e-6);
+    expect(Math.abs(atEnd.decks.B.trackTime - performedEnd)).toBeLessThan(TOL);
   });
 
   it('degrades a dangling or unvectorizable Take pin to a hard cut', () => {
@@ -1010,5 +1088,75 @@ describe('BPM authority (bpm-authority bugfix, ADR 0016)', () => {
     // Set tempo defaults to Raskal's effective 174 → Kambi pitches to it.
     expect(plan.entries[0].rate).toBeCloseTo(1);
     expect(plan.entries[1].rate).toBeCloseTo(174 / 172, 5);
+  });
+});
+
+describe('per-entry trim (sets #164)', () => {
+  // Same two-track fixture as the planStateAt suite (window mix 60..80),
+  // with trims: outgoing +0.1 (≈ +2.4 dB), incoming −0.2 (≈ −4.8 dB).
+  const lanes: Transition['lanes'] = {
+    faderA: [
+      { x: 0, y: 1 },
+      { x: 1, y: 0 },
+    ],
+  };
+  const trimmedPlan = (trimA: number | undefined, trimB: number | undefined) =>
+    planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' }, trim: trimA },
+          { trackId: 2, pin: null, trim: trimB },
+        ],
+        tracks: { 1: facts(90, 10), 2: facts(100) },
+        transitionsByUuid: { t1: tr({ lanes }) },
+      })
+    );
+
+  it('carries the offset onto PlannedEntry (absent = neutral 0)', () => {
+    const plan = trimmedPlan(0.1, undefined);
+    expect(plan.entries[0].trim).toBe(0.1);
+    expect(plan.entries[1].trim).toBe(0);
+  });
+
+  it('neutral entries put NO trim on the lanes — the live knob rules', () => {
+    const s = planStateAt(trimmedPlan(undefined, undefined), 20);
+    expect(s.lanes.A.trim).toBeUndefined();
+    expect(s.lanes.B.trim).toBeUndefined();
+  });
+
+  it('solo stretch: the playing deck sounds neutral + offset; the upcoming deck holds its own from load', () => {
+    const s = planStateAt(trimmedPlan(0.1, -0.2), 20);
+    // Occupancy starts at the upcoming entry: deck B's trim is already in
+    // place when the Conductor loads it — before its window begins.
+    expect(s.lanes.A.trim).toBeCloseTo(0.6);
+    expect(s.lanes.B.trim).toBeCloseTo(0.3);
+  });
+
+  it('inside the window each deck keeps its own entry offset (no artifact trim lanes yet)', () => {
+    const s = planStateAt(trimmedPlan(0.1, -0.2), 70);
+    expect(s.lanes.A.trim).toBeCloseTo(0.6);
+    expect(s.lanes.B.trim).toBeCloseTo(0.3);
+  });
+
+  it('after the handover the incoming deck still carries its offset', () => {
+    const s = planStateAt(trimmedPlan(0.1, -0.2), 90);
+    expect(s.lanes.B.trim).toBeCloseTo(0.3);
+  });
+
+  it('clamps neutral + offset to the knob', () => {
+    const s = planStateAt(trimmedPlan(0.5, -0.5), 20);
+    expect(s.lanes.A.trim).toBe(1);
+    expect(s.lanes.B.trim).toBe(0);
+  });
+
+  it('withEntryTrim: artifact-recorded trim wins during its window; the offset is the baseline elsewhere', () => {
+    const artifact = { fader: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, trim: 0.9 };
+    // A lane already carrying trim is artifact-recorded — untouched.
+    expect(withEntryTrim(artifact, 0.2)).toBe(artifact);
+    // A bare lane takes neutral + offset.
+    const bare = { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0 };
+    expect(withEntryTrim(bare, 0.2).trim).toBeCloseTo(0.7);
+    // Neutral offset leaves the lane alone (identity — no trim key).
+    expect(withEntryTrim(bare, 0)).toBe(bare);
   });
 });

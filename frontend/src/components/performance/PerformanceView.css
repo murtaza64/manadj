@@ -2,12 +2,12 @@
    library player — square 1px-border buttons, hot-cue squares, palette from
    styles/variables.css. Deck = minimap header + one dense band in three
    zones (TRACK / PLAY / MIX), outer → inner; X-FADER + MASTER strip between
-   the waveforms and the decks; the surface is content-sized and the
-   embedded library takes every remaining pixel. */
+   the waveforms and the decks. The view is the content-sized TOP PANEL only
+   (gh#165) — the shared App-level browse panel takes every remaining pixel. */
 
 .perf-root {
   position: relative;
-  height: 100%;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--base);
@@ -16,16 +16,19 @@
   font-size: 12px;
 }
 
-.perf-root.midi-cursor-hidden,
-.perf-root.midi-cursor-hidden :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
+/* Cursor suppression blankets the whole app surface (top panel + shared
+   browse panel below) — the class stays on .perf-root (the hook's target,
+   armed only while the view is active), :has() lifts the scope. */
+.app-main:has(.perf-root.midi-cursor-hidden),
+.app-main:has(.perf-root.midi-cursor-hidden) :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
   cursor: none !important;
 }
 
-.perf-root.midi-cursor-hidden :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
+.app-main:has(.perf-root.midi-cursor-hidden) :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
   cursor: auto !important;
 }
 
-.perf-root.midi-cursor-hidden::after {
+.app-main:has(.perf-root.midi-cursor-hidden)::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -147,7 +150,16 @@
   background: var(--mantle);
 }
 
-.perf-strip-slot { width: 130px; justify-self: end; }
+/* Right cell: all volume faders together (CUE MIX / PHONES / MASTER). */
+.perf-strip-slot {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.perf-strip-slot:not(.wide) .perf-fader { width: 110px; flex-shrink: 0; }
+.perf-strip-slot:not(.wide) .perf-fader:last-child { width: 130px; }
 
 .perf-strip-slot.wide {
   width: auto;
@@ -169,9 +181,6 @@
   gap: 8px;
 }
 
-/* Cue controls ride the strip's left cell (headphone-cue 03) */
-.perf-strip-left .perf-fader { width: 110px; flex-shrink: 0; }
-
 .perf-strip-toggle {
   padding: 1px 6px;
   font-size: 9px;
@@ -191,6 +200,14 @@
 }
 
 .perf-strip-ghost { visibility: hidden; }
+
+/* Waveform/deck section toggles (perf-layout 12 / gh#68): WAVE / DECK next
+   to KBD, same .perf-strip-toggle language (lit green while shown). The
+   grouping span dissolves so the buttons ride the strip cell's own flex
+   gap — KBD↔WAVE↔DECK spacing stays uniform. */
+.perf-section-toggles {
+  display: contents;
+}
 
 /* The toggle hides every on-control key hint */
 .perf-root.kbd-hints-off .perf-kbd { display: none; }
@@ -1052,21 +1069,14 @@
   flex-shrink: 0;
 }
 
-/* ── Library below ────────────────────────────────────────────── */
+/* ── Shared browse panel below (layout in TopBar.css) ─────────── */
 
-.perf-library {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.perf-library > div { height: 100%; }
-
-/* Row affordances dim while their deck is locked (audibly running) */
-.perf-library.lock-A .track-load-button-A,
-.perf-library.lock-B .track-load-button-B,
-.perf-library.lock-C .track-load-button-C,
-.perf-library.lock-D .track-load-button-D {
+/* Row affordances dim while their deck is locked (audibly running);
+   BrowsePanel applies the lock classes only in performance mode. */
+.app-browse.lock-A .track-load-button-A,
+.app-browse.lock-B .track-load-button-B,
+.app-browse.lock-C .track-load-button-C,
+.app-browse.lock-D .track-load-button-D {
   opacity: 0.35;
   cursor: not-allowed;
 }

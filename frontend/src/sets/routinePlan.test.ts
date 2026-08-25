@@ -195,6 +195,7 @@ describe('buildSlotLanes / slotLanesAt', () => {
       basePitchPercent: 0,
       trace: [],
       lanes,
+      jumpMixSecs: [],
     };
     expect(slotLanesAt(slot, 8).fader).toBe(0);
     expect(slotLanesAt(slot, 16).fader).toBe(1);
@@ -213,6 +214,7 @@ describe('buildSlotLanes / slotLanesAt', () => {
       basePitchPercent: 0,
       trace: [],
       lanes,
+      jumpMixSecs: [],
     };
     expect(slotLanesAt(slot, 20).fader).toBe(1);
     expect(slotLanesAt(slot, 44).fader).toBe(0.4);
@@ -236,6 +238,7 @@ describe('buildSlotLanes / slotLanesAt', () => {
       basePitchPercent: 0,
       trace: [],
       lanes,
+      jumpMixSecs: [],
     };
     // No fader events on this slot → open by default (see defaults rule).
     expect(slotLanesAt(slot, 5)).toEqual({

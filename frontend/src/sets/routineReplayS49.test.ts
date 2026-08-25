@@ -10,7 +10,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { planSet, planStateAt, type PlanInput } from './planner';
+import { jumpCrossed, planSet, planStateAt, type PlanInput } from './planner';
 import type { RoutinePlanInput } from './routinePlan';
 
 interface Fixture extends RoutinePlanInput {
@@ -80,23 +80,61 @@ describe('s49 #20–23 Routine (real promoted recording)', () => {
   it('re-anchors the recorded ~177 BPM performance to the 174 target (pitch ≈ 0)', () => {
     // The session rode ~+1.7% (pitch events at 1.728): the Routine clock
     // absorbed it — replay at the track-native target needs ~0 pitch.
+    // Post-#161 there is no base-pitch snap (pitch = the noise-simplified
+    // segment slope, so pitch and position never disagree): "≈ 0" means
+    // within a whisker of base, not exactly base.
     const plan = planSet(s49Input());
     const r = plan.routines[0];
     let moving = 0;
-    let snapped = 0;
+    let nearBase = 0;
     for (let t = r.mixStartSec + 1; t < r.mixEndSec; t += 1) {
       const s = planStateAt(plan, t);
       for (const slot of r.slots) {
         const d = s.decks[slot.deck!];
         if (!d.playing) continue;
         moving++;
-        if (d.pitchPercent === 0) snapped++;
+        if (Math.abs(d.pitchPercent) < 0.75) nearBase++;
         expect(Math.abs(d.pitchPercent)).toBeLessThan(8);
       }
     }
     expect(moving).toBeGreaterThan(200);
-    // The bulk of the recording is beatmatched: snap dominates.
-    expect(snapped / moving).toBeGreaterThan(0.8);
+    // The bulk of the recording is beatmatched: near-base dominates.
+    expect(nearBase / moving).toBeGreaterThan(0.8);
+  });
+
+  it('replay is phase-consistent: integrating the pitch reproduces the position target (#161 finding 4)', () => {
+    // THE desync regression: the deck plays at pitchPercent; if that rate
+    // does not integrate to the plan's own position target, drift accrues
+    // and the Conductor must keep seeking — audible jumps and lost
+    // beatmatch. Between recorded jumps, Euler-integrating each slot's
+    // pitch must track its planned position within the servo's deadband.
+    const plan = planSet(s49Input());
+    const r = plan.routines[0];
+    const dt = 0.05;
+    for (const slot of r.slots) {
+      const deck = slot.deck!;
+      let integrated: number | null = null;
+      let maxErr = 0;
+      // Audible span only: pre-entry cue-juggling blips in the recording
+      // are silent (pre-entry lanes are closed) — phase there is moot.
+      for (let t = Math.max(r.mixStartSec, slot.entryMixSec) + 0.5; t < r.mixEndSec; t += dt) {
+        const s = planStateAt(plan, t);
+        const d = s.decks[deck];
+        if (!d.playing) {
+          integrated = null; // paused/parked: re-anchor on resume
+          continue;
+        }
+        if (integrated === null || jumpCrossed(plan, t - dt, t)) {
+          integrated = d.trackTime; // (re)anchor: joins + recorded jumps
+          continue;
+        }
+        integrated += (1 + d.pitchPercent / 100) * dt;
+        maxErr = Math.max(maxErr, Math.abs(integrated - d.trackTime));
+        // Never let it silently re-anchor via assertion failure spam:
+        if (Math.abs(integrated - d.trackTime) > 0.03) break;
+      }
+      expect(maxErr).toBeLessThan(0.03);
+    }
   });
 
   it('each slot joins at its recorded entry and the exit hands off in track 1072', () => {

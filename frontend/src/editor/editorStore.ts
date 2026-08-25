@@ -245,11 +245,20 @@ export class EditorStore {
   }
 
   /** Point the session at a saved Transition by uuid — selection only,
-   * never a mutation (jumping from the history's promoted mark). */
+   * never a mutation (jumping from the history's promoted mark; the
+   * evidence cycler, gh#167). Leaving a pristine item evaporates it
+   * (navigateTransition's rule) — cycling the unified evidence list must
+   * not strand untouched sketches as chips. Emit-only: pristine items
+   * never persist, so the evaporation needs no save. */
   selectTransition(uuid: string): void {
-    const items = this.liveItems();
-    const index = items.findIndex((it) => it.uuid === uuid);
+    let items = this.liveItems();
+    const cur = items[this.state.session.active];
+    let index = items.findIndex((it) => it.uuid === uuid);
     if (index < 0 || index === this.state.session.active) return;
+    if (cur && isPristine(cur) && items.length > 1) {
+      items = items.filter((it) => it !== cur);
+      index = items.findIndex((it) => it.uuid === uuid);
+    }
     this.emit({
       session: { items, active: index },
       mix: { ...this.state.mix, transition: structuredClone(items[index].transition) },

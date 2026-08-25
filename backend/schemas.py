@@ -582,15 +582,22 @@ class SetEntryItem(BaseModel):
     track_id is the entry identity (a Track at most once per Set).
 
     The pin (sets 02) describes the adjacency this entry heads: a
-    Transition uuid, a Take uuid, an explicit Hard-cut (sets 26 — no
+    Transition uuid, a Take uuid, a Routine uuid (sets 160, ADR 0035 —
+    pinned on the adjacency leaving the Routine's first cast track,
+    covering the following adjacencies; covered entries keep their own
+    pins here, shadowed client-side), an explicit Hard-cut (sets 26 — no
     uuid: it references nothing), or nothing (Unresolved). Kind and uuid
-    travel together for transition/take; the uuid is stored as asserted
-    (never validated against the transitions/takes tables — dangling
+    travel together for transition/take/routine; the uuid is stored as
+    asserted (never validated against the referenced tables — dangling
     degrades client-side).
     """
     track_id: int
-    pin_kind: str | None = Field(default=None, pattern=r"^(transition|take|hardcut)$")
+    pin_kind: str | None = Field(default=None, pattern=r"^(transition|take|hardcut|routine)$")
     pin_uuid: str | None = None
+    # Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+    # units (0 = neutral, ±0.5 spans the knob) — composes with track
+    # Autogain when that lands (ADR 0034), never an absolute level.
+    trim: float = Field(default=0.0, ge=-0.5, le=0.5)
 
     @model_validator(mode="after")
     def _pin_fields_travel_together(self) -> "SetEntryItem":
@@ -606,12 +613,15 @@ class SetDormantPinItem(BaseModel):
     """One Dormant pin (sets 07): a broken pin remembered per ORDERED
     track pair, per Set. Unlike an entry pin it always carries a pin —
     a memory of nothing is nothing (a Hard-cut pin IS a pin: dormancy
-    round-trips it, sets 26). The uuid is stored as asserted (dangling
-    memories are DROPPED by the deletion paths, degrade_pins).
+    round-trips it, sets 26). A Routine pin's memory is keyed by its
+    BOUNDARY tracks (entry, exit — sets 160): it restores when the cast
+    is the next n entries again, not on plain pair adjacency. The uuid
+    is stored as asserted (dangling memories are DROPPED by the deletion
+    paths, degrade_pins).
     """
     a_track_id: int
     b_track_id: int
-    pin_kind: str = Field(pattern=r"^(transition|take|hardcut)$")
+    pin_kind: str = Field(pattern=r"^(transition|take|hardcut|routine)$")
     pin_uuid: str | None = None
 
     @model_validator(mode="after")
@@ -620,7 +630,7 @@ class SetDormantPinItem(BaseModel):
             if self.pin_uuid is not None:
                 raise ValueError("a hardcut pin carries no pin_uuid")
         elif self.pin_uuid is None:
-            raise ValueError("a transition/take pin requires a pin_uuid")
+            raise ValueError("a transition/take/routine pin requires a pin_uuid")
         return self
 
 
@@ -638,6 +648,7 @@ class SetEntryRow(BaseModel):
     position: int
     pin_kind: str | None
     pin_uuid: str | None
+    trim: float
 
     model_config = ConfigDict(from_attributes=True)
 

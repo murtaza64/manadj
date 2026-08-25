@@ -230,6 +230,75 @@ describe('planSet with a pinned Routine', () => {
     expect(plan.entries.map((e) => e.deck)).toEqual(['A', 'B', 'A', 'B']);
   });
 
+  it('interior Set reorder never degrades replay (boundaries + membership, sets 160/#161)', () => {
+    // 4-cast recording so an interior pair exists: cast [1,2,3,4], but
+    // the Set holds them as 1,3,2,4 — presentational order only.
+    const cast = [1, 2, 3, 4];
+    const entriesBeats = [0, 16, 32, 48];
+    const positions = [60, 0, 10, 5];
+    const events: RoutineEventInput[] = [];
+    for (let b = 0; b <= 64; b += 4) {
+      const playheads: Record<string, number> = {};
+      for (const slot of [0, 1, 2, 3]) {
+        if (b >= entriesBeats[slot])
+          playheads[String(slot)] = positions[slot] + (b - entriesBeats[slot]) * 0.5;
+      }
+      events.push(tick(b, playheads));
+    }
+    const input: PlanInput = {
+      entries: [
+        { trackId: 1, pin: null },
+        { trackId: 3, pin: null, trim: 0.1 },
+        { trackId: 2, pin: null },
+        { trackId: 4, pin: null },
+        { trackId: 9, pin: null },
+      ],
+      tracks: { 1: facts(240), 2: facts(240), 3: facts(240), 4: facts(240), 9: facts(240) },
+      transitionsByUuid: {},
+      takesByUuid: {},
+      routines: [
+        {
+          startEntryIndex: 0,
+          routine: {
+            cast,
+            entryOffsetsBeats: entriesBeats,
+            entryPositions: positions,
+            durationBeats: 64,
+            events,
+          },
+        },
+      ],
+    };
+    const plan = planSet(input);
+    expect(plan.warnings.some((w) => w.kind === 'routine-invalid')).toBe(false);
+    expect(plan.routines).toHaveLength(1);
+    expect(plan.adjacencies.slice(0, 3).every((a) => a.kind === 'routine')).toBe(true);
+    // The slot's track finds its own covered entry's trim (track 3 sits
+    // at Set index 1 but plays as slot 2).
+    const slot2Entry = plan.entries.find((e) => e.trackId === 3);
+    expect(slot2Entry?.trim).toBe(0.1);
+    // …and the trim baseline rides the slot's deck lanes during the span
+    // (recorded lanes carry no trim — sets #164 precedence, wired #161).
+    const r = plan.routines[0];
+    const midSpan = r.mixStartSec + (40 / 64) * (r.mixEndSec - r.mixStartSec); // beat 40: slot 2 entered
+    const slot2Deck = r.slots[2].deck!;
+    const state = planStateAt(plan, midSpan);
+    expect(state.lanes[slot2Deck].trim).toBeCloseTo(0.5 + 0.1, 6);
+    // A broken BOUNDARY still degrades (exit swapped out of place).
+    const broken = planSet({
+      ...input,
+      entries: [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+        { trackId: 4, pin: null },
+        { trackId: 3, pin: null },
+        { trackId: 9, pin: null },
+      ],
+    });
+    expect(broken.warnings.some((w) => w.kind === 'routine-invalid')).toBe(true);
+    expect(broken.routines).toEqual([]);
+  });
+
   it('a missing cast BPM skips the pin (beat clock cannot scale)', () => {
     const input = routineInput();
     input.tracks[2] = facts(240, null);
@@ -275,6 +344,87 @@ describe('planSet with a pinned Routine', () => {
     expect(mid.decks.C.playing).toBe(true);
     expect(mid.decks.A.playing).toBe(true);
     expect(mid.decks.A.trackId).toBe(9);
+  });
+
+  it('an upstream pinned blend into the routine head plays out — no cliff (#161 finding 1)', () => {
+    // Track 8 blends into the routine's head (track 1) through a pinned
+    // 20s window; the outgoing must fade per its lane and keep sounding
+    // to the window end — the Routine "enters with its first cast track
+    // playing"; the blend that delivers it is upstream's business.
+    const transition: Transition = {
+      startSec: 200,
+      durationSec: 20,
+      bInSec: 0,
+      tempoMatch: false,
+      lanes: {},
+    };
+    const input: PlanInput = {
+      entries: [
+        { trackId: 8, pin: { kind: 'transition', uuid: 'up' } },
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+        { trackId: 3, pin: null },
+        { trackId: 9, pin: null },
+      ],
+      tracks: { 8: facts(240), 1: facts(240), 2: facts(240), 3: facts(240), 9: facts(240) },
+      transitionsByUuid: { up: transition },
+      takesByUuid: {},
+      routines: [{ startEntryIndex: 1, routine: recording([1, 2, 3]) }],
+    };
+    const plan = planSet(input);
+    expect(plan.routines).toHaveLength(1);
+    expect(plan.adjacencies[0].kind).toBe('transition');
+    const adj = plan.adjacencies[0];
+    const outDeck = plan.entries[0].deck;
+    const inDeck = plan.entries[1].deck;
+    // Mid-window: both sides sound; the outgoing rides the window lanes.
+    const mid = planStateAt(plan, (adj.mixStartSec + adj.mixEndSec) / 2);
+    expect(mid.decks[outDeck].playing).toBe(true);
+    expect(mid.decks[outDeck].trackId).toBe(8);
+    expect(mid.decks[inDeck].playing).toBe(true);
+    expect(mid.decks[inDeck].trackId).toBe(1);
+    // Just before the window end the outgoing still sounds — no cliff at
+    // the head's entry; it releases only past its authored exit.
+    const late = planStateAt(plan, adj.mixEndSec - 0.5);
+    expect(late.decks[outDeck].playing).toBe(true);
+    const past = planStateAt(plan, adj.mixEndSec + 0.5);
+    expect(past.decks[outDeck].playing).toBe(false);
+    // No synthesized fade truncated the outgoing.
+    expect(plan.entries[0].graceFade).toBeUndefined();
+    expect(plan.entries[0].exitMixSec).toBeCloseTo(adj.mixEndSec, 6);
+
+    // THE cliff shape (#161 finding 1): the routine window opens INSIDE
+    // the upstream blend, and a later slot reuses the outgoing's deck
+    // (allocation knows it frees in time). The routine override must not
+    // claim that deck while the outgoing is still audible — it fades per
+    // the window's automation, never a hard stop.
+    const overlapping: PlanInput = {
+      ...input,
+      routines: [
+        {
+          startEntryIndex: 1,
+          // Anchor the recording's slot-0 entry mark at track-1 time 5 —
+          // the routine span opens mid-blend (track 1 enters at 0).
+          routine: { ...recording([1, 2, 3]), entryPositions: [5, 0, 10] },
+        },
+      ],
+    };
+    const plan2 = planSet(overlapping);
+    const r2 = plan2.routines[0];
+    const out2 = plan2.entries[0].deck;
+    const upstream = plan2.adjacencies[0];
+    expect(upstream.kind).toBe('transition');
+    // A later slot reuses the outgoing's deck.
+    expect(r2.slots.some((s) => s.deck === out2)).toBe(true);
+    // The span opened before the blend finished…
+    expect(r2.mixStartSec).toBeLessThan(upstream.mixEndSec);
+    // …and the outgoing STILL sounds through its window (no stomp).
+    const inside = planStateAt(plan2, (r2.mixStartSec + upstream.mixEndSec) / 2);
+    expect(inside.decks[out2].playing).toBe(true);
+    expect(inside.decks[out2].trackId).toBe(8);
+    // Past its exit the deck belongs to the routine (the reusing slot).
+    const freed = planStateAt(plan2, upstream.mixEndSec + 0.5);
+    expect(freed.decks[out2].trackId).not.toBe(8);
   });
 
   it('routines never grace-fade and never collide with the parity transform', () => {

@@ -14,6 +14,9 @@ import {
   fmtInTime,
   fmtOverlapTime,
   fmtPlayTime,
+  fmtTrimDb,
+  trimOffsetDb,
+  trimOffsetFromDb,
   REMOVE_COL_W,
   ROW_GAP,
   TITLE_X,
@@ -28,6 +31,7 @@ const entry = (over: Partial<PlannedEntry> = {}): PlannedEntry => ({
   exitSec: 180,
   entryMixSec: 0,
   exitMixSec: 180,
+  trim: 0,
   ...over,
 });
 
@@ -148,5 +152,26 @@ describe('fmtOverlapTime (sets 32)', () => {
     expect(
       fmtOverlapTime({ kind: 'transition', mixStartSec: 100, mixEndSec: 99 })
     ).toBe('0:00');
+  });
+});
+
+describe('trim cell (sets #164)', () => {
+  it('reads the offset in dB: knob units × 24 dB, signed when non-neutral', () => {
+    expect(fmtTrimDb(0)).toBe('0.0');
+    expect(fmtTrimDb(0.1)).toBe('+2.4');
+    expect(fmtTrimDb(-0.2)).toBe('−4.8');
+    expect(fmtTrimDb(0.5)).toBe('+12.0');
+    expect(fmtTrimDb(-0.5)).toBe('−12.0');
+  });
+
+  it('offset↔dB round-trips', () => {
+    expect(trimOffsetDb(0.25)).toBeCloseTo(6);
+    expect(trimOffsetFromDb(6)).toBeCloseTo(0.25);
+    expect(trimOffsetFromDb(trimOffsetDb(-0.31))).toBeCloseTo(-0.31);
+  });
+
+  it('sub-0.05dB residue reads neutral (a reset never shows −0.0)', () => {
+    expect(fmtTrimDb(0.001)).toBe('0.0');
+    expect(fmtTrimDb(-0.001)).toBe('0.0');
   });
 });

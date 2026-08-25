@@ -2,13 +2,13 @@
  * Browse-session store (four-deck-performance 27): the Library's
  * session state, hoisted out of component state.
  *
- * Every top-panel mode mounts its own Library instance (App.tsx renders
- * one per mode), so component state dies on every Performance ⟷ Library
- * flip — a rapid gesture now (backtick, hardware VIEW). Mounts SEED from
- * here and write changes back; the standalone Library and the
- * Performance-embedded browse deliberately share one session, so
- * flipping views is continuous. Same rationale as setStore's Set-view
- * state; Set selection itself stays setStore's.
+ * Born when every top-panel mode mounted its own Library instance and
+ * component state died on every Performance ⟷ Library flip. Since gh#165
+ * ONE shared Library mounts once at App level (BrowsePanel) and never
+ * remounts on mode switches, so this is now belt-and-braces: it seeds the
+ * single mount and would carry the session across any future remount.
+ * Same rationale as setStore's Set-view state; Set selection itself stays
+ * setStore's.
  *
  * Non-reactive on purpose: read imperatively at mount, written by
  * effects. Nothing subscribes — only the next mount cares.

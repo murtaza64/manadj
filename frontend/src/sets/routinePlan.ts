@@ -23,9 +23,12 @@
  *   recorded ride re-anchored: rate = (track-sec/beat) / (mix-sec/beat).
  *   Recorded pitch events are not replayed literally — their audible
  *   effect lives in the trace (grid-derived, so the recording's own
- *   anchor rate divides out). Segments within tolerance of the slot's
- *   sync rate snap to its base pitch (beatmatched passages replay
- *   rock-steady; deliberate rides follow the trace).
+ *   anchor rate divides out). Traces are noise-simplified per moving run
+ *   (#161 finding 4) and pitch is EXACTLY the segment slope, so pitch
+ *   and position never disagree: beatmatched passages replay as one
+ *   steady rate ≈ base; deliberate rides follow the recording; the
+ *   Conductor corrects residue with rate nudges, seeking only at
+ *   recorded jumps.
  * - The exit slot's deck keeps sounding past the Routine end (the
  *   boundary contract: exits with its last cast track playing); the
  *   downstream adjacency window sits on its timeline.
@@ -111,6 +114,11 @@ export interface PlannedRoutineSlot {
   basePitchPercent: number;
   trace: RoutineTracePoint[];
   lanes: RoutineSlotLanes;
+  /** THIS slot's trace discontinuity instants on the mix axis (#161):
+   * the Conductor hard-syncs ONLY the jumping slot's deck — a recorded
+   * seek on one deck must never snap the others (they may be mid-blend
+   * or nudging; an all-deck seek reads as an audible hiccup). */
+  jumpMixSecs: number[];
 }
 
 export interface PlannedRoutine {
@@ -163,15 +171,14 @@ const MOVING_MIN = 0.5;
 const MOVING_MAX = 2.0;
 /** |Δpos| at or under this over a flat segment = paused, not a jump. */
 const PAUSE_EPS_SEC = 0.35;
-/** Segment rate within this fraction of the slot's base rate snaps to
- * the base pitch (tick-sampling jitter must not warble a beatmatched
- * passage). */
-const SYNC_SNAP_FRACTION = 0.02;
-/** Deviations beyond this fraction of base are not credible deck rides —
- * sampling noise around gestures (a stab, a hair-late tick) reads as a
- * wild momentary rate. Pitch snaps to base there; POSITION still follows
- * the trace (the Conductor's drift check absorbs the residue). */
-const RIDE_BAND_FRACTION = 0.15;
+/** Trace simplification epsilon (#161 finding 4): within a moving run
+ * (jump-to-jump), samples deviating less than this from the straight
+ * line between the kept neighbors are tick-sampling jitter, not motion —
+ * they are dropped, so segment slopes (= replay pitch) come out steady
+ * and the position trajectory is noise-free. Real rides survive: a
+ * genuine rate change displaces samples beyond the epsilon and keeps its
+ * inflection points. */
+const TRACE_SIMPLIFY_EPS_SEC = 0.03;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -248,15 +255,84 @@ export function buildSlotTrace(
       a.ratePerBeat = a.moving ? lastMovingRate : 0;
     }
   }
+  // Simplify moving runs (#161 finding 4): raw per-segment slopes carry
+  // tick-sampling jitter (±1-2% rate noise over ~1s segments) — replayed
+  // literally they warble the deck pitch AND wiggle the position target,
+  // which the Conductor's servo then chases. Douglas-Peucker inside each
+  // jump-free moving run keeps endpoints and real ride inflections,
+  // drops the jitter; slopes recompute endpoint-exact.
+  const simplified = simplifyMovingRuns(trace);
   // The final point inherits the last segment's motion for extrapolation
   // past the end.
-  if (trace.length >= 2) {
-    const last = trace[trace.length - 1];
-    const prev = trace[trace.length - 2];
+  if (simplified.length >= 2) {
+    const last = simplified[simplified.length - 1];
+    const prev = simplified[simplified.length - 2];
     last.moving = prev.moving;
     last.ratePerBeat = prev.moving ? prev.ratePerBeat : 0;
   }
-  return trace;
+  return simplified;
+}
+
+/** Douglas-Peucker over each maximal jump-free MOVING run: intermediate
+ * samples within TRACE_SIMPLIFY_EPS_SEC of the kept line are jitter and
+ * drop out; kept segments get endpoint-exact rates. Non-moving points,
+ * jump landings, and run boundaries always survive. */
+function simplifyMovingRuns(trace: RoutineTracePoint[]): RoutineTracePoint[] {
+  if (trace.length < 3) return trace;
+  const keep = new Array<boolean>(trace.length).fill(false);
+  keep[0] = true;
+  keep[trace.length - 1] = true;
+  const dp = (lo: number, hi: number): void => {
+    // Keep the farthest-from-the-chord point if it exceeds epsilon.
+    if (hi - lo < 2) return;
+    const a = trace[lo];
+    const b = trace[hi];
+    const db = b.beat - a.beat || 1e-9;
+    let worst = -1;
+    let worstDev = TRACE_SIMPLIFY_EPS_SEC;
+    for (let k = lo + 1; k < hi; k++) {
+      const f = (trace[k].beat - a.beat) / db;
+      const dev = Math.abs(trace[k].pos - (a.pos + (b.pos - a.pos) * f));
+      if (dev > worstDev) {
+        worstDev = dev;
+        worst = k;
+      }
+    }
+    if (worst >= 0) {
+      keep[worst] = true;
+      dp(lo, worst);
+      dp(worst, hi);
+    }
+  };
+  // Walk maximal runs of consecutive MOVING segments with no jump inside.
+  let runStart: number | null = null;
+  for (let i = 0; i < trace.length; i++) {
+    const inRun =
+      i < trace.length - 1 && trace[i].moving && !trace[i + 1].jump && trace[i].ratePerBeat > 0;
+    if (inRun && runStart === null) runStart = i;
+    if (!inRun) {
+      if (runStart !== null && i > runStart) {
+        keep[runStart] = true;
+        keep[i] = true;
+        dp(runStart, i);
+      } else {
+        keep[i] = true;
+      }
+      runStart = null;
+      keep[i] = true;
+    }
+  }
+  const out: RoutineTracePoint[] = [];
+  for (let i = 0; i < trace.length; i++) if (keep[i]) out.push({ ...trace[i] });
+  // Endpoint-exact slopes on the kept segments (moving ones only).
+  for (let i = 0; i < out.length - 1; i++) {
+    const a = out[i];
+    const b = out[i + 1];
+    if (a.moving && !b.jump && b.beat > a.beat) {
+      a.ratePerBeat = (b.pos - a.pos) / (b.beat - a.beat);
+    }
+  }
+  return out;
 }
 
 export interface TraceState {
@@ -424,6 +500,12 @@ export function buildPlannedRoutine(
     const bpm = ctx.trackBpms[slot];
     const syncRate = 60 / bpm;
     const basePitchPercent = clampPitch((ctx.targetBpm / bpm - 1) * 100);
+    const trace = buildSlotTrace(
+      slotSamples(input.events, slot),
+      syncRate,
+      input.entryOffsetsBeats[slot],
+      input.entryPositions[slot]
+    );
     return {
       slot,
       trackId,
@@ -431,13 +513,12 @@ export function buildPlannedRoutine(
       entryMixSec: entryMixSecs[slot],
       entryTrackSec: input.entryPositions[slot],
       basePitchPercent,
-      trace: buildSlotTrace(
-        slotSamples(input.events, slot),
-        syncRate,
-        input.entryOffsetsBeats[slot],
-        input.entryPositions[slot]
-      ),
+      trace,
       lanes: buildSlotLanes(input.events, slot, slot === 0),
+      jumpMixSecs: trace
+        .filter((p) => p.jump)
+        .map((p) => ctx.mixStartSec + p.beat * secPerBeat)
+        .sort((a, b) => a - b),
     };
   });
 
@@ -472,13 +553,9 @@ export function buildPlannedRoutine(
   }
   const trackSecAtEnd = Math.max(0, traceStateAt(exitTrace, input.durationBeats).pos);
 
-  const jumpMixSecs: number[] = [];
-  for (const s of slots) {
-    for (const p of s.trace) {
-      if (p.jump) jumpMixSecs.push(ctx.mixStartSec + p.beat * secPerBeat);
-    }
-  }
-  jumpMixSecs.sort((a, b) => a - b);
+  // Routine-wide list kept for whole-plan queries (per-deck hard-sync
+  // scoping reads the slots' own lists — #161).
+  const jumpMixSecs: number[] = slots.flatMap((s) => s.jumpMixSecs).sort((a, b) => a - b);
 
   return {
     routine: {
@@ -524,15 +601,26 @@ export function routineSlotStateAt(
       pitchPercent: slot.basePitchPercent,
     };
   }
-  // Re-anchored pitch: the deck rate reproducing this trace segment at
-  // the target tempo, snapped to the slot's base when beatmatched (or
-  // when the segment reads outside the credible ride band — noise).
+  // A negative trace position is the recording's silent lead (the deck
+  // rolled before the track's time 0 — entry lead gaps allowed, ADR
+  // 0035): replay parks the deck at 0 and starts it when the recorded
+  // position crosses 0 — clamping while "playing" would make the servo
+  // fight a pinned target (#161 finding 4, the s49 Like A G6 entry).
+  if (t.pos < 0) {
+    return { trackTime: 0, playing: false, pitchPercent: slot.basePitchPercent };
+  }
+  // Re-anchored pitch: EXACTLY the deck rate reproducing this trace
+  // segment at the target tempo — pitch and position derivative agree by
+  // construction (#161 finding 4: the old base-pitch snap made the deck
+  // play a rate its own position target didn't, so drift accrued and the
+  // Conductor seeked it back every few seconds — the audible desync).
+  // Segment slopes are already noise-free (simplifyMovingRuns), so a
+  // beatmatched passage reads as one steady rate ≈ base; genuine rides
+  // follow the recording. Varispeed clamp is the only discretion.
   const deckRate = t.ratePerBeat / routine.secPerBeat;
-  const baseRate = 1 + slot.basePitchPercent / 100;
-  const deviation = Math.abs(deckRate - baseRate) / baseRate;
-  const pitchPercent =
-    deviation <= SYNC_SNAP_FRACTION || deviation > RIDE_BAND_FRACTION
-      ? slot.basePitchPercent
-      : clampPitch((deckRate - 1) * 100);
-  return { trackTime: Math.max(0, t.pos), playing: true, pitchPercent };
+  return {
+    trackTime: t.pos,
+    playing: true,
+    pitchPercent: clampPitch((deckRate - 1) * 100),
+  };
 }

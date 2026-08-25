@@ -399,6 +399,25 @@ export function _resetSoftTakeoverForTests(): void {
   takeovers.clear();
 }
 
+/**
+ * A mapped input port detached (deck unplug — midi-controller 20): forget
+ * everything dispatch believed about the hardware's PHYSICAL state. The
+ * software values ARE the control memory and stay untouched; what must not
+ * survive a replug is the pickup picture. A still-latched machine would let
+ * the first post-replug sample apply straight through (the control moved
+ * while unplugged → the remembered value jumps), and an unlatched one could
+ * false-latch by "crossing" judged against a sample from before the unplug.
+ * Cleared machines rebuild on demand exactly like a fresh boot, first-touch
+ * grace included (softTakeover.ts). An armed grid chord dies with the port
+ * too: its release edge is gone, so it would otherwise eat that deck's jog
+ * ticks forever. (Held-button decoder state is per port and already reset
+ * by the adapter; LEDs resync via the output store.)
+ */
+export function forgetHardwareState(): void {
+  takeovers.clear();
+  gridChordState = initialGridChordState();
+}
+
 /** One absolute target, resolved: identity, domain value, read, write. */
 interface AbsoluteRoute {
   key: string;

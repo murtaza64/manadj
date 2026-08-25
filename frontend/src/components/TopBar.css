@@ -9,10 +9,28 @@
   overflow: hidden;
 }
 
+/* Mode top panels stack over the ONE shared bottom browse panel (gh#165);
+   position anchors the perf cursor-suppression overlay. */
 .app-main {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The shared browse panel: every remaining pixel under the active mode's
+   top panel (the whole surface in library mode). Lock-dim classes on it are
+   styled in PerformanceView.css (perf load-lock domain). */
+.app-browse {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-browse > div {
+  height: 100%;
 }
 
 .topbar {

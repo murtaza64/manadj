@@ -1255,6 +1255,15 @@ export const api = {
   },
 
   routineCandidates: {
+    /** ALL miner-suggested candidate spans (sets #161): the Set pane
+     * matches casts against adjacencies client-side for the row-level
+     * "routines detected" highlight (the picker still queries per head). */
+    list: async (): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-candidates`);
+      if (!res.ok) throw new Error(`Failed to fetch routine candidates (${res.status})`);
+      return res.json();
+    },
+
     /** A Session's miner-suggested Routine spans, timeline order (ADR
      * 0035, routines 157) — the confirm surface reads this. */
     forSession: async (sessionUuid: string): Promise<RoutineCandidateWire[]> => {
@@ -1262,6 +1271,20 @@ export const api = {
         `${API_BASE}/routine-candidates?session_uuid=${encodeURIComponent(sessionUuid)}`
       );
       if (!res.ok) throw new Error(`Failed to fetch routine candidates (${res.status})`);
+      return res.json();
+    },
+
+    /** Cast-prefix match (routines 157): candidates whose cast covers
+     * exactly the given ordered list's next len(cast) entries, entering
+     * on the first and exiting at the last — the pin picker's lowest
+     * trust tier (sets 160). Strongest evidence first. */
+    query: async (trackIds: number[]): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-candidates/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_ids: trackIds }),
+      });
+      if (!res.ok) throw new Error(`Failed to query routine candidates (${res.status})`);
       return res.json();
     },
   },
@@ -1607,24 +1630,32 @@ export interface SetRowWire {
 export interface SetEntryItemWire {
   track_id: number;
   /** Adjacency pin (sets 02): kind and uuid travel together for
-   * transition/take; a Hard-cut pin (sets 26) carries no uuid. */
-  pin_kind?: 'transition' | 'take' | 'hardcut' | null;
+   * transition/take/routine (sets 160); a Hard-cut pin (sets 26)
+   * carries no uuid. */
+  pin_kind?: 'transition' | 'take' | 'hardcut' | 'routine' | null;
   pin_uuid?: string | null;
+  /** Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+   * units (0 = neutral, ±0.5 spans the knob) — composes with track
+   * Autogain when that lands (ADR 0034). Absent = neutral. */
+  trim?: number;
 }
 
 export interface SetEntryRowWire {
   track_id: number;
   position: number;
-  pin_kind: 'transition' | 'take' | 'hardcut' | null;
+  pin_kind: 'transition' | 'take' | 'hardcut' | 'routine' | null;
   pin_uuid: string | null;
+  /** Trim offset from neutral, knob units (sets #164). */
+  trim: number;
 }
 
 /** A Dormant pin (sets 07): a broken pin remembered per ORDERED track
- * pair, per Set — same shape on PUT and GET. */
+ * pair, per Set — same shape on PUT and GET. A routine memory (sets
+ * 160) is keyed by its BOUNDARY tracks (entry, exit). */
 export interface SetDormantPinWire {
   a_track_id: number;
   b_track_id: number;
-  pin_kind: 'transition' | 'take' | 'hardcut';
+  pin_kind: 'transition' | 'take' | 'hardcut' | 'routine';
   pin_uuid: string | null;
 }
 

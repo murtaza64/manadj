@@ -28,6 +28,7 @@ import {
 } from '../editor/pairStore';
 import type { HotCue, Track } from '../types';
 import { resolvePlanPins } from './adjacency';
+import { getRoutineCast, primeRoutineCasts } from './routineCasts';
 
 /** Hot Cue 1 in track seconds, null when slot 1 is unset — THE home of
  * the cue-slot convention's "slot 1 = first buildup" lookup (the plan's
@@ -78,64 +79,48 @@ import { useSetSettings } from './setSettings';
 import type { SetEntryLocal } from './setStore';
 
 /**
- * DEV SEAM — Routine replay before the pin plumbing lands (routines 159;
- * TEMPORARY, replaced by #160's routine-pin resolution at the e2e merge).
- * Gated OFF by default: `localStorage.setItem('manadj.devRoutineReplay',
- * '1')` feeds every saved Routine whose cast matches consecutive Set
- * entries into the plan's routines channel, so replay is audible and
- * reviewable end-to-end. Deliberately NOT pin semantics: no picker, no
- * dormancy — first cast match wins.
+ * Routine-pin replay resolution (sets #161, the #159↔#160 seam): each
+ * entry pinning a Routine (`kind: 'routine'`) fetches the full artifact
+ * and feeds the plan's routines channel at its head index — the planner
+ * validates the cast against the next-n entries (degrading invalid pins
+ * with a `routine-invalid` warning) and builds the slot-remapped,
+ * beat-rebased replay; covered adjacencies defer to the span. A failed
+ * fetch degrades that pin to a hard cut (dangling-reference rule).
+ * Replaced #159's temporary `manadj.devRoutineReplay` localStorage seam.
  */
-function useDevRoutineReplay(
-  entries: SetEntryLocal[] | undefined
-): PlanInput['routines'] | undefined {
-  const enabled =
-    typeof localStorage !== 'undefined' &&
-    localStorage.getItem('manadj.devRoutineReplay') === '1';
-  const { data: rows } = useQuery({
-    queryKey: ['routines'],
-    enabled: enabled && (entries?.length ?? 0) > 0,
-    staleTime: 30_000,
-    queryFn: () => api.routines.list(),
-  });
-  const matches = useMemo(() => {
-    if (!enabled || !rows || !entries) return [];
-    const out: { startEntryIndex: number; uuid: string }[] = [];
-    const claimed = new Set<number>();
-    for (const row of rows) {
-      const n = row.cast.length;
-      for (let i = 0; i + n <= entries.length; i++) {
-        if (claimed.has(i)) continue;
-        if (row.cast.every((tid, k) => entries[i + k].trackId === tid)) {
-          out.push({ startEntryIndex: i, uuid: row.uuid });
-          claimed.add(i);
-          break;
-        }
-      }
-    }
-    return out.sort((a, b) => a.startEntryIndex - b.startEntryIndex);
-  }, [enabled, rows, entries]);
+function useRoutinePinReplay(entries: SetEntryLocal[] | undefined): {
+  routines: PlanInput['routines'] | undefined;
+  isLoading: boolean;
+} {
+  const pins = useMemo(
+    () =>
+      (entries ?? []).flatMap((e, i) =>
+        e.pin?.kind === 'routine' ? [{ startEntryIndex: i, uuid: e.pin.uuid }] : []
+      ),
+    [entries]
+  );
   const detailQueries = useQueries({
-    queries: matches.map((m) => ({
-      queryKey: ['routine', m.uuid],
-      queryFn: () => api.routines.get(m.uuid),
+    queries: pins.map((p) => ({
+      queryKey: ['routine', p.uuid],
+      queryFn: () => api.routines.get(p.uuid),
       staleTime: Infinity,
       retry: false,
     })),
   });
-  // Stable identity: recompute only when a fetch lands (plan identity
-  // feeds useMemo chains downstream).
-  const dataKey = matches
-    .map((m, i) => `${m.uuid}@${m.startEntryIndex}:${detailQueries[i]?.data ? 1 : 0}`)
+  const isLoading = detailQueries.some((q) => q.isLoading);
+  // Stable identity: recompute only when a pin moves or a fetch lands
+  // (plan identity feeds useMemo chains downstream).
+  const dataKey = pins
+    .map((p, i) => `${p.uuid}@${p.startEntryIndex}:${detailQueries[i]?.data ? 1 : 0}`)
     .join(',');
-  return useMemo(() => {
-    if (!enabled || matches.length === 0) return undefined;
+  const routines = useMemo(() => {
+    if (pins.length === 0) return undefined;
     const out: NonNullable<PlanInput['routines']> = [];
-    matches.forEach((m, i) => {
+    pins.forEach((p, i) => {
       const d = detailQueries[i]?.data;
-      if (!d) return; // still loading / failed → the pinless plan stands
+      if (!d) return; // failed → dangling → the head plans as a hard cut
       out.push({
-        startEntryIndex: m.startEntryIndex,
+        startEntryIndex: p.startEntryIndex,
         routine: {
           cast: d.cast,
           entryOffsetsBeats: d.entry_offsets_beats,
@@ -147,7 +132,8 @@ function useDevRoutineReplay(
     });
     return out.length > 0 ? out : undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, dataKey]);
+  }, [dataKey]);
+  return { routines, isLoading };
 }
 
 export function useSetPlan(
@@ -177,7 +163,8 @@ export function useSetPlanParts(
 ): { input: PlanInput | undefined; plan: SetPlan | undefined } {
   const { tempoReturnSecPerPercent, graceHeadroomSec, graceFadeSec } = useSetSettings();
   const pairStore = useSyncExternalStore(subscribePairStore, snapshotPairStore);
-  const devRoutines = useDevRoutineReplay(entries);
+  const { routines: pinnedRoutines, isLoading: routineDetailsLoading } =
+    useRoutinePinReplay(entries);
 
   // Never plan against an unloaded pair store: pinned Transitions would
   // transiently degrade to hard cuts — and a "Play set" pressed in that
@@ -197,6 +184,23 @@ export function useSetPlanParts(
     e.pin?.kind === 'take' ? [e.pin.uuid] : []
   );
   const takeUuidsKey = takeUuids.join(',');
+
+  // Routine pins (sets 160): coverage needs the casts — fetch the
+  // Routine list (metadata only) exactly when a routine pin is in play,
+  // and prime the module cache dormancy reconciliation reads.
+  const routineUuidsKey = (entries ?? [])
+    .flatMap((e) => (e.pin?.kind === 'routine' ? [e.pin.uuid] : []))
+    .join(',');
+  const routinesNeeded = routineUuidsKey.length > 0;
+  const { data: routineRows, isLoading: routinesQueryLoading } = useQuery({
+    queryKey: ['routines'],
+    queryFn: api.routines.list,
+    enabled: routinesNeeded,
+  });
+  const routinesLoading = (routinesNeeded && routinesQueryLoading) || routineDetailsLoading;
+  useEffect(() => {
+    if (routineRows) primeRoutineCasts(routineRows);
+  }, [routineRows]);
   const takeQueries = useQueries({
     queries: takeUuids.map((uuid) => ({
       queryKey: ['take', uuid],
@@ -223,7 +227,7 @@ export function useSetPlanParts(
 
   const input = useMemo<PlanInput | undefined>(() => {
     if (!entries || entries.length === 0) return undefined;
-    if (!transitionsReady || takesLoading || hotCuesLoading) return undefined;
+    if (!transitionsReady || takesLoading || hotCuesLoading || routinesLoading) return undefined;
     if (!trackMap || entries.some((e) => !trackMap.has(e.trackId))) return undefined;
 
     const tracks: PlanInput['tracks'] = {};
@@ -240,13 +244,19 @@ export function useSetPlanParts(
     // (via ConductorPlanFeed), and practice all play the same choice the
     // badges show. Pins pass through untouched; PlanInput's shape is
     // unchanged (replan grafting keeps matching pins by uuid).
-    const resolved = resolvePlanPins(entries, (a, b) =>
-      (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
-        uuid: it.uuid,
-        name: it.name,
-        favorite: it.favorite,
-        updatedAtMs: it.updatedAtMs,
-      }))
+    const resolved = resolvePlanPins(
+      entries,
+      (a, b) =>
+        (pairStore[`${a}:${b}`]?.items ?? []).map((it) => ({
+          uuid: it.uuid,
+          name: it.name,
+          favorite: it.favorite,
+          updatedAtMs: it.updatedAtMs,
+        })),
+      // Routine coverage (sets 160): fresh rows first, cache fallback —
+      // covered interior adjacencies defer to the Routine span (sets
+      // #159's replay, fed via the routines channel below).
+      (uuid) => routineRows?.find((r) => r.uuid === uuid)?.cast ?? getRoutineCast(uuid)
     );
 
     // Full Transition payloads for each adjacency's ordered pair, keyed by
@@ -282,7 +292,7 @@ export function useSetPlanParts(
       takesByUuid,
       tempo: tempoInput,
       grace: { headroomSec: graceHeadroomSec, fadeSec: graceFadeSec },
-      routines: devRoutines,
+      routines: pinnedRoutines,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -292,14 +302,17 @@ export function useSetPlanParts(
     transitionsReady,
     takesLoading,
     hotCuesLoading,
+    routinesLoading,
+    routineRows,
     hotCue1Signature,
     takeUuidsKey,
+    routineUuidsKey,
     tempo?.policy,
     tempo?.setTempoBpm,
     tempoReturnSecPerPercent,
     graceHeadroomSec,
     graceFadeSec,
-    devRoutines,
+    pinnedRoutines,
   ]);
   const plan = useMemo(() => (input ? planSet(input) : undefined), [input]);
   return { input, plan };

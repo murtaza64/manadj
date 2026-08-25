@@ -467,6 +467,192 @@ describe('mix-domain alignment (4dp 39)', () => {
   });
 });
 
+describe('lost pitch baseline repair (sets 166)', () => {
+  // Slices captured before the recorder seeded pitch explicitly (the
+  // sessions-18 fix) carry a FALSE zero baseline for any deck pitched
+  // before the seed — the DJ rides sets at an elevated tempo, so the
+  // standing pitch of BOTH decks is invisible to the slice. The playhead
+  // samples are direct observations of the actual rate: when they
+  // contradict the recorded baseline, the measurement wins.
+  const RATE_A = 1.0172; // outgoing 175 ridden at ~178 (pitch never logged)
+  const RATE_B = 1.023; // incoming 174 matched to it (pitch never logged)
+
+  /** Damaged slice: init pitch 0/0 (the lie), ticks riding the performed
+   * rates. Window 100..160; A at 60s, B at 8s at the open. */
+  function damagedInput(over: { events?: CaptureEvent[]; endS?: number } = {}) {
+    const endS = over.endS ?? 160;
+    const events: CaptureEvent[] = [init('A', 100)];
+    for (let t = 100; t <= endS; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B }));
+    }
+    events.push(...(over.events ?? []));
+    return { events, windowStartS: 100, windowEndS: endS };
+  }
+
+  it('repairs a false zero baseline from the playhead samples', () => {
+    // required = 175/174 − 1 = +0.575%; performed ride = RATE_B/RATE_A −
+    // 1 = +0.570%. With the recorded (false) baseline this read as a
+    // 0.575% residual over 60s — unmatched, and the entry back-projected
+    // ~1.4s late (4 beats). The measured rates restore the match.
+    const draft = vectorizeTake(damagedInput(), { bpmA: 175, bpmB: 174 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+    // The window spans the outgoing's PERFORMED track seconds.
+    expect(draft.transition.durationSec).toBeCloseTo(60 * RATE_A, 1);
+  });
+
+  it('trusts the recorded pitch when the samples agree (exactness kept)', () => {
+    const decks = { A: deck({ pitch: 1.72 }), B: deck({ trackId: 2, pitch: 2.3 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 160; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * 1.0172, B: 8 + (t - 100) * 1.023 }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    // durationSec computed from the RECORDED pitch, bit-exact.
+    expect(draft.transition.durationSec).toBe(60 * 1.0172);
+  });
+
+  it('keeps the recorded baseline when samples are too sparse to measure', () => {
+    // One tick = no pairs: the false baseline is unmeasurable — the
+    // verdict stays what the recorded evidence says (unmatched here).
+    const events: CaptureEvent[] = [
+      init('A', 100),
+      tick(100, { A: 60, B: 8 }),
+      tick(160, { A: 60 + 60 * RATE_A, B: 8 + 60 * RATE_B }),
+    ];
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(false);
+  });
+
+  it('measures the baseline only up to the first pitch event of the channel', () => {
+    // The DJ corrects B's pitch mid-window: the recorded value governs
+    // from the event on; the measured baseline covers the span before it.
+    const draft = vectorizeTake(
+      damagedInput({ events: [pitch(130, 'B', 2.3)] }),
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+  });
+
+  it('a discontinuity (jump) does not poison the measurement', () => {
+    // A backward beat-jump mid-window: the pair spanning it is an
+    // outlier; the median slope still reads the true rate.
+    const events: CaptureEvent[] = [init('A', 100)];
+    for (let t = 100; t <= 160; t += 1) {
+      const jumped = t > 130 ? -5.517 : 0; // 16 beats at 174
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B + jumped }));
+    }
+    events.push({
+      t: 130.5,
+      kind: 'transport',
+      channel: 'B',
+      action: 'jumpBeats',
+      playhead: 8 + 30.5 * RATE_B - 5.517,
+      detail: -16,
+    });
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+});
+
+describe('rate-relative tempo-match (sets 169)', () => {
+  // The Tap Ho (172) → Alone (174) family: takes performed at an ELEVATED
+  // standing tempo (~177) read as unmatched despite a perfect ride. The
+  // settled-pitch gate mixes a repaired (tick-measured, capture-clock
+  // skewed) baseline with a recorded (audio-clock) one — a ~0.1% phantom
+  // residual the quarter-beat drift bound amplifies into a false negative
+  // on any window past ~45s. The measured cruise-slope RATIO cancels the
+  // skew: tempoMatch ⇔ rateOut·bpmA ≈ rateInc·bpmB.
+  it('an elevated-standing-tempo ride reads as matched with correct alignment (take 641 shape)', () => {
+    // bpm 172→174, required = 172/174 − 1 = −1.149%. A's standing pitch
+    // recorded (+2.9017); B's LOST (the sets-166 family). Capture-clock
+    // cruise slopes ride the EXACT required ratio, but sit ~0.13% under
+    // A's recorded pitch (clock skew) — inside the repair threshold, so
+    // A keeps the recorded value while B gets the measured one: the
+    // settled ratio carries a phantom 0.13% and the old bound killed it.
+    const RATE_A = 1.0277;
+    const RATE_B = RATE_A * (172 / 174);
+    const decks = { A: deck({ pitch: 2.9017 }), B: deck({ trackId: 2 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 180; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 180 },
+      { bpmA: 172, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    // Matched back-projection against the OUTGOING's actual rate: the
+    // entry lands where the performance entered (well under half a beat).
+    expect(Math.abs(draft.transition.bInSec - 8)).toBeLessThan(0.15);
+  });
+
+  it('a hair-hot corrected ride on a long window stays matched (take 941 shape)', () => {
+    // Both baselines recorded truthfully; B settled 0.148% hot of the
+    // required ratio over a 108s window — the DJ absorbed the residual
+    // with bends. Quarter-beat settled bound rejects it (0.16s > 0.086s);
+    // the measured gate's half-beat bound accepts what was audibly held.
+    const RATE_A = 1.0232;
+    const RATE_B = 1.012955; // required would be 1.0232·172/174 = 1.011467
+    const decks = { A: deck({ pitch: 2.32 }), B: deck({ trackId: 2, pitch: 1.2955 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 208; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 208 },
+      { bpmA: 172, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+
+  it('a native-rate take is unchanged (anchors bit-exact from recorded pitch)', () => {
+    // Healthy slice, A native: the measured gate must not perturb the
+    // recorded-evidence output.
+    const decks = { A: deck(), B: deck({ trackId: 2, pitch: 0.575 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 160; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100), B: 8 + (t - 100) * 1.00575 }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.durationSec).toBe(60);
+    expect(draft.transition.startSec).toBe(60);
+  });
+
+  it('a genuinely unmatched ride on a close-BPM pair still reads false', () => {
+    // 172 vs 174 with NO adjustment at all: within the 1.5% settled
+    // tolerance, but the measured ratio reads the full BPM gap (1.15% ≫
+    // 0.25%) and the settled drift bound rejects the 80s window — the
+    // performance drifted a beat every ~30s and must replay that way.
+    const events: CaptureEvent[] = [init('A', 100)];
+    for (let t = 100; t <= 180; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100), B: 8 + (t - 100) }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 180 },
+      { bpmA: 172, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(false);
+    // Unmatched = start-anchored: the performed entry survives.
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+  });
+});
+
 describe('assignment-aware fader lanes (4dp 39)', () => {
   it('a right-side outgoing deck composes the RIGHT crossfader gain', () => {
     // Relabeled pair: physical B→D, both on the crossfader's right half.

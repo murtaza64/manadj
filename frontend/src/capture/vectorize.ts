@@ -12,8 +12,9 @@
  *   POSITIONS (the lane domain — MixPlayer re-applies the fader taper).
  *   Trim stays out: gain staging, not the move.
  * - CONTINUOUS GESTURES COLLAPSE: pitch riding and Nudges (bends) never
- *   become lanes; the settled incoming pitch against the BPM ratio decides
- *   the single static tempo-match.
+ *   become lanes; the single static tempo-match is decided rate-relatively
+ *   (sets 169) — by the settled B-vs-A rate ratio against the BPM ratio,
+ *   or by the measured cruise-slope ratio when the ticks prove the ride.
  * - SPARSE LANES: dense drag streams simplify (RDP) to editable
  *   breakpoints; untouched controls stay out of `lanes` entirely — except
  *   the incoming fader lane, always drawn: its model default (a 2s fade-in
@@ -40,11 +41,29 @@ const STEP_EPS = 0.002;
 const SIMPLIFY_EPS = 0.015;
 /** Constant-lane inclusion thresholds. */
 const VARIES_EPS = 0.005;
-const OFF_DEFAULT_EPS = 0.02;
+/** Exported for the editor's lane shading (mix-editor 39): "renders as
+ * neutral" and "vectorizes as untouched" must be the same epsilon. */
+export const OFF_DEFAULT_EPS = 0.02;
 /** Performed-vs-required pitch gap (percent) still reading as "matched". */
 const TEMPO_MATCH_TOLERANCE_PERCENT = 1.5;
+/** Measured-ride gap (percent) reading as "matched" (sets 169). The
+ * cruise-slope RATIO cancels capture-clock skew, so it is an order more
+ * precise than the settled-pitch evidence: real rides in the library
+ * measure ≤0.15% off required; a no-touch pair reads the full BPM gap. */
+const MEASURED_RIDE_TOLERANCE_PERCENT = 0.25;
 /** Discontinuities smaller than this are sample jitter, not gestures. */
 const MIN_JUMP_SEC = 0.1;
+/** Baseline repair (sets 166): the measured rate replaces the recorded
+ * pitch baseline only past this disagreement — tick-slope jitter on a
+ * healthy slice is ~0.05%; a lost baseline is ≥ the ride itself. */
+const BASELINE_REPAIR_TOLERANCE_PERCENT = 0.2;
+/** Minimum consecutive-tick pairs for a trustworthy rate measurement. */
+const MIN_RATE_PAIRS = 3;
+/** Self-consistency bound: the pairs must agree (median absolute
+ * deviation, rate units) or the span is ambiguous — heavy nudging over
+ * few samples — and the recorded baseline stands. Real ~1 Hz ticks carry
+ * ~0.15% sampling jitter; ambiguity reads an order louder. */
+const MAX_RATE_MAD = 0.005;
 
 export interface VectorizeInput {
   /** The Take's raw slice, starting with its `init` head. */
@@ -76,8 +95,27 @@ export function vectorizeTake(
   const { windowStartS, windowEndS } = input;
   const windowLen = Math.max(0, windowEndS - windowStartS);
 
+  // LOST BASELINE REPAIR (sets 166): slices captured before the recorder
+  // seeded pitch explicitly (the sessions-18 fix) carry a false zero
+  // baseline for any deck pitched before the seed — the whole damaged-era
+  // library replays unmatched and out of phase. The playhead samples ARE
+  // direct observations of the actual rate: when the measured baseline
+  // contradicts the recorded one beyond jitter, the measurement wins.
+  // Post-fix slices agree within jitter and keep their exact recorded
+  // values (bit-identical output).
+  const baseline: Partial<Record<CaptureChannel, number>> = {};
+  for (const ch of Object.keys(init.decks) as CaptureChannel[]) {
+    const measured = measuredPitchBaseline(input.events, ch, windowStartS, windowEndS);
+    if (
+      measured !== null &&
+      Math.abs(measured - init.decks[ch].pitch) > BASELINE_REPAIR_TOLERANCE_PERCENT
+    ) {
+      baseline[ch] = measured;
+    }
+  }
+
   const pitchAt = (ch: CaptureChannel, t: number): number => {
-    let p = init.decks[ch].pitch;
+    let p = baseline[ch] ?? init.decks[ch].pitch;
     for (const e of input.events) {
       if (e.kind === 'pitch' && e.channel === ch && e.t <= t) p = e.value;
     }
@@ -121,11 +159,36 @@ export function vectorizeTake(
   // a 145-beat double is 1.5 beats. Match only when the residual drift
   // over the whole window stays under a quarter-beat of B.
   const driftBoundS = facts.bpmB ? 0.25 * (60 / facts.bpmB) : null;
-  const tempoMatch =
+  const settledMatch =
     required !== null &&
     driftBoundS !== null &&
     Math.abs(renormPct - required) <= TEMPO_MATCH_TOLERANCE_PERCENT &&
     (Math.abs(renormPct - required) / 100) * durationSec <= driftBoundS;
+  // MEASURED-RIDE evidence (sets 169): the settled-pitch verdict leans on
+  // recorded/repaired baselines, and mixing a repaired deck with a
+  // recorded one injects capture-clock skew (~0.1%) into the ratio —
+  // which the quarter-beat drift bound amplifies into false negatives on
+  // any window past ~45s (elevated standing tempo reads as unmatched).
+  // The Transition doctrine's reference is the outgoing's ACTUAL rate, so
+  // measure the ride directly: each deck's cruise slope from the slice's
+  // own ticks, ratioed — the shared capture clock cancels out. tempoMatch
+  // ⇔ rateOut·bpmA ≈ rateInc·bpmB. A bend-corrected ride never
+  // accumulates its residual as phase error (the DJ absorbed it), so this
+  // gate carries a looser HALF-beat bound: enough to keep a genuinely
+  // sloppy uncorrected cruise on a long window out.
+  const cruiseOut = medianTickSlopePct(input.events, out, windowStartS, windowEndS);
+  const cruiseInc = medianTickSlopePct(input.events, inc, windowStartS, windowEndS);
+  const measuredPct =
+    cruiseOut !== null && cruiseInc !== null
+      ? ((100 + cruiseInc) / (100 + cruiseOut) - 1) * 100
+      : null;
+  const measuredMatch =
+    required !== null &&
+    driftBoundS !== null &&
+    measuredPct !== null &&
+    Math.abs(measuredPct - required) <= MEASURED_RIDE_TOLERANCE_PERCENT &&
+    (Math.abs(measuredPct - required) / 100) * durationSec <= 2 * driftBoundS;
+  const tempoMatch = settledMatch || measuredMatch;
 
   // DISCRETE GESTURES → JUMP EVENTS (issue 04, ADR 0020's line): beat
   // jumps and hot-cue presses on the INCOMING deck are intentional
@@ -185,6 +248,65 @@ export function vectorizeTake(
       ...(jumps.length > 0 ? { jumps } : {}),
     },
   };
+}
+
+/**
+ * A channel's measured pitch baseline (percent), from the slice's own
+ * tick playheads (sets 166): the cruise slope over the span before the
+ * channel's first pitch event (from the event on, the recorded value
+ * governs).
+ */
+function measuredPitchBaseline(
+  events: CaptureEvent[],
+  ch: CaptureChannel,
+  windowStartS: number,
+  windowEndS: number
+): number | null {
+  const firstPitchT = events.find((e) => e.kind === 'pitch' && e.channel === ch)?.t ?? Infinity;
+  return medianTickSlopePct(events, ch, windowStartS, Math.min(windowEndS, firstPitchT));
+}
+
+/**
+ * A channel's measured cruise rate as a pitch percent: median slope of
+ * consecutive tick pairs over [spanStart, spanEnd], with the sets-166
+ * guards (≥ MIN_RATE_PAIRS pairs, slopes in the plausible playing range,
+ * pair self-consistency MAD ≤ MAX_RATE_MAD). The median rejects isolated
+ * discontinuities — jumps, seeks, momentary bends. Null when the span is
+ * unmeasurable or ambiguous. Note: slopes live in the CAPTURE clock; the
+ * absolute value carries the clock's skew, but a RATIO of two channels'
+ * slopes cancels it (sets 169).
+ */
+function medianTickSlopePct(
+  events: CaptureEvent[],
+  ch: CaptureChannel,
+  spanStart: number,
+  spanEnd: number
+): number | null {
+  const samples: { t: number; pos: number }[] = [];
+  for (const e of events) {
+    if (e.kind !== 'tick' || e.t < spanStart || e.t > spanEnd) continue;
+    const pos = e.playheads[ch];
+    if (pos !== undefined) samples.push({ t: e.t, pos });
+  }
+  samples.sort((a, b) => a.t - b.t);
+  const slopes: number[] = [];
+  for (let i = 1; i < samples.length; i++) {
+    const dt = samples[i].t - samples[i - 1].t;
+    if (dt <= 0) continue;
+    const slope = (samples[i].pos - samples[i - 1].pos) / dt;
+    if (slope > 0.5 && slope < 2) slopes.push(slope);
+  }
+  if (slopes.length < MIN_RATE_PAIRS) return null;
+  const median = medianOf(slopes);
+  const mad = medianOf(slopes.map((s) => Math.abs(s - median)));
+  if (mad > MAX_RATE_MAD) return null;
+  return (median - 1) * 100;
+}
+
+function medianOf(xs: number[]): number {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 /**

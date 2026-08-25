@@ -76,6 +76,12 @@ class FakeEngine {
   setPitch(p: number): void {
     this.pitchPercent = p;
   }
+  /** Simulated audio drift: shift the playhead WITHOUT an event (the
+   * worklet wandering / start latency — not a user gesture). */
+  displace(dt: number): void {
+    if (this.playingFlag) this.anchorPos += dt;
+    else this.parkedAt += dt;
+  }
   subscribe(fn: () => void): () => void {
     this.subs.add(fn);
     return () => this.subs.delete(fn);
@@ -293,6 +299,98 @@ describe('Routine boundary adoption (no reload)', () => {
     expect(lanes.A!.fader).toBe(0);
     expect(lanes.C!.fader).toBe(1);
     conductorStopAtEnd();
+  });
+});
+
+describe('recorded-jump hard sync is deck-scoped (#161 finding 1 follow-up)', () => {
+  it('a slot trace jump seeks ONLY that slot\'s deck; the others keep rolling', () => {
+    // Slot 1's recording jumps at beat 24 (mix 60 + 24·0.5 = 72): a
+    // +8s recorded seek. Slot 0 (deck A) must not be touched by it.
+    const rec = recording();
+    for (const e of rec.events) {
+      if (e.kind === 'tick' && (e.beat as number) >= 24) {
+        const ph = e.playheads as Record<string, number>;
+        if (ph['1'] !== undefined) ph['1'] += 8;
+      }
+    }
+    const facts = { durationSec: 240, bpm: 120, hotCue1Sec: null };
+    const plan = planSet({
+      entries: [
+        { trackId: 1, pin: null },
+        { trackId: 2, pin: null },
+        { trackId: 3, pin: null },
+      ],
+      tracks: { 1: facts, 2: facts, 3: facts },
+      transitionsByUuid: {},
+      takesByUuid: {},
+      routines: [{ startEntryIndex: 0, routine: rec }],
+    });
+    const { conductor, engines } = makeConductor(plan);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(69); // inside the routine, B joined at 68
+    tickAt(69.1);
+    tickAt(70);
+    const seeksA = engines.A.seeks;
+    const seeksB = engines.B.seeks;
+    tickAt(71.9);
+    tickAt(72.1); // crossing slot 1's recorded jump
+    expect(engines.B.seeks).toBe(seeksB + 1); // the jumping deck hard-syncs
+    expect(engines.A.seeks).toBe(seeksA); // the others are left alone
+    conductor.stop();
+  });
+});
+
+describe('phase servo (#161 finding 4)', () => {
+  it('sub-seek drift corrects by a rate nudge, never a seek', () => {
+    const { conductor, engines } = makeConductor();
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30); // solo stretch: deck A joined and settled
+    tickAt(30.02);
+    const seeksBefore = engines.A.seeks;
+    const plannedPitch = engines.A.pitchPercent;
+    engines.A.displace(0.08); // 80ms of drift — inside the nudge zone
+    tickAt(30.04);
+    expect(engines.A.seeks).toBe(seeksBefore); // corrected WITHOUT a seek
+    // The nudge rides the planned pitch against the drift (deck ahead →
+    // slow down), capped at the inaudible ceiling.
+    expect(engines.A.pitchPercent).toBeLessThan(plannedPitch);
+    expect(plannedPitch - engines.A.pitchPercent).toBeLessThanOrEqual(0.75 + 1e-9);
+    conductor.stop();
+  });
+
+  it('drift inside the deadband leaves the deck alone (no nudge, no seek)', () => {
+    const { conductor, engines } = makeConductor();
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30);
+    tickAt(30.02);
+    const seeksBefore = engines.A.seeks;
+    const plannedPitch = engines.A.pitchPercent;
+    engines.A.displace(0.01); // under the 20ms deadband: estimate noise
+    tickAt(30.04);
+    expect(engines.A.seeks).toBe(seeksBefore);
+    expect(engines.A.pitchPercent).toBe(plannedPitch);
+    conductor.stop();
+  });
+
+  it('gross desync gives up nudging and re-seeks to the plan', () => {
+    const { conductor, engines } = makeConductor();
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30);
+    tickAt(30.02);
+    const seeksBefore = engines.A.seeks;
+    engines.A.displace(0.4); // past SEEK_TOLERANCE_S
+    tickAt(30.04);
+    expect(engines.A.seeks).toBe(seeksBefore + 1);
+    expect(engines.A.getPlayhead()).toBeCloseTo(30.04, 1);
+    conductor.stop();
   });
 });
 

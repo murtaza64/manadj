@@ -169,3 +169,39 @@ def test_rename_routine(client, weave_session):
     res = client.patch(f"/api/routines/{routine['uuid']}", json={"name": "s49 finale"})
     assert res.status_code == 200
     assert res.json()["name"] == "s49 finale"
+
+
+def test_delete_routine_degrades_set_pins(client, db, weave_session):
+    """Sets 160: deleting a Routine nulls Set pins referencing it and
+    drops Dormant memories of it (the sets 12 rule, routine kind)."""
+    _, cast = weave_session
+    take = client.post("/api/routine-takes", json=confirm_payload(cast)).json()
+    routine = client.post(f"/api/routine-takes/{take['uuid']}/promote").json()
+
+    s = models.Set(name="degrade")
+    db.add(s)
+    db.commit()
+    db.add(
+        models.SetEntry(
+            set_id=s.id,
+            track_id=cast[0],
+            position=0,
+            pin_kind="routine",
+            pin_uuid=routine["uuid"],
+        )
+    )
+    db.add(
+        models.SetDormantPin(
+            set_id=s.id,
+            a_track_id=cast[0],
+            b_track_id=cast[-1],
+            pin_kind="routine",
+            pin_uuid=routine["uuid"],
+        )
+    )
+    db.commit()
+
+    assert client.delete(f"/api/routines/{routine['uuid']}").status_code == 200
+    entry = db.query(models.SetEntry).filter(models.SetEntry.set_id == s.id).one()
+    assert entry.pin_kind is None and entry.pin_uuid is None
+    assert db.query(models.SetDormantPin).filter(models.SetDormantPin.set_id == s.id).count() == 0

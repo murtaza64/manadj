@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.database import get_db
+from backend.routers.sets import degrade_pins
 
 router = APIRouter()
 
@@ -69,13 +70,16 @@ def patch_routine(
 @router.delete("/{uuid}")
 def delete_routine(uuid: str, db: Session = Depends(get_db)) -> dict:
     """Delete a Routine and clear the promoted mark on its origin take —
-    the evidence survives and may be re-promoted."""
+    the evidence survives and may be re-promoted. Set pins referencing
+    it degrade to Unresolved; Dormant memories of it are dropped
+    (sets 12 rule, extended to routine pins in sets 160)."""
     r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
     if r is None:
         raise HTTPException(status_code=404, detail="routine not found")
     db.query(models.RoutineTake).filter(
         models.RoutineTake.promoted_routine_uuid == uuid
     ).update({models.RoutineTake.promoted_routine_uuid: None}, synchronize_session=False)
+    degrade_pins(db, "routine", {uuid})
     db.delete(r)
     db.commit()
     return {"ok": True}
