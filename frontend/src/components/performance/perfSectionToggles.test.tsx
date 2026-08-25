@@ -6,8 +6,9 @@
  * the toggles mount alongside the view — same store, same contract.)
  * Heavy deck surfaces are stubbed; the assertions are the feature's contract:
  * click toggles, state persists, hidden sections are display:none but
- * STAY MOUNTED (display only — audio/transport untouched), and the
- * embedded library survives to take the freed space.
+ * STAY MOUNTED (display only — audio/transport untouched). The freed space
+ * goes to the shared browse panel below the view (App-level, gh#165) —
+ * that reflow is plain flex and is verified in-browser.
  */
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
@@ -38,9 +39,6 @@ vi.hoisted(() => {
   } as Storage;
 });
 
-vi.mock('../Library', () => ({
-  default: () => <div className="stub-library" />,
-}));
 vi.mock('../../contexts/DeckContext', () => ({
   DeckScope: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }));
@@ -128,9 +126,8 @@ describe('performance section toggles', () => {
     // Display only: the panels are still in the DOM — nothing was unmounted,
     // so deck/audio state can't have been disturbed by hiding.
     expect(host.querySelectorAll('.stub-deckpanel')).toHaveLength(4);
-    // Independent: waveforms untouched; library still there for the reflow.
+    // Independent: waveforms untouched.
     expect(display(host.querySelector('.perf-waves'))).toBe('');
-    expect(host.querySelector('.stub-library')).not.toBeNull();
     // Button reflects hidden; state persisted for the next boot.
     expect(decksBtn.classList.contains('on')).toBe(false);
     expect(decksBtn.getAttribute('aria-pressed')).toBe('false');
@@ -162,7 +159,7 @@ describe('performance section toggles', () => {
     expect(display(host.querySelector('.perf-waves'))).toBe('');
   });
 
-  it('both hidden: the surface keeps only the mixer strip; library remains', () => {
+  it('both hidden: the surface keeps only the mixer strip', () => {
     const host = mount();
     const [wavesBtn, decksBtn] = host.querySelectorAll<HTMLButtonElement>('.perf-section-toggle');
     act(() => {
@@ -172,6 +169,5 @@ describe('performance section toggles', () => {
     expect(display(host.querySelector('.perf-waves'))).toBe('none');
     expect(display(host.querySelector('.perf-decks'))).toBe('none');
     expect(host.querySelector('.stub-mixer')).not.toBeNull();
-    expect(host.querySelector('.stub-library')).not.toBeNull();
   });
 });

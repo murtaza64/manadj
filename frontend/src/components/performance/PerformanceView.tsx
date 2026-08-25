@@ -1,30 +1,30 @@
 /**
  * The Performance view (performance-mode issues 03/04/05; layout per
- * perf-layout 01): four-Deck surface over an embedded Library. Top surface
- * is CONTENT-SIZED — stacked full-width waveforms, the MixerStrip
- * (X-FADER + MASTER), then a 2×2 A–D grid (each deck carries its own
- * channel controls in its MIX zone). The real Library browse surface
- * (browseOnly, per-row load-to-A–D buttons) takes every remaining pixel.
+ * perf-layout 01): the four-Deck TOP PANEL. CONTENT-SIZED — stacked
+ * full-width waveforms, the MixerStrip (X-FADER + MASTER), then a 2×2 A–D
+ * grid (each deck carries its own channel controls in its MIX zone). The
+ * browse surface below is the ONE shared BrowsePanel (gh#165) — this view
+ * registers its load policy there and drives the table through the shared
+ * handle.
  *
  * This view owns its keyboard outright (issue 04): per-deck DeckKeys hubs
  * inside each scope, table keys here (↑/↓ navigate; ←/→ load to the focused
  * left/right Decks; Enter = the focused left Deck — issue 22). Control focus
  * decides the target, not the letter, so ← and Enter follow A↔C and → follows
  * B↔D without disturbing the selection. Space is deliberately unbound —
- * single-deck muscle memory must not toggle a live deck. The embedded library
- * mounts no hub.
+ * single-deck muscle memory must not toggle a live deck. The shared browse
+ * panel mounts no hub in this mode.
  *
  * Load lock (view policy, not provider): a Load onto an audibly-running
  * deck is refused with a hint — in this view a deck is replaced only
  * deliberately. The library view keeps replace-freely.
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { ReactNode } from 'react';
-import Library from '../Library';
-import type { LibraryBrowseHandle } from '../Library';
+import { registerBrowseHost, sharedBrowseHandle } from '../browseHost';
 import { DeckScope } from '../../contexts/DeckContext';
+import { useViewActive } from '../../contexts/viewActive';
 import { useDecks } from '../../hooks/useDeck';
-import type { DeckEngine } from '../../playback/DeckEngine';
+import { isDeckLocked } from './deckLock';
 import type { ChannelId } from '../../playback/mixer';
 import type { Track } from '../../types';
 import { DeckPanel, DeckWaveform } from './DeckPanel';
@@ -51,61 +51,14 @@ const initialHintsOn = localStorage.getItem(HINTS_STORAGE_KEY) !== 'off';
 const wavesShownSnapshot = () => isPerfSectionShown('waveforms');
 const decksShownSnapshot = () => isPerfSectionShown('decks');
 
-/** True while a Load onto this deck must be refused (audible or about to be). */
-function isDeckLocked(engine: DeckEngine): boolean {
-  return engine.isAudioRunning() || engine.getSnapshot().pendingPlay;
-}
-
-/** Reactive version of the lock, for styling the row affordances. */
-function useDeckLocked(engine: DeckEngine): boolean {
-  return useSyncExternalStore(
-    (cb) => engine.subscribe(cb),
-    () => isDeckLocked(engine)
-  );
-}
-
-/**
- * Self-subscribing lock-dim wrapper: the lock booleans flip exactly when a
- * deck starts/stops, so subscribing at view level re-rendered the whole
- * view — embedded library table included — right as playback started
- * (visible jitter, issue 10). Here a flip restyles only this div; the
- * children element (created by the parent) is identity-stable, so React
- * skips the table.
- */
-function LockDimmedLibrary({
-  engineA,
-  engineB,
-  engineC,
-  engineD,
-  children,
-}: {
-  engineA: DeckEngine;
-  engineB: DeckEngine;
-  engineC: DeckEngine;
-  engineD: DeckEngine;
-  children: ReactNode;
-}) {
-  const lockedA = useDeckLocked(engineA);
-  const lockedB = useDeckLocked(engineB);
-  const lockedC = useDeckLocked(engineC);
-  const lockedD = useDeckLocked(engineD);
-  return (
-    <div
-      className={`perf-library${lockedA ? ' lock-A' : ''}${lockedB ? ' lock-B' : ''}${
-        lockedC ? ' lock-C' : ''
-      }${lockedD ? ' lock-D' : ''}`}
-    >
-      {children}
-    </div>
-  );
-}
-
 export function PerformanceView() {
   const decks = useDecks();
-  const { A, B, C, D } = decks;
-  const libraryRef = useRef<LibraryBrowseHandle>(null);
+  // Keep-alive: this view stays mounted while hidden — everything that
+  // drives the SHARED browse panel (document keys, host registration is
+  // fine, cursor policy) gates on activity so hidden copies stay inert.
+  const viewActive = useViewActive();
   const rootRef = useRef<HTMLDivElement>(null);
-  useMidiCursorSuppression(rootRef);
+  useMidiCursorSuppression(rootRef, viewActive);
   const controlFocus = useControlFocus();
   // Live focus for the once-bound keydown listener: ← / → / Enter must
   // target the CURRENT focused Decks, but re-binding on every focus change
@@ -125,10 +78,6 @@ export function PerformanceView() {
   // All load paths in this view (row buttons, double-click, ←/→/Enter) go
   // through here. Engines and per-deck loadTrack are identity-stable, so
   // this callback is too (memoized rows depend on it).
-  const engineA = A.engine;
-  const engineB = B.engine;
-  const engineC = C.engine;
-  const engineD = D.engine;
   const tryLoad = useCallback(
     (deck: ChannelId, track: Track) => {
       const target = decks[deck];
@@ -144,8 +93,21 @@ export function PerformanceView() {
     [decks]
   );
 
+  // This view's load policy for the shared browse panel (gh#165): row
+  // buttons and double-click route through the load lock; double-click
+  // follows the focused left Deck (issue 22). Stays registered while
+  // hidden (the panel reads only the active mode's entry) and refreshes
+  // when focus flips.
+  useEffect(
+    () => registerBrowseHost('performance', { onLoadToDeck: tryLoad, doubleClickDeck: controlFocus.left }),
+    [tryLoad, controlFocus.left]
+  );
+
   // ── Table keys: ↑/↓ navigate; ←/→ load focused left/right; Enter = left ─
+  // Bound only while this view is the visible one: the browse handle is
+  // shared now, and the editor binds the same arrows.
   useEffect(() => {
+    if (!viewActive) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (isGuardedKeyEvent(event)) return;
 
@@ -170,7 +132,7 @@ export function PerformanceView() {
 
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        libraryRef.current?.navigate(event.key === 'ArrowDown' ? 1 : -1);
+        sharedBrowseHandle.current?.navigate(event.key === 'ArrowDown' ? 1 : -1);
         return;
       }
 
@@ -184,7 +146,7 @@ export function PerformanceView() {
       }
       const loadDeck = browseLoadTarget(event.key, controlFocusRef.current);
       if (loadDeck) {
-        const selected = libraryRef.current?.getSelectedTrack();
+        const selected = sharedBrowseHandle.current?.getSelectedTrack();
         if (!selected) return;
         event.preventDefault();
         tryLoad(loadDeck, selected);
@@ -193,7 +155,7 @@ export function PerformanceView() {
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [tryLoad]);
+  }, [tryLoad, viewActive]);
 
   // Section visibility (perf-layout 12 / gh#68): hide-don't-unmount —
   // display:none only, so engines, zoom state and canvases stay alive
@@ -213,7 +175,8 @@ export function PerformanceView() {
 
   return (
     <div ref={rootRef} className={`perf-root${hintsOn ? '' : ' kbd-hints-off'}`}>
-      {/* Performance surface — content-sized; the library gets the rest */}
+      {/* Performance surface — content-sized; the shared browse panel
+          below (App-level BrowsePanel, gh#165) gets every remaining pixel. */}
       <div className="perf-surface">
         <PerfWaves hidden={!wavesShown} />
         <MixerStrip hintsOn={hintsOn} onToggleHints={toggleHints} />
@@ -242,24 +205,6 @@ export function PerformanceView() {
           </DeckScope>
         </div>
       </div>
-
-      {/* Browse surface — the real Library, all remaining height. All loads
-          (hover buttons, double-click, arrow keys) go through the load lock. */}
-      <LockDimmedLibrary
-        engineA={engineA}
-        engineB={engineB}
-        engineC={engineC}
-        engineD={engineD}
-      >
-        <DeckScope deck="A">
-          <Library
-            browseOnly
-            onLoadToDeck={tryLoad}
-            doubleClickDeck={controlFocus.left}
-            browseRef={libraryRef}
-          />
-        </DeckScope>
-      </LockDimmedLibrary>
     </div>
   );
 }
@@ -278,7 +223,7 @@ export function PerformanceView() {
 function PerfWaves({ hidden }: { hidden?: boolean }) {
   const [visibleSeconds, setVisibleSeconds] = useState(DEFAULT_VISIBLE_SECONDS);
   return (
-    // Hidden = display:none (topbar section toggle, gh#68); stays mounted
+    // Hidden = display:none (mixer-strip WAVE toggle, gh#68); stays mounted
     // so the shared zoom survives a hide/show round-trip.
     <div className="perf-waves" style={hidden ? { display: 'none' } : undefined}>
       {PERFORMANCE_WAVEFORM_ORDER.map((deck) => (
