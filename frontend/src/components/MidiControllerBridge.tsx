@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { attachMidiController } from '../midi/adapter';
 import { markMidiActivity } from '../midi/activity';
-import { dispatchMidiAction } from '../midi/dispatch';
+import { dispatchMidiAction, forgetHardwareState } from '../midi/dispatch';
 import { INPULSE_300_MK2 } from '../midi/mappings/inpulse300mk2';
 import { DDJ_GRV6 } from '../midi/mappings/ddjGrv6';
 
@@ -19,6 +19,9 @@ export function MidiControllerBridge() {
         mappings: [INPULSE_300_MK2, DDJ_GRV6],
         onActivity: markMidiActivity,
         onAction: dispatchMidiAction,
+        // Unplug forgets the physical-hardware picture (midi-controller
+        // 20): software values survive; a replug re-latches via pickup.
+        onPortDetached: forgetHardwareState,
       }),
     []
   );
