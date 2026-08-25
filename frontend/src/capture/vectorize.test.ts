@@ -467,6 +467,105 @@ describe('mix-domain alignment (4dp 39)', () => {
   });
 });
 
+describe('lost pitch baseline repair (sets 166)', () => {
+  // Slices captured before the recorder seeded pitch explicitly (the
+  // sessions-18 fix) carry a FALSE zero baseline for any deck pitched
+  // before the seed — the DJ rides sets at an elevated tempo, so the
+  // standing pitch of BOTH decks is invisible to the slice. The playhead
+  // samples are direct observations of the actual rate: when they
+  // contradict the recorded baseline, the measurement wins.
+  const RATE_A = 1.0172; // outgoing 175 ridden at ~178 (pitch never logged)
+  const RATE_B = 1.023; // incoming 174 matched to it (pitch never logged)
+
+  /** Damaged slice: init pitch 0/0 (the lie), ticks riding the performed
+   * rates. Window 100..160; A at 60s, B at 8s at the open. */
+  function damagedInput(over: { events?: CaptureEvent[]; endS?: number } = {}) {
+    const endS = over.endS ?? 160;
+    const events: CaptureEvent[] = [init('A', 100)];
+    for (let t = 100; t <= endS; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B }));
+    }
+    events.push(...(over.events ?? []));
+    return { events, windowStartS: 100, windowEndS: endS };
+  }
+
+  it('repairs a false zero baseline from the playhead samples', () => {
+    // required = 175/174 − 1 = +0.575%; performed ride = RATE_B/RATE_A −
+    // 1 = +0.570%. With the recorded (false) baseline this read as a
+    // 0.575% residual over 60s — unmatched, and the entry back-projected
+    // ~1.4s late (4 beats). The measured rates restore the match.
+    const draft = vectorizeTake(damagedInput(), { bpmA: 175, bpmB: 174 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+    // The window spans the outgoing's PERFORMED track seconds.
+    expect(draft.transition.durationSec).toBeCloseTo(60 * RATE_A, 1);
+  });
+
+  it('trusts the recorded pitch when the samples agree (exactness kept)', () => {
+    const decks = { A: deck({ pitch: 1.72 }), B: deck({ trackId: 2, pitch: 2.3 }) };
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 160; t += 1) {
+      events.push(tick(t, { A: 60 + (t - 100) * 1.0172, B: 8 + (t - 100) * 1.023 }));
+    }
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    // durationSec computed from the RECORDED pitch, bit-exact.
+    expect(draft.transition.durationSec).toBe(60 * 1.0172);
+  });
+
+  it('keeps the recorded baseline when samples are too sparse to measure', () => {
+    // One tick = no pairs: the false baseline is unmeasurable — the
+    // verdict stays what the recorded evidence says (unmatched here).
+    const events: CaptureEvent[] = [
+      init('A', 100),
+      tick(100, { A: 60, B: 8 }),
+      tick(160, { A: 60 + 60 * RATE_A, B: 8 + 60 * RATE_B }),
+    ];
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(false);
+  });
+
+  it('measures the baseline only up to the first pitch event of the channel', () => {
+    // The DJ corrects B's pitch mid-window: the recorded value governs
+    // from the event on; the measured baseline covers the span before it.
+    const draft = vectorizeTake(
+      damagedInput({ events: [pitch(130, 'B', 2.3)] }),
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+  });
+
+  it('a discontinuity (jump) does not poison the measurement', () => {
+    // A backward beat-jump mid-window: the pair spanning it is an
+    // outlier; the median slope still reads the true rate.
+    const events: CaptureEvent[] = [init('A', 100)];
+    for (let t = 100; t <= 160; t += 1) {
+      const jumped = t > 130 ? -5.517 : 0; // 16 beats at 174
+      events.push(tick(t, { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B + jumped }));
+    }
+    events.push({
+      t: 130.5,
+      kind: 'transport',
+      channel: 'B',
+      action: 'jumpBeats',
+      playhead: 8 + 30.5 * RATE_B - 5.517,
+      detail: -16,
+    });
+    const draft = vectorizeTake(
+      { events, windowStartS: 100, windowEndS: 160 },
+      { bpmA: 175, bpmB: 174 }
+    )!;
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+});
+
 describe('assignment-aware fader lanes (4dp 39)', () => {
   it('a right-side outgoing deck composes the RIGHT crossfader gain', () => {
     // Relabeled pair: physical B→D, both on the crossfader's right half.
