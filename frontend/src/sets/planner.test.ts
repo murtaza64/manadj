@@ -392,6 +392,60 @@ describe('Take pins (plan-time vectorization)', () => {
     expect(plan.entries[1].mixOffsetSec).toBeCloseTo(52);
   });
 
+  it('phase assertion (sets 166): planned B rides the performed alignment', () => {
+    // A damaged pre-sessions-18 slice: both decks pitched BEFORE the
+    // recorder seeded (init pitch 0/0 — a lie), beatmatched live at an
+    // elevated tempo. The playhead samples carry the true rates; the
+    // planned B-deck phase must match the performed alignment across the
+    // window — at the open AND at the commit point — within a hard
+    // tolerance (well under half a beat at 174 BPM = 0.17s).
+    const RATE_A = 1.0172;
+    const RATE_B = 1.023;
+    const events: CaptureEvent[] = [
+      {
+        t: 100,
+        kind: 'init',
+        outgoingChannel: 'A',
+        decks: {
+          A: { trackId: 1, playing: true, fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pitch: 0 },
+          B: { trackId: 2, playing: true, fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pitch: 0 },
+        },
+        crossfader: 0,
+        crossfaderEnabled: true,
+      },
+    ];
+    for (let t = 100; t <= 160; t += 1) {
+      events.push({
+        t,
+        kind: 'tick',
+        playheads: { A: 60 + (t - 100) * RATE_A, B: 8 + (t - 100) * RATE_B },
+      });
+    }
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'take', uuid: 'tk166' } },
+          { trackId: 2, pin: null },
+        ],
+        tracks: { 1: facts(200, null, 175), 2: facts(300, null, 174) },
+        takesByUuid: { tk166: { events, windowStartS: 100, windowEndS: 160 } },
+      })
+    );
+    const [adj] = plan.adjacencies;
+    expect(adj.kind).toBe('take');
+    expect(adj.transition!.tempoMatch).toBe(true);
+    const TOL = 0.15;
+    // Window open: B sits at the transition's authored alignment — the
+    // performed entry position.
+    const atOpen = planStateAt(plan, adj.mixStartSec + 1e-6);
+    expect(Math.abs(atOpen.decks.B.trackTime - adj.transition!.bInSec)).toBeLessThan(1e-4);
+    expect(Math.abs(atOpen.decks.B.trackTime - 8)).toBeLessThan(TOL);
+    // Commit point: B lands where the performance actually left it.
+    const performedEnd = 8 + 60 * RATE_B;
+    const atEnd = planStateAt(plan, adj.mixEndSec - 1e-6);
+    expect(Math.abs(atEnd.decks.B.trackTime - performedEnd)).toBeLessThan(TOL);
+  });
+
   it('degrades a dangling or unvectorizable Take pin to a hard cut', () => {
     const dangling = planSet(
       input({
