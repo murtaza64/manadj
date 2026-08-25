@@ -851,8 +851,13 @@ export class Conductor {
     if (this.audioExhausted(deck, target.trackTime)) return;
     engine.setPitch(ramping ? lerp(startPitch, target.pitchPercent, rampP) : target.pitchPercent);
     if (!snap.playing) {
-      engine.seek(target.trackTime);
-      engine.play();
+      // Machine-grade join (#173): exact positioned start. The performer
+      // path (seek + play) routes a paused deck's launch through the
+      // cross-deck quantized launch, which displaced the join onto the
+      // sounding deck's live beat phase — flow-in landed up to half a
+      // reference beat off the plan while seek-in (a restart of playing
+      // decks) was exact.
+      engine.playAt(target.trackTime);
       return;
     }
     if (ramping) return; // anchor: untouched while converging
