@@ -137,25 +137,31 @@ describe('clean blend', () => {
 });
 
 describe('hard cut', () => {
-  it('a crossfader flick (zero overlap) is a Handover', () => {
+  it('a crossfader flick (zero overlap, same instant) is a Handover', () => {
     const s = incumbentA();
     s.at(5).crossfader(-1); // full A
     s.at(10).fader('B', 1); // B faded up but crossfader-killed, not yet playing
     s.at(20).crossfader(1).play('B'); // the flick: A killed, B in — same instant
     const { takes } = run(s.at(20).advance(HORIZON + 1).events());
     expect(takes).toHaveLength(1);
+    // Cessation and onset coincide, so the window is that instant — the one
+    // legitimately degenerate case (a literal same-frame flick).
     expect(takes[0].windowStartS).toBe(20);
     expect(takes[0].windowEndS).toBe(20);
     expect(takes[0].confidence).toBe(0.7);
   });
 
-  it('cessation-then-onset within the cut gap is one Handover, anchored at the cut', () => {
+  it('cessation-then-onset within the cut gap spans the cut ramp, never zero-length (#138)', () => {
+    // The Take-960 defect: a fader chop drops the outgoing, the incoming
+    // arrives a beat later. The window must span the cut ramp (cessation →
+    // incoming onset), not collapse to a single instant.
     const s = incumbentA();
     s.at(20).fader('A', 0).at(21).play('B').fader('B', 1).advance(HORIZON + 1);
     const { takes } = run(s.events());
     expect(takes).toHaveLength(1);
-    expect(takes[0].windowStartS).toBe(20);
-    expect(takes[0].windowEndS).toBe(20);
+    expect(takes[0].windowStartS).toBe(20); // outgoing cessation
+    expect(takes[0].windowEndS).toBe(21); // incoming onset
+    expect(takes[0].windowEndS).toBeGreaterThan(takes[0].windowStartS);
   });
 
   it('a gap longer than the cut gap is silence between tracks, not a Handover', () => {
@@ -163,6 +169,76 @@ describe('hard cut', () => {
     s.at(20).fader('A', 0).at(26).play('B').fader('B', 1).advance(HORIZON + 1);
     const { takes } = run(s.events());
     expect(takes).toHaveLength(0);
+  });
+});
+
+describe('cut-window hygiene (#138 defect 1: never zero-length)', () => {
+  it('a fader chop then the incoming a fraction later spans the ramp, not a point', () => {
+    // The real repro (Take 960, session 19 @72572.5): the outgoing is
+    // fader-chopped to silence, the incoming ramps up ~0.3s later. The
+    // window must span that cut ramp.
+    const s = incumbentA();
+    s.at(20).fader('A', 0); // outgoing cessation
+    s.at(20.3).play('B').fader('B', 1); // incoming onset within the cut gap
+    s.advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(20);
+    expect(takes[0].windowEndS).toBeCloseTo(20.3, 6);
+    expect(takes[0].windowEndS).toBeGreaterThan(takes[0].windowStartS);
+    expect(takes[0].confidence).toBe(0.7); // sub-second overlap tier
+  });
+
+  it('a deck-agnostic cut (B out, D in) also gets a non-degenerate window', () => {
+    // Take 960 traded on B→D, not A→B — the fix is per unordered pair.
+    const s = script().at(0).load('B', 191).load('D', 597).fader('D', 0).play('B').advance(10);
+    s.at(20).fader('B', 0); // Under the Waves out
+    s.at(20.3).play('D').fader('D', 1); // Sovereign in
+    s.advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(191);
+    expect(takes[0].incomingTrackId).toBe(597);
+    expect(takes[0].outgoingDeck).toBe('B');
+    expect(takes[0].incomingDeck).toBe('D');
+    expect(takes[0].windowEndS).toBeGreaterThan(takes[0].windowStartS);
+  });
+});
+
+describe('one engagement, one Take per ordered pair (#138 defect 2)', () => {
+  it('an outgoing flicker across the horizon settles the pair once, not twice', () => {
+    // The real repro (session 19, Bangarang→Full Send twice): the outgoing
+    // briefly re-departs and returns while the incoming stays; the machine
+    // must not settle the same ordered pair a second time.
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1); // engagement 1→2 opens
+    s.at(20).fader('A', 0); // outgoing dips out...
+    s.at(23).fader('A', 1); // ...and returns within the horizon (folds)
+    s.at(30).fader('A', 0); // final cessation
+    s.advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(2);
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(30);
+  });
+
+  it('a genuinely separate later re-mix of the same pair is NOT suppressed', () => {
+    // The guard is horizon-scoped: a real second mix of the same ordered
+    // pair, well past the settle horizon, is its own Handover.
+    const s = incumbentA();
+    // Take 1→2 #1: B mixes in, A out.
+    s.at(10).play('B').fader('B', 1).at(20).fader('A', 0).advance(HORIZON + 1);
+    // Re-establish track 1 as the floor: A fades back in, B out — a 2→1
+    // Handover well past the horizon.
+    s.at(60).fader('A', 1).at(70).fader('B', 0).advance(HORIZON + 1);
+    // Take 1→2 #2: B mixes in again, A out.
+    s.at(100).fader('B', 1).at(110).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    const oneToTwo = takes.filter((t) => t.outgoingTrackId === 1 && t.incomingTrackId === 2);
+    expect(oneToTwo).toHaveLength(2);
+    expect(oneToTwo[1].windowEndS - oneToTwo[0].windowEndS).toBeGreaterThan(HORIZON);
   });
 });
 

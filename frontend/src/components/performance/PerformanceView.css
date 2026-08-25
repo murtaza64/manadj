@@ -2,12 +2,12 @@
    library player — square 1px-border buttons, hot-cue squares, palette from
    styles/variables.css. Deck = minimap header + one dense band in three
    zones (TRACK / PLAY / MIX), outer → inner; X-FADER + MASTER strip between
-   the waveforms and the decks; the surface is content-sized and the
-   embedded library takes every remaining pixel. */
+   the waveforms and the decks. The view is the content-sized TOP PANEL only
+   (gh#165) — the shared App-level browse panel takes every remaining pixel. */
 
 .perf-root {
   position: relative;
-  height: 100%;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--base);
@@ -16,16 +16,19 @@
   font-size: 12px;
 }
 
-.perf-root.midi-cursor-hidden,
-.perf-root.midi-cursor-hidden :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
+/* Cursor suppression blankets the whole app surface (top panel + shared
+   browse panel below) — the class stays on .perf-root (the hook's target,
+   armed only while the view is active), :has() lifts the scope. */
+.app-main:has(.perf-root.midi-cursor-hidden),
+.app-main:has(.perf-root.midi-cursor-hidden) :not(input):not(textarea):not(select):not([contenteditable="true"]):not([role="menu"]):not([role="menuitem"]) {
   cursor: none !important;
 }
 
-.perf-root.midi-cursor-hidden :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
+.app-main:has(.perf-root.midi-cursor-hidden) :is(input, textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [data-cursor-normal]) {
   cursor: auto !important;
 }
 
-.perf-root.midi-cursor-hidden::after {
+.app-main:has(.perf-root.midi-cursor-hidden)::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -57,12 +60,13 @@
 .perf-wave-row {
   position: relative;
   --wave-deck-color: var(--text);
+  --wave-deck-rgb: 255, 255, 255;
 }
 
-.perf-wave-row.deck-a { --wave-deck-color: var(--deck-a); }
-.perf-wave-row.deck-b { --wave-deck-color: var(--deck-b); }
-.perf-wave-row.deck-c { --wave-deck-color: var(--deck-c); }
-.perf-wave-row.deck-d { --wave-deck-color: var(--deck-d); }
+.perf-wave-row.deck-a { --wave-deck-color: var(--deck-a); --wave-deck-rgb: var(--deck-a-rgb); }
+.perf-wave-row.deck-b { --wave-deck-color: var(--deck-b); --wave-deck-rgb: var(--deck-b-rgb); }
+.perf-wave-row.deck-c { --wave-deck-color: var(--deck-c); --wave-deck-rgb: var(--deck-c-rgb); }
+.perf-wave-row.deck-d { --wave-deck-color: var(--deck-d); --wave-deck-rgb: var(--deck-d-rgb); }
 
 .perf-wave-row::before,
 .perf-wave-row::after {
@@ -83,8 +87,35 @@
 .perf-wave-row.focused::before,
 .perf-wave-row.focused::after { opacity: 1; }
 
+/* Control focus: frame the WHOLE waveform rectangle in the deck color —
+   the side bars alone were easy to miss. A dedicated overlay child (an
+   outline on the row paints in the row's own phase, i.e. UNDER the opaque
+   canvas); no filters over canvas layers. */
+.perf-wave-focus-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 2px solid var(--wave-deck-color);
+  pointer-events: none;
+}
+
 .perf-wave-row .waveform-container {
   transition: opacity 120ms ease;
+}
+
+/* Fader area fill (performance-mode 09): the timeline's audibility-fill
+   idiom live — a solid DECK-COLORED wash rising from the bottom edge, its
+   height the fader's audio-taper gain. Alpha in the background (not
+   element opacity) keeps the deck identity readable over the busy canvas.
+   Overlay, not background (the GL canvas paints opaque); alpha/opacity
+   ONLY over canvas layers (see the filter warning below). */
+.perf-wave-fader-fill {
+  position: absolute;
+  inset: 0 4px;
+  z-index: 3;
+  width: calc(100% - 8px);
+  height: 100%;
+  pointer-events: none;
 }
 
 /* De-emphasis is OPACITY ONLY — never `filter` (or `backdrop-filter`) over
@@ -95,6 +126,16 @@
    (stability/01, slope-bisected in a lane; opacity measured clean). */
 .perf-wave-row:not(.focused) .waveform-container {
   opacity: 0.6;
+}
+
+/* Machine tenure (Conductor / session replay): control focus means nothing
+   on the waveforms — no frame, no bright bars (the row drops .focused), and
+   NO unfocused dim: every deck renders at full brightness. Must WIN over
+   the :not(.focused) de-emphasis above (after it + higher specificity —
+   it originally sat before at equal specificity, dimming everything during
+   controlled playback). Deck CONTROLS keep their focus treatment. */
+.perf-wave-row.machine:not(.focused) .waveform-container {
+  opacity: 1;
 }
 
 /* ── Mixer strip: X-FADER centered, MASTER on the right ───────── */
@@ -109,7 +150,16 @@
   background: var(--mantle);
 }
 
-.perf-strip-slot { width: 130px; justify-self: end; }
+/* Right cell: all volume faders together (CUE MIX / PHONES / MASTER). */
+.perf-strip-slot {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.perf-strip-slot:not(.wide) .perf-fader { width: 110px; flex-shrink: 0; }
+.perf-strip-slot:not(.wide) .perf-fader:last-child { width: 130px; }
 
 .perf-strip-slot.wide {
   width: auto;
@@ -131,9 +181,6 @@
   gap: 8px;
 }
 
-/* Cue controls ride the strip's left cell (headphone-cue 03) */
-.perf-strip-left .perf-fader { width: 110px; flex-shrink: 0; }
-
 .perf-strip-toggle {
   padding: 1px 6px;
   font-size: 9px;
@@ -153,6 +200,14 @@
 }
 
 .perf-strip-ghost { visibility: hidden; }
+
+/* Waveform/deck section toggles (perf-layout 12 / gh#68): WAVE / DECK next
+   to KBD, same .perf-strip-toggle language (lit green while shown). The
+   grouping span dissolves so the buttons ride the strip cell's own flex
+   gap — KBD↔WAVE↔DECK spacing stays uniform. */
+.perf-section-toggles {
+  display: contents;
+}
 
 /* The toggle hides every on-control key hint */
 .perf-root.kbd-hints-off .perf-kbd { display: none; }
@@ -1014,21 +1069,14 @@
   flex-shrink: 0;
 }
 
-/* ── Library below ────────────────────────────────────────────── */
+/* ── Shared browse panel below (layout in TopBar.css) ─────────── */
 
-.perf-library {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.perf-library > div { height: 100%; }
-
-/* Row affordances dim while their deck is locked (audibly running) */
-.perf-library.lock-A .track-load-button-A,
-.perf-library.lock-B .track-load-button-B,
-.perf-library.lock-C .track-load-button-C,
-.perf-library.lock-D .track-load-button-D {
+/* Row affordances dim while their deck is locked (audibly running);
+   BrowsePanel applies the lock classes only in performance mode. */
+.app-browse.lock-A .track-load-button-A,
+.app-browse.lock-B .track-load-button-B,
+.app-browse.lock-C .track-load-button-C,
+.app-browse.lock-D .track-load-button-D {
   opacity: 0.35;
   cursor: not-allowed;
 }

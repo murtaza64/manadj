@@ -59,6 +59,9 @@ export type WaveformModulation = (trackTimeSec: number) => {
 };
 
 const MIN_VISIBLE_SECONDS = 1;
+/** Idle-poll cadence for the self-driven loop when paused and unchanged —
+ * matches the in-repo motion clocks (DawTimeline, usePlayGuides). */
+const IDLE_TICK_MS = 250;
 // one zoom sensitivity everywhere: utils/waveformZoom owns the constant
 const WHEEL_STEP = STEP_RATIO;
 const DEFAULT_VISIBLE_SECONDS = 20;
@@ -218,6 +221,8 @@ uniform vec3 u_colorHigh;
 uniform int u_anchor;      // 0 center, 1 top, 2 bottom
 uniform float u_brightness; // body colors only; markers are a separate pass
 uniform float u_modEnabled;
+uniform float u_modSplit;  // 1 = split lobes (see BODY_MAIN split comment)
+uniform float u_modPlayheadT; // split mode: track-sec boundary of the played past
 uniform float u_modStart;  // track-seconds range covered by u_modTex
 uniform float u_modSpan;
 in vec2 v_uv;
@@ -365,7 +370,10 @@ void main() {
   float b[8];
   bands8Column(t0, t0 + px, b);
   vec3 g = groupAmps(b);
-  if (u_modEnabled > 0.5) {
+  // Split mode (performance-mode 10): AHEAD of the playhead the TOP lobe
+  // shows the live strip and the bottom lobe ground truth; BEHIND it both
+  // lobes show what was actually heard (the history-fed modulation).
+  if (u_modEnabled > 0.5 && (u_modSplit < 0.5 || v_uv.y > 0.5 || t0 < u_modPlayheadT)) {
     vec4 m = texture(u_modTex, vec2((t0 - u_modStart) / u_modSpan, 0.5)) * float(${MOD_RANGE});
     g *= m.rgb * m.a;
     p *= m.a;
@@ -474,6 +482,22 @@ export class WaveformRendererV2 {
   private lastPlayhead = 0;
   private animationFrame: number | null = null;
 
+  // Self-driven loop gating (performance-hardening 01): the loop drops to a
+  // 250ms idle poll when nothing that feeds a frame changed and the playhead
+  // is still, and sleeps entirely while the owning view is hidden. Mutators
+  // set `dirty`; playhead motion is detected against `lastPlayhead`. The
+  // `driven` path (DawTimeline's own motion clock) never enters here.
+  private idleTimer: number | null = null;
+  private dirty = true;
+  private active = true;
+  private playing = false;
+  /** The clock the self-driven loop reads; retained so setActive can
+   * restart the loop on re-activation. Null for the `driven` path. */
+  private clock: PlaybackClock | null = null;
+  /** The running loop's tick, so markDirty can pull a parked idle poll
+   * forward. Non-null only while a self-driven loop is active. */
+  private scheduledTick: (() => void) | null = null;
+
   // Externally-set window (DAW timeline), as normalized track positions.
   private externalWindow = false;
   private windowStart = 0;
@@ -483,6 +507,7 @@ export class WaveformRendererV2 {
 
   // Modulation (transition-editor rows).
   private modulation: WaveformModulation | null = null;
+  private modSplit = false;
   private modTex: WebGLTexture | null = null;
   private modScratch = new Uint8Array(MOD_TEX_WIDTH * 4);
 
@@ -523,9 +548,11 @@ export class WaveformRendererV2 {
     this.config = config;
     this.isMinimap = config.isMinimapMode ?? false;
     this.anchor = this.isMinimap ? 'bottom' : (config.amplitudeAnchor ?? 'center');
-    // Minimap dims the body (legacy parity) so markers pop; markers stay full.
+    // Minimap dims the body (legacy parity) so markers pop; markers stay
+    // full. 0.55 → 0.65 (performance-mode 09 review): the unplayed body
+    // reads brighter while the played wash below carries the contrast.
     this.brightness =
-      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) * (this.isMinimap ? 0.55 : 1);
+      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) * (this.isMinimap ? 0.65 : 1);
     const gl = canvas.getContext('webgl2');
     if (!gl) throw new Error('WebGL 2 not supported');
     this.gl = gl;
@@ -534,6 +561,24 @@ export class WaveformRendererV2 {
   }
 
   // ------------------------------------------------------------------ data
+
+  /** Wake the self-driven loop for one frame (performance-hardening 01):
+   * every mutator that changes what a frame draws calls this so an idle
+   * renderer repaints immediately instead of after the next idle poll. If
+   * the loop is currently parked on its idle timer, pull the next frame
+   * forward to rAF so the change shows on the very next frame (seek/zoom/
+   * play must never wait out the 250ms poll). No-op for the `driven` path,
+   * which never enters the idle branch. */
+  public markDirty(): void {
+    this.dirty = true;
+    // Parked on the idle timer (not rAF, and the loop is running/active):
+    // cancel it and run now. `scheduledTick` is set only while a loop runs.
+    if (this.active && this.idleTimer !== null && this.scheduledTick) {
+      window.clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+      this.animationFrame = requestAnimationFrame(this.scheduledTick);
+    }
+  }
 
   public setWaveformData(data: DecodedWaveform): void {
     this.data = data;
@@ -545,21 +590,25 @@ export class WaveformRendererV2 {
       data.duration,
     );
     this.beatgridCache = null; // beat x-positions depend on track duration
+    this.markDirty();
   }
 
   public setStyle(styleId: string, params?: Partial<StyleParams>): void {
     this.styleId = styleId;
     if (params) this.params = { ...this.params, ...params };
+    this.markDirty();
   }
 
   public setCuePoint(cueTime: number | null): void {
     this.cuePoint = cueTime;
+    this.markDirty();
   }
 
   /** Shaded overlay regions (looping 05); empty clears. Positions are
    * track-time, so a region drawn per frame translates with the content. */
   public setRegions(regions: OverlayRegion[]): void {
     this.regions = regions;
+    this.markDirty();
   }
 
   public setHotCues(
@@ -569,6 +618,7 @@ export class WaveformRendererV2 {
     for (const hc of hotCues) {
       this.hotCues.set(hc.slot_number, { time: hc.time_seconds, color: hc.color });
     }
+    this.markDirty();
   }
 
   public setBeatgrid(
@@ -588,12 +638,14 @@ export class WaveformRendererV2 {
     this.dropMarkWidthMul = null; // drop-line widths follow their beatlines
     this.tierBars = ladder?.tierBars ?? [1];
     this.ladder = ladder ?? null;
+    this.markDirty();
   }
 
   /** Reset-mark indicator positions (already downbeat-resolved); empty
    * clears. Drawn per frame like cues, so they translate with content. */
   public setResetMarks(times: number[]): void {
     this.resetMarks = times;
+    this.markDirty();
   }
 
   /** Possible-drop hypotheses (structure-analysis 02): analysis opinion,
@@ -602,6 +654,7 @@ export class WaveformRendererV2 {
   public setDropMarks(marks: Array<{ time: number; strength: number }>): void {
     this.dropMarks = marks;
     this.dropMarkWidthMul = null;
+    this.markDirty();
   }
 
   /** Beatjump target guides (beatjump-guides 01): the deck's jump size in
@@ -609,11 +662,20 @@ export class WaveformRendererV2 {
    * the same beat-domain math the jump itself uses. */
   public setBeatjumpGuides(beats: number | null): void {
     this.beatjumpBeats = beats;
+    this.markDirty();
   }
 
   /** Per-column automation modulation (editor rows); null clears. */
   public setModulation(fn: WaveformModulation | null): void {
     this.modulation = fn;
+    this.markDirty();
+  }
+
+  /** Split mode (performance-mode 10): modulation reshapes only the TOP
+   * lobe of the mirrored body; the bottom lobe stays ground truth. Only
+   * meaningful with the center anchor. */
+  public setModulationSplit(on: boolean): void {
+    this.modSplit = on;
   }
 
   /**
@@ -625,6 +687,7 @@ export class WaveformRendererV2 {
     this.externalWindow = true;
     this.windowStart = first;
     this.windowEnd = last;
+    this.markDirty();
   }
 
   /** Splice the canvas into per-segment windows (transition-takes 06);
@@ -633,6 +696,7 @@ export class WaveformRendererV2 {
    * instead of falling back to a stale single window. */
   public setDisplaySegments(segments: DisplaySegment[] | null): void {
     this.displaySegments = segments;
+    this.markDirty();
   }
 
   // ------------------------------------------------------------- rendering
@@ -726,20 +790,98 @@ export class WaveformRendererV2 {
     gl.viewport(0, 0, w, h);
   }
 
-  /** Self-driving convenience: renderFrame on an own rAF loop. */
+  /**
+   * Self-driving loop (performance-hardening 01): renderFrame on an own
+   * clock that idles when there's nothing to draw. A frame renders when the
+   * playhead moved (playing/scrubbing), a mutator marked the renderer dirty
+   * since the last frame, or the canvas resized; otherwise the loop drops
+   * from rAF to a 250ms idle poll whose ticks only CHECK (no GL work at
+   * all while paused and unchanged). It sleeps entirely while the owning
+   * view is hidden (`setActive(false)`), and wakes instantly on the next
+   * mutation or activation — the idiom shared by DawTimeline /
+   * usePlayGuides. The `driven` path (caller's own motion clock) never
+   * calls this.
+   */
   public startRenderLoop(clock: PlaybackClock): void {
-    const loop = () => {
-      this.renderFrame(clock);
-      this.animationFrame = requestAnimationFrame(loop);
+    this.clock = clock;
+    this.clearScheduled();
+    const schedule = (playedOrDirty: boolean) => {
+      if (!this.active) return; // hidden view: sleep until setActive(true)
+      if (playedOrDirty) this.animationFrame = requestAnimationFrame(tick);
+      else this.idleTimer = window.setTimeout(tick, IDLE_TICK_MS);
     };
-    this.animationFrame = requestAnimationFrame(loop);
+    const tick = () => {
+      this.animationFrame = null;
+      this.idleTimer = null;
+      const moved = clock.getPlayhead() !== this.lastPlayhead;
+      const wasDirty = this.dirty;
+      const needsDraw = this.playing || moved || wasDirty || this.canvasResized();
+      if (needsDraw) {
+        this.dirty = false;
+        this.renderFrame(clock);
+      }
+      // Playing, playhead motion this frame (scrubbing), OR any pending
+      // mutation keeps the loop at 60fps; a still, unchanged, paused frame
+      // drops to the idle poll.
+      schedule(this.playing || moved || wasDirty || this.dirty);
+    };
+    this.scheduledTick = tick;
+    // Prime lastPlayhead so the first idle decision compares against a real
+    // read, then run the first frame.
+    this.lastPlayhead = clock.getPlayhead();
+    this.dirty = true;
+    tick();
   }
 
-  public stopRenderLoop(): void {
+  /** Gate the whole self-driven loop on the owning view's visibility
+   * (performance-hardening 01): a hidden keep-alive view schedules zero rAF
+   * work; re-activation repaints immediately (no stale first frame). */
+  public setActive(active: boolean): void {
+    if (active === this.active) return;
+    this.active = active;
+    if (!active) {
+      this.clearScheduled();
+    } else if (this.clock) {
+      // Wake: force a fresh frame, then resume scheduling.
+      this.markDirty();
+      this.startRenderLoop(this.clock);
+    }
+  }
+
+  /** A layout resize the idle poll must catch (the drag-resize case where
+   * no mutator fires): CSS size or dpr no longer matches the backing
+   * store. renderFrame does the actual resize + repaint. */
+  private canvasResized(): boolean {
+    const dpr = window.devicePixelRatio || 1;
+    return (
+      this.canvas.width !== Math.round(this.canvas.clientWidth * dpr) ||
+      this.canvas.height !== Math.round(this.canvas.clientHeight * dpr)
+    );
+  }
+
+  /** Track whether the deck is advancing (performance-hardening 01): pins
+   * the loop at 60fps while true, and a false→true flip wakes an idle loop
+   * on the spot so playback starts smooth (no first-frame hitch). */
+  public setPlaying(playing: boolean): void {
+    if (playing === this.playing) return;
+    this.playing = playing;
+    if (playing) this.markDirty(); // wake an idle-polling loop now
+  }
+
+  private clearScheduled(): void {
+    this.scheduledTick = null;
     if (this.animationFrame !== null) {
       cancelAnimationFrame(this.animationFrame);
       this.animationFrame = null;
     }
+    if (this.idleTimer !== null) {
+      window.clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+
+  public stopRenderLoop(): void {
+    this.clearScheduled();
   }
 
   private computeView(w: number, h: number, dpr: number): FrameView {
@@ -782,6 +924,8 @@ export class WaveformRendererV2 {
     // Modulation texture (sampled fresh each frame: window and automation
     // both move; 1024 callback samples is well within frame budget).
     gl.uniform1f(u('u_modEnabled'), this.modulation ? 1 : 0);
+    gl.uniform1f(u('u_modSplit'), this.modulation && this.modSplit ? 1 : 0);
+    gl.uniform1f(u('u_modPlayheadT'), view.playhead);
     if (this.modulation) {
       this.uploadModulation(view, modAffine);
       gl.activeTexture(gl.TEXTURE3);
@@ -901,9 +1045,11 @@ export class WaveformRendererV2 {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE); // additive (legacy parity: rgb premultiplied)
 
-    // Played-portion dim (minimap, zoned-marks verdict): 0.35 black wash
-    // over the body left of the playhead. Draw order body → dim → marks,
-    // so every mark keeps full brightness in the played region. With the
+    // Played-portion dim (minimap, zoned-marks verdict): 0.55 black wash
+    // (0.35 → 0.55, performance-mode 09 review: with the brighter unplayed
+    // body the played side needed a deeper cut to read at a glance) over
+    // the body left of the playhead. Draw order body → dim → marks, so
+    // every mark keeps full brightness in the played region. With the
     // playhead inside an overlay region (active loop), the wash stops at
     // the region's left edge — about to replay, never "already heard".
     if (this.isMinimap && !opts.skipPlayhead) {
@@ -919,7 +1065,7 @@ export class WaveformRendererV2 {
         // semi-transparent and let the page background composite through
         // (a gray wash instead of a darkening).
         gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
-        gl.uniform1f(uAlpha, 0.35);
+        gl.uniform1f(uAlpha, 0.55);
         this.drawTriangles(dimVerts, this.overlayVao!, this.overlayBuffer!);
         gl.uniform1f(uAlpha, 1);
         gl.blendFunc(gl.ONE, gl.ONE);
@@ -1440,6 +1586,7 @@ export class WaveformRendererV2 {
       Math.max(seconds, MIN_VISIBLE_SECONDS),
       this.data.duration,
     );
+    this.markDirty();
   }
 
   public zoomIn(): void {

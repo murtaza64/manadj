@@ -183,11 +183,33 @@
   font-size: 11px;
   font-weight: 700;
 }
+/* Half-height chips (overlap clusters share the strip, sessions 22). */
+.stl-take-chip.slim text {
+  font-size: 9px;
+}
+/* 3-4-row clusters: chips are 6-8px tall — no room for text (the hover
+   title carries the label). */
+.stl-take-chip.micro text {
+  display: none;
+}
 .stl-take-whisker {
   stroke: #00ff6a;
   stroke-width: 1;
   opacity: 0.4;
   stroke-dasharray: 3 3;
+}
+/* Hover spotlight (sessions 22): everything but the take's tracks dims;
+   its whiskers show solid at any zoom. */
+.stl-hover-dim {
+  fill: rgba(4, 6, 10, 0.6);
+}
+.stl-take-whisker.hover {
+  opacity: 0.9;
+  stroke-dasharray: none;
+}
+.stl-take-chip:hover rect {
+  stroke: #ffffff;
+  stroke-width: 1;
 }
 
 .stl-anchor line {

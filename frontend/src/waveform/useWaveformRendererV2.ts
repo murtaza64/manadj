@@ -37,6 +37,31 @@ interface Options {
   /** Which persisted Waveform style slot this surface renders with.
    * Defaults to 'full'; minimaps pass 'minimap'. */
   slot?: SlotName;
+  /** Whether the owning mode view is currently visible (performance-hardening
+   * 01): false sleeps the self-driven rAF loop entirely (keep-alive views
+   * stay mounted while hidden). Ignored in `driven` mode — the caller's
+   * motion clock owns scheduling. Defaults to true. */
+  active?: boolean;
+  /** Whether the deck is currently advancing (performance-hardening 01):
+   * true pins the loop at 60fps so playback is smooth, and a false→true flip
+   * wakes an idle-polling loop instantly (no ≤250ms hitch at play). Playhead
+   * motion alone would eventually wake it, but not on the first frame.
+   * Ignored in `driven` mode. Defaults to false. */
+  playing?: boolean;
+  /** Any-value wake (performance-hardening 01): an identity change marks
+   * the renderer dirty, repainting an idle frame immediately. For frame
+   * inputs the renderer can't see through its mutators — the live mixer
+   * channel state feeding `modulation` (performance-mode 09): a fader/EQ
+   * move on a PAUSED deck must retint the waveform now, not a poll later. */
+  wakeKey?: unknown;
+  /** Event-driven wake (#155): subscribe `markDirty` to a push channel for
+   * playhead mutations the loop can't anticipate — the deck's transport
+   * gesture stream (`DeckEngine.addTransportEventListener`). Paused MIDI jog
+   * seeks arrive sparser than 60fps, so without a per-seek wake the loop
+   * re-parks on its 250ms idle poll between ticks and scrubbing jitters at
+   * poll cadence. Returns an unsubscribe; must be referentially stable
+   * (useCallback) or the effect churns. Ignored in `driven` mode. */
+  subscribeWake?: (cb: () => void) => () => void;
 }
 
 export function useWaveformRendererV2({
@@ -52,6 +77,10 @@ export function useWaveformRendererV2({
   dropMarks,
   driven = false,
   slot = 'full',
+  active = true,
+  playing = false,
+  wakeKey,
+  subscribeWake,
 }: Options) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WaveformRendererV2 | null>(null);
@@ -80,6 +109,35 @@ export function useWaveformRendererV2({
   const draw = useCallback(() => {
     rendererRef.current?.renderFrame(clock);
   }, [clock]);
+
+  // View-visibility gating (performance-hardening 01): sleep the self-driven
+  // loop while hidden. Only the self-running loop is gated — `driven`
+  // surfaces schedule through their caller. Re-applied after re-init
+  // (waveformData) so a fresh renderer inherits the current visibility.
+  useEffect(() => {
+    if (!driven) rendererRef.current?.setActive(active);
+  }, [active, driven, waveformData]);
+
+  // Playing gate (performance-hardening 01): pin the loop at 60fps while the
+  // deck advances; the false→true flip also wakes an idle-polling loop
+  // instantly (no play hitch). Re-applied after re-init.
+  useEffect(() => {
+    if (!driven) rendererRef.current?.setPlaying(playing);
+  }, [playing, driven, waveformData]);
+
+  // External wake (performance-hardening 01): repaint on wakeKey change.
+  useEffect(() => {
+    if (wakeKey !== undefined) rendererRef.current?.markDirty();
+  }, [wakeKey]);
+
+  // Push-channel wake (#155): every event on the subscribed stream (e.g. a
+  // paused jog seek's transport gesture) pulls an idle-parked loop forward
+  // to the next frame. Re-subscribed after re-init (waveformData) so a
+  // fresh renderer is covered.
+  useEffect(() => {
+    if (driven || !subscribeWake) return;
+    return subscribeWake(() => rendererRef.current?.markDirty());
+  }, [subscribeWake, driven, waveformData]);
 
   // Persisted Waveform style: applied live (also after re-init).
   useEffect(() => {

@@ -47,6 +47,17 @@ export const OFF_DEFAULT_EPS = 0.02;
 const TEMPO_MATCH_TOLERANCE_PERCENT = 1.5;
 /** Discontinuities smaller than this are sample jitter, not gestures. */
 const MIN_JUMP_SEC = 0.1;
+/** Baseline repair (sets 166): the measured rate replaces the recorded
+ * pitch baseline only past this disagreement — tick-slope jitter on a
+ * healthy slice is ~0.05%; a lost baseline is ≥ the ride itself. */
+const BASELINE_REPAIR_TOLERANCE_PERCENT = 0.2;
+/** Minimum consecutive-tick pairs for a trustworthy rate measurement. */
+const MIN_RATE_PAIRS = 3;
+/** Self-consistency bound: the pairs must agree (median absolute
+ * deviation, rate units) or the span is ambiguous — heavy nudging over
+ * few samples — and the recorded baseline stands. Real ~1 Hz ticks carry
+ * ~0.15% sampling jitter; ambiguity reads an order louder. */
+const MAX_RATE_MAD = 0.005;
 
 export interface VectorizeInput {
   /** The Take's raw slice, starting with its `init` head. */
@@ -78,8 +89,27 @@ export function vectorizeTake(
   const { windowStartS, windowEndS } = input;
   const windowLen = Math.max(0, windowEndS - windowStartS);
 
+  // LOST BASELINE REPAIR (sets 166): slices captured before the recorder
+  // seeded pitch explicitly (the sessions-18 fix) carry a false zero
+  // baseline for any deck pitched before the seed — the whole damaged-era
+  // library replays unmatched and out of phase. The playhead samples ARE
+  // direct observations of the actual rate: when the measured baseline
+  // contradicts the recorded one beyond jitter, the measurement wins.
+  // Post-fix slices agree within jitter and keep their exact recorded
+  // values (bit-identical output).
+  const baseline: Partial<Record<CaptureChannel, number>> = {};
+  for (const ch of Object.keys(init.decks) as CaptureChannel[]) {
+    const measured = measuredPitchBaseline(input.events, ch, windowStartS, windowEndS);
+    if (
+      measured !== null &&
+      Math.abs(measured - init.decks[ch].pitch) > BASELINE_REPAIR_TOLERANCE_PERCENT
+    ) {
+      baseline[ch] = measured;
+    }
+  }
+
   const pitchAt = (ch: CaptureChannel, t: number): number => {
-    let p = init.decks[ch].pitch;
+    let p = baseline[ch] ?? init.decks[ch].pitch;
     for (const e of input.events) {
       if (e.kind === 'pitch' && e.channel === ch && e.t <= t) p = e.value;
     }
@@ -187,6 +217,50 @@ export function vectorizeTake(
       ...(jumps.length > 0 ? { jumps } : {}),
     },
   };
+}
+
+/**
+ * A channel's measured pitch baseline (percent), from the slice's own
+ * tick playheads (sets 166): median slope of consecutive in-window tick
+ * pairs, over the span before the channel's first pitch event (from the
+ * event on, the recorded value governs). The median rejects isolated
+ * discontinuities — jumps, seeks, momentary bends. Slopes outside the
+ * plausible playing range (a paused deck reads ~0; a jump pair reads
+ * wild) are discarded. Null when fewer than MIN_RATE_PAIRS pairs remain.
+ */
+function measuredPitchBaseline(
+  events: CaptureEvent[],
+  ch: CaptureChannel,
+  windowStartS: number,
+  windowEndS: number
+): number | null {
+  const firstPitchT = events.find((e) => e.kind === 'pitch' && e.channel === ch)?.t ?? Infinity;
+  const spanEnd = Math.min(windowEndS, firstPitchT);
+  const samples: { t: number; pos: number }[] = [];
+  for (const e of events) {
+    if (e.kind !== 'tick' || e.t < windowStartS || e.t > spanEnd) continue;
+    const pos = e.playheads[ch];
+    if (pos !== undefined) samples.push({ t: e.t, pos });
+  }
+  samples.sort((a, b) => a.t - b.t);
+  const slopes: number[] = [];
+  for (let i = 1; i < samples.length; i++) {
+    const dt = samples[i].t - samples[i - 1].t;
+    if (dt <= 0) continue;
+    const slope = (samples[i].pos - samples[i - 1].pos) / dt;
+    if (slope > 0.5 && slope < 2) slopes.push(slope);
+  }
+  if (slopes.length < MIN_RATE_PAIRS) return null;
+  const median = medianOf(slopes);
+  const mad = medianOf(slopes.map((s) => Math.abs(s - median)));
+  if (mad > MAX_RATE_MAD) return null;
+  return (median - 1) * 100;
+}
+
+function medianOf(xs: number[]): number {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 /**

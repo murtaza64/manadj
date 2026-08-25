@@ -139,8 +139,12 @@ export interface InitDeckState {
 /** Bump whenever detection semantics or defaults change: old Takes stay
  * attributable to the detector that produced them (issue 05 tuning).
  * v2 (4dp 37 + 10): the >2-audible self-gate is gone and one pair machine
- * runs per unordered physical pair, emitting role-relabeled slices. */
-export const DETECTOR_VERSION = 2;
+ * runs per unordered physical pair, emitting role-relabeled slices.
+ * v3 (#138): zero-overlap hard-cut windows span the cut ramp (cessation →
+ * incoming onset) instead of collapsing to one instant, and one engagement
+ * emits at most one Take per ordered pair (a flicker across the settle
+ * horizon no longer settles a duplicate). */
+export const DETECTOR_VERSION = 3;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a

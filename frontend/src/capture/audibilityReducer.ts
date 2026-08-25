@@ -122,9 +122,12 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
       const d = e.channel ? s.decks[e.channel] : null;
       if (e.control === 'fader' && d) d.fader = e.value;
       else if (e.control === 'trim' && d) d.trim = e.value;
-      else if (e.control === 'eqLow' && d) d.eq = { ...d.eq, low: e.value };
-      else if (e.control === 'eqMid' && d) d.eq = { ...d.eq, mid: e.value };
-      else if (e.control === 'eqHigh' && d) d.eq = { ...d.eq, high: e.value };
+      // Mutate the eq band in place (capture spine 02): the reducer owns
+      // `s`, and every retainer (checkpoints, timeline snapshots) already
+      // deep-clones `eq`, so an in-place band write can't leak.
+      else if (e.control === 'eqLow' && d) d.eq.low = e.value;
+      else if (e.control === 'eqMid' && d) d.eq.mid = e.value;
+      else if (e.control === 'eqHigh' && d) d.eq.high = e.value;
       else if (e.control === 'filter' && d) d.filter = e.value;
       else if (e.control === 'crossfaderAssignment' && d)
         d.assignment = assignmentFromValue(e.value);

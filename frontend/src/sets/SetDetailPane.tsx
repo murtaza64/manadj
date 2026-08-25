@@ -55,7 +55,6 @@ import {
   type PairStore,
 } from '../editor/pairStore';
 import { requestPairEdit } from '../editor/openPair';
-import { requestTakeReview } from '../capture/takeReview';
 import {
   clearFreshTake,
   freshTakeChip,
@@ -219,11 +218,13 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
 
   // Adjacency click-through (sets 09): route by RESOLVED pin kind — a
   // Transition (pinned or auto-resolved, sets 26) opens the editor with
-  // that Transition selected, a Take pin opens the existing Take-review
-  // flow, a cut (hard-cut pin, or no evidence) opens a blank sketch for
-  // the pair. The request rides a window event; App flips the mode; the
-  // mounted editor consumes it — this pane's state (set store) survives
-  // the switch untouched.
+  // that Transition selected, a Take pin opens for review on the loaded
+  // pair (gh#167 — Take pins ride the pair path now, so set context
+  // travels with them), a cut (hard-cut pin, or no evidence) opens a
+  // blank sketch for the pair. The request rides a window event; App
+  // flips the mode; the mounted editor consumes it — this pane's state
+  // (set store) survives the switch untouched. setContext arms the
+  // editor's evidence cycler pin-follow (gh#167).
   // Identity-stable (issue 42): a prop on ~87 memoized adjacency rows.
   const openAdjacencyEditor = useCallback(
     (aTrackId: number, bTrackId: number, pin: AdjacencyPin | null) => {
@@ -234,17 +235,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         bTrackId
       );
       const view = adjacencyView(pin, transitions, pairTakes);
-      if (view.status === 'take') {
-        requestTakeReview(view.take!.uuid);
-        return;
-      }
       requestPairEdit({
         aTrackId,
         bTrackId,
         transitionUuid: view.status === 'transition' ? view.transition!.uuid : null,
+        takeUuid: view.status === 'take' ? view.take!.uuid : null,
+        setContext: { setId, headTrackId: aTrackId },
       });
     },
-    []
+    [setId]
   );
 
   // Set-wide auto-fill (role shrunk by sets 26): one click FREEZES every

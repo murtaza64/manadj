@@ -7,7 +7,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -72,6 +72,8 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(sets.router, prefix="/api/sets", tags=["sets"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(drops.router, prefix="/api/drops", tags=["drops"])
+app.include_router(routine_candidates.router, prefix="/api/routine-candidates", tags=["routine-candidates"])
+app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
 
 
 
@@ -107,6 +109,11 @@ def _build_task_worker() -> "TaskWorker | None":
         logging.getLogger("backend.main").info(
             "native analysis disabled via DISABLE_ANALYSIS_WORKER"
         )
+
+    # Routine mining (ADR 0035, routines 157): cheap event-log replay, no
+    # heavy deps — always registered.
+    from .routine_miner_tasks import ROUTINE_MINE_TASK_TYPE, make_routine_mine_handler
+    handlers[ROUTINE_MINE_TASK_TYPE] = make_routine_mine_handler()
 
     config = get_config()
     delays: dict[str, float] = {}
@@ -183,6 +190,17 @@ async def startup_event():
                 enqueue_missing_analysis(db)
             finally:
                 db.close()
+
+        # Sweep: any ended Session with missing/stale Routine suggestions
+        # gets re-mined (routines 157; a MINER_VERSION bump lands here).
+        from .database import SessionLocal
+        from .routine_miner_tasks import enqueue_stale_routine_mining
+
+        db = SessionLocal()
+        try:
+            enqueue_stale_routine_mining(db)
+        finally:
+            db.close()
 
 
 @app.on_event("shutdown")

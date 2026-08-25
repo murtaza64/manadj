@@ -238,6 +238,22 @@ describe('take drafts (transition-takes 03)', () => {
     vi.runAllTimers();
     expect(p.saves).toEqual([]);
   });
+
+  it('selectTransition evaporates a pristine item on the way out (gh#167)', () => {
+    const p = fakePersistence({
+      '1:2': { items: [edited('u1')], active: 0 },
+    });
+    const store = new EditorStore(p);
+    store.loadPair('1:2');
+    store.startBlankSketch(); // pristine "Transition 2", active
+    expect(store.getSnapshot().session.items).toHaveLength(2);
+    store.selectTransition('u1'); // cycle back without touching the sketch
+    const snap = store.getSnapshot();
+    expect(snap.session.items.map((it) => it.uuid)).toEqual(['u1']);
+    expect(snap.session.active).toBe(0);
+    vi.runAllTimers();
+    expect(p.saves).toEqual([]); // still selection-only, no save armed
+  });
 });
 
 describe('debounce and dispose', () => {

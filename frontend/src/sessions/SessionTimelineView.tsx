@@ -13,6 +13,7 @@
  * pause/resume replay. A moving playhead tracks session replay.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -36,13 +37,24 @@ import {
   collapseCandidates,
   createStateIndex,
   deriveTimeline,
+  takeDeckPair,
+  takeSpanPair,
   traceWindow,
 } from './timelineModel';
-import type { CollapseCandidate, StateAtT, TimelineModel } from './timelineModel';
+import type { CollapseCandidate, StateAtT, TakeSpanRef, TimeAxis, TimelineModel } from './timelineModel';
 import { REARM_AFTER_MS, followScrollTarget } from './followScroll';
 import { useViewActive } from '../contexts/viewActive';
 import { getTimelineViewState, patchTimelineViewState } from './timelineViewState';
-import { drawAudibilityArea, drawGridlines, drawStyledRuns, traceRuns } from './waveformLanes';
+import { staggerRows } from './labelStagger';
+import {
+  createMonotonicTToPx,
+  decimatePlayheadTrace,
+  drawAudibilityArea,
+  drawGridlines,
+  drawStyledRuns,
+  tracePolylinePoints,
+  traceRuns,
+} from './waveformLanes';
 import type { TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
 import type { ServoDeckActivity } from './replayStore';
@@ -72,9 +84,20 @@ const LANE_GAP = 6;
 const CHIP_STRIP_H = 30;
 const RULER_H = 22;
 const MAX_PX_PER_SEC = 60;
+/** Detail marks — gesture markers (◆N/↷N/▲/↕ labels + ticks) and take
+ * boundary whiskers — render only when the viewport shows at most this
+ * many (un-collapsed) seconds: zoomed way out they smear into noise and
+ * cost thousands of text/line nodes (sessions 22). Take chips stay. */
+const DETAIL_MARKS_MAX_VISIBLE_S = 600;
 /** Canvas draws this much beyond the viewport each side, so native
  * scrolling never outruns the painted window between re-centers. */
 const CANVAS_MARGIN = 400;
+/** Zoom gestures BLIT the last full waveform paint (per-axis-segment
+ * drawImage) instead of re-interpreting the waveform per wheel frame —
+ * at low zoom a full CPU repaint spans the whole session × 4 lanes and
+ * blocked every frame of the gesture (this issue). The real repaint
+ * runs once, this long after the last zoom wheel event. */
+const ZOOM_REPAINT_SETTLE_MS = 160;
 
 // ── Formatting ──────────────────────────────────────────────────────────
 
@@ -156,6 +179,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
   );
   const [scrubT, setScrubT] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
+  // Hovered take chip (sessions 22): spotlight state lives HERE and renders
+  // in the per-frame overlay — the memoized scene must not re-render per
+  // hover, so it only receives the stable callback.
+  const [hoverTake, setHoverTake] = useState<TakeRowWire | null>(null);
   const [pxPerSec, setPxPerSec] = useState<number | null>(
     () => getTimelineViewState(session.uuid)?.pxPerSec ?? null
   ); // null = fit
@@ -275,11 +302,30 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     [model, collapseIdle, thresholdS, expandedGaps, effPx]
   );
   const width = Math.max(viewportW, Math.ceil(axis?.totalPx ?? viewportW));
+  // A primitive that flips only when zoom crosses the 10-min line — the
+  // memoized scene re-renders exactly then (axis changes anyway).
+  const showDetailMarks = viewportW / effPx <= DETAIL_MARKS_MAX_VISIBLE_S;
 
   const zoomCtxRef = useRef({ model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedGaps });
   zoomCtxRef.current = { model, axis, fitPx, viewportW, collapseIdle, thresholdS, expandedGaps };
   const pendingZoomRef = useRef<{ factor: number; clientX: number } | null>(null);
   const wheelGestureRef = useRef<{ axis: 'pan' | 'zoom'; last: number } | null>(null);
+  // Zoom-gesture blit state: the last FULL canvas paint plus the axis it
+  // was painted under. While `zoomBlitUntilRef` is in the future the
+  // canvas effect remaps this snapshot instead of repainting; the settle
+  // timer then forces one real repaint (paintEpoch) iff any blit ran.
+  const paintSnapshotRef = useRef<{
+    canvas: HTMLCanvasElement;
+    x0: number;
+    winW: number;
+    dpr: number;
+    svgH: number;
+    segments: TimeAxis['segments'];
+  } | null>(null);
+  const zoomBlitUntilRef = useRef(0);
+  const blitDirtyRef = useRef(false);
+  const settleTimerRef = useRef(0);
+  const [paintEpoch, setPaintEpoch] = useState(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -344,12 +390,22 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
         factor: (pending?.factor ?? 1) * Math.pow(1.0015, -e.deltaY * unit),
         clientX: e.clientX,
       };
+      // Gesture in flight: the canvas blits until the wheel goes quiet,
+      // then one real repaint (only if a blit actually painted — a zoom
+      // pinned at the fit floor never dirtied the canvas).
+      zoomBlitUntilRef.current = now + ZOOM_REPAINT_SETTLE_MS + 80;
+      window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = window.setTimeout(() => {
+        zoomBlitUntilRef.current = 0;
+        if (blitDirtyRef.current) setPaintEpoch((v) => v + 1);
+      }, ZOOM_REPAINT_SETTLE_MS);
       if (!raf) raf = requestAnimationFrame(applyZoom);
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => {
       el.removeEventListener('wheel', handler);
       if (raf) cancelAnimationFrame(raf);
+      window.clearTimeout(settleTimerRef.current);
     };
      
   }, [hasModel, setScrollLeft]);
@@ -622,11 +678,35 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, gridsReadyKey]);
 
+  // Zoom-adaptive run decimation (this issue): at low zoom a jog/pitch-
+  // heavy session cut into thousands of SUB-PIXEL runs, and the per-run
+  // fixed cost made every canvas repaint a main-thread stall. Thin trace
+  // samples to ~¾px of session time before run-cutting — position error
+  // stays sub-pixel by construction. Quantized to powers of two so the
+  // memo only recomputes when zoom crosses a bucket, not per wheel frame.
+  const runMinDtSRaw = 0.75 / effPx;
+  const runMinDtS = runMinDtSRaw <= 1 ? 0 : 2 ** Math.floor(Math.log2(runMinDtSRaw));
   const runsByDeck = useMemo(() => {
     const out = {} as Record<CaptureDeck, TraceRun[]>;
-    for (const d of ALL_DECKS) out[d] = model ? traceRuns(model.decks[d]) : [];
+    for (const d of ALL_DECKS) out[d] = model ? traceRuns(model.decks[d], undefined, runMinDtS) : [];
     return out;
-  }, [model]);
+  }, [model, runMinDtS]);
+
+  // Scene copies of the traces, thinned to the SAME zoom bucket (this
+  // issue, part 2): the trace polylines walked every raw sample per scene
+  // render — at low zoom that's the whole multi-hour trace × 4 decks on
+  // every zoom frame / scroll-quantum crossing. Points that can't move
+  // ≥1px horizontally are dropped up front; a seek that jumps the lane
+  // vertically (≥ ~1px of playhead scale) always survives.
+  const sceneTracesByDeck = useMemo(() => {
+    const out = {} as Record<CaptureDeck, { t: number; playhead: number }[][]>;
+    for (const d of ALL_DECKS) {
+      const dt = model?.decks[d];
+      const minPh = dt && dt.maxPlayhead > 0 ? dt.maxPlayhead / Math.max(1, laneH - 24) : Infinity;
+      out[d] = dt ? dt.traces.map((tr) => decimatePlayheadTrace(tr, runMinDtS, minPh)) : [];
+    }
+    return out;
+  }, [model, runMinDtS, laneH]);
 
   const slot = useStyleSlot('full');
 
@@ -664,17 +744,60 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, winW, svgH);
     ctx.translate(-x0, 0); // helpers draw in timeline coordinates
+    // Zoom gesture in flight: remap the last full paint through the new
+    // axis instead of re-interpreting the waveform. The axis is piecewise
+    // linear, so a per-segment drawImage is exact in position (waveform
+    // detail stretches until the settle repaint) — GPU-cheap where the
+    // full paint was a per-frame main-thread stall at low zoom.
+    const snap = paintSnapshotRef.current;
+    if (
+      performance.now() < zoomBlitUntilRef.current &&
+      snap !== null &&
+      snap.svgH === svgH &&
+      snap.segments.length === axis.segments.length
+    ) {
+      blitDirtyRef.current = true;
+      for (let i = 0; i < axis.segments.length; i++) {
+        const os = snap.segments[i];
+        const ns = axis.segments[i];
+        // The slice of this segment the snapshot actually painted…
+        const o0 = Math.max(os.px0, snap.x0);
+        const o1 = Math.min(os.px1, snap.x0 + snap.winW);
+        if (o1 <= o0) continue;
+        // …mapped linearly into the new axis' px space.
+        const ow = os.px1 - os.px0;
+        const f0 = ow > 0 ? (o0 - os.px0) / ow : 0;
+        const f1 = ow > 0 ? (o1 - os.px0) / ow : 1;
+        const n0 = ns.px0 + f0 * (ns.px1 - ns.px0);
+        const n1 = ns.px0 + f1 * (ns.px1 - ns.px0);
+        if (n1 <= n0 || n1 <= x0 || n0 >= x1) continue;
+        ctx.drawImage(
+          snap.canvas,
+          (o0 - snap.x0) * snap.dpr,
+          0,
+          (o1 - o0) * snap.dpr,
+          snap.svgH * snap.dpr,
+          n0,
+          0,
+          n1 - n0,
+          svgH
+        );
+      }
+      return;
+    }
     for (const deck of LANE_ORDER) {
       const geo = { width, yOffset: laneY(deck), height: laneH, x0, x1 };
       const dt = model.decks[deck];
       // 1. Audibility area chart (behind).
       drawAudibilityArea(ctx, dt.gainSteps, axis, DECK_COLORS[deck], geo);
-      // 2. Full-color styled waveform per track span's runs.
+      // 2. Full-color styled waveform per track span's runs, modulated by
+      // the recorded mixer state (sessions 19: EQ kills drop their band,
+      // fader/trim shrink the waveform).
       for (const span of dt.trackSpans) {
         const wave = wavesByTrack[span.trackId];
         const spanRuns = runsByDeck[deck].filter((r) => r.t0 >= span.start && r.t1 <= span.end);
         if (wave) {
-          drawStyledRuns(ctx, wave, slot.styleId, slot.params, spanRuns, axis, geo);
+          drawStyledRuns(ctx, wave, slot.styleId, slot.params, spanRuns, axis, geo, dt.controlSteps);
           // 3. Beat gridlines over the waveform (jump/pitch-aware).
           const grid = gridsByTrack[span.trackId];
           if (grid?.data) {
@@ -690,12 +813,20 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
         }
       }
     }
+    // Snapshot the full paint for the next zoom gesture's blits.
+    const snapCanvas = snap?.canvas ?? document.createElement('canvas');
+    snapCanvas.width = canvas.width;
+    snapCanvas.height = canvas.height;
+    snapCanvas.getContext('2d')?.drawImage(canvas, 0, 0);
+    paintSnapshotRef.current = { canvas: snapCanvas, x0, winW, dpr, svgH, segments: axis.segments };
+    blitDirtyRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, runsByDeck, slot]);
+  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, runsByDeck, slot, paintEpoch]);
 
   // Stable scene callbacks (the scene is memoized — inline closures would
   // defeat it every render).
   const onTakeClick = useCallback((take: TakeRowWire) => setSelection({ kind: 'take', take }), []);
+  const onTakeHover = useCallback((take: TakeRowWire | null) => setHoverTake(take), []);
   const onGapToggle = useCallback(
     (idx: number) =>
       setExpandedGaps((prev) => {
@@ -854,12 +985,15 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   takes={takes}
                   trackNames={trackNames}
                   selectedTakeUuid={selection.kind === 'take' ? selection.take.uuid : null}
+                  tracesByDeck={sceneTracesByDeck}
                   showTraces={showTraces}
+                  showDetailMarks={showDetailMarks}
                   candidates={candidates}
                   collapseIdle={collapseIdle}
                   thresholdS={thresholdS}
                   expandedGaps={expandedGaps}
                   onTakeClick={onTakeClick}
+                  onTakeHover={onTakeHover}
                   onGapToggle={onGapToggle}
                 />
                 <SceneOverlay
@@ -874,6 +1008,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   replayT={replayHere ? replayT : null}
                   replayPaused={replay.status === 'paused'}
                   selection={selection}
+                  hoverTake={hoverTake}
                 />
               </svg>
             </div>
@@ -909,7 +1044,11 @@ interface SceneProps {
   takes: TakeRowWire[];
   trackNames: Record<number, string>;
   selectedTakeUuid: string | null;
+  /** Zoom-bucket-decimated traces for the polylines (identity changes
+   * only when the bucket does — not per zoom frame). */
+  tracesByDeck: Record<CaptureDeck, { t: number; playhead: number }[][]>;
   showTraces: boolean;
+  showDetailMarks: boolean;
   /** Collapse candidates (idle + tenure, sessions 14) — indices key the
    * expanded set. */
   candidates: CollapseCandidate[];
@@ -917,6 +1056,7 @@ interface SceneProps {
   thresholdS: number;
   expandedGaps: ReadonlySet<number>;
   onTakeClick(take: TakeRowWire): void;
+  onTakeHover(take: TakeRowWire | null): void;
   onGapToggle(idx: number): void;
 }
 
@@ -931,12 +1071,15 @@ const TimelineScene = memo(function TimelineScene({
   takes,
   trackNames,
   selectedTakeUuid,
+  tracesByDeck,
   showTraces,
+  showDetailMarks,
   candidates,
   collapseIdle,
   thresholdS,
   expandedGaps,
   onTakeClick,
+  onTakeHover,
   onGapToggle,
 }: SceneProps) {
   const X = (t: number) => axis.tToPx(t);
@@ -975,6 +1118,56 @@ const TimelineScene = memo(function TimelineScene({
     axis.segments.filter((s) => s.collapsed && s.kind === 'tenure').map((s) => s.start)
   );
 
+  // Take chip coloring (sessions 22): outgoing → incoming deck gradient.
+  // One def per deck pair in use; chips whose decks the log doesn't
+  // resolve keep the stylesheet's default fill.
+  const takePairs = takes.map((t) => takeDeckPair(model, t));
+
+  // Chip layout (sessions 22): overlapping chips share the strip height.
+  // Up to FOUR rows (2 rows capped dense stretches at overlap — the third
+  // concurrent chip landed on an occupied row); each connected overlap
+  // cluster shrinks only as much as IT needs (rows = max row used within
+  // the cluster), so a lone pair keeps half-height chips while a 4-deep
+  // pile drops to quarter height. Isolated chips keep the full strip.
+  const chipLayout = (() => {
+    const order = takes
+      .map((_, i) => i)
+      .sort((a, b) => takes[a].window_start_s - takes[b].window_start_s);
+    const items = order.map((i) => {
+      const x0 = X(takes[i].window_start_s);
+      return { x0, x1: Math.max(X(takes[i].window_end_s), x0 + 12) };
+    });
+    const rows = staggerRows(items, 4);
+    const layout = new Array<{ row: number; rows: number }>(takes.length);
+    let clusterStart = 0;
+    let clusterEnd = items.length > 0 ? items[0].x1 : 0;
+    const closeCluster = (k: number) => {
+      let rowsNeeded = 1;
+      for (let j = clusterStart; j < k; j++) rowsNeeded = Math.max(rowsNeeded, rows[j] + 1);
+      for (let j = clusterStart; j < k; j++) {
+        layout[order[j]] = { row: rows[j], rows: rowsNeeded };
+      }
+    };
+    for (let k = 1; k < items.length; k++) {
+      if (items[k].x0 < clusterEnd) {
+        clusterEnd = Math.max(clusterEnd, items[k].x1);
+      } else {
+        closeCluster(k);
+        clusterStart = k;
+        clusterEnd = items[k].x1;
+      }
+    }
+    closeCluster(items.length);
+    return layout;
+  })();
+  const gradientPairs = [
+    ...new Set(
+      takePairs
+        .filter((p): p is { from: CaptureDeck; to: CaptureDeck } => p.from !== null && p.to !== null)
+        .map((p) => `${p.from}-${p.to}`)
+    ),
+  ];
+
   return (
     <g>
       <defs>
@@ -986,6 +1179,16 @@ const TimelineScene = memo(function TimelineScene({
           <stop offset="12%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
           <stop offset="100%" stopColor="var(--mantle, #181818)" stopOpacity="0.92" />
         </linearGradient>
+        {/* Take chip gradients: outgoing deck color → incoming deck color. */}
+        {gradientPairs.map((key) => {
+          const [from, to] = key.split('-') as [CaptureDeck, CaptureDeck];
+          return (
+            <linearGradient key={key} id={`stl-take-grad-${key}`} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor={DECK_COLORS[from]} />
+              <stop offset="100%" stopColor={DECK_COLORS[to]} />
+            </linearGradient>
+          );
+        })}
       </defs>
       {ticks.map((t) => (
         <g key={`tick-${t}`}>
@@ -1003,12 +1206,15 @@ const TimelineScene = memo(function TimelineScene({
           y={laneY(deck)}
           model={model}
           X={X}
+          axis={axis}
           viewX0={viewX0}
           viewX1={viewX1}
           tView0={tView0}
           tView1={tView1}
           h={laneH}
+          traces={tracesByDeck[deck]}
           showTraces={showTraces}
+          showDetailMarks={showDetailMarks}
         />
       ))}
 
@@ -1101,48 +1307,76 @@ const TimelineScene = memo(function TimelineScene({
         );
       })}
 
-      {/* Take chips. */}
-      {takes.map((t) => {
+      {/* Take chips (deck-pair gradient fill; boundary whiskers are
+          detail marks — hidden past the 10-min line, sessions 22). */}
+      {takes.map((t, ti) => {
         const x0 = X(t.window_start_s);
         const x1 = Math.max(X(t.window_end_s), x0 + 12);
         if (x1 < viewX0 || x0 > viewX1) return null;
         const label = `${trackNames[t.a_track_id] ?? t.a_track_id} → ${
           trackNames[t.b_track_id] ?? t.b_track_id
         }`;
+        const pair = takePairs[ti];
+        const grad =
+          pair.from !== null && pair.to !== null
+            ? `url(#stl-take-grad-${pair.from}-${pair.to})`
+            : null;
+        const { row, rows } = chipLayout[ti];
+        const chipH = (CHIP_STRIP_H - 6) / rows;
+        const chipY = RULER_H + 2 + row * chipH;
+        const textY = chipY + chipH / 2 + 3;
+        // 2 rows: smaller text; 3-4 rows: chips too thin for text at all
+        // (the hover title still carries the label).
+        const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         return (
           <g
             key={t.uuid}
-            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}`}
+            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}${sizeClass}`}
             onClick={(e) => {
               e.stopPropagation();
               onTakeClick(t);
             }}
+            onMouseEnter={() => onTakeHover(t)}
+            onMouseLeave={() => onTakeHover(null)}
           >
             <title>{`${label} · confidence ${t.confidence.toFixed(2)}`}</title>
-            <rect x={x0} y={RULER_H + 2} width={x1 - x0} height={CHIP_STRIP_H - 6} rx={5} />
+            <rect
+              x={x0}
+              y={chipY}
+              width={x1 - x0}
+              height={chipH}
+              rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
+              style={grad ? { fill: grad } : undefined}
+            />
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={RULER_H + 17}>
+              <text x={x0 + 5} y={textY}>
                 ● {label.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
             ) : (
-              <text x={x0 + 4} y={RULER_H + 17}>
+              <text x={x0 + 4} y={textY}>
                 ●
               </text>
             )}
-            <line
-              x1={x0}
-              y1={RULER_H + CHIP_STRIP_H - 4}
-              x2={x0}
-              y2={lanesBottom}
-              className="stl-take-whisker"
-            />
-            <line
-              x1={x1}
-              y1={RULER_H + CHIP_STRIP_H - 4}
-              x2={x1}
-              y2={lanesBottom}
-              className="stl-take-whisker"
-            />
+            {showDetailMarks ? (
+              <>
+                <line
+                  x1={x0}
+                  y1={RULER_H + CHIP_STRIP_H - 4}
+                  x2={x0}
+                  y2={lanesBottom}
+                  className="stl-take-whisker"
+                  style={pair.from !== null ? { stroke: DECK_COLORS[pair.from] } : undefined}
+                />
+                <line
+                  x1={x1}
+                  y1={RULER_H + CHIP_STRIP_H - 4}
+                  x2={x1}
+                  y2={lanesBottom}
+                  className="stl-take-whisker"
+                  style={pair.to !== null ? { stroke: DECK_COLORS[pair.to] } : undefined}
+                />
+              </>
+            ) : null}
           </g>
         );
       })}
@@ -1170,6 +1404,7 @@ function SceneOverlay({
   replayT,
   replayPaused,
   selection,
+  hoverTake,
 }: {
   model: TimelineModel;
   axis: ReturnType<typeof buildTimeAxis>;
@@ -1182,6 +1417,7 @@ function SceneOverlay({
   replayT: number | null;
   replayPaused: boolean;
   selection: Selection;
+  hoverTake: TakeRowWire | null;
 }) {
   const X = (t: number) => axis.tToPx(t);
   const lanesBottom = laneYOf('D', lanesTop, laneH) + laneH;
@@ -1219,17 +1455,28 @@ function SceneOverlay({
               const lx = covering
                 ? Math.max(anchor, Math.min(scrollX + 6, spanEnd - estW - 8))
                 : anchor;
+              // A long label must not poke out behind the NEXT load's
+              // label (sessions 22): truncate at the next span's start.
+              const next = model.decks[deck].trackSpans[i + 1];
+              const availPx = next ? X(next.start) - 8 - (lx + 3) : Infinity;
+              let shown = label;
+              if (estW > availPx) {
+                const maxChars = Math.floor(availPx / 6.4) - 1;
+                if (maxChars < 3) return null; // no room — the load bar still marks it
+                shown = `${label.slice(0, maxChars)}…`;
+              }
+              const shownW = shown.length * 6.4;
               return (
                 <g key={`trklabel-${i}`}>
                   <rect
                     x={lx - 12}
                     y={y + 3}
-                    width={estW + 18}
+                    width={shownW + 18}
                     height={14}
                     fill="url(#stl-label-fade)"
                   />
                   <text x={lx + 3} y={y + 14} className="stl-track-label" fill={color}>
-                    {label}
+                    {shown}
                   </text>
                 </g>
               );
@@ -1237,6 +1484,63 @@ function SceneOverlay({
           </g>
         );
       })}
+
+      {/* Take hover spotlight (sessions 22): dim every lane stretch that
+          is NOT the hovered Take's two tracks, and show its boundary
+          whiskers regardless of the detail-marks zoom gate. Lives here
+          (per-frame layer), so hovering never re-renders the scene. */}
+      {hoverTake
+        ? (() => {
+            const pair = takeSpanPair(model, hoverTake);
+            const spans = [pair.from, pair.to].filter((s): s is TakeSpanRef => s !== null);
+            const dims: ReactNode[] = [];
+            for (const deck of LANE_ORDER) {
+              const y = laneYOf(deck, lanesTop, laneH);
+              const mine = spans.filter((s) => s.deck === deck);
+              if (mine.length === 0) {
+                dims.push(
+                  <rect key={`dim-${deck}`} x={0} y={y} width={axis.totalPx} height={laneH} className="stl-hover-dim" />
+                );
+              } else {
+                const x0 = Math.min(...mine.map((s) => X(s.start)));
+                const x1 = Math.max(...mine.map((s) => X(s.end)));
+                if (x0 > 0) {
+                  dims.push(
+                    <rect key={`dim-${deck}-l`} x={0} y={y} width={x0} height={laneH} className="stl-hover-dim" />
+                  );
+                }
+                if (x1 < axis.totalPx) {
+                  dims.push(
+                    <rect key={`dim-${deck}-r`} x={x1} y={y} width={axis.totalPx - x1} height={laneH} className="stl-hover-dim" />
+                  );
+                }
+              }
+            }
+            const wx0 = X(hoverTake.window_start_s);
+            const wx1 = X(hoverTake.window_end_s);
+            return (
+              <g style={{ pointerEvents: 'none' }}>
+                {dims}
+                <line
+                  x1={wx0}
+                  y1={RULER_H + CHIP_STRIP_H - 4}
+                  x2={wx0}
+                  y2={lanesBottom}
+                  className="stl-take-whisker hover"
+                  style={pair.from ? { stroke: DECK_COLORS[pair.from.deck] } : undefined}
+                />
+                <line
+                  x1={wx1}
+                  y1={RULER_H + CHIP_STRIP_H - 4}
+                  x2={wx1}
+                  y2={lanesBottom}
+                  className="stl-take-whisker hover"
+                  style={pair.to ? { stroke: DECK_COLORS[pair.to.deck] } : undefined}
+                />
+              </g>
+            );
+          })()
+        : null}
 
       {/* Moment selection anchor — hidden while the replay head is the
           one cursor (it follows current time; clicks seek it). */}
@@ -1278,17 +1582,22 @@ function DeckLane({
   y,
   model,
   X,
+  axis,
   viewX0,
   viewX1,
   tView0,
   tView1,
   h,
+  traces,
   showTraces,
+  showDetailMarks,
 }: {
   deck: CaptureDeck;
   y: number;
   model: TimelineModel;
   X(t: number): number;
+  /** Monotonic-cursor lookups for the point-heavy paths (sessions 22). */
+  axis: TimeAxis;
   /** Quantized visible px window — everything outside is culled. */
   viewX0: number;
   viewX1: number;
@@ -1296,7 +1605,10 @@ function DeckLane({
   tView0: number;
   tView1: number;
   h: number;
+  /** Zoom-bucket-decimated traces (parent memo) for the polylines. */
+  traces: { t: number; playhead: number }[][];
   showTraces: boolean;
+  showDetailMarks: boolean;
 }) {
   const dt = model.decks[deck];
   const color = DECK_COLORS[deck];
@@ -1358,65 +1670,96 @@ function DeckLane({
         );
       })}
 
-      {/* Play/pause markers at the playing-span boundaries. */}
-      {dt.playingSpans.map((sp, i) => {
-        const x0 = X(sp.start);
-        const x1 = X(sp.end);
-        if (x1 < viewX0 || x0 > viewX1) return null;
-        return (
-          <g key={`pp-${i}`} className="stl-transport-mark">
-            <text x={x0 + 1} y={y + h - 8} fill={color}>
-              ▶
-            </text>
-            <text x={x1 + 1} y={y + h - 8} fill={color}>
-              ▪
-            </text>
-          </g>
-        );
-      })}
+      {/* Play/pause markers at the playing-span boundaries. Detail-gated
+          (this issue): past ~10 visible minutes they're overlapping glyph
+          confetti, and hundreds of <text> nodes made every low-zoom scene
+          render/paint expensive. */}
+      {showDetailMarks
+        ? dt.playingSpans.map((sp, i) => {
+            const x0 = X(sp.start);
+            const x1 = X(sp.end);
+            if (x1 < viewX0 || x0 > viewX1) return null;
+            return (
+              <g key={`pp-${i}`} className="stl-transport-mark">
+                <text x={x0 + 1} y={y + h - 8} fill={color}>
+                  ▶
+                </text>
+                <text x={x1 + 1} y={y + h - 8} fill={color}>
+                  ▪
+                </text>
+              </g>
+            );
+          })
+        : null}
 
-      {/* Jump/cue gesture markers (sessions 04 iteration). */}
-      {dt.gestures.map((g, i) => {
-        if (g.t < tView0 || g.t > tView1) return null;
-        return (
-          <g key={`ges-${i}`} className="stl-gesture">
-            <title>{`${g.action}${g.detail !== undefined ? ` ${g.detail}` : ''} → ${fmtClock(g.playhead)}`}</title>
-            <line x1={X(g.t)} y1={y + 16} x2={X(g.t)} y2={y + h - 4} stroke={color} className="stl-gesture-tick" />
-            <text x={X(g.t) + 2} y={y + 26} fill={color}>
-              {gestureLabel(g)}
-            </text>
-          </g>
-        );
-      })}
+      {/* Jump/cue gesture markers (sessions 04 iteration), labels
+          staggered onto rows so a cluster (stab run, repeated jumps)
+          stays legible (sessions 21). Ticks keep the exact x. Past ~10
+          visible minutes the markers hide entirely — labels AND ticks
+          (sessions 22): unreadable at that density, and thousands of
+          text/line nodes weighed the scene. */}
+      {showDetailMarks
+        ? (() => {
+            const visible = dt.gestures
+              .map((g, i) => ({ g, i }))
+              .filter(({ g }) => g.t >= tView0 && g.t <= tView1);
+            // Label extent estimate: 10px font ≈ 6px/char + padding.
+            const items = visible.map(({ g }) => {
+              const x0 = X(g.t) + 2;
+              return { x0, x1: x0 + gestureLabel(g).length * 6 + 6 };
+            });
+            // Rows adapt to the lane height (40–84px): 2 rows at minimum
+            // height, up to 4 — deeper fans would wander into the waveform.
+            const maxRows = Math.max(2, Math.min(4, Math.floor((h - 24) / 10)));
+            const rows = staggerRows(items, maxRows);
+            return visible.map(({ g, i }, k) => (
+              <g key={`ges-${i}`} className="stl-gesture">
+                <title>{`${g.action}${g.detail !== undefined ? ` ${g.detail}` : ''} → ${fmtClock(g.playhead)}`}</title>
+                <line x1={X(g.t)} y1={y + 16} x2={X(g.t)} y2={y + h - 4} stroke={color} className="stl-gesture-tick" />
+                <text x={X(g.t) + 2} y={y + 26 + rows[k] * 10} fill={color}>
+                  {gestureLabel(g)}
+                </text>
+              </g>
+            ));
+          })()
+        : null}
 
-      {/* Held loops: a bracket bar along the lane top. */}
-      {dt.loops.map((lp, i) => {
-        const x0 = X(lp.start);
-        const x1 = Math.max(X(lp.end), x0 + 4);
-        if (x1 < viewX0 || x0 > viewX1) return null;
-        return (
-          <g key={`loop-${i}`} className="stl-loop" >
-            <title>{`loop ${fmtClock(lp.region.start)}–${fmtClock(lp.region.end)}${lp.open ? ' (unreleased)' : ''}`}</title>
-            <line x1={x0} y1={y + 18} x2={x1} y2={y + 18} stroke={color} />
-            <line x1={x0} y1={y + 18} x2={x0} y2={y + 23} stroke={color} />
-            <line x1={x1} y1={y + 18} x2={x1} y2={y + 23} stroke={color} />
-          </g>
-        );
-      })}
+      {/* Held loops: a bracket bar along the lane top. Detail-gated with
+          the other marks — sub-4px brackets at overview zoom are noise. */}
+      {showDetailMarks
+        ? dt.loops.map((lp, i) => {
+            const x0 = X(lp.start);
+            const x1 = Math.max(X(lp.end), x0 + 4);
+            if (x1 < viewX0 || x0 > viewX1) return null;
+            return (
+              <g key={`loop-${i}`} className="stl-loop" >
+                <title>{`loop ${fmtClock(lp.region.start)}–${fmtClock(lp.region.end)}${lp.open ? ' (unreleased)' : ''}`}</title>
+                <line x1={x0} y1={y + 18} x2={x1} y2={y + 18} stroke={color} />
+                <line x1={x0} y1={y + 18} x2={x0} y2={y + 23} stroke={color} />
+                <line x1={x1} y1={y + 18} x2={x1} y2={y + 23} stroke={color} />
+              </g>
+            );
+          })
+        : null}
 
       {/* Playhead traces (position-in-track reading), sliced to the
-          window — a multi-hour trace is thousands of points, and the
-          polyline string was rebuilt whole per render. */}
+          window and decimated to pixel resolution (sessions 22) — at low
+          zoom the slice is the whole trace, and full-precision per-point
+          tToPx + stringification dominated the scene render. The traces
+          arrive pre-thinned to the zoom bucket (this issue), so a scene
+          render walks ~px-resolution points, not every raw sample. */}
       {showTraces
-        ? dt.traces.map((trace, i) => {
+        ? traces.map((trace, i) => {
             const win = traceWindow(trace, tView0, tView1);
             if (!win) return null;
             return (
               <polyline
                 key={`trace-${i}`}
-                points={win
-                  .map((p) => `${X(p.t)},${y + 18 + (1 - p.playhead / maxPlayhead) * (h - 24)}`)
-                  .join(' ')}
+                points={tracePolylinePoints(
+                  win,
+                  createMonotonicTToPx(axis),
+                  (ph) => y + 18 + (1 - ph / maxPlayhead) * (h - 24)
+                )}
                 className="stl-trace"
                 stroke={color}
               />

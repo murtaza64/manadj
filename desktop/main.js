@@ -3,7 +3,7 @@
 // Attaches to an already-running manadj (`make dev`); owns no processes or
 // state. See README.md and .scratch/desktop-shell/issues/01-electron-attach-shell.md.
 
-const { app, BrowserWindow, dialog, ipcMain, net, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, screen, session } = require("electron");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -176,6 +176,66 @@ async function attach(win) {
   tryAttach();
 }
 
+// The visualizer child window, when open (realtime-visualization 02/03):
+// the sticky/fullscreen-on-display controls target it.
+let visualizerWindow = null;
+
+// Display targeting (realtime-visualization 03): the laptop-side control
+// modal lists displays and sends the visualizer fullscreen onto one (the
+// HDMI projector flow — no touching the projector window itself).
+function registerVisualizerIpc() {
+  ipcMain.handle("visualizer:displays", () => {
+    const primary = screen.getPrimaryDisplay();
+    const bounds = visualizerWindow?.getBounds() ?? null;
+    const currentId = bounds ? screen.getDisplayMatching(bounds).id : null;
+    return screen.getAllDisplays().map((display, i) => ({
+      id: display.id,
+      label: display.label || `Display ${i + 1}`,
+      width: display.size.width,
+      height: display.size.height,
+      primary: display.id === primary.id,
+      current: display.id === currentId,
+      fullscreen: !!visualizerWindow?.isFullScreen() && display.id === currentId,
+    }));
+  });
+  ipcMain.handle("visualizer:fullscreen", (_event, displayId) => {
+    if (!visualizerWindow) return { ok: false, reason: "visualizer window not open" };
+    const display = screen.getAllDisplays().find((d) => d.id === displayId);
+    if (!display) return { ok: false, reason: "display not found" };
+    const win = visualizerWindow;
+    const enter = () => {
+      win.setAlwaysOnTop(false); // floating windows can't enter fullscreen
+      win.setBounds(display.bounds);
+      win.setFullScreen(true);
+    };
+    if (win.isFullScreen()) {
+      // macOS animates fullscreen transitions; moving displays requires
+      // leaving first and re-entering once the leave settles.
+      win.once("leave-full-screen", () => setTimeout(enter, 150));
+      win.setFullScreen(false);
+    } else {
+      enter();
+    }
+    return { ok: true };
+  });
+  ipcMain.handle("visualizer:toggle-fullscreen", () => {
+    if (!visualizerWindow) return { ok: false, reason: "visualizer window not open" };
+    const win = visualizerWindow;
+    if (win.isFullScreen()) {
+      win.setFullScreen(false);
+    } else {
+      win.setAlwaysOnTop(false);
+      win.setFullScreen(true);
+    }
+    return { ok: true };
+  });
+  ipcMain.handle("visualizer:windowed", () => {
+    if (!visualizerWindow) return { ok: false, reason: "visualizer window not open" };
+    visualizerWindow.setFullScreen(false);
+    return { ok: true };
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     ...loadBounds(),
@@ -193,6 +253,44 @@ function createWindow() {
       // audio would keep playing while UI clocks and waveforms stall.
       backgroundThrottling: false,
     },
+  });
+  // Visualizer window (realtime-visualization 01): the renderer opens it
+  // via window.open('/visualizer', ...). Give it a normal native title bar
+  // (its page has no TopBar drag region) and never throttle it — it renders
+  // rAF visuals and may sit occluded behind the main window on one screen
+  // before being dragged to the projector.
+  win.webContents.setWindowOpenHandler((details) => ({
+    action: "allow",
+    overrideBrowserWindowOptions: {
+      title: details.frameName === "manadj-arena" ? "manaDJ arena" : "manaDJ visualizer",
+      backgroundColor: "#000000",
+      // An explicit webPreferences override REPLACES the opener's inherited
+      // webPreferences rather than merging — so preload must be re-stated
+      // here or the child window has no manadjVisualizer bridge (its ⛶ then
+      // falls back to the HTML fullscreen API, which no-ops on this
+      // always-on-top floating window). realtime-visualization 07.
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        backgroundThrottling: false,
+      },
+    },
+  }));
+  // Track the visualizer child window and make it sticky: floats above
+  // other windows and follows across Spaces (projector second-screen use).
+  win.webContents.on("did-create-window", (child, details) => {
+    if (details.frameName !== "manadj-visualizer") return;
+    visualizerWindow = child;
+    child.setAlwaysOnTop(true, "floating");
+    // NOT setVisibleOnAllWorkspaces({visibleOnFullScreen:true}): on macOS
+    // it transforms the app to an accessory — the Dock icon vanished —
+    // and it is incompatible with fullscreen (the broken ⛶). Sticky =
+    // always-on-top only.
+    // Native fullscreen needs a normal window level; restore float on exit.
+    child.on("enter-full-screen", () => child.setAlwaysOnTop(false));
+    child.on("leave-full-screen", () => child.setAlwaysOnTop(true, "floating"));
+    child.on("closed", () => {
+      if (visualizerWindow === child) visualizerWindow = null;
+    });
   });
   // Open maximized (desktop-shell 06 — zoomed, not macOS fullscreen). The
   // persisted NORMAL bounds spread in above and getNormalBounds() below
@@ -251,6 +349,7 @@ app.whenReady().then(() => {
   assertChannelLabels();
   const disposeRecordingIpc = registerRecordingIpc({ app, dialog, ipcMain });
   app.once("before-quit", disposeRecordingIpc);
+  registerVisualizerIpc();
   createWindow();
 });
 

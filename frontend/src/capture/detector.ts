@@ -83,6 +83,20 @@ export interface PairMachine {
    * snapshots this, so a Load onto the stopped deck within the cut gap
    * can't mis-attribute the outgoing Track. */
   outTrackAtCessation: number | null;
+  /** For a zero-overlap hard cut ONLY: the incoming's audibility onset. A
+   * cut engages AT the outgoing's cessation (so overlap is zero and the
+   * naive window collapses); the incoming arrives shortly after within the
+   * cut gap. The Take window then spans the cut ramp — cessation → this
+   * onset — instead of degenerating to a single instant (issue #138 defect
+   * 1; Take 960 was window_start == window_end). null for overlap
+   * engagements, whose window end is the outgoing's own final cessation. */
+  cutIncomingOnset: number | null;
+  /** The last (outgoing, incoming, windowEnd) this machine emitted — the
+   * per-engagement dedup guard (issue #138 defect 2). One physical pair
+   * flickering across the settle horizon must not settle the SAME ordered
+   * pair twice; a re-emit whose window end lands within `settleHorizonS` of
+   * the previous one is the same Handover and is suppressed. */
+  lastEmit: { outgoingTrackId: number; incomingTrackId: number; windowEndS: number } | null;
   /** Engagement-open snapshot, stamped into the Take slice as its `init`
    * event — ROLE-shaped (outgoing='A', incoming='B') with the physical
    * decks recorded on it. */
@@ -118,7 +132,9 @@ function freshMachine(): PairMachine {
     incomingSilentSince: null,
     outSilentSince: null,
     outTrackAtCessation: null,
+    cutIncomingOnset: null,
     openSnapshot: null,
+    lastEmit: null,
   };
 }
 
@@ -151,10 +167,19 @@ function dissolve(m: PairMachine): void {
   m.incomingSilentSince = null;
   m.outSilentSince = null;
   m.outTrackAtCessation = null;
+  m.cutIncomingOnset = null;
   m.openSnapshot = null;
+  // NOTE: lastEmit deliberately survives a dissolve — it guards the NEXT
+  // engagement (a flicker re-opening the same ordered pair; issue #138).
 }
 
-function openEngagement(s: CaptureState, m: PairMachine, key: PairKey, at: number): void {
+function openEngagement(
+  s: CaptureState,
+  m: PairMachine,
+  key: PairKey,
+  at: number,
+  cutIncomingOnset: number | null = null
+): void {
   const outgoing = m.incumbent!;
   const incoming = mate(key, outgoing);
   m.engagedSince = at;
@@ -163,6 +188,9 @@ function openEngagement(s: CaptureState, m: PairMachine, key: PairKey, at: numbe
   m.outgoingTrackId = m.outTrackAtCessation ?? s.decks[outgoing].trackId;
   m.incomingTrackId = s.decks[incoming].trackId;
   m.incomingSilentSince = null;
+  // A cut engages AT the outgoing's cessation; remember the incoming's
+  // onset so the Take window spans the cut ramp, not one instant (#138).
+  m.cutIncomingOnset = cutIncomingOnset;
   const snapDeck = (d: DeckCapture) => ({
     trackId: d.trackId,
     playing: d.playing,
@@ -228,13 +256,38 @@ function relabel(
 function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake | null {
   if (m.outgoingTrackId === null || m.incomingTrackId === null) return null;
   const windowStartS = m.engagedSince!;
-  const windowEndS = m.outSilentSince!;
+  // A zero-overlap hard cut engages at the outgoing's cessation, so the
+  // outgoing's own silence instant (outSilentSince) equals the window
+  // start — degenerate. The window then spans the cut ramp: cessation →
+  // the incoming's onset (#138 defect 1). An overlap engagement keeps the
+  // outgoing's final cessation as its end (the glossary window: the
+  // contiguous period the two tracks trade, ending at the outgoing's
+  // cessation).
+  const windowEndS =
+    m.cutIncomingOnset !== null ? Math.max(m.outSilentSince!, m.cutIncomingOnset) : m.outSilentSince!;
   const outgoing = m.incumbent!;
   const incoming = mate(key, outgoing);
   const overlap = windowEndS - windowStartS;
+  // One engagement, at most one Take per ordered pair (#138 defect 2): a
+  // physical pair can flicker across the settle horizon and re-open the
+  // same ordered pair; a re-emit whose window end lands within the settle
+  // horizon of the previous emit is the same Handover, suppressed.
+  if (
+    m.lastEmit !== null &&
+    m.lastEmit.outgoingTrackId === m.outgoingTrackId &&
+    m.lastEmit.incomingTrackId === m.incomingTrackId &&
+    windowEndS - m.lastEmit.windowEndS <= s.params.settleHorizonS
+  ) {
+    return null;
+  }
   const confidence = !s.decks[incoming].audible ? 0.5 : overlap < 1 ? 0.7 : 0.9;
   const lo = windowStartS - s.params.padS;
   const hi = windowEndS + s.params.padS;
+  m.lastEmit = {
+    outgoingTrackId: m.outgoingTrackId,
+    incomingTrackId: m.incomingTrackId,
+    windowEndS,
+  };
   return {
     outgoingTrackId: m.outgoingTrackId,
     incomingTrackId: m.incomingTrackId,
@@ -251,13 +304,51 @@ function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake |
     // Pre-window pad events ARE included (context); the init state already
     // reflects them, and that's safe: control events carry absolute values
     // (set, not delta), so replaying them over init is idempotent.
-    events: [
-      ...(m.openSnapshot ? [m.openSnapshot] : []),
-      ...s.log
-        .filter((ev) => ev.t >= lo && ev.t <= hi)
-        .map((ev) => relabel(ev, outgoing, incoming))
-        .filter((ev): ev is CaptureEvent => ev !== null),
-    ],
+    // Single pass over the log (capture spine 02): relabel yields fresh
+    // per-event copies, so the slice stays immutable evidence.
+    events: sliceTake(s.log, lo, hi, outgoing, incoming, m.openSnapshot),
+  };
+}
+
+/** Build a Take's role-relabeled event slice in one pass: the init head
+ * (if any), then every logged event in [lo, hi] that belongs to the pair,
+ * relabeled to A/B. relabel returns fresh copies, so the result is an
+ * immutable evidence slice (never aliases the rolling log). */
+function sliceTake(
+  log: CaptureEvent[],
+  lo: number,
+  hi: number,
+  outgoing: CaptureDeck,
+  incoming: CaptureDeck,
+  head: Extract<CaptureEvent, { kind: 'init' }> | null
+): CaptureEvent[] {
+  const events: CaptureEvent[] = [];
+  if (head) events.push(head);
+  for (const ev of log) {
+    if (ev.t < lo || ev.t > hi) continue;
+    const r = relabel(ev, outgoing, incoming);
+    if (r !== null) events.push(r);
+  }
+  return events;
+}
+
+/** Deep-clone the reducible state so a mutating reduce can't reach the
+ * caller's copy. The rolling `log` array is copied by reference-of-elements
+ * (events are immutable); everything the imperative helpers write —
+ * per-deck audibility cache, `eq`, pair machines — is cloned. */
+function cloneCaptureState(state: CaptureState): CaptureState {
+  return {
+    ...state,
+    decks: {
+      A: { ...state.decks.A, eq: { ...state.decks.A.eq } },
+      B: { ...state.decks.B, eq: { ...state.decks.B.eq } },
+      C: { ...state.decks.C, eq: { ...state.decks.C.eq } },
+      D: { ...state.decks.D, eq: { ...state.decks.D.eq } },
+    },
+    pairs: Object.fromEntries(
+      PAIR_KEYS.map((k) => [k, { ...state.pairs[k] }])
+    ) as Record<PairKey, PairMachine>,
+    log: [...state.log],
   };
 }
 
@@ -265,27 +356,47 @@ function emitTake(s: CaptureState, m: PairMachine, key: PairKey): DetectedTake |
  * Feed one event; returns the next state and any settled Takes. With six
  * pair machines one moment may settle several (deliberately liberal —
  * glossary Handover).
+ *
+ * PURE wrapper (the detector's tested seam): the input state is never
+ * mutated — it is cloned once, then reduced in place. The always-on
+ * recorder owns its state and skips the clone (`reduceCaptureInto` /
+ * `reduceCaptureBatch`, capture spine 02): the deep clone was ~6× the
+ * per-event cost during a busy passage (a crossfader ride).
  */
 export function reduceCapture(
   state: CaptureState,
   e: CaptureEvent
 ): [CaptureState, DetectedTake[]] {
-  // The input state is never mutated: everything below works on this
-  // deep clone (imperative onEdge/applyEvent helpers mutate the clone,
-  // not the caller's state — externally the reducer stays pure).
-  const s: CaptureState = {
-    ...state,
-    decks: {
-      A: { ...state.decks.A },
-      B: { ...state.decks.B },
-      C: { ...state.decks.C },
-      D: { ...state.decks.D },
-    },
-    pairs: Object.fromEntries(
-      PAIR_KEYS.map((k) => [k, { ...state.pairs[k] }])
-    ) as Record<PairKey, PairMachine>,
-    log: [...state.log, e],
-  };
+  const s = cloneCaptureState(state);
+  const takes = reduceCaptureInto(s, e);
+  return [s, takes];
+}
+
+/**
+ * Reduce a whole batch of events into `state` IN PLACE (capture spine 02):
+ * the recorder queues the events a single notify produced and reduces them
+ * in one pass over its owned state — no per-event clone, no O(n) log copy.
+ * Event timestamps are captured at enqueue, so ordering/clock are
+ * identical to the per-event path; settlement is time-driven off the ~1 Hz
+ * ticks regardless. Returns every Take the batch settled, in order.
+ */
+export function reduceCaptureBatch(state: CaptureState, events: CaptureEvent[]): DetectedTake[] {
+  const takes: DetectedTake[] = [];
+  for (const e of events) {
+    const emitted = reduceCaptureInto(state, e);
+    if (emitted.length > 0) takes.push(...emitted);
+  }
+  return takes;
+}
+
+/**
+ * The mutating reduce core: apply one event to `s` IN PLACE and return any
+ * settled Takes. The caller owns `s` (the recorder, or the pure wrapper's
+ * fresh clone) — the imperative onEdge/applyEvent helpers write straight
+ * to it.
+ */
+export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTake[] {
+  s.log.push(e);
   const takes: DetectedTake[] = [];
   const now = e.t;
 
@@ -338,7 +449,7 @@ export function reduceCapture(
       }
     }
     pruneLog(s, now);
-    return [s, takes];
+    return takes;
   }
 
   // A Load re-premises the deck: the track being traded no longer exists
@@ -419,11 +530,18 @@ export function reduceCapture(
 
   pruneLog(s, now);
 
-  return [s, takes];
+  return takes;
 }
 
 /** Prune the rolling log to the current retention horizon — the most
- * retentive machine wins (an engaged pair pins its window's pad). */
+ * retentive machine wins (an engaged pair pins its window's pad).
+ *
+ * Ring-buffer with an index horizon (capture spine 02): events are chrono-
+ * ordered, so the dead prefix is a contiguous run at the front. Count it
+ * and drop it with ONE in-place splice — no full `filter` copy per event
+ * (the O(n)→O(n²) hazard over a busy passage). Nothing is dropped on the
+ * common event (splice(0,0) is a no-op), so the steady-state cost is O(1).
+ * `s.log[0]` stays the first retained event, as the detector reads it. */
 function pruneLog(s: CaptureState, now: number): void {
   let keepFrom = Infinity;
   for (const key of PAIR_KEYS) {
@@ -434,9 +552,11 @@ function pruneLog(s: CaptureState, now: number): void {
         : (m.outSilentSince ?? now) - s.params.idleKeepS;
     if (need < keepFrom) keepFrom = need;
   }
-  if (s.log.length > 0 && s.log[0].t < keepFrom) {
-    s.log = s.log.filter((ev) => ev.t >= keepFrom);
-  }
+  const log = s.log;
+  if (log.length === 0 || log[0].t >= keepFrom) return;
+  let dead = 0;
+  while (dead < log.length && log[dead].t < keepFrom) dead++;
+  log.splice(0, dead);
 }
 
 /** An audibility edge on one deck, within one pair machine. */
@@ -467,7 +587,10 @@ function onEdge(
         m.outSilentSince !== null &&
         now - m.outSilentSince <= s.params.cutGapMaxS
       ) {
-        openEngagement(s, m, key, m.outSilentSince); // hard cut: window is the cut instant
+        // Hard cut: engage AT the cessation (window start), and record the
+        // incoming's onset (window end) so the slice spans the cut ramp
+        // instead of collapsing to a single instant (#138 defect 1).
+        openEngagement(s, m, key, m.outSilentSince, now);
       } else {
         // Incumbent long gone: fresh incumbency, no Handover.
         m.incumbent = ch;

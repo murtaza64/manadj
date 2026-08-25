@@ -80,6 +80,22 @@ import { samplePeakCeilingCurve } from './gainStaging';
 export const CHANNEL_IDS = ['A', 'B', 'C', 'D'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
+/**
+ * What a notify touched (capture spine 02): a channel id names that
+ * channel's ChannelState or crossfader-assignment; the string tags name a
+ * channel-less global. `undefined` = unknown/everything (graph revival,
+ * routing) — subscribers must then diff the whole surface. Channel-scoped
+ * subscribers (recorder, Conductor/Replay watchers) diff only the touched
+ * channel, skipping the per-channel loop for a single fader/EQ move.
+ */
+export type MixerChange =
+  | ChannelId
+  | 'crossfader'
+  | 'crossfaderEnabled'
+  | 'master'
+  | 'cue'
+  | 'routing';
+
 /** What a deck needs from the audio layer: a live context and its channel input. */
 export interface DeckAudioPort {
   ensureAudio(): { ctx: AudioContext; input: AudioNode };
@@ -97,6 +113,22 @@ export interface MasterRecordingTap {
 export interface ChannelLevelSample {
   meanAbsolute: number;
   clipped: boolean;
+}
+
+/** Master-bus spectrum snapshot (visualizer): per-bin magnitudes in dBFS
+ * from the visualizer analyser, plus what's needed to map bins to Hz. */
+export interface MasterSpectrum {
+  /** Analyser frequency data, dB per bin (length = fftSize / 2). */
+  magnitudesDb: Float32Array;
+  sampleRate: number;
+  fftSize: number;
+}
+
+/** Master-bus stereo time-domain snapshot (visualizer scope/goniometer). */
+export interface MasterWaveform {
+  left: Float32Array;
+  right: Float32Array;
+  sampleRate: number;
 }
 
 /** Per-channel control state, [0,1] except filter [-1,1] and pfl (bool). */
@@ -310,6 +342,18 @@ export class Mixer {
   /** Independent pre-Master recording guard: monitor volume/boost must not
    * alter the recorded Mix. Recorder taps hang here across route changes. */
   private recordingCeiling: WaveShaperNode | null = null;
+  /** Master-bus spectrum tap for the visualizer (realtime-visualization 01):
+   * hangs off recordingCeiling — route-independent and pre-Master, so the
+   * visuals reflect program content, not monitor loudness. Pure sink. */
+  private visualizerAnalyser: AnalyserNode | null = null;
+  private visualizerBuffer: Float32Array<ArrayBuffer> | null = null;
+  /** Stereo time-domain taps (visualizer scope/goniometer): a splitter off
+   * recordingCeiling feeding one analyser per side. Pure sinks. */
+  private visualizerWaveAnalysers: { left: AnalyserNode; right: AnalyserNode } | null = null;
+  private visualizerWaveBuffers: {
+    left: Float32Array<ArrayBuffer>;
+    right: Float32Array<ArrayBuffer>;
+  } | null = null;
   private cueGain: GainNode | null = null;
   private blendCueGain: GainNode | null = null;
   private blendMasterGain: GainNode | null = null;
@@ -324,7 +368,7 @@ export class Mixer {
   /** Serializes async routing applies — concurrent setSinkId/wiring
    * interleavings must not tear the output graph. */
   private routingChain: Promise<void> = Promise.resolve();
-  private listeners = new Set<() => void>();
+  private listeners = new Set<(changed?: MixerChange) => void>();
 
   // Control state survives graph rebuilds (StrictMode revival).
   private channels: Record<ChannelId, ChannelState> = {
@@ -424,11 +468,44 @@ export class Mixer {
       // deck; it must never be handed to the fake timer sink.
       attachSinkKeepalive(ctx);
 
+      // Visualizer spectrum tap (realtime-visualization 01). 2048 is the
+      // punch/resolution balance from the prior-art survey
+      // (docs/research/audio-visualizer-prior-art.md): the FFT window spans
+      // fftSize/sampleRate seconds, so 4096 @ 48 kHz smeared kick attacks
+      // across ~85 ms — 2048 halves that (~43 ms) while keeping ~23 Hz/bin
+      // (~9 bins under the 250 Hz crossover). No analyser smoothing — the
+      // browser EMA is FFT-block-rate-coupled; consumers own ballistics.
+      const visualizerAnalyser = ctx.createAnalyser();
+      visualizerAnalyser.fftSize = 2048;
+      visualizerAnalyser.smoothingTimeConstant = 0;
+      recordingCeiling.connect(visualizerAnalyser);
+
+      // Stereo time-domain taps for the scope/goniometer presets
+      // (realtime-visualization 02): the goniometer needs L and R
+      // separately (an AnalyserNode alone downmixes its input to mono).
+      const visualizerSplit = ctx.createChannelSplitter(2);
+      const visualizerWaveLeft = ctx.createAnalyser();
+      const visualizerWaveRight = ctx.createAnalyser();
+      visualizerWaveLeft.fftSize = 2048;
+      visualizerWaveRight.fftSize = 2048;
+      recordingCeiling.connect(visualizerSplit);
+      visualizerSplit.connect(visualizerWaveLeft, 0);
+      visualizerSplit.connect(visualizerWaveRight, 1);
+
       this.ctx = ctx;
       this.strips = strips;
       this.masterGain = masterGain;
       this.masterOutput = masterOutput;
       this.recordingCeiling = recordingCeiling;
+      this.visualizerAnalyser = visualizerAnalyser;
+      this.visualizerBuffer = new Float32Array(
+        new ArrayBuffer((visualizerAnalyser.fftSize / 2) * 4)
+      );
+      this.visualizerWaveAnalysers = { left: visualizerWaveLeft, right: visualizerWaveRight };
+      this.visualizerWaveBuffers = {
+        left: new Float32Array(new ArrayBuffer(visualizerWaveLeft.fftSize * 4)),
+        right: new Float32Array(new ArrayBuffer(visualizerWaveRight.fftSize * 4)),
+      };
       this.cueGain = cueGain;
       this.blendCueGain = blendCueGain;
       this.blendMasterGain = blendMasterGain;
@@ -626,6 +703,42 @@ export class Mixer {
     return live.strips[channel].levelSample();
   }
 
+  /**
+   * Master-bus spectrum snapshot (realtime-visualization 01), read off the
+   * visualizer analyser (post-program, pre-Master — route-independent).
+   * Reads the LIVE graph only (never force-creates a context, same rule as
+   * readChannelLevel); null with no graph, which the visualizer renders as
+   * silence. The returned buffer is reused across calls — consume it
+   * synchronously.
+   */
+  readMasterSpectrum(): MasterSpectrum | null {
+    const live = this.liveGraph();
+    if (!live || !this.visualizerAnalyser || !this.visualizerBuffer) return null;
+    this.visualizerAnalyser.getFloatFrequencyData(this.visualizerBuffer);
+    return {
+      magnitudesDb: this.visualizerBuffer,
+      sampleRate: live.ctx.sampleRate,
+      fftSize: this.visualizerAnalyser.fftSize,
+    };
+  }
+
+  /**
+   * Master-bus stereo time-domain snapshot (realtime-visualization 02) for
+   * the scope/goniometer presets. Same live-graph-only and reused-buffer
+   * contract as readMasterSpectrum.
+   */
+  readMasterWaveform(): MasterWaveform | null {
+    const live = this.liveGraph();
+    if (!live || !this.visualizerWaveAnalysers || !this.visualizerWaveBuffers) return null;
+    this.visualizerWaveAnalysers.left.getFloatTimeDomainData(this.visualizerWaveBuffers.left);
+    this.visualizerWaveAnalysers.right.getFloatTimeDomainData(this.visualizerWaveBuffers.right);
+    return {
+      left: this.visualizerWaveBuffers.left,
+      right: this.visualizerWaveBuffers.right,
+      sampleRate: live.ctx.sampleRate,
+    };
+  }
+
   /** The audio access a deck is constructed against. */
   portFor(channel: ChannelId): DeckAudioPort {
     return {
@@ -642,14 +755,18 @@ export class Mixer {
    * subscribe so hardware moves repaint them. Fires after every setter;
    * channel states are replaced immutably, so snapshot selectors can rely
    * on reference/primitive equality.
+   *
+   * Listeners get the changed-control hint (capture spine 02): the touched
+   * channel or global tag, `undefined` = diff everything. Hint-blind
+   * subscribers (useSyncExternalStore repaints) just ignore the argument.
    */
-  subscribe(listener: () => void): () => void {
+  subscribe(listener: (changed?: MixerChange) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private notify(): void {
-    for (const listener of this.listeners) listener();
+  private notify(changed?: MixerChange): void {
+    for (const listener of this.listeners) listener(changed);
   }
 
   getChannelState(channel: ChannelId): ChannelState {
@@ -670,7 +787,7 @@ export class Mixer {
 
   setTrim(channel: ChannelId, value: number): void {
     this.channels[channel] = { ...this.channels[channel], trim: value };
-    this.notify();
+    this.notify(channel);
     // Per-CHANNEL-LANE guard, not the overlay-wide one (sessions 15): a
     // Conductor overlay carries no trim, and the live trim knob must keep
     // working through a set. Only a lane that actually holds trim owns the
@@ -684,7 +801,7 @@ export class Mixer {
   setEq(channel: ChannelId, band: EqBand, value: number): void {
     const ch = this.channels[channel];
     this.channels[channel] = { ...ch, eq: { ...ch.eq, [band]: value } };
-    this.notify();
+    this.notify(channel);
     if (this.automation) return; // overlay owns the node; lands on disengage
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].bandGains[band].gain, eqValueToGain(value));
@@ -693,7 +810,7 @@ export class Mixer {
   /** position in [-1, 1]: negative = LPF, positive = HPF, center = bypass. */
   setFilter(channel: ChannelId, position: number): void {
     this.channels[channel] = { ...this.channels[channel], filter: position };
-    this.notify();
+    this.notify(channel);
     if (this.automation) return; // overlay owns the node; lands on disengage
     this.ensure();
     this.applyFilter(channel);
@@ -701,7 +818,7 @@ export class Mixer {
 
   setFader(channel: ChannelId, value: number): void {
     this.channels[channel] = { ...this.channels[channel], fader: value };
-    this.notify();
+    this.notify(channel);
     if (this.automation) return; // overlay owns the node; lands on disengage
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].faderGain.gain, channelFaderToGain(value));
@@ -711,7 +828,7 @@ export class Mixer {
   setCrossfader(position: number): void {
     this.crossfader = position;
     saveCrossfaderPosition(position);
-    this.notify();
+    this.notify('crossfader');
     if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();
     this.applyCrossfader(true);
@@ -721,7 +838,7 @@ export class Mixer {
     if (this.crossfaderAssignments[channel] === assignment) return;
     this.crossfaderAssignments = { ...this.crossfaderAssignments, [channel]: assignment };
     saveCrossfaderAssignments(this.crossfaderAssignments);
-    this.notify();
+    this.notify(channel);
     if (this.automation) return; // pinned neutral; assignment lands on disengage
     this.ensure();
     this.applyCrossfader(true);
@@ -734,7 +851,7 @@ export class Mixer {
   setCrossfaderEnabled(enabled: boolean): void {
     this.crossfaderEnabled = enabled;
     saveCrossfaderEnabled(enabled);
-    this.notify();
+    this.notify('crossfaderEnabled');
     if (this.automation) return; // pinned to neutral; lands on disengage
     this.ensure();
     this.applyCrossfader(true);
@@ -742,7 +859,7 @@ export class Mixer {
 
   setMaster(value: number): void {
     this.master = value;
-    this.notify();
+    this.notify('master');
     const { ctx } = this.ensure();
     if (this.masterGain) rampGain(ctx, this.masterGain.gain, masterValueToGain(value));
   }
@@ -830,7 +947,7 @@ export class Mixer {
       cuePairInMain = null;
       this.cueSinkId = null;
       this.cuePair = null;
-      this.notify();
+      this.notify('routing');
     }
 
     if (plan.masterPairInMain || cuePairInMain) {
@@ -877,7 +994,7 @@ export class Mixer {
         this.cueBridge?.stop();
         this.cueSinkId = null;
         this.cuePair = null;
-        this.notify();
+        this.notify('routing');
       }
     } else {
       this.cueBridge?.stop();
@@ -890,7 +1007,7 @@ export class Mixer {
    * Any channels may be cued together (they sum). */
   setPfl(channel: ChannelId, on: boolean): void {
     this.channels[channel] = { ...this.channels[channel], pfl: on };
-    this.notify();
+    this.notify(channel);
     const { ctx, strips } = this.ensure();
     rampGain(ctx, strips[channel].pflGain.gain, on ? 1 : 0);
   }
@@ -906,7 +1023,7 @@ export class Mixer {
   /** Cue bus volume (the headphone-level knob), 0..1. */
   setCueLevel(value: number): void {
     this.cueLevel = value;
-    this.notify();
+    this.notify('cue');
     const { ctx } = this.ensure();
     if (this.cueGain) rampGain(ctx, this.cueGain.gain, cueLevelToGain(value));
   }
@@ -919,7 +1036,7 @@ export class Mixer {
    * before the bridge so the headphones stay sample-aligned (ADR 0017). */
   setCueMix(value: number): void {
     this.cueMix = value;
-    this.notify();
+    this.notify('cue');
     const { ctx } = this.ensure();
     const { cue, master } = cueMixGains(value);
     if (this.blendCueGain) rampGain(ctx, this.blendCueGain.gain, cue);
@@ -945,7 +1062,7 @@ export class Mixer {
       this.cueSinkId = null;
       this.cuePair = null;
       if (ctx && ctx.state !== 'closed') await this.applyOutputRouting();
-      this.notify();
+      this.notify('routing');
       return;
     }
     this.ensure();
@@ -963,7 +1080,7 @@ export class Mixer {
       this.cuePair = null;
       throw err;
     } finally {
-      this.notify();
+      this.notify('routing');
     }
   }
 

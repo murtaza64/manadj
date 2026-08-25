@@ -6,18 +6,21 @@ import { queryClient } from './api/queryClient';
 const StyleTuningPage = lazy(() => import('./waveform/StyleTuningPage'));
 const MidiInspectorPage = lazy(() => import('./midi/MidiInspectorPage'));
 const JogTuningPage = lazy(() => import('./midi/JogTuningPage'));
-import Library from './components/Library';
+const VisualizerApp = lazy(() => import('./visualizer/VisualizerApp'));
+const ArenaApp = lazy(() => import('./visualizer/ArenaApp'));
+import { BrowsePanel } from './components/BrowsePanel';
 import { SyncView } from './components/SyncView';
 import { PerformanceView } from './components/performance/PerformanceView';
 import { TopBar } from './components/TopBar';
 import type { AppMode } from './components/TopBar';
 import { FilterProvider } from './contexts/FilterContext';
-import { DeckProvider, DeckScope } from './contexts/DeckContext';
+import { DeckProvider } from './contexts/DeckContext';
 import { MidiControllerBridge } from './components/MidiControllerBridge';
 import { MidiControlRegistrar } from './components/MidiControlRegistrar';
 import { MidiFeedbackBridge } from './components/MidiFeedbackBridge';
 import { MidiLevelMeterBridge } from './components/MidiLevelMeterBridge';
 import { AudioRoutingBridge } from './components/AudioRoutingBridge';
+import { VisualizerBridge } from './components/VisualizerBridge';
 import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
@@ -129,6 +132,19 @@ function App() {
     );
   }
 
+  // The visualizer window (realtime-visualization 01): a standalone root —
+  // no DeckProvider, so it can never create a second AudioContext (ADR
+  // 0009). Band data arrives over the BroadcastChannel from the main
+  // window's VisualizerBridge.
+  if (window.location.pathname === '/visualizer') {
+    // ?arena=1 → the genetic judging arena (realtime-visualization 06);
+    // same standalone rules: no DeckProvider, never an AudioContext.
+    const arena = new URLSearchParams(window.location.search).has('arena');
+    return (
+      <Suspense fallback={null}>{arena ? <ArenaApp /> : <VisualizerApp />}</Suspense>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -140,6 +156,9 @@ function App() {
         <MidiLevelMeterBridge />
         <AudioRoutingBridge />
         <AnalysisPendingBridge />
+        {/* Visualizer band feed (realtime-visualization 01): transmits only
+            while a visualizer window pings. */}
+        <VisualizerBridge />
         {/* Live re-plan (sets 24): plan-input subscription for the
             conducting Set — above the view switch, like the Conductor
             it feeds. */}
@@ -151,22 +170,17 @@ function App() {
           <div className="app-shell">
             <TopBar mode={view} onModeChange={setView} />
             <main className="app-main">
-              {/* The three DECK modes keep alive (perf-layout 09): they
-                  mount on first visit and then hide instead of unmounting,
-                  so zoom/scroll/panel state survives mode switches in
-                  every component at once. Config-ish pages stay
+              {/* Top panels: the deck modes keep alive (perf-layout 09) —
+                  mount on first visit, then hide instead of unmounting, so
+                  zoom/panel state survives mode switches. Library mode has
+                  no top panel of its own (its Player/TagEditor block lives
+                  inside the shared panel's Library). Config-ish pages stay
                   conditional — remounting them is cheap and honest. */}
               <KeepAliveView active={view === 'performance'}>
                 <PerformanceView />
               </KeepAliveView>
               <KeepAliveView active={view === 'transition'}>
                 <TransitionEditor />
-              </KeepAliveView>
-              <KeepAliveView active={view === 'library'}>
-                {/* The library view is Deck A (performance-mode issue 02). */}
-                <DeckScope deck="A">
-                  <Library />
-                </DeckScope>
               </KeepAliveView>
               {view === 'history' ? (
                 <TakeHistoryView />
@@ -181,6 +195,10 @@ function App() {
                   <JogTuningPage />
                 </Suspense>
               ) : null}
+              {/* Bottom panel: the ONE shared Library instance (gh#165) —
+                  always mounted, never remounts on mode switches; hides
+                  under the config pages. */}
+              <BrowsePanel mode={view} />
             </main>
           </div>
         </FilterProvider>
