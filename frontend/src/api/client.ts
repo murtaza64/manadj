@@ -1356,6 +1356,42 @@ export const api = {
       const res = await fetch(`${API_BASE}/routines/${uuid}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Failed to delete routine (${res.status})`);
     },
+
+    /** Replace the authored edits layer (gh#170 pass 2): the Routine
+     * editor's draft — lane envelopes + Jumps, beat-domain. Null clears.
+     * The recording itself never changes (evidence doctrine). */
+    saveEdits: async (
+      uuid: string,
+      edits: Record<string, unknown> | null
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/edits`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ edits }),
+      });
+      if (!res.ok) throw new Error(`Failed to save routine edits (${res.status})`);
+      return res.json();
+    },
+
+    /** Boundary trim + mechanical re-promotion (gh#170): re-run promotion
+     * over the origin Routine Take with the window narrowed by beat
+     * amounts from either edge; the Routine row updates IN PLACE (same
+     * uuid — Set pins survive), the raw Take is untouched. */
+    retrim: async (
+      uuid: string,
+      body: { trim_start_beats: number; trim_end_beats: number }
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/retrim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to re-promote routine (${res.status})`);
+      }
+      return res.json();
+    },
   },
 
   sessions: {
@@ -1595,6 +1631,9 @@ export interface RoutineDetailWire extends RoutineRowWire {
   /** Slot-addressed, beat-domain mechanical replay (each event carries
    * `beat` + `slot`; global controls carry slot null). */
   events: Record<string, unknown>[];
+  /** Authored edits layer (gh#170 pass 2; routines/routineDraft parses
+   * tolerantly). Null/absent = unedited. */
+  edits?: Record<string, unknown> | null;
 }
 
 // ── Session wire types (Sessions PRD, ADR 0033) ─────────────────────────

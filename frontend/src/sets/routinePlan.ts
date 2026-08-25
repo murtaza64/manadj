@@ -40,6 +40,7 @@
  * e2e merge; tests feed it directly.
  */
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
+import { applyJumpEditsToTrace } from '../routines/routineDraft';
 
 // ── Input (the seam) ─────────────────────────────────────────────────────
 
@@ -54,6 +55,11 @@ export interface RoutinePlanInput {
   entryPositions: number[];
   durationBeats: number;
   events: RoutineEventInput[];
+  /** Authored edits over the recording (gh#170 pass 2 — the Routine
+   * editor's draft layer, persisted on the Routine): applied at build
+   * time so the editor's audition and the set Conductor replay the same
+   * result. Opaque here; parsed by routines/routineDraft. */
+  edits?: import('../routines/routineDraft').RoutineEdits | null;
 }
 
 export type RoutineEventInput = Record<string, unknown>;
@@ -99,14 +105,30 @@ export interface RoutineSlotLanes {
    * pre-window level predates the slice); a slot without any defaults
    * open from its entry (it was audible the whole recorded span). */
   defaults: { fader: number; eq: number; filter: number };
+  /** Controls whose points are AUTHORED envelopes (gh#170 pass 2): the
+   * editor's breakpoints, linearly interpolated — not recorded steps. */
+  authored?: Partial<Record<'fader' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter', boolean>>;
 }
 
 export interface PlannedRoutineSlot {
   slot: number;
   trackId: number;
   /** Allocated deck; null = overflow (unallocatable — flagged at plan
-   * time, silent at replay). */
+   * time, silent at replay). Decks are REUSED across slots (gh#170
+   * pass 2): a slot whose motion has ended frees its deck for later
+   * entries, so overflow means true CONCURRENCY exceeded 4 — which a
+   * real recording (performed on 4 physical decks) can never do. */
   deck: RoutineDeck | null;
+  /** The deck belongs to THIS slot from here (mix seconds): span start
+   * for a fresh claim, the previous occupant's release for a reused
+   * deck. Evaluators must not apply a slot's verdict to a reused deck
+   * outside its occupancy — the prior occupant owns it there. */
+  occupyFromMixSec: number;
+  /** The deck frees here (end of the slot's last recorded motion; the
+   * routine end when it plays out). Occupancy, not audibility: a deck
+   * spinning under a closed fader is still busy reproducing the
+   * recording. */
+  releaseMixSec: number;
   entryMixSec: number;
   entryTrackSec: number;
   /** (targetBpm / trackBpm − 1)·100, clamped to the varispeed range —
@@ -427,52 +449,190 @@ function laneValueAt(points: RoutineLanePoint[], beat: number, fallback: number)
   return points[lo].value;
 }
 
-/** The slot's recorded mixer lanes at a Routine beat (mixer domain —
- * planner PlanAutomation shape, structurally). */
+/** Authored envelopes interpolate LINEARLY between breakpoints (the pair
+ * editor's lane semantic); before the first / after the last point the
+ * envelope holds flat (the pair editor's window-edge extension). */
+function laneValueAtAuthored(points: RoutineLanePoint[], beat: number, fallback: number): number {
+  if (points.length === 0) return fallback;
+  if (beat <= points[0].beat) return points[0].value;
+  let lo = 0;
+  let hi = points.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (points[mid].beat <= beat) lo = mid;
+    else hi = mid - 1;
+  }
+  const a = points[lo];
+  const b = points[lo + 1];
+  if (!b || b.beat <= a.beat) return a.value;
+  const f = (beat - a.beat) / (b.beat - a.beat);
+  return a.value + (b.value - a.value) * f;
+}
+
+/** The slot's mixer lanes at a Routine beat (mixer domain — planner
+ * PlanAutomation shape, structurally): recorded steps hold, authored
+ * envelopes interpolate. */
 export function slotLanesAt(
   slot: PlannedRoutineSlot,
   beat: number
 ): { fader: number; eq: { low: number; mid: number; high: number }; filter: number } {
   const l = slot.lanes;
+  const value = (
+    control: 'fader' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter',
+    fallback: number
+  ): number =>
+    l.authored?.[control]
+      ? laneValueAtAuthored(l[control], beat, fallback)
+      : laneValueAt(l[control], beat, fallback);
   return {
-    fader: laneValueAt(l.fader, beat, l.defaults.fader),
+    fader: value('fader', l.defaults.fader),
     eq: {
-      low: laneValueAt(l.eqLow, beat, l.defaults.eq),
-      mid: laneValueAt(l.eqMid, beat, l.defaults.eq),
-      high: laneValueAt(l.eqHigh, beat, l.defaults.eq),
+      low: value('eqLow', l.defaults.eq),
+      mid: value('eqMid', l.defaults.eq),
+      high: value('eqHigh', l.defaults.eq),
     },
-    filter: laneValueAt(l.filter, beat, l.defaults.filter),
+    filter: value('filter', l.defaults.filter),
   };
 }
 
 // ── Deck allocation ──────────────────────────────────────────────────────
 
-/** Slot 0 adopts; each later slot takes the first deck in A→B→C→D order
- * that no earlier slot holds and no external occupant still needs at the
- * slot's entry instant. No mid-Routine release (v1). */
+/** Reuse breathing room (gh#170 pass 2): a freed deck is offered to a
+ * later entry only this many mix-seconds after its occupant's motion
+ * ended — the Conductor needs a beat to load/cue the incoming track. */
+export const ROUTINE_DECK_RELEASE_BUFFER_SEC = 2;
+
+export interface RoutineSlotSpan {
+  entryMixSec: number;
+  /** End of the slot's last recorded motion on the mix axis (deck
+   * occupancy end — the routine end for a slot that plays out). */
+  releaseMixSec: number;
+}
+
+export interface RoutineDeckAssignment {
+  deck: RoutineDeck | null;
+  /** See PlannedRoutineSlot.occupyFromMixSec. */
+  occupyFromMixSec: number;
+}
+
+/**
+ * Slot 0 adopts the sounding deck; each later slot takes the first deck
+ * in A→B→C→D order that is free at its entry — free meaning no external
+ * occupant still needs it AND no earlier slot's occupancy (entry →
+ * release + buffer) covers the entry instant. Decks RELEASE when their
+ * slot's recorded motion ends and are reused (gh#170 pass 2 — the old
+ * cardinality rule allocated n decks for n slots and flagged phantom
+ * overflow on any 5+ cast; a real recording was performed on 4 physical
+ * decks, so true concurrency can never exceed 4). Overflow (null) now
+ * means genuinely concurrent slots exceeded the deck count.
+ *
+ * (Recorded deck-literal reuse is NOT consulted: promotion re-addresses
+ * deck→slot and drops the literals — honoring the original reuse pattern
+ * would need promotion to carry a hint. Noted for the #161 stack.)
+ */
 export function allocateRoutineDecks(
-  entryMixSecs: number[],
+  spans: RoutineSlotSpan[],
   adoptedDeck: RoutineDeck,
   busy: { deck: RoutineDeck; untilMixSec: number }[]
-): (RoutineDeck | null)[] {
-  const held = new Set<RoutineDeck>([adoptedDeck]);
-  const out: (RoutineDeck | null)[] = [adoptedDeck];
-  for (let slot = 1; slot < entryMixSecs.length; slot++) {
-    const entry = entryMixSecs[slot];
-    const deck =
-      ROUTINE_DECK_ORDER.find(
-        (d) => !held.has(d) && !busy.some((b) => b.deck === d && b.untilMixSec > entry)
-      ) ?? null;
-    if (deck) held.add(deck);
-    out.push(deck);
+): RoutineDeckAssignment[] {
+  if (spans.length === 0) return [];
+  const out: RoutineDeckAssignment[] = [
+    { deck: adoptedDeck, occupyFromMixSec: -Infinity },
+  ];
+  // Per-deck timeline of claims made so far (slot index → span).
+  const claims = new Map<RoutineDeck, { entry: number; release: number }[]>();
+  claims.set(adoptedDeck, [
+    { entry: spans[0].entryMixSec, release: spans[0].releaseMixSec },
+  ]);
+  for (let slot = 1; slot < spans.length; slot++) {
+    const entry = spans[slot].entryMixSec;
+    let assigned: RoutineDeckAssignment = { deck: null, occupyFromMixSec: entry };
+    for (const d of ROUTINE_DECK_ORDER) {
+      if (busy.some((b) => b.deck === d && b.untilMixSec > entry)) continue;
+      const held = claims.get(d) ?? [];
+      const blocker = held.find(
+        (c) => c.release + ROUTINE_DECK_RELEASE_BUFFER_SEC > entry
+      );
+      if (blocker) continue;
+      const lastRelease = held.length > 0 ? held[held.length - 1].release : null;
+      assigned = {
+        deck: d,
+        // A reused deck belongs to the new slot the moment it freed (the
+        // replay parks it on the incoming cue there); a fresh deck is the
+        // slot's from the span start.
+        occupyFromMixSec: lastRelease !== null ? lastRelease : -Infinity,
+      };
+      held.push({ entry, release: spans[slot].releaseMixSec });
+      claims.set(d, held);
+      break;
+    }
+    out.push(assigned);
   }
   return out;
+}
+
+/** End beat of a trace's final RECORDED motion, clamped to the routine
+ * span: the segment walk's last advancing stretch, ending at the LAST
+ * SAMPLE — never the trailing extrapolation. A finished slot's trace
+ * simply stops (the deck leaves the ticks when unloaded/stopped), and
+ * buildSlotTrace marks the final point `moving` for the exit handoff's
+ * benefit — but occupancy is an evidence question: the deck is free
+ * after the last instant the recording SHOWS it advancing. (The exit
+ * slot's release is forced to the routine end by the caller — the
+ * boundary contract, not the trace.) */
+export function lastMotionEndBeat(trace: RoutineTracePoint[], durationBeats: number): number {
+  if (trace.length === 0) return 0;
+  let end = trace[0].beat;
+  for (let i = 0; i < trace.length - 1; i++) {
+    if (trace[i].moving) end = trace[i + 1].beat;
+  }
+  const last = trace[trace.length - 1];
+  if (last.moving) end = Math.max(end, last.beat);
+  return Math.min(end, durationBeats);
 }
 
 // ── The whole build ──────────────────────────────────────────────────────
 
 const clampPitch = (p: number): number =>
   Math.max(-MAX_PITCH_RANGE_PERCENT, Math.min(MAX_PITCH_RANGE_PERCENT, p));
+
+/** Re-skin a built PlannedRoutine with (possibly different) authored
+ * lane edits WITHOUT rebuilding traces/allocation — the editor's lane-
+ * drag hot path (gh#170 pass 2): trace identities survive, so waveform
+ * rendering stays untouched while a lane drags at ~60 Hz. */
+export function plannedWithLaneEdits(
+  planned: PlannedRoutine,
+  edits: import('../routines/routineDraft').RoutineEdits | null
+): PlannedRoutine {
+  if (!edits || Object.keys(edits.lanes).length === 0) return planned;
+  return {
+    ...planned,
+    slots: planned.slots.map((s) => ({
+      ...s,
+      lanes: withLaneEdits(s.lanes, edits, s.slot),
+    })),
+  };
+}
+
+/** Authored lane envelopes REPLACE the recorded step lane for their
+ * (slot, control) — the draft layer (gh#170 pass 2). */
+function withLaneEdits(
+  lanes: RoutineSlotLanes,
+  edits: import('../routines/routineDraft').RoutineEdits | null,
+  slot: number
+): RoutineSlotLanes {
+  if (!edits) return lanes;
+  const controls = ['fader', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
+  let out = lanes;
+  for (const control of controls) {
+    const pts = edits.lanes[`${slot}:${control}`];
+    if (!pts) continue;
+    if (out === lanes) out = { ...lanes, authored: { ...lanes.authored } };
+    out[control] = pts;
+    out.authored![control] = true;
+  }
+  return out;
+}
 
 export function buildPlannedRoutine(
   input: RoutinePlanInput,
@@ -484,37 +644,66 @@ export function buildPlannedRoutine(
   const entryMixSecs = input.entryOffsetsBeats.map((b) => ctx.mixStartSec + b * secPerBeat);
   const mixEndSec = ctx.mixStartSec + input.durationBeats * secPerBeat;
 
-  const decks = allocateRoutineDecks(entryMixSecs, ctx.adoptedDeck, ctx.busy);
-  const overflow = decks
-    .map((d, slot) => (d === null ? slot : null))
+  // Traces first (gh#170 pass 2): allocation needs each slot's RELEASE —
+  // the end of its recorded motion — so freed decks can serve later
+  // entries (concurrency-based allocation, not cast cardinality).
+  // Authored jump edits (the Routine editor's draft layer) apply here so
+  // every downstream consumer — allocation, jump scoping, the Conductor,
+  // the editor's audition — sees the edited trajectory.
+  const edits = input.edits ?? null;
+  const traces = input.cast.map((_, slot) => {
+    const raw = buildSlotTrace(
+      slotSamples(input.events, slot),
+      60 / ctx.trackBpms[slot],
+      input.entryOffsetsBeats[slot],
+      input.entryPositions[slot]
+    );
+    if (!edits) return raw;
+    const authored = edits.jumps.filter((j) => j.slot === slot);
+    const removed = edits.removedRecordedJumps.filter((r) => r.slot === slot);
+    if (authored.length === 0 && removed.length === 0) return raw;
+    return applyJumpEditsToTrace(raw, authored, removed, input.durationBeats);
+  });
+  const releaseMixSecs = traces.map((trace, slot) =>
+    slot === n - 1
+      ? mixEndSec // the exit slot holds its deck to the boundary contract
+      : ctx.mixStartSec + lastMotionEndBeat(trace, input.durationBeats) * secPerBeat
+  );
+
+  const assignments = allocateRoutineDecks(
+    entryMixSecs.map((entryMixSec, slot) => ({
+      entryMixSec,
+      releaseMixSec: releaseMixSecs[slot],
+    })),
+    ctx.adoptedDeck,
+    ctx.busy
+  );
+  const overflow = assignments
+    .map((a, slot) => (a.deck === null ? slot : null))
     .filter((s): s is number => s !== null);
   if (overflow.length > 0) {
     warnings.push({
       severity: 'error',
       kind: 'routine-deck-overflow',
-      message: `routine needs ${n} concurrent decks but only ${n - overflow.length} are free — slot${overflow.length > 1 ? 's' : ''} ${overflow.join(', ')} cannot sound`,
+      message: `routine peaks above 4 concurrent slots — slot${overflow.length > 1 ? 's' : ''} ${overflow.join(', ')} cannot sound (no deck free at entry)`,
     });
   }
 
   const slots: PlannedRoutineSlot[] = input.cast.map((trackId, slot) => {
     const bpm = ctx.trackBpms[slot];
-    const syncRate = 60 / bpm;
     const basePitchPercent = clampPitch((ctx.targetBpm / bpm - 1) * 100);
-    const trace = buildSlotTrace(
-      slotSamples(input.events, slot),
-      syncRate,
-      input.entryOffsetsBeats[slot],
-      input.entryPositions[slot]
-    );
+    const trace = traces[slot];
     return {
       slot,
       trackId,
-      deck: decks[slot],
+      deck: assignments[slot].deck,
+      occupyFromMixSec: assignments[slot].occupyFromMixSec,
+      releaseMixSec: releaseMixSecs[slot],
       entryMixSec: entryMixSecs[slot],
       entryTrackSec: input.entryPositions[slot],
       basePitchPercent,
       trace,
-      lanes: buildSlotLanes(input.events, slot, slot === 0),
+      lanes: withLaneEdits(buildSlotLanes(input.events, slot, slot === 0), edits, slot),
       jumpMixSecs: trace
         .filter((p) => p.jump)
         .map((p) => ctx.mixStartSec + p.beat * secPerBeat)
@@ -623,4 +812,20 @@ export function routineSlotStateAt(
     playing: true,
     pitchPercent: clampPitch((deckRate - 1) * 100),
   };
+}
+
+/** The slot occupying `deck` at a mix instant (reuse-aware, gh#170
+ * pass 2): the LAST slot in entry order whose occupancy has opened.
+ * Null when the routine never allocated the deck. */
+export function slotOccupyingDeckAt(
+  routine: PlannedRoutine,
+  deck: RoutineDeck,
+  mixTime: number
+): PlannedRoutineSlot | null {
+  let occupant: PlannedRoutineSlot | null = null;
+  for (const slot of routine.slots) {
+    if (slot.deck !== deck) continue;
+    if (mixTime >= slot.occupyFromMixSec || occupant === null) occupant = slot;
+  }
+  return occupant;
 }

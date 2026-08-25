@@ -129,6 +129,18 @@
   color: #1c0316;
 }
 
+/* Promoted ◆ row: the star opens the Routine editor (gh#170). */
+.take-open-routine {
+  background: none;
+  border: none;
+  color: #ff00c8;
+  cursor: pointer;
+  font-size: 12px;
+}
+.take-open-routine:hover {
+  text-shadow: 0 0 6px #ff00c8;
+}
+
 /* "View in Session" jump (sessions 04): the timeline glyph, cyan accent. */
 .take-view-session {
   background: none;

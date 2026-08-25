@@ -1201,6 +1201,12 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
       const beat = (mixTime - routine.mixStartSec) / routine.secPerBeat;
       for (const slot of routine.slots) {
         if (slot.deck === null) continue;
+        // Deck REUSE inside the span (gh#170 pass 2): a freed deck serves
+        // a later entry. Before a slot's occupancy opens, the deck's
+        // verdict belongs to its PRIOR occupant — slots iterate in entry
+        // order, so the in-occupancy write below overwrites correctly
+        // once mixTime passes each occupant's occupyFrom.
+        if (mixTime < slot.occupyFromMixSec) continue;
         const s = routineSlotStateAt(routine, slot, mixTime);
         const entryIndex = routine.startEntryIndex + slot.slot;
         // A slot's deck may still carry an EXTERNAL occupant early in the
@@ -1209,8 +1215,18 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
         // deck is upstream's business: the head's entry blend fades the
         // outgoing per its own window automation, never a hard stop
         // (#161 finding 1). The override claims the deck at its release.
+        // SAME-ROUTINE siblings are NOT external (gh#170 pass 2 reuse):
+        // a finished slot's trace extrapolates `playing` forever (the
+        // exit-handoff artifact), which would block its deck's next
+        // tenant here — occupancy alone decides the intra-routine
+        // handoff.
         const cur = state.decks[slot.deck];
-        if (cur.playing && cur.entryIndex !== null && cur.entryIndex !== entryIndex) continue;
+        const curIsSibling =
+          cur.entryIndex !== null &&
+          cur.entryIndex >= routine.startEntryIndex &&
+          cur.entryIndex < routine.startEntryIndex + routine.slots.length;
+        if (!curIsSibling && cur.playing && cur.entryIndex !== null && cur.entryIndex !== entryIndex)
+          continue;
         state.decks[slot.deck] = {
           entryIndex,
           trackId: slot.trackId,

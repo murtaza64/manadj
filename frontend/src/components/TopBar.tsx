@@ -15,12 +15,13 @@ import { isVisualizerOpen, toggleVisualizer } from '../visualizer/windowControl'
 import { VisualizerControlModal } from './VisualizerControlModal';
 import './TopBar.css';
 
-export type AppMode = 'library' | 'performance' | 'transition' | 'history' | 'sync' | 'styles' | 'jog-tune';
+export type AppMode = 'library' | 'performance' | 'transition' | 'routine' | 'history' | 'sync' | 'styles' | 'jog-tune';
 
 const MODES: { id: AppMode; icon: string; title: string }[] = [
   { id: 'library', icon: '≡', title: 'Library' },
   { id: 'performance', icon: '▸', title: 'Performance' },
   { id: 'transition', icon: '⋈', title: 'Transition editor' },
+  { id: 'routine', icon: '◆', title: 'Routine editor' },
   { id: 'history', icon: '↻', title: 'Transition history' },
   { id: 'sync', icon: '⇄', title: 'Sync' },
   { id: 'styles', icon: '◔', title: 'Waveform styles' },

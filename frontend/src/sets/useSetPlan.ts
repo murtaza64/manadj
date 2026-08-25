@@ -27,6 +27,7 @@ import {
   subscribePairStore,
 } from '../editor/pairStore';
 import type { HotCue, Track } from '../types';
+import { parseEdits } from '../routines/routineDraft';
 import { resolvePlanPins } from './adjacency';
 import { getRoutineCast, primeRoutineCasts } from './routineCasts';
 
@@ -127,6 +128,9 @@ function useRoutinePinReplay(entries: SetEntryLocal[] | undefined): {
           entryPositions: d.entry_positions,
           durationBeats: d.duration_beats,
           events: d.events,
+          // The Routine editor's authored edits (gh#170 pass 2) ride
+          // into set replay too — one build, every consumer.
+          edits: d.edits ? parseEdits(d.edits) : null,
         },
       });
     });

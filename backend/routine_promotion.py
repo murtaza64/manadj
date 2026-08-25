@@ -435,3 +435,76 @@ def promote(
         residencies=residencies,
         dropped_events=dropped,
     )
+
+
+# ── boundary trim + re-promotion (gh#170) ───────────────────────────────
+
+
+def _invert_beat_clock(beat_at, lo: float, hi: float, target_beat: float) -> float:
+    """Capture-seconds instant where the (monotone) beat clock crosses
+    `target_beat` — bisection over the window."""
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if beat_at(mid) < target_beat:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def retrim(
+    events: Sequence[dict[str, Any]],
+    cast: Sequence[int],
+    window_start_s: float,
+    window_end_s: float,
+    entry_offsets: Sequence[float],
+    grids: dict[int, list[dict[str, Any]]],
+    trim_start_beats: float,
+    trim_end_beats: float,
+) -> PromotedRoutine:
+    """Boundary trim + mechanical re-promotion (the v1 review affordance,
+    ADR 0035 / gh#170): narrow the ORIGINAL take window by beat amounts
+    from either edge — the editor's axis is the Routine clock, so trims
+    arrive in beats and invert here through the same beat clock promotion
+    built — then re-run `promote` over the narrowed window. The raw take
+    is untouched (evidence doctrine); trims are inward-only (the recording
+    is the outer bound). A slot whose entry falls past the new end drops
+    from the cast (the confirm flow's rule); one entering before the new
+    start rebases to offset 0 (playing at window open). n ≥ 3 holds.
+    """
+    if trim_start_beats < 0 or trim_end_beats < 0:
+        raise PromotionError("trim amounts must be ≥ 0 (inward-only)")
+    events = sorted(events, key=lambda e: e.get("t", 0))
+    residencies = map_slots(events, cast, window_start_s, window_end_s, entry_offsets)
+    beat_at = build_beat_clock(events, residencies, grids, window_start_s, window_end_s)
+    total = beat_at(window_end_s)
+    b0 = trim_start_beats
+    b1 = total - trim_end_beats
+    if b1 - b0 <= 1e-6:
+        raise PromotionError("trim collapses the window")
+    s0 = (
+        window_start_s
+        if b0 <= 0
+        else _invert_beat_clock(beat_at, window_start_s, window_end_s, b0)
+    )
+    s1 = (
+        window_end_s
+        if trim_end_beats <= 0
+        else _invert_beat_clock(beat_at, window_start_s, window_end_s, b1)
+    )
+    if s1 - s0 <= 0:
+        raise PromotionError("trim collapses the window")
+    new_cast: list[int] = []
+    new_offsets: list[float] = []
+    for slot, tid in enumerate(cast):
+        entry_t = window_start_s + entry_offsets[slot]
+        if entry_t >= s1:
+            continue  # trimmed off the end — the slot leaves the cast
+        new_cast.append(tid)
+        new_offsets.append(max(0.0, entry_t - s0))
+    if len(new_cast) < 3:
+        raise PromotionError(
+            "trim leaves fewer than 3 cast slots — a 2-cast routine is a "
+            "Transition (ADR 0035)"
+        )
+    return promote(events, new_cast, s0, s1, new_offsets, grids)

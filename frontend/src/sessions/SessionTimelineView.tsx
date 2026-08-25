@@ -29,6 +29,7 @@ import { requestTakeReview } from '../capture/takeReview';
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
 import { useToast } from '../components/Toast';
+import { openCandidateInEditor, openRoutineTakeInEditor } from '../routines/openFlow';
 import { isTypingTarget } from '../components/performance/performanceKeys';
 import { beatgridQueryOptions } from '../hooks/useBeatgridData';
 import type { BeatgridResponse } from '../types';
@@ -893,6 +894,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     (rt: RoutineTakeRowWire) => setSelection({ kind: 'routineTake', take: rt }),
     []
   );
+
   const onGapToggle = useCallback(
     (idx: number) =>
       setExpandedGaps((prev) => {
@@ -913,6 +915,36 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
 
   // ── Candidate confirm flow (ADR 0035, routines 158) ──────────────────
   const queryClient = useQueryClient();
+
+  // Region → Routine editor (gh#170 pass 2 directive 4): the ✎ button on
+  // a detected region runs its tier's open flow (candidate: confirm +
+  // promote — the deliberate act; take: promote if needed) and the app
+  // flips to the editor.
+  const onOpenCandidateInEditor = useCallback(
+    async (c: RoutineCandidateWire) => {
+      try {
+        await openCandidateInEditor(c);
+        void queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+        void queryClient.invalidateQueries({ queryKey: ['routines'] });
+        void queryClient.invalidateQueries({ queryKey: ['routine-candidates', session.uuid] });
+      } catch (err) {
+        toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [queryClient, session.uuid, toast]
+  );
+  const onOpenRoutineTakeInEditor = useCallback(
+    async (rt: RoutineTakeRowWire) => {
+      try {
+        await openRoutineTakeInEditor(rt);
+        void queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+        void queryClient.invalidateQueries({ queryKey: ['routines'] });
+      } catch (err) {
+        toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [queryClient, session.uuid, toast]
+  );
   const axisRef = useRef(axis);
   axisRef.current = axis;
   const trimDraggedRef = useRef(false);
@@ -1274,6 +1306,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   onTakeHover={onTakeHover}
                   onCandidateClick={onCandidateClick}
                   onRoutineTakeClick={onRoutineTakeClick}
+                  onOpenCandidateInEditor={onOpenCandidateInEditor}
+                  onOpenRoutineTakeInEditor={onOpenRoutineTakeInEditor}
                   onGapToggle={onGapToggle}
                 />
                 <SceneOverlay
@@ -1347,6 +1381,8 @@ interface SceneProps {
   onTakeHover(take: TakeRowWire | null): void;
   onCandidateClick(candidate: RoutineCandidateWire): void;
   onRoutineTakeClick(take: RoutineTakeRowWire): void;
+  onOpenCandidateInEditor(candidate: RoutineCandidateWire): void | Promise<void>;
+  onOpenRoutineTakeInEditor(take: RoutineTakeRowWire): void | Promise<void>;
   onGapToggle(idx: number): void;
 }
 
@@ -1376,6 +1412,8 @@ const TimelineScene = memo(function TimelineScene({
   onTakeHover,
   onCandidateClick,
   onRoutineTakeClick,
+  onOpenCandidateInEditor,
+  onOpenRoutineTakeInEditor,
   onGapToggle,
 }: SceneProps) {
   const X = (t: number) => axis.tToPx(t);
@@ -1709,7 +1747,7 @@ const TimelineScene = memo(function TimelineScene({
               onCandidateClick(c);
             }}
           >
-            <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm`}</title>
+            <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm (with trim), ✎ to open in the Routine editor`}</title>
             <rect x={x0} y={lanesTop} width={x1 - x0} height={lanesBottom - lanesTop} className="stl-cand-band" />
             <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} className="stl-cand-chip-rect" />
             {x1 - x0 > 90 ? (
@@ -1720,6 +1758,23 @@ const TimelineScene = memo(function TimelineScene({
               <text x={x0 + 4} y={textY}>
                 ⧉
               </text>
+            )}
+            {/* Per-region editor open (gh#170 pass 2 directive 4):
+                confirm-then-promote-then-open — the deliberate act. */}
+            {x1 - x0 > 40 && (
+              <g
+                className="stl-region-edit"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onOpenCandidateInEditor(c);
+                }}
+              >
+                <title>Open in the Routine editor (confirms this candidate + promotes)</title>
+                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} rx={3} />
+                <text x={x1 - 10} y={textY} textAnchor="middle">
+                  ✎
+                </text>
+              </g>
             )}
           </g>
         );
@@ -1746,7 +1801,7 @@ const TimelineScene = memo(function TimelineScene({
               onRoutineTakeClick(rt);
             }}
           >
-            <title>{`Routine Take · ${chain}${rt.promoted_routine_uuid ? ' · promoted ★' : ''}`}</title>
+            <title>{`Routine Take · ${chain}${rt.promoted_routine_uuid ? ' · promoted ★' : ''} — ✎ opens the Routine editor`}</title>
             <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} />
             {x1 - x0 > 90 ? (
               <text x={x0 + 5} y={textY}>
@@ -1756,6 +1811,25 @@ const TimelineScene = memo(function TimelineScene({
               <text x={x0 + 4} y={textY}>
                 ◆
               </text>
+            )}
+            {x1 - x0 > 40 && (
+              <g
+                className="stl-region-edit dark"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onOpenRoutineTakeInEditor(rt);
+                }}
+              >
+                <title>
+                  {rt.promoted_routine_uuid
+                    ? 'Open its Routine in the Routine editor'
+                    : 'Promote + open in the Routine editor'}
+                </title>
+                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} rx={3} />
+                <text x={x1 - 10} y={textY} textAnchor="middle">
+                  ✎
+                </text>
+              </g>
             )}
           </g>
         );

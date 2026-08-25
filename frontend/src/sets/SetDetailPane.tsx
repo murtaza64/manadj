@@ -59,6 +59,7 @@ import {
   type PairStore,
 } from '../editor/pairStore';
 import { requestPairEdit } from '../editor/openPair';
+import { requestRoutineEdit } from '../routines/openRoutine';
 import {
   clearFreshTake,
   freshTakeChip,
@@ -282,11 +283,12 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         bTrackId
       );
       const view = adjacencyView(pin, transitions, pairTakes);
-      // Routine pins have no editor click-through yet (replay/review is
-      // sets #159; the future Routine editor generalizes the kind-aware
-      // Transition editor). Takes ride requestPairEdit's takeUuid — the
-      // unified evidence switcher (mix-editor #167).
-      if (view.status === 'routine') return;
+      if (view.status === 'routine') {
+        // A routine pin opens the Routine editor (gh#170) — the covered
+        // span is one artifact, not a pair; the pin's uuid IS the Routine.
+        if (pin?.kind === 'routine') requestRoutineEdit({ routineUuid: pin.uuid });
+        return;
+      }
       requestPairEdit({
         aTrackId,
         bTrackId,
@@ -1442,6 +1444,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                       label={routineRowLabel(cov, routineRows, (id) =>
                         trackMap?.get(id)?.title || `Track ${id}`
                       )}
+                      routineUuid={cov.uuid}
                       coversCount={cov.cast.length - 1}
                       exitLabel={
                         trackMap?.get(cov.cast[cov.cast.length - 1])?.title ||
@@ -2221,6 +2224,7 @@ function routineRowLabel(
 const RoutinePinRow = memo(function RoutinePinRow({
   index,
   label,
+  routineUuid,
   coversCount,
   exitLabel,
   onOpenPicker,
@@ -2228,6 +2232,7 @@ const RoutinePinRow = memo(function RoutinePinRow({
   /** This adjacency's index in the displayed order. */
   index: number;
   label: string;
+  routineUuid: string;
   /** Adjacencies the Routine covers (n − 1). */
   coversCount: number;
   exitLabel: string;
@@ -2254,6 +2259,18 @@ const RoutinePinRow = memo(function RoutinePinRow({
         style={{ color: ROUTINE_COLOR, fontWeight: 800 }}
       >
         ▾ ◆ ROUTINE {label}
+      </button>
+      <button
+        className="set-chip-btn"
+        data-routine-edit
+        onClick={(e) => {
+          e.stopPropagation();
+          requestRoutineEdit({ routineUuid });
+        }}
+        title="Open this Routine in the Routine editor (gh#170) — slot view, replay audition, boundary trim"
+        style={{ color: ROUTINE_COLOR }}
+      >
+        ⧉ edit
       </button>
       <span style={{ color: 'var(--subtext0)' }}>
         covers {coversCount} adjacencies · exits with {exitLabel}

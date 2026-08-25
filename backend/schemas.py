@@ -529,13 +529,31 @@ class RoutineRow(BaseModel):
 
 
 class RoutineDetail(RoutineRow):
-    """One Routine with its slot-addressed, beat-domain event replay."""
+    """One Routine with its slot-addressed, beat-domain event replay and
+    the editor's authored edits layer (gh#170 pass 2; null = unedited)."""
     events: list[dict]
+    edits: dict | None = None
+
+
+class RoutineEditsPut(BaseModel):
+    """Replace a Routine's authored edits (gh#170 pass 2): slot-indexed
+    lane envelopes + Jump events, beat-domain. Stored opaquely (the
+    events_json posture — the frontend's routineDraft parses tolerantly);
+    null clears every edit."""
+    edits: dict | None = None
 
 
 class RoutinePatch(BaseModel):
     """Rename a Routine (the only mutable field pre-editor)."""
     name: str | None = None
+
+
+class RoutineRetrim(BaseModel):
+    """Boundary trim + re-promotion (gh#170): beat amounts to shave off
+    either edge of the origin take's window — inward-only, on the Routine
+    clock (the editor's axis)."""
+    trim_start_beats: float = Field(ge=0)
+    trim_end_beats: float = Field(ge=0)
 
 
 # Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)

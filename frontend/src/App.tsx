@@ -24,6 +24,8 @@ import { VisualizerBridge } from './components/VisualizerBridge';
 import { ConductorPlanFeed } from './sets/ConductorPlanFeed';
 import { SetSpaceTransport } from './sets/SetSpaceTransport';
 import TransitionEditor from './editor/TransitionEditor';
+import RoutineEditorView from './routines/RoutineEditorView';
+import { OPEN_ROUTINE_EVENT } from './routines/openRoutine';
 import { TakeHistoryView } from './components/history/TakeHistoryView';
 import { OPEN_SESSION_EVENT } from './sessions/openSession';
 import { KeepAliveView } from './contexts/KeepAliveView';
@@ -43,7 +45,7 @@ function AnalysisPendingBridge() {
   return null;
 }
 
-const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'history', 'sync', 'styles', 'jog-tune'];
+const MODE_IDS: AppMode[] = ['library', 'performance', 'transition', 'routine', 'history', 'sync', 'styles', 'jog-tune'];
 
 /** Session-state persistence of the top-panel mode: reopen where you were. */
 const MODE_KEY = 'manadj-app-mode';
@@ -115,6 +117,14 @@ function App() {
     return () => window.removeEventListener(OPEN_PAIR_EVENT, onOpenPair);
   }, []);
 
+  // A routine-edit request (Set routine pin / history ◆ row, gh#170)
+  // opens the Routine editor; the mounted editor consumes it.
+  useEffect(() => {
+    const onOpenRoutine = () => setView('routine');
+    window.addEventListener(OPEN_ROUTINE_EVENT, onOpenRoutine);
+    return () => window.removeEventListener(OPEN_ROUTINE_EVENT, onOpenRoutine);
+  }, []);
+
   // A Session-moment request (history's "view in Session", sessions 04)
   // opens the Library — Sessions live there now (sidebar section + pane);
   // the mounted Library consumes the selection from the session store.
@@ -181,6 +191,9 @@ function App() {
               </KeepAliveView>
               <KeepAliveView active={view === 'transition'}>
                 <TransitionEditor />
+              </KeepAliveView>
+              <KeepAliveView active={view === 'routine'}>
+                <RoutineEditorView />
               </KeepAliveView>
               {view === 'history' ? (
                 <TakeHistoryView />
