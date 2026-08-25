@@ -8,7 +8,6 @@ import { describe, expect, it } from 'vitest';
 import { DECK_COLORS } from '../theme/deckColors';
 import { DECK_LANE_ORDER, LANE_COLORS, LANE_LABELS } from './laneColors';
 import { LANE_IDS } from './mixModel';
-import type { LaneId } from './mixModel';
 
 /** '#rrggbb' → [hue 0..360, saturation 0..1] (lightness unused). */
 function hueSat(hex: string): [number, number] {
