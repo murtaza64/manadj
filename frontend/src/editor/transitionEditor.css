@@ -243,15 +243,21 @@
   background: var(--surface1, #45475a);
 }
 
+/* FIXED GEOMETRY (gh#167 feedback): every switcher segment has a set
+   width so switching evidence kinds (name ↔ take, ▶ ↔ +, del ↔ sure?)
+   never moves a button. */
 .editor-switcher-name {
-  max-width: 140px;
+  width: 150px;
+  flex: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .editor-switcher-input {
-  width: 120px;
+  width: 150px;
+  flex: none;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   color: var(--text, #cdd6f4);
@@ -259,6 +265,12 @@
   font-weight: bold;
   padding: 0 6px;
   outline: none;
+}
+
+.editor-switcher button.editor-switcher-nav {
+  width: 22px;
+  flex: none;
+  padding: 0;
 }
 
 /* ★ renders smaller than other glyphs at the switcher's 11px — bump the
@@ -278,10 +290,26 @@
 .editor-switcher-pos {
   display: flex;
   align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  flex: none;
+  box-sizing: border-box;
   padding: 0 5px;
   font-size: 10px;
   font-family: monospace;
   color: var(--subtext0, #a6adc8);
+}
+
+.editor-switcher button.editor-switcher-star {
+  width: 26px;
+  flex: none;
+  padding: 0;
+}
+
+.editor-switcher button.editor-switcher-del {
+  width: 42px;
+  flex: none;
+  padding: 0;
 }
 
 .editor-switcher-del.confirming,
@@ -289,6 +317,19 @@
 .editor-switcher-del.confirming:active:not(:disabled) {
   background: var(--red, #f38ba8);
   color: var(--base, #1e1e2e);
+}
+
+/* Evidence switcher (gh#167): only the CURRENT evidence renders as the
+   name chip; the ▾ opens the full evidence dropdown (ContextMenu). A
+   loaded Take reads mauve (the Set view's ● take color). */
+.editor-switcher-name.take {
+  color: var(--mauve, #cba6f7);
+}
+
+.editor-switcher button.editor-switcher-browse {
+  width: 18px;
+  flex: none;
+  padding: 0;
 }
 
 .editor-fit {
@@ -501,14 +542,21 @@
 }
 
 /* ── Take review banner (transition-takes 03): a row of the center
-   panel — never a top strip (it made the editor overflow). ── */
+   panel — never a top strip (it made the editor overflow). The row is
+   ALWAYS mounted with its space reserved (gh#167 feedback): entering/
+   leaving take review toggles visibility, never geometry. ── */
 .editor-take-banner {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
+  min-height: 22px;
   font-size: 12px;
   color: #bff7ff;
+}
+
+.editor-take-banner.hidden {
+  visibility: hidden;
 }
 
 .editor-take-banner button {
