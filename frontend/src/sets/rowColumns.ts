@@ -195,6 +195,26 @@ export function trimOffsetFromDb(db: number): number {
   return db / TRIM_DB_PER_UNIT;
 }
 
+/** Trim drag geometry (sets #183): pixels of vertical travel per dB.
+ * 20 px/dB puts the full ±12 dB throw at ~480px and a typical ±3 dB
+ * ride within a comfortable wrist move. */
+export const TRIM_DRAG_PX_PER_DB = 20;
+/** The drag's dB granularity (sets #183): values land on 0.1 dB ticks —
+ * exactly the display resolution, so the readout advances one tick per
+ * 2px and never wobbles between roundings. */
+export const TRIM_DRAG_DB_STEP = 0.1;
+
+/** Dragged trim value (knob units) from the TOTAL pointer delta since
+ * pointer-down (sets #183): deterministic — the same pixel always reads
+ * the same value within a drag; no per-event accumulation to drift.
+ * `dyPx` is positive for upward travel (louder). Quantized to
+ * TRIM_DRAG_DB_STEP ticks. */
+export function trimDragValue(startTrim: number, dyPx: number): number {
+  const db = trimOffsetDb(startTrim) + dyPx / TRIM_DRAG_PX_PER_DB;
+  const stepped = Math.round(db / TRIM_DRAG_DB_STEP) * TRIM_DRAG_DB_STEP;
+  return trimOffsetFromDb(stepped);
+}
+
 /** Trim cell text: the offset in dB, signed when non-neutral ("+2.4",
  * "−12.0"); neutral reads "0.0" (rendered dim by the cell). */
 export function fmtTrimDb(trim: number): string {
