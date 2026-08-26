@@ -120,11 +120,11 @@ describe('sidebar structure (gh#174)', () => {
   it('renders pinned All tracks, one create button, and the three sections', async () => {
     const host = await mount();
     expect(row(host, 'view:all')).not.toBeNull();
-    expect(['tracks', 'playlists', 'sets'].map((id) => header(host, id)?.textContent)).toEqual([
-      '▾Tracks',
-      '▾Playlists',
-      '▾Sets',
-    ]);
+    // Section order (gh#189): Sets above Playlists.
+    const headers = Array.from(
+      host.querySelectorAll<HTMLElement>('[data-section-header]')
+    ).map((el) => el.textContent);
+    expect(headers).toEqual(['▾Tracks', '▾Sets', '▾Playlists']);
     // Section rows all present, in their sections.
     const expected = [
       'view:unprocessed',
@@ -142,6 +142,15 @@ describe('sidebar structure (gh#174)', () => {
     expect(buttons).toContain('+ New…');
     expect(buttons).not.toContain('+ New Playlist');
     expect(buttons).not.toContain('+ New Set');
+    // "+ New…" sits at the bottom of the sidebar (gh#189): every section
+    // header precedes it in document order.
+    const newButton = createButton(host);
+    for (const id of ['tracks', 'sets', 'playlists']) {
+      expect(
+        header(host, id)!.compareDocumentPosition(newButton) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    }
   });
 });
 
