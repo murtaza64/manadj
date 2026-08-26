@@ -31,14 +31,18 @@ import {
   getSetEntries,
   getSetSelection,
   insertTrackIntoSet,
+  pinRoutine,
   removeTracksFromSet,
   reorderSetEntries,
   replaceSetEntries,
   repointTakePinsLocal,
   setAdjacencyPin,
   setAdjacencyPins,
+  setEntryTrim,
   setSetSelection,
+  unpinRoutine,
 } from './setStore';
+import { _resetRoutineCastsForTests } from './routineCasts';
 
 const mocked = api as unknown as {
   sets: { get: ReturnType<typeof vi.fn>; replaceEntries: ReturnType<typeof vi.fn> };
@@ -48,6 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocked.sets.replaceEntries.mockResolvedValue({});
   _resetSetStoreForTests();
+  _resetRoutineCastsForTests();
 });
 
 describe('repointTakePinsLocal', () => {
@@ -120,9 +125,9 @@ describe('dormancy wiring (sets 07)', () => {
     expect(mocked.sets.replaceEntries).toHaveBeenLastCalledWith(
       1,
       [
-        { track_id: 11, pin_kind: null, pin_uuid: null },
-        { track_id: 10, pin_kind: null, pin_uuid: null },
-        { track_id: 12, pin_kind: null, pin_uuid: null },
+        { track_id: 11, pin_kind: null, pin_uuid: null, trim: 0 },
+        { track_id: 10, pin_kind: null, pin_uuid: null, trim: 0 },
+        { track_id: 12, pin_kind: null, pin_uuid: null, trim: 0 },
       ],
       [
         { a_track_id: 10, b_track_id: 11, pin_kind: 'transition', pin_uuid: 'tr-1' },
@@ -275,8 +280,8 @@ describe('dormancy wiring (sets 07)', () => {
     await ensureSetEntriesLoaded(1);
 
     expect(getSetEntries(1)).toEqual([
-      { trackId: 10, pin: { kind: 'take', uuid: 'tk-1' } },
-      { trackId: 11, pin: null },
+      { trackId: 10, pin: { kind: 'take', uuid: 'tk-1' }, trim: 0 },
+      { trackId: 11, pin: null, trim: 0 },
     ]);
     expect(dormantOf(1)).toEqual([]);
     // Local-only: normalization never pushes.
@@ -423,5 +428,188 @@ describe('degradeDeletedPinsLocal (sets 12)', () => {
     expect(getSetEntries(2)).toEqual([{ trackId: 10, pin: null }]);
     // Local-only: the deletion endpoint already nulled the rows.
     expect(mocked.sets.replaceEntries).not.toHaveBeenCalled();
+  });
+});
+
+describe('per-entry trim (sets #164)', () => {
+  it('setEntryTrim: optimistic local update + wholesale PUT carrying trim', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: null },
+      { trackId: 11, pin: null },
+    ]);
+    mocked.sets.replaceEntries.mockClear();
+
+    setEntryTrim(1, 10, 0.125);
+
+    expect(getSetEntries(1)![0].trim).toBe(0.125);
+    expect(getSetEntries(1)![1].trim).toBeUndefined();
+    expect(mocked.sets.replaceEntries).toHaveBeenCalledWith(
+      1,
+      [
+        { track_id: 10, pin_kind: null, pin_uuid: null, trim: 0.125 },
+        { track_id: 11, pin_kind: null, pin_uuid: null, trim: 0 },
+      ],
+      []
+    );
+  });
+
+  it('commit: false streams locally without a PUT (drag), the release commits once', () => {
+    replaceSetEntries(1, [{ trackId: 10, pin: null }]);
+    mocked.sets.replaceEntries.mockClear();
+
+    setEntryTrim(1, 10, 0.05, { commit: false });
+    setEntryTrim(1, 10, 0.1, { commit: false });
+    expect(getSetEntries(1)![0].trim).toBe(0.1);
+    expect(mocked.sets.replaceEntries).not.toHaveBeenCalled();
+
+    setEntryTrim(1, 10, 0.1, { commit: true });
+    expect(mocked.sets.replaceEntries).toHaveBeenCalledTimes(1);
+  });
+
+  it('clamps to the knob (±0.5 offset)', () => {
+    replaceSetEntries(1, [{ trackId: 10, pin: null }]);
+    setEntryTrim(1, 10, 0.9);
+    expect(getSetEntries(1)![0].trim).toBe(0.5);
+    setEntryTrim(1, 10, -0.9);
+    expect(getSetEntries(1)![0].trim).toBe(-0.5);
+  });
+
+  it('trim rides its track through reorders (dormancy reconcile carries it)', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: { kind: 'transition', uuid: 'tr-1' }, trim: 0.2 },
+      { trackId: 11, pin: null, trim: -0.1 },
+      { trackId: 12, pin: null },
+    ]);
+
+    reorderSetEntries(1, [11, 10, 12]);
+
+    expect(getSetEntries(1)).toEqual([
+      { trackId: 11, pin: null, trim: -0.1 },
+      { trackId: 10, pin: null, trim: 0.2 },
+      { trackId: 12, pin: null, trim: undefined },
+    ]);
+  });
+
+  it('loads trim from the wire, defaulting absent to neutral 0', async () => {
+    mocked.sets.get.mockResolvedValue({
+      id: 3,
+      entries: [
+        { track_id: 10, position: 0, pin_kind: null, pin_uuid: null, trim: 0.25 },
+        { track_id: 11, position: 1, pin_kind: null, pin_uuid: null },
+      ],
+      dormant: [],
+    });
+
+    await ensureSetEntriesLoaded(3);
+
+    expect(getSetEntries(3)).toEqual([
+      { trackId: 10, pin: null, trim: 0.25 },
+      { trackId: 11, pin: null, trim: 0 },
+    ]);
+  });
+});
+
+describe('pinRoutine / unpinRoutine (sets 160)', () => {
+  it('pinRoutine shadows the displaced pin as the head pair Dormant memory', () => {
+    replaceSetEntries(1, [
+      { trackId: 1, pin: { kind: 'transition', uuid: 'tr-old' } },
+      { trackId: 2, pin: null },
+      { trackId: 3, pin: null },
+    ]);
+    pinRoutine(1, 1, 'r1', [1, 2, 3]);
+    expect(getSetEntries(1)![0].pin).toEqual({ kind: 'routine', uuid: 'r1' });
+    expect(getSetDormantPins(1)).toEqual([
+      { aTrackId: 1, bTrackId: 2, pin: { kind: 'transition', uuid: 'tr-old' } },
+    ]);
+    // The PUT carried the routine pin + the shadow.
+    const [, items, dormant] = mocked.sets.replaceEntries.mock.lastCall!;
+    expect(items[0]).toEqual({ track_id: 1, pin_kind: 'routine', pin_uuid: 'r1', trim: 0 });
+    expect(dormant).toEqual([
+      { a_track_id: 1, b_track_id: 2, pin_kind: 'transition', pin_uuid: 'tr-old' },
+    ]);
+  });
+
+  it('pinRoutine on an unpinned head shadows nothing', () => {
+    replaceSetEntries(1, [
+      { trackId: 1, pin: null },
+      { trackId: 2, pin: null },
+      { trackId: 3, pin: null },
+    ]);
+    pinRoutine(1, 1, 'r1', [1, 2, 3]);
+    expect(getSetEntries(1)![0].pin).toEqual({ kind: 'routine', uuid: 'r1' });
+    expect(getSetDormantPins(1)).toEqual([]);
+  });
+
+  it('unpinRoutine restores the shadowed pin immediately', () => {
+    replaceSetEntries(1, [
+      { trackId: 1, pin: { kind: 'transition', uuid: 'tr-old' } },
+      { trackId: 2, pin: null },
+      { trackId: 3, pin: null },
+    ]);
+    pinRoutine(1, 1, 'r1', [1, 2, 3]);
+    unpinRoutine(1, 1);
+    expect(getSetEntries(1)![0].pin).toEqual({ kind: 'transition', uuid: 'tr-old' });
+    expect(getSetDormantPins(1)).toEqual([]);
+  });
+
+  it('covered interior pins survive pinRoutine untouched (shadowed at read time)', () => {
+    replaceSetEntries(1, [
+      { trackId: 1, pin: null },
+      { trackId: 2, pin: { kind: 'take', uuid: 'tk-i' } },
+      { trackId: 3, pin: null },
+      { trackId: 4, pin: null },
+    ]);
+    pinRoutine(1, 1, 'r4', [1, 2, 3, 4]);
+    expect(getSetEntries(1)![1].pin).toEqual({ kind: 'take', uuid: 'tk-i' });
+    unpinRoutine(1, 1);
+    expect(getSetEntries(1)![1].pin).toEqual({ kind: 'take', uuid: 'tk-i' });
+    expect(getSetEntries(1)![0].pin).toBe(null);
+  });
+
+  it('reorder breaking a boundary sends the routine Dormant and wakes the shadow (store plumbing)', () => {
+    replaceSetEntries(1, [
+      { trackId: 1, pin: { kind: 'transition', uuid: 'tr-old' } },
+      { trackId: 2, pin: null },
+      { trackId: 3, pin: null },
+      { trackId: 4, pin: null },
+    ]);
+    pinRoutine(1, 1, 'r1', [1, 2, 3]);
+    // Remove the exit boundary's interior sibling: cast membership breaks.
+    removeTracksFromSet(1, [2]);
+    const entries = getSetEntries(1)!;
+    // (1, 3) is the new head pair — the routine is Dormant, keyed 1→3;
+    // the shadow was keyed (1, 2), whose pair is gone, so it stays
+    // Dormant too.
+    expect(entries[0].pin).toBe(null);
+    const dormant = getSetDormantPins(1)!;
+    expect(dormant).toContainEqual({
+      aTrackId: 1,
+      bTrackId: 3,
+      pin: { kind: 'routine', uuid: 'r1' },
+    });
+    expect(dormant).toContainEqual({
+      aTrackId: 1,
+      bTrackId: 2,
+      pin: { kind: 'transition', uuid: 'tr-old' },
+    });
+  });
+
+  it('degradeDeletedPinsLocal(routine) nulls routine pins and drops routine memories', () => {
+    replaceSetEntries(1, [
+      { trackId: 1, pin: { kind: 'routine', uuid: 'r1' } },
+      { trackId: 2, pin: null },
+      { trackId: 3, pin: null },
+    ]);
+    replaceSetEntries(
+      2,
+      [
+        { trackId: 5, pin: null },
+        { trackId: 6, pin: null },
+      ],
+      [{ aTrackId: 5, bTrackId: 7, pin: { kind: 'routine', uuid: 'r1' } }]
+    );
+    degradeDeletedPinsLocal('routine', 'r1');
+    expect(getSetEntries(1)![0].pin).toBe(null);
+    expect(getSetDormantPins(2)).toEqual([]);
   });
 });

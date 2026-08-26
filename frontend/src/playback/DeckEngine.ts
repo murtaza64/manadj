@@ -507,6 +507,30 @@ export class DeckEngine {
     this.dispatch({ type: 'hot-cue-up', slot, time: timeSeconds });
   }
 
+  /**
+   * Machine-grade positioned start (#173): park the playhead at exactly
+   * `seconds` and start there, bypassing the cross-deck quantized launch.
+   * The conductors' seam — a Conductor window join (flow-in), a MixPlayer
+   * audition, any machine start is a plan evaluation at an instant, not a
+   * performer gesture: routing it through play()'s launch path let the
+   * peer's live beat phase displace the entry by up to half a reference
+   * beat (or defer it), so flow-in, seek-in, and auditions disagreed.
+   * Fires the seek discontinuity tap — parity with the `seek(); play()`
+   * sequence it replaces (call sites self-guard / capture-gate as before).
+   */
+  playAt(seconds: number): void {
+    if (!this.buffer) return;
+    const time = this.clampPlayhead(seconds);
+    this.fireTransportEvent({ action: 'seek', playhead: time });
+    // A playing deck restarts exactly at `time` via the seek effect; a
+    // paused one parks, then starts through an UNQUANTIZED play — no
+    // launch reference, so the start is immediate and exact.
+    this.dispatch({ type: 'seek', time });
+    if (!this.transport.playing) {
+      this.dispatch({ type: 'play' }, { quantize: false, beatTimes: this.beatTimes });
+    }
+  }
+
   /** Machine-grade preview launch (session replay, sessions 12): start
    * preview audio at exactly `seconds`. Bypasses Quantize and never touches
    * the cue point — replay reproduces recorded timing and must not mutate
@@ -755,13 +779,15 @@ export class DeckEngine {
       'loop-preset',
     ]);
 
-  private dispatch(event: TransportEvent): void {
+  /** `ctx` overrides the ambient gesture context — machine-grade starts
+   * (playAt) pass an unquantized one; performer gestures use the default. */
+  private dispatch(event: TransportEvent, ctx?: TransportContext): void {
     if (!this.buffer) return;
     if (DeckEngine.CUE_FREEZING_EVENTS.has(event.type)) {
       this.cueIsLoadDefault = false;
     }
     const synced = { ...this.transport, playhead: this.getPlayhead() };
-    const [next, effects] = reduceTransport(synced, event, this.transportContext());
+    const [next, effects] = reduceTransport(synced, event, ctx ?? this.transportContext());
     const cueChanged = next.cuePoint !== synced.cuePoint;
     const loopChanged = next.loop !== synced.loop;
     this.transport = next;
