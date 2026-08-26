@@ -55,3 +55,20 @@ export function isDeckAudible(
   if (Math.abs(d.filter) >= filterKillBeyond) return false;
   return deckMasterGain(d, mixer) >= params.audibleGain;
 }
+
+/** Is this deck emitting ANY Master-bus signal — audibility with a zero
+ * gain threshold? The detector's entry-onset backdating clock (#178) keys
+ * on this: a play-then-fader-slam entry's window must start where the
+ * deck first SOUNDED, not where its rising gain happened to cross
+ * `audibleGain` (mid-ramp, 1–2 beats late). Audible ⊆ sounding. */
+export function isDeckSounding(
+  d: AudibleDeckInputs,
+  mixer: AudibleMixerInputs,
+  params: Pick<DetectorParams, 'eqKillBelow' | 'filterKillBeyond'>
+): boolean {
+  if (!d.playing) return false;
+  const { eqKillBelow, filterKillBeyond } = params;
+  if (d.eq.low <= eqKillBelow && d.eq.mid <= eqKillBelow && d.eq.high <= eqKillBelow) return false;
+  if (Math.abs(d.filter) >= filterKillBeyond) return false;
+  return deckMasterGain(d, mixer) > 0;
+}

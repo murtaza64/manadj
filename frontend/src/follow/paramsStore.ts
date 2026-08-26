@@ -8,6 +8,7 @@
 import { useSyncExternalStore } from 'react';
 import { DEFAULT_FOLLOW_PARAMS } from './model';
 import type { FollowParams } from './model';
+import { writeSetting } from '../settings/persistedSettings';
 
 const STORAGE_KEY = 'manadj-follow-params';
 /** The retired one-shot's key — deleted on boot (this key REPLACES it). */
@@ -33,11 +34,8 @@ function loadParams(): FollowParams {
 }
 
 function saveParams(params: FollowParams): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(params));
-  } catch {
-    // persistence is best-effort; the session still follows
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify(params));
 }
 
 let params: FollowParams = loadParams();

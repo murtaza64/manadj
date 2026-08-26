@@ -125,6 +125,27 @@ describe('anchors', () => {
     expect(tr.bInSec).toBeCloseTo(8.2);
   });
 
+  it('a repaired (backdated) entry window lands B at its true first-audible position (#178)', () => {
+    // Play-then-slam entry: B starts from its top at 99.5, the detector
+    // (v4) backdates the window start to the first sound at 100 — the
+    // back-projection must land B 0.5s in (its true position at the
+    // window start), not beats later.
+    const input = {
+      events: [
+        init('A', 100, { decks: { A: deck(), B: deck({ trackId: 2, fader: 0 }) } }),
+        { t: 99.5, kind: 'transport', channel: 'B', action: 'play', playhead: 0 } as CaptureEvent,
+        tick(100, { A: 60 }),
+        control(100, 'fader', 'B', 0.01),
+        control(100.6, 'fader', 'B', 1),
+        tick(110, { A: 70, B: 10.5 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.bInSec).toBeCloseTo(0.5);
+  });
+
   it('returns null without an init head', () => {
     expect(vectorizeTake({ events: [tick(100, { A: 1 })], windowStartS: 100, windowEndS: 110 }, facts)).toBeNull();
   });
@@ -475,6 +496,62 @@ describe('mix-domain alignment (4dp 39)', () => {
     )!;
     // 1% × 4s = 0.04s drift < quarter-beat (0.086s): matched, as before.
     expect(draft.transition.tempoMatch).toBe(true);
+  });
+});
+
+// ── Octave-equivalent tempo-match (grid-octave 168) ──────────────────────
+// The field bug: Nebula (track 959) gridded at 87.51 but ridden at 175
+// against 172-gridded Want It (take 1fae90e2): required read +96.6% and
+// could never fire. Half/double grids are first-class in the library
+// (dyadic-fold doctrine), so the grid ratio's dyadic folds 2r and r/2 are
+// octave-equivalent matches; the fold nearest the performed ride is tested.
+describe('octave-equivalent tempo-match (grid-octave 168)', () => {
+  /** Both decks riding recorded pitches over window 100..(100+len);
+   * ticks agree with the recorded baseline (no repair in play). */
+  function riddenInput(pitchA: number, pitchB: number, len = 50) {
+    const decks = { A: deck({ pitch: pitchA }), B: deck({ trackId: 2, pitch: pitchB }) };
+    const rA = 1 + pitchA / 100;
+    const rB = 1 + pitchB / 100;
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 100 + len; t += 5) {
+      events.push(tick(t, { A: 60 + (t - 100) * rA, B: 8 + (t - 100) * rB }));
+    }
+    return { events, windowStartS: 100, windowEndS: 100 + len };
+  }
+
+  it('a half-gridded INCOMING matches at the r/2 fold (track 959 field shape)', () => {
+    // Nebula gridded 87.51, true 175: raw required +96.6%; the performed
+    // renorm −1.73% sits on the r/2 fold's −1.72% — matched.
+    const draft = vectorizeTake(riddenInput(1.78, 0.02, 55), { bpmA: 172, bpmB: 87.5069 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+    // Back-projection runs at the FOLDED ratio (≈0.983), not the raw grid
+    // ratio (≈1.966): the commit point lands on B's performed end.
+    const modelEnd =
+      draft.transition.bInSec + draft.transition.durationSec * (0.5 * (172 / 87.5069));
+    expect(modelEnd).toBeCloseTo(8 + 55 * 1.0002, 1);
+  });
+
+  it('a half-gridded OUTGOING matches at the 2r fold (track 821 field shape)', () => {
+    // Everyday VIP gridded 87, ridden ~174 into 175-gridded FREE (take
+    // c722e43d): raw required −50.3%; renorm −0.58% ≈ the 2r fold.
+    const draft = vectorizeTake(riddenInput(2.36, 1.77, 90), { bpmA: 87, bpmB: 175.0056 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+
+  it('a ride matching NO fold stays unmatched (folds are not a loophole)', () => {
+    // r = 174/116 = 1.5: the canonical fold (r/2) still requires −25% —
+    // a flat 0% ride is no octave-equivalent match.
+    const draft = vectorizeTake(riddenInput(0, 0), { bpmA: 174, bpmB: 116 })!;
+    expect(draft.transition.tempoMatch).toBe(false);
+  });
+
+  it('the drift bound reads B at the folded (fastest) BPM — no half-time discount', () => {
+    // Under the r/2 fold B's true beat is DOUBLE the grid's: a 0.25%
+    // residual over 50s (0.125s drift) passes a quarter-beat of the 87.5
+    // grid (0.171s) but NOT of the true 175 (0.086s) — unmatched.
+    const draft = vectorizeTake(riddenInput(0, -1.464), { bpmA: 172, bpmB: 87.5 })!;
+    expect(draft.transition.tempoMatch).toBe(false);
   });
 });
 

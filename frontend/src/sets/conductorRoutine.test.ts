@@ -66,6 +66,12 @@ class FakeEngine {
     this.emit();
   }
 
+  /** Machine-grade positioned start (#173): exact seek + start. */
+  playAt(t: number): void {
+    this.seek(t);
+    this.play();
+  }
+
   pause(): void {
     if (!this.playingFlag) return;
     this.parkedAt = this.getPlayhead();
@@ -431,5 +437,64 @@ describe('exit handoff', () => {
     expect(engines.B.getSnapshot().playing).toBe(false);
     expect(conductor.isPlaying()).toBe(true);
     conductor.stop();
+  });
+});
+
+describe('rolling junction decks (sets #143)', () => {
+  /** No Routines: two pinned windows overlapping in mix time (60..80 and
+   * 72..92), so the third entry allocates deck C — the Conductor must
+   * drive (and watch) it exactly like a Routine-allocated deck. */
+  function rollingPlan(): SetPlan {
+    const facts = { durationSec: 240, bpm: 120, hotCue1Sec: null };
+    const tr = (startSec: number) => ({
+      startSec,
+      durationSec: 20,
+      bInSec: 0,
+      tempoMatch: false,
+      lanes: {},
+    });
+    const input: PlanInput = {
+      entries: [
+        { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+        { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+        { trackId: 3, pin: null },
+      ],
+      tracks: { 1: facts, 2: facts, 3: facts },
+      transitionsByUuid: { t1: tr(60), t2: tr(12) },
+      takesByUuid: {},
+    };
+    return planSet(input);
+  }
+
+  it('drives the allocated deck C through the junction: loads it, plays all three', () => {
+    const plan = rollingPlan();
+    expect(plan.entries.map((e) => e.deck)).toEqual(['A', 'B', 'C']);
+    const { conductor, engines, loads } = makeConductor(plan);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(30);
+    expect(loads.some((l) => l.deck === 'C' && l.trackId === 3)).toBe(true);
+    tickAt(76); // inside both windows
+    tickAt(76.1);
+    expect(engines.A.getSnapshot().playing).toBe(true);
+    expect(engines.B.getSnapshot().playing).toBe(true);
+    expect(engines.C.getSnapshot().playing).toBe(true);
+    conductor.stop();
+  });
+
+  it('a manual gesture on the junction deck C is a takeover (C is watched)', () => {
+    const plan = rollingPlan();
+    const { conductor, engines, stopped } = makeConductor(plan);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    tickAt(76);
+    tickAt(76.1);
+    expect(engines.C.getSnapshot().playing).toBe(true);
+    engines.C.pause(); // the user grabs the third deck
+    expect(stopped).toEqual(['takeover']);
+    expect(conductor.isActive()).toBe(false);
+    expect(engines.A.getSnapshot().playing).toBe(true);
   });
 });

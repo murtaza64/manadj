@@ -130,7 +130,8 @@ export type ConductorStopReason = 'ended' | 'stopped' | 'takeover' | 'displaced'
 export interface ConductorAudio {
   mixer: Mixer;
   /** The shared pair is mandatory; C/D are needed exactly when the plan
-   * carries Routines whose slots allocate onto them (routines 159). */
+   * allocates onto them — Routine slots (routines 159) or rolling-
+   * junction entries (sets #143). */
   engines: Record<'A' | 'B', DeckEngine> & Partial<Record<'C' | 'D', DeckEngine>>;
 }
 
@@ -216,9 +217,11 @@ export class Conductor {
     this.driven = this.drivenDecks(plan);
   }
 
-  /** A/B plus every Routine-allocated deck with an engine on hand. */
+  /** A/B plus every allocated deck with an engine on hand — Routine
+   * slots and rolling-junction entries (sets #143) both land on C/D. */
   private drivenDecks(plan: SetPlan): PlanDeck[] {
     const used = new Set<PlanDeck>(['A', 'B']);
+    for (const e of plan.entries) used.add(e.deck);
     for (const r of plan.routines) {
       for (const s of r.slots) if (s.deck !== null) used.add(s.deck);
     }
@@ -919,8 +922,13 @@ export class Conductor {
     if (this.audioExhausted(deck, target.trackTime)) return;
     if (!snap.playing) {
       engine.setPitch(ramping ? lerp(startPitch, target.pitchPercent, rampP) : target.pitchPercent);
-      engine.seek(target.trackTime);
-      engine.play();
+      // Machine-grade join (#173): exact positioned start. The performer
+      // path (seek + play) routes a paused deck's launch through the
+      // cross-deck quantized launch, which displaced the join onto the
+      // sounding deck's live beat phase — flow-in landed up to half a
+      // reference beat off the plan while seek-in (a restart of playing
+      // decks) was exact.
+      engine.playAt(target.trackTime);
       return;
     }
     if (ramping) {

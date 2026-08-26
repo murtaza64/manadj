@@ -621,10 +621,27 @@ export function nearestTime(sorted: number[], t: number): number | null {
  * Performance-view decks keep tempo.PITCH_RANGE_PERCENT. */
 export const EDITOR_PITCH_RANGE_PERCENT = 25;
 
-/** Pitch percent to BPM-match B to A, clamped to the editor's widened
- * varispeed range. */
+/** The BPM-match rate ratio for B against A, octave-equivalent
+ * (grid-octave 168): half/double-BPM beatgrids are first-class in the
+ * library (DnB gridded at 87 and ridden at 174 — the same dyadic-fold
+ * doctrine as the browse gate), so the raw bpmA/bpmB ratio may read ~2 or
+ * ~0.5 against a match the DJ performed at native. The canonical match is
+ * the dyadic fold of the ratio nearest 1 — the octave a DJ actually rides.
+ * Vectorization tests the SAME fold, so a matched Take replays at its
+ * performed rate. */
+export function tempoMatchRatio(bpmA: number | null, bpmB: number | null): number | null {
+  if (!bpmA || !bpmB) return null;
+  const r = bpmA / bpmB;
+  return [r, 2 * r, r / 2].reduce((best, c) =>
+    Math.abs(c - 1) < Math.abs(best - 1) ? c : best
+  );
+}
+
+/** Pitch percent to BPM-match B to A (octave-equivalent — see
+ * tempoMatchRatio), clamped to the editor's widened varispeed range. */
 export function tempoMatchPitch(bpmA: number | null, bpmB: number | null): number {
-  if (!bpmA || !bpmB) return 0;
-  const percent = (bpmA / bpmB - 1) * 100;
+  const ratio = tempoMatchRatio(bpmA, bpmB);
+  if (ratio === null) return 0;
+  const percent = (ratio - 1) * 100;
   return Math.max(-EDITOR_PITCH_RANGE_PERCENT, Math.min(EDITOR_PITCH_RANGE_PERCENT, percent));
 }

@@ -75,7 +75,11 @@ def replace_session_candidates(db: Session, session: models.Session) -> int:
                     [round(o, 3) for o in c.entry_offsets]
                 ),
                 evidence_json=json.dumps(
-                    {"returns": c.n_returns, "triples": c.n_triples}
+                    {
+                        "returns": c.n_returns,
+                        "triples": c.n_triples,
+                        "doubles": c.n_doubles,
+                    }
                 ),
                 miner_version=MINER_VERSION,
             )
