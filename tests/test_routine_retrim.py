@@ -212,6 +212,24 @@ def test_retrim_endpoint_widens_back_after_narrow(client, promoted_routine):
     assert out["duration_beats"] == pytest.approx(120.0, abs=1.0)
 
 
+def test_retrim_preserves_nudges(client, promoted_routine):
+    """gh#190 item 6: alignment nudges are beat-free track-time slides —
+    they ride a retrim untouched (dropped slots excepted)."""
+    routine, _, _ = promoted_routine
+    res = client.put(
+        f"/api/routines/{routine['uuid']}/edits",
+        json={"edits": {"lanes": {}, "jumps": [], "removedRecordedJumps": [],
+                        "nudges": {"1": 0.05}}},
+    )
+    assert res.status_code == 200, res.text
+    res = client.post(
+        f"/api/routines/{routine['uuid']}/retrim",
+        json={"trim_start_beats": 10.0, "trim_end_beats": 0.0},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["edits"]["nudges"] == {"1": 0.05}
+
+
 def test_retrim_endpoint_rejects_broken_cast(client, promoted_routine):
     routine, _, _ = promoted_routine
     res = client.post(

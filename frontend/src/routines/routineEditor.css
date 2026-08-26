@@ -353,6 +353,38 @@
   white-space: nowrap;
 }
 
+/* Alignment nudge (gh#190 item 6): tiny ◀ value ▶ group on the slot chip.
+   The chip is pointer-events: none; the nudge group re-enables itself. */
+.rt-nudge {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  pointer-events: auto;
+}
+.rt-nudge button {
+  background: transparent;
+  border: none;
+  color: var(--subtext0, #a6adc8);
+  font-size: 8px;
+  padding: 0 2px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.rt-nudge button:hover {
+  color: var(--text, #e8e8f0);
+}
+.rt-nudge-value {
+  font-family: monospace;
+  font-size: 9px;
+  color: var(--subtext0, #a6adc8);
+  min-width: 30px;
+  text-align: center;
+}
+.rt-nudge-value.on {
+  color: var(--routine-accent);
+  cursor: pointer;
+}
+
 /* Lane toggle chips (the editor's gutter idiom, floated top-right of the
    wave row). */
 .rt-lanetoggles {

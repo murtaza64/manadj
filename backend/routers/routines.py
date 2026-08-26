@@ -247,9 +247,24 @@ def _shift_edits(
         return out
     jumps = rebase(edits.get("jumps") or [], needs_delta=True)
     removed = rebase(edits.get("removedRecordedJumps") or [], needs_delta=False)
-    if not lanes and not jumps and not removed:
+    # Alignment nudges (gh#190 item 6) are beat-free track-time slides —
+    # they ride the trim untouched, minus dropped slots.
+    nudges = {}
+    for key, val in (edits.get("nudges") or {}).items():
+        try:
+            slot = int(str(key))
+        except ValueError:
+            continue
+        if slot < kept_slots and isinstance(val, (int, float)) and val:
+            nudges[str(slot)] = val
+    if not lanes and not jumps and not removed and not nudges:
         return None
-    return {"lanes": lanes, "jumps": jumps, "removedRecordedJumps": removed}
+    return {
+        "lanes": lanes,
+        "jumps": jumps,
+        "removedRecordedJumps": removed,
+        "nudges": nudges,
+    }
 
 
 @router.delete("/{uuid}")

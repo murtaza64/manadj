@@ -184,6 +184,22 @@ describe('build integration (the one seam: editor audition ≡ set replay)', () 
     // Other lanes stay recorded.
     expect(slot1.lanes.authored?.eqLow).toBeUndefined();
   });
+
+  it('alignment nudges slide the trace rigidly (gh#190 item 6)', () => {
+    const base = buildPlannedRoutine(input(), ctx).routine;
+    const edits = { ...emptyEdits(), nudges: { '1': 0.25 } };
+    const { routine } = buildPlannedRoutine({ ...input(), edits }, ctx);
+    const b = base.slots[1];
+    const n = routine.slots[1];
+    // Every trace position shifts by exactly the nudge; beats untouched.
+    expect(n.trace.map((p) => p.beat)).toEqual(b.trace.map((p) => p.beat));
+    n.trace.forEach((p, i) => expect(p.pos).toBeCloseTo(b.trace[i].pos + 0.25));
+    expect(n.entryTrackSec).toBeCloseTo(b.entryTrackSec + 0.25);
+    // Other slots untouched.
+    routine.slots[0].trace.forEach((p, i) =>
+      expect(p.pos).toBeCloseTo(base.slots[0].trace[i].pos)
+    );
+  });
 });
 
 describe('parseEdits', () => {
@@ -205,5 +221,11 @@ describe('parseEdits', () => {
   it('null/garbage = empty', () => {
     expect(parseEdits(null).jumps).toEqual([]);
     expect(parseEdits('nope').lanes).toEqual({});
+    expect(parseEdits(null).nudges).toEqual({});
+  });
+
+  it('parses nudges, dropping zeros and non-numbers (gh#190 item 6)', () => {
+    const parsed = parseEdits({ nudges: { '0': 0.05, '1': 0, '2': 'x', '3': -0.1 } });
+    expect(parsed.nudges).toEqual({ '0': 0.05, '3': -0.1 });
   });
 });

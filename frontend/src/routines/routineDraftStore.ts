@@ -33,6 +33,7 @@ const clone = (e: RoutineEdits): RoutineEdits => ({
   lanes: Object.fromEntries(Object.entries(e.lanes).map(([k, v]) => [k, [...v]])),
   jumps: e.jumps.map((j) => ({ ...j })),
   removedRecordedJumps: e.removedRecordedJumps.map((r) => ({ ...r })),
+  nudges: { ...e.nudges },
 });
 
 export class RoutineDraftStore {
@@ -134,6 +135,16 @@ export class RoutineDraftStore {
       e.removedRecordedJumps = e.removedRecordedJumps.filter(
         (r) => !(r.slot === slot && Math.abs(r.beat - beat) < 1e-6)
       );
+    });
+    this.endGesture();
+  }
+
+  /** Per-slot alignment nudge (gh#190 item 6): set the slot's rigid
+   * track-time slide. 0 clears the entry. One undo step per call. */
+  setNudge(slot: number, deltaSec: number): void {
+    this.mutate(`nudge:${slot}:${deltaSec}`, (e) => {
+      if (deltaSec === 0) delete e.nudges[String(slot)];
+      else e.nudges[String(slot)] = deltaSec;
     });
     this.endGesture();
   }

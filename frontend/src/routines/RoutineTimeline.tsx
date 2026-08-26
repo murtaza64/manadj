@@ -43,7 +43,7 @@ import {
   type PlannedRoutineSlot,
   type RoutineLanePoint,
 } from '../sets/routinePlan';
-import type { RoutinePlayer } from './RoutinePlayer';
+import { AUDITION_MARGIN_BEATS, type RoutinePlayer } from './RoutinePlayer';
 import type { RoutineDraftStore } from './routineDraftStore';
 import type { AuthoredJump, RoutineEdits } from './routineDraft';
 import { traceDrawRuns, type BeatRun } from './routineWaveRuns';
@@ -266,7 +266,11 @@ export function RoutineTimeline({
       const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
       if (px <= 0) return;
       const beat = s + (clientX - rect.left) / px;
-      onSeekBeat(Math.max(0, Math.min(beat, duration)));
+      // Seeks roam one audition margin beyond either boundary (gh#190
+      // item 5) — the player clamps to the same range.
+      onSeekBeat(
+        Math.max(-AUDITION_MARGIN_BEATS, Math.min(beat, duration + AUDITION_MARGIN_BEATS))
+      );
     },
     [onSeekBeat, duration]
   );
@@ -274,7 +278,7 @@ export function RoutineTimeline({
     (e: React.PointerEvent) => {
       if (
         (e.target as HTMLElement).closest(
-          '.rt-trimhandle, .rt-jump, .rt-lanetoggles, .rt-lanestrip, .rt-jump-popover, .rt-laneauthor'
+          '.rt-trimhandle, .rt-jump, .rt-lanetoggles, .rt-lanestrip, .rt-jump-popover, .rt-laneauthor, .rt-nudge'
         )
       )
         return;
@@ -794,6 +798,46 @@ export function RoutineTimeline({
                   {slot.slot === planned.slots.length - 1 && (
                     <span className="rt-boundary-tag">exits with</span>
                   )}
+                  {(() => {
+                    // Alignment nudge (gh#190 item 6): slide the slot's
+                    // track under the routine clock in small steps.
+                    const cur = edits.nudges[String(slot.slot)] ?? 0;
+                    const step = (e: React.MouseEvent) => (e.shiftKey ? 0.1 : 0.01);
+                    const ms = Math.round(cur * 1000);
+                    return (
+                      <span
+                        className="rt-nudge"
+                        title="Alignment nudge: slide this slot's track (±10 ms; shift ±100 ms; click the value to reset)"
+                      >
+                        <button
+                          onClick={(e) =>
+                            draftStore.setNudge(
+                              slot.slot,
+                              Math.round((cur - step(e)) * 1000) / 1000
+                            )
+                          }
+                        >
+                          ◀
+                        </button>
+                        <span
+                          className={`rt-nudge-value${cur !== 0 ? ' on' : ''}`}
+                          onClick={() => cur !== 0 && draftStore.setNudge(slot.slot, 0)}
+                        >
+                          {ms > 0 ? `+${ms}` : ms}ms
+                        </span>
+                        <button
+                          onClick={(e) =>
+                            draftStore.setNudge(
+                              slot.slot,
+                              Math.round((cur + step(e)) * 1000) / 1000
+                            )
+                          }
+                        >
+                          ▶
+                        </button>
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div className="rt-lanetoggles">
                   {SLOT_LANE_ORDER.map((control) => {

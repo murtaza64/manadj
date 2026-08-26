@@ -321,9 +321,16 @@ export default function RoutineEditorView() {
   // Jump-edited base: traces carry authored/removed jumps. Lane edits
   // apply as a cheap re-skin below — trace identities survive lane drags
   // (the ~60 Hz hot path never rebuilds traces).
+  // Nudges rebuild traces too (gh#190 item 6 — a rigid track-time slide
+  // is a trace transform, not a lane re-skin).
   const jumpEditsKey = useMemo(
-    () => JSON.stringify({ j: draft.edits.jumps, r: draft.edits.removedRecordedJumps }),
-    [draft.edits.jumps, draft.edits.removedRecordedJumps]
+    () =>
+      JSON.stringify({
+        j: draft.edits.jumps,
+        r: draft.edits.removedRecordedJumps,
+        n: draft.edits.nudges,
+      }),
+    [draft.edits.jumps, draft.edits.removedRecordedJumps, draft.edits.nudges]
   );
   const baseEditor: EditorRoutine | null = useMemo(() => {
     if (!buildable) return null;

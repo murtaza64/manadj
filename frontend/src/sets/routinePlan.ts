@@ -661,8 +661,17 @@ export function buildPlannedRoutine(
     if (!edits) return raw;
     const authored = edits.jumps.filter((j) => j.slot === slot);
     const removed = edits.removedRecordedJumps.filter((r) => r.slot === slot);
-    if (authored.length === 0 && removed.length === 0) return raw;
-    return applyJumpEditsToTrace(raw, authored, removed, input.durationBeats);
+    let trace =
+      authored.length === 0 && removed.length === 0
+        ? raw
+        : applyJumpEditsToTrace(raw, authored, removed, input.durationBeats);
+    // Alignment nudge (gh#190 item 6): a RIGID track-time slide — the
+    // slot plays material offset by deltaSec at the same routine beats.
+    // Applied to the trace, so replay, waveform runs and hotcue mapping
+    // all shift together by construction.
+    const nudge = edits.nudges?.[String(slot)] ?? 0;
+    if (nudge !== 0) trace = trace.map((p) => ({ ...p, pos: p.pos + nudge }));
+    return trace;
   });
   const releaseMixSecs = traces.map((trace, slot) =>
     slot === n - 1
@@ -700,7 +709,7 @@ export function buildPlannedRoutine(
       occupyFromMixSec: assignments[slot].occupyFromMixSec,
       releaseMixSec: releaseMixSecs[slot],
       entryMixSec: entryMixSecs[slot],
-      entryTrackSec: input.entryPositions[slot],
+      entryTrackSec: input.entryPositions[slot] + (edits?.nudges?.[String(slot)] ?? 0),
       basePitchPercent,
       trace,
       lanes: withLaneEdits(buildSlotLanes(input.events, slot, slot === 0), edits, slot),

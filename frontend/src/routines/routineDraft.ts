@@ -50,12 +50,22 @@ export interface RoutineEdits {
   lanes: Record<string, RoutineLanePoint[]>;
   jumps: AuthoredJump[];
   removedRecordedJumps: RemovedRecordedJump[];
+  /** Per-slot alignment NUDGE (gh#190 item 6): a rigid track-seconds
+   * offset sliding the whole track under the routine clock — the slot
+   * plays material shifted by deltaSec at the same routine beats. Keyed
+   * by slot (JSON string keys); absent/0 = no slide. */
+  nudges: Record<string, number>;
 }
 
-export const EMPTY_EDITS: RoutineEdits = { lanes: {}, jumps: [], removedRecordedJumps: [] };
+export const EMPTY_EDITS: RoutineEdits = {
+  lanes: {},
+  jumps: [],
+  removedRecordedJumps: [],
+  nudges: {},
+};
 
 export function emptyEdits(): RoutineEdits {
-  return { lanes: {}, jumps: [], removedRecordedJumps: [] };
+  return { lanes: {}, jumps: [], removedRecordedJumps: [], nudges: {} };
 }
 
 export function laneKey(slot: number, control: string): string {
@@ -66,7 +76,8 @@ export function editsAreEmpty(e: RoutineEdits): boolean {
   return (
     Object.keys(e.lanes).length === 0 &&
     e.jumps.length === 0 &&
-    e.removedRecordedJumps.length === 0
+    e.removedRecordedJumps.length === 0 &&
+    Object.keys(e.nudges).length === 0
   );
 }
 
@@ -119,7 +130,13 @@ export function parseEdits(raw: unknown): RoutineEdits {
           typeof (r as RemovedRecordedJump).beat === 'number'
       )
     : [];
-  return { lanes, jumps, removedRecordedJumps };
+  const nudges: Record<string, number> = {};
+  if (o.nudges && typeof o.nudges === 'object') {
+    for (const [k, v] of Object.entries(o.nudges as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v !== 0) nudges[k] = v;
+    }
+  }
+  return { lanes, jumps, removedRecordedJumps, nudges };
 }
 
 // ── Trace transform ──────────────────────────────────────────────────────
