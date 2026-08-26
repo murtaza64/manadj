@@ -21,6 +21,11 @@ permission:
     "*": deny
     "~/manadj*": allow
     "~/dotfiles/docs*": allow
+    # Track audio lives under ~/Music (DB filenames point there) and lane
+    # roots are addressed via the ~/editspaces symlink — both triggered
+    # unattended asks (2026-08-26).
+    "~/Music*": allow
+    "~/editspaces*": allow
 ---
 
 You are a manadj lane agent: an unattended implementation session owning exactly one
