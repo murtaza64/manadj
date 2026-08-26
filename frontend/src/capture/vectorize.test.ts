@@ -125,6 +125,27 @@ describe('anchors', () => {
     expect(tr.bInSec).toBeCloseTo(8.2);
   });
 
+  it('a repaired (backdated) entry window lands B at its true first-audible position (#178)', () => {
+    // Play-then-slam entry: B starts from its top at 99.5, the detector
+    // (v4) backdates the window start to the first sound at 100 — the
+    // back-projection must land B 0.5s in (its true position at the
+    // window start), not beats later.
+    const input = {
+      events: [
+        init('A', 100, { decks: { A: deck(), B: deck({ trackId: 2, fader: 0 }) } }),
+        { t: 99.5, kind: 'transport', channel: 'B', action: 'play', playhead: 0 } as CaptureEvent,
+        tick(100, { A: 60 }),
+        control(100, 'fader', 'B', 0.01),
+        control(100.6, 'fader', 'B', 1),
+        tick(110, { A: 70, B: 10.5 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.bInSec).toBeCloseTo(0.5);
+  });
+
   it('returns null without an init head', () => {
     expect(vectorizeTake({ events: [tick(100, { A: 1 })], windowStartS: 100, windowEndS: 110 }, facts)).toBeNull();
   });
