@@ -41,6 +41,8 @@ import type { VectorizeInput } from '../capture/vectorize';
 import { vectorizeTake } from '../capture/vectorize';
 import type { Transition } from '../editor/mixModel';
 import {
+  aEndMixTime,
+  aTrackTimeAt,
   bContentSegments,
   bTrackTimeAt,
   laneValuesAt,
@@ -729,8 +731,16 @@ export function planSet(input: PlanInput): SetPlan {
       nextMixOffset = mixEndSec - bAtWindowEnd / rateIn;
     }
 
-    // Outgoing exits at the window end, clamped to its own end.
-    const exitSec = Math.min(windowEndLocal, facts.durationSec);
+    // Outgoing exits at the window end — SIMULATED THROUGH ITS JUMPS
+    // (issue 177): the exit instant on the authored (elapsed-play) axis is
+    // the window end or A's first track-end crossing on the jumped path,
+    // whichever is first; the exit TRACK position applies the passed jump
+    // deltas. Without jumpsA this is the old min(windowEnd, durA) pair.
+    const exitLocal = aEndMixTime(transition, facts.durationSec);
+    const exitSec = Math.min(
+      facts.durationSec,
+      Math.max(0, aTrackTimeAt(transition, exitLocal))
+    );
     entries.push({
       trackId,
       deck,
@@ -739,7 +749,7 @@ export function planSet(input: PlanInput): SetPlan {
       entrySec,
       exitSec,
       entryMixSec,
-      exitMixSec: toMix(exitSec),
+      exitMixSec: toMix(exitLocal),
       trim: input.entries[i].trim ?? 0,
     });
     adjacencies.push({
@@ -1052,6 +1062,22 @@ function playingTrackTimeAt(
       pitchPercent: windowed.pitchIncomingPercent * (1 - tau / d),
     };
   }
+  // Inside the entry's own EXIT window the OUTGOING may Jump (issue 177):
+  // the solo anchor stays valid for the elapsed-play axis (mix time keeps
+  // advancing linearly at the entry's rate — the doctrine), and the deck's
+  // TRACK position adds the deltas of every passed outgoing jump. Before
+  // the window no jump has passed (window-scoped), so this is the plain
+  // solo anchor there too.
+  const exitAdj = adjacencies[idx];
+  if (exitAdj && isWindowed(exitAdj) && exitAdj.transition.jumpsA?.length) {
+    return {
+      trackTime: Math.max(
+        0,
+        aTrackTimeAt(exitAdj.transition, authoredLocalAt(exitAdj, mixTime))
+      ),
+      pitchPercent: (entry.rate - 1) * 100,
+    };
+  }
   return {
     trackTime: (mixTime - entry.mixOffsetSec) * entry.rate,
     pitchPercent: (entry.rate - 1) * 100,
@@ -1240,21 +1266,26 @@ export function jumpCrossed(plan: SetPlan, t0: number, t1: number): boolean {
 }
 
 /** The decks whose plan target jumped in (t0, t1] — the Conductor
- * hard-syncs EXACTLY these (#161): an authored window jump is the
- * incoming deck's gesture; a Routine trace discontinuity belongs to its
- * slot's deck. Seeking the other decks too snapped their (legitimately
- * nudging) playheads — an audible hiccup on every recorded jump, worst
- * mid-blend at a routine boundary. */
+ * hard-syncs EXACTLY these (#161): an authored window jump is a single
+ * deck's gesture — an incoming jump the incoming deck's, an outgoing jump
+ * (jumpsA, issue 177) the outgoing deck's — and a Routine trace
+ * discontinuity belongs to its slot's deck. Seeking the other decks too
+ * snapped their (legitimately nudging) playheads — an audible hiccup on
+ * every recorded jump, worst mid-blend at a routine boundary. */
 export function jumpCrossedDecks(plan: SetPlan, t0: number, t1: number): PlanDeck[] {
   const decks = new Set<PlanDeck>();
   plan.adjacencies.forEach((adj, i) => {
-    if (!isWindowed(adj) || !adj.transition.jumps) return;
-    for (const j of adj.transition.jumps) {
-      // Authored instant startSec + x·duration, mapped onto the mix axis.
-      const tj = adj.mixStartSec + (j.x * adj.transition.durationSec) / adj.rateOutgoing;
-      if (tj > t0 && tj <= t1) {
-        const inDeck = plan.entries[i + 1]?.deck;
-        if (inDeck) decks.add(inDeck);
+    if (!isWindowed(adj)) return;
+    const roles = [
+      { jumps: adj.transition.jumps, deck: plan.entries[i + 1]?.deck },
+      { jumps: adj.transition.jumpsA, deck: plan.entries[i]?.deck },
+    ];
+    for (const { jumps, deck } of roles) {
+      if (!jumps || deck === undefined) continue;
+      for (const j of jumps) {
+        // Authored instant startSec + x·duration, mapped onto the mix axis.
+        const tj = adj.mixStartSec + (j.x * adj.transition.durationSec) / adj.rateOutgoing;
+        if (tj > t0 && tj <= t1) decks.add(deck);
       }
     }
   });

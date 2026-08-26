@@ -136,6 +136,74 @@ describe('clean blend', () => {
   });
 });
 
+describe('entry onset (#178): the window starts at the entry gesture', () => {
+  it('hot entry — fader standing, transport start later: onset at the play event', () => {
+    const s = incumbentA();
+    s.at(10).fader('B', 1); // fader standing, deck not yet playing
+    s.at(13).play('B').advance(10).at(25).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(13);
+    expect(takes[0].windowEndS).toBe(25);
+  });
+
+  it('play-then-slam: backdates to the first sound, not the audibleGain crossing', () => {
+    const s = incumbentA();
+    // B starts silent (fader 0), then the fader slams up in steps: first
+    // sound at 12 (gain ~5e-5), the audibleGain crossing at 12.6. The
+    // Reflexion→Higher defect: windows opened at the crossing, clipping
+    // the incoming's first 1–2 beats.
+    s.at(11).play('B');
+    s.at(12).fader('B', 0.01).at(12.3).fader('B', 0.2).at(12.6).fader('B', 0.5);
+    s.advance(8).at(21).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(12);
+    expect(takes[0].windowEndS).toBe(21);
+  });
+
+  it('the backdate is capped at entryBackdateMaxS', () => {
+    const s = incumbentA();
+    // B whispers far below audibleGain for 10s (sounding clock open),
+    // then slams to full: the window may reach back only the cap.
+    s.at(10).play('B').fader('B', 0.05);
+    s.advance(9);
+    s.at(20).fader('B', 1).advance(5).at(26).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(20 - DEFAULT_DETECTOR_PARAMS.entryBackdateMaxS);
+  });
+
+  it('crossfader-driven entry backdates to the crossfader gesture start', () => {
+    const s = incumbentA();
+    s.at(5).crossfader(-1); // hard left: B's side fully killed
+    s.at(10).fader('B', 1).play('B'); // playing, fader up — still silent
+    s.at(15).crossfader(-0.99); // the ride begins: first sound
+    s.at(16).crossfader(0); // gain crosses audibleGain mid-ride
+    s.advance(5).at(22).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(15);
+    expect(takes[0].windowEndS).toBe(22);
+  });
+
+  it('an overlap cannot predate the incumbent\'s own audibility', () => {
+    // Both decks rise together out of silence: the incumbent (first to
+    // cross) bounds the backdate.
+    const s = script()
+      .at(0).load('A', 1).load('B', 2)
+      .fader('A', 0).fader('B', 0)
+      .play('A').play('B').advance(3);
+    s.at(10).fader('A', 0.01).fader('B', 0.01); // both first sound at 10
+    s.at(11).fader('A', 1); // A crosses first: incumbent since 11
+    s.at(12).fader('B', 1); // B crosses: onset floored at the incumbent's 11
+    s.advance(5).at(18).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].windowStartS).toBe(11);
+  });
+});
+
 describe('hard cut', () => {
   it('a crossfader flick (zero overlap, same instant) is a Handover', () => {
     const s = incumbentA();
