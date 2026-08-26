@@ -697,6 +697,11 @@ class Routine(Base):
     entry_positions_json = Column(Text, nullable=False)  # JSON list, track-seconds
     duration_beats = Column(Float, nullable=False)
     events_json = Column(Text, nullable=False)  # slot-addressed, beat-domain (opaque)
+    # Authored EDITS over the recording (gh#170 pass 2 — the Routine
+    # editor's draft layer): slot-indexed lane envelopes + Jump events on
+    # any slot, beat-domain. Opaque JSON (the events_json posture); the
+    # recording above stays evidence and never changes. Null = unedited.
+    edits_json = Column(Text, nullable=True)
     origin_take_uuid = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

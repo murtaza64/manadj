@@ -13,8 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
+from backend.beatgrid_utils import constant_tempo_changes
 from backend.database import get_db
 from backend.routers.sets import degrade_pins
+from backend.routine_promotion import PromotionError, retrim
 
 router = APIRouter()
 
@@ -43,14 +45,38 @@ def list_routines(db: Session = Depends(get_db)) -> list[schemas.RoutineRow]:
     return [_row(r) for r in rows]
 
 
+def _detail(r: models.Routine) -> schemas.RoutineDetail:
+    return schemas.RoutineDetail(
+        **_row(r).model_dump(),
+        events=json.loads(r.events_json),
+        edits=json.loads(r.edits_json) if r.edits_json else None,
+    )
+
+
 @router.get("/{uuid}", response_model=schemas.RoutineDetail)
 def get_routine(uuid: str, db: Session = Depends(get_db)) -> schemas.RoutineDetail:
     r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
     if r is None:
         raise HTTPException(status_code=404, detail="routine not found")
-    return schemas.RoutineDetail(
-        **_row(r).model_dump(), events=json.loads(r.events_json)
-    )
+    return _detail(r)
+
+
+@router.put("/{uuid}/edits", response_model=schemas.RoutineDetail)
+def put_routine_edits(
+    uuid: str, payload: schemas.RoutineEditsPut, db: Session = Depends(get_db)
+) -> schemas.RoutineDetail:
+    """Replace the authored edits layer (gh#170 pass 2). The recording
+    (events_json) is evidence and never changes; edits are the Routine
+    editor's draft — lane envelopes + Jumps, beat-domain — applied at
+    replay-build time by every consumer (editor audition AND set
+    Conductor). Null clears."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    r.edits_json = json.dumps(payload.edits) if payload.edits else None
+    db.commit()
+    db.refresh(r)
+    return _detail(r)
 
 
 @router.patch("/{uuid}", response_model=schemas.RoutineRow)
@@ -65,6 +91,141 @@ def patch_routine(
     db.commit()
     db.refresh(r)
     return _row(r)
+
+
+@router.post("/{uuid}/retrim", response_model=schemas.RoutineDetail)
+def retrim_routine(
+    uuid: str, payload: schemas.RoutineRetrim, db: Session = Depends(get_db)
+) -> schemas.RoutineDetail:
+    """Boundary trim + mechanical re-promotion (gh#170, the v1 review
+    affordance promised at confirm time): re-run promotion over the origin
+    Routine Take with the window narrowed by beat amounts from either
+    edge. The Routine row updates IN PLACE (same uuid — Set pins keep
+    their reference and re-validate against the new cast/boundaries at
+    plan time); the raw take is untouched. 422 when the origin take or
+    its Session is gone, or when the trim breaks n ≥ 3."""
+    r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
+    if r is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    if r.origin_take_uuid is None:
+        raise HTTPException(
+            status_code=422, detail="routine has no origin take — boundaries are baked"
+        )
+    rt = (
+        db.query(models.RoutineTake)
+        .filter(models.RoutineTake.uuid == r.origin_take_uuid)
+        .first()
+    )
+    if rt is None:
+        raise HTTPException(
+            status_code=422, detail="the origin Routine Take is gone — cannot re-promote"
+        )
+    s = db.query(models.Session).filter(models.Session.uuid == rt.session_uuid).first()
+    if s is None:
+        raise HTTPException(
+            status_code=422,
+            detail="the take's Session is gone — its event slice reference cannot be read",
+        )
+    events: list[dict] = []
+    for chunk in s.chunks:
+        events.extend(json.loads(chunk.events_json))
+
+    cast = json.loads(rt.cast_json)
+    grids: dict[int, list[dict]] = {}
+    for tid in cast:
+        bg = db.query(models.Beatgrid).filter(models.Beatgrid.track_id == tid).first()
+        if bg is not None:
+            grids[tid] = json.loads(bg.tempo_changes_json)
+            continue
+        track = db.query(models.Track).filter(models.Track.id == tid).first()
+        bpm = track.bpm_projected if track is not None else None
+        if bpm is None or bpm <= 0:
+            raise HTTPException(
+                status_code=422, detail=f"cast track {tid} has no beatgrid or BPM"
+            )
+        grids[tid] = constant_tempo_changes(bpm)
+
+    try:
+        result = retrim(
+            events,
+            cast,
+            rt.window_start_s,
+            rt.window_end_s,
+            json.loads(rt.entry_offsets_json),
+            grids,
+            payload.trim_start_beats,
+            payload.trim_end_beats,
+        )
+    except PromotionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    r.entry_track_id = result.cast[0]
+    r.exit_track_id = result.cast[-1]
+    r.cast_json = json.dumps(result.cast)
+    r.entry_offsets_beats_json = json.dumps(result.entry_offsets_beats)
+    r.entry_positions_json = json.dumps(result.entry_positions)
+    r.duration_beats = result.duration_beats
+    r.events_json = json.dumps(result.events)
+    # Authored edits ride the trim (gh#170 pass 2): beats rebase by the
+    # start trim; entries falling outside the new span (or on dropped
+    # slots) drop. Best-effort — removed-recorded-jump matches may
+    # resurface if the rebased clock lands off their tolerance.
+    if r.edits_json:
+        shifted = _shift_edits(
+            json.loads(r.edits_json),
+            payload.trim_start_beats,
+            result.duration_beats,
+            len(result.cast),
+        )
+        r.edits_json = json.dumps(shifted) if shifted else None
+    db.commit()
+    db.refresh(r)
+    return _detail(r)
+
+
+def _shift_edits(
+    edits: dict, shift_beats: float, new_duration: float, kept_slots: int
+) -> dict | None:
+    """Rebase an edits layer onto a retrimmed Routine's clock."""
+    lanes: dict = {}
+    for key, pts in (edits.get("lanes") or {}).items():
+        try:
+            slot = int(str(key).split(":")[0])
+        except ValueError:
+            continue
+        if slot >= kept_slots or not isinstance(pts, list):
+            continue
+        shifted = [
+            {**p, "beat": p["beat"] - shift_beats}
+            for p in pts
+            if isinstance(p, dict) and isinstance(p.get("beat"), (int, float))
+        ]
+        shifted = [p for p in shifted if -1e-6 <= p["beat"] <= new_duration + 1e-6]
+        if shifted:
+            lanes[key] = shifted
+    def rebase(items: list, needs_delta: bool) -> list:
+        out = []
+        for j in items or []:
+            if not isinstance(j, dict):
+                continue
+            slot = j.get("slot")
+            beat = j.get("beat")
+            if not isinstance(slot, int) or slot >= kept_slots:
+                continue
+            if not isinstance(beat, (int, float)):
+                continue
+            if needs_delta and not isinstance(j.get("deltaSec"), (int, float)):
+                continue
+            nb = beat - shift_beats
+            if nb < 0 or nb > new_duration:
+                continue
+            out.append({**j, "beat": nb})
+        return out
+    jumps = rebase(edits.get("jumps") or [], needs_delta=True)
+    removed = rebase(edits.get("removedRecordedJumps") or [], needs_delta=False)
+    if not lanes and not jumps and not removed:
+        return None
+    return {"lanes": lanes, "jumps": jumps, "removedRecordedJumps": removed}
 
 
 @router.delete("/{uuid}")

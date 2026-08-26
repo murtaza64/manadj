@@ -26,6 +26,7 @@
  * authored window fades, recorded Routine choreography, and grace fades
  * all read from the same model the Conductor executes.
  */
+import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { bContentSegments } from '../editor/mixModel';
 import { DECK_COLORS } from '../theme/deckColors';
@@ -51,7 +52,7 @@ const LANE_H = 46;
 const TITLE_H = 13;
 export const LADDER_H = LANE_H * 2 + 4;
 /** The routine family's magenta (cast bracket, candidate chips). */
-const ROUTINE_BAND_COLOR = '#ff00c8';
+const ROUTINE_BAND_COLOR = ROUTINE_ACCENT;
 
 // ── Four-deck lane geometry (sets #161) ────────────────────────────────
 // Two-deck: the classic A/B mirrored braid. Four-deck: the PHYSICAL deck
@@ -362,7 +363,7 @@ export const OverviewLadder = memo(function OverviewLadder({
                 bottom: 0,
                 left: `${(r.mixStartSec / total) * 100}%`,
                 width: `${Math.max(((r.mixEndSec - r.mixStartSec) / total) * 100, 0.05)}%`,
-                background: 'rgba(255, 0, 200, 0.07)',
+                background: 'rgba(var(--routine-accent-rgb), 0.07)',
                 borderLeft: `1px solid ${ROUTINE_BAND_COLOR}`,
                 borderRight: `1px dashed ${ROUTINE_BAND_COLOR}`,
                 zIndex: 1,

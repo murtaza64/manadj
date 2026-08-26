@@ -12,6 +12,7 @@ export const OPEN_SESSION_EVENT = 'manadj:open-session';
 let selectedUuid: string | null = null;
 let pendingFocusS: number | null = null;
 let pendingSpanS: number | null = null;
+let pendingFlash: { start: number; end: number } | null = null;
 
 export function getSelectedSessionUuid(): string | null {
   return selectedUuid;
@@ -23,6 +24,7 @@ export function selectSession(uuid: string | null): void {
   if (uuid === null) {
     pendingFocusS = null;
     pendingSpanS = null;
+    pendingFlash = null;
   }
 }
 
@@ -35,6 +37,10 @@ export interface SessionMomentRequest {
    * moment — the timeline raises pxPerSec to viewportW/spanS (never below
    * fit). Null keeps the current/fit zoom. */
   spanS?: number | null;
+  /** Momentary region highlight (gh#170 provenance deep-link): the
+   * timeline pulses this capture-clock span once on arrival — the
+   * routine's source region announcing itself. */
+  flash?: { start: number; end: number } | null;
 }
 
 /** REQUEST (history's "view in Session", ownership chip): select durably,
@@ -44,6 +50,7 @@ export function requestSessionMoment(req: SessionMomentRequest): void {
   selectedUuid = req.sessionUuid;
   pendingFocusS = req.atS;
   pendingSpanS = req.spanS ?? null;
+  pendingFlash = req.flash ?? null;
   focusVersion += 1;
   window.dispatchEvent(new CustomEvent(OPEN_SESSION_EVENT));
 }
@@ -51,6 +58,7 @@ export function requestSessionMoment(req: SessionMomentRequest): void {
 export interface SessionFocus {
   atS: number | null;
   spanS: number | null;
+  flash: { start: number; end: number } | null;
   /** Bumps on every request — panes re-apply focus when it changes.
    * (Keep-alive views, perf-layout 09: BOTH Library instances can be
    * mounted at once, so a clearing one-shot consume would race them; a
@@ -63,5 +71,5 @@ let focusVersion = 0;
 /** PEEK (non-clearing): the latest focus request. Panes track `version`
  * and re-center whenever it bumps — on mount AND while staying mounted. */
 export function peekSessionFocus(): SessionFocus {
-  return { atS: pendingFocusS, spanS: pendingSpanS, version: focusVersion };
+  return { atS: pendingFocusS, spanS: pendingSpanS, flash: pendingFlash, version: focusVersion };
 }

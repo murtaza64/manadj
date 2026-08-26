@@ -11,10 +11,12 @@ import type { ChannelId } from '../playback/mixer';
 import type { Track } from '../types';
 
 /** The modes that show the shared browse panel. */
-export type BrowseMode = 'library' | 'performance' | 'transition';
+export type BrowseMode = 'library' | 'performance' | 'transition' | 'routine';
 
 export function isBrowseMode(mode: AppMode): mode is BrowseMode {
-  return mode === 'library' || mode === 'performance' || mode === 'transition';
+  return (
+    mode === 'library' || mode === 'performance' || mode === 'transition' || mode === 'routine'
+  );
 }
 
 /**

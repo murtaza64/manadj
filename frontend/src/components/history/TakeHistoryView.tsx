@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { RoutineTakeRowWire, TakeRowWire } from '../../api/client';
 import { requestTakeReview } from '../../capture/takeReview';
+import { requestRoutineEdit } from '../../routines/openRoutine';
 import { requestSessionMoment } from '../../sessions/openSession';
 import { degradeDeletedPinsLocal } from '../../sets/setStore';
 import { useToast } from '../Toast';
@@ -325,7 +326,16 @@ export function TakeHistoryView() {
                       </td>
                       <td className="take-promoted">
                         {e.take.promoted_routine_uuid ? (
-                          <span title="Promoted to a saved Routine">★</span>
+                          <button
+                            className="take-open-routine"
+                            title="Promoted — open the Routine in the Routine editor (gh#170)"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              requestRoutineEdit({ routineUuid: e.take.promoted_routine_uuid! });
+                            }}
+                          >
+                            ★
+                          </button>
                         ) : (
                           <button
                             className="take-promote"

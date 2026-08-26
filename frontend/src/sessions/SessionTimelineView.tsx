@@ -29,6 +29,8 @@ import { requestTakeReview } from '../capture/takeReview';
 import { useDecks } from '../hooks/useDeck';
 import { useMixer } from '../hooks/useMixer';
 import { useToast } from '../components/Toast';
+import { openCandidateInEditor, openRoutineTakeInEditor } from '../routines/openFlow';
+import { requestRoutineEdit } from '../routines/openRoutine';
 import { isTypingTarget } from '../components/performance/performanceKeys';
 import { beatgridQueryOptions } from '../hooks/useBeatgridData';
 import type { BeatgridResponse } from '../types';
@@ -161,6 +163,8 @@ interface Props {
   /** Deep-link zoom (sessions 16): show at most this many seconds around
    * the focus moment (never zooms below fit; short sessions keep fit). */
   focusSpanS?: number | null;
+  /** Momentary source-region highlight (gh#170 provenance deep-link). */
+  focusFlash?: { start: number; end: number } | null;
   /** Bumps per deep-link request (perf-layout 09): a kept-alive view must
    * re-apply focus when a NEW request arrives, not only on mount. */
   focusVersion?: number;
@@ -169,7 +173,7 @@ interface Props {
   onBack?: () => void;
 }
 
-export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion, onBack }: Props) {
+export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, focusVersion, onBack }: Props) {
   // Keep-alive (perf-layout 09): sleep the per-frame work while hidden.
   const viewActive = useViewActive();
   // Responsive vertical budget: lanes scale, chrome sheds when tight.
@@ -550,7 +554,18 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     setSelection({ kind: 'moment', t: focusS });
     const el = scrollRef.current;
     if (el) setScrollLeft(el, Math.max(0, axis.tToPx(focusS) - el.clientWidth / 2));
-  }, [focusS, focusSpanS, focusVersion, model, axis, width, fitPx, viewportW, setScrollLeft]);
+    // Provenance flash (gh#170): pulse the source region once, keyed so a
+    // repeated deep-link re-triggers the CSS animation.
+    if (focusFlash) setFlash({ ...focusFlash, key: focusVersion ?? 0 });
+  }, [focusS, focusSpanS, focusFlash, focusVersion, model, axis, width, fitPx, viewportW, setScrollLeft]);
+
+  // Momentary region flash state (cleared after the animation).
+  const [flash, setFlash] = useState<{ start: number; end: number; key: number } | null>(null);
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 2600);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   // Checkpointed scrub lookups: hover fires per mousemove — reducing the
   // whole 100k-event log each time froze large Sessions (issue 13).
@@ -887,12 +902,19 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
   const onCandidateClick = useCallback((c: RoutineCandidateWire) => {
     setSelection({ kind: 'candidate', candidate: c });
     setTrim({ start: c.window_start_s, end: c.window_end_s });
-    trimBoundsRef.current = { lo: c.window_start_s, hi: c.window_end_s };
+    // Trim bounds reach the WHOLE session (gh#170 follow-up: outward trim
+    // — the miner under-sizes dwell-shaped windows, #181's WYGFM case),
+    // not just the miner's window; confirm re-derives from the session
+    // slice either way.
+    const segs = axisRef.current?.segments;
+    const hi = segs && segs.length > 0 ? segs[segs.length - 1].end : c.window_end_s;
+    trimBoundsRef.current = { lo: 0, hi: Math.max(hi, c.window_end_s) };
   }, []);
   const onRoutineTakeClick = useCallback(
     (rt: RoutineTakeRowWire) => setSelection({ kind: 'routineTake', take: rt }),
     []
   );
+
   const onGapToggle = useCallback(
     (idx: number) =>
       setExpandedGaps((prev) => {
@@ -913,6 +935,46 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
 
   // ── Candidate confirm flow (ADR 0035, routines 158) ──────────────────
   const queryClient = useQueryClient();
+
+  // Region → Routine editor (gh#170 pass 2 directive 4): the ✎ button on
+  // a detected region runs its tier's open flow (candidate: confirm +
+  // promote — the deliberate act; take: promote if needed) and the app
+  // flips to the editor.
+  const onOpenCandidateInEditor = useCallback(
+    async (c: RoutineCandidateWire) => {
+      try {
+        await openCandidateInEditor(c);
+        void queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+        void queryClient.invalidateQueries({ queryKey: ['routines'] });
+        void queryClient.invalidateQueries({ queryKey: ['routine-candidates', session.uuid] });
+      } catch (err) {
+        toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [queryClient, session.uuid, toast]
+  );
+  const onOpenRoutineTakeInEditor = useCallback(
+    async (rt: RoutineTakeRowWire) => {
+      try {
+        await openRoutineTakeInEditor(rt);
+        void queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+        void queryClient.invalidateQueries({ queryKey: ['routines'] });
+      } catch (err) {
+        toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [queryClient, session.uuid, toast]
+  );
+  // Persisted tier (gh#170 follow-up): the ◆ region's ✎ opens directly.
+  const onOpenRoutine = useCallback((routineUuid: string) => {
+    requestRoutineEdit({ routineUuid });
+  }, []);
+  // Names for ◆ region labels (metadata only; cheap and cached).
+  const { data: routineRows } = useQuery({ queryKey: ['routines'], queryFn: api.routines.list });
+  const routineNames = useMemo(
+    () => Object.fromEntries((routineRows ?? []).map((r) => [r.uuid, r.name])),
+    [routineRows]
+  );
   const axisRef = useRef(axis);
   axisRef.current = axis;
   const trimDraggedRef = useRef(false);
@@ -1274,6 +1336,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   onTakeHover={onTakeHover}
                   onCandidateClick={onCandidateClick}
                   onRoutineTakeClick={onRoutineTakeClick}
+                  onOpenCandidateInEditor={onOpenCandidateInEditor}
+                  onOpenRoutineTakeInEditor={onOpenRoutineTakeInEditor}
+                  onOpenRoutine={onOpenRoutine}
+                  routineNames={routineNames}
                   onGapToggle={onGapToggle}
                 />
                 <SceneOverlay
@@ -1291,6 +1357,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   hoverTake={hoverTake}
                   trim={selection.kind === 'candidate' ? trim : null}
                   onTrimHandleDown={onTrimHandleDown}
+                  flash={flash}
                 />
               </svg>
             </div>
@@ -1347,6 +1414,12 @@ interface SceneProps {
   onTakeHover(take: TakeRowWire | null): void;
   onCandidateClick(candidate: RoutineCandidateWire): void;
   onRoutineTakeClick(take: RoutineTakeRowWire): void;
+  onOpenCandidateInEditor(candidate: RoutineCandidateWire): void | Promise<void>;
+  onOpenRoutineTakeInEditor(take: RoutineTakeRowWire): void | Promise<void>;
+  /** Direct open — persisted tier (gh#170 follow-up). */
+  onOpenRoutine(routineUuid: string): void;
+  /** Persisted Routine names keyed by uuid (labels for the ◆ tier). */
+  routineNames: Record<string, string | null>;
   onGapToggle(idx: number): void;
 }
 
@@ -1376,6 +1449,10 @@ const TimelineScene = memo(function TimelineScene({
   onTakeHover,
   onCandidateClick,
   onRoutineTakeClick,
+  onOpenCandidateInEditor,
+  onOpenRoutineTakeInEditor,
+  onOpenRoutine,
+  routineNames,
   onGapToggle,
 }: SceneProps) {
   const X = (t: number) => axis.tToPx(t);
@@ -1709,7 +1786,7 @@ const TimelineScene = memo(function TimelineScene({
               onCandidateClick(c);
             }}
           >
-            <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm`}</title>
+            <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm (with trim), ✎ to open in the Routine editor`}</title>
             <rect x={x0} y={lanesTop} width={x1 - x0} height={lanesBottom - lanesTop} className="stl-cand-band" />
             <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} className="stl-cand-chip-rect" />
             {x1 - x0 > 90 ? (
@@ -1721,11 +1798,33 @@ const TimelineScene = memo(function TimelineScene({
                 ⧉
               </text>
             )}
+            {/* Per-region editor open (gh#170 pass 2 directive 4):
+                confirm-then-promote-then-open — the deliberate act. */}
+            {x1 - x0 > 40 && (
+              <g
+                className="stl-region-edit"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onOpenCandidateInEditor(c);
+                }}
+              >
+                <title>Open in the Routine editor (confirms this candidate + promotes)</title>
+                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} rx={3} />
+                <text x={x1 - 10} y={textY} textAnchor="middle">
+                  ✎
+                </text>
+              </g>
+            )}
           </g>
         );
       })}
 
-      {/* Confirmed Routine Take chips (routines 158). */}
+      {/* Routine Take + persisted Routine regions (gh#170 follow-up):
+          always-on region guides for ALL tiers, matching the pin
+          picker's ladder — solid ◆ persisted > dimmed ◆ Routine Take >
+          dashed ⧉ candidate. A promoted take renders as its ROUTINE
+          (highest tier wins — no stacked duplicates; confirmed
+          candidates are already filtered upstream the same way). */}
       {routineTakes.map((rt, i) => {
         const x0 = X(rt.window_start_s);
         const x1 = Math.max(X(rt.window_end_s), x0 + 12);
@@ -1737,25 +1836,68 @@ const TimelineScene = memo(function TimelineScene({
         const textY = chipY + chipH / 2 + 3;
         const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         const selected = selectedRoutineTakeUuid === rt.uuid;
+        const routineUuid = rt.promoted_routine_uuid;
+        const persisted = routineUuid !== null;
+        const label = persisted
+          ? routineNames[routineUuid!] || chain
+          : chain;
         return (
           <g
             key={rt.uuid}
-            className={`stl-rtake-chip${selected ? ' selected' : ''}${sizeClass}`}
+            className={`${persisted ? 'stl-routine-chip' : 'stl-rtake-chip'}${selected ? ' selected' : ''}${sizeClass}`}
             onClick={(e) => {
               e.stopPropagation();
               onRoutineTakeClick(rt);
             }}
           >
-            <title>{`Routine Take · ${chain}${rt.promoted_routine_uuid ? ' · promoted ★' : ''}`}</title>
-            <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} />
+            <title>
+              {persisted
+                ? `Routine · ${label} — ✎ opens the Routine editor`
+                : `Routine Take (unpromoted) · ${chain} — ✎ promotes + opens the Routine editor`}
+            </title>
+            <rect
+              x={x0}
+              y={lanesTop}
+              width={x1 - x0}
+              height={lanesBottom - lanesTop}
+              className={persisted ? 'stl-routine-band' : 'stl-rtake-band'}
+            />
+            <rect
+              x={x0}
+              y={chipY}
+              width={x1 - x0}
+              height={chipH}
+              rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
+              className="stl-rtake-chip-rect"
+            />
             {x1 - x0 > 90 ? (
               <text x={x0 + 5} y={textY}>
-                ◆ {`${rt.promoted_routine_uuid ? '★ ' : ''}${chain}`.slice(0, Math.floor((x1 - x0) / 7))}
+                {persisted ? '◆' : '◇'} {label.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
             ) : (
               <text x={x0 + 4} y={textY}>
-                ◆
+                {persisted ? '◆' : '◇'}
               </text>
+            )}
+            {x1 - x0 > 40 && (
+              <g
+                className="stl-region-edit dark"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (persisted) onOpenRoutine(routineUuid!);
+                  else void onOpenRoutineTakeInEditor(rt);
+                }}
+              >
+                <title>
+                  {persisted
+                    ? 'Open this Routine in the Routine editor'
+                    : 'Promote + open in the Routine editor (review)'}
+                </title>
+                <rect x={x1 - 18} y={chipY + 1} width={16} height={chipH - 2} rx={3} />
+                <text x={x1 - 10} y={textY} textAnchor="middle">
+                  ✎
+                </text>
+              </g>
             )}
           </g>
         );
@@ -1787,6 +1929,7 @@ function SceneOverlay({
   hoverTake,
   trim,
   onTrimHandleDown,
+  flash,
 }: {
   model: TimelineModel;
   axis: ReturnType<typeof buildTimeAxis>;
@@ -1800,6 +1943,8 @@ function SceneOverlay({
   replayPaused: boolean;
   selection: Selection;
   hoverTake: TakeRowWire | null;
+  /** Provenance flash (gh#170): a source region pulsing once. */
+  flash?: { start: number; end: number; key: number } | null;
   /** Boundary trim of the selected candidate (routines 158): the span
    * rendered with draggable edge handles; null unless a candidate is
    * selected. */
@@ -1812,6 +1957,20 @@ function SceneOverlay({
 
   return (
     <g>
+      {/* Provenance flash (gh#170 deep-link): the routine's source region
+          pulses once on arrival. Keyed per request so a repeat re-runs
+          the CSS animation. */}
+      {flash && (
+        <rect
+          key={flash.key}
+          className="stl-flash-region"
+          x={X(flash.start)}
+          y={lanesTop}
+          width={Math.max(X(flash.end) - X(flash.start), 8)}
+          height={lanesBottom - lanesTop}
+          rx={4}
+        />
+      )}
       {/* Track labels: the LOAD bar itself is in the (windowed, memoized)
           lane; the label hangs here because it STICKS to the viewport's
           left edge while its span covers it — an exact-scrollX behavior.

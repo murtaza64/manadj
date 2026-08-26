@@ -70,7 +70,11 @@ describe('s49 #20–23 Routine (real promoted recording)', () => {
     expect(r.mixStartSec).toBeCloseTo(63.18, 1);
     // 527.74 beats at 174 BPM ≈ 182s of replay.
     expect(r.mixEndSec - r.mixStartSec).toBeCloseTo((fixture.durationBeats * 60) / 174, 3);
-    expect(r.slots.map((s) => s.deck)).toEqual(['A', 'B', 'C', 'D']);
+    // Concurrency allocation (gh#170 pass 2): Full Send's motion ends
+    // before Like A G6's entry, so the exit slot REUSES freed B (freed
+    // decks precede fresh ones in the A→B→C→D order) — the recording
+    // never needs deck D.
+    expect(r.slots.map((s) => s.deck)).toEqual(['A', 'B', 'C', 'B']);
     expect(plan.adjacencies.map((a) => a.kind)).toEqual(['routine', 'routine', 'routine']);
     expect(plan.warnings.filter((w) => w.severity === 'error')).toEqual([]);
     // All four cast tracks beatmatched at 174: base pitch 0 everywhere.
@@ -145,14 +149,16 @@ describe('s49 #20–23 Routine (real promoted recording)', () => {
       const d = after.decks[slot.deck!];
       expect(d.trackId).toBe(slot.trackId);
     }
-    // Exit continuity: Like A G6 keeps rolling across the boundary.
+    // Exit continuity: Like A G6 keeps rolling across the boundary (on
+    // whichever deck allocation handed the exit slot — reuse-aware).
+    const exitDeck = r.exit.deck;
     const before = planStateAt(plan, r.mixEndSec - 0.05);
     const after = planStateAt(plan, r.mixEndSec + 0.05);
-    expect(before.decks.D.playing).toBe(true);
-    expect(after.decks.D.playing).toBe(true);
-    expect(after.decks.D.trackId).toBe(1072);
-    expect(Math.abs(after.decks.D.trackTime - before.decks.D.trackTime)).toBeLessThan(0.5);
-    expect(after.decks.D.trackTime).toBeCloseTo(r.exit.trackSecAtEnd, 0);
+    expect(before.decks[exitDeck].playing).toBe(true);
+    expect(after.decks[exitDeck].playing).toBe(true);
+    expect(after.decks[exitDeck].trackId).toBe(1072);
+    expect(Math.abs(after.decks[exitDeck].trackTime - before.decks[exitDeck].trackTime)).toBeLessThan(0.5);
+    expect(after.decks[exitDeck].trackTime).toBeCloseTo(r.exit.trackSecAtEnd, 0);
     // The exit position is inside the track (a real handoff point).
     expect(r.exit.trackSecAtEnd).toBeGreaterThan(0);
     expect(r.exit.trackSecAtEnd).toBeLessThan(184.19);

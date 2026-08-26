@@ -61,6 +61,7 @@ const MARQUEE_CLICK_PX = 4;
 
 export function LaneCanvas({
   id,
+  color: colorProp,
   widthPx,
   points,
   guides,
@@ -71,7 +72,14 @@ export function LaneCanvas({
   selected,
   onSelectedChange,
 }: {
+  /** Lane identity: kind semantics (neutral line, fill anchor, shade
+   * ramps, filter snap) key off the id's control prefix. The Routine
+   * editor passes kind-matched ids for its slot lanes (gh#170 pass 2 —
+   * a pair is the 2-slot special case; this canvas is the shared lane
+   * editor) with a `color` override carrying slot identity. */
   id: LaneId;
+  /** Stroke/fill color; defaults to the pair palette (LANE_COLORS[id]). */
+  color?: string;
   /** Rendered width — a draw-effect dependency so zoom resizes redraw in
    * place (this used to be a `key`, remounting the canvas per zoom step). */
   widthPx: number;
@@ -257,7 +265,7 @@ export function LaneCanvas({
       ctx.fillRect(a, LANE_PAD, Math.max(b - a, 1.5), lh);
     }
 
-    const color = LANE_COLORS[id];
+    const color = colorProp ?? LANE_COLORS[id];
     // DEVIATION rendering (mix-editor 39): the curve renders per straight
     // segment — grey at/near neutral ramping to the deck color with
     // deviation, with the area between curve and NEUTRAL AXIS filled as a
@@ -401,7 +409,7 @@ export function LaneCanvas({
   // React-triggered redraws (model/hover/zoom/height changes).
   useEffect(() => {
     drawRef.current();
-  }, [points, id, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
+  }, [points, id, colorProp, guides, widthPx, hoverIndex, chopPreview, resizeTick, selected, marquee]);
 
   // Scroll-triggered redraws: reposition only when the view leaves the
   // drawn span (or the zoom it was drawn at changed).
