@@ -27,7 +27,9 @@ import { audibleHolder, type AudibleSurfaceId } from '../playback/audibleSurface
 import { channelFaderToGain, crossfaderGains, trimToGain } from '../playback/mixerMath';
 import type { PlanAutomation, PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
 
-type PlanDeck = PlannedEntry['deck'];
+/** The pair-machine decks: Pickup adopts the shared A/B pair (a Routine's
+ * C/D allocations are Conductor territory — routines 159). */
+type PlanDeck = 'A' | 'B';
 
 /** Default alignment tolerance for the two-deck blend case: the
  * Conductor's drift tolerance (issue 16). Tunable — but raising it past
@@ -150,14 +152,18 @@ export function readPickupSnapshot(
   };
 }
 
-// ── Audibility (Master-bus model, paused decks count) ───────────────────
+// ── Audibility (Master-bus model, transport-gated) ──────────────────────
 
 const { audibleGain, eqKillBelow, filterKillBeyond } = DEFAULT_DETECTOR_PARAMS;
 
-/** detector.ts's deckAudible without the transport gate: would this
- * channel be audible on the Master bus if its deck ran? */
+/** detector.ts's deckAudible: is this channel audible on the Master bus
+ * RIGHT NOW? A paused deck is silent regardless of its fader (#161: a
+ * paused deck B with fader up used to block Pickup as a phantom anchor —
+ * lowering the fader "fixed" it). Silent decks are reconcilable, never
+ * anchors. */
 function channelAudible(snap: PickupSnapshot, ch: PlanDeck): boolean {
   if (snap.decks[ch].trackId === null) return false;
+  if (!snap.decks[ch].playing) return false;
   const c = snap.channels[ch];
   if (c.eq.low <= eqKillBelow && c.eq.mid <= eqKillBelow && c.eq.high <= eqKillBelow) {
     return false;
@@ -443,11 +449,22 @@ function twoDeckPickup(
 
 // ── Execution helpers (pure; the runtime applies them) ──────────────────
 
-/** Mirror a plan's physical deck assignment (A↔B). planStateAt derives
- * decks and lanes from entry.deck alone, so this transform is complete. */
+/** Mirror a plan's physical deck assignment (A↔B; a Routine's C/D
+ * allocations stay put). planStateAt derives decks and lanes from
+ * entry.deck and the routine slots' decks, so this transform is
+ * complete. */
 export function flipPlanDecks(plan: SetPlan): SetPlan {
-  const flip = (d: PlannedEntry['deck']): PlannedEntry['deck'] => (d === 'A' ? 'B' : 'A');
-  return { ...plan, entries: plan.entries.map((e) => ({ ...e, deck: flip(e.deck) })) };
+  const flip = (d: PlannedEntry['deck']): PlannedEntry['deck'] =>
+    d === 'A' ? 'B' : d === 'B' ? 'A' : d;
+  return {
+    ...plan,
+    entries: plan.entries.map((e) => ({ ...e, deck: flip(e.deck) })),
+    routines: plan.routines.map((r) => ({
+      ...r,
+      slots: r.slots.map((s) => ({ ...s, deck: s.deck === null ? null : flip(s.deck) })),
+      exit: { ...r.exit, deck: flip(r.exit.deck) },
+    })),
+  };
 }
 
 /**
@@ -463,6 +480,10 @@ export function pickupStartLanes(snap: PickupSnapshot): Record<PlanDeck, PlanAut
       fader: c.fader * Math.sqrt(xfGain(snap, ch)),
       eq: { ...c.eq },
       filter: c.filter,
+      // Adopt the live trim (sets #164): engaging is inaudible, and the
+      // ramp converges onto the plan's entry trim (or hands the node
+      // back to base at ramp end when the plan carries none).
+      trim: c.trim,
     };
   };
   return { A: lane('A'), B: lane('B') };

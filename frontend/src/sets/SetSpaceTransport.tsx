@@ -71,7 +71,14 @@ function Adapter({ setId }: { setId: number }): null {
   useEffect(() => {
     const audio = () => ({
       mixer: ctx.current.mixer,
-      engines: { A: ctx.current.decks.A.engine, B: ctx.current.decks.B.engine },
+      // All four engines: Routine slots allocate across A→B→C→D
+      // (routines 159).
+      engines: {
+        A: ctx.current.decks.A.engine,
+        B: ctx.current.decks.B.engine,
+        C: ctx.current.decks.C.engine,
+        D: ctx.current.decks.D.engine,
+      },
     });
     // The deck provider's one Load path (ADR 0022), SetDetailPane's idiom.
     const loadTrackOnDeck = (deck: ChannelId, trackId: number) => {

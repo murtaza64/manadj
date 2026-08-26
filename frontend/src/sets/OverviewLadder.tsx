@@ -16,8 +16,18 @@
  * ladder auto-scrolls DAW-style (paged — pan when the playhead crosses
  * ~78% of the viewport; a seek discontinuity centers instead). Manual
  * pan disengages follow; zoom never does.
+ *
+ * Four decks + Routines (sets #161, closing #159's deferred acceptance
+ * item): when the plan allocates C/D (Routine spans), the ladder grows a
+ * second mirrored braid (C up / D down under the A/B pair); Routine
+ * spans render as full-height magenta bands (the cast bracket's color)
+ * across their covered range; and every lane carries a per-deck
+ * fader-LEVEL curve (prototype variant E) sampled from planStateAt —
+ * authored window fades, recorded Routine choreography, and grace fades
+ * all read from the same model the Conductor executes.
  */
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { bContentSegments } from '../editor/mixModel';
 import { DECK_COLORS } from '../theme/deckColors';
 import type { HotCue, Track } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
@@ -27,12 +37,33 @@ import { HOT_CUE_CSS_COLORS } from '../hotcues/palette';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
 import { drawStyledWave, MINIMAP_BRIGHTNESS } from './ladderWaveStyle';
-import type { PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
+import {
+  planStateAt,
+  type PlanDeck,
+  type PlannedAdjacency,
+  type PlannedEntry,
+  type SetPlan,
+} from './planner';
 import { getLadderView, setLadderView } from './setStore';
 
 const LANE_H = 46;
 const TITLE_H = 13;
 export const LADDER_H = LANE_H * 2 + 4;
+/** The routine family's magenta (cast bracket, candidate chips). */
+const ROUTINE_BAND_COLOR = '#ff00c8';
+
+// ── Four-deck lane geometry (sets #161) ────────────────────────────────
+// Two-deck: the classic A/B mirrored braid. Four-deck: the PHYSICAL deck
+// layout top-to-bottom — C, A, B, D (C above A, D below B) — the A/B
+// braid stays central, the outboard decks flank it. Wave directions keep
+// titles on each lane's outer edge.
+const LANE_STRIDE = LANE_H + 2;
+function laneTopFor(fourDeck: boolean): Record<PlanDeck, number> {
+  return fourDeck
+    ? { C: 0, A: LANE_STRIDE, B: LANE_STRIDE * 2, D: LANE_STRIDE * 3 }
+    : { A: 0, B: LANE_STRIDE, C: LANE_STRIDE * 2, D: LANE_STRIDE * 3 };
+}
+const LANE_UP: Record<PlanDeck, boolean> = { A: true, B: false, C: true, D: false };
 /** Max zoom: ~8s of mix per 100px. */
 const MAX_PX_PER_SEC = 12.5;
 /** Default framing shows at most this much mix — a whole hour-long set
@@ -131,6 +162,29 @@ export const OverviewLadder = memo(function OverviewLadder({
   const lastAutoScrollAt = useRef(0);
   const lastMixTime = useRef<number | null>(null);
   const total = Math.max(plan.totalSec, 0.001);
+
+  // Four-deck mode (sets #161): a second mirrored braid (C/D) exactly
+  // when the plan allocates beyond A/B — i.e. Routine spans exist.
+  const fourDeck =
+    plan.routines.length > 0 || plan.entries.some((e) => e.deck === 'C' || e.deck === 'D');
+  const decks: readonly PlanDeck[] = fourDeck ? ['A', 'B', 'C', 'D'] : ['A', 'B'];
+  const ladderH = fourDeck ? LANE_H * 4 + 8 : LADDER_H;
+  // Physical lane order (C, A, B, D in four-deck mode).
+  const laneTop = laneTopFor(fourDeck);
+
+  // Per-deck fader-LEVEL polylines (prototype variant E), sampled from
+  // planStateAt — the same model the Conductor executes, so authored
+  // window fades, recorded Routine choreography, grace fades, and hard
+  // cuts all show as real levels. One-off per plan identity (~4000
+  // samples over the whole mix; step-compressed before rendering).
+  const faderLevels = useMemo(() => sampleFaderLevels(plan, decks), [plan, fourDeck]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Content runs per entry (#161): clips render the audio AS IT PLAYS —
+  // jumps splice, loops repeat, leads/pauses go blank.
+  const contentSegments = useMemo(
+    () => clipContentSegments(plan, (id) => tracks.get(id)?.duration_secs ?? Infinity),
+    [plan, tracks]
+  );
 
   // Canvases redraw at the SETTLED zoom (crisp after the gesture, cheap
   // during it — CSS scaling covers the in-between frames; the backing
@@ -268,7 +322,7 @@ export const OverviewLadder = memo(function OverviewLadder({
           overflowY: 'hidden',
           scrollbarWidth: 'thin',
           position: 'relative',
-          height: LADDER_H,
+          height: ladderH,
           borderBottom: '1px solid var(--surface0)',
           background: 'var(--crust)',
         }}
@@ -290,7 +344,46 @@ export const OverviewLadder = memo(function OverviewLadder({
               adj={adj}
               total={total}
               future={previewFutures?.[i] ?? null}
+              outTop={laneTop[plan.entries[i]?.deck ?? 'A']}
+              inTop={laneTop[plan.entries[i + 1]?.deck ?? 'B']}
             />
+          ))}
+          {/* Routine spans (sets #161): a full-height magenta band across
+              the covered range — the recording is the authority inside;
+              the cast bracket in the list wears the same color. */}
+          {plan.routines.map((r, i) => (
+            <div
+              key={`routine-${i}`}
+              title={`Pinned Routine — ${r.slots.length} cast slots replay as recorded across this span`}
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: `${(r.mixStartSec / total) * 100}%`,
+                width: `${Math.max(((r.mixEndSec - r.mixStartSec) / total) * 100, 0.05)}%`,
+                background: 'rgba(255, 0, 200, 0.07)',
+                borderLeft: `1px solid ${ROUTINE_BAND_COLOR}`,
+                borderRight: `1px dashed ${ROUTINE_BAND_COLOR}`,
+                zIndex: 1,
+                pointerEvents: 'none',
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 1,
+                  left: 3,
+                  color: ROUTINE_BAND_COLOR,
+                  fontSize: 9,
+                  fontWeight: 800,
+                  letterSpacing: '0.06em',
+                  textShadow: '0 0 4px #000',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                ◆ ROUTINE
+              </span>
+            </div>
           ))}
           {/* Tempo return ramps (sets 06): the incoming eases back to its
               native tempo after the window — drawn on its lane, fading out
@@ -306,7 +399,9 @@ export const OverviewLadder = memo(function OverviewLadder({
                   position: 'absolute',
                   left: `${(adj.mixEndSec / total) * 100}%`,
                   width: `${((adj.tempoReturnEndSec - adj.mixEndSec) / total) * 100}%`,
-                  top: inDeck === 'A' ? LANE_H - 7 : LANE_H + 3,
+                  top: LANE_UP[inDeck]
+                    ? laneTop[inDeck] + LANE_H - 7
+                    : laneTop[inDeck] + 1,
                   height: 6,
                   background: 'linear-gradient(90deg, #ff00ff 0%, rgba(255,0,255,0) 100%)',
                   zIndex: 3,
@@ -328,7 +423,7 @@ export const OverviewLadder = memo(function OverviewLadder({
                 style={{
                   position: 'absolute',
                   left: `${(adj.mixStartSec / total) * 100}%`,
-                  top: LANE_H - 8,
+                  top: laneTop.A + LANE_H - 8,
                   transform: 'translateX(-50%)',
                   color: w.severity === 'error' ? '#ff0040' : '#ffe000',
                   fontSize: 12,
@@ -347,11 +442,25 @@ export const OverviewLadder = memo(function OverviewLadder({
             <LadderClip
               key={`${entry.trackId}-${i}`}
               entry={entry}
+              segments={contentSegments[i] ?? EMPTY_SEGMENTS}
+              top={laneTop[entry.deck]}
               position={i + 1}
               track={tracks.get(entry.trackId)}
               hotCues={hotCuesByTrack.get(entry.trackId) ?? EMPTY_CUES}
               total={total}
               redrawKey={settledZoom}
+            />
+          ))}
+          {/* Per-deck fader LEVELS (prototype variant E, sets #161): the
+              deck's audible level over mix time as a filled curve on its
+              lane — window fades, recorded Routine rides, grace fades. */}
+          {decks.map((d) => (
+            <FaderLevelLane
+              key={`level-${d}`}
+              deck={d}
+              top={laneTop[d]}
+              points={faderLevels[d] ?? []}
+              total={total}
             />
           ))}
           {/* Grace fades (sets 14): the synthesized fade-out drawn over the
@@ -360,7 +469,7 @@ export const OverviewLadder = memo(function OverviewLadder({
           {plan.entries.map((entry, i) => {
             const g = entry.graceFade;
             if (!g) return null;
-            const top = entry.deck === 'A' ? 0 : LANE_H + 2;
+            const top = laneTop[entry.deck];
             return (
               <div key={`grace-${i}`} style={{ pointerEvents: 'none' }}>
                 <div
@@ -372,10 +481,9 @@ export const OverviewLadder = memo(function OverviewLadder({
                     top,
                     height: LANE_H,
                     background: 'rgba(255,0,64,0.30)',
-                    clipPath:
-                      entry.deck === 'A'
-                        ? 'polygon(0 0, 0 100%, 100% 100%)'
-                        : 'polygon(0 0, 100% 0, 0 100%)',
+                    clipPath: LANE_UP[entry.deck]
+                      ? 'polygon(0 0, 0 100%, 100% 100%)'
+                      : 'polygon(0 0, 100% 0, 0 100%)',
                     zIndex: 3,
                   }}
                 />
@@ -396,19 +504,35 @@ export const OverviewLadder = memo(function OverviewLadder({
               </div>
             );
           })}
-          {/* Center line the mirrored lanes meet at */}
+          {/* Center line the A/B braid meets at */}
           <div
             style={{
               position: 'absolute',
               left: 0,
               right: 0,
-              top: LANE_H,
+              top: laneTop.A + LANE_H,
               height: 2,
               background: 'rgba(255,255,255,0.35)',
               zIndex: 3,
               pointerEvents: 'none',
             }}
           />
+          {fourDeck &&
+            [laneTop.A - 1, laneTop.D - 1].map((y) => (
+              <div
+                key={`sep-${y}`}
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: y,
+                  height: 1,
+                  background: 'rgba(255,255,255,0.18)',
+                  zIndex: 3,
+                  pointerEvents: 'none',
+                }}
+              />
+            ))}
           {/* Conductor playhead (sets 05) — rAF-driven, hidden when idle */}
           <div
             ref={playheadRef}
@@ -427,6 +551,27 @@ export const OverviewLadder = memo(function OverviewLadder({
           />
         </div>
       </div>
+      {/* Deck lane letters (four-deck mode): a fixed gutter overlay so the
+          braids stay legible while panning. */}
+      {fourDeck &&
+        decks.map((d) => (
+          <span
+            key={`lane-label-${d}`}
+            style={{
+              position: 'absolute',
+              left: 3,
+              top: laneTop[d] + (LANE_UP[d] ? 2 : LANE_H - 14),
+              zIndex: 6,
+              color: DECK_COLORS[d],
+              fontSize: 10,
+              fontWeight: 800,
+              textShadow: '0 0 4px #000, 0 0 4px #000',
+              pointerEvents: 'none',
+            }}
+          >
+            {d}
+          </span>
+        ))}
       {/* Follow-playback toggle (sets 05): on at playback start, off on
           manual pan/scroll, re-engaged by seeking or this button. */}
       {conducting && (
@@ -454,15 +599,268 @@ export const OverviewLadder = memo(function OverviewLadder({
   );
 });
 
+/** One linear run of audible content inside a clip (#161): between
+ * these, the artifact jumps (beat jumps, stabs, loop-collapsed repeats),
+ * pauses, or sits in a silent lead — rendered blank, exactly as it will
+ * play. */
+export interface ClipContentSegment {
+  mixStart: number;
+  mixEnd: number;
+  trackStart: number;
+  trackEnd: number;
+}
+
+/** Merge tolerance: consecutive runs whose positions meet within this
+ * are one continuous strip (no splice mark for numeric dust). */
+const SEGMENT_MERGE_EPS_S = 0.5;
+
+function pushRun(out: ClipContentSegment[], seg: ClipContentSegment): void {
+  if (seg.mixEnd - seg.mixStart <= 1e-6) return;
+  const prev = out[out.length - 1];
+  if (
+    prev &&
+    Math.abs(prev.mixEnd - seg.mixStart) < 1e-6 &&
+    Math.abs(prev.trackEnd - seg.trackStart) < SEGMENT_MERGE_EPS_S
+  ) {
+    prev.mixEnd = seg.mixEnd;
+    prev.trackEnd = seg.trackEnd;
+    return;
+  }
+  out.push(seg);
+}
+
+/**
+ * Per-entry audible content runs (#161): the ladder renders the audio AS
+ * IT WILL PLAY — repeated sections drawn repeated, skipped audio skipped,
+ * silent leads/pauses blank. Windowed entries take the transition model's
+ * own piecewise walk (bContentSegments, jump-expanded); Routine entries
+ * take their slot trace's moving runs; everything else is one linear
+ * strip.
+ */
+export function clipContentSegments(
+  plan: SetPlan,
+  durOf: (trackId: number) => number
+): ClipContentSegment[][] {
+  return plan.entries.map((entry, i) => {
+    const out: ClipContentSegment[] = [];
+    const span = entry.exitMixSec - entry.entryMixSec;
+    if (span <= 0) return out;
+
+    // Routine slot? Its trace IS the playback (runs between jumps/pauses).
+    const routine = plan.routines.find(
+      (r) => i >= r.startEntryIndex && i < r.startEntryIndex + r.slots.length
+    );
+    const slot = routine?.slots[i - routine.startEntryIndex];
+    if (routine && slot && slot.deck !== null) {
+      const spb = routine.secPerBeat;
+      // Head plays from its own entry up to the span open (linear).
+      if (entry.entryMixSec < routine.mixStartSec) {
+        const first = slot.trace[0];
+        pushRun(out, {
+          mixStart: entry.entryMixSec,
+          mixEnd: routine.mixStartSec,
+          trackStart: entry.entrySec,
+          trackEnd: Math.max(0, first?.pos ?? entry.entrySec),
+        });
+      }
+      for (let k = 0; k < slot.trace.length - 1; k++) {
+        const a = slot.trace[k];
+        const b = slot.trace[k + 1];
+        if (!a.moving || a.ratePerBeat <= 0) continue;
+        // Run to the next point (jump landings cut runs; traceStateAt
+        // rides a's rate up to the landing).
+        let beat0 = a.beat;
+        let pos0 = a.pos;
+        const beat1 = b.beat;
+        const pos1 = b.jump ? a.pos + a.ratePerBeat * (beat1 - a.beat) : b.pos;
+        if (pos1 <= 0) continue; // wholly inside the silent lead
+        if (pos0 < 0) {
+          // Clip the run at its 0-crossing (park-until-positive rule).
+          beat0 = a.beat + -a.pos / a.ratePerBeat;
+          pos0 = 0;
+        }
+        pushRun(out, {
+          mixStart: Math.max(entry.entryMixSec, routine.mixStartSec + beat0 * spb),
+          mixEnd: Math.min(entry.exitMixSec, routine.mixStartSec + beat1 * spb),
+          trackStart: pos0,
+          trackEnd: pos1,
+        });
+      }
+      // The exit slot keeps sounding past the span end (linear to exit).
+      if (entry.exitMixSec > routine.mixEndSec) {
+        pushRun(out, {
+          mixStart: routine.mixEndSec,
+          mixEnd: entry.exitMixSec,
+          trackStart: routine.exit.trackSecAtEnd,
+          trackEnd: entry.exitSec,
+        });
+      }
+      return out;
+    }
+
+    // Windowed incoming: the transition model's own audible walk (lead
+    // gaps deferred, jumps expanded — loops render repeated).
+    const entryAdj = i > 0 ? plan.adjacencies[i - 1] : undefined;
+    if (entryAdj && (entryAdj.kind === 'transition' || entryAdj.kind === 'take')) {
+      const tr = entryAdj.transition;
+      const authoredEnd = tr.startSec + tr.durationSec;
+      const segs = bContentSegments(tr, durOf(entry.trackId), entryAdj.rateIncoming);
+      for (const s of segs) {
+        // The walk runs to B's track end; the window owns only its own
+        // span — the post-window solo strip is appended below.
+        const a0 = s.mixStartSec;
+        const a1 = Math.min(s.mixEndSec, authoredEnd);
+        if (a1 <= a0) continue;
+        // Authored window axis → global mix axis via the outgoing's rate.
+        const g0 = entryAdj.mixStartSec + (a0 - tr.startSec) / entryAdj.rateOutgoing;
+        const g1 = entryAdj.mixStartSec + (a1 - tr.startSec) / entryAdj.rateOutgoing;
+        pushRun(out, {
+          mixStart: Math.max(entry.entryMixSec, g0),
+          mixEnd: Math.min(entry.exitMixSec, g1),
+          trackStart: s.bStartSec,
+          trackEnd: s.bStartSec + (a1 - a0) * entryAdj.rateIncoming,
+        });
+      }
+      // Past the window: solo to the exit (Tempo return curvature is
+      // sub-pixel at minimap scale — endpoints exact).
+      const windowEndGlobal = entryAdj.mixEndSec;
+      if (entry.exitMixSec > windowEndGlobal) {
+        const last = out[out.length - 1];
+        pushRun(out, {
+          mixStart: Math.max(entry.entryMixSec, windowEndGlobal),
+          mixEnd: entry.exitMixSec,
+          trackStart: last ? last.trackEnd : entry.entrySec,
+          trackEnd: entry.exitSec,
+        });
+      }
+      if (out.length > 0) return out;
+    }
+
+    // Plain entry: one linear strip (the pre-#161 render).
+    pushRun(out, {
+      mixStart: entry.entryMixSec,
+      mixEnd: entry.exitMixSec,
+      trackStart: entry.entrySec,
+      trackEnd: entry.exitSec,
+    });
+    return out;
+  });
+}
+
+/** Per-deck audible level over mix time (variant E): playing × fader,
+ * sampled from planStateAt and step-compressed (levels are mostly flat —
+ * points survive only where the value moves). ~one sample per
+ * totalSec/4000 (floor 0.5s): a minimap curve, not an automation lane. */
+function sampleFaderLevels(
+  plan: SetPlan,
+  decks: readonly PlanDeck[]
+): Partial<Record<PlanDeck, [number, number][]>> {
+  const out: Partial<Record<PlanDeck, [number, number][]>> = {};
+  for (const d of decks) out[d] = [];
+  const total = Math.max(plan.totalSec, 0.001);
+  if (plan.entries.length === 0) return out;
+  const step = Math.max(0.5, total / 4000);
+  // Track the previous raw sample per deck so a level CHANGE first drops
+  // an anchor at the pre-change instant (steps stay steps, not slopes).
+  const prev: Partial<Record<PlanDeck, [number, number]>> = {};
+  for (let t = 0; t <= total; t += step) {
+    const s = planStateAt(plan, t);
+    for (const d of decks) {
+      const v = s.decks[d].playing ? s.lanes[d].fader : 0;
+      const pts = out[d]!;
+      const last = pts[pts.length - 1];
+      if (!last) {
+        pts.push([t, v]);
+      } else if (Math.abs(v - last[1]) > 0.004) {
+        const p = prev[d];
+        if (p && p[0] > last[0]) pts.push(p);
+        pts.push([t, v]);
+      }
+      prev[d] = [t, v];
+    }
+  }
+  for (const d of decks) {
+    const pts = out[d]!;
+    const p = prev[d];
+    if (p && (pts.length === 0 || p[0] > pts[pts.length - 1][0])) pts.push(p);
+  }
+  return out;
+}
+
+/** SVG width units for a fader-level lane (preserveAspectRatio="none"
+ * stretches it to the ladder's zoomed width). */
+const LEVEL_VIEW_W = 4000;
+
+/** One deck's fader-level curve (variant E): a filled polyline on the
+ * deck's lane, anchored at the braid's center line (up lanes fill upward,
+ * down lanes downward) in the deck's identity color. */
+function FaderLevelLane({
+  deck,
+  top,
+  points,
+  total,
+}: {
+  deck: PlanDeck;
+  /** The deck's lane top (physical order — C, A, B, D in four-deck). */
+  top: number;
+  points: [number, number][];
+  total: number;
+}) {
+  if (points.length === 0) return null;
+  // Uniform UP on every lane (#161): level rises from the lane's bottom
+  // edge regardless of stacking position — mirroring lives only in the
+  // lane geometry (C/A/B/D), never in how a curve reads within a lane.
+  const H = LANE_H;
+  const yAt = (v: number) => H - v * (H - 4);
+  const xAt = (t: number) => (t / total) * LEVEL_VIEW_W;
+  const base = H;
+  let dPath = `M ${xAt(points[0][0]).toFixed(1)} ${base}`;
+  for (const [t, v] of points) dPath += ` L ${xAt(t).toFixed(1)} ${yAt(v).toFixed(1)}`;
+  dPath += ` L ${xAt(points[points.length - 1][0]).toFixed(1)} ${base} Z`;
+  const color = DECK_COLORS[deck];
+  return (
+    <svg
+      viewBox={`0 0 ${LEVEL_VIEW_W} ${H}`}
+      preserveAspectRatio="none"
+      style={{
+        position: 'absolute',
+        left: 0,
+        top,
+        width: '100%',
+        height: H,
+        zIndex: 3,
+        pointerEvents: 'none',
+      }}
+    >
+      <path
+        d={dPath}
+        fill={color}
+        fillOpacity={0.16}
+        stroke={color}
+        strokeOpacity={0.65}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
 function AdjacencyBand({
   adj,
   total,
   future,
+  outTop,
+  inTop,
 }: {
   adj: PlannedAdjacency;
   total: number;
   /** Drag-preview future (sets 07); null = not previewing / unaffected. */
   future: AdjacencyFuture | null;
+  /** Lane tops of the decks this handover involves — the band spans
+   * exactly their lanes (four-deck mode would otherwise paint columns
+   * over idle lanes). */
+  outTop: number;
+  inTop: number;
 }) {
   if (adj.kind === 'hardcut') {
     // AUTO-FILLABLE preview: this hypothetical pair has a library
@@ -502,8 +900,15 @@ function AdjacencyBand({
       </div>
     );
   }
+  // Routine coverage renders as ONE magenta span band (the ladder's
+  // routine layer) — per-adjacency bands would be interior slivers.
+  if (adj.kind === 'routine') return null;
   const color = adj.kind === 'transition' ? '#00ff00' : '#ff9900';
   const bg = adj.kind === 'transition' ? 'rgba(0,255,0,0.10)' : 'rgba(255,153,0,0.12)';
+  // The band spans exactly the lanes of the two decks involved (a
+  // routine-exit handover can leave from C/D — sets #161).
+  const top = Math.min(outTop, inTop);
+  const bottom = Math.max(outTop, inTop) + LANE_H;
   // WILL-RESTORE preview: a Dormant pin wakes if the drop commits — the
   // band renders in its pin-kind color inside a dashed violet frame + ↺
   // (violet is unclaimed: cyan/magenta are Deck identity, never state —
@@ -513,8 +918,8 @@ function AdjacencyBand({
     <div
       style={{
         position: 'absolute',
-        top: 0,
-        bottom: 0,
+        top,
+        height: bottom - top,
         left: `${(adj.mixStartSec / total) * 100}%`,
         width: `${Math.max(((adj.mixEndSec - adj.mixStartSec) / total) * 100, 0.05)}%`,
         background: bg,
@@ -550,8 +955,12 @@ function AdjacencyBand({
  * every ladder render re-ran them all (528 clip renders per 88-track
  * open). Props are stable plan/track slices; the blob arrives through
  * the clip's own query subscription. */
+const EMPTY_SEGMENTS: ClipContentSegment[] = [];
+
 const LadderClip = memo(function LadderClip({
   entry,
+  segments,
+  top,
   position,
   track,
   hotCues,
@@ -559,6 +968,11 @@ const LadderClip = memo(function LadderClip({
   redrawKey,
 }: {
   entry: PlannedEntry;
+  /** Audible content runs (#161): each renders its own wave slice —
+   * jumps splice, loops repeat, leads/pauses show the clip's dark bg. */
+  segments: ClipContentSegment[];
+  /** The entry deck's lane top (physical order, four-deck aware). */
+  top: number;
   /** 1-based position in the set — matches the track list's numbering. */
   position: number;
   track: Track | undefined;
@@ -567,19 +981,23 @@ const LadderClip = memo(function LadderClip({
   /** Bumps when the canvas backing store should re-render (zoom settle). */
   redrawKey: number;
 }) {
-  const isA = entry.deck === 'A';
+  // Lane geometry keys off the deck (four-deck aware, sets #161): up
+  // lanes (A/C) carry the title on the top edge, down lanes (B/D) on the
+  // bottom — the outer edge of each mirrored braid.
+  const up = LANE_UP[entry.deck];
   const title = track ? (track.title ?? track.filename) : `Track ${entry.trackId}`;
   const cues = hotCues.map((c) => ({
     t: c.time_seconds,
     color: c.color ?? HOT_CUE_CSS_COLORS[c.slot_number] ?? '#fff',
   }));
+  const span = Math.max(entry.exitMixSec - entry.entryMixSec, 0.001);
   return (
     <div
       style={{
         position: 'absolute',
         left: `${(entry.entryMixSec / total) * 100}%`,
-        width: `${((entry.exitMixSec - entry.entryMixSec) / total) * 100}%`,
-        top: isA ? 0 : LANE_H + 2,
+        width: `${(span / total) * 100}%`,
+        top,
         height: LANE_H,
         border: `1px solid ${DECK_COLORS[entry.deck]}`,
         background: '#0b0b12',
@@ -589,16 +1007,33 @@ const LadderClip = memo(function LadderClip({
         zIndex: 2,
       }}
     >
-      {isA && <ClipTitle position={position} title={title} color={DECK_COLORS.A} />}
-      <LadderWave
-        trackId={entry.trackId}
-        height={LANE_H - TITLE_H - 2}
-        range={[entry.entrySec, entry.exitSec]}
-        cues={cues}
-        dir={isA ? 'up' : 'down'}
-        redrawKey={redrawKey}
-      />
-      {!isA && <ClipTitle position={position} title={title} color={DECK_COLORS.B} />}
+      {up && <ClipTitle position={position} title={title} color={DECK_COLORS[entry.deck]} />}
+      <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+        {segments.map((seg, k) => (
+          <div
+            key={`seg-${k}`}
+            style={{
+              position: 'absolute',
+              left: `${((seg.mixStart - entry.entryMixSec) / span) * 100}%`,
+              width: `${((seg.mixEnd - seg.mixStart) / span) * 100}%`,
+              top: 0,
+              bottom: 0,
+              // Splice mark: a run boundary is a real playback jump.
+              borderLeft: k > 0 ? '1px solid rgba(255,255,255,0.45)' : undefined,
+            }}
+          >
+            <LadderWave
+              trackId={entry.trackId}
+              height={LANE_H - TITLE_H - 2}
+              range={[seg.trackStart, seg.trackEnd]}
+              cues={cues}
+              dir={up ? 'up' : 'down'}
+              redrawKey={redrawKey}
+            />
+          </div>
+        ))}
+      </div>
+      {!up && <ClipTitle position={position} title={title} color={DECK_COLORS[entry.deck]} />}
     </div>
   );
 });
@@ -703,10 +1138,14 @@ function LadderWave({
       ctx.clearRect(0, 0, wDraw, h);
       if (!wave) return;
 
+      // Bipolar on every lane (#161): the classic symmetric read —
+      // mirroring belongs to the lane STACKING (C/A/B/D geometry), never
+      // to how a lane's own content is drawn. `dir` still places the cue
+      // flags on the title side below.
       drawStyledWave(ctx, wave, slot.styleId, slot.params, {
         width: wDraw,
         height: h,
-        dir,
+        dir: 'bipolar',
         range,
         brightness: MINIMAP_BRIGHTNESS,
       });

@@ -115,7 +115,7 @@ describe('non-performance holder (sets 25: the dual-driver bug)', () => {
   });
 });
 
-describe('audibility anchoring (Master-bus model, paused counts)', () => {
+describe('audibility anchoring (Master-bus model, transport-gated)', () => {
   it('no audible deck → unlit with no-audible-deck', () => {
     const plan = windowedPlan();
     const d = unlit(
@@ -124,12 +124,24 @@ describe('audibility anchoring (Master-bus model, paused counts)', () => {
     expect(d.reason).toBe('no-audible-deck');
   });
 
-  it('a PAUSED audible deck anchors (predicate holds while paused)', () => {
+  it('a PAUSED deck is silent regardless of fader — never an anchor (#161)', () => {
+    // The human-reported shape: A playing and audible, B PAUSED with its
+    // fader up. B is silent — Pickup must light anchored on A alone
+    // (the old paused-counts model made B a phantom anchor and blocked).
     const plan = windowedPlan();
-    const s = snap({ decks: { A: deck(1, 30, { playing: false }), B: { ...silentDeck } } });
+    const s = snap({
+      decks: { A: deck(1, 30), B: deck(2, 8, { playing: false }) },
+    });
     const d = lit(evaluatePickup(plan, s));
     expect(d.mixTime).toBeCloseTo(30);
     expect(d.anchors).toEqual(['A']);
+  });
+
+  it('ALL decks paused → no anchor (silence has nothing to pick up)', () => {
+    const plan = windowedPlan();
+    const s = snap({ decks: { A: deck(1, 30, { playing: false }), B: { ...silentDeck } } });
+    const d = unlit(evaluatePickup(plan, s));
+    expect(d.reason).toBe('no-audible-deck');
   });
 
   it('a killed channel is not an anchor: EQ kill, filter kill, crossfader', () => {
@@ -411,7 +423,14 @@ describe('pickupStartLanes (the convergence ramp start)', () => {
       },
     });
     const lanes = pickupStartLanes(s);
-    expect(lanes.A).toEqual({ fader: 0.8, eq: { low: 0.4, mid: 0.5, high: 0.6 }, filter: 0.2 });
+    // Trim rides along (sets #164): engaging reproduces the sounding
+    // trim, then the ramp converges onto the plan's entry trim.
+    expect(lanes.A).toEqual({
+      fader: 0.8,
+      eq: { low: 0.4, mid: 0.5, high: 0.6 },
+      filter: 0.2,
+      trim: 0.5,
+    });
   });
 
   it('folds the crossfader gain into the fader (value·√xf preserves gain)', () => {
