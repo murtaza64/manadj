@@ -22,6 +22,7 @@ import {
 } from './presets/gen';
 import type { PresetRenderer, VisualizerPreset } from './presets/types';
 import { BACKEND_URL } from '../api/client';
+import { writeSetting } from '../settings/persistedSettings';
 import {
   countSoloReviews,
   INITIAL_CYCLE,
@@ -208,7 +209,7 @@ export function VisualizerApp() {
   );
   const toggleHud = () =>
     setHudVisible((v) => {
-      localStorage.setItem('manadj-visualizer-hud', String(!v));
+      writeSetting('manadj-visualizer-hud', String(!v));
       return !v;
     });
   const [genTick, setGenTick] = useState(0);
@@ -603,7 +604,7 @@ export function VisualizerApp() {
       } else if (k === 'c') {
         setCycleMode((prev) => {
           const next = CYCLE_MODES[(CYCLE_MODES.indexOf(prev) + 1) % CYCLE_MODES.length];
-          localStorage.setItem(CYCLE_KEY, next);
+          writeSetting(CYCLE_KEY, next);
           return next;
         });
       }
@@ -726,7 +727,7 @@ export function VisualizerApp() {
           onClick={() =>
             setCycleMode((prev) => {
               const next = CYCLE_MODES[(CYCLE_MODES.indexOf(prev) + 1) % CYCLE_MODES.length];
-              localStorage.setItem(CYCLE_KEY, next);
+              writeSetting(CYCLE_KEY, next);
               return next;
             })
           }

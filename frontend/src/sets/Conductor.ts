@@ -40,22 +40,45 @@ import {
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { Mixer } from '../playback/mixer';
 import {
-  jumpCrossed,
+  jumpCrossedDecks,
   planStateAt,
+  PLAN_DECKS,
   type PlanAutomation,
+  type PlanDeck,
   type PlanState,
-  type PlannedEntry,
   type SetPlan,
 } from './planner';
 import { soundingWindowAt, soundingWindowKey } from './replan';
 
 const DRIFT_TOLERANCE_S = 0.12;
 
+// ── Phase servo (#161 finding 4) ───────────────────────────────────────
+// Sub-seek drift corrects by riding the deck's rate a touch — a DJ's
+// nudge — never by re-seeking: audible playhead jumps are reserved for
+// recorded jumps (hard syncs) and gross desync. Below the deadband the
+// playhead estimate's own noise rules; above it the nudge burns drift at
+// NUDGE_GAIN %/s-of-drift, capped at an inaudible ±MAX_NUDGE_PERCENT.
+/** |drift| under this is estimate noise — leave the deck alone. */
+const NUDGE_DEADBAND_S = 0.02;
+/** Corrective pitch percent per second of drift (0.06s → 0.75%). */
+const NUDGE_GAIN_PERCENT_PER_S = 12.5;
+/** Nudge ceiling — beyond what this can hold, drift grows to the seek. */
+const MAX_NUDGE_PERCENT = 0.75;
+/** Gross desync: give up nudging and re-seek (also every hard sync). */
+const SEEK_TOLERANCE_S = 0.25;
+
 /** How close to the decoded duration a self-parked playhead must sit to
  * count as the worklet running off the buffer (natural end). */
 const NATURAL_END_TOLERANCE_S = 0.05;
 
 const lerp = (a: number, b: number, p: number): number => a + (b - a) * p;
+
+/** Trim is OPTIONAL on a lane (absent = the live user's trim rules):
+ * lerp when both ends carry it, hold the defined end otherwise — a
+ * pickup ramp whose start lanes adopted the base trim converges onto an
+ * entry-trim target without a step (sets #164). */
+const lerpOptional = (a: number | undefined, b: number | undefined, p: number) =>
+  a === undefined ? b : b === undefined ? a : lerp(a, b, p);
 
 const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAutomation => ({
   fader: lerp(from.fader, to.fader, p),
@@ -65,28 +88,51 @@ const lerpLanes = (from: PlanAutomation, to: PlanAutomation, p: number): PlanAut
     high: lerp(from.eq.high, to.eq.high, p),
   },
   filter: lerp(from.filter, to.filter, p),
+  trim: lerpOptional(from.trim, to.trim, p),
 });
 
 const LANE_EPS = 1e-3;
-type PlanDeck = PlannedEntry['deck'];
+
+/** Presence differing counts (absent = base trim rules — a real change). */
+const trimDiffers = (a: number | undefined, b: number | undefined): boolean =>
+  a === undefined || b === undefined ? a !== b : Math.abs(a - b) > LANE_EPS;
 
 const laneDiffers = (a: PlanAutomation, b: PlanAutomation): boolean =>
   Math.abs(a.fader - b.fader) > LANE_EPS ||
   Math.abs(a.eq.low - b.eq.low) > LANE_EPS ||
   Math.abs(a.eq.mid - b.eq.mid) > LANE_EPS ||
   Math.abs(a.eq.high - b.eq.high) > LANE_EPS ||
-  Math.abs(a.filter - b.filter) > LANE_EPS;
+  Math.abs(a.filter - b.filter) > LANE_EPS ||
+  trimDiffers(a.trim, b.trim);
 
 const lanesDiffer = (
   a: Record<PlanDeck, PlanAutomation>,
   b: Record<PlanDeck, PlanAutomation>
-): boolean => laneDiffers(a.A, b.A) || laneDiffers(a.B, b.B);
+): boolean => PLAN_DECKS.some((d) => laneDiffers(a[d], b[d]));
+
+const silentLane = (): PlanAutomation => ({
+  fader: 0,
+  eq: { low: 0.5, mid: 0.5, high: 0.5 },
+  filter: 0,
+});
+
+/** Widen the pair-machine (A/B) lanes to the full deck record (C/D
+ * silent) — Pickup adopts the shared pair; Routines drive C/D only from
+ * plan evaluation. */
+const padLanes = (l: Record<'A' | 'B', PlanAutomation>): Record<PlanDeck, PlanAutomation> => ({
+  ...l,
+  C: silentLane(),
+  D: silentLane(),
+});
 
 export type ConductorStopReason = 'ended' | 'stopped' | 'takeover' | 'displaced';
 
 export interface ConductorAudio {
   mixer: Mixer;
-  engines: Record<PlanDeck, DeckEngine>;
+  /** The shared pair is mandatory; C/D are needed exactly when the plan
+   * allocates onto them — Routine slots (routines 159) or rolling-
+   * junction entries (sets #143). */
+  engines: Record<'A' | 'B', DeckEngine> & Partial<Record<'C' | 'D', DeckEngine>>;
 }
 
 export interface ConductorHooks {
@@ -105,8 +151,14 @@ export class Conductor {
    * (sets 24) — via replacePlan only, never assigned elsewhere. */
   private _plan: SetPlan;
   private readonly mixer: Mixer;
-  private readonly engines: Record<PlanDeck, DeckEngine>;
+  private readonly engines: Partial<Record<PlanDeck, DeckEngine>>;
   private readonly hooks: ConductorHooks;
+  /** The decks this run drives: A/B always, plus every deck a plan
+   * Routine allocates (when its engine was provided). Everything the
+   * Conductor touches — loads, sync, lanes, watchers, pause — is scoped
+   * here, so a manual jam on an unused deck C stays the user's business
+   * in a Routine-less set. */
+  private driven: PlanDeck[];
 
   /** Surface claimed + watchers attached (between start and teardown). */
   private active = false;
@@ -126,7 +178,7 @@ export class Conductor {
   private suppressSilence = false;
   /** Last load requested per deck (one request per target; the engine's
    * snapshot lags the async fetch). */
-  private loadRequested: Record<PlanDeck, number | null> = { A: null, B: null };
+  private loadRequested: Record<PlanDeck, number | null> = { A: null, B: null, C: null, D: null };
   /** Last entry index handed to the prefetch hook (sets 14). */
   private prefetchedIndex = -1;
   /** Last automation values written (the sounding mix) — written into
@@ -162,6 +214,23 @@ export class Conductor {
     this.mixer = audio.mixer;
     this.engines = audio.engines;
     this.hooks = hooks;
+    this.driven = this.drivenDecks(plan);
+  }
+
+  /** A/B plus every allocated deck with an engine on hand — Routine
+   * slots and rolling-junction entries (sets #143) both land on C/D. */
+  private drivenDecks(plan: SetPlan): PlanDeck[] {
+    const used = new Set<PlanDeck>(['A', 'B']);
+    for (const e of plan.entries) used.add(e.deck);
+    for (const r of plan.routines) {
+      for (const s of r.slots) if (s.deck !== null) used.add(s.deck);
+    }
+    return PLAN_DECKS.filter((d) => used.has(d) && this.engines[d] !== undefined);
+  }
+
+  /** A driven deck's engine (callers only pass driven decks). */
+  private engine(deck: PlanDeck): DeckEngine {
+    return this.engines[deck]!;
   }
 
   // ── Reads ────────────────────────────────────────────────────────────
@@ -268,8 +337,8 @@ export class Conductor {
     mixTime: number,
     opts: {
       rampSec: number;
-      rampDecks: PlanDeck[];
-      startLanes: Record<PlanDeck, PlanAutomation>;
+      rampDecks: ('A' | 'B')[];
+      startLanes: Record<'A' | 'B', PlanAutomation>;
     }
   ): void {
     if (this.active || this.playing) return;
@@ -283,22 +352,23 @@ export class Conductor {
     this.pendingHardSync = true; // silent decks position hard on the first tick
     const startPitch: Partial<Record<PlanDeck, number>> = {};
     for (const deck of opts.rampDecks) {
-      startPitch[deck] = this.engines[deck].getSnapshot().pitchPercent;
+      startPitch[deck] = this.engine(deck).getSnapshot().pitchPercent;
     }
+    const startLanes = padLanes(opts.startLanes);
     this.pickupRamp = {
       startAudio: this.mixer.now(),
       durationSec: Math.max(opts.rampSec, 0),
-      startLanes: opts.startLanes,
+      startLanes,
       startPitch,
     };
     // Written in the same synchronous span as engageAutomation's
     // crossfader pin: both 50ms node ramps run together and the start
     // lanes reproduce the sounding gains, so the engage is inaudible.
     this.self(() => {
-      this.mixer.setAutomation('A', opts.startLanes.A);
-      this.mixer.setAutomation('B', opts.startLanes.B);
+      this.mixer.setAutomation('A', startLanes.A);
+      this.mixer.setAutomation('B', startLanes.B);
     });
-    this.lastLanes = opts.startLanes;
+    this.lastLanes = startLanes;
     this.playing = true;
     this.raf = requestAnimationFrame(this.tick);
     this.emit();
@@ -329,6 +399,11 @@ export class Conductor {
     const oldT = this.getMixTime();
     const t = Math.max(0, Math.min(mixTime, Math.max(newPlan.totalSec - 0.001, 0)));
     this._plan = newPlan;
+    // Note: watchers stay as attached at activation — a re-plan that
+    // INTRODUCES the first Routine mid-run drives C/D without gesture
+    // watchers until the next start (routine pins re-plan rarely; the
+    // wiring lands with #160).
+    this.driven = this.drivenDecks(newPlan);
     this.mixTimeAtAnchor = t;
     this.anchorAudioTime = this.mixer.now();
     this.lastTickT = t;
@@ -343,8 +418,8 @@ export class Conductor {
       return;
     }
     const startPitch: Partial<Record<PlanDeck, number>> = {};
-    for (const deck of ['A', 'B'] as const) {
-      const snap = this.engines[deck].getSnapshot();
+    for (const deck of this.driven) {
+      const snap = this.engine(deck).getSnapshot();
       if (!snap.playing || !state.decks[deck].playing) continue;
       if (Math.abs(snap.pitchPercent - state.decks[deck].pitchPercent) > 0.01) {
         startPitch[deck] = snap.pitchPercent;
@@ -430,10 +505,8 @@ export class Conductor {
     this.automationToken = this.mixer.engageAutomation();
     this.unsubs.push(
       this.watchMixer(),
-      this.watchEngine('A'),
-      this.watchEngine('B'),
-      this.engines.A.addTransportEventListener(this.gestureTap),
-      this.engines.B.addTransportEventListener(this.gestureTap),
+      ...this.driven.map((deck) => this.watchEngine(deck)),
+      ...this.driven.map((deck) => this.engine(deck).addTransportEventListener(this.gestureTap)),
       // Displaced by another claimant (the Transition editor): stand down
       // without releasing (only the holder may release) and leave the
       // decks/overlay to the new holder.
@@ -504,12 +577,16 @@ export class Conductor {
     const skip = (key: string) => touched?.has(key) ?? false;
     const lanes = this.lastLanes;
     if (lanes) {
-      for (const ch of ['A', 'B'] as const) {
+      for (const ch of this.driven) {
         if (!skip(`${ch}.fader`)) this.mixer.setFader(ch, lanes[ch].fader);
         if (!skip(`${ch}.eqLow`)) this.mixer.setEq(ch, 'low', lanes[ch].eq.low);
         if (!skip(`${ch}.eqMid`)) this.mixer.setEq(ch, 'mid', lanes[ch].eq.mid);
         if (!skip(`${ch}.eqHigh`)) this.mixer.setEq(ch, 'high', lanes[ch].eq.high);
         if (!skip(`${ch}.filter`)) this.mixer.setFilter(ch, lanes[ch].filter);
+        // A lane WITHOUT trim never owned the node — the base (live)
+        // trim is already the sounding value (sets #164).
+        const trim = lanes[ch].trim;
+        if (trim !== undefined && !skip(`${ch}.trim`)) this.mixer.setTrim(ch, trim);
       }
     }
     if (!skip('crossfader')) this.mixer.setCrossfader(0);
@@ -517,8 +594,7 @@ export class Conductor {
 
   private pauseDecks(): void {
     this.self(() => {
-      this.engines.A.pause();
-      this.engines.B.pause();
+      for (const deck of this.driven) this.engine(deck).pause();
     });
   }
 
@@ -529,7 +605,7 @@ export class Conductor {
   };
 
   private watchEngine(deck: PlanDeck): () => void {
-    const engine = this.engines[deck];
+    const engine = this.engine(deck);
     let prev = engine.getSnapshot();
     return engine.subscribe(() => {
       const snap = engine.getSnapshot();
@@ -586,7 +662,7 @@ export class Conductor {
     // snapshot object allocation per notify, and the changed-channel hint
     // scopes the diff to the touched channel. Last-values track reality
     // even while gated (selfOps/inactive) — only the takeover is gated.
-    const readCh = (ch: 'A' | 'B') => {
+    const readCh = (ch: PlanDeck) => {
       const c = this.mixer.getChannelState(ch);
       return {
         fader: c.fader,
@@ -598,9 +674,8 @@ export class Conductor {
         pfl: c.pfl,
       };
     };
+    const lastCh = new Map(this.driven.map((ch) => [ch, readCh(ch)]));
     const last = {
-      A: readCh('A'),
-      B: readCh('B'),
       crossfader: this.mixer.getCrossfader(),
       crossfaderEnabled: this.mixer.getCrossfaderEnabled(),
       master: this.mixer.getMaster(),
@@ -610,9 +685,9 @@ export class Conductor {
       // changed base state is a human hand. Field-level diff: the touched
       // fields keep the user's values through the takeover base-sync.
       const touched = new Set<string>();
-      const diffCh = (ch: 'A' | 'B'): void => {
+      const diffCh = (ch: PlanDeck): void => {
         const c = this.mixer.getChannelState(ch);
-        const l = last[ch];
+        const l = lastCh.get(ch)!;
         if (c.fader !== l.fader) touched.add(`${ch}.fader`);
         if (c.eq.low !== l.eqLow) touched.add(`${ch}.eqLow`);
         if (c.eq.mid !== l.eqMid) touched.add(`${ch}.eqMid`);
@@ -620,11 +695,12 @@ export class Conductor {
         if (c.filter !== l.filter) touched.add(`${ch}.filter`);
         if (c.trim !== l.trim) touched.add(`${ch}.trim`);
         if (c.pfl !== l.pfl) touched.add(`${ch}.pfl`);
-        last[ch] = readCh(ch);
+        lastCh.set(ch, readCh(ch));
       };
       const all = changed === undefined;
-      if (all || changed === 'A') diffCh('A');
-      if (all || changed === 'B') diffCh('B');
+      for (const ch of this.driven) {
+        if (all || changed === ch) diffCh(ch);
+      }
       if (all || changed === 'crossfader') {
         const xf = this.mixer.getCrossfader();
         if (xf !== last.crossfader) touched.add('crossfader');
@@ -655,8 +731,8 @@ export class Conductor {
       return;
     }
     const state = planStateAt(this.plan, t);
-    const readyA = this.ensureDeckTrack('A', state);
-    const readyB = this.ensureDeckTrack('B', state);
+    const ready: Partial<Record<PlanDeck, boolean>> = {};
+    for (const deck of this.driven) ready[deck] = this.ensureDeckTrack(deck, state);
     this.prefetchAhead(state);
 
     // Load latency (sets 14): never stall while music plays; never skip
@@ -666,18 +742,16 @@ export class Conductor {
     // the clock there would skip the incoming's opening). While any deck
     // is sounding, the clock runs and the late deck joins at its plan
     // position when ready (syncDeck's seek-to-plan below).
-    const missingA = state.decks.A.playing && !readyA;
-    const missingB = state.decks.B.playing && !readyB;
-    const anySounding =
-      (state.decks.A.playing && readyA) || (state.decks.B.playing && readyB);
-    if ((missingA || missingB) && !anySounding) {
+    const missing = this.driven.some((d) => state.decks[d].playing && !ready[d]);
+    const anySounding = this.driven.some((d) => state.decks[d].playing && ready[d]);
+    if (missing && !anySounding) {
       this.mixTimeAtAnchor = t;
       this.anchorAudioTime = this.mixer.now();
       // Frozen = silent by definition: park anything still sounding
       // (e.g. a hard-cut outgoing running past its cut instant).
       this.self(() => {
-        for (const deck of ['A', 'B'] as const) {
-          if (this.engines[deck].getSnapshot().playing) this.engines[deck].pause();
+        for (const deck of this.driven) {
+          if (this.engine(deck).getSnapshot().playing) this.engine(deck).pause();
         }
       });
       this.raf = requestAnimationFrame(this.tick);
@@ -685,7 +759,7 @@ export class Conductor {
     }
 
     // A deck JOINING this tick (plan says play, engine not yet playing)
-    // hard-syncs BOTH decks in this same task: worklet starts posted
+    // hard-syncs EVERY deck in this same task: worklet starts posted
     // together share their render-quantum boundary, so the decks' start
     // latencies cancel. Started apart, the latency difference is a
     // constant audible flam that the drift check can never see — the
@@ -693,17 +767,18 @@ export class Conductor {
     // reads ~0 while the actual audio runs behind by each deck's own
     // start latency (the set-playback clash bug; pausing and resuming
     // "fixed" it by doing exactly this restart-together).
-    const joining =
-      (readyA &&
-        state.decks.A.playing &&
-        !this.engines.A.getSnapshot().playing &&
-        !this.audioExhausted('A', state.decks.A.trackTime)) ||
-      (readyB &&
-        state.decks.B.playing &&
-        !this.engines.B.getSnapshot().playing &&
-        !this.audioExhausted('B', state.decks.B.trackTime));
-    const hard =
-      this.pendingHardSync || joining || jumpCrossed(this.plan, this.lastTickT, t);
+    const joining = this.driven.some(
+      (d) =>
+        ready[d] &&
+        state.decks[d].playing &&
+        !this.engine(d).getSnapshot().playing &&
+        !this.audioExhausted(d, state.decks[d].trackTime)
+    );
+    // Hard syncs are deck-scoped for jumps (#161): a recorded jump seeks
+    // ONLY the jumping deck; joins/seeks still hard-sync every deck (the
+    // flam-cancel start rule above).
+    const hardAll = this.pendingHardSync || joining;
+    const jumped = hardAll ? [] : jumpCrossedDecks(this.plan, this.lastTickT, t);
     this.pendingHardSync = false;
     this.lastTickT = t;
     // Pickup convergence (sets 16): while the ramp runs, every mixer
@@ -711,17 +786,17 @@ export class Conductor {
     // plan value — p→1 guarantees convergence.
     const p = this.rampProgress();
     const ramp = this.pickupRamp;
-    const lanes = ramp?.startLanes
-      ? {
-          A: lerpLanes(ramp.startLanes.A, state.lanes.A, p),
-          B: lerpLanes(ramp.startLanes.B, state.lanes.B, p),
-        }
+    const startLanes = ramp?.startLanes;
+    const lanes = startLanes
+      ? (Object.fromEntries(
+          PLAN_DECKS.map((d) => [d, lerpLanes(startLanes[d], state.lanes[d], p)])
+        ) as Record<PlanDeck, PlanAutomation>)
       : state.lanes;
     this.self(() => {
-      if (readyA) this.syncDeck('A', state, hard, p);
-      if (readyB) this.syncDeck('B', state, hard, p);
-      this.mixer.setAutomation('A', lanes.A);
-      this.mixer.setAutomation('B', lanes.B);
+      for (const deck of this.driven) {
+        if (ready[deck]) this.syncDeck(deck, state, hardAll || jumped.includes(deck), p);
+      }
+      for (const deck of this.driven) this.mixer.setAutomation(deck, lanes[deck]);
     });
     this.lastLanes = lanes;
 
@@ -741,22 +816,18 @@ export class Conductor {
     this.pickupRamp = null; // positions/lanes snap silently while paused
     const t = this.getMixTime();
     const state = planStateAt(this.plan, t);
-    const readyA = this.ensureDeckTrack('A', state);
-    const readyB = this.ensureDeckTrack('B', state);
+    const ready: Partial<Record<PlanDeck, boolean>> = {};
+    for (const deck of this.driven) ready[deck] = this.ensureDeckTrack(deck, state);
     this.prefetchAhead(state);
     this.self(() => {
-      for (const [deck, ready] of [
-        ['A', readyA],
-        ['B', readyB],
-      ] as const) {
-        if (!ready) continue;
-        const engine = this.engines[deck];
+      for (const deck of this.driven) {
+        if (!ready[deck]) continue;
+        const engine = this.engine(deck);
         if (engine.getSnapshot().playing) engine.pause();
         engine.seek(state.decks[deck].trackTime);
         engine.setPitch(state.decks[deck].pitchPercent);
       }
-      this.mixer.setAutomation('A', state.lanes.A);
-      this.mixer.setAutomation('B', state.lanes.B);
+      for (const deck of this.driven) this.mixer.setAutomation(deck, state.lanes[deck]);
     });
     this.lastLanes = state.lanes;
     if (state.activeEntryIndex !== this.activeEntryIndex) {
@@ -772,7 +843,7 @@ export class Conductor {
   private prefetchAhead(state: PlanState): void {
     if (!this.hooks.prefetch) return;
     const nextIdx =
-      Math.max(state.decks.A.entryIndex ?? -1, state.decks.B.entryIndex ?? -1) + 1;
+      Math.max(...this.driven.map((d) => state.decks[d].entryIndex ?? -1)) + 1;
     if (nextIdx <= 0 || nextIdx >= this.plan.entries.length) return;
     if (this.prefetchedIndex === nextIdx) return;
     this.prefetchedIndex = nextIdx;
@@ -784,7 +855,7 @@ export class Conductor {
   private ensureDeckTrack(deck: PlanDeck, state: PlanState): boolean {
     const desired = state.decks[deck];
     if (desired.trackId === null) return false;
-    const snap = this.engines[deck].getSnapshot();
+    const snap = this.engine(deck).getSnapshot();
     if (snap.trackId !== desired.trackId) {
       if (this.loadRequested[deck] !== desired.trackId) {
         this.loadRequested[deck] = desired.trackId;
@@ -800,13 +871,13 @@ export class Conductor {
    * to play. True only in that dead zone — a target back inside the
    * buffer (a seek) still restarts normally. */
   private audioExhausted(deck: PlanDeck, targetTrackTime: number): boolean {
-    const snap = this.engines[deck].getSnapshot();
+    const snap = this.engine(deck).getSnapshot();
     return (
       !snap.playing &&
       snap.loadState === 'ready' &&
       snap.duration > 0 &&
       targetTrackTime >= snap.duration - NATURAL_END_TOLERANCE_S &&
-      this.engines[deck].getPlayhead() >= snap.duration - NATURAL_END_TOLERANCE_S
+      this.engine(deck).getPlayhead() >= snap.duration - NATURAL_END_TOLERANCE_S
     );
   }
 
@@ -830,7 +901,7 @@ export class Conductor {
    * its adopted value to the plan's, and the anchor is never re-seeked
    * mid-ramp (seamless by construction — sets 16). */
   private syncDeck(deck: PlanDeck, state: PlanState, hard: boolean, rampP = 1): void {
-    const engine = this.engines[deck];
+    const engine = this.engine(deck);
     const target = state.decks[deck];
     const snap: DeckSnapshot = engine.getSnapshot();
     const startPitch = this.pickupRamp?.startPitch[deck];
@@ -849,17 +920,36 @@ export class Conductor {
     // hold the park (silence, as planned-ish) instead of restarting it
     // into an instant re-'ended' every tick.
     if (this.audioExhausted(deck, target.trackTime)) return;
-    engine.setPitch(ramping ? lerp(startPitch, target.pitchPercent, rampP) : target.pitchPercent);
     if (!snap.playing) {
-      engine.seek(target.trackTime);
-      engine.play();
+      engine.setPitch(ramping ? lerp(startPitch, target.pitchPercent, rampP) : target.pitchPercent);
+      // Machine-grade join (#173): exact positioned start. The performer
+      // path (seek + play) routes a paused deck's launch through the
+      // cross-deck quantized launch, which displaced the join onto the
+      // sounding deck's live beat phase — flow-in landed up to half a
+      // reference beat off the plan while seek-in (a restart of playing
+      // decks) was exact.
+      engine.playAt(target.trackTime);
       return;
     }
-    if (ramping) return; // anchor: untouched while converging
-    const drift = engine.getPlayhead() - target.trackTime;
-    if (hard || Math.abs(drift) > DRIFT_TOLERANCE_S) {
-      engine.seek(target.trackTime);
+    if (ramping) {
+      engine.setPitch(lerp(startPitch, target.pitchPercent, rampP));
+      return; // anchor: untouched while converging
     }
+    // Phase servo (#161 finding 4): hard syncs (joins, recorded jumps)
+    // and gross desync re-seek; everything else corrects by a rate nudge
+    // folded into the planned pitch — beatmatch holds, no audible jumps.
+    const drift = engine.getPlayhead() - target.trackTime;
+    if (hard || Math.abs(drift) > SEEK_TOLERANCE_S) {
+      engine.seek(target.trackTime);
+      engine.setPitch(target.pitchPercent);
+      return;
+    }
+    const nudge =
+      Math.abs(drift) <= NUDGE_DEADBAND_S
+        ? 0
+        : -Math.sign(drift) *
+          Math.min(MAX_NUDGE_PERCENT, Math.abs(drift) * NUDGE_GAIN_PERCENT_PER_S);
+    engine.setPitch(target.pitchPercent + nudge);
   }
 
   // ── Internals ────────────────────────────────────────────────────────

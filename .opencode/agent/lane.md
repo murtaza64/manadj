@@ -9,15 +9,23 @@ model: anthropic/claude-opus-4-8
 # syntax). Do not add edit denies here and trust them. The real-DB write wall
 # is the data-write-guard plugin; the lane write boundary is external_directory
 # deny-by-default (which matches CONTAINING DIRECTORIES, not file paths).
-# data/ is deliberately absent from the whitelist: lane sessions have no
-# direct path to the real DB — sandbox cloning happens inside lane_app.py.
+# 2026-08-26 (human directive): ~/manadj is whitelisted — landing-adjacent
+# commands (land.py verification, jj -R ~/manadj, make -C ~/manadj electron)
+# were stalling unattended sessions on permission asks. This admits bash READS
+# of data/; the write wall remains the data-write-guard plugin, and lane
+# discipline (sandbox clones only, never target the real DB) still applies.
 permission:
   edit: allow
   bash: allow
   external_directory:
     "*": deny
-    "~/manadj/.editspace*": allow
+    "~/manadj*": allow
     "~/dotfiles/docs*": allow
+    # Track audio lives under ~/Music (DB filenames point there) and lane
+    # roots are addressed via the ~/editspaces symlink — both triggered
+    # unattended asks (2026-08-26).
+    "~/Music*": allow
+    "~/editspaces*": allow
 ---
 
 You are a manadj lane agent: an unattended implementation session owning exactly one

@@ -80,6 +80,12 @@ class FakeEngine {
     this.emit();
   }
 
+  /** Machine-grade positioned start (#173): exact seek + start. */
+  playAt(t: number): void {
+    this.seek(t);
+    this.play();
+  }
+
   pause(): void {
     if (!this.playingFlag) return;
     this.pauses++;

@@ -238,13 +238,154 @@ def test_practice_returns_never_seed():
 
 def test_triples_alone_never_seed():
     # A 20s three-deck stretch with no performance return: decomposable as
-    # overlapping windows, not a Routine candidate.
+    # overlapping windows, not a Routine candidate. (A lone triple is not
+    # a layered run — see test_layered_run_seeds below.)
     events = [
         load(0, "A", 1), play(0, "A"), pause(60, "A"),
         load(20, "B", 2), play(20, "B"), pause(70, "B"),
         load(40, "C", 3), play(40, "C"), pause(80, "C"),
     ]
     result = mine_session(events, [ORDERING])
+    assert result.candidates == []
+
+
+# The layered/versus run (gh#175): four cascading tenures, each entering
+# while the previous still plays — sustained 3-concurrency, no away-gaps,
+# so no return ever fires. Two long triples: 60–80 (T1·T2·T3) and
+# 100–130 (T2·T3·T4).
+def layered_run_events():
+    return [
+        load(5, "A", 1), play(5, "A"), pause(80, "A"),
+        load(40, "B", 2), play(40, "B"), pause(130, "B"),
+        load(60, "C", 3), play(60, "C"), pause(140, "C"),
+        load(100, "D", 4), play(100, "D"), pause(200, "D"),
+    ]
+
+
+def test_layered_run_seeds_candidate():
+    result = mine_session(layered_run_events(), [ORDERING])
+    assert result.n_returns == 0
+    assert len(result.candidates) == 1
+    c = result.candidates[0]
+    assert c.cast == [1, 2, 3, 4]
+    assert (c.n_returns, c.n_triples) == (0, 2)
+    # Window expands into the entry/exit tenures, clamped into the bounding
+    # solos (T1 alone 5–40 before, T4 alone 140–200 after, ±3s pad).
+    assert (c.window_start_s, c.window_end_s) == (37, 143)
+
+
+# --- doubles (gh#181) ---
+# The versus run's real structure with its cascade synthetically removed:
+# clean partner swaps (each partner leaves before the next arrives, gaps
+# under the solo threshold), so NO triples and NO returns ever fire — only
+# dual-dominance dwells, pivot-chained (T2 bridges D1→D2, T3 rides D2→D3,
+# the Thoughts shape). Faders stay parked (a dwell signature).
+#   T1 A: 5–100, T2 B: 60–180, T3 C: 105–260, T4 D: 185–320
+#   D1 60–100 (T1·T2), D2 105–180 (T2·T3), D3 185–260 (T3·T4)
+def double_chain_events():
+    return [
+        load(5, "A", 1), play(5, "A"), pause(100, "A"),
+        load(60, "B", 2), play(60, "B"), pause(180, "B"),
+        load(105, "C", 3), play(105, "C"), pause(260, "C"),
+        load(185, "D", 4), play(185, "D"), pause(320, "D"),
+    ]
+
+
+def test_double_chain_seeds_candidate():
+    result = mine_session(double_chain_events(), [ORDERING])
+    assert result.n_returns == 0
+    assert len(result.candidates) == 1
+    c = result.candidates[0]
+    assert c.cast == [1, 2, 3, 4]
+    assert (c.n_returns, c.n_triples, c.n_doubles) == (0, 0, 3)
+    # Window expands into the entry/exit tenures, clamped into the
+    # bounding solos (T1 alone 5–60 before, T4 alone 260–320 after, ±3s).
+    assert (c.window_start_s, c.window_end_s) == (57, 263)
+
+
+def test_lone_double_never_seeds():
+    # One qualifying dwell (T1·T2) and a sub-threshold overlap (T2·T3
+    # 25s < DOUBLE_MIN_S): no chain, no returns, no triples — a single
+    # dwell is a generous overlap, not choreography.
+    events = [
+        load(5, "A", 1), play(5, "A"), pause(100, "A"),
+        load(60, "B", 2), play(60, "B"), pause(160, "B"),
+        load(130, "C", 3), play(130, "C"), pause(155, "C"),
+    ]
+    result = mine_session(events, [ORDERING])
+    assert result.candidates == []
+
+
+def test_blend_ramp_is_not_a_double():
+    # Same chain shape, but T1's fader rides a clean falling ramp through
+    # the first dwell — a crossfade in progress, not a dwell. D1 dies, the
+    # chain never reaches DOUBLE_CHAIN_MIN, nothing seeds.
+    events = double_chain_events() + [
+        fader(70, "A", 0.9), fader(85, "A", 0.7), fader(98, "A", 0.52),
+    ]
+    # ...and drop T4 so D2+D3 can't chain on their own without D1.
+    events = [e for e in events if e.get("channel") != "D"]
+    result = mine_session(events, [ORDERING])
+    assert result.candidates == []
+
+
+def test_pivot_solo_splits_double_chain():
+    # The pivot (T2) plays ALONE for 10s between the two dwells — a solo
+    # moment. The pivot's tenure is continuous, but a Routine boundary is
+    # a solo moment: the chain must split, leaving two lone dwells.
+    events = [
+        load(5, "A", 1), play(5, "A"), pause(100, "A"),
+        load(60, "B", 2), play(60, "B"), pause(190, "B"),
+        load(110, "C", 3), play(110, "C"), pause(185, "C"),
+    ]
+    result = mine_session(events, [ORDERING])
+    assert result.candidates == []
+
+
+def test_disjoint_doubles_do_not_chain():
+    # Two dwells with no shared pivot (T1·T2 then T3·T4, all tenures
+    # disjoint across the pairs) — nothing bridges them.
+    events = [
+        load(5, "A", 1), play(5, "A"), pause(100, "A"),
+        load(60, "B", 2), play(60, "B"), pause(103, "B"),
+        load(107, "C", 3), play(107, "C"), pause(210, "C"),
+        load(150, "D", 4), play(150, "D"), pause(215, "D"),
+    ]
+    result = mine_session(events, [ORDERING])
+    assert result.candidates == []
+
+
+def test_drill_dwell_stays_excluded():
+    # A dual-dominance drill rep: T1 re-tried after an away-gap with a
+    # backseek (practice return) overlapping the dwell — the dwell is
+    # tainted and never seeds.
+    events = [
+        load(0, "A", 1), play(0, "A", playhead=0.0), pause(60, "A", playhead=60.0),
+        load(40, "B", 2), play(40, "B"), pause(120, "B"),
+        seek(65, "A", playhead=10.0),
+        play(75, "A"), pause(130, "A"),
+        load(112, "C", 3), play(112, "C"), pause(200, "C"),
+    ]
+    result = mine_session(events, [ORDERING])
+    assert result.n_practice_returns == 1
+    assert result.candidates == []
+
+
+def test_layered_run_with_practice_returns_never_seeds():
+    # The same cascade rehearsed: T1 re-tried after an away-gap with a
+    # backseek — the section has returns (all practice), so the layered-run
+    # path must keep refusing to seed.
+    events = layered_run_events() + [
+        seek(90, "A", playhead=10.0),
+        play(95, "A"), pause(110, "A"),
+    ]
+    events = [
+        e if e["t"] != 80 or e.get("action") != "pause" else pause(80, "A", playhead=75.0)
+        for e in events
+    ]
+    result = mine_session(events, [ORDERING])
+    assert result.n_returns == 1
+    assert result.n_practice_returns == 1
     assert result.candidates == []
 
 

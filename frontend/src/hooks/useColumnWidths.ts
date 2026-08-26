@@ -10,6 +10,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { COLUMN_CONFIG } from '../components/columnConfig';
+import { writeSetting } from '../settings/persistedSettings';
 
 const STORAGE_KEY = 'manadj-column-widths-v1';
 export const MIN_COL_WIDTH = 40;
@@ -31,7 +32,8 @@ function persist(widths: Widths) {
   const overrides = Object.fromEntries(
     Object.entries(widths).filter(([id, w]) => w !== DEFAULTS[id]),
   );
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify(overrides));
 }
 
 export function useColumnWidths(showOrder = false) {

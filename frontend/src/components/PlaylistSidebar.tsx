@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { isTrackDrag, readTrackDragPayload } from '../selection/trackDrag';
@@ -10,6 +10,12 @@ import {
 import { applyReorder, indicatorY, insertionIndexFromPointer, type RowRect } from '../selection/dropIndex';
 import ContextMenu, { useContextMenuState, type MenuItem } from './ContextMenu';
 import SetsSidebarSection from '../sets/SetsSidebarSection';
+import SidebarSectionHeader from './SidebarSectionHeader';
+import {
+  isSidebarSectionCollapsed,
+  setSidebarSectionCollapsed,
+  subscribeSidebarSections,
+} from './sidebarSectionsStore';
 import './PlaylistSidebar.css';
 import { createSetFromPlaylist } from '../sets/playlistFlows';
 import type { Playlist } from '../types';
@@ -60,10 +66,23 @@ export default function PlaylistSidebar({
 }: PlaylistSidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
+  // Unified create (gh#174): one "+ New…" button opens a kind picker; the
+  // chosen kind starts that section's existing inline-create flow. Sets'
+  // creating flag lives here because the popup is sidebar-level.
+  const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null);
+  const [isCreatingSet, setIsCreatingSet] = useState(false);
   // Inline rename (playlist-editing 07): which row is being renamed + draft.
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const queryClient = useQueryClient();
+
+  // Collapsible sections (gh#174), persisted in sidebarSectionsStore.
+  const tracksCollapsed = useSyncExternalStore(subscribeSidebarSections, () =>
+    isSidebarSectionCollapsed('tracks')
+  );
+  const playlistsCollapsed = useSyncExternalStore(subscribeSidebarSections, () =>
+    isSidebarSectionCollapsed('playlists')
+  );
 
   const { data: playlists = [], isLoading } = useQuery({
     queryKey: ['playlists'],
@@ -114,6 +133,31 @@ export default function PlaylistSidebar({
     if (newPlaylistName.trim()) {
       createMutation.mutate(newPlaylistName.trim());
     }
+  };
+
+  // Kind picker (gh#174): future object kinds (routines, …) get an entry
+  // here. Picking a kind expands its section and starts the existing
+  // inline-create flow there.
+  const createKindItems: MenuItem[] = [
+    {
+      label: 'Set',
+      onSelect: () => {
+        setSidebarSectionCollapsed('sets', false);
+        setIsCreatingSet(true);
+      },
+    },
+    {
+      label: 'Playlist',
+      onSelect: () => {
+        setSidebarSectionCollapsed('playlists', false);
+        setIsCreating(true);
+      },
+    },
+  ];
+
+  const openCreateMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setCreateMenu({ x: rect.left, y: rect.bottom + 2 });
   };
 
   // ── Playlist row context menu (playlist-editing 07) ────────────────────
@@ -201,12 +245,14 @@ export default function PlaylistSidebar({
     }
   };
 
-  /** Playlist-row rectangles in the list's content coordinates. */
+  /** Playlist-row rectangles in the section's content coordinates. (The
+   * section container doesn't scroll itself — the fluid list above it
+   * does — so viewport-relative offsets are already content offsets.) */
   const rowRects = (list: HTMLDivElement): RowRect[] => {
     const listRect = list.getBoundingClientRect();
     return Array.from(list.querySelectorAll('[data-playlist-row]')).map((row) => {
       const r = (row as HTMLElement).getBoundingClientRect();
-      return { top: r.top - listRect.top + list.scrollTop, height: r.height };
+      return { top: r.top - listRect.top, height: r.height };
     });
   };
 
@@ -217,7 +263,7 @@ export default function PlaylistSidebar({
     const list = listRef.current;
     if (!list) return;
     const rects = rowRects(list);
-    const pointerY = e.clientY - list.getBoundingClientRect().top + list.scrollTop;
+    const pointerY = e.clientY - list.getBoundingClientRect().top;
     const index = insertionIndexFromPointer(pointerY, rects);
     setReorderIndicator({ index, y: indicatorY(index, rects) });
   };
@@ -258,7 +304,8 @@ export default function PlaylistSidebar({
         // standalone sidebars diverged. 13px matches the track table.
         fontSize: '13px',
       }}>
-      {/* "All tracks" special view (brand/sync/mode switch live in the TopBar) */}
+      {/* Pinned top (gh#174): "All tracks" is the only pinned view, with
+          the unified create button beside everything below scrolling. */}
       <div
         data-entry-key="view:all"
         onClick={() => onSelectView('all')}
@@ -268,187 +315,217 @@ export default function PlaylistSidebar({
         All tracks
       </div>
 
-      {/* "Unprocessed" special view */}
-      <div
-        data-entry-key="view:unprocessed"
-        onClick={() => onSelectView('unprocessed')}
-        className={rowClass('view:unprocessed', selectedView === 'unprocessed')}
-        style={{ borderBottom: '1px solid var(--surface0)' }}
-      >
-        Unprocessed
+      {/* Unified create (gh#174): one button, kind picker popup — replaces
+          the per-section "+ New Playlist" / "+ New Set" buttons. */}
+      {/* (Section headers below carry their own top borders.) */}
+      <div style={{ padding: '8px' }}>
+        <button
+          className="pl-sidebar-new"
+          aria-haspopup="menu"
+          aria-expanded={createMenu !== null}
+          onClick={openCreateMenu}
+        >
+          + New…
+        </button>
       </div>
 
-      {/* "Needs attention" worklist (ADR 0024): tracks whose grid analysis
-          bailed and that still have no saved grid — resolve by manual
-          gridding or External Import */}
-      <div
-        data-entry-key="view:needs-attention"
-        onClick={() => onSelectView('needs-attention')}
-        className={rowClass('view:needs-attention', selectedView === 'needs-attention')}
-        style={{ borderBottom: '1px solid var(--surface0)' }}
-      >
-        Needs attention
-      </div>
-
-      {/* "Archived" special view (CONTEXT.md: Archived — out of the active
-          Library; one click away, never mixed in) */}
-      <div
-        data-entry-key="view:archived"
-        onClick={() => onSelectView('archived')}
-        className={rowClass('view:archived', selectedView === 'archived')}
-        style={{ color: 'var(--subtext0)' }}
-      >
-        Archived
-      </div>
-
-      {/* Sessions (sessions 04): ONE entry — the list opens in the main
-          area (in place of the track list), a session opens its timeline. */}
-      <div
-        data-entry-key="view:session"
-        onClick={() => onSelectView('session')}
-        className={rowClass('view:session', selectedView === 'session')}
-        style={{ borderBottom: '1px solid var(--surface0)' }}
-      >
-        ▦ Sessions
-      </div>
-
-      {/* Playlist list */}
-      <div
-        ref={listRef}
-        onDragOver={handleListDragOver}
-        onDragLeave={handleListDragLeave}
-        onDrop={handleListDrop}
-        style={{ flex: 1, overflow: 'auto', position: 'relative' }}
-      >
-        {reorderIndicator && (
-          <div
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: Math.max(0, reorderIndicator.y - 1),
-              height: '2px',
-              background: 'var(--blue)',
-              pointerEvents: 'none',
-              zIndex: 10,
-            }}
-          />
-        )}
-        {isLoading ? (
-          <div style={{ padding: '8px 12px', color: 'var(--subtext1)' }}>Loading...</div>
-        ) : (
-          playlists.map((playlist: Playlist) => (
+      {/* ONE fluid list: collapsible Tracks / Playlists / Sets sections. */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <SidebarSectionHeader id="tracks" label="Tracks" />
+        {!tracksCollapsed && (
+          <>
+            {/* "Unprocessed" special view */}
             <div
-              key={playlist.id}
-              data-playlist-row
-              data-entry-key={`playlist:${playlist.id}`}
-              draggable={renamingId !== playlist.id}
-              onDragStart={(e) => setPlaylistDragPayload(e.dataTransfer, playlist.id)}
-              onClick={() => onSelectPlaylist(playlist.id)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                openMenu(e.clientX, e.clientY, playlist);
-              }}
-              onDragOver={(e) => handleRowDragOver(e, playlist.id)}
-              onDragLeave={() => setDragOverPlaylistId((cur) => (cur === playlist.id ? null : cur))}
-              onDrop={(e) => handleRowDrop(e, playlist.id)}
-              className={rowClass(
-                `playlist:${playlist.id}`,
-                selectedView === 'playlist' && selectedPlaylistId === playlist.id
-              )}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                borderLeft: playlist.color ? `3px solid ${playlist.color}` : 'none',
-                // Drag-over highlight steps above the hover/selected tint
-                ...(dragOverPlaylistId === playlist.id ? { background: 'var(--surface1)' } : {}),
-              }}
+              data-entry-key="view:unprocessed"
+              onClick={() => onSelectView('unprocessed')}
+              className={rowClass('view:unprocessed', selectedView === 'unprocessed')}
             >
-              {renamingId === playlist.id ? (
+              Unprocessed
+            </div>
+
+            {/* "Needs attention" worklist (ADR 0024): tracks whose grid
+                analysis bailed and that still have no saved grid — resolve
+                by manual gridding or External Import */}
+            <div
+              data-entry-key="view:needs-attention"
+              onClick={() => onSelectView('needs-attention')}
+              className={rowClass('view:needs-attention', selectedView === 'needs-attention')}
+            >
+              Needs attention
+            </div>
+
+            {/* "Archived" special view (CONTEXT.md: Archived — out of the
+                active Library; one click away, never mixed in) */}
+            <div
+              data-entry-key="view:archived"
+              onClick={() => onSelectView('archived')}
+              className={rowClass('view:archived', selectedView === 'archived')}
+              style={{ color: 'var(--subtext0)' }}
+            >
+              Archived
+            </div>
+
+            {/* Sessions (sessions 04): ONE entry — the list opens in the
+                main area (in place of the track list), a session opens its
+                timeline. */}
+            <div
+              data-entry-key="view:session"
+              onClick={() => onSelectView('session')}
+              className={rowClass('view:session', selectedView === 'session')}
+            >
+              ▦ Sessions
+            </div>
+          </>
+        )}
+
+        <SidebarSectionHeader id="playlists" label="Playlists" />
+        {!playlistsCollapsed && (
+          <div
+            ref={listRef}
+            onDragOver={handleListDragOver}
+            onDragLeave={handleListDragLeave}
+            onDrop={handleListDrop}
+            style={{ position: 'relative' }}
+          >
+            {reorderIndicator && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: Math.max(0, reorderIndicator.y - 1),
+                  height: '2px',
+                  background: 'var(--blue)',
+                  pointerEvents: 'none',
+                  zIndex: 10,
+                }}
+              />
+            )}
+            {isLoading ? (
+              <div style={{ padding: '8px 12px', color: 'var(--subtext1)' }}>Loading...</div>
+            ) : (
+              playlists.map((playlist: Playlist) => (
+                <div
+                  key={playlist.id}
+                  data-playlist-row
+                  data-entry-key={`playlist:${playlist.id}`}
+                  draggable={renamingId !== playlist.id}
+                  onDragStart={(e) => setPlaylistDragPayload(e.dataTransfer, playlist.id)}
+                  onClick={() => onSelectPlaylist(playlist.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    openMenu(e.clientX, e.clientY, playlist);
+                  }}
+                  onDragOver={(e) => handleRowDragOver(e, playlist.id)}
+                  onDragLeave={() =>
+                    setDragOverPlaylistId((cur) => (cur === playlist.id ? null : cur))
+                  }
+                  onDrop={(e) => handleRowDrop(e, playlist.id)}
+                  className={rowClass(
+                    `playlist:${playlist.id}`,
+                    selectedView === 'playlist' && selectedPlaylistId === playlist.id
+                  )}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderLeft: playlist.color ? `3px solid ${playlist.color}` : 'none',
+                    // Drag-over highlight steps above the hover/selected tint
+                    ...(dragOverPlaylistId === playlist.id ? { background: 'var(--surface1)' } : {}),
+                  }}
+                >
+                  {renamingId === playlist.id ? (
+                    <input
+                      type="text"
+                      value={renameDraft}
+                      autoFocus
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitRename(playlist);
+                        if (e.key === 'Escape') setRenamingId(null);
+                      }}
+                      onBlur={() => commitRename(playlist)}
+                      style={{
+                        flex: 1,
+                        padding: '2px 6px',
+                        background: 'var(--surface0)',
+                        border: '1px solid var(--surface1)',
+                        color: 'var(--text)',
+                        fontSize: 'inherit',
+                      }}
+                    />
+                  ) : (
+                    <span>{playlist.name}</span>
+                  )}
+                </div>
+              ))
+            )}
+
+            {/* Inline new-playlist form (started from the unified create popup) */}
+            {isCreating && (
+              <div style={{ padding: '4px 8px 8px', display: 'flex', gap: '4px' }}>
                 <input
                   type="text"
-                  value={renameDraft}
-                  autoFocus
-                  onChange={(e) => setRenameDraft(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
+                  value={newPlaylistName}
+                  onChange={(e) => setNewPlaylistName(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename(playlist);
-                    if (e.key === 'Escape') setRenamingId(null);
+                    if (e.key === 'Enter') handleCreateClick();
+                    if (e.key === 'Escape') {
+                      setIsCreating(false);
+                      setNewPlaylistName('');
+                    }
                   }}
-                  onBlur={() => commitRename(playlist)}
+                  placeholder="Playlist name"
+                  autoFocus
                   style={{
                     flex: 1,
-                    padding: '2px 6px',
+                    minWidth: 0,
+                    padding: '4px 8px',
                     background: 'var(--surface0)',
                     border: '1px solid var(--surface1)',
                     color: 'var(--text)',
-                    fontSize: 'inherit',
                   }}
                 />
-              ) : (
-                <span>{playlist.name}</span>
-              )}
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Create new playlist */}
-      <div style={{
-        padding: '8px',
-        borderTop: '1px solid var(--surface0)',
-      }}>
-        {isCreating ? (
-          <div style={{ display: 'flex', gap: '4px' }}>
-            <input
-              type="text"
-              value={newPlaylistName}
-              onChange={(e) => setNewPlaylistName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateClick()}
-              placeholder="Playlist name"
-              autoFocus
-              style={{
-                flex: 1,
-                padding: '4px 8px',
-                background: 'var(--surface0)',
-                border: '1px solid var(--surface1)',
-                color: 'var(--text)',
-              }}
-            />
-            <button onClick={handleCreateClick} className="pl-sidebar-ok">
-              ✓
-            </button>
-            <button
-              onClick={() => {
-                setIsCreating(false);
-                setNewPlaylistName('');
-              }}
-              className="pl-sidebar-cancel"
-            >
-              ✗
-            </button>
+                <button onClick={handleCreateClick} className="pl-sidebar-ok">
+                  ✓
+                </button>
+                <button
+                  onClick={() => {
+                    setIsCreating(false);
+                    setNewPlaylistName('');
+                  }}
+                  className="pl-sidebar-cancel"
+                >
+                  ✗
+                </button>
+              </div>
+            )}
           </div>
-        ) : (
-          <button onClick={() => setIsCreating(true)} className="pl-sidebar-new">
-            + New Playlist
-          </button>
         )}
-      </div>
 
-      {/* Sets: sidebar siblings of Playlists (sets 01) */}
-      <div style={{ maxHeight: '40%', overflow: 'auto' }}>
+        {/* Sets: sidebar siblings of Playlists (sets 01) */}
         <SetsSidebarSection
           selectedSetId={selectedView === 'set' ? selectedSetId : null}
           onSelectSet={onSelectSet}
           onSelectedSetDeleted={() => onSelectView('all')}
           cursorKey={cursorKey}
+          creating={isCreatingSet}
+          onStopCreating={() => setIsCreatingSet(false)}
         />
       </div>
 
       </div>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}
+      {createMenu && (
+        <ContextMenu
+          x={createMenu.x}
+          y={createMenu.y}
+          items={createKindItems}
+          onClose={() => setCreateMenu(null)}
+        />
+      )}
     </>
   );
 }
