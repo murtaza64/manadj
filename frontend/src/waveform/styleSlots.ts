@@ -8,6 +8,7 @@
 // become a product feature — see the waveform-overhaul PRD.
 
 import { useSyncExternalStore } from 'react';
+import { removeSetting, writeSetting } from '../settings/persistedSettings';
 import { DEFAULT_PARAMS, DEFAULT_STYLE_ID, STYLE_REGISTRY } from './styles';
 import type { RGB, StyleParams } from './styles';
 
@@ -109,21 +110,14 @@ export function setSlot(
     params: { ...prev.params, ...patch.params },
   };
   slots = { ...slots, [name]: next };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: STORAGE_VERSION, ...slots }));
-  } catch {
-    // Persistence is best-effort; the in-memory state still drives rendering.
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify({ version: STORAGE_VERSION, ...slots }));
   for (const l of listeners) l();
 }
 
 export function resetSlots(): void {
   slots = defaultSlots();
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    /* best-effort */
-  }
+  removeSetting(STORAGE_KEY);
   for (const l of listeners) l();
 }
 

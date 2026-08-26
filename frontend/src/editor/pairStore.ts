@@ -324,7 +324,8 @@ function isDefaultShape(tr: Transition): boolean {
     tr.tempoMatch === d.tempoMatch &&
     Object.values(tr.lanes).every((pts) => !pts || pts.length === 0) &&
     (tr.hiddenLanes?.length ?? 0) === 0 &&
-    (tr.jumps?.length ?? 0) === 0
+    (tr.jumps?.length ?? 0) === 0 &&
+    (tr.jumpsA?.length ?? 0) === 0
   );
 }
 

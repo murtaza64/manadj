@@ -1,4 +1,12 @@
-import { useState, useRef, useEffect, useImperativeHandle, useMemo, useCallback } from 'react';
+import {
+  useState,
+  useRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useCallback,
+  useSyncExternalStore,
+} from 'react';
 import type { Ref } from 'react';
 import { DRAG_POINTER_STALE_MS, dragEdgeScrollDelta } from './dragScroll';
 import { useQueries, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -22,6 +30,7 @@ import {
   type SidebarEntry,
 } from './browseNav';
 import { browseSession, restoredView, updateBrowseSession } from './browseStore';
+import { isSidebarSectionCollapsed, subscribeSidebarSections } from './sidebarSectionsStore';
 import { useSetBeatgridDownbeat, useNudgeBeatgrid } from '../hooks/useBeatgridData';
 import { useHotCueActions } from '../hooks/useHotCueActions';
 import { registerBrowseSurface } from '../midi/controlRegistry';
@@ -338,13 +347,24 @@ export default function Library({
     queryFn: api.playlists.list,
   });
   const { data: sidebarSets = [] } = useQuery({ queryKey: ['sets'], queryFn: api.sets.list });
+  // Collapsed sections (gh#174) hide their rows, so they leave the walk.
+  const tracksCollapsed = useSyncExternalStore(subscribeSidebarSections, () =>
+    isSidebarSectionCollapsed('tracks')
+  );
+  const playlistsCollapsed = useSyncExternalStore(subscribeSidebarSections, () =>
+    isSidebarSectionCollapsed('playlists')
+  );
+  const setsCollapsed = useSyncExternalStore(subscribeSidebarSections, () =>
+    isSidebarSectionCollapsed('sets')
+  );
   const sidebarNavEntries = useMemo(
     () =>
       sidebarEntries(
         sidebarPlaylists.map((p: { id: number }) => p.id),
-        sidebarSets.map((s: { id: number }) => s.id)
+        sidebarSets.map((s: { id: number }) => s.id),
+        { tracks: tracksCollapsed, playlists: playlistsCollapsed, sets: setsCollapsed }
       ),
-    [sidebarPlaylists, sidebarSets]
+    [sidebarPlaylists, sidebarSets, tracksCollapsed, playlistsCollapsed, setsCollapsed]
   );
 
   // Fetch all tracks ('all'/'unprocessed' views, and the edit-mode library pane)

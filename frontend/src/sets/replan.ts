@@ -275,7 +275,8 @@ const sameGeometry = (a: Transition, b: Transition): boolean =>
   a.durationSec === b.durationSec &&
   a.bInSec === b.bInSec &&
   a.tempoMatch === b.tempoMatch &&
-  jumpsEqual(a.jumps, b.jumps);
+  jumpsEqual(a.jumps, b.jumps) &&
+  jumpsEqual(a.jumpsA, b.jumpsA);
 
 /**
  * Defer the sounding window's geometry: a PlanInput whose adjacency for
@@ -311,6 +312,7 @@ export function graftSoundingWindow(
         bInSec: old.bInSec,
         tempoMatch: old.tempoMatch,
         jumps: old.jumps,
+        jumpsA: old.jumpsA,
       };
       return {
         ...input,

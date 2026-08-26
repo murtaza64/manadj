@@ -37,6 +37,7 @@ import {
   ALL_DECKS,
   applyEvent,
   deckAudible,
+  deckSounding,
   initialAudibilityState,
   tenureHeld,
 } from './audibilityReducer';
@@ -55,6 +56,13 @@ interface DeckCapture extends ReducerDeckState {
   audible: boolean;
   /** Time of the last audibility flip. */
   since: number;
+  /** Sounding = emitting ANY Master-bus signal (audibility with a zero
+   * gain threshold; audibility.ts). Audible ⊆ sounding. */
+  sounding: boolean;
+  /** Time of the last sounding flip — the entry-onset backdating clock
+   * (#178): an overlap engagement's window starts here (capped), not at
+   * the `audibleGain` crossing. */
+  soundingSince: number;
 }
 
 /** The six unordered physical pairs — one Handover machine each. */
@@ -152,7 +160,10 @@ export function initialCaptureState(params: DetectorParams = DEFAULT_DETECTOR_PA
     ...base,
     log: [],
     decks: Object.fromEntries(
-      ALL_DECKS.map((ch) => [ch, { ...base.decks[ch], audible: false, since: 0 }])
+      ALL_DECKS.map((ch) => [
+        ch,
+        { ...base.decks[ch], audible: false, since: 0, sounding: false, soundingSince: 0 },
+      ])
     ) as Record<CaptureDeck, DeckCapture>,
     suspended: false,
     pairs: Object.fromEntries(PAIR_KEYS.map((k) => [k, freshMachine()])) as Record<
@@ -475,6 +486,20 @@ export function reduceCaptureInto(s: CaptureState, e: CaptureEvent): DetectedTak
   // (deliberate; revisiting that is a follow-up grill, not this issue).
   applyEvent(s, e);
 
+  // Sounding cache (#178) — the entry-onset backdating clock, kept current
+  // on every event (suspension included; it carries no verdicts of its
+  // own). Audible ⊆ sounding, so the audibility flip that opens an
+  // engagement below always sees this deck's soundingSince already
+  // stamped — for a hot entry both flip on this very event and the
+  // backdate is zero by construction.
+  for (const ch of ALL_DECKS) {
+    const sounding = deckSounding(s, ch);
+    if (sounding !== s.decks[ch].sounding) {
+      s.decks[ch].sounding = sounding;
+      s.decks[ch].soundingSince = now;
+    }
+  }
+
   // Suspension edge — tenure ONLY (4dp 37; the one rule, shared with the
   // timeline and recorder). Entering discards in-flight engagements and
   // clears incumbency on every machine; leaving re-establishes each
@@ -659,7 +684,19 @@ function onEdge(
       if (m.engagedSince !== null) {
         m.incomingSilentSince = null; // fold a tease gap
       } else if (s.decks[incumbent].audible) {
-        openEngagement(s, m, key, now); // overlap onset
+        // Overlap onset (#178): the window starts where the incoming first
+        // SOUNDED, not where its rising gain crossed `audibleGain` — a
+        // play-then-fader-slam entry loses its first beats otherwise.
+        // Bounded by `entryBackdateMaxS` (a residual whisper-level fader
+        // can hold the sounding clock open for minutes) and by the
+        // incumbent's own audibility (an overlap cannot predate its
+        // incumbent).
+        const onset = Math.max(
+          s.decks[ch].soundingSince,
+          now - s.params.entryBackdateMaxS,
+          s.decks[incumbent].since
+        );
+        openEngagement(s, m, key, onset);
       } else if (
         m.outSilentSince !== null &&
         now - m.outSilentSince <= s.params.cutGapMaxS

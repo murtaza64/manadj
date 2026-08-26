@@ -7,8 +7,8 @@ row IS a Cameo Take) and `engagement_uuid` (one engagement's pairwise
 offspring group by it); `set_cameo_pins` holds Set entries' manual Cameo
 pins (active + dormant, keyed on host track per Set).
 
-Revision ID: 0035_roxqp
-Revises: 0034_wqtstkrm
+Revision ID: 0036_roxqp
+Revises: 0035_tkxst
 Create Date: 2026-08-25
 
 """
@@ -19,8 +19,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '0035_roxqp'
-down_revision: Union[str, Sequence[str], None] = '0034_wqtstkrm'
+revision: str = '0036_roxqp'
+down_revision: Union[str, Sequence[str], None] = '0035_tkxst'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
