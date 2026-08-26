@@ -230,6 +230,28 @@ def test_retrim_preserves_nudges(client, promoted_routine):
     assert res.json()["edits"]["nudges"] == {"1": 0.05}
 
 
+def test_retrim_rebases_pause_edits(client, promoted_routine):
+    """gh#190 play/pause events: authored pauses and removed recorded
+    pauses rebase by the start trim like jumps (durBeats rides along)."""
+    routine, _, _ = promoted_routine
+    res = client.put(
+        f"/api/routines/{routine['uuid']}/edits",
+        json={"edits": {"lanes": {}, "jumps": [], "removedRecordedJumps": [],
+                        "pauses": [{"id": "p1", "slot": 1, "beat": 30.0, "durBeats": 4.0}],
+                        "removedRecordedPauses": [{"slot": 1, "beat": 40.0}],
+                        "nudges": {}}},
+    )
+    assert res.status_code == 200, res.text
+    res = client.post(
+        f"/api/routines/{routine['uuid']}/retrim",
+        json={"trim_start_beats": 10.0, "trim_end_beats": 0.0},
+    )
+    assert res.status_code == 200, res.text
+    edits = res.json()["edits"]
+    assert edits["pauses"] == [{"id": "p1", "slot": 1, "beat": 20.0, "durBeats": 4.0}]
+    assert edits["removedRecordedPauses"] == [{"slot": 1, "beat": 30.0}]
+
+
 def test_retrim_endpoint_rejects_broken_cast(client, promoted_routine):
     routine, _, _ = promoted_routine
     res = client.post(

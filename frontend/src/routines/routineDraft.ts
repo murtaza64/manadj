@@ -44,28 +44,67 @@ export interface RemovedRecordedJump {
   beat: number;
 }
 
+/** An authored PAUSE (gh#190 iteration: play/pause events are first-class
+ * like jumps): the slot's deck HOLDS its position from `beat` for
+ * `durBeats`, then resumes from where it paused — the tail displaces
+ * rigidly backward by the track-time the recording covered under the
+ * hold (the jump doctrine's mirror; displacement is rigid). */
+export interface AuthoredPause {
+  id: string;
+  slot: number;
+  /** Routine beat the hold starts. */
+  beat: number;
+  /** Hold length in routine beats. */
+  durBeats: number;
+}
+
+export interface RemovedRecordedPause {
+  slot: number;
+  /** The recorded hold's START beat (matched within a small tolerance).
+   * Removal plays THROUGH the hold: motion continues at the surrounding
+   * rate and the tail displaces forward by the held span. */
+  beat: number;
+}
+
 export interface RoutineEdits {
   /** Authored lane envelopes, keyed `${slot}:${control}` — absent key =
    * the recorded step lane plays. Points in routine beats, sorted. */
   lanes: Record<string, RoutineLanePoint[]>;
   jumps: AuthoredJump[];
   removedRecordedJumps: RemovedRecordedJump[];
+  pauses: AuthoredPause[];
+  removedRecordedPauses: RemovedRecordedPause[];
   /** Per-slot alignment NUDGE (gh#190 item 6): a rigid track-seconds
    * offset sliding the whole track under the routine clock — the slot
    * plays material shifted by deltaSec at the same routine beats. Keyed
    * by slot (JSON string keys); absent/0 = no slide. */
   nudges: Record<string, number>;
+  /** Per-slot channel TRIM (gh#190 iteration): 0..1, 0.5 nominal —
+   * replayed through the automation overlay's own trim (real gain
+   * curves). Keyed by slot; absent = nominal. */
+  trims: Record<string, number>;
 }
 
 export const EMPTY_EDITS: RoutineEdits = {
   lanes: {},
   jumps: [],
   removedRecordedJumps: [],
+  pauses: [],
+  removedRecordedPauses: [],
   nudges: {},
+  trims: {},
 };
 
 export function emptyEdits(): RoutineEdits {
-  return { lanes: {}, jumps: [], removedRecordedJumps: [], nudges: {} };
+  return {
+    lanes: {},
+    jumps: [],
+    removedRecordedJumps: [],
+    pauses: [],
+    removedRecordedPauses: [],
+    nudges: {},
+    trims: {},
+  };
 }
 
 export function laneKey(slot: number, control: string): string {
@@ -77,7 +116,10 @@ export function editsAreEmpty(e: RoutineEdits): boolean {
     Object.keys(e.lanes).length === 0 &&
     e.jumps.length === 0 &&
     e.removedRecordedJumps.length === 0 &&
-    Object.keys(e.nudges).length === 0
+    e.pauses.length === 0 &&
+    e.removedRecordedPauses.length === 0 &&
+    Object.keys(e.nudges).length === 0 &&
+    Object.keys(e.trims).length === 0
   );
 }
 
@@ -130,13 +172,48 @@ export function parseEdits(raw: unknown): RoutineEdits {
           typeof (r as RemovedRecordedJump).beat === 'number'
       )
     : [];
+  const pauses: AuthoredPause[] = Array.isArray(o.pauses)
+    ? (o.pauses as unknown[])
+        .filter(
+          (p): p is AuthoredPause =>
+            typeof p === 'object' &&
+            p !== null &&
+            typeof (p as AuthoredPause).slot === 'number' &&
+            typeof (p as AuthoredPause).beat === 'number' &&
+            typeof (p as AuthoredPause).durBeats === 'number' &&
+            (p as AuthoredPause).durBeats > 0
+        )
+        .map((p) => ({
+          id: typeof p.id === 'string' ? p.id : `p-${p.slot}:${p.beat}`,
+          slot: p.slot,
+          beat: p.beat,
+          durBeats: p.durBeats,
+        }))
+    : [];
+  const removedRecordedPauses: RemovedRecordedPause[] = Array.isArray(o.removedRecordedPauses)
+    ? (o.removedRecordedPauses as unknown[]).filter(
+        (r): r is RemovedRecordedPause =>
+          typeof r === 'object' &&
+          r !== null &&
+          typeof (r as RemovedRecordedPause).slot === 'number' &&
+          typeof (r as RemovedRecordedPause).beat === 'number'
+      )
+    : [];
   const nudges: Record<string, number> = {};
   if (o.nudges && typeof o.nudges === 'object') {
     for (const [k, v] of Object.entries(o.nudges as Record<string, unknown>)) {
       if (typeof v === 'number' && Number.isFinite(v) && v !== 0) nudges[k] = v;
     }
   }
-  return { lanes, jumps, removedRecordedJumps, nudges };
+  const trims: Record<string, number> = {};
+  if (o.trims && typeof o.trims === 'object') {
+    for (const [k, v] of Object.entries(o.trims as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 && v !== 0.5) {
+        trims[k] = v;
+      }
+    }
+  }
+  return { lanes, jumps, removedRecordedJumps, pauses, removedRecordedPauses, nudges, trims };
 }
 
 // ── Trace transform ──────────────────────────────────────────────────────
@@ -176,6 +253,147 @@ export function expandAuthoredJump(
  * (displacement is rigid); the caller re-derives jumpMixSecs from the
  * result's jump flags.
  */
+/** Ride-aware position of a trace at `beat` (traceStateAt's rule, local —
+ * routineDraft must not import routinePlan back). */
+function tracePosAt(trace: RoutineTracePoint[], beat: number): {
+  pos: number;
+  moving: boolean;
+  ratePerBeat: number;
+} {
+  if (trace.length === 0) return { pos: 0, moving: false, ratePerBeat: 0 };
+  if (beat <= trace[0].beat) return { pos: trace[0].pos, moving: false, ratePerBeat: 0 };
+  let lo = 0;
+  for (let i = 0; i < trace.length; i++) {
+    if (trace[i].beat <= beat) lo = i;
+    else break;
+  }
+  const p = trace[lo];
+  const next = trace[lo + 1];
+  if (!next || next.jump) {
+    return {
+      pos: p.pos + (p.moving ? p.ratePerBeat * (beat - p.beat) : 0),
+      moving: p.moving,
+      ratePerBeat: p.ratePerBeat,
+    };
+  }
+  const f = (beat - p.beat) / (next.beat - p.beat);
+  return {
+    pos: p.pos + (next.pos - p.pos) * f,
+    moving: p.moving,
+    ratePerBeat: p.ratePerBeat,
+  };
+}
+
+/**
+ * Apply a slot's PAUSE edits to its replay trace (pure — the jump
+ * transform's sibling, gh#190):
+ *
+ * - An AUTHORED pause (beat b, d beats) holds the deck at pos(b) until
+ *   b+d, then resumes FROM THE HOLD — the tail displaces rigidly
+ *   backward by the track-time the original trace covered in (b, b+d);
+ *   original points inside the hold drop (rigid doctrine).
+ * - A REMOVED recorded pause plays THROUGH the hold: the hold-start
+ *   point turns moving at the pre-pause rate (fallback: the resume
+ *   rate), interior hold points drop, and the tail displaces forward by
+ *   the span the deck would have covered.
+ */
+export function applyPauseEditsToTrace(
+  trace: RoutineTracePoint[],
+  authored: AuthoredPause[],
+  removed: RemovedRecordedPause[],
+  durationBeats: number
+): RoutineTracePoint[] {
+  let out = trace;
+  for (const r of removed) out = removeRecordedPauseFromTrace(out, r.beat);
+  const sorted = [...authored].sort((a, b) => a.beat - b.beat);
+  for (const p of sorted) {
+    out = insertPauseIntoTrace(out, p.beat, p.durBeats, durationBeats);
+  }
+  return out;
+}
+
+const PAUSE_MATCH_EPS = 0.01;
+
+function removeRecordedPauseFromTrace(
+  trace: RoutineTracePoint[],
+  startBeat: number
+): RoutineTracePoint[] {
+  const i = trace.findIndex(
+    (p) => !p.moving && Math.abs(p.beat - startBeat) <= PAUSE_MATCH_EPS
+  );
+  if (i < 0) return trace;
+  // The hold's end: motion resuming, or a SEEK splitting the hold
+  // (recordedPauses' split rule — the seek keeps its own marker).
+  let k = i + 1;
+  while (k < trace.length && !trace[k].moving && !trace[k].jump) k++;
+  if (k >= trace.length) return trace; // trailing stop — nothing to play through
+  // The rate the deck would have kept: last moving rate before the hold,
+  // else the resume rate.
+  let rate = trace[k].ratePerBeat;
+  for (let j = i - 1; j >= 0; j--) {
+    if (trace[j].moving) {
+      rate = trace[j].ratePerBeat;
+      break;
+    }
+  }
+  if (rate <= 0) return trace;
+  if (trace[k].jump) {
+    // The hold ends in a recorded SEEK: play through UP TO the seek —
+    // the seek re-anchors position absolutely, so the tail (and the
+    // seek's own landing) stays exactly as recorded. The jump marker's
+    // displayed Δ re-derives from the new ride-out automatically.
+    const out: RoutineTracePoint[] = trace.slice(0, i);
+    out.push({ ...trace[i], moving: true, ratePerBeat: rate });
+    for (let j = k; j < trace.length; j++) out.push(trace[j]);
+    return out;
+  }
+  const span = trace[k].beat - trace[i].beat;
+  // CONTINUITY displacement (gh#190 walkthrough, three passes): the tail
+  // lands on the EXTENSION of the pre-pause ride — as if the deck never
+  // stopped. delta = extendedPos(resume) − recordedResumePos: this also
+  // absorbs any position CREEP the deck picked up while "paused" (jog /
+  // tick noise — the real corpus crept 0.106 s over a 2.4-beat hold,
+  // which a span-only displacement turned into an audible late phase).
+  // No quantization: the fractional span and the fractional resume beat
+  // cancel by construction when the pre-pause ride was in time.
+  const delta = trace[i].pos + rate * span - trace[k].pos;
+  const out: RoutineTracePoint[] = trace.slice(0, i);
+  out.push({ ...trace[i], moving: true, ratePerBeat: rate });
+  for (let j = k; j < trace.length; j++) {
+    out.push({ ...trace[j], pos: trace[j].pos + delta });
+  }
+  return out;
+}
+
+function insertPauseIntoTrace(
+  trace: RoutineTracePoint[],
+  beat: number,
+  durBeats: number,
+  durationBeats: number
+): RoutineTracePoint[] {
+  if (durBeats <= 0 || trace.length === 0) return trace;
+  const end = Math.min(beat + durBeats, durationBeats + durBeats);
+  const sA = tracePosAt(trace, beat);
+  const sB = tracePosAt(trace, end);
+  const delta = sB.pos - sA.pos; // track-time the hold swallows
+  const out: RoutineTracePoint[] = [];
+  for (const p of trace) {
+    if (p.beat < beat - 1e-9) out.push(p);
+  }
+  out.push({ beat, pos: sA.pos, jump: false, moving: false, ratePerBeat: 0 });
+  out.push({
+    beat: end,
+    pos: sA.pos,
+    jump: false,
+    moving: sB.moving,
+    ratePerBeat: sB.ratePerBeat,
+  });
+  for (const p of trace) {
+    if (p.beat > end + 1e-9) out.push({ ...p, pos: p.pos - delta });
+  }
+  return out;
+}
+
 export function applyJumpEditsToTrace(
   trace: RoutineTracePoint[],
   authored: AuthoredJump[],

@@ -19,6 +19,11 @@ export interface BeatRun {
   b1: number;
   ph0: number;
   ph1: number;
+  /** The deck was NOT advancing here (a hold/park — gh#190): the span
+   * renders as a dimmed held frame, never a stretched smear (a recorded
+   * pause's position can CREEP a fraction of a second, which stretched
+   * across beats aliases into garbage). */
+  held?: boolean;
 }
 
 /**
@@ -36,7 +41,7 @@ export function traceDrawRuns(trace: RoutineTracePoint[], durationBeats: number)
   if (trace.length === 0) return runs;
   const first = trace[0];
   if (first.beat > 0) {
-    runs.push({ b0: 0, b1: first.beat, ph0: first.pos, ph1: first.pos });
+    runs.push({ b0: 0, b1: first.beat, ph0: first.pos, ph1: first.pos, held: true });
   }
   for (let i = 0; i < trace.length - 1; i++) {
     const p = trace[i];
@@ -46,7 +51,7 @@ export function traceDrawRuns(trace: RoutineTracePoint[], durationBeats: number)
     const ph1 = q.jump
       ? p.pos + (p.moving ? p.ratePerBeat * db : 0)
       : q.pos;
-    runs.push({ b0: p.beat, b1: q.beat, ph0: p.pos, ph1 });
+    runs.push({ b0: p.beat, b1: q.beat, ph0: p.pos, ph1, held: !p.moving });
   }
   const last = trace[trace.length - 1];
   if (last.beat < durationBeats) {
@@ -56,6 +61,7 @@ export function traceDrawRuns(trace: RoutineTracePoint[], durationBeats: number)
       b1: durationBeats,
       ph0: last.pos,
       ph1: last.pos + (last.moving ? last.ratePerBeat * db : 0),
+      held: !last.moving,
     });
   }
   return runs;

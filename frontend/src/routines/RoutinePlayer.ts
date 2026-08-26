@@ -398,6 +398,10 @@ export class RoutinePlayer {
         fader: lanes.fader,
         eq: lanes.eq,
         filter: lanes.filter,
+        // Channel trim (gh#190): the RECORDED trim lane + the slot
+        // knob's offset (slotLanesAt folds both) — deterministic replay,
+        // never the live user trim.
+        trim: lanes.trim,
       });
     }
   }

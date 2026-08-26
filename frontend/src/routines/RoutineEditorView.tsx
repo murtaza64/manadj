@@ -52,8 +52,9 @@ import {
   buildEditorRoutine,
   buildTrackMeter,
   recordedJumps,
+  recordedPauses,
   secondsLabel,
-  slotColor,
+  slotAccent,
   type EditorRoutine,
   type TrackMeter,
 } from './routineEditorModel';
@@ -347,6 +348,10 @@ export default function RoutineEditorView() {
     () => (rawEditor ? rawEditor.planned.slots.map((s) => recordedJumps(s.trace)) : []),
     [rawEditor]
   );
+  const recordedPausesBySlot = useMemo(
+    () => (rawEditor ? rawEditor.planned.slots.map((s) => recordedPauses(s.trace)) : []),
+    [rawEditor]
+  );
   // Jump-edited base: traces carry authored/removed jumps. Lane edits
   // apply as a cheap re-skin below — trace identities survive lane drags
   // (the ~60 Hz hot path never rebuilds traces).
@@ -357,9 +362,17 @@ export default function RoutineEditorView() {
       JSON.stringify({
         j: draft.edits.jumps,
         r: draft.edits.removedRecordedJumps,
+        p: draft.edits.pauses,
+        rp: draft.edits.removedRecordedPauses,
         n: draft.edits.nudges,
       }),
-    [draft.edits.jumps, draft.edits.removedRecordedJumps, draft.edits.nudges]
+    [
+      draft.edits.jumps,
+      draft.edits.removedRecordedJumps,
+      draft.edits.pauses,
+      draft.edits.removedRecordedPauses,
+      draft.edits.nudges,
+    ]
   );
   const baseEditor: EditorRoutine | null = useMemo(() => {
     if (!buildable) return null;
@@ -698,11 +711,11 @@ export default function RoutineEditorView() {
           <>
             <span className="re-contract">
               enters with{' '}
-              <b style={{ color: slotColor(0) }}>
+              <b style={{ color: slotAccent(editor?.planned.slots[0]?.deck) }}>
                 {entryTrack?.title || entryTrack?.filename || `#${detail.cast[0]}`}
               </b>{' '}
               · exits with{' '}
-              <b style={{ color: slotColor(detail.cast.length - 1) }}>
+              <b style={{ color: slotAccent(editor?.planned.slots[detail.cast.length - 1]?.deck) }}>
                 {exitTrack?.title || exitTrack?.filename || `#${detail.cast[detail.cast.length - 1]}`}
               </b>
             </span>
@@ -807,7 +820,7 @@ export default function RoutineEditorView() {
           {trimEnabled && trim && (
             <span className="re-trim">
               <span className={`re-trimlabel${trimDirty ? ' dirty' : ''}`}>
-                trim {beatLabel(trim.startBeat)} → {beatLabel(trim.endBeat)} b
+                window {beatLabel(trim.startBeat)} → {beatLabel(trim.endBeat)} b
                 {trim.startBeat < -0.05 || trim.endBeat > detail.duration_beats + 0.05
                   ? ' (widens — clamped to the session slice)'
                   : ''}
@@ -871,6 +884,7 @@ export default function RoutineEditorView() {
           editor={editor}
           plannedForRuns={baseEditor!.planned}
           recordedJumpsBySlot={recordedJumpsBySlot}
+          recordedPausesBySlot={recordedPausesBySlot}
           tracks={tracks}
           waves={waves}
           meters={meters}

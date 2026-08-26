@@ -126,6 +126,7 @@ function fakeMixer(clock: () => number, capture: LaneCapture): Mixer {
     setFader: () => {},
     setEq: () => {},
     setFilter: () => {},
+    setTrim: () => {}, // routine lanes carry trim now (gh#190)
     setCrossfader: () => {},
   } as unknown as Mixer;
 }

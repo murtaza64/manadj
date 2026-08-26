@@ -247,23 +247,33 @@ def _shift_edits(
         return out
     jumps = rebase(edits.get("jumps") or [], needs_delta=True)
     removed = rebase(edits.get("removedRecordedJumps") or [], needs_delta=False)
+    pauses = rebase(edits.get("pauses") or [], needs_delta=False)
+    removed_pauses = rebase(edits.get("removedRecordedPauses") or [], needs_delta=False)
     # Alignment nudges (gh#190 item 6) are beat-free track-time slides —
     # they ride the trim untouched, minus dropped slots.
-    nudges = {}
-    for key, val in (edits.get("nudges") or {}).items():
-        try:
-            slot = int(str(key))
-        except ValueError:
-            continue
-        if slot < kept_slots and isinstance(val, (int, float)) and val:
-            nudges[str(slot)] = val
-    if not lanes and not jumps and not removed and not nudges:
+    def slot_map(key_name: str, keep) -> dict:
+        out = {}
+        for key, val in (edits.get(key_name) or {}).items():
+            try:
+                slot = int(str(key))
+            except ValueError:
+                continue
+            if slot < kept_slots and isinstance(val, (int, float)) and keep(val):
+                out[str(slot)] = val
+        return out
+
+    nudges = slot_map("nudges", lambda v: bool(v))
+    trims = slot_map("trims", lambda v: v != 0.5)
+    if not any([lanes, jumps, removed, nudges, trims, pauses, removed_pauses]):
         return None
     return {
         "lanes": lanes,
         "jumps": jumps,
         "removedRecordedJumps": removed,
+        "pauses": pauses,
+        "removedRecordedPauses": removed_pauses,
         "nudges": nudges,
+        "trims": trims,
     }
 
 

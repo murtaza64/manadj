@@ -14,10 +14,12 @@ import {
 } from '../sets/routinePlan';
 import {
   applyJumpEditsToTrace,
+  applyPauseEditsToTrace,
   expandAuthoredJump,
   parseEdits,
   emptyEdits,
 } from './routineDraft';
+import { recordedPauses } from './routineEditorModel';
 
 const pt = (
   beat: number,
@@ -115,6 +117,119 @@ describe('applyJumpEditsToTrace', () => {
   it('no edits = the same trace', () => {
     const t = steady();
     expect(applyJumpEditsToTrace(t, [], [], 64)).toBe(t);
+  });
+});
+
+describe('applyPauseEditsToTrace (gh#190 play/pause events)', () => {
+  it('an authored pause holds the deck, then resumes from the hold', () => {
+    const out = applyPauseEditsToTrace(
+      steady(),
+      [{ id: 'p', slot: 0, beat: 16, durBeats: 8 }],
+      [],
+      64
+    );
+    // Hold at pos(16) = 18 through beats 16..24.
+    expect(traceStateAt(out, 18).pos).toBeCloseTo(18);
+    expect(traceStateAt(out, 18).moving).toBe(false);
+    expect(traceStateAt(out, 23.9).pos).toBeCloseTo(18);
+    // Resume FROM the hold: the tail rides 4 track-seconds behind.
+    expect(traceStateAt(out, 32).pos).toBeCloseTo(10 + 32 * 0.5 - 4);
+    expect(traceStateAt(out, 32).moving).toBe(true);
+    // Before the hold: untouched.
+    expect(traceStateAt(out, 8).pos).toBeCloseTo(14);
+  });
+
+  it('removing a recorded pause plays through the hold', () => {
+    // Recorded hold: motion 0..16 (pos 10..18), held 16..24, resumes
+    // 24..64 (pos 18..38).
+    const trace = [
+      pt(0, 10),
+      pt(16, 18, { moving: false, ratePerBeat: 0 }),
+      pt(24, 18),
+      pt(64, 38),
+    ];
+    const out = applyPauseEditsToTrace(trace, [], [{ slot: 0, beat: 16 }], 64);
+    // Motion continues at the pre-pause rate through the old hold…
+    expect(traceStateAt(out, 20).moving).toBe(true);
+    expect(traceStateAt(out, 20).pos).toBeCloseTo(20);
+    // …and the tail displaces forward by the held span (8 beats · 0.5).
+    expect(traceStateAt(out, 32).pos).toBeCloseTo(22 + 8 * 0.5);
+    expect(out[out.length - 1].pos).toBeCloseTo(42);
+  });
+
+  it('removal is EXACT continuity — creep during the hold is absorbed (gh#190)', () => {
+    // The real-corpus case: a hand-timed 7.3-beat hold whose position
+    // CREPT 0.1 s while "paused" (jog/tick noise). Removal must land the
+    // tail on the extension of the pre-pause ride — as if never paused —
+    // not merely shift it by the hold span (which played 0.1 s late).
+    const trace = [
+      pt(0, 10),
+      pt(16, 18, { moving: false, ratePerBeat: 0 }),
+      pt(23.3, 18.1), // resume: crept +0.1 during the hold
+      pt(64, 38.45),
+    ];
+    const out = applyPauseEditsToTrace(trace, [], [{ slot: 0, beat: 16 }], 64);
+    // Extended ride: pos(b) = 10 + 0.5·b for the WHOLE tail.
+    expect(traceStateAt(out, 23.3).pos).toBeCloseTo(10 + 23.3 * 0.5);
+    expect(traceStateAt(out, 40).pos).toBeCloseTo(10 + 40 * 0.5);
+    expect(out[out.length - 1].pos).toBeCloseTo(10 + 64 * 0.5);
+    // Continuous through the old hold at the pre-pause rate.
+    expect(traceStateAt(out, 20).pos).toBeCloseTo(20);
+    expect(traceStateAt(out, 20).moving).toBe(true);
+  });
+
+  it('no edits = the same trace', () => {
+    const t = steady();
+    expect(applyPauseEditsToTrace(t, [], [], 64)).toBe(t);
+  });
+});
+
+describe('recordedPauses', () => {
+  it('finds interior holds; pre-entry parks and trailing stops are not pauses', () => {
+    const trace = [
+      pt(0, 10, { moving: false, ratePerBeat: 0 }), // pre-entry park
+      pt(8, 10), // motion starts
+      pt(24, 18, { moving: false, ratePerBeat: 0 }), // interior hold…
+      pt(32, 18), // …resumes
+      pt(56, 30, { moving: false, ratePerBeat: 0 }), // trailing stop
+      pt(64, 30, { moving: false, ratePerBeat: 0 }),
+    ];
+    expect(recordedPauses(trace)).toEqual([{ beat: 24, endBeat: 32 }]);
+  });
+
+  it('a SEEK during a hold splits it: hold + jump + hold (gh#190 design pass)', () => {
+    const trace = [
+      pt(0, 10),
+      pt(16, 18, { moving: false, ratePerBeat: 0 }), // paused…
+      pt(20, 4, { jump: true, moving: false, ratePerBeat: 0 }), // …seek while paused…
+      pt(28, 4), // …resumes
+      pt(64, 22),
+    ];
+    expect(recordedPauses(trace)).toEqual([
+      { beat: 16, endBeat: 20 },
+      { beat: 20, endBeat: 28 },
+    ]);
+  });
+});
+
+describe('removing a hold that ends in a seek', () => {
+  it('plays through to the seek; the seek and tail stay exactly as recorded', () => {
+    const trace = [
+      pt(0, 10),
+      pt(16, 18, { moving: false, ratePerBeat: 0 }),
+      pt(20, 4, { jump: true, moving: false, ratePerBeat: 0 }),
+      pt(28, 4),
+      pt(64, 22),
+    ];
+    const out = applyPauseEditsToTrace(trace, [], [{ slot: 0, beat: 16 }], 64);
+    // The old hold now rides at the pre-pause rate…
+    expect(traceStateAt(out, 18).moving).toBe(true);
+    expect(traceStateAt(out, 18).pos).toBeCloseTo(19);
+    // …the seek still lands where it landed, tail untouched.
+    const landing = out.find((p) => p.jump)!;
+    expect(landing.beat).toBe(20);
+    expect(landing.pos).toBeCloseTo(4);
+    expect(out[out.length - 1].pos).toBeCloseTo(22);
   });
 });
 

@@ -10,13 +10,13 @@
  * editor shows is exactly what the Conductor would replay — the same
  * PlannedRoutine, minus the Set around it.
  *
- * Slots are entry-ordered positional roles, not decks: the C-A-B-D deck
- * color conventions deliberately do NOT apply. Slots get their own
- * scheme, anchored on THE routine accent (theme/routineColor — one token
- * for every Routine surface) and rotating bright hues from there.
+ * Slots are entry-ordered positional roles; their DISPLAY identity is
+ * the allocated DECK's accent color (gh#190 iteration — deckColors, the
+ * identity every performance surface speaks). THE routine accent
+ * (theme/routineColor) stays the boundary/trim token.
  */
 import type { RoutineDetailWire } from '../api/client';
-import { ROUTINE_ACCENT } from '../theme/routineColor';
+import { DECK_COLORS } from '../theme/deckColors';
 import { resolveLadder, resolvedMarkTimes, type PersistedLadder } from '../meter/ladder';
 import type { BeatgridData } from '../types';
 import type { BeatRun } from './routineWaveRuns';
@@ -29,32 +29,18 @@ import {
   type RoutinePlanInput,
 } from '../sets/routinePlan';
 
-// ── Slot identity ────────────────────────────────────────────────────────
+// ── Slot identity: DECK accent colors (gh#190 iteration) ────────────────
+//
+// The original doctrine gave slots their own rotating palette ("slots are
+// roles, not decks"). Walkthrough verdict: the DECK accents (A/B/C/D —
+// theme/deckColors, the identity every performance surface speaks) read
+// better — a slot wears its ALLOCATED deck's color; reused decks share
+// one color on purpose. Overflow (no deck) wears neutral grey.
 
-/** Entry-ordered slot palette (bright, fully saturated — house rule).
- * Slot 0 carries THE routine accent; hues rotate from there. */
-export const SLOT_COLORS = [
-  ROUTINE_ACCENT, // slot 0 — THE routine accent (entry / boundary anchor)
-  '#ffb521', // amber
-  '#2bff7e', // green
-  '#31c8ff', // cyan
-  '#b06bff', // violet
-  '#ff5c39', // orange-red
-  '#ff3fd4', // magenta (freed by the accent change)
-  '#7dffe4', // mint
-] as const;
+const NO_DECK_COLOR = '#8a8a96';
 
-export function slotColor(slot: number): string {
-  return SLOT_COLORS[slot % SLOT_COLORS.length];
-}
-
-/** rgba() of a slot color at an alpha (colors above are #rrggbb). */
-export function slotColorRgba(slot: number, alpha: number): string {
-  const hex = slotColor(slot);
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
+export function slotAccent(deck: 'A' | 'B' | 'C' | 'D' | null | undefined): string {
+  return deck ? DECK_COLORS[deck] : NO_DECK_COLOR;
 }
 
 // ── Slot lane color families (gh#190 items 1/3: accent = FADER only) ────
@@ -68,11 +54,12 @@ export function slotColorRgba(slot: number, alpha: number): string {
 // wears ONE consistent color everywhere, with a hi/lo (HPF above
 // center / LPF below) hue distinction at draw time.
 
-export type SlotLaneControl = 'fader' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter';
+export type SlotLaneControl = 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter';
 export const SLOT_LANE_ORDER: SlotLaneControl[] = [
   // The pair editor's away-from-the-wave order (deck B's stack): FADER at
   // the wave seam, FILTER at the outer edge.
   'fader',
+  'trim',
   'eqLow',
   'eqMid',
   'eqHigh',
@@ -82,6 +69,7 @@ export const SLOT_LANE_ORDER: SlotLaneControl[] = [
 /** Terse strip labels — the pair editor's LANE_LABELS vocabulary. */
 export const SLOT_LANE_LABELS: Record<SlotLaneControl, string> = {
   fader: 'FADER',
+  trim: 'TRIM',
   eqLow: 'LOW',
   eqMid: 'MID',
   eqHigh: 'HIGH',
@@ -103,9 +91,12 @@ export const FILTER_COLOR = '#00ffc4';
  * cool base, so hi/lo reads at a glance. */
 export const FILTER_LPF_COLOR = '#ff8a00';
 
-export function slotLaneColors(slot: number): Record<SlotLaneControl, string> {
+export function slotLaneColors(
+  deck: 'A' | 'B' | 'C' | 'D' | null | undefined
+): Record<SlotLaneControl, string> {
   return {
-    fader: slotColor(slot), // the slot accent — fader ONLY (gh#190)
+    fader: slotAccent(deck), // the deck accent — fader ONLY (gh#190)
+    trim: '#c9c9d4', // neutral silver — gain plumbing, not identity
     eqLow: EQ_TRIAD.eqLow,
     eqMid: EQ_TRIAD.eqMid,
     eqHigh: EQ_TRIAD.eqHigh,
@@ -138,6 +129,49 @@ export function recordedJumps(trace: {
     const p = trace[i - 1];
     const ride = p.pos + (p.moving ? p.ratePerBeat * (q.beat - p.beat) : 0);
     out.push({ beat: q.beat, deltaSec: q.pos - ride });
+  }
+  return out;
+}
+
+// ── Recorded pause list (gh#190: play/pause events, jump idiom) ─────────
+
+export interface RecordedPause {
+  /** Routine beat the hold starts. */
+  beat: number;
+  /** Routine beat motion resumes. */
+  endBeat: number;
+}
+
+/** A slot's recorded INTERIOR holds — spans where the deck paused between
+ * motion (the pre-entry park and a trailing stop are boundaries, not
+ * pauses). A SEEK during a hold (a jump point inside the span, gh#190
+ * design pass) SPLITS it: hold + jump + hold — each piece is its own
+ * marker, independently removable, and the seek keeps its own jump
+ * marker; the two sides of the pause stay independently editable. The
+ * pause markers' model, raw-trace provenance (ghosts keep their place
+ * once removed, like recorded jumps). */
+export function recordedPauses(trace: {
+  beat: number;
+  moving: boolean;
+  jump: boolean;
+}[]): RecordedPause[] {
+  const out: RecordedPause[] = [];
+  let seenMotion = false;
+  for (let i = 0; i < trace.length; i++) {
+    const p = trace[i];
+    if (p.moving) {
+      seenMotion = true;
+      continue;
+    }
+    if (!seenMotion) continue; // pre-entry park
+    // The hold runs until motion resumes OR a seek splits it.
+    let k = i + 1;
+    while (k < trace.length && !trace[k].moving && !trace[k].jump) k++;
+    if (k >= trace.length) break; // trailing stop
+    if (trace[k].beat - p.beat > 1e-6) {
+      out.push({ beat: p.beat, endBeat: trace[k].beat });
+    }
+    i = k - 1;
   }
   return out;
 }
@@ -408,7 +442,7 @@ export function slotLadderMarks(
   if (minTier >= meter.tierBars.length && !showWeak) return out;
   for (const run of runs) {
     const span = run.ph1 - run.ph0;
-    if (span <= 1e-9) continue;
+    if (run.held || span <= 1e-9) continue; // a held frame plays no lattice
     const toBeatR = (t: number) =>
       run.b0 + ((t - run.ph0) / span) * (run.b1 - run.b0);
     for (let i = lowerBound(meter.beats, run.ph0); i < meter.beats.length; i++) {
@@ -460,7 +494,7 @@ export function slotDownbeatMarks(
   const resets: number[] = [];
   for (const run of runs) {
     const span = run.ph1 - run.ph0;
-    if (span <= 1e-9) continue;
+    if (run.held || span <= 1e-9) continue;
     const toBeatR = (t: number) =>
       run.b0 + ((t - run.ph0) / span) * (run.b1 - run.b0);
     for (
