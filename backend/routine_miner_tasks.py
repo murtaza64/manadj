@@ -48,20 +48,62 @@ def playlist_orderings(db: Session) -> list[dict[int, int]]:
     return list(by_playlist.values())
 
 
+def _dupes_confirmed_take(
+    candidate_cast: list[int],
+    window_start_s: float,
+    window_end_s: float,
+    takes: list[tuple[set[int], float, float]],
+) -> bool:
+    """Does a mined candidate duplicate an already-confirmed Routine Take?
+
+    Re-mining mints fresh candidate uuids, so `origin_candidate_uuid`
+    dangles by design — a confirmed span's re-mined twin would come back
+    as a new suggestion and stack a dashed band under the confirmed one
+    (gh#187). Span-shaped identity instead: time overlap ≥50% of the
+    shorter window plus ≥2 shared cast tracks (adjacent distinct
+    candidates share at most the one handover track).
+    """
+    cast = set(candidate_cast)
+    for take_cast, t0, t1 in takes:
+        overlap = min(window_end_s, t1) - max(window_start_s, t0)
+        if overlap <= 0:
+            continue
+        shorter = min(window_end_s - window_start_s, t1 - t0)
+        if overlap < 0.5 * shorter:
+            continue
+        if len(cast & take_cast) >= 2:
+            return True
+    return False
+
+
 def replace_session_candidates(db: Session, session: models.Session) -> int:
     """Mine one Session and replace its suggestion rows; stamp the marker.
 
     Does not commit — the caller owns the transaction (handler and tests
     commit; a failure rolls the delete back with everything else).
+
+    Mined candidates that duplicate an already-confirmed Routine Take of
+    this Session are dropped (gh#187): the take chip/band is the
+    surviving surface for that span.
     """
     events: list[dict[str, Any]] = []
     for chunk in session.chunks:  # relationship order: seq
         events.extend(json.loads(chunk.events_json))
     result = mine_session(events, playlist_orderings(db))
+    confirmed = [
+        (set(json.loads(t.cast_json)), t.window_start_s, t.window_end_s)
+        for t in db.query(models.RoutineTake)
+        .filter(models.RoutineTake.session_uuid == session.uuid)
+        .all()
+    ]
     db.query(models.RoutineCandidate).filter(
         models.RoutineCandidate.session_uuid == session.uuid
     ).delete()
+    kept = 0
     for c in result.candidates:
+        if _dupes_confirmed_take(c.cast, c.window_start_s, c.window_end_s, confirmed):
+            continue
+        kept += 1
         db.add(
             models.RoutineCandidate(
                 uuid=str(uuid_lib.uuid4()),
@@ -86,14 +128,16 @@ def replace_session_candidates(db: Session, session: models.Session) -> int:
         )
     session.routine_miner_version = MINER_VERSION
     logger.info(
-        "routine miner v%d session %s: %d candidates (%d/%d returns practice)",
+        "routine miner v%d session %s: %d candidates, %d confirmed dupes dropped"
+        " (%d/%d returns practice)",
         MINER_VERSION,
         session.uuid,
-        len(result.candidates),
+        kept,
+        len(result.candidates) - kept,
         result.n_practice_returns,
         result.n_returns,
     )
-    return len(result.candidates)
+    return kept
 
 
 def make_routine_mine_handler():

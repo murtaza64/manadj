@@ -66,6 +66,10 @@ class PromotedRoutine:
     events: list[dict[str, Any]]  # slot-addressed, beat-domain
     residencies: list[SlotResidency] = field(default_factory=list)
     dropped_events: int = 0  # deck activity outside the cast
+    # The capture-clock window promoted over — persisted on the Routine
+    # so a later retrim measures against the CURRENT bounds (gh#190).
+    window_start_s: float = 0.0
+    window_end_s: float = 0.0
 
 
 # ── beatgrid helpers ─────────────────────────────────────────────────────
@@ -434,6 +438,8 @@ def promote(
         events=out_events,
         residencies=residencies,
         dropped_events=dropped,
+        window_start_s=window_start_s,
+        window_end_s=window_end_s,
     )
 
 
@@ -463,9 +469,11 @@ def retrim(
     trim_end_beats: float,
 ) -> PromotedRoutine:
     """Boundary trim + mechanical re-promotion (the v1 review affordance,
-    ADR 0035 / gh#170): move the ORIGINAL take window's boundaries by
-    beat amounts — the editor's axis is the Routine clock, so trims
-    arrive in beats. POSITIVE narrows (inverted through the same beat
+    ADR 0035 / gh#170): move the given window's boundaries by beat
+    amounts — the editor's axis is the Routine clock, so trims arrive in
+    beats, relative to the window passed in (the router passes the
+    routine's CURRENT window, gh#190). POSITIVE narrows (inverted
+    through the same beat
     clock promotion built); NEGATIVE WIDENS outward (gh#170 follow-up:
     the miner under-sizes dwell-shaped windows — #181's WYGFM case),
     converted at the boundary-local beat rate and bounded by the origin

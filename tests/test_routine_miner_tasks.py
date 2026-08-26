@@ -126,6 +126,50 @@ def test_mine_task_replaces_stale_rows(db, trio):
     assert rows[0].miner_version == MINER_VERSION
 
 
+def make_routine_take(db, session_uuid, cast, w0, w1):
+    rt = models.RoutineTake(
+        uuid=f"rt-{session_uuid}-{w0}",
+        session_uuid=session_uuid,
+        entry_track_id=cast[0],
+        exit_track_id=cast[-1],
+        cast_json=json.dumps(cast),
+        window_start_s=w0,
+        window_end_s=w1,
+        entry_offsets_json=json.dumps([0.0] * len(cast)),
+    )
+    db.add(rt)
+    db.commit()
+    return rt
+
+
+def test_remine_drops_candidate_duplicating_confirmed_take(db, trio):
+    """gh#187: a re-mine mints fresh candidate uuids, so the confirmed
+    take's origin uuid dangles — the twin must be dropped by span+cast,
+    not resurface as a stacked suggestion."""
+    t1, t2, t3 = trio
+    make_session(db, "s1", weave_events(t1.id, t2.id, t3.id))
+    # The weave mines to window (27, 83); the confirm trimmed inside it.
+    make_routine_take(db, "s1", [t1.id, t2.id, t3.id], 30, 80)
+    enqueue_routine_mine(db, "s1")
+    run_miner(db)
+    assert db.query(models.RoutineCandidate).count() == 0
+
+
+def test_remine_keeps_distinct_candidates(db, trio):
+    t1, t2, t3 = trio
+    make_session(db, "s1", weave_events(t1.id, t2.id, t3.id))
+    # Elsewhere in the session: no time overlap — candidate survives.
+    make_routine_take(db, "s1", [t1.id, t2.id, t3.id], 200, 260)
+    # Overlapping span but ≤1 shared cast track (an adjacent, genuinely
+    # different choreography) — candidate survives.
+    make_routine_take(db, "s1", [t1.id, 9001, 9002], 27, 83)
+    # Another session's take never suppresses this session's candidates.
+    make_routine_take(db, "other", [t1.id, t2.id, t3.id], 27, 83)
+    enqueue_routine_mine(db, "s1")
+    run_miner(db)
+    assert db.query(models.RoutineCandidate).count() == 1
+
+
 def test_enqueue_dedupes_inflight(db, trio):
     make_session(db, "s1", [])
     assert enqueue_routine_mine(db, "s1") is not None
