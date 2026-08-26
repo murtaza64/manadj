@@ -24,11 +24,16 @@ The pipeline, per Session, over the concatenated `session_chunks` events:
 4. **Candidate carving** — seeds are performance returns; clusters split
    at boundary solo moments (concurrency ≤ 1 for ≥ 8s — but a seed's own
    away-gap is interior, never a boundary); triples extend a seeded
-   cluster but never seed one; the cast must be a contiguous run of some
-   ordered track list (a playlist), enter with its first member and exit
-   with its last (the Routine boundary contract); windows expand into the
-   bounding solos. Chained candidates may share exactly one boundary
-   track (one's exit is the other's entry).
+   cluster but a lone triple never seeds one. Exception (gh#175): a
+   section with NO returns at all whose triples include a sustained run
+   (≥ TRIPLE_RUN_MIN long triples) seeds from that run — a versus/layered
+   block performed live never breaks audibility, so no return exists to
+   seed it, while any rehearsal of one shows re-tries (returns, practice-
+   flagged) and keeps refusing to seed. The cast must be a contiguous run
+   of some ordered track list (a playlist), enter with its first member
+   and exit with its last (the Routine boundary contract); windows expand
+   into the bounding solos. Chained candidates may share exactly one
+   boundary track (one's exit is the other's entry).
 
 Pure algorithm — no DB access; the task layer (`routine_miner_tasks`)
 feeds it events + playlist orderings and persists the suggestion rows
@@ -45,7 +50,8 @@ from typing import Any, Iterable, Sequence
 
 # Bump to invalidate persisted suggestion rows: the sweep re-mines every
 # Session whose marker differs (routine_miner_tasks.enqueue_stale_routine_mining).
-MINER_VERSION = 1
+# v2: layered-run (triple-run) seeding for versus-style blocks (gh#175).
+MINER_VERSION = 2
 
 # --- audibility reconstruction ---
 FADER_ON = 0.10           # channel fader above this = contributing
@@ -65,6 +71,7 @@ EVENT_CLUSTER_S = 90.0    # events this close belong to one section
 
 # --- candidate carving ---
 TRIPLE_SEED_MIN_S = 15.0  # triples shorter than this don't even extend
+TRIPLE_RUN_MIN = 2        # long triples needed for layered-run seeding (gh#175)
 SOLO_MIN_S = 8.0          # concurrency ≤ 1 at least this long = solo moment
 CLUSTER_MAX_GAP_S = 160.0  # max seed-to-seed gap within one cluster
 TRIPLE_ATTACH_PAD_S = 75.0  # triples within this of a cluster extend it
@@ -456,15 +463,25 @@ def _solo_moments(intervals: Sequence[Interval]) -> list[tuple[float, float]]:
 def _carve_section(
     section: Section, orderings: Sequence[dict[int, int]]
 ) -> list[Candidate]:
-    seeds = [r for r in section.returns if not r.practice]
+    seeds: list[Any] = [r for r in section.returns if not r.practice]
+    long_triples = [tr for tr in section.triples if tr.duration >= TRIPLE_SEED_MIN_S]
+    triple_seeded = False
     if not seeds:
-        # Triples alone are decomposable as overlapping adjacency windows —
-        # they extend a seeded cluster but never seed one.
-        return []
+        # A lone triple is decomposable as overlapping adjacency windows —
+        # it extends a seeded cluster but never seeds one. But a versus/
+        # layered block performed live sustains audibility (no away-gaps),
+        # so no return exists to seed it (gh#175): a section with NO
+        # returns at all whose triples include a sustained run seeds from
+        # the long triples. Any returns present here are practice-flagged
+        # (rehearsal re-tries) — keep refusing to seed.
+        if section.returns or len(long_triples) < TRIPLE_RUN_MIN:
+            return []
+        seeds = list(long_triples)
+        triple_seeded = True
 
     # Boundary solos: a seed's away-gap is interior to a Routine, never a
     # boundary — drop solos overlapping any seed's gap.
-    gaps = [(r.gap_start, r.t) for r in seeds]
+    gaps = [(r.gap_start, r.t) for r in seeds if isinstance(r, ReturnEvent)]
     bsolos = [
         s
         for s in _solo_moments(section.intervals)
@@ -487,11 +504,20 @@ def _carve_section(
             cur = [r]
     clusters.append(cur)
 
-    # Long triples extend a seeded cluster (chaining off already-attached
-    # members) but never seed one.
-    long_triples = [tr for tr in section.triples if tr.duration >= TRIPLE_SEED_MIN_S]
+    # An isolated long triple that clustered alone is back to being a mere
+    # overlap moment — layered-run seeding needs the sustained run.
+    if triple_seeded:
+        clusters = [cl for cl in clusters if len(cl) >= TRIPLE_RUN_MIN]
+
+    # Triples extend a seeded cluster (chaining off already-attached
+    # members) but never seed one: long ones for return-seeded clusters,
+    # every section triple for a layered run (short ones corroborate the
+    # same block).
+    attachable = section.triples if triple_seeded else long_triples
     for cl in clusters:
-        for tr in long_triples:
+        for tr in attachable:
+            if tr in cl:
+                continue
             if tr.t <= max(ev.end for ev in cl) + TRIPLE_ATTACH_PAD_S and tr.end >= min(
                 ev.t for ev in cl
             ) - TRIPLE_ATTACH_PAD_S:

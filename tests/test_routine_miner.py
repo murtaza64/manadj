@@ -238,13 +238,57 @@ def test_practice_returns_never_seed():
 
 def test_triples_alone_never_seed():
     # A 20s three-deck stretch with no performance return: decomposable as
-    # overlapping windows, not a Routine candidate.
+    # overlapping windows, not a Routine candidate. (A lone triple is not
+    # a layered run — see test_layered_run_seeds below.)
     events = [
         load(0, "A", 1), play(0, "A"), pause(60, "A"),
         load(20, "B", 2), play(20, "B"), pause(70, "B"),
         load(40, "C", 3), play(40, "C"), pause(80, "C"),
     ]
     result = mine_session(events, [ORDERING])
+    assert result.candidates == []
+
+
+# The layered/versus run (gh#175): four cascading tenures, each entering
+# while the previous still plays — sustained 3-concurrency, no away-gaps,
+# so no return ever fires. Two long triples: 60–80 (T1·T2·T3) and
+# 100–130 (T2·T3·T4).
+def layered_run_events():
+    return [
+        load(5, "A", 1), play(5, "A"), pause(80, "A"),
+        load(40, "B", 2), play(40, "B"), pause(130, "B"),
+        load(60, "C", 3), play(60, "C"), pause(140, "C"),
+        load(100, "D", 4), play(100, "D"), pause(200, "D"),
+    ]
+
+
+def test_layered_run_seeds_candidate():
+    result = mine_session(layered_run_events(), [ORDERING])
+    assert result.n_returns == 0
+    assert len(result.candidates) == 1
+    c = result.candidates[0]
+    assert c.cast == [1, 2, 3, 4]
+    assert (c.n_returns, c.n_triples) == (0, 2)
+    # Window expands into the entry/exit tenures, clamped into the bounding
+    # solos (T1 alone 5–40 before, T4 alone 140–200 after, ±3s pad).
+    assert (c.window_start_s, c.window_end_s) == (37, 143)
+
+
+def test_layered_run_with_practice_returns_never_seeds():
+    # The same cascade rehearsed: T1 re-tried after an away-gap with a
+    # backseek — the section has returns (all practice), so the layered-run
+    # path must keep refusing to seed.
+    events = layered_run_events() + [
+        seek(90, "A", playhead=10.0),
+        play(95, "A"), pause(110, "A"),
+    ]
+    events = [
+        e if e["t"] != 80 or e.get("action") != "pause" else pause(80, "A", playhead=75.0)
+        for e in events
+    ]
+    result = mine_session(events, [ORDERING])
+    assert result.n_returns == 1
+    assert result.n_practice_returns == 1
     assert result.candidates == []
 
 
