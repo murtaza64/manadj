@@ -119,6 +119,103 @@ function splashPageDataUrl(target) {
   return "data:text/html;charset=utf-8," + encodeURIComponent(html);
 }
 
+// --- persistent renderer log (stability #188) ----------------------------------
+//
+// Blank-screen crashes leave no evidence when the shell runs attached (`make
+// electron PORT=...`): renderer console goes only to that terminal, and a dead
+// renderer takes its devtools console with it. Tee every renderer console line
+// and every crash signal (render-process-gone, unresponsive, child-process-gone,
+// GPU status) to an append-only file under ~/Library/Logs/manaDJ/ so the next
+// occurrence is captured no matter how the shell was launched. Lines carry the
+// shell pid: multiple attached shells (human app + lane apps) share the file.
+
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
+let rendererLogStream = null;
+
+function openRendererLog() {
+  try {
+    const dir = app.getPath("logs"); // ~/Library/Logs/manaDJ (after setName)
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "renderer.log");
+    try {
+      // Startup-time rotation only: keep one previous generation.
+      if (fs.statSync(file).size > LOG_MAX_BYTES) fs.renameSync(file, `${file}.1`);
+    } catch {
+      // first launch — no file yet
+    }
+    rendererLogStream = fs.createWriteStream(file, { flags: "a" });
+    return file;
+  } catch (err) {
+    process.stdout.write(`[app] renderer log unavailable: ${err.message}\n`);
+    return null;
+  }
+}
+
+function logRenderer(line) {
+  rendererLogStream?.write(`${new Date().toISOString()} [${process.pid}] ${line}\n`);
+}
+
+// Crash signals also go to stdout — visible live in the attach terminal.
+function logCrashSignal(line) {
+  process.stdout.write(`[app] ${line}\n`);
+  logRenderer(`[crash-signal] ${line}`);
+}
+
+function describeWebContents(wc) {
+  try {
+    return `wc#${wc.id} ${wc.getURL() || "(no url)"}`;
+  } catch {
+    return "wc#? (destroyed)";
+  }
+}
+
+function instrumentCrashSignals() {
+  // App-level events cover every webContents (main window, visualizer, arena)
+  // without per-window wiring.
+  app.on("render-process-gone", (_event, wc, details) => {
+    logCrashSignal(
+      `render-process-gone: reason=${details.reason} exitCode=${details.exitCode} ${describeWebContents(wc)}`,
+    );
+    // GPU state at the moment of death — the region-leak thread
+    // (issues/stability/01) showed GPU-side exhaustion kills renderers.
+    try {
+      logRenderer(`[crash-signal] gpu-feature-status: ${JSON.stringify(app.getGPUFeatureStatus())}`);
+    } catch {
+      // best-effort
+    }
+  });
+  app.on("child-process-gone", (_event, details) => {
+    // GPU process death repaints every surface black — a classic blank screen.
+    logCrashSignal(
+      `child-process-gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode} name=${details.name ?? ""}`,
+    );
+  });
+  // Baseline GPU state, logged once the first page finishes loading — at
+  // app-ready the GPU process hasn't initialized and the status reads all
+  // software. A later crash entry gets diffed against this healthy snapshot.
+  let gpuBaselineLogged = false;
+  app.on("web-contents-created", (_event, wc) => {
+    forwardConsole(wc);
+    wc.once("did-finish-load", () => {
+      if (gpuBaselineLogged) return;
+      gpuBaselineLogged = true;
+      try {
+        logRenderer(`[session] gpu-feature-status: ${JSON.stringify(app.getGPUFeatureStatus())}`);
+      } catch {
+        // best-effort
+      }
+    });
+    wc.on("unresponsive", () => logCrashSignal(`unresponsive: ${describeWebContents(wc)}`));
+    wc.on("responsive", () => logCrashSignal(`responsive again: ${describeWebContents(wc)}`));
+    wc.on("did-fail-load", (_e, code, desc, url, isMainFrame) => {
+      // -3 (ABORTED) is normal navigation churn; everything else is evidence.
+      if (code !== -3 && isMainFrame) {
+        logCrashSignal(`did-fail-load: ${code} ${desc} url=${url}`);
+      }
+    });
+  });
+}
+
 // --- CoreAudio channel-label assertion (four-deck 33) --------------------------
 //
 // Known Mappings whose firmware ships all-Unknown output channel labels,
@@ -298,13 +395,15 @@ function createWindow() {
   // restores the last hand-set size across sessions.
   win.maximize();
   win.on("close", () => saveBounds(win));
-  forwardConsole(win.webContents);
+  // Console forwarding is wired app-wide in instrumentCrashSignals via
+  // web-contents-created (covers this window plus visualizer/arena children).
   attach(win);
 }
 
 // Forward the renderer's console to stdout with a "[browser] " prefix.
 // scripts/dev.py recognizes the prefix and relabels the line into its
 // multiplexed stream; in a bare `make app` terminal it reads fine as-is.
+// Every line is also teed to the persistent renderer log (stability #188).
 const LEGACY_LEVELS = ["debug", "log", "warning", "error"];
 
 function forwardConsole(webContents) {
@@ -320,9 +419,18 @@ function forwardConsole(webContents) {
     const tag = level === "log" || level === "info" ? "" : `${level}: `;
     for (const text of message.split("\n")) {
       process.stdout.write(`[browser] ${tag}${text}${where}\n`);
+      logRenderer(`[browser] ${tag}${text}${where}`);
     }
   });
 }
+
+const rendererLogFile = openRendererLog();
+logRenderer(
+  `[session] shell start pid=${process.pid} target=${TARGET} ` +
+    `electron=${process.versions.electron} chrome=${process.versions.chrome}`,
+);
+if (rendererLogFile) process.stdout.write(`[app] renderer log: ${rendererLogFile}\n`);
+instrumentCrashSignals();
 
 app.whenReady().then(() => {
   // Auto-grant device capabilities so nothing prompts on the dev machine:
@@ -356,3 +464,10 @@ app.whenReady().then(() => {
 // Single-window app: closing the window quits, even on macOS.
 // No hidden-but-playing state.
 app.on("window-all-closed", () => app.quit());
+
+// A clean-quit marker distinguishes "user closed the app" from "the log just
+// stops" (main-process death) when reading the file after an incident.
+app.on("quit", (_event, exitCode) => {
+  logRenderer(`[session] shell quit exitCode=${exitCode}`);
+  rendererLogStream?.end();
+});

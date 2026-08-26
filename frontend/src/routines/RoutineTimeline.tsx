@@ -290,7 +290,11 @@ export function RoutineTimeline({
     (edge: 'start' | 'end') => (e: React.PointerEvent) => {
       if (!onTrimChange) return;
       e.stopPropagation();
+      e.preventDefault();
       trimDrag.current = edge;
+      // No text selection while dragging (gh#190 item 9).
+      const prevUserSelect = document.body.style.userSelect;
+      document.body.style.userSelect = 'none';
       const onMove = (ev: PointerEvent) => {
         const el = rowsRef.current;
         const t = trimRef.current;
@@ -314,6 +318,7 @@ export function RoutineTimeline({
       };
       const onUp = () => {
         trimDrag.current = null;
+        document.body.style.userSelect = prevUserSelect;
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
       };

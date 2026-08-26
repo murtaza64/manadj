@@ -162,6 +162,56 @@ def test_retrim_endpoint_updates_in_place(client, promoted_routine):
     assert detail["duration_beats"] == pytest.approx(110.0, abs=0.5)
 
 
+def test_retrim_endpoint_sequential_trims_measure_current_window(
+    client, db, promoted_routine
+):
+    """gh#190 item 8: a second retrim's beat amounts are relative to the
+    routine's CURRENT window — not the origin take's original bounds (the
+    old stateless behavior silently reverted the first trim)."""
+    routine, _, cast = promoted_routine
+    res = client.post(
+        f"/api/routines/{routine['uuid']}/retrim",
+        json={"trim_start_beats": 0.0, "trim_end_beats": 20.0},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["duration_beats"] == pytest.approx(100.0, abs=0.5)
+    # Second trim from the other edge must PRESERVE the first.
+    res = client.post(
+        f"/api/routines/{routine['uuid']}/retrim",
+        json={"trim_start_beats": 10.0, "trim_end_beats": 0.0},
+    )
+    assert res.status_code == 200, res.text
+    out = res.json()
+    assert out["duration_beats"] == pytest.approx(90.0, abs=0.5)
+    assert out["entry_offsets_beats"] == pytest.approx([0.0, 10.0, 50.0], abs=0.5)
+    # The stored window tracks both trims (10 beats = 5 s at 2 beats/s).
+    row = (
+        db.query(models.Routine).filter(models.Routine.uuid == routine["uuid"]).first()
+    )
+    assert row.window_start_s == pytest.approx(5.0, abs=0.3)
+    assert row.window_end_s == pytest.approx(50.0, abs=0.3)
+
+
+def test_retrim_endpoint_widens_back_after_narrow(client, promoted_routine):
+    """gh#190 item 8: NEGATIVE trim amounts widen the CURRENT window back
+    out (bounded by the session slice) — the ✓ Apply expansion path."""
+    routine, _, cast = promoted_routine
+    res = client.post(
+        f"/api/routines/{routine['uuid']}/retrim",
+        json={"trim_start_beats": 0.0, "trim_end_beats": 20.0},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["duration_beats"] == pytest.approx(100.0, abs=0.5)
+    res = client.post(
+        f"/api/routines/{routine['uuid']}/retrim",
+        json={"trim_start_beats": 0.0, "trim_end_beats": -20.0},
+    )
+    assert res.status_code == 200, res.text
+    out = res.json()
+    assert out["cast"] == cast
+    assert out["duration_beats"] == pytest.approx(120.0, abs=1.0)
+
+
 def test_retrim_endpoint_rejects_broken_cast(client, promoted_routine):
     routine, _, _ = promoted_routine
     res = client.post(

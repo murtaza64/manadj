@@ -42,6 +42,8 @@ import {
   ALL_DECKS,
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  candidateDupesTake,
+  castSpanRefs,
   collapseCandidates,
   createStateIndex,
   deriveTimeline,
@@ -136,6 +138,14 @@ type Selection =
   | { kind: 'candidate'; candidate: RoutineCandidateWire }
   | { kind: 'routineTake'; take: RoutineTakeRowWire };
 
+/** A hovered routine band/chip (gh#187): the cast + window driving the
+ * hover-dim spotlight (take-chip parity, any tier — ◆/◇/⧉). */
+interface HoverCast {
+  cast: number[];
+  start: number;
+  end: number;
+}
+
 /** The trim-adjusted confirm payload pieces: slots whose entry survives
  * the trimmed window, offsets re-based onto the new start (clamped ≥ 0 —
  * a slot already playing at the trimmed start enters at 0). Mechanical:
@@ -219,6 +229,9 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
   // in the per-frame overlay — the memoized scene must not re-render per
   // hover, so it only receives the stable callback.
   const [hoverTake, setHoverTake] = useState<TakeRowWire | null>(null);
+  // Hovered routine band/chip (◆/◇/⧉, gh#187): the cast-track spotlight —
+  // exact parity with the take-chip hover, generalized to n cast tracks.
+  const [hoverCast, setHoverCast] = useState<HoverCast | null>(null);
   const [pxPerSec, setPxPerSec] = useState<number | null>(
     () => getTimelineViewState(session.uuid)?.pxPerSec ?? null
   ); // null = fit
@@ -254,13 +267,19 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     [allRoutineTakes, session.uuid]
   );
   // A confirmed candidate stops highlighting — its Routine Take chip is
-  // the surviving surface.
+  // the surviving surface. The uuid check alone leaks after a re-mine
+  // (candidate rows are replaced with fresh uuids — the origin uuid
+  // dangles by design), so a span-shaped dedupe backs it up: a candidate
+  // duplicating a confirmed take's span collapses instead of stacking a
+  // dashed ⧉ band under the ◆ (gh#187).
   const routineCandidates = useMemo(() => {
     const confirmed = new Set(
       (allRoutineTakes ?? []).map((t) => t.origin_candidate_uuid).filter(Boolean)
     );
-    return (allRoutineCandidates ?? []).filter((c) => !confirmed.has(c.uuid));
-  }, [allRoutineCandidates, allRoutineTakes]);
+    return (allRoutineCandidates ?? []).filter(
+      (c) => !confirmed.has(c.uuid) && !routineTakes.some((rt) => candidateDupesTake(c, rt))
+    );
+  }, [allRoutineCandidates, allRoutineTakes, routineTakes]);
 
   const model: TimelineModel | null = useMemo(
     () => (events ? deriveTimeline(events) : null),
@@ -898,6 +917,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
   // defeat it every render).
   const onTakeClick = useCallback((take: TakeRowWire) => setSelection({ kind: 'take', take }), []);
   const onTakeHover = useCallback((take: TakeRowWire | null) => setHoverTake(take), []);
+  const onCastHover = useCallback((hover: HoverCast | null) => setHoverCast(hover), []);
   const trimBoundsRef = useRef<{ lo: number; hi: number } | null>(null);
   const onCandidateClick = useCallback((c: RoutineCandidateWire) => {
     setSelection({ kind: 'candidate', candidate: c });
@@ -1147,9 +1167,18 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
               className="stl-open-editor"
               onClick={() => requestTakeReview(selection.take.uuid)}
             >
-              Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
-              {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id} · open in
-              editor
+              {selection.take.kind === 'guest' ? (
+                <>
+                  ◐ Cameo {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id}{' '}
+                  over {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id}
+                </>
+              ) : (
+                <>
+                  Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
+                  {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id}
+                </>
+              )}{' '}
+              · open in editor
             </button>
             <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
               ✕
@@ -1334,6 +1363,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                   expandedGaps={expandedGaps}
                   onTakeClick={onTakeClick}
                   onTakeHover={onTakeHover}
+                  onCastHover={onCastHover}
                   onCandidateClick={onCandidateClick}
                   onRoutineTakeClick={onRoutineTakeClick}
                   onOpenCandidateInEditor={onOpenCandidateInEditor}
@@ -1355,6 +1385,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                   replayPaused={replay.status === 'paused'}
                   selection={selection}
                   hoverTake={hoverTake}
+                  hoverCast={hoverCast}
                   trim={selection.kind === 'candidate' ? trim : null}
                   onTrimHandleDown={onTrimHandleDown}
                   flash={flash}
@@ -1412,6 +1443,8 @@ interface SceneProps {
   expandedGaps: ReadonlySet<number>;
   onTakeClick(take: TakeRowWire): void;
   onTakeHover(take: TakeRowWire | null): void;
+  /** Routine band/chip hover (gh#187): the cast-track spotlight. */
+  onCastHover(hover: HoverCast | null): void;
   onCandidateClick(candidate: RoutineCandidateWire): void;
   onRoutineTakeClick(take: RoutineTakeRowWire): void;
   onOpenCandidateInEditor(candidate: RoutineCandidateWire): void | Promise<void>;
@@ -1447,6 +1480,7 @@ const TimelineScene = memo(function TimelineScene({
   expandedGaps,
   onTakeClick,
   onTakeHover,
+  onCastHover,
   onCandidateClick,
   onRoutineTakeClick,
   onOpenCandidateInEditor,
@@ -1690,30 +1724,39 @@ const TimelineScene = memo(function TimelineScene({
       })}
 
       {/* Take chips (deck-pair gradient fill; boundary whiskers are
-          detail marks — hidden past the 10-min line, sessions 22). */}
+          detail marks — hidden past the 10-min line, sessions 22).
+          Cameo Takes (kind 'guest', #140) carry the guest family's
+          identity — orange ◐, "guest over host" — instead of the
+          generic transition gradient (gh#185). */}
       {takes.map((t, ti) => {
         const x0 = X(t.window_start_s);
         const x1 = Math.max(X(t.window_end_s), x0 + 12);
         if (x1 < viewX0 || x0 > viewX1) return null;
-        const label = `${trackNames[t.a_track_id] ?? t.a_track_id} → ${
-          trackNames[t.b_track_id] ?? t.b_track_id
-        }`;
+        const cameo = t.kind === 'guest';
+        const label = cameo
+          ? `${trackNames[t.b_track_id] ?? t.b_track_id} over ${
+              trackNames[t.a_track_id] ?? t.a_track_id
+            }`
+          : `${trackNames[t.a_track_id] ?? t.a_track_id} → ${
+              trackNames[t.b_track_id] ?? t.b_track_id
+            }`;
         const pair = takePairs[ti];
         const grad =
-          pair.from !== null && pair.to !== null
+          !cameo && pair.from !== null && pair.to !== null
             ? `url(#stl-take-grad-${pair.from}-${pair.to})`
             : null;
         const { row, rows } = chipLayout[ti];
         const chipH = (CHIP_STRIP_H - 6) / rows;
         const chipY = RULER_H + 2 + row * chipH;
-        const textY = chipY + chipH / 2 + 3;
-        // 2 rows: smaller text; 3-4 rows: chips too thin for text at all
-        // (the hover title still carries the label).
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
+        // 2 rows: smaller text; 3-4 rows: no room for the label — but the
+        // kind glyph stays (gh#185: stacked chips must still tell their
+        // kind apart). The hover title carries the label.
         const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         return (
           <g
             key={t.uuid}
-            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}${sizeClass}`}
+            className={`stl-take-chip${cameo ? ' cameo' : ''}${selectedTakeUuid === t.uuid ? ' selected' : ''}${sizeClass}`}
             onClick={(e) => {
               e.stopPropagation();
               onTakeClick(t);
@@ -1721,7 +1764,7 @@ const TimelineScene = memo(function TimelineScene({
             onMouseEnter={() => onTakeHover(t)}
             onMouseLeave={() => onTakeHover(null)}
           >
-            <title>{`${label} · confidence ${t.confidence.toFixed(2)}`}</title>
+            <title>{`${cameo ? 'Cameo Take (#140) · ' : ''}${label} · confidence ${t.confidence.toFixed(2)}`}</title>
             <rect
               x={x0}
               y={chipY}
@@ -1730,15 +1773,14 @@ const TimelineScene = memo(function TimelineScene({
               rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
               style={grad ? { fill: grad } : undefined}
             />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              {cameo ? '◐' : '●'}
+            </text>
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={textY}>
-                ● {label.slice(0, Math.floor((x1 - x0) / 7))}
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {label.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
-            ) : (
-              <text x={x0 + 4} y={textY}>
-                ●
-              </text>
-            )}
+            ) : null}
             {showDetailMarks ? (
               <>
                 <line
@@ -1774,7 +1816,7 @@ const TimelineScene = memo(function TimelineScene({
         const { row, rows } = chipLayout[candChipBase + i];
         const chipH = (CHIP_STRIP_H - 6) / rows;
         const chipY = RULER_H + 2 + row * chipH;
-        const textY = chipY + chipH / 2 + 3;
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
         const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         const selected = selectedCandidateUuid === c.uuid;
         return (
@@ -1785,19 +1827,22 @@ const TimelineScene = memo(function TimelineScene({
               e.stopPropagation();
               onCandidateClick(c);
             }}
+            onMouseEnter={() =>
+              onCastHover({ cast: c.cast, start: c.window_start_s, end: c.window_end_s })
+            }
+            onMouseLeave={() => onCastHover(null)}
           >
             <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm (with trim), ✎ to open in the Routine editor`}</title>
             <rect x={x0} y={lanesTop} width={x1 - x0} height={lanesBottom - lanesTop} className="stl-cand-band" />
             <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} className="stl-cand-chip-rect" />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              ⧉
+            </text>
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={textY}>
-                ⧉ {`${c.cast.length}× ${chain}`.slice(0, Math.floor((x1 - x0) / 7))}
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {`${c.cast.length}× ${chain}`.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
-            ) : (
-              <text x={x0 + 4} y={textY}>
-                ⧉
-              </text>
-            )}
+            ) : null}
             {/* Per-region editor open (gh#170 pass 2 directive 4):
                 confirm-then-promote-then-open — the deliberate act. */}
             {x1 - x0 > 40 && (
@@ -1833,7 +1878,7 @@ const TimelineScene = memo(function TimelineScene({
         const { row, rows } = chipLayout[rtakeChipBase + i];
         const chipH = (CHIP_STRIP_H - 6) / rows;
         const chipY = RULER_H + 2 + row * chipH;
-        const textY = chipY + chipH / 2 + 3;
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
         const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         const selected = selectedRoutineTakeUuid === rt.uuid;
         const routineUuid = rt.promoted_routine_uuid;
@@ -1849,6 +1894,10 @@ const TimelineScene = memo(function TimelineScene({
               e.stopPropagation();
               onRoutineTakeClick(rt);
             }}
+            onMouseEnter={() =>
+              onCastHover({ cast: rt.cast, start: rt.window_start_s, end: rt.window_end_s })
+            }
+            onMouseLeave={() => onCastHover(null)}
           >
             <title>
               {persisted
@@ -1870,15 +1919,14 @@ const TimelineScene = memo(function TimelineScene({
               rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
               className="stl-rtake-chip-rect"
             />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              {persisted ? '◆' : '◇'}
+            </text>
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={textY}>
-                {persisted ? '◆' : '◇'} {label.slice(0, Math.floor((x1 - x0) / 7))}
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {label.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
-            ) : (
-              <text x={x0 + 4} y={textY}>
-                {persisted ? '◆' : '◇'}
-              </text>
-            )}
+            ) : null}
             {x1 - x0 > 40 && (
               <g
                 className="stl-region-edit dark"
@@ -1927,6 +1975,7 @@ function SceneOverlay({
   replayPaused,
   selection,
   hoverTake,
+  hoverCast,
   trim,
   onTrimHandleDown,
   flash,
@@ -1943,6 +1992,8 @@ function SceneOverlay({
   replayPaused: boolean;
   selection: Selection;
   hoverTake: TakeRowWire | null;
+  /** Hovered routine band/chip (gh#187): cast-track spotlight. */
+  hoverCast: HoverCast | null;
   /** Provenance flash (gh#170): a source region pulsing once. */
   flash?: { start: number; end: number; key: number } | null;
   /** Boundary trim of the selected candidate (routines 158): the span
@@ -2031,14 +2082,17 @@ function SceneOverlay({
         );
       })}
 
-      {/* Take hover spotlight (sessions 22): dim every lane stretch that
-          is NOT the hovered Take's two tracks, and show its boundary
-          whiskers regardless of the detail-marks zoom gate. Lives here
-          (per-frame layer), so hovering never re-renders the scene. */}
-      {hoverTake
+      {/* Hover spotlight (sessions 22; routines gh#187): dim every lane
+          stretch that is NOT the hovered chip's tracks — a Take's two, or
+          a routine band's whole cast — and show boundary whiskers
+          regardless of the detail-marks zoom gate. Lives here (per-frame
+          layer), so hovering never re-renders the scene. */}
+      {hoverTake || hoverCast
         ? (() => {
-            const pair = takeSpanPair(model, hoverTake);
-            const spans = [pair.from, pair.to].filter((s): s is TakeSpanRef => s !== null);
+            const pair = hoverTake ? takeSpanPair(model, hoverTake) : null;
+            const spans = pair
+              ? [pair.from, pair.to].filter((s): s is TakeSpanRef => s !== null)
+              : castSpanRefs(model, hoverCast!.cast, hoverCast!.start, hoverCast!.end);
             const dims: ReactNode[] = [];
             for (const deck of LANE_ORDER) {
               const y = laneYOf(deck, lanesTop, laneH);
@@ -2062,8 +2116,16 @@ function SceneOverlay({
                 }
               }
             }
-            const wx0 = X(hoverTake.window_start_s);
-            const wx1 = X(hoverTake.window_end_s);
+            const wx0 = X(hoverTake ? hoverTake.window_start_s : hoverCast!.start);
+            const wx1 = X(hoverTake ? hoverTake.window_end_s : hoverCast!.end);
+            // Take whiskers carry the deck colors; routine whiskers the
+            // routine family's accent.
+            const c0 = pair
+              ? pair.from && { stroke: DECK_COLORS[pair.from.deck] }
+              : { stroke: 'var(--routine-accent)' };
+            const c1 = pair
+              ? pair.to && { stroke: DECK_COLORS[pair.to.deck] }
+              : { stroke: 'var(--routine-accent)' };
             return (
               <g style={{ pointerEvents: 'none' }}>
                 {dims}
@@ -2073,7 +2135,7 @@ function SceneOverlay({
                   x2={wx0}
                   y2={lanesBottom}
                   className="stl-take-whisker hover"
-                  style={pair.from ? { stroke: DECK_COLORS[pair.from.deck] } : undefined}
+                  style={c0 || undefined}
                 />
                 <line
                   x1={wx1}
@@ -2081,7 +2143,7 @@ function SceneOverlay({
                   x2={wx1}
                   y2={lanesBottom}
                   className="stl-take-whisker hover"
-                  style={pair.to ? { stroke: DECK_COLORS[pair.to.deck] } : undefined}
+                  style={c1 || undefined}
                 />
               </g>
             );

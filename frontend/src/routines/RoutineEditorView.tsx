@@ -29,6 +29,7 @@ import {
   subscribeAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
+import { watchAuditionTakeover } from '../editor/auditionTakeover';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
 import { decodeWaveformBlob, type DecodedWaveform } from '../waveform/blob';
@@ -475,6 +476,27 @@ export default function RoutineEditorView() {
     };
   }, [player, mixer, auditionTogglePlay, cancelArm]);
 
+  // Deck-control takeover (gh#186), the pair editor's rule on four decks:
+  // a mixer gesture during audition stands the replay down — decks keep
+  // sounding, sounding values land in base, the borrow unwinds. Pitch
+  // checkpoint dropped (the user keeps the running decks).
+  useEffect(
+    () =>
+      watchAuditionTakeover({
+        mixer,
+        surface: 'routine-editor',
+        standDown: () => player.standDown(),
+        cancelArm,
+        takeToken: () => {
+          const token = automationTokenRef.current;
+          automationTokenRef.current = null;
+          pitchCheckpointRef.current = null;
+          return token;
+        },
+      }),
+    [player, mixer, cancelArm]
+  );
+
   // Space = play/pause; ⌘Z/⌘⇧Z = the draft's undo/redo (the undo story
   // the pair editor never grew) — while this view is visible.
   useEffect(() => {
@@ -542,7 +564,10 @@ export default function RoutineEditorView() {
     try {
       const d = await api.routines.retrim(detail.uuid, {
         trim_start_beats: trim.startBeat,
-        trim_end_beats: Math.max(0, detail.duration_beats - trim.endBeat),
+        // NEGATIVE widens (endBeat dragged past duration) — do not clamp
+        // (gh#190 item 8: the old Math.max(0, …) silently no-oped every
+        // outward end trim).
+        trim_end_beats: detail.duration_beats - trim.endBeat,
       });
       // Same uuid, rebased clock: reload the draft from the response
       // (the server shifted the edits layer with the trim).

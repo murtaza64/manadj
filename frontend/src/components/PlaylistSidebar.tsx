@@ -315,21 +315,7 @@ export default function PlaylistSidebar({
         All tracks
       </div>
 
-      {/* Unified create (gh#174): one button, kind picker popup — replaces
-          the per-section "+ New Playlist" / "+ New Set" buttons. */}
-      {/* (Section headers below carry their own top borders.) */}
-      <div style={{ padding: '8px' }}>
-        <button
-          className="pl-sidebar-new"
-          aria-haspopup="menu"
-          aria-expanded={createMenu !== null}
-          onClick={openCreateMenu}
-        >
-          + New…
-        </button>
-      </div>
-
-      {/* ONE fluid list: collapsible Tracks / Playlists / Sets sections. */}
+      {/* ONE fluid list: collapsible Tracks / Sets / Playlists sections. */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         <SidebarSectionHeader id="tracks" label="Tracks" />
         {!tracksCollapsed && (
@@ -377,6 +363,16 @@ export default function PlaylistSidebar({
             </div>
           </>
         )}
+
+        {/* Sets: sidebar siblings of Playlists, ordered above them (gh#189) */}
+        <SetsSidebarSection
+          selectedSetId={selectedView === 'set' ? selectedSetId : null}
+          onSelectSet={onSelectSet}
+          onSelectedSetDeleted={() => onSelectView('all')}
+          cursorKey={cursorKey}
+          creating={isCreatingSet}
+          onStopCreating={() => setIsCreatingSet(false)}
+        />
 
         <SidebarSectionHeader id="playlists" label="Playlists" />
         {!playlistsCollapsed && (
@@ -503,16 +499,20 @@ export default function PlaylistSidebar({
             )}
           </div>
         )}
+      </div>
 
-        {/* Sets: sidebar siblings of Playlists (sets 01) */}
-        <SetsSidebarSection
-          selectedSetId={selectedView === 'set' ? selectedSetId : null}
-          onSelectSet={onSelectSet}
-          onSelectedSetDeleted={() => onSelectView('all')}
-          cursorKey={cursorKey}
-          creating={isCreatingSet}
-          onStopCreating={() => setIsCreatingSet(false)}
-        />
+      {/* Unified create (gh#174): one button, kind picker popup — replaces
+          the per-section "+ New Playlist" / "+ New Set" buttons. Pinned to
+          the bottom of the sidebar (gh#189). */}
+      <div style={{ padding: '8px', borderTop: '1px solid var(--surface0)' }}>
+        <button
+          className="pl-sidebar-new"
+          aria-haspopup="menu"
+          aria-expanded={createMenu !== null}
+          onClick={openCreateMenu}
+        >
+          + New…
+        </button>
       </div>
 
       </div>
