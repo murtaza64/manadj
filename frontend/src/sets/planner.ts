@@ -35,6 +35,8 @@ import type { VectorizeInput } from '../capture/vectorize';
 import { vectorizeTake } from '../capture/vectorize';
 import type { Transition } from '../editor/mixModel';
 import {
+  aEndMixTime,
+  aTrackTimeAt,
   bContentSegments,
   bTrackTimeAt,
   laneValuesAt,
@@ -434,8 +436,16 @@ export function planSet(input: PlanInput): SetPlan {
       nextMixOffset = mixEndSec - bAtWindowEnd / rateIn;
     }
 
-    // Outgoing exits at the window end, clamped to its own end.
-    const exitSec = Math.min(windowEndLocal, facts.durationSec);
+    // Outgoing exits at the window end — SIMULATED THROUGH ITS JUMPS
+    // (issue 177): the exit instant on the authored (elapsed-play) axis is
+    // the window end or A's first track-end crossing on the jumped path,
+    // whichever is first; the exit TRACK position applies the passed jump
+    // deltas. Without jumpsA this is the old min(windowEnd, durA) pair.
+    const exitLocal = aEndMixTime(transition, facts.durationSec);
+    const exitSec = Math.min(
+      facts.durationSec,
+      Math.max(0, aTrackTimeAt(transition, exitLocal))
+    );
     entries.push({
       trackId,
       deck,
@@ -444,7 +454,7 @@ export function planSet(input: PlanInput): SetPlan {
       entrySec,
       exitSec,
       entryMixSec,
-      exitMixSec: toMix(exitSec),
+      exitMixSec: toMix(exitLocal),
     });
     adjacencies.push({
       kind,
@@ -705,6 +715,22 @@ function playingTrackTimeAt(
       pitchPercent: windowed.pitchIncomingPercent * (1 - tau / d),
     };
   }
+  // Inside the entry's own EXIT window the OUTGOING may Jump (issue 177):
+  // the solo anchor stays valid for the elapsed-play axis (mix time keeps
+  // advancing linearly at the entry's rate — the doctrine), and the deck's
+  // TRACK position adds the deltas of every passed outgoing jump. Before
+  // the window no jump has passed (window-scoped), so this is the plain
+  // solo anchor there too.
+  const exitAdj = adjacencies[idx];
+  if (exitAdj && isWindowed(exitAdj) && exitAdj.transition.jumpsA?.length) {
+    return {
+      trackTime: Math.max(
+        0,
+        aTrackTimeAt(exitAdj.transition, authoredLocalAt(exitAdj, mixTime))
+      ),
+      pitchPercent: (entry.rate - 1) * 100,
+    };
+  }
   return {
     trackTime: (mixTime - entry.mixOffsetSec) * entry.rate,
     pitchPercent: (entry.rate - 1) * 100,
@@ -812,8 +838,10 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
  * miss sub-tolerance jumps). */
 export function jumpCrossed(plan: SetPlan, t0: number, t1: number): boolean {
   for (const adj of plan.adjacencies) {
-    if (!isWindowed(adj) || !adj.transition.jumps) continue;
-    for (const j of adj.transition.jumps) {
+    if (!isWindowed(adj)) continue;
+    // Both roles' jumps (issue 177): incoming and outgoing instants live
+    // on the same authored axis; the Conductor hard-syncs both decks.
+    for (const j of [...(adj.transition.jumps ?? []), ...(adj.transition.jumpsA ?? [])]) {
       // Authored instant startSec + x·duration, mapped onto the mix axis.
       const tj = adj.mixStartSec + (j.x * adj.transition.durationSec) / adj.rateOutgoing;
       if (tj > t0 && tj <= t1) return true;

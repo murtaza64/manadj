@@ -591,19 +591,23 @@
   border-color: var(--text);
 }
 
-/* ── Jump events (transition-takes 01): incoming-track discontinuities.
-   Bright saturated cyan — distinct from the pink playhead/window edges
-   and the green cue guides. */
+/* ── Jump events (transition-takes 01; both roles since issue 177):
+   per-deck discontinuities. Bright saturated deck colors — distinct from
+   the pink playhead/window edges and the green cue guides. */
 .editor-jump {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 0;
-  /* The splice seam (transition-takes 06), scoped to ROW B — the deck
-     that jumps (Jump events are incoming-only) — in that deck's color. */
+  /* The splice seam (transition-takes 06), scoped to the row of the deck
+     that jumps, in that deck's color. */
   border-left: 2px solid var(--deck-b);
   cursor: grab;
   z-index: 60;
+}
+
+.editor-jump.a {
+  border-left-color: var(--deck-a);
 }
 
 /* Widen the grab target beyond the 2px line. */
@@ -633,6 +637,14 @@
   background: var(--deck-b);
   border-radius: 3px;
   user-select: none;
+}
+
+/* Row A mirrors the seam: A's baseline is the TOP edge (peaks grow down),
+   so its chips ride there. */
+.editor-jump.a .editor-jump-chip {
+  bottom: auto;
+  top: 1px;
+  background: var(--deck-a);
 }
 
 .editor-jump-popover {

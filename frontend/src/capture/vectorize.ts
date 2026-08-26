@@ -19,11 +19,17 @@
  *   breakpoints; untouched controls stay out of `lanes` entirely — except
  *   the incoming fader lane, always drawn: its model default (a 2s fade-in
  *   ramp) would lie about a deck that was already up.
- * - DISCRETE GESTURES PRESERVED (issue 04): incoming-deck beat jumps and
- *   hot-cue presses become Jump events; outgoing-deck ones are dropped
- *   (incoming-only, ADR 0020). Plain seeks are scrubbing — not gestures:
- *   a mid-window seek simply shifts the commit-point alignment, i.e. the
- *   final (post-seek) alignment wins, per the idealization rule.
+ * - DISCRETE GESTURES PRESERVED (issue 04, both decks since issue 177):
+ *   beat jumps and hot-cue presses become Jump events — incoming-deck ones
+ *   on `jumps`, outgoing-deck ones on `jumpsA` (the doctrine's pre-planned
+ *   relaxation: mix time ≡ the outgoing's elapsed play). Jumps are
+ *   window-scoped; an ESSENTIAL pre-window outgoing jump — a backward
+ *   jump/loop whose replayed stretch is still in progress when the
+ *   incoming enters — WIDENS the window to contain it (pre-window jumps
+ *   are never admitted; inessential ones are absorbed by the anchors).
+ *   Plain seeks are scrubbing — not gestures: a mid-window seek simply
+ *   shifts the commit-point alignment, i.e. the final (post-seek)
+ *   alignment wins, per the idealization rule.
  *
  * The editor's deck roles are track-based: editor A = the outgoing deck,
  * whichever physical channel it was on.
@@ -92,8 +98,7 @@ export function vectorizeTake(
   if (!init || init.kind !== 'init') return null;
   const out = init.outgoingChannel;
   const inc = OTHER[out];
-  const { windowStartS, windowEndS } = input;
-  const windowLen = Math.max(0, windowEndS - windowStartS);
+  const { windowEndS } = input;
 
   // LOST BASELINE REPAIR (sets 166): slices captured before the recorder
   // seeded pitch explicitly (the sessions-18 fix) carry a false zero
@@ -105,7 +110,7 @@ export function vectorizeTake(
   // values (bit-identical output).
   const baseline: Partial<Record<CaptureChannel, number>> = {};
   for (const ch of Object.keys(init.decks) as CaptureChannel[]) {
-    const measured = measuredPitchBaseline(input.events, ch, windowStartS, windowEndS);
+    const measured = measuredPitchBaseline(input.events, ch, input.windowStartS, windowEndS);
     if (
       measured !== null &&
       Math.abs(measured - init.decks[ch].pitch) > BASELINE_REPAIR_TOLERANCE_PERCENT
@@ -142,7 +147,32 @@ export function vectorizeTake(
     return ref.pos + (t - ref.t) * rateAt(ch, ref.t);
   };
 
-  const startSec = playheadAt(out, windowStartS);
+  // WINDOW WIDENING (issue 177): an essential pre-window outgoing jump —
+  // a backward jump or loop whose replayed stretch is still in progress
+  // at the window start (the double's setup: jump back, then bring the
+  // incoming in over the repeated material) — widens the window to
+  // contain it, landing the jump at x=0. Iterated to a fixpoint: an even
+  // earlier jump may be essential relative to the widened start.
+  // Inessential pre-window jumps (forward, or replay already completed)
+  // are absorbed by the track-time anchors and never admitted.
+  let windowStartS = input.windowStartS;
+  for (let pass = 0; pass < 8; pass++) {
+    const t = essentialPreWindowJumpInstant(input.events, out, windowStartS, rateAt);
+    if (t === null || t >= windowStartS) break;
+    windowStartS = t;
+  }
+  const widened = windowStartS < input.windowStartS;
+  const win: VectorizeInput = { events: input.events, windowStartS, windowEndS };
+  const windowLen = Math.max(0, windowEndS - windowStartS);
+
+  // A widened start IS a jump instant: the anchor must be the PRE-jump
+  // position (the model applies the delta AT the instant), so extrapolate
+  // from the latest sample strictly before it. Unwidened keeps the exact
+  // legacy read (samples at the boundary included).
+  const startSec = widened
+    ? (playheadStrictlyBefore(input.events, out, windowStartS, rateAt) ??
+      playheadAt(out, windowStartS))
+    : playheadAt(out, windowStartS);
   const durationSec = windowLen * rateAt(out, windowStartS);
 
   // Static tempo-match from the settled incoming pitch (idealization),
@@ -190,28 +220,32 @@ export function vectorizeTake(
     (Math.abs(measuredPct - required) / 100) * durationSec <= 2 * driftBoundS;
   const tempoMatch = settledMatch || measuredMatch;
 
-  // DISCRETE GESTURES → JUMP EVENTS (issue 04, ADR 0020's line): beat
-  // jumps and hot-cue presses on the INCOMING deck are intentional
-  // structure, preserved; the outgoing deck's are dropped at vectorization
-  // (incoming-only — the raw slice keeps them for a later both-decks
-  // extension). Each delta measures the landing against the pre-jump
-  // path — extrapolated from the latest sample strictly before the
-  // gesture, so chained jumps compose correctly. Plain seeks are
-  // scrubbing, not gestures.
-  const jumps: JumpEvent[] = [];
-  if (windowLen > 0) {
+  // DISCRETE GESTURES → JUMP EVENTS (issue 04, ADR 0020's line; both
+  // decks since issue 177): beat jumps and hot-cue presses are intentional
+  // structure, preserved — incoming-deck ones as `jumps`, outgoing-deck
+  // ones as `jumpsA` (window-scoped; essential pre-window ones already
+  // pulled in by the widening above). Each delta measures the landing
+  // against the pre-jump path — extrapolated from the latest sample
+  // strictly before the gesture, so chained jumps compose correctly.
+  // Plain seeks are scrubbing, not gestures.
+  const jumpsFor = (ch: CaptureChannel): JumpEvent[] => {
+    const js: JumpEvent[] = [];
+    if (windowLen <= 0) return js;
     for (const e of input.events) {
-      if (e.kind !== 'transport' || e.channel !== inc) continue;
+      if (e.kind !== 'transport' || e.channel !== ch) continue;
       if (e.action !== 'jumpBeats' && e.action !== 'hotCue') continue;
       if (e.t < windowStartS || e.t > windowEndS) continue;
-      const pre = playheadStrictlyBefore(input.events, inc, e.t, rateAt);
+      const pre = playheadStrictlyBefore(input.events, ch, e.t, rateAt);
       if (pre === null) continue;
       const deltaSec = e.playhead - pre;
       if (Math.abs(deltaSec) < MIN_JUMP_SEC) continue;
-      jumps.push({ x: (e.t - windowStartS) / windowLen, deltaSec });
+      js.push({ x: (e.t - windowStartS) / windowLen, deltaSec });
     }
-    jumps.push(...loopJumps(input, inc, rateAt));
-  }
+    js.push(...loopJumps(win, ch, rateAt));
+    return js;
+  };
+  const jumps = jumpsFor(inc);
+  const jumpsA = jumpsFor(out);
   // Repeats each apply their delta (the model expands them back).
   const jumpTotal = jumps.reduce((sum, j) => sum + j.deltaSec * jumpRepeatCount(j), 0);
 
@@ -244,8 +278,9 @@ export function vectorizeTake(
       durationSec,
       bInSec,
       tempoMatch,
-      lanes: windowLen > 0 ? buildLanes(input, init, out) : {},
+      lanes: windowLen > 0 ? buildLanes(win, init, out) : {},
       ...(jumps.length > 0 ? { jumps } : {}),
+      ...(jumpsA.length > 0 ? { jumpsA } : {}),
     },
   };
 }
@@ -311,18 +346,18 @@ function medianOf(xs: number[]): number {
 
 /**
  * LOOP ENGAGEMENTS → REPEATED JUMP EVENTS (looping 06, extending ADR
- * 0020's discrete-gesture rule): a held loop on the incoming deck
+ * 0020's discrete-gesture rule; both decks since issue 177): a held loop
  * collapses to ONE backward Jump — displacement = the loop length, count
  * = the number of wraps — rather than k separate jumps. Wraps are pure
  * derivation (region + engage playhead + rate), never guessed from the
  * coarse ticks: the deck crosses the end edge every `len` track-seconds
  * once it reaches it. Each loop event (engage/resize/translate/release)
  * closes the previous segment; a loop still open at the window end counts
- * wraps up to the end. Outgoing-deck loops are dropped (incoming-only).
+ * wraps up to the end.
  */
 function loopJumps(
   input: VectorizeInput,
-  inc: CaptureChannel,
+  ch: CaptureChannel,
   rateAt: (ch: CaptureChannel, t: number) => number
 ): JumpEvent[] {
   const { windowStartS, windowEndS } = input;
@@ -336,7 +371,7 @@ function loopJumps(
     open = null;
     const len = end - start;
     if (len <= 0 || tEnd <= t0) return;
-    const rate = rateAt(inc, t0);
+    const rate = rateAt(ch, t0);
     const clampedEnd = Math.min(tEnd, windowEndS);
     const unwrapped = p0 + (clampedEnd - t0) * rate;
     const count = Math.floor((unwrapped - end) / len) + 1;
@@ -348,7 +383,7 @@ function loopJumps(
   };
 
   for (const e of input.events) {
-    if (e.kind !== 'loop' || e.channel !== inc || e.t > windowEndS) continue;
+    if (e.kind !== 'loop' || e.channel !== ch || e.t > windowEndS) continue;
     close(e.t);
     if (e.region) {
       open = { t: e.t, playhead: e.playhead, start: e.region.start, end: e.region.end };
@@ -356,6 +391,56 @@ function loopJumps(
   }
   close(windowEndS);
   return out;
+}
+
+/**
+ * The earliest ESSENTIAL outgoing jump instant strictly before the window
+ * start, or null (issue 177's widening rule). Essential = the replayed
+ * material is still in progress when the incoming enters:
+ * - a discrete BACKWARD jump (beat jump / hot cue) whose replay hasn't
+ *   re-reached the pre-jump position by `startS` (measured on the actual
+ *   sampled path, so later gestures are respected);
+ * - a loop engagement still open at `startS` whose first wrap precedes it
+ *   (the wraps continue into the window; the collapsed repeated Jump must
+ *   sit inside it).
+ * Forward jumps and completed replays are inessential — the track-time
+ * anchors absorb them.
+ */
+function essentialPreWindowJumpInstant(
+  events: CaptureEvent[],
+  ch: CaptureChannel,
+  startS: number,
+  rateAt: (ch: CaptureChannel, t: number) => number
+): number | null {
+  const candidates: number[] = [];
+
+  const atStart = playheadStrictlyBefore(events, ch, startS, rateAt);
+  if (atStart !== null) {
+    for (const e of events) {
+      if (e.kind !== 'transport' || e.channel !== ch || e.t >= startS) continue;
+      if (e.action !== 'jumpBeats' && e.action !== 'hotCue') continue;
+      const pre = playheadStrictlyBefore(events, ch, e.t, rateAt);
+      if (pre === null) continue;
+      const deltaSec = e.playhead - pre;
+      if (deltaSec > -MIN_JUMP_SEC) continue; // forward or jitter
+      if (atStart < pre) candidates.push(e.t); // replay still in progress
+    }
+  }
+
+  let open: { t: number; playhead: number; start: number; end: number } | null = null;
+  for (const e of events) {
+    if (e.kind !== 'loop' || e.channel !== ch || e.t >= startS) continue;
+    open = e.region
+      ? { t: e.t, playhead: e.playhead, start: e.region.start, end: e.region.end }
+      : null;
+  }
+  if (open && open.end - open.start > 0) {
+    const rate = rateAt(ch, open.t);
+    const tw = open.t + (open.end - open.playhead) / rate;
+    if (tw >= open.t && tw < startS) candidates.push(tw);
+  }
+
+  return candidates.length > 0 ? Math.min(...candidates) : null;
 }
 
 /** Playhead extrapolated from the latest sample STRICTLY before t (null

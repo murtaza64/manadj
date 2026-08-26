@@ -22,7 +22,7 @@
  * every instant, track, and Transition stays exactly as pinned.
  */
 import { DEFAULT_DETECTOR_PARAMS } from '../capture/events';
-import { bContentSegments, bTrackTimeAt } from '../editor/mixModel';
+import { aContentSegments, aTrackTimeAt, bContentSegments, bTrackTimeAt } from '../editor/mixModel';
 import { audibleHolder, type AudibleSurfaceId } from '../playback/audibleSurface';
 import { channelFaderToGain, crossfaderGains, trimToGain } from '../playback/mixerMath';
 import type { PlanAutomation, PlannedAdjacency, PlannedEntry, SetPlan } from './planner';
@@ -237,8 +237,26 @@ export function mixTimeForTrackTime(plan: SetPlan, idx: number, tau: number): nu
       }
     }
   }
-  // Solo anchor (also the outgoing's regime inside its EXIT window — the
-  // authored axis is its own track time at its solo rate).
+  // The outgoing's regime inside its EXIT window with outgoing jumps
+  // (issue 177): invert per audible segment of A's jumped walk — replayed
+  // content maps to its FIRST landing, like B's entry-window inversion.
+  const exitAdj = plan.adjacencies[idx];
+  if (isWindowed(exitAdj) && exitAdj.transition.jumpsA?.length) {
+    for (const seg of aContentSegments(exitAdj.transition, Number.POSITIVE_INFINITY)) {
+      const authored = seg.mixStartSec + (tau - seg.bStartSec);
+      if (authored < seg.mixStartSec - SPAN_EPS || authored >= seg.mixEndSec) continue;
+      const t = mixFromAuthored(exitAdj, authored);
+      const soloFrom = isWindowed(entryAdj) ? entryAdj.tempoReturnEndSec : entry.entryMixSec;
+      if (t < soloFrom - SPAN_EPS) continue;
+      return clampSpan(t);
+    }
+    // tau isn't on the jumped path (e.g. skipped-over content): no clean map.
+    return null;
+  }
+
+  // Solo anchor (also the outgoing's regime inside its EXIT window when
+  // the outgoing has no jumps — the authored axis is its own track time
+  // at its solo rate).
   const t = entry.mixOffsetSec + tau / entry.rate;
   const soloFrom = isWindowed(entryAdj) ? entryAdj.tempoReturnEndSec : entry.entryMixSec;
   if (t < soloFrom - SPAN_EPS) return null;
@@ -391,7 +409,12 @@ function twoDeckPickup(
     const offDeck = dom === inDeck ? outDeck : inDeck;
     const expected =
       offDeck === outDeck
-        ? (t - outEntry.mixOffsetSec) * outEntry.rate
+        ? // Through the outgoing's jumps (issue 177): identity when
+          // jumpsA is empty — the old (t − mixOffset)·rate.
+          aTrackTimeAt(
+            adj.transition,
+            adj.transition.startSec + (t - adj.mixStartSec) * adj.rateOutgoing
+          )
         : bTrackTimeAt(
             adj.transition,
             adj.transition.startSec + (t - adj.mixStartSec) * adj.rateOutgoing,

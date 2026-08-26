@@ -241,11 +241,14 @@ describe('discrete gestures become Jump events (issue 04)', () => {
     expect(tr.jumps).toEqual([{ x: 0.5, deltaSec: expect.closeTo(46) }]);
   });
 
-  it('outgoing-deck jumps are dropped (incoming-only, ADR 0020) but stay in the slice', () => {
+  it('outgoing-deck jumps become jumpsA (issue 177) with anchors untouched', () => {
+    // A rolling from 60; at mix 110 (x 0.5) expected 70, landed 40.
     const input = baseInput([transport(110, 'A', 'jumpBeats', 40, -32)]);
     const draft = vectorizeTake(input, facts)!;
+    expect(draft.transition.jumpsA).toEqual([{ x: 0.5, deltaSec: expect.closeTo(-30) }]);
     expect(draft.transition.jumps).toBeUndefined();
-    expect(draft.transition.startSec).toBeCloseTo(60); // anchor unaffected
+    expect(draft.transition.startSec).toBeCloseTo(60); // track-time anchor unaffected
+    expect(draft.transition.durationSec).toBeCloseTo(20); // elapsed-play width unaffected
   });
 
   it('chained jumps compute each delta against the post-previous-jump path', () => {
@@ -332,12 +335,20 @@ describe('loop engagements collapse to repeated Jump events (looping 06)', () =>
     expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
   });
 
-  it('outgoing-deck loops are dropped (incoming-only, ADR 0020)', () => {
+  it('outgoing-deck loops collapse to a repeated Jump on jumpsA (issue 177)', () => {
+    // A rolling from 60; loop [65, 67) engaged at 105 (playhead 65),
+    // released at 115 — unwrapped 75, so 5 wraps of 2s.
     const input = baseInput([
       loop(105, 'A', 65, { start: 65, end: 67 }),
       loop(115, 'A', 66, null),
     ]);
-    expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toBeUndefined();
+    expect(tr.jumpsA).toHaveLength(1);
+    const j = tr.jumpsA![0];
+    expect(j.x).toBeCloseTo(0.35); // first wrap at t 107
+    expect(j.deltaSec).toBeCloseTo(-2);
+    expect(j.count).toBe(5);
   });
 
   it('loop wraps and ordinary jumps coexist in the same Take', () => {
@@ -694,5 +705,106 @@ describe('assignment-aware fader lanes (4dp 39)', () => {
     // faderA never moved: no lane emitted for it at all (untouched + at
     // its resting default).
     expect(draft.transition.lanes.faderA).toBeUndefined();
+  });
+});
+
+describe('window widening for essential pre-window outgoing jumps (issue 177)', () => {
+  const transport = (
+    t: number,
+    channel: CaptureChannel,
+    action: 'jumpBeats' | 'hotCue',
+    playhead: number
+  ): CaptureEvent => ({ t, kind: 'transport', channel, action, playhead });
+
+  const loop = (
+    t: number,
+    channel: CaptureChannel,
+    playhead: number,
+    region: { start: number; end: number } | null
+  ): CaptureEvent => ({ t, kind: 'loop', channel, playhead, region });
+
+  it('a backward outgoing jump mid-replay at the window start widens the window to contain it', () => {
+    // A jumps 55 → 25 at t95 (Δ −30); its replay is still in progress
+    // when the window opens at 100 → the window widens to 95 and the
+    // jump lands at x = 0 with the PRE-jump track-time anchor.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        transport(95, 'A', 'jumpBeats', 25),
+        tick(100, { A: 30, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(55); // pre-jump anchor at the widened start
+    expect(tr.durationSec).toBeCloseTo(25); // 95..120 in outgoing seconds
+    expect(tr.jumpsA).toEqual([{ x: expect.closeTo(0), deltaSec: expect.closeTo(-30) }]);
+    // B's entry alignment re-reads at the widened start: 8 at t100 → 3 at t95.
+    expect(tr.bInSec).toBeCloseTo(3);
+  });
+
+  it('a completed pre-window replay is inessential — absorbed by the anchor, never admitted', () => {
+    // A jumps 52 → 49 at t92 (Δ −3); the 3s replay completes by t95,
+    // well before the window opens → no widening, no jumpsA.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        transport(92, 'A', 'jumpBeats', 49),
+        tick(100, { A: 57, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(57); // post-jump path, absorbed
+    expect(tr.durationSec).toBeCloseTo(20);
+    expect(tr.jumpsA).toBeUndefined();
+  });
+
+  it('an outgoing loop straddling the window start widens to its first wrap', () => {
+    // Loop [56, 58) engaged at t96 (playhead 56): first wrap at t98,
+    // still open at the window start (100), released at t108 — 6 wraps.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        loop(96, 'A', 56, { start: 56, end: 58 }),
+        tick(100, { B: 8 }),
+        loop(108, 'A', 57, null),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(58); // the loop's end edge, about to wrap
+    expect(tr.durationSec).toBeCloseTo(22); // 98..120
+    expect(tr.jumpsA).toHaveLength(1);
+    const j = tr.jumpsA![0];
+    expect(j.x).toBeCloseTo(0);
+    expect(j.deltaSec).toBeCloseTo(-2);
+    expect(j.count).toBe(6);
+  });
+
+  it('pre-window INCOMING jumps never widen the window', () => {
+    // The incoming's pre-window jump is ordinary scrub history — its
+    // alignment is what the commit-point back-projection reads anyway.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50, B: 40 }),
+        transport(95, 'B', 'jumpBeats', 3),
+        tick(100, { A: 60, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(60);
+    expect(tr.durationSec).toBeCloseTo(20);
+    expect(tr.jumps).toBeUndefined();
+    expect(tr.jumpsA).toBeUndefined();
   });
 });

@@ -1066,3 +1066,112 @@ describe('BPM authority (bpm-authority bugfix, ADR 0016)', () => {
     expect(plan.entries[1].rate).toBeCloseTo(174 / 172, 5);
   });
 });
+
+// ── Outgoing Jump events (issue 177) ─────────────────────────────────────
+// Mix time ≡ the outgoing's elapsed play through the window; anchors stay
+// in track time. The plan simulates the outgoing THROUGH its jumps: deck
+// positions mid-window, the exit position, and the Conductor's crossing
+// detection all read the jumped path.
+
+describe('outgoing jumps (issue 177)', () => {
+  const twoTracks = (transition: Transition, dur1 = 90) =>
+    input({
+      entries: [
+        { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+        { trackId: 2, pin: null },
+      ],
+      tracks: { 1: facts(dur1), 2: facts(200) },
+      transitionsByUuid: { t1: transition },
+    });
+
+  it('simulates the exit position through jumps: exit track ≠ authored window end', () => {
+    // Window 60..80; −8 at x 0.5 (mix 70): the outgoing exits the full-
+    // width window at track 72, not 80 — downstream anchoring reads THIS.
+    const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: -8 }] })));
+    const [a, b] = plan.entries;
+    expect(a.exitSec).toBeCloseTo(72);
+    expect(a.exitMixSec).toBeCloseTo(80); // elapsed play runs the full width
+    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(80);
+    // The INCOMING's anchor is untouched by the outgoing's jumps.
+    expect(b.mixOffsetSec).toBeCloseTo(52);
+  });
+
+  it('a forward jump past the outgoing track end exits it at that instant', () => {
+    // durA 75; +10 at mix 70 lands at 80 ≥ 75 → the outgoing dies at mix
+    // 70, parked at its track end; the window keeps its authored footprint.
+    const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: 10 }] }), 75));
+    expect(plan.entries[0].exitMixSec).toBeCloseTo(70);
+    expect(plan.entries[0].exitSec).toBeCloseTo(75);
+    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(80);
+  });
+
+  it('planStateAt drives the outgoing deck through its jumps mid-window', () => {
+    const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: -8 }] })));
+    expect(planStateAt(plan, 69.9).decks.A.trackTime).toBeCloseTo(69.9);
+    expect(planStateAt(plan, 70).decks.A.trackTime).toBeCloseTo(62);
+    expect(planStateAt(plan, 75).decks.A.trackTime).toBeCloseTo(67);
+    // Parked at the SIMULATED exit after the window.
+    expect(planStateAt(plan, 85).decks.A.trackTime).toBeCloseTo(72);
+    expect(planStateAt(plan, 85).decks.A.playing).toBe(false);
+  });
+
+  it('jumpCrossed reports outgoing-jump instants like incoming ones', () => {
+    const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: -8 }] })));
+    expect(jumpCrossed(plan, 69.9, 70.1)).toBe(true);
+    expect(jumpCrossed(plan, 70.1, 70.3)).toBe(false);
+  });
+
+  it('context-independence: the same artifact replays identically wherever the pair enters the Set', () => {
+    // The same Transition (jumps on BOTH roles) pinned for pair 2→3 in
+    // two Sets: one opens on track 2; the other reaches track 2 via a
+    // hard cut out of track 1 (entering at its Hot Cue 1). Deck positions
+    // relative to the window start must be identical (issue 177
+    // regression: track-time anchors + elapsed-play window axis).
+    const transition = tr({
+      jumpsA: [{ x: 0.4, deltaSec: -6 }],
+      jumps: [{ x: 0.5, deltaSec: -8 }],
+    });
+    const short = planSet(
+      input({
+        entries: [
+          { trackId: 2, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 2: facts(90), 3: facts(200) },
+        transitionsByUuid: { t1: transition },
+      })
+    );
+    const long = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null }, // hard cut into track 2
+          { trackId: 2, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 1: facts(100), 2: facts(90, 15), 3: facts(200) },
+        transitionsByUuid: { t1: transition },
+      })
+    );
+    const wShort = short.adjacencies[0];
+    const wLong = long.adjacencies[1];
+    expect(wLong.mixStartSec).toBeGreaterThan(wShort.mixStartSec); // different contexts
+    const outShort = short.entries[0].deck;
+    const inShort = short.entries[1].deck;
+    const outLong = long.entries[1].deck;
+    const inLong = long.entries[2].deck;
+    for (const delta of [0, 5.5, 8.01, 12, 19.5]) {
+      const sState = planStateAt(short, wShort.mixStartSec + delta);
+      const lState = planStateAt(long, wLong.mixStartSec + delta);
+      expect(lState.decks[outLong].trackTime).toBeCloseTo(
+        sState.decks[outShort].trackTime,
+        6
+      );
+      expect(lState.decks[inLong].trackTime).toBeCloseTo(
+        sState.decks[inShort].trackTime,
+        6
+      );
+      expect(lState.lanes[outLong]).toEqual(sState.lanes[outShort]);
+      expect(lState.lanes[inLong]).toEqual(sState.lanes[inShort]);
+    }
+  });
+});
