@@ -1,7 +1,7 @@
 """routine-edits
 
-Revision ID: 0035_qyskqolt
-Revises: 0034_wqtstkrm
+Revision ID: 0036_qyskqolt
+Revises: 0035_tkxst
 Create Date: 2026-08-25
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '0035_qyskqolt'
-down_revision: Union[str, Sequence[str], None] = '0034_wqtstkrm'
+revision: str = '0036_qyskqolt'
+down_revision: Union[str, Sequence[str], None] = '0035_tkxst'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

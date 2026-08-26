@@ -573,13 +573,16 @@ export function drawStyledWave(
     dir: 'up' | 'down' | 'bipolar';
     range: [number, number];
     brightness?: number;
+    /** Per-column fader/EQ modulation (sets #171) — same contract the
+     * session timeline's drawStyledRuns threads through. */
+    modulate?: (x: number) => ColumnModulation;
   },
 ): void {
   const { width: w, height: h, dir } = opts;
   const [t0, t1] = opts.range;
   ctx.fillStyle = WAVE_BG_CSS;
   ctx.fillRect(0, 0, w, h);
-  const columns = computeStyledColumns(data, styleId, params, t0, t1, w, opts.brightness ?? 1);
+  const columns = computeStyledColumns(data, styleId, params, t0, t1, w, opts.brightness ?? 1, opts.modulate);
   for (let x = 0; x < w; x++) {
     const col = columns[x];
     if (col.outOfTrack) {

@@ -4,6 +4,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   EDITOR_PITCH_RANGE_PERCENT,
+  aContentSegments,
+  aEndMixTime,
+  aExitTrackTime,
+  aTrackTimeAt,
   arrangementAt,
   bContentSegments,
   bEndMixTime,
@@ -450,5 +454,119 @@ describe('tempoMatchPitch (editor varispeed)', () => {
   it('is 0 without both BPMs', () => {
     expect(tempoMatchPitch(null, 120)).toBe(0);
     expect(tempoMatchPitch(120, null)).toBe(0);
+  });
+});
+
+// ── Outgoing Jump events (issue 177) ─────────────────────────────────────
+// Mix time ≡ A's elapsed play through the window: A never slides, but may
+// Jump. Anchors stay in track time; the window runs its full mix width
+// even when jumps repeat material.
+
+describe('aTrackTimeAt with outgoing jumps', () => {
+  const t = (jumpsA: JumpEvent[]): Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'> => ({
+    startSec: 30,
+    durationSec: 20,
+    jumpsA,
+  });
+
+  it('is the identity without jumpsA (the old invariant)', () => {
+    expect(aTrackTimeAt({ startSec: 30, durationSec: 20 }, 47)).toBe(47);
+  });
+
+  it('applies the delta AT the instant', () => {
+    const tr = t([{ x: 0.5, deltaSec: -8 }]); // instant 40
+    expect(aTrackTimeAt(tr, 39.9)).toBeCloseTo(39.9);
+    expect(aTrackTimeAt(tr, 40)).toBeCloseTo(32);
+    expect(aTrackTimeAt(tr, 45)).toBeCloseTo(37);
+  });
+
+  it('expands repeated backward jumps at their own displacement period', () => {
+    // −4 at the window start, ×3: wraps at 30, 34, 38 (period = 4s — A
+    // plays native, mix time IS its elapsed play).
+    const tr = t([{ x: 0, deltaSec: -4, count: 3 }]);
+    expect(aTrackTimeAt(tr, 33)).toBeCloseTo(29);
+    expect(aTrackTimeAt(tr, 35)).toBeCloseTo(27);
+    expect(aTrackTimeAt(tr, 49)).toBeCloseTo(37);
+  });
+});
+
+describe('aContentSegments / aEndMixTime (jump-repeat rendering)', () => {
+  it('renders repeated material repeated: one strip per replay', () => {
+    // Loop [26, 30) ×3 from the window start (issue 177 regression:
+    // jump-repeat rendering).
+    const tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'> = {
+      startSec: 30,
+      durationSec: 20,
+      jumpsA: [{ x: 0, deltaSec: -4, count: 3 }],
+    };
+    const segs = aContentSegments(tr, 100);
+    expect(segs).toHaveLength(4);
+    expect(segs[0]).toEqual({ mixStartSec: 0, mixEndSec: 30, bStartSec: 0 });
+    expect(segs[1]).toEqual({ mixStartSec: 30, mixEndSec: 34, bStartSec: 26 });
+    expect(segs[2]).toEqual({ mixStartSec: 34, mixEndSec: 38, bStartSec: 26 });
+    expect(segs[3]).toEqual({ mixStartSec: 38, mixEndSec: 50, bStartSec: 26 });
+    // The window still runs its full mix width — the accepted asymmetry:
+    // 20s of mix, 8s net of outgoing audio span.
+    expect(aEndMixTime(tr, 100)).toBeCloseTo(50);
+    expect(aExitTrackTime(tr)).toBeCloseTo(38);
+  });
+
+  it('without jumpsA degenerates to one segment ending at min(window end, durA)', () => {
+    const tr = { startSec: 30, durationSec: 20 };
+    expect(aContentSegments(tr, 100)).toEqual([
+      { mixStartSec: 0, mixEndSec: 50, bStartSec: 0 },
+    ]);
+    expect(aEndMixTime(tr, 45)).toBeCloseTo(45);
+    expect(aEndMixTime(tr, 100)).toBeCloseTo(50);
+  });
+
+  it('a forward jump past the track end ends A at that instant', () => {
+    const tr = { startSec: 30, durationSec: 20, jumpsA: [{ x: 0.5, deltaSec: 10 }] };
+    // Instant 40: track 40 → 50 ≥ durA 45.
+    expect(aEndMixTime(tr, 45)).toBeCloseTo(40);
+    const segs = aContentSegments(tr, 45);
+    expect(segs).toHaveLength(1);
+    expect(segs[0].mixEndSec).toBeCloseTo(40);
+  });
+
+  it('a backward jump can extend A past its linear end (replay inside the window)', () => {
+    // durA 45 < window end 50: linearly A dies at 45, but a −8 at instant
+    // 40 rewinds to 32 — A now plays to the full window end.
+    const tr = { startSec: 30, durationSec: 20, jumpsA: [{ x: 0.5, deltaSec: -8 }] };
+    expect(aEndMixTime(tr, 45)).toBeCloseTo(50);
+    expect(aExitTrackTime(tr)).toBeCloseTo(42);
+  });
+});
+
+describe('arrangementAt with outgoing jumps', () => {
+  const durations = { a: 100, b: 200 };
+  const mixWith = (jumpsA: JumpEvent[]): EditorMix => ({
+    trackAId: 1,
+    trackBId: 2,
+    transition: {
+      startSec: 30,
+      durationSec: 20,
+      bInSec: 0,
+      tempoMatch: false,
+      lanes: {},
+      jumpsA,
+    },
+  });
+
+  it('aTrackTime applies passed deltas; aActive defers below-zero jumps', () => {
+    const m = mixWith([{ x: 0, deltaSec: -40 }]); // 30 → −10 at the window start
+    expect(arrangementAt(m, 29.9, durations, 1).aTrackTime).toBeCloseTo(29.9);
+    expect(arrangementAt(m, 30, durations, 1).aTrackTime).toBeCloseTo(-10);
+    expect(arrangementAt(m, 30, durations, 1).aActive).toBe(false); // silent below zero
+    expect(arrangementAt(m, 41, durations, 1).aActive).toBe(true);
+    expect(arrangementAt(m, 41, durations, 1).aTrackTime).toBeCloseTo(1);
+  });
+
+  it('keeps the no-jump arrangement bit-identical', () => {
+    const m = mixWith([]);
+    const arr = arrangementAt(m, 45, durations, 1);
+    expect(arr.aActive).toBe(true);
+    expect(arr.aTrackTime).toBe(45);
+    expect(arr.mixDuration).toBeCloseTo(230); // B (entering at 30) runs to its end
   });
 });

@@ -40,16 +40,21 @@ export const DEFAULT_LANE_IDS: LaneId[] = [
 export type Lanes = Partial<Record<LaneId, LanePoint[]>>;
 
 /** A Jump event (glossary; ADR 0020, transition-takes 01): a playback
- * discontinuity of the INCOMING track — at a mix instant, B's playhead
+ * discontinuity of one deck — at a mix instant, that deck's playhead
  * jumps by `deltaSec` of its own track time (negative = back, e.g.
- * doubling a buildup). Incoming-only: the Sketch origin invariant (A's
- * track time ≡ mix time) is untouched. The instant lives on the mix axis
- * as a normalized window position, like LanePoint.x; the array is
- * order-insensitive (indices stay stable across x drags). */
+ * doubling a buildup). Lives on either role (issue 177, 2026-08-26 —
+ * incoming-only before that): `Transition.jumps` is the incoming's array,
+ * `Transition.jumpsA` the outgoing's. Outgoing jumps restate the Sketch
+ * origin invariant as mix time ≡ A's ELAPSED PLAY through the window (A
+ * never slides, but may Jump; anchors stay in track time, so the artifact
+ * is context-free). The instant lives on the mix axis as a normalized
+ * window position, like LanePoint.x; the array is order-insensitive
+ * (indices stay stable across x drags). */
 export interface JumpEvent {
   /** 0..1 position within the transition window. */
   x: number;
-  /** Jump distance in B's OWN seconds (+ = forward, − = back/replay). */
+  /** Jump distance in the owning deck's OWN seconds (+ = forward, − =
+   * back/replay). */
   deltaSec: number;
   /**
    * Repeat count k ≥ 1 (looping 06); absent = 1. Only coherent on a
@@ -83,6 +88,13 @@ export interface Transition {
   lanes: Lanes;
   /** Jump events on the incoming track (absent/empty = none). */
   jumps?: JumpEvent[];
+  /** Jump events on the OUTGOING track (issue 177; absent/empty = none).
+   * Window-scoped like the incoming's (x ∈ [0,1]; pre-window jumps are
+   * never admitted — vectorization widens the window instead). Deltas are
+   * in A's OWN seconds. Mix time within the window is A's elapsed play:
+   * A runs the full window width even when jumps repeat material (window
+   * mix-duration ≠ outgoing-audio-span is the accepted asymmetry). */
+  jumpsA?: JumpEvent[];
   /** Lanes removed from the editor (any lane is removable, defaults too).
    * Hidden lanes keep their drawn envelope in `lanes` — re-adding restores
    * it — but read as their DEFAULT value during playback (an invisible
@@ -198,12 +210,16 @@ export function arrangementAt(
   mixDuration: number;
 } {
   const tr = mix.transition;
-  const aEnd = Math.min(tr.startSec + tr.durationSec, durations.a);
+  const aEnd = aEndMixTime(tr, durations.a);
+  const aTrackTime = aTrackTimeAt(tr, mixTime);
   const bTrackTime = bTrackTimeAt(tr, mixTime, rateB);
   const bEnd = bEndMixTime(tr, durations.b, rateB);
   return {
-    aActive: mixTime >= 0 && mixTime < aEnd,
-    aTrackTime: mixTime,
+    // aTrackTime ≥ 0 defers A past a below-zero outgoing jump, mirroring
+    // B's deferral; aEnd is jump-aware (first durA crossing on the jumped
+    // path, capped at the window end — issue 177).
+    aActive: mixTime >= 0 && aTrackTime >= 0 && mixTime < aEnd,
+    aTrackTime,
     // bTrackTime ≥ 0 defers B past a negative entry anchor's silent lead
     // gap (and past a mid-window jump below B's start): the deck stays
     // inactive until B's audio (re)starts. B's FIRST end is its end —
@@ -235,18 +251,60 @@ export function jumpInstantSec(
  * walks jumps walks THIS, so audition/segments/end-time replay repeats
  * faithfully.
  */
+function expandJumpList(
+  tr: Pick<Transition, 'startSec' | 'durationSec'>,
+  jumps: JumpEvent[] | undefined,
+  rate: number
+): { tj: number; deltaSec: number }[] {
+  const out: { tj: number; deltaSec: number }[] = [];
+  for (const j of jumps ?? []) {
+    const count = jumpRepeatCount(j);
+    const tj = jumpInstantSec(tr, j);
+    const period = rate > 0 ? -j.deltaSec / rate : 0;
+    for (let i = 0; i < count; i++) out.push({ tj: tj + i * period, deltaSec: j.deltaSec });
+  }
+  return out.sort((a, b) => a.tj - b.tj);
+}
+
 function expandedJumps(
   tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumps'>,
   rateB: number
 ): { tj: number; deltaSec: number }[] {
-  const out: { tj: number; deltaSec: number }[] = [];
-  for (const j of tr.jumps ?? []) {
-    const count = jumpRepeatCount(j);
-    const tj = jumpInstantSec(tr, j);
-    const period = rateB > 0 ? -j.deltaSec / rateB : 0;
-    for (let i = 0; i < count; i++) out.push({ tj: tj + i * period, deltaSec: j.deltaSec });
+  return expandJumpList(tr, tr.jumps, rateB);
+}
+
+/** The OUTGOING's jumps expanded onto the mix axis (issue 177). A plays
+ * native in the editor domain — mix time IS its elapsed play — so a
+ * backward jump's repeat period is exactly |deltaSec| mix-seconds. (Set
+ * playback maps this axis through the outgoing deck's rate.) */
+function expandedJumpsA(
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>
+): { tj: number; deltaSec: number }[] {
+  return expandJumpList(tr, tr.jumpsA, 1);
+}
+
+/** A's track-time under the playhead at mix-time t (issue 177): mix time
+ * is A's elapsed play — linear at native rate — plus the deltas of every
+ * (expanded) outgoing Jump whose instant has passed. Without jumpsA this
+ * is the identity (the old invariant, A's track time ≡ mix time). */
+export function aTrackTimeAt(
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>,
+  mixTime: number
+): number {
+  let t = mixTime;
+  for (const j of expandedJumpsA(tr)) {
+    if (mixTime >= j.tj) t += j.deltaSec;
   }
-  return out.sort((a, b) => a.tj - b.tj);
+  return t;
+}
+
+/** A's track-time when the window ends — the outgoing's exit position,
+ * simulated through its jumps (downstream anchors on the outgoing's
+ * timeline resolve against THIS, not the authored window end). */
+export function aExitTrackTime(
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>
+): number {
+  return aTrackTimeAt(tr, tr.startSec + tr.durationSec);
 }
 
 /** B's track-time under the playhead at mix-time t: linear in rateB, plus
@@ -276,31 +334,36 @@ export interface BContentSegment {
 }
 
 /**
- * THE piecewise walk (single source): linear spans between Jump events,
- * clipped to audible content — entry deferred while b < 0 (lead gaps and
- * below-zero jumps), exit at B's FIRST durB crossing (first end is the
- * end; a jump firing exactly at the crossing wins — bTrackTimeAt applies
- * deltas AT their instants). Returns the active segments and B's end on
- * the mix axis; `bContentSegments`/`bEndMixTime` are its two views.
+ * THE piecewise walk (single source, role-generic since issue 177):
+ * linear spans between Jump events, clipped to audible content — entry
+ * deferred while track time < 0 (lead gaps and below-zero jumps), exit at
+ * the FIRST `dur` crossing (first end is the end; a jump firing exactly
+ * at the crossing wins — deltas apply AT their instants) or at
+ * `capMixSec`, whichever is first. B's walk is uncapped (keep-last
+ * semantics past the window); A's caps at the window end (the transition
+ * over, the outgoing is out).
  */
-function walkB(
-  tr: Pick<Transition, 'startSec' | 'bInSec' | 'durationSec' | 'jumps'>,
-  durB: number,
-  rateB: number
+function walkDeck(
+  originMixSec: number,
+  originTrackSec: number,
+  rate: number,
+  jumps: { tj: number; deltaSec: number }[],
+  dur: number,
+  capMixSec = Infinity
 ): { segments: BContentSegment[]; endMixSec: number } {
-  const jumps = expandedJumps(tr, rateB);
   const segments: BContentSegment[] = [];
-  let t0 = tr.startSec;
-  let b0 = tr.bInSec;
+  let t0 = originMixSec;
+  let b0 = originTrackSec;
 
   /** Emit the active sub-span of the linear span [t0, spanEnd) and report
-   * where it ends ({done} when durB was crossed strictly inside it). */
+   * where it ends ({done} when dur was crossed strictly inside it). */
   const linear = (spanEnd: number): { end: number; done: boolean } => {
-    if (b0 >= durB) return { end: spanEnd, done: false }; // dead span (bInSec past the end)
-    const entry = b0 < 0 ? t0 + -b0 / rateB : t0;
-    const tHit = t0 + (durB - b0) / rateB;
-    const done = tHit < spanEnd;
-    const end = done ? tHit : spanEnd;
+    const capped = Math.min(spanEnd, capMixSec);
+    if (b0 >= dur) return { end: capped, done: false }; // dead span (origin past the end)
+    const entry = b0 < 0 ? t0 + -b0 / rate : t0;
+    const tHit = t0 + (dur - b0) / rate;
+    const done = tHit < capped;
+    const end = done ? tHit : capped;
     if (end > entry) {
       segments.push({ mixStartSec: entry, mixEndSec: end, bStartSec: Math.max(0, b0) });
     }
@@ -309,17 +372,56 @@ function walkB(
 
   for (const j of jumps) {
     const tj = j.tj;
+    if (tj >= capMixSec) break; // unreachable within the cap
     if (tj > t0) {
       const r = linear(tj);
       if (r.done) return { segments, endMixSec: r.end };
-      b0 += (tj - t0) * rateB;
+      b0 += (tj - t0) * rate;
       t0 = tj;
     }
     b0 += j.deltaSec;
-    if (b0 >= durB) return { segments, endMixSec: t0 };
+    if (b0 >= dur) return { segments, endMixSec: t0 };
   }
-  if (b0 >= durB) return { segments, endMixSec: t0 + (durB - b0) / rateB };
+  if (b0 >= dur) return { segments, endMixSec: Math.min(t0 + (dur - b0) / rate, capMixSec) };
   return { segments, endMixSec: linear(Infinity).end };
+}
+
+/** B's walk: from the window start at the entry anchor, uncapped. */
+function walkB(
+  tr: Pick<Transition, 'startSec' | 'bInSec' | 'durationSec' | 'jumps'>,
+  durB: number,
+  rateB: number
+): { segments: BContentSegment[]; endMixSec: number } {
+  return walkDeck(tr.startSec, tr.bInSec, rateB, expandedJumps(tr, rateB), durB);
+}
+
+/** A's walk (issue 177): from mix 0 at track 0 (Sketch origin), native
+ * rate, jumps window-scoped, capped at the window end. */
+function walkA(
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>,
+  durA: number
+): { segments: BContentSegment[]; endMixSec: number } {
+  return walkDeck(0, 0, 1, expandedJumpsA(tr), durA, tr.startSec + tr.durationSec);
+}
+
+/** A's audible content as mix-axis segments (issue 177): one linear span
+ * when jumpsA is empty; the DAW-splice views map through these exactly as
+ * B's do — repeated audio drawn repeated. */
+export function aContentSegments(
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>,
+  durA: number
+): BContentSegment[] {
+  return walkA(tr, durA).segments;
+}
+
+/** Mix-time when A's audio ends: the window end, or the FIRST instant its
+ * jumped track time reaches durA if that comes sooner. Without jumpsA
+ * this is the old `min(startSec + durationSec, durA)`. */
+export function aEndMixTime(
+  tr: Pick<Transition, 'startSec' | 'durationSec' | 'jumpsA'>,
+  durA: number
+): number {
+  return walkA(tr, durA).endMixSec;
 }
 
 /** B's audible content as mix-axis segments (transition-takes 06). */
@@ -375,9 +477,10 @@ export function slideBToCue(
   return slideB(tr, cueSec - bTrackTimeAt(tr, playheadMix, rateB), locked, rateB);
 }
 
-// Deck A has no slide math: A is pinned to the sketch origin and its track
-// time ≡ mix time, so A-side "slides" would only mirror B's (the PRD
-// equivalences). Decided 2026-07-03: deck A's editor controls are plain
+// Deck A has no slide math: A is pinned to the sketch origin — mix time ≡
+// A's elapsed play (track time when jumpsA is empty) — so A-side "slides"
+// would only mirror B's (the PRD equivalences). A never slides, but may
+// Jump (issue 177). Decided 2026-07-03: deck A's editor controls are plain
 // TRANSPORT instead — hot cue / beat jump move the playhead (player.seek).
 
 /**

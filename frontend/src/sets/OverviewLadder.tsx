@@ -38,6 +38,7 @@ import { HOT_CUE_CSS_COLORS } from '../hotcues/palette';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
 import { drawStyledWave, MINIMAP_BRIGHTNESS } from './ladderWaveStyle';
+import { planColumnModulator } from './ladderPlanModulation';
 import {
   planStateAt,
   type PlanDeck,
@@ -444,6 +445,7 @@ export const OverviewLadder = memo(function OverviewLadder({
               key={`${entry.trackId}-${i}`}
               entry={entry}
               segments={contentSegments[i] ?? EMPTY_SEGMENTS}
+              plan={plan}
               top={laneTop[entry.deck]}
               position={i + 1}
               track={tracks.get(entry.trackId)}
@@ -961,6 +963,7 @@ const EMPTY_SEGMENTS: ClipContentSegment[] = [];
 const LadderClip = memo(function LadderClip({
   entry,
   segments,
+  plan,
   top,
   position,
   track,
@@ -972,6 +975,10 @@ const LadderClip = memo(function LadderClip({
   /** Audible content runs (#161): each renders its own wave slice —
    * jumps splice, loops repeat, leads/pauses show the clip's dark bg. */
   segments: ClipContentSegment[];
+  /** Whole plan, for the clip's fader/EQ waveform modulation (sets #171)
+   * — a stable slice: replans swap the object, so the memo still holds
+   * between replans. */
+  plan: SetPlan;
   /** The entry deck's lane top (physical order, four-deck aware). */
   top: number;
   /** 1-based position in the set — matches the track list's numbering. */
@@ -1030,6 +1037,9 @@ const LadderClip = memo(function LadderClip({
               cues={cues}
               dir={up ? 'up' : 'down'}
               redrawKey={redrawKey}
+              plan={plan}
+              deck={entry.deck}
+              mixRange={[seg.mixStart, seg.mixEnd]}
             />
           </div>
         ))}
@@ -1092,6 +1102,9 @@ function LadderWave({
   cues,
   dir,
   redrawKey,
+  plan,
+  deck,
+  mixRange,
 }: {
   /** The blob is fetched HERE, not passed down (issue 43): a decoded
    * waveform in props is deep-walked — typed arrays and all — by React's
@@ -1104,6 +1117,14 @@ function LadderWave({
   cues: { t: number; color: string }[];
   dir: 'up' | 'down';
   redrawKey: number;
+  /** Plan + deck + mix-time span drive per-column fader/EQ modulation
+   * (sets #171): the columns dim/shrink with the planned fader and drop
+   * band colors on EQ kills — session-timeline parity, evaluated from
+   * planStateAt so the clip shows what the Conductor will do. */
+  plan: SetPlan;
+  deck: PlanDeck;
+  /** Mix-time span this clip occupies ([entryMixSec, exitMixSec]). */
+  mixRange: [number, number];
 }) {
   const { data } = useWaveformBlob(trackId);
   const wave: DecodedWaveform | null = data ?? null;
@@ -1149,10 +1170,11 @@ function LadderWave({
         dir: 'bipolar',
         range,
         brightness: MINIMAP_BRIGHTNESS,
+        modulate: planColumnModulator(plan, deck, mixRange, wDraw),
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wave, height, dir, range[0], range[1], redrawKey, slot]);
+  }, [wave, height, dir, range[0], range[1], redrawKey, slot, plan, deck, mixRange[0], mixRange[1]]);
 
   return (
     <div style={{ position: 'relative', height, flex: 'none' }}>

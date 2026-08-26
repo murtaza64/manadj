@@ -26,7 +26,7 @@
  *   gates its feed — ONE rule, `surfaceDisplaced` (ADR 0022/0033).
  */
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
-import { deckMasterGain, isDeckAudible } from './audibility';
+import { deckMasterGain, isDeckAudible, isDeckSounding } from './audibility';
 import { DEFAULT_DETECTOR_PARAMS } from './events';
 import type { CaptureDeck, CaptureEvent, DetectorParams } from './events';
 
@@ -205,6 +205,13 @@ export function tenureHeld(s: AudibilityState): boolean {
  * suspend as a whole under tenure, and the exit re-seed needs reality. */
 export function deckAudible(s: AudibilityState, ch: CaptureDeck): boolean {
   return isDeckAudible(s.decks[ch], mixerInputs(s), s.params);
+}
+
+/** Raw mixer "sounding" of one deck — audibility with a zero gain
+ * threshold (any Master-bus signal at all; audibility.ts). The detector's
+ * entry-onset backdating clock (#178) reads this. */
+export function deckSounding(s: AudibilityState, ch: CaptureDeck): boolean {
+  return isDeckSounding(s.decks[ch], mixerInputs(s), s.params);
 }
 
 /** Master-audible under the shared surface: a machine tenure displaces the

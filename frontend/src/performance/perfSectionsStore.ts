@@ -10,6 +10,8 @@
  * tearing down engines — audio/transport lives in DeckProvider above the
  * view switch and is untouched.
  */
+import { writeSetting } from '../settings/persistedSettings';
+
 export type PerfSection = 'waveforms' | 'decks';
 
 const STORAGE_KEY = 'manadj-perf-sections';
@@ -36,11 +38,8 @@ function load(): Shown {
 }
 
 function save(shown: Shown): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(shown));
-  } catch {
-    // persistence is best-effort; the session keeps its setting
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify(shown));
 }
 
 let shown = load();

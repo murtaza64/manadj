@@ -10,7 +10,15 @@ import { useEffect, useRef } from 'react';
 import { useViewActive } from '../contexts/viewActive';
 import { DECK_COLORS, hexToRgbTriplet } from '../theme/deckColors';
 import { cueCssColor } from '../hotcues/palette';
-import { bContentSegments, bEndMixTime, bTrackTimeAt, laneValuesAt } from './mixModel';
+import {
+  aContentSegments,
+  aEndMixTime,
+  aTrackTimeAt,
+  bContentSegments,
+  bEndMixTime,
+  bTrackTimeAt,
+  laneValuesAt,
+} from './mixModel';
 import { MixPlayer } from './MixPlayer';
 import type { EditorMix } from './mixModel';
 import type { ThreeBandWaveform } from '../waveform/blob';
@@ -88,7 +96,9 @@ export function GlobalMinimap({
       const tr = mix.transition;
       const durA = waveA?.duration ?? 0;
       const durB = waveB?.duration ?? 0;
-      const aEnd = durA > 0 ? Math.min(tr.startSec + tr.durationSec, durA) : 0;
+      // Jump-aware A end (issue 177): first durA crossing on the jumped
+      // path, capped at the window end.
+      const aEnd = durA > 0 ? aEndMixTime(tr, durA) : 0;
       const eqScale = (v: number) => Math.min(v * 2, 1.15);
       const bands = [
         { key: 'low' as const, color: '242,97,97' },
@@ -102,8 +112,9 @@ export function GlobalMinimap({
       for (let x = 0; x < w; x++) {
         const t = (x / w) * contentEnd;
         const v = laneValuesAt(tr, t);
+        const aTrack = aTrackTimeAt(tr, t);
         const bTrack = bTrackTimeAt(tr, t, rateB);
-        const aOn = durA > 0 && t >= 0 && t < aEnd;
+        const aOn = durA > 0 && t >= 0 && aTrack >= 0 && aTrack < durA && t < aEnd;
         const bOn = durB > 0 && t >= tr.startSec && bTrack >= 0 && bTrack < durB && t < bEnd;
 
         const drawCol = (
@@ -125,7 +136,9 @@ export function GlobalMinimap({
         // A hangs from the top edge, B rises from the bottom; through the
         // transition the two interleave in the same space.
         if (aOn && waveA) {
-          drawCol(waveA, t, v.faderA, { low: v.eqLowA, mid: v.eqMidA, high: v.eqHighA }, 'down');
+          // aTrack, not t: the per-column loop renders A's splice
+          // discontinuities for free (issue 177), exactly like B's.
+          drawCol(waveA, aTrack, v.faderA, { low: v.eqLowA, mid: v.eqMidA, high: v.eqHighA }, 'down');
         }
         if (bOn && waveB) {
           drawCol(waveB, bTrack, v.faderB, { low: v.eqLowB, mid: v.eqMidB, high: v.eqHighB }, 'up');
@@ -148,13 +161,27 @@ export function GlobalMinimap({
         ctx.fillRect(x - 1, 0, 2, h);
         ctx.fillRect(x + 1, edge === 'top' ? 0 : h - 5, 5, 5);
       };
+      // A cues map through A's spliced segments (issue 177) plus the
+      // silent tail after the window — a cue in replayed content marks
+      // every landing. Without jumpsA this degenerates to the legacy
+      // track-position flags.
+      const aExitTrack =
+        durA > 0 ? Math.min(durA, Math.max(0, aTrackTimeAt(tr, aEnd))) : 0;
+      const aCueSegs =
+        durA > 0
+          ? [
+              ...aContentSegments(tr, durA),
+              ...(durA > aExitTrack
+                ? [{ mixStartSec: aEnd, mixEndSec: aEnd + (durA - aExitTrack), bStartSec: aExitTrack }]
+                : []),
+            ]
+          : [];
       for (const c of hotCuesA) {
-        if (c.time_seconds >= 0 && c.time_seconds <= contentEnd) {
-          cueFlag(
-            (c.time_seconds / contentEnd) * w,
-            'top',
-            cueCssColor(c.slot_number, c.color)
-          );
+        for (const g of aCueSegs) {
+          if (c.time_seconds < g.bStartSec) continue;
+          const mixT = g.mixStartSec + (c.time_seconds - g.bStartSec);
+          if (mixT >= g.mixEndSec || mixT < 0 || mixT > contentEnd) continue;
+          cueFlag((mixT / contentEnd) * w, 'top', cueCssColor(c.slot_number, c.color));
         }
       }
       // B cues map through the spliced segments (transition-takes 06) —

@@ -41,24 +41,6 @@
   background: var(--surface1);
 }
 
-.sets-sidebar-new {
-  width: 100%;
-  padding: 6px;
-  background: transparent;
-  border: 1px solid var(--surface1);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.sets-sidebar-new:hover {
-  background: var(--surface0);
-  border-color: var(--text);
-}
-
-.sets-sidebar-new:active {
-  background: var(--surface1);
-}
-
 /* Sidebar walk cursor (four-deck-performance 24). */
 .sets-sidebar-row.cursor {
   outline: 1px solid var(--blue);

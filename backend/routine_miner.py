@@ -17,18 +17,39 @@ The pipeline, per Session, over the concatenated `session_chunks` events:
    deck saw backward transport motion during the gap (re-seeking to replay
    a junction) or the return is a pair-isolated alternation (fader-drill
    reps). See CONTEXT.md "Practice rep": a read-time verdict with tunable
-   thresholds; the log itself stays impartial.
+   thresholds; the log itself stays impartial. Doubles inherit the verdict
+   by overlap: a dual-dominance dwell overlapping a practice-flagged
+   return of either member is a drill rep, not choreography (gh#181).
+2b. **Doubles** (gh#181) — sustained dual-dominance dwells: exactly two
+   distinct tracks with channel faders above DOMINANT_FADER together for
+   ≥ DOUBLE_MIN_S, past blend shape into dwell (the overlap IS the
+   content). A stretch where either deck rides a clean falling ramp
+   (net fall ≥ BLEND_NET_FALL with ≤ BLEND_MAX_REVERSALS direction
+   changes) is a crossfade in progress, not a dwell — dropped. Transport
+   jumps during the dwell strengthen the read but aren't required.
 3. **Sectioning** — complexity events (performance/practice returns,
-   3-track-concurrency stretches, self-doubles) clustered in time, plus
-   the audibility intervals around them.
+   doubles, 3-track-concurrency stretches, self-doubles) clustered in
+   time, plus the audibility intervals around them.
 4. **Candidate carving** — seeds are performance returns; clusters split
    at boundary solo moments (concurrency ≤ 1 for ≥ 8s — but a seed's own
    away-gap is interior, never a boundary); triples extend a seeded
-   cluster but never seed one; the cast must be a contiguous run of some
-   ordered track list (a playlist), enter with its first member and exit
-   with its last (the Routine boundary contract); windows expand into the
-   bounding solos. Chained candidates may share exactly one boundary
-   track (one's exit is the other's entry).
+   cluster but a lone triple never seeds one. Double chains also seed
+   (gh#181): consecutive clean DoubleEvents sharing a pivot track whose
+   audibility tenure is continuous across both fuse into one cluster —
+   the pivot bridges the partner swap, no triple needed at the seam; a
+   boundary solo still splits (the pivot handing off ends the Routine),
+   and a lone double never seeds (a single dwell is just a generous
+   overlap — ≥ DOUBLE_CHAIN_MIN chained dwells make choreography).
+   Layered-run fallback (gh#175): a section that produced no cluster and
+   has NO returns at all but a sustained run of long triples
+   (≥ TRIPLE_RUN_MIN) seeds from that run — a versus/layered block
+   performed live never breaks audibility, so no return exists to seed
+   it, while any rehearsal of one shows re-tries (returns, practice-
+   flagged) and keeps refusing to seed. The cast must be a contiguous run
+   of some ordered track list (a playlist), enter with its first member
+   and exit with its last (the Routine boundary contract); windows expand
+   into the bounding solos. Chained candidates may share exactly one
+   boundary track (one's exit is the other's entry).
 
 Pure algorithm — no DB access; the task layer (`routine_miner_tasks`)
 feeds it events + playlist orderings and persists the suggestion rows
@@ -45,7 +66,9 @@ from typing import Any, Iterable, Sequence
 
 # Bump to invalidate persisted suggestion rows: the sweep re-mines every
 # Session whose marker differs (routine_miner_tasks.enqueue_stale_routine_mining).
-MINER_VERSION = 1
+# v2: layered-run (triple-run) seeding for versus-style blocks (gh#175).
+# v3: Double seed class — dual-dominance dwells, pivot-chained (gh#181).
+MINER_VERSION = 3
 
 # --- audibility reconstruction ---
 FADER_ON = 0.10           # channel fader above this = contributing
@@ -63,8 +86,16 @@ PAIR_WINDOW_AFTER_S = 20.0
 MIN_TRIPLE_S = 2.0        # 3-concurrency stretches shorter than this ignored
 EVENT_CLUSTER_S = 90.0    # events this close belong to one section
 
+# --- doubles (gh#181) ---
+DOMINANT_FADER = 0.5      # fader above this = the deck is dominant
+DOUBLE_MIN_S = 30.0       # dual-dominance shorter than this is blend, not dwell
+BLEND_NET_FALL = 0.35     # a deck falling this much across the stretch...
+BLEND_MAX_REVERSALS = 2   # ...with at most this many direction changes = ramp
+DOUBLE_CHAIN_MIN = 2      # pivot-chained dwells needed to seed a cluster
+
 # --- candidate carving ---
 TRIPLE_SEED_MIN_S = 15.0  # triples shorter than this don't even extend
+TRIPLE_RUN_MIN = 2        # long triples needed for layered-run seeding (gh#175)
 SOLO_MIN_S = 8.0          # concurrency ≤ 1 at least this long = solo moment
 CLUSTER_MAX_GAP_S = 160.0  # max seed-to-seed gap within one cluster
 TRIPLE_ATTACH_PAD_S = 75.0  # triples within this of a cluster extend it
@@ -115,6 +146,28 @@ class TripleEvent:
 
 
 @dataclass
+class DoubleEvent:
+    """A dual-dominance dwell (gh#181): exactly two distinct tracks with
+    faders above DOMINANT_FADER together for ≥ DOUBLE_MIN_S, blend-shaped
+    stretches excluded. `practice` is stamped by overlap with a
+    practice-flagged return of either member (a drill rep)."""
+
+    t: float
+    end: float
+    track_a: int
+    track_b: int
+    practice: bool = False
+
+    @property
+    def tracks(self) -> frozenset[int]:
+        return frozenset((self.track_a, self.track_b))
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.t
+
+
+@dataclass
 class Section:
     """A time-clustered patch of complexity: its events + every audibility
     interval overlapping it (context included, intervals unclipped)."""
@@ -123,6 +176,7 @@ class Section:
     end: float
     returns: list[ReturnEvent]
     triples: list[TripleEvent]
+    doubles: list[DoubleEvent]
     intervals: list[Interval]
 
 
@@ -136,6 +190,7 @@ class Candidate:
     entry_offsets: list[float]    # per slot, seconds from window start
     n_returns: int                # performance-return seeds in the cluster
     n_triples: int                # attached triple events
+    n_doubles: int = 0            # chained dual-dominance dwells (gh#181)
 
     @property
     def entry_track_id(self) -> int:
@@ -147,7 +202,7 @@ class Candidate:
 
     @property
     def n_events(self) -> int:
-        return self.n_returns + self.n_triples
+        return self.n_returns + self.n_triples + self.n_doubles
 
 
 @dataclass
@@ -164,11 +219,14 @@ class MinerResult:
 
 def reconstruct_audibility(
     events: Sequence[dict[str, Any]],
+    fader_on: float = FADER_ON,
 ) -> tuple[list[Interval], dict[str, list[float]]]:
     """Replay the event stream into merged per-deck audibility intervals,
     plus per-deck backseek instants (backward transport motion).
 
-    Audible = loaded ∧ playing ∧ fader > FADER_ON. The playhead estimate
+    Audible = loaded ∧ playing ∧ fader > `fader_on` (the default
+    reconstructs audibility; DOMINANT_FADER reconstructs dominance for
+    double detection, gh#181). The playhead estimate
     advances with wall time while a deck plays; any transport event whose
     playhead lands BACKSEEK_S behind the estimate is a backseek. Every
     transport event carrying a playhead feeds the estimate — including
@@ -187,7 +245,7 @@ def reconstruct_audibility(
     backseeks: dict[str, list[float]] = defaultdict(list)
 
     def audible(ch: str) -> bool:
-        return playing[ch] and fader[ch] > FADER_ON and loaded.get(ch) is not None
+        return playing[ch] and fader[ch] > fader_on and loaded.get(ch) is not None
 
     def transition(ch: str, t: float, mutate) -> None:
         was, tid_was = audible(ch), loaded.get(ch)
@@ -335,6 +393,109 @@ def detect_triples(intervals: Sequence[Interval]) -> list[TripleEvent]:
     return out
 
 
+def detect_doubles(
+    dom_intervals: Sequence[Interval],
+    events: Sequence[dict[str, Any]],
+) -> list[DoubleEvent]:
+    """Dual-dominance dwells (gh#181) from DOMINANT_FADER-thresholded
+    intervals: maximal stretches with exactly two distinct tracks dominant,
+    ≥ DOUBLE_MIN_S long, that are not blend-shaped (a deck riding a clean
+    falling ramp is a crossfade in progress — the hand-off, not a dwell).
+
+    `events` must be sorted by t (mine_session sorts); only fader control
+    events are read (for the ramp test).
+    """
+    faders: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for e in events:
+        if e.get("kind") == "control" and e.get("control") == "fader" and e.get("channel"):
+            faders[e["channel"]].append(
+                (float(e.get("t", 0)), float(e.get("value", 1)))
+            )
+
+    def blend_ramp(ch: str, a: float, b: float) -> bool:
+        """Fader on `ch` over [a, b]: a clean net fall = hand-off ramp.
+        (A rising ramp is the incoming track arriving — that's what a dwell
+        looks like from the entering side, so only falls disqualify.)"""
+        vals: list[float] = []
+        start_val: float | None = None
+        for t, v in faders.get(ch, []):
+            if t < a:
+                start_val = v
+            elif t <= b:
+                vals.append(v)
+            else:
+                break
+        if not vals:
+            return False  # fader parked — a dwell signature
+        if start_val is not None:
+            vals.insert(0, start_val)
+        reversals = 0
+        last_dir = 0
+        for v0, v1 in zip(vals, vals[1:]):
+            d = 1 if v1 > v0 else (-1 if v1 < v0 else 0)
+            if d and last_dir and d != last_dir:
+                reversals += 1
+            if d:
+                last_dir = d
+        net = vals[-1] - vals[0]
+        return net <= -BLEND_NET_FALL and reversals <= BLEND_MAX_REVERSALS
+
+    pts: list[tuple[float, int, int]] = []
+    for i, iv in enumerate(dom_intervals):
+        pts.append((iv.start, 1, i))
+        pts.append((iv.end, -1, i))
+    pts.sort()
+    active: set[int] = set()
+    out: list[DoubleEvent] = []
+    cur_pair: frozenset[int] | None = None
+    cur_start = 0.0
+    cur_chans: dict[int, str] = {}
+
+    def close(end: float) -> None:
+        nonlocal cur_pair
+        if cur_pair is None:
+            return
+        if end - cur_start >= DOUBLE_MIN_S and not any(
+            blend_ramp(ch, cur_start, end) for ch in cur_chans.values()
+        ):
+            a, b = sorted(cur_pair)
+            out.append(DoubleEvent(t=cur_start, end=end, track_a=a, track_b=b))
+        cur_pair = None
+
+    for t, d, i in pts:
+        if d == 1:
+            active.add(i)
+        else:
+            active.discard(i)
+        tids = frozenset(dom_intervals[j].track_id for j in active)
+        if len(tids) == 2:
+            if tids != cur_pair:
+                close(t)
+                cur_pair, cur_start = tids, t
+                cur_chans = {
+                    dom_intervals[j].track_id: dom_intervals[j].channel
+                    for j in active
+                }
+        else:
+            close(t)
+    return out
+
+
+def stamp_double_practice(
+    doubles: Sequence[DoubleEvent], returns: Sequence[ReturnEvent]
+) -> None:
+    """A dwell overlapping a practice-flagged return of either member is a
+    drill rep (gh#181) — the re-try taints the dwell it drilled."""
+    for d in doubles:
+        d.practice = any(
+            r.practice
+            and r.track_id in d.tracks
+            and r.gap_start < d.end
+            and r.end > d.t
+            for r in returns
+        )
+
+
 def _self_double_instants(intervals: Sequence[Interval]) -> list[float]:
     """Same track audible on two decks at once (sectioning signal only)."""
     by_tid: dict[int, list[Interval]] = defaultdict(list)
@@ -362,6 +523,7 @@ def build_sections(
     intervals: Sequence[Interval],
     returns: Sequence[ReturnEvent],
     triples: Sequence[TripleEvent],
+    doubles: Sequence[DoubleEvent] = (),
 ) -> list[Section]:
     """Cluster complexity events within EVENT_CLUSTER_S into sections and
     attach every interval overlapping the section span (unclipped)."""
@@ -370,6 +532,8 @@ def build_sections(
         events.append((r.t, r.end, r))
     for tr in triples:
         events.append((tr.t, tr.end, tr))
+    for d in doubles:
+        events.append((d.t, d.end, d))
     for t in _self_double_instants(intervals):
         events.append((t, t, None))
     if not events:
@@ -422,6 +586,10 @@ def build_sections(
                     (e[2] for e in g if isinstance(e[2], TripleEvent)),
                     key=lambda tr: tr.t,
                 ),
+                doubles=sorted(
+                    (e[2] for e in g if isinstance(e[2], DoubleEvent)),
+                    key=lambda d: d.t,
+                ),
                 intervals=[
                     iv for iv in intervals if iv.start < t1 and iv.end > t0
                 ],
@@ -456,15 +624,13 @@ def _solo_moments(intervals: Sequence[Interval]) -> list[tuple[float, float]]:
 def _carve_section(
     section: Section, orderings: Sequence[dict[int, int]]
 ) -> list[Candidate]:
-    seeds = [r for r in section.returns if not r.practice]
-    if not seeds:
-        # Triples alone are decomposable as overlapping adjacency windows —
-        # they extend a seeded cluster but never seed one.
-        return []
+    ret_seeds = [r for r in section.returns if not r.practice]
+    clean_doubles = [d for d in section.doubles if not d.practice]
+    long_triples = [tr for tr in section.triples if tr.duration >= TRIPLE_SEED_MIN_S]
 
     # Boundary solos: a seed's away-gap is interior to a Routine, never a
     # boundary — drop solos overlapping any seed's gap.
-    gaps = [(r.gap_start, r.t) for r in seeds]
+    gaps = [(r.gap_start, r.t) for r in ret_seeds]
     bsolos = [
         s
         for s in _solo_moments(section.intervals)
@@ -474,24 +640,77 @@ def _carve_section(
     def solo_between(t_a: float, t_b: float) -> bool:
         return any(a >= t_a and b <= t_b for a, b in bsolos)
 
-    # Cluster seeds: close in time, no boundary solo between them.
-    clusters: list[list[Any]] = []
-    cur: list[Any] = [seeds[0]]
-    for r in seeds[1:]:
-        if r.t - cur[-1].end <= CLUSTER_MAX_GAP_S and not solo_between(
-            cur[-1].end, r.t
-        ):
-            cur.append(r)
-        else:
-            clusters.append(cur)
-            cur = [r]
-    clusters.append(cur)
+    def cluster_by_time(evs: list[Any]) -> list[list[Any]]:
+        """Greedy time clustering: close in time, no boundary solo between."""
+        out: list[list[Any]] = []
+        cur: list[Any] = [evs[0]]
+        for ev in evs[1:]:
+            if ev.t - cur[-1].end <= CLUSTER_MAX_GAP_S and not solo_between(
+                cur[-1].end, ev.t
+            ):
+                cur.append(ev)
+            else:
+                out.append(cur)
+                cur = [ev]
+        out.append(cur)
+        return out
 
-    # Long triples extend a seeded cluster (chaining off already-attached
-    # members) but never seed one.
-    long_triples = [tr for tr in section.triples if tr.duration >= TRIPLE_SEED_MIN_S]
+    # Return-seeded clusters (the original seed class).
+    clusters: list[list[Any]] = cluster_by_time(ret_seeds) if ret_seeds else []
+
+    # Double chains (gh#181): consecutive dwells fuse when a pivot track's
+    # audibility tenure is continuous across both — the pivot bridges the
+    # partner swap. A boundary solo still splits (the pivot handing off
+    # ends the Routine), and a lone dwell never seeds (a single dwell is
+    # a generous overlap, not choreography).
+    def pivot_bridged(d1: DoubleEvent, d2: DoubleEvent) -> bool:
+        return any(
+            iv.track_id in (d1.tracks & d2.tracks)
+            and iv.start <= d1.t
+            and iv.end >= d2.end
+            for iv in section.intervals
+        )
+
+    chain: list[DoubleEvent] = []
+    for d in clean_doubles:
+        if (
+            chain
+            and d.t - chain[-1].end <= CLUSTER_MAX_GAP_S
+            and pivot_bridged(chain[-1], d)
+            and not solo_between(chain[-1].end, d.t)
+        ):
+            chain.append(d)
+        else:
+            if len(chain) >= DOUBLE_CHAIN_MIN:
+                clusters.append(list(chain))
+            chain = [d]
+    if len(chain) >= DOUBLE_CHAIN_MIN:
+        clusters.append(list(chain))
+
+    # Layered-run fallback (gh#175): nothing seeded, no returns at all,
+    # but a sustained run of long triples — a versus/layered block whose
+    # dwells didn't qualify. Any returns present here are practice-flagged
+    # (rehearsal re-tries) — keep refusing to seed.
+    triple_seeded = False
+    if not clusters:
+        if section.returns or len(long_triples) < TRIPLE_RUN_MIN:
+            return []
+        clusters = [
+            cl
+            for cl in cluster_by_time(list(long_triples))
+            if len(cl) >= TRIPLE_RUN_MIN
+        ]
+        triple_seeded = True
+
+    # Triples extend a seeded cluster (chaining off already-attached
+    # members) but never seed one: long ones for return-seeded clusters,
+    # every section triple for a layered run (short ones corroborate the
+    # same block).
+    attachable = section.triples if triple_seeded else long_triples
     for cl in clusters:
-        for tr in long_triples:
+        for tr in attachable:
+            if tr in cl:
+                continue
             if tr.t <= max(ev.end for ev in cl) + TRIPLE_ATTACH_PAD_S and tr.end >= min(
                 ev.t for ev in cl
             ) - TRIPLE_ATTACH_PAD_S:
@@ -522,7 +741,8 @@ def _carve_section(
             continue
 
         n_returns = sum(1 for ev in cl if isinstance(ev, ReturnEvent))
-        n_triples = len(cl) - n_returns
+        n_doubles = sum(1 for ev in cl if isinstance(ev, DoubleEvent))
+        n_triples = len(cl) - n_returns - n_doubles
         first_ev_t = min(ev.t for ev in cl)
         last_ev_end = max(ev.end for ev in cl)
 
@@ -589,6 +809,7 @@ def _carve_section(
                     ],
                     n_returns=n_returns,
                     n_triples=n_triples,
+                    n_doubles=n_doubles,
                 )
             )
             break  # first ordering that validates the cast wins
@@ -626,7 +847,10 @@ def mine_session(
     intervals, backseeks = reconstruct_audibility(events)
     returns = detect_returns(intervals, backseeks)
     triples = detect_triples(intervals)
-    sections = build_sections(intervals, returns, triples)
+    dom_intervals, _ = reconstruct_audibility(events, fader_on=DOMINANT_FADER)
+    doubles = detect_doubles(dom_intervals, events)
+    stamp_double_practice(doubles, returns)
+    sections = build_sections(intervals, returns, triples, doubles)
 
     candidates: list[Candidate] = []
     for section in sections:

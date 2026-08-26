@@ -41,6 +41,8 @@ import type { VectorizeInput } from '../capture/vectorize';
 import { vectorizeTake } from '../capture/vectorize';
 import type { Transition } from '../editor/mixModel';
 import {
+  aEndMixTime,
+  aTrackTimeAt,
   bContentSegments,
   bTrackTimeAt,
   laneValuesAt,
@@ -729,8 +731,16 @@ export function planSet(input: PlanInput): SetPlan {
       nextMixOffset = mixEndSec - bAtWindowEnd / rateIn;
     }
 
-    // Outgoing exits at the window end, clamped to its own end.
-    const exitSec = Math.min(windowEndLocal, facts.durationSec);
+    // Outgoing exits at the window end — SIMULATED THROUGH ITS JUMPS
+    // (issue 177): the exit instant on the authored (elapsed-play) axis is
+    // the window end or A's first track-end crossing on the jumped path,
+    // whichever is first; the exit TRACK position applies the passed jump
+    // deltas. Without jumpsA this is the old min(windowEnd, durA) pair.
+    const exitLocal = aEndMixTime(transition, facts.durationSec);
+    const exitSec = Math.min(
+      facts.durationSec,
+      Math.max(0, aTrackTimeAt(transition, exitLocal))
+    );
     entries.push({
       trackId,
       deck,
@@ -739,7 +749,7 @@ export function planSet(input: PlanInput): SetPlan {
       entrySec,
       exitSec,
       entryMixSec,
-      exitMixSec: toMix(exitSec),
+      exitMixSec: toMix(exitLocal),
       trim: input.entries[i].trim ?? 0,
     });
     adjacencies.push({
@@ -1052,13 +1062,33 @@ function playingTrackTimeAt(
       pitchPercent: windowed.pitchIncomingPercent * (1 - tau / d),
     };
   }
+  // Inside the entry's own EXIT window the OUTGOING may Jump (issue 177):
+  // the solo anchor stays valid for the elapsed-play axis (mix time keeps
+  // advancing linearly at the entry's rate — the doctrine), and the deck's
+  // TRACK position adds the deltas of every passed outgoing jump. Before
+  // the window no jump has passed (window-scoped), so this is the plain
+  // solo anchor there too.
+  const exitAdj = adjacencies[idx];
+  if (exitAdj && isWindowed(exitAdj) && exitAdj.transition.jumpsA?.length) {
+    return {
+      trackTime: Math.max(
+        0,
+        aTrackTimeAt(exitAdj.transition, authoredLocalAt(exitAdj, mixTime))
+      ),
+      pitchPercent: (entry.rate - 1) * 100,
+    };
+  }
   return {
     trackTime: (mixTime - entry.mixOffsetSec) * entry.rate,
     pitchPercent: (entry.rate - 1) * 100,
   };
 }
 
-export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
+/** The raw plan verdict at a mix instant — every playback semantic EXCEPT
+ * the authority-handoff ramp (sets #179). `planStateAt` is this plus the
+ * ramp; consumers that must see the unsmoothed authored values (and the
+ * ramp's own before/after samples) read this directly. */
+export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
   const state: PlanState = {
     decks: { A: { ...IDLE_DECK }, B: { ...IDLE_DECK }, C: { ...IDLE_DECK }, D: { ...IDLE_DECK } },
     lanes: { A: soloLanes(0), B: soloLanes(0), C: soloLanes(0), D: soloLanes(0) },
@@ -1247,6 +1277,91 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
   return state;
 }
 
+// ── Authority-handoff ramp (sets #179) ──────────────────────────────────
+// When authority over a deck's lanes passes hands — window→solo, solo→
+// window, window→window (the #143 later-window-wins overlap), window→
+// routine edge, routine exit→solo — a hand-edited artifact may leave the
+// incoming authority's first value off the outgoing's last one, stepping
+// the control instantly (audible click/jump on fader/EQ/filter). The ramp
+// lerps that residual step away over a short horizon: playback smoothing
+// only, computed at read time — never persisted into any artifact.
+// Continuous handoffs (captured hands) have zero residual and read
+// byte-identical; hard cuts are deliberate cuts and never smooth.
+
+/** Ramp horizon (s) — a tunable heuristic (a setting, not model). */
+export const AUTHORITY_HANDOFF_RAMP_SEC = 0.15;
+
+/** Offset for sampling "the outgoing authority's last value" just before
+ * a boundary instant. */
+const HANDOFF_EPS = 1e-6;
+
+/** Residual steps below this are continuity, not discontinuity: the
+ * before-sample sits HANDOFF_EPS shy of the boundary, so a continuous
+ * authored ramp reads a slope·eps residual — the dead-band swallows it
+ * (and any genuinely sub-audible step), keeping continuous handoffs
+ * byte-identical to the raw verdict. */
+const RESIDUAL_DEADBAND = 1e-3;
+
+/** Every instant lane authority changes hands, ascending: windowed
+ * adjacency opens/closes and Routine span edges. Hard cuts (zero-width)
+ * are deliberate cuts — excluded on purpose. */
+function authorityBoundaries(plan: SetPlan): number[] {
+  const ts = new Set<number>();
+  for (const adj of plan.adjacencies) {
+    if (!isWindowed(adj)) continue;
+    ts.add(adj.mixStartSec);
+    ts.add(adj.mixEndSec);
+  }
+  for (const r of plan.routines) {
+    ts.add(r.mixStartSec);
+    ts.add(r.mixEndSec);
+  }
+  return [...ts].filter((t) => t > 0).sort((a, b) => a - b);
+}
+
+const clampTo = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** The plan verdict at a mix instant, authority-handoff ramp applied
+ * (sets #179): within the ramp horizon after an authority boundary, each
+ * deck's lanes carry the boundary's residual step (outgoing last value −
+ * incoming first value) decayed linearly to zero — the incoming
+ * authority's own motion passes through untouched. The before-sample is
+ * itself smoothed (recursion strictly backwards), so boundaries closer
+ * than the horizon still hand off continuously. */
+export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
+  const state = planStateAtRaw(plan, mixTime);
+  if (state.done) return state;
+  let boundary: number | null = null;
+  for (const t of authorityBoundaries(plan)) {
+    if (t <= mixTime && mixTime - t < AUTHORITY_HANDOFF_RAMP_SEC) boundary = t;
+  }
+  if (boundary === null) return state;
+  const decay = 1 - (mixTime - boundary) / AUTHORITY_HANDOFF_RAMP_SEC;
+  const before = planStateAt(plan, boundary - HANDOFF_EPS);
+  const incoming = planStateAtRaw(plan, boundary);
+  for (const deck of PLAN_DECKS) {
+    const cur = state.lanes[deck];
+    const out = before.lanes[deck];
+    const inc = incoming.lanes[deck];
+    /** Residual-step decay per field: zero residual reads unchanged. */
+    const f = (o: number, n: number, c: number, lo: number, hi: number) => {
+      const residual = o - n;
+      return Math.abs(residual) < RESIDUAL_DEADBAND ? c : clampTo(c + residual * decay, lo, hi);
+    };
+    state.lanes[deck] = {
+      ...cur,
+      fader: f(out.fader, inc.fader, cur.fader, 0, 1),
+      eq: {
+        low: f(out.eq.low, inc.eq.low, cur.eq.low, 0, 1),
+        mid: f(out.eq.mid, inc.eq.mid, cur.eq.mid, 0, 1),
+        high: f(out.eq.high, inc.eq.high, cur.eq.high, 0, 1),
+      },
+      filter: f(out.filter, inc.filter, cur.filter, -1, 1),
+    };
+  }
+  return state;
+}
+
 /** Jump instants of the window containing [t0, t1), on the GLOBAL mix
  * axis — the Conductor hard-syncs decks when a tick crosses one (the
  * model applies jump deltas discontinuously; drift correction alone would
@@ -1256,21 +1371,26 @@ export function jumpCrossed(plan: SetPlan, t0: number, t1: number): boolean {
 }
 
 /** The decks whose plan target jumped in (t0, t1] — the Conductor
- * hard-syncs EXACTLY these (#161): an authored window jump is the
- * incoming deck's gesture; a Routine trace discontinuity belongs to its
- * slot's deck. Seeking the other decks too snapped their (legitimately
- * nudging) playheads — an audible hiccup on every recorded jump, worst
- * mid-blend at a routine boundary. */
+ * hard-syncs EXACTLY these (#161): an authored window jump is a single
+ * deck's gesture — an incoming jump the incoming deck's, an outgoing jump
+ * (jumpsA, issue 177) the outgoing deck's — and a Routine trace
+ * discontinuity belongs to its slot's deck. Seeking the other decks too
+ * snapped their (legitimately nudging) playheads — an audible hiccup on
+ * every recorded jump, worst mid-blend at a routine boundary. */
 export function jumpCrossedDecks(plan: SetPlan, t0: number, t1: number): PlanDeck[] {
   const decks = new Set<PlanDeck>();
   plan.adjacencies.forEach((adj, i) => {
-    if (!isWindowed(adj) || !adj.transition.jumps) return;
-    for (const j of adj.transition.jumps) {
-      // Authored instant startSec + x·duration, mapped onto the mix axis.
-      const tj = adj.mixStartSec + (j.x * adj.transition.durationSec) / adj.rateOutgoing;
-      if (tj > t0 && tj <= t1) {
-        const inDeck = plan.entries[i + 1]?.deck;
-        if (inDeck) decks.add(inDeck);
+    if (!isWindowed(adj)) return;
+    const roles = [
+      { jumps: adj.transition.jumps, deck: plan.entries[i + 1]?.deck },
+      { jumps: adj.transition.jumpsA, deck: plan.entries[i]?.deck },
+    ];
+    for (const { jumps, deck } of roles) {
+      if (!jumps || deck === undefined) continue;
+      for (const j of jumps) {
+        // Authored instant startSec + x·duration, mapped onto the mix axis.
+        const tj = adj.mixStartSec + (j.x * adj.transition.durationSec) / adj.rateOutgoing;
+        if (tj > t0 && tj <= t1) decks.add(deck);
       }
     }
   });

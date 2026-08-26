@@ -318,39 +318,45 @@ export class EditorStore {
     }));
   }
 
-  // ── Jump events (transition-takes 01) ───────────────────────────────
+  // ── Jump events (transition-takes 01; both roles since issue 177) ────
   // Array order is INSERTION order, never re-sorted: the UI addresses
   // jumps by index across x drags (the math is order-insensitive).
+  // `role` picks the deck: 'B' = incoming (`jumps`), 'A' = outgoing
+  // (`jumpsA` — mix time ≡ A's elapsed play). Default 'B' keeps the
+  // pre-177 call sites unchanged.
 
   /** Add a Jump event at normalized window position x (clamped 0..1),
    * with no distance yet — the marker's editor sets deltaSec. */
-  addJump(x: number): void {
+  addJump(x: number, role: 'A' | 'B' = 'B'): void {
+    const key = role === 'A' ? 'jumpsA' : 'jumps';
     const jump = { x: Math.max(0, Math.min(1, x)), deltaSec: 0 };
     this.updateMix((m) => ({
       ...m,
-      transition: { ...m.transition, jumps: [...(m.transition.jumps ?? []), jump] },
+      transition: { ...m.transition, [key]: [...(m.transition[key] ?? []), jump] },
     }));
   }
 
   /** Patch one Jump event (marker drags patch `x`, the Δ editor patches
    * `deltaSec`) — addressed by insertion index, stable across x drags. */
-  updateJump(index: number, patch: Partial<JumpEvent>): void {
+  updateJump(index: number, patch: Partial<JumpEvent>, role: 'A' | 'B' = 'B'): void {
+    const key = role === 'A' ? 'jumpsA' : 'jumps';
     this.updateMix((m) => ({
       ...m,
       transition: {
         ...m.transition,
-        jumps: (m.transition.jumps ?? []).map((j, i) => (i === index ? { ...j, ...patch } : j)),
+        [key]: (m.transition[key] ?? []).map((j, i) => (i === index ? { ...j, ...patch } : j)),
       },
     }));
   }
 
   /** Delete one Jump event by insertion index. */
-  removeJump(index: number): void {
+  removeJump(index: number, role: 'A' | 'B' = 'B'): void {
+    const key = role === 'A' ? 'jumpsA' : 'jumps';
     this.updateMix((m) => ({
       ...m,
       transition: {
         ...m.transition,
-        jumps: (m.transition.jumps ?? []).filter((_, i) => i !== index),
+        [key]: (m.transition[key] ?? []).filter((_, i) => i !== index),
       },
     }));
   }
