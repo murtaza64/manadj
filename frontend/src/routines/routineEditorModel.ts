@@ -54,50 +54,16 @@ export function slotColorRgba(slot: number, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// ── Slot lane color families (pass 2: EXTEND the pair editor's palette) ──
+// ── Slot lane color families (gh#190 items 1/3: accent = FADER only) ────
 //
-// The pair editor's laneColors doctrine (mix-editor 32/39, #59): the
-// FADER lane IS the identity anchor; FILTER wears the anchor rotated
-// −20° ("the deck's own color, shifted"); the EQ bands are one RGB triad
-// hue-tilted a small per-identity amount so identities stay tellable
-// apart. Slots inherit exactly that rule with the slot color as anchor
-// and a per-slot triad tilt — no invented scheme.
-
-function hexToHsl(hex: string): [number, number, number] {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  if (max === min) return [0, 0, l];
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  let h: number;
-  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
-  else if (max === g) h = ((b - r) / d + 2) * 60;
-  else h = ((r - g) / d + 4) * 60;
-  return [h, s, l];
-}
-
-function hslToHex(h: number, s: number, l: number): string {
-  const hue = ((h % 360) + 360) % 360;
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
-  const m = l - c / 2;
-  const [r, g, b] =
-    hue < 60 ? [c, x, 0] : hue < 120 ? [x, c, 0] : hue < 180 ? [0, c, x] : hue < 240 ? [0, x, c] : hue < 300 ? [x, 0, c] : [c, 0, x];
-  const to = (v: number) =>
-    Math.round((v + m) * 255)
-      .toString(16)
-      .padStart(2, '0');
-  return `#${to(r)}${to(g)}${to(b)}`;
-}
-
-function rotateHue(hex: string, deg: number): string {
-  const [h, s, l] = hexToHsl(hex);
-  return hslToHex(h + deg, s, l);
-}
+// The pair editor's laneColors doctrine (mix-editor 32/39, #59) gave
+// every lane a per-identity hue. The routine editor walkthrough (gh#190)
+// tightened it: the slot ACCENT is reserved for the FADER lane alone —
+// slot identity rides the fader strip and the slot chip. EQ bands wear
+// the plain RGB triad (LOW red, MID green, HIGH blue — no per-slot
+// tilt: with n slots the tilts read as noise, not identity), and FILTER
+// wears ONE consistent color everywhere, with a hi/lo (HPF above
+// center / LPF below) hue distinction at draw time.
 
 export type SlotLaneControl = 'fader' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter';
 export const SLOT_LANE_ORDER: SlotLaneControl[] = [
@@ -120,24 +86,27 @@ export const SLOT_LANE_LABELS: Record<SlotLaneControl, string> = {
 };
 
 /** The RGB triad the pair editor's EQ lanes share (laneColors: LOW red,
- * MID green, HIGH blue), before the per-identity tilt. */
+ * MID green, HIGH blue) — plain, no per-slot tilt (gh#190 item 3). */
 const EQ_TRIAD: Record<'eqLow' | 'eqMid' | 'eqHigh', string> = {
   eqLow: '#ff2d2d',
   eqMid: '#2dff6a',
   eqHigh: '#3d6aff',
 };
 
+/** THE filter color — one hue on every slot (gh#190 item 3): labels,
+ * edges, toggles, and the HPF (above-center) side of the curve. */
+export const FILTER_COLOR = '#00ffc4';
+/** The LPF (below-center) side of the filter curve — warm against the
+ * cool base, so hi/lo reads at a glance. */
+export const FILTER_LPF_COLOR = '#ff8a00';
+
 export function slotLaneColors(slot: number): Record<SlotLaneControl, string> {
-  const anchor = slotColor(slot);
-  // Small per-slot triad tilt (A/B use ∓25°): spread slots across
-  // −18°…+30° so neighboring slots' EQ hues stay tellable apart.
-  const tilt = (slot % 5) * 12 - 18;
   return {
-    fader: anchor,
-    eqLow: rotateHue(EQ_TRIAD.eqLow, tilt),
-    eqMid: rotateHue(EQ_TRIAD.eqMid, tilt),
-    eqHigh: rotateHue(EQ_TRIAD.eqHigh, tilt),
-    filter: rotateHue(anchor, -20),
+    fader: slotColor(slot), // the slot accent — fader ONLY (gh#190)
+    eqLow: EQ_TRIAD.eqLow,
+    eqMid: EQ_TRIAD.eqMid,
+    eqHigh: EQ_TRIAD.eqHigh,
+    filter: FILTER_COLOR,
   };
 }
 
@@ -238,13 +207,25 @@ export interface RulerTick {
   /** Major ticks carry a label; minor ticks are grid only. */
   major: boolean;
   label?: string;
+  /** Hypermeter tier (gh#190 item 7), anchored on beat 0 = a downbeat:
+   * 'phrase' every 16 beats, 'bar' every 4, 'minor' otherwise. Drawn at
+   * three grid strengths so the musical structure reads at any zoom. */
+  tier: 'minor' | 'bar' | 'phrase';
 }
 
 const LABEL_STEPS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 
+/** Hypermeter tier of a beat (beat 0 anchors the grid). */
+export function hypermeterTier(beat: number): RulerTick['tier'] {
+  if (beat % 16 === 0) return 'phrase';
+  if (beat % 4 === 0) return 'bar';
+  return 'minor';
+}
+
 /** Beat-domain ruler ticks for a view window. Major (labelled) ticks land
  * on the smallest power-of-two-ish beat step whose spacing clears
- * `minLabelPx`; minors quarter it (floor 1 beat). */
+ * `minLabelPx`; minors quarter it (floor 1 beat). Every tick also carries
+ * its hypermeter tier (gh#190 item 7). */
 export function rulerTicks(
   viewStartBeat: number,
   viewEndBeat: number,
@@ -257,7 +238,12 @@ export function rulerTicks(
   const first = Math.max(0, Math.floor(viewStartBeat / minor) * minor);
   for (let b = first; b <= viewEndBeat; b += minor) {
     const major = b % step === 0;
-    ticks.push({ beat: b, major, label: major ? String(b) : undefined });
+    ticks.push({
+      beat: b,
+      major,
+      label: major ? String(b) : undefined,
+      tier: hypermeterTier(b),
+    });
   }
   return ticks;
 }

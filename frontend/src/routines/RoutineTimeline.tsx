@@ -12,8 +12,10 @@
  * column interpreter (sets/ladderWaveStyle — the one persisted Waveform
  * style, LOD-correct averaging) draws each run, columns sampled at
  * integer timeline pixels — stable under scroll/zoom. The waveform body
- * is deliberately UNMODULATED by the mixer state — this is an editing
- * surface (the pair editor's posture): level reads on the lane strips.
+ * is MODULATED by the slot's lane state (gh#190 item 11 — parity with
+ * the session timeline and the set ladder): each column renders through
+ * fader gain + EQ band gains via the shared ColumnModulation contract
+ * (filter excluded, matching both surfaces' control-lane choice).
  *
  * EDITING (pass 2, directive 2): lane strips flip between the recorded
  * step rendering and the pair editor's OWN LaneCanvas (structural reuse —
@@ -27,7 +29,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Track, HotCue } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
-import { createStyledColumnRenderer } from '../sets/ladderWaveStyle';
+import { createStyledColumnRenderer, type ColumnModulation } from '../sets/ladderWaveStyle';
+import { channelFaderToGain } from '../playback/mixerMath';
+import { eqValueToGain } from '../playback/graph';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { cueCssColor } from '../hotcues/palette';
 import { ROUTINE_ACCENT } from '../theme/routineColor';
@@ -44,6 +48,7 @@ import type { RoutineDraftStore } from './routineDraftStore';
 import type { AuthoredJump, RoutineEdits } from './routineDraft';
 import { traceDrawRuns, type BeatRun } from './routineWaveRuns';
 import {
+  FILTER_LPF_COLOR,
   rulerTicks,
   slotColor,
   slotLaneColors,
@@ -68,6 +73,13 @@ const MAX_PX_PER_BEAT = 64;
 /** Kind-matched pseudo LaneIds: LaneCanvas keys its NEUTRAL line, fill
  * anchor, shade ramps and filter snap off the id's control prefix — the
  * slot's identity rides the color override instead. */
+/** Lanes shown before any toggling (gh#190 item 4). */
+const DEFAULT_LANES: SlotLaneControl[] = ['fader', 'eqLow', 'filter'];
+
+/** Display-normalizer twin of waveformLanes' NOMINAL_STRIP_GAIN (minus
+ * trim — routines carry no trim lane): full fader renders unmodified. */
+const NOMINAL_SLOT_GAIN = channelFaderToGain(1);
+
 const CONTROL_LANE_ID: Record<SlotLaneControl, LaneId> = {
   fader: 'faderA',
   eqLow: 'eqLowA',
@@ -138,15 +150,16 @@ export function RoutineTimeline({
   viewRef.current = { pxPerBeat, scrollBeat };
 
   // Visible lane strips per slot (the pair editor's lane-toggle idiom;
-  // FADER on by default — n slots × 5 strips would drown the rows).
+  // FADER + LOW + FILTER on by default, gh#190 item 4 — the three lanes
+  // that carry most transitions; all 5 per slot would drown the rows).
   const [visibleLanes, setVisibleLanes] = useState<Record<number, SlotLaneControl[]>>({});
   const lanesFor = useCallback(
-    (slot: number): SlotLaneControl[] => visibleLanes[slot] ?? ['fader'],
+    (slot: number): SlotLaneControl[] => visibleLanes[slot] ?? DEFAULT_LANES,
     [visibleLanes]
   );
   const toggleLane = useCallback((slot: number, control: SlotLaneControl) => {
     setVisibleLanes((prev) => {
-      const cur = prev[slot] ?? ['fader'];
+      const cur = prev[slot] ?? DEFAULT_LANES;
       const next = cur.includes(control)
         ? cur.filter((c) => c !== control)
         : SLOT_LANE_ORDER.filter((c) => cur.includes(c) || c === control);
@@ -477,9 +490,12 @@ export function RoutineTimeline({
         for (const tick of gridBeats) {
           const x = xAt(tick.beat);
           if (x < -24 || x > width + 24) continue;
-          ctx.strokeStyle = tick.major ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
+          // Hypermeter tiers (gh#190 item 7): phrase > bar > beat.
+          const [alpha, top] =
+            tick.tier === 'phrase' ? [0.55, 2] : tick.tier === 'bar' ? [0.3, 8] : [0.14, 14];
+          ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
           ctx.beginPath();
-          ctx.moveTo(x, tick.major ? 6 : 14);
+          ctx.moveTo(x, top);
           ctx.lineTo(x, RULER_H);
           ctx.stroke();
           if (tick.major && tick.label !== undefined) {
@@ -514,8 +530,12 @@ export function RoutineTimeline({
       drawGrid(ctx, gridBeats, xAt, width, WAVE_H);
       const wave = waves.get(slot.trackId) ?? null;
       if (wave) {
-        drawSlotWave(ctx, wave, styleSlot.styleId, styleSlot.params, slotRuns[i], {
+        // Modulation reads the LIVE build (lane edits included) — runs
+        // stay keyed on the jump-edited base (identity survives drags).
+        const liveSlot = planned.slots[i] ?? slot;
+        drawSlotWave(ctx, wave, styleSlot.styleId, styleSlot.params, slotRuns[i], liveSlot, {
           xAt,
+          beatAt: (px: number) => (px + viewPx) / pxPerBeat,
           width,
           waveH: WAVE_H,
         });
@@ -553,6 +573,7 @@ export function RoutineTimeline({
     pxPerBeat,
     scrollBeat,
     plannedForRuns,
+    planned,
     input,
     waves,
     hotcues,
@@ -1032,7 +1053,7 @@ function JumpPopover({
 
 function drawGrid(
   ctx: CanvasRenderingContext2D,
-  ticks: { beat: number; major: boolean }[],
+  ticks: { beat: number; major: boolean; tier: 'minor' | 'bar' | 'phrase' }[],
   xAt: (beat: number) => number,
   width: number,
   height: number
@@ -1040,7 +1061,15 @@ function drawGrid(
   for (const tick of ticks) {
     const x = xAt(tick.beat);
     if (x < 0 || x > width) continue;
-    ctx.strokeStyle = tick.major ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)';
+    // Beatgrid visibility + hypermeter (gh#190 item 7): three strengths —
+    // phrase (16) > bar (4) > beat — so the musical frame reads on the
+    // rows themselves, not just the ruler.
+    ctx.strokeStyle =
+      tick.tier === 'phrase'
+        ? 'rgba(255,255,255,0.20)'
+        : tick.tier === 'bar'
+          ? 'rgba(255,255,255,0.11)'
+          : 'rgba(255,255,255,0.05)';
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, height);
@@ -1050,14 +1079,24 @@ function drawGrid(
 
 /** Styled-run waveform pass (the session timeline's drawStyledRuns,
  * beat-axis flavor): per run, columns sample the run's LINEAR beat→track
- * mapping at integer timeline pixels — LOD-correct and scroll-stable. */
+ * mapping at integer timeline pixels — LOD-correct and scroll-stable.
+ * Columns modulate through the slot's lane state (gh#190 item 11):
+ * fader gain scales the body, EQ gains scale their band groups — the
+ * session timeline / set ladder's exact ColumnModulation contract
+ * (filter excluded, both surfaces' choice). */
 function drawSlotWave(
   ctx: CanvasRenderingContext2D,
   wave: DecodedWaveform,
   styleId: string,
   params: import('../waveform/styles').StyleParams,
   runs: BeatRun[],
-  geo: { xAt: (beat: number) => number; width: number; waveH: number }
+  modSlot: PlannedRoutineSlot,
+  geo: {
+    xAt: (beat: number) => number;
+    beatAt: (px: number) => number;
+    width: number;
+    waveH: number;
+  }
 ): void {
   const midY = geo.waveH / 2;
   const halfH = geo.waveH / 2 - 2;
@@ -1074,7 +1113,18 @@ function drawSlotWave(
     const xStart = Math.round(cx0);
     const cols = Math.round(cx1) - xStart;
     if (cols <= 0) continue;
-    const columns = renderer.render(phA, phB, cols, 1);
+    const modulate = (x: number): ColumnModulation => {
+      const lanes = slotLanesAt(modSlot, geo.beatAt(xStart + x + 0.5));
+      return {
+        eq: [
+          eqValueToGain(lanes.eq.low),
+          eqValueToGain(lanes.eq.mid),
+          eqValueToGain(lanes.eq.high),
+        ],
+        scale: Math.min(2, channelFaderToGain(lanes.fader) / NOMINAL_SLOT_GAIN),
+      };
+    };
+    const columns = renderer.render(phA, phB, cols, 1, modulate);
     for (let x = 0; x < cols; x++) {
       const col = columns[x];
       if (col.outOfTrack) continue;
@@ -1128,9 +1178,13 @@ function drawHotCues(
   ctx.textAlign = 'left';
 }
 
-/** Recorded lane steps in the editor's strip geometry: a step polyline in
- * the lane's color over the flat strip; the default renders dim when
- * nothing was recorded (the lane plays its default). */
+/** Recorded lane steps in the editor's strip geometry (gh#190 items 1-3):
+ * a step polyline + AREA FILL in the lane's color over the flat strip —
+ * fader/EQ fill from the bottom (energy present, the LaneCanvas
+ * doctrine), FILTER fills from its CENTER (bipolar) with the hi/lo hue
+ * split (HPF above = base, LPF below = warm). EQ/filter strips carry a
+ * neutral center guide. The default renders dim when nothing was
+ * recorded (the lane plays its default). */
 function drawLaneSteps(
   ctx: CanvasRenderingContext2D,
   slot: PlannedRoutineSlot,
@@ -1146,15 +1200,24 @@ function drawLaneSteps(
 ): void {
   const points = control === 'filter' ? slot.lanes.filter : slot.lanes[control];
   const recorded = points.length > 0;
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = recorded ? 0.95 : 0.28;
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  let pen = false;
+  const yOf = (v: number) => geo.stripH - 2 - v * (geo.stripH - 4);
+  const bipolar = control === 'filter';
+  const centerY = yOf(0.5);
+
+  // Neutral center guide (gh#190 item 1) — EQ/filter rest at center.
+  if (control !== 'fader') {
+    ctx.fillStyle = 'rgba(255,255,255,0.13)';
+    ctx.fillRect(0, centerY, geo.width, 1);
+  }
+
+  // Sample the lane per pixel into contiguous spans (pen breaks outside
+  // the routine window).
+  const spans: { x0: number; ys: number[] }[] = [];
+  let cur: { x0: number; ys: number[] } | null = null;
   for (let x = 0; x < geo.width; x++) {
     const beat = geo.scrollBeat + (x + 0.5) / geo.pxPerBeat;
     if (beat < 0 || beat > geo.duration) {
-      pen = false;
+      cur = null;
       continue;
     }
     const lanes = slotLanesAt(slot, beat);
@@ -1164,14 +1227,57 @@ function drawLaneSteps(
         : control === 'filter'
           ? (lanes.filter + 1) / 2
           : lanes.eq[control === 'eqLow' ? 'low' : control === 'eqMid' ? 'mid' : 'high'];
-    const y = geo.stripH - 2 - v * (geo.stripH - 4);
-    if (!pen) {
-      ctx.moveTo(x, y);
-      pen = true;
-    } else {
-      ctx.lineTo(x, y);
+    if (!cur) {
+      cur = { x0: x, ys: [] };
+      spans.push(cur);
     }
+    cur.ys.push(yOf(v));
   }
-  ctx.stroke();
-  ctx.globalAlpha = 1;
+
+  const fillAlpha = recorded ? 0.2 : 0.07;
+  const strokeAlpha = recorded ? 0.95 : 0.28;
+  // Filter hi/lo: the curve/fill above center wears the base color, the
+  // below-center (LPF) side the warm one — clip-rect per side.
+  const sides: { color: string; clip: [number, number] | null }[] = bipolar
+    ? [
+        { color, clip: [0, centerY + 0.5] },
+        { color: FILTER_LPF_COLOR, clip: [centerY + 0.5, geo.stripH] },
+      ]
+    : [{ color, clip: null }];
+
+  for (const side of sides) {
+    ctx.save();
+    if (side.clip) {
+      ctx.beginPath();
+      ctx.rect(0, side.clip[0], geo.width, side.clip[1] - side.clip[0]);
+      ctx.clip();
+    }
+    // Area fill (gh#190 item 2): to the bottom for fader/EQ, to the
+    // center for filter.
+    const baseY = bipolar ? centerY + 0.5 : geo.stripH - 1;
+    ctx.fillStyle = side.color;
+    ctx.globalAlpha = fillAlpha;
+    for (const span of spans) {
+      ctx.beginPath();
+      ctx.moveTo(span.x0, baseY);
+      span.ys.forEach((y, i) => ctx.lineTo(span.x0 + i, y));
+      ctx.lineTo(span.x0 + span.ys.length - 1, baseY);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Step polyline.
+    ctx.strokeStyle = side.color;
+    ctx.globalAlpha = strokeAlpha;
+    ctx.lineWidth = 1.4;
+    for (const span of spans) {
+      ctx.beginPath();
+      span.ys.forEach((y, i) => {
+        if (i === 0) ctx.moveTo(span.x0, y);
+        else ctx.lineTo(span.x0 + i, y);
+      });
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
 }
