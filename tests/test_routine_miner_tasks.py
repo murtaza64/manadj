@@ -93,7 +93,7 @@ def test_mine_task_persists_suggestion_rows(db, trio):
     assert (row.entry_track_id, row.exit_track_id) == (t1.id, t3.id)
     assert (row.window_start_s, row.window_end_s) == (27, 83)
     assert json.loads(row.entry_offsets_json) == [0, 3, 45]
-    assert json.loads(row.evidence_json) == {"returns": 1, "triples": 0}
+    assert json.loads(row.evidence_json) == {"returns": 1, "triples": 0, "doubles": 0}
     assert row.miner_version == MINER_VERSION
 
     db.refresh(s)
@@ -207,7 +207,7 @@ def test_list_candidates_by_session(db, client, trio):
     assert len(rows) == 1
     assert rows[0]["cast"] == [t1.id, t2.id, t3.id]
     assert rows[0]["entry_offsets"] == [0, 3, 45]
-    assert rows[0]["evidence"] == {"returns": 1, "triples": 0}
+    assert rows[0]["evidence"] == {"returns": 1, "triples": 0, "doubles": 0}
     assert rows[0]["miner_version"] == MINER_VERSION
     assert client.get(
         "/api/routine-candidates", params={"session_uuid": "other"}
