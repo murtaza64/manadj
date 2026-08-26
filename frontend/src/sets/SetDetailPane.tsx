@@ -136,8 +136,7 @@ import {
   ROW_GAP,
   ROW_PAD_X,
   TRIM_COL_W,
-  trimOffsetDb,
-  trimOffsetFromDb,
+  trimDragValue,
   type BpmDeltaRef,
 } from './rowColumns';
 import {
@@ -2153,10 +2152,6 @@ const AdjacencyRow = memo(function AdjacencyRow({
   );
 });
 
-/** Trim drag sensitivity (sets #164): dB per pixel of vertical travel —
- * the knob's ±12 dB spans ~160px. */
-const TRIM_DRAG_DB_PER_PX = 0.15;
-
 /**
  * Compact per-entry trim control (sets #164): the entry's trim offset in
  * dB, editable in place. Drag ↕ streams local updates (one wholesale PUT
@@ -2164,6 +2159,11 @@ const TRIM_DRAG_DB_PER_PX = 0.15;
  * neutral. The value is an OFFSET from neutral — track Autogain composes
  * with it when it lands (ADR 0034) — applied by the Conductor for the
  * entry's deck tenure; a live trim-knob move still takes over.
+ *
+ * Drag feel (sets #183): the value derives from the TOTAL delta since
+ * pointer-down (trimDragValue — deterministic, quantized to 0.1 dB,
+ * 20 px/dB), and the origin rebases when the 3px click dead-zone breaks
+ * so the first tick never jumps.
  */
 const TrimCell = memo(function TrimCell({
   trackId,
@@ -2178,7 +2178,7 @@ const TrimCell = memo(function TrimCell({
   const neutral = trim === 0;
   const valueAt = (clientY: number): number => {
     const d = drag.current!;
-    return trimOffsetFromDb(trimOffsetDb(d.startTrim) + (d.startY - clientY) * TRIM_DRAG_DB_PER_PX);
+    return trimDragValue(d.startTrim, d.startY - clientY);
   };
   return (
     <span
@@ -2237,6 +2237,9 @@ const TrimCell = memo(function TrimCell({
           const d = drag.current;
           if (!d || e.pointerId !== d.pointerId) return;
           if (!d.moved && Math.abs(e.clientY - d.startY) < 3) return; // a click never nudges
+          // Rebase the origin at dead-zone exit (sets #183): the drag
+          // starts from zero delta instead of jumping 3px worth of dB.
+          if (!d.moved) d.startY = e.clientY;
           d.moved = true;
           onTrimChange(trackId, valueAt(e.clientY), false);
         }}

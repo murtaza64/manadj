@@ -15,6 +15,7 @@ import {
   fmtOverlapTime,
   fmtPlayTime,
   fmtTrimDb,
+  trimDragValue,
   trimOffsetDb,
   trimOffsetFromDb,
   REMOVE_COL_W,
@@ -173,5 +174,32 @@ describe('trim cell (sets #164)', () => {
   it('sub-0.05dB residue reads neutral (a reset never shows −0.0)', () => {
     expect(fmtTrimDb(0.001)).toBe('0.0');
     expect(fmtTrimDb(-0.001)).toBe('0.0');
+  });
+});
+
+describe('trim drag (sets #183)', () => {
+  it('20px of travel = 1 dB, up is louder', () => {
+    expect(trimOffsetDb(trimDragValue(0, 20))).toBeCloseTo(1);
+    expect(trimOffsetDb(trimDragValue(0, -20))).toBeCloseTo(-1);
+  });
+
+  it('quantizes to 0.1 dB ticks — one tick per 2px', () => {
+    expect(trimOffsetDb(trimDragValue(0, 2))).toBeCloseTo(0.1);
+    expect(trimOffsetDb(trimDragValue(0, 4))).toBeCloseTo(0.2);
+    // Between ticks the value holds one of the neighbours, never a
+    // fractional-tick reading.
+    const between = trimOffsetDb(trimDragValue(0, 3));
+    expect(Math.abs(Math.round(between / 0.1) * 0.1 - between)).toBeLessThan(1e-9);
+  });
+
+  it('is deterministic: same total delta = same value, regardless of path', () => {
+    expect(trimDragValue(0.2, 37)).toBe(trimDragValue(0.2, 37));
+    // Retracing to the start pixel reads the start value (on-grid start).
+    expect(trimOffsetDb(trimDragValue(0.25, 0))).toBeCloseTo(6);
+  });
+
+  it('offsets from the drag-start trim', () => {
+    // +6 dB start, 20px up → +7 dB.
+    expect(trimOffsetDb(trimDragValue(0.25, 20))).toBeCloseTo(7);
   });
 });
