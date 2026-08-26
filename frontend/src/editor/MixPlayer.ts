@@ -323,8 +323,11 @@ export class MixPlayer {
       return;
     }
     if (!snap.playing) {
-      engine.seek(trackTime);
-      engine.play();
+      // Machine-grade join (#173): exact positioned start — the performer
+      // seek+play path routed a paused deck through the cross-deck
+      // quantized launch, so each audition's B entry rode A's live beat
+      // phase at the gesture instant (run-to-run alignment variance).
+      engine.playAt(trackTime);
       return;
     }
     const drift = engine.getPlayhead() - trackTime;

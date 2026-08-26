@@ -14,7 +14,9 @@
  * - CONTINUOUS GESTURES COLLAPSE: pitch riding and Nudges (bends) never
  *   become lanes; the single static tempo-match is decided rate-relatively
  *   (sets 169) — by the settled B-vs-A rate ratio against the BPM ratio,
- *   or by the measured cruise-slope ratio when the ticks prove the ride.
+ *   or by the measured cruise-slope ratio when the ticks prove the ride —
+ *   octave-equivalently (grid-octave 168): the required ride is the grid
+ *   ratio's dyadic fold nearest 1.
  * - SPARSE LANES: dense drag streams simplify (RDP) to editable
  *   breakpoints; untouched controls stay out of `lanes` entirely — except
  *   the incoming fader lane, always drawn: its model default (a 2s fade-in
@@ -28,7 +30,7 @@
  * The editor's deck roles are track-based: editor A = the outgoing deck,
  * whichever physical channel it was on.
  */
-import { jumpRepeatCount } from '../editor/mixModel';
+import { jumpRepeatCount, tempoMatchRatio } from '../editor/mixModel';
 import type { JumpEvent, LaneId, LanePoint, Lanes, Transition } from '../editor/mixModel';
 import { channelFaderToGain, crossfaderGains } from '../playback/mixerMath';
 import type { CaptureChannel, CaptureEvent, InitDeckState } from './events';
@@ -151,14 +153,32 @@ export function vectorizeTake(
   // pitch — is what must read as matched. A DJ who matched B to a PITCHED
   // A (both decks −0.7%-ish) performed a perfect match that absolute
   // comparison misses.
-  const required =
-    facts.bpmA && facts.bpmB ? (facts.bpmA / facts.bpmB - 1) * 100 : null;
   const renormPct = (rateAt(inc, windowEndS) / rateAt(out, windowEndS) - 1) * 100;
+  // OCTAVE-AWARE REQUIRED (grid-octave 168): half/double-BPM beatgrids
+  // are first-class in this library (DnB gridded at 87 and ridden at 174;
+  // the browse gate already folds dyadically — crud.get_tracks). Against
+  // a half-gridded track the raw grid ratio reads +~100%/−~50% required:
+  // unmatchable, every real match lost (track 959 field evidence). The
+  // required ride is the CANONICAL octave fold (tempoMatchRatio — the
+  // dyadic fold of the grid ratio nearest 1), the same fold the model
+  // replays a matched draft at, so the verdict and the playback agree.
+  // Folds sit ≥ 33% apart across the library's BPM range while the
+  // tolerance is 1.5% — folding cannot flip a healthy verdict.
+  const gridRatio = facts.bpmA && facts.bpmB ? facts.bpmA / facts.bpmB : null;
+  const matchRatio = tempoMatchRatio(facts.bpmA, facts.bpmB);
+  const fold = gridRatio !== null && matchRatio !== null ? matchRatio / gridRatio : null;
+  const required = matchRatio !== null ? (matchRatio - 1) * 100 : null;
   // Beat-domain drift bound (4dp 39): a pitch-domain tolerance alone lets
   // the accumulated back-projection error grow with the window — 1% over
   // a 145-beat double is 1.5 beats. Match only when the residual drift
-  // over the whole window stays under a quarter-beat of B.
-  const driftBoundS = facts.bpmB ? 0.25 * (60 / facts.bpmB) : null;
+  // over the whole window stays under a quarter-beat of B. Under a fold
+  // B's true beat is ambiguous (B half-gridded vs A double-gridded), so
+  // read the bound at the FASTEST interpretation of B's BPM — the
+  // conservative bound, never looser than the grid's own.
+  const driftBoundS =
+    facts.bpmB && fold !== null
+      ? 0.25 * (60 / (facts.bpmB * Math.max(1, 1 / fold)))
+      : null;
   const settledMatch =
     required !== null &&
     driftBoundS !== null &&
