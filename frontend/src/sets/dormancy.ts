@@ -18,14 +18,32 @@
  * waits) / auto-resolves (a library Transition exists for the pair —
  * plan-time resolution will play it, sets 26) / unresolved (will cut);
  * unaffected adjacencies are null.
+ *
+ * Routine pins (sets 160, ADR 0035) reconcile by their OWN rule, not
+ * the ordered-pair rule: dormancy keys on the boundary tracks + cast
+ * membership only. A routine pin stays live exactly while its cast is
+ * the next n entries from its head (interior reorder is FREE — the
+ * recorded choreography defines interior play order; interior Set order
+ * is presentational). Breaking a boundary or the membership sends it
+ * Dormant, keyed (entry track, exit track); it restores when the cast
+ * is the next n entries again — never on plain pair adjacency. While a
+ * routine pin rides its head adjacency, that pair's Dormant memory is
+ * KEPT (the shadow of the pin the routine displaced — restored on
+ * unpin/Dormant); covered interior pins stay in the entries, shadowed
+ * at read time.
  */
-import type { AdjacencyPin } from './adjacency';
+import type { AdjacencyPin, RoutineCastLookup } from './adjacency';
+import { routineOfferable } from './adjacency';
 
 /** An ordered Set entry as dormancy sees it: the track plus the pin of
- * the adjacency it heads (structurally `SetEntryLocal`). */
+ * the adjacency it heads (structurally `SetEntryLocal`). Trim (sets
+ * #164) is per-TRACK entry state, not adjacency state — the reconcile
+ * carries it along untouched (dormancy is a pin rule only). */
 export interface OrderedEntry {
   trackId: number;
   pin: AdjacencyPin | null;
+  /** Trim offset from neutral (sets #164); absent = neutral. */
+  trim?: number;
 }
 
 /** A Set's memory of a broken pin, keyed by the ORDERED track pair. */
@@ -51,41 +69,122 @@ const key = (a: number, b: number): string => `${a}|${b}`;
 export function reconcileOrderChange(
   oldEntries: readonly OrderedEntry[],
   oldDormant: readonly DormantPin[],
-  newTrackIds: readonly number[]
+  newTrackIds: readonly number[],
+  /** Routine casts (sets 160): needed to evaluate routine-pin liveness.
+   * Absent/null cast = liveness unknowable — the pin rides on its head
+   * entry unchanged (never guessed Dormant on missing metadata). */
+  castOf?: RoutineCastLookup
 ): { entries: OrderedEntry[]; dormant: DormantPin[] } {
-  // Pins on the old adjacencies (the last entry's pin is meaningless).
+  // Routine pins reconcile by the boundary+membership rule (below);
+  // everything else is pinned to its ordered pair.
   const oldPairPins = new Map<string, AdjacencyPin>();
+  const oldRoutinePins: { headTrackId: number; pin: AdjacencyPin }[] = [];
   for (let i = 0; i < oldEntries.length - 1; i++) {
     const pin = oldEntries[i].pin;
-    if (pin) oldPairPins.set(key(oldEntries[i].trackId, oldEntries[i + 1].trackId), pin);
+    if (!pin) continue;
+    if (pin.kind === 'routine') {
+      oldRoutinePins.push({ headTrackId: oldEntries[i].trackId, pin });
+    } else {
+      oldPairPins.set(key(oldEntries[i].trackId, oldEntries[i + 1].trackId), pin);
+    }
   }
 
   const dormantByPair = new Map<string, DormantPin>();
   for (const d of oldDormant) dormantByPair.set(key(d.aTrackId, d.bTrackId), d);
 
-  const entries: OrderedEntry[] = newTrackIds.map((trackId) => ({ trackId, pin: null }));
+  // Entry state that is not pin state (trim) rides with its track.
+  const oldByTrackId = new Map(oldEntries.map((e) => [e.trackId, e]));
+  const entries: OrderedEntry[] = newTrackIds.map((trackId) => ({
+    trackId,
+    pin: null,
+    trim: oldByTrackId.get(trackId)?.trim,
+  }));
+
+  /** A routine pin is live at head index j when its cast is the next n
+   * entries (membership + boundaries — routineOfferable IS the rule). */
+  const routineLiveAt = (cast: readonly number[]): number => {
+    const j = newTrackIds.indexOf(cast[0]);
+    return j >= 0 && routineOfferable(newTrackIds, j, cast) ? j : -1;
+  };
+
+  // Pass 1 — riding routine pins claim their head entries. Their head
+  // pair's Dormant memory is NOT dropped: it is the shadow of the pin
+  // the routine displaced (restored on unpin/Dormant).
+  const claimed = new Set<number>();
+  for (const { headTrackId, pin } of oldRoutinePins) {
+    const cast = (pin.uuid !== undefined ? castOf?.(pin.uuid) : null) ?? null;
+    if (!cast) {
+      // Liveness unknowable: ride on the head entry if it survived.
+      const j = newTrackIds.indexOf(headTrackId);
+      if (j >= 0 && j < entries.length - 1 && !claimed.has(j)) {
+        entries[j].pin = pin;
+        claimed.add(j);
+      }
+      continue;
+    }
+    const j = routineLiveAt(cast);
+    if (j >= 0 && !claimed.has(j)) {
+      entries[j].pin = pin;
+      claimed.add(j);
+    } else {
+      // Boundary/membership broken: Dormant, keyed by the BOUNDARY
+      // tracks (a fresh break overwrites an older memory).
+      const aTrackId = cast[0];
+      const bTrackId = cast[cast.length - 1];
+      dormantByPair.set(key(aTrackId, bTrackId), { aTrackId, bTrackId, pin });
+    }
+  }
+
+  // Pass 2 — surviving ordered-pair pins ride along. A stale Dormant
+  // memory for a ridden pair is dropped (a pair never carries two pins)
+  // — UNLESS a routine claimed the adjacency: its head-pair memory is
+  // the shadow, kept above.
   for (let i = 0; i < entries.length - 1; i++) {
+    if (claimed.has(i)) continue;
     const k = key(entries[i].trackId, entries[i + 1].trackId);
     const kept = oldPairPins.get(k);
     if (kept) {
-      // Still adjacent: the pin rides along. A stale Dormant memory for
-      // the same pair is dropped — a pair never carries two pins.
       entries[i].pin = kept;
       oldPairPins.delete(k);
-      dormantByPair.delete(k);
-      continue;
-    }
-    const dormant = dormantByPair.get(k);
-    if (dormant) {
-      entries[i].pin = dormant.pin;
       dormantByPair.delete(k);
     }
   }
 
-  // Broken pins go Dormant (a fresh break overwrites an older memory).
+  // Broken ordered-pair pins go Dormant (fresh break overwrites).
   for (const [k, pin] of oldPairPins) {
     const [aTrackId, bTrackId] = k.split('|').map(Number);
     dormantByPair.set(k, { aTrackId, bTrackId, pin });
+  }
+
+  // Pass 3 — Dormant routine memories wake when the cast is the next n
+  // entries again and no explicit pin rode onto the head adjacency.
+  // They outrank pair-memory restores (the routine displaced that pin;
+  // waking re-shadows it) but never displace a riding pin. Routine
+  // memories NEVER wake on plain pair adjacency of (entry, exit) — that
+  // means the interior is gone, the opposite of their condition.
+  for (const [k, d] of dormantByPair) {
+    if (d.pin.kind !== 'routine') continue;
+    const cast = castOf?.(d.pin.uuid) ?? null;
+    if (!cast) continue;
+    const j = routineLiveAt(cast);
+    if (j >= 0 && j < entries.length - 1 && entries[j].pin === null && !claimed.has(j)) {
+      entries[j].pin = d.pin;
+      claimed.add(j);
+      dormantByPair.delete(k);
+    }
+  }
+
+  // Pass 4 — remaining Dormant pair memories restore on their pair
+  // becoming adjacent again (skipping routine-claimed heads: those
+  // memories stay shadowed under the routine).
+  for (let i = 0; i < entries.length - 1; i++) {
+    if (entries[i].pin !== null || claimed.has(i)) continue;
+    const k = key(entries[i].trackId, entries[i + 1].trackId);
+    const dormant = dormantByPair.get(k);
+    if (dormant && dormant.pin.kind !== 'routine') {
+      entries[i].pin = dormant.pin;
+      dormantByPair.delete(k);
+    }
   }
 
   return { entries, dormant: [...dormantByPair.values()] };
@@ -115,7 +214,11 @@ export function previewAdjacencyFutures(
   for (let i = 0; i < oldEntries.length - 1; i++) {
     oldAdjacent.add(key(oldEntries[i].trackId, oldEntries[i + 1].trackId));
   }
-  const dormantPairs = new Set(oldDormant.map((d) => key(d.aTrackId, d.bTrackId)));
+  // Routine memories are keyed by BOUNDARY tracks, not an adjacency —
+  // pair adjacency never restores them, so they never preview (sets 160).
+  const dormantPairs = new Set(
+    oldDormant.filter((d) => d.pin.kind !== 'routine').map((d) => key(d.aTrackId, d.bTrackId))
+  );
 
   const futures: (AdjacencyFuture | null)[] = [];
   for (let i = 0; i < newTrackIds.length - 1; i++) {

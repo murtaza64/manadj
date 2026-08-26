@@ -1254,6 +1254,110 @@ export const api = {
     },
   },
 
+  routineCandidates: {
+    /** ALL miner-suggested candidate spans (sets #161): the Set pane
+     * matches casts against adjacencies client-side for the row-level
+     * "routines detected" highlight (the picker still queries per head). */
+    list: async (): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-candidates`);
+      if (!res.ok) throw new Error(`Failed to fetch routine candidates (${res.status})`);
+      return res.json();
+    },
+
+    /** A Session's miner-suggested Routine spans, timeline order (ADR
+     * 0035, routines 157) — the confirm surface reads this. */
+    forSession: async (sessionUuid: string): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(
+        `${API_BASE}/routine-candidates?session_uuid=${encodeURIComponent(sessionUuid)}`
+      );
+      if (!res.ok) throw new Error(`Failed to fetch routine candidates (${res.status})`);
+      return res.json();
+    },
+
+    /** Cast-prefix match (routines 157): candidates whose cast covers
+     * exactly the given ordered list's next len(cast) entries, entering
+     * on the first and exiting at the last — the pin picker's lowest
+     * trust tier (sets 160). Strongest evidence first. */
+    query: async (trackIds: number[]): Promise<RoutineCandidateWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-candidates/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_ids: trackIds }),
+      });
+      if (!res.ok) throw new Error(`Failed to query routine candidates (${res.status})`);
+      return res.json();
+    },
+  },
+
+  routineTakes: {
+    /** Routine Takes, newest first (the Transition history reads this
+     * alongside takes.list; ADR 0035, routines 158). */
+    list: async (): Promise<RoutineTakeRowWire[]> => {
+      const res = await fetch(`${API_BASE}/routine-takes`);
+      if (!res.ok) throw new Error('Failed to fetch routine takes');
+      return res.json();
+    },
+
+    /** Confirm a candidate span (with boundary trim) into a Routine Take.
+     * n ≥ 3 — a 2-cast confirm is a hand-cut Take (POST /api/takes). */
+    create: async (payload: RoutineTakeCreateWire): Promise<RoutineTakeRowWire> => {
+      const res = await fetch(`${API_BASE}/routine-takes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Failed to confirm routine take (${res.status})`);
+      return res.json();
+    },
+
+    /** Mechanical promotion: deck→slot re-addressing + beat-domain rebase
+     * via the cast Beatgrids → a saved Routine. */
+    promote: async (uuid: string): Promise<RoutineRowWire> => {
+      const res = await fetch(`${API_BASE}/routine-takes/${uuid}/promote`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail ?? `Failed to promote routine take (${res.status})`);
+      }
+      return res.json();
+    },
+
+    delete: async (uuid: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/routine-takes/${uuid}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete routine take (${res.status})`);
+    },
+  },
+
+  routines: {
+    /** All saved Routines, newest first — metadata only. */
+    list: async (): Promise<RoutineRowWire[]> => {
+      const res = await fetch(`${API_BASE}/routines`);
+      if (!res.ok) throw new Error('Failed to fetch routines');
+      return res.json();
+    },
+
+    /** One Routine with its slot-addressed, beat-domain event replay. */
+    get: async (uuid: string): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}`);
+      if (!res.ok) throw new Error(`Failed to fetch routine (${res.status})`);
+      return res.json();
+    },
+
+    rename: async (uuid: string, name: string | null): Promise<RoutineRowWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error(`Failed to rename routine (${res.status})`);
+      return res.json();
+    },
+
+    delete: async (uuid: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Failed to delete routine (${res.status})`);
+    },
+  },
+
   sessions: {
     /** The Sessions list, newest first — headers + Take count (ADR 0033). */
     list: async (): Promise<SessionRowWire[]> => {
@@ -1435,6 +1539,64 @@ export interface TakeCreateWire {
   origin?: string;
 }
 
+// ── Routine wire types (ADR 0035, routines 157/158) ─────────────────────
+
+export interface RoutineCandidateWire {
+  uuid: string;
+  session_uuid: string;
+  /** Entry-ordered cast (track ids = slot order). */
+  cast: number[];
+  /** Capture-clock window on the owning Session. */
+  window_start_s: number;
+  window_end_s: number;
+  /** Per slot, seconds from window start (slot 0 = 0.0). */
+  entry_offsets: number[];
+  evidence: Record<string, number>;
+  miner_version: number;
+  created_at: string | null;
+}
+
+export interface RoutineTakeCreateWire {
+  uuid: string;
+  session_uuid: string;
+  window_start_s: number;
+  window_end_s: number;
+  cast: number[];
+  entry_offsets: number[];
+  origin_candidate_uuid?: string | null;
+}
+
+export interface RoutineTakeRowWire {
+  uuid: string;
+  session_uuid: string;
+  cast: number[];
+  window_start_s: number;
+  window_end_s: number;
+  entry_offsets: number[];
+  origin_candidate_uuid: string | null;
+  promoted_routine_uuid: string | null;
+  confirmed_at: string;
+}
+
+export interface RoutineRowWire {
+  uuid: string;
+  name: string | null;
+  cast: number[];
+  /** Per slot, beats from Routine start. */
+  entry_offsets_beats: number[];
+  /** Per slot, track position (seconds) at its entry. */
+  entry_positions: number[];
+  duration_beats: number;
+  origin_take_uuid: string | null;
+  created_at: string | null;
+}
+
+export interface RoutineDetailWire extends RoutineRowWire {
+  /** Slot-addressed, beat-domain mechanical replay (each event carries
+   * `beat` + `slot`; global controls carry slot null). */
+  events: Record<string, unknown>[];
+}
+
 // ── Session wire types (Sessions PRD, ADR 0033) ─────────────────────────
 
 export interface SessionRowWire {
@@ -1468,24 +1630,32 @@ export interface SetRowWire {
 export interface SetEntryItemWire {
   track_id: number;
   /** Adjacency pin (sets 02): kind and uuid travel together for
-   * transition/take; a Hard-cut pin (sets 26) carries no uuid. */
-  pin_kind?: 'transition' | 'take' | 'hardcut' | null;
+   * transition/take/routine (sets 160); a Hard-cut pin (sets 26)
+   * carries no uuid. */
+  pin_kind?: 'transition' | 'take' | 'hardcut' | 'routine' | null;
   pin_uuid?: string | null;
+  /** Per-entry trim (sets #164): an OFFSET from neutral in mixer-knob
+   * units (0 = neutral, ±0.5 spans the knob) — composes with track
+   * Autogain when that lands (ADR 0034). Absent = neutral. */
+  trim?: number;
 }
 
 export interface SetEntryRowWire {
   track_id: number;
   position: number;
-  pin_kind: 'transition' | 'take' | 'hardcut' | null;
+  pin_kind: 'transition' | 'take' | 'hardcut' | 'routine' | null;
   pin_uuid: string | null;
+  /** Trim offset from neutral, knob units (sets #164). */
+  trim: number;
 }
 
 /** A Dormant pin (sets 07): a broken pin remembered per ORDERED track
- * pair, per Set — same shape on PUT and GET. */
+ * pair, per Set — same shape on PUT and GET. A routine memory (sets
+ * 160) is keyed by its BOUNDARY tracks (entry, exit). */
 export interface SetDormantPinWire {
   a_track_id: number;
   b_track_id: number;
-  pin_kind: 'transition' | 'take' | 'hardcut';
+  pin_kind: 'transition' | 'take' | 'hardcut' | 'routine';
   pin_uuid: string | null;
 }
 

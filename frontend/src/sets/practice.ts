@@ -21,7 +21,7 @@ export const PRACTICE_RUNWAY_SEC = 30;
 /** Structural slices of the set plan (sets/planner.ts types satisfy
  * these) — undefined when no plan is available for the adjacency. */
 export interface PracticeCueInput {
-  adjacency?: { kind: 'hardcut' | 'transition' | 'take'; mixStartSec: number };
+  adjacency?: { kind: 'hardcut' | 'transition' | 'take' | 'routine'; mixStartSec: number };
   outgoingEntry?: { mixOffsetSec: number };
   incomingEntry?: { entrySec: number };
   outgoingDurationSec: number;

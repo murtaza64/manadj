@@ -1,0 +1,152 @@
+/* Pin picker panel (sets 160, prototype variant P). Routine family =
+   bright magenta (#ff00c8), matching the Session timeline's candidate
+   chips; the three trust tiers are visually distinct (solid border >
+   dimmer solid > dashed). */
+
+.ppp-panel {
+  position: fixed;
+  z-index: 1000;
+  min-width: 320px;
+  max-width: 440px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 8px 12px 10px;
+  background: var(--mantle, #14141c);
+  border: 1px solid var(--surface1, #3a3a4a);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+  color: var(--text, #ddd);
+}
+
+.ppp-title {
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--blue, #4aa8ff);
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ppp-section {
+  font-size: 11px;
+  font-weight: 800;
+  margin: 8px 0 2px;
+}
+.ppp-section small {
+  color: var(--subtext0, #777);
+  font-weight: 500;
+}
+.ppp-section.ppp-routine {
+  color: #ff00c8;
+}
+.ppp-section.ppp-transitions {
+  color: var(--green, #58d68d);
+}
+.ppp-section.ppp-takes {
+  color: var(--mauve, #b478ff);
+}
+
+.ppp-opt {
+  cursor: pointer;
+  padding: 3px 9px;
+  border-radius: 6px;
+}
+.ppp-opt:hover {
+  background: var(--surface0, #2a2a36);
+}
+.ppp-opt.current {
+  font-weight: 700;
+}
+.ppp-none {
+  color: var(--subtext0, #666);
+  padding: 2px 9px;
+}
+
+.ppp-transition-opt {
+  color: var(--green, #58d68d);
+}
+.ppp-take-opt {
+  color: var(--mauve, #b478ff);
+}
+.ppp-hardcut {
+  color: var(--red, #ff5555);
+  font-weight: 800;
+  margin-top: 6px;
+  border-top: 1px solid var(--surface1, #3a3a4a);
+  border-radius: 0 0 6px 6px;
+  padding-top: 6px;
+}
+.ppp-unpin {
+  color: var(--subtext1, #999);
+}
+
+/* Routine tier cards */
+.ppp-routine-opt {
+  border: 1px solid #ff00c8;
+  border-radius: 8px;
+  margin: 4px 0;
+  padding: 5px 9px;
+}
+.ppp-routine-opt b {
+  color: #ff00c8;
+}
+.ppp-routine-opt small {
+  color: var(--subtext0, #9a9ab0);
+  margin-left: 6px;
+}
+.ppp-routine-opt.tier-take {
+  border-color: rgba(255, 0, 200, 0.55);
+}
+.ppp-routine-opt.tier-take b {
+  color: #ff5fd8;
+}
+.ppp-routine-opt.tier-candidate {
+  border-style: dashed;
+  border-color: rgba(255, 0, 200, 0.55);
+}
+.ppp-routine-opt.tier-candidate b {
+  color: #ff5fd8;
+  font-weight: 600;
+}
+.ppp-routine-opt.current {
+  background: rgba(255, 0, 200, 0.08);
+}
+
+/* Entry-offset mini gantt */
+.ppp-lanes {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ppp-lane {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ppp-lane-label {
+  width: 132px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--subtext1, #aaa);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.ppp-lane-track {
+  position: relative;
+  flex: 1;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.ppp-lane-track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(255, 0, 200, 0.6);
+  border-radius: 3px;
+}

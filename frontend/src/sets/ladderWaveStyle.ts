@@ -555,16 +555,25 @@ const OUT_OF_TRACK_CSS = `rgb(${Math.round(BG[0] * 0.6 * 255)},${Math.round(
 )},${Math.round(BG[2] * 0.6 * 255)})`;
 
 /**
- * Draw one clip's styled waveform into a 2D context. `dir` is the ladder's
- * mirrored-lane orientation: 'up' grows from the bottom edge (deck A,
- * above the center line), 'down' hangs from the top edge (deck B).
+ * Draw one clip's styled waveform into a 2D context. `dir` orients the
+ * render: 'up' grows from the bottom edge, 'down' hangs from the top,
+ * 'bipolar' mirrors every band symmetrically around the vertical center
+ * (the classic waveform read — the ladder uses this on every lane,
+ * #161: lane MIRRORING lives in the stack geometry, never in how a
+ * lane's own content is drawn).
  */
 export function drawStyledWave(
   ctx: CanvasRenderingContext2D,
   data: DecodedWaveform,
   styleId: string,
   params: StyleParams,
-  opts: { width: number; height: number; dir: 'up' | 'down'; range: [number, number]; brightness?: number },
+  opts: {
+    width: number;
+    height: number;
+    dir: 'up' | 'down' | 'bipolar';
+    range: [number, number];
+    brightness?: number;
+  },
 ): void {
   const { width: w, height: h, dir } = opts;
   const [t0, t1] = opts.range;
@@ -580,8 +589,17 @@ export function drawStyledWave(
     }
     for (const seg of col.segments) {
       ctx.fillStyle = seg.css;
-      const hgt = (seg.y1 - seg.y0) * h;
-      ctx.fillRect(x, dir === 'up' ? h - seg.y1 * h : seg.y0 * h, 1, hgt);
+      if (dir === 'bipolar') {
+        // Each band mirrors around the centerline at half amplitude —
+        // full dynamic range still spans the lane.
+        const yTop = (h - seg.y1 * h) / 2;
+        const hgt = Math.max(1, ((seg.y1 - seg.y0) * h) / 2);
+        ctx.fillRect(x, yTop, 1, hgt);
+        ctx.fillRect(x, h - yTop - hgt, 1, hgt);
+      } else {
+        const hgt = (seg.y1 - seg.y0) * h;
+        ctx.fillRect(x, dir === 'up' ? h - seg.y1 * h : seg.y0 * h, 1, hgt);
+      }
     }
   }
 }
