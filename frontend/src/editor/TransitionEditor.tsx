@@ -277,6 +277,10 @@ function TransitionEditorInner() {
    * The stored function is the cancel — any other transport gesture,
    * displacement, or pair supersession calls it; fulfilment nulls it. */
   const pendingAuditionRef = useRef<(() => void) | null>(null);
+  /** Per-side flag: has ANY session assignment landed yet? Consulted only
+   * by the mount-time last-pair fallback (#188) so its late-resolving
+   * fetch can never clobber a pair an artifact open assigned meanwhile. */
+  const sessionSeededRef = useRef<{ A: boolean; B: boolean }>({ A: false, B: false });
   const [auditionPending, setAuditionPending] = useState(false);
   const cancelPendingAudition = useCallback(() => {
     if (!pendingAuditionRef.current) return;
@@ -294,6 +298,7 @@ function TransitionEditorInner() {
    * another surface). */
   const assignSession = useCallback(
     (deck: 'A' | 'B', track: Track) => {
+      sessionSeededRef.current[deck] = true;
       cancelPendingAudition();
       if (player.isPlaying()) player.pause();
       if (deck === 'A') setTrackA(track);
@@ -643,7 +648,16 @@ function TransitionEditorInner() {
       if (shared) {
         assignSession(deck, shared);
       } else if (fallbackId !== undefined && fallbackId !== null && !Number.isNaN(fallbackId)) {
-        api.tracks.getById(fallbackId).then((t: Track) => assignSession(deck, t)).catch(() => undefined);
+        api.tracks.getById(fallbackId).then((t: Track) => {
+          // Stale-resolution guard (#188): an artifact open (openTake /
+          // openPair) can land while this fetch is in flight — its
+          // assignment must win. Without this check the last-pair fallback
+          // silently clobbers the just-opened pair and the next audition
+          // plays an unrelated track. (Same race DeckContext's restore
+          // fallback already guards.)
+          if (sessionSeededRef.current[deck]) return;
+          assignSession(deck, t);
+        }).catch(() => undefined);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
