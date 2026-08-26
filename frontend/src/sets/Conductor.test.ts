@@ -163,7 +163,12 @@ class FakeEngine {
 
 type LaneCapture = { A: PlanAutomation | null; B: PlanAutomation | null };
 
-function fakeMixer(clock: () => number, capture?: LaneCapture): Mixer {
+function fakeMixer(
+  clock: () => number,
+  capture?: LaneCapture,
+  /** Base trim writes (sets #164): takeover's base-sync lands lane trim here. */
+  trimWrites?: Array<{ ch: 'A' | 'B'; value: number }>
+): Mixer {
   const channel = { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, pfl: false };
   return {
     now: clock,
@@ -180,6 +185,9 @@ function fakeMixer(clock: () => number, capture?: LaneCapture): Mixer {
     setFader: () => {},
     setEq: () => {},
     setFilter: () => {},
+    setTrim: (ch: 'A' | 'B', value: number) => {
+      if (trimWrites) trimWrites.push({ ch, value });
+    },
     setCrossfader: () => {},
   } as unknown as Mixer;
 }
@@ -247,22 +255,26 @@ function makeConductor(
   const engines = { A: new FakeEngine(clock, latencyOf), B: new FakeEngine(clock, latencyOf) };
   const stopped: string[] = [];
   const lanes: LaneCapture = { A: null, B: null };
+  const trimWrites: Array<{ ch: 'A' | 'B'; value: number }> = [];
   const loads: Array<{ deck: ChannelId; trackId: number }> = [];
   const conductor = new Conductor(
     plan,
-    { mixer: fakeMixer(clock, lanes), engines: engines as unknown as Record<ChannelId, DeckEngine> },
+    {
+      mixer: fakeMixer(clock, lanes, trimWrites),
+      engines: engines as unknown as Record<ChannelId, DeckEngine>,
+    },
     {
       loadTrack: (deck, trackId) => {
         loads.push({ deck, trackId });
         // emittingLoads models the real async flow: the engine emits its
         // trackId change outside any conductor call (self-guard blind).
-        if (opts.emittingLoads) engines[deck].loadForeign(trackId);
-        else engines[deck].trackId = trackId;
+        if (opts.emittingLoads) engines[deck as 'A' | 'B'].loadForeign(trackId);
+        else engines[deck as 'A' | 'B'].trackId = trackId;
       },
       onStopped: (reason) => stopped.push(reason),
     }
   );
-  return { conductor, engines, plan, stopped, lanes, loads };
+  return { conductor, engines, plan, stopped, lanes, loads, trimWrites };
 }
 
 /** Per-deck actual-audio offset from its plan position at mix time t. */
@@ -581,7 +593,13 @@ describe('live re-plan (sets 24: replacePlan)', () => {
     expect(engines.A.pitchPercent).toBeGreaterThan(0);
     expect(engines.A.pitchPercent).toBeLessThan(5);
     tickAt(32.05); // ramp complete
-    expect(engines.A.pitchPercent).toBeCloseTo(5, 6);
+    // The ease deliberately accrued ~|Δpitch|/100 · rampSec/2 = 50ms of
+    // drift; the phase servo (#161 finding 4) now burns it with a gentle
+    // nudge folded into the planned pitch — never a seek.
+    expect(engines.A.pitchPercent).toBeGreaterThanOrEqual(5);
+    expect(engines.A.pitchPercent).toBeLessThanOrEqual(5.75 + 1e-9);
+    // (Convergence itself is untestable here: the fake engine's playhead
+    // is pitch-blind — conductorRoutine.test.ts covers the servo.)
     // Never re-seeked while converging (the pickup no-touch rule).
     expect(engines.A.seeks).toBe(seeks);
     conductor.stop();
@@ -606,5 +624,80 @@ describe('live re-plan (sets 24: replacePlan)', () => {
     expect(lanes.A!.fader).toBeGreaterThan(0.25);
     expect(lanes.A!.fader).toBeLessThan(0.99);
     conductor.stop();
+  });
+});
+
+describe('per-entry trim (sets #164)', () => {
+  const latency = () => 0.002;
+
+  /** overlapPlan with trims: entry 0 (deck A) +0.1, entry 1 (deck B) −0.2. */
+  function trimmedPlan(): SetPlan {
+    const transition: Transition = {
+      startSec: 60,
+      durationSec: 10,
+      bInSec: 0,
+      tempoMatch: false,
+      lanes: {},
+    };
+    return planSet({
+      entries: [
+        { trackId: 1, pin: { kind: 'transition', uuid: 't1' }, trim: 0.1 },
+        { trackId: 2, pin: null, trim: -0.2 },
+      ],
+      tracks: {
+        1: { durationSec: 120, bpm: null, hotCue1Sec: null },
+        2: { durationSec: 120, bpm: null, hotCue1Sec: null },
+      },
+      transitionsByUuid: { t1: transition },
+      takesByUuid: {},
+    });
+  }
+
+  it('applies each entry trim on its deck from load: neutral + offset rides the overlay', () => {
+    const { conductor, lanes } = makeConductor(latency, trimmedPlan());
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    // Deck A sounds its entry: neutral 0.5 + 0.1. Deck B holds the
+    // upcoming entry's trim already — in place from the Deck load,
+    // before its window begins.
+    expect(lanes.A?.trim).toBeCloseTo(0.6);
+    expect(lanes.B?.trim).toBeCloseTo(0.3);
+    conductor.stop();
+  });
+
+  it('neutral entries put no trim on the overlay — the live knob keeps the node', () => {
+    const { conductor, lanes } = makeConductor(latency); // overlapPlan: all neutral
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    expect(lanes.A?.trim).toBeUndefined();
+    expect(lanes.B?.trim).toBeUndefined();
+    conductor.stop();
+  });
+
+  it('takeover lands the sounding trim into base state (inaudible disengage)', () => {
+    const { conductor, engines, stopped, trimWrites } = makeConductor(latency, trimmedPlan());
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    now = 30;
+    engines.A.pause(); // manual gesture mid-track → takeover
+    expect(stopped).toEqual(['takeover']);
+    expect(trimWrites).toEqual([
+      { ch: 'A', value: expect.closeTo(0.6, 5) },
+      { ch: 'B', value: expect.closeTo(0.3, 5) },
+    ]);
+  });
+
+  it('takeover with all-neutral entries never touches base trim', () => {
+    const { conductor, engines, stopped, trimWrites } = makeConductor(latency);
+    conductor.playFromEntry(0);
+    tickAt(0);
+    tickAt(0.01);
+    now = 30;
+    engines.A.pause();
+    expect(stopped).toEqual(['takeover']);
+    expect(trimWrites).toEqual([]);
   });
 });

@@ -180,7 +180,7 @@ function harness() {
       audio,
       (deck, trackId) => {
         loads.push(`${deck}:${trackId}`);
-        engines[deck].trackId = trackId;
+        engines[deck as 'A' | 'B'].trackId = trackId;
       },
       { rampSec: 1.5 }
     );
@@ -216,6 +216,9 @@ describe('pickup during an editor audition (the issue-25 repro)', () => {
     expect(player.isPlaying()).toBe(false);
     unregisterSurface('editor');
 
+    // The release paused the decks; a PAUSED deck is silent and never an
+    // anchor (#161 transport gate) — the DJ brings deck A back in first.
+    engines.A.playing = true;
     const decision = pickup();
     expect(decision).toMatchObject({ lit: true, mixTime: 30 });
     expect(getConductor()).not.toBeNull(); // the ONE driver now conducting

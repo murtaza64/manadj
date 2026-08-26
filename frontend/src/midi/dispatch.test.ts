@@ -31,6 +31,7 @@ import {
   _resetGridChordForTests,
   _resetSoftTakeoverForTests,
   dispatchMidiAction,
+  forgetHardwareState,
 } from './dispatch';
 import { _resetTakeoverFeedbackForTests, takeoverHint, takeoverKey } from './takeoverFeedback';
 import {
@@ -1013,6 +1014,74 @@ describe('mixer/pitch/match (midi-controller 04)', () => {
     dispatchMidiAction({ kind: 'absolute', target: { control: 'master' }, value: 1 });
     dispatchMidiAction({ kind: 'absolute', target: { control: 'pitch', deck: 'A' }, value: 1 });
     expect(calls).toEqual([]);
+  });
+});
+
+describe('deck unplug control memory (midi-controller 20)', () => {
+  const fader = (value: number): MidiAction => ({
+    kind: 'absolute',
+    target: { control: 'channel-fader', channel: 'A' },
+    value,
+  });
+  const trim = (value: number): MidiAction => ({
+    kind: 'absolute',
+    target: { control: 'trim', channel: 'A' },
+    value,
+  });
+
+  it('a latched control must pick the remembered value up again after replug', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(fader(1)); // latches at the default
+    dispatchMidiAction(fader(0.8)); // tracks down — software remembers 0.8
+    forgetHardwareState(); // unplug
+    // The physical fader moved to 0.2 while unplugged. Replugged, its
+    // first sample must NOT jump the remembered 0.8 (a surviving latch
+    // would apply it straight through).
+    dispatchMidiAction(fader(0.2));
+    expect(calls).toEqual(['mixer:fader:A:1', 'mixer:fader:A:0.8']);
+    expect(takeoverHint(takeoverKey.channelFader('A'))).toBe('up');
+    // Crossing the remembered value picks up again, like any fresh boot.
+    dispatchMidiAction(fader(0.85));
+    expect(calls).toEqual(['mixer:fader:A:1', 'mixer:fader:A:0.8', 'mixer:fader:A:0.85']);
+  });
+
+  it('crossing is never judged against a pre-unplug sample', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(trim(0.2)); // mismatched (default 0.5): suppressed
+    forgetHardwareState(); // unplug
+    // 0.2 → 0.9 would "cross" 0.5 if the stale sample survived the replug.
+    dispatchMidiAction(trim(0.9));
+    expect(calls).toEqual([]);
+  });
+
+  it('replug re-latches like a fresh boot: first sample within grace latches', () => {
+    registerFakeMixerControls();
+    dispatchMidiAction(trim(0.5)); // latches at the default
+    dispatchMidiAction(trim(0.3)); // software remembers 0.3
+    forgetHardwareState(); // unplug
+    // The knob barely moved while unplugged: first-touch grace latches it
+    // without demanding a wiggle back through the value.
+    dispatchMidiAction(trim(0.33));
+    expect(calls).toEqual(['mixer:trim:A:0.5', 'mixer:trim:A:0.3', 'mixer:trim:A:0.33']);
+  });
+
+  it('an armed grid chord dies with the port: jog is plain after replug, no stale commit', () => {
+    registerFakeDeckControls('A');
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'down',
+      target: { control: 'grid-nudge', deck: 'A', direction: 'later' },
+    });
+    dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 3 });
+    forgetHardwareState(); // unplug mid-chord: the release edge is lost
+    dispatchMidiAction({ kind: 'relative', target: { control: 'jog', deck: 'A' }, ticks: 2 });
+    // A post-replug release of the same pad is a stray: swallowed.
+    dispatchMidiAction({
+      kind: 'button',
+      edge: 'up',
+      target: { control: 'grid-nudge', deck: 'A', direction: 'later' },
+    });
+    expect(calls).toEqual(['A:gridLocal:3', 'A:jog:2']);
   });
 });
 

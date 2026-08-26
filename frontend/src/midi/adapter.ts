@@ -25,7 +25,11 @@ import type { DecoderState } from './translator';
  * keyboard and pointer unaffected.
  *
  * Decoder state is per port and reset on (re)connect, so a replug never
- * resumes a stale held-button picture.
+ * resumes a stale held-button picture. Detaching a mapped input also
+ * notifies onPortDetached (midi-controller 20): dispatch forgets its
+ * physical-hardware picture (soft-takeover latches, armed grid chords) so
+ * a replugged control must pick the remembered software value up again
+ * instead of jumping it.
  *
  * Output side (midi-pad-leds 01): output ports match Mappings by the same
  * name substring; each match publishes a send capability to the output
@@ -37,10 +41,18 @@ export interface AttachMidiOptions {
   mappings: readonly Mapping[];
   onActivity?: () => void;
   onAction: (action: MidiAction) => void;
+  /** A mapped input port detached (unplug, or dispose). Fired after the
+   * port's listener is gone, so no action can race the notification. */
+  onPortDetached?: () => void;
 }
 
 /** Attach once at the app provider level; returns a detach function. */
-export function attachMidiController({ mappings, onActivity, onAction }: AttachMidiOptions): () => void {
+export function attachMidiController({
+  mappings,
+  onActivity,
+  onAction,
+  onPortDetached,
+}: AttachMidiOptions): () => void {
   let disposed = false;
   let access: MIDIAccess | null = null;
   const attached = new Map<MIDIInput, () => void>();
@@ -62,6 +74,7 @@ export function attachMidiController({ mappings, onActivity, onAction }: AttachM
     attached.set(input, () => {
       input.removeEventListener('midimessage', onMessage);
       controllerDetached(input.id);
+      onPortDetached?.();
     });
     controllerAttached(input.id, input.name ?? 'MIDI controller');
   };

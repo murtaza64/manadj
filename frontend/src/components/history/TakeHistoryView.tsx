@@ -1,16 +1,21 @@
 /**
- * Transition history (transition-takes 02): the chronological log of
- * Takes — "what did I actually mix, when" (glossary). Minimal on
- * purpose: newest-first rows with pair, time, window length, confidence,
- * and delete. Opening a Take in the editor is issue 03; false positives
- * are kept deliberately (delete is manual — ADR 0020).
+ * Transition history (transition-takes 02; routines 158): the
+ * chronological log of Takes AND Routine Takes — "what did I actually
+ * mix, when" (glossary) — grouped with kin: rows sharing an engagement
+ * identity (the ordered pair for Takes, the ordered cast for Routine
+ * Takes) sit together, groups ordered by their newest member. False
+ * positives are kept deliberately (delete is manual — ADR 0020).
+ * A Routine Take row can promote (mechanical deck→slot + beat rebase,
+ * ADR 0035) right here.
  */
 import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
+import type { RoutineTakeRowWire, TakeRowWire } from '../../api/client';
 import { requestTakeReview } from '../../capture/takeReview';
 import { requestSessionMoment } from '../../sessions/openSession';
 import { degradeDeletedPinsLocal } from '../../sets/setStore';
+import { useToast } from '../Toast';
 import './takeHistory.css';
 
 function fmtWhen(iso: string): string {
@@ -29,18 +34,67 @@ function fmtLen(sec: number): string {
   return `${Math.floor(sec / 60)}m${String(Math.round(sec % 60)).padStart(2, '0')}s`;
 }
 
+/** One history row: a Take or a Routine Take, under a shared kin key. */
+type HistoryEntry =
+  | { kind: 'take'; when: string; kin: string; take: TakeRowWire }
+  | { kind: 'routine'; when: string; kin: string; take: RoutineTakeRowWire };
+
 export function TakeHistoryView() {
   const queryClient = useQueryClient();
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['takes'] });
+  const toast = useToast();
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['takes'] });
+    void queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+  };
 
   const { data: rows, error } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+  const { data: routineRows } = useQuery({
+    queryKey: ['routine-takes'],
+    queryFn: api.routineTakes.list,
+  });
 
   // Live update needs no listener here: the take sink invalidates
   // `['takes']` itself on persist (sets 13).
 
+  // Kin groups (glossary "grouped with kin"): key = the engagement
+  // identity — ordered pair for Takes, ordered cast for Routine Takes.
+  // Groups sort by their newest member; rows within a group newest first.
+  const groups = useMemo(() => {
+    const entries: HistoryEntry[] = [
+      ...(rows ?? []).map((t) => ({
+        kind: 'take' as const,
+        when: t.detected_at,
+        kin: `pair:${t.a_track_id}->${t.b_track_id}`,
+        take: t,
+      })),
+      ...(routineRows ?? []).map((t) => ({
+        kind: 'routine' as const,
+        when: t.confirmed_at,
+        kin: `cast:${t.cast.join('->')}`,
+        take: t,
+      })),
+    ];
+    const byKin = new Map<string, HistoryEntry[]>();
+    for (const e of entries) {
+      const list = byKin.get(e.kin);
+      if (list) list.push(e);
+      else byKin.set(e.kin, [e]);
+    }
+    const out = [...byKin.values()];
+    for (const list of out) list.sort((a, b) => b.when.localeCompare(a.when));
+    out.sort((a, b) => b[0].when.localeCompare(a[0].when));
+    return out;
+  }, [rows, routineRows]);
+
   const trackIds = useMemo(
-    () => [...new Set((rows ?? []).flatMap((t) => [t.a_track_id, t.b_track_id]))].sort((a, b) => a - b),
-    [rows]
+    () =>
+      [
+        ...new Set([
+          ...(rows ?? []).flatMap((t) => [t.a_track_id, t.b_track_id]),
+          ...(routineRows ?? []).flatMap((t) => t.cast),
+        ]),
+      ].sort((a, b) => a - b),
+    [rows, routineRows]
   );
   const { data: labels } = useQuery({
     queryKey: ['take-track-labels', trackIds],
@@ -70,14 +124,33 @@ export function TakeHistoryView() {
     invalidate();
   };
 
+  const removeRoutine = async (uuid: string) => {
+    await api.routineTakes.delete(uuid).catch((err) => console.error('routine take delete failed', err));
+    invalidate();
+  };
+
+  const promote = async (uuid: string) => {
+    try {
+      const routine = await api.routineTakes.promote(uuid);
+      toast(
+        `Promoted — Routine saved: ${routine.cast.length} slots · ${Math.round(routine.duration_beats)} beats.`
+      );
+    } catch (err) {
+      toast(String(err));
+    }
+    invalidate();
+  };
+
   const label = (id: number) => labels?.[id] ?? `track ${id}`;
+
+  const empty = (rows?.length ?? 0) === 0 && (routineRows?.length ?? 0) === 0;
 
   return (
     <div className="take-history">
       {error ? <div className="take-history-error">{String(error)}</div> : null}
       {rows === undefined ? (
         <div className="take-history-empty">Loading…</div>
-      ) : rows.length === 0 ? (
+      ) : empty ? (
         <div className="take-history-empty">
           No Takes yet — mix something in the Performance view and finished handovers land here.
         </div>
@@ -86,7 +159,7 @@ export function TakeHistoryView() {
           <thead>
             <tr>
               <th>When</th>
-              <th>Handover</th>
+              <th>Engagement</th>
               <th>Window</th>
               <th>Confidence</th>
               <th />
@@ -95,69 +168,163 @@ export function TakeHistoryView() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((t) => (
-              <tr
-                key={t.uuid}
-                className="take-row"
-                title={
-                  t.promoted_transition_uuid
-                    ? 'Open its promoted Transition in the editor'
-                    : 'Review this Take in the Transition editor'
-                }
-                onClick={() => requestTakeReview(t.uuid)}
-              >
-                <td className="take-when">{fmtWhen(t.detected_at)}</td>
-                <td className="take-pair">
-                  <span title={`outgoing: ${label(t.a_track_id)}`}>{label(t.a_track_id)}</span>
-                  <span className="take-arrow"> → </span>
-                  <span title={`incoming: ${label(t.b_track_id)}`}>{label(t.b_track_id)}</span>
-                </td>
-                <td>{fmtLen(t.window_end_s - t.window_start_s)}</td>
-                <td>
-                  <span
-                    className="take-confidence"
-                    style={{ opacity: 0.4 + t.confidence * 0.6 }}
-                    title={`detector v${t.detector_version}`}
-                  >
-                    {(t.confidence * 100).toFixed(0)}%
-                  </span>
-                </td>
-                <td className="take-promoted">
-                  {t.promoted_transition_uuid ? (
-                    <span title="Promoted to the Transition library">★</span>
-                  ) : null}
-                </td>
-                <td>
-                  {t.session_uuid ? (
-                    <button
-                      className="take-view-session"
-                      title="View this moment on its Session's timeline"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        requestSessionMoment({
-                          sessionUuid: t.session_uuid!,
-                          atS: t.window_start_s,
-                        });
-                      }}
+            {groups.map((group) => {
+              const head = group[0];
+              const kinLabel =
+                head.kind === 'take'
+                  ? `${label(head.take.a_track_id)} → ${label(head.take.b_track_id)}`
+                  : head.take.cast.map(label).join(' → ');
+              return [
+                <tr key={`kin-${head.kin}`} className="take-kin-header">
+                  <td colSpan={7}>
+                    {head.kind === 'routine' ? '◆ ' : ''}
+                    {kinLabel}
+                    <span className="take-kin-count">
+                      {group.length > 1 ? ` · ${group.length} takes` : ''}
+                    </span>
+                  </td>
+                </tr>,
+                ...group.map((e) =>
+                  e.kind === 'take' ? (
+                    <tr
+                      key={e.take.uuid}
+                      className="take-row"
+                      title={
+                        e.take.promoted_transition_uuid
+                          ? 'Open its promoted Transition in the editor'
+                          : 'Review this Take in the Transition editor'
+                      }
+                      onClick={() => requestTakeReview(e.take.uuid)}
                     >
-                      ▦
-                    </button>
-                  ) : null}
-                </td>
-                <td>
-                  <button
-                    className="take-delete"
-                    title="Delete this Take"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void remove(t.uuid);
-                    }}
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
+                      <td className="take-when">{fmtWhen(e.take.detected_at)}</td>
+                      <td className="take-pair">
+                        <span title={`outgoing: ${label(e.take.a_track_id)}`}>
+                          {label(e.take.a_track_id)}
+                        </span>
+                        <span className="take-arrow"> → </span>
+                        <span title={`incoming: ${label(e.take.b_track_id)}`}>
+                          {label(e.take.b_track_id)}
+                        </span>
+                      </td>
+                      <td>{fmtLen(e.take.window_end_s - e.take.window_start_s)}</td>
+                      <td>
+                        <span
+                          className="take-confidence"
+                          style={{ opacity: 0.4 + e.take.confidence * 0.6 }}
+                          title={`detector v${e.take.detector_version}${e.take.origin === 'manual' ? ' · hand-cut' : ''}`}
+                        >
+                          {(e.take.confidence * 100).toFixed(0)}%
+                        </span>
+                      </td>
+                      <td className="take-promoted">
+                        {e.take.promoted_transition_uuid ? (
+                          <span title="Promoted to the Transition library">★</span>
+                        ) : null}
+                      </td>
+                      <td>
+                        {e.take.session_uuid ? (
+                          <button
+                            className="take-view-session"
+                            title="View this moment on its Session's timeline"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              requestSessionMoment({
+                                sessionUuid: e.take.session_uuid!,
+                                atS: e.take.window_start_s,
+                              });
+                            }}
+                          >
+                            ▦
+                          </button>
+                        ) : null}
+                      </td>
+                      <td>
+                        <button
+                          className="take-delete"
+                          title="Delete this Take"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            void remove(e.take.uuid);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr
+                      key={e.take.uuid}
+                      className="take-row routine"
+                      title="A hand-confirmed Routine Take — view it on its Session's timeline"
+                      onClick={() =>
+                        requestSessionMoment({
+                          sessionUuid: e.take.session_uuid,
+                          atS: e.take.window_start_s,
+                          spanS: (e.take.window_end_s - e.take.window_start_s) * 2,
+                        })
+                      }
+                    >
+                      <td className="take-when">{fmtWhen(e.take.confirmed_at)}</td>
+                      <td className="take-pair">
+                        <span className="take-routine-badge" title="Routine Take (ADR 0035)">
+                          ◆ {e.take.cast.length}×
+                        </span>{' '}
+                        {e.take.cast.map(label).join(' → ')}
+                      </td>
+                      <td>{fmtLen(e.take.window_end_s - e.take.window_start_s)}</td>
+                      <td>
+                        <span className="take-confidence" title="Hand-confirmed — no detector score">
+                          confirmed
+                        </span>
+                      </td>
+                      <td className="take-promoted">
+                        {e.take.promoted_routine_uuid ? (
+                          <span title="Promoted to a saved Routine">★</span>
+                        ) : (
+                          <button
+                            className="take-promote"
+                            title="Promote to a Routine (mechanical deck→slot re-addressing + beat-domain rebase)"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              void promote(e.take.uuid);
+                            }}
+                          >
+                            ↑
+                          </button>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="take-view-session"
+                          title="View this span on its Session's timeline"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            requestSessionMoment({
+                              sessionUuid: e.take.session_uuid,
+                              atS: e.take.window_start_s,
+                            });
+                          }}
+                        >
+                          ▦
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="take-delete"
+                          title="Delete this Routine Take"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            void removeRoutine(e.take.uuid);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                ),
+              ];
+            })}
           </tbody>
         </table>
       )}
