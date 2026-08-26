@@ -285,10 +285,17 @@
 }
 
 /* Lane strips: the editor's flat #0e0e0e strip + 3px color edge + terse
-   label (transitionEditor.css .editor-lanestrip family). */
+   label (transitionEditor.css .editor-lanestrip family). A small gap
+   between strips (gh#190 iteration): a curve pinned at 0 or 100% hugs
+   its strip edge — without daylight there it reads as the neighbour's
+   line. Page background shows through the gap. */
 .rt-lanestrip {
   position: relative;
   border-top: 1px solid #1b1b1b;
+  margin-top: 3px;
+}
+.rt-wave-row + .rt-lanestrip {
+  margin-top: 4px;
 }
 .rt-laneedge {
   position: absolute;

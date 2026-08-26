@@ -35,10 +35,12 @@ import { eqValueToGain } from '../playback/graph';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { cueCssColor } from '../hotcues/palette';
 import { ROUTINE_ACCENT } from '../theme/routineColor';
-import { LaneCanvas } from '../editor/LaneCanvas';
+import { GUIDE_TIER_ALPHA, GUIDE_TIER_WIDTH, LaneCanvas } from '../editor/LaneCanvas';
+import { TIER_ALPHA, TIER_WIDTH } from '../waveform/WaveformRendererV2';
 import type { LaneId, LanePoint } from '../editor/mixModel';
 import {
   slotLanesAt,
+  traceStateAt,
   type PlannedRoutine,
   type PlannedRoutineSlot,
   type RoutineLanePoint,
@@ -49,6 +51,7 @@ import type { AuthoredJump, RoutineEdits } from './routineDraft';
 import { traceDrawRuns, type BeatRun } from './routineWaveRuns';
 import {
   FILTER_LPF_COLOR,
+  gridTicks,
   rulerTicks,
   slotColor,
   slotLaneColors,
@@ -449,6 +452,12 @@ export function RoutineTimeline({
     () => rulerTicks(scrollBeat, scrollBeat + (pxPerBeat > 0 ? width / pxPerBeat : 0), pxPerBeat),
     [scrollBeat, pxPerBeat, width]
   );
+  // Canvas gridlines: the Metric-ladder density/weight scheme every other
+  // view renders (gh#190 — WaveformRendererV2's culling rules).
+  const gridLines = useMemo(
+    () => gridTicks(scrollBeat, scrollBeat + (pxPerBeat > 0 ? width / pxPerBeat : 0), pxPerBeat),
+    [scrollBeat, pxPerBeat, width]
+  );
   // Keyed on the jump-edited base: trace identities survive lane drags.
   const slotRuns = useMemo<BeatRun[][]>(
     () => plannedForRuns.slots.map((slot) => traceDrawRuns(slot.trace, duration)),
@@ -494,14 +503,21 @@ export function RoutineTimeline({
         for (const tick of gridBeats) {
           const x = xAt(tick.beat);
           if (x < -24 || x > width + 24) continue;
-          // Hypermeter tiers (gh#190 item 7): phrase > bar > beat.
-          const [alpha, top] =
-            tick.tier === 'phrase' ? [0.55, 2] : tick.tier === 'bar' ? [0.3, 8] : [0.14, 14];
+          // Ladder tiers at the shared weights, RELATIVE to the lowest
+          // visible level (gh#190 item 7 iteration) — the ruler thins in
+          // step with the rows.
+          const pos = tick.tier - gridLines.baseTier;
+          const alpha =
+            pos <= 0 ? 0.15 : TIER_ALPHA[Math.min(pos - 1, TIER_ALPHA.length - 1)];
+          const top = pos >= 3 ? 2 : pos >= 1 ? 8 : 14;
           ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+          ctx.lineWidth =
+            pos <= 0 ? 1 : TIER_WIDTH[Math.min(pos - 1, TIER_WIDTH.length - 1)];
           ctx.beginPath();
           ctx.moveTo(x, top);
           ctx.lineTo(x, RULER_H);
           ctx.stroke();
+          ctx.lineWidth = 1;
           if (tick.major && tick.label !== undefined) {
             ctx.fillStyle = 'rgba(232,232,240,0.75)';
             ctx.fillText(tick.label, x + 4, 9);
@@ -531,7 +547,7 @@ export function RoutineTimeline({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = '#0b0b0b';
       ctx.fillRect(0, 0, width, WAVE_H);
-      drawGrid(ctx, gridBeats, xAt, width, WAVE_H);
+      drawGrid(ctx, gridLines, xAt, width, WAVE_H);
       const wave = waves.get(slot.trackId) ?? null;
       if (wave) {
         // Modulation reads the LIVE build (lane edits included) — runs
@@ -571,6 +587,45 @@ export function RoutineTimeline({
       if (xAt(duration) < width) {
         ctx.fillRect(Math.max(0, xAt(duration)), 0, width - Math.max(0, xAt(duration)), WAVE_H);
       }
+      // Expansion preview (gh#190 item 10): an outward-dragged trim
+      // handle projects the boundary slot's material into the extension
+      // region — the same extrapolation the re-promotion will pull in
+      // (approximate: the true retrim replays the session slice; this
+      // shows the boundary track's own continuation).
+      if (wave && trim) {
+        const ext: BeatRun[] = [];
+        if (slot.slot === 0 && trim.startBeat < 0) {
+          const s = traceStateAt(slot.trace, 1e-3);
+          const rate = s.moving ? s.ratePerBeat : 0;
+          ext.push({
+            b0: trim.startBeat,
+            b1: 0,
+            ph0: s.pos + trim.startBeat * rate,
+            ph1: s.pos,
+          });
+        }
+        if (slot.slot === plannedForRuns.slots.length - 1 && trim.endBeat > duration) {
+          const s = traceStateAt(slot.trace, duration);
+          const rate = s.moving ? s.ratePerBeat : 0;
+          ext.push({
+            b0: duration,
+            b1: trim.endBeat,
+            ph0: s.pos,
+            ph1: s.pos + (trim.endBeat - duration) * rate,
+          });
+        }
+        if (ext.length > 0) {
+          ctx.globalAlpha = 0.7;
+          const liveSlot = planned.slots[i] ?? slot;
+          drawSlotWave(ctx, wave, styleSlot.styleId, styleSlot.params, ext, liveSlot, {
+            xAt,
+            beatAt: (px: number) => (px + viewPx) / pxPerBeat,
+            width,
+            waveH: WAVE_H,
+          });
+          ctx.globalAlpha = 1;
+        }
+      }
     });
   }, [
     width,
@@ -582,9 +637,11 @@ export function RoutineTimeline({
     waves,
     hotcues,
     gridBeats,
+    gridLines,
     duration,
     slotRuns,
     styleSlot,
+    trim,
   ]);
 
   // ── Recorded-lane strip drawing (non-authored strips only) ───────────
@@ -606,7 +663,7 @@ export function RoutineTimeline({
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.fillStyle = '#0e0e0e';
         ctx.fillRect(0, 0, width, STRIP_H);
-        drawGrid(ctx, gridBeats, xAt, width, STRIP_H);
+        drawGrid(ctx, gridLines, xAt, width, STRIP_H, 'strip');
         drawLaneSteps(ctx, slot, control, colors[control], {
           width,
           stripH: STRIP_H,
@@ -616,20 +673,30 @@ export function RoutineTimeline({
         });
       }
     }
-  }, [width, pxPerBeat, scrollBeat, planned, gridBeats, duration, lanesFor]);
+  }, [width, pxPerBeat, scrollBeat, planned, gridLines, duration, lanesFor]);
 
   // ── DOM ──────────────────────────────────────────────────────────────
   const xOf = (beat: number) => (beat - scrollBeat) * pxPerBeat;
   const windowLeft = xOf(0);
   const windowWidth = duration * pxPerBeat;
 
-  // LaneCanvas guides: the beat grid, normalized into the routine window.
+  // LaneCanvas guides: the ladder grid, normalized into the routine
+  // window — tiers ride through RELATIVE to the lowest visible level
+  // (gh#190 iteration), so authored lanes wear the pair editor's exact
+  // GUIDE_TIER weights and thin in step with the rows.
   const laneGuides = useMemo(
     () =>
-      gridBeats
+      gridLines.ticks
         .filter((t) => t.beat >= 0 && t.beat <= duration)
-        .map((t) => ({ x: duration > 0 ? t.beat / duration : 0, strong: t.major })),
-    [gridBeats, duration]
+        .map((t) => {
+          const pos = t.tier - gridLines.baseTier;
+          return {
+            x: duration > 0 ? t.beat / duration : 0,
+            strong: pos > 0,
+            tier: pos > 0 ? pos - 1 : undefined,
+          };
+        }),
+    [gridLines, duration]
   );
 
   const authorLane = useCallback(
@@ -1095,29 +1162,36 @@ function JumpPopover({
 
 // ── Canvas helpers (module-local; pure drawing) ──────────────────────────
 
+/** Metric-ladder gridlines at the SHARED weights (gh#190 item 7,
+ * walkthrough round 2 — "consistent weight"): wave rows use
+ * WaveformRendererV2's TIER_WIDTH/TIER_ALPHA (weak beats 1px @ 0.15,
+ * their look on every waveform surface); lane strips use LaneCanvas's
+ * dimmer GUIDE_TIER_* (guides sit under automation). Left-aligned rects,
+ * the renderer's own geometry. Styling is RELATIVE to the lowest visible
+ * level (`baseTier`, gh#190 iteration): the thinnest visible tier wears
+ * the weak-beat style and the rest escalate from there, so zooming out
+ * re-thins the surviving lines instead of leaving a wall of thick ones. */
 function drawGrid(
   ctx: CanvasRenderingContext2D,
-  ticks: { beat: number; major: boolean; tier: 'minor' | 'bar' | 'phrase' }[],
+  grid: { ticks: { beat: number; tier: number }[]; baseTier: number },
   xAt: (beat: number) => number,
   width: number,
-  height: number
+  height: number,
+  flavor: 'wave' | 'strip' = 'wave'
 ): void {
-  for (const tick of ticks) {
+  const tierWidth = flavor === 'wave' ? TIER_WIDTH : GUIDE_TIER_WIDTH;
+  const tierAlpha = flavor === 'wave' ? TIER_ALPHA : GUIDE_TIER_ALPHA;
+  const weakAlpha = flavor === 'wave' ? 0.15 : 0.09;
+  for (const tick of grid.ticks) {
     const x = xAt(tick.beat);
-    if (x < 0 || x > width) continue;
-    // Beatgrid visibility + hypermeter (gh#190 item 7): three strengths —
-    // phrase (16) > bar (4) > beat — so the musical frame reads on the
-    // rows themselves, not just the ruler.
-    ctx.strokeStyle =
-      tick.tier === 'phrase'
-        ? 'rgba(255,255,255,0.20)'
-        : tick.tier === 'bar'
-          ? 'rgba(255,255,255,0.11)'
-          : 'rgba(255,255,255,0.05)';
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
+    if (x < -4 || x > width) continue;
+    // Style position relative to the lowest visible level: 0 = the weak
+    // (thinnest) style, k > 0 = TIER_*[k−1], clamped at the top.
+    const pos = tick.tier - grid.baseTier;
+    const w = pos <= 0 ? 1 : tierWidth[Math.min(pos - 1, tierWidth.length - 1)];
+    const alpha = pos <= 0 ? weakAlpha : tierAlpha[Math.min(pos - 1, tierAlpha.length - 1)];
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.fillRect(x, 0, w, height);
   }
 }
 

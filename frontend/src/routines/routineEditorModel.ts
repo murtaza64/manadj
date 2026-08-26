@@ -207,25 +207,99 @@ export interface RulerTick {
   /** Major ticks carry a label; minor ticks are grid only. */
   major: boolean;
   label?: string;
-  /** Hypermeter tier (gh#190 item 7), anchored on beat 0 = a downbeat:
-   * 'phrase' every 16 beats, 'bar' every 4, 'minor' otherwise. Drawn at
-   * three grid strengths so the musical structure reads at any zoom. */
-  tier: 'minor' | 'bar' | 'phrase';
+  /** Metric-ladder tier of the beat (gh#190 item 7, walkthrough round 2:
+   * CONSISTENT WEIGHT with every other view): −1 = weak beat, 0 = bar …
+   * 4 = 16-bar boundary — the duple default ladder anchored on beat 0
+   * (the routine clock has no persisted ladder; the window opens on a
+   * downbeat by the promotion contract). */
+  tier: number;
 }
 
 const LABEL_STEPS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 
-/** Hypermeter tier of a beat (beat 0 anchors the grid). */
-export function hypermeterTier(beat: number): RulerTick['tier'] {
-  if (beat % 16 === 0) return 'phrase';
-  if (beat % 4 === 0) return 'bar';
-  return 'minor';
+/** Bars per tier-k group under the duple default (meter/ladder's
+ * tierBars): [bar, 2-bar, 4-bar, 8-bar, 16-bar]. */
+export const ROUTINE_TIER_BARS: readonly number[] = [1, 2, 4, 8, 16];
+const BEATS_PER_BAR = 4;
+
+/** Metric-ladder tier of a routine beat (beat 0 anchors the ladder):
+ * −1 = weak beat; else the highest tier whose group the bar opens. */
+export function ladderTier(beat: number): number {
+  if (beat % BEATS_PER_BAR !== 0) return -1;
+  const bar = beat / BEATS_PER_BAR;
+  let tier = 0;
+  for (let k = ROUTINE_TIER_BARS.length - 1; k > 0; k--) {
+    if (bar % ROUTINE_TIER_BARS[k] === 0) {
+      tier = k;
+      break;
+    }
+  }
+  return tier;
+}
+
+export interface GridTick {
+  beat: number;
+  /** −1 = weak beat, 0…4 = bar tier (ladderTier). */
+  tier: number;
+}
+
+export interface GridTicksResult {
+  ticks: GridTick[];
+  /** The lowest VISIBLE level at this zoom: −1 when weak beats show,
+   * else the lowest drawable tier. Styling is RELATIVE to it (gh#190
+   * iteration): the lowest visible level always wears the weak-beat
+   * (thinnest) style and tiers above escalate from there — zooming out
+   * hides lower tiers AND re-thins the survivors, so a zoomed-out view
+   * never reads as a wall of thick lines. */
+  baseTier: number;
+}
+
+/** Gridline ticks for the timeline canvases — WaveformRendererV2's
+ * density RULES at the routine editor's own threshold (gh#190 iteration:
+ * hide lower tiers as the view zooms out, transition-editor feel): weak
+ * beats show from 12 px/beat; each ladder tier draws only when its OWN
+ * spacing clears `minSpacingPx` — and that includes tier 0, so BARS drop
+ * out too once a whole routine is squeezed into the view (the renderer's
+ * 2.5px cutoff suits second-scale windows; a 500-beat fit needs breathing
+ * room, not a line forest). Weights stay the shared TIER_* scheme,
+ * indexed relative to `baseTier`.
+ * May extend past [0, duration] (the audition margin shows). */
+export function gridTicks(
+  viewStartBeat: number,
+  viewEndBeat: number,
+  pxPerBeat: number,
+  minSpacingPx = 24
+): GridTicksResult {
+  if (pxPerBeat <= 0) return { ticks: [], baseTier: -1 };
+  const showWeak = pxPerBeat >= 12;
+  const pxPerBar = pxPerBeat * BEATS_PER_BAR;
+  let minTier = ROUTINE_TIER_BARS.length;
+  for (let k = 0; k < ROUTINE_TIER_BARS.length; k++) {
+    if (pxPerBar * ROUTINE_TIER_BARS[k] >= minSpacingPx) {
+      minTier = k;
+      break;
+    }
+  }
+  const baseTier = showWeak ? -1 : minTier;
+  const out: GridTick[] = [];
+  if (minTier >= ROUTINE_TIER_BARS.length && !showWeak) {
+    return { ticks: out, baseTier };
+  }
+  const step = showWeak ? 1 : BEATS_PER_BAR * ROUTINE_TIER_BARS[Math.min(minTier, 4)];
+  const first = Math.floor(viewStartBeat / step) * step;
+  for (let b = first; b <= viewEndBeat; b += step) {
+    const tier = ladderTier(b);
+    if (tier < 0 && !showWeak) continue;
+    if (tier >= 0 && tier < minTier) continue;
+    out.push({ beat: b, tier });
+  }
+  return { ticks: out, baseTier };
 }
 
 /** Beat-domain ruler ticks for a view window. Major (labelled) ticks land
  * on the smallest power-of-two-ish beat step whose spacing clears
  * `minLabelPx`; minors quarter it (floor 1 beat). Every tick also carries
- * its hypermeter tier (gh#190 item 7). */
+ * its ladder tier (gh#190 item 7). */
 export function rulerTicks(
   viewStartBeat: number,
   viewEndBeat: number,
@@ -242,7 +316,7 @@ export function rulerTicks(
       beat: b,
       major,
       label: major ? String(b) : undefined,
-      tier: hypermeterTier(b),
+      tier: ladderTier(b),
     });
   }
   return ticks;
