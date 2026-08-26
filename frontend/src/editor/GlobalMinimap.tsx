@@ -77,12 +77,17 @@ export function GlobalMinimap({
 
   // ── Base layer: waveforms + transition frame (debounced redraw) ──
   useEffect(() => {
+    if (!viewActive) return; // hidden (KeepAliveView): clientWidth is 0 — a
+    // redraw would resize the base to 0×0 and the overlay's drawImage on
+    // re-activation throws InvalidStateError, unmounting the whole app
+    // (#188 blank screen). viewActive is a dep, so re-activation repaints.
     const timer = setTimeout(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
+      if (w === 0 || h === 0) return; // mid-layout / hidden — never a 0-size base
       if (!baseRef.current) baseRef.current = document.createElement('canvas');
       const base = baseRef.current;
       base.width = w * dpr;
@@ -200,7 +205,7 @@ export function GlobalMinimap({
       wakeRef.current();
     }, 100);
     return () => clearTimeout(timer);
-  }, [mix, waveA, waveB, rateB, contentEnd, hotCuesA, hotCuesB]);
+  }, [mix, waveA, waveB, rateB, contentEnd, hotCuesA, hotCuesB, viewActive]);
 
   // ── Overlay layer: viewport rect + playhead (dirty-keyed motion clock,
   // performance-hardening 01): redraw only when the composited inputs
@@ -236,7 +241,11 @@ export function GlobalMinimap({
         }
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
-        if (baseRef.current) ctx.drawImage(baseRef.current, 0, 0, w, h);
+        // 0-size sources throw InvalidStateError (#188) — belt and braces
+        // alongside the base effect's own size gate.
+        if (baseRef.current && baseRef.current.width > 0 && baseRef.current.height > 0) {
+          ctx.drawImage(baseRef.current, 0, 0, w, h);
+        }
 
         const viewStart = getScrollPx() / pxPerSec;
         const viewSec = getViewPx() / pxPerSec;
