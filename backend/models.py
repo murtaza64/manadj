@@ -347,6 +347,53 @@ class Transition(Base):
     )
 
 
+class Cameo(Base):
+    """A saved Cameo (cameos PRD, issue #140): a guest Track's bounded
+    appearance inside a host Track's play — the guest becomes audible and
+    silent entirely within the host's play, and the host remains current.
+
+    The survivor rule is the boundary with Transition: whoever remains
+    current classifies the move. Mirrors the Transition storage pattern
+    (ADR 0011): identity is the client-generated `uuid`, `position` is
+    cosmetic append order within the ordered (host, guest) pair, and the
+    payload — two-edged window in host track seconds, guest alignment,
+    optional guest→host tempo-match, role-addressed lanes, Jumps on both
+    roles — is opaque JSON under a client-authoritative pair-replace.
+    A Track may Cameo over itself (host == guest is legal).
+    """
+
+    __tablename__ = "cameos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    host_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    guest_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    uuid = Column(String, nullable=False)
+    position = Column(Integer, nullable=False)
+    name = Column(String, nullable=False)
+    favorite = Column(Boolean, nullable=False, default=False, server_default="0")
+    data_json = Column(Text, nullable=False)  # window + alignment + lanes (opaque)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # ORM-level cascade, as on Transition (SQLite FK PRAGMA is off).
+    host_track = relationship(
+        "Track",
+        foreign_keys=[host_track_id],
+        backref=backref("cameos_hosted", cascade="all, delete-orphan"),
+    )
+    guest_track = relationship(
+        "Track",
+        foreign_keys=[guest_track_id],
+        backref=backref("cameos_guesting", cascade="all, delete-orphan"),
+    )
+
+    __table_args__ = (
+        Index("idx_cameos_host", "host_track_id"),
+        Index("idx_cameos_guest", "guest_track_id"),
+        Index("idx_cameos_pair_uuid", "host_track_id", "guest_track_id", "uuid", unique=True),
+    )
+
+
 class TransitionTemplate(Base):
     """A saved Transition template (mix-editor issues 03 + 28).
 
@@ -512,6 +559,14 @@ class Take(Base):
     mark (`detected` for the detector's verdicts, `manual` for hand-cut
     Takes, issue 06). Pre-Sessions Takes are sessionless (`session_uuid`
     NULL) and count as `detected`.
+
+    Cameos (#140): `kind` records the detector's settle verdict by the
+    survivor rule — `handover` (a = outgoing, b = incoming) or `guest`
+    (a CAMEO TAKE: a = the surviving host, b = the visiting guest).
+    `engagement_uuid` stamps every capture from one engagement (the
+    pairwise offspring of a multi-deck double/triple are a first-class
+    group — the Transition history groups by it, never by timestamp
+    inference). Pre-#140 rows backfill kind='handover', engagement NULL.
     """
 
     __tablename__ = "takes"
@@ -534,6 +589,12 @@ class Take(Base):
     # How the Take came to be: "detected" (the detector) or "manual"
     # (hand-cut, issue 06). Never NULL for new rows; the migration backfills.
     origin = Column(String, nullable=False, default="detected")
+    # Survivor-rule verdict (#140): "handover" or "guest" (a Cameo Take).
+    kind = Column(String, nullable=False, default="handover", server_default="handover")
+    # The engagement this capture settled from (#140) — shared by every
+    # pairwise Take/Cameo Take one multi-deck engagement emits. Nullable:
+    # pre-#140 rows and hand-cut Takes without one.
+    engagement_uuid = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -555,6 +616,7 @@ class Take(Base):
         Index("idx_takes_b", "b_track_id"),
         Index("idx_takes_detected_at", "detected_at"),
         Index("idx_takes_session", "session_uuid"),
+        Index("idx_takes_engagement", "engagement_uuid"),
     )
 
 
@@ -736,6 +798,14 @@ class Set(Base):
         cascade="all, delete-orphan",
         order_by="SetDormantPin.id",
     )
+    # Cameo pins (#140): per-entry guest ornaments, keyed on host track
+    # (active and dormant rows in one table — see SetCameoPin).
+    cameo_pins = relationship(
+        "SetCameoPin",
+        back_populates="set",
+        cascade="all, delete-orphan",
+        order_by="SetCameoPin.position",
+    )
 
 
 class SetEntry(Base):
@@ -814,4 +884,42 @@ class SetDormantPin(Base):
         Index(
             "uq_set_dormant_pins_set_pair", "set_id", "a_track_id", "b_track_id", unique=True
         ),
+    )
+
+
+class SetCameoPin(Base):
+    """A Cameo pin on a Set entry (cameos PRD, #140): zero or more saved
+    Cameos — or, manually, Cameo Takes — hosted by that entry's Track.
+    Always manual (an ornament resolves to nothing: no Unresolved state,
+    never auto-filled) and adjacency-independent (reordering never touches
+    them).
+
+    Keyed on (set, host track), NOT on the entry row: the entry identity
+    is its track_id anyway, and Cameo-pin dormancy keys on the host Track
+    per Set (glossary "Dormant pin") — `dormant` rows are the memory kept
+    while the host Track is out of the Set, restored when it returns.
+    Like every pin, pin_uuid is deliberately NOT a foreign key (the
+    backend stores what the client asserts); the deletion paths DROP
+    rows referencing deleted artifacts (degrade_cameo_pins — there is no
+    Unresolved to degrade to). Wholesale-replaced with the entries PUT.
+    """
+
+    __tablename__ = "set_cameo_pins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    set_id = Column(Integer, ForeignKey("sets.id", ondelete="CASCADE"), nullable=False)
+    host_track_id = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False)  # order within the entry's pins
+    pin_kind = Column(String, nullable=False)  # "cameo" | "cameo-take"
+    pin_uuid = Column(String, nullable=False)
+    # Dormant (sets 07 extended, #140): the host Track left the Set; the
+    # pin restores when it returns. Keyed on host Track per Set.
+    dormant = Column(Boolean, nullable=False, default=False, server_default="0")
+    created_at = Column(DateTime, default=func.now())
+
+    set = relationship("Set", back_populates="cameo_pins")
+
+    __table_args__ = (
+        Index("idx_set_cameo_pins_set", "set_id"),
+        Index("idx_set_cameo_pins_host", "set_id", "host_track_id"),
     )

@@ -359,3 +359,25 @@
 .set-tempo-option:active {
   background: var(--surface1);
 }
+
+/* Cameo pin row (#140): a subordinate ornament line under its host row —
+   orange = the guest family; never a stair step. */
+.set-cameo-pin-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 1px 8px 3px 44px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.set-cameo-pin-chip {
+  color: #ff7a00;
+  border: 1px solid rgba(255, 122, 0, 0.45);
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.set-cameo-pin-row:hover .set-cameo-pin-chip {
+  border-color: #ff7a00;
+}

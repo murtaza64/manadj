@@ -31,7 +31,25 @@ import {
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
+import type { CameoPin } from './cameoPins';
 import './PinPickerPanel.css';
+
+/** The Cameo/ornament family's color (#140 — matches the history's
+ * guest badge; bright orange, deliberately off the Deck cyan/magenta). */
+export const CAMEO_COLOR = '#ff7a00';
+
+/** One Cameo option for the head entry (#140): a saved Cameo hosted by
+ * it, or a Cameo Take (guest-kind Take) whose host it is. */
+export interface CameoEvidence {
+  kind: 'cameo' | 'cameo-take';
+  uuid: string;
+  /** Saved Cameo: its name. Cameo Take: the detection timestamp. */
+  label: string;
+  guestTrackId: number;
+  favorite?: boolean;
+  /** Cameo Take window length (capture clock, seconds). */
+  windowS?: number;
+}
 
 /** The routine family's color (matches the Session timeline's candidate
  * chips — bright, fully saturated magenta; sessionTimeline.css). */
@@ -53,6 +71,12 @@ interface PinPickerPanelProps {
   onPin: (pin: AdjacencyPin | null) => void;
   /** Pin a Routine (the cast rides along to prime dormancy's lookup). */
   onPinRoutine: (uuid: string, cast: readonly number[]) => void;
+  /** Cameo section (#140): guest ornaments hosted by the HEAD entry —
+   * saved Cameos and Cameo Takes with this host. Always manual: each
+   * option toggles its pin (multiple pins per entry are the point). */
+  cameoEvidence: readonly CameoEvidence[];
+  cameoPins: readonly CameoPin[];
+  onToggleCameoPin: (pin: CameoPin) => void;
   onClose: () => void;
 }
 
@@ -100,6 +124,9 @@ export default function PinPickerPanel({
   trackLabel,
   onPin,
   onPinRoutine,
+  cameoEvidence,
+  cameoPins,
+  onToggleCameoPin,
   onClose,
 }: PinPickerPanelProps) {
   const showToast = useToast();
@@ -355,6 +382,36 @@ export default function PinPickerPanel({
         ))
       ) : (
         <div className="ppp-none">none</div>
+      )}
+
+      {cameoEvidence.length > 0 && (
+        <>
+          <div className="ppp-section ppp-cameos">
+            Cameos over {trackLabel(aTrackId)}{' '}
+            <small>(entry ornaments — the Set order never advances)</small>
+          </div>
+          {cameoEvidence.map((c) => {
+            const pinned = cameoPins.some((p) => p.kind === c.kind && p.uuid === c.uuid);
+            return (
+              <div
+                key={`${c.kind}:${c.uuid}`}
+                className={`ppp-opt ppp-cameo-opt${pinned ? ' current' : ''}`}
+                onClick={pick(() => onToggleCameoPin({ kind: c.kind, uuid: c.uuid }))}
+                title={
+                  c.kind === 'cameo'
+                    ? 'Saved Cameo hosted by this entry — toggle its pin (plays the guest on a free deck inside the host)'
+                    : 'Cameo Take (unreviewed capture) — pinning it is a deliberate act naming that evidence (#140; never auto-filled)'
+                }
+              >
+                ◐ {c.kind === 'cameo' ? (c.favorite ? '★ ' : '') : '▸ '}
+                {trackLabel(c.guestTrackId)} over {trackLabel(aTrackId)}
+                {c.kind === 'cameo-take' ? ` · ${c.label}` : c.label ? ` · ${c.label}` : ''}
+                {c.windowS !== undefined ? ` · ${c.windowS.toFixed(1)}s` : ''}
+                {pinned ? ' ✓' : ''}
+              </div>
+            );
+          })}
+        </>
       )}
 
       <div

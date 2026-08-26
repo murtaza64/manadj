@@ -143,8 +143,14 @@ export interface InitDeckState {
  * v3 (#138): zero-overlap hard-cut windows span the cut ramp (cessation →
  * incoming onset) instead of collapsing to one instant, and one engagement
  * emits at most one Take per ordered pair (a flicker across the settle
- * horizon no longer settles a duplicate). */
-export const DETECTOR_VERSION = 3;
+ * horizon no longer settles a duplicate).
+ * v4 (#140): the survivor rule's SECOND verdict — a tease where the
+ * outgoing survives as current settles a Guest engagement and emits a
+ * Cameo Take (kind 'guest'; tease-and-bail no longer dissolves silently) —
+ * and every capture carries its engagement identity (concurrent
+ * deck-sharing engagements share one uuid, so a triple's pairwise
+ * offspring are a first-class group). */
+export const DETECTOR_VERSION = 4;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a
@@ -178,10 +184,20 @@ export const DEFAULT_DETECTOR_PARAMS: DetectorParams = {
 
 // ── Detected Takes ───────────────────────────────────────────────────────
 
-/** A settled Handover, ready to persist. Times are on the capture clock;
+/** A settled verdict, ready to persist. Times are on the capture clock;
  * the window is the engagement (glossary), the events its padded slice —
- * role-relabeled (outgoing='A', incoming='B'; 4dp 10). */
+ * role-relabeled (outgoing='A', incoming='B'; 4dp 10).
+ *
+ * `kind` is the survivor rule's verdict (#140): 'handover' (outgoing →
+ * incoming — a Take) or 'guest' (the outgoing SURVIVES as current — a
+ * Cameo Take: the outgoing role is the host, the incoming the guest;
+ * host-as-A holds through the same relabeling). */
 export interface DetectedTake {
+  kind: 'handover' | 'guest';
+  /** The engagement this verdict settled from (#140): concurrent
+   * deck-sharing engagements share it — a double/triple's pairwise
+   * offspring group by it in the Transition history. */
+  engagementUuid: string;
   outgoingTrackId: number;
   incomingTrackId: number;
   /** The physical decks the Handover traded on (also stamped on the

@@ -255,12 +255,19 @@ describe('cross-cuts fold (dnb teases, double drops)', () => {
     expect(takes[0].windowEndS).toBe(20);
   });
 
-  it('a tease where the outgoing survives is no Handover at all', () => {
+  it('a tease where the outgoing survives is no Handover — it is a GUEST engagement (#140)', () => {
     const s = incumbentA();
-    // B in for 3s, bailed back out; A plays on.
+    // B in for 3s, bailed back out; A plays on: the survivor rule's
+    // second verdict — a Cameo Take, not silence.
     s.at(10).play('B').fader('B', 1).at(13).fader('B', 0).advance(HORIZON + 2);
     const { state, takes } = run(s.events());
-    expect(takes).toHaveLength(0);
+    expect(takes).toHaveLength(1);
+    const take = takes[0];
+    expect(take.kind).toBe('guest');
+    expect(take.outgoingTrackId).toBe(1); // host = the survivor
+    expect(take.incomingTrackId).toBe(2); // guest = the visitor
+    expect(take.windowStartS).toBe(10); // engagement open
+    expect(take.windowEndS).toBe(13); // the guest's final cessation
     expect(state.pairs.AB.incumbent).toBe('A'); // A still owns the floor
   });
 
@@ -273,6 +280,98 @@ describe('cross-cuts fold (dnb teases, double drops)', () => {
     expect(takes).toHaveLength(1);
     expect(takes[0].windowStartS).toBe(10);
     expect(takes[0].windowEndS).toBe(24);
+  });
+});
+
+describe('the Guest-engagement verdict (#140 — Cameo Takes)', () => {
+  it('two teases of the same pair are two engagements, two Cameo Takes', () => {
+    const s = incumbentA();
+    s.at(10).fader('B', 1).play('B').at(13).fader('B', 0); // tease 1
+    s.advance(HORIZON + 2); // settles as guest
+    s.at(30).fader('B', 1).at(35).fader('B', 0); // tease 2 (B still playing)
+    s.advance(HORIZON + 2);
+    const { takes } = run(s.events());
+    expect(takes.map((t) => t.kind)).toEqual(['guest', 'guest']);
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(13);
+    expect(takes[1].windowStartS).toBe(30);
+    expect(takes[1].windowEndS).toBe(35);
+    // Distinct engagements — distinct identities.
+    expect(takes[0].engagementUuid).not.toBe(takes[1].engagementUuid);
+  });
+
+  it('guest cross-cut gaps fold into ONE Cameo Take (dnb tease in and out)', () => {
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1); // in
+    s.at(13).fader('B', 0); // out (gap < horizon)
+    s.at(16).fader('B', 1); // back — folds
+    s.at(20).fader('B', 0).advance(HORIZON + 2); // final out
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].kind).toBe('guest');
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(20); // the guest's FINAL cessation
+  });
+
+  it('a Load after the tease ends settles the Guest engagement eagerly', () => {
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1).at(13).fader('B', 0);
+    s.at(15).load('B', 5); // next tune onto the guest deck, inside the horizon
+    s.advance(1);
+    const { state, takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].kind).toBe('guest');
+    expect(takes[0].incomingTrackId).toBe(2); // the traded track, not the fresh load
+    expect(takes[0].windowEndS).toBe(13);
+    expect(state.pairs.AB.incumbent).toBe('A');
+  });
+
+  it('a mix that collapses entirely is NOT a Guest engagement', () => {
+    // Guest out at 13, host dies at 15 (inside the guest horizon): the
+    // host did not survive as current — no verdict from the guest clock.
+    const s = incumbentA();
+    s.at(10).play('B').fader('B', 1).at(13).fader('B', 0);
+    s.at(15).fader('A', 0).advance(HORIZON + 2);
+    const { takes } = run(s.events());
+    expect(takes.filter((t) => t.kind === 'guest')).toHaveLength(0);
+  });
+
+  it('a self-double against the same track settles a guest verdict', () => {
+    const s = script().at(0).load('A', 1).load('B', 1).fader('B', 0).play('A').advance(10);
+    s.at(10).play('B').fader('B', 1).at(18).fader('B', 0).advance(HORIZON + 2);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(1);
+    expect(takes[0].kind).toBe('guest');
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(1);
+  });
+
+  it('PFL stays invisible: a cue-only audition settles nothing', () => {
+    const s = incumbentA();
+    s.at(10).pfl('B', true).at(20).pfl('B', false).advance(HORIZON + 2);
+    const { takes } = run(s.events());
+    expect(takes).toHaveLength(0);
+  });
+
+  it('a chained double half-swap shares ONE engagement uuid across its verdicts', () => {
+    // A+D double; B drops in; A leaves — A→B and A→D Handovers (4dp 10)
+    // carry the same engagement identity (#140: a triple is a first-class
+    // group, not timestamp inference).
+    const s = script()
+      .at(0)
+      .load('A', 1)
+      .load('B', 2)
+      .load('D', 7)
+      .fader('B', 0)
+      .play('A')
+      .advance(5);
+    s.at(5).play('D').advance(20);
+    s.at(25).play('B').fader('B', 1).advance(2);
+    s.at(27).fader('A', 0).advance(HORIZON + 1);
+    const { takes } = run(s.events());
+    expect(takes.length).toBeGreaterThanOrEqual(2);
+    const uuids = new Set(takes.map((t) => t.engagementUuid));
+    expect(uuids.size).toBe(1);
   });
 });
 
@@ -486,6 +585,10 @@ describe('third-deck audibility does not gate the pair machine (4dp 37)', () => 
 
   it('a layer entering AND leaving mid-blend leaves the engagement intact', () => {
     // The accent-over-blend case: C stabs in for 3s inside an A→B blend.
+    // The blend settles its Handover; the stab settles a GUEST verdict on
+    // the surviving pair (B hosts C — #140; the A/C pair yields nothing:
+    // A did not survive as current past C's cessation). All verdicts of
+    // the deck-sharing engagements carry ONE engagement uuid.
     const s = script()
       .at(0)
       .load('A', 1)
@@ -498,9 +601,15 @@ describe('third-deck audibility does not gate the pair machine (4dp 37)', () => 
     s.at(12).play('C').advance(3).at(15).pause('C'); // the layer
     s.at(16).fader('A', 0).advance(HORIZON + 1);
     const { takes } = run(s.events());
-    expect(takes).toHaveLength(1);
-    expect(takes[0].outgoingTrackId).toBe(1);
-    expect(takes[0].incomingTrackId).toBe(2);
+    const handovers = takes.filter((t) => t.kind === 'handover');
+    const guests = takes.filter((t) => t.kind === 'guest');
+    expect(handovers).toHaveLength(1);
+    expect(handovers[0].outgoingTrackId).toBe(1);
+    expect(handovers[0].incomingTrackId).toBe(2);
+    expect(guests).toHaveLength(1);
+    expect(guests[0].outgoingTrackId).toBe(2); // host = the surviving B
+    expect(guests[0].incomingTrackId).toBe(3); // guest = the stab
+    expect(guests[0].engagementUuid).toBe(handovers[0].engagementUuid);
   });
 
   it('keeps every deck in the log; three audible does not suspend', () => {
@@ -621,8 +730,10 @@ describe('pairwise machines across the four decks (4dp 10)', () => {
     }
   });
 
-  it('a double collapsing back to its host emits nothing (the 76% case)', () => {
-    // A hosts; D layers in for 30s and fades back out; A plays on.
+  it('a double collapsing back to its host emits a Cameo Take (was: nothing — the 76% case)', () => {
+    // A hosts; D layers in for 30s and fades back out; A plays on. The
+    // survivor rule (#140): the host survives as current, so the double
+    // finally leaves evidence — a guest verdict, window = the engagement.
     const s = script()
       .at(0)
       .load('A', 1)
@@ -633,7 +744,14 @@ describe('pairwise machines across the four decks (4dp 10)', () => {
     s.at(10).play('D').fader('D', 1).advance(30);
     s.at(40).fader('D', 0).advance(HORIZON + 2); // layer out; A persists
     const { takes } = run(s.events());
-    expect(takes).toHaveLength(0);
+    expect(takes).toHaveLength(1);
+    expect(takes[0].kind).toBe('guest');
+    expect(takes[0].outgoingTrackId).toBe(1);
+    expect(takes[0].incomingTrackId).toBe(7);
+    expect(takes[0].windowStartS).toBe(10);
+    expect(takes[0].windowEndS).toBe(40);
+    expect(takes[0].outgoingDeck).toBe('A');
+    expect(takes[0].incomingDeck).toBe('D');
   });
 
   it('a chained-double half-swap emits both ordered-pair verdicts (A→B and A→D)', () => {

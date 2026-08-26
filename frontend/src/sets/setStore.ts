@@ -21,6 +21,7 @@ import { useSyncExternalStore } from 'react';
 import { api } from '../api/client';
 import { EMPTY_SELECTION, prune, type Selection } from '../selection/selectionModel';
 import type { AdjacencyPin } from './adjacency';
+import { reconcileCameoOrderChange, type CameoPin, type DormantCameoPin } from './cameoPins';
 import { reconcileOrderChange, type DormantPin } from './dormancy';
 import { getRoutineCast, setRoutineCast } from './routineCasts';
 
@@ -36,6 +37,10 @@ export interface SetEntryLocal {
    * absolute level — track Autogain composes with it when it lands
    * (ADR 0034). The Conductor applies it for the entry's deck tenure. */
   trim?: number;
+  /** Cameo pins (#140): ordered guest ornaments hosted by this entry's
+   * Track — always manual, adjacency-independent (reordering never
+   * touches them; removal sends them Dormant keyed on the host). */
+  cameoPins?: CameoPin[];
 }
 
 interface SetStoreSnapshot {
@@ -45,6 +50,9 @@ interface SetStoreSnapshot {
   /** Dormant pins per Set id (sets 07): broken-pin memories, strictly
    * per-Set, keyed by ordered track pair. Loaded with the entries. */
   dormantBySet: Record<number, DormantPin[]>;
+  /** Dormant Cameo pins per Set id (#140): removed hosts' ornament
+   * memories, keyed on the host track. Loaded with the entries. */
+  dormantCameosBySet: Record<number, DormantCameoPin[]>;
   /** Row selection per Set id (sets 18): lives here, not in component
    * state, so the context menu, keyboard handlers, and group drag all
    * read the same selection — and it survives mode switches like the
@@ -56,6 +64,7 @@ let snapshot: SetStoreSnapshot = {
   selectedSetId: null,
   entriesBySet: {},
   dormantBySet: {},
+  dormantCameosBySet: {},
   selectionBySet: {},
 };
 
@@ -157,12 +166,17 @@ async function doLoad(setId: number): Promise<void> {
             ? { kind: 'hardcut' }
             : null,
       trim: e.trim ?? 0,
+      cameoPins: (e.cameo_pins ?? []).map((p) => ({ kind: p.pin_kind, uuid: p.pin_uuid })),
     }));
     const dormant: DormantPin[] = (detail.dormant ?? []).map((d) => ({
       aTrackId: d.a_track_id,
       bTrackId: d.b_track_id,
       pin:
         d.pin_kind === 'hardcut' ? { kind: 'hardcut' } : { kind: d.pin_kind, uuid: d.pin_uuid! },
+    }));
+    const dormantCameos: DormantCameoPin[] = (detail.dormant_cameos ?? []).map((d) => ({
+      hostTrackId: d.host_track_id,
+      pin: { kind: d.pin_kind, uuid: d.pin_uuid },
     }));
     // Normalize through the reconcile rule (sets 07): server state where
     // a Dormant memory covers a currently-adjacent pair (writable via
@@ -176,14 +190,44 @@ async function doLoad(setId: number): Promise<void> {
       entries.map((e) => e.trackId),
       getRoutineCast
     );
-    setSetStateLocal(setId, normalized.entries, normalized.dormant);
+    // Same normalization for Cameo pins (#140): a memory whose host is
+    // present restores on read (the reconcile carries cameoPins, which
+    // dormancy.ts's rebuild deliberately does not know about).
+    const cameo = reconcileCameoOrderChange(
+      entries,
+      dormantCameos,
+      normalized.entries.map((e) => e.trackId)
+    );
+    setSetStateLocal(
+      setId,
+      withCameoPins(normalized.entries, cameo.cameoPinsByHost),
+      normalized.dormant,
+      cameo.dormant
+    );
   } catch (err) {
     console.error(`set store: entries load failed for set ${setId}`, err);
-    if (!snapshot.entriesBySet[setId]) setSetStateLocal(setId, [], []);
+    if (!snapshot.entriesBySet[setId]) setSetStateLocal(setId, [], [], []);
   }
 }
 
-function setSetStateLocal(setId: number, entries: SetEntryLocal[], dormant: DormantPin[]): void {
+/** Reattach Cameo pins to a rebuilt entry list (dormancy's reconcile
+ * builds fresh entry objects that only carry pin+trim). */
+function withCameoPins(
+  entries: SetEntryLocal[],
+  cameoPinsByHost: Map<number, CameoPin[]>
+): SetEntryLocal[] {
+  return entries.map((e) => {
+    const pins = cameoPinsByHost.get(e.trackId);
+    return pins && pins.length > 0 ? { ...e, cameoPins: pins } : { ...e, cameoPins: undefined };
+  });
+}
+
+function setSetStateLocal(
+  setId: number,
+  entries: SetEntryLocal[],
+  dormant: DormantPin[],
+  dormantCameos: DormantCameoPin[] = currentDormantCameos(setId)
+): void {
   // Selected rows that left the Set drop out of the selection (sets 18)
   // — the one write point for entries is the one prune point.
   const selection = prune(
@@ -194,6 +238,7 @@ function setSetStateLocal(setId: number, entries: SetEntryLocal[], dormant: Dorm
     ...snapshot,
     entriesBySet: { ...snapshot.entriesBySet, [setId]: entries },
     dormantBySet: { ...snapshot.dormantBySet, [setId]: dormant },
+    dormantCameosBySet: { ...snapshot.dormantCameosBySet, [setId]: dormantCameos },
     selectionBySet: { ...snapshot.selectionBySet, [setId]: selection },
   };
   notify();
@@ -226,22 +271,28 @@ function currentDormant(setId: number): DormantPin[] {
   return snapshot.dormantBySet[setId] ?? [];
 }
 
+function currentDormantCameos(setId: number): DormantCameoPin[] {
+  return snapshot.dormantCameosBySet[setId] ?? [];
+}
+
 /** Replace a Set's entries (and, optionally, its Dormant pins): the
  * snapshot updates synchronously (optimistic), the wholesale PUT runs in
  * the background (ADR 0011: no retry queue). */
 export function replaceSetEntries(
   setId: number,
   entries: SetEntryLocal[],
-  dormant: DormantPin[] = currentDormant(setId)
+  dormant: DormantPin[] = currentDormant(setId),
+  dormantCameos: DormantCameoPin[] = currentDormantCameos(setId)
 ): void {
-  setSetStateLocal(setId, entries, dormant);
-  void pushSetState(setId, entries, dormant);
+  setSetStateLocal(setId, entries, dormant, dormantCameos);
+  void pushSetState(setId, entries, dormant, dormantCameos);
 }
 
 async function pushSetState(
   setId: number,
   entries: SetEntryLocal[],
-  dormant: DormantPin[]
+  dormant: DormantPin[],
+  dormantCameos: DormantCameoPin[]
 ): Promise<void> {
   try {
     await api.sets.replaceEntries(
@@ -251,12 +302,22 @@ async function pushSetState(
         pin_kind: e.pin?.kind ?? null,
         pin_uuid: e.pin?.uuid ?? null,
         trim: e.trim ?? 0,
+        // Omitted when empty (the backend defaults) — the common no-
+        // ornament entry stays noise-free on the wire.
+        ...(e.cameoPins && e.cameoPins.length > 0
+          ? { cameo_pins: e.cameoPins.map((p) => ({ pin_kind: p.kind, pin_uuid: p.uuid })) }
+          : {}),
       })),
       dormant.map((d) => ({
         a_track_id: d.aTrackId,
         b_track_id: d.bTrackId,
         pin_kind: d.pin.kind,
         pin_uuid: d.pin.uuid ?? null,
+      })),
+      dormantCameos.map((d) => ({
+        host_track_id: d.hostTrackId,
+        pin_kind: d.pin.kind,
+        pin_uuid: d.pin.uuid,
       }))
     );
   } catch (err) {
@@ -273,9 +334,10 @@ export function getSetDormantPins(setId: number): DormantPin[] | undefined {
   return snapshot.dormantBySet[setId];
 }
 
-/** Route a track-order change through the dormancy reconcile rule
- * (sets 07): pins whose pair stays adjacent ride along, broken pins go
- * Dormant, newly-adjacent pairs restore their memory. */
+/** Route a track-order change through the dormancy reconcile rules:
+ * adjacency pins (sets 07 — broken pins go Dormant, newly-adjacent pairs
+ * restore) and Cameo pins (#140 — host-membership keyed: removal sends
+ * an entry's ornaments Dormant, a returning host restores them). */
 function applyOrderChange(setId: number, newTrackIds: number[]): void {
   const entries = snapshot.entriesBySet[setId];
   if (!entries) return;
@@ -285,7 +347,8 @@ function applyOrderChange(setId: number, newTrackIds: number[]): void {
     newTrackIds,
     getRoutineCast
   );
-  replaceSetEntries(setId, next, dormant);
+  const cameo = reconcileCameoOrderChange(entries, currentDormantCameos(setId), newTrackIds);
+  replaceSetEntries(setId, withCameoPins(next, cameo.cameoPinsByHost), dormant, cameo.dormant);
 }
 
 /** Append the given tracks (skipping ones already in the Set — a Track
@@ -417,7 +480,75 @@ export function unpinRoutine(setId: number, headTrackId: number): void {
     cleared.map((e) => e.trackId),
     getRoutineCast
   );
-  replaceSetEntries(setId, next, dormant);
+  // Order unchanged, but the reconcile rebuilds entry objects — reattach
+  // the untouched Cameo pins (#140).
+  const cameo = reconcileCameoOrderChange(
+    cleared,
+    currentDormantCameos(setId),
+    next.map((e) => e.trackId)
+  );
+  replaceSetEntries(setId, withCameoPins(next, cameo.cameoPinsByHost), dormant, cameo.dormant);
+}
+
+/** The Set's Dormant Cameo pins (#140), or undefined while unloaded. */
+export function useSetDormantCameoPins(setId: number): DormantCameoPin[] | undefined {
+  return useSyncExternalStore(subscribeSetStore, () => snapshot.dormantCameosBySet[setId]);
+}
+
+export function getSetDormantCameoPins(setId: number): DormantCameoPin[] | undefined {
+  return snapshot.dormantCameosBySet[setId];
+}
+
+/** Toggle a Cameo pin on the entry hosting `hostTrackId` (#140): pin if
+ * absent, unpin if present — always a manual act (ornaments are never
+ * auto-filled). Multiple pins per entry are the point (PRD story 14). */
+export function toggleCameoPin(setId: number, hostTrackId: number, pin: CameoPin): void {
+  const entries = snapshot.entriesBySet[setId];
+  if (!entries) return;
+  const next = entries.map((e) => {
+    if (e.trackId !== hostTrackId) return e;
+    const pins = e.cameoPins ?? [];
+    const has = pins.some((p) => p.kind === pin.kind && p.uuid === pin.uuid);
+    const nextPins = has
+      ? pins.filter((p) => !(p.kind === pin.kind && p.uuid === pin.uuid))
+      : [...pins, pin];
+    return { ...e, cameoPins: nextPins.length > 0 ? nextPins : undefined };
+  });
+  replaceSetEntries(setId, next);
+}
+
+/** Mirror the server's Cameo-pin drop (#140) in every loaded Set: pins
+ * of the given kind referencing a deleted artifact are removed outright
+ * — active and Dormant alike (ornaments have no Unresolved). Local-only,
+ * like degradeDeletedPinsLocal. */
+export function degradeDeletedCameoPinsLocal(kind: CameoPin['kind'], uuid: string): void {
+  let changed = false;
+  const entriesBySet = { ...snapshot.entriesBySet };
+  for (const [setId, entries] of Object.entries(entriesBySet)) {
+    if (
+      !entries.some((e) => e.cameoPins?.some((p) => p.kind === kind && p.uuid === uuid))
+    ) {
+      continue;
+    }
+    changed = true;
+    entriesBySet[Number(setId)] = entries.map((e) => {
+      const pins = e.cameoPins;
+      if (!pins?.some((p) => p.kind === kind && p.uuid === uuid)) return e;
+      const nextPins = pins.filter((p) => !(p.kind === kind && p.uuid === uuid));
+      return { ...e, cameoPins: nextPins.length > 0 ? nextPins : undefined };
+    });
+  }
+  const dormantCameosBySet = { ...snapshot.dormantCameosBySet };
+  for (const [setId, dormant] of Object.entries(dormantCameosBySet)) {
+    if (!dormant.some((d) => d.pin.kind === kind && d.pin.uuid === uuid)) continue;
+    changed = true;
+    dormantCameosBySet[Number(setId)] = dormant.filter(
+      (d) => !(d.pin.kind === kind && d.pin.uuid === uuid)
+    );
+  }
+  if (!changed) return;
+  snapshot = { ...snapshot, entriesBySet, dormantCameosBySet };
+  notify();
 }
 
 /** Remove Tracks in one order change (the row ✕; sets 18's
@@ -537,22 +668,31 @@ export function dropSetLocalState(setId: number): void {
   if (
     snapshot.entriesBySet[setId] ||
     snapshot.dormantBySet[setId] ||
+    snapshot.dormantCameosBySet[setId] ||
     snapshot.selectionBySet[setId]
   ) {
     const entriesBySet = { ...snapshot.entriesBySet };
     const dormantBySet = { ...snapshot.dormantBySet };
+    const dormantCameosBySet = { ...snapshot.dormantCameosBySet };
     const selectionBySet = { ...snapshot.selectionBySet };
     delete entriesBySet[setId];
     delete dormantBySet[setId];
+    delete dormantCameosBySet[setId];
     delete selectionBySet[setId];
-    snapshot = { ...snapshot, entriesBySet, dormantBySet, selectionBySet };
+    snapshot = { ...snapshot, entriesBySet, dormantBySet, dormantCameosBySet, selectionBySet };
   }
   notify();
 }
 
 /** Reset module state (tests only). */
 export function _resetSetStoreForTests(): void {
-  snapshot = { selectedSetId: null, entriesBySet: {}, dormantBySet: {}, selectionBySet: {} };
+  snapshot = {
+    selectedSetId: null,
+    entriesBySet: {},
+    dormantBySet: {},
+    dormantCameosBySet: {},
+    selectionBySet: {},
+  };
   scrollTopBySet.clear();
   ladderViewBySet.clear();
   loadPromises.clear();

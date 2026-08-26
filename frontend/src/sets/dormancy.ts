@@ -34,16 +34,21 @@
  */
 import type { AdjacencyPin, RoutineCastLookup } from './adjacency';
 import { routineOfferable } from './adjacency';
+import type { CameoPin } from './cameoPins';
 
 /** An ordered Set entry as dormancy sees it: the track plus the pin of
  * the adjacency it heads (structurally `SetEntryLocal`). Trim (sets
- * #164) is per-TRACK entry state, not adjacency state — the reconcile
- * carries it along untouched (dormancy is a pin rule only). */
+ * #164) and Cameo pins (#140) are per-TRACK entry state, not adjacency
+ * state — the reconcile carries them along untouched (dormancy here is
+ * an adjacency-pin rule only; Cameo-pin dormancy for REMOVED hosts is
+ * cameoPins.ts's reconcile, layered by the store). */
 export interface OrderedEntry {
   trackId: number;
   pin: AdjacencyPin | null;
   /** Trim offset from neutral (sets #164); absent = neutral. */
   trim?: number;
+  /** Cameo pins (#140); ride with their track through any reorder. */
+  cameoPins?: CameoPin[];
 }
 
 /** A Set's memory of a broken pin, keyed by the ORDERED track pair. */
@@ -92,12 +97,14 @@ export function reconcileOrderChange(
   const dormantByPair = new Map<string, DormantPin>();
   for (const d of oldDormant) dormantByPair.set(key(d.aTrackId, d.bTrackId), d);
 
-  // Entry state that is not pin state (trim) rides with its track.
+  // Entry state that is not pin state (trim, Cameo pins) rides with its
+  // track. (A REMOVED host's Cameo pins are cameoPins.ts's business.)
   const oldByTrackId = new Map(oldEntries.map((e) => [e.trackId, e]));
   const entries: OrderedEntry[] = newTrackIds.map((trackId) => ({
     trackId,
     pin: null,
     trim: oldByTrackId.get(trackId)?.trim,
+    cameoPins: oldByTrackId.get(trackId)?.cameoPins,
   }));
 
   /** A routine pin is live at head index j when its cast is the next n

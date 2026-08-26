@@ -441,6 +441,9 @@ export function flipPlanDecks(plan: SetPlan): SetPlan {
       slots: r.slots.map((s) => ({ ...s, deck: s.deck === null ? null : flip(s.deck) })),
       exit: { ...r.exit, deck: flip(r.exit.deck) },
     })),
+    // Cameos (#140) borrow decks relative to the same assignment — flip
+    // with it so a guest never lands on its flipped host's deck.
+    cameos: plan.cameos.map((c) => ({ ...c, deck: flip(c.deck) })),
   };
 }
 

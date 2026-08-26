@@ -300,6 +300,40 @@ class TransitionRow(BaseModel):
     updated_at: datetime | None = None
 
 
+# Cameo Schemas (cameos PRD, #140 — client-authoritative pair-replace,
+# mirroring Transitions ADR 0011)
+
+class CameoItem(BaseModel):
+    """One saved Cameo as the client materializes it.
+
+    `uuid` is the client-generated identity; `data` is the opaque payload
+    (two-edged window in host track seconds, guest alignment, optional
+    guest→host tempo-match, role lanes, Jumps on both roles) — never
+    queried. Position is NOT in the payload: it is the item's index.
+    """
+    uuid: str
+    name: str
+    favorite: bool = False
+    data: dict
+
+
+class CameoPairReplace(BaseModel):
+    """Full replacement of an ordered (host, guest) pair's Cameo set."""
+    items: list[CameoItem]
+
+
+class CameoRow(BaseModel):
+    """A persisted Cameo (GET response)."""
+    host_track_id: int
+    guest_track_id: int
+    uuid: str
+    position: int
+    name: str
+    favorite: bool
+    data: dict
+    updated_at: datetime | None = None
+
+
 # Track-link Schemas (linked-pairs PRD — symmetric Linked pairs)
 
 class TrackLinkRow(BaseModel):
@@ -377,6 +411,12 @@ class TakeCreate(BaseModel):
     events: list[dict]
     session_uuid: str | None = None
     origin: str = "detected"
+    # Survivor-rule verdict (#140): "handover" (a = outgoing, b = incoming)
+    # or "guest" (a Cameo Take: a = surviving host, b = visiting guest).
+    kind: str = Field(default="handover", pattern=r"^(handover|guest)$")
+    # The engagement this capture settled from (#140): pairwise offspring
+    # of one multi-deck engagement share it (history groups by it).
+    engagement_uuid: str | None = None
 
 
 class TakeRow(BaseModel):
@@ -392,6 +432,8 @@ class TakeRow(BaseModel):
     promoted_transition_uuid: str | None = None
     session_uuid: str | None = None
     origin: str = "detected"
+    kind: str = "handover"
+    engagement_uuid: str | None = None
 
 
 class TakeDetail(TakeRow):
@@ -575,6 +617,22 @@ class SetRow(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CameoPinItem(BaseModel):
+    """One Cameo pin (#140): a saved Cameo or — manually — a Cameo Take
+    hosted by the carrying entry's Track. Always manual, never auto-filled
+    (an ornament resolves to nothing); the uuid is stored as asserted
+    (dangling pins are DROPPED by the deletion paths — there is no
+    Unresolved to degrade to)."""
+    pin_kind: str = Field(pattern=r"^(cameo|cameo-take)$")
+    pin_uuid: str
+
+
+class SetDormantCameoPinItem(CameoPinItem):
+    """A Dormant Cameo pin (#140): kept while its host Track is out of the
+    Set — Cameo dormancy keys on the host Track per Set, not on a pair."""
+    host_track_id: int
+
+
 class SetEntryItem(BaseModel):
     """One entry of a wholesale entries replace (PUT payload).
 
@@ -598,6 +656,9 @@ class SetEntryItem(BaseModel):
     # units (0 = neutral, ±0.5 spans the knob) — composes with track
     # Autogain when that lands (ADR 0034), never an absolute level.
     trim: float = Field(default=0.0, ge=-0.5, le=0.5)
+    # Cameo pins (#140): ordered guest ornaments hosted by this entry's
+    # Track. Adjacency-independent — reordering never touches them.
+    cameo_pins: list[CameoPinItem] = []
 
     @model_validator(mode="after")
     def _pin_fields_travel_together(self) -> "SetEntryItem":
@@ -636,10 +697,12 @@ class SetDormantPinItem(BaseModel):
 
 class SetEntriesReplace(BaseModel):
     """Full replacement of a Set's ordered entry list (ADR 0011 pattern),
-    plus its Dormant pins (sets 07) — both client-authoritative, both
-    replaced wholesale in the same PUT (dormancy is Set state)."""
+    plus its Dormant pins (sets 07) and Dormant Cameo pins (#140) — all
+    client-authoritative, all replaced wholesale in the same PUT
+    (dormancy is Set state)."""
     items: list[SetEntryItem]
     dormant: list[SetDormantPinItem] = []
+    dormant_cameos: list[SetDormantCameoPinItem] = []
 
 
 class SetEntryRow(BaseModel):
@@ -649,6 +712,7 @@ class SetEntryRow(BaseModel):
     pin_kind: str | None
     pin_uuid: str | None
     trim: float
+    cameo_pins: list[CameoPinItem] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -664,12 +728,15 @@ class SetDormantPinRow(BaseModel):
 
 
 class SetWithEntries(SetRow):
-    """A Set with its ordered entries and Dormant pins (sets 07)."""
+    """A Set with its ordered entries, Dormant pins (sets 07), and
+    Dormant Cameo pins (#140). Entries carry their active Cameo pins
+    (attached by the router — the storage keys on (set, host track))."""
     entries: list[SetEntryRow] = []
     # The ORM relationship is named dormant_pins; the wire field is dormant.
     dormant: list[SetDormantPinRow] = Field(
         default=[], validation_alias=AliasChoices("dormant", "dormant_pins")
     )
+    dormant_cameos: list[SetDormantCameoPinItem] = []
 
 
 class SetOrderItem(BaseModel):

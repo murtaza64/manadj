@@ -46,6 +46,9 @@
 .ppp-section.ppp-takes {
   color: var(--mauve, #b478ff);
 }
+.ppp-section.ppp-cameos {
+  color: #ff7a00;
+}
 
 .ppp-opt {
   cursor: pointer;
@@ -68,6 +71,9 @@
 }
 .ppp-take-opt {
   color: var(--mauve, #b478ff);
+}
+.ppp-cameo-opt {
+  color: #ff7a00;
 }
 .ppp-hardcut {
   color: var(--red, #ff5555);

@@ -106,6 +106,15 @@
   font-weight: 400;
 }
 
+/* Cameo Take rows (#140): orange = the guest/ornament family. */
+.take-row.guest:hover td {
+  background: rgba(255, 122, 0, 0.06);
+}
+.take-guest-badge {
+  color: #ff7a00;
+  font-weight: 700;
+}
+
 /* Routine Take rows: magenta = the routine family (ADR 0035). */
 .take-row.routine:hover td {
   background: rgba(255, 0, 200, 0.06);

@@ -50,6 +50,8 @@ import { TRIM_NEUTRAL } from '../playback/mixerMath';
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
 import type { Track } from '../types';
 import type { AdjacencyPin } from './adjacency';
+import type { CameoPin } from './cameoPins';
+import type { CameoPlanSource } from './cameoPlan';
 import {
   buildPlannedRoutine,
   routineSlotStateAt,
@@ -109,8 +111,13 @@ export const DEFAULT_GRACE_FADE_SEC = 2;
 export interface PlanInput {
   /** Trim (sets #164) is an OFFSET from neutral in mixer-knob units
    * (0/absent = neutral) — offset, never absolute, so track Autogain
-   * composes when it lands (ADR 0034). */
-  entries: { trackId: number; pin: AdjacencyPin | null; trim?: number }[];
+   * composes when it lands (ADR 0034). Cameo pins (#140) are entry
+   * ornaments; their playback geometry arrives via cameoSourcesByUuid. */
+  entries: { trackId: number; pin: AdjacencyPin | null; trim?: number; cameoPins?: CameoPin[] }[];
+  /** Resolved Cameo geometry per pin uuid (#140) — saved payloads and
+   * Cameo Takes reduced upstream (cameoPlan.ts) to one shape. A pin
+   * whose uuid is absent here is dangling and plays nothing. */
+  cameoSourcesByUuid?: Record<string, CameoPlanSource>;
   /** Facts per track id. Every entry's track must be present. */
   tracks: Record<number, PlannerTrackFacts>;
   /** Full Transition payloads per uuid (the pair store's `data`). */
@@ -228,10 +235,43 @@ export interface PlanWarning {
     | 'routine-invalid'
     | 'routine-window-collision'
     | 'routine-deck-overflow'
-    | 'routine-global-controls-dropped';
+    | 'routine-global-controls-dropped'
+    | 'cameo-invalid'
+    | 'cameo-window-collision'
+    | 'cameo-grace-fade'
+    | 'cameo-deck-overflow';
   message: string;
   adjacencyIndex?: number;
   entryIndex?: number;
+}
+
+/** A planned Cameo (#140): the guest's bounded appearance on a borrowed
+ * free deck inside its host entry's span. Never advances the Set — no
+ * entry, no adjacency, no parity participation (ping-pong is a pure
+ * function of adjacency count; ornaments are invisible to it). */
+export interface PlannedCameo {
+  /** Index into plan.entries of the HOST entry. */
+  entryIndex: number;
+  pinKind: CameoPin['kind'];
+  pinUuid: string;
+  guestTrackId: number;
+  /** The borrowed deck: first free A→B→C→D across the window (+ load
+   * headroom); returned at the exit. */
+  deck: PlanDeck;
+  mixStartSec: number;
+  /** Possibly Grace-clamped (the adjacency always wins). */
+  mixEndSec: number;
+  authoredMixEndSec: number;
+  /** Guest track position at mixStartSec; advances at guestRate. */
+  guestStartSec: number;
+  guestRate: number;
+  pitchPercent: number;
+  /** Linear fade ramps (v1 — Cameo vectorization arrives with the
+   * editor); the fade-out ends at mixEndSec. */
+  fadeInSec: number;
+  fadeOutSec: number;
+  /** True when the exit was Grace-clamped into the next adjacency. */
+  graceFaded: boolean;
 }
 
 export interface SetPlan {
@@ -240,6 +280,9 @@ export interface SetPlan {
   /** Pinned Routine replays (routines 159), in mix order. Covered
    * adjacencies point in by routineIndex. */
   routines: PlannedRoutine[];
+  /** Planned Cameos (#140), in mix order — guest ornaments on borrowed
+   * decks inside their hosts' spans. */
+  cameos: PlannedCameo[];
   /** Mix length: the last track's exit instant. */
   totalSec: number;
   /** Non-fatal degeneracies (overlapping windows, insufficient Tempo
@@ -289,7 +332,7 @@ export function planSet(input: PlanInput): SetPlan {
   const routines: PlannedRoutine[] = [];
   const warnings: PlanWarning[] = [];
   if (input.entries.length === 0) {
-    return { entries, adjacencies, routines, totalSec: 0, warnings };
+    return { entries, adjacencies, routines, cameos: [], totalSec: 0, warnings };
   }
 
   const tempo: TempoPolicyInput = input.tempo ?? { policy: 'riding' };
@@ -771,8 +814,159 @@ export function planSet(input: PlanInput): SetPlan {
   applyGraceFades(entries, adjacencies, warnings, input.grace);
   flagEntriesAfterExit(entries, adjacencies, warnings);
 
+  // Cameos (#140) plan LAST: ornaments borrow whatever the spine left
+  // free and never influence it (parity, windows, and grace transforms
+  // are all settled by now — the adjacency always wins).
+  const cameos = planCameos(input, entries, adjacencies, routines, warnings);
+
   const last = entries[entries.length - 1];
-  return { entries, adjacencies, routines, totalSec: Math.max(0, last.exitMixSec), warnings };
+  return { entries, adjacencies, routines, cameos, totalSec: Math.max(0, last.exitMixSec), warnings };
+}
+
+/** Load headroom for a Cameo's borrowed deck (#140): claimed this long
+ * before the guest's entry so the Conductor can load it — the same
+ * doctrine as the grace headroom, deliberately its default value. */
+export const CAMEO_LOAD_LEAD_SEC = 5;
+
+/**
+ * Plan every entry's Cameo pins (#140): map the two-edged window from
+ * host track time onto the mix axis (mix time ≡ the host's elapsed play;
+ * anchored on the host's solo mapping), clamp the exit by the Grace rule
+ * — a guest colliding with the host's outgoing window fades out early,
+ * the adjacency always wins — and borrow the first free deck A→B→C→D
+ * across the window plus load headroom. Deck exhaustion skips the pin
+ * with a warning: connective tissue outranks ornament.
+ */
+function planCameos(
+  input: PlanInput,
+  entries: PlannedEntry[],
+  adjacencies: PlannedAdjacency[],
+  routines: PlannedRoutine[],
+  warnings: PlanWarning[]
+): PlannedCameo[] {
+  const cameos: PlannedCameo[] = [];
+  const sources = input.cameoSourcesByUuid ?? {};
+
+  for (let inputIdx = 0; inputIdx < input.entries.length; inputIdx++) {
+    const pins = input.entries[inputIdx].cameoPins;
+    if (!pins || pins.length === 0) continue;
+    const hostTrackId = input.entries[inputIdx].trackId;
+    // Find the host's planned entry by track id (a Track appears at most
+    // once per Set): inside a Routine span plan.entries' interior order
+    // is slot order, so positional indexing would lie.
+    const hostIdx = entries.findIndex((e) => e.trackId === hostTrackId);
+    if (hostIdx < 0) continue;
+    const host = entries[hostIdx];
+    // A host inside a Routine span: the recording owns those decks and
+    // lanes — the ornament is unplannable there (v1).
+    const inRoutine = routines.some(
+      (r) => host.entryMixSec < r.mixEndSec && host.exitMixSec > r.mixStartSec
+    );
+    if (inRoutine) {
+      warnings.push({
+        severity: 'warning',
+        kind: 'cameo-invalid',
+        entryIndex: hostIdx,
+        message: 'cameo pin skipped: its host plays inside a Routine span (the recording owns those decks)',
+      });
+      continue;
+    }
+
+    for (const pin of pins) {
+      const source = sources[pin.uuid];
+      if (!source) continue; // dangling → plays nothing (ornament doctrine)
+
+      // Host track time → mix axis via the host's solo anchor. Windows
+      // inside the host's own entry window / Tempo return are mapped
+      // approximately (the solo anchor already accounts for the ramp's
+      // end); flag when the guest enters before the host settles.
+      const mixStartSec = host.mixOffsetSec + source.entryHostSec / host.rate;
+      const authoredMixEndSec = host.mixOffsetSec + source.exitHostSec / host.rate;
+      const entryAdj = hostIdx > 0 ? adjacencies[hostIdx - 1] : undefined;
+      const settleMixSec = Math.max(host.entryMixSec, entryAdj?.tempoReturnEndSec ?? 0);
+      if (mixStartSec < settleMixSec) {
+        warnings.push({
+          severity: 'warning',
+          kind: 'cameo-window-collision',
+          entryIndex: hostIdx,
+          message:
+            'cameo window opens before its host settles (inside the entry window or Tempo return) — guest timing is approximate there',
+        });
+      }
+
+      // Grace rule (#140, glossary Conductor): the guest must be silent
+      // within the host's play, and the host's outgoing adjacency always
+      // wins — clamp the exit to the earlier of the two boundaries.
+      const exitAdj = adjacencies[hostIdx];
+      const boundary = Math.min(
+        host.exitMixSec,
+        exitAdj && exitAdj.mixStartSec < authoredMixEndSec ? exitAdj.mixStartSec : Infinity
+      );
+      const mixEndSec = Math.min(authoredMixEndSec, boundary);
+      const graceFaded = mixEndSec < authoredMixEndSec;
+      if (mixEndSec <= mixStartSec) {
+        warnings.push({
+          severity: 'warning',
+          kind: 'cameo-grace-fade',
+          entryIndex: hostIdx,
+          message:
+            'cameo pin skipped: its window sits entirely inside/after the next handover — the adjacency always wins',
+        });
+        continue;
+      }
+      if (graceFaded) {
+        warnings.push({
+          severity: 'warning',
+          kind: 'cameo-grace-fade',
+          entryIndex: hostIdx,
+          message: `cameo guest fades out ${(authoredMixEndSec - mixEndSec).toFixed(1)}s early — the adjacency always wins`,
+        });
+      }
+
+      // Borrow the first free deck A→B→C→D across [start − lead, end]:
+      // free of planned entries, Routine slots, and earlier Cameos.
+      const lo = mixStartSec - CAMEO_LOAD_LEAD_SEC;
+      const overlaps = (a0: number, a1: number) => a0 < mixEndSec && a1 > lo;
+      const busy = (d: PlanDeck): boolean =>
+        entries.some((e) => e.deck === d && overlaps(e.entryMixSec - CAMEO_LOAD_LEAD_SEC, e.exitMixSec)) ||
+        routines.some(
+          (r) =>
+            overlaps(r.mixStartSec, r.mixEndSec) &&
+            r.slots.some((s) => s.deck === d)
+        ) ||
+        cameos.some((c) => c.deck === d && overlaps(c.mixStartSec - CAMEO_LOAD_LEAD_SEC, c.mixEndSec));
+      const free = PLAN_DECKS.find((d) => !busy(d));
+      if (!free) {
+        warnings.push({
+          severity: 'warning',
+          kind: 'cameo-deck-overflow',
+          entryIndex: hostIdx,
+          message: 'cameo pin skipped: no free deck across its window — connective tissue outranks ornament',
+        });
+        continue;
+      }
+
+      cameos.push({
+        entryIndex: hostIdx,
+        pinKind: pin.kind,
+        pinUuid: pin.uuid,
+        guestTrackId: source.guestTrackId,
+        deck: free,
+        mixStartSec,
+        mixEndSec,
+        authoredMixEndSec,
+        guestStartSec: source.guestStartSec,
+        guestRate: 1 + source.pitchPercent / 100,
+        pitchPercent: source.pitchPercent,
+        fadeInSec: source.fadeInSec,
+        fadeOutSec: source.fadeOutSec,
+        graceFaded,
+      });
+    }
+  }
+
+  cameos.sort((a, b) => a.mixStartSec - b.mixStartSec);
+  return cameos;
 }
 
 /** True when a planned entry never becomes audible: it enters at/after
@@ -1226,6 +1420,43 @@ export function planStateAt(plan: SetPlan, mixTime: number): PlanState {
           plan.entries[entryIndex]?.trim ?? 0
         );
       }
+    }
+  }
+
+  // Cameo override (#140): inside a planned Cameo's window (plus load
+  // headroom) the guest owns its borrowed deck — parked at its start
+  // position through the lead, then advancing with a linear fade in/out
+  // (v1 lanes; Cameo vectorization arrives with the editor). Allocation
+  // already avoided every entry/Routine/Cameo occupant, so a PLAYING
+  // occupant here is a plan degeneracy — the occupant wins, never a
+  // hard stop.
+  if (!state.done) {
+    for (const cameo of plan.cameos) {
+      if (mixTime < cameo.mixStartSec - CAMEO_LOAD_LEAD_SEC || mixTime >= cameo.mixEndSec) {
+        continue;
+      }
+      const cur = state.decks[cameo.deck];
+      if (cur.playing && cur.trackId !== null && cur.trackId !== cameo.guestTrackId) continue;
+      const playing = mixTime >= cameo.mixStartSec;
+      const trackTime =
+        cameo.guestStartSec + (playing ? (mixTime - cameo.mixStartSec) * cameo.guestRate : 0);
+      state.decks[cameo.deck] = {
+        entryIndex: cameo.entryIndex,
+        trackId: cameo.guestTrackId,
+        trackTime,
+        playing,
+        pitchPercent: cameo.pitchPercent,
+      };
+      // The guest's v1 lanes: a fade-in ramp from the entry, a fade-out
+      // ramp reaching silence at the (possibly Grace-clamped) exit.
+      let fader = 0;
+      if (playing) {
+        const inRamp = cameo.fadeInSec > 0 ? (mixTime - cameo.mixStartSec) / cameo.fadeInSec : 1;
+        const outRamp =
+          cameo.fadeOutSec > 0 ? (cameo.mixEndSec - mixTime) / cameo.fadeOutSec : 1;
+        fader = Math.max(0, Math.min(1, inRamp, outRamp));
+      }
+      state.lanes[cameo.deck] = soloLanes(fader);
     }
   }
   return state;

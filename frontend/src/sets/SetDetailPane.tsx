@@ -160,6 +160,7 @@ import {
   setAdjacencyPins,
   setEntryTrim,
   setSetScroll,
+  toggleCameoPin,
   unpinRoutine,
   setSetSelection,
   useSetDormantPins,
@@ -241,6 +242,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   // (the useTrackSelection ref pattern — issue 42).
   const takesRef = useRef(takes);
   takesRef.current = takes;
+
+  // ── Cameos (#140) ────────────────────────────────────────────────────
+  // Saved Cameos feed the picker's ornament section (hosted by the head
+  // entry); Cameo Takes are the guest-kind rows of the takes query above.
+  const { data: cameoRows = [] } = useQuery({ queryKey: ['cameos'], queryFn: api.cameos.list });
 
   // ── Routines (sets 160, ADR 0035) ────────────────────────────────────
   // Saved Routines + Routine Takes: coverage (cast bracket, shadowing),
@@ -1435,6 +1441,37 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   onTrimChange={handleTrimChange}
                   onContextMenu={track ? handleRowContextMenu : undefined}
                 />
+                {/* Cameo pins (#140): the entry's guest ornaments — a
+                    subordinate line under the host row (never a stair
+                    step; the spine stays adjacency-shaped). Click opens
+                    the picker on the adjacency this entry heads. */}
+                {entry.cameoPins && entry.cameoPins.length > 0 && (
+                  <div
+                    className="set-cameo-pin-row"
+                    title="Cameo pins on this entry — guests play on a free deck inside the host's span; the Set order never advances. Click to edit."
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openPicker(i, e.clientX, e.clientY);
+                    }}
+                  >
+                    {entry.cameoPins.map((p) => {
+                      const guestId =
+                        p.kind === 'cameo'
+                          ? cameoRows.find((c) => c.uuid === p.uuid)?.guest_track_id
+                          : takes.find((t) => t.uuid === p.uuid)?.b_track_id;
+                      const guest =
+                        guestId !== undefined
+                          ? trackMap?.get(guestId)?.title || `Track ${guestId}`
+                          : '(deleted)';
+                      return (
+                        <span key={`${p.kind}:${p.uuid}`} className="set-cameo-pin-chip">
+                          ◐ {guest}
+                          {p.kind === 'cameo-take' ? ' ▸' : ''}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
                 {next &&
                   (cov && cov.headIndex !== i ? null : cov ? ( // covered interior: collapsed
                     <RoutinePinRow
@@ -1582,6 +1619,32 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 }
               }}
               onPinRoutine={(uuid, cast) => pinRoutine(setId, head.trackId, uuid, cast)}
+              cameoEvidence={[
+                ...cameoRows
+                  .filter((c) => c.host_track_id === head.trackId)
+                  .map((c) => ({
+                    kind: 'cameo' as const,
+                    uuid: c.uuid,
+                    label: c.name,
+                    guestTrackId: c.guest_track_id,
+                    favorite: c.favorite,
+                  })),
+                ...takes
+                  .filter((t) => t.kind === 'guest' && t.a_track_id === head.trackId)
+                  .map((t) => ({
+                    kind: 'cameo-take' as const,
+                    uuid: t.uuid,
+                    label: new Date(
+                      t.detected_at.endsWith('Z') || t.detected_at.includes('+')
+                        ? t.detected_at
+                        : `${t.detected_at}Z`
+                    ).toLocaleString(),
+                    guestTrackId: t.b_track_id,
+                    windowS: t.window_end_s - t.window_start_s,
+                  })),
+              ]}
+              cameoPins={head.cameoPins ?? []}
+              onToggleCameoPin={(pin) => toggleCameoPin(setId, head.trackId, pin)}
               onClose={() => setPicker(null)}
             />
           );
@@ -1723,6 +1786,10 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'routine-window-collision': 'routine window collides',
   'routine-deck-overflow': 'routine out of decks',
   'routine-global-controls-dropped': 'routine crossfader dropped',
+  'cameo-invalid': 'cameo pin skipped',
+  'cameo-window-collision': 'cameo before host settles',
+  'cameo-grace-fade': 'cameo fades early',
+  'cameo-deck-overflow': 'cameo out of decks',
 };
 
 /** Memoized (issue 42): ~87 of these sit in a big set, and a selection
