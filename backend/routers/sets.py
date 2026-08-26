@@ -198,12 +198,14 @@ def replace_entries(
                     position=position,
                     pin_kind=item.pin_kind,
                     pin_uuid=item.pin_uuid,
+                    trim=item.trim,
                 )
             )
         else:
             entry.position = position
             entry.pin_kind = item.pin_kind
             entry.pin_uuid = item.pin_uuid
+            entry.trim = item.trim
 
     for track_id, entry in existing.items():
         if track_id not in seen:

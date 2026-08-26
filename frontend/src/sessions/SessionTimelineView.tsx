@@ -15,9 +15,15 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { SessionRowWire, TakeRowWire } from '../api/client';
+import type {
+  RoutineCandidateWire,
+  RoutineTakeRowWire,
+  SessionRowWire,
+  TakeRowWire,
+} from '../api/client';
+import { DEFAULT_DETECTOR_PARAMS, DETECTOR_VERSION } from '../capture/events';
 import { DECK_COLORS } from '../theme/deckColors';
 import { requestTakeReview } from '../capture/takeReview';
 import { useDecks } from '../hooks/useDeck';
@@ -124,7 +130,29 @@ function fmtWhen(iso: string): string {
 type Selection =
   | { kind: 'none' }
   | { kind: 'moment'; t: number }
-  | { kind: 'take'; take: TakeRowWire };
+  | { kind: 'take'; take: TakeRowWire }
+  | { kind: 'candidate'; candidate: RoutineCandidateWire }
+  | { kind: 'routineTake'; take: RoutineTakeRowWire };
+
+/** The trim-adjusted confirm payload pieces: slots whose entry survives
+ * the trimmed window, offsets re-based onto the new start (clamped ≥ 0 —
+ * a slot already playing at the trimmed start enters at 0). Mechanical:
+ * trimming the end before a slot's entry drops it from the cast (that is
+ * how a candidate can shrink to n=2 and route to the hand-cut Take flow). */
+function effectiveCast(
+  candidate: RoutineCandidateWire,
+  trim: { start: number; end: number }
+): { cast: number[]; offsets: number[] } {
+  const cast: number[] = [];
+  const offsets: number[] = [];
+  candidate.cast.forEach((tid, i) => {
+    const entryAbs = candidate.window_start_s + candidate.entry_offsets[i];
+    if (entryAbs >= trim.end) return;
+    cast.push(tid);
+    offsets.push(Math.max(0, entryAbs - trim.start));
+  });
+  return { cast, offsets };
+}
 
 interface Props {
   session: SessionRowWire;
@@ -179,6 +207,10 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
   );
   const [scrubT, setScrubT] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
+  // Boundary trim for the selected candidate (routines 158): seeded to the
+  // candidate's window on select, dragged via the overlay's edge handles,
+  // clamped inside the miner window (trim only — no expansion).
+  const [trim, setTrim] = useState<{ start: number; end: number } | null>(null);
   // Hovered take chip (sessions 22): spotlight state lives HERE and renders
   // in the per-frame overlay — the memoized scene must not re-render per
   // hover, so it only receives the stable callback.
@@ -197,12 +229,34 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     gcTime: 60_000,
   });
   const { data: allTakes } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+  // Routine confirm flow (ADR 0035, routines 158): miner candidates for
+  // this Session + already-confirmed Routine Takes.
+  const { data: allRoutineCandidates } = useQuery({
+    queryKey: ['routine-candidates', session.uuid],
+    queryFn: () => api.routineCandidates.forSession(session.uuid),
+  });
+  const { data: allRoutineTakes } = useQuery({
+    queryKey: ['routine-takes'],
+    queryFn: api.routineTakes.list,
+  });
 
   const events = detail?.events as CaptureEvent[] | undefined;
   const takes = useMemo(
     () => (allTakes ?? []).filter((t) => t.session_uuid === session.uuid),
     [allTakes, session.uuid]
   );
+  const routineTakes = useMemo(
+    () => (allRoutineTakes ?? []).filter((t) => t.session_uuid === session.uuid),
+    [allRoutineTakes, session.uuid]
+  );
+  // A confirmed candidate stops highlighting — its Routine Take chip is
+  // the surviving surface.
+  const routineCandidates = useMemo(() => {
+    const confirmed = new Set(
+      (allRoutineTakes ?? []).map((t) => t.origin_candidate_uuid).filter(Boolean)
+    );
+    return (allRoutineCandidates ?? []).filter((c) => !confirmed.has(c.uuid));
+  }, [allRoutineCandidates, allRoutineTakes]);
 
   const model: TimelineModel | null = useMemo(
     () => (events ? deriveTimeline(events) : null),
@@ -218,6 +272,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
       wanted.add(t.a_track_id);
       wanted.add(t.b_track_id);
     }
+    for (const c of routineCandidates) for (const id of c.cast) wanted.add(id);
+    for (const rt of routineTakes) for (const id of rt.cast) wanted.add(id);
     const missing = [...wanted].filter((id) => trackNames[id] === undefined);
     if (missing.length === 0) return;
     Promise.all(
@@ -229,7 +285,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
       )
     ).then((pairs) => setTrackNames((prev) => ({ ...prev, ...Object.fromEntries(pairs) })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, takes]);
+  }, [model, takes, routineCandidates, routineTakes]);
 
   // Collapse geometry pre-pass (pxPerSec-independent): what the fit zoom
   // and the axis both need.
@@ -827,6 +883,16 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
   // defeat it every render).
   const onTakeClick = useCallback((take: TakeRowWire) => setSelection({ kind: 'take', take }), []);
   const onTakeHover = useCallback((take: TakeRowWire | null) => setHoverTake(take), []);
+  const trimBoundsRef = useRef<{ lo: number; hi: number } | null>(null);
+  const onCandidateClick = useCallback((c: RoutineCandidateWire) => {
+    setSelection({ kind: 'candidate', candidate: c });
+    setTrim({ start: c.window_start_s, end: c.window_end_s });
+    trimBoundsRef.current = { lo: c.window_start_s, hi: c.window_end_s };
+  }, []);
+  const onRoutineTakeClick = useCallback(
+    (rt: RoutineTakeRowWire) => setSelection({ kind: 'routineTake', take: rt }),
+    []
+  );
   const onGapToggle = useCallback(
     (idx: number) =>
       setExpandedGaps((prev) => {
@@ -845,8 +911,125 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
     return Math.min(rect.width, Math.max(0, clientX - rect.left));
   };
 
+  // ── Candidate confirm flow (ADR 0035, routines 158) ──────────────────
+  const queryClient = useQueryClient();
+  const axisRef = useRef(axis);
+  axisRef.current = axis;
+  const trimDraggedRef = useRef(false);
+  /** Drag a trim boundary: window-level listeners for the gesture, time
+   * clamped inside the miner window and 2s off the opposite edge. */
+  const onTrimHandleDown = useCallback((edge: 'start' | 'end', e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const move = (ev: MouseEvent) => {
+      const ax = axisRef.current;
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!ax || !rect) return;
+      trimDraggedRef.current = true;
+      const t = ax.pxToT(Math.min(rect.width, Math.max(0, ev.clientX - rect.left)));
+      const b = trimBoundsRef.current;
+      setTrim((prev) => {
+        if (!prev) return prev;
+        if (edge === 'start') {
+          return { ...prev, start: Math.min(Math.max(t, b?.lo ?? -Infinity), prev.end - 2) };
+        }
+        return { ...prev, end: Math.max(Math.min(t, b?.hi ?? Infinity), prev.start + 2) };
+      });
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }, []);
+
+  const confirmCandidate = async () => {
+    if (selection.kind !== 'candidate' || !trim) return;
+    const { cast, offsets } = effectiveCast(selection.candidate, trim);
+    if (cast.length < 3) return;
+    try {
+      const row = await api.routineTakes.create({
+        uuid: crypto.randomUUID(),
+        session_uuid: session.uuid,
+        window_start_s: trim.start,
+        window_end_s: trim.end,
+        cast,
+        entry_offsets: offsets,
+        origin_candidate_uuid: selection.candidate.uuid,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+      setSelection({ kind: 'routineTake', take: row });
+      toast(`Routine Take confirmed — ${cast.length} tracks · ${fmtDur(trim.end - trim.start)}.`);
+    } catch (err) {
+      toast(String(err));
+    }
+  };
+
+  /** n=2 route (ADR 0035): a 2-cast confirm is a Transition — cut a
+   * hand-cut Take (origin 'manual') with the trimmed slice copied in. */
+  const cutTakeInstead = async () => {
+    if (selection.kind !== 'candidate' || !trim || !events) return;
+    const { cast } = effectiveCast(selection.candidate, trim);
+    if (cast.length !== 2) return;
+    const pad = 2;
+    const slice = events.filter((e) => e.t >= trim.start - pad && e.t <= trim.end + pad);
+    try {
+      await api.takes.create({
+        uuid: crypto.randomUUID(),
+        a_track_id: cast[0],
+        b_track_id: cast[1],
+        window_start_s: trim.start,
+        window_end_s: trim.end,
+        confidence: 1,
+        detector_version: DETECTOR_VERSION,
+        params: DEFAULT_DETECTOR_PARAMS,
+        events: slice,
+        session_uuid: session.uuid,
+        origin: 'manual',
+      });
+      await queryClient.invalidateQueries({ queryKey: ['takes'] });
+      setSelection({ kind: 'none' });
+      toast('Hand-cut Take created — a 2-cast span is a Transition, not a Routine.');
+    } catch (err) {
+      toast(String(err));
+    }
+  };
+
+  const promoteRoutineTake = async (rt: RoutineTakeRowWire) => {
+    try {
+      const routine = await api.routineTakes.promote(rt.uuid);
+      await queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+      await queryClient.invalidateQueries({ queryKey: ['routines'] });
+      setSelection({
+        kind: 'routineTake',
+        take: { ...rt, promoted_routine_uuid: routine.uuid },
+      });
+      toast(
+        `Promoted — Routine saved: ${routine.cast.length} slots · ${Math.round(routine.duration_beats)} beats.`
+      );
+    } catch (err) {
+      toast(String(err));
+    }
+  };
+
+  const deleteRoutineTake = async (rt: RoutineTakeRowWire) => {
+    try {
+      await api.routineTakes.delete(rt.uuid);
+      await queryClient.invalidateQueries({ queryKey: ['routine-takes'] });
+      setSelection({ kind: 'none' });
+    } catch (err) {
+      toast(String(err));
+    }
+  };
+
   const onTimelineClick = (clientX: number) => {
     if (!axis || !events) return;
+    // The click that lands after a trim drag must not move the selection.
+    if (trimDraggedRef.current) {
+      trimDraggedRef.current = false;
+      return;
+    }
     const t = axis.pxToT(pxAt(clientX));
     setSelection({ kind: 'moment', t });
     // Click during playback = seek (the deck-jog idiom: position gestures
@@ -905,6 +1088,93 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
               Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
               {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id} · open in
               editor
+            </button>
+            <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
+              ✕
+            </button>
+          </span>
+        ) : null}
+
+        {/* Candidate confirm cluster (routines 158): trim on the timeline,
+            confirm here. Trimming the cast to 2 flips the button to the
+            hand-cut-Take route (a 2-cast span is a Transition, ADR 0035). */}
+        {selection.kind === 'candidate' && trim
+          ? (() => {
+              const eff = effectiveCast(selection.candidate, trim);
+              const chain = eff.cast.map((id) => trackNames[id] ?? `#${id}`).join(' → ');
+              return (
+                <span className="stl-cluster stl-cand-cluster">
+                  <span className="stl-cand-title" title={chain}>
+                    ⧉ candidate · {eff.cast.length} tracks · {fmtDur(trim.end - trim.start)}
+                  </span>
+                  {eff.cast.length >= 3 ? (
+                    <button
+                      className="stl-confirm"
+                      title={`Confirm this span as a Routine Take\n${chain}`}
+                      onClick={() => void confirmCandidate()}
+                    >
+                      ✓ Confirm Routine Take
+                    </button>
+                  ) : eff.cast.length === 2 ? (
+                    <button
+                      className="stl-confirm two"
+                      title="A 2-cast span is a Transition — this cuts a hand-cut Take instead (ADR 0035)"
+                      onClick={() => void cutTakeInstead()}
+                    >
+                      n=2 → Cut Take instead
+                    </button>
+                  ) : (
+                    <span className="stl-cand-title">window too tight</span>
+                  )}
+                  <button
+                    className="stl-clear"
+                    title="Reset trim to the miner's window"
+                    onClick={() =>
+                      setTrim({
+                        start: selection.candidate.window_start_s,
+                        end: selection.candidate.window_end_s,
+                      })
+                    }
+                  >
+                    ↺
+                  </button>
+                  <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
+                    ✕
+                  </button>
+                </span>
+              );
+            })()
+          : null}
+
+        {/* Routine Take cluster: promote (mechanical deck→slot + beat
+            rebase) or delete; the raw take is never altered by promotion. */}
+        {selection.kind === 'routineTake' ? (
+          <span className="stl-cluster stl-cand-cluster">
+            <span
+              className="stl-cand-title"
+              title={selection.take.cast.map((id) => trackNames[id] ?? `#${id}`).join(' → ')}
+            >
+              ◆ Routine Take · {selection.take.cast.length} tracks
+            </span>
+            {selection.take.promoted_routine_uuid ? (
+              <span className="stl-cand-title" title="Promoted to a saved Routine">
+                ★ promoted
+              </span>
+            ) : (
+              <button
+                className="stl-confirm"
+                title="Mechanically promote: deck→slot re-addressing + beat-domain rebase via the cast Beatgrids"
+                onClick={() => void promoteRoutineTake(selection.take)}
+              >
+                ↑ Promote to Routine
+              </button>
+            )}
+            <button
+              className="stl-clear"
+              title="Delete this Routine Take"
+              onClick={() => void deleteRoutineTake(selection.take)}
+            >
+              ✕ delete
             </button>
             <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
               ✕
@@ -983,8 +1253,16 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   laneH={laneH}
                   lanesTop={lanesTop}
                   takes={takes}
+                  routineCandidates={routineCandidates}
+                  routineTakes={routineTakes}
                   trackNames={trackNames}
                   selectedTakeUuid={selection.kind === 'take' ? selection.take.uuid : null}
+                  selectedCandidateUuid={
+                    selection.kind === 'candidate' ? selection.candidate.uuid : null
+                  }
+                  selectedRoutineTakeUuid={
+                    selection.kind === 'routineTake' ? selection.take.uuid : null
+                  }
                   tracesByDeck={sceneTracesByDeck}
                   showTraces={showTraces}
                   showDetailMarks={showDetailMarks}
@@ -994,6 +1272,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   expandedGaps={expandedGaps}
                   onTakeClick={onTakeClick}
                   onTakeHover={onTakeHover}
+                  onCandidateClick={onCandidateClick}
+                  onRoutineTakeClick={onRoutineTakeClick}
                   onGapToggle={onGapToggle}
                 />
                 <SceneOverlay
@@ -1009,6 +1289,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusVersion,
                   replayPaused={replay.status === 'paused'}
                   selection={selection}
                   hoverTake={hoverTake}
+                  trim={selection.kind === 'candidate' ? trim : null}
+                  onTrimHandleDown={onTrimHandleDown}
                 />
               </svg>
             </div>
@@ -1042,8 +1324,14 @@ interface SceneProps {
   laneH: number;
   lanesTop: number;
   takes: TakeRowWire[];
+  /** Miner-suggested Routine spans (unconfirmed) + confirmed Routine
+   * Takes (routines 158) — chips in the same strip as Take chips. */
+  routineCandidates: RoutineCandidateWire[];
+  routineTakes: RoutineTakeRowWire[];
   trackNames: Record<number, string>;
   selectedTakeUuid: string | null;
+  selectedCandidateUuid: string | null;
+  selectedRoutineTakeUuid: string | null;
   /** Zoom-bucket-decimated traces for the polylines (identity changes
    * only when the bucket does — not per zoom frame). */
   tracesByDeck: Record<CaptureDeck, { t: number; playhead: number }[][]>;
@@ -1057,6 +1345,8 @@ interface SceneProps {
   expandedGaps: ReadonlySet<number>;
   onTakeClick(take: TakeRowWire): void;
   onTakeHover(take: TakeRowWire | null): void;
+  onCandidateClick(candidate: RoutineCandidateWire): void;
+  onRoutineTakeClick(take: RoutineTakeRowWire): void;
   onGapToggle(idx: number): void;
 }
 
@@ -1069,8 +1359,12 @@ const TimelineScene = memo(function TimelineScene({
   laneH,
   lanesTop,
   takes,
+  routineCandidates,
+  routineTakes,
   trackNames,
   selectedTakeUuid,
+  selectedCandidateUuid,
+  selectedRoutineTakeUuid,
   tracesByDeck,
   showTraces,
   showDetailMarks,
@@ -1080,6 +1374,8 @@ const TimelineScene = memo(function TimelineScene({
   expandedGaps,
   onTakeClick,
   onTakeHover,
+  onCandidateClick,
+  onRoutineTakeClick,
   onGapToggle,
 }: SceneProps) {
   const X = (t: number) => axis.tToPx(t);
@@ -1129,16 +1425,25 @@ const TimelineScene = memo(function TimelineScene({
   // cluster shrinks only as much as IT needs (rows = max row used within
   // the cluster), so a lone pair keeps half-height chips while a 4-deep
   // pile drops to quarter height. Isolated chips keep the full strip.
+  // Routine-take + candidate chips (routines 158) share the strip and the
+  // stagger: indices run takes, then routineTakes, then candidates.
+  const chipWindows = [
+    ...takes.map((t) => ({ start: t.window_start_s, end: t.window_end_s })),
+    ...routineTakes.map((t) => ({ start: t.window_start_s, end: t.window_end_s })),
+    ...routineCandidates.map((c) => ({ start: c.window_start_s, end: c.window_end_s })),
+  ];
+  const rtakeChipBase = takes.length;
+  const candChipBase = takes.length + routineTakes.length;
   const chipLayout = (() => {
-    const order = takes
+    const order = chipWindows
       .map((_, i) => i)
-      .sort((a, b) => takes[a].window_start_s - takes[b].window_start_s);
+      .sort((a, b) => chipWindows[a].start - chipWindows[b].start);
     const items = order.map((i) => {
-      const x0 = X(takes[i].window_start_s);
-      return { x0, x1: Math.max(X(takes[i].window_end_s), x0 + 12) };
+      const x0 = X(chipWindows[i].start);
+      return { x0, x1: Math.max(X(chipWindows[i].end), x0 + 12) };
     });
     const rows = staggerRows(items, 4);
-    const layout = new Array<{ row: number; rows: number }>(takes.length);
+    const layout = new Array<{ row: number; rows: number }>(chipWindows.length);
     let clusterStart = 0;
     let clusterEnd = items.length > 0 ? items[0].x1 : 0;
     const closeCluster = (k: number) => {
@@ -1381,6 +1686,81 @@ const TimelineScene = memo(function TimelineScene({
         );
       })}
 
+      {/* Candidate highlights (routines 158): a translucent band down the
+          lanes marks each miner-suggested Routine span; the chip in the
+          strip is the click target (confirm flow). */}
+      {routineCandidates.map((c, i) => {
+        const x0 = X(c.window_start_s);
+        const x1 = Math.max(X(c.window_end_s), x0 + 12);
+        if (x1 < viewX0 || x0 > viewX1) return null;
+        const chain = c.cast.map((id) => trackNames[id] ?? `#${id}`).join(' → ');
+        const { row, rows } = chipLayout[candChipBase + i];
+        const chipH = (CHIP_STRIP_H - 6) / rows;
+        const chipY = RULER_H + 2 + row * chipH;
+        const textY = chipY + chipH / 2 + 3;
+        const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
+        const selected = selectedCandidateUuid === c.uuid;
+        return (
+          <g
+            key={c.uuid}
+            className={`stl-cand-chip${selected ? ' selected' : ''}${sizeClass}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCandidateClick(c);
+            }}
+          >
+            <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm`}</title>
+            <rect x={x0} y={lanesTop} width={x1 - x0} height={lanesBottom - lanesTop} className="stl-cand-band" />
+            <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} className="stl-cand-chip-rect" />
+            {x1 - x0 > 90 ? (
+              <text x={x0 + 5} y={textY}>
+                ⧉ {`${c.cast.length}× ${chain}`.slice(0, Math.floor((x1 - x0) / 7))}
+              </text>
+            ) : (
+              <text x={x0 + 4} y={textY}>
+                ⧉
+              </text>
+            )}
+          </g>
+        );
+      })}
+
+      {/* Confirmed Routine Take chips (routines 158). */}
+      {routineTakes.map((rt, i) => {
+        const x0 = X(rt.window_start_s);
+        const x1 = Math.max(X(rt.window_end_s), x0 + 12);
+        if (x1 < viewX0 || x0 > viewX1) return null;
+        const chain = rt.cast.map((id) => trackNames[id] ?? `#${id}`).join(' → ');
+        const { row, rows } = chipLayout[rtakeChipBase + i];
+        const chipH = (CHIP_STRIP_H - 6) / rows;
+        const chipY = RULER_H + 2 + row * chipH;
+        const textY = chipY + chipH / 2 + 3;
+        const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
+        const selected = selectedRoutineTakeUuid === rt.uuid;
+        return (
+          <g
+            key={rt.uuid}
+            className={`stl-rtake-chip${selected ? ' selected' : ''}${sizeClass}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRoutineTakeClick(rt);
+            }}
+          >
+            <title>{`Routine Take · ${chain}${rt.promoted_routine_uuid ? ' · promoted ★' : ''}`}</title>
+            <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} />
+            {x1 - x0 > 90 ? (
+              <text x={x0 + 5} y={textY}>
+                ◆ {`${rt.promoted_routine_uuid ? '★ ' : ''}${chain}`.slice(0, Math.floor((x1 - x0) / 7))}
+              </text>
+            ) : (
+              <text x={x0 + 4} y={textY}>
+                ◆
+              </text>
+            )}
+          </g>
+        );
+      })}
+
       {/* Cursors, playheads, and sticky labels live in SceneOverlay: they
           move every mousemove/frame/scroll and must not drag this memoized
           scene with them (issue 13). */}
@@ -1405,6 +1785,8 @@ function SceneOverlay({
   replayPaused,
   selection,
   hoverTake,
+  trim,
+  onTrimHandleDown,
 }: {
   model: TimelineModel;
   axis: ReturnType<typeof buildTimeAxis>;
@@ -1418,6 +1800,11 @@ function SceneOverlay({
   replayPaused: boolean;
   selection: Selection;
   hoverTake: TakeRowWire | null;
+  /** Boundary trim of the selected candidate (routines 158): the span
+   * rendered with draggable edge handles; null unless a candidate is
+   * selected. */
+  trim: { start: number; end: number } | null;
+  onTrimHandleDown(edge: 'start' | 'end', e: React.MouseEvent): void;
 }) {
   const X = (t: number) => axis.tToPx(t);
   const lanesBottom = laneYOf('D', lanesTop, laneH) + laneH;
@@ -1538,6 +1925,69 @@ function SceneOverlay({
                   style={pair.to ? { stroke: DECK_COLORS[pair.to.deck] } : undefined}
                 />
               </g>
+            );
+          })()
+        : null}
+
+      {/* Selected candidate: trimmed span + draggable boundary handles +
+          per-slot entry marks (routines 158). The handles are the only
+          interactive nodes in this per-frame layer. */}
+      {selection.kind === 'candidate' && trim
+        ? (() => {
+            const c = selection.candidate;
+            const x0 = X(trim.start);
+            const x1 = X(trim.end);
+            return (
+              <g className="stl-trim">
+                <rect
+                  x={x0}
+                  y={RULER_H}
+                  width={Math.max(x1 - x0, 2)}
+                  height={lanesBottom - RULER_H}
+                  className="stl-trim-span"
+                />
+                {c.cast.map((tid, i) => {
+                  const entryAbs = c.window_start_s + c.entry_offsets[i];
+                  if (entryAbs >= trim.end) return null;
+                  const ex = X(Math.max(entryAbs, trim.start));
+                  return (
+                    <g key={`entry-${i}`} className="stl-trim-entry">
+                      <title>{`slot ${i} · ${trackNames[tid] ?? `#${tid}`}`}</title>
+                      <line x1={ex} y1={lanesTop} x2={ex} y2={lanesTop + 10} />
+                      <text x={ex + 2} y={lanesTop + 9}>{i}</text>
+                    </g>
+                  );
+                })}
+                {(['start', 'end'] as const).map((edge) => {
+                  const hx = edge === 'start' ? x0 : x1;
+                  return (
+                    <g key={edge} className="stl-trim-handle" onMouseDown={(e) => onTrimHandleDown(edge, e)}>
+                      <rect x={hx - 5} y={RULER_H} width={10} height={lanesBottom - RULER_H} />
+                      <line x1={hx} y1={RULER_H} x2={hx} y2={lanesBottom} />
+                      <circle cx={hx} cy={RULER_H + 8} r={5} />
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })()
+        : null}
+
+      {/* Selected Routine Take: static span highlight (no handles — the
+          confirm already fixed the boundary). */}
+      {selection.kind === 'routineTake'
+        ? (() => {
+            const x0 = X(selection.take.window_start_s);
+            const x1 = X(selection.take.window_end_s);
+            return (
+              <rect
+                x={x0}
+                y={RULER_H}
+                width={Math.max(x1 - x0, 2)}
+                height={lanesBottom - RULER_H}
+                className="stl-trim-span confirmed"
+                style={{ pointerEvents: 'none' }}
+              />
             );
           })()
         : null}
