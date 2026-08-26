@@ -82,7 +82,7 @@ def main() -> None:
         for c in result.candidates:
             print(
                 f"    @{c.window_start_s:.0f} dur {c.window_end_s - c.window_start_s:.0f}s"
-                f"  cast {c.cast}  ev(ret={c.n_returns}, tri={c.n_triples})"
+                f"  cast {c.cast}  ev(ret={c.n_returns}, tri={c.n_triples}, dbl={c.n_doubles})"
                 f"  {describe_cast(c.cast)}"
             )
 
