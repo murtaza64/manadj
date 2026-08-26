@@ -17,6 +17,9 @@
  */
 import type { RoutineDetailWire } from '../api/client';
 import { ROUTINE_ACCENT } from '../theme/routineColor';
+import { resolveLadder, resolvedMarkTimes, type PersistedLadder } from '../meter/ladder';
+import type { BeatgridData } from '../types';
+import type { BeatRun } from './routineWaveRuns';
 import { parseEdits, type RoutineEdits } from './routineDraft';
 import {
   buildPlannedRoutine,
@@ -272,14 +275,7 @@ export function gridTicks(
 ): GridTicksResult {
   if (pxPerBeat <= 0) return { ticks: [], baseTier: -1 };
   const showWeak = pxPerBeat >= 12;
-  const pxPerBar = pxPerBeat * BEATS_PER_BAR;
-  let minTier = ROUTINE_TIER_BARS.length;
-  for (let k = 0; k < ROUTINE_TIER_BARS.length; k++) {
-    if (pxPerBar * ROUTINE_TIER_BARS[k] >= minSpacingPx) {
-      minTier = k;
-      break;
-    }
-  }
+  const minTier = ladderBaseTier(pxPerBeat, ROUTINE_TIER_BARS, minSpacingPx);
   const baseTier = showWeak ? -1 : minTier;
   const out: GridTick[] = [];
   if (minTier >= ROUTINE_TIER_BARS.length && !showWeak) {
@@ -294,6 +290,319 @@ export function gridTicks(
     out.push({ beat: b, tier });
   }
   return { ticks: out, baseTier };
+}
+
+// ── Per-track Metric ladders on the slot rows (gh#190 iteration) ─────────
+//
+// The routine-clock duple grid above is an INFERENCE (beat 0 = a
+// downbeat, straight 4/4 forever) — kept only for the ruler and as the
+// gridless fallback. The slot rows render each track's REAL Metric
+// ladder (meter/ladder.ts — persisted arities + Reset marks applied),
+// projected from track time onto the routine clock through the slot's
+// replay trace runs: the same mapping the waveform columns use, so a
+// gridline always sits on the audio it grids.
+
+/** One cast track's resolved meter, ready to project through runs. */
+export interface TrackMeter {
+  /** beat_times (downbeats are exact members — the grid contract). */
+  beats: number[];
+  /** Downbeat time → ladder tier + parenthetical flag + bar ordinal
+   * within its governing segment (Reset-aware). */
+  downs: Map<number, { tier: number; parenthetical: boolean; barIndex: number }>;
+  /** Downbeat times, ascending (the lattice the map is keyed on). */
+  downbeats: number[];
+  /** Reset marks resolved onto the downbeat lattice (track seconds). */
+  resetMarks: number[];
+  /** Bars per tier-k group, from the projection (arity-aware). */
+  tierBars: readonly number[];
+  /** Bars per TOP-tier group (the phrase the global count runs on). */
+  topBars: number;
+}
+
+/** Resolve a track's meter for the editor; null = gridless (the routine-
+ * clock fallback grid draws instead). */
+export function buildTrackMeter(
+  grid: BeatgridData | null,
+  ladder: PersistedLadder | null
+): TrackMeter | null {
+  const proj = resolveLadder(grid, ladder);
+  if (!proj || !grid || grid.beat_times.length === 0) return null;
+  const downs = new Map<number, { tier: number; parenthetical: boolean; barIndex: number }>();
+  grid.downbeat_times.forEach((t, i) => {
+    downs.set(t, {
+      tier: proj.tiers[i] ?? 0,
+      parenthetical: proj.parentheticals[i] ?? false,
+      barIndex: proj.barIndexes[i] ?? 0,
+    });
+  });
+  return {
+    beats: grid.beat_times,
+    downs,
+    downbeats: grid.downbeat_times,
+    resetMarks: resolvedMarkTimes(grid, ladder),
+    tierBars: proj.tierBars,
+    topBars: proj.tierBars[proj.tierBars.length - 1] ?? 16,
+  };
+}
+
+export interface LadderMark {
+  /** Routine beat (the timeline's axis). */
+  beatR: number;
+  /** −1 = weak beat; else the downbeat's ladder tier. */
+  tier: number;
+  /** "Extra" bar (metric-ladder 03) — tints gold. */
+  parenthetical: boolean;
+}
+
+export interface SlotLadderMarks {
+  marks: LadderMark[];
+  /** Reset marks, in routine beats. */
+  resets: number[];
+  /** Lowest visible level (relative-thinning base — see GridTicksResult). */
+  baseTier: number;
+}
+
+function lowerBound(arr: readonly number[], t: number): number {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** The lowest DRAWABLE tier at a zoom (the culling loop shared by the
+ * routine-clock grid, the slot ladders, and the global ladder). */
+export function ladderBaseTier(
+  pxPerBeat: number,
+  tierBars: readonly number[],
+  minSpacingPx = 24
+): number {
+  const pxPerBar = pxPerBeat * BEATS_PER_BAR;
+  for (let k = 0; k < tierBars.length; k++) {
+    if (pxPerBar * tierBars[k] >= minSpacingPx) return k;
+  }
+  return tierBars.length;
+}
+
+/**
+ * Project a slot's track meter through its draw runs onto the routine
+ * clock. Density/thinning decisions ride the ROUTINE-clock pxPerBeat
+ * (replay is beatmatched, so one track beat ≈ one routine beat): weak
+ * beats from 12 px/beat, each tier needs `minSpacingPx` of its own
+ * spacing (bars drop out too — gh#190), styling relative to `baseTier`.
+ * Frozen runs (paused frame) carry no gridlines.
+ */
+export function slotLadderMarks(
+  meter: TrackMeter,
+  runs: BeatRun[],
+  pxPerBeat: number,
+  minSpacingPx = 24
+): SlotLadderMarks {
+  const showWeak = pxPerBeat >= 12;
+  const minTier = ladderBaseTier(pxPerBeat, meter.tierBars, minSpacingPx);
+  const baseTier = showWeak ? -1 : minTier;
+  const out: SlotLadderMarks = { marks: [], resets: [], baseTier };
+  if (minTier >= meter.tierBars.length && !showWeak) return out;
+  for (const run of runs) {
+    const span = run.ph1 - run.ph0;
+    if (span <= 1e-9) continue;
+    const toBeatR = (t: number) =>
+      run.b0 + ((t - run.ph0) / span) * (run.b1 - run.b0);
+    for (let i = lowerBound(meter.beats, run.ph0); i < meter.beats.length; i++) {
+      const t = meter.beats[i];
+      if (t > run.ph1) break;
+      const d = meter.downs.get(t);
+      if (!d) {
+        if (showWeak) out.marks.push({ beatR: toBeatR(t), tier: -1, parenthetical: false });
+        continue;
+      }
+      if (d.tier < minTier) continue;
+      out.marks.push({ beatR: toBeatR(t), tier: d.tier, parenthetical: d.parenthetical });
+    }
+    for (const m of meter.resetMarks) {
+      if (m >= run.ph0 && m <= run.ph1) out.resets.push(toBeatR(m));
+    }
+  }
+  return out;
+}
+
+// ── The GLOBAL ladder (gh#190 iteration) ─────────────────────────────────
+//
+// The mix's own hypermeter, on the routine clock: anchored on track 0's
+// ladder, then GOVERNED by whichever slot is still carrying its recorded
+// motion — ties break by first entry (slot order IS entry order). At a
+// governance handoff the incoming track's ladder is adopted; when its
+// phrase phase disagrees with the running count, the ladder DERIVES a
+// meter reset at the incoming's next phrase boundary and flags the
+// leftover bars parenthetical (gold) — an extra bar played between one
+// track's exit and the next drop reads at a glance, even though no
+// source track carries a Reset mark there.
+
+export interface ProjectedDownbeat {
+  beatR: number;
+  tier: number;
+  parenthetical: boolean;
+  /** Bar ordinal within the track's own governing segment (Reset-aware). */
+  barIndex: number;
+}
+
+/** ALL of a slot's downbeats (and source Reset marks) projected through
+ * its runs onto the routine clock — no zoom culling (the global ladder's
+ * feed; culling happens at draw). */
+export function slotDownbeatMarks(
+  meter: TrackMeter,
+  runs: BeatRun[]
+): { downs: ProjectedDownbeat[]; resets: number[] } {
+  const downs: ProjectedDownbeat[] = [];
+  const resets: number[] = [];
+  for (const run of runs) {
+    const span = run.ph1 - run.ph0;
+    if (span <= 1e-9) continue;
+    const toBeatR = (t: number) =>
+      run.b0 + ((t - run.ph0) / span) * (run.b1 - run.b0);
+    for (
+      let i = lowerBound(meter.downbeats, run.ph0);
+      i < meter.downbeats.length;
+      i++
+    ) {
+      const t = meter.downbeats[i];
+      if (t > run.ph1) break;
+      const d = meter.downs.get(t)!;
+      downs.push({ beatR: toBeatR(t), ...d });
+    }
+    for (const m of meter.resetMarks) {
+      if (m >= run.ph0 && m <= run.ph1) resets.push(toBeatR(m));
+    }
+  }
+  return { downs, resets };
+}
+
+export interface GlobalLadderMark {
+  beatR: number;
+  tier: number;
+  /** Extra bar (derived or source) — tints gold. */
+  parenthetical: boolean;
+}
+
+export interface GlobalLadder {
+  /** Downbeats only, ascending, deduped at handoffs. */
+  marks: GlobalLadderMark[];
+  /** Reset guides (routine beats): source-track marks AND derived ones. */
+  resets: number[];
+}
+
+export interface GovernorSpan {
+  /** Index into the parallel downbeat-marks array (slot order). */
+  slot: number;
+  entryBeat: number;
+  releaseBeat: number;
+}
+
+const HANDOFF_EPS_BEATS = 0.6;
+
+/**
+ * Build the global ladder. `spans` in slot (= entry) order; `downsBySlot`
+ * parallel (null = gridless slot — skipped for governance). The governor
+ * at beat b is the FIRST slot with entry ≤ b < release; when it releases,
+ * the next takes over. Seamless handoffs (incoming phrase phase agrees
+ * with the running count) adopt the incoming ladder silently; phase
+ * breaks derive a reset at the incoming's next phrase boundary, with the
+ * in-between bars flattened to plain parenthetical bars.
+ */
+export function buildGlobalLadder(
+  spans: GovernorSpan[],
+  downsBySlot: (ProjectedDownbeat[] | null)[],
+  resetsBySlot: (number[] | null)[],
+  topBarsBySlot: (number | null)[],
+  durationBeats: number
+): GlobalLadder {
+  const usable = spans.filter((s) => (downsBySlot[s.slot] ?? null) !== null);
+  const marks: GlobalLadderMark[] = [];
+  const resets: number[] = [];
+  if (usable.length === 0) return { marks, resets };
+
+  // Governance segments over [0, duration]: breakpoints at every entry
+  // and release of a usable slot.
+  const cuts = [
+    ...new Set(
+      usable
+        .flatMap((s) => [s.entryBeat, s.releaseBeat])
+        .concat([0, durationBeats])
+        .filter((b) => b >= 0 && b <= durationBeats)
+        .map((b) => Math.round(b * 1e6) / 1e6)
+    ),
+  ].sort((a, b) => a - b);
+  const governorAt = (b: number): GovernorSpan | null =>
+    usable.find((s) => b >= s.entryBeat - 1e-6 && b < s.releaseBeat - 1e-6) ?? null;
+
+  let prevGov: GovernorSpan | null = null;
+  /** The previous segment's LAST global downbeat (running-count probe). */
+  let lastMark: { beatR: number; barIndex: number } | null = null;
+  for (let c = 0; c < cuts.length - 1; c++) {
+    const s0 = cuts[c];
+    const s1 = cuts[c + 1];
+    if (s1 - s0 <= 1e-6) continue;
+    const gov = governorAt(s0 + 1e-6);
+    if (!gov) continue;
+    const downs = (downsBySlot[gov.slot] ?? []).filter(
+      (d) => d.beatR >= s0 - 1e-6 && d.beatR < s1 - 1e-6
+    );
+    for (const r of resetsBySlot[gov.slot] ?? []) {
+      if (r >= s0 - 1e-6 && r < s1 - 1e-6) resets.push(r);
+    }
+    if (downs.length === 0) {
+      prevGov = gov;
+      continue;
+    }
+    const topBars = topBarsBySlot[gov.slot] ?? 16;
+    // Handoff phase check (a NEW governor, with a running count behind).
+    let derivedFrom: number | null = null; // flatten-to-parenthetical start
+    if (prevGov && prevGov.slot !== gov.slot && lastMark) {
+      const d0 = downs[0];
+      // Expected phase: the running count continued bar by bar. The gap
+      // between the last outgoing downbeat and the first incoming one is
+      // measured in GLOBAL bars (beatmatched ⇒ ~4 routine beats per bar).
+      const barsGap = Math.max(
+        1,
+        Math.round((d0.beatR - lastMark.beatR) / BEATS_PER_BAR)
+      );
+      const expected = (lastMark.barIndex + barsGap) % topBars;
+      if (d0.barIndex % topBars !== expected) {
+        // Phase break: derive a reset at the incoming's next phrase
+        // boundary; bars before it are the mix's own "extra" bars.
+        const boundary = downs.find((d) => d.barIndex % topBars === 0);
+        if (boundary && boundary.beatR > d0.beatR - 1e-6) {
+          derivedFrom = d0.beatR;
+          resets.push(boundary.beatR);
+        }
+      }
+    }
+    for (const d of downs) {
+      // Dedupe a handoff downbeat coinciding with the previous mark.
+      if (marks.length > 0 && d.beatR - marks[marks.length - 1].beatR < HANDOFF_EPS_BEATS) {
+        continue;
+      }
+      const inDerived =
+        derivedFrom !== null &&
+        d.beatR >= derivedFrom - 1e-6 &&
+        d.barIndex % topBars !== 0;
+      marks.push({
+        beatR: d.beatR,
+        tier: inDerived ? 0 : d.tier,
+        parenthetical: d.parenthetical || inDerived,
+      });
+      if (inDerived === false && derivedFrom !== null && d.barIndex % topBars === 0) {
+        derivedFrom = null; // the derived reset landed — normal count resumes
+      }
+    }
+    lastMark = downs[downs.length - 1];
+    prevGov = gov;
+  }
+  resets.sort((a, b) => a - b);
+  return { marks, resets };
 }
 
 /** Beat-domain ruler ticks for a view window. Major (labelled) ticks land

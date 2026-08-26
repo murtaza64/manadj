@@ -50,11 +50,15 @@ import { RoutineDraftStore, useRoutineDraft, editsForSave } from './routineDraft
 import {
   beatLabel,
   buildEditorRoutine,
+  buildTrackMeter,
   recordedJumps,
   secondsLabel,
   slotColor,
   type EditorRoutine,
+  type TrackMeter,
 } from './routineEditorModel';
+import { beatgridQueryOptions } from '../hooks/useBeatgridData';
+import { metricLadderQueryOptions } from '../hooks/useMetricLadderData';
 import './routineEditor.css';
 
 const LAST_ROUTINE_KEY = 'manadj-last-routine';
@@ -232,6 +236,31 @@ export default function RoutineEditorView() {
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uniqueTrackIds, wavesKey]);
+
+  // Per-track meters (gh#190 iteration): each slot row grids on ITS
+  // track's real Metric ladder (Reset marks applied), not a global
+  // inference. Shares the app-wide beatgrid/metric-ladder caches.
+  const gridQueries = useQueries({
+    queries: uniqueTrackIds.map((id) => beatgridQueryOptions(id)),
+  });
+  const ladderQueries = useQueries({
+    queries: uniqueTrackIds.map((id) => metricLadderQueryOptions(id)),
+  });
+  const metersKey =
+    gridQueries.map((q) => (q.data ? q.data.updated_at ?? '1' : '·')).join(',') +
+    '|' +
+    ladderQueries.map((q) => (q.data ? q.data.reset_marks.join(';') : '·')).join(',');
+  const meters = useMemo(() => {
+    const map = new Map<number, TrackMeter | null>();
+    uniqueTrackIds.forEach((id, i) => {
+      map.set(
+        id,
+        buildTrackMeter(gridQueries[i]?.data?.data ?? null, ladderQueries[i]?.data ?? null)
+      );
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uniqueTrackIds, metersKey]);
 
   // Hotcues per cast track (one bulk request — the set-open idiom).
   const { data: hotcueRows } = useQuery({
@@ -844,6 +873,7 @@ export default function RoutineEditorView() {
           recordedJumpsBySlot={recordedJumpsBySlot}
           tracks={tracks}
           waves={waves}
+          meters={meters}
           hotcues={hotcuesMap}
           player={player}
           draftStore={draftStore}

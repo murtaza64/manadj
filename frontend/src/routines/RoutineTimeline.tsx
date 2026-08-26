@@ -35,7 +35,12 @@ import { eqValueToGain } from '../playback/graph';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { cueCssColor } from '../hotcues/palette';
 import { ROUTINE_ACCENT } from '../theme/routineColor';
-import { GUIDE_TIER_ALPHA, GUIDE_TIER_WIDTH, LaneCanvas } from '../editor/LaneCanvas';
+import {
+  GUIDE_TIER_ALPHA,
+  GUIDE_TIER_WIDTH,
+  LaneCanvas,
+  type LaneGuide,
+} from '../editor/LaneCanvas';
 import { TIER_ALPHA, TIER_WIDTH } from '../waveform/WaveformRendererV2';
 import type { LaneId, LanePoint } from '../editor/mixModel';
 import {
@@ -50,10 +55,17 @@ import type { RoutineDraftStore } from './routineDraftStore';
 import type { AuthoredJump, RoutineEdits } from './routineDraft';
 import { traceDrawRuns, type BeatRun } from './routineWaveRuns';
 import {
+  buildGlobalLadder,
   FILTER_LPF_COLOR,
   gridTicks,
+  ladderBaseTier,
+  ROUTINE_TIER_BARS,
   rulerTicks,
   slotColor,
+  slotDownbeatMarks,
+  slotLadderMarks,
+  type SlotLadderMarks,
+  type TrackMeter,
   slotLaneColors,
   SLOT_LANE_LABELS,
   SLOT_LANE_ORDER,
@@ -109,6 +121,7 @@ export function RoutineTimeline({
   recordedJumpsBySlot,
   tracks,
   waves,
+  meters,
   hotcues,
   player,
   draftStore,
@@ -127,6 +140,10 @@ export function RoutineTimeline({
   recordedJumpsBySlot: RecordedJump[][];
   tracks: Map<number, Track>;
   waves: Map<number, DecodedWaveform | null>;
+  /** Per-track resolved Metric ladders (gh#190 iteration): each slot row
+   * grids on its OWN track's ladder — Reset marks applied — projected
+   * through the replay trace; null = gridless (routine-clock fallback). */
+  meters: Map<number, TrackMeter | null>;
   hotcues: Map<number, HotCue[]>;
   player: RoutinePlayer;
   draftStore: RoutineDraftStore;
@@ -452,17 +469,58 @@ export function RoutineTimeline({
     () => rulerTicks(scrollBeat, scrollBeat + (pxPerBeat > 0 ? width / pxPerBeat : 0), pxPerBeat),
     [scrollBeat, pxPerBeat, width]
   );
-  // Canvas gridlines: the Metric-ladder density/weight scheme every other
-  // view renders (gh#190 — WaveformRendererV2's culling rules).
+  // Canvas gridlines, routine-clock duple inference — the RULER's grid
+  // and the gridless-track fallback only (gh#190 iteration: slot rows
+  // grid on their track's real ladder below).
   const gridLines = useMemo(
     () => gridTicks(scrollBeat, scrollBeat + (pxPerBeat > 0 ? width / pxPerBeat : 0), pxPerBeat),
     [scrollBeat, pxPerBeat, width]
   );
+
   // Keyed on the jump-edited base: trace identities survive lane drags.
   const slotRuns = useMemo<BeatRun[][]>(
     () => plannedForRuns.slots.map((slot) => traceDrawRuns(slot.trace, duration)),
     [plannedForRuns, duration]
   );
+  // Per-slot REAL ladders (gh#190 iteration): the track's beat/downbeat
+  // lattice + tiers + Reset marks, projected through the slot's draw runs
+  // onto the routine clock. Keyed on the jump-edited base like the runs
+  // (identities survive lane drags); view-independent (beats, not px), so
+  // scroll doesn't rebuild — only zoom (density decisions) does.
+  const slotLadders = useMemo<(SlotLadderMarks | null)[]>(
+    () =>
+      plannedForRuns.slots.map((slot, i) => {
+        const meter = meters.get(slot.trackId) ?? null;
+        return meter ? slotLadderMarks(meter, slotRuns[i], pxPerBeat) : null;
+      }),
+    [plannedForRuns, slotRuns, meters, pxPerBeat]
+  );
+  // The GLOBAL ladder (gh#190 iteration): the mix's own hypermeter on the
+  // ruler — anchored on slot 0, governed by the audible slot (ties by
+  // first entry), with DERIVED reset guides where a handoff breaks the
+  // running phrase count. Zoom-independent; culling happens at draw.
+  const globalLadder = useMemo(() => {
+    const { mixStartSec, secPerBeat } = plannedForRuns;
+    const toBeat = (sec: number) => (sec - mixStartSec) / secPerBeat;
+    const downsBySlot: (ReturnType<typeof slotDownbeatMarks> | null)[] =
+      plannedForRuns.slots.map((slot, i) => {
+        const meter = meters.get(slot.trackId) ?? null;
+        return meter ? slotDownbeatMarks(meter, slotRuns[i]) : null;
+      });
+    return buildGlobalLadder(
+      plannedForRuns.slots.map((slot) => ({
+        slot: slot.slot,
+        entryBeat: toBeat(slot.entryMixSec),
+        releaseBeat: toBeat(slot.releaseMixSec),
+      })),
+      downsBySlot.map((d) => d?.downs ?? null),
+      downsBySlot.map((d) => d?.resets ?? null),
+      plannedForRuns.slots.map(
+        (slot) => meters.get(slot.trackId)?.topBars ?? null
+      ),
+      duration
+    );
+  }, [plannedForRuns, slotRuns, meters, duration]);
   const jumpMarkers = useMemo<JumpMarker[][]>(() => {
     return planned.slots.map((slot) => {
       const out: JumpMarker[] = [];
@@ -500,27 +558,72 @@ export function RoutineTimeline({
         ctx.fillRect(0, 0, width, RULER_H);
         ctx.font = 'bold 10px monospace';
         ctx.textBaseline = 'middle';
+        const globalMode = globalLadder.marks.length > 0;
         for (const tick of gridBeats) {
           const x = xAt(tick.beat);
           if (x < -24 || x > width + 24) continue;
-          // Ladder tiers at the shared weights, RELATIVE to the lowest
-          // visible level (gh#190 item 7 iteration) — the ruler thins in
-          // step with the rows.
-          const pos = tick.tier - gridLines.baseTier;
-          const alpha =
-            pos <= 0 ? 0.15 : TIER_ALPHA[Math.min(pos - 1, TIER_ALPHA.length - 1)];
-          const top = pos >= 3 ? 2 : pos >= 1 ? 8 : 14;
-          ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-          ctx.lineWidth =
-            pos <= 0 ? 1 : TIER_WIDTH[Math.min(pos - 1, TIER_WIDTH.length - 1)];
-          ctx.beginPath();
-          ctx.moveTo(x, top);
-          ctx.lineTo(x, RULER_H);
-          ctx.stroke();
-          ctx.lineWidth = 1;
+          if (globalMode) {
+            // The GLOBAL ladder carries the structure below; routine-clock
+            // ticks stay label-weight only.
+            if (tick.major) {
+              ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+              ctx.beginPath();
+              ctx.moveTo(x, 14);
+              ctx.lineTo(x, RULER_H);
+              ctx.stroke();
+            }
+          } else {
+            // No meters anywhere: the routine-clock tier lines, RELATIVE
+            // to the lowest visible level (gh#190 item 7 iteration).
+            const pos = tick.tier - gridLines.baseTier;
+            const alpha =
+              pos <= 0 ? 0.15 : TIER_ALPHA[Math.min(pos - 1, TIER_ALPHA.length - 1)];
+            const top = pos >= 3 ? 2 : pos >= 1 ? 8 : 14;
+            ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+            ctx.lineWidth =
+              pos <= 0 ? 1 : TIER_WIDTH[Math.min(pos - 1, TIER_WIDTH.length - 1)];
+            ctx.beginPath();
+            ctx.moveTo(x, top);
+            ctx.lineTo(x, RULER_H);
+            ctx.stroke();
+            ctx.lineWidth = 1;
+          }
           if (tick.major && tick.label !== undefined) {
             ctx.fillStyle = 'rgba(232,232,240,0.75)';
             ctx.fillText(tick.label, x + 4, 9);
+          }
+        }
+        if (globalMode) {
+          // The mix's own hypermeter (gh#190): governed downbeats at the
+          // shared weights (relative thinning), parenthetical bars gold,
+          // reset guides (source AND derived) as gold pole + pennant.
+          const minTier = ladderBaseTier(pxPerBeat, ROUTINE_TIER_BARS);
+          const baseTier = pxPerBeat >= 12 ? -1 : minTier;
+          for (const m of globalLadder.marks) {
+            const x = xAt(m.beatR);
+            if (x < -24 || x > width + 24) continue;
+            // Parenthetical bars ALWAYS draw (they are the finding).
+            if (m.tier < minTier && !m.parenthetical) continue;
+            const pos = m.tier - baseTier;
+            const alpha =
+              pos <= 0 ? 0.2 : TIER_ALPHA[Math.min(pos - 1, TIER_ALPHA.length - 1)];
+            const w = pos <= 0 ? 1 : TIER_WIDTH[Math.min(pos - 1, TIER_WIDTH.length - 1)];
+            ctx.fillStyle = m.parenthetical
+              ? `rgba(255,209,102,${Math.min(1, alpha + 0.25)})`
+              : `rgba(255,255,255,${alpha})`;
+            ctx.fillRect(x, m.tier >= 2 ? 4 : 10, Math.max(w, m.parenthetical ? 2 : 1), RULER_H);
+          }
+          for (const r of globalLadder.resets) {
+            const x = xAt(r);
+            if (x < -24 || x > width + 24) continue;
+            ctx.fillStyle = 'rgba(255,209,102,0.95)';
+            ctx.fillRect(x - 1, 0, 2, RULER_H);
+            ctx.beginPath();
+            ctx.moveTo(x - 1, 0);
+            ctx.lineTo(x - 1, 10);
+            ctx.lineTo(x - 7, 5);
+            ctx.closePath();
+            ctx.fill();
           }
         }
         for (const b of [0, duration]) {
@@ -547,7 +650,9 @@ export function RoutineTimeline({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = '#0b0b0b';
       ctx.fillRect(0, 0, width, WAVE_H);
-      drawGrid(ctx, gridLines, xAt, width, WAVE_H);
+      const ladder = slotLadders[i];
+      if (ladder) drawLadder(ctx, ladder, xAt, width, WAVE_H, 'wave');
+      else drawGrid(ctx, gridLines, xAt, width, WAVE_H);
       const wave = waves.get(slot.trackId) ?? null;
       if (wave) {
         // Modulation reads the LIVE build (lane edits included) — runs
@@ -638,6 +743,8 @@ export function RoutineTimeline({
     hotcues,
     gridBeats,
     gridLines,
+    slotLadders,
+    globalLadder,
     duration,
     slotRuns,
     styleSlot,
@@ -663,7 +770,9 @@ export function RoutineTimeline({
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.fillStyle = '#0e0e0e';
         ctx.fillRect(0, 0, width, STRIP_H);
-        drawGrid(ctx, gridLines, xAt, width, STRIP_H, 'strip');
+        const ladder = slotLadders[slot.slot];
+        if (ladder) drawLadder(ctx, ladder, xAt, width, STRIP_H, 'strip');
+        else drawGrid(ctx, gridLines, xAt, width, STRIP_H, 'strip');
         drawLaneSteps(ctx, slot, control, colors[control], {
           width,
           stripH: STRIP_H,
@@ -673,31 +782,46 @@ export function RoutineTimeline({
         });
       }
     }
-  }, [width, pxPerBeat, scrollBeat, planned, gridLines, duration, lanesFor]);
+  }, [width, pxPerBeat, scrollBeat, planned, gridLines, slotLadders, duration, lanesFor]);
 
   // ── DOM ──────────────────────────────────────────────────────────────
   const xOf = (beat: number) => (beat - scrollBeat) * pxPerBeat;
   const windowLeft = xOf(0);
   const windowWidth = duration * pxPerBeat;
 
-  // LaneCanvas guides: the ladder grid, normalized into the routine
-  // window — tiers ride through RELATIVE to the lowest visible level
-  // (gh#190 iteration), so authored lanes wear the pair editor's exact
-  // GUIDE_TIER weights and thin in step with the rows.
-  const laneGuides = useMemo(
-    () =>
-      gridLines.ticks
-        .filter((t) => t.beat >= 0 && t.beat <= duration)
-        .map((t) => {
-          const pos = t.tier - gridLines.baseTier;
+  // LaneCanvas guides, PER SLOT (gh#190 iteration): the slot's real track
+  // ladder normalized into the routine window, tiers RELATIVE to the
+  // lowest visible level so authored lanes wear the pair editor's exact
+  // GUIDE_TIER weights and thin in step with the rows. Gridless slots
+  // fall back to the routine-clock grid.
+  const laneGuidesBySlot = useMemo(() => {
+    const norm = (beat: number) => (duration > 0 ? beat / duration : 0);
+    const fallback = gridLines.ticks
+      .filter((t) => t.beat >= 0 && t.beat <= duration)
+      .map((t) => {
+        const pos = t.tier - gridLines.baseTier;
+        return {
+          x: norm(t.beat),
+          strong: pos > 0,
+          tier: pos > 0 ? pos - 1 : undefined,
+        };
+      });
+    return planned.slots.map((slot) => {
+      const ladder = slotLadders[slot.slot];
+      if (!ladder) return fallback;
+      return ladder.marks
+        .filter((m) => m.beatR >= 0 && m.beatR <= duration)
+        .map((m) => {
+          const pos = m.tier - ladder.baseTier;
           return {
-            x: duration > 0 ? t.beat / duration : 0,
+            x: norm(m.beatR),
             strong: pos > 0,
             tier: pos > 0 ? pos - 1 : undefined,
+            parenthetical: m.parenthetical || undefined,
           };
-        }),
-    [gridLines, duration]
-  );
+        });
+    });
+  }, [gridLines, slotLadders, planned, duration]);
 
   const authorLane = useCallback(
     (slot: PlannedRoutineSlot, control: SlotLaneControl) => {
@@ -751,7 +875,7 @@ export function RoutineTimeline({
           color={color}
           widthPx={Math.max(windowWidth, 4)}
           points={pts.map(toLanePoint)}
-          guides={laneGuides}
+          guides={laneGuidesBySlot[slot.slot] ?? EMPTY_GUIDES}
           chopWall={duration > 0 ? 0.1 / duration : 0.01}
           windowLeftPx={0}
           registerScrollDraw={scrollDrawFor(key)}
@@ -1054,6 +1178,7 @@ export function RoutineTimeline({
 }
 
 const NO_SELECTION: number[] = [];
+const EMPTY_GUIDES: LaneGuide[] = [];
 
 // ── Jump popover ─────────────────────────────────────────────────────────
 
@@ -1171,6 +1296,25 @@ function JumpPopover({
  * level (`baseTier`, gh#190 iteration): the thinnest visible tier wears
  * the weak-beat style and the rest escalate from there, so zooming out
  * re-thins the surviving lines instead of leaving a wall of thick ones. */
+/** Style for a ladder line at style position `pos` (relative to the
+ * lowest visible level: 0 = weak/thinnest, k > 0 = TIER_*[k−1]). */
+function ladderLineStyle(
+  pos: number,
+  flavor: 'wave' | 'strip'
+): { w: number; alpha: number } {
+  const tierWidth = flavor === 'wave' ? TIER_WIDTH : GUIDE_TIER_WIDTH;
+  const tierAlpha = flavor === 'wave' ? TIER_ALPHA : GUIDE_TIER_ALPHA;
+  const weakAlpha = flavor === 'wave' ? 0.15 : 0.09;
+  if (pos <= 0) return { w: 1, alpha: weakAlpha };
+  return {
+    w: tierWidth[Math.min(pos - 1, tierWidth.length - 1)],
+    alpha: tierAlpha[Math.min(pos - 1, tierAlpha.length - 1)],
+  };
+}
+
+/** The Metric-ladder authoring gold (Reset pennants, parenthetical bars). */
+const LADDER_GOLD = '255,209,102';
+
 function drawGrid(
   ctx: CanvasRenderingContext2D,
   grid: { ticks: { beat: number; tier: number }[]; baseTier: number },
@@ -1179,19 +1323,49 @@ function drawGrid(
   height: number,
   flavor: 'wave' | 'strip' = 'wave'
 ): void {
-  const tierWidth = flavor === 'wave' ? TIER_WIDTH : GUIDE_TIER_WIDTH;
-  const tierAlpha = flavor === 'wave' ? TIER_ALPHA : GUIDE_TIER_ALPHA;
-  const weakAlpha = flavor === 'wave' ? 0.15 : 0.09;
   for (const tick of grid.ticks) {
     const x = xAt(tick.beat);
     if (x < -4 || x > width) continue;
-    // Style position relative to the lowest visible level: 0 = the weak
-    // (thinnest) style, k > 0 = TIER_*[k−1], clamped at the top.
-    const pos = tick.tier - grid.baseTier;
-    const w = pos <= 0 ? 1 : tierWidth[Math.min(pos - 1, tierWidth.length - 1)];
-    const alpha = pos <= 0 ? weakAlpha : tierAlpha[Math.min(pos - 1, tierAlpha.length - 1)];
+    const { w, alpha } = ladderLineStyle(tick.tier - grid.baseTier, flavor);
     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
     ctx.fillRect(x, 0, w, height);
+  }
+}
+
+/** A slot's REAL track ladder (gh#190 iteration): projected marks at the
+ * shared weights, parenthetical bars tinted gold (metric-ladder 03), gold
+ * Reset poles (the renderer's mark language, sans pennant at row scale). */
+function drawLadder(
+  ctx: CanvasRenderingContext2D,
+  ladder: SlotLadderMarks,
+  xAt: (beat: number) => number,
+  width: number,
+  height: number,
+  flavor: 'wave' | 'strip'
+): void {
+  for (const m of ladder.marks) {
+    const x = xAt(m.beatR);
+    if (x < -4 || x > width) continue;
+    const { w, alpha } = ladderLineStyle(m.tier - ladder.baseTier, flavor);
+    ctx.fillStyle = m.parenthetical
+      ? `rgba(${LADDER_GOLD},${Math.min(1, alpha + 0.12)})`
+      : `rgba(255,255,255,${alpha})`;
+    ctx.fillRect(x, 0, w, height);
+  }
+  for (const beatR of ladder.resets) {
+    const x = xAt(beatR);
+    if (x < -4 || x > width) continue;
+    ctx.fillStyle = `rgba(${LADDER_GOLD},0.9)`;
+    ctx.fillRect(x - 1, 0, 2, height);
+    if (flavor === 'wave') {
+      // LEFT-flying pennant at the top edge (cue flags fly right).
+      ctx.beginPath();
+      ctx.moveTo(x - 1, 0);
+      ctx.lineTo(x - 1, 12);
+      ctx.lineTo(x - 8, 6);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 }
 
