@@ -815,3 +815,19 @@ class SetDormantPin(Base):
             "uq_set_dormant_pins_set_pair", "set_id", "a_track_id", "b_track_id", unique=True
         ),
     )
+
+
+class AppSetting(Base):
+    """A persisted UI preference (settings, #176): key -> the raw string the
+    frontend previously kept in localStorage (often JSON, sometimes a bare
+    token like "true" or a preset id). The DB is the source of truth so
+    sandbox clones inherit the real app's preferences; each origin's
+    localStorage is just a write-through cache. The backend stores what the
+    client asserts — no value interpretation.
+    """
+
+    __tablename__ = "settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

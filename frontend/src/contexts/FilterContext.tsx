@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
+import { writeSetting } from '../settings/persistedSettings';
 
 interface FilterState {
   search: string;
@@ -53,7 +54,8 @@ export function FilterProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (filters.sortColumn) {
-      localStorage.setItem('trackListSort', JSON.stringify({
+      // Write-through (settings #176): DB + localStorage cache, best-effort.
+      writeSetting('trackListSort', JSON.stringify({
         column: filters.sortColumn,
         direction: filters.sortDirection
       }));

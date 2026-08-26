@@ -4,6 +4,7 @@ import {
   GRV6_JOG_CALIBRATION,
 } from './jogCalibration';
 import type { JogCalibration, JogProfile } from './jogCalibration';
+import { removeSetting, writeSetting } from '../settings/persistedSettings';
 
 const STORAGE_KEY = 'manadj.grv6JogCalibration';
 const STORAGE_VERSION = 1;
@@ -58,24 +59,17 @@ export function getJogCalibration(profile?: JogProfile): JogCalibration {
 
 export function setGrv6JogCalibration(patch: Partial<JogCalibration>): void {
   grv6Calibration = sanitizeJogCalibration({ ...grv6Calibration, ...patch });
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ version: STORAGE_VERSION, calibration: grv6Calibration })
-    );
-  } catch {
-    // Persistence is best-effort; the live calibration still applies.
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(
+    STORAGE_KEY,
+    JSON.stringify({ version: STORAGE_VERSION, calibration: grv6Calibration })
+  );
   for (const listener of listeners) listener();
 }
 
 export function resetGrv6JogCalibration(): void {
   grv6Calibration = { ...GRV6_JOG_CALIBRATION };
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // best-effort
-  }
+  removeSetting(STORAGE_KEY);
   for (const listener of listeners) listener();
 }
 

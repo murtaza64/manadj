@@ -130,7 +130,8 @@ export type ConductorStopReason = 'ended' | 'stopped' | 'takeover' | 'displaced'
 export interface ConductorAudio {
   mixer: Mixer;
   /** The shared pair is mandatory; C/D are needed exactly when the plan
-   * carries Routines whose slots allocate onto them (routines 159). */
+   * allocates onto them — Routine slots (routines 159) or rolling-
+   * junction entries (sets #143). */
   engines: Record<'A' | 'B', DeckEngine> & Partial<Record<'C' | 'D', DeckEngine>>;
 }
 
@@ -216,9 +217,11 @@ export class Conductor {
     this.driven = this.drivenDecks(plan);
   }
 
-  /** A/B plus every Routine-allocated deck with an engine on hand. */
+  /** A/B plus every allocated deck with an engine on hand — Routine
+   * slots and rolling-junction entries (sets #143) both land on C/D. */
   private drivenDecks(plan: SetPlan): PlanDeck[] {
     const used = new Set<PlanDeck>(['A', 'B']);
+    for (const e of plan.entries) used.add(e.deck);
     for (const r of plan.routines) {
       for (const s of r.slots) if (s.deck !== null) used.add(s.deck);
     }

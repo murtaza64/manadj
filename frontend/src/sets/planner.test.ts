@@ -342,7 +342,7 @@ describe('pinned Transition windows', () => {
     expect(plan.entries[1].mixOffsetSec).toBeCloseTo(42);
   });
 
-  it('flags overlapping windows (as a grace fade, sets 14) and windows past the outgoing end', () => {
+  it('rolls an overlapping window onto a free deck (sets #143) and flags windows past the outgoing end', () => {
     const overlapping = planSet(
       input({
         entries: [
@@ -357,13 +357,17 @@ describe('pinned Transition windows', () => {
         },
       })
     );
-    // The collision surfaces as the grace-fade transform's warning (the
-    // raw window-overlap flag is subsumed — one chip per collision).
-    const flagged = overlapping.warnings.find(
-      (w) => w.kind === 'grace-fade' || w.kind === 'grace-floor'
-    );
-    expect(flagged?.adjacencyIndex).toBe(1);
-    expect(overlapping.warnings.some((w) => w.kind === 'window-overlap')).toBe(false);
+    // The junction rolls: the incoming allocates deck C (A and B are
+    // still audible at its window start) — no truncation, no chip (a
+    // performed rolling junction is not a degeneracy).
+    expect(overlapping.entries.map((e) => e.deck)).toEqual(['A', 'B', 'C']);
+    expect(overlapping.entries[0].graceFade).toBeUndefined();
+    expect(overlapping.entries[0].exitMixSec).toBeCloseTo(80);
+    expect(
+      overlapping.warnings.some(
+        (w) => w.kind === 'window-overlap' || w.kind === 'grace-fade' || w.kind === 'grace-floor'
+      )
+    ).toBe(false);
 
     const pastEnd = planSet(twoTracks(tr({ startSec: 95 })));
     expect(pastEnd.warnings.some((w) => w.kind === 'window-past-end' && w.adjacencyIndex === 0)).toBe(
@@ -954,9 +958,11 @@ describe('grace fade (planner transform)', () => {
   });
 
   it('floors at the entry window: degenerate pileups plan as-authored with an error flag', () => {
-    // Four tracks; window 2 (needing deck B, entry 1's) opens at mix 83 —
-    // freeing deck B by 78 would cut into entry 1's own entry window
-    // (60..80): no heroics, plan as authored, flag an error.
+    // Four tracks, short windows: window 0 at 60..80 (entry 1 enters via
+    // it), window 1 at 81..83 (entry 1's own exit), window 2 opens at 84
+    // — NO mix-time overlap anywhere (nothing rolls to deck C, sets
+    // #143), but deck B must free by 79, inside entry 1's own entry
+    // window (60..80): no heroics, plan as authored, flag an error.
     const plan = planSet(
       input({
         entries: [
@@ -968,48 +974,63 @@ describe('grace fade (planner transform)', () => {
         tracks: { 1: facts(100), 2: facts(200), 3: facts(100), 4: facts(100) },
         transitionsByUuid: {
           t1: tr({ startSec: 60, bInSec: 0, tempoMatch: false }),
-          t2: tr({ startSec: 22, bInSec: 0, tempoMatch: false }), // window mix 82..102
-          t3: tr({ startSec: 1, bInSec: 0, tempoMatch: false }), // window mix 83..103
+          t2: tr({ startSec: 21, durationSec: 2, bInSec: 0, tempoMatch: false }), // mix 81..83
+          t3: tr({ startSec: 3, durationSec: 2, bInSec: 0, tempoMatch: false }), // mix 84..86
         },
         grace: { headroomSec: 5, fadeSec: 2 },
       })
     );
+    expect(plan.entries.map((e) => e.deck)).toEqual(['A', 'B', 'A', 'B']);
     const e1 = plan.entries[1];
     expect(e1.graceFade).toBeUndefined();
-    expect(e1.exitMixSec).toBeCloseTo(102); // as authored
+    expect(e1.exitMixSec).toBeCloseTo(83); // as authored
     expect(
       plan.warnings.some((w) => w.kind === 'grace-floor' && w.severity === 'error' && w.adjacencyIndex === 2)
     ).toBe(true);
   });
 
-  it('replaces the window-overlap warning when the fade handles the collision', () => {
-    // Window 2 at mix 92..112 overlaps window 1 (82..102): entry 1 is
-    // truncated at 87 (grace) — the fade chip subsumes the overlap chip.
+  it('fades only on TRUE deck exhaustion (sets #143): a five-deep pileup truncates the fallback victim', () => {
+    // Four 100s windows, each overlapping ALL the previous: entries roll
+    // A→B→C→D; the fifth entry finds nothing free at its window start
+    // (mix 90 — every deck's occupant is still audible), falls back to
+    // ping-pong deck A, and the grace fade truncates A's occupant (entry
+    // 0). The fade chip subsumes the overlap chip on that adjacency.
     const plan = planSet(
       input({
         entries: [
           { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
           { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
           { trackId: 3, pin: { kind: 'transition', uuid: 't3' } },
-          { trackId: 4, pin: null },
+          { trackId: 4, pin: { kind: 'transition', uuid: 't4' } },
+          { trackId: 5, pin: null },
         ],
-        tracks: { 1: facts(100), 2: facts(200), 3: facts(100), 4: facts(100) },
+        tracks: { 1: facts(400), 2: facts(400), 3: facts(400), 4: facts(400), 5: facts(400) },
         transitionsByUuid: {
-          t1: tr({ startSec: 60, bInSec: 0, tempoMatch: false }),
-          t2: tr({ startSec: 22, bInSec: 0, tempoMatch: false }), // window mix 82..102
-          t3: tr({ startSec: 10, bInSec: 0, tempoMatch: false }), // window mix 92..112
+          t1: tr({ startSec: 60, durationSec: 100, bInSec: 0, tempoMatch: false }), // mix 60..160
+          t2: tr({ startSec: 10, durationSec: 100, bInSec: 0, tempoMatch: false }), // mix 70..170
+          t3: tr({ startSec: 10, durationSec: 100, bInSec: 0, tempoMatch: false }), // mix 80..180
+          t4: tr({ startSec: 10, durationSec: 100, bInSec: 0, tempoMatch: false }), // mix 90..190
         },
         grace: { headroomSec: 5, fadeSec: 2 },
       })
     );
-    const e1 = plan.entries[1];
-    expect(e1.exitMixSec).toBeCloseTo(87);
-    expect(e1.exitSec).toBeCloseTo(27); // (87 − 60) at rate 1
-    expect(e1.graceFade!.authoredExitSec).toBeCloseTo(42);
-    expect(plan.warnings.some((w) => w.kind === 'grace-fade' && w.adjacencyIndex === 2)).toBe(true);
-    expect(plan.warnings.some((w) => w.kind === 'window-overlap' && w.adjacencyIndex === 2)).toBe(
-      false
-    );
+    expect(plan.entries.map((e) => e.deck)).toEqual(['A', 'B', 'C', 'D', 'A']);
+    const e0 = plan.entries[0];
+    expect(e0.exitMixSec).toBeCloseTo(85); // 90 − headroom
+    expect(e0.graceFade).toBeDefined();
+    expect(e0.graceFade!.fadeStartMixSec).toBeCloseTo(83);
+    // Rolled junctions carry no chips; the exhausted one carries the fade
+    // chip only (overlap subsumed).
+    expect(plan.warnings.some((w) => w.kind === 'grace-fade' && w.adjacencyIndex === 3)).toBe(true);
+    expect(plan.warnings.some((w) => w.kind === 'window-overlap')).toBe(false);
+    // Mid-pileup (t=100): all four decks sound; the truncated entry 0 is
+    // gone from A — deck A carries the fifth entry (window 3's incoming).
+    const s = planStateAt(plan, 100);
+    expect(s.decks.A.playing).toBe(true);
+    expect(s.decks.A.trackId).toBe(5);
+    expect(s.decks.B.playing).toBe(true);
+    expect(s.decks.C.playing).toBe(true);
+    expect(s.decks.D.playing).toBe(true);
   });
 
   it('leaves non-colliding plans untouched', () => {
@@ -1020,6 +1041,129 @@ describe('grace fade (planner transform)', () => {
     expect(plan.warnings.some((w) => w.kind === 'grace-fade' || w.kind === 'grace-floor')).toBe(
       false
     );
+  });
+});
+
+describe('rolling junctions (overlapping adjacency windows, sets #143)', () => {
+  /** Windows 60..80 and 72..92 on the mix axis (entry 1 anchored at 60):
+   * consecutive pinned windows genuinely overlapping in mix time — the
+   * junction the current pipeline used to squeeze via grace fade.
+   * Distinguishable lanes: window 0's incoming rides faderB 0.7; window
+   * 1 authors faderA 0.3 / faderB 0.9. */
+  const rolling = (over: Partial<PlanInput> = {}) =>
+    planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 1: facts(200), 2: facts(200), 3: facts(200) },
+        transitionsByUuid: {
+          t1: tr({
+            startSec: 60,
+            bInSec: 0,
+            tempoMatch: false,
+            lanes: { faderA: [{ x: 0, y: 0.8 }], faderB: [{ x: 0, y: 0.7 }] },
+          }),
+          t2: tr({
+            startSec: 12,
+            bInSec: 0,
+            tempoMatch: false,
+            lanes: { faderA: [{ x: 0, y: 0.3 }], faderB: [{ x: 0, y: 0.9 }] },
+          }),
+        },
+        ...over,
+      })
+    );
+
+  it('allocates the first free deck (A→B→C→D) for the incoming instead of truncating', () => {
+    const plan = rolling();
+    expect(plan.entries.map((e) => e.deck)).toEqual(['A', 'B', 'C']);
+    // Nothing squeezed: the outgoing plays its full authored window.
+    expect(plan.entries[0].graceFade).toBeUndefined();
+    expect(plan.entries[0].exitMixSec).toBeCloseTo(80);
+    // Authored windows never shift.
+    expect(plan.adjacencies[0].mixStartSec).toBeCloseTo(60);
+    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(80);
+    expect(plan.adjacencies[1].mixStartSec).toBeCloseTo(72);
+    // A performed rolling junction is not a degeneracy: no chips.
+    expect(
+      plan.warnings.some(
+        (w) => w.kind === 'window-overlap' || w.kind === 'grace-fade' || w.kind === 'grace-floor'
+      )
+    ).toBe(false);
+  });
+
+  it('keeps all three tracks audible through the junction, as performed', () => {
+    const plan = rolling();
+    const s = planStateAt(plan, 76); // inside both windows
+    expect(s.decks.A.playing).toBe(true);
+    expect(s.decks.B.playing).toBe(true);
+    expect(s.decks.C.playing).toBe(true);
+    expect(s.lanes.A.fader).toBeGreaterThan(0);
+    expect(s.lanes.B.fader).toBeGreaterThan(0);
+    expect(s.lanes.C.fader).toBeGreaterThan(0);
+  });
+
+  it('hands the shared track’s lanes to the LATER window at its window start (map #114 authority)', () => {
+    const plan = rolling();
+    // Before window 1 opens: window 0 governs both its decks — the
+    // shared track (deck B) reads window 0's incoming fader.
+    const before = planStateAt(plan, 71.9);
+    expect(before.lanes.B.fader).toBeCloseTo(0.7);
+    // From window 1's start the LATER window owns the shared track: deck
+    // B reads window 1's OUTGOING fader; the earlier window keeps
+    // governing only its own outgoing (deck A); the new incoming (deck
+    // C) reads window 1's incoming fader.
+    const during = planStateAt(plan, 76);
+    expect(during.lanes.A.fader).toBeCloseTo(0.8);
+    expect(during.lanes.B.fader).toBeCloseTo(0.3);
+    expect(during.lanes.C.fader).toBeCloseTo(0.9);
+    // After window 0 ends the junction reads like any window: deck A's
+    // occupant exited (silent), window 1 still governs B and C.
+    const after = planStateAt(plan, 85);
+    expect(after.lanes.A.fader).toBe(0);
+    expect(after.lanes.B.fader).toBeCloseTo(0.3);
+    expect(after.lanes.C.fader).toBeCloseTo(0.9);
+  });
+
+  it('leaves non-overlapping plans on ping-pong parity (no third deck)', () => {
+    const plan = rolling({
+      transitionsByUuid: {
+        t1: tr({ startSec: 60, bInSec: 0, tempoMatch: false }), // mix 60..80
+        t2: tr({ startSec: 30, bInSec: 0, tempoMatch: false }), // mix 90..110
+      },
+    });
+    expect(plan.entries.map((e) => e.deck)).toEqual(['A', 'B', 'A']);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it('rolls a window overlapping a hard-cut tail too: the tail plays out at solo fader', () => {
+    // Track 1 hard-cuts at mix 100; track 2 (entering at its Hot Cue 20,
+    // anchored at 80) opens its window to track 3 at mix 95 — while the
+    // tail is still sounding on deck A. The incoming rolls to C; the
+    // tail is neither truncated nor muted.
+    const plan = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null },
+          { trackId: 2, pin: { kind: 'transition', uuid: 't2' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 1: facts(100), 2: facts(200, 20), 3: facts(200) },
+        transitionsByUuid: {
+          t2: tr({ startSec: 15, bInSec: 0, tempoMatch: false }), // mix 95..115
+        },
+      })
+    );
+    expect(plan.entries.map((e) => e.deck)).toEqual(['A', 'B', 'C']);
+    expect(plan.entries[0].graceFade).toBeUndefined();
+    expect(plan.entries[0].exitMixSec).toBeCloseTo(100);
+    const s = planStateAt(plan, 97);
+    expect(s.decks.A.playing).toBe(true);
+    expect(s.lanes.A.fader).toBe(1); // solo — no active window touches A
+    expect(s.decks.C.playing).toBe(true);
   });
 });
 
@@ -1088,6 +1232,115 @@ describe('BPM authority (bpm-authority bugfix, ADR 0016)', () => {
     // Set tempo defaults to Raskal's effective 174 → Kambi pitches to it.
     expect(plan.entries[0].rate).toBeCloseTo(1);
     expect(plan.entries[1].rate).toBeCloseTo(174 / 172, 5);
+  });
+});
+
+// ── Outgoing Jump events (issue 177) ─────────────────────────────────────
+// Mix time ≡ the outgoing's elapsed play through the window; anchors stay
+// in track time. The plan simulates the outgoing THROUGH its jumps: deck
+// positions mid-window, the exit position, and the Conductor's crossing
+// detection all read the jumped path.
+
+describe('outgoing jumps (issue 177)', () => {
+  const twoTracks = (transition: Transition, dur1 = 90) =>
+    input({
+      entries: [
+        { trackId: 1, pin: { kind: 'transition', uuid: 't1' } },
+        { trackId: 2, pin: null },
+      ],
+      tracks: { 1: facts(dur1), 2: facts(200) },
+      transitionsByUuid: { t1: transition },
+    });
+
+  it('simulates the exit position through jumps: exit track ≠ authored window end', () => {
+    // Window 60..80; −8 at x 0.5 (mix 70): the outgoing exits the full-
+    // width window at track 72, not 80 — downstream anchoring reads THIS.
+    const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: -8 }] })));
+    const [a, b] = plan.entries;
+    expect(a.exitSec).toBeCloseTo(72);
+    expect(a.exitMixSec).toBeCloseTo(80); // elapsed play runs the full width
+    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(80);
+    // The INCOMING's anchor is untouched by the outgoing's jumps.
+    expect(b.mixOffsetSec).toBeCloseTo(52);
+  });
+
+  it('a forward jump past the outgoing track end exits it at that instant', () => {
+    // durA 75; +10 at mix 70 lands at 80 ≥ 75 → the outgoing dies at mix
+    // 70, parked at its track end; the window keeps its authored footprint.
+    const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: 10 }] }), 75));
+    expect(plan.entries[0].exitMixSec).toBeCloseTo(70);
+    expect(plan.entries[0].exitSec).toBeCloseTo(75);
+    expect(plan.adjacencies[0].mixEndSec).toBeCloseTo(80);
+  });
+
+  it('planStateAt drives the outgoing deck through its jumps mid-window', () => {
+    const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: -8 }] })));
+    expect(planStateAt(plan, 69.9).decks.A.trackTime).toBeCloseTo(69.9);
+    expect(planStateAt(plan, 70).decks.A.trackTime).toBeCloseTo(62);
+    expect(planStateAt(plan, 75).decks.A.trackTime).toBeCloseTo(67);
+    // Parked at the SIMULATED exit after the window.
+    expect(planStateAt(plan, 85).decks.A.trackTime).toBeCloseTo(72);
+    expect(planStateAt(plan, 85).decks.A.playing).toBe(false);
+  });
+
+  it('jumpCrossed reports outgoing-jump instants like incoming ones', () => {
+    const plan = planSet(twoTracks(tr({ jumpsA: [{ x: 0.5, deltaSec: -8 }] })));
+    expect(jumpCrossed(plan, 69.9, 70.1)).toBe(true);
+    expect(jumpCrossed(plan, 70.1, 70.3)).toBe(false);
+  });
+
+  it('context-independence: the same artifact replays identically wherever the pair enters the Set', () => {
+    // The same Transition (jumps on BOTH roles) pinned for pair 2→3 in
+    // two Sets: one opens on track 2; the other reaches track 2 via a
+    // hard cut out of track 1 (entering at its Hot Cue 1). Deck positions
+    // relative to the window start must be identical (issue 177
+    // regression: track-time anchors + elapsed-play window axis).
+    const transition = tr({
+      jumpsA: [{ x: 0.4, deltaSec: -6 }],
+      jumps: [{ x: 0.5, deltaSec: -8 }],
+    });
+    const short = planSet(
+      input({
+        entries: [
+          { trackId: 2, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 2: facts(90), 3: facts(200) },
+        transitionsByUuid: { t1: transition },
+      })
+    );
+    const long = planSet(
+      input({
+        entries: [
+          { trackId: 1, pin: null }, // hard cut into track 2
+          { trackId: 2, pin: { kind: 'transition', uuid: 't1' } },
+          { trackId: 3, pin: null },
+        ],
+        tracks: { 1: facts(100), 2: facts(90, 15), 3: facts(200) },
+        transitionsByUuid: { t1: transition },
+      })
+    );
+    const wShort = short.adjacencies[0];
+    const wLong = long.adjacencies[1];
+    expect(wLong.mixStartSec).toBeGreaterThan(wShort.mixStartSec); // different contexts
+    const outShort = short.entries[0].deck;
+    const inShort = short.entries[1].deck;
+    const outLong = long.entries[1].deck;
+    const inLong = long.entries[2].deck;
+    for (const delta of [0, 5.5, 8.01, 12, 19.5]) {
+      const sState = planStateAt(short, wShort.mixStartSec + delta);
+      const lState = planStateAt(long, wLong.mixStartSec + delta);
+      expect(lState.decks[outLong].trackTime).toBeCloseTo(
+        sState.decks[outShort].trackTime,
+        6
+      );
+      expect(lState.decks[inLong].trackTime).toBeCloseTo(
+        sState.decks[inShort].trackTime,
+        6
+      );
+      expect(lState.lanes[outLong]).toEqual(sState.lanes[outShort]);
+      expect(lState.lanes[inLong]).toEqual(sState.lanes[inShort]);
+    }
   });
 });
 

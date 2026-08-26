@@ -69,3 +69,29 @@
   outline: 1px solid var(--blue);
   outline-offset: -1px;
 }
+
+/* Collapsible section headers (gh#174) — the Sets header's typography,
+   now clickable with a collapse caret. */
+.pl-sidebar-section-header {
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--subtext0);
+  border-top: 1px solid var(--surface0);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pl-sidebar-section-header.collapsed {
+  padding-bottom: 6px;
+}
+
+.pl-sidebar-section-header:hover {
+  color: var(--text);
+}
+
+.pl-sidebar-section-caret {
+  display: inline-block;
+  width: 12px;
+}

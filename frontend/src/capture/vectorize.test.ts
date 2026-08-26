@@ -125,6 +125,27 @@ describe('anchors', () => {
     expect(tr.bInSec).toBeCloseTo(8.2);
   });
 
+  it('a repaired (backdated) entry window lands B at its true first-audible position (#178)', () => {
+    // Play-then-slam entry: B starts from its top at 99.5, the detector
+    // (v4) backdates the window start to the first sound at 100 — the
+    // back-projection must land B 0.5s in (its true position at the
+    // window start), not beats later.
+    const input = {
+      events: [
+        init('A', 100, { decks: { A: deck(), B: deck({ trackId: 2, fader: 0 }) } }),
+        { t: 99.5, kind: 'transport', channel: 'B', action: 'play', playhead: 0 } as CaptureEvent,
+        tick(100, { A: 60 }),
+        control(100, 'fader', 'B', 0.01),
+        control(100.6, 'fader', 'B', 1),
+        tick(110, { A: 70, B: 10.5 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.bInSec).toBeCloseTo(0.5);
+  });
+
   it('returns null without an init head', () => {
     expect(vectorizeTake({ events: [tick(100, { A: 1 })], windowStartS: 100, windowEndS: 110 }, facts)).toBeNull();
   });
@@ -241,11 +262,14 @@ describe('discrete gestures become Jump events (issue 04)', () => {
     expect(tr.jumps).toEqual([{ x: 0.5, deltaSec: expect.closeTo(46) }]);
   });
 
-  it('outgoing-deck jumps are dropped (incoming-only, ADR 0020) but stay in the slice', () => {
+  it('outgoing-deck jumps become jumpsA (issue 177) with anchors untouched', () => {
+    // A rolling from 60; at mix 110 (x 0.5) expected 70, landed 40.
     const input = baseInput([transport(110, 'A', 'jumpBeats', 40, -32)]);
     const draft = vectorizeTake(input, facts)!;
+    expect(draft.transition.jumpsA).toEqual([{ x: 0.5, deltaSec: expect.closeTo(-30) }]);
     expect(draft.transition.jumps).toBeUndefined();
-    expect(draft.transition.startSec).toBeCloseTo(60); // anchor unaffected
+    expect(draft.transition.startSec).toBeCloseTo(60); // track-time anchor unaffected
+    expect(draft.transition.durationSec).toBeCloseTo(20); // elapsed-play width unaffected
   });
 
   it('chained jumps compute each delta against the post-previous-jump path', () => {
@@ -332,12 +356,20 @@ describe('loop engagements collapse to repeated Jump events (looping 06)', () =>
     expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
   });
 
-  it('outgoing-deck loops are dropped (incoming-only, ADR 0020)', () => {
+  it('outgoing-deck loops collapse to a repeated Jump on jumpsA (issue 177)', () => {
+    // A rolling from 60; loop [65, 67) engaged at 105 (playhead 65),
+    // released at 115 — unwrapped 75, so 5 wraps of 2s.
     const input = baseInput([
       loop(105, 'A', 65, { start: 65, end: 67 }),
       loop(115, 'A', 66, null),
     ]);
-    expect(vectorizeTake(input, facts)!.transition.jumps).toBeUndefined();
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.jumps).toBeUndefined();
+    expect(tr.jumpsA).toHaveLength(1);
+    const j = tr.jumpsA![0];
+    expect(j.x).toBeCloseTo(0.35); // first wrap at t 107
+    expect(j.deltaSec).toBeCloseTo(-2);
+    expect(j.count).toBe(5);
   });
 
   it('loop wraps and ordinary jumps coexist in the same Take', () => {
@@ -464,6 +496,62 @@ describe('mix-domain alignment (4dp 39)', () => {
     )!;
     // 1% × 4s = 0.04s drift < quarter-beat (0.086s): matched, as before.
     expect(draft.transition.tempoMatch).toBe(true);
+  });
+});
+
+// ── Octave-equivalent tempo-match (grid-octave 168) ──────────────────────
+// The field bug: Nebula (track 959) gridded at 87.51 but ridden at 175
+// against 172-gridded Want It (take 1fae90e2): required read +96.6% and
+// could never fire. Half/double grids are first-class in the library
+// (dyadic-fold doctrine), so the grid ratio's dyadic folds 2r and r/2 are
+// octave-equivalent matches; the fold nearest the performed ride is tested.
+describe('octave-equivalent tempo-match (grid-octave 168)', () => {
+  /** Both decks riding recorded pitches over window 100..(100+len);
+   * ticks agree with the recorded baseline (no repair in play). */
+  function riddenInput(pitchA: number, pitchB: number, len = 50) {
+    const decks = { A: deck({ pitch: pitchA }), B: deck({ trackId: 2, pitch: pitchB }) };
+    const rA = 1 + pitchA / 100;
+    const rB = 1 + pitchB / 100;
+    const events: CaptureEvent[] = [init('A', 100, { decks })];
+    for (let t = 100; t <= 100 + len; t += 5) {
+      events.push(tick(t, { A: 60 + (t - 100) * rA, B: 8 + (t - 100) * rB }));
+    }
+    return { events, windowStartS: 100, windowEndS: 100 + len };
+  }
+
+  it('a half-gridded INCOMING matches at the r/2 fold (track 959 field shape)', () => {
+    // Nebula gridded 87.51, true 175: raw required +96.6%; the performed
+    // renorm −1.73% sits on the r/2 fold's −1.72% — matched.
+    const draft = vectorizeTake(riddenInput(1.78, 0.02, 55), { bpmA: 172, bpmB: 87.5069 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+    expect(draft.transition.bInSec).toBeCloseTo(8, 1);
+    // Back-projection runs at the FOLDED ratio (≈0.983), not the raw grid
+    // ratio (≈1.966): the commit point lands on B's performed end.
+    const modelEnd =
+      draft.transition.bInSec + draft.transition.durationSec * (0.5 * (172 / 87.5069));
+    expect(modelEnd).toBeCloseTo(8 + 55 * 1.0002, 1);
+  });
+
+  it('a half-gridded OUTGOING matches at the 2r fold (track 821 field shape)', () => {
+    // Everyday VIP gridded 87, ridden ~174 into 175-gridded FREE (take
+    // c722e43d): raw required −50.3%; renorm −0.58% ≈ the 2r fold.
+    const draft = vectorizeTake(riddenInput(2.36, 1.77, 90), { bpmA: 87, bpmB: 175.0056 })!;
+    expect(draft.transition.tempoMatch).toBe(true);
+  });
+
+  it('a ride matching NO fold stays unmatched (folds are not a loophole)', () => {
+    // r = 174/116 = 1.5: the canonical fold (r/2) still requires −25% —
+    // a flat 0% ride is no octave-equivalent match.
+    const draft = vectorizeTake(riddenInput(0, 0), { bpmA: 174, bpmB: 116 })!;
+    expect(draft.transition.tempoMatch).toBe(false);
+  });
+
+  it('the drift bound reads B at the folded (fastest) BPM — no half-time discount', () => {
+    // Under the r/2 fold B's true beat is DOUBLE the grid's: a 0.25%
+    // residual over 50s (0.125s drift) passes a quarter-beat of the 87.5
+    // grid (0.171s) but NOT of the true 175 (0.086s) — unmatched.
+    const draft = vectorizeTake(riddenInput(0, -1.464), { bpmA: 172, bpmB: 87.5 })!;
+    expect(draft.transition.tempoMatch).toBe(false);
   });
 });
 
@@ -694,5 +782,106 @@ describe('assignment-aware fader lanes (4dp 39)', () => {
     // faderA never moved: no lane emitted for it at all (untouched + at
     // its resting default).
     expect(draft.transition.lanes.faderA).toBeUndefined();
+  });
+});
+
+describe('window widening for essential pre-window outgoing jumps (issue 177)', () => {
+  const transport = (
+    t: number,
+    channel: CaptureChannel,
+    action: 'jumpBeats' | 'hotCue',
+    playhead: number
+  ): CaptureEvent => ({ t, kind: 'transport', channel, action, playhead });
+
+  const loop = (
+    t: number,
+    channel: CaptureChannel,
+    playhead: number,
+    region: { start: number; end: number } | null
+  ): CaptureEvent => ({ t, kind: 'loop', channel, playhead, region });
+
+  it('a backward outgoing jump mid-replay at the window start widens the window to contain it', () => {
+    // A jumps 55 → 25 at t95 (Δ −30); its replay is still in progress
+    // when the window opens at 100 → the window widens to 95 and the
+    // jump lands at x = 0 with the PRE-jump track-time anchor.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        transport(95, 'A', 'jumpBeats', 25),
+        tick(100, { A: 30, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(55); // pre-jump anchor at the widened start
+    expect(tr.durationSec).toBeCloseTo(25); // 95..120 in outgoing seconds
+    expect(tr.jumpsA).toEqual([{ x: expect.closeTo(0), deltaSec: expect.closeTo(-30) }]);
+    // B's entry alignment re-reads at the widened start: 8 at t100 → 3 at t95.
+    expect(tr.bInSec).toBeCloseTo(3);
+  });
+
+  it('a completed pre-window replay is inessential — absorbed by the anchor, never admitted', () => {
+    // A jumps 52 → 49 at t92 (Δ −3); the 3s replay completes by t95,
+    // well before the window opens → no widening, no jumpsA.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        transport(92, 'A', 'jumpBeats', 49),
+        tick(100, { A: 57, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(57); // post-jump path, absorbed
+    expect(tr.durationSec).toBeCloseTo(20);
+    expect(tr.jumpsA).toBeUndefined();
+  });
+
+  it('an outgoing loop straddling the window start widens to its first wrap', () => {
+    // Loop [56, 58) engaged at t96 (playhead 56): first wrap at t98,
+    // still open at the window start (100), released at t108 — 6 wraps.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50 }),
+        loop(96, 'A', 56, { start: 56, end: 58 }),
+        tick(100, { B: 8 }),
+        loop(108, 'A', 57, null),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(58); // the loop's end edge, about to wrap
+    expect(tr.durationSec).toBeCloseTo(22); // 98..120
+    expect(tr.jumpsA).toHaveLength(1);
+    const j = tr.jumpsA![0];
+    expect(j.x).toBeCloseTo(0);
+    expect(j.deltaSec).toBeCloseTo(-2);
+    expect(j.count).toBe(6);
+  });
+
+  it('pre-window INCOMING jumps never widen the window', () => {
+    // The incoming's pre-window jump is ordinary scrub history — its
+    // alignment is what the commit-point back-projection reads anyway.
+    const input = {
+      events: [
+        init('A', 90),
+        tick(90, { A: 50, B: 40 }),
+        transport(95, 'B', 'jumpBeats', 3),
+        tick(100, { A: 60, B: 8 }),
+      ],
+      windowStartS: 100,
+      windowEndS: 120,
+    };
+    const tr = vectorizeTake(input, facts)!.transition;
+    expect(tr.startSec).toBeCloseTo(60);
+    expect(tr.durationSec).toBeCloseTo(20);
+    expect(tr.jumps).toBeUndefined();
+    expect(tr.jumpsA).toBeUndefined();
   });
 });
