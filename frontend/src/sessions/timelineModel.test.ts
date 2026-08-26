@@ -172,6 +172,28 @@ describe('deriveTimeline', () => {
     ).toEqual({ from: null, to: 'B' });
   });
 
+  it('takeDeckPair follows the audible copy when a track is loaded on two decks (gh#184)', () => {
+    // Track 9 sits loaded on A (silent — never played) AND on D, where it
+    // actually plays through the take window. Deck-order-first matching
+    // used to attribute the chip to A.
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 9, bpm: 172 }, // silent copy
+      { t: 1, kind: 'load', channel: 'B', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+      { t: 5, kind: 'load', channel: 'D', trackId: 9, bpm: 172 },
+      { t: 6, kind: 'transport', channel: 'D', action: 'play', playhead: 0 },
+      { t: 30, kind: 'transport', channel: 'B', action: 'pause', playhead: 28 },
+      { t: 40, kind: 'transport', channel: 'D', action: 'pause', playhead: 34 },
+    ];
+    const m = deriveTimeline(events);
+    const take = { a_track_id: 7, b_track_id: 9, window_start_s: 8, window_end_s: 25 };
+    expect(takeDeckPair(m, take)).toEqual({ from: 'B', to: 'D' });
+    // Both copies silent in the window: still resolves (first-found fallback).
+    const early = { a_track_id: 7, b_track_id: 9, window_start_s: 1, window_end_s: 1.5 };
+    expect(takeDeckPair(m, early).to).not.toBeNull();
+  });
+
   it('an empty log derives an empty, zero-span model', () => {
     const m = deriveTimeline([]);
     expect(m.start).toBe(0);
