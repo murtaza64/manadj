@@ -187,10 +187,23 @@
 .stl-take-chip.slim text {
   font-size: 9px;
 }
-/* 3-4-row clusters: chips are 6-8px tall — no room for text (the hover
-   title carries the label). */
-.stl-take-chip.micro text {
+/* 3-4-row clusters: chips are 6-8px tall — no room for the LABEL (the
+   hover title carries it), but the kind glyph stays visible at any
+   stack depth (gh#185: stacked chips must still tell their kind). */
+.stl-take-chip.micro .stl-chip-label {
   display: none;
+}
+.stl-take-chip.micro .stl-chip-glyph {
+  font-size: 7px;
+}
+
+/* Cameo Take chips (#140/#185): orange = the guest/ornament family, as
+   the Transition history's ◐ rows — NOT the transition-take gradient. */
+.stl-take-chip.cameo rect {
+  fill: #ff7a00;
+}
+.stl-take-chip.cameo text {
+  fill: #1a0d00;
 }
 .stl-take-whisker {
   stroke: #00ff6a;
@@ -238,8 +251,11 @@
 .stl-cand-chip.slim text {
   font-size: 9px;
 }
-.stl-cand-chip.micro text {
+.stl-cand-chip.micro .stl-chip-label {
   display: none;
+}
+.stl-cand-chip.micro .stl-chip-glyph {
+  font-size: 7px;
 }
 /* The lane-spanning highlight band: ALWAYS-ON region guide (gh#170
    pass 2 directive 4 — detected routines must read at rest, not on
@@ -352,9 +368,13 @@
 .stl-rtake-chip.slim text {
   font-size: 9px;
 }
-.stl-routine-chip.micro text,
-.stl-rtake-chip.micro text {
+.stl-routine-chip.micro .stl-chip-label,
+.stl-rtake-chip.micro .stl-chip-label {
   display: none;
+}
+.stl-routine-chip.micro .stl-chip-glyph,
+.stl-rtake-chip.micro .stl-chip-glyph {
+  font-size: 7px;
 }
 
 /* Trim span + handles (confirm-with-boundary-trim). */
