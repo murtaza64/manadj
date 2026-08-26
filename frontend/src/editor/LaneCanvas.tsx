@@ -10,6 +10,14 @@ import { insertChop, nearestTime } from './mixModel';
 import { indicesInRect, moveGroup, toggleIndex } from './laneSelection';
 import type { SelectRect } from './laneSelection';
 import { LANE_COLORS } from './laneColors';
+import {
+  emptyLaneShade,
+  laneDeviation,
+  laneFillAnchor,
+  laneNeutral,
+  pointStroke,
+  segmentShade,
+} from './laneShade';
 import type { LaneId, LanePoint } from './mixModel';
 /** One automation lane: breakpoint polyline editor (canvas only; the label
  * and clear button live in the lane strip). */
@@ -36,11 +44,7 @@ const GUIDE_TIER_WIDTH: readonly number[] = [1.5, 1.5, 2, 2.5, 3];
 const LANE_POINT_R = 5;
 /** Grab tolerance around a breakpoint (px). */
 const LANE_GRAB_PX = 13;
-/** Vertical inset of the VALUE range inside the lane rect: y=0/y=1
- * breakpoints sit this far from the strip boundary instead of ON it —
- * without this, bottom-edge points were half outside the hit div and hard
- * to grab (and grabbing them fought the adjacent strip). */
-const LANE_VPAD = 6;
+
 /** Lane canvas bitmap width cap (buffer px): effective DPR shrinks once a
  * window's CSS width exceeds this, keeping deep-zoom canvases inside GPU
  * limits and the compositor budget. */
@@ -199,16 +203,27 @@ export function LaneCanvas({
     // transparent except where breakpoint circles overflow into it.
     const lh = h - LANE_PAD * 2;
     const lx = (nx: number) => LANE_PAD + nx * lw - spanL;
-    // Value axis inset by LANE_VPAD: extremes stay grabbable (see const).
-    const ly = (ny: number) => LANE_PAD + LANE_VPAD + (1 - ny) * (lh - LANE_VPAD * 2);
-    // Background/midline clipped to the lane rect ∩ this canvas.
+    // Value axis spans the FULL lane rect: y=0/y=1 sit exactly on the
+    // background edges, so the min/max lines, the strip borders, and the
+    // ruled guides all coincide (walkthrough feedback, mix-editor 39 —
+    // a 6px inset here read as awkward gaps in the grid). Edge points
+    // remain grabbable via LANE_GRAB_PX; their circles overflow into the
+    // canvas pad and render complete.
+    const ly = (ny: number) => LANE_PAD + (1 - ny) * lh;
+    // Background + NEUTRAL guide clipped to the lane rect ∩ this canvas.
+    // The guide sits at the lane's neutral (mix-editor 39): center for
+    // EQ/filter, EMPTY (bottom) for faders. Filters fill from this line;
+    // faders and EQ fill from MIN (energy present — laneFillAnchor). The
+    // fader guide coincides with the strip's bottom edge, which is fine:
+    // silence needs no extra line.
+    const neutralY = ly(laneNeutral(id));
     const bx1 = Math.max(lx(0), 0);
     const bx2 = Math.min(lx(1), w);
     if (bx2 > bx1) {
       ctx.fillStyle = 'rgba(24, 24, 24, 0.85)';
       ctx.fillRect(bx1, LANE_PAD, bx2 - bx1, lh);
-      ctx.fillStyle = '#313136';
-      ctx.fillRect(bx1, LANE_PAD + lh / 2, bx2 - bx1, 1);
+      ctx.fillStyle = 'rgba(255,255,255,0.13)';
+      ctx.fillRect(bx1, neutralY, bx2 - bx1, 1);
     }
 
     // Beat/cue guides continue through the lanes (beatmatching alignment).
@@ -243,45 +258,93 @@ export function LaneCanvas({
     }
 
     const color = LANE_COLORS[id];
-    // Curve path (with flat extensions to the window edges; off-canvas
-    // coordinates clip harmlessly).
-    const tracePath = () => {
-      ctx.beginPath();
-      points.forEach((p, i) => {
-        const px = lx(p.x);
-        const py = ly(p.y);
-        if (i === 0) {
-          ctx.moveTo(lx(0), py);
-          ctx.lineTo(px, py);
+    // DEVIATION rendering (mix-editor 39): the curve renders per straight
+    // segment — grey at/near neutral ramping to the deck color with
+    // deviation, with the area between curve and NEUTRAL AXIS filled as a
+    // horizontal gradient whose alpha tracks the INTERPOLATED value (the
+    // stops come from segmentShade; a flat segment degenerates to a flat
+    // fill). Flat extensions to the window edges get the same treatment
+    // (off-canvas coordinates clip harmlessly). Filter segments hue-split
+    // by side (LPF dark / HPF light) inside segmentShade.
+    if (points.length > 0) {
+      const fillY = ly(laneFillAnchor(id));
+      const ext: LanePoint[] = [
+        { x: 0, y: points[0].y },
+        ...points,
+        { x: 1, y: points[points.length - 1].y },
+      ];
+      for (let i = 0; i < ext.length - 1; i++) {
+        const a = ext[i];
+        const b = ext[i + 1];
+        const shade = segmentShade(id, color, a.y, b.y);
+        if (shade.fill !== null) {
+          const x0 = lx(a.x);
+          const x1 = lx(b.x);
+          ctx.beginPath();
+          ctx.moveTo(x0, ly(a.y));
+          ctx.lineTo(x1, ly(b.y));
+          ctx.lineTo(x1, fillY);
+          ctx.lineTo(x0, fillY);
+          ctx.closePath();
+          if (x1 - x0 > 0.5) {
+            const grad = ctx.createLinearGradient(x0, 0, x1, 0);
+            for (const s of shade.fill) grad.addColorStop(s.offset, s.color);
+            ctx.fillStyle = grad;
+          } else {
+            // Degenerate span (vertical slam): no visible area to grade.
+            ctx.fillStyle = shade.fill[shade.fill.length - 1].color;
+          }
+          ctx.fill();
         }
-        ctx.lineTo(px, py);
-        if (i === points.length - 1) ctx.lineTo(lx(1), py);
-      });
-    };
-
-    // Translucent fill under the curve (DAW-style) — makes each lane's shape
-    // read at a glance even when several strips are stacked.
-    tracePath();
-    ctx.lineTo(lx(1), ly(0));
-    ctx.lineTo(lx(0), ly(0));
-    ctx.closePath();
-    ctx.globalAlpha = 0.18;
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    tracePath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.stroke();
+        {
+          // Stroke: same per-value gradient as the fill. Degenerate spans
+          // (vertical slams) take the strongest endpoint so a slam still
+          // reads at full strength.
+          const x0 = lx(a.x);
+          const x1 = lx(b.x);
+          ctx.beginPath();
+          ctx.moveTo(x0, ly(a.y));
+          ctx.lineTo(x1, ly(b.y));
+          if (x1 - x0 > 0.5) {
+            const grad = ctx.createLinearGradient(x0, 0, x1, 0);
+            for (const s of shade.stroke) grad.addColorStop(s.offset, s.color);
+            ctx.strokeStyle = grad;
+          } else {
+            const deeper = laneDeviation(id, a.y) >= laneDeviation(id, b.y) ? a.y : b.y;
+            ctx.strokeStyle = pointStroke(id, color, deeper);
+          }
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    } else if (bx2 > bx1) {
+      // EMPTY lane: a flat neutral-grey line at the resting default with a
+      // grey fill down to the anchor — present but untouched, instead of a
+      // bare background (walkthrough feedback).
+      const es = emptyLaneShade(id);
+      const yPx = ly(es.y);
+      const fillY = ly(laneFillAnchor(id));
+      if (Math.abs(fillY - yPx) > 0.5) {
+        ctx.fillStyle = es.fill;
+        ctx.fillRect(bx1, Math.min(yPx, fillY), bx2 - bx1, Math.abs(fillY - yPx));
+      }
+      ctx.beginPath();
+      ctx.moveTo(bx1, yPx);
+      ctx.lineTo(bx2, yPx);
+      ctx.strokeStyle = es.stroke;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
 
     // Breakpoints: uniform size, centered on their true curve position —
     // circles at the extremes overflow into the pad, floating over the
-    // window borders instead of getting cut off or nudged inward.
+    // window borders instead of getting cut off or nudged inward. Dots
+    // follow the deviation ramp too: a breakpoint parked at neutral is
+    // quiet grey, a working one carries the lane color.
     points.forEach((p) => {
       ctx.beginPath();
       ctx.arc(lx(p.x), ly(p.y), LANE_POINT_R, 0, Math.PI * 2);
-      ctx.fillStyle = color;
+      ctx.fillStyle = pointStroke(id, color, p.y);
       ctx.fill();
     });
 
@@ -382,19 +445,19 @@ export function LaneCanvas({
       }
       if (bestX !== null) x = bestX;
     }
-    // Same LANE_VPAD-inset value axis as the draw effect.
-    const vh = rect.height - LANE_VPAD * 2;
+    // Same full-height value axis as the draw effect.
+    const vh = rect.height;
     return {
       x,
       /** Unsnapped x — the rubber band never beat-snaps. */
       rawX,
-      y: Math.max(0, Math.min(1, 1 - (ey - LANE_VPAD) / vh)),
+      y: Math.max(0, Math.min(1, 1 - ey / vh)),
       nearestIndex: (() => {
         let best = -1;
         let bestDist = Infinity;
         pointsRef.current.forEach((p, i) => {
           const dx = LANE_PAD + p.x * lw - ex;
-          const dy = LANE_VPAD + (1 - p.y) * vh - ey;
+          const dy = (1 - p.y) * vh - ey;
           const d = Math.hypot(dx, dy);
           if (d < bestDist) {
             bestDist = d;

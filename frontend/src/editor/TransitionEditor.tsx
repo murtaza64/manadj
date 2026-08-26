@@ -8,6 +8,7 @@
  * .scratch/mix-editor/NOTES.md).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useBeatgridData } from '../hooks/useBeatgridData';
 import { gridFirstBpm } from '../components/deckControls/bpmCommit';
@@ -33,14 +34,21 @@ import { armAudition } from './auditionArm';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
-import { TransitionSwitcher } from './TransitionSwitcher';
+import { EvidenceSwitcher } from './EvidenceSwitcher';
+import {
+  activeEvidenceRef,
+  buildEvidenceCycle,
+  findEvidenceIndex,
+  pinFollowUpdate,
+} from './evidence';
+import type { EvidenceItem, EvidenceRef, PairTake, SetEditContext } from './evidence';
 import { TemplatesDropdown } from './TemplatesDropdown';
 import { SaveTemplateModal } from './SaveTemplateModal';
 import type { SaveTemplateResult } from './SaveTemplateModal';
 import { barBeatLabel, bEntryLabel, lengthBeatsLabel } from './beatReadout';
 import { beatsToSeconds, slideBeatsToSeconds } from './gestureMath';
 import { EditorStore, useEditorSelector } from './editorStore';
-import { LAST_PAIR_KEY, initTransitionStore } from './pairStore';
+import { LAST_PAIR_KEY, initTransitionStore, isPristine } from './pairStore';
 import { applyTemplate, stripTemplateLanes } from './templateModel';
 import { vectorizeTake } from '../capture/vectorize';
 import { trackEffectiveBpm } from '../sets/planner';
@@ -57,7 +65,13 @@ import {
 import { EDITOR_PITCH_RANGE_PERCENT, defaultMix, tempoMatchPitch } from './mixModel';
 import type { Transition } from './mixModel';
 import { LinkToggle } from '../links/LinkToggle';
-import { repointTakePinsLocal } from '../sets/setStore';
+import {
+  ensureSetEntriesLoaded,
+  repointTakePinsLocal,
+  setAdjacencyPin,
+  useSetEntries,
+} from '../sets/setStore';
+import type { AdjacencyPin } from '../sets/adjacency';
 import type { Track } from '../types';
 import './transitionEditor.css';
 
@@ -173,6 +187,44 @@ function TransitionEditorInner() {
   }, [player, bpmA, bpmB]);
 
   const pairKey = trackA && trackB ? `${trackA.id}:${trackB.id}` : null;
+
+  // ── From-Set context (gh#167) ────────────────────────────────────────
+  // Set by the adjacency click-through (openPair below); DORMANT the
+  // moment the loaded pair stops matching (manual re-assign, deck swap,
+  // another artifact open) — the pairKey guard, not teardown choreography.
+  // While active, the evidence cycler follows switches with the Set pin.
+  const [setCtx, setSetCtx] = useState<SetEditContext | null>(null);
+  const setCtxRef = useRef(setCtx);
+  useEffect(() => {
+    setCtxRef.current = setCtx;
+  });
+  const activeSetCtx = setCtx && setCtx.pairKey === pairKey ? setCtx : null;
+  useEffect(() => {
+    if (activeSetCtx) void ensureSetEntriesLoaded(activeSetCtx.setId);
+  }, [activeSetCtx]);
+  // The adjacency's LIVE pin — the pinned mark follows it (ordering doesn't:
+  // the cycle is anchored to the evidence the adjacency opened with).
+  const ctxEntries = useSetEntries(activeSetCtx?.setId ?? -1);
+  const livePin: AdjacencyPin | null = activeSetCtx
+    ? (ctxEntries?.find((e) => e.trackId === activeSetCtx.headTrackId)?.pin ?? null)
+    : null;
+
+  // The pair's Takes for the evidence cycle (recent-first from the API;
+  // the builder re-sorts defensively and drops promoted ones).
+  const { data: allTakes = [] } = useQuery({ queryKey: ['takes'], queryFn: api.takes.list });
+  const pairTakes: PairTake[] = useMemo(
+    () =>
+      trackA && trackB
+        ? allTakes
+            .filter((t) => t.a_track_id === trackA.id && t.b_track_id === trackB.id)
+            .map((t) => ({
+              uuid: t.uuid,
+              detectedAt: t.detected_at,
+              promotedTransitionUuid: t.promoted_transition_uuid,
+            }))
+        : [],
+    [allTakes, trackA, trackB]
+  );
 
   /** Bumped whenever a Transition loads/switches: the timeline re-frames
    * around the window and the playhead parks at the window start. The park
@@ -597,11 +649,55 @@ function TransitionEditorInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Open a Take for review on the ALREADY-LOADED pair (the tracks are
+   * the caller's — trackRef for user gestures, the freshly fetched pair
+   * for artifact opens). Unpromoted → vectorize into an unsaved draft
+   * (store.stampTakeDraft; review-via-Vectorization, transition-takes
+   * 03); already-promoted → just select its Transition. Returns whether
+   * the Take is now the loaded evidence (pin-follow gates on it). */
+  const reviewTake = useCallback(
+    async (uuid: string, a: Track, b: Track): Promise<boolean> => {
+      try {
+        const detail = await api.takes.get(uuid);
+        if (detail.a_track_id !== a.id || detail.b_track_id !== b.id) return false;
+        if (detail.promoted_transition_uuid) {
+          store.selectTransition(detail.promoted_transition_uuid);
+          return true;
+        }
+        // Re-selecting the Take already under review: keep its draft item
+        // (and any edits) instead of re-vectorizing over them.
+        const draft = store.getSnapshot().takeDraft;
+        if (draft?.takeUuid === uuid) {
+          store.selectTransition(draft.itemUuid);
+          return true;
+        }
+        const vectorized = vectorizeTake(
+          {
+            events: detail.events,
+            windowStartS: detail.window_start_s,
+            windowEndS: detail.window_end_s,
+          },
+          // Grid-first (ADR 0016): same authority the plan-time
+          // vectorization uses — the bpm column can be a stale projection.
+          { bpmA: trackEffectiveBpm(a), bpmB: trackEffectiveBpm(b) }
+        );
+        if (!vectorized) {
+          console.error('take review: slice has no init head — cannot vectorize', uuid);
+          return false;
+        }
+        store.stampTakeDraft(uuid, vectorized.transition);
+        return true;
+      } catch (err) {
+        console.error('take review: open failed', err);
+        return false;
+      }
+    },
+    [store]
+  );
+
   // Take review (transition-takes 03): a Transition-history row opens its
   // Take here. Tracks are assigned by ROLE — outgoing → editor A, whatever
-  // physical deck it played on. An unpromoted Take vectorizes into an
-  // unsaved draft (store.stampTakeDraft); an already-promoted one just
-  // selects its Transition.
+  // physical deck it played on.
   const openTake = useCallback(
     async (uuid: string) => {
       // SESSION-ONLY open (sets 37, same contract as openPair below): no
@@ -618,27 +714,13 @@ function TransitionEditorInner() {
         const pk = `${a.id}:${b.id}`;
         localStorage.setItem(LAST_PAIR_KEY, pk);
         store.loadPair(pk);
-        if (detail.promoted_transition_uuid) {
-          store.selectTransition(detail.promoted_transition_uuid);
-          return;
-        }
-        const draft = vectorizeTake(
-          {
-            events: detail.events,
-            windowStartS: detail.window_start_s,
-            windowEndS: detail.window_end_s,
-          },
-          // Grid-first (ADR 0016): same authority the plan-time
-          // vectorization uses — the bpm column can be a stale projection.
-          { bpmA: trackEffectiveBpm(a), bpmB: trackEffectiveBpm(b) }
-        );
-        if (draft) store.stampTakeDraft(uuid, draft.transition);
-        else console.error('take review: slice has no init head — cannot vectorize', uuid);
+        setSetCtx(null); // history opens carry no Set adjacency
+        await reviewTake(uuid, a, b);
       } catch (err) {
         console.error('take review: open failed', err);
       }
     },
-    [assignSession, warmPair, store]
+    [assignSession, warmPair, store, reviewTake]
   );
   useEffect(() => {
     const consume = () => {
@@ -677,13 +759,25 @@ function TransitionEditorInner() {
         const pk = `${a.id}:${b.id}`;
         localStorage.setItem(LAST_PAIR_KEY, pk);
         store.loadPair(pk);
-        if (req.transitionUuid) store.selectTransition(req.transitionUuid);
-        else store.startBlankSketch();
+        // The opened evidence anchors the cycle's front (gh#167): the
+        // ordering freezes for the visit — only the pinned mark follows the
+        // live pin, so cycling never re-sorts under the user's feet.
+        let anchor: EvidenceRef | null = null;
+        if (req.takeUuid) {
+          const ok = await reviewTake(req.takeUuid, a, b);
+          if (ok) anchor = { kind: 'take', uuid: req.takeUuid };
+        } else if (req.transitionUuid) {
+          store.selectTransition(req.transitionUuid);
+          anchor = { kind: 'transition', uuid: req.transitionUuid };
+        } else {
+          store.startBlankSketch();
+        }
+        setSetCtx(req.setContext ? { ...req.setContext, pairKey: pk, anchor } : null);
       } catch (err) {
         console.error('adjacency edit: open failed', err);
       }
     },
-    [assignSession, warmPair, store]
+    [assignSession, warmPair, store, reviewTake]
   );
   useEffect(() => {
     const consume = () => {
@@ -694,6 +788,33 @@ function TransitionEditorInner() {
     window.addEventListener(OPEN_PAIR_EVENT, consume);
     return () => window.removeEventListener(OPEN_PAIR_EVENT, consume);
   }, [openPair]);
+
+  // Evidence switch (gh#167): the cycler's one gesture. Saved Transition
+  // → select; Take → review-via-Vectorization on the loaded pair. In set
+  // context THE SWITCH IS THE DELIBERATE ACT: the Set pin follows through
+  // the existing pin plumbing (setAdjacencyPin) — live replan rides the
+  // set store notify for free (ConductorPlanFeed; lane values live,
+  // geometry deferred under the sounding-window graft). Outside set
+  // context pinFollowUpdate returns null — no Set is ever touched.
+  const selectEvidence = useCallback(
+    async (item: EvidenceItem) => {
+      const { A: a, B: b } = trackRef.current;
+      if (!a || !b) return;
+      if (item.kind === 'transition') {
+        store.selectTransition(item.uuid);
+      } else {
+        const ok = await reviewTake(item.uuid, a, b);
+        if (!ok) return; // failed opens never move the pin
+      }
+      const upd = pinFollowUpdate(setCtxRef.current, `${a.id}:${b.id}`, item);
+      if (upd) setAdjacencyPin(upd.setId, upd.headTrackId, upd.pin);
+    },
+    [store, reviewTake]
+  );
+
+  /** ▶ past the last chip: a fresh pristine Transition — never a pin
+   * (pristine items have no persisted uuid to point at). */
+  const newSketch = useCallback(() => store.startBlankSketch(), [store]);
 
   // Keep-alive: the editor stays mounted while hidden — its document keys
   // drive the SHARED browse panel (gh#165), so they bind only while this
@@ -824,6 +945,11 @@ function TransitionEditorInner() {
               pairLoaded={pairKey !== null}
               onSwapDecks={swapDecks}
               canSwapDecks={trackA !== null && trackB !== null}
+              pairTakes={pairTakes}
+              evidenceAnchor={activeSetCtx?.anchor ?? null}
+              livePin={livePin}
+              onSelectEvidence={(item) => void selectEvidence(item)}
+              onNewSketch={newSketch}
             />
 
             <DeckCard
@@ -899,6 +1025,11 @@ function EditorCenterPanel({
   pairLoaded,
   onSwapDecks,
   canSwapDecks,
+  pairTakes,
+  evidenceAnchor,
+  livePin,
+  onSelectEvidence,
+  onNewSketch,
 }: {
   store: EditorStore;
   player: MixPlayer;
@@ -921,6 +1052,19 @@ function EditorCenterPanel({
   /** Swap the loaded pair A ⇄ B (issue 29 — shell owns track assignment). */
   onSwapDecks: () => void;
   canSwapDecks: boolean;
+  /** The loaded pair's Takes — the evidence cycle's second section
+   * (gh#167). */
+  pairTakes: PairTake[];
+  /** Set context (gh#167): the evidence the adjacency opened with (frozen
+   * sort anchor) and the adjacency's live pin (the pinned mark). Null/null
+   * outside set context. */
+  evidenceAnchor: EvidenceRef | null;
+  livePin: AdjacencyPin | null;
+  /** Switch the loaded evidence (the shell owns Take vectorization and
+   * pin-follow). */
+  onSelectEvidence: (item: EvidenceItem) => void;
+  /** ▶ past the last chip: fresh pristine Transition. */
+  onNewSketch: () => void;
 }) {
   // Play-button state rides player/engine emits (transport, loads).
   const [, bump] = useState(0);
@@ -1022,6 +1166,22 @@ function EditorCenterPanel({
   const saveDisabledReason = !pairLoaded ? 'Load two tracks first' : 'Both tracks need beatgrids';
   const activeItemName = session.items[session.active]?.name;
 
+  // The unified evidence cycle (gh#167): saved Transitions (favorites
+  // lead) then unpromoted Takes recent-first; in set context the opened
+  // evidence anchors the front and `pinned` tracks the live pin. Rebuilt per
+  // render — this panel already re-renders on every session/mix change.
+  const liveItems = store.liveItems();
+  const evidence = buildEvidenceCycle({
+    saved: liveItems,
+    takes: pairTakes,
+    takeDraft,
+    anchor: evidenceAnchor,
+    livePin,
+  });
+  const activeEvidenceIndex = findEvidenceIndex(evidence, activeEvidenceRef(session, takeDraft));
+  const activeItem = liveItems[session.active];
+  const activeIsDraft = !!takeDraft && activeItem?.uuid === takeDraft.itemUuid;
+
   return (
     <div className="editor-center">
       {/* Row 1: transport + the two mode toggles. TEMPO/SNAP engaged =
@@ -1080,12 +1240,14 @@ function EditorCenterPanel({
           SNAP
         </button>
       </div>
-      {/* Row 2: Transition selection + templates + pair-link. */}
+      {/* Row 2: evidence cycler (gh#167) + templates + pair-link. */}
       <div className="editor-center-row">
-        <TransitionSwitcher
-          items={store.liveItems()}
-          active={session.active}
-          onNavigate={(dir) => store.navigateTransition(dir)}
+        <EvidenceSwitcher
+          items={evidence}
+          activeIndex={activeEvidenceIndex}
+          canNew={activeItem ? !isPristine(activeItem) : false}
+          onSelect={onSelectEvidence}
+          onNew={onNewSketch}
           onRename={(name) => store.renameActive(name)}
           onToggleFavorite={() => store.toggleFavorite()}
           onDelete={() => store.deleteActive()}
@@ -1133,17 +1295,24 @@ function EditorCenterPanel({
           seconds={tr.bInSec}
         />
       </div>
-      {takeDraft && (
-        <div className="editor-center-row editor-take-banner">
-          <span>Reviewing a Take — unsaved until promoted</span>
-          <button className="editor-take-promote" onClick={promoteTake}>
-            Promote to library
-          </button>
-          <button className="editor-take-discard" onClick={() => store.discardTakeDraft()}>
-            Discard
-          </button>
-        </div>
-      )}
+      {/* Take-review row: SPACE ALWAYS RESERVED (gh#167 feedback — the
+          banner appearing must never shove the rows around); content shows
+          only while the draft IS the loaded evidence, so the cycler can
+          move off an unpromoted draft without stranding the banner over an
+          unrelated Transition. visibility (not conditional mount) keeps
+          the hidden buttons inert AND the geometry fixed. */}
+      <div
+        className={`editor-center-row editor-take-banner${activeIsDraft ? '' : ' hidden'}`}
+        aria-hidden={!activeIsDraft}
+      >
+        <span>Reviewing a Take — unsaved until promoted</span>
+        <button className="editor-take-promote" onClick={promoteTake}>
+          Promote to library
+        </button>
+        <button className="editor-take-discard" onClick={() => store.discardTakeDraft()}>
+          Discard
+        </button>
+      </div>
 
       {saveModalOpen && canSaveTemplate && (
         <SaveTemplateModal

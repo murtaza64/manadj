@@ -18,6 +18,14 @@ export interface PairEditRequest {
   /** Saved Transition to select once the pair loads (a Transition pin);
    * null opens a blank sketch (unresolved adjacency). */
   transitionUuid: string | null;
+  /** Take to open for review on the loaded pair (a Take pin) — gh#167:
+   * Take pins ride the pair path too, so set context travels with them.
+   * Wins over transitionUuid when both are set. */
+  takeUuid?: string | null;
+  /** From-Set click-through context (gh#167): while the pair stays
+   * loaded, the editor's evidence cycler follows switches with the Set
+   * pin (setAdjacencyPin, keyed by the adjacency's head track). */
+  setContext?: { setId: number; headTrackId: number } | null;
 }
 
 let pending: PairEditRequest | null = null;
