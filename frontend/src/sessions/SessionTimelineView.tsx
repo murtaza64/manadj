@@ -42,6 +42,8 @@ import {
   ALL_DECKS,
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  candidateDupesTake,
+  castSpanRefs,
   collapseCandidates,
   createStateIndex,
   deriveTimeline,
@@ -136,6 +138,14 @@ type Selection =
   | { kind: 'candidate'; candidate: RoutineCandidateWire }
   | { kind: 'routineTake'; take: RoutineTakeRowWire };
 
+/** A hovered routine band/chip (gh#187): the cast + window driving the
+ * hover-dim spotlight (take-chip parity, any tier — ◆/◇/⧉). */
+interface HoverCast {
+  cast: number[];
+  start: number;
+  end: number;
+}
+
 /** The trim-adjusted confirm payload pieces: slots whose entry survives
  * the trimmed window, offsets re-based onto the new start (clamped ≥ 0 —
  * a slot already playing at the trimmed start enters at 0). Mechanical:
@@ -219,6 +229,9 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
   // in the per-frame overlay — the memoized scene must not re-render per
   // hover, so it only receives the stable callback.
   const [hoverTake, setHoverTake] = useState<TakeRowWire | null>(null);
+  // Hovered routine band/chip (◆/◇/⧉, gh#187): the cast-track spotlight —
+  // exact parity with the take-chip hover, generalized to n cast tracks.
+  const [hoverCast, setHoverCast] = useState<HoverCast | null>(null);
   const [pxPerSec, setPxPerSec] = useState<number | null>(
     () => getTimelineViewState(session.uuid)?.pxPerSec ?? null
   ); // null = fit
@@ -254,13 +267,19 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     [allRoutineTakes, session.uuid]
   );
   // A confirmed candidate stops highlighting — its Routine Take chip is
-  // the surviving surface.
+  // the surviving surface. The uuid check alone leaks after a re-mine
+  // (candidate rows are replaced with fresh uuids — the origin uuid
+  // dangles by design), so a span-shaped dedupe backs it up: a candidate
+  // duplicating a confirmed take's span collapses instead of stacking a
+  // dashed ⧉ band under the ◆ (gh#187).
   const routineCandidates = useMemo(() => {
     const confirmed = new Set(
       (allRoutineTakes ?? []).map((t) => t.origin_candidate_uuid).filter(Boolean)
     );
-    return (allRoutineCandidates ?? []).filter((c) => !confirmed.has(c.uuid));
-  }, [allRoutineCandidates, allRoutineTakes]);
+    return (allRoutineCandidates ?? []).filter(
+      (c) => !confirmed.has(c.uuid) && !routineTakes.some((rt) => candidateDupesTake(c, rt))
+    );
+  }, [allRoutineCandidates, allRoutineTakes, routineTakes]);
 
   const model: TimelineModel | null = useMemo(
     () => (events ? deriveTimeline(events) : null),
@@ -898,6 +917,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
   // defeat it every render).
   const onTakeClick = useCallback((take: TakeRowWire) => setSelection({ kind: 'take', take }), []);
   const onTakeHover = useCallback((take: TakeRowWire | null) => setHoverTake(take), []);
+  const onCastHover = useCallback((hover: HoverCast | null) => setHoverCast(hover), []);
   const trimBoundsRef = useRef<{ lo: number; hi: number } | null>(null);
   const onCandidateClick = useCallback((c: RoutineCandidateWire) => {
     setSelection({ kind: 'candidate', candidate: c });
@@ -1334,6 +1354,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                   expandedGaps={expandedGaps}
                   onTakeClick={onTakeClick}
                   onTakeHover={onTakeHover}
+                  onCastHover={onCastHover}
                   onCandidateClick={onCandidateClick}
                   onRoutineTakeClick={onRoutineTakeClick}
                   onOpenCandidateInEditor={onOpenCandidateInEditor}
@@ -1355,6 +1376,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
                   replayPaused={replay.status === 'paused'}
                   selection={selection}
                   hoverTake={hoverTake}
+                  hoverCast={hoverCast}
                   trim={selection.kind === 'candidate' ? trim : null}
                   onTrimHandleDown={onTrimHandleDown}
                   flash={flash}
@@ -1412,6 +1434,8 @@ interface SceneProps {
   expandedGaps: ReadonlySet<number>;
   onTakeClick(take: TakeRowWire): void;
   onTakeHover(take: TakeRowWire | null): void;
+  /** Routine band/chip hover (gh#187): the cast-track spotlight. */
+  onCastHover(hover: HoverCast | null): void;
   onCandidateClick(candidate: RoutineCandidateWire): void;
   onRoutineTakeClick(take: RoutineTakeRowWire): void;
   onOpenCandidateInEditor(candidate: RoutineCandidateWire): void | Promise<void>;
@@ -1447,6 +1471,7 @@ const TimelineScene = memo(function TimelineScene({
   expandedGaps,
   onTakeClick,
   onTakeHover,
+  onCastHover,
   onCandidateClick,
   onRoutineTakeClick,
   onOpenCandidateInEditor,
@@ -1785,6 +1810,10 @@ const TimelineScene = memo(function TimelineScene({
               e.stopPropagation();
               onCandidateClick(c);
             }}
+            onMouseEnter={() =>
+              onCastHover({ cast: c.cast, start: c.window_start_s, end: c.window_end_s })
+            }
+            onMouseLeave={() => onCastHover(null)}
           >
             <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm (with trim), ✎ to open in the Routine editor`}</title>
             <rect x={x0} y={lanesTop} width={x1 - x0} height={lanesBottom - lanesTop} className="stl-cand-band" />
@@ -1849,6 +1878,10 @@ const TimelineScene = memo(function TimelineScene({
               e.stopPropagation();
               onRoutineTakeClick(rt);
             }}
+            onMouseEnter={() =>
+              onCastHover({ cast: rt.cast, start: rt.window_start_s, end: rt.window_end_s })
+            }
+            onMouseLeave={() => onCastHover(null)}
           >
             <title>
               {persisted
@@ -1927,6 +1960,7 @@ function SceneOverlay({
   replayPaused,
   selection,
   hoverTake,
+  hoverCast,
   trim,
   onTrimHandleDown,
   flash,
@@ -1943,6 +1977,8 @@ function SceneOverlay({
   replayPaused: boolean;
   selection: Selection;
   hoverTake: TakeRowWire | null;
+  /** Hovered routine band/chip (gh#187): cast-track spotlight. */
+  hoverCast: HoverCast | null;
   /** Provenance flash (gh#170): a source region pulsing once. */
   flash?: { start: number; end: number; key: number } | null;
   /** Boundary trim of the selected candidate (routines 158): the span
@@ -2031,14 +2067,17 @@ function SceneOverlay({
         );
       })}
 
-      {/* Take hover spotlight (sessions 22): dim every lane stretch that
-          is NOT the hovered Take's two tracks, and show its boundary
-          whiskers regardless of the detail-marks zoom gate. Lives here
-          (per-frame layer), so hovering never re-renders the scene. */}
-      {hoverTake
+      {/* Hover spotlight (sessions 22; routines gh#187): dim every lane
+          stretch that is NOT the hovered chip's tracks — a Take's two, or
+          a routine band's whole cast — and show boundary whiskers
+          regardless of the detail-marks zoom gate. Lives here (per-frame
+          layer), so hovering never re-renders the scene. */}
+      {hoverTake || hoverCast
         ? (() => {
-            const pair = takeSpanPair(model, hoverTake);
-            const spans = [pair.from, pair.to].filter((s): s is TakeSpanRef => s !== null);
+            const pair = hoverTake ? takeSpanPair(model, hoverTake) : null;
+            const spans = pair
+              ? [pair.from, pair.to].filter((s): s is TakeSpanRef => s !== null)
+              : castSpanRefs(model, hoverCast!.cast, hoverCast!.start, hoverCast!.end);
             const dims: ReactNode[] = [];
             for (const deck of LANE_ORDER) {
               const y = laneYOf(deck, lanesTop, laneH);
@@ -2062,8 +2101,16 @@ function SceneOverlay({
                 }
               }
             }
-            const wx0 = X(hoverTake.window_start_s);
-            const wx1 = X(hoverTake.window_end_s);
+            const wx0 = X(hoverTake ? hoverTake.window_start_s : hoverCast!.start);
+            const wx1 = X(hoverTake ? hoverTake.window_end_s : hoverCast!.end);
+            // Take whiskers carry the deck colors; routine whiskers the
+            // routine family's accent.
+            const c0 = pair
+              ? pair.from && { stroke: DECK_COLORS[pair.from.deck] }
+              : { stroke: 'var(--routine-accent)' };
+            const c1 = pair
+              ? pair.to && { stroke: DECK_COLORS[pair.to.deck] }
+              : { stroke: 'var(--routine-accent)' };
             return (
               <g style={{ pointerEvents: 'none' }}>
                 {dims}
@@ -2073,7 +2120,7 @@ function SceneOverlay({
                   x2={wx0}
                   y2={lanesBottom}
                   className="stl-take-whisker hover"
-                  style={pair.from ? { stroke: DECK_COLORS[pair.from.deck] } : undefined}
+                  style={c0 || undefined}
                 />
                 <line
                   x1={wx1}
@@ -2081,7 +2128,7 @@ function SceneOverlay({
                   x2={wx1}
                   y2={lanesBottom}
                   className="stl-take-whisker hover"
-                  style={pair.to ? { stroke: DECK_COLORS[pair.to.deck] } : undefined}
+                  style={c1 || undefined}
                 />
               </g>
             );
