@@ -16,6 +16,7 @@ import type { AudioOutputDevice } from './audioDevices';
 import { DEFAULT_ROUTING_PREFS, parseRoutingPrefs, resolveRouting } from './routing';
 import type { ResolvedRouting, RoutingPrefs, SavedDevice } from './routing';
 import type { Mixer } from './mixer';
+import { writeSetting } from '../settings/persistedSettings';
 
 const STORAGE_KEY = 'manadj-audio-routing';
 
@@ -35,11 +36,8 @@ function loadPrefs(): RoutingPrefs {
 }
 
 function savePrefs(prefs: RoutingPrefs): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
-  } catch {
-    // persistence is best-effort; the session still routes
-  }
+  // Write-through (settings #176): DB + localStorage cache, best-effort.
+  writeSetting(STORAGE_KEY, JSON.stringify(prefs));
 }
 
 let mixer: Mixer | null = null;

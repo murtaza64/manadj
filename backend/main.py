@@ -7,7 +7,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, settings
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -74,6 +74,7 @@ app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(drops.router, prefix="/api/drops", tags=["drops"])
 app.include_router(routine_candidates.router, prefix="/api/routine-candidates", tags=["routine-candidates"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
+app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 
 
 
