@@ -228,6 +228,18 @@ export class MixPlayer {
     this.emit();
   }
 
+  /** Takeover stand-down (gh#186): stop conducting WITHOUT touching the
+   * decks — they keep sounding as they are (the Conductor's takeover
+   * contract, via auditionTakeover). pause() is the arbiter/UI path and
+   * pauses the engines; this one leaves them to the user. */
+  standDown(): void {
+    if (!this.playing) return;
+    this.mixTimeAtAnchor = this.getMixTime();
+    this.playing = false;
+    cancelAnimationFrame(this.raf);
+    this.emit();
+  }
+
   seek(mixTime: number): void {
     const t = Math.max(0, Math.min(mixTime, this.getMixDuration()));
     this.mixTimeAtAnchor = t;

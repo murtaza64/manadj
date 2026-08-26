@@ -29,6 +29,7 @@ import {
   subscribeAudible,
   unregisterSurface,
 } from '../playback/audibleSurface';
+import { watchAuditionTakeover } from '../editor/auditionTakeover';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
 import { decodeWaveformBlob, type DecodedWaveform } from '../waveform/blob';
@@ -474,6 +475,27 @@ export default function RoutineEditorView() {
       pitchCheckpointRef.current = null;
     };
   }, [player, mixer, auditionTogglePlay, cancelArm]);
+
+  // Deck-control takeover (gh#186), the pair editor's rule on four decks:
+  // a mixer gesture during audition stands the replay down — decks keep
+  // sounding, sounding values land in base, the borrow unwinds. Pitch
+  // checkpoint dropped (the user keeps the running decks).
+  useEffect(
+    () =>
+      watchAuditionTakeover({
+        mixer,
+        surface: 'routine-editor',
+        standDown: () => player.standDown(),
+        cancelArm,
+        takeToken: () => {
+          const token = automationTokenRef.current;
+          automationTokenRef.current = null;
+          pitchCheckpointRef.current = null;
+          return token;
+        },
+      }),
+    [player, mixer, cancelArm]
+  );
 
   // Space = play/pause; ⌘Z/⌘⇧Z = the draft's undo/redo (the undo story
   // the pair editor never grew) — while this view is visible.

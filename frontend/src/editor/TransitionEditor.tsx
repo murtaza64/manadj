@@ -31,6 +31,7 @@ import {
 import { useMixer } from '../hooks/useMixer';
 import { prefetchTrackBuffer } from '../sets/prefetch';
 import { armAudition } from './auditionArm';
+import { watchAuditionTakeover } from './auditionTakeover';
 import { MixPlayer } from './MixPlayer';
 import { DawTimeline } from './DawTimeline';
 import { DeckCard } from './DeckCard';
@@ -624,6 +625,29 @@ function TransitionEditorInner() {
       pitchCheckpointRef.current = null;
     };
   }, [player, mixer, midiJogA, midiJogB, auditionTogglePlay, cancelPendingAudition]);
+
+  // Deck-control takeover (gh#186): a hand on a mixer control while the
+  // editor holds audibility gets the Conductor's answer — the audition
+  // stands down, the decks keep sounding, the sounding values land in
+  // base state, and the borrow unwinds (release + disengage). The pitch
+  // checkpoint is dropped, not restored: the user keeps the running
+  // decks, tempo-match rate and all.
+  useEffect(
+    () =>
+      watchAuditionTakeover({
+        mixer,
+        surface: 'editor',
+        standDown: () => player.standDown(),
+        cancelArm: cancelPendingAudition,
+        takeToken: () => {
+          const token = automationTokenRef.current;
+          automationTokenRef.current = null;
+          pitchCheckpointRef.current = null;
+          return token;
+        },
+      }),
+    [player, mixer, cancelPendingAudition]
+  );
 
   // Adopt tracks on entry, per slot: the shared deck's loaded track wins
   // (mode switches carry the pair), else the saved last pair (refresh

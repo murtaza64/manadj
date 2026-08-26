@@ -1167,9 +1167,18 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
               className="stl-open-editor"
               onClick={() => requestTakeReview(selection.take.uuid)}
             >
-              Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
-              {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id} · open in
-              editor
+              {selection.take.kind === 'guest' ? (
+                <>
+                  ◐ Cameo {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id}{' '}
+                  over {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id}
+                </>
+              ) : (
+                <>
+                  Take {trackNames[selection.take.a_track_id] ?? selection.take.a_track_id} →{' '}
+                  {trackNames[selection.take.b_track_id] ?? selection.take.b_track_id}
+                </>
+              )}{' '}
+              · open in editor
             </button>
             <button className="stl-clear" onClick={() => setSelection({ kind: 'none' })}>
               ✕
@@ -1715,30 +1724,39 @@ const TimelineScene = memo(function TimelineScene({
       })}
 
       {/* Take chips (deck-pair gradient fill; boundary whiskers are
-          detail marks — hidden past the 10-min line, sessions 22). */}
+          detail marks — hidden past the 10-min line, sessions 22).
+          Cameo Takes (kind 'guest', #140) carry the guest family's
+          identity — orange ◐, "guest over host" — instead of the
+          generic transition gradient (gh#185). */}
       {takes.map((t, ti) => {
         const x0 = X(t.window_start_s);
         const x1 = Math.max(X(t.window_end_s), x0 + 12);
         if (x1 < viewX0 || x0 > viewX1) return null;
-        const label = `${trackNames[t.a_track_id] ?? t.a_track_id} → ${
-          trackNames[t.b_track_id] ?? t.b_track_id
-        }`;
+        const cameo = t.kind === 'guest';
+        const label = cameo
+          ? `${trackNames[t.b_track_id] ?? t.b_track_id} over ${
+              trackNames[t.a_track_id] ?? t.a_track_id
+            }`
+          : `${trackNames[t.a_track_id] ?? t.a_track_id} → ${
+              trackNames[t.b_track_id] ?? t.b_track_id
+            }`;
         const pair = takePairs[ti];
         const grad =
-          pair.from !== null && pair.to !== null
+          !cameo && pair.from !== null && pair.to !== null
             ? `url(#stl-take-grad-${pair.from}-${pair.to})`
             : null;
         const { row, rows } = chipLayout[ti];
         const chipH = (CHIP_STRIP_H - 6) / rows;
         const chipY = RULER_H + 2 + row * chipH;
-        const textY = chipY + chipH / 2 + 3;
-        // 2 rows: smaller text; 3-4 rows: chips too thin for text at all
-        // (the hover title still carries the label).
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
+        // 2 rows: smaller text; 3-4 rows: no room for the label — but the
+        // kind glyph stays (gh#185: stacked chips must still tell their
+        // kind apart). The hover title carries the label.
         const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         return (
           <g
             key={t.uuid}
-            className={`stl-take-chip${selectedTakeUuid === t.uuid ? ' selected' : ''}${sizeClass}`}
+            className={`stl-take-chip${cameo ? ' cameo' : ''}${selectedTakeUuid === t.uuid ? ' selected' : ''}${sizeClass}`}
             onClick={(e) => {
               e.stopPropagation();
               onTakeClick(t);
@@ -1746,7 +1764,7 @@ const TimelineScene = memo(function TimelineScene({
             onMouseEnter={() => onTakeHover(t)}
             onMouseLeave={() => onTakeHover(null)}
           >
-            <title>{`${label} · confidence ${t.confidence.toFixed(2)}`}</title>
+            <title>{`${cameo ? 'Cameo Take (#140) · ' : ''}${label} · confidence ${t.confidence.toFixed(2)}`}</title>
             <rect
               x={x0}
               y={chipY}
@@ -1755,15 +1773,14 @@ const TimelineScene = memo(function TimelineScene({
               rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
               style={grad ? { fill: grad } : undefined}
             />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              {cameo ? '◐' : '●'}
+            </text>
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={textY}>
-                ● {label.slice(0, Math.floor((x1 - x0) / 7))}
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {label.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
-            ) : (
-              <text x={x0 + 4} y={textY}>
-                ●
-              </text>
-            )}
+            ) : null}
             {showDetailMarks ? (
               <>
                 <line
@@ -1799,7 +1816,7 @@ const TimelineScene = memo(function TimelineScene({
         const { row, rows } = chipLayout[candChipBase + i];
         const chipH = (CHIP_STRIP_H - 6) / rows;
         const chipY = RULER_H + 2 + row * chipH;
-        const textY = chipY + chipH / 2 + 3;
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
         const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         const selected = selectedCandidateUuid === c.uuid;
         return (
@@ -1818,15 +1835,14 @@ const TimelineScene = memo(function TimelineScene({
             <title>{`Routine candidate · ${chain} · returns ${c.evidence.returns ?? 0}, triples ${c.evidence.triples ?? 0} — click to confirm (with trim), ✎ to open in the Routine editor`}</title>
             <rect x={x0} y={lanesTop} width={x1 - x0} height={lanesBottom - lanesTop} className="stl-cand-band" />
             <rect x={x0} y={chipY} width={x1 - x0} height={chipH} rx={rows === 1 ? 5 : rows === 2 ? 4 : 2} className="stl-cand-chip-rect" />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              ⧉
+            </text>
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={textY}>
-                ⧉ {`${c.cast.length}× ${chain}`.slice(0, Math.floor((x1 - x0) / 7))}
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {`${c.cast.length}× ${chain}`.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
-            ) : (
-              <text x={x0 + 4} y={textY}>
-                ⧉
-              </text>
-            )}
+            ) : null}
             {/* Per-region editor open (gh#170 pass 2 directive 4):
                 confirm-then-promote-then-open — the deliberate act. */}
             {x1 - x0 > 40 && (
@@ -1862,7 +1878,7 @@ const TimelineScene = memo(function TimelineScene({
         const { row, rows } = chipLayout[rtakeChipBase + i];
         const chipH = (CHIP_STRIP_H - 6) / rows;
         const chipY = RULER_H + 2 + row * chipH;
-        const textY = chipY + chipH / 2 + 3;
+        const textY = chipY + chipH / 2 + (rows >= 3 ? 2.5 : 3);
         const sizeClass = rows >= 3 ? ' micro' : rows === 2 ? ' slim' : '';
         const selected = selectedRoutineTakeUuid === rt.uuid;
         const routineUuid = rt.promoted_routine_uuid;
@@ -1903,15 +1919,14 @@ const TimelineScene = memo(function TimelineScene({
               rx={rows === 1 ? 5 : rows === 2 ? 4 : 2}
               className="stl-rtake-chip-rect"
             />
+            <text x={x0 + 4} y={textY} className="stl-chip-glyph">
+              {persisted ? '◆' : '◇'}
+            </text>
             {x1 - x0 > 90 ? (
-              <text x={x0 + 5} y={textY}>
-                {persisted ? '◆' : '◇'} {label.slice(0, Math.floor((x1 - x0) / 7))}
+              <text x={x0 + 15} y={textY} className="stl-chip-label">
+                {label.slice(0, Math.floor((x1 - x0) / 7))}
               </text>
-            ) : (
-              <text x={x0 + 4} y={textY}>
-                {persisted ? '◆' : '◇'}
-              </text>
-            )}
+            ) : null}
             {x1 - x0 > 40 && (
               <g
                 className="stl-region-edit dark"
