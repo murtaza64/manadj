@@ -220,18 +220,18 @@
   cursor: pointer;
 }
 .stl-cand-chip .stl-cand-chip-rect {
-  fill: rgba(255, 0, 200, 0.28);
-  stroke: #ff00c8;
+  fill: rgba(var(--routine-accent-rgb), 0.28);
+  stroke: var(--routine-accent);
   stroke-width: 1.5;
   stroke-dasharray: 5 3;
 }
 .stl-cand-chip.selected .stl-cand-chip-rect,
 .stl-cand-chip:hover .stl-cand-chip-rect {
-  fill: rgba(255, 0, 200, 0.35);
+  fill: rgba(var(--routine-accent-rgb), 0.35);
   stroke-dasharray: none;
 }
 .stl-cand-chip text {
-  fill: #ff5fd8;
+  fill: rgba(var(--routine-accent-rgb), 0.85);
   font-size: 11px;
   font-weight: 700;
 }
@@ -245,14 +245,14 @@
    pass 2 directive 4 — detected routines must read at rest, not on
    hover); still quieter than the waveforms. Clicks pass through. */
 .stl-cand-chip .stl-cand-band {
-  fill: rgba(255, 0, 200, 0.13);
-  stroke: rgba(255, 0, 200, 0.75);
+  fill: rgba(var(--routine-accent-rgb), 0.13);
+  stroke: rgba(var(--routine-accent-rgb), 0.75);
   stroke-width: 1.5;
   stroke-dasharray: 4 4;
   pointer-events: none;
 }
 .stl-cand-chip.selected .stl-cand-band {
-  fill: rgba(255, 0, 200, 0.1);
+  fill: rgba(var(--routine-accent-rgb), 0.1);
 }
 
 /* Per-region editor-open button (gh#170 pass 2 directive 4). */
@@ -260,68 +260,120 @@
   cursor: pointer;
 }
 .stl-region-edit rect {
-  fill: #ff00c8;
+  fill: var(--routine-accent);
   stroke: none;
 }
 .stl-region-edit text {
-  fill: #1c0316 !important;
+  fill: var(--routine-accent-ink, #101400) !important;
   font-size: 10px !important;
   font-weight: 700;
 }
 .stl-region-edit:hover rect {
-  fill: #ff5fd8;
+  fill: rgba(var(--routine-accent-rgb), 0.85);
 }
 .stl-region-edit.dark rect {
-  fill: #1c0316;
+  fill: var(--routine-accent-ink, #101400);
 }
 .stl-region-edit.dark text {
-  fill: #ff5fd8 !important;
+  fill: rgba(var(--routine-accent-rgb), 0.85) !important;
 }
 .stl-region-edit.dark:hover rect {
-  fill: #3a072e;
+  fill: #2a3305;
 }
 
-.stl-rtake-chip {
+/* Routine region tiers (gh#170 follow-up) — the pin picker's ladder:
+   solid ◆ persisted > dimmed ◆ Routine Take > dashed ⧉ candidate. All
+   three carry ALWAYS-ON lane bands; highest tier wins per span. */
+.stl-rtake-chip,
+.stl-routine-chip {
   cursor: pointer;
 }
-.stl-rtake-chip rect {
-  fill: #ff00c8;
-  opacity: 0.9;
+/* Persisted ◆: solid, full-strength. */
+.stl-routine-chip .stl-rtake-chip-rect {
+  fill: var(--routine-accent);
+  opacity: 1;
 }
-.stl-rtake-chip.selected rect,
-.stl-rtake-chip:hover rect {
+.stl-routine-chip .stl-routine-band {
+  fill: rgba(var(--routine-accent-rgb), 0.16);
+  stroke: rgba(var(--routine-accent-rgb), 0.85);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+/* Routine Take ◇: solid but dimmed. */
+.stl-rtake-chip .stl-rtake-chip-rect {
+  fill: var(--routine-accent);
+  opacity: 0.45;
+}
+.stl-rtake-chip .stl-rtake-band {
+  fill: rgba(var(--routine-accent-rgb), 0.08);
+  stroke: rgba(var(--routine-accent-rgb), 0.45);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.stl-routine-chip.selected .stl-rtake-chip-rect,
+.stl-routine-chip:hover .stl-rtake-chip-rect,
+.stl-rtake-chip.selected .stl-rtake-chip-rect,
+.stl-rtake-chip:hover .stl-rtake-chip-rect {
   stroke: #ffffff;
   stroke-width: 2;
+  opacity: 1;
 }
+.stl-routine-chip text,
 .stl-rtake-chip text {
-  fill: #1c0316;
+  fill: var(--routine-accent-ink, #101400);
   font-size: 11px;
   font-weight: 700;
 }
+.stl-rtake-chip text {
+  fill: var(--routine-accent);
+}
+
+/* Provenance flash (gh#170 deep-link): the routine's source region
+   announces itself once on arrival, then fades. */
+.stl-flash-region {
+  fill: rgba(var(--routine-accent-rgb), 0.30);
+  stroke: var(--routine-accent);
+  stroke-width: 2;
+  pointer-events: none;
+  animation: stl-flash-fade 2.4s ease-out forwards;
+}
+@keyframes stl-flash-fade {
+  0% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.stl-routine-chip.slim text,
 .stl-rtake-chip.slim text {
   font-size: 9px;
 }
+.stl-routine-chip.micro text,
 .stl-rtake-chip.micro text {
   display: none;
 }
 
 /* Trim span + handles (confirm-with-boundary-trim). */
 .stl-trim-span {
-  fill: rgba(255, 0, 200, 0.08);
-  stroke: #ff00c8;
+  fill: rgba(var(--routine-accent-rgb), 0.08);
+  stroke: var(--routine-accent);
   stroke-width: 1;
   pointer-events: none;
 }
 .stl-trim-span.confirmed {
   stroke-dasharray: none;
-  fill: rgba(255, 0, 200, 0.06);
+  fill: rgba(var(--routine-accent-rgb), 0.06);
 }
 .stl-trim-entry line {
-  stroke: #ff5fd8;
+  stroke: rgba(var(--routine-accent-rgb), 0.85);
   stroke-width: 1.5;
 }
 .stl-trim-entry text {
-  fill: #ff5fd8;
+  fill: rgba(var(--routine-accent-rgb), 0.85);
   font-size: 9px;
   font-weight: 700;
 }
@@ -332,11 +384,11 @@
   fill: transparent;
 }
 .stl-trim-handle line {
-  stroke: #ff00c8;
+  stroke: var(--routine-accent);
   stroke-width: 2;
 }
 .stl-trim-handle circle {
-  fill: #ff00c8;
+  fill: var(--routine-accent);
   stroke: #ffffff;
   stroke-width: 1;
 }
@@ -346,16 +398,16 @@
 
 /* Confirm-flow cluster buttons. */
 .stl-cand-cluster .stl-cand-title {
-  color: #ff5fd8;
+  color: rgba(var(--routine-accent-rgb), 0.85);
   font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
 }
 .stl-confirm {
-  background: #ff00c8;
+  background: var(--routine-accent);
   border: none;
   border-radius: 4px;
-  color: #1c0316;
+  color: var(--routine-accent-ink, #101400);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -363,7 +415,7 @@
   white-space: nowrap;
 }
 .stl-confirm:hover {
-  background: #ff5fd8;
+  background: rgba(var(--routine-accent-rgb), 0.85);
 }
 .stl-confirm.two {
   background: #00ff6a;

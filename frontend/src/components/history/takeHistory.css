@@ -108,37 +108,37 @@
 
 /* Routine Take rows: magenta = the routine family (ADR 0035). */
 .take-row.routine:hover td {
-  background: rgba(255, 0, 200, 0.06);
+  background: rgba(var(--routine-accent-rgb), 0.06);
 }
 .take-routine-badge {
-  color: #ff00c8;
+  color: var(--routine-accent);
   font-weight: 700;
 }
 .take-promote {
   background: none;
-  border: 1px solid #ff00c8;
+  border: 1px solid var(--routine-accent);
   border-radius: 4px;
-  color: #ff00c8;
+  color: var(--routine-accent);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
   padding: 0 6px;
 }
 .take-promote:hover {
-  background: #ff00c8;
-  color: #1c0316;
+  background: var(--routine-accent);
+  color: var(--routine-accent-ink, #101400);
 }
 
 /* Promoted ◆ row: the star opens the Routine editor (gh#170). */
 .take-open-routine {
   background: none;
   border: none;
-  color: #ff00c8;
+  color: var(--routine-accent);
   cursor: pointer;
   font-size: 12px;
 }
 .take-open-routine:hover {
-  text-shadow: 0 0 6px #ff00c8;
+  text-shadow: 0 0 6px var(--routine-accent);
 }
 
 /* "View in Session" jump (sessions 04): the timeline glyph, cyan accent. */

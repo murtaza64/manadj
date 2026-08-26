@@ -75,8 +75,8 @@ describe('rulerTicks', () => {
 });
 
 describe('slotColor', () => {
-  it('cycles a bright entry-ordered palette, slot 0 magenta', () => {
-    expect(slotColor(0)).toBe('#ff3fd4');
+  it('cycles a bright entry-ordered palette, slot 0 = THE routine accent', () => {
+    expect(slotColor(0)).toBe('#a8ff00');
     expect(slotColor(1)).not.toBe(slotColor(0));
     expect(slotColor(8)).toBe(slotColor(0));
   });

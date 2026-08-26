@@ -15,6 +15,8 @@
  * the miner's boundaries into a Routine Take, promotes, and pins — the
  * sequence match evidences intent (ADR 0035 exception).
  */
+import { ROUTINE_ACCENT } from '../theme/routineColor';
+import { openRoutineSource, routineSourceFromTakes, type RoutineSource } from '../routines/provenance';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -35,7 +37,7 @@ import './PinPickerPanel.css';
 
 /** The routine family's color (matches the Session timeline's candidate
  * chips — bright, fully saturated magenta; sessionTimeline.css). */
-export const ROUTINE_COLOR = '#ff00c8';
+export const ROUTINE_COLOR = ROUTINE_ACCENT;
 
 interface PinPickerPanelProps {
   x: number;
@@ -225,6 +227,23 @@ export default function PinPickerPanel({
     fn();
   };
 
+  /** Provenance deep-link (gh#170): ▦ opens the source Session timeline
+   * centered on the span with its region guide flashed. */
+  const sourceBtn = (src: RoutineSource | null) =>
+    src && (
+      <button
+        className="ppp-source"
+        title="Open in Session timeline (the routine's source span)"
+        onClick={(e) => {
+          e.stopPropagation();
+          openRoutineSource(src);
+          onClose();
+        }}
+      >
+        ▦
+      </button>
+    );
+
   return (
     <div
       ref={panelRef}
@@ -254,6 +273,7 @@ export default function PinPickerPanel({
                 title={`Saved Routine — pin it here: covers the next ${r.cast.length - 1} adjacencies; exits with ${trackLabel(r.cast[r.cast.length - 1])} playing`}
               >
                 <b>◆ ROUTINE {routineLabel(r)}</b>
+                {sourceBtn(routineSourceFromTakes(r.uuid, routineTakes))}
                 <small>
                   {r.cast.length} slots · ~{Math.round(r.duration_beats)} beats · covers{' '}
                   {r.cast.length - 1} adjacencies
@@ -278,6 +298,7 @@ export default function PinPickerPanel({
                   {busyUuid === rt.uuid ? '… ' : ''}◆ Routine Take ·{' '}
                   {new Date(rt.confirmed_at).toLocaleDateString()}
                 </b>
+                {sourceBtn({ sessionUuid: rt.session_uuid, startS: rt.window_start_s, endS: rt.window_end_s })}
                 <small>
                   {rt.cast.length} tracks · {Math.round(rt.window_end_s - rt.window_start_s)}s ·
                   promote → pin
@@ -300,6 +321,7 @@ export default function PinPickerPanel({
                 <b>
                   {busyUuid === c.uuid ? '… ' : ''}⧉ candidate (unconfirmed)
                 </b>
+                {sourceBtn({ sessionUuid: c.session_uuid, startS: c.window_start_s, endS: c.window_end_s })}
                 <small>
                   {c.cast.length} tracks · {Math.round(c.window_end_s - c.window_start_s)}s ·
                   confirm → promote → pin

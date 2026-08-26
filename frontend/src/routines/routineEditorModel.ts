@@ -12,10 +12,11 @@
  *
  * Slots are entry-ordered positional roles, not decks: the C-A-B-D deck
  * color conventions deliberately do NOT apply. Slots get their own
- * scheme, anchored on the routine-identity magenta (sets 160's cast
- * bracket) and rotating bright hues from there.
+ * scheme, anchored on THE routine accent (theme/routineColor — one token
+ * for every Routine surface) and rotating bright hues from there.
  */
 import type { RoutineDetailWire } from '../api/client';
+import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { parseEdits, type RoutineEdits } from './routineDraft';
 import {
   buildPlannedRoutine,
@@ -28,15 +29,15 @@ import {
 // ── Slot identity ────────────────────────────────────────────────────────
 
 /** Entry-ordered slot palette (bright, fully saturated — house rule).
- * Slot 0 carries the routine-identity magenta; hues rotate from there. */
+ * Slot 0 carries THE routine accent; hues rotate from there. */
 export const SLOT_COLORS = [
-  '#ff3fd4', // slot 0 — the routine magenta (entry / boundary anchor)
+  ROUTINE_ACCENT, // slot 0 — THE routine accent (entry / boundary anchor)
   '#ffb521', // amber
   '#2bff7e', // green
   '#31c8ff', // cyan
   '#b06bff', // violet
   '#ff5c39', // orange-red
-  '#f4ff54', // yellow
+  '#ff3fd4', // magenta (freed by the accent change)
   '#7dffe4', // mint
 ] as const;
 

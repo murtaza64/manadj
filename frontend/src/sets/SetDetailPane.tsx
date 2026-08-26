@@ -60,6 +60,7 @@ import {
 } from '../editor/pairStore';
 import { requestPairEdit } from '../editor/openPair';
 import { requestRoutineEdit } from '../routines/openRoutine';
+import { openRoutineSource, routineSourceFromTakes } from '../routines/provenance';
 import {
   clearFreshTake,
   freshTakeChip,
@@ -259,6 +260,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   useEffect(() => {
     primeRoutineCasts(routineRows);
   }, [routineRows]);
+  // Provenance deep-link (gh#170): a routine pin's source Session is one
+  // click away — resolved through the origin Routine Take. Ref-read so
+  // the ~87 memoized rows keep an identity-stable callback.
+  const routineTakeRowsRef2 = useRef(routineTakeRows);
+  routineTakeRowsRef2.current = routineTakeRows;
+  const openRoutinePinSource = useCallback((routineUuid: string) => {
+    const src = routineSourceFromTakes(routineUuid, routineTakeRowsRef2.current);
+    if (src) openRoutineSource(src);
+  }, []);
   const castOf = useCallback(
     (uuid: string) => routineRows.find((r) => r.uuid === uuid)?.cast ?? getRoutineCast(uuid),
     [routineRows]
@@ -1409,7 +1419,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   mark
                     ? {
                         borderLeft: `3px solid ${ROUTINE_COLOR}`,
-                        background: 'rgba(255, 0, 200, 0.07)',
+                        background: 'rgba(var(--routine-accent-rgb), 0.07)',
                       }
                     : undefined
                 }
@@ -1446,6 +1456,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                       )}
                       routineUuid={cov.uuid}
                       coversCount={cov.cast.length - 1}
+                      onOpenSource={openRoutinePinSource}
                       exitLabel={
                         trackMap?.get(cov.cast[cov.cast.length - 1])?.title ||
                         `Track ${cov.cast[cov.cast.length - 1]}`
@@ -2228,6 +2239,7 @@ const RoutinePinRow = memo(function RoutinePinRow({
   coversCount,
   exitLabel,
   onOpenPicker,
+  onOpenSource,
 }: {
   /** This adjacency's index in the displayed order. */
   index: number;
@@ -2237,6 +2249,9 @@ const RoutinePinRow = memo(function RoutinePinRow({
   coversCount: number;
   exitLabel: string;
   onOpenPicker: (index: number, x: number, y: number) => void;
+  /** Provenance deep-link (gh#170): open the source Session span; null =
+   * origin take gone (button hidden). */
+  onOpenSource: ((routineUuid: string) => void) | null;
 }) {
   return (
     <div
@@ -2245,7 +2260,7 @@ const RoutinePinRow = memo(function RoutinePinRow({
       style={{
         gap: `${ADJ_ROW_GAP}px`,
         padding: `2px ${ROW_PAD_X}px 2px ${ADJ_PAD_LEFT}px`,
-        backgroundImage: `linear-gradient(90deg, rgba(255, 0, 200, 0.10), transparent 65%)`,
+        backgroundImage: `linear-gradient(90deg, rgba(var(--routine-accent-rgb), 0.10), transparent 65%)`,
       }}
     >
       <span style={{ width: `${ADJ_GUTTER_W}px`, flexShrink: 0 }} />
@@ -2272,6 +2287,20 @@ const RoutinePinRow = memo(function RoutinePinRow({
       >
         ⧉ edit
       </button>
+      {onOpenSource && (
+        <button
+          className="set-chip-btn"
+          data-routine-source
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenSource(routineUuid);
+          }}
+          title="Open in Session timeline — the routine's source span, region guide flashed (provenance deep-link)"
+          style={{ color: ROUTINE_COLOR }}
+        >
+          ▦ source
+        </button>
+      )}
       <span style={{ color: 'var(--subtext0)' }}>
         covers {coversCount} adjacencies · exits with {exitLabel}
       </span>
@@ -2510,7 +2539,7 @@ const SetTrackRow = memo(function SetTrackRow({
               fontSize: '10px',
               fontWeight: 800,
               color: castMark === 'exit' ? 'var(--base)' : ROUTINE_COLOR,
-              background: castMark === 'exit' ? ROUTINE_COLOR : 'rgba(255, 0, 200, 0.12)',
+              background: castMark === 'exit' ? ROUTINE_COLOR : 'rgba(var(--routine-accent-rgb), 0.12)',
               border: `1px solid ${ROUTINE_COLOR}`,
             }}
           >

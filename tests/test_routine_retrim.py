@@ -64,9 +64,22 @@ def test_retrim_collapse_raises():
         retrim(weave_events(), CAST, *WINDOW, OFFSETS, GRIDS, 80.0, 80.0)
 
 
-def test_retrim_negative_raises():
-    with pytest.raises(PromotionError, match="inward-only"):
-        retrim(weave_events(), CAST, *WINDOW, OFFSETS, GRIDS, -1.0, 0.0)
+def test_retrim_widens_outward_bounded_by_the_slice(subtests=None):
+    # Start from an under-sized window 5..55 (offsets rebased: entries at
+    # abs 0/10/30 → the miner "missed" 5 s on each side). Negative trims
+    # widen back out; the session slice (events 0..60) is the outer bound.
+    offsets = [0.0, 5.0, 25.0]
+    base = retrim(weave_events(), CAST, 5.0, 55.0, offsets, GRIDS, 0.0, 0.0)
+    assert base.duration_beats == pytest.approx(100.0, abs=0.5)
+    # Widen 10 beats (= 5 s at 2 beats/s) on each side → the full 0..60.
+    widened = retrim(weave_events(), CAST, 5.0, 55.0, offsets, GRIDS, -10.0, -10.0)
+    assert widened.duration_beats == pytest.approx(120.0, abs=1.0)
+    # Entry MARKS stay put (the recording's truth); only the window moved
+    # — slot 0's entry now sits 10 beats into the widened span.
+    assert widened.entry_offsets_beats == pytest.approx([10.0, 20.0, 60.0], abs=1.0)
+    # Over-widening clamps to the slice extent — never invents audio.
+    clamped = retrim(weave_events(), CAST, 5.0, 55.0, offsets, GRIDS, -500.0, -500.0)
+    assert clamped.duration_beats == pytest.approx(120.0, abs=1.5)
 
 
 # ── Router (in-memory SQLite via conftest) ───────────────────────────────

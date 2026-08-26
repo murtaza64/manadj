@@ -2,8 +2,8 @@
    ported (reuse over reinvention): dark #0b0b0b/#0e0e0e chrome, flat lane
    strips with a 3px color edge + terse labels, monospace readouts, the
    pink playhead, chip/popover typography from transitionEditor.css.
-   Routine identity stays magenta (the set view's cast bracket family);
-   slots extend the LaneId palette (slotLaneColors). */
+   Routine identity rides THE routine accent token (--routine-accent,
+   theme/routineColor); slots extend the LaneId palette (slotLaneColors). */
 
 .routine-editor {
   display: flex;
@@ -30,7 +30,7 @@
   flex-wrap: wrap;
 }
 .re-kind {
-  color: #ff3fd4;
+  color: var(--routine-accent);
   font-weight: 700;
   letter-spacing: 0.08em;
   font-size: 11px;
@@ -51,6 +51,19 @@
   color: var(--subtext0, #a6adc8);
   font-size: 11px;
 }
+/* Provenance deep-link (gh#170). */
+.re-source {
+  background: transparent;
+  border: 1px solid rgba(var(--routine-accent-rgb), 0.5);
+  border-radius: 3px;
+  color: var(--routine-accent);
+  font-size: 11px;
+  padding: 1px 7px;
+  cursor: pointer;
+}
+.re-source:hover {
+  background: rgba(var(--routine-accent-rgb), 0.15);
+}
 
 /* ── Transport ── */
 .re-transport {
@@ -65,8 +78,8 @@
   width: 44px;
   height: 24px;
   background: transparent;
-  color: #ff3fd4;
-  border: 1px solid #ff3fd4;
+  color: var(--routine-accent);
+  border: 1px solid var(--routine-accent);
   border-radius: 3px;
   font-size: 12px;
   font-weight: 600;
@@ -76,8 +89,8 @@
   background: var(--surface0, #313244);
 }
 .re-play.on {
-  background: #ff3fd4;
-  color: #14020f;
+  background: var(--routine-accent);
+  color: var(--routine-accent-ink, #101400);
 }
 .re-play.arming {
   border-style: dashed;
@@ -165,7 +178,7 @@
   font-size: 11px;
 }
 .re-trimlabel.dirty {
-  color: #ff3fd4;
+  color: var(--routine-accent);
 }
 .re-trimoff {
   color: #555;
@@ -178,8 +191,8 @@
 /* Accent CTA: outline at rest (the editor's promote-button posture). */
 .re-trimapply {
   background: transparent;
-  color: #ff3fd4;
-  border: 1px solid #ff3fd4;
+  color: var(--routine-accent);
+  border: 1px solid var(--routine-accent);
   border-radius: 3px;
   padding: 2px 8px;
   font-size: 11px;
@@ -333,7 +346,7 @@
   font-size: 10px;
 }
 .rt-boundary-tag {
-  color: #ff3fd4;
+  color: var(--routine-accent);
   font-size: 9px;
   letter-spacing: 0.06em;
   font-weight: 700;
@@ -427,7 +440,7 @@
   gap: 6px;
   padding: 6px 8px;
   background: #0b0b0b;
-  border: 1px solid #ff3fd4;
+  border: 1px solid var(--routine-accent);
   border-radius: 4px;
   font-size: 11px;
   color: #e8e8f0;
@@ -498,7 +511,7 @@
   bottom: 0;
   left: 0;
   width: 0;
-  border-left: 2px solid #ff3fd4;
+  border-left: 2px solid var(--routine-accent);
   pointer-events: none;
   z-index: 2;
 }
@@ -506,7 +519,7 @@
   position: absolute;
   bottom: 2px;
   left: 3px;
-  color: #ff3fd4;
+  color: var(--routine-accent);
   font-size: 9px;
   letter-spacing: 0.1em;
   font-weight: 700;
@@ -539,7 +552,7 @@
   bottom: 0;
   left: 5px;
   width: 2px;
-  background: #ff3fd4;
+  background: var(--routine-accent);
   opacity: 0.85;
 }
 .rt-trimhandle::after {
@@ -549,9 +562,25 @@
   left: 1px;
   width: 10px;
   height: 26px;
-  border: 1.5px solid #ff3fd4;
+  border: 1.5px solid var(--routine-accent);
   border-radius: 5px;
   background: #14141f;
+}
+.rt-trimextend {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(var(--routine-accent-rgb), 0.14),
+    rgba(var(--routine-accent-rgb), 0.14) 6px,
+    rgba(0, 0, 0, 0.15) 6px,
+    rgba(0, 0, 0, 0.15) 12px
+  );
+  border-left: 1px dashed var(--routine-accent);
+  border-right: 1px dashed var(--routine-accent);
+  pointer-events: none;
+  z-index: 1;
 }
 .rt-trimshade {
   position: absolute;
@@ -559,8 +588,8 @@
   bottom: 0;
   background: repeating-linear-gradient(
     -45deg,
-    rgba(255, 63, 212, 0.1),
-    rgba(255, 63, 212, 0.1) 6px,
+    rgba(var(--routine-accent-rgb), 0.1),
+    rgba(var(--routine-accent-rgb), 0.1) 6px,
     rgba(0, 0, 0, 0.25) 6px,
     rgba(0, 0, 0, 0.25) 12px
   );

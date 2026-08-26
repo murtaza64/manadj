@@ -43,6 +43,7 @@ import { RoutinePlayer } from './RoutinePlayer';
 import { RoutineTimeline, type TrimRange } from './RoutineTimeline';
 import { consumeRoutineEdit, OPEN_ROUTINE_EVENT } from './openRoutine';
 import { openCandidateInEditor, openRoutineTakeInEditor } from './openFlow';
+import { openRoutineSource } from './provenance';
 import { editsAreEmpty, parseEdits } from './routineDraft';
 import { RoutineDraftStore, useRoutineDraft, editsForSave } from './routineDraftStore';
 import {
@@ -524,7 +525,9 @@ export default function RoutineEditorView() {
   }, [detail]);
   const trimEnabled = !!detail?.origin_take_uuid;
   const trimDirty =
-    !!trim && !!detail && (trim.startBeat > 0.05 || trim.endBeat < detail.duration_beats - 0.05);
+    !!trim &&
+    !!detail &&
+    (Math.abs(trim.startBeat) > 0.05 || Math.abs(trim.endBeat - detail.duration_beats) > 0.05);
   const droppedSlots = useMemo(() => {
     if (!detail || !trim) return [];
     return detail.entry_offsets_beats
@@ -580,6 +583,11 @@ export default function RoutineEditorView() {
   );
 
   // ── Render ───────────────────────────────────────────────────────────
+  // Provenance (gh#170 deep-link): the origin Routine Take carries the
+  // source Session reference.
+  const sourceTake = detail?.origin_take_uuid
+    ? routineTakeRows.find((t) => t.uuid === detail.origin_take_uuid) ?? null
+    : null;
   const entryTrack = detail ? tracks.get(detail.cast[0]) : undefined;
   const exitTrack = detail ? tracks.get(detail.cast[detail.cast.length - 1]) : undefined;
   const playing = player.isPlaying();
@@ -643,6 +651,21 @@ export default function RoutineEditorView() {
                 ? ` · ${secondsLabel(detail.duration_beats * editor.planned.secPerBeat)}`
                 : ''}
             </span>
+            {sourceTake && (
+              <button
+                className="re-source"
+                title="Open in Session timeline — the routine's source span, region guide flashed (provenance deep-link)"
+                onClick={() =>
+                  openRoutineSource({
+                    sessionUuid: sourceTake.session_uuid,
+                    startS: sourceTake.window_start_s,
+                    endS: sourceTake.window_end_s,
+                  })
+                }
+              >
+                ▦ source
+              </button>
+            )}
           </>
         )}
       </div>
@@ -724,6 +747,9 @@ export default function RoutineEditorView() {
             <span className="re-trim">
               <span className={`re-trimlabel${trimDirty ? ' dirty' : ''}`}>
                 trim {beatLabel(trim.startBeat)} → {beatLabel(trim.endBeat)} b
+                {trim.startBeat < -0.05 || trim.endBeat > detail.duration_beats + 0.05
+                  ? ' (widens — clamped to the session slice)'
+                  : ''}
               </span>
               {droppedSlots.length > 0 && (
                 <span className="re-trimdrop">

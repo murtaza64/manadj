@@ -463,17 +463,19 @@ def retrim(
     trim_end_beats: float,
 ) -> PromotedRoutine:
     """Boundary trim + mechanical re-promotion (the v1 review affordance,
-    ADR 0035 / gh#170): narrow the ORIGINAL take window by beat amounts
-    from either edge — the editor's axis is the Routine clock, so trims
-    arrive in beats and invert here through the same beat clock promotion
-    built — then re-run `promote` over the narrowed window. The raw take
-    is untouched (evidence doctrine); trims are inward-only (the recording
-    is the outer bound). A slot whose entry falls past the new end drops
-    from the cast (the confirm flow's rule); one entering before the new
-    start rebases to offset 0 (playing at window open). n ≥ 3 holds.
+    ADR 0035 / gh#170): move the ORIGINAL take window's boundaries by
+    beat amounts — the editor's axis is the Routine clock, so trims
+    arrive in beats. POSITIVE narrows (inverted through the same beat
+    clock promotion built); NEGATIVE WIDENS outward (gh#170 follow-up:
+    the miner under-sizes dwell-shaped windows — #181's WYGFM case),
+    converted at the boundary-local beat rate and bounded by the origin
+    session slice's own extent (the events carry audibility; there is
+    nothing to replay beyond them). Then `promote` re-runs over the new
+    window — the raw take is untouched (evidence doctrine). A slot whose
+    entry falls past the new end drops from the cast (the confirm flow's
+    rule); one entering before the new start rebases (offset 0 at open).
+    n ≥ 3 holds.
     """
-    if trim_start_beats < 0 or trim_end_beats < 0:
-        raise PromotionError("trim amounts must be ≥ 0 (inward-only)")
     events = sorted(events, key=lambda e: e.get("t", 0))
     residencies = map_slots(events, cast, window_start_s, window_end_s, entry_offsets)
     beat_at = build_beat_clock(events, residencies, grids, window_start_s, window_end_s)
@@ -482,16 +484,32 @@ def retrim(
     b1 = total - trim_end_beats
     if b1 - b0 <= 1e-6:
         raise PromotionError("trim collapses the window")
-    s0 = (
-        window_start_s
-        if b0 <= 0
-        else _invert_beat_clock(beat_at, window_start_s, window_end_s, b0)
-    )
-    s1 = (
-        window_end_s
-        if trim_end_beats <= 0
-        else _invert_beat_clock(beat_at, window_start_s, window_end_s, b1)
-    )
+
+    # Boundary-local beat rates (beats/sec) for the widen conversion.
+    def bps_at(t: float) -> float:
+        lo = max(window_start_s, t - 1.0)
+        hi = min(window_end_s, t + 1.0)
+        db = beat_at(hi) - beat_at(lo)
+        dt = hi - lo
+        return db / dt if dt > 0 and db > 0 else DEFAULT_BPS
+
+    # The session slice's extent — the outer bound for widening.
+    times = [float(e.get("t", 0)) for e in events]
+    ev_lo = max(0.0, min(times)) if times else window_start_s
+    ev_hi = max(times) if times else window_end_s
+
+    if b0 > 0:
+        s0 = _invert_beat_clock(beat_at, window_start_s, window_end_s, b0)
+    elif b0 < 0:
+        s0 = max(ev_lo, window_start_s - (-b0) / bps_at(window_start_s))
+    else:
+        s0 = window_start_s
+    if trim_end_beats > 0:
+        s1 = _invert_beat_clock(beat_at, window_start_s, window_end_s, b1)
+    elif trim_end_beats < 0:
+        s1 = min(ev_hi, window_end_s + (-trim_end_beats) / bps_at(window_end_s))
+    else:
+        s1 = window_end_s
     if s1 - s0 <= 0:
         raise PromotionError("trim collapses the window")
     new_cast: list[int] = []

@@ -549,11 +549,12 @@ class RoutinePatch(BaseModel):
 
 
 class RoutineRetrim(BaseModel):
-    """Boundary trim + re-promotion (gh#170): beat amounts to shave off
-    either edge of the origin take's window — inward-only, on the Routine
-    clock (the editor's axis)."""
-    trim_start_beats: float = Field(ge=0)
-    trim_end_beats: float = Field(ge=0)
+    """Boundary trim + re-promotion (gh#170): beat amounts to move either
+    edge of the origin take's window, on the Routine clock (the editor's
+    axis). Positive narrows; NEGATIVE WIDENS outward (gh#170 follow-up —
+    bounded server-side by the origin session slice's extent)."""
+    trim_start_beats: float
+    trim_end_beats: float
 
 
 # Set Schemas (sets PRD, issue 01 — client-authoritative entry replace)

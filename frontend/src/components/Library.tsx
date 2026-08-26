@@ -1296,7 +1296,13 @@ export default function Library({
             /* Sessions (sessions 04): the list in place of the track
                table; a selected session swaps to its timeline. */
             selectedSessionUuid !== null ? (
-              <SessionTimelinePane sessionUuid={selectedSessionUuid} />
+              <SessionTimelinePane
+                sessionUuid={selectedSessionUuid}
+                onBack={() => {
+                  setSelectedSessionUuid(null);
+                  selectSession(null);
+                }}
+              />
             ) : (
               <SessionsListView
                 onOpen={(uuid) => {

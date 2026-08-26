@@ -30,6 +30,7 @@ import type { DecodedWaveform } from '../waveform/blob';
 import { createStyledColumnRenderer } from '../sets/ladderWaveStyle';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { cueCssColor } from '../hotcues/palette';
+import { ROUTINE_ACCENT } from '../theme/routineColor';
 import { LaneCanvas } from '../editor/LaneCanvas';
 import type { LaneId, LanePoint } from '../editor/mixModel';
 import {
@@ -54,6 +55,9 @@ import {
 } from './routineEditorModel';
 
 const WAVE_H = 64;
+/** Outward-trim drag allowance (beats past either boundary); the server
+ * clamps the applied widen to the session slice's extent. */
+const TRIM_WIDEN_CAP_BEATS = 128;
 const STRIP_H = 22;
 const STRIP_H_AUTHORED = 34;
 const RULER_H = 24;
@@ -179,8 +183,11 @@ export function RoutineTimeline({
     (s: number, px: number): number => {
       const w = containerRef.current?.clientWidth ?? 0;
       const viewBeats = px > 0 ? w / px : 0;
-      const max = Math.max(duration + PAD_BEATS - viewBeats, -PAD_BEATS);
-      return Math.max(-PAD_BEATS, Math.min(s, max));
+      // ±TRIM_WIDEN_CAP_BEATS of slack so outward trim handles stay
+      // reachable/visible past the routine boundaries.
+      const lo = -PAD_BEATS - TRIM_WIDEN_CAP_BEATS;
+      const max = Math.max(duration + PAD_BEATS + TRIM_WIDEN_CAP_BEATS - viewBeats, lo);
+      return Math.max(lo, Math.min(s, max));
     },
     [duration]
   );
@@ -292,11 +299,16 @@ export function RoutineTimeline({
         const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
         if (px <= 0) return;
         const beat = s + (ev.clientX - rect.left) / px;
+        // Inward AND outward (gh#170 follow-up — the miner under-sizes
+        // dwell-shaped windows): boundaries drag past 0/duration to
+        // WIDEN, up to a generous margin; the server clamps the applied
+        // widen to the origin session slice's real extent. Keep ≥ 8
+        // beats between the edges.
         if (trimDrag.current === 'start') {
-          const v = Math.max(0, Math.min(beat, t.endBeat - 8));
+          const v = Math.max(-TRIM_WIDEN_CAP_BEATS, Math.min(beat, t.endBeat - 8));
           onTrimChange({ ...t, startBeat: v });
         } else {
-          const v = Math.min(duration, Math.max(beat, t.startBeat + 8));
+          const v = Math.min(duration + TRIM_WIDEN_CAP_BEATS, Math.max(beat, t.startBeat + 8));
           onTrimChange({ ...t, endBeat: v });
         }
       };
@@ -473,7 +485,7 @@ export function RoutineTimeline({
         for (const b of [0, duration]) {
           const x = xAt(b);
           if (x < -2 || x > width + 2) continue;
-          ctx.strokeStyle = '#ff3fd4';
+          ctx.strokeStyle = ROUTINE_ACCENT;
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(x, 0);
@@ -860,8 +872,9 @@ export function RoutineTimeline({
               </div>
             );
           })}
-        {trim && (trim.startBeat > 0 || trim.endBeat < duration) && (
+        {trim && (
           <>
+            {/* Inward cuts: hatched CUT regions. */}
             {trim.startBeat > 0 && (
               <div
                 className="rt-trimshade"
@@ -874,6 +887,24 @@ export function RoutineTimeline({
                 style={{
                   left: xOf(trim.endBeat),
                   width: Math.max(0, xOf(duration) - xOf(trim.endBeat)),
+                }}
+              />
+            )}
+            {/* Outward widens (gh#170 follow-up): EXTENSION regions — the
+                re-promotion will pull this span in from the session slice
+                (server-clamped to its real extent). */}
+            {trim.startBeat < 0 && (
+              <div
+                className="rt-trimextend"
+                style={{ left: xOf(trim.startBeat), width: Math.max(0, xOf(0) - xOf(trim.startBeat)) }}
+              />
+            )}
+            {trim.endBeat > duration && (
+              <div
+                className="rt-trimextend"
+                style={{
+                  left: xOf(duration),
+                  width: Math.max(0, xOf(trim.endBeat) - xOf(duration)),
                 }}
               />
             )}
