@@ -564,7 +564,10 @@ export default function RoutineEditorView() {
     try {
       const d = await api.routines.retrim(detail.uuid, {
         trim_start_beats: trim.startBeat,
-        trim_end_beats: Math.max(0, detail.duration_beats - trim.endBeat),
+        // NEGATIVE widens (endBeat dragged past duration) — do not clamp
+        // (gh#190 item 8: the old Math.max(0, …) silently no-oped every
+        // outward end trim).
+        trim_end_beats: detail.duration_beats - trim.endBeat,
       });
       // Same uuid, rebased clock: reload the draft from the response
       // (the server shifted the edits layer with the trim).

@@ -703,6 +703,14 @@ class Routine(Base):
     # recording above stays evidence and never changes. Null = unedited.
     edits_json = Column(Text, nullable=True)
     origin_take_uuid = Column(String, nullable=True)
+    # The CURRENT capture-clock window this Routine was promoted over
+    # (gh#190): equals the origin take's window at promote time, then
+    # tracks every retrim — the take's own window is immutable evidence,
+    # so without this a second retrim would misapply against the original
+    # bounds. Null on pre-#190 rows (retrim falls back to the take window
+    # and self-heals).
+    window_start_s = Column(Float, nullable=True)
+    window_end_s = Column(Float, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
