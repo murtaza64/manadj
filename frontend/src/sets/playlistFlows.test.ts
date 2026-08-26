@@ -67,9 +67,9 @@ describe('createSetFromPlaylist — Play order into a new Set', () => {
     expect(mocked.sets.replaceEntries).toHaveBeenCalledWith(
       42,
       [
-        { track_id: 5, pin_kind: null, pin_uuid: null },
-        { track_id: 3, pin_kind: null, pin_uuid: null },
-        { track_id: 9, pin_kind: null, pin_uuid: null },
+        { track_id: 5, pin_kind: null, pin_uuid: null, trim: 0 },
+        { track_id: 3, pin_kind: null, pin_uuid: null, trim: 0 },
+        { track_id: 9, pin_kind: null, pin_uuid: null, trim: 0 },
       ],
       // No Dormant pins (sets 07) on a fresh copy.
       []

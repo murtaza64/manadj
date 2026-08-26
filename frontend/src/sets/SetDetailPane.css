@@ -47,10 +47,10 @@
   /* Center on the VIEWPORT, not the header (22 follow-up): the pane
      sits right of the sidebar, so the grid's own centering reads
      off-center on screen. The shift is measured by the pane (the
-     header's viewport offset) and applied paint-only — at extreme
-     narrow widths the transport may visually overlap the left zone
-     rather than reflow; the grid's no-shrink guarantee still governs
-     layout. */
+     header's viewport offset), applied paint-only, and CLAMPED to the
+     header's own box (#161) — it never paints over the side clusters
+     or a neighboring surface's chrome; with no room it falls back to
+     the grid cell's natural centering. */
   transform: translateX(var(--transport-viewport-shift, 0px));
 }
 
@@ -63,8 +63,9 @@
   min-width: 0;
 }
 
-/* The transport is the view's primary action: bigger and bolder than the
-   secondary cluster, which stays compact and unbolded. Fixed height +
+/* The transport is the view's primary action: bold where the secondary
+   cluster is not, but SIZED like the rest of the app's control chrome —
+   at 30px/14px it dominated the pane (#161 finding). Fixed height +
    flex centering (22 follow-up): the glyphs (▶ ⏸ ⏹ ⤴) have uneven font
    metrics, and without a locked box the tallest one grows its button and
    shifts the whole header row. */
@@ -72,9 +73,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 30px;
-  padding: 0 16px;
-  font-size: 14px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 12px;
   font-weight: bold;
   line-height: 1;
 }
@@ -82,7 +83,7 @@
 /* Play's label swaps between "▶ Play set" and "⏸ Playing" — reserve the
    wider label's width so toggling never re-centers the transport. */
 .set-play {
-  min-width: 116px;
+  min-width: 92px;
 }
 
 .set-header-actions .btn {

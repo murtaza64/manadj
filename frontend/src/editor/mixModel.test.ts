@@ -432,9 +432,19 @@ describe('tempoMatchPitch (editor varispeed)', () => {
     expect(tempoMatchPitch(140, 120)).toBeCloseTo((140 / 120 - 1) * 100);
   });
 
-  it('clamps at the editor range', () => {
-    expect(tempoMatchPitch(200, 100)).toBe(EDITOR_PITCH_RANGE_PERCENT);
-    expect(tempoMatchPitch(100, 200)).toBe(-EDITOR_PITCH_RANGE_PERCENT);
+  it('octave-equivalent pairs match at native (grid-octave 168)', () => {
+    // Half/double grids are first-class: a 2:1 BPM ratio is a match at
+    // pitch 0, not a +100% varispeed demand.
+    expect(tempoMatchPitch(200, 100)).toBe(0);
+    expect(tempoMatchPitch(100, 200)).toBe(0);
+    // The field pair: 172-gridded outgoing, 87.51-gridded (true 175) in.
+    expect(tempoMatchPitch(172, 87.5069)).toBeCloseTo(-1.72, 2);
+  });
+
+  it('clamps at the editor range (beyond any octave fold)', () => {
+    // r = 3: the nearest fold (r/2 = 1.5) still demands +50% — clamped.
+    expect(tempoMatchPitch(300, 100)).toBe(EDITOR_PITCH_RANGE_PERCENT);
+    expect(tempoMatchPitch(100, 300)).toBe(-EDITOR_PITCH_RANGE_PERCENT);
   });
 
   it('is 0 without both BPMs', () => {

@@ -212,6 +212,137 @@
   stroke-width: 1;
 }
 
+/* ── Routine candidates + Routine Takes (ADR 0035, routines 158) ──
+   Magenta = the routine family: dashed suggestion chips (candidates),
+   solid chips once confirmed (Routine Takes). Bright, fully saturated —
+   the project's palette. */
+.stl-cand-chip {
+  cursor: pointer;
+}
+.stl-cand-chip .stl-cand-chip-rect {
+  fill: rgba(255, 0, 200, 0.18);
+  stroke: #ff00c8;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+.stl-cand-chip.selected .stl-cand-chip-rect,
+.stl-cand-chip:hover .stl-cand-chip-rect {
+  fill: rgba(255, 0, 200, 0.35);
+  stroke-dasharray: none;
+}
+.stl-cand-chip text {
+  fill: #ff5fd8;
+  font-size: 11px;
+  font-weight: 700;
+}
+.stl-cand-chip.slim text {
+  font-size: 9px;
+}
+.stl-cand-chip.micro text {
+  display: none;
+}
+/* The lane-spanning highlight band: visible but never louder than the
+   waveforms; clicks pass through to the chip / lanes. */
+.stl-cand-chip .stl-cand-band {
+  fill: rgba(255, 0, 200, 0.07);
+  stroke: rgba(255, 0, 200, 0.35);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+.stl-cand-chip.selected .stl-cand-band {
+  fill: rgba(255, 0, 200, 0.1);
+}
+
+.stl-rtake-chip {
+  cursor: pointer;
+}
+.stl-rtake-chip rect {
+  fill: #ff00c8;
+  opacity: 0.9;
+}
+.stl-rtake-chip.selected rect,
+.stl-rtake-chip:hover rect {
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+.stl-rtake-chip text {
+  fill: #1c0316;
+  font-size: 11px;
+  font-weight: 700;
+}
+.stl-rtake-chip.slim text {
+  font-size: 9px;
+}
+.stl-rtake-chip.micro text {
+  display: none;
+}
+
+/* Trim span + handles (confirm-with-boundary-trim). */
+.stl-trim-span {
+  fill: rgba(255, 0, 200, 0.08);
+  stroke: #ff00c8;
+  stroke-width: 1;
+  pointer-events: none;
+}
+.stl-trim-span.confirmed {
+  stroke-dasharray: none;
+  fill: rgba(255, 0, 200, 0.06);
+}
+.stl-trim-entry line {
+  stroke: #ff5fd8;
+  stroke-width: 1.5;
+}
+.stl-trim-entry text {
+  fill: #ff5fd8;
+  font-size: 9px;
+  font-weight: 700;
+}
+.stl-trim-handle {
+  cursor: ew-resize;
+}
+.stl-trim-handle rect {
+  fill: transparent;
+}
+.stl-trim-handle line {
+  stroke: #ff00c8;
+  stroke-width: 2;
+}
+.stl-trim-handle circle {
+  fill: #ff00c8;
+  stroke: #ffffff;
+  stroke-width: 1;
+}
+.stl-trim-handle:hover line {
+  stroke: #ffffff;
+}
+
+/* Confirm-flow cluster buttons. */
+.stl-cand-cluster .stl-cand-title {
+  color: #ff5fd8;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.stl-confirm {
+  background: #ff00c8;
+  border: none;
+  border-radius: 4px;
+  color: #1c0316;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.stl-confirm:hover {
+  background: #ff5fd8;
+}
+.stl-confirm.two {
+  background: #00ff6a;
+  color: #04140b;
+}
+
 .stl-anchor line {
   stroke: #ffffff;
   stroke-width: 1.5;
