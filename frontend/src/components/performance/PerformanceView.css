@@ -1044,6 +1044,49 @@
   border-color: var(--green);
 }
 
+/* Stem kill switches (stems #210) — one bright color per stem, lit while
+   the stem is audible; dark while killed. Row only renders when the deck
+   is playing from stems. */
+.perf-stemrow {
+  display: flex;
+  gap: 4px;
+  justify-content: space-between;
+}
+.perf-stemrow .player-button.perf-stem {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  font-size: 9px;
+  height: 20px;
+  letter-spacing: 0.05em;
+  opacity: 0.5;
+}
+.perf-stem.on { opacity: 1; }
+.perf-stem-vocals.on,
+.perf-stem-vocals.on:hover:not(:disabled) {
+  background: var(--yellow);
+  color: var(--base);
+  border-color: var(--yellow);
+}
+.perf-stem-drums.on,
+.perf-stem-drums.on:hover:not(:disabled) {
+  background: var(--red);
+  color: var(--base);
+  border-color: var(--red);
+}
+.perf-stem-bass.on,
+.perf-stem-bass.on:hover:not(:disabled) {
+  background: var(--purple);
+  color: var(--base);
+  border-color: var(--purple);
+}
+.perf-stem-other.on,
+.perf-stem-other.on:hover:not(:disabled) {
+  background: var(--cyan);
+  color: var(--base);
+  border-color: var(--cyan);
+}
+
 /* Key Lock toggle (key-lock 03) — padlock glyph leading the foot row,
    lit while tempo changes leave the Track's Key unchanged */
 .perf-keylock {

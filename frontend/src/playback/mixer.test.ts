@@ -444,3 +444,49 @@ describe('master recording tap', () => {
     expect(input.inputs.size).toBe(0);
   });
 });
+
+describe('stem kill switches (stems #210)', () => {
+  it('defaults every stem on and toggles immutably with channel hints', () => {
+    const mixer = new Mixer();
+    expect(mixer.getChannelState('A').stems).toEqual({
+      vocals: true,
+      drums: true,
+      bass: true,
+      other: true,
+    });
+    const hints: unknown[] = [];
+    mixer.subscribe((changed) => hints.push(changed));
+    const before = mixer.getChannelState('A');
+    mixer.setStemEnabled('A', 'drums', false);
+    expect(mixer.getChannelState('A').stems.drums).toBe(false);
+    expect(before.stems.drums).toBe(true); // immutable replacement
+    expect(mixer.getChannelState('B').stems.drums).toBe(true); // channel-scoped
+    expect(hints).toEqual(['A']);
+  });
+
+  it('setStemEnabled is idempotent (no notify without a change)', () => {
+    const mixer = new Mixer();
+    const hints: unknown[] = [];
+    mixer.subscribe((changed) => hints.push(changed));
+    mixer.setStemEnabled('A', 'bass', true); // already on
+    expect(hints).toEqual([]);
+  });
+
+  it('toggleStem flips and resetStems restores all-on', () => {
+    const mixer = new Mixer();
+    mixer.toggleStem('C', 'vocals');
+    mixer.toggleStem('C', 'other');
+    expect(mixer.getChannelState('C').stems.vocals).toBe(false);
+    mixer.resetStems('C');
+    expect(mixer.getChannelState('C').stems).toEqual({
+      vocals: true,
+      drums: true,
+      bass: true,
+      other: true,
+    });
+    const hints: unknown[] = [];
+    mixer.subscribe((changed) => hints.push(changed));
+    mixer.resetStems('C'); // already flat — no notify
+    expect(hints).toEqual([]);
+  });
+});

@@ -1147,6 +1147,13 @@ export class DeckEngine {
    * declick-ramps every change. */
   setStemGains(gains: number[]): void {
     if (!this.stemBuffers) return;
+    // Dedupe: mixer subscribers forward on every channel change (any knob
+    // move) — only actual stem changes reach the audio thread.
+    if (this.stemGains && this.stemGains.length === gains.length
+        && this.stemGains.every((g, i) => g === gains[i])) {
+      return;
+    }
+    if (!this.stemGains && gains.every((g) => g === 1)) return; // unity is the load state
     this.stemGains = gains.slice();
     this.sourceNode?.setStemGains(this.stemGains);
   }

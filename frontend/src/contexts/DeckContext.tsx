@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DeckEngine } from '../playback/DeckEngine';
-import { CHANNEL_IDS, Mixer } from '../playback/mixer';
+import { CHANNEL_IDS, Mixer, STEM_NAMES } from '../playback/mixer';
 import { CaptureRecorder } from '../capture/recorder';
 import { persistTake } from '../capture/takeSink';
 import { SessionSink } from '../capture/sessionSink';
@@ -85,6 +85,24 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     },
     [engines, mixer]
   );
+
+  // Stem kill switches (stems #210): mixer owns the state (MIDI, capture,
+  // automation all route through it), the deck worklet applies it — this
+  // is the forwarding seam. Channel-scoped change hints keep it cheap; the
+  // engine dedupes, so only actual stem flips reach the audio thread.
+  useEffect(() => {
+    const forward = (deck: ChannelId) => {
+      const stems = mixer.getChannelState(deck).stems;
+      engines[deck].setStemGains(STEM_NAMES.map((stem) => (stems[stem] ? 1 : 0)));
+    };
+    return mixer.subscribe((changed) => {
+      if (changed && CHANNEL_IDS.includes(changed as ChannelId)) {
+        forward(changed as ChannelId);
+      } else if (changed === undefined) {
+        for (const deck of CHANNEL_IDS) forward(deck);
+      }
+    });
+  }, [engines, mixer]);
 
   // Cross-deck quantized launch (cue-quantize-bpm 04): each deck's paused
   // launch (Play, Cue-hold, Hot-cue-hold) references another live Deck's
@@ -202,6 +220,8 @@ export function DeckProvider({ children }: { children: ReactNode }) {
           () => null
         );
 
+      // Kill state is per-Track (stems #210): a new Load starts all-on.
+      mixer.resetStems(deck);
       void engines[deck].load({
         trackId: track.id,
         audioUrl: api.tracks.audioUrl(track.id),
@@ -218,7 +238,7 @@ export function DeckProvider({ children }: { children: ReactNode }) {
         beatTimes,
       });
     },
-    [engines, queryClient]
+    [engines, mixer, queryClient]
   );
 
   // Keep each Deck's Quantize grid live (cue-quantize-bpm 01): the engine

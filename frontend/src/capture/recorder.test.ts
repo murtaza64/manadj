@@ -48,7 +48,14 @@ vi.mock('../api/queryClient', () => ({
 const HORIZON = DEFAULT_DETECTOR_PARAMS.settleHorizonS;
 
 function flatChannel(): ChannelState {
-  return { trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, fader: 1, pfl: false };
+  return {
+    trim: 0.5,
+    eq: { low: 0.5, mid: 0.5, high: 0.5 },
+    filter: 0,
+    fader: 1,
+    pfl: false,
+    stems: { vocals: true, drums: true, bass: true, other: true },
+  };
 }
 
 class FakeMixerSource implements CaptureMixerSource {

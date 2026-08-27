@@ -208,6 +208,13 @@ function dispatchButton(target: ButtonAction['target'], edge: 'down' | 'up'): vo
       midiMixerControls()?.togglePfl(target.channel);
       return;
     }
+    case 'stem': {
+      // Stems gesture (stems #210): mixer-class toggle like PFL — the
+      // mixer owns kill state; the deck worklet applies it.
+      if (edge !== 'down') return;
+      midiMixerControls()?.toggleStem(target.channel, target.stem);
+      return;
+    }
     case 'loop-preset': {
       // Loops gesture class (ADR 0019, midi-performance-ops 02): dropped
       // where the audible surface registers no loops (e.g. the editor).

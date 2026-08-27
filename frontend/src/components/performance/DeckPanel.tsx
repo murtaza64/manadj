@@ -49,7 +49,16 @@ import { formatKeyDisplay } from '../../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../../utils/displayColors';
 import { setKeyLockFlag } from '../../playback/keyLockStore';
 import { DECK_KEYS } from './performanceKeys';
-import { CHANNEL_IDS } from '../../playback/mixer';
+import { CHANNEL_IDS, STEM_NAMES } from '../../playback/mixer';
+import type { StemName } from '../../playback/mixer';
+
+/** Stem kill-switch labels (stems #210): compact, hardware-ish. */
+const STEM_LABELS: Record<StemName, string> = {
+  vocals: 'VOC',
+  drums: 'DRM',
+  bass: 'BAS',
+  other: 'OTH',
+};
 import type { EqBand } from '../../playback/graph';
 import type { Track } from '../../types';
 
@@ -578,6 +587,7 @@ function MixZone({ track }: { track: Track | null }) {
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
   const keyLock = useDeckSnapshot((s) => s.keyLock);
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
 
   // Soft-takeover hints (midi-controller 18): pulse the control a
   // mismatched hardware fader/knob is reaching for. Read per control —
@@ -710,6 +720,26 @@ function MixZone({ track }: { track: Track | null }) {
           </svg>
         </button>
       </div>
+      {/* Stem kill switches (stems #210): shown only when this Load is
+          playing from stems (replace policy, #209). Mixer state — hardware
+          toggles repaint, capture records (#212). Worklet declick-ramps
+          every flip; all-on is identity with pre-stems playback. */}
+      {stemsLoaded ? (
+        <div className="perf-stemrow">
+          {STEM_NAMES.map((stem) => (
+            <button
+              key={stem}
+              className={`player-button perf-mini perf-stem perf-stem-${stem}${
+                channel.stems[stem] ? ' on' : ''
+              }`}
+              onClick={() => mixer.setStemEnabled(deck, stem, !channel.stems[stem])}
+              title={`${channel.stems[stem] ? 'Kill' : 'Restore'} ${stem}`}
+            >
+              {STEM_LABELS[stem]}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <HFader
         label="VOL"
         fill
