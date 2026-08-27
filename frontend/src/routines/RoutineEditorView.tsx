@@ -30,6 +30,7 @@ import {
   unregisterSurface,
 } from '../playback/audibleSurface';
 import { watchAuditionTakeover } from '../editor/auditionTakeover';
+import { armAudition } from '../editor/auditionArm';
 import { isGuardedKeyEvent } from '../components/performance/performanceKeys';
 import { useViewActive } from '../contexts/viewActive';
 import { decodeWaveformBlob, type DecodedWaveform } from '../waveform/blob';
@@ -426,8 +427,9 @@ export default function RoutineEditorView() {
     automationTokenRef.current = mixer.engageAutomation();
   }, [mixer]);
 
-  // One-press arm (auditionArm generalized to the slot→deck projection —
-  // the A/B-typed arm module is pair-scoped; resistance list, gh#170).
+  // One-press arm via the shared module (#204: the inline slot→deck
+  // reimplementation is retired — armAudition now takes an arbitrary
+  // target list, so the slot editor and the pair editor share one arm).
   const pendingArmRef = useRef<(() => void) | null>(null);
   const [armPending, setArmPending] = useState(false);
   const cancelArm = useCallback(() => {
@@ -448,39 +450,29 @@ export default function RoutineEditorView() {
     if (!routine) return;
     ensureAudible();
     if (!isAudible('routine-editor')) return;
-    // Issue missing loads (claim-before-load), then play when every
-    // driven deck holds its CURRENT occupant's track ready (deck reuse
-    // loads later occupants on the fly through the player's hook).
-    const targets = player.currentTargets();
-    const unsubs: (() => void)[] = [];
-    const check = () => {
+    // Every driven deck must hold its CURRENT occupant's track ready
+    // (deck reuse loads later occupants on the fly through the player's
+    // hook). The player's ready() is the authority, so onReady re-checks
+    // it before playing.
+    const onReady = () => {
       if (!player.ready()) return;
-      for (const u of unsubs) u();
       pendingArmRef.current = null;
       setArmPending(false);
       player.play();
     };
-    for (const { deck, trackId } of targets) {
-      const engine = decksRef.current[deck].engine;
-      const snap = engine.getSnapshot();
-      const inFlight =
-        snap.trackId === trackId &&
-        (snap.loadState === 'ready' || snap.loadState === 'fetching' || snap.loadState === 'decoding');
-      if (!inFlight) {
-        const track = tracks.get(trackId);
-        if (track) decksRef.current[deck].loadTrack(track);
-      }
-    }
-    if (player.ready()) {
-      player.play();
-      return;
-    }
-    for (const { deck } of targets) {
-      unsubs.push(decksRef.current[deck].engine.subscribe(check));
-    }
-    pendingArmRef.current = () => {
-      for (const u of unsubs) u();
-    };
+    const cancel = armAudition({
+      targets: player.currentTargets().map(({ deck, trackId }) => ({
+        engine: decksRef.current[deck].engine,
+        trackId,
+        load: () => {
+          const track = tracks.get(trackId);
+          if (track) decksRef.current[deck].loadTrack(track);
+        },
+      })),
+      onReady,
+    });
+    if (cancel === null) return; // fired synchronously
+    pendingArmRef.current = cancel;
     setArmPending(true);
   }, [player, ensureAudible, cancelArm, tracks]);
 
