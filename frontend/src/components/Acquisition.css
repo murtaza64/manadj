@@ -352,6 +352,12 @@
   margin-top: var(--space-md);
 }
 
+.acquisition-soulseek-searched-at {
+  color: var(--overlay1);
+  font-weight: normal;
+  text-transform: none;
+}
+
 .acquisition-soulseek-downloading {
   color: var(--sapphire);
   padding: var(--space-sm);

@@ -32,6 +32,7 @@ from ..track_metadata.file_facts import refresh_file_facts
 from .cleanup import CleanedMetadata, CleanupConfig, clean_metadata, safe_basename
 from .manager import upsert_confirmed_correspondence
 from .models import AudioProvenance, SourceItem
+from .source import RateLimitedError
 from .supplier import SearchSupplier, Supplier, SupplierSearchResult, TransferState
 
 if TYPE_CHECKING:
@@ -127,34 +128,56 @@ def download_handler(
     supplier: Supplier,
     tracks_dir: Path,
     cleanup_config: CleanupConfig | None = None,
+    on_failure: Callable[[Session, SourceItem], None] | None = None,
 ) -> Callable[[Session, dict[str, Any]], None]:
-    """Build the task handler for `download` tasks (Direct Supplier)."""
+    """Build the task handler for `download` tasks (Direct Supplier).
+
+    `on_failure` runs on a terminal failure (not a rate-limit backoff, which
+    retries) — e.g. enqueue an automatic Soulseek search so alternatives are
+    ready by the time the operator looks (gh#216). It must commit its own
+    work: the worker rolls back after the re-raise.
+    """
+    from ..tasks.manager import Deferred
+
     cleanup = cleanup_config or CleanupConfig()
 
     def handle(db: Session, payload: dict[str, Any]) -> None:
         item = db.query(SourceItem).filter(SourceItem.id == payload["source_item_id"]).one()
 
-        meta = clean_metadata(item.title, item.uploader, cleanup)
-        basename = safe_basename(meta.artist, meta.title)
+        try:
+            meta = clean_metadata(item.title, item.uploader, cleanup)
+            basename = safe_basename(meta.artist, meta.title)
 
-        path = _adoptable_orphan(db, tracks_dir, basename)
-        if path is None:
-            path = supplier.download(item.permalink_url, tracks_dir, basename)
-            logger.info("downloaded %s -> %s", item.permalink_url, path)
+            path = _adoptable_orphan(db, tracks_dir, basename)
+            if path is None:
+                path = supplier.download(item.permalink_url, tracks_dir, basename)
+                logger.info("downloaded %s -> %s", item.permalink_url, path)
 
-        _finish_acquisition(
-            db,
-            item,
-            path,
-            meta,
-            tracks_dir,
-            AudioProvenance(
-                source=item.source,
-                external_id=item.external_id,
-                url=item.permalink_url,
-                asserted=False,
-            ),
-        )
+            _finish_acquisition(
+                db,
+                item,
+                path,
+                meta,
+                tracks_dir,
+                AudioProvenance(
+                    source=item.source,
+                    external_id=item.external_id,
+                    url=item.permalink_url,
+                    asserted=False,
+                ),
+            )
+        except (Deferred, RateLimitedError):
+            raise  # not terminal — the task will run again
+        except Exception:
+            if on_failure is not None:
+                # discard this attempt's partial work first so on_failure's
+                # commit can't land half an acquisition
+                db.rollback()
+                try:
+                    on_failure(db, item)
+                except Exception:
+                    logger.exception("download on_failure hook failed for item %d", item.id)
+            raise
 
     return handle
 

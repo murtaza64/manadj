@@ -232,6 +232,30 @@ def test_soulseek_search_endpoint_smoke(soulseek_client: TestClient) -> None:
     assert resp.json()["query"] == "hoax wake up flac"
 
 
+def test_soulseek_remembered_search_endpoint_smoke(soulseek_client: TestClient) -> None:
+    """Every search is remembered per item and served back on GET (gh#216)."""
+    soulseek_client.post("/api/acquisition/refresh")
+    item = soulseek_client.get("/api/acquisition/items").json()[0]
+
+    # never searched -> null
+    resp = soulseek_client.get(f"/api/acquisition/items/{item['id']}/soulseek/search")
+    assert resp.status_code == 200
+    assert resp.json() is None
+
+    searched = soulseek_client.post(
+        f"/api/acquisition/items/{item['id']}/soulseek/search",
+        json={"query": "hoax wake up"},
+    ).json()
+    assert searched["searched_at"] is not None
+
+    resp = soulseek_client.get(f"/api/acquisition/items/{item['id']}/soulseek/search")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["query"] == "hoax wake up"
+    assert body["results"] == searched["results"]
+    assert body["searched_at"] == searched["searched_at"]
+
+
 def test_soulseek_pick_endpoint_smoke(soulseek_client: TestClient) -> None:
     soulseek_client.post("/api/acquisition/refresh")
     item = soulseek_client.get("/api/acquisition/items").json()[0]

@@ -528,6 +528,8 @@ export interface SoulseekResult {
 export interface SoulseekSearchResponse {
   query: string;
   results: SoulseekResult[];
+  // ISO-8601 UTC when this search ran (remembered searches, gh#216)
+  searched_at?: string | null;
 }
 
 // State of a track's latest analysis task (task-system 01): the Analyze

@@ -563,28 +563,54 @@ function remoteBasename(filename: string): string {
   return parts[parts.length - 1];
 }
 
+function timeAgo(iso: string): string {
+  const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
+  return `${Math.round(secs / 86400)}d ago`;
+}
+
 function SoulseekPicker({ item }: { item: SourceItem }) {
   const queryClient = useQueryClient();
-  const [query, setQuery] = useState(item.search_query ?? item.title);
+  // null = untouched; the input shows the remembered query (gh#216), falling
+  // back to the Cleanup-derived default, until the operator types
+  const [typed, setTyped] = useState<string | null>(null);
+
+  // the remembered search hydrates the picker instantly on selection (gh#216)
+  const { data: remembered } = useQuery({
+    queryKey: ['soulseekSearch', item.id],
+    queryFn: () => api.acquisition.soulseekRemembered(item.id),
+  });
+  const query = typed ?? remembered?.query ?? item.search_query ?? item.title;
 
   const searchMutation = useMutation({
     mutationFn: () => api.acquisition.soulseekSearch(item.id, query.trim()),
+    // a fresh search is the new remembered search — render from one place
+    onSuccess: data => queryClient.setQueryData(['soulseekSearch', item.id], data),
   });
   const pickMutation = useMutation({
     mutationFn: (result: SoulseekResult) => api.acquisition.soulseekPick(item.id, result),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] }),
   });
 
-  const results = searchMutation.data?.results;
+  const results = remembered?.results;
   return (
     <div className="acquisition-soulseek">
-      <div className="acquisition-sidebar-heading">soulseek</div>
+      <div className="acquisition-sidebar-heading">
+        soulseek
+        {remembered?.searched_at && (
+          <span className="acquisition-soulseek-searched-at">
+            {' '}· searched {timeAgo(remembered.searched_at)}
+          </span>
+        )}
+      </div>
       <div className="acquisition-soulseek-search">
         <input
           className="acquisition-link-input"
           placeholder="search soulseek…"
           value={query}
-          onChange={e => setQuery(e.target.value)}
+          onChange={e => setTyped(e.target.value)}
           onKeyDown={e => {
             if (e.key === 'Enter' && query.trim()) searchMutation.mutate();
           }}

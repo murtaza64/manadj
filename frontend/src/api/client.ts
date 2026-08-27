@@ -1129,6 +1129,13 @@ export const api = {
       return res.json();
     },
 
+    // The remembered search for an item (gh#216), or null if never searched.
+    soulseekRemembered: async (itemId: number): Promise<SoulseekSearchResponse | null> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`);
+      if (!res.ok) throw new Error('Failed to fetch remembered soulseek search');
+      return res.json();
+    },
+
     soulseekSearch: async (itemId: number, query: string): Promise<SoulseekSearchResponse> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`, {
         method: 'POST',

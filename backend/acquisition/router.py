@@ -25,9 +25,14 @@ from .manager import (
     restore_item,
     set_classification,
 )
-from .cleanup import clean_metadata
 from .download import pick_supplier_result
 from .picker import shape_results
+from .searches import (
+    default_search_query,
+    remember_search,
+    remembered_results,
+    remembered_search,
+)
 from .models import AudioProvenance, SourceCorrespondence, SourceItem
 from .source import SoundCloudSource, Source
 from .supplier import SearchSupplier, SupplierSearchResult
@@ -234,8 +239,7 @@ def _provenance_map(db: Session) -> dict[int, ProvenanceInfo]:
 
 def _search_query(item: SourceItem) -> str:
     """The Cleanup-derived default query for Search Supplier pickers."""
-    meta = clean_metadata(item.title, item.uploader, get_config().acquisition.cleanup)
-    return f"{meta.artist} {meta.title}" if meta.artist else meta.title
+    return default_search_query(item, get_config().acquisition.cleanup)
 
 
 @router.get("/items", response_model=list[SourceItemResponse])
@@ -409,6 +413,8 @@ class SoulseekResult(BaseModel):
 class SoulseekSearchResponse(BaseModel):
     query: str  # the query actually searched (echoes the default when unset)
     results: list[SoulseekResult]
+    # ISO-8601 UTC when this search ran; set on remembered searches (gh#216)
+    searched_at: str | None = None
 
 
 @router.get("/suppliers", response_model=list[SupplierInfo])
@@ -432,7 +438,11 @@ def soulseek_search(
     db: Session = Depends(get_db),
     supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
 ) -> SoulseekSearchResponse:
-    """Search Soulseek for candidates for an unfulfilled item."""
+    """Search Soulseek for candidates for an unfulfilled item.
+
+    Every search is remembered per item (gh#216): the picker hydrates from
+    it on selection, and a new search overwrites it.
+    """
     sup = _require_soulseek(supplier)
     try:
         item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
@@ -440,12 +450,40 @@ def soulseek_search(
         raise HTTPException(status_code=404, detail="source item not found")
     query = (body.query or "").strip() or _search_query(item)
     shaped = shape_results(sup.search(query), item.duration_ms)
+    results = [
+        SoulseekResult(**vars(s.result), duration_delta_ms=s.duration_delta_ms)
+        for s in shaped
+    ]
+    row = remember_search(db, item.id, query, [r.model_dump() for r in results])
     return SoulseekSearchResponse(
         query=query,
-        results=[
-            SoulseekResult(**vars(s.result), duration_delta_ms=s.duration_delta_ms)
-            for s in shaped
-        ],
+        results=results,
+        searched_at=(
+            row.searched_at.replace(tzinfo=timezone.utc).isoformat()
+            if row.searched_at
+            else None
+        ),
+    )
+
+
+@router.get(
+    "/items/{item_id}/soulseek/search", response_model=SoulseekSearchResponse | None
+)
+def soulseek_remembered_search(
+    item_id: int, db: Session = Depends(get_db)
+) -> SoulseekSearchResponse | None:
+    """The remembered search for an item, or null if it was never searched."""
+    row = remembered_search(db, item_id)
+    if row is None:
+        return None
+    return SoulseekSearchResponse(
+        query=row.query,
+        results=[SoulseekResult(**d) for d in remembered_results(row)],
+        searched_at=(
+            row.searched_at.replace(tzinfo=timezone.utc).isoformat()
+            if row.searched_at
+            else None
+        ),
     )
 
 
