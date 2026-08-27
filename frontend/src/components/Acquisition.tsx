@@ -449,6 +449,11 @@ function ItemDetail({ item, onClose }: { item: SourceItem; onClose: () => void }
         (item.download.task_state === 'pending' || item.download.task_state === 'running') && (
           <div className="acquisition-soulseek-downloading">
             ⇣ downloading via Soulseek…
+            {item.download.attempt != null &&
+              item.download.attempts_total != null &&
+              item.download.attempts_total > 1 && (
+                <> (source {item.download.attempt}/{item.download.attempts_total})</>
+              )}
           </div>
         )}
 
@@ -593,6 +598,15 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
     mutationFn: (result: SoulseekResult) => api.acquisition.soulseekPick(item.id, result),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] }),
   });
+  // hands-off: server auto-picks a high-quality mp3 and retries across peers
+  const autoMutation = useMutation({
+    mutationFn: () => api.acquisition.soulseekAuto(item.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['acquisitionItems'] });
+      // the auto endpoint may have run (and remembered) a fresh search
+      queryClient.invalidateQueries({ queryKey: ['soulseekSearch', item.id] });
+    },
+  });
 
   const results = remembered?.results;
   return (
@@ -622,12 +636,23 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
         >
           {searchMutation.isPending ? 'searching…' : 'search'}
         </button>
+        <button
+          className="acquisition-action-button acquisition-action-queue"
+          title="hands-off: auto-pick a high-quality mp3 (exact duration, ≥192 kbps) and retry up to 5 peers on failure"
+          disabled={autoMutation.isPending}
+          onClick={() => autoMutation.mutate()}
+        >
+          {autoMutation.isPending ? 'picking…' : '⚡ auto mp3'}
+        </button>
       </div>
       {searchMutation.isError && (
         <div className="acquisition-error">{(searchMutation.error as Error).message}</div>
       )}
       {pickMutation.isError && (
         <div className="acquisition-error">{(pickMutation.error as Error).message}</div>
+      )}
+      {autoMutation.isError && (
+        <div className="acquisition-error">{(autoMutation.error as Error).message}</div>
       )}
       {results && results.length === 0 && (
         <div className="acquisition-item-sub">no peers offered a match</div>

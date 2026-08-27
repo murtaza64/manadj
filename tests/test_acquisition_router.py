@@ -278,6 +278,61 @@ def test_soulseek_pick_endpoint_smoke(soulseek_client: TestClient) -> None:
     assert resp.status_code == 409
 
 
+def make_soulseek_app(db_session: Session, results: list[SupplierSearchResult]) -> TestClient:
+    app = FastAPI()
+    app.include_router(router, prefix="/api/acquisition")
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_source] = lambda: FakeSource([CANNED_ITEM])
+    app.dependency_overrides[get_soulseek_supplier] = lambda: FakeSource(
+        [], search_results=results
+    )
+    return TestClient(app)
+
+
+def test_soulseek_auto_endpoint_smoke(db_session: Session) -> None:
+    """Hands-off download (gh#214): fresh search remembered, mp3 auto-picked,
+    multi-candidate task queued."""
+    mp3 = SupplierSearchResult(
+        download_token="tok-mp3",
+        filename="@@peer\\Music\\Hoax - Wake Up.mp3",
+        format="mp3",
+        bitrate_kbps=320,
+        size_bytes=9_000_000,
+        duration_ms=274_000,
+        queue_length=0,
+        username="peer",
+    )
+    with make_soulseek_app(db_session, [CANNED_RESULT, mp3]) as c:
+        c.post("/api/acquisition/refresh")
+        item = c.get("/api/acquisition/items").json()[0]
+
+        resp = c.post(f"/api/acquisition/items/{item['id']}/soulseek/auto")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["state"] == "queued"
+        assert body["download"]["via"] == "soulseek"
+        assert body["download"]["attempt"] == 1
+        assert body["download"]["attempts_total"] == 1  # the flac is not auto-pickable
+
+        # the fresh search was remembered
+        resp = c.get(f"/api/acquisition/items/{item['id']}/soulseek/search")
+        assert resp.json() is not None and len(resp.json()["results"]) == 2
+
+        # a second auto while one is in flight is a conflict
+        resp = c.post(f"/api/acquisition/items/{item['id']}/soulseek/auto")
+        assert resp.status_code == 409
+
+
+def test_soulseek_auto_endpoint_409_when_nothing_pickable(db_session: Session) -> None:
+    # the canned flac fails the mp3-only auto filter
+    with make_soulseek_app(db_session, [CANNED_RESULT]) as c:
+        c.post("/api/acquisition/refresh")
+        item = c.get("/api/acquisition/items").json()[0]
+        resp = c.post(f"/api/acquisition/items/{item['id']}/soulseek/auto")
+        assert resp.status_code == 409
+        assert "pick manually" in resp.json()["detail"]
+
+
 def test_set_provenance_endpoint_smoke(client: TestClient, db_session: Session) -> None:
     from backend.models import Track
 

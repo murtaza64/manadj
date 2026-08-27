@@ -25,7 +25,7 @@ from .manager import (
     restore_item,
     set_classification,
 )
-from .download import pick_supplier_result
+from .download import pick_supplier_result, start_supplier_download
 from .picker import shape_results
 from .searches import (
     default_search_query,
@@ -142,6 +142,10 @@ class DownloadStatus(BaseModel):
     cooling_down_until: str | None = None
     # which Supplier is delivering the audio: "soundcloud" | "soulseek"
     via: str = "soundcloud"
+    # hands-off soulseek downloads (gh#214): which candidate is being tried
+    # (1-based) out of how many
+    attempt: int | None = None
+    attempts_total: int | None = None
 
 
 class BulkQueueRequest(BaseModel):
@@ -203,6 +207,22 @@ def _via(task: "Task") -> str:
     return "soulseek" if task.type == "soulseek-download" else "soundcloud"
 
 
+def _task_status(task: "Task") -> DownloadStatus:
+    status = DownloadStatus(
+        task_state=task.state,
+        error=task.error,
+        cooling_down_until=_cooling_down_until(task),
+        via=_via(task),
+    )
+    if task.type == "soulseek-download":
+        payload = task.payload
+        candidates = payload.get("candidates")
+        if candidates:
+            status.attempt = payload.get("attempt", 0) + 1
+            status.attempts_total = len(candidates)
+    return status
+
+
 def _download_map(db: Session) -> dict[int, DownloadStatus]:
     """source_item_id -> latest download-task status (either Supplier)."""
     statuses: dict[int, DownloadStatus] = {}
@@ -212,12 +232,7 @@ def _download_map(db: Session) -> dict[int, DownloadStatus]:
         db.query(Task).filter(Task.type.in_(DOWNLOAD_TASK_TYPES)).order_by(Task.id).all()
     ):
         if task.ref and task.ref.startswith("source_item:"):
-            statuses[int(task.ref.split(":", 1)[1])] = DownloadStatus(
-                task_state=task.state,
-                error=task.error,
-                cooling_down_until=_cooling_down_until(task),
-                via=_via(task),
-            )
+            statuses[int(task.ref.split(":", 1)[1])] = _task_status(task)
     return statuses
 
 
@@ -268,12 +283,7 @@ def _item_response(db: Session, item_id: int) -> SourceItemResponse:
         resp.provenance = _provenance_map(db).get(resp.correspondence.track_id)
     tasks = [t for t in list_tasks(db, ref=f"source_item:{item_id}") if t.type in DOWNLOAD_TASK_TYPES]
     if tasks:
-        resp.download = DownloadStatus(
-            task_state=tasks[0].state,
-            error=tasks[0].error,
-            cooling_down_until=_cooling_down_until(tasks[0]),
-            via=_via(tasks[0]),
-        )
+        resp.download = _task_status(tasks[0])
     return resp
 
 
@@ -405,6 +415,8 @@ class SoulseekResult(BaseModel):
     duration_ms: int | None
     queue_length: int | None
     has_free_slot: bool | None = None
+    # the peer offering the file (hands-off retries spread across peers)
+    username: str | None = None
     # derived server-side against the item's duration (search only; ignored
     # on pick — the Supplier needs none of it)
     duration_delta_ms: int | None = None
@@ -485,6 +497,63 @@ def soulseek_remembered_search(
             else None
         ),
     )
+
+
+@router.post("/items/{item_id}/soulseek/auto", response_model=SourceItemResponse)
+def soulseek_auto_download(
+    item_id: int,
+    db: Session = Depends(get_db),
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> SourceItemResponse:
+    """Hands-off download (gh#214): search if needed, auto-pick, download.
+
+    Candidates come from the remembered search when one exists (remembering
+    is the point: no 20s wait per item), else a fresh default-query search
+    (which is then remembered). The auto pick list is mp3-only, exact
+    duration, healthy bitrate, one candidate per peer, best first — the
+    download task falls back through it on failure.
+    """
+    from .picker import MIN_AUTO_BITRATE_KBPS, auto_candidates, dicts_to_shaped
+
+    sup = _require_soulseek(supplier)
+    try:
+        item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="source item not found")
+
+    row = remembered_search(db, item_id)
+    if row is not None:
+        shaped = dicts_to_shaped(remembered_results(row))
+    else:
+        query = _search_query(item)
+        shaped = shape_results(sup.search(query), item.duration_ms)
+        remember_search(
+            db,
+            item_id,
+            query,
+            [
+                SoulseekResult(**vars(s.result), duration_delta_ms=s.duration_delta_ms).model_dump()
+                for s in shaped
+            ],
+        )
+
+    candidates = auto_candidates(shaped)
+    if not candidates:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "no auto-pickable mp3 among the search results (need exact "
+                f"duration and ≥{MIN_AUTO_BITRATE_KBPS} kbps) — pick manually"
+            ),
+        )
+    try:
+        start_supplier_download(db, item_id, sup, [c.result for c in candidates])
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except RuntimeError as e:
+        # every candidate peer rejected the request outright
+        raise HTTPException(status_code=502, detail=str(e))
+    return _item_response(db, item_id)
 
 
 @router.post("/items/{item_id}/soulseek/pick", response_model=SourceItemResponse)

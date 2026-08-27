@@ -1149,6 +1149,19 @@ export const api = {
       return res.json();
     },
 
+    // Hands-off download (gh#214): auto-pick a high-quality mp3 and retry
+    // across peers server-side. 409 = nothing auto-pickable.
+    soulseekAuto: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/auto`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek auto-download failed'));
+      }
+      return res.json();
+    },
+
     soulseekPick: async (itemId: number, result: SoulseekResult): Promise<SourceItem> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/pick`, {
         method: 'POST',

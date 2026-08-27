@@ -17,6 +17,7 @@ from backend.acquisition.download import (
     SOULSEEK_TASK_TYPE,
     pick_supplier_result,
     soulseek_download_handler,
+    start_supplier_download,
 )
 from backend.acquisition.manager import get_correspondence, list_source_items, refresh
 from backend.acquisition.models import AudioProvenance, SourceItem
@@ -248,6 +249,193 @@ class TestSoulseekChain:
         assert task.error is not None and "search and pick again" in task.error
         db_session.refresh(item)
         assert item.state != "fulfilled"
+
+
+def candidate(token: str, username: str) -> SupplierSearchResult:
+    return SupplierSearchResult(
+        download_token=token,
+        filename=f"@@{username}\\Music\\Hoax - Wake Up ({token}).mp3",
+        format="mp3",
+        bitrate_kbps=320,
+        size_bytes=9_000_000,
+        duration_ms=274_000,
+        queue_length=0,
+        username=username,
+    )
+
+
+class TestMultiSourceRetry:
+    """Hands-off downloads (gh#214): the task falls back through its
+    candidate snapshot — a different peer per attempt — before failing."""
+
+    def make_supplier(self, tmp_path: Path, **kwargs: object) -> FakeSource:
+        staging = tmp_path / "slskd-staging"
+        staging.mkdir(exist_ok=True)
+        return FakeSource(
+            [item_data("111", title="Hoax - Wake Up [FREE DL]", uploader="hoaxdnb")],
+            staging_dir=staging,
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    def test_failed_transfer_advances_to_next_source(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        supplier = self.make_supplier(
+            tmp_path,
+            download_file=audio_file("mp3"),
+            transfer_states_by_token={
+                "tok-a": [TransferState.FAILED],
+                "tok-b": [TransferState.COMPLETED],
+            },
+        )
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        item = setup_item(db_session, supplier)
+        candidates = [candidate("tok-a", "peer-a"), candidate("tok-b", "peer-b")]
+        start_supplier_download(db_session, item.id, supplier, candidates)
+
+        # tick 1: first transfer failed -> advance to peer-b, defer (no failure)
+        assert run_pending(db_session, make_handlers(supplier, tracks_dir)) == 1
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "pending"
+        assert task.error is None
+        assert task.payload["attempt"] == 1
+        assert task.payload["transfer_id"] == "transfer:tok-b"
+        assert supplier.requested == ["tok-a", "tok-b"]
+
+        # tick 2: peer-b completes -> chain finishes
+        release_deferral(db_session, item)
+        assert run_pending(db_session, make_handlers(supplier, tracks_dir)) == 1
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "done", task.error
+        db_session.refresh(item)
+        assert item.state == "fulfilled"
+        # the landed file came from the second candidate
+        landed = list(tracks_dir.glob("Hoax - Wake Up.*"))
+        assert len(landed) == 1
+
+    def test_all_sources_exhausted_fails_task(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        supplier = self.make_supplier(
+            tmp_path, transfer_states=[TransferState.FAILED]
+        )
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        item = setup_item(db_session, supplier)
+        candidates = [candidate(f"tok-{i}", f"peer-{i}") for i in range(3)]
+        start_supplier_download(db_session, item.id, supplier, candidates)
+
+        # each failed transfer advances and defers; the last one fails the task
+        for _ in range(3):
+            run_pending(db_session, make_handlers(supplier, tracks_dir))
+            release_deferral(db_session, item)
+
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "failed"
+        assert task.error is not None
+        assert "all 3 sources tried" in task.error
+        assert supplier.requested == ["tok-0", "tok-1", "tok-2"]
+        # searchable again
+        db_session.refresh(item)
+        assert item.state != "fulfilled"
+        pick_supplier_result(db_session, item.id, supplier, RESULT)
+
+    def test_stalled_queue_abandons_peer_for_next(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        """A transfer sitting in a peer's queue past the stall window is
+        cancelled and the next source tried — eternal remote queues must not
+        eat the whole TTL."""
+        import json
+        from datetime import datetime, timedelta, timezone
+
+        supplier = self.make_supplier(
+            tmp_path,
+            download_file=audio_file("mp3"),
+            transfer_states_by_token={
+                "tok-a": [TransferState.QUEUED],
+                "tok-b": [TransferState.COMPLETED],
+            },
+        )
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        item = setup_item(db_session, supplier)
+        candidates = [candidate("tok-a", "peer-a"), candidate("tok-b", "peer-b")]
+        start_supplier_download(db_session, item.id, supplier, candidates)
+
+        # not stalled yet: just a defer, no advance
+        run_pending(db_session, make_handlers(supplier, tracks_dir))
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.payload["attempt"] == 0
+
+        # backdate the attempt past the stall window
+        payload = task.payload
+        payload["attempt_started"] = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=16)
+        ).isoformat()
+        task.payload_json = json.dumps(payload)
+        task.not_before = None
+        db_session.commit()
+
+        run_pending(db_session, make_handlers(supplier, tracks_dir))
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "pending"
+        assert task.payload["attempt"] == 1
+        assert supplier.cancelled == ["transfer:tok-a"]
+
+        release_deferral(db_session, item)
+        run_pending(db_session, make_handlers(supplier, tracks_dir))
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "done", task.error
+
+    def test_rejected_request_skips_to_next_candidate(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        audio_file: Callable[..., Path],
+    ) -> None:
+        supplier = self.make_supplier(
+            tmp_path,
+            download_file=audio_file("mp3"),
+            request_error_tokens={"tok-a"},
+            transfer_states=[TransferState.COMPLETED],
+        )
+        tracks_dir = tmp_path / "tracks"
+        tracks_dir.mkdir()
+        item = setup_item(db_session, supplier)
+        candidates = [candidate("tok-a", "peer-a"), candidate("tok-b", "peer-b")]
+        task = start_supplier_download(db_session, item.id, supplier, candidates)
+
+        # the rejected peer was skipped at request time
+        assert task.payload["attempt"] == 1
+        assert task.payload["transfer_id"] == "transfer:tok-b"
+
+        run_pending(db_session, make_handlers(supplier, tracks_dir))
+        task = list_tasks(db_session, ref=f"source_item:{item.id}")[0]
+        assert task.state == "done", task.error
+
+    def test_all_requests_rejected_raises(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        supplier = self.make_supplier(
+            tmp_path, request_error_tokens={"tok-a", "tok-b"}
+        )
+        item = setup_item(db_session, supplier)
+        candidates = [candidate("tok-a", "peer-a"), candidate("tok-b", "peer-b")]
+
+        with pytest.raises(RuntimeError, match="exhausted"):
+            start_supplier_download(db_session, item.id, supplier, candidates)
+
+        # nothing queued: the item is still pickable
+        db_session.rollback()
+        assert list_tasks(db_session, ref=f"source_item:{item.id}") == []
 
 
 class TestRetryAfterCrashedAttempt:

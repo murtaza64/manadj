@@ -117,10 +117,14 @@ class FakeSource:
     and `transfer_states` cans a transfer-state sequence advanced one step per
     `transfer_status` poll (e.g. [QUEUED, IN_PROGRESS, COMPLETED] for a happy
     transfer, or a run of QUEUED for a TTL-expiry test; the last state holds
-    once the sequence is exhausted). On COMPLETED the fixture file is staged
-    into `staging_dir` under the picked result's remote basename — mirroring
-    slskd, which downloads into its own directory and reports the path; the
-    download task moves it into the library.
+    once the sequence is exhausted). `transfer_states_by_token` cans a distinct
+    sequence per download_token (multi-source retry tests, gh#214), falling
+    back to `transfer_states`; `request_error_tokens` makes `request` reject
+    the given tokens outright; `cancel` records into `.cancelled`. On
+    COMPLETED the fixture file is staged into `staging_dir` under the picked
+    result's remote basename — mirroring slskd, which downloads into its own
+    directory and reports the path; the download task moves it into the
+    library.
     """
 
     def __init__(
@@ -130,6 +134,8 @@ class FakeSource:
         download_error: Exception | None = None,
         search_results: list[SupplierSearchResult] | None = None,
         transfer_states: list[TransferState] | None = None,
+        transfer_states_by_token: dict[str, list[TransferState]] | None = None,
+        request_error_tokens: set[str] | None = None,
         staging_dir: Path | None = None,
     ) -> None:
         self._items = items
@@ -137,9 +143,13 @@ class FakeSource:
         self._download_error = download_error
         self._search_results = search_results or []
         self._transfer_states = list(transfer_states or [])
+        self._transfer_states_by_token = transfer_states_by_token or {}
+        self._request_error_tokens = request_error_tokens or set()
         self._staging_dir = staging_dir
         self._transfer_results: dict[str, SupplierSearchResult] = {}
         self._poll_counts: dict[str, int] = {}
+        self.requested: list[str] = []  # download_tokens, in request order
+        self.cancelled: list[str] = []  # transfer_ids, in cancel order
 
     def list_items(self) -> list[SourceItemData]:
         return self._items
@@ -157,16 +167,24 @@ class FakeSource:
         return self._search_results
 
     def request(self, result: SupplierSearchResult) -> str:
+        if result.download_token in self._request_error_tokens:
+            raise RuntimeError(f"peer rejected request for {result.download_token}")
+        self.requested.append(result.download_token)
         transfer_id = f"transfer:{result.download_token}"
         self._transfer_results[transfer_id] = result
         self._poll_counts[transfer_id] = 0
         return transfer_id
 
+    def cancel(self, transfer_id: str) -> None:
+        self.cancelled.append(transfer_id)
+
     def transfer_status(self, transfer_id: str) -> TransferStatus:
-        assert self._transfer_states, "FakeSource not configured for transfers"
+        token = transfer_id.removeprefix("transfer:")
+        states = self._transfer_states_by_token.get(token, self._transfer_states)
+        assert states, "FakeSource not configured for transfers"
         n = self._poll_counts.get(transfer_id, 0)
         # hold on the last canned state once the sequence is exhausted
-        state = self._transfer_states[min(n, len(self._transfer_states) - 1)]
+        state = states[min(n, len(states) - 1)]
         self._poll_counts[transfer_id] = n + 1
         if state is TransferState.COMPLETED:
             assert self._staging_dir is not None, "FakeSource has no staging_dir"

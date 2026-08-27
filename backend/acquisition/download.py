@@ -8,12 +8,14 @@ Two task types share that chain and differ only in how the bytes arrive:
 
 - `download` (Direct Supplier, SoundCloud): the handler downloads straight
   into the tracks directory via the base `Supplier` seam.
-- `soulseek-download` (Search Supplier): the operator's pick already asked
-  the peer for the file (`pick_supplier_result`); the handler polls the
-  transfer per worker tick — no blocking waits — and on completion moves the
-  staged file into the tracks directory. A hard TTL from pick time fails
-  stuck transfers; failure returns the item to searchable state (candidates
-  are ephemeral — no stored pick, no retry of a pick).
+- `soulseek-download` (Search Supplier): the pick (an operator's, or the
+  hands-off auto-pick, gh#214) already asked a peer for the file
+  (`start_supplier_download`); the handler polls the transfer per worker
+  tick — no blocking waits — and on completion moves the staged file into
+  the tracks directory. The task payload snapshots its candidate list: on a
+  failed or stalled transfer it advances to the next candidate (a different
+  peer) until the list is exhausted, then fails. A hard TTL from pick time
+  bounds the whole affair; failure returns the item to searchable state.
 """
 
 import logging
@@ -41,11 +43,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 SOULSEEK_TASK_TYPE = "soulseek-download"
-# Hard TTL for a picked transfer, measured from task creation regardless of
-# transfer state (PRD: transfers finish in minutes once started).
+# Hard TTL for a picked download (all sources together), measured from task
+# creation regardless of transfer state (PRD: transfers finish in minutes
+# once started).
 SOULSEEK_TTL = timedelta(hours=24)
 # How long the handler defers between transfer-state polls.
 SOULSEEK_POLL_SECS = 15.0
+# A transfer still sitting in a peer's queue this long is abandoned for the
+# next candidate — eternal remote queues are Soulseek's commonest failure
+# mode, and hands-off downloads (gh#214) must not wait out the full TTL on
+# a dead peer while alternatives exist.
+SOULSEEK_ATTEMPT_STALL = timedelta(minutes=15)
 
 
 def _utcnow() -> datetime:
@@ -189,15 +197,55 @@ def pick_supplier_result(
     result: SupplierSearchResult,
     ttl: timedelta = SOULSEEK_TTL,
 ) -> "Task":
-    """The operator picked a search candidate: start the transfer, queue the task.
+    """The operator picked one search candidate: a single-source download."""
+    return start_supplier_download(db, item_id, supplier, [result], ttl=ttl)
 
-    Asks the peer for the file immediately (candidates are ephemeral — there
-    is no stored pick to retry later) and creates a `soulseek-download` task
-    that polls the transfer. The peer/remote-filename live in the task log
-    only (PRD caveat 1).
+
+def _request_next(
+    supplier: SearchSupplier, candidates: list[SupplierSearchResult], start: int
+) -> tuple[int, str]:
+    """Request the first requestable candidate at or after `start`.
+
+    A peer that rejects the request outright is skipped (that attempt is
+    spent); returns (index, transfer_id) or raises RuntimeError when the
+    list is exhausted.
+    """
+    for idx in range(start, len(candidates)):
+        result = candidates[idx]
+        try:
+            return idx, supplier.request(result)
+        except Exception as e:
+            logger.warning(
+                "soulseek request rejected for %s (source %d/%d): %s",
+                result.filename,
+                idx + 1,
+                len(candidates),
+                e,
+            )
+    raise RuntimeError(
+        f"all {len(candidates)} soulseek source(s) exhausted — search and pick again"
+    )
+
+
+def start_supplier_download(
+    db: Session,
+    item_id: int,
+    supplier: SearchSupplier,
+    candidates: list[SupplierSearchResult],
+    ttl: timedelta = SOULSEEK_TTL,
+) -> "Task":
+    """Start a soulseek download with a candidate list to fall back through.
+
+    Asks a peer for the first requestable candidate immediately and creates a
+    `soulseek-download` task that polls the transfer. The task payload
+    snapshots the whole candidate list (a later re-search must not change a
+    download already in flight); the handler advances through it on failure
+    (gh#214). A manual pick is the single-candidate case.
     """
     from ..tasks.manager import create_task, list_tasks
 
+    if not candidates:
+        raise ValueError("no candidates to download")
     item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
     if item.state not in ("new", "queued"):
         raise ValueError(f"source item {item_id} is {item.state}; cannot pick for it")
@@ -208,28 +256,91 @@ def pick_supplier_result(
                 f"source item {item_id} already has a {task.type} task in flight"
             )
 
-    transfer_id = supplier.request(result)
+    attempt, transfer_id = _request_next(supplier, candidates, 0)
     logger.info(
-        "soulseek pick for item %d: %s (token %s) -> transfer %s",
+        "soulseek download for item %d: %s (source %d/%d) -> transfer %s",
         item_id,
-        result.filename,
-        result.download_token,
+        candidates[attempt].filename,
+        attempt + 1,
+        len(candidates),
         transfer_id,
     )
+    now = _utcnow()
     task = create_task(
         db,
         SOULSEEK_TASK_TYPE,
         {
             "source_item_id": item_id,
+            "candidates": [vars(c) for c in candidates],
+            "attempt": attempt,
             "transfer_id": transfer_id,
-            "filename": result.filename,
-            "deadline": (_utcnow() + ttl).isoformat(),
+            "filename": candidates[attempt].filename,
+            "attempt_started": now.isoformat(),
+            "deadline": (now + ttl).isoformat(),
         },
         ref=ref,
     )
     item.state = "queued"
     db.commit()
     return task
+
+
+def _advance_to_next_source(
+    db: Session,
+    supplier: SearchSupplier,
+    payload: dict[str, Any],
+    reason: str,
+    cancel_current: bool = False,
+) -> None:
+    """Move an in-flight download to its next candidate (gh#214).
+
+    Requests the next requestable candidate (RuntimeError when none are
+    left), then persists the advanced payload onto the task row and commits —
+    the worker's Deferred handling rolls back, so the mutation must be
+    durable before the handler defers.
+    """
+    import json
+
+    from ..tasks.models import Task
+    from .picker import result_from_dict
+
+    if cancel_current:
+        try:
+            supplier.cancel(payload["transfer_id"])
+        except Exception as e:
+            logger.warning("could not cancel stalled transfer: %s", e)
+
+    candidates = [result_from_dict(d) for d in payload["candidates"]]
+    old = payload["attempt"]
+    attempt, transfer_id = _request_next(supplier, candidates, old + 1)
+    logger.info(
+        "soulseek download for item %d: %s (%s) — advancing to source %d/%d: %s",
+        payload["source_item_id"],
+        payload["filename"],
+        reason,
+        attempt + 1,
+        len(candidates),
+        candidates[attempt].filename,
+    )
+    payload.update(
+        attempt=attempt,
+        transfer_id=transfer_id,
+        filename=candidates[attempt].filename,
+        attempt_started=_utcnow().isoformat(),
+    )
+    # the handler only sees its payload; locate the task row (unique: the
+    # in-flight guard allows one running soulseek-download per item)
+    task = (
+        db.query(Task)
+        .filter(
+            Task.state == "running",
+            Task.type == SOULSEEK_TASK_TYPE,
+            Task.ref == f"source_item:{payload['source_item_id']}",
+        )
+        .one()
+    )
+    task.payload_json = json.dumps(payload)
+    db.commit()
 
 
 def soulseek_download_handler(
@@ -241,7 +352,9 @@ def soulseek_download_handler(
 
     One non-blocking step per run: adopt a crashed attempt's file if present;
     enforce the hard TTL; otherwise poll the transfer and either finish the
-    chain, fail, or defer until the next tick.
+    chain, advance to the next candidate (failed or stalled-in-queue
+    transfer, gh#214), fail once candidates are exhausted, or defer until
+    the next tick.
     """
     from ..tasks.manager import Deferred
 
@@ -279,13 +392,35 @@ def soulseek_download_handler(
                 f"({payload['filename']!r}) — search and pick again"
             )
 
+        # pre-#214 payloads carry no candidate list: nothing to advance to
+        sources_left = payload["attempt"] + 1 < len(payload["candidates"]) \
+            if "candidates" in payload else False
+
         status = supplier.transfer_status(payload["transfer_id"])
         if status.state in (TransferState.QUEUED, TransferState.IN_PROGRESS):
+            # a transfer stuck in a peer's queue is abandoned for the next
+            # source; one actually moving is left to run
+            stalled = (
+                status.state is TransferState.QUEUED
+                and sources_left
+                and "attempt_started" in payload
+                and _utcnow() - datetime.fromisoformat(payload["attempt_started"])
+                >= SOULSEEK_ATTEMPT_STALL
+            )
+            if stalled:
+                _advance_to_next_source(
+                    db, supplier, payload, "stalled in peer queue", cancel_current=True
+                )
             raise Deferred(SOULSEEK_POLL_SECS, f"transfer {status.state.value}")
         if status.state is TransferState.FAILED:
+            if sources_left:
+                _advance_to_next_source(db, supplier, payload, "transfer failed")
+                raise Deferred(SOULSEEK_POLL_SECS, "advanced to next source")
+            tried = payload.get("attempt", 0) + 1
             raise RuntimeError(
-                f"soulseek transfer failed ({payload['filename']!r}) — "
-                "search and pick again"
+                f"soulseek transfer failed ({payload['filename']!r})"
+                + (f" — all {tried} sources tried" if tried > 1 else "")
+                + " — search and pick again"
             )
 
         # completed: move the staged file to the tracks directory under the

@@ -2,7 +2,12 @@
 canned search results — filtering, duration deltas, best-pick-first ordering.
 """
 
-from backend.acquisition.picker import shape_results
+from backend.acquisition.picker import (
+    auto_candidates,
+    dicts_to_shaped,
+    result_from_dict,
+    shape_results,
+)
 from backend.acquisition.supplier import SupplierSearchResult
 
 ITEM_DURATION_MS = 200_000
@@ -15,6 +20,7 @@ def result(
     bitrate_kbps: int | None = None,
     queue_length: int | None = 0,
     has_free_slot: bool | None = None,
+    username: str | None = None,
 ) -> SupplierSearchResult:
     return SupplierSearchResult(
         download_token=token,
@@ -25,6 +31,7 @@ def result(
         duration_ms=duration_ms,
         queue_length=queue_length,
         has_free_slot=has_free_slot,
+        username=username,
     )
 
 
@@ -113,3 +120,71 @@ class TestOrdering:
             ITEM_DURATION_MS,
         )
         assert order(shaped) == ["free", "queued"]
+
+
+class TestAutoCandidates:
+    """The hands-off pick list (gh#214): mp3-only, exact duration, healthy
+    bitrate, one candidate per peer, capped at five sources."""
+
+    def test_only_exact_duration_high_bitrate_mp3s(self) -> None:
+        shaped = shape_results(
+            [
+                result("good", "mp3", bitrate_kbps=320, username="a"),
+                result("lossless", "flac", username="b"),
+                result("low-bitrate", "mp3", bitrate_kbps=128, username="c"),
+                result("no-bitrate", "mp3", username="d"),
+                result(
+                    "wrong-length", "mp3", bitrate_kbps=320,
+                    duration_ms=ITEM_DURATION_MS + 30_000, username="e",
+                ),
+                result("mystery-length", "mp3", bitrate_kbps=320, duration_ms=None, username="f"),
+            ],
+            ITEM_DURATION_MS,
+        )
+        assert order(auto_candidates(shaped)) == ["good"]
+
+    def test_one_candidate_per_peer_best_first(self) -> None:
+        shaped = shape_results(
+            [
+                result("a-320", "mp3", bitrate_kbps=320, username="a"),
+                result("a-256", "mp3", bitrate_kbps=256, username="a"),
+                result("b-256", "mp3", bitrate_kbps=256, username="b"),
+            ],
+            ITEM_DURATION_MS,
+        )
+        assert order(auto_candidates(shaped)) == ["a-320", "b-256"]
+
+    def test_capped_at_five_sources(self) -> None:
+        shaped = shape_results(
+            [
+                result(f"peer{i}", "mp3", bitrate_kbps=320, username=f"u{i}")
+                for i in range(8)
+            ],
+            ITEM_DURATION_MS,
+        )
+        assert len(auto_candidates(shaped)) == 5
+
+    def test_unknown_peers_are_distinct(self) -> None:
+        shaped = shape_results(
+            [
+                result("one", "mp3", bitrate_kbps=320),
+                result("two", "mp3", bitrate_kbps=320),
+            ],
+            ITEM_DURATION_MS,
+        )
+        assert len(auto_candidates(shaped)) == 2
+
+
+class TestCandidateSerialization:
+    def test_result_from_dict_ignores_extras_and_tolerates_missing(self) -> None:
+        r = result("tok", "mp3", bitrate_kbps=320, username="peer")
+        d = {**vars(r), "duration_delta_ms": 0}
+        assert result_from_dict(d) == r
+        del d["username"]
+        assert result_from_dict(d).username is None
+
+    def test_dicts_to_shaped_reads_stored_deltas(self) -> None:
+        shaped = shape_results([result("tok", "mp3", bitrate_kbps=320)], ITEM_DURATION_MS)
+        dicts = [{**vars(s.result), "duration_delta_ms": s.duration_delta_ms} for s in shaped]
+        rehydrated = dicts_to_shaped(dicts)
+        assert rehydrated == shaped

@@ -6,7 +6,8 @@ duration delta against the Source Item computed per candidate, and the list
 sorted exact-duration-lossless first (PRD story 4).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from typing import Any
 
 from .supplier import SupplierSearchResult
 
@@ -76,3 +77,56 @@ def shape_results(
         )
 
     return sorted(shaped, key=sort_key)
+
+
+# Hands-off downloads (gh#214): what counts as "a reasonable high-quality
+# mp3", and how many distinct peers a download will try before failing.
+MIN_AUTO_BITRATE_KBPS = 192
+MAX_AUTO_SOURCES = 5
+
+
+def auto_candidates(
+    shaped: list[ShapedResult], limit: int = MAX_AUTO_SOURCES
+) -> list[ShapedResult]:
+    """The hands-off pick list: best-first mp3s worth downloading unseen.
+
+    Eligible: exact duration (the wrong-recording guard is non-negotiable
+    without an operator looking), mp3, and a reported bitrate of at least
+    MIN_AUTO_BITRATE_KBPS (an unreported bitrate is not worth a blind pick).
+    One candidate per peer, so retries actually try *different* sources;
+    `shaped` is already best-first, so the list inherits its order.
+    """
+    seen_peers: set[str] = set()
+    out: list[ShapedResult] = []
+    for s in shaped:
+        r = s.result
+        if r.format != "mp3" or not s.exact_duration:
+            continue
+        if (r.bitrate_kbps or 0) < MIN_AUTO_BITRATE_KBPS:
+            continue
+        if r.username is not None:
+            if r.username in seen_peers:
+                continue
+            seen_peers.add(r.username)
+        out.append(s)
+        if len(out) >= limit:
+            break
+    return out
+
+
+_RESULT_FIELDS = frozenset(f.name for f in fields(SupplierSearchResult))
+
+
+def result_from_dict(d: dict[str, Any]) -> SupplierSearchResult:
+    """A SupplierSearchResult from a stored/wire candidate dict, ignoring
+    picker-facing extras (duration_delta_ms) and tolerating missing fields."""
+    return SupplierSearchResult(**{k: v for k, v in d.items() if k in _RESULT_FIELDS})
+
+
+def dicts_to_shaped(dicts: list[dict[str, Any]]) -> list[ShapedResult]:
+    """Rehydrate a remembered search's candidate dicts (gh#216) — the stored
+    list is already shaped, so deltas are read back, not recomputed."""
+    return [
+        ShapedResult(result=result_from_dict(d), duration_delta_ms=d.get("duration_delta_ms"))
+        for d in dicts
+    ]

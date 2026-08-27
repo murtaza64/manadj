@@ -503,6 +503,9 @@ export interface DownloadStatus {
   cooling_down_until?: string | null;
   // which Supplier is delivering the audio
   via: 'soundcloud' | 'soulseek';
+  // hands-off soulseek downloads (gh#214): candidate being tried (1-based) / total
+  attempt?: number | null;
+  attempts_total?: number | null;
 }
 
 // Suppliers (see CONTEXT.md: Supplier / Direct Supplier / Search Supplier)
@@ -520,6 +523,8 @@ export interface SoulseekResult {
   duration_ms: number | null;
   queue_length: number | null;
   has_free_slot: boolean | null;
+  // the peer offering the file
+  username?: string | null;
   // derived server-side vs the item's duration; results arrive sorted
   // exact-duration-lossless first (issue 04)
   duration_delta_ms: number | null;
