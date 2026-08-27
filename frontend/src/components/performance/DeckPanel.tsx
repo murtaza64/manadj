@@ -38,6 +38,7 @@ import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { DECK_COLORS, hexToRgbTriplet } from '../../theme/deckColors';
+import { AUDIBILITY_FILL_ALPHA } from '../../theme/markers';
 import { PLAY_MARKER_FRACTION, trackWindowSeconds } from '../../utils/waveformZoom';
 import { channelFaderToGain, trimToGain } from '../../playback/mixerMath';
 import { createStripHistory } from '../../performance/stripHistory';
@@ -218,7 +219,9 @@ export function DeckWaveform({
     let raf = 0;
     let idleTimer = 0;
     let lastDrawKey = '';
-    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, 0.12)`;
+    // The shared audibility-fill wash (theme/markers, gh#201): one alpha
+    // across every "how loud is this deck here" surface.
+    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, ${AUDIBILITY_FILL_ALPHA})`;
     const schedule = (active: boolean) => {
       if (active) raf = requestAnimationFrame(loop);
       else idleTimer = window.setTimeout(loop, 250);

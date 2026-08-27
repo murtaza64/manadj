@@ -709,24 +709,24 @@
      1.5 CSS px at DPR 2) — a raw 3 CSS px read double-weight (issue 14).
      z-index above the lane canvases (1) and labels (2). */
   width: 1.5px;
-  background: var(--pink);
+  background: var(--playhead); /* Transport playhead (D6 registry) */
   pointer-events: none;
   z-index: 100;
   will-change: transform;
 }
 
 /* Live Conductor playhead (sets 38): the ongoing SET's position inside
-   the loaded transition's window. Saturated orange — distinct from the
-   pink mix playhead, cyan jumps, and green cue guides; below the mix
-   playhead (100), above jumps (60). */
+   the loaded transition's window. Machine orange (D6 registry) — distinct
+   from the pink Transport playhead, cyan jumps, and green cue guides;
+   below the mix playhead (100), above jumps (60). */
 .editor-conductor-playhead {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0; /* driven per frame via transform: translateX */
   width: 1.5px;
-  background: #ff9500;
-  box-shadow: 0 0 4px #ff950088;
+  background: var(--orange);
+  box-shadow: 0 0 4px rgba(var(--orange-rgb), 0.53);
   pointer-events: none;
   z-index: 90;
   will-change: transform;

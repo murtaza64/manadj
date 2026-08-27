@@ -647,7 +647,7 @@
   bottom: 0;
   left: 0;
   width: 1.5px;
-  background: var(--pink, #ff2d95);
+  background: var(--playhead); /* Transport playhead (D6 registry) */
   pointer-events: none;
   z-index: 1; /* under the slot panel's dim (gh#190 iteration) */
 }

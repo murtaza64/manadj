@@ -22,15 +22,16 @@ import { usePlayGuides } from './usePlayGuides';
 import { guideScreenFraction } from './playGuideModel';
 import { composeRate } from '../playback/tempo';
 import { trackWindowSeconds } from '../utils/waveformZoom';
+import { PLAY_MARKER_FRACTION } from '../theme/markers';
 import {
   waveformRowCenterPercent,
   waveformRowTopPercent,
 } from '../components/performance/waveformOrder';
 import './PlayGuideOverlay.css';
 
-/** Where the deck waveforms pin the playhead (DeckWaveform's renderer
- * config — playMarkerPosition). */
-export const PLAY_MARKER_FRACTION = 0.25;
+/* The playhead pin fraction comes from theme/markers.PLAY_MARKER_FRACTION
+ * (single source) — the guides project against the same fraction the deck
+ * waveforms render with. */
 
 /** Hide a guide once it leaves the canvas (small slack so the line exits
  * cleanly instead of popping at the edge). */

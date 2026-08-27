@@ -631,13 +631,14 @@
   font-size: 11px;
 }
 
-/* The moving replay playhead: green (active/record family), full height. */
+/* The moving replay playhead: Machine orange (D6 registry — machine
+   playback, same identity as the Conductor), full height. */
 .stl-replay-head line {
-  stroke: #00ff6a;
+  stroke: var(--orange);
   stroke-width: 2;
 }
 .stl-replay-head polygon {
-  fill: #00ff6a;
+  fill: var(--orange);
 }
 .stl-replay-head.paused line {
   stroke-dasharray: 4 3;

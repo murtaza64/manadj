@@ -78,39 +78,8 @@
   image-rendering: crisp-edges;
 }
 
-.waveform-playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 25%;  /* Fixed at 25% of viewport */
-  width: 3px;
-  background: var(--pink);
-  pointer-events: none;
-  z-index: 100;
-  opacity: 1;
-}
-
-.waveform-cue-point {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--peach);
-  pointer-events: none;
-  z-index: 9;
-}
-
-.waveform-cue-triangle {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 6px solid var(--peach);
-}
+/* Dead DOM playhead/cue-marker rules removed (gh#201): the GL renderer
+   draws these; main cue is --orange line + triangle (D11). */
 
 /* Minimap Styles */
 .minimap-container {
