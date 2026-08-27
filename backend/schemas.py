@@ -81,6 +81,8 @@ class Track(TrackBase):
     key_provenance: str | None = None
     # Worklist flag (ADR 0024): analysis bailed and no saved grid yet
     needs_attention: bool = False
+    # Current stems on disk (stems #118; stale = absent per #149)
+    has_stems: bool = False
     tags: list[Tag] = []
     provenance: TrackProvenance | None = None
     # One served BPM (ADR 0027): the grid-first projection

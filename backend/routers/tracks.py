@@ -194,6 +194,35 @@ def get_track_audio(track_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{track_id}/stems/{stem}")
+def get_track_stem(track_id: int, stem: str, db: Session = Depends(get_db)):
+    """Serve one stem (vocals/drums/bass/other) as AAC m4a, with Range support.
+
+    404 unless the track has *current* stems (stale = absent, #149): stale
+    stems are misaligned with the replaced source's beatgrid and must never
+    be served.
+    """
+    from backend.stems import STEM_NAMES, is_current, stems_dir
+
+    if stem not in STEM_NAMES:
+        raise HTTPException(status_code=404, detail="Unknown stem")
+    track = crud.get_track(db, track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+    if not is_current(track_id, Path(track.filename)):
+        raise HTTPException(status_code=404, detail="Stems not available")
+    stem_path = stems_dir(track_id) / f"{stem}.m4a"
+    if not stem_path.exists():
+        raise HTTPException(status_code=404, detail="Stems not available")
+
+    return FileResponse(
+        stem_path,
+        media_type="audio/mp4",
+        filename=f"{track_id}-{stem}.m4a",
+        content_disposition_type="inline",
+    )
+
+
 @router.get("/metadata/compare", response_model=MetadataComparisonResult)
 def compare_metadata(db: Session = Depends(get_db)):
     """Compare database metadata with file tags for all tracks."""

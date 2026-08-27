@@ -127,6 +127,19 @@ class Track(Base):
                 return dominant_bpm(tempo_changes, duration)
         return centibpm_to_bpm(self.bpm)
 
+    @property
+    def has_stems(self) -> bool:
+        """Whether *current* stems exist on disk for this Track (stems #118).
+
+        Filesystem is the source of truth (#149: no DB rows for stems);
+        this is a meta.json read + a source stat per call — cheap enough
+        for paginated listings. schemas.Track.has_stems reads this."""
+        # Lazy import: stems reads config; keep model import light.
+        from pathlib import Path as _Path
+
+        from .stems import is_current
+        return is_current(self.id, _Path(self.filename))
+
 
 class Waveform(Base):
     """Waveform data (ADR 0014): one style-agnostic analysis blob per Track."""

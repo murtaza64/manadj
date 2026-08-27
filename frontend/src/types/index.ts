@@ -40,6 +40,9 @@ export interface Track {
   key_provenance?: string | null;
   /** Worklist flag (ADR 0024): grid analysis bailed and no saved grid yet */
   needs_attention?: boolean;
+  /** Current stems on disk (stems #118; stale = absent). Gates the stem
+   * load path — no probing per stem. */
+  has_stems?: boolean;
   /** One served BPM (ADR 0027): the grid-first projection — the
    * Beatgrid's dominant tempo when a real grid exists, else the stored
    * value. Float BPM; there is no second field to prefer. */
