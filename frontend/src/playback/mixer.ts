@@ -1081,6 +1081,21 @@ export class Mixer {
     this.setStemEnabled(channel, stem, !this.channels[channel].stems[stem]);
   }
 
+  /** Solo a stem (shift-click / a future hardware chord): only it plays.
+   * Soloing the already-soloed stem un-solos (back to all-on). One state
+   * replacement + one notify, so capture logs the whole move atomically. */
+  soloStem(channel: ChannelId, stem: StemName): void {
+    const ch = this.channels[channel];
+    const soloed = STEM_NAMES.every((name) => ch.stems[name] === (name === stem));
+    const next = Object.fromEntries(
+      STEM_NAMES.map((name) => [name, soloed || name === stem])
+    ) as Record<StemName, boolean>;
+    this.channels[channel] = { ...ch, stems: next };
+    this.notify(channel);
+    if (this.automation?.[channel]?.stems !== undefined) return;
+    this.applyStems(channel);
+  }
+
   /** All stems back on — a new Load's kill state is clean (#210). */
   resetStems(channel: ChannelId): void {
     const ch = this.channels[channel];

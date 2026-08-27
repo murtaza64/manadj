@@ -365,3 +365,8 @@ a.provenance-chip:hover {
   font-weight: 700;
   line-height: 14px;
 }
+
+/* Stems presence (stems map #118): plain white check when current stems
+   exist on disk; empty cell otherwise. */
+.stems-cell { text-align: center; }
+.stems-check { color: var(--text); }

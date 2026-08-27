@@ -93,11 +93,17 @@ interface GainRamp {
 export class StemTrackSource implements TrackSource {
   readonly length: number;
   private readonly stems: Float32Array[][];
+  /** Settled per-stem gains: what gainAt returns wherever no ramp is in
+   * flight. Ramps are TRANSIENT declick devices, not the state itself —
+   * an unsettled ramp anchored at the kill position would resurrect the
+   * stem for reads before it (seek-back bug, stems #210 review). */
+  private readonly gains: number[];
   private readonly ramps: (GainRamp | null)[];
 
   constructor(stems: Float32Array[][]) {
     this.stems = stems;
     this.length = stems[0]?.[0]?.length ?? 0;
+    this.gains = stems.map(() => 1);
     this.ramps = stems.map(() => null);
   }
 
@@ -105,10 +111,10 @@ export class StemTrackSource implements TrackSource {
     return this.stems.length;
   }
 
-  /** The gain of stem `s` at a track frame (ramp-aware). */
+  /** The gain of stem `s` at a track frame (ramp-aware while in flight). */
   gainAt(s: number, frame: number): number {
     const ramp = this.ramps[s];
-    if (!ramp) return 1;
+    if (!ramp) return this.gains[s];
     if (frame <= ramp.startFrame) return ramp.g0;
     const t = Math.min(1, (frame - ramp.startFrame) / ramp.lengthFrames);
     return ramp.g0 + (ramp.g1 - ramp.g0) * t;
@@ -120,12 +126,28 @@ export class StemTrackSource implements TrackSource {
   setGain(s: number, target: number, atFrame: number, rampFrames: number): void {
     if (s < 0 || s >= this.stems.length) return;
     const g0 = this.gainAt(s, atFrame);
-    this.ramps[s] = {
-      g0,
-      g1: target,
-      startFrame: atFrame,
-      lengthFrames: Math.max(1, rampFrames),
-    };
+    this.gains[s] = target;
+    this.ramps[s] =
+      rampFrames > 0 && g0 !== target
+        ? { g0, g1: target, startFrame: atFrame, lengthFrames: Math.max(1, rampFrames) }
+        : null;
+  }
+
+  /** Collapse every in-flight ramp to its target — reads anywhere in the
+   * track then see the settled gain. Called on voice (re)starts: a seek is
+   * a declick splice already, so the new voice needs no gain ramp. */
+  settleGains(): void {
+    this.ramps.fill(null);
+  }
+
+  /** Null out ramps the live voice has fully played past (once per render
+   * block): after that, backwards reads (loop folds, stretch pre-reads)
+   * must see the settled gain, not the pre-kill one. */
+  settleCompletedRamps(positionFrames: number): void {
+    for (let s = 0; s < this.ramps.length; s++) {
+      const ramp = this.ramps[s];
+      if (ramp && positionFrames > ramp.startFrame + ramp.lengthFrames) this.ramps[s] = null;
+    }
   }
 
   sampleAt(channel: number, index: number): number {

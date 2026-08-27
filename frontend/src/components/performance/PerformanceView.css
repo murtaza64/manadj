@@ -1083,6 +1083,10 @@
   letter-spacing: 0.05em;
   border: 1px solid var(--surface0);
   color: var(--overlay0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 .perf-stemrow .player-button.perf-stem.on {
   border-color: var(--stem-color);

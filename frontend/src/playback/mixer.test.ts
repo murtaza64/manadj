@@ -551,3 +551,35 @@ describe('stem applier + automation stems (stems #212)', () => {
     expect(applied[applied.length - 1]).toEqual({ channel: 'C', stems: allOn });
   });
 });
+
+describe('stem solo (stems review feedback)', () => {
+  it('solo isolates a stem; soloing it again restores all-on', () => {
+    const mixer = new Mixer();
+    mixer.soloStem('A', 'vocals');
+    expect(mixer.getChannelState('A').stems).toEqual({
+      vocals: true,
+      drums: false,
+      bass: false,
+      other: false,
+    });
+    mixer.soloStem('A', 'vocals'); // un-solo
+    expect(mixer.getChannelState('A').stems).toEqual({
+      vocals: true,
+      drums: true,
+      bass: true,
+      other: true,
+    });
+  });
+
+  it('solo from a partially-killed state isolates the clicked stem', () => {
+    const mixer = new Mixer();
+    mixer.setStemEnabled('B', 'drums', false);
+    mixer.soloStem('B', 'bass');
+    expect(mixer.getChannelState('B').stems).toEqual({
+      vocals: false,
+      drums: false,
+      bass: true,
+      other: false,
+    });
+  });
+});

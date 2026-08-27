@@ -550,8 +550,12 @@ function PlayZone() {
                   className={`player-button perf-stem perf-stem-${stem}${
                     stems[stem] ? ' on' : ''
                   }`}
-                  onClick={() => mixer.setStemEnabled(deck, stem, !stems[stem])}
-                  title={`${stems[stem] ? 'Kill' : 'Restore'} ${stem}`}
+                  onClick={(e) =>
+                    e.shiftKey
+                      ? mixer.soloStem(deck, stem)
+                      : mixer.setStemEnabled(deck, stem, !stems[stem])
+                  }
+                  title={`${stems[stem] ? 'Kill' : 'Restore'} ${stem} — shift-click to solo`}
                 >
                   {STEM_LABELS[stem]}
                 </button>

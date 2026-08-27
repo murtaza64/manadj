@@ -184,6 +184,11 @@ export class DeckSourceKernel {
    * equal-gain summing. */
   start(positionFrames: number, startId: number): void {
     if (!this.track) return;
+    // Stem gain ramps are declick devices anchored at their change
+    // position — settle them on every (re)start so a seek before the kill
+    // point can't resurrect a killed stem (stems #210 review). The splice
+    // itself declicks the restart.
+    if (this.track.source instanceof StemTrackSource) this.track.source.settleGains();
     this.retireLive();
     const length = this.track.source.length;
     this.live = {
@@ -223,6 +228,11 @@ export class DeckSourceKernel {
     const frames = out[0]?.length ?? 0;
     for (const channel of out) channel.fill(0);
     if (!this.live && this.fading.length === 0) return null;
+    // Once per block: retire fully-played stem ramps, so backwards reads
+    // (loop folds, stretch pre-reads) see settled gains.
+    if (this.live && this.live.source instanceof StemTrackSource) {
+      this.live.source.settleCompletedRamps(this.live.position);
+    }
 
     // Stretch voices render block-wise through the engine (it takes one
     // rate per block — tempo moves at 128-frame granularity are inaudible);

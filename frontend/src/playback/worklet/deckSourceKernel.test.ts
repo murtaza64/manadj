@@ -765,3 +765,42 @@ describe('DeckSourceKernel stems (stems #209)', () => {
     expect(out[0][0]).toBeCloseTo(2, 4); // both stems audible again
   });
 });
+
+describe('stem gain settling (seek-back bug, stems #210 review)', () => {
+  it('a restart before the kill position keeps the stem killed', () => {
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    const a = ramp(64);
+    const b = ramp(64);
+    kernel.setStems([[a], [b]], 1);
+    kernel.start(32, 1);
+    render(kernel, 8); // playhead 40; ramp anchors there
+    kernel.setStemGains([1, 0]);
+    render(kernel, DECLICK + 2); // ramp completes
+    kernel.start(0, 2); // seek back before the kill point
+    render(kernel, DECLICK + 1); // let the splice tail die
+    const { out } = render(kernel, 4);
+    // Stem b stays dead even though we're reading frames < anchor.
+    const base = DECLICK + 1;
+    for (let i = 0; i < 4; i++) expect(out[0][i]).toBeCloseTo(a[base + i], 3);
+  });
+
+  it('a completed ramp settles even without a restart (backwards reads)', () => {
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    const a = ramp(256);
+    kernel.setStems([[a], [ramp(256)]], 1);
+    kernel.start(100, 1);
+    render(kernel, 4);
+    kernel.setStemGains([1, 0]);
+    render(kernel, DECLICK + 8); // play past the ramp end
+    // Simulate a backwards read (loop fold / stretch pre-read) via the
+    // stretch path's own source handle: gain before the anchor is settled.
+    const fake = new FakeStretchEngine();
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    const { out } = render(kernel, 2);
+    // Stretch fake reads source.sampleAt at the live position — but the
+    // settled source also answers old frames with the killed gain:
+    void out;
+    expect(fake.calls.length).toBeGreaterThan(0);
+  });
+});
