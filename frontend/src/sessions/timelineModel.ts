@@ -847,27 +847,102 @@ interface TakeWindow {
 
 /** The track spans a Take's outgoing (a) and incoming (b) Tracks occupied
  * during its window — chip coloring + hover spotlight (sessions 22). A
- * Track is matched by its tenure overlapping the window; null when the
- * log doesn't show it (e.g. a manual Take against a truncated log). */
+ * Track is matched by its tenure overlapping the window; when the same
+ * Track sits loaded on multiple decks (one copy silent), the AUDIBLE
+ * copy wins — the deck the Take's events actually rode, not whichever
+ * deck happens first in A–D order (gh#184). Null when the log doesn't
+ * show it (e.g. a manual Take against a truncated log). */
 export function takeSpanPair(
   model: TimelineModel,
   take: TakeWindow
 ): { from: TakeSpanRef | null; to: TakeSpanRef | null } {
-  const find = (trackId: number): TakeSpanRef | null => {
-    for (const ch of ALL_DECKS) {
-      for (const span of model.decks[ch].trackSpans) {
-        if (
-          span.trackId === trackId &&
-          span.start < take.window_end_s &&
-          span.end > take.window_start_s
-        ) {
-          return { deck: ch, start: span.start, end: span.end };
+  return {
+    from: trackSpanRef(model, take.a_track_id, take.window_start_s, take.window_end_s),
+    to: trackSpanRef(model, take.b_track_id, take.window_start_s, take.window_end_s),
+  };
+}
+
+/** The track span (deck tenure) that carried `trackId` during a window —
+ * the audible-copy-wins rule shared by Take chips and Routine casts
+ * (gh#184). Null when the log doesn't show the track in the window. */
+function trackSpanRef(
+  model: TimelineModel,
+  trackId: number,
+  windowStartS: number,
+  windowEndS: number
+): TakeSpanRef | null {
+  let best: TakeSpanRef | null = null;
+  let bestAudible = -1;
+  for (const ch of ALL_DECKS) {
+    for (const span of model.decks[ch].trackSpans) {
+      if (span.trackId === trackId && span.start < windowEndS && span.end > windowStartS) {
+        // Audible seconds this copy contributed inside the window ∩ span:
+        // the copy that actually sounded through the transition wins.
+        const w0 = Math.max(span.start, windowStartS);
+        const w1 = Math.min(span.end, windowEndS);
+        let audible = 0;
+        for (const a of model.decks[ch].audibleSpans) {
+          audible += Math.max(0, Math.min(a.end, w1) - Math.max(a.start, w0));
+        }
+        if (audible > bestAudible) {
+          bestAudible = audible;
+          best = { deck: ch, start: span.start, end: span.end };
         }
       }
     }
-    return null;
-  };
-  return { from: find(take.a_track_id), to: find(take.b_track_id) };
+  }
+  return best;
+}
+
+/** The track spans a Routine cast occupied during its window — one ref
+ * per resolvable cast track (gh#187: the routine-band hover spotlight,
+ * parity with `takeSpanPair`). Unresolvable tracks are skipped. */
+export function castSpanRefs(
+  model: TimelineModel,
+  cast: readonly number[],
+  windowStartS: number,
+  windowEndS: number
+): TakeSpanRef[] {
+  const out: TakeSpanRef[] = [];
+  for (const trackId of cast) {
+    const ref = trackSpanRef(model, trackId, windowStartS, windowEndS);
+    if (ref) out.push(ref);
+  }
+  return out;
+}
+
+// ── Candidate ↔ Routine Take dedupe (gh#187) ─────────────────────────────
+
+interface RoutineWindow {
+  window_start_s: number;
+  window_end_s: number;
+  cast: readonly number[];
+}
+
+/** Does a mined candidate duplicate a confirmed Routine Take's span?
+ *
+ * Re-mining replaces a Session's candidate rows wholesale with FRESH
+ * uuids, so a confirmed take's `origin_candidate_uuid` dangles and the
+ * uuid-based "already confirmed" filter misses the re-mined twin — it
+ * stacked as a dashed ⧉ band under the confirmed ◆ (gh#187). Identity is
+ * therefore span-shaped: heavy time overlap (≥50% of the shorter window
+ * — confirms trim inside the miner window, and re-mines shift bounds)
+ * plus ≥2 shared cast tracks (adjacent DISTINCT candidates share at most
+ * the one handover track, so they survive). */
+export function candidateDupesTake(candidate: RoutineWindow, take: RoutineWindow): boolean {
+  const overlap =
+    Math.min(candidate.window_end_s, take.window_end_s) -
+    Math.max(candidate.window_start_s, take.window_start_s);
+  if (overlap <= 0) return false;
+  const shorter = Math.min(
+    candidate.window_end_s - candidate.window_start_s,
+    take.window_end_s - take.window_start_s
+  );
+  if (overlap < 0.5 * shorter) return false;
+  const takeCast = new Set(take.cast);
+  let shared = 0;
+  for (const id of candidate.cast) if (takeCast.has(id)) shared++;
+  return shared >= 2;
 }
 
 /** Deck-only view of `takeSpanPair` (the chip gradient's endpoints). */

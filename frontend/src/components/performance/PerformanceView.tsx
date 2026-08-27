@@ -37,6 +37,7 @@ import { CONTROL_FOCUS_KEYS, browseLoadTarget, isGuardedKeyEvent } from './perfo
 import { DEFAULT_VISIBLE_SECONDS } from '../../utils/waveformZoom';
 import { PERFORMANCE_WAVEFORM_ORDER } from './waveformOrder';
 import { useMidiCursorSuppression } from '../../performance/useMidiCursorSuppression';
+import { writeSetting } from '../../settings/persistedSettings';
 import { toggleControlFocus, useControlFocus } from '../../performance/controlFocus';
 import { isPerfSectionShown, subscribePerfSections } from '../../performance/perfSectionsStore';
 import './PerformanceView.css';
@@ -169,7 +170,7 @@ export function PerformanceView() {
   const [hintsOn, setHintsOn] = useState(initialHintsOn);
   const toggleHints = () => {
     const next = !hintsOn;
-    localStorage.setItem(HINTS_STORAGE_KEY, next ? 'on' : 'off');
+    writeSetting(HINTS_STORAGE_KEY, next ? 'on' : 'off');
     setHintsOn(next);
   };
 

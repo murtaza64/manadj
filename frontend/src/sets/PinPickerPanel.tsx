@@ -15,6 +15,8 @@
  * the miner's boundaries into a Routine Take, promotes, and pins — the
  * sequence match evidences intent (ADR 0035 exception).
  */
+import { ROUTINE_ACCENT } from '../theme/routineColor';
+import { openRoutineSource, routineSourceFromTakes, type RoutineSource } from '../routines/provenance';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -31,11 +33,29 @@ import {
   type TakeEvidence,
   type TransitionEvidence,
 } from './adjacency';
+import type { CameoPin } from './cameoPins';
 import './PinPickerPanel.css';
+
+/** The Cameo/ornament family's color (#140 — matches the history's
+ * guest badge; bright orange, deliberately off the Deck cyan/magenta). */
+export const CAMEO_COLOR = '#ff7a00';
+
+/** One Cameo option for the head entry (#140): a saved Cameo hosted by
+ * it, or a Cameo Take (guest-kind Take) whose host it is. */
+export interface CameoEvidence {
+  kind: 'cameo' | 'cameo-take';
+  uuid: string;
+  /** Saved Cameo: its name. Cameo Take: the detection timestamp. */
+  label: string;
+  guestTrackId: number;
+  favorite?: boolean;
+  /** Cameo Take window length (capture clock, seconds). */
+  windowS?: number;
+}
 
 /** The routine family's color (matches the Session timeline's candidate
  * chips — bright, fully saturated magenta; sessionTimeline.css). */
-export const ROUTINE_COLOR = '#ff00c8';
+export const ROUTINE_COLOR = ROUTINE_ACCENT;
 
 interface PinPickerPanelProps {
   x: number;
@@ -53,6 +73,12 @@ interface PinPickerPanelProps {
   onPin: (pin: AdjacencyPin | null) => void;
   /** Pin a Routine (the cast rides along to prime dormancy's lookup). */
   onPinRoutine: (uuid: string, cast: readonly number[]) => void;
+  /** Cameo section (#140): guest ornaments hosted by the HEAD entry —
+   * saved Cameos and Cameo Takes with this host. Always manual: each
+   * option toggles its pin (multiple pins per entry are the point). */
+  cameoEvidence: readonly CameoEvidence[];
+  cameoPins: readonly CameoPin[];
+  onToggleCameoPin: (pin: CameoPin) => void;
   onClose: () => void;
 }
 
@@ -100,6 +126,9 @@ export default function PinPickerPanel({
   trackLabel,
   onPin,
   onPinRoutine,
+  cameoEvidence,
+  cameoPins,
+  onToggleCameoPin,
   onClose,
 }: PinPickerPanelProps) {
   const showToast = useToast();
@@ -225,6 +254,23 @@ export default function PinPickerPanel({
     fn();
   };
 
+  /** Provenance deep-link (gh#170): ▦ opens the source Session timeline
+   * centered on the span with its region guide flashed. */
+  const sourceBtn = (src: RoutineSource | null) =>
+    src && (
+      <button
+        className="ppp-source"
+        title="Open in Session timeline (the routine's source span)"
+        onClick={(e) => {
+          e.stopPropagation();
+          openRoutineSource(src);
+          onClose();
+        }}
+      >
+        ▦
+      </button>
+    );
+
   return (
     <div
       ref={panelRef}
@@ -254,6 +300,7 @@ export default function PinPickerPanel({
                 title={`Saved Routine — pin it here: covers the next ${r.cast.length - 1} adjacencies; exits with ${trackLabel(r.cast[r.cast.length - 1])} playing`}
               >
                 <b>◆ ROUTINE {routineLabel(r)}</b>
+                {sourceBtn(routineSourceFromTakes(r.uuid, routineTakes))}
                 <small>
                   {r.cast.length} slots · ~{Math.round(r.duration_beats)} beats · covers{' '}
                   {r.cast.length - 1} adjacencies
@@ -278,6 +325,7 @@ export default function PinPickerPanel({
                   {busyUuid === rt.uuid ? '… ' : ''}◆ Routine Take ·{' '}
                   {new Date(rt.confirmed_at).toLocaleDateString()}
                 </b>
+                {sourceBtn({ sessionUuid: rt.session_uuid, startS: rt.window_start_s, endS: rt.window_end_s })}
                 <small>
                   {rt.cast.length} tracks · {Math.round(rt.window_end_s - rt.window_start_s)}s ·
                   promote → pin
@@ -300,6 +348,7 @@ export default function PinPickerPanel({
                 <b>
                   {busyUuid === c.uuid ? '… ' : ''}⧉ candidate (unconfirmed)
                 </b>
+                {sourceBtn({ sessionUuid: c.session_uuid, startS: c.window_start_s, endS: c.window_end_s })}
                 <small>
                   {c.cast.length} tracks · {Math.round(c.window_end_s - c.window_start_s)}s ·
                   confirm → promote → pin
@@ -355,6 +404,36 @@ export default function PinPickerPanel({
         ))
       ) : (
         <div className="ppp-none">none</div>
+      )}
+
+      {cameoEvidence.length > 0 && (
+        <>
+          <div className="ppp-section ppp-cameos">
+            Cameos over {trackLabel(aTrackId)}{' '}
+            <small>(entry ornaments — the Set order never advances)</small>
+          </div>
+          {cameoEvidence.map((c) => {
+            const pinned = cameoPins.some((p) => p.kind === c.kind && p.uuid === c.uuid);
+            return (
+              <div
+                key={`${c.kind}:${c.uuid}`}
+                className={`ppp-opt ppp-cameo-opt${pinned ? ' current' : ''}`}
+                onClick={pick(() => onToggleCameoPin({ kind: c.kind, uuid: c.uuid }))}
+                title={
+                  c.kind === 'cameo'
+                    ? 'Saved Cameo hosted by this entry — toggle its pin (plays the guest on a free deck inside the host)'
+                    : 'Cameo Take (unreviewed capture) — pinning it is a deliberate act naming that evidence (#140; never auto-filled)'
+                }
+              >
+                ◐ {c.kind === 'cameo' ? (c.favorite ? '★ ' : '') : '▸ '}
+                {trackLabel(c.guestTrackId)} over {trackLabel(aTrackId)}
+                {c.kind === 'cameo-take' ? ` · ${c.label}` : c.label ? ` · ${c.label}` : ''}
+                {c.windowS !== undefined ? ` · ${c.windowS.toFixed(1)}s` : ''}
+                {pinned ? ' ✓' : ''}
+              </div>
+            );
+          })}
+        </>
       )}
 
       <div

@@ -5,7 +5,7 @@
  * (issue 04), Take count, and a manual delete. Rows open the timeline;
  * deleting a Session never touches a Take.
  */
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { CaptureEvent } from '../capture/events';
@@ -56,8 +56,18 @@ function SessionTracksCell({ uuid, ended }: { uuid: string; ended: boolean }) {
   return <>{count}</>;
 }
 
+/** Scroll retention across timeline round-trips (gh#170 follow-up): the
+ * list unmounts when a Session opens; back must land where you left.
+ * Module-level (the LAST_PAIR_KEY posture) — survives the unmount, not a
+ * reload. */
+let lastListScrollTop = 0;
+
 export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }) {
   const queryClient = useQueryClient();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Restore BEFORE paint (rows may still be loading — re-apply when they
+  // land); save continuously (unmount-only saves miss keep-alive hides).
+  const rowsReady = useRef(false);
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
   const { data: rows, error } = useQuery({ queryKey: ['sessions'], queryFn: api.sessions.list });
@@ -67,8 +77,21 @@ export function SessionsListView({ onOpen }: { onOpen?: (uuid: string) => void }
     invalidate();
   };
 
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || rows === undefined || rowsReady.current) return;
+    rowsReady.current = true;
+    el.scrollTop = lastListScrollTop;
+  }, [rows]);
+
   return (
-    <div className="sessions-list">
+    <div
+      className="sessions-list"
+      ref={scrollRef}
+      onScroll={(e) => {
+        lastListScrollTop = (e.target as HTMLElement).scrollTop;
+      }}
+    >
       {error ? <div className="sessions-list-error">{String(error)}</div> : null}
       {rows === undefined ? (
         <div className="sessions-list-empty">Loading…</div>

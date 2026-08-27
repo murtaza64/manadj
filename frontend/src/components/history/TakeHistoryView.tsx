@@ -1,18 +1,22 @@
 /**
- * Transition history (transition-takes 02; routines 158): the
- * chronological log of Takes AND Routine Takes — "what did I actually
- * mix, when" (glossary) — grouped with kin: rows sharing an engagement
- * identity (the ordered pair for Takes, the ordered cast for Routine
- * Takes) sit together, groups ordered by their newest member. False
- * positives are kept deliberately (delete is manual — ADR 0020).
- * A Routine Take row can promote (mechanical deck→slot + beat rebase,
- * ADR 0035) right here.
+ * Transition history (transition-takes 02; routines 158; cameos #140):
+ * the chronological log of Takes, CAMEO TAKES, and Routine Takes — "what
+ * did I actually mix, when" (glossary) — grouped with kin: rows sharing
+ * an engagement identity sit together. Since #140 that identity is the
+ * detector's engagement uuid when stamped (a double/triple's pairwise
+ * Takes and Cameo Takes group as one move); rows without one (pre-#140,
+ * hand cuts) fall back to the ordered pair, Routine Takes to the ordered
+ * cast. Groups order by their newest member. False positives are kept
+ * deliberately (delete is manual — ADR 0020). A Routine Take row can
+ * promote (mechanical deck→slot + beat rebase, ADR 0035) right here;
+ * Cameo Take promotion (→ a Cameo) waits for the kind-aware editor.
  */
 import { useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { RoutineTakeRowWire, TakeRowWire } from '../../api/client';
 import { requestTakeReview } from '../../capture/takeReview';
+import { requestRoutineEdit } from '../../routines/openRoutine';
 import { requestSessionMoment } from '../../sessions/openSession';
 import { degradeDeletedPinsLocal } from '../../sets/setStore';
 import { useToast } from '../Toast';
@@ -57,14 +61,17 @@ export function TakeHistoryView() {
   // `['takes']` itself on persist (sets 13).
 
   // Kin groups (glossary "grouped with kin"): key = the engagement
-  // identity — ordered pair for Takes, ordered cast for Routine Takes.
+  // identity — the detector's engagement uuid when stamped (#140), else
+  // the ordered pair for Takes, the ordered cast for Routine Takes.
   // Groups sort by their newest member; rows within a group newest first.
   const groups = useMemo(() => {
     const entries: HistoryEntry[] = [
       ...(rows ?? []).map((t) => ({
         kind: 'take' as const,
         when: t.detected_at,
-        kin: `pair:${t.a_track_id}->${t.b_track_id}`,
+        kin: t.engagement_uuid
+          ? `engagement:${t.engagement_uuid}`
+          : `pair:${t.a_track_id}->${t.b_track_id}`,
         take: t,
       })),
       ...(routineRows ?? []).map((t) => ({
@@ -172,12 +179,14 @@ export function TakeHistoryView() {
               const head = group[0];
               const kinLabel =
                 head.kind === 'take'
-                  ? `${label(head.take.a_track_id)} → ${label(head.take.b_track_id)}`
+                  ? head.take.kind === 'guest'
+                    ? `${label(head.take.b_track_id)} over ${label(head.take.a_track_id)}`
+                    : `${label(head.take.a_track_id)} → ${label(head.take.b_track_id)}`
                   : head.take.cast.map(label).join(' → ');
               return [
                 <tr key={`kin-${head.kin}`} className="take-kin-header">
                   <td colSpan={7}>
-                    {head.kind === 'routine' ? '◆ ' : ''}
+                    {head.kind === 'routine' ? '◆ ' : head.take.kind === 'guest' ? '◐ ' : ''}
                     {kinLabel}
                     <span className="take-kin-count">
                       {group.length > 1 ? ` · ${group.length} takes` : ''}
@@ -188,23 +197,61 @@ export function TakeHistoryView() {
                   e.kind === 'take' ? (
                     <tr
                       key={e.take.uuid}
-                      className="take-row"
+                      className={e.take.kind === 'guest' ? 'take-row guest' : 'take-row'}
                       title={
-                        e.take.promoted_transition_uuid
-                          ? 'Open its promoted Transition in the editor'
-                          : 'Review this Take in the Transition editor'
+                        e.take.kind === 'guest'
+                          ? e.take.session_uuid
+                            ? 'A Cameo Take (#140) — view this tease on its Session timeline (Cameo review/promotion arrives with the kind-aware editor)'
+                            : 'A Cameo Take (#140) — review/promotion arrives with the kind-aware editor'
+                          : e.take.promoted_transition_uuid
+                            ? 'Open its promoted Transition in the editor'
+                            : 'Review this Take in the Transition editor'
                       }
-                      onClick={() => requestTakeReview(e.take.uuid)}
+                      onClick={() => {
+                        // Vectorization's Cameo mode is deferred with the
+                        // editor (#140 tracer): a guest Take deep-links to
+                        // its Session moment instead of a Transition draft.
+                        if (e.take.kind === 'guest') {
+                          if (e.take.session_uuid) {
+                            requestSessionMoment({
+                              sessionUuid: e.take.session_uuid,
+                              atS: e.take.window_start_s,
+                            });
+                          }
+                          return;
+                        }
+                        requestTakeReview(e.take.uuid);
+                      }}
                     >
                       <td className="take-when">{fmtWhen(e.take.detected_at)}</td>
                       <td className="take-pair">
-                        <span title={`outgoing: ${label(e.take.a_track_id)}`}>
-                          {label(e.take.a_track_id)}
-                        </span>
-                        <span className="take-arrow"> → </span>
-                        <span title={`incoming: ${label(e.take.b_track_id)}`}>
-                          {label(e.take.b_track_id)}
-                        </span>
+                        {e.take.kind === 'guest' ? (
+                          <>
+                            <span
+                              className="take-guest-badge"
+                              title="Cameo Take: the host survived — the guest rode over it (#140)"
+                            >
+                              ◐
+                            </span>{' '}
+                            <span title={`guest: ${label(e.take.b_track_id)}`}>
+                              {label(e.take.b_track_id)}
+                            </span>
+                            <span className="take-arrow"> over </span>
+                            <span title={`host: ${label(e.take.a_track_id)}`}>
+                              {label(e.take.a_track_id)}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span title={`outgoing: ${label(e.take.a_track_id)}`}>
+                              {label(e.take.a_track_id)}
+                            </span>
+                            <span className="take-arrow"> → </span>
+                            <span title={`incoming: ${label(e.take.b_track_id)}`}>
+                              {label(e.take.b_track_id)}
+                            </span>
+                          </>
+                        )}
                       </td>
                       <td>{fmtLen(e.take.window_end_s - e.take.window_start_s)}</td>
                       <td>
@@ -279,7 +326,16 @@ export function TakeHistoryView() {
                       </td>
                       <td className="take-promoted">
                         {e.take.promoted_routine_uuid ? (
-                          <span title="Promoted to a saved Routine">★</span>
+                          <button
+                            className="take-open-routine"
+                            title="Promoted — open the Routine in the Routine editor (gh#170)"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              requestRoutineEdit({ routineUuid: e.take.promoted_routine_uuid! });
+                            }}
+                          >
+                            ★
+                          </button>
                         ) : (
                           <button
                             className="take-promote"

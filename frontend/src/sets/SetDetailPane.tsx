@@ -59,6 +59,8 @@ import {
   type PairStore,
 } from '../editor/pairStore';
 import { requestPairEdit } from '../editor/openPair';
+import { requestRoutineEdit } from '../routines/openRoutine';
+import { openRoutineSource, routineSourceFromTakes } from '../routines/provenance';
 import {
   clearFreshTake,
   freshTakeChip,
@@ -134,8 +136,7 @@ import {
   ROW_GAP,
   ROW_PAD_X,
   TRIM_COL_W,
-  trimOffsetDb,
-  trimOffsetFromDb,
+  trimDragValue,
   type BpmDeltaRef,
 } from './rowColumns';
 import {
@@ -160,6 +161,7 @@ import {
   setAdjacencyPins,
   setEntryTrim,
   setSetScroll,
+  toggleCameoPin,
   unpinRoutine,
   setSetSelection,
   useSetDormantPins,
@@ -242,6 +244,11 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   const takesRef = useRef(takes);
   takesRef.current = takes;
 
+  // ── Cameos (#140) ────────────────────────────────────────────────────
+  // Saved Cameos feed the picker's ornament section (hosted by the head
+  // entry); Cameo Takes are the guest-kind rows of the takes query above.
+  const { data: cameoRows = [] } = useQuery({ queryKey: ['cameos'], queryFn: api.cameos.list });
+
   // ── Routines (sets 160, ADR 0035) ────────────────────────────────────
   // Saved Routines + Routine Takes: coverage (cast bracket, shadowing),
   // the per-adjacency "routine available" hint, and the picker's top two
@@ -258,6 +265,15 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
   useEffect(() => {
     primeRoutineCasts(routineRows);
   }, [routineRows]);
+  // Provenance deep-link (gh#170): a routine pin's source Session is one
+  // click away — resolved through the origin Routine Take. Ref-read so
+  // the ~87 memoized rows keep an identity-stable callback.
+  const routineTakeRowsRef2 = useRef(routineTakeRows);
+  routineTakeRowsRef2.current = routineTakeRows;
+  const openRoutinePinSource = useCallback((routineUuid: string) => {
+    const src = routineSourceFromTakes(routineUuid, routineTakeRowsRef2.current);
+    if (src) openRoutineSource(src);
+  }, []);
   const castOf = useCallback(
     (uuid: string) => routineRows.find((r) => r.uuid === uuid)?.cast ?? getRoutineCast(uuid),
     [routineRows]
@@ -282,11 +298,12 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
         bTrackId
       );
       const view = adjacencyView(pin, transitions, pairTakes);
-      // Routine pins have no editor click-through yet (replay/review is
-      // sets #159; the future Routine editor generalizes the kind-aware
-      // Transition editor). Takes ride requestPairEdit's takeUuid — the
-      // unified evidence switcher (mix-editor #167).
-      if (view.status === 'routine') return;
+      if (view.status === 'routine') {
+        // A routine pin opens the Routine editor (gh#170) — the covered
+        // span is one artifact, not a pair; the pin's uuid IS the Routine.
+        if (pin?.kind === 'routine') requestRoutineEdit({ routineUuid: pin.uuid });
+        return;
+      }
       requestPairEdit({
         aTrackId,
         bTrackId,
@@ -1407,7 +1424,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   mark
                     ? {
                         borderLeft: `3px solid ${ROUTINE_COLOR}`,
-                        background: 'rgba(255, 0, 200, 0.07)',
+                        background: 'rgba(var(--routine-accent-rgb), 0.07)',
                       }
                     : undefined
                 }
@@ -1435,6 +1452,37 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                   onTrimChange={handleTrimChange}
                   onContextMenu={track ? handleRowContextMenu : undefined}
                 />
+                {/* Cameo pins (#140): the entry's guest ornaments — a
+                    subordinate line under the host row (never a stair
+                    step; the spine stays adjacency-shaped). Click opens
+                    the picker on the adjacency this entry heads. */}
+                {entry.cameoPins && entry.cameoPins.length > 0 && (
+                  <div
+                    className="set-cameo-pin-row"
+                    title="Cameo pins on this entry — guests play on a free deck inside the host's span; the Set order never advances. Click to edit."
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openPicker(i, e.clientX, e.clientY);
+                    }}
+                  >
+                    {entry.cameoPins.map((p) => {
+                      const guestId =
+                        p.kind === 'cameo'
+                          ? cameoRows.find((c) => c.uuid === p.uuid)?.guest_track_id
+                          : takes.find((t) => t.uuid === p.uuid)?.b_track_id;
+                      const guest =
+                        guestId !== undefined
+                          ? trackMap?.get(guestId)?.title || `Track ${guestId}`
+                          : '(deleted)';
+                      return (
+                        <span key={`${p.kind}:${p.uuid}`} className="set-cameo-pin-chip">
+                          ◐ {guest}
+                          {p.kind === 'cameo-take' ? ' ▸' : ''}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
                 {next &&
                   (cov && cov.headIndex !== i ? null : cov ? ( // covered interior: collapsed
                     <RoutinePinRow
@@ -1442,7 +1490,9 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                       label={routineRowLabel(cov, routineRows, (id) =>
                         trackMap?.get(id)?.title || `Track ${id}`
                       )}
+                      routineUuid={cov.uuid}
                       coversCount={cov.cast.length - 1}
+                      onOpenSource={openRoutinePinSource}
                       exitLabel={
                         trackMap?.get(cov.cast[cov.cast.length - 1])?.title ||
                         `Track ${cov.cast[cov.cast.length - 1]}`
@@ -1582,6 +1632,32 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
                 }
               }}
               onPinRoutine={(uuid, cast) => pinRoutine(setId, head.trackId, uuid, cast)}
+              cameoEvidence={[
+                ...cameoRows
+                  .filter((c) => c.host_track_id === head.trackId)
+                  .map((c) => ({
+                    kind: 'cameo' as const,
+                    uuid: c.uuid,
+                    label: c.name,
+                    guestTrackId: c.guest_track_id,
+                    favorite: c.favorite,
+                  })),
+                ...takes
+                  .filter((t) => t.kind === 'guest' && t.a_track_id === head.trackId)
+                  .map((t) => ({
+                    kind: 'cameo-take' as const,
+                    uuid: t.uuid,
+                    label: new Date(
+                      t.detected_at.endsWith('Z') || t.detected_at.includes('+')
+                        ? t.detected_at
+                        : `${t.detected_at}Z`
+                    ).toLocaleString(),
+                    guestTrackId: t.b_track_id,
+                    windowS: t.window_end_s - t.window_start_s,
+                  })),
+              ]}
+              cameoPins={head.cameoPins ?? []}
+              onToggleCameoPin={(pin) => toggleCameoPin(setId, head.trackId, pin)}
               onClose={() => setPicker(null)}
             />
           );
@@ -1723,6 +1799,10 @@ const WARNING_LABELS: Record<PlanWarning['kind'], string> = {
   'routine-window-collision': 'routine window collides',
   'routine-deck-overflow': 'routine out of decks',
   'routine-global-controls-dropped': 'routine crossfader dropped',
+  'cameo-invalid': 'cameo pin skipped',
+  'cameo-window-collision': 'cameo before host settles',
+  'cameo-grace-fade': 'cameo fades early',
+  'cameo-deck-overflow': 'cameo out of decks',
 };
 
 /** Memoized (issue 42): ~87 of these sit in a big set, and a selection
@@ -2072,10 +2152,6 @@ const AdjacencyRow = memo(function AdjacencyRow({
   );
 });
 
-/** Trim drag sensitivity (sets #164): dB per pixel of vertical travel —
- * the knob's ±12 dB spans ~160px. */
-const TRIM_DRAG_DB_PER_PX = 0.15;
-
 /**
  * Compact per-entry trim control (sets #164): the entry's trim offset in
  * dB, editable in place. Drag ↕ streams local updates (one wholesale PUT
@@ -2083,6 +2159,11 @@ const TRIM_DRAG_DB_PER_PX = 0.15;
  * neutral. The value is an OFFSET from neutral — track Autogain composes
  * with it when it lands (ADR 0034) — applied by the Conductor for the
  * entry's deck tenure; a live trim-knob move still takes over.
+ *
+ * Drag feel (sets #183): the value derives from the TOTAL delta since
+ * pointer-down (trimDragValue — deterministic, quantized to 0.1 dB,
+ * 20 px/dB), and the origin rebases when the 3px click dead-zone breaks
+ * so the first tick never jumps.
  */
 const TrimCell = memo(function TrimCell({
   trackId,
@@ -2097,7 +2178,7 @@ const TrimCell = memo(function TrimCell({
   const neutral = trim === 0;
   const valueAt = (clientY: number): number => {
     const d = drag.current!;
-    return trimOffsetFromDb(trimOffsetDb(d.startTrim) + (d.startY - clientY) * TRIM_DRAG_DB_PER_PX);
+    return trimDragValue(d.startTrim, d.startY - clientY);
   };
   return (
     <span
@@ -2156,6 +2237,9 @@ const TrimCell = memo(function TrimCell({
           const d = drag.current;
           if (!d || e.pointerId !== d.pointerId) return;
           if (!d.moved && Math.abs(e.clientY - d.startY) < 3) return; // a click never nudges
+          // Rebase the origin at dead-zone exit (sets #183): the drag
+          // starts from zero delta instead of jumping 3px worth of dB.
+          if (!d.moved) d.startY = e.clientY;
           d.moved = true;
           onTrimChange(trackId, valueAt(e.clientY), false);
         }}
@@ -2221,17 +2305,23 @@ function routineRowLabel(
 const RoutinePinRow = memo(function RoutinePinRow({
   index,
   label,
+  routineUuid,
   coversCount,
   exitLabel,
   onOpenPicker,
+  onOpenSource,
 }: {
   /** This adjacency's index in the displayed order. */
   index: number;
   label: string;
+  routineUuid: string;
   /** Adjacencies the Routine covers (n − 1). */
   coversCount: number;
   exitLabel: string;
   onOpenPicker: (index: number, x: number, y: number) => void;
+  /** Provenance deep-link (gh#170): open the source Session span; null =
+   * origin take gone (button hidden). */
+  onOpenSource: ((routineUuid: string) => void) | null;
 }) {
   return (
     <div
@@ -2240,7 +2330,7 @@ const RoutinePinRow = memo(function RoutinePinRow({
       style={{
         gap: `${ADJ_ROW_GAP}px`,
         padding: `2px ${ROW_PAD_X}px 2px ${ADJ_PAD_LEFT}px`,
-        backgroundImage: `linear-gradient(90deg, rgba(255, 0, 200, 0.10), transparent 65%)`,
+        backgroundImage: `linear-gradient(90deg, rgba(var(--routine-accent-rgb), 0.10), transparent 65%)`,
       }}
     >
       <span style={{ width: `${ADJ_GUTTER_W}px`, flexShrink: 0 }} />
@@ -2255,6 +2345,32 @@ const RoutinePinRow = memo(function RoutinePinRow({
       >
         ▾ ◆ ROUTINE {label}
       </button>
+      <button
+        className="set-chip-btn"
+        data-routine-edit
+        onClick={(e) => {
+          e.stopPropagation();
+          requestRoutineEdit({ routineUuid });
+        }}
+        title="Open this Routine in the Routine editor (gh#170) — slot view, replay audition, boundary trim"
+        style={{ color: ROUTINE_COLOR }}
+      >
+        ⧉ edit
+      </button>
+      {onOpenSource && (
+        <button
+          className="set-chip-btn"
+          data-routine-source
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenSource(routineUuid);
+          }}
+          title="Open in Session timeline — the routine's source span, region guide flashed (provenance deep-link)"
+          style={{ color: ROUTINE_COLOR }}
+        >
+          ▦ source
+        </button>
+      )}
       <span style={{ color: 'var(--subtext0)' }}>
         covers {coversCount} adjacencies · exits with {exitLabel}
       </span>
@@ -2493,7 +2609,7 @@ const SetTrackRow = memo(function SetTrackRow({
               fontSize: '10px',
               fontWeight: 800,
               color: castMark === 'exit' ? 'var(--base)' : ROUTINE_COLOR,
-              background: castMark === 'exit' ? ROUTINE_COLOR : 'rgba(255, 0, 200, 0.12)',
+              background: castMark === 'exit' ? ROUTINE_COLOR : 'rgba(var(--routine-accent-rgb), 0.12)',
               border: `1px solid ${ROUTINE_COLOR}`,
             }}
           >

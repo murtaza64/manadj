@@ -22,6 +22,7 @@ import {
 } from './presets/gen';
 import type { PresetRenderer, VisualizerPreset } from './presets/types';
 import { BACKEND_URL } from '../api/client';
+import { writeSetting } from '../settings/persistedSettings';
 import {
   countSoloReviews,
   INITIAL_CYCLE,
@@ -208,7 +209,7 @@ export function VisualizerApp() {
   );
   const toggleHud = () =>
     setHudVisible((v) => {
-      localStorage.setItem('manadj-visualizer-hud', String(!v));
+      writeSetting('manadj-visualizer-hud', String(!v));
       return !v;
     });
   const [genTick, setGenTick] = useState(0);
@@ -288,6 +289,21 @@ export function VisualizerApp() {
         setParamValue(event.data.presetId, event.data.paramId, event.data.value);
         return;
       }
+      if (event.data?.type === 'solo-command') {
+        // Solo-review action from the modal: runs the same verdict/skip
+        // logic as the g/b/m/n hotkeys (GA events, counts, sampling).
+        if (event.data.action === 'next') skipNextRef.current();
+        else verdictRef.current(event.data.action);
+        return;
+      }
+      if (event.data?.type === 'set-cycle') {
+        const mode = event.data.mode;
+        if (CYCLE_MODES.includes(mode)) {
+          writeSetting(CYCLE_KEY, mode);
+          setCycleMode(mode);
+        }
+        return;
+      }
       if (event.data?.type !== 'bands') return;
       feedRef.current = {
         bands: event.data.bands,
@@ -315,6 +331,7 @@ export function VisualizerApp() {
         ),
         presetId: getPresetId(),
         params: getParamValues(presetById(getPresetId())),
+        cycleMode: cycleModeRef.current,
       };
       channel.postMessage(message);
     };
@@ -522,6 +539,10 @@ export function VisualizerApp() {
   // ---- Solo review actions + hotkeys (g/b/m/t/n/c). Store getters keep
   // these closure-safe; registered once.
   const advanceRef = useRef<() => void>(() => {});
+  // Modal remote entry points (channel handler registers once; these refs
+  // bridge it to the closures below).
+  const verdictRef = useRef<(outcome: SoloVerdict) => void>(() => {});
+  const skipNextRef = useRef<() => void>(() => {});
   // Watch-time tracking (human, 2026-08-22): manual skips are quality
   // evidence, weighted by how long the preset was watched.
   const watchStartRef = useRef(performance.now());
@@ -575,6 +596,20 @@ export function VisualizerApp() {
       // Verdicts do NOT auto-advance (human: keep watching until I move on).
       showToast(`${outcome === 'like' ? '👍' : outcome === 'dislike' ? '👎' : '·'} ${outcome} — ${id}`);
     };
+    verdictRef.current = verdict;
+    const skipNext = () => {
+      // Manual skip = judgment: log the outgoing preset's watch time.
+      const outgoing = getPresetId();
+      if (isCandidateId(outgoing)) {
+        void postGaEvent({
+          type: 'skip',
+          target: outgoing,
+          watchedS: Math.round((performance.now() - watchStartRef.current) / 100) / 10,
+        });
+      }
+      advance();
+    };
+    skipNextRef.current = skipNext;
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
@@ -583,18 +618,7 @@ export function VisualizerApp() {
       if (k === 'g') verdict('like');
       else if (k === 'b') verdict('dislike');
       else if (k === 'm') verdict('neutral');
-      else if (k === 'n') {
-        // Manual skip = judgment: log the outgoing preset's watch time.
-        const outgoing = getPresetId();
-        if (isCandidateId(outgoing)) {
-          void postGaEvent({
-            type: 'skip',
-            target: outgoing,
-            watchedS: Math.round((performance.now() - watchStartRef.current) / 100) / 10,
-          });
-        }
-        advance();
-      }
+      else if (k === 'n') skipNext();
       else if (k === 't') {
         // Inline note input — window.prompt is a no-op in the Electron
         // renderer (the "t key doesn't work" bug).
@@ -603,7 +627,7 @@ export function VisualizerApp() {
       } else if (k === 'c') {
         setCycleMode((prev) => {
           const next = CYCLE_MODES[(CYCLE_MODES.indexOf(prev) + 1) % CYCLE_MODES.length];
-          localStorage.setItem(CYCLE_KEY, next);
+          writeSetting(CYCLE_KEY, next);
           return next;
         });
       }
@@ -726,7 +750,7 @@ export function VisualizerApp() {
           onClick={() =>
             setCycleMode((prev) => {
               const next = CYCLE_MODES[(CYCLE_MODES.indexOf(prev) + 1) % CYCLE_MODES.length];
-              localStorage.setItem(CYCLE_KEY, next);
+              writeSetting(CYCLE_KEY, next);
               return next;
             })
           }

@@ -8,7 +8,9 @@
  * - The SIDEBAR CURSOR: a highlight that walks the sidebar's rows without
  *   changing the selected view (rekordbox tree semantics: turning moves
  *   the cursor, pressing opens). Entries mirror the sidebar's visual
- *   order: special views, playlists, sets.
+ *   order: pinned All tracks, then the Tracks / Playlists / Sets sections
+ *   (gh#174) — a collapsed section's rows are hidden, so they leave the
+ *   walk.
  *
  * Everything here is data-in/data-out; Library.tsx owns the React state.
  */
@@ -44,8 +46,11 @@ export type SidebarEntry =
   | { kind: 'playlist'; id: number }
   | { kind: 'set'; id: number };
 
-const SPECIAL_VIEWS: SidebarViewEntry['view'][] = [
-  'all',
+/** The sidebar's collapsible sections (gh#174). */
+export type SidebarSectionId = 'tracks' | 'playlists' | 'sets';
+
+/** The Tracks section's rows ("All tracks" is pinned above the sections). */
+const TRACK_VIEWS: SidebarViewEntry['view'][] = [
   'unprocessed',
   'needs-attention',
   'archived',
@@ -53,12 +58,18 @@ const SPECIAL_VIEWS: SidebarViewEntry['view'][] = [
   'session',
 ];
 
-/** All walkable sidebar rows, in the sidebar's visual order. */
-export function sidebarEntries(playlistIds: number[], setIds: number[]): SidebarEntry[] {
+/** All walkable sidebar rows, in the sidebar's visual order. Collapsed
+ * sections contribute no rows (their rows are hidden). */
+export function sidebarEntries(
+  playlistIds: number[],
+  setIds: number[],
+  collapsed: Partial<Record<SidebarSectionId, boolean>> = {}
+): SidebarEntry[] {
   return [
-    ...SPECIAL_VIEWS.map((view): SidebarEntry => ({ kind: 'view', view })),
-    ...playlistIds.map((id): SidebarEntry => ({ kind: 'playlist', id })),
-    ...setIds.map((id): SidebarEntry => ({ kind: 'set', id })),
+    { kind: 'view', view: 'all' },
+    ...(collapsed.tracks ? [] : TRACK_VIEWS.map((view): SidebarEntry => ({ kind: 'view', view }))),
+    ...(collapsed.playlists ? [] : playlistIds.map((id): SidebarEntry => ({ kind: 'playlist', id }))),
+    ...(collapsed.sets ? [] : setIds.map((id): SidebarEntry => ({ kind: 'set', id }))),
   ];
 }
 

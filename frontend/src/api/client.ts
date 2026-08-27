@@ -165,6 +165,11 @@ export const api = {
     /** URL of a track's audio stream (for audio elements / direct fetch). */
     audioUrl: (id: number) => `${API_BASE}/tracks/${id}/audio`,
 
+    /** URL of one stem (vocals/drums/bass/other) — 404 unless the track has
+     * current stems (Track.has_stems; stems #118). */
+    stemUrl: (id: number, stem: 'vocals' | 'drums' | 'bass' | 'other') =>
+      `${API_BASE}/tracks/${id}/stems/${stem}`,
+
     list: async (
       page: number = 1,
       perPage: number = 1000,
@@ -1189,6 +1194,33 @@ export const api = {
     },
   },
 
+  cameos: {
+    /** All saved Cameos (boot/plan load; #140). Ordered (host, guest)
+     * pair, then position — the Cameo sibling of transitions.list. */
+    list: async (): Promise<CameoRowWire[]> => {
+      const res = await fetch(`${API_BASE}/cameos`);
+      if (!res.ok) throw new Error('Failed to fetch cameos');
+      return res.json();
+    },
+
+    /** Client-authoritative pair-replace (ADR 0011 pattern): the server
+     * reconciles the ordered (host, guest) pair by uuid. An empty items
+     * list deletes the pair. Deleted Cameos DROP Set Cameo pins. */
+    replacePair: async (
+      hostTrackId: number,
+      guestTrackId: number,
+      items: { uuid: string; name: string; favorite: boolean; data: Record<string, unknown> }[]
+    ): Promise<CameoRowWire[]> => {
+      const res = await fetch(`${API_BASE}/cameos/pair/${hostTrackId}/${guestTrackId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      if (!res.ok) throw new Error(`Failed to save cameos (${res.status})`);
+      return res.json();
+    },
+  },
+
   trackLinks: {
     /** All Linked pairs (boot load), canonical order low < high. */
     list: async (): Promise<{ low_track_id: number; high_track_id: number }[]> => {
@@ -1356,6 +1388,42 @@ export const api = {
       const res = await fetch(`${API_BASE}/routines/${uuid}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Failed to delete routine (${res.status})`);
     },
+
+    /** Replace the authored edits layer (gh#170 pass 2): the Routine
+     * editor's draft — lane envelopes + Jumps, beat-domain. Null clears.
+     * The recording itself never changes (evidence doctrine). */
+    saveEdits: async (
+      uuid: string,
+      edits: Record<string, unknown> | null
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/edits`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ edits }),
+      });
+      if (!res.ok) throw new Error(`Failed to save routine edits (${res.status})`);
+      return res.json();
+    },
+
+    /** Boundary trim + mechanical re-promotion (gh#170): re-run promotion
+     * over the origin Routine Take with the window narrowed by beat
+     * amounts from either edge; the Routine row updates IN PLACE (same
+     * uuid — Set pins survive), the raw Take is untouched. */
+    retrim: async (
+      uuid: string,
+      body: { trim_start_beats: number; trim_end_beats: number }
+    ): Promise<RoutineDetailWire> => {
+      const res = await fetch(`${API_BASE}/routines/${uuid}/retrim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => d.detail).catch(() => null);
+        throw new Error(detail || `Failed to re-promote routine (${res.status})`);
+      }
+      return res.json();
+    },
   },
 
   sessions: {
@@ -1480,16 +1548,18 @@ export const api = {
 
     /** Client-authoritative wholesale replace of the ordered entry list
      * (ADR 0011 pattern): the server reconciles by track_id. Dormant
-     * pins (sets 07) are Set state and ride the same PUT wholesale. */
+     * pins (sets 07) and Dormant Cameo pins (#140) are Set state and
+     * ride the same PUT wholesale. */
     replaceEntries: async (
       id: number,
       items: SetEntryItemWire[],
-      dormant: SetDormantPinWire[] = []
+      dormant: SetDormantPinWire[] = [],
+      dormantCameos: SetDormantCameoPinWire[] = []
     ): Promise<SetWithEntriesWire> => {
       const res = await fetch(`${API_BASE}/sets/${id}/entries`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, dormant }),
+        body: JSON.stringify({ items, dormant, dormant_cameos: dormantCameos }),
       });
       if (!res.ok) throw new Error(`Failed to save set entries (${res.status})`);
       return res.json();
@@ -1514,6 +1584,12 @@ export interface TakeRowWire {
   session_uuid: string | null;
   /** How the Take came to be: 'detected' or 'manual' (issue 06). */
   origin: string;
+  /** Survivor-rule verdict (#140): 'handover', or 'guest' — a CAMEO TAKE
+   * (a = the surviving host, b = the visiting guest). */
+  kind: 'handover' | 'guest';
+  /** Engagement identity (#140): pairwise offspring of one multi-deck
+   * engagement share it (the history groups by it). Null pre-#140. */
+  engagement_uuid: string | null;
 }
 
 export interface TakeDetailWire extends TakeRowWire {
@@ -1537,6 +1613,10 @@ export interface TakeCreateWire {
   session_uuid?: string | null;
   /** 'detected' (default) or 'manual' (hand-cut, issue 06). */
   origin?: string;
+  /** Survivor-rule verdict (#140); absent = 'handover'. */
+  kind?: 'handover' | 'guest';
+  /** Engagement identity (#140); absent/null for hand cuts without one. */
+  engagement_uuid?: string | null;
 }
 
 // ── Routine wire types (ADR 0035, routines 157/158) ─────────────────────
@@ -1595,6 +1675,9 @@ export interface RoutineDetailWire extends RoutineRowWire {
   /** Slot-addressed, beat-domain mechanical replay (each event carries
    * `beat` + `slot`; global controls carry slot null). */
   events: Record<string, unknown>[];
+  /** Authored edits layer (gh#170 pass 2; routines/routineDraft parses
+   * tolerantly). Null/absent = unedited. */
+  edits?: Record<string, unknown> | null;
 }
 
 // ── Session wire types (Sessions PRD, ADR 0033) ─────────────────────────
@@ -1612,6 +1695,22 @@ export interface SessionDetailWire extends SessionRowWire {
   events: CaptureEventWire[];
 }
 
+// ── Cameo wire types (cameos PRD, #140) ─────────────────────────────────
+
+export interface CameoRowWire {
+  host_track_id: number;
+  guest_track_id: number;
+  uuid: string;
+  position: number;
+  name: string;
+  favorite: boolean;
+  /** Opaque payload: two-edged window in host track seconds, guest
+   * alignment, optional guest→host tempo-match, role lanes, Jumps on
+   * both roles. The client owns the shape (see sets/cameoPlan.ts). */
+  data: Record<string, unknown>;
+  updated_at: string | null;
+}
+
 // ── Set wire types (sets 01) ────────────────────────────────────────────
 
 export interface SetRowWire {
@@ -1627,6 +1726,20 @@ export interface SetRowWire {
   has_archived_tracks: boolean;
 }
 
+/** One Cameo pin (#140): a guest ornament on a Set entry — a saved Cameo
+ * or, manually, a Cameo Take hosted by that entry's Track. Always manual;
+ * never auto-filled. */
+export interface CameoPinWire {
+  pin_kind: 'cameo' | 'cameo-take';
+  pin_uuid: string;
+}
+
+/** A Dormant Cameo pin (#140): kept while its host Track is out of the
+ * Set (Cameo dormancy keys on the host Track per Set, not on a pair). */
+export interface SetDormantCameoPinWire extends CameoPinWire {
+  host_track_id: number;
+}
+
 export interface SetEntryItemWire {
   track_id: number;
   /** Adjacency pin (sets 02): kind and uuid travel together for
@@ -1638,6 +1751,9 @@ export interface SetEntryItemWire {
    * units (0 = neutral, ±0.5 spans the knob) — composes with track
    * Autogain when that lands (ADR 0034). Absent = neutral. */
   trim?: number;
+  /** Cameo pins (#140): ordered guest ornaments hosted by this entry's
+   * Track. Adjacency-independent. Absent = none. */
+  cameo_pins?: CameoPinWire[];
 }
 
 export interface SetEntryRowWire {
@@ -1647,6 +1763,8 @@ export interface SetEntryRowWire {
   pin_uuid: string | null;
   /** Trim offset from neutral, knob units (sets #164). */
   trim: number;
+  /** Cameo pins (#140), in pin order. */
+  cameo_pins: CameoPinWire[];
 }
 
 /** A Dormant pin (sets 07): a broken pin remembered per ORDERED track
@@ -1662,4 +1780,6 @@ export interface SetDormantPinWire {
 export interface SetWithEntriesWire extends SetRowWire {
   entries: SetEntryRowWire[];
   dormant: SetDormantPinWire[];
+  /** Dormant Cameo pins (#140): host-track-keyed memories. */
+  dormant_cameos: SetDormantCameoPinWire[];
 }

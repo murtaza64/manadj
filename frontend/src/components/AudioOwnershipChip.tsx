@@ -77,18 +77,33 @@ export function AudioOwnershipChip({
       disabled={face.kind === 'decks'}
       style={set?.color ? { borderLeft: `3px solid ${set.color}` } : undefined}
     >
+      {/* Who drives: a metronome while the machine performs (SET, REPLAY,
+          AUDITION — auditions are machine playback too), the vinyl glyph
+          (◉ — same as the Practice verb) while the decks are in human hands
+          (DECKS). SET keeps its ▶/⏸ next to the metronome — the paused
+          claim (ADR 0024) stays legible. */}
       {face.kind === 'set' ? (
         <>
+          <span className="topbar-ownership-icon">{'\u{F07DA}'}</span>
           <span className="topbar-ownership-icon">{face.playing ? '▶' : '⏸'}</span>
           <span className="topbar-ownership-kind">SET</span>
           <span className="topbar-ownership-name">{set?.name ?? `#${face.setId}`}</span>
         </>
       ) : face.kind === 'audition' ? (
-        <span className="topbar-ownership-kind">AUDITION</span>
+        <>
+          <span className="topbar-ownership-icon">{'\u{F07DA}'}</span>
+          <span className="topbar-ownership-kind">AUDITION</span>
+        </>
       ) : face.kind === 'replay' ? (
-        <span className="topbar-ownership-kind">REPLAY</span>
+        <>
+          <span className="topbar-ownership-icon">{'\u{F07DA}'}</span>
+          <span className="topbar-ownership-kind">REPLAY</span>
+        </>
       ) : (
-        <span className="topbar-ownership-kind">DECKS</span>
+        <>
+          <span className="topbar-ownership-icon">◉</span>
+          <span className="topbar-ownership-kind">DECKS</span>
+        </>
       )}
     </button>
   );

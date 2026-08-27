@@ -7,7 +7,7 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines
+from .routers import tracks, tags, waveforms, playlists, beatgrids, metric_ladders, hotcues, sync_playlists, sync_status, sync_performance, sync_export, sync_tags, sync_tracks, sync_library, analyze, transitions, transition_templates, track_links, takes, sessions, sets, tasks, drops, visualizer_ga, routine_candidates, routine_takes, routines, settings, cameos
 from .acquisition import models as acquisition_models  # noqa: F401  (registers tables on Base)
 from .acquisition.router import router as acquisition_router
 from .tasks import models as task_models  # noqa: F401  (registers tables on Base)
@@ -75,7 +75,9 @@ app.include_router(drops.router, prefix="/api/drops", tags=["drops"])
 app.include_router(routine_candidates.router, prefix="/api/routine-candidates", tags=["routine-candidates"])
 app.include_router(routine_takes.router, prefix="/api/routine-takes", tags=["routine-takes"])
 app.include_router(routines.router, prefix="/api/routines", tags=["routines"])
+app.include_router(cameos.router, prefix="/api/cameos", tags=["cameos"])
 app.include_router(visualizer_ga.router, prefix="/api/ga", tags=["visualizer-ga"])
+app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 
 
 
@@ -85,6 +87,10 @@ def _waveform_generation_enabled() -> bool:
 
 def _analysis_enabled() -> bool:
     return os.getenv("DISABLE_ANALYSIS_WORKER", "").lower() not in ("true", "1", "yes")
+
+
+def _stems_enabled() -> bool:
+    return os.getenv("DISABLE_STEMS_WORKER", "").lower() not in ("true", "1", "yes")
 
 
 def _build_task_worker() -> "TaskWorker | None":
@@ -110,6 +116,14 @@ def _build_task_worker() -> "TaskWorker | None":
     else:
         logging.getLogger("backend.main").info(
             "native analysis disabled via DISABLE_ANALYSIS_WORKER"
+        )
+
+    if _stems_enabled():
+        from .stems_tasks import STEM_SPLIT_TASK_TYPE, make_stem_split_handler
+        handlers[STEM_SPLIT_TASK_TYPE] = make_stem_split_handler()
+    else:
+        logging.getLogger("backend.main").info(
+            "stem splitting disabled via DISABLE_STEMS_WORKER"
         )
 
     # Routine mining (ADR 0035, routines 157): cheap event-log replay, no
@@ -190,6 +204,19 @@ async def startup_event():
             db = SessionLocal()
             try:
                 enqueue_missing_analysis(db)
+            finally:
+                db.close()
+
+        # Sweep: any active Track lacking current stems gets a stem-split
+        # task — unless the backlog exceeds the guard (full-library splits
+        # belong to scripts/backfill_stems.py, not the serial worker).
+        if _stems_enabled():
+            from .database import SessionLocal
+            from .stems_tasks import enqueue_missing_stems
+
+            db = SessionLocal()
+            try:
+                enqueue_missing_stems(db)
             finally:
                 db.close()
 

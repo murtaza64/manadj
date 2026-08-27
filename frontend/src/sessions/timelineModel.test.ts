@@ -9,6 +9,8 @@ import type { CaptureEvent } from '../capture/events';
 import {
   COLLAPSED_MARKER_PX,
   buildTimeAxis,
+  candidateDupesTake,
+  castSpanRefs,
   collapseCandidates,
   createStateIndex,
   deriveTimeline,
@@ -170,6 +172,28 @@ describe('deriveTimeline', () => {
     expect(
       takeDeckPair(m, { a_track_id: 99, b_track_id: 9, window_start_s: 8, window_end_s: 25 })
     ).toEqual({ from: null, to: 'B' });
+  });
+
+  it('takeDeckPair follows the audible copy when a track is loaded on two decks (gh#184)', () => {
+    // Track 9 sits loaded on A (silent — never played) AND on D, where it
+    // actually plays through the take window. Deck-order-first matching
+    // used to attribute the chip to A.
+    const events: CaptureEvent[] = [
+      ...seed(0),
+      { t: 1, kind: 'load', channel: 'A', trackId: 9, bpm: 172 }, // silent copy
+      { t: 1, kind: 'load', channel: 'B', trackId: 7, bpm: 174 },
+      { t: 2, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+      { t: 5, kind: 'load', channel: 'D', trackId: 9, bpm: 172 },
+      { t: 6, kind: 'transport', channel: 'D', action: 'play', playhead: 0 },
+      { t: 30, kind: 'transport', channel: 'B', action: 'pause', playhead: 28 },
+      { t: 40, kind: 'transport', channel: 'D', action: 'pause', playhead: 34 },
+    ];
+    const m = deriveTimeline(events);
+    const take = { a_track_id: 7, b_track_id: 9, window_start_s: 8, window_end_s: 25 };
+    expect(takeDeckPair(m, take)).toEqual({ from: 'B', to: 'D' });
+    // Both copies silent in the window: still resolves (first-found fallback).
+    const early = { a_track_id: 7, b_track_id: 9, window_start_s: 1, window_end_s: 1.5 };
+    expect(takeDeckPair(m, early).to).not.toBeNull();
   });
 
   it('an empty log derives an empty, zero-span model', () => {
@@ -765,5 +789,68 @@ describe('tenure collapse (sessions 14)', () => {
     });
     const seg = axis.segments.find((s) => s.collapsed && s.kind === 'tenure');
     expect(seg).toMatchObject({ start: 10, end: 500, holder: 'conductor' });
+  });
+});
+
+describe('castSpanRefs (routine hover spotlight, gh#187)', () => {
+  const events: CaptureEvent[] = [
+    ...seed(0),
+    { t: 1, kind: 'load', channel: 'A', trackId: 7, bpm: 174 },
+    { t: 2, kind: 'transport', channel: 'A', action: 'play', playhead: 0 },
+    { t: 5, kind: 'load', channel: 'B', trackId: 8, bpm: 172 },
+    { t: 6, kind: 'transport', channel: 'B', action: 'play', playhead: 0 },
+    { t: 10, kind: 'load', channel: 'C', trackId: 9, bpm: 170 },
+    { t: 11, kind: 'transport', channel: 'C', action: 'play', playhead: 0 },
+    { t: 40, kind: 'transport', channel: 'A', action: 'pause', playhead: 38 },
+    { t: 41, kind: 'transport', channel: 'B', action: 'pause', playhead: 35 },
+    { t: 42, kind: 'transport', channel: 'C', action: 'pause', playhead: 31 },
+  ];
+  const m = deriveTimeline(events);
+
+  it('resolves each cast track to its deck span within the window', () => {
+    const refs = castSpanRefs(m, [7, 8, 9], 5, 35);
+    expect(refs).toEqual([
+      { deck: 'A', start: 1, end: 42 },
+      { deck: 'B', start: 5, end: 42 },
+      { deck: 'C', start: 10, end: 42 },
+    ]);
+  });
+
+  it('skips cast tracks the log does not show in the window', () => {
+    const refs = castSpanRefs(m, [7, 999], 5, 35);
+    expect(refs).toEqual([{ deck: 'A', start: 1, end: 42 }]);
+  });
+});
+
+describe('candidateDupesTake (re-mined twin dedupe, gh#187)', () => {
+  const take = { window_start_s: 30, window_end_s: 80, cast: [1, 2, 3] };
+
+  it('heavy overlap + shared cast = duplicate', () => {
+    // The re-mined twin: same cast, near-same window (bounds shifted).
+    expect(
+      candidateDupesTake({ window_start_s: 27, window_end_s: 83, cast: [1, 2, 3] }, take)
+    ).toBe(true);
+    // A trimmed confirm: the take window sits inside the candidate's.
+    expect(
+      candidateDupesTake({ window_start_s: 20, window_end_s: 90, cast: [1, 2, 3, 4] }, take)
+    ).toBe(true);
+  });
+
+  it('no time overlap = distinct', () => {
+    expect(
+      candidateDupesTake({ window_start_s: 100, window_end_s: 150, cast: [1, 2, 3] }, take)
+    ).toBe(false);
+  });
+
+  it('adjacent candidate sharing only the handover track survives', () => {
+    expect(
+      candidateDupesTake({ window_start_s: 28, window_end_s: 82, cast: [3, 4, 5] }, take)
+    ).toBe(false);
+  });
+
+  it('shallow overlap survives even with a shared cast', () => {
+    expect(
+      candidateDupesTake({ window_start_s: 75, window_end_s: 200, cast: [1, 2, 3] }, take)
+    ).toBe(false);
   });
 });

@@ -37,6 +37,12 @@ Renderer console (`console.*` in the frontend) is forwarded to stdout as
 `[browser] ...` lines; `make dev-app` gives them their own label in the
 multiplexed stream. DevTools (Cmd+Option+I) remains the richer surface.
 
+Everything is also teed to `~/Library/Logs/manaDJ/renderer.log` (timestamped,
+pid-tagged, 5 MB startup rotation) along with crash signals —
+render-process-gone, child-process-gone (GPU death), unresponsive,
+did-fail-load, GPU feature status, clean-quit marker — so blank-screen
+incidents leave evidence even in attach mode (stability #188).
+
 ## Behavior
 
 - `backgroundThrottling: false` — rAF/timers keep running while occluded;

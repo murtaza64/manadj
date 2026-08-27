@@ -143,8 +143,18 @@ export interface InitDeckState {
  * v3 (#138): zero-overlap hard-cut windows span the cut ramp (cessation →
  * incoming onset) instead of collapsing to one instant, and one engagement
  * emits at most one Take per ordered pair (a flicker across the settle
- * horizon no longer settles a duplicate). */
-export const DETECTOR_VERSION = 3;
+ * horizon no longer settles a duplicate).
+ * v4 (#178): overlap-engagement onsets backdate to the incoming's first
+ * SOUND (playing ∧ gain > 0, capped at `entryBackdateMaxS`) — a
+ * play-then-fader-slam entry's window begins at the entry gesture, not at
+ * the mid-ramp `audibleGain` crossing that clipped its first beats.
+ * v5 (#140): the survivor rule's SECOND verdict — a tease where the
+ * outgoing survives as current settles a Guest engagement and emits a
+ * Cameo Take (kind 'guest'; tease-and-bail no longer dissolves silently) —
+ * and every capture carries its engagement identity (concurrent
+ * deck-sharing engagements share one uuid, so a triple's pairwise
+ * offspring are a first-class group). */
+export const DETECTOR_VERSION = 5;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a
@@ -160,6 +170,11 @@ export interface DetectorParams {
   /** Settle horizon: the outgoing must stay silent this long before the
    * Handover completes; returns within it fold (cross-cuts). */
   settleHorizonS: number;
+  /** Entry-onset backdating cap (#178): an overlap engagement's window
+   * starts at the incoming's first sound (playing, gain > 0), at most
+   * this far before its `audibleGain` crossing — a residual whisper-level
+   * fader could otherwise hold the sounding clock open for minutes. */
+  entryBackdateMaxS: number;
   /** Raw-slice padding either side of the Take window. */
   padS: number;
   /** Rolling-log retention while no engagement is open. */
@@ -172,16 +187,27 @@ export const DEFAULT_DETECTOR_PARAMS: DetectorParams = {
   filterKillBeyond: 0.97,
   cutGapMaxS: 2,
   settleHorizonS: 8,
+  entryBackdateMaxS: 2,
   padS: 2,
   idleKeepS: 30,
 };
 
 // ── Detected Takes ───────────────────────────────────────────────────────
 
-/** A settled Handover, ready to persist. Times are on the capture clock;
+/** A settled verdict, ready to persist. Times are on the capture clock;
  * the window is the engagement (glossary), the events its padded slice —
- * role-relabeled (outgoing='A', incoming='B'; 4dp 10). */
+ * role-relabeled (outgoing='A', incoming='B'; 4dp 10).
+ *
+ * `kind` is the survivor rule's verdict (#140): 'handover' (outgoing →
+ * incoming — a Take) or 'guest' (the outgoing SURVIVES as current — a
+ * Cameo Take: the outgoing role is the host, the incoming the guest;
+ * host-as-A holds through the same relabeling). */
 export interface DetectedTake {
+  kind: 'handover' | 'guest';
+  /** The engagement this verdict settled from (#140): concurrent
+   * deck-sharing engagements share it — a double/triple's pairwise
+   * offspring group by it in the Transition history. */
+  engagementUuid: string;
   outgoingTrackId: number;
   incomingTrackId: number;
   /** The physical decks the Handover traded on (also stamped on the

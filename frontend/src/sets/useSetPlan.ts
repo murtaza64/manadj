@@ -19,14 +19,17 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import type { CaptureEvent } from '../capture/events';
 import type { VectorizeInput } from '../capture/vectorize';
 import type { Transition } from '../editor/mixModel';
+import { cameoSourceFromData, cameoSourceFromTake, type CameoPlanSource } from './cameoPlan';
 import {
   initTransitionStore,
   snapshotPairStore,
   subscribePairStore,
 } from '../editor/pairStore';
 import type { HotCue, Track } from '../types';
+import { parseEdits } from '../routines/routineDraft';
 import { resolvePlanPins } from './adjacency';
 import { getRoutineCast, primeRoutineCasts } from './routineCasts';
 
@@ -127,6 +130,9 @@ function useRoutinePinReplay(entries: SetEntryLocal[] | undefined): {
           entryPositions: d.entry_positions,
           durationBeats: d.duration_beats,
           events: d.events,
+          // The Routine editor's authored edits (gh#170 pass 2) ride
+          // into set replay too — one build, every consumer.
+          edits: d.edits ? parseEdits(d.edits) : null,
         },
       });
     });
@@ -211,6 +217,33 @@ export function useSetPlanParts(
   });
   const takesLoading = takeQueries.some((q) => q.isLoading);
 
+  // Cameo pins (#140): saved Cameos resolve from the cameos list (their
+  // authored payload), Cameo Takes from their raw slices — both reduced
+  // to CameoPlanSource here; a failed fetch dangles (plays nothing).
+  const cameoUuidsKey = (entries ?? [])
+    .flatMap((e) => (e.cameoPins ?? []).filter((p) => p.kind === 'cameo').map((p) => p.uuid))
+    .join(',');
+  const cameoTakeUuids = (entries ?? []).flatMap((e) =>
+    (e.cameoPins ?? []).filter((p) => p.kind === 'cameo-take').map((p) => p.uuid)
+  );
+  const cameosNeeded = cameoUuidsKey.length > 0;
+  const { data: cameoRows, isLoading: cameosQueryLoading } = useQuery({
+    queryKey: ['cameos'],
+    queryFn: api.cameos.list,
+    enabled: cameosNeeded,
+  });
+  const cameoTakeQueries = useQueries({
+    queries: cameoTakeUuids.map((uuid) => ({
+      queryKey: ['take', uuid],
+      queryFn: () => api.takes.get(uuid),
+      staleTime: Infinity,
+      retry: false,
+    })),
+  });
+  const cameosLoading =
+    (cameosNeeded && cameosQueryLoading) || cameoTakeQueries.some((q) => q.isLoading);
+  const cameoTakeUuidsKey = cameoTakeUuids.join(',');
+
   // Hot Cue 1 per track — the hard-cut entry anchor (sets 19). One bulk
   // query for the whole set (issue 43); cue mutations invalidate the
   // ['hotcues'] prefix, so cue edits still invalidate the plan.
@@ -227,7 +260,9 @@ export function useSetPlanParts(
 
   const input = useMemo<PlanInput | undefined>(() => {
     if (!entries || entries.length === 0) return undefined;
-    if (!transitionsReady || takesLoading || hotCuesLoading || routinesLoading) return undefined;
+    if (!transitionsReady || takesLoading || hotCuesLoading || routinesLoading || cameosLoading) {
+      return undefined;
+    }
     if (!trackMap || entries.some((e) => !trackMap.has(e.trackId))) return undefined;
 
     const tracks: PlanInput['tracks'] = {};
@@ -280,6 +315,25 @@ export function useSetPlanParts(
       };
     });
 
+    // Cameo geometry per pin uuid (#140): unreadable payloads/slices
+    // dangle (a Cameo pin plays nothing rather than guessing).
+    const cameoSourcesByUuid: Record<string, CameoPlanSource> = {};
+    for (const row of cameoRows ?? []) {
+      const source = cameoSourceFromData(row.guest_track_id, row.data);
+      if (source) cameoSourcesByUuid[row.uuid] = source;
+    }
+    cameoTakeUuids.forEach((uuid, i) => {
+      const detail = cameoTakeQueries[i]?.data;
+      if (!detail || detail.kind !== 'guest') return;
+      const source = cameoSourceFromTake({
+        guestTrackId: detail.b_track_id,
+        windowStartS: detail.window_start_s,
+        windowEndS: detail.window_end_s,
+        events: detail.events as unknown as CaptureEvent[],
+      });
+      if (source) cameoSourcesByUuid[uuid] = source;
+    });
+
     const tempoInput: TempoPolicyInput =
       tempo?.policy === 'fixed'
         ? { policy: 'fixed', setTempoBpm: tempo.setTempoBpm }
@@ -290,6 +344,7 @@ export function useSetPlanParts(
       tracks,
       transitionsByUuid,
       takesByUuid,
+      cameoSourcesByUuid,
       tempo: tempoInput,
       grace: { headroomSec: graceHeadroomSec, fadeSec: graceFadeSec },
       routines: pinnedRoutines,
@@ -303,10 +358,14 @@ export function useSetPlanParts(
     takesLoading,
     hotCuesLoading,
     routinesLoading,
+    cameosLoading,
     routineRows,
+    cameoRows,
     hotCue1Signature,
     takeUuidsKey,
     routineUuidsKey,
+    cameoUuidsKey,
+    cameoTakeUuidsKey,
     tempo?.policy,
     tempo?.setTempoBpm,
     tempoReturnSecPerPercent,

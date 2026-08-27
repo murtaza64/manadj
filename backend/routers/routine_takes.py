@@ -157,6 +157,8 @@ def promote_routine_take(uuid: str, db: Session = Depends(get_db)) -> schemas.Ro
         duration_beats=result.duration_beats,
         events_json=json.dumps(result.events),
         origin_take_uuid=rt.uuid,
+        window_start_s=result.window_start_s,
+        window_end_s=result.window_end_s,
     )
     db.add(routine)
     rt.promoted_routine_uuid = routine.uuid

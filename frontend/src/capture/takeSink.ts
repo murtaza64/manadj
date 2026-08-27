@@ -34,11 +34,19 @@ export function persistTake(take: DetectedTake, sessionUuid: string | null = nul
       events: take.events,
       session_uuid: sessionUuid,
       origin: 'detected',
+      // Survivor-rule verdict + engagement identity (#140): a 'guest'
+      // row IS a Cameo Take (a = host, b = guest).
+      kind: take.kind,
+      engagement_uuid: take.engagementUuid,
     })
     .then(() => {
       void queryClient.invalidateQueries({ queryKey: ['takes'] });
-      // The matching adjacency's transient "new take — pin?" offer.
-      recordFreshTake(take.outgoingTrackId, take.incomingTrackId, uuid);
+      // The matching adjacency's transient "new take — pin?" offer —
+      // Handovers only: a Cameo Take is an entry ornament, never an
+      // adjacency candidate (#140; Cameo pins are always manual).
+      if (take.kind === 'handover') {
+        recordFreshTake(take.outgoingTrackId, take.incomingTrackId, uuid);
+      }
     })
     .catch((err) => {
       console.error('take capture: persist failed — Take lost', err);

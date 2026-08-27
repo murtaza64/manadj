@@ -13,6 +13,7 @@ import {
   buildSlotTrace,
   routineSlotStateAt,
   slotLanesAt,
+  slotOccupyingDeckAt,
   traceStateAt,
   type RoutineEventInput,
   type RoutinePlanInput,
@@ -88,28 +89,72 @@ const baseCtx = {
 
 // ── Deck allocation ─────────────────────────────────────────────────────
 
+/** Spans that never release inside the routine (the pre-pass-2 shape). */
+const spans = (entries: number[], releases?: number[]) =>
+  entries.map((entryMixSec, i) => ({
+    entryMixSec,
+    releaseMixSec: releases?.[i] ?? 1e9,
+  }));
+const decksOf = (a: ReturnType<typeof allocateRoutineDecks>) => a.map((x) => x.deck);
+
 describe('allocateRoutineDecks', () => {
   it('adopts slot 0 and hands out A→B→C→D to the rest', () => {
-    expect(allocateRoutineDecks([0, 10, 20, 30], 'A', [])).toEqual(['A', 'B', 'C', 'D']);
+    expect(decksOf(allocateRoutineDecks(spans([0, 10, 20, 30]), 'A', []))).toEqual([
+      'A',
+      'B',
+      'C',
+      'D',
+    ]);
   });
 
   it('adoption on B leaves A first in line', () => {
-    expect(allocateRoutineDecks([0, 10, 20], 'B', [])).toEqual(['B', 'A', 'C']);
+    expect(decksOf(allocateRoutineDecks(spans([0, 10, 20]), 'B', []))).toEqual(['B', 'A', 'C']);
   });
 
   it('skips an externally busy deck until it frees', () => {
     // A is busy until mix 15: slot 1 (entry 10) must skip it, slot 2
     // (entry 20) may not take it either — it went to C... A is free by
     // then and A precedes D.
-    expect(allocateRoutineDecks([0, 10, 20], 'B', [{ deck: 'A', untilMixSec: 15 }])).toEqual([
+    expect(
+      decksOf(allocateRoutineDecks(spans([0, 10, 20]), 'B', [{ deck: 'A', untilMixSec: 15 }]))
+    ).toEqual(['B', 'C', 'A']);
+  });
+
+  it('true concurrency overflow gets null (plan-time validation, not improvisation)', () => {
+    // Five slots all holding to the end — a synthetic shape; a real
+    // recording was performed on 4 physical decks.
+    expect(decksOf(allocateRoutineDecks(spans([0, 1, 2, 3, 4]), 'A', []))).toEqual([
+      'A',
       'B',
       'C',
-      'A',
+      'D',
+      null,
     ]);
   });
 
-  it('overflow slots get null (plan-time validation, not improvisation)', () => {
-    expect(allocateRoutineDecks([0, 1, 2, 3, 4], 'A', [])).toEqual(['A', 'B', 'C', 'D', null]);
+  it('REUSES a freed deck for a later entry (gh#170 pass 2 — allocation is concurrency, not cardinality)', () => {
+    // Slot 0's motion ends at 50; slot 4 enters at 60 — deck A is free
+    // again (release + 2s buffer ≤ entry) and A precedes every other
+    // freed candidate.
+    const out = allocateRoutineDecks(
+      spans([0, 10, 20, 30, 60], [50, 1e9, 1e9, 1e9, 1e9]),
+      'A',
+      []
+    );
+    expect(decksOf(out)).toEqual(['A', 'B', 'C', 'D', 'A']);
+    // The reusing slot's occupancy opens when the deck freed.
+    expect(out[4].occupyFromMixSec).toBe(50);
+  });
+
+  it('the release buffer keeps back-to-back reuse honest (load/cue time)', () => {
+    // A frees at 59 — 59 + 2 > 60, so slot 4 cannot take it (or anything
+    // else: B/C/D never release) → overflow.
+    const out = allocateRoutineDecks(
+      spans([0, 10, 20, 30, 60], [59, 1e9, 1e9, 1e9, 1e9]),
+      'A',
+      []
+    );
+    expect(decksOf(out)).toEqual(['A', 'B', 'C', 'D', null]);
   });
 });
 
@@ -193,6 +238,8 @@ describe('buildSlotLanes / slotLanesAt', () => {
       entryMixSec: 0,
       entryTrackSec: 0,
       basePitchPercent: 0,
+      occupyFromMixSec: -Infinity,
+      releaseMixSec: 1e9,
       trace: [],
       lanes,
       jumpMixSecs: [],
@@ -212,6 +259,8 @@ describe('buildSlotLanes / slotLanesAt', () => {
       entryMixSec: 0,
       entryTrackSec: 60,
       basePitchPercent: 0,
+      occupyFromMixSec: -Infinity,
+      releaseMixSec: 1e9,
       trace: [],
       lanes,
       jumpMixSecs: [],
@@ -236,6 +285,8 @@ describe('buildSlotLanes / slotLanesAt', () => {
       entryMixSec: 0,
       entryTrackSec: 0,
       basePitchPercent: 0,
+      occupyFromMixSec: -Infinity,
+      releaseMixSec: 1e9,
       trace: [],
       lanes,
       jumpMixSecs: [],
@@ -284,11 +335,25 @@ describe('buildPlannedRoutine', () => {
     expect(warnings.some((w) => w.kind === 'routine-global-controls-dropped')).toBe(true);
   });
 
-  it('flags deck overflow as a plan-time error', () => {
-    const input = syntheticRoutine();
-    input.cast = [1, 2, 3, 4, 5];
-    input.entryOffsetsBeats = [0, 8, 16, 24, 32];
-    input.entryPositions = [60, 0, 0, 0, 0];
+  it('flags TRUE-CONCURRENCY deck overflow as a plan-time error (5 slots advancing together)', () => {
+    // All five slots' playheads advance the whole span — genuinely five
+    // concurrent decks, which a real 4-deck recording can never produce.
+    const events: RoutineEventInput[] = [];
+    const entries = [0, 8, 16, 24, 32];
+    for (let b = 0; b <= 64; b += 4) {
+      const playheads: Record<string, number> = {};
+      for (let slot = 0; slot < 5; slot++) {
+        if (b >= entries[slot]) playheads[String(slot)] = (b - entries[slot]) * 0.5;
+      }
+      events.push(tick(b, playheads));
+    }
+    const input: RoutinePlanInput = {
+      cast: [1, 2, 3, 4, 5],
+      entryOffsetsBeats: entries,
+      entryPositions: [0, 0, 0, 0, 0],
+      durationBeats: 64,
+      events,
+    };
     const { routine, warnings } = buildPlannedRoutine(input, {
       ...baseCtx,
       trackBpms: [120, 120, 120, 120, 120],
@@ -297,6 +362,50 @@ describe('buildPlannedRoutine', () => {
     expect(warnings.some((w) => w.kind === 'routine-deck-overflow' && w.severity === 'error')).toBe(
       true
     );
+  });
+
+  it('5-cast SEQUENTIAL weave allocates every slot by reusing freed decks (gh#170 pass 2 regression)', () => {
+    // The Gimme→…→Lose Control shape: each non-exit slot's motion ends
+    // well before later entries; concurrency never exceeds 4, so slot 4
+    // must land on the first freed deck (A) — the old cardinality rule
+    // flagged phantom overflow here.
+    const events: RoutineEventInput[] = [];
+    const entries = [0, 8, 16, 24, 48];
+    const stops = [12, 24, 36, 44, 64]; // motion end per slot (beats)
+    for (let b = 0; b <= 64; b += 2) {
+      const playheads: Record<string, number> = {};
+      for (let slot = 0; slot < 5; slot++) {
+        if (b < entries[slot]) continue;
+        const advanced = Math.min(b, stops[slot]) - entries[slot];
+        playheads[String(slot)] = advanced * 0.5;
+      }
+      events.push(tick(b, playheads));
+    }
+    const input: RoutinePlanInput = {
+      cast: [1, 2, 3, 4, 5],
+      entryOffsetsBeats: entries,
+      entryPositions: [0, 0, 0, 0, 0],
+      durationBeats: 64,
+      events,
+    };
+    const { routine, warnings } = buildPlannedRoutine(input, {
+      ...baseCtx,
+      trackBpms: [120, 120, 120, 120, 120],
+    });
+    // A→B→C→D preference AMONG FREE decks: freed A precedes fresh C/D,
+    // so the weave rides three decks — A is reused twice, D never needed.
+    // (slot 0 frees at beat 12 = mix 106; +2s buffer = slot 2's entry at
+    // mix 108 exactly; slot 2 frees at beat 36 = mix 118 for slot 4.)
+    expect(routine.slots.map((s) => s.deck)).toEqual(['A', 'B', 'A', 'C', 'A']);
+    expect(warnings.some((w) => w.kind === 'routine-deck-overflow')).toBe(false);
+    expect(routine.slots[2].occupyFromMixSec).toBeCloseTo(106, 5);
+    expect(routine.slots[4].occupyFromMixSec).toBeCloseTo(118, 5);
+    // The occupancy resolver hands deck A to each tenant in turn.
+    expect(slotOccupyingDeckAt(routine, 'A', 102)?.slot).toBe(0);
+    expect(slotOccupyingDeckAt(routine, 'A', 110)?.slot).toBe(2);
+    expect(slotOccupyingDeckAt(routine, 'A', 120)?.slot).toBe(4);
+    // The exit slot never releases before the boundary (exit contract).
+    expect(routine.slots[4].releaseMixSec).toBeCloseTo(132, 5);
   });
 });
 

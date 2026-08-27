@@ -71,7 +71,8 @@ describe('createSetFromPlaylist — Play order into a new Set', () => {
         { track_id: 3, pin_kind: null, pin_uuid: null, trim: 0 },
         { track_id: 9, pin_kind: null, pin_uuid: null, trim: 0 },
       ],
-      // No Dormant pins (sets 07) on a fresh copy.
+      // No Dormant pins (sets 07) or Cameo memories (#140) on a fresh copy.
+      [],
       []
     );
   });

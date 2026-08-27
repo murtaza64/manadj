@@ -228,6 +228,18 @@ export class MixPlayer {
     this.emit();
   }
 
+  /** Takeover stand-down (gh#186): stop conducting WITHOUT touching the
+   * decks — they keep sounding as they are (the Conductor's takeover
+   * contract, via auditionTakeover). pause() is the arbiter/UI path and
+   * pauses the engines; this one leaves them to the user. */
+  standDown(): void {
+    if (!this.playing) return;
+    this.mixTimeAtAnchor = this.getMixTime();
+    this.playing = false;
+    cancelAnimationFrame(this.raf);
+    this.emit();
+  }
+
   seek(mixTime: number): void {
     const t = Math.max(0, Math.min(mixTime, this.getMixDuration()));
     this.mixTimeAtAnchor = t;
@@ -288,12 +300,14 @@ export class MixPlayer {
       this.pause();
       return;
     }
-    // Jump events (transition-takes 01): crossing an instant makes B's
-    // arrangement position discontinuous. The drift corrector would catch
-    // deltas past its tolerance anyway; the explicit crossing check makes
-    // sub-tolerance jumps land too, exactly one hard sync per crossing.
+    // Jump events (transition-takes 01; both roles since issue 177):
+    // crossing an instant makes that deck's arrangement position
+    // discontinuous. The drift corrector would catch deltas past its
+    // tolerance anyway; the explicit crossing check makes sub-tolerance
+    // jumps land too, exactly one hard sync per crossing — syncDecks
+    // hard-syncs BOTH decks, so one check covers either array.
     const tr = this.mix.transition;
-    const crossed = (tr.jumps ?? []).some((j) => {
+    const crossed = [...(tr.jumps ?? []), ...(tr.jumpsA ?? [])].some((j) => {
       const tj = jumpInstantSec(tr, j);
       return tj > this.lastTickT && tj <= t;
     });
@@ -361,9 +375,11 @@ export class MixPlayer {
     // Not audible → not ours to pitch (sets 21). play() re-applies on the
     // audition that claims, so the editor's tempo match is never stale.
     if (!this.audible()) return;
-    // Sketch origin invariant: A's track time is mix time, so A must run at
-    // native rate. A persisted Performance pitch would drift against the
-    // arrangement until the safety corrector audibly re-seeks it.
+    // Sketch origin invariant: mix time is A's elapsed play (track time ≡
+    // mix time between jumps — issue 177), so A must run at native rate;
+    // jumpsA are discontinuities, not rate changes. A persisted
+    // Performance pitch would drift against the arrangement until the
+    // safety corrector audibly re-seeks it.
     this.engineA.setPitch(0);
     this.engineB.setPitch(
       this.mix.transition.tempoMatch ? tempoMatchPitch(this.bpm.a, this.bpm.b) : 0

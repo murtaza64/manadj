@@ -90,6 +90,15 @@
   color: var(--base);
 }
 
+/* Auto-cycle mode: one joined segmented control. */
+.vizmodal-cycle {
+  gap: 0;
+}
+
+.vizmodal-cycle .vizmodal-btn + .vizmodal-btn {
+  border-left-width: 0;
+}
+
 .vizmodal-btn.gen {
   font-size: 11px;
   font-weight: 400;

@@ -25,8 +25,10 @@ import { EMPTY_SELECTION } from '../selection/selectionModel';
 import type { DormantPin } from './dormancy';
 import {
   _resetSetStoreForTests,
+  degradeDeletedCameoPinsLocal,
   degradeDeletedPinsLocal,
   ensureSetEntriesLoaded,
+  getSetDormantCameoPins,
   getSetDormantPins,
   getSetEntries,
   getSetSelection,
@@ -40,6 +42,7 @@ import {
   setAdjacencyPins,
   setEntryTrim,
   setSetSelection,
+  toggleCameoPin,
   unpinRoutine,
 } from './setStore';
 import { _resetRoutineCastsForTests } from './routineCasts';
@@ -132,7 +135,8 @@ describe('dormancy wiring (sets 07)', () => {
       [
         { a_track_id: 10, b_track_id: 11, pin_kind: 'transition', pin_uuid: 'tr-1' },
         { a_track_id: 11, b_track_id: 12, pin_kind: 'take', pin_uuid: 'tk-1' },
-      ]
+      ],
+      [] // no Dormant Cameo pins (#140)
     );
 
     reorderSetEntries(1, [10, 11, 12]);
@@ -449,7 +453,8 @@ describe('per-entry trim (sets #164)', () => {
         { track_id: 10, pin_kind: null, pin_uuid: null, trim: 0.125 },
         { track_id: 11, pin_kind: null, pin_uuid: null, trim: 0 },
       ],
-      []
+      [],
+      [] // no Dormant Cameo pins (#140)
     );
   });
 
@@ -611,5 +616,83 @@ describe('pinRoutine / unpinRoutine (sets 160)', () => {
     degradeDeletedPinsLocal('routine', 'r1');
     expect(getSetEntries(1)![0].pin).toBe(null);
     expect(getSetDormantPins(2)).toEqual([]);
+  });
+});
+
+describe('Cameo pin wiring (#140)', () => {
+  it('toggleCameoPin pins then unpins, pushing cameo_pins on the wholesale PUT', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: null },
+      { trackId: 11, pin: null },
+    ]);
+    mocked.sets.replaceEntries.mockClear();
+
+    toggleCameoPin(1, 10, { kind: 'cameo-take', uuid: 'gt-1' });
+    expect(getSetEntries(1)![0].cameoPins).toEqual([{ kind: 'cameo-take', uuid: 'gt-1' }]);
+    const [, items] = mocked.sets.replaceEntries.mock.lastCall!;
+    expect(items[0].cameo_pins).toEqual([{ pin_kind: 'cameo-take', pin_uuid: 'gt-1' }]);
+    expect(items[1].cameo_pins).toBeUndefined(); // empty = omitted
+
+    toggleCameoPin(1, 10, { kind: 'cameo-take', uuid: 'gt-1' });
+    expect(getSetEntries(1)![0].cameoPins).toBeUndefined();
+  });
+
+  it('removing the host sends its pins Dormant; re-adding restores them', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: null, cameoPins: [{ kind: 'cameo', uuid: 'c-1' }] },
+      { trackId: 11, pin: null },
+    ]);
+
+    removeTracksFromSet(1, [10]);
+    expect(getSetEntries(1)!.map((e) => e.trackId)).toEqual([11]);
+    expect(getSetDormantCameoPins(1)).toEqual([
+      { hostTrackId: 10, pin: { kind: 'cameo', uuid: 'c-1' } },
+    ]);
+    // The PUT carried the memory.
+    const [, , , dormantCameos] = mocked.sets.replaceEntries.mock.lastCall!;
+    expect(dormantCameos).toEqual([
+      { host_track_id: 10, pin_kind: 'cameo', pin_uuid: 'c-1' },
+    ]);
+
+    insertTrackIntoSet(1, 10, 0);
+    expect(getSetEntries(1)![0].cameoPins).toEqual([{ kind: 'cameo', uuid: 'c-1' }]);
+    expect(getSetDormantCameoPins(1)).toEqual([]);
+  });
+
+  it('reorder never touches Cameo pins (PRD story 15)', () => {
+    replaceSetEntries(1, [
+      { trackId: 10, pin: null, cameoPins: [{ kind: 'cameo', uuid: 'c-1' }] },
+      { trackId: 11, pin: null },
+      { trackId: 12, pin: null },
+    ]);
+    reorderSetEntries(1, [12, 10, 11]);
+    const entries = getSetEntries(1)!;
+    expect(entries.find((e) => e.trackId === 10)!.cameoPins).toEqual([
+      { kind: 'cameo', uuid: 'c-1' },
+    ]);
+    expect(getSetDormantCameoPins(1)).toEqual([]);
+  });
+
+  it('degradeDeletedCameoPinsLocal drops the pin everywhere, dormant included', () => {
+    replaceSetEntries(1, [
+      {
+        trackId: 10,
+        pin: null,
+        cameoPins: [
+          { kind: 'cameo-take', uuid: 'gt-1' },
+          { kind: 'cameo', uuid: 'c-2' },
+        ],
+      },
+    ]);
+    replaceSetEntries(2, [
+      { trackId: 20, pin: null, cameoPins: [{ kind: 'cameo-take', uuid: 'gt-1' }] },
+      { trackId: 21, pin: null },
+    ]);
+    removeTracksFromSet(2, [20]); // gt-1 now dormant in set 2
+
+    degradeDeletedCameoPinsLocal('cameo-take', 'gt-1');
+
+    expect(getSetEntries(1)![0].cameoPins).toEqual([{ kind: 'cameo', uuid: 'c-2' }]);
+    expect(getSetDormantCameoPins(2)).toEqual([]);
   });
 });
