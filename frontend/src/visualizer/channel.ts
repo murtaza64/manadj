@@ -8,6 +8,7 @@
  */
 
 import type { BandLevels, EnergyTrend } from './bands';
+import type { CycleMode, SoloVerdict } from './soloReview';
 
 export const VISUALIZER_CHANNEL = 'manadj-visualizer';
 
@@ -31,6 +32,8 @@ export interface VisualizerPing {
   presetId?: string;
   /** Active preset's resolved param values (modal sliders mirror them). */
   params?: Record<string, number>;
+  /** Auto-cycle mode (the modal's cycle controls mirror it). */
+  cycleMode?: CycleMode;
 }
 
 /** Main window → viz: remote preset switch (realtime-visualization 03) —
@@ -46,6 +49,21 @@ export interface VisualizerSetParam {
   presetId: string;
   paramId: string;
   value: number;
+}
+
+/** Main window → viz: solo-review action from the control modal — a
+ * verdict on the current candidate, or 'next' (manual skip + advance).
+ * The viz window executes it with its own solo-flow logic (GA event,
+ * exposure counts, param-genotype sampling). */
+export interface VisualizerSoloCommand {
+  type: 'solo-command';
+  action: SoloVerdict | 'next';
+}
+
+/** Main window → viz: set the auto-cycle mode from the control modal. */
+export interface VisualizerSetCycle {
+  type: 'set-cycle';
+  mode: CycleMode;
 }
 
 /** Beat lock from the dominant audible deck's beatgrid (ADR 0016: the grid
@@ -147,7 +165,9 @@ export type VisualizerMessage =
   | VisualizerPing
   | VisualizerFrame
   | VisualizerSetPreset
-  | VisualizerSetParam;
+  | VisualizerSetParam
+  | VisualizerSoloCommand
+  | VisualizerSetCycle;
 
 /** URL the visualizer window opens at (App.tsx pathname branch). */
 export const VISUALIZER_PATH = '/visualizer';

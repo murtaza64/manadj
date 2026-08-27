@@ -89,6 +89,10 @@ def _analysis_enabled() -> bool:
     return os.getenv("DISABLE_ANALYSIS_WORKER", "").lower() not in ("true", "1", "yes")
 
 
+def _stems_enabled() -> bool:
+    return os.getenv("DISABLE_STEMS_WORKER", "").lower() not in ("true", "1", "yes")
+
+
 def _build_task_worker() -> "TaskWorker | None":
     """The task worker (ADR-0003): waveform generation always, downloads if configured."""
     import logging
@@ -112,6 +116,14 @@ def _build_task_worker() -> "TaskWorker | None":
     else:
         logging.getLogger("backend.main").info(
             "native analysis disabled via DISABLE_ANALYSIS_WORKER"
+        )
+
+    if _stems_enabled():
+        from .stems_tasks import STEM_SPLIT_TASK_TYPE, make_stem_split_handler
+        handlers[STEM_SPLIT_TASK_TYPE] = make_stem_split_handler()
+    else:
+        logging.getLogger("backend.main").info(
+            "stem splitting disabled via DISABLE_STEMS_WORKER"
         )
 
     # Routine mining (ADR 0035, routines 157): cheap event-log replay, no
@@ -192,6 +204,19 @@ async def startup_event():
             db = SessionLocal()
             try:
                 enqueue_missing_analysis(db)
+            finally:
+                db.close()
+
+        # Sweep: any active Track lacking current stems gets a stem-split
+        # task — unless the backlog exceeds the guard (full-library splits
+        # belong to scripts/backfill_stems.py, not the serial worker).
+        if _stems_enabled():
+            from .database import SessionLocal
+            from .stems_tasks import enqueue_missing_stems
+
+            db = SessionLocal()
+            try:
+                enqueue_missing_stems(db)
             finally:
                 db.close()
 

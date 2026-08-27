@@ -48,6 +48,12 @@ warn_unused_configs = true
 line-length = 100
 target-version = "py313"
 
+[tool.uv]
+# stems is a default group so plain `uv run` never prunes demucs from the venv
+# (the split pipeline invokes it as a subprocess; the backend never imports it —
+# see backend/stems.py import-hygiene note, stems map #118 / #149).
+default-groups = ["dev", "stems"]
+
 [tool.uv.sources]
 madmom = { git = "https://github.com/CPJKU/madmom" }
 beat-this = { git = "https://github.com/CPJKU/beat_this" }
@@ -57,4 +63,7 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.0.1",
     "watchfiles>=1.2.0",
+]
+stems = [
+    "demucs>=4.0.1",
 ]
