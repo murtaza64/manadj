@@ -137,7 +137,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
               width: '8px',
               height: '8px',
               borderRadius: '50%',
-              background: 'var(--red)'
+              background: 'var(--danger)'
             }} />
           )}
         </div>
@@ -266,7 +266,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
             // Active filter = accent border (inline wins over the CSS
             // hover, so the accent holds — unified vocabulary)
             ...(filters.selectedKeyCamelotIds.length > 0
-              ? { borderColor: getAverageKeyColor(filters.selectedKeyCamelotIds) || 'var(--mauve)' }
+              ? { borderColor: getAverageKeyColor(filters.selectedKeyCamelotIds) || 'var(--accent)' }
               : {}),
           }}
         >
@@ -296,7 +296,7 @@ export default function FilterBar({ totalTracks, filteredCount, loadedByDeck }: 
           style={{
             minWidth: '60px',
             ...(filters.bpmCenter !== null
-              ? { borderColor: getBpmColor(filters.bpmCenter) || 'var(--mauve)' }
+              ? { borderColor: getBpmColor(filters.bpmCenter) || 'var(--accent)' }
               : {}),
           }}
         >

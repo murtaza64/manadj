@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.2);
 }
 
@@ -34,7 +34,7 @@
   z-index: 1;
   background: var(--mantle);
   border: 1px solid var(--surface0);
-  padding: 16px;
+  padding: var(--space-16);
   min-width: 420px;
   max-width: 500px;
 }
@@ -42,15 +42,15 @@
 .follow-modal-reference-section {
   background: var(--base);
   border: 1px solid var(--surface0);
-  padding: 12px;
-  margin-bottom: 16px;
+  padding: var(--space-12);
+  margin-bottom: var(--space-16);
 }
 
 .follow-modal-criteria-item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: var(--space-8);
+  padding: var(--space-12);
   background: var(--base);
   border: 1px solid var(--surface0);
 }
@@ -73,24 +73,23 @@
 
 .follow-modal-energy-presets {
   display: flex;
-  gap: 8px;
+  gap: var(--space-8);
   flex-wrap: wrap;
 }
 
 .follow-modal-energy-preset-btn {
-  padding: 6px 12px;
+  padding: var(--space-6) var(--space-12);
   background: var(--surface0);
   color: var(--text);
   border: 1px solid var(--surface1);
   cursor: pointer;
-  font-size: 12px;
-  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: var(--font-body);
 }
 
 .follow-modal-energy-preset-btn.active {
-  background: var(--blue);
+  background: var(--accent);
   color: var(--base);
-  border-color: var(--blue);
+  border-color: var(--accent);
   font-weight: bold;
 }
 
@@ -99,7 +98,7 @@
 }
 
 .follow-modal-energy-preset-btn.active:hover:not(:disabled) {
-  background: var(--blue);
+  background: var(--accent);
   opacity: 0.9;
 }
 
@@ -109,29 +108,27 @@
 }
 
 .follow-modal-preview-text {
-  font-size: 12px;
-  color: var(--green);
-  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: var(--font-body);
+  color: var(--success);
   font-weight: bold;
 }
 
 .follow-modal-footer {
   display: flex;
-  gap: 12px;
+  gap: var(--space-12);
   justify-content: flex-end;
-  padding-top: 12px;
-  margin-top: 16px;
+  padding-top: var(--space-12);
+  margin-top: var(--space-16);
   border-top: 1px solid var(--surface0);
 }
 
 .follow-modal-action-btn {
-  padding: 6px 16px;
+  padding: var(--space-6) var(--space-16);
   background: var(--surface0);
   color: var(--text);
   border: 1px solid var(--surface1);
   cursor: pointer;
-  font-size: 13px;
-  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: var(--font-body);
 }
 
 .follow-modal-action-btn:hover {
@@ -139,13 +136,8 @@
 }
 
 .follow-modal-action-btn-primary {
-  background: var(--green);
+  background: var(--success);
   color: var(--base);
-  border-color: var(--green);
+  border-color: var(--success);
   font-weight: bold;
-}
-
-.follow-modal-action-btn-primary:hover {
-  background: var(--teal);
-  border-color: var(--teal);
 }

@@ -43,9 +43,9 @@
 .topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-12);
   height: 40px;
-  padding: 0 10px;
+  padding: 0 var(--space-12);
   background: var(--crust);
   border-bottom: 1px solid var(--surface1);
   flex-shrink: 0;
@@ -80,13 +80,13 @@
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .topbar-group {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .topbar-divider {
@@ -106,15 +106,14 @@
 .topbar-segment {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   height: 24px;
-  padding: 0 10px;
+  padding: 0 var(--space-12);
   background: transparent;
   border: 1px solid var(--overlay0);
   border-right-width: 0;
   color: var(--subtext0);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .topbar-segment:last-of-type {
@@ -122,50 +121,50 @@
 }
 
 .topbar-segment-icon {
-  font-size: 13px;
+  font-size: var(--font-body);
   font-weight: 700;
   line-height: 1;
 }
 
 .topbar-segment-label {
-  font-size: 10px;
+  font-size: var(--font-micro);
   font-weight: 800;
   letter-spacing: 0.08em;
   line-height: 1;
 }
 
 .topbar-segment:hover {
-  color: var(--blue);
+  color: var(--accent);
 }
 
 .topbar-segment.active {
-  background: var(--blue);
-  border-color: var(--blue);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--base);
 }
 
 /* Overflow trigger: a quiet ⋯ segment until an overflow mode is active,
    then it wears that mode's icon + label (kept narrow either way). */
 .topbar-segment-overflow {
-  padding: 0 8px;
+  padding: 0 var(--space-8);
 }
 
 .topbar-segment-overflow.open:not(.active) {
-  color: var(--blue);
-  border-color: var(--blue);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .topbar-mode-menu-scrim {
   position: fixed;
   inset: 0;
-  z-index: 950;
+  z-index: var(--z-overlay);
 }
 
 .topbar-mode-menu {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 951;
+  z-index: calc(var(--z-overlay) + 1);
   display: flex;
   flex-direction: column;
   min-width: 200px;
@@ -177,15 +176,14 @@
 .topbar-mode-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   height: 30px;
-  padding: 0 10px;
+  padding: 0 var(--space-12);
   background: transparent;
   border: 0;
   color: var(--subtext0);
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
 }
 
 .topbar-mode-menu-item:hover {
@@ -194,7 +192,7 @@
 }
 
 .topbar-mode-menu-item.active {
-  background: var(--blue);
+  background: var(--accent);
   color: var(--base);
 }
 
@@ -203,7 +201,7 @@
 }
 
 .topbar-mode-menu-title {
-  font-size: 10px;
+  font-size: var(--font-micro);
   font-weight: 600;
   color: var(--overlay1);
   white-space: nowrap;
@@ -225,21 +223,20 @@
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--subtext0);
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: 800;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .topbar-quantize:hover {
-  border-color: var(--green);
-  color: var(--green);
+  border-color: var(--success);
+  color: var(--success);
 }
 
 .topbar-quantize.on {
-  background: var(--green);
-  border-color: var(--green);
+  background: var(--success);
+  border-color: var(--success);
   color: var(--base);
 }
 
@@ -257,12 +254,12 @@
 .topbar-recorder select,
 .topbar-recorder button {
   height: 24px;
-  padding: 0 6px;
+  padding: 0 var(--space-6);
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--subtext0);
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--font-micro);
   font-weight: 800;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -273,8 +270,8 @@
 .topbar-recorder button:disabled { cursor: wait; opacity: 0.65; }
 
 .topbar-recorder button:hover:not(:disabled) {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .topbar-record-dot,
@@ -282,18 +279,18 @@
   display: inline-block;
   width: 7px;
   height: 7px;
-  background: var(--red);
+  background: var(--danger);
 }
 
 .topbar-record-dot { border-radius: 50%; }
 .topbar-recorder.recording .topbar-record-stop {
   min-width: 58px;
-  background: var(--red);
-  border-color: var(--red);
+  background: var(--danger);
+  border-color: var(--danger);
   color: var(--base);
 }
 .topbar-recorder.recording .topbar-record-stop:hover {
-  background: color-mix(in srgb, var(--red) 80%, var(--base));
+  background: color-mix(in srgb, var(--danger) 80%, var(--base));
   color: var(--base);
 }
 .topbar-recorder.recording .topbar-record-square { background: var(--base); }
@@ -302,19 +299,19 @@
    joined pair; SAVE and × join instead. */
 .topbar-recorder.ready select { border-right-width: 1px; }
 .topbar-recorder.ready .topbar-record-retry {
-  border-color: var(--yellow);
-  color: var(--yellow);
+  border-color: var(--warning);
+  color: var(--warning);
 }
 .topbar-recorder.ready .topbar-record-retry:hover:not(:disabled) {
-  border-color: var(--yellow);
-  color: var(--yellow);
-  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+  border-color: var(--warning);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
 }
 .topbar-recorder.ready .topbar-record-retry + button { border-left-width: 0; }
 .topbar-record-error {
-  margin: 0 6px;
-  color: var(--red);
-  font-size: 12px;
+  margin: 0 var(--space-6);
+  color: var(--danger);
+  font-size: var(--font-body);
   font-weight: 900;
   line-height: 1;
 }
@@ -328,19 +325,18 @@
 .topbar-ownership {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   height: 24px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--overlay0);
-  font-size: 10px;
+  font-size: var(--font-micro);
   font-weight: 700;
   letter-spacing: 0.08em;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 /* Muted DECKS: the shared default — glanceable, not clickable. */
@@ -349,22 +345,22 @@
 }
 
 .topbar-ownership.set-playing {
-  background: var(--green);
-  border-color: var(--green);
+  background: var(--success);
+  border-color: var(--success);
   color: var(--base);
 }
 
 /* Paused Conductor STILL holds the claim (ADR 0024) — never hide it.
    Yellow: the one state people would otherwise misread as "free". */
 .topbar-ownership.set-paused {
-  background: var(--yellow);
-  border-color: var(--yellow);
+  background: var(--warning);
+  border-color: var(--warning);
   color: var(--base);
 }
 
 .topbar-ownership.audition {
-  background: var(--mauve);
-  border-color: var(--mauve);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--base);
 }
 
@@ -372,8 +368,8 @@
    the decks right now; green like a playing set, click = jump to the
    replayed Session's playhead. */
 .topbar-ownership.replay {
-  background: var(--green);
-  border-color: var(--green);
+  background: var(--success);
+  border-color: var(--success);
   color: var(--base);
 }
 
@@ -381,7 +377,7 @@
    REPLAY, AUDITION), the vinyl glyph (◉, same as the Practice verb) while
    the decks are in human hands (DECKS). */
 .topbar-ownership-icon {
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1;
 }
 
@@ -397,7 +393,7 @@
 .topbar-routing {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 /* Topbar knobs run a notch smaller than the deck MIX-zone ones. */
@@ -415,7 +411,7 @@
 .topbar-routing-bus-group {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-4);
 }
 
 .topbar-routing-bus {
@@ -427,20 +423,20 @@
   max-width: 150px;
   height: 24px;
   box-sizing: border-box;
-  padding: 0 4px;
+  padding: 0 var(--space-4);
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--subtext0);
   /* base.css inherits the app font into button/input but not select */
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--font-micro);
   font-weight: 700;
   text-overflow: ellipsis;
 }
 
 .topbar-routing-bus.missing select {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* MIDI Controller badge: passive status, lit while a mapped controller is
@@ -448,9 +444,9 @@
 .topbar-midi {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   height: 24px;
-  font-size: 10px;
+  font-size: var(--font-micro);
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--overlay0);
@@ -462,16 +458,15 @@
   width: 8px;
   height: 8px;
   background: var(--surface2);
-  transition: background 0.15s, box-shadow 0.15s;
 }
 
 .topbar-midi.on {
-  color: var(--green);
+  color: var(--success);
 }
 
 .topbar-midi.on .topbar-midi-dot {
-  background: var(--green);
-  box-shadow: 0 0 6px var(--green);
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
 }
 
 /* ── Visualizer (realtime-visualization 01/02) ─────────────────────── */
@@ -485,33 +480,32 @@
 .topbar-visualizer {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-4);
   height: 24px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--subtext0);
-  font-size: 10px;
+  font-size: var(--font-micro);
   font-weight: 800;
   letter-spacing: 0.08em;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .topbar-visualizer-icon {
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1;
 }
 
 .topbar-visualizer:hover {
-  border-color: var(--mauve);
-  color: var(--mauve);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .topbar-visualizer.on {
-  background: var(--mauve);
-  border-color: var(--mauve);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--base);
 }
 
@@ -523,13 +517,12 @@
   border: 1px solid var(--overlay0);
   border-left-width: 0;
   color: var(--subtext0);
-  font-size: 12px;
+  font-size: var(--font-body);
   line-height: 1;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
 }
 
 .topbar-visualizer-caret:hover {
-  border-color: var(--mauve);
-  color: var(--mauve);
+  border-color: var(--accent);
+  color: var(--accent);
 }

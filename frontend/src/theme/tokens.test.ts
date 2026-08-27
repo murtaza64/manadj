@@ -1,15 +1,16 @@
-/** Design tokens (gh#199): installTheme projects every token onto :root,
- * and the no-visual-change guarantee — every var the retired
- * styles/variables.css defined is still installed with the same value. */
+/** Design tokens (gh#199): installTheme projects every token onto :root.
+ * The gh#199 no-visual-change baseline was retired by the gh#200 sweep:
+ * legacy aliases (--font-xs..xl, --space-xs..xl, deprecated accents) are
+ * deleted and motion tokens retuned to their D8/D9 values. This test now
+ * guards the surviving var values and the retirement itself. */
 import { describe, expect, it } from 'vitest';
 
 import { DECK_COLORS } from './deckColors';
 import { CSS_VARS, hexToGlFloats, installTheme } from './tokens';
 
-/** styles/variables.css at its retirement (gh#199) — the regression
- * baseline. Retunes are step-2 work (gh#200) and must update this test
- * deliberately. */
-const RETIRED_VARIABLES_CSS: Record<string, string> = {
+/** Vars that survived the gh#200 sweep, at their post-sweep values.
+ * Retunes must update this test deliberately. */
+const STABLE_VARS: Record<string, string> = {
   '--base': '#1e1e1e',
   '--mantle': '#181818',
   '--crust': '#111111',
@@ -22,14 +23,6 @@ const RETIRED_VARIABLES_CSS: Record<string, string> = {
   '--overlay0': '#6c7086',
   '--overlay1': '#7f849c',
   '--overlay2': '#9399b2',
-  '--blue': '#4a9eff',
-  '--sapphire': '#00b8d4',
-  '--green': '#5ed75e',
-  '--teal': '#26c6b8',
-  '--yellow': '#f9e2af',
-  '--red': '#ff4466',
-  '--mauve': '#b366ff',
-  '--lavender': '#7a7aff',
   '--hc-1': '#1e90ff',
   '--hc-2': '#ffd400',
   '--hc-3': '#ff8800',
@@ -43,25 +36,45 @@ const RETIRED_VARIABLES_CSS: Record<string, string> = {
   '--energy-3': '#ff9933',
   '--energy-4': '#ff4444',
   '--energy-5': '#ff0000',
-  '--space-xs': '4px',
-  '--space-sm': '8px',
-  '--space-md': '12px',
-  '--space-lg': '16px',
-  '--space-xl': '24px',
-  '--font-xs': '13px',
-  '--font-sm': '14px',
-  '--font-md': '16px',
-  '--font-lg': '20px',
-  '--font-xl': '24px',
   '--radius': '0',
-  '--transition-fast': '0.15s ease',
-  '--transition-normal': '0.2s ease',
+  // D8/D9 durations (retuned from the pre-sweep 0.15s/0.2s in gh#200)
+  '--transition-fast': '0.1s ease',
+  '--transition-normal': '0.15s ease',
 };
 
+/** Deleted by the gh#200 sweep (DESIGN.md kill list). Installing any of
+ * these again is a regression — consumers must use semantic tokens. */
+const RETIRED_VARS = [
+  '--blue',
+  '--sapphire',
+  '--green',
+  '--teal',
+  '--yellow',
+  '--red',
+  '--mauve',
+  '--lavender',
+  '--space-xs',
+  '--space-sm',
+  '--space-md',
+  '--space-lg',
+  '--space-xl',
+  '--font-xs',
+  '--font-sm',
+  '--font-md',
+  '--font-lg',
+  '--font-xl',
+];
+
 describe('tokens', () => {
-  it('still installs every retired variables.css var with the same value', () => {
-    for (const [name, value] of Object.entries(RETIRED_VARIABLES_CSS)) {
+  it('installs every surviving var with its post-sweep value', () => {
+    for (const [name, value] of Object.entries(STABLE_VARS)) {
       expect(CSS_VARS[name], name).toBe(value);
+    }
+  });
+
+  it('no longer installs the retired legacy aliases (gh#200)', () => {
+    for (const name of RETIRED_VARS) {
+      expect(CSS_VARS[name], name).toBeUndefined();
     }
   });
 

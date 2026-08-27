@@ -170,7 +170,7 @@ function parseCueColor(color: string | null | undefined): [number, number, numbe
  * cue palette, warmer than the grey gridlines. */
 const RESET_MARK_COLOR: [number, number, number] = [1.0, 0.82, 0.4];
 
-/** Playhead pink (var(--pink)) — shared by the playhead bar and the
+/** Playhead pink (var(--playhead)) — shared by the playhead bar and the
  * beatjump target guides, which are playhead-relative by meaning. */
 const PLAYHEAD_COLOR: [number, number, number] = [0.96, 0.76, 0.91];
 

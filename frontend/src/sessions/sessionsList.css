@@ -2,75 +2,75 @@
    project style — green marks the live/persisted-record family. */
 
 .sessions-list {
-  padding: 16px 20px;
+  padding: var(--space-16) var(--space-16);
   overflow-y: auto;
   height: 100%;
-  background: var(--crust, #111);
+  background: var(--crust);
 }
 
 .sessions-list-empty {
-  color: #888;
-  padding: 32px 8px;
-  font-size: 14px;
+  color: var(--overlay1);
+  padding: var(--space-24) var(--space-8);
+  font-size: var(--font-large);
 }
 
 .sessions-list-error {
-  color: #ff2d55;
-  padding: 8px;
-  font-size: 12px;
+  color: var(--danger);
+  padding: var(--space-8);
+  font-size: var(--font-body);
 }
 
 .sessions-list-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 .sessions-list-table th {
   text-align: left;
-  color: #777;
+  color: var(--overlay0);
   font-weight: 500;
-  font-size: 11px;
+  font-size: var(--font-small);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  padding: 6px 10px;
-  border-bottom: 1px solid #26263a;
+  padding: var(--space-6) var(--space-8);
+  border-bottom: 1px solid var(--surface0);
 }
 
 .sessions-list-table td {
-  padding: 7px 10px;
-  border-bottom: 1px solid #1a1a28;
+  padding: var(--space-8) var(--space-8);
+  border-bottom: 1px solid var(--surface0);
 }
 
 .session-when {
-  color: #999;
+  color: var(--overlay2);
   white-space: nowrap;
 }
 
 .session-duration {
-  color: #ccc;
+  color: var(--subtext1);
   white-space: nowrap;
 }
 
 .session-duration.live {
-  color: #00ff6a;
+  color: var(--success);
   font-weight: 700;
 }
 
 .session-takes {
-  color: #00e5ff;
+  color: var(--accent);
 }
 
 .session-delete {
   background: none;
   border: none;
-  color: #555;
+  color: var(--overlay0);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 
 .session-delete:hover {
-  color: #ff2d55;
+  color: var(--danger);
 }
 
 /* Rows open the timeline (sessions 04). */
@@ -78,13 +78,13 @@
   cursor: pointer;
 }
 .session-row.openable:hover td {
-  background: rgba(0, 229, 255, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .session-tracks {
-  color: #a6e3a1;
+  color: var(--success);
   font-variant-numeric: tabular-nums;
 }
 .session-tracks-loading {
-  color: var(--overlay0, #6c7086);
+  color: var(--overlay0);
 }
