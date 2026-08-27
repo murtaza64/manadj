@@ -30,6 +30,11 @@ import type { StyleParams } from './styles';
 
 export interface WaveformRendererConfig {
   isMinimapMode?: boolean;
+  /** Transparent background (performance-mode 09 review): background
+   * pixels get alpha 0 so an UNDERLAY (the fader area fill) shows through
+   * without tinting the waveform body. The container must paint the BG
+   * color itself. */
+  transparentBackground?: boolean;
   /** Position of the fixed playhead in follow mode (0.0-1.0, default 0.25). */
   playMarkerPosition?: number;
   /** Draw a time/bar readout on the overlay canvas (main waveform only). */
@@ -226,6 +231,24 @@ uniform float u_modSplit;  // 1 = split lobes (see BODY_MAIN split comment)
 uniform float u_modPlayheadT; // split mode: track-sec boundary of the played past
 uniform float u_modStart;  // track-seconds range covered by u_modTex
 uniform float u_modSpan;
+// Stem masking (stems #213): per-stem texture sets, LOD-identical to the
+// mix (padded upstream), combined per texel with a per-COLUMN mask
+// sampled from u_stemMaskTex — the EQ modulation idiom, so the mask
+// carries history: behind the playhead it is what was actually heard,
+// ahead it is the live kill state. Lobe split (u_stemLobeSplit=1, the
+// deck strip): ahead of the playhead the BOTTOM lobe shows the raw mix
+// (ground truth); everything else shows the masked composite.
+uniform sampler2D u_stemPeaks; // RGBA = the 4 stems' broadband peaks
+uniform sampler2D u_stemLo0; uniform sampler2D u_stemLo1;
+uniform sampler2D u_stemLo2; uniform sampler2D u_stemLo3;
+uniform sampler2D u_stemHi0; uniform sampler2D u_stemHi1;
+uniform sampler2D u_stemHi2; uniform sampler2D u_stemHi3;
+uniform sampler2D u_stemMaskTex;
+uniform float u_stemMaskStart;
+uniform float u_stemMaskSpan;
+uniform float u_stemOn;
+uniform float u_stemLobeSplit;
+uniform float u_opaqueBg; // 0 = transparent background (underlay fill)
 in vec2 v_uv;
 out vec4 fragColor;
 
@@ -236,6 +259,40 @@ float fetch1(sampler2D tex, int texel) {
 }
 vec4 fetch4(sampler2D tex, int texel) {
   return texelFetch(tex, ivec2(texel % ${TEX_WIDTH}, texel / ${TEX_WIDTH}), 0);
+}
+
+// Set once per fragment in main (stems #213): whether to combine stems,
+// and with which per-stem gains (the column's mask).
+bool g_stems = false;
+vec4 g_mask = vec4(1.0);
+// Combination math mirrors blob.ts compositeStemWaveforms (the executable
+// spec): values are raw (gamma-quantized); combine in the linear domain —
+// peaks as a clamped weighted sum, bands as a weighted power sum — and
+// return to the raw domain so the callers' amp() applies as usual.
+float fetchPeakV(int texel) {
+  if (!g_stems) return fetch1(u_peakTex, texel);
+  float a = dot(g_mask, pow(fetch4(u_stemPeaks, texel), vec4(u_invGamma)));
+  return pow(min(a, 1.0), 1.0 / u_invGamma);
+}
+vec4 fetchLoV(int texel) {
+  if (!g_stems) return fetch4(u_bandLoTex, texel);
+  vec4 e = vec4(0.0);
+  vec4 a;
+  a = pow(fetch4(u_stemLo0, texel), vec4(u_invGamma)); e += g_mask.r * a * a;
+  a = pow(fetch4(u_stemLo1, texel), vec4(u_invGamma)); e += g_mask.g * a * a;
+  a = pow(fetch4(u_stemLo2, texel), vec4(u_invGamma)); e += g_mask.b * a * a;
+  a = pow(fetch4(u_stemLo3, texel), vec4(u_invGamma)); e += g_mask.a * a * a;
+  return pow(min(sqrt(e), vec4(1.0)), vec4(1.0 / u_invGamma));
+}
+vec4 fetchHiV(int texel) {
+  if (!g_stems) return fetch4(u_bandHiTex, texel);
+  vec4 e = vec4(0.0);
+  vec4 a;
+  a = pow(fetch4(u_stemHi0, texel), vec4(u_invGamma)); e += g_mask.r * a * a;
+  a = pow(fetch4(u_stemHi1, texel), vec4(u_invGamma)); e += g_mask.g * a * a;
+  a = pow(fetch4(u_stemHi2, texel), vec4(u_invGamma)); e += g_mask.b * a * a;
+  a = pow(fetch4(u_stemHi3, texel), vec4(u_invGamma)); e += g_mask.a * a * a;
+  return pow(min(sqrt(e), vec4(1.0)), vec4(1.0 / u_invGamma));
 }
 
 // Pick the pyramid level so a pixel column covers <= 8 elements.
@@ -261,7 +318,7 @@ float peakColumn(float t0, float t1) {
   int i0 = clamp(int(floor(t0 * pps / scale)), 0, count - 1);
   int i1 = clamp(int(floor(t1 * pps / scale)), i0, min(i0 + 8, count - 1));
   float m = 0.0;
-  for (int i = i0; i <= i1; i++) m = max(m, fetch1(u_peakTex, u_peakOffsets[level] + i));
+  for (int i = i0; i <= i1; i++) m = max(m, fetchPeakV(u_peakOffsets[level] + i));
   return amp(m);
 }
 
@@ -275,10 +332,10 @@ void bands8At(float t, out float b[8]) {
   int i0 = clamp(int(floor(fIdx)), 0, count - 1);
   int i1 = min(i0 + 1, count - 1);
   float fr = clamp(fIdx - float(i0), 0.0, 1.0) * u_smooth;
-  vec4 lo = mix(fetch4(u_bandLoTex, u_bandOffsets[level] + i0),
-                fetch4(u_bandLoTex, u_bandOffsets[level] + i1), fr);
-  vec4 hi = mix(fetch4(u_bandHiTex, u_bandOffsets[level] + i0),
-                fetch4(u_bandHiTex, u_bandOffsets[level] + i1), fr);
+  vec4 lo = mix(fetchLoV(u_bandOffsets[level] + i0),
+                fetchLoV(u_bandOffsets[level] + i1), fr);
+  vec4 hi = mix(fetchHiV(u_bandOffsets[level] + i0),
+                fetchHiV(u_bandOffsets[level] + i1), fr);
   b[0] = amp(lo.r); b[1] = amp(lo.g); b[2] = amp(lo.b); b[3] = amp(lo.a);
   b[4] = amp(hi.r); b[5] = amp(hi.g); b[6] = amp(hi.b); b[7] = amp(hi.a);
 }
@@ -300,8 +357,8 @@ void bands8Column(float t0, float t1, out float b[8]) {
   vec4 lo = vec4(0.0);
   vec4 hi = vec4(0.0);
   for (int i = i0; i <= i1; i++) {
-    lo += fetch4(u_bandLoTex, u_bandOffsets[level] + i);
-    hi += fetch4(u_bandHiTex, u_bandOffsets[level] + i);
+    lo += fetchLoV(u_bandOffsets[level] + i);
+    hi += fetchHiV(u_bandOffsets[level] + i);
   }
   float inv = 1.0 / float(i1 - i0 + 1);
   lo *= inv;
@@ -362,7 +419,17 @@ const BODY_MAIN = `
 void main() {
   float px = u_visibleSeconds / u_canvasWidth;
   float t0 = u_startTime + v_uv.x * u_visibleSeconds;
-  if (t0 < 0.0 || t0 > u_duration) { fragColor = vec4(BG * 0.6, 1.0); return; }
+  if (t0 < 0.0 || t0 > u_duration) {
+    fragColor = u_opaqueBg > 0.5 ? vec4(BG * 0.6, 1.0) : vec4(0.0);
+    return;
+  }
+  // Stem masking (stems #213): same lobes/playhead rule as the EQ split —
+  // ahead of the playhead the bottom lobe stays the raw mix (strip only).
+  g_stems = u_stemOn > 0.5 &&
+    (t0 < u_modPlayheadT || v_uv.y > 0.5 || u_stemLobeSplit < 0.5);
+  if (g_stems) {
+    g_mask = texture(u_stemMaskTex, vec2((t0 - u_stemMaskStart) / u_stemMaskSpan, 0.5));
+  }
   // Amplitude coordinate: mirrored (center) or edge-anchored half-waveforms.
   float yA = u_anchor == 0 ? abs(v_uv.y - 0.5) * 2.0
            : u_anchor == 1 ? 1.0 - v_uv.y
@@ -381,7 +448,14 @@ void main() {
   }
   g = clamp(g, 0.0, 1.0);
   vec3 c = styleColor(yA, p, g, b);
-  fragColor = vec4(BG + (c - BG) * u_brightness, 1.0);
+  vec3 col = BG + (c - BG) * u_brightness;
+  // Transparent-background mode: background pixels (style output ≈ BG)
+  // drop out so the underlay (fader area fill) shows below the body
+  // without tinting it. Coverage from the style's own deviation from BG;
+  // premultiplied output.
+  float aDev = max(max(abs(c.r - BG.r), abs(c.g - BG.g)), abs(c.b - BG.b));
+  float a = u_opaqueBg > 0.5 ? 1.0 : clamp(aDev * 24.0, 0.0, 1.0);
+  fragColor = vec4(col * a, a);
 }`;
 
 // Overlay pass: plain position+color triangles in pixel space (ported from
@@ -509,6 +583,17 @@ export class WaveformRendererV2 {
   // Modulation (transition-editor rows).
   private modulation: WaveformModulation | null = null;
   private modSplit = false;
+  /** Per-stem textures (stems #213): one RGBA peaks texture (4 stems in
+   * the channels) + per-stem lo/hi band textures. Null = no masking. */
+  private stemTex: { peaks: TexBinding; lo: TexBinding[]; hi: TexBinding[] } | null = null;
+  /** Per-column stem mask (u_stemMaskTex): the column's track time in,
+   * per-stem gains out — history behind the playhead, live ahead (the
+   * caller's callback owns that, like the modulation closure). */
+  private stemMaskAt: ((t: number) => readonly number[]) | null = null;
+  private stemLobeSplit = true;
+  private stemMaskTex: WebGLTexture | null = null;
+  private transparentBg = false;
+  private stemMaskScratch = new Uint8Array(MOD_TEX_WIDTH * 4);
   private modTex: WebGLTexture | null = null;
   private modScratch = new Uint8Array(MOD_TEX_WIDTH * 4);
 
@@ -554,7 +639,8 @@ export class WaveformRendererV2 {
     // reads brighter while the played wash below carries the contrast.
     this.brightness =
       Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) * (this.isMinimap ? 0.65 : 1);
-    const gl = canvas.getContext('webgl2');
+    this.transparentBg = config.transparentBackground ?? false;
+    const gl = canvas.getContext('webgl2', { alpha: this.transparentBg });
     if (!gl) throw new Error('WebGL 2 not supported');
     this.gl = gl;
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -591,6 +677,46 @@ export class WaveformRendererV2 {
       data.duration,
     );
     this.beatgridCache = null; // beat x-positions depend on track duration
+    this.markDirty();
+  }
+
+  /** Per-stem waveforms (stems #213): 4 decoded blobs, LOD-identical to
+   * the mix blob (padded upstream). Uploaded once per Load — stem toggles
+   * touch only the per-frame mask texture. Null clears stem masking. */
+  public setStemWaveforms(stems: DecodedWaveform[] | null): void {
+    const { gl } = this;
+    if (this.stemTex) {
+      gl.deleteTexture(this.stemTex.peaks.tex);
+      for (const b of [...this.stemTex.lo, ...this.stemTex.hi]) gl.deleteTexture(b.tex);
+      this.stemTex = null;
+    }
+    if (stems && stems.length === 4) {
+      // Interleave the 4 stems' peak packs into one RGBA pack (texture-unit
+      // budget: 16 total; this keeps the whole stem apparatus at 10 units).
+      const base = stems[0].peaks;
+      const interleaved = new Uint8Array(base.data.length * 4);
+      for (let s = 0; s < 4; s++) {
+        const d = stems[s].peaks.data;
+        for (let i = 0; i < d.length; i++) interleaved[i * 4 + s] = d[i];
+      }
+      const peaksPack: LodPack = { ...base, data: interleaved };
+      this.stemTex = {
+        peaks: this.uploadPack(null, peaksPack, 4),
+        lo: stems.map((d) => this.uploadPack(null, d.bandsLo, 4)),
+        hi: stems.map((d) => this.uploadPack(null, d.bandsHi, 4)),
+      };
+    }
+    this.markDirty();
+  }
+
+  /** The per-column mask source + lobe behavior (strip splits lobes ahead
+   * of the playhead; the minimap masks everywhere). */
+  public setStemMask(
+    maskAt: ((t: number) => readonly number[]) | null,
+    lobeSplit = true
+  ): void {
+    this.stemMaskAt = maskAt;
+    this.stemLobeSplit = lobeSplit;
     this.markDirty();
   }
 
@@ -922,6 +1048,32 @@ export class WaveformRendererV2 {
     this.uploadLod(prog, 'u_peak', this.peakTex!.pack);
     this.uploadLod(prog, 'u_band', this.bandLoTex!.pack);
 
+    // Stem masking (stems #213): per-stem sets on units 4-15, the mask on
+    // unit 3's neighbor (unit 3 is the modTex; mask rides the LAST unit).
+    const stemOn = this.stemTex !== null && this.stemMaskAt !== null;
+    gl.uniform1f(u('u_stemOn'), stemOn ? 1 : 0);
+    gl.uniform1f(u('u_stemLobeSplit'), this.stemLobeSplit ? 1 : 0);
+    if (stemOn) {
+      const sets = this.stemTex!;
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, sets.peaks.tex);
+      gl.uniform1i(u('u_stemPeaks'), 4);
+      for (let i = 0; i < 4; i++) {
+        gl.activeTexture(gl.TEXTURE5 + i);
+        gl.bindTexture(gl.TEXTURE_2D, sets.lo[i].tex);
+        gl.activeTexture(gl.TEXTURE9 + i);
+        gl.bindTexture(gl.TEXTURE_2D, sets.hi[i].tex);
+        gl.uniform1i(u(`u_stemLo${i}`), 5 + i);
+        gl.uniform1i(u(`u_stemHi${i}`), 9 + i);
+      }
+      this.uploadStemMask(view);
+      gl.activeTexture(gl.TEXTURE13);
+      gl.bindTexture(gl.TEXTURE_2D, this.stemMaskTex);
+      gl.uniform1i(u('u_stemMaskTex'), 13);
+      gl.uniform1f(u('u_stemMaskStart'), view.startTime);
+      gl.uniform1f(u('u_stemMaskSpan'), view.visibleSeconds);
+    }
+
     // Modulation texture (sampled fresh each frame: window and automation
     // both move; 1024 callback samples is well within frame budget).
     gl.uniform1f(u('u_modEnabled'), this.modulation ? 1 : 0);
@@ -964,6 +1116,7 @@ export class WaveformRendererV2 {
     gl.uniform3f(u('u_colorMid'), ...colors[1]);
     gl.uniform3f(u('u_colorHigh'), ...colors[2]);
     gl.uniform1i(u('u_anchor'), this.anchor === 'center' ? 0 : this.anchor === 'top' ? 1 : 2);
+    gl.uniform1f(u('u_opaqueBg'), this.transparentBg ? 0 : 1);
     gl.uniform1f(u('u_brightness'), this.brightness);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -1001,6 +1154,35 @@ export class WaveformRendererV2 {
       s[i * 4 + 3] = Math.max(0, Math.min(255, (m.gain / MOD_RANGE) * 255));
     }
     gl.bindTexture(gl.TEXTURE_2D, this.modTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MOD_TEX_WIDTH, 1, gl.RGBA, gl.UNSIGNED_BYTE, s);
+  }
+
+  /** Per-frame stem mask (stems #213): one texel per column, sampled from
+   * the caller's mask callback — history behind the playhead, live ahead
+   * (the callback owns that boundary, exactly like the modulation fn). */
+  private uploadStemMask(view: FrameView): void {
+    const { gl } = this;
+    gl.activeTexture(gl.TEXTURE13);
+    if (!this.stemMaskTex) {
+      this.stemMaskTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.stemMaskTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, MOD_TEX_WIDTH, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    }
+    const fn = this.stemMaskAt!;
+    const s = this.stemMaskScratch;
+    for (let i = 0; i < MOD_TEX_WIDTH; i++) {
+      const t = view.startTime + ((i + 0.5) / MOD_TEX_WIDTH) * view.visibleSeconds;
+      const m = fn(t);
+      s[i * 4] = m[0] ? 255 : 0;
+      s[i * 4 + 1] = m[1] ? 255 : 0;
+      s[i * 4 + 2] = m[2] ? 255 : 0;
+      s[i * 4 + 3] = m[3] ? 255 : 0;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.stemMaskTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MOD_TEX_WIDTH, 1, gl.RGBA, gl.UNSIGNED_BYTE, s);
   }
 
@@ -1635,6 +1817,12 @@ export class WaveformRendererV2 {
     for (const b of [this.peakTex, this.bandLoTex, this.bandHiTex]) {
       if (b) gl.deleteTexture(b.tex);
     }
+    if (this.stemTex) {
+      gl.deleteTexture(this.stemTex.peaks.tex);
+      for (const b of [...this.stemTex.lo, ...this.stemTex.hi]) gl.deleteTexture(b.tex);
+      this.stemTex = null;
+    }
+    if (this.stemMaskTex) gl.deleteTexture(this.stemMaskTex);
     this.peakTex = this.bandLoTex = this.bandHiTex = null;
     if (this.modTex) gl.deleteTexture(this.modTex);
     if (this.overlayProgram) gl.deleteProgram(this.overlayProgram);

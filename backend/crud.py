@@ -268,6 +268,10 @@ def create_track(db: Session, track: schemas.TrackCreate):
     # ... and native grid+key Analysis (ADR 0024, same pattern).
     from .analysis_tasks import enqueue_analysis_task
     enqueue_analysis_task(db, db_track.id)
+    # ... and stems (stems #195, same pattern): new imports split on
+    # arrival, so the deck's stem controls are live by the first Load.
+    from .stems_tasks import enqueue_stem_split
+    enqueue_stem_split(db, db_track.id)
 
     return db_track
 

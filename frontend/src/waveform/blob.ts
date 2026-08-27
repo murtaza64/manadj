@@ -99,7 +99,34 @@ const SUPPORTED_VERSIONS = [1, 2]; // identical layout; v2 = multi-resolution wi
 /** Fixed header size: 40 bytes + 9 edge floats + 2 count u32s. */
 const MIN_BLOB_BYTES = 40 + 9 * 4 + 8;
 
+/** The blob's raw arrays, pre-LOD-packing — the compositing substrate
+ * (stems #213). `peaks`/`bands` view the source buffer (no copy). */
+export interface ParsedWaveformArrays {
+  header: WaveformBlobHeader;
+  peaks: Uint8Array;
+  /** Frame-major [bandCount × nBands]. */
+  bands: Uint8Array;
+}
+
 export function decodeWaveformBlob(buf: ArrayBuffer): DecodedWaveform {
+  const parsed = parseWaveformArrays(buf);
+  return packWaveformArrays(parsed);
+}
+
+/** LOD-pack parsed arrays into the renderer's DecodedWaveform shape. */
+export function packWaveformArrays(parsed: ParsedWaveformArrays): DecodedWaveform {
+  const { header, peaks, bands } = parsed;
+  const { peakCount, bandCount, nBands } = header;
+  return {
+    header,
+    peaks: buildLodPack(peaks, peakCount, 1, 'max'),
+    bandsLo: buildLodPack(sliceBands(bands, bandCount, nBands, 0), bandCount, 4, 'mean'),
+    bandsHi: buildLodPack(sliceBands(bands, bandCount, nBands, 4), bandCount, 4, 'mean'),
+    duration: header.duration,
+  };
+}
+
+export function parseWaveformArrays(buf: ArrayBuffer): ParsedWaveformArrays {
   if (buf.byteLength < MIN_BLOB_BYTES) {
     throw new Error(`waveform blob: truncated (${buf.byteLength} bytes)`);
   }
@@ -142,13 +169,92 @@ export function decodeWaveformBlob(buf: ArrayBuffer): DecodedWaveform {
     version, sampleRate, duration, peakHop, bandHop, stftWindow,
     nBands, gamma, bandEdges, peakCount, bandCount,
   };
+  return { header, peaks: peaksRaw, bands: bandsRaw };
+}
+
+/** Pad/trim a parsed blob to exact counts (stems #213): the renderer's
+ * per-stem texture sets must be LOD-identical to the mix blob's, sharing
+ * one set of level uniforms. Missing frames read as silence. */
+export function padParsedWaveform(
+  parsed: ParsedWaveformArrays,
+  target: { peakCount: number; bandCount: number }
+): ParsedWaveformArrays {
+  const { header, peaks, bands } = parsed;
+  const nBands = header.nBands;
+  if (header.peakCount === target.peakCount && header.bandCount === target.bandCount) {
+    return parsed;
+  }
+  const outPeaks = new Uint8Array(target.peakCount);
+  outPeaks.set(peaks.subarray(0, Math.min(peaks.length, target.peakCount)));
+  const outBands = new Uint8Array(target.bandCount * nBands);
+  outBands.set(bands.subarray(0, Math.min(bands.length, target.bandCount * nBands)));
   return {
-    header,
-    peaks: buildLodPack(peaksRaw, peakCount, 1, 'max'),
-    bandsLo: buildLodPack(sliceBands(bandsRaw, bandCount, nBands, 0), bandCount, 4, 'mean'),
-    bandsHi: buildLodPack(sliceBands(bandsRaw, bandCount, nBands, 4), bandCount, 4, 'mean'),
-    duration,
+    header: { ...header, peakCount: target.peakCount, bandCount: target.bandCount },
+    peaks: outPeaks,
+    bands: outBands,
   };
+}
+
+/**
+ * REFERENCE implementation of the stem-composite math (stems #213): the
+ * shader's per-texel combination (WaveformRendererV2 fetch wrappers) must
+ * agree with this — peaks clamped linear sum, bands power sum — and the
+ * unit tests here are the executable spec. Runtime compositing happens
+ * GPU-side (per-column mask texture), so this is not on any hot path.
+ *
+ * Composite per-stem waveforms into one DecodedWaveform for the ACTIVE
+ * stems (stems #213). Dequantizes through the stored gamma, combines —
+ * peaks as a clamped linear sum (per-bin max-abs of a sum is bounded by
+ * the sum of maxes; exact when stems peak in phase), bands as a power sum
+ * sqrt(Σa²) (exact for uncorrelated content) — and requantizes. Frame
+ * counts may differ by a frame across stems; the composite uses the min.
+ */
+export function compositeStemWaveforms(
+  stems: ParsedWaveformArrays[],
+  active: boolean[],
+  /** Pad/trim to these counts (stems #213 split mode: the renderer's
+   * second texture set must be LOD-identical to the mix blob's). */
+  target?: { peakCount: number; bandCount: number }
+): DecodedWaveform {
+  if (stems.length === 0) throw new Error('compositeStemWaveforms: no stems');
+  const head = stems[0].header;
+  const invGamma = 1 / head.gamma;
+  // Dequant LUT: stored q -> linear amplitude.
+  const amp = new Float32Array(256);
+  for (let q = 0; q < 256; q++) amp[q] = Math.pow(q / 255, invGamma);
+
+  const availPeaks = Math.min(...stems.map((s) => s.header.peakCount));
+  const availBands = Math.min(...stems.map((s) => s.header.bandCount));
+  const peakCount = target?.peakCount ?? availPeaks;
+  const bandCount = target?.bandCount ?? availBands;
+  const nBands = head.nBands;
+
+  const peakSum = new Float32Array(peakCount);
+  const bandPow = new Float32Array(bandCount * nBands);
+  const peakLimit = Math.min(peakCount, availPeaks);
+  const bandLimit = Math.min(bandCount, availBands) * nBands;
+  for (let i = 0; i < stems.length; i++) {
+    if (!active[i]) continue;
+    const sp = stems[i].peaks;
+    for (let f = 0; f < peakLimit; f++) peakSum[f] += amp[sp[f]];
+    const sb = stems[i].bands;
+    for (let f = 0; f < bandLimit; f++) {
+      const a = amp[sb[f]];
+      bandPow[f] += a * a;
+    }
+  }
+
+  const peaks = new Uint8Array(peakCount);
+  for (let f = 0; f < peakCount; f++) {
+    peaks[f] = Math.round(Math.min(1, peakSum[f]) ** head.gamma * 255);
+  }
+  const bands = new Uint8Array(bandCount * nBands);
+  for (let f = 0; f < bandCount * nBands; f++) {
+    bands[f] = Math.round(Math.min(1, Math.sqrt(bandPow[f])) ** head.gamma * 255);
+  }
+
+  const header: WaveformBlobHeader = { ...head, peakCount, bandCount };
+  return packWaveformArrays({ header, peaks, bands });
 }
 
 /** Repack frame-major band bytes into RGBA texels for bands [first..first+4). */

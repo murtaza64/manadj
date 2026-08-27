@@ -25,6 +25,9 @@ import { useScrubTransport } from '../../hooks/useScrubTransport';
 import { useViewActive } from '../../contexts/viewActive';
 import WebGLWaveform from '../WebGLWaveform';
 import WaveformMinimap from '../WaveformMinimap';
+import { useStemWaveforms } from '../../waveform/useStemWaveform';
+import { ALL_ON, stemMaskHistoryFor } from '../../performance/stemMaskHistory';
+import type { StemMask } from '../../performance/stemMaskHistory';
 import TagPill from '../TagPill';
 import { TransportPair } from '../deckControls/TransportPair';
 import { HotCuePads } from '../deckControls/HotCuePads';
@@ -50,7 +53,7 @@ import { getBpmColor, getKeyColor } from '../../utils/displayColors';
 import { setKeyLockFlag } from '../../playback/keyLockStore';
 import { DECK_KEYS } from './performanceKeys';
 import { CHANNEL_IDS, STEM_NAMES } from '../../playback/mixer';
-import type { StemName } from '../../playback/mixer';
+import type { ChannelId, StemName } from '../../playback/mixer';
 
 /** Stem kill-switch labels (stems #210): compact, hardware-ish. */
 const STEM_LABELS: Record<StemName, string> = {
@@ -71,6 +74,102 @@ const MATCH_HINT_MS = 2000;
  * panel reads through the query cache (seeded with the loaded snapshot) and
  * edits invalidate ['track', id].
  */
+/** Stem-row affordance (stems review): for a loaded stem-less track, a
+ * hover swaps the disabled kill buttons for EXTRACT STEMS — enqueues a
+ * stem-split task, polls has_stems, then offers a one-click reload of
+ * this deck (the Load is what flips it onto the stems path). */
+function useStemRowState(
+  loadedTrack: Track | null,
+  stemsLoaded: boolean,
+  loadTrack: (track: Track) => void
+) {
+  const [hovered, setHovered] = useState(false);
+  const [extracting, setExtracting] = useState<number | null>(null);
+  const [ready, setReady] = useState<Track | null>(null);
+  const trackId = loadedTrack?.id ?? null;
+
+  // New load resets the affordance.
+  useEffect(() => {
+    setExtracting(null);
+    setReady(null);
+  }, [trackId]);
+
+  // Poll while a split is in flight (the task takes ~20-40s).
+  useEffect(() => {
+    if (extracting === null) return;
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await api.tracks.getById(extracting);
+        if (fresh.has_stems) {
+          setReady(fresh);
+          setExtracting(null);
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [extracting]);
+
+  const wantsAffordance = trackId !== null && !stemsLoaded;
+  let action: { label: string; title: string; disabled: boolean; run: () => void } | null = null;
+  if (wantsAffordance && ready) {
+    action = {
+      label: 'STEMS READY — RELOAD',
+      title: 'Stems extracted; reload the track to use them',
+      disabled: false,
+      run: () => loadTrack(ready),
+    };
+  } else if (wantsAffordance && extracting !== null) {
+    action = {
+      label: 'SPLITTING…',
+      title: 'Stem separation running (~30s)',
+      disabled: true,
+      run: () => {},
+    };
+  } else if (wantsAffordance && hovered) {
+    action = {
+      label: 'EXTRACT STEMS',
+      title: 'Split this track into stems (background task)',
+      disabled: false,
+      run: () => {
+        if (trackId === null) return;
+        setExtracting(trackId);
+        api.tracks.extractStems(trackId).catch(() => setExtracting(null));
+      },
+    };
+  }
+  return {
+    action,
+    onHover: () => setHovered(true),
+    onLeave: () => setHovered(false),
+  };
+}
+
+/** The EFFECTIVE live stem mask (stems #213): an automation lane that
+ * holds stems wins (ADR 0022), else the user's kill state. Returns a
+ * stable-when-unchanged callback for per-frame sampling. */
+function useLiveStemMask(deck: ChannelId): () => StemMask {
+  const mixer = useMixer();
+  const cache = useRef<{ src: unknown; mask: StemMask }>({ src: null, mask: ALL_ON });
+  return useCallback(() => {
+    const stems =
+      mixer.getAutomation(deck)?.stems ?? mixer.getChannelState(deck).stems;
+    if (stems !== cache.current.src) {
+      cache.current = {
+        src: stems,
+        mask: [
+          stems.vocals ? 1 : 0,
+          stems.drums ? 1 : 0,
+          stems.bass ? 1 : 0,
+          stems.other ? 1 : 0,
+        ],
+      };
+    }
+    return cache.current.mask;
+  }, [mixer, deck]);
+}
+
 function useDeckTrack(): Track | null {
   const { loadedTrack } = useDeck();
   const { data } = useQuery<Track>({
@@ -125,6 +224,21 @@ export function DeckWaveform({
 
   const transport = useScrubTransport();
   const mixer = useMixer();
+  // Stem waveforms (stems #213): per-stem textures + a per-column mask
+  // sampled per frame — history behind the playhead (what was actually
+  // heard, the EQ-modulation idiom), the live kill state ahead. Toggles
+  // touch nothing heavy: no recomposite, no texture churn.
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
+  const stemWaveforms = useStemWaveforms(loadedTrack?.id ?? null, stemsLoaded);
+  const liveStemMask = useLiveStemMask(deck);
+  const stemHistory = stemMaskHistoryFor(deck);
+  useEffect(() => {
+    stemHistory.clear();
+  }, [stemHistory, loadedTrack?.id]);
+  const stemMaskAt = useCallback(
+    (t: number) => stemHistory.at(t, liveStemMask()),
+    [stemHistory, liveStemMask]
+  );
   const viewActive = useViewActive();
   // The deck's channel state (replaced immutably on every mixer move):
   // wakes the idle waveform loop so a PAUSED deck retints instantly on
@@ -227,7 +341,10 @@ export function DeckWaveform({
     let raf = 0;
     let idleTimer = 0;
     let lastDrawKey = '';
-    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, 0.12)`;
+    // Underlay now (performance-mode 09 review): the GL strip renders a
+    // transparent background, so the fill sits BELOW the waveform — deck
+    // identity without tinting the body. Slightly more opaque to carry.
+    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, 0.18)`;
     const schedule = (active: boolean) => {
       if (active) raf = requestAnimationFrame(loop);
       else idleTimer = window.setTimeout(loop, 250);
@@ -238,6 +355,7 @@ export function DeckWaveform({
       const live = liveStrip();
       const advancing = snap.playing || snap.previewing;
       historyRef.current.record(playhead, advancing, live);
+      stemHistory.record(playhead, advancing, liveStemMask());
 
       const canvas = fillCanvasRef.current;
       let didDraw = false;
@@ -298,8 +416,15 @@ export function DeckWaveform({
     <div
       className={`perf-wave-row deck-${deck.toLowerCase()}${showFocus ? ' focused' : ''}${machineHeld ? ' machine' : ''}`}
     >
+      {/* Fader area fill UNDERLAY (see fillCss note): the GL strip has a
+          transparent background, so the fill shows through background
+          pixels only — the waveform body is never tinted. */}
+      <canvas ref={fillCanvasRef} className="perf-wave-fader-fill" />
       <WebGLWaveform
         trackId={loadedTrack?.id ?? null}
+        stemWaveforms={stemWaveforms}
+        stemMaskAt={stemMaskAt}
+        transparentBackground
         clock={engine}
         cuePoint={cuePoint}
         loop={loop}
@@ -314,9 +439,6 @@ export function DeckWaveform({
         modulation={modulation}
         modulationSplit
       />
-      {/* Translucent overlay (the GL canvas is opaque — nothing shows
-          "behind" it); no filters over canvas layers (compositor leak). */}
-      <canvas ref={fillCanvasRef} className="perf-wave-fader-fill" />
       {showFocus ? <div className="perf-wave-focus-frame" /> : null}
     </div>
   );
@@ -506,15 +628,17 @@ function TrackZone({ track }: { track: Track | null }) {
 //   <pads bot>
 
 function PlayZone() {
-  const { deck, engine } = useDeck();
+  const { deck, engine, loadedTrack, loadTrack } = useDeck();
   // Stem kill switches (stems #210): under the hotcue pads, INSIDE the
-  // fixed-height pad band — the padcol squashes from 4 rows to 5 when the
-  // Load plays from stems, so deck height never changes. Mixer state —
+  // fixed-height pad band (5th row, all rows squashed — deck height never
+  // changes; the row is ALWAYS present so decks match). Mixer state —
   // hardware toggles repaint, capture records (#212); worklet
-  // declick-ramps every flip.
+  // declick-ramps every flip. Stem-less tracks: buttons disabled; hovering
+  // offers EXTRACT STEMS (enqueues a stem-split task, #195's machinery).
   const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
   const mixer = useMixer();
   const stems = useMixerValue((m) => m.getChannelState(deck).stems);
+  const stemRow = useStemRowState(loadedTrack, stemsLoaded, loadTrack);
   // Hand hints by side: left-side Decks (A/C) show the left-hand ('A')
   // keys, right-side (B/D) the right-hand ('B') keys.
   const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
@@ -531,7 +655,7 @@ function PlayZone() {
   return (
     <div className="perf-zone perf-zone-play">
       <div className="perf-play-inner">
-        <div className={`perf-padcol${stemsLoaded ? ' has-stems' : ''}`}>
+        <div className="perf-padcol has-stems">
           <BeatjumpRow
             backKbd={<Kbd k={keys.jumpBack} />}
             forwardKbd={<Kbd k={keys.jumpForward} />}
@@ -542,26 +666,44 @@ function PlayZone() {
               padKbd={(slot) => (slot <= 4 ? <Kbd k={keys.pads[slot - 1]} /> : null)}
             />
           </div>
-          {stemsLoaded ? (
-            <div className="perf-stemrow">
-              {STEM_NAMES.map((stem) => (
+          <div
+            className="perf-stemrow"
+            onMouseEnter={stemRow.onHover}
+            onMouseLeave={stemRow.onLeave}
+          >
+            {stemRow.action ? (
+              <button
+                className="player-button perf-stem perf-stem-action"
+                disabled={stemRow.action.disabled}
+                onClick={stemRow.action.run}
+                title={stemRow.action.title}
+              >
+                {stemRow.action.label}
+              </button>
+            ) : (
+              STEM_NAMES.map((stem) => (
                 <button
                   key={stem}
                   className={`player-button perf-stem perf-stem-${stem}${
-                    stems[stem] ? ' on' : ''
+                    stemsLoaded && stems[stem] ? ' on' : ''
                   }`}
+                  disabled={!stemsLoaded}
                   onClick={(e) =>
                     e.shiftKey
                       ? mixer.soloStem(deck, stem)
                       : mixer.setStemEnabled(deck, stem, !stems[stem])
                   }
-                  title={`${stems[stem] ? 'Kill' : 'Restore'} ${stem} — shift-click to solo`}
+                  title={
+                    stemsLoaded
+                      ? `${stems[stem] ? 'Kill' : 'Restore'} ${stem} — shift-click to solo`
+                      : 'No stems for this track'
+                  }
                 >
                   {STEM_LABELS[stem]}
                 </button>
-              ))}
-            </div>
-          ) : null}
+              ))
+            )}
+          </div>
         </div>
         <div className="perf-transport-col">
           <div className="perf-nudge">
@@ -881,6 +1023,15 @@ export function DeckPanel({
     (s) => s.playing || s.pendingPlay || s.previewing || s.hotCuePreviewSlot !== null,
   );
   const track = useDeckTrack();
+  // Stem waveforms (stems #213) — same textures/mask history as the strip.
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
+  const stemWaveforms = useStemWaveforms(track?.id ?? null, stemsLoaded);
+  const liveStemMask = useLiveStemMask(deck);
+  const stemMaskAt = useCallback(
+    (t: number) => stemMaskHistoryFor(deck).at(t, liveStemMask()),
+    [deck, liveStemMask]
+  );
+  const minimapWake = useMixerValue((m) => m.getChannelState(deck).stems);
   // Per-gesture wake (#155): paused seeks repaint the minimap playhead on
   // the next frame instead of the 250ms idle poll.
   const subscribeWake = useCallback(
@@ -901,6 +1052,9 @@ export function DeckPanel({
         <div className="perf-minimap-wrap">
           <WaveformMinimap
             trackId={track?.id ?? null}
+            stemWaveforms={stemWaveforms}
+            stemMaskAt={stemMaskAt}
+            wakeKey={minimapWake}
             clock={engine}
             cuePoint={cuePoint}
             loop={loop}

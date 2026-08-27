@@ -209,6 +209,35 @@ def split_track(track_id: int, source: Path, config: StemsConfig | None = None) 
     return dest
 
 
+# --- Stem waveforms (stems #213) ------------------------------------------------
+
+
+def ensure_stem_waveform(track_id: int, stem: str, config: StemsConfig | None = None) -> Path:
+    """The stem's MWF1 waveform blob path, generating it on first request.
+
+    Lazy by design (#213): generation reuses the waveform pipeline (~1.5 s
+    per stem) and caches `{stem}.mwf` beside the m4a. No currency machinery
+    of its own — a re-split replaces the whole stems dir, so a stale .mwf
+    dies with its stale stems. Raises FileNotFoundError without the stem.
+    """
+    config = config or get_config().stems
+    directory = stems_dir(track_id, config)
+    audio = directory / f"{stem}.m4a"
+    if not audio.exists():
+        raise FileNotFoundError(audio)
+    blob_path = directory / f"{stem}.mwf"
+    if blob_path.exists():
+        return blob_path
+    from backend.waveform_data import generate_blob
+
+    blob = generate_blob(str(audio))
+    tmp = blob_path.with_suffix(".mwf.tmp")
+    tmp.write_bytes(blob)
+    tmp.replace(blob_path)
+    logger.info("generated stem waveform %s", blob_path)
+    return blob_path
+
+
 # --- Alignment gate -----------------------------------------------------------
 
 

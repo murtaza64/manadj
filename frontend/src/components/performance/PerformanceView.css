@@ -112,10 +112,21 @@
 .perf-wave-fader-fill {
   position: absolute;
   inset: 0 4px;
-  z-index: 3;
+  /* UNDERLAY (performance-mode 09 review): below the transparent-bg GL
+     canvas — deck-color fill without tinting the waveform body. */
+  z-index: 0;
   width: calc(100% - 8px);
   height: 100%;
   pointer-events: none;
+}
+/* The GL strip paints alpha-0 background pixels; the row supplies the BG
+   color the shader used to paint (vec3(0.03,0.03,0.05)). */
+.perf-wave-row {
+  background: rgb(8, 8, 13);
+}
+.perf-wave-row canvas:not(.perf-wave-fader-fill) {
+  position: relative;
+  z-index: 1;
 }
 
 /* De-emphasis is OPACITY ONLY — never `filter` (or `backdrop-filter`) over
@@ -1102,6 +1113,31 @@
   background: var(--surface0);
   border-color: var(--stem-color);
   color: var(--overlay0);
+}
+
+/* Extract-stems affordance (stems review): the row swaps to one spanning
+   action button for stem-less tracks — offer on hover, progress while the
+   split task runs, reload when done. */
+.perf-stemrow .player-button.perf-stem-action {
+  grid-column: 1 / -1; /* the row is a 4-column grid; the action spans it */
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.perf-stemrow .player-button.perf-stem-action:disabled {
+  border-color: var(--surface1);
+  color: var(--overlay0);
+  background: none;
 }
 
 /* Key Lock toggle (key-lock 03) — padlock glyph leading the foot row,
