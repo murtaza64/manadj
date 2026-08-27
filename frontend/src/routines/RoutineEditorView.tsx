@@ -60,6 +60,13 @@ import {
 } from './routineEditorModel';
 import { beatgridQueryOptions } from '../hooks/useBeatgridData';
 import { metricLadderQueryOptions } from '../hooks/useMetricLadderData';
+import {
+  MODE_KEY_HINTS,
+  MODE_LABELS,
+  MODE_TITLES,
+  useEditorMode,
+  type EditorMode,
+} from './editorMode';
 import './routineEditor.css';
 
 const LAST_ROUTINE_KEY = 'manadj-last-routine';
@@ -70,6 +77,10 @@ export default function RoutineEditorView() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const viewActive = useViewActive();
+
+  // Modal editing (ADR 0038, gh#207): mode is a working posture — it lives
+  // here in the shell so it persists across artifact switches.
+  const [editorMode, setEditorMode] = useEditorMode(viewActive);
 
   // Track rows for the load hook (deck reuse loads tracks mid-play):
   // usually already fetched; falls back to the API for a cold id.
@@ -760,6 +771,19 @@ export default function RoutineEditorView() {
           >
             {playing ? '❚❚' : armPending ? '…' : '▶'}
           </button>
+          <span className="re-modebar" role="group" aria-label="Editor mode">
+            {(['select', 'pan', 'jump'] as EditorMode[]).map((m) => (
+              <button
+                key={m}
+                className={`re-modebtn${editorMode === m ? ' on' : ''}`}
+                title={MODE_TITLES[m]}
+                onClick={() => setEditorMode(m)}
+              >
+                {MODE_LABELS[m]}
+                <kbd>{MODE_KEY_HINTS[m]}</kbd>
+              </button>
+            ))}
+          </span>
           <span className="re-beat" ref={beatReadoutRef} />
           <span className="re-history">
             <button
@@ -895,6 +919,8 @@ export default function RoutineEditorView() {
           trim={trimEnabled ? trim : null}
           onTrimChange={trimEnabled ? setTrim : null}
           onSeekBeat={onSeekBeat}
+          mode={editorMode}
+          onModeHome={() => setEditorMode('select')}
         />
       )}
     </div>
