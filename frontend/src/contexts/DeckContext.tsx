@@ -205,6 +205,14 @@ export function DeckProvider({ children }: { children: ReactNode }) {
       void engines[deck].load({
         trackId: track.id,
         audioUrl: api.tracks.audioUrl(track.id),
+        // Current stems on disk (stems #209): the deck plays the 4 stems
+        // instead of the single file, mixed in the worklet (kill switches
+        // ride on this); stem-less tracks take the unchanged single path.
+        stemUrls: track.has_stems
+          ? (['vocals', 'drums', 'bass', 'other'] as const).map((stem) =>
+              api.tracks.stemUrl(track.id, stem)
+            )
+          : null,
         bpm: track.bpm ?? null,
         savedCuePoint: track.cue_point_time ?? null,
         beatTimes,

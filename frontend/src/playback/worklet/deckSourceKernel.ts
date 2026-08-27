@@ -28,6 +28,8 @@
  */
 
 import type { LoopFrames, SourceMode } from './protocol';
+import { SingleTrackSource, StemTrackSource } from './trackSource';
+import type { TrackSource } from './trackSource';
 
 /** The worklet-internal stretcher seam (ADR 0018): feed samples, set rate,
  * transpose fixed at none. `render` fills `frames` of output whose audible
@@ -47,7 +49,7 @@ export interface StretchEngine {
    * (−0.3 dB in the first 10 ms, probe-measured) with only the track's
    * genuine pre-cue context in the OLA state. */
   prime(
-    channels: Float32Array[],
+    source: TrackSource,
     positionFrames: number,
     rate: number,
     loop: LoopFrames | null
@@ -55,7 +57,7 @@ export interface StretchEngine {
   render(
     out: Float32Array[],
     frames: number,
-    channels: Float32Array[],
+    source: TrackSource,
     positionFrames: number,
     rate: number,
     loop: LoopFrames | null
@@ -63,7 +65,7 @@ export interface StretchEngine {
 }
 
 interface Voice {
-  channels: Float32Array[];
+  source: TrackSource;
   /** Track-frames advanced per output frame at rate 1 (trackSR / outputSR). */
   srRatio: number;
   /** Position in track frames (fractional). */
@@ -87,7 +89,7 @@ interface Voice {
 const MAX_FADING_VOICES = 3;
 
 export class DeckSourceKernel {
-  private track: { channels: Float32Array[]; srRatio: number } | null = null;
+  private track: { source: TrackSource; srRatio: number } | null = null;
   private live: Voice | null = null;
   private fading: Voice[] = [];
   private readonly declickFrames: number;
@@ -113,7 +115,28 @@ export class DeckSourceKernel {
   /** Hand over a track's channel data. Future starts read the new track;
    * an in-flight declick tail keeps its captured old data. */
   setTrack(channels: Float32Array[], srRatio: number): void {
-    this.track = { channels, srRatio };
+    this.track = { source: new SingleTrackSource(channels), srRatio };
+  }
+
+  /** Hand over a track's stems (stems #209): `stems[s]` is one stem's
+   * channel data. Reads mix the stems with per-stem gains (unity on load)
+   * before either render path — one stretcher, sample-locked stems. */
+  setStems(stems: Float32Array[][], srRatio: number): void {
+    this.track = { source: new StemTrackSource(stems), srRatio };
+  }
+
+  /** Target per-stem gains, declick-ramped from the live voice's current
+   * position (both render paths read the same position-keyed ramp). A
+   * single-source track ignores this. Gains live on the track source, so
+   * a later start() (same Load) keeps the kill state; a new load resets. */
+  setStemGains(gains: number[]): void {
+    const source = this.track?.source;
+    if (!(source instanceof StemTrackSource)) return;
+    const atFrame = this.live?.position ?? 0;
+    const ramp = this.live ? this.declickFrames * this.live.srRatio : 0;
+    for (let s = 0; s < Math.min(gains.length, source.stemCount); s++) {
+      source.setGain(s, gains[s], atFrame, ramp);
+    }
   }
 
   setStretchEngine(engine: StretchEngine | null): void {
@@ -139,11 +162,11 @@ export class DeckSourceKernel {
     this.mode = mode;
     const live = this.live;
     if (!live) return;
-    const { channels, srRatio, position, startId } = live;
+    const { source, srRatio, position, startId } = live;
     this.retireLive();
     // Full-declick attack: equal-gain crossfade with the correlated tail.
     this.live = {
-      channels,
+      source,
       srRatio,
       position,
       age: 0,
@@ -162,9 +185,9 @@ export class DeckSourceKernel {
   start(positionFrames: number, startId: number): void {
     if (!this.track) return;
     this.retireLive();
-    const length = this.track.channels[0]?.length ?? 0;
+    const length = this.track.source.length;
     this.live = {
-      channels: this.track.channels,
+      source: this.track.source,
       srRatio: this.track.srRatio,
       position: Math.max(0, Math.min(positionFrames, Math.max(0, length - 1))),
       age: 0,
@@ -177,7 +200,7 @@ export class DeckSourceKernel {
 
   /** Frames in the voice's own track. */
   private static lengthOf(voice: Voice): number {
-    return voice.channels[0]?.length ?? 0;
+    return voice.source.length;
   }
 
   /** Declick-fade to silence. Idempotent. */
@@ -211,7 +234,7 @@ export class DeckSourceKernel {
       if (engine?.ready && liveAtStart.srRatio === 1) {
         if (this.primedVoice !== liveAtStart) {
           engine.prime(
-            liveAtStart.channels,
+            liveAtStart.source,
             liveAtStart.position,
             rates[0],
             this.renderLoopFor(liveAtStart)
@@ -222,7 +245,7 @@ export class DeckSourceKernel {
         engine.render(
           liveBlock,
           frames,
-          liveAtStart.channels,
+          liveAtStart.source,
           liveAtStart.position,
           rates[0],
           this.renderLoopFor(liveAtStart)
@@ -288,10 +311,10 @@ export class DeckSourceKernel {
             // attack (NOT the stab attack): the wrapped content is
             // correlated with the tail, and only the symmetric equal-gain
             // crossfade sums to unity across the wrap.
-            const { channels, srRatio, startId, mode } = voice;
+            const { source, srRatio, startId, mode } = voice;
             this.retireLive();
             this.live = {
-              channels,
+              source,
               srRatio,
               position: wrapped,
               age: 0,
@@ -353,16 +376,15 @@ export class DeckSourceKernel {
     return Math.min(1, voice.age / voice.attackFrames);
   }
 
-  /** Linear-interpolate the voice at its position into out[·][frame]. */
+  /** Linear-interpolate the voice at its position into out[·][frame].
+   * Reads go through the TrackSource seam (stems mix here, ramp-aware). */
   private mix(voice: Voice, out: Float32Array[], frame: number, gain: number): void {
     if (gain <= 0) return;
     const idx = Math.floor(voice.position);
     const frac = voice.position - idx;
     for (let c = 0; c < out.length; c++) {
-      const data = voice.channels[Math.min(c, voice.channels.length - 1)];
-      if (!data) continue;
-      const s0 = idx < data.length ? data[idx] : 0;
-      const s1 = frac > 0 && idx + 1 < data.length ? data[idx + 1] : 0;
+      const s0 = voice.source.sampleAt(c, idx);
+      const s1 = frac > 0 ? voice.source.sampleAt(c, idx + 1) : 0;
       out[c][frame] += (s0 + frac * (s1 - s0)) * gain;
     }
   }

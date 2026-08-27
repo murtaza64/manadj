@@ -106,6 +106,7 @@ function emptySnapshot(): DeckSnapshot {
     loopBeatsLabel: null,
     pendingLoopBeats: 4,
     hasBeatgrid: false,
+  stemsLoaded: false,
   };
 }
 

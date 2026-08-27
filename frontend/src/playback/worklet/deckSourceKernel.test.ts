@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DeckSourceKernel } from './deckSourceKernel';
 import type { StretchEngine } from './deckSourceKernel';
+import type { TrackSource } from './trackSource';
 
 /**
  * Pure position-bookkeeping and declick tests for the worklet kernel —
@@ -357,21 +358,20 @@ class FakeStretchEngine implements StretchEngine {
   render(
     out: Float32Array[],
     frames: number,
-    channels: Float32Array[],
+    source: TrackSource,
     positionFrames: number,
     rate: number,
     loop: { startFrames: number; endFrames: number } | null
   ): void {
     this.calls.push({ position: positionFrames, rate, frames, loop });
     for (let c = 0; c < out.length; c++) {
-      const data = channels[Math.min(c, channels.length - 1)];
       for (let i = 0; i < frames; i++) {
         // Honor the read-layer loop fold, like the real window fill.
         let idx = Math.round(positionFrames + i * rate);
         if (loop && idx >= loop.endFrames) {
           idx = loop.startFrames + ((idx - loop.endFrames) % (loop.endFrames - loop.startFrames));
         }
-        out[c][i] = idx < data.length ? -data[idx] : 0;
+        out[c][i] = -source.sampleAt(c, idx);
       }
     }
   }
@@ -688,5 +688,80 @@ describe('DeckSourceKernel track swap', () => {
     kernel.start(0, 2);
     const { out } = render(kernel, 8);
     for (let i = 1; i < 8; i++) expect(out[0][i]).toBe(newData[i]);
+  });
+});
+
+describe('DeckSourceKernel stems (stems #209)', () => {
+  /** Two mono stems: 1..n and 10·(1..n); unity sum = 11·(1..n). */
+  function stemKernel(n = 64): DeckSourceKernel {
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    const a = ramp(n);
+    const b = new Float32Array(n);
+    for (let i = 0; i < n; i++) b[i] = (i + 1) * 10;
+    kernel.setStems([[a], [b]], 1);
+    return kernel;
+  }
+
+  it('renders the unity-gain stem sum (replace-policy identity)', () => {
+    const kernel = stemKernel();
+    kernel.start(0, 1);
+    const { out } = render(kernel, 8);
+    for (let i = 0; i < 8; i++) expect(out[0][i]).toBeCloseTo((i + 1) * 11, 4);
+  });
+
+  it('setStemGains kills a stem with a declick ramp anchored at the playhead', () => {
+    const kernel = stemKernel();
+    kernel.start(0, 1);
+    render(kernel, 8); // playhead now at frame 8
+    kernel.setStemGains([1, 0]);
+    const { out } = render(kernel, DECLICK + 4);
+    // Ramp spans frames 8..8+DECLICK: stem b's contribution slopes to 0.
+    for (let i = 0; i < DECLICK; i++) {
+      const frame = 8 + i;
+      const bGain = 1 - i / DECLICK;
+      expect(out[0][i]).toBeCloseTo((frame + 1) * (1 + 10 * bGain), 3);
+    }
+    // Past the ramp: only stem a remains.
+    for (let i = DECLICK; i < DECLICK + 4; i++) {
+      expect(out[0][i]).toBeCloseTo(8 + i + 1, 3);
+    }
+  });
+
+  it('setStemGains while stopped applies instantly to the next start', () => {
+    const kernel = stemKernel();
+    kernel.setStemGains([0, 1]);
+    kernel.start(4, 1);
+    const { out } = render(kernel, 4);
+    for (let i = 0; i < 4; i++) expect(out[0][i]).toBeCloseTo((4 + i + 1) * 10, 4);
+  });
+
+  it('setStemGains is a no-op on a single-source track', () => {
+    const kernel = new DeckSourceKernel(DECLICK, 0);
+    kernel.setTrack([ramp(16)], 1);
+    kernel.setStemGains([0, 0, 0, 0]);
+    kernel.start(0, 1);
+    const { out } = render(kernel, 4);
+    expect(out[0][0]).toBeCloseTo(1, 5);
+  });
+
+  it('stretch mode reads the mixed stems through the source seam', () => {
+    const kernel = stemKernel();
+    const fake = new FakeStretchEngine();
+    kernel.setStretchEngine(fake);
+    kernel.setMode('stretch');
+    kernel.setStemGains([1, 0]); // kill stem b before starting
+    kernel.start(10, 1);
+    const { out } = render(kernel, 4);
+    // FakeStretchEngine negates source.sampleAt — only stem a audible.
+    for (let i = 0; i < 4; i++) expect(out[0][i]).toBeCloseTo(-(10 + i + 1), 4);
+  });
+
+  it('a fresh setStems resets gains to unity (kill state is per-Load)', () => {
+    const kernel = stemKernel();
+    kernel.setStemGains([0, 0]);
+    kernel.setStems([[ramp(16)], [ramp(16)]], 1);
+    kernel.start(0, 1);
+    const { out } = render(kernel, 4);
+    expect(out[0][0]).toBeCloseTo(2, 4); // both stems audible again
   });
 });

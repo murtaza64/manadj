@@ -21,6 +21,7 @@ import type {
   LoopFrames,
 } from './protocol';
 import type { StretchEngine } from './deckSourceKernel';
+import type { TrackSource } from './trackSource';
 import { fillStretchWindow } from './windowFill';
 import createSignalsmithModule from './vendor/signalsmithStretchModule';
 import type { SignalsmithWasmModule } from './vendor/signalsmithStretchModule';
@@ -85,7 +86,7 @@ class SignalsmithEngine implements StretchEngine {
    * once per stab. History before track start reads as silence — the
    * genuine context. */
   prime(
-    channels: Float32Array[],
+    source: TrackSource,
     positionFrames: number,
     rate: number,
     loop: LoopFrames | null
@@ -102,7 +103,7 @@ class SignalsmithEngine implements StretchEngine {
     let position = positionFrames - warmOut * rate;
     while (remaining > 0) {
       const frames = Math.min(WARM_BLOCK, remaining);
-      this.render(this.warmScratch, frames, channels, position, rate, loop);
+      this.render(this.warmScratch, frames, source, position, rate, loop);
       position += frames * rate;
       remaining -= frames;
     }
@@ -113,7 +114,7 @@ class SignalsmithEngine implements StretchEngine {
   render(
     out: Float32Array[],
     frames: number,
-    channels: Float32Array[],
+    source: TrackSource,
     positionFrames: number,
     rate: number,
     loop: LoopFrames | null
@@ -131,7 +132,9 @@ class SignalsmithEngine implements StretchEngine {
     const windowStart = windowEnd - this.bufferLength;
     for (let c = 0; c < this.channels; c++) {
       const heap = new Float32Array(memory, this.inPtrs[c], this.bufferLength);
-      fillStretchWindow(heap, channels[Math.min(c, channels.length - 1)], windowStart, loop);
+      // Stems mix inside the source's fillWindow (stems #209): the
+      // stretcher hears the already-mixed composite.
+      fillStretchWindow(heap, source, c, windowStart, loop);
     }
     m._seek(this.bufferLength, rate);
     m._process(0, frames);
@@ -181,6 +184,12 @@ class DeckSourceProcessor extends AudioWorkletProcessor {
       switch (command.type) {
         case 'load':
           this.kernel.setTrack(command.channels, command.sampleRate / sampleRate);
+          break;
+        case 'load-stems':
+          this.kernel.setStems(command.stems, command.sampleRate / sampleRate);
+          break;
+        case 'stem-gains':
+          this.kernel.setStemGains(command.gains);
           break;
         case 'start':
           this.kernel.start(command.positionFrames, command.startId);
