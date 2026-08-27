@@ -335,7 +335,7 @@ function TransitionEditorInner() {
       const decks = sharedDecksRef.current;
       for (const t of tracks) {
         if (decks.A.loadedTrack?.id === t.id || decks.B.loadedTrack?.id === t.id) continue;
-        prefetchTrackBuffer(mixer, t.id).catch((err) =>
+        prefetchTrackBuffer(mixer, t.id, false).catch((err) =>
           console.warn('editor open: decode-cache warm failed', t.id, err)
         );
       }

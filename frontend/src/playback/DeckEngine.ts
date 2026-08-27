@@ -26,7 +26,7 @@ import { foldLoopPlayhead, projectLoopBeats } from './loop';
 import type { LoopRegion, LoopResize } from './loop';
 import type { DeckAudioPort } from './mixer';
 import { DeckSourceNode } from './worklet/deckSourceNode';
-import { getCachedBuffer, putCachedBuffer } from './bufferCache';
+import { getCachedBuffer, getCachedStems, putCachedBuffer, putCachedStems } from './bufferCache';
 import { firstNonSilentTime, resolveInitialCue } from './cueDefaults';
 import { MAX_PITCH_RANGE_PERCENT, composeRate } from './tempo';
 
@@ -300,16 +300,20 @@ export class DeckEngine {
       let buffer: AudioBuffer | null = null;
       let stems: AudioBuffer[] | null = null;
       if (info.stemUrls && info.stemUrls.length > 0) {
-        // Stems path (stems #209, replace policy): fetch + decode all
-        // stems; the worklet mixes them. Any failure falls back to the
+        // Stems path (stems #209, replace policy): cached decodes (a set
+        // prefetch or a previous Load, #211) or fetch + decode all stems;
+        // the worklet mixes them. Any failure falls back to the
         // single-file path below — a deck must always be able to play.
-        // Cache integration is #211; this path refetches for now.
-        try {
-          stems = await this.fetchStems(info.stemUrls, abort.signal);
-        } catch (err) {
-          if (abort.signal.aborted) return;
-          console.warn('[DeckEngine] stems load failed, falling back to single file:', err);
-          stems = null;
+        stems = getCachedStems(info.trackId) ?? null;
+        if (!stems) {
+          try {
+            stems = await this.fetchStems(info.stemUrls, abort.signal);
+            putCachedStems(info.trackId, stems);
+          } catch (err) {
+            if (abort.signal.aborted) return;
+            console.warn('[DeckEngine] stems load failed, falling back to single file:', err);
+            stems = null;
+          }
         }
         if (abort.signal.aborted) return;
         if (stems) buffer = stems[0];
