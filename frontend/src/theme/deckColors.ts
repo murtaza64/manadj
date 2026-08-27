@@ -6,11 +6,11 @@
  * (green = active, blue = accent) never denote a Deck.
  *
  * TS/canvas consumers import DECK_COLORS; CSS consumers use the variables
- * installed at boot (main.tsx), one pair per fixed Deck: `--deck-a` …
- * `--deck-d` (hex) and `--deck-a-rgb` … `--deck-d-rgb` (comma-separated
- * triplets, for `rgba(var(--deck-c-rgb), 0.14)` alpha washes).
+ * installed at boot by theme/tokens.ts installTheme(), one pair per fixed
+ * Deck: `--deck-a` … `--deck-d` (hex) and `--deck-a-rgb` …
+ * `--deck-d-rgb` (comma-separated triplets, for
+ * `rgba(var(--deck-c-rgb), 0.14)` alpha washes).
  */
-import { CHANNEL_IDS } from '../playback/mixer';
 import type { ChannelId } from '../playback/mixer';
 
 export const DECK_COLORS: Record<ChannelId, string> = {
@@ -24,14 +24,4 @@ export const DECK_COLORS: Record<ChannelId, string> = {
 export function hexToRgbTriplet(hex: string): string {
   const value = parseInt(hex.slice(1), 16);
   return `${(value >> 16) & 0xff}, ${(value >> 8) & 0xff}, ${value & 0xff}`;
-}
-
-/** Install the CSS variables on the root element. Called once at boot. */
-export function installDeckColorVars(
-  root: { style: { setProperty(name: string, value: string): void } } = document.documentElement
-): void {
-  for (const deck of CHANNEL_IDS) {
-    root.style.setProperty(`--deck-${deck.toLowerCase()}`, DECK_COLORS[deck]);
-    root.style.setProperty(`--deck-${deck.toLowerCase()}-rgb`, hexToRgbTriplet(DECK_COLORS[deck]));
-  }
 }

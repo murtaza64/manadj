@@ -1,6 +1,6 @@
 /* Performance view — ultra-flat layout (perf-layout 01). Design language:
    library player — square 1px-border buttons, hot-cue squares, palette from
-   styles/variables.css. Deck = minimap header + one dense band in three
+   theme/tokens.ts (DESIGN.md). Deck = minimap header + one dense band in three
    zones (TRACK / PLAY / MIX), outer → inner; X-FADER + MASTER strip between
    the waveforms and the decks. The view is the content-sized TOP PANEL only
    (gh#165) — the shared App-level browse panel takes every remaining pixel. */

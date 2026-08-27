@@ -267,6 +267,10 @@ An independent playback unit: one loaded Track plus its transport state (playhea
 **Deck color**:
 The per-Deck identity color used across every surface: Deck A cyan, Deck B magenta (as established by the Transition editor). Identity only — state colors (green for active/playing, blue for accents) never denote a Deck, and Deck colors never denote a state. Colors for per-deck things (e.g. automation lanes) live inside the deck's hue family — near-cyan hues belong to A, near-magenta to B — with a fixed role→hue-offset shared by both decks, the deck color itself marking the deck's primary element (2026-07-05).
 
+**Design tokens**:
+The design system's named values — color roles, the type/spacing/z scales, the playhead identity registry — single-sourced (ADR 0037) and written up in `DESIGN.md`. A color in manadj is a meaning, not a literal: Deck colors mean Decks, machine orange marks machine playback (Conductor, session replay), transport pink marks the audible mix position, hotcue colors come only from the slot palette or a cue's stored color.
+_Avoid_: theme (implies switchable; manadj is dark-only)
+
 **Mixer**:
 The single shared output stage: one channel strip per Deck (trim, 3-band EQ, sweep filter, channel fader), plus crossfader, master volume, and an always-on final sample ceiling. Neutral trim is -6 dB, supplying expected two-channel summing headroom; Master has explicit unity at 50% and +6 dB at maximum; the -2 dBFS Master/Cue ceiling guards overload without changing ordinary program loudness. Each channel may be assigned to the crossfader's left side, right side, or neither; Deck identity does not determine that assignment. Mirrors a hardware DJ mixer.
 
