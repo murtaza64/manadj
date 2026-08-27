@@ -93,6 +93,28 @@ def _source_identity(source: Path) -> tuple[int, int]:
     return st.st_mtime_ns, st.st_size
 
 
+def is_current(track_id: int, source: Path, config: StemsConfig | None = None) -> bool:
+    """The currency check (#149): stale = any mismatch, and stale = absent.
+
+    Stale when meta.json is missing/unreadable, the model knob changed,
+    STEMS_VERSION was bumped, or the source file's identity (mtime+size)
+    no longer matches — replaced audio makes old stems misaligned with the
+    new file's beatgrid, so they must not be trusted. A missing source file
+    also reads as stale (the caller decides whether it is splittable at all).
+    """
+    config = config or get_config().stems
+    meta = read_meta(track_id, config)
+    if meta is None:
+        return False
+    if meta.model != config.model or meta.stems_version != STEMS_VERSION:
+        return False
+    try:
+        mtime_ns, size = _source_identity(Path(source))
+    except OSError:
+        return False
+    return meta.source_mtime_ns == mtime_ns and meta.source_size == size
+
+
 def _run(cmd: list[str], **kwargs) -> None:
     """Run a subprocess, raising with its stderr tail on failure."""
     proc = subprocess.run(cmd, capture_output=True, check=False, **kwargs)
