@@ -490,3 +490,64 @@ describe('stem kill switches (stems #210)', () => {
     expect(hints).toEqual([]);
   });
 });
+
+describe('stem applier + automation stems (stems #212)', () => {
+  const allOn = { vocals: true, drums: true, bass: true, other: true };
+  const drumsOff = { ...allOn, drums: false };
+
+  function rig() {
+    const mixer = new Mixer();
+    const applied: Array<{ channel: string; stems: Record<string, boolean> }> = [];
+    mixer.registerStemApplier((channel, stems) => applied.push({ channel, stems }));
+    applied.length = 0; // drop the registration-time asserts
+    return { mixer, applied };
+  }
+
+  it('live kills reach the applier; automation-held stems do not', () => {
+    const { mixer, applied } = rig();
+    mixer.setStemEnabled('A', 'drums', false);
+    expect(applied).toEqual([{ channel: 'A', stems: drumsOff }]);
+
+    const owner = mixer.engageAutomation();
+    mixer.setAutomation('A', {
+      fader: 1,
+      eq: { low: 0.5, mid: 0.5, high: 0.5 },
+      filter: 0,
+      stems: allOn,
+    });
+    applied.length = 0;
+    mixer.setStemEnabled('A', 'drums', true); // lane holds stems: state only
+    expect(applied).toEqual([]);
+    mixer.disengageAutomation(owner);
+  });
+
+  it('a lane with stems applies them; disengage lands base back', () => {
+    const { mixer, applied } = rig();
+    const owner = mixer.engageAutomation();
+    mixer.setAutomation('B', {
+      fader: 1,
+      eq: { low: 0.5, mid: 0.5, high: 0.5 },
+      filter: 0,
+      stems: drumsOff,
+    });
+    expect(applied).toEqual([{ channel: 'B', stems: drumsOff }]);
+    applied.length = 0;
+    mixer.disengageAutomation(owner);
+    // Base state (all on) lands on every channel.
+    expect(applied.filter((a) => a.channel === 'B')).toEqual([
+      { channel: 'B', stems: allOn },
+    ]);
+  });
+
+  it('a lane that never carries stems leaves the live kills in charge', () => {
+    const { mixer, applied } = rig();
+    mixer.setStemEnabled('C', 'bass', false);
+    applied.length = 0;
+    const owner = mixer.engageAutomation();
+    mixer.setAutomation('C', { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0 });
+    expect(applied).toEqual([]); // stems-less lane: no stem application
+    mixer.disengageAutomation(owner);
+    mixer.setStemEnabled('C', 'bass', true);
+    expect(applied[applied.length - 1]).toEqual({ channel: 'C', stems: allOn });
+  });
+});

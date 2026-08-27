@@ -507,6 +507,14 @@ function TrackZone({ track }: { track: Track | null }) {
 
 function PlayZone() {
   const { deck, engine } = useDeck();
+  // Stem kill switches (stems #210): under the hotcue pads, INSIDE the
+  // fixed-height pad band — the padcol squashes from 4 rows to 5 when the
+  // Load plays from stems, so deck height never changes. Mixer state —
+  // hardware toggles repaint, capture records (#212); worklet
+  // declick-ramps every flip.
+  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
+  const mixer = useMixer();
+  const stems = useMixerValue((m) => m.getChannelState(deck).stems);
   // Hand hints by side: left-side Decks (A/C) show the left-hand ('A')
   // keys, right-side (B/D) the right-hand ('B') keys.
   const keys = DECK_KEYS[deck === 'A' || deck === 'C' ? 'A' : 'B'];
@@ -523,7 +531,7 @@ function PlayZone() {
   return (
     <div className="perf-zone perf-zone-play">
       <div className="perf-play-inner">
-        <div className="perf-padcol">
+        <div className={`perf-padcol${stemsLoaded ? ' has-stems' : ''}`}>
           <BeatjumpRow
             backKbd={<Kbd k={keys.jumpBack} />}
             forwardKbd={<Kbd k={keys.jumpForward} />}
@@ -534,6 +542,22 @@ function PlayZone() {
               padKbd={(slot) => (slot <= 4 ? <Kbd k={keys.pads[slot - 1]} /> : null)}
             />
           </div>
+          {stemsLoaded ? (
+            <div className="perf-stemrow">
+              {STEM_NAMES.map((stem) => (
+                <button
+                  key={stem}
+                  className={`player-button perf-stem perf-stem-${stem}${
+                    stems[stem] ? ' on' : ''
+                  }`}
+                  onClick={() => mixer.setStemEnabled(deck, stem, !stems[stem])}
+                  title={`${stems[stem] ? 'Kill' : 'Restore'} ${stem}`}
+                >
+                  {STEM_LABELS[stem]}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="perf-transport-col">
           <div className="perf-nudge">
@@ -587,7 +611,6 @@ function MixZone({ track }: { track: Track | null }) {
 
   const pitch = useDeckSnapshot((s) => s.pitchPercent);
   const keyLock = useDeckSnapshot((s) => s.keyLock);
-  const stemsLoaded = useDeckSnapshot((s) => s.stemsLoaded);
 
   // Soft-takeover hints (midi-controller 18): pulse the control a
   // mismatched hardware fader/knob is reaching for. Read per control —
@@ -720,26 +743,6 @@ function MixZone({ track }: { track: Track | null }) {
           </svg>
         </button>
       </div>
-      {/* Stem kill switches (stems #210): shown only when this Load is
-          playing from stems (replace policy, #209). Mixer state — hardware
-          toggles repaint, capture records (#212). Worklet declick-ramps
-          every flip; all-on is identity with pre-stems playback. */}
-      {stemsLoaded ? (
-        <div className="perf-stemrow">
-          {STEM_NAMES.map((stem) => (
-            <button
-              key={stem}
-              className={`player-button perf-mini perf-stem perf-stem-${stem}${
-                channel.stems[stem] ? ' on' : ''
-              }`}
-              onClick={() => mixer.setStemEnabled(deck, stem, !channel.stems[stem])}
-              title={`${channel.stems[stem] ? 'Kill' : 'Restore'} ${stem}`}
-            >
-              {STEM_LABELS[stem]}
-            </button>
-          ))}
-        </div>
-      ) : null}
       <HFader
         label="VOL"
         fill

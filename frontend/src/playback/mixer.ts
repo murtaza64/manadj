@@ -166,6 +166,9 @@ export interface AutomationChannelValues {
   filter: number;
   /** Absent = the base (live user) trim applies. */
   trim?: number;
+  /** Per-stem enables (stems #212, trim precedent): absent = the live
+   * user's stem kills stay in charge during the machine tenure. */
+  stems?: Record<StemName, boolean>;
 }
 
 const FLAT_CHANNEL: ChannelState = {
@@ -614,6 +617,9 @@ export class Mixer {
     }
     this.automationOwner = null;
     this.automation = null;
+    // Stems land base state regardless of the audio graph (the applier
+    // bridge talks to deck engines, not strip nodes).
+    for (const channel of CHANNEL_IDS) this.applyStems(channel);
     const live = this.liveGraph();
     if (!live) return;
     const { ctx, strips } = live;
@@ -657,7 +663,15 @@ export class Mixer {
       return;
     }
     const prevTrim = this.automation[channel]?.trim;
+    const prevStems = this.automation[channel]?.stems;
     this.automation[channel] = values;
+    // Stems ride the lane only when present (stems #212, trim precedent):
+    // apply on change, hand back to base when a lane DROPS its stems. The
+    // applier bridge is graph-independent, so this sits before the
+    // liveGraph gate.
+    if (values.stems !== undefined || prevStems !== undefined) {
+      this.applyStems(channel);
+    }
     const live = this.liveGraph();
     if (!live) return;
     const { ctx, strips } = live;
@@ -1023,13 +1037,43 @@ export class Mixer {
     rampGain(ctx, strips[channel].pflGain.gain, on ? 1 : 0);
   }
 
+  /** The stems audio applier (stems #210/#212): the mixer owns stem STATE,
+   * but the audio lives in the deck worklet, which the mixer can't reach —
+   * DeckContext registers the bridge to the engines here. Like the strip
+   * nodes, the applier receives the EFFECTIVE stems: an automation lane
+   * that carries stems owns them (ADR 0022); base reapplies on disengage. */
+  private stemApplier: ((channel: ChannelId, stems: Record<StemName, boolean>) => void) | null =
+    null;
+
+  registerStemApplier(
+    applier: (channel: ChannelId, stems: Record<StemName, boolean>) => void
+  ): () => void {
+    this.stemApplier = applier;
+    // Assert current effective state so a late-registering bridge converges.
+    for (const channel of CHANNEL_IDS) this.applyStems(channel);
+    return () => {
+      if (this.stemApplier === applier) this.stemApplier = null;
+    };
+  }
+
+  /** Push the effective stems (automation lane if it holds them, else base)
+   * to the audio bridge. */
+  private applyStems(channel: ChannelId): void {
+    const effective = this.automation?.[channel]?.stems ?? this.channels[channel].stems;
+    this.stemApplier?.(channel, effective);
+  }
+
   /** Stem kill switch (stems #210): mixer-owned state; the deck worklet
-   * applies it (DeckContext forwards ChannelState.stems as gains). */
+   * applies it (via the registered stem applier). */
   setStemEnabled(channel: ChannelId, stem: StemName, on: boolean): void {
     const ch = this.channels[channel];
     if (ch.stems[stem] === on) return;
     this.channels[channel] = { ...ch, stems: { ...ch.stems, [stem]: on } };
     this.notify(channel);
+    // Per-CHANNEL-LANE guard like trim (sessions 15): only a lane that
+    // actually holds stems owns the worklet; base lands on disengage.
+    if (this.automation?.[channel]?.stems !== undefined) return;
+    this.applyStems(channel);
   }
 
   /** Hardware toggle (MidiMixerControls, like togglePfl). */
@@ -1046,6 +1090,8 @@ export class Mixer {
       stems: { vocals: true, drums: true, bass: true, other: true },
     };
     this.notify(channel);
+    if (this.automation?.[channel]?.stems !== undefined) return;
+    this.applyStems(channel);
   }
 
   togglePfl(channel: ChannelId): void {

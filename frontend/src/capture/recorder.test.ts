@@ -92,6 +92,12 @@ class FakeMixerSource implements CaptureMixerSource {
     this.channels[ch] = { ...this.channels[ch], fader };
     for (const fn of this.listeners) fn();
   }
+
+  killStem(ch: ChannelId, stem: 'vocals' | 'drums' | 'bass' | 'other'): void {
+    const prev = this.channels[ch];
+    this.channels[ch] = { ...prev, stems: { ...prev.stems, [stem]: false } };
+    for (const fn of this.listeners) fn();
+  }
 }
 
 function emptySnapshot(): DeckSnapshot {
@@ -1040,6 +1046,23 @@ describe('seed pitch (sessions 18)', () => {
       .slice(before)
       .filter((e): e is Extract<CaptureEvent, { kind: 'pitch' | 'bend' }> => e.kind === 'pitch');
     expect(pitches.some((e) => e.channel === 'B' && e.value === -1.5)).toBe(true);
+    r.recorder.dispose();
+  });
+});
+
+describe('stem kill capture (stems #212)', () => {
+  it('a stem kill logs a 0-valued control event for its channel', () => {
+    const r = rig();
+    r.recorder.start();
+    r.mixer.killStem('A', 'drums');
+    // (start() seeds the full control surface, so unity stemDrums events
+    // exist for every channel — the kill is the one zero.)
+    const kills = r.logged.filter(
+      (e): e is Extract<CaptureEvent, { kind: 'control' }> =>
+        e.kind === 'control' && e.control === 'stemDrums' && e.value === 0
+    );
+    expect(kills).toHaveLength(1);
+    expect(kills[0].channel).toBe('A');
     r.recorder.dispose();
   });
 });

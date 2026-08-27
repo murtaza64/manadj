@@ -573,8 +573,32 @@
 .perf-padcol {
   display: grid;
   grid-template-columns: repeat(4, 36px);
-  grid-template-rows: repeat(4, 1fr);
+  /* Fixed band height (stems #210): 4 rows at the measured 21.75px +
+     3 gaps — pinned so the stem row can join WITHOUT growing the deck.
+     minmax(0) lets rows compress below button min-content. */
+  height: 99px;
+  grid-template-rows: repeat(4, minmax(0, 1fr));
   gap: 4px;
+}
+
+/* Stems loaded: a 5th row (the stem kill switches) squashes all rows
+   above into the same 99px band — deck height never changes. */
+.perf-padcol.has-stems {
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+}
+.perf-padcol.has-stems .player-button,
+.perf-padcol.has-stems .hot-cue {
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.perf-padcol .perf-stemrow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  min-height: 0;
 }
 
 .perf-padcol .deck-jumprow { grid-column: 1 / -1; }
@@ -1044,47 +1068,36 @@
   border-color: var(--green);
 }
 
-/* Stem kill switches (stems #210) — one bright color per stem, lit while
-   the stem is audible; dark while killed. Row only renders when the deck
-   is playing from stems. */
-.perf-stemrow {
-  display: flex;
-  gap: 4px;
-  justify-content: space-between;
-}
+/* Stem kill switches (stems #210) — the hot-cue set/unset idiom: audible
+   stem = colored outline + tinted fill + colored text (like a set pad);
+   killed = grey outline, dim text (like an unset pad). Colors are the
+   --stem-* tokens (theme/tokens.ts). */
+.perf-stem-vocals { --stem-color: var(--stem-vocals); }
+.perf-stem-drums { --stem-color: var(--stem-drums); }
+.perf-stem-bass { --stem-color: var(--stem-bass); }
+.perf-stem-other { --stem-color: var(--stem-other); }
+
 .perf-stemrow .player-button.perf-stem {
-  flex: 1;
   min-width: 0;
-  padding: 2px 4px;
   font-size: 9px;
-  height: 20px;
   letter-spacing: 0.05em;
-  opacity: 0.5;
+  border: 1px solid var(--surface0);
+  color: var(--overlay0);
 }
-.perf-stem.on { opacity: 1; }
-.perf-stem-vocals.on,
-.perf-stem-vocals.on:hover:not(:disabled) {
-  background: var(--yellow);
-  color: var(--base);
-  border-color: var(--yellow);
+.perf-stemrow .player-button.perf-stem.on {
+  border-color: var(--stem-color);
+  background: color-mix(in srgb, var(--stem-color) 12%, transparent);
+  color: var(--stem-color);
 }
-.perf-stem-drums.on,
-.perf-stem-drums.on:hover:not(:disabled) {
-  background: var(--red);
-  color: var(--base);
-  border-color: var(--red);
+.perf-stemrow .player-button.perf-stem.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--stem-color) 25%, transparent);
+  border-color: var(--stem-color);
+  color: var(--stem-color);
 }
-.perf-stem-bass.on,
-.perf-stem-bass.on:hover:not(:disabled) {
-  background: var(--purple);
-  color: var(--base);
-  border-color: var(--purple);
-}
-.perf-stem-other.on,
-.perf-stem-other.on:hover:not(:disabled) {
-  background: var(--cyan);
-  color: var(--base);
-  border-color: var(--cyan);
+.perf-stemrow .player-button.perf-stem:not(.on):hover:not(:disabled) {
+  background: var(--surface0);
+  border-color: var(--stem-color);
+  color: var(--overlay0);
 }
 
 /* Key Lock toggle (key-lock 03) — padlock glyph leading the foot row,

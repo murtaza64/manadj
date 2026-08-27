@@ -86,23 +86,18 @@ export function DeckProvider({ children }: { children: ReactNode }) {
     [engines, mixer]
   );
 
-  // Stem kill switches (stems #210): mixer owns the state (MIDI, capture,
-  // automation all route through it), the deck worklet applies it — this
-  // is the forwarding seam. Channel-scoped change hints keep it cheap; the
-  // engine dedupes, so only actual stem flips reach the audio thread.
-  useEffect(() => {
-    const forward = (deck: ChannelId) => {
-      const stems = mixer.getChannelState(deck).stems;
-      engines[deck].setStemGains(STEM_NAMES.map((stem) => (stems[stem] ? 1 : 0)));
-    };
-    return mixer.subscribe((changed) => {
-      if (changed && CHANNEL_IDS.includes(changed as ChannelId)) {
-        forward(changed as ChannelId);
-      } else if (changed === undefined) {
-        for (const deck of CHANNEL_IDS) forward(deck);
-      }
-    });
-  }, [engines, mixer]);
+  // Stem kill switches (stems #210/#212): mixer owns the state (MIDI,
+  // capture, automation all route through it), the deck worklet applies it
+  // — this registered applier is the bridge. The mixer sends EFFECTIVE
+  // stems (an automation lane that holds stems wins, ADR 0022); the engine
+  // dedupes, so repeated asserts don't reach the audio thread.
+  useEffect(
+    () =>
+      mixer.registerStemApplier((deck, stems) => {
+        engines[deck].setStemGains(STEM_NAMES.map((stem) => (stems[stem] ? 1 : 0)));
+      }),
+    [engines, mixer]
+  );
 
   // Cross-deck quantized launch (cue-quantize-bpm 04): each deck's paused
   // launch (Play, Cue-hold, Hot-cue-hold) references another live Deck's

@@ -368,6 +368,11 @@ export class CaptureRecorder {
     ['eqHigh', (c) => c.eq.high],
     ['filter', (c) => c.filter],
     ['pfl', (c) => (c.pfl ? 1 : 0)],
+    // Stem kill switches (stems #212): booleans as 0/1.
+    ['stemVocals', (c) => (c.stems.vocals ? 1 : 0)],
+    ['stemDrums', (c) => (c.stems.drums ? 1 : 0)],
+    ['stemBass', (c) => (c.stems.bass ? 1 : 0)],
+    ['stemOther', (c) => (c.stems.other ? 1 : 0)],
   ];
 
   private diffMixer(changed?: MixerChange): void {
