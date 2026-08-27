@@ -165,6 +165,11 @@ export const api = {
     /** URL of a track's audio stream (for audio elements / direct fetch). */
     audioUrl: (id: number) => `${API_BASE}/tracks/${id}/audio`,
 
+    /** URL of one stem (vocals/drums/bass/other) — 404 unless the track has
+     * current stems (Track.has_stems; stems #118). */
+    stemUrl: (id: number, stem: 'vocals' | 'drums' | 'bass' | 'other') =>
+      `${API_BASE}/tracks/${id}/stems/${stem}`,
+
     list: async (
       page: number = 1,
       perPage: number = 1000,

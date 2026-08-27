@@ -211,14 +211,48 @@ describe('slot→deck driving', () => {
     expect(lanes.A?.fader).toBe(1); // slot 0 defaults open
   });
 
-  it('ends (pauses) at the routine end', () => {
+  it('plays through the tail margin; ends at duration + margin (gh#190 item 5)', () => {
     const { player, engines } = makePlayer();
     player.play();
     tickAt(31.9);
     expect(player.isPlaying()).toBe(true);
-    tickAt(32.1); // duration 64 beats = 32 s
+    // Past the window end (32 s) the exit slot keeps rolling — the
+    // boundary contract, now auditable.
+    tickAt(32.5);
+    expect(player.isPlaying()).toBe(true);
+    expect(engines.C.getSnapshot().playing).toBe(true);
+    // duration (32 s) + margin (32 beats = 16 s) = 48 s: the audition ends.
+    tickAt(48.1);
     expect(player.isPlaying()).toBe(false);
     expect(engines.A.getSnapshot().playing).toBe(false);
+  });
+
+  it('seeks roam one margin beyond either boundary (gh#190 item 5)', () => {
+    const { player, engines } = makePlayer();
+    // Lead-in: slot 0 (rolling at the window open) parks BEFORE its entry
+    // position — entry 60 track-sec, 5 s earlier at rate 1 = 55.
+    player.seek(-5);
+    expect(player.getMixTime()).toBeCloseTo(-5);
+    expect(engines.A.getPlayhead()).toBeCloseTo(55, 1);
+    // Clamp: one margin (16 s) before 0 / after the 32 s duration.
+    player.seek(-100);
+    expect(player.getMixTime()).toBeCloseTo(-16);
+    player.seek(100);
+    expect(player.getMixTime()).toBeCloseTo(48);
+  });
+
+  it('lead-in audition rolls the entry slot backward (gh#190 item 5)', () => {
+    const { player, engines, lanes } = makePlayer();
+    player.seek(-4);
+    player.play();
+    tickAt(0.1); // audio clock +0.1 s → mix time -3.9
+    expect(player.getMixTime()).toBeCloseTo(-3.9);
+    expect(player.isPlaying()).toBe(true);
+    expect(engines.A.getSnapshot().playing).toBe(true);
+    expect(engines.A.getPlayhead()).toBeCloseTo(56.1, 0);
+    // Later slots stay parked; slot 0's fader default is open.
+    expect(engines.B.getSnapshot().playing).toBe(false);
+    expect(lanes.A?.fader).toBe(1);
   });
 });
 

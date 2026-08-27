@@ -261,6 +261,11 @@
   display: block;
   width: 100%;
   border-bottom: 1px solid var(--surface0, #313244);
+  /* Vertical overflow (gh#190): rows scroll under a pinned ruler. */
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: #0b0b0b;
 }
 .rt-rows {
   position: relative;
@@ -273,10 +278,10 @@
 .rt-wave-row {
   position: relative;
 }
-/* Rows sit flush (the editor's seam rule); a 1px surface line separates
-   slot BLOCKS (wave + its strips), not wave from strips. */
+/* Slot blocks separate with real GAPS (gh#190 iteration: hierarchy —
+   a track and its lanes read as one unit, blocks read apart). */
 .rt-slotblock {
-  border-bottom: 1px solid var(--surface0, #313244);
+  margin-bottom: 14px;
 }
 .rt-wave-row canvas,
 .rt-lanestrip canvas {
@@ -285,10 +290,17 @@
 }
 
 /* Lane strips: the editor's flat #0e0e0e strip + 3px color edge + terse
-   label (transitionEditor.css .editor-lanestrip family). */
+   label (transitionEditor.css .editor-lanestrip family). A small gap
+   between strips (gh#190 iteration): a curve pinned at 0 or 100% hugs
+   its strip edge — without daylight there it reads as the neighbour's
+   line. Page background shows through the gap. */
 .rt-lanestrip {
   position: relative;
   border-top: 1px solid #1b1b1b;
+  margin-top: 3px;
+}
+.rt-wave-row + .rt-lanestrip {
+  margin-top: 4px;
 }
 .rt-laneedge {
   position: absolute;
@@ -297,6 +309,7 @@
   bottom: 0;
   width: 3px;
   pointer-events: none;
+  z-index: 3; /* above the slot panel */
 }
 .rt-lanelabel {
   position: absolute;
@@ -308,24 +321,77 @@
   letter-spacing: 0.06em;
   pointer-events: none;
   opacity: 0.9;
+  z-index: 3; /* above the slot panel */
 }
 
 /* Slot chip: identity header floating at the row's top-left. */
-.rt-slotchip {
+/* Fixed-width dim panel behind the left-side controls (gh#190): spans the
+   slot block; content scrolls behind it without distracting. Fixed width,
+   titles truncate. */
+/* The continuous tint column (gh#190 iteration): spans the whole rows
+   area so block gaps never cut it; slot panels are transparent content
+   layered over it. */
+.rt-panelcol {
   position: absolute;
-  top: 3px;
-  left: 6px;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 208px;
+  background: rgba(11, 11, 11, 0.88);
+  border-right: 1px solid var(--surface0, #313244);
+  z-index: 2;
+  box-sizing: border-box;
+}
+.rt-slotpanel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 208px;
+  z-index: 2;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  pointer-events: auto;
+}
+.rt-sp-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(11, 11, 11, 0.85);
-  border: 1px solid;
-  border-radius: 3px;
-  padding: 1px 6px 1px 1px;
-  pointer-events: none;
-  font-size: 11px;
-  max-width: 44%;
-  z-index: 3;
+  color: var(--text, #e8e8f0);
+  max-width: 100%;
+}
+.rt-sp-trunc {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.rt-sp-artist {
+  color: var(--subtext0, #a6adc8);
+  font-size: 10px;
+}
+.rt-sp-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--subtext0, #a6adc8);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.rt-sp-trim {
+  /* Bottom-right of the TRACK MAIN area (the wave row's 64px), not the
+     automation lanes below (gh#190 iteration). */
+  position: absolute;
+  right: 6px;
+  top: 26px;
+}
+.rt-sp-trim.on .perf-knob span {
+  color: var(--routine-accent);
 }
 .rt-slotnum {
   color: #0b0b0b;
@@ -333,17 +399,6 @@
   font-family: monospace;
   border-radius: 2px;
   padding: 0 5px;
-}
-.rt-slottitle {
-  color: var(--text, #e8e8f0);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.rt-slotdeck {
-  color: var(--subtext0, #a6adc8);
-  white-space: nowrap;
-  font-size: 10px;
 }
 .rt-boundary-tag {
   color: var(--routine-accent);
@@ -353,12 +408,15 @@
   white-space: nowrap;
 }
 
+
 /* Lane toggle chips (the editor's gutter idiom, floated top-right of the
    wave row). */
+/* Left-anchored (gh#190 iteration): controls live where the labels are —
+   bottom-left of the wave row, under the slot chip. */
 .rt-lanetoggles {
   position: absolute;
-  top: 3px;
-  right: 6px;
+  bottom: 3px;
+  left: 6px;
   display: flex;
   gap: 2px;
   z-index: 3;
@@ -392,7 +450,7 @@
   left: 0;
   width: 0;
   border-left: 2px solid;
-  z-index: 2;
+  z-index: 1; /* under the slot panel's dim (gh#190 iteration) */
   pointer-events: auto;
   cursor: pointer;
 }
@@ -405,6 +463,59 @@
   left: -5px;
   width: 12px;
 }
+/* Selected wave rows (gh#190 track drag): slot-colored outline; the row
+   drags as a clip while selected. */
+.rt-wave-row.rt-selected {
+  outline: 1px solid;
+  outline-offset: -1px;
+  cursor: grab;
+}
+.rt-wave-row.rt-selected:active {
+  cursor: grabbing;
+}
+
+/* Displacement editor (gh#190 redesign): 3-state direction switcher. */
+.rt-dir {
+  display: inline-flex;
+  gap: 1px;
+}
+.rt-dir button {
+  padding: 1px 5px;
+  background: transparent;
+  border: 1px solid var(--surface1, #45475a);
+  color: var(--subtext0, #a6adc8);
+  cursor: pointer;
+  font-size: 10px;
+}
+.rt-dir button.on {
+  background: var(--routine-accent);
+  border-color: var(--routine-accent);
+  color: #0b0b0b;
+}
+.rt-displacement input {
+  width: 44px;
+}
+
+/* Paired resume (▶) marker at a pause's end — smaller chip, same pole. */
+.rt-jump.rt-pause-resume .rt-jump-chip {
+  font-size: 8px;
+  padding: 0 3px;
+}
+
+/* Pause markers (gh#190 play/pause events) — the jump idiom's look;
+   authored/ghost variants mirror the jump classes. */
+.rt-jump.authored-pause {
+  border-left-style: dashed;
+}
+.rt-jump.ghost-pause {
+  opacity: 0.45;
+}
+.rt-jump.ghost-pause .rt-jump-chip {
+  background: transparent !important;
+  color: var(--subtext0, #a6adc8);
+  border: 1px dashed var(--subtext0, #a6adc8);
+}
+
 .rt-jump.authored {
   cursor: grab;
   border-left-style: double;
@@ -435,6 +546,7 @@
 .rt-jump-popover {
   position: absolute;
   top: calc(100% + 2px);
+  z-index: 7;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -485,10 +597,13 @@
   outline: 1px solid var(--surface1, #45454f);
 }
 
-/* Author/discard toggle at the strip's right edge. */
+/* Edit/discard toggle, left-anchored after the lane label (gh#190). */
 .rt-laneauthor {
   position: absolute;
-  right: 6px;
+  /* Icon-only, right-aligned inside the panel, next to the lane
+     (gh#190 iteration). 208px panel − button − margin. */
+  left: 182px;
+  z-index: 3; /* above the slot panel */
   top: 50%;
   transform: translateY(-50%);
   background: rgba(11, 11, 11, 0.8);
@@ -513,7 +628,7 @@
   width: 0;
   border-left: 2px solid var(--routine-accent);
   pointer-events: none;
-  z-index: 2;
+  z-index: 1; /* under the slot panel's dim (gh#190 iteration) */
 }
 .rt-boundarylabel {
   position: absolute;
@@ -534,7 +649,7 @@
   width: 1.5px;
   background: var(--pink, #ff2d95);
   pointer-events: none;
-  z-index: 4;
+  z-index: 1; /* under the slot panel's dim (gh#190 iteration) */
 }
 
 .rt-trimhandle {
@@ -544,7 +659,7 @@
   left: -6px;
   width: 12px;
   cursor: ew-resize;
-  z-index: 5;
+  z-index: 1; /* under the slot panel's dim (gh#190 iteration) */
 }
 .rt-trimgrip {
   position: absolute;

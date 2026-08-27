@@ -242,6 +242,7 @@ describe('buildSlotLanes / slotLanesAt', () => {
       releaseMixSec: 1e9,
       trace: [],
       lanes,
+      trim: 0.5,
       jumpMixSecs: [],
     };
     expect(slotLanesAt(slot, 8).fader).toBe(0);
@@ -263,6 +264,7 @@ describe('buildSlotLanes / slotLanesAt', () => {
       releaseMixSec: 1e9,
       trace: [],
       lanes,
+      trim: 0.5,
       jumpMixSecs: [],
     };
     expect(slotLanesAt(slot, 20).fader).toBe(1);
@@ -289,11 +291,13 @@ describe('buildSlotLanes / slotLanesAt', () => {
       releaseMixSec: 1e9,
       trace: [],
       lanes,
+      trim: 0.5,
       jumpMixSecs: [],
     };
     // No fader events on this slot → open by default (see defaults rule).
     expect(slotLanesAt(slot, 5)).toEqual({
       fader: 1,
+      trim: 0.5,
       eq: { low: 0.5, mid: 0.5, high: 0.5 },
       filter: 0,
     });

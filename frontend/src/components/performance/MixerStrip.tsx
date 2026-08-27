@@ -1,8 +1,9 @@
 /**
- * The mixer strip (perf-layout 01): X-FADER + MASTER in a slim horizontal
+ * The mixer strip (perf-layout 01): X-FADER + CUE MIX in a slim horizontal
  * row between the waveforms and the decks. Per-channel controls (TRIM/EQ/
- * FLT/VOL) live on their deck's MIX zone — the strip is all that remains of
- * the central mixer column.
+ * FLT/VOL) live on their deck's MIX zone; MASTER and PHONES gain are knobs
+ * beside the top bar's routing selects (gh#66) — the strip is all that
+ * remains of the central mixer column.
  *
  * Wired straight to the Mixer module (ADR 0009): mixer state is not React
  * state — controls are CONTROLLED components reading it through
@@ -14,11 +15,7 @@ import { useRef } from 'react';
 import { useMixer, useMixerValue } from '../../hooks/useMixer';
 import { useTakeoverHint } from '../../hooks/useTakeoverHint';
 import { takeoverKey, type TakeoverDirection } from '../../midi/takeoverFeedback';
-import {
-  CUE_LEVEL_DEFAULT,
-  CUE_MIX_DEFAULT,
-  MASTER_LEVEL_DEFAULT,
-} from '../../playback/mixer';
+import { CUE_MIX_DEFAULT } from '../../playback/mixer';
 import type { ChannelId } from '../../playback/mixer';
 import { CROSSFADER_ASSIGNMENTS } from '../../playback/crossfaderAssignmentStore';
 import { DiagonalPairLinks } from '../../links/PerformancePairLinks';
@@ -42,6 +39,8 @@ export function Knob({
   defaultValue,
   value,
   onChange,
+  title,
+  className,
   ghost = null,
   takeover = null,
 }: {
@@ -52,6 +51,10 @@ export function Knob({
   defaultValue: number;
   value: number;
   onChange: (value: number) => void;
+  /** Hover tooltip on the dial. */
+  title?: string;
+  /** Extra class(es) on the knob wrapper (size/ring variants). */
+  className?: string;
   /** Automation ghost (sets 15): a second, translucent pointer at the live
    * automation value while an overlay is engaged. Display only — never
    * affects the real pointer (base state) or gesture handling. */
@@ -73,9 +76,14 @@ export function Knob({
   const ghostAngle = ghost === null ? null : toAngle(ghost);
 
   return (
-    <div className={`perf-knob${takeover ? ` perf-takeover perf-takeover-${takeover}` : ''}`}>
+    <div
+      className={`perf-knob${className ? ` ${className}` : ''}${
+        takeover ? ` perf-takeover perf-takeover-${takeover}` : ''
+      }`}
+    >
       <div
         className="perf-knob-dial"
+        title={title}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
           drag.current = { startY: e.clientY, startValue: value };
@@ -297,20 +305,16 @@ export function MixerStrip({
 }) {
   const mixer = useMixer();
   const crossfader = useMixerValue((m) => m.getCrossfader());
-  const master = useMixerValue((m) => m.getMaster());
   // Crossfader bypass — audio truth lives in the Mixer; UI repaints
   // through the same subscription as every other mixer control.
   const xfOn = useMixerValue((m) => m.getCrossfaderEnabled());
-  // Cue bus (headphone-cue 03): blend + headphone level. Same subscription,
-  // so the hardware level knob repaints PHONES live.
+  // Cue bus (headphone-cue 03): the blend. Same subscription, so hardware
+  // moves repaint it live.
   const cueMix = useMixerValue((m) => m.getCueMix());
-  const cueLevel = useMixerValue((m) => m.getCueLevel());
   // Soft-takeover hints (midi-controller 18): pulse the control a
   // mismatched hardware knob is reaching for.
   const cueMixTakeover = useTakeoverHint(takeoverKey.cueMix());
-  const cueLevelTakeover = useTakeoverHint(takeoverKey.cueLevel());
   const crossfaderTakeover = useTakeoverHint(takeoverKey.crossfader());
-  const masterTakeover = useTakeoverHint(takeoverKey.master());
 
   return (
     <div className="perf-strip">
@@ -377,8 +381,9 @@ export function MixerStrip({
         <DiagonalPairLinks />
       </div>
       <div className="perf-strip-slot">
-        {/* All volume faders together on the right: headphone blend/level,
-            then MASTER. */}
+        {/* Headphone blend. MASTER and PHONES gain moved to the top bar's
+            routing knobs (gh#66) — the blend is the only cue control left
+            in the strip. */}
         <HFader
           label="CUE MIX"
           min={0}
@@ -388,28 +393,6 @@ export function MixerStrip({
           onChange={(v) => mixer.setCueMix(v)}
           title="Headphone blend: cue only ← → master only (double-click = cue only)"
           takeover={cueMixTakeover}
-        />
-        <HFader
-          label="PHONES"
-          min={0}
-          max={1}
-          value={cueLevel}
-          defaultValue={CUE_LEVEL_DEFAULT}
-          fill
-          onChange={(v) => mixer.setCueLevel(v)}
-          title="Headphone (cue) level"
-          takeover={cueLevelTakeover}
-        />
-        <HFader
-          label="MASTER"
-          min={0}
-          max={1}
-          value={master}
-          defaultValue={MASTER_LEVEL_DEFAULT}
-          fill
-          onChange={(v) => mixer.setMaster(v)}
-          title="Master volume (double-click = 0 dB; upper half boosts to +6 dB)"
-          takeover={masterTakeover}
         />
       </div>
     </div>

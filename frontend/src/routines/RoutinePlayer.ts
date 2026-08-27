@@ -40,6 +40,14 @@ import {
 const DRIFT_TOLERANCE_S = 0.12;
 const PITCH_EPS = 0.005;
 
+/** Audition margin beyond the Routine window, in Routine beats (gh#190
+ * item 5 — transition-editor parity: the pair editor auditions its whole
+ * arrangement, not just the transition window). BEFORE the window the
+ * window-open slots roll backward from their entry state; AFTER it the
+ * exit slot's forced trailing motion extrapolates (the boundary
+ * contract). Seeks and the transport clock both roam this range. */
+export const AUDITION_MARGIN_BEATS = 32;
+
 export interface RoutinePlayerAudio {
   mixer: Mixer;
   engines: Partial<Record<RoutineDeck, DeckEngine>>;
@@ -130,6 +138,25 @@ export class RoutinePlayer {
     return this.routine ? slotOccupyingDeckAt(this.routine, deck, t) : null;
   }
 
+  /** Slot state with the lead-in extension (gh#190 item 5): before the
+   * window a slot that is rolling at the window open (slot 0 — the entry
+   * boundary) rolls BACKWARD from its opening state at its own rate;
+   * a pre-track-start position parks at 0 (the silent-lead rule). Past
+   * the window end routineSlotStateAt already extrapolates (the exit
+   * slot's trailing motion is forced by the build). */
+  private slotStateAt(slot: PlannedRoutineSlot, t: number) {
+    const r = this.routine!;
+    if (t >= r.mixStartSec) return routineSlotStateAt(r, slot, t);
+    // Sample just inside the window: AT the boundary the trace's first
+    // point reads as parked (traceStateAt's beat <= first-point rule).
+    const s0 = routineSlotStateAt(r, slot, r.mixStartSec + 1e-3);
+    if (!s0.playing) return s0;
+    const rate = 1 + s0.pitchPercent / 100;
+    const pos = s0.trackTime + (t - r.mixStartSec) * rate;
+    if (pos < 0) return { trackTime: 0, playing: false, pitchPercent: s0.pitchPercent };
+    return { trackTime: pos, playing: true, pitchPercent: s0.pitchPercent };
+  }
+
   /** Every driven deck holds its CURRENT occupant's track, decoded. */
   ready(): boolean {
     if (!this.routine) return false;
@@ -166,6 +193,11 @@ export class RoutinePlayer {
 
   getMixDuration(): number {
     return this.routine ? this.routine.mixEndSec - this.routine.mixStartSec : 0;
+  }
+
+  /** The audition margin in mix seconds (gh#190 item 5). */
+  getMarginSec(): number {
+    return this.routine ? AUDITION_MARGIN_BEATS * this.routine.secPerBeat : 0;
   }
 
   /** Current position on the Routine clock, in beats. */
@@ -213,7 +245,10 @@ export class RoutinePlayer {
   }
 
   seek(mixTime: number): void {
-    const t = Math.max(0, Math.min(mixTime, this.getMixDuration()));
+    // The seekable range extends one margin beyond either boundary
+    // (gh#190 item 5 — audition context around the window).
+    const margin = this.getMarginSec();
+    const t = Math.max(-margin, Math.min(mixTime, this.getMixDuration() + margin));
     this.mixTimeAtAnchor = t;
     this.lastTickT = t;
     this.anchorAudioTime = this.mixer.now();
@@ -230,7 +265,7 @@ export class RoutinePlayer {
         const occupant = this.occupantAt(deck, t);
         if (!engine || !occupant) continue;
         if (!this.deckHoldsOccupant(engine, deck, occupant)) continue;
-        const state = routineSlotStateAt(this.routine, occupant, t);
+        const state = this.slotStateAt(occupant, t);
         engine.seek(Math.max(0, state.trackTime));
       }
     }
@@ -265,7 +300,7 @@ export class RoutinePlayer {
       return;
     }
     const t = this.getMixTime();
-    if (t >= this.getMixDuration()) {
+    if (t >= this.getMixDuration() + this.getMarginSec()) {
       this.pause();
       return;
     }
@@ -304,7 +339,7 @@ export class RoutinePlayer {
         if (engine.getSnapshot().playing) engine.pause();
         continue;
       }
-      const state = routineSlotStateAt(this.routine, occupant, t);
+      const state = this.slotStateAt(occupant, t);
       // Recorded discontinuity crossed since the last tick → hard-sync
       // THIS deck only (#161 per-deck jump scoping), and only within the
       // occupant's own tenure.
@@ -363,6 +398,10 @@ export class RoutinePlayer {
         fader: lanes.fader,
         eq: lanes.eq,
         filter: lanes.filter,
+        // Channel trim (gh#190): the RECORDED trim lane + the slot
+        // knob's offset (slotLanesAt folds both) — deterministic replay,
+        // never the live user trim.
+        trim: lanes.trim,
       });
     }
   }
