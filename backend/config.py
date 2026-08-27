@@ -2,8 +2,8 @@
 
 import os
 import tomllib
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from backend.acquisition.classification import ClassificationConfig
@@ -45,6 +45,24 @@ class SoulseekConfig:
 
 
 @dataclass
+class StemsConfig:
+    """Stem splitting configuration (stems map #118; storage decisions #149).
+
+    directory: on-disk stem cache root (data/stems by default) — the first
+    on-disk derived-artifact cache; filesystem is the source of truth.
+    model: demucs model name (a knob — htdemucs_ft is a candidate upgrade).
+    device: torch device for the split subprocess (cpu fallback ~3.8x realtime).
+    """
+    directory: str = ""
+    model: str = "htdemucs"
+    device: str = "mps"
+
+    def __post_init__(self) -> None:
+        if not self.directory:
+            self.directory = str(Path(__file__).parent.parent / "data" / "stems")
+
+
+@dataclass
 class AcquisitionConfig:
     """Acquisition configuration."""
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
@@ -62,6 +80,7 @@ class Config:
     soundcloud: SoundCloudConfig
     soulseek: SoulseekConfig
     acquisition: AcquisitionConfig
+    stems: StemsConfig = field(default_factory=StemsConfig)
 
 
 def _load_dotenv() -> None:
@@ -107,6 +126,17 @@ def _download_delay_secs(data: dict[str, Any]) -> float:
     return float(section.get("download_delay_secs", default))
 
 
+def _stems_config(data: dict[str, Any]) -> StemsConfig:
+    """[stems] section: directory/model/device knobs, defaults otherwise."""
+    section: dict[str, Any] = data.get("stems", {})
+    defaults = StemsConfig()
+    return StemsConfig(
+        directory=section.get("directory", "") or defaults.directory,
+        model=section.get("model", "") or defaults.model,
+        device=section.get("device", "") or defaults.device,
+    )
+
+
 def _soulseek_config(data: dict[str, Any]) -> SoulseekConfig:
     """[soulseek] slskd_url from config.toml; the API key from env/.env only."""
     section: dict[str, Any] = data.get("soulseek", {})
@@ -146,7 +176,8 @@ def load_config() -> Config:
             ),
             soundcloud=SoundCloudConfig(oauth_token=_soundcloud_token({})),
             soulseek=_soulseek_config({}),
-            acquisition=AcquisitionConfig()
+            acquisition=AcquisitionConfig(),
+            stems=_stems_config({}),
         )
 
     with open(config_path, "rb") as f:
@@ -180,7 +211,8 @@ def load_config() -> Config:
             classification=_classification_config(data),
             cleanup=_cleanup_config(data),
             download_delay_secs=_download_delay_secs(data),
-        )
+        ),
+        stems=_stems_config(data),
     )
 
 

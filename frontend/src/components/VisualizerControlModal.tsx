@@ -8,10 +8,13 @@ import {
 } from '../visualizer/presets/gen';
 import {
   getVisualizerRemote,
+  sendVisualizerCycle,
   sendVisualizerParam,
   sendVisualizerPreset,
+  sendVisualizerSolo,
   subscribeVisualizerRemote,
 } from '../visualizer/remote';
+import type { CycleMode } from '../visualizer/soloReview';
 import { isVisualizerOpen, openArena, toggleVisualizer } from '../visualizer/windowControl';
 import './VisualizerControlModal.css';
 
@@ -30,6 +33,13 @@ import './VisualizerControlModal.css';
 const LOCAL_EDIT_PRECEDENCE_MS = 1200;
 /** Genepool candidates in the switcher while the marathon runs (rt-viz 06). */
 const GEN_LISTINGS = aliveCandidateListings();
+
+/** Auto-cycle modes, mirroring the viz window's `c` hotkey states. */
+const CYCLE_CHOICES: { mode: CycleMode; label: string; title: string }[] = [
+  { mode: 'off', label: 'Off', title: 'No auto-cycle' },
+  { mode: 'timer', label: '45s', title: 'Advance every 45 seconds' },
+  { mode: 'drop', label: 'Post-drop', title: 'Advance 128 beats after each drop' },
+];
 
 export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
   const remote = useSyncExternalStore(subscribeVisualizerRemote, getVisualizerRemote);
@@ -99,6 +109,57 @@ export function VisualizerControlModal({ onClose }: { onClose: () => void }) {
           <button className="vizmodal-btn" onClick={() => openArena()}>
             Open arena
           </button>
+        </div>
+
+        <h3>Review — {remote.presetId ?? 'no preset'}</h3>
+        <div className="vizmodal-row">
+          <button
+            className="vizmodal-btn"
+            disabled={!remote.open}
+            title="Like the current candidate (viz hotkey g)"
+            onClick={() => sendVisualizerSolo('like')}
+          >
+            👍 Like
+          </button>
+          <button
+            className="vizmodal-btn"
+            disabled={!remote.open}
+            title="Dislike the current candidate (viz hotkey b)"
+            onClick={() => sendVisualizerSolo('dislike')}
+          >
+            👎 Dislike
+          </button>
+          <button
+            className="vizmodal-btn"
+            disabled={!remote.open}
+            title="Neutral verdict on the current candidate (viz hotkey m)"
+            onClick={() => sendVisualizerSolo('neutral')}
+          >
+            · Neutral
+          </button>
+          <button
+            className="vizmodal-btn"
+            disabled={!remote.open}
+            title="Skip to the next candidate — logs watch time (viz hotkey n)"
+            onClick={() => sendVisualizerSolo('next')}
+          >
+            ⏭ Next
+          </button>
+        </div>
+
+        <h3>Auto-cycle</h3>
+        <div className="vizmodal-row vizmodal-cycle">
+          {CYCLE_CHOICES.map(({ mode, label, title }) => (
+            <button
+              key={mode}
+              className={`vizmodal-btn${remote.cycleMode === mode ? ' active' : ''}`}
+              disabled={!remote.open}
+              title={title}
+              onClick={() => sendVisualizerCycle(mode)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         <h3>Presets (score)</h3>

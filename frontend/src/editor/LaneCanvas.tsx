@@ -36,9 +36,10 @@ export interface LaneGuide {
 }
 
 /** Lane-guide styling per Metric-ladder tier (bar … 16-bar). Dimmer than
- * the waveform gridlines — guides sit under automation breakpoints. */
-const GUIDE_TIER_ALPHA: readonly number[] = [0.22, 0.28, 0.36, 0.45, 0.55];
-const GUIDE_TIER_WIDTH: readonly number[] = [1.5, 1.5, 2, 2.5, 3];
+ * the waveform gridlines — guides sit under automation breakpoints.
+ * Exported (gh#190): the routine editor's recorded lane strips share it. */
+export const GUIDE_TIER_ALPHA: readonly number[] = [0.22, 0.28, 0.36, 0.45, 0.55];
+export const GUIDE_TIER_WIDTH: readonly number[] = [1.5, 1.5, 2, 2.5, 3];
 
 /** Breakpoint circle radius (uniform for all points). */
 const LANE_POINT_R = 5;

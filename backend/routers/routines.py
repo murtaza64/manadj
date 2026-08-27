@@ -99,11 +99,16 @@ def retrim_routine(
 ) -> schemas.RoutineDetail:
     """Boundary trim + mechanical re-promotion (gh#170, the v1 review
     affordance promised at confirm time): re-run promotion over the origin
-    Routine Take with the window narrowed by beat amounts from either
-    edge. The Routine row updates IN PLACE (same uuid — Set pins keep
-    their reference and re-validate against the new cast/boundaries at
-    plan time); the raw take is untouched. 422 when the origin take or
-    its Session is gone, or when the trim breaks n ≥ 3."""
+    Routine Take with the window moved by beat amounts from either edge
+    (positive narrows, negative widens — gh#170 follow-up). The amounts
+    are relative to the routine's CURRENT window (gh#190: the editor's
+    axis is the current routine clock, so a second trim must not measure
+    against the take's original bounds), which is stored on the Routine
+    and updated here; pre-#190 rows fall back to the take window once.
+    The Routine row updates IN PLACE (same uuid — Set pins keep their
+    reference and re-validate against the new cast/boundaries at plan
+    time); the raw take is untouched. 422 when the origin take or its
+    Session is gone, or when the trim breaks n ≥ 3."""
     r = db.query(models.Routine).filter(models.Routine.uuid == uuid).first()
     if r is None:
         raise HTTPException(status_code=404, detail="routine not found")
@@ -130,7 +135,24 @@ def retrim_routine(
     for chunk in s.chunks:
         events.extend(json.loads(chunk.events_json))
 
-    cast = json.loads(rt.cast_json)
+    # Measure against the routine's CURRENT window (gh#190). The cast is
+    # the routine's current cast — a prefix of the take's (end trims drop
+    # a suffix; start trims never drop). Entry instants are fixed session
+    # evidence, so current-window offsets re-derive from the take's:
+    # clamped at 0 for slots whose true entry precedes the current start
+    # (the narrow-rebase rule).
+    cur_s0 = r.window_start_s if r.window_start_s is not None else rt.window_start_s
+    cur_s1 = r.window_end_s if r.window_end_s is not None else rt.window_end_s
+    take_offsets = json.loads(rt.entry_offsets_json)
+    cast = json.loads(r.cast_json)
+    if len(cast) > len(take_offsets) or cast != json.loads(rt.cast_json)[: len(cast)]:
+        raise HTTPException(
+            status_code=422,
+            detail="routine cast no longer derives from the origin take — cannot re-promote",
+        )
+    offsets = [
+        max(0.0, rt.window_start_s + take_offsets[i] - cur_s0) for i in range(len(cast))
+    ]
     grids: dict[int, list[dict]] = {}
     for tid in cast:
         bg = db.query(models.Beatgrid).filter(models.Beatgrid.track_id == tid).first()
@@ -149,9 +171,9 @@ def retrim_routine(
         result = retrim(
             events,
             cast,
-            rt.window_start_s,
-            rt.window_end_s,
-            json.loads(rt.entry_offsets_json),
+            cur_s0,
+            cur_s1,
+            offsets,
             grids,
             payload.trim_start_beats,
             payload.trim_end_beats,
@@ -166,6 +188,8 @@ def retrim_routine(
     r.entry_positions_json = json.dumps(result.entry_positions)
     r.duration_beats = result.duration_beats
     r.events_json = json.dumps(result.events)
+    r.window_start_s = result.window_start_s
+    r.window_end_s = result.window_end_s
     # Authored edits ride the trim (gh#170 pass 2): beats rebase by the
     # start trim; entries falling outside the new span (or on dropped
     # slots) drop. Best-effort — removed-recorded-jump matches may
@@ -223,9 +247,34 @@ def _shift_edits(
         return out
     jumps = rebase(edits.get("jumps") or [], needs_delta=True)
     removed = rebase(edits.get("removedRecordedJumps") or [], needs_delta=False)
-    if not lanes and not jumps and not removed:
+    pauses = rebase(edits.get("pauses") or [], needs_delta=False)
+    removed_pauses = rebase(edits.get("removedRecordedPauses") or [], needs_delta=False)
+    # Alignment nudges (gh#190 item 6) are beat-free track-time slides —
+    # they ride the trim untouched, minus dropped slots.
+    def slot_map(key_name: str, keep) -> dict:
+        out = {}
+        for key, val in (edits.get(key_name) or {}).items():
+            try:
+                slot = int(str(key))
+            except ValueError:
+                continue
+            if slot < kept_slots and isinstance(val, (int, float)) and keep(val):
+                out[str(slot)] = val
+        return out
+
+    nudges = slot_map("nudges", lambda v: bool(v))
+    trims = slot_map("trims", lambda v: v != 0.5)
+    if not any([lanes, jumps, removed, nudges, trims, pauses, removed_pauses]):
         return None
-    return {"lanes": lanes, "jumps": jumps, "removedRecordedJumps": removed}
+    return {
+        "lanes": lanes,
+        "jumps": jumps,
+        "removedRecordedJumps": removed,
+        "pauses": pauses,
+        "removedRecordedPauses": removed_pauses,
+        "nudges": nudges,
+        "trims": trims,
+    }
 
 
 @router.delete("/{uuid}")

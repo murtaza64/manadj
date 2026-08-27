@@ -2,17 +2,14 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import { installPerfHook } from './perfHook.ts'
-import { installDeckColorVars } from './theme/deckColors.ts'
-import { installRoutineColorVars } from './theme/routineColor.ts'
+import { installTheme } from './theme/tokens.ts'
 import { hydratePersistedSettings } from './settings/persistedSettings.ts'
+import RootErrorBoundary from './components/RootErrorBoundary.tsx'
 
-// Deck colors (CONTEXT.md: Deck color): --deck-a … --deck-d (+ -rgb) come
-// from the TS source of truth so canvas and CSS consumers can't drift.
-installDeckColorVars()
-
-// The routine accent (gh#170): --routine-accent (+ -rgb, -ink), same
-// TS-source-of-truth idiom.
-installRoutineColorVars()
+// Design tokens (DESIGN.md, gh#199): every CSS custom property — neutrals,
+// accents, deck colors, hotcue palette, scales — comes from the TS source
+// of truth (theme/tokens.ts) so canvas/GL and CSS consumers can't drift.
+installTheme()
 
 // Desktop shell (Electron) detection: gates titlebar CSS (drag region,
 // traffic-light inset) in TopBar.css. See desktop/README.md.
@@ -30,7 +27,10 @@ async function boot() {
   const { default: App } = await import('./App.tsx')
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App />
+      {/* Root error boundary (gh#191): crash panel instead of blank screen. */}
+      <RootErrorBoundary>
+        <App />
+      </RootErrorBoundary>
     </StrictMode>,
   )
 }

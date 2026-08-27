@@ -1,6 +1,6 @@
 /* Performance view — ultra-flat layout (perf-layout 01). Design language:
    library player — square 1px-border buttons, hot-cue squares, palette from
-   styles/variables.css. Deck = minimap header + one dense band in three
+   theme/tokens.ts (DESIGN.md). Deck = minimap header + one dense band in three
    zones (TRACK / PLAY / MIX), outer → inner; X-FADER + MASTER strip between
    the waveforms and the decks. The view is the content-sized TOP PANEL only
    (gh#165) — the shared App-level browse panel takes every remaining pixel. */
@@ -688,6 +688,41 @@
 .perf-knob-pointer {
   position: absolute;
   inset: 0;
+}
+
+/* Size variant: TRIM (set-and-forget gain) runs smaller than the EQ knobs;
+   vertical margins keep its under-label on the row's shared baseline. */
+.perf-knob-small .perf-knob-dial {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0;
+}
+
+.perf-knob-small .perf-knob-pointer::after {
+  height: 6px;
+}
+
+/* Ring variant: FLT wears a detached double outer ring (the bipolar
+   LPF↔HPF sweep). The dial shrinks so the OUTER ring lands on the EQ
+   knobs' 22px footprint; margins keep the under-label on the row
+   baseline. Display only — never intercepts the drag. */
+.perf-knob-filter .perf-knob-dial {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0;
+}
+
+.perf-knob-filter .perf-knob-pointer::after {
+  height: 6px;
+}
+
+.perf-knob-filter .perf-knob-dial::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 1px solid var(--overlay1);
+  border-radius: 50%;
+  pointer-events: none;
 }
 
 .perf-knob-pointer::after {

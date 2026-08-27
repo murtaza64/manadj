@@ -318,10 +318,12 @@ def test_lone_double_never_seeds():
 
 def test_blend_ramp_is_not_a_double():
     # Same chain shape, but T1's fader rides a clean falling ramp through
-    # the first dwell — a crossfade in progress, not a dwell. D1 dies, the
-    # chain never reaches DOUBLE_CHAIN_MIN, nothing seeds.
+    # the first dwell — a crossfade in progress, not a dwell (the fall
+    # spans the stretch, not just the exit tail). D1 dies, the chain never
+    # reaches DOUBLE_CHAIN_MIN, nothing seeds.
     events = double_chain_events() + [
-        fader(70, "A", 0.9), fader(85, "A", 0.7), fader(98, "A", 0.52),
+        fader(62, "A", 1.0), fader(70, "A", 0.9), fader(78, "A", 0.8),
+        fader(85, "A", 0.7), fader(90, "A", 0.62), fader(98, "A", 0.52),
     ]
     # ...and drop T4 so D2+D3 can't chain on their own without D1.
     events = [e for e in events if e.get("channel") != "D"]
@@ -373,11 +375,15 @@ def test_drill_dwell_stays_excluded():
 
 def test_layered_run_with_practice_returns_never_seeds():
     # The same cascade rehearsed: T1 re-tried after an away-gap with a
-    # backseek — the section has returns (all practice), so the layered-run
-    # path must keep refusing to seed.
+    # backseek OUTSIDE any dwell (mid-dwell backjumps are performed
+    # choreography and don't flag, gh#182 — a rehearsal re-seek happens
+    # with nobody dwelling under it). The section has returns (all
+    # practice): the layered-run path keeps refusing to seed, and the
+    # cascade's own pair dwells ([T1·T2] 40–80, [T2·T3] 80–130) refuse
+    # too — a re-tried chain member means the run is a rehearsal re-run.
     events = layered_run_events() + [
-        seek(90, "A", playhead=10.0),
-        play(95, "A"), pause(110, "A"),
+        seek(131, "A", playhead=10.0),
+        play(132, "A"), pause(150, "A"),
     ]
     events = [
         e if e["t"] != 80 or e.get("action") != "pause" else pause(80, "A", playhead=75.0)
@@ -387,6 +393,43 @@ def test_layered_run_with_practice_returns_never_seeds():
     assert result.n_returns == 1
     assert result.n_practice_returns == 1
     assert result.candidates == []
+
+
+# The s49 @5140–5391 shape (gh#182): a dual-ride with the next overlap
+# arriving mid-dwell. T3 probes over the T1·T2 dwell, backjumps on its own
+# deck to cue the real entry, rides T2, and T4 closes. Every seam is a
+# triple, so v3's exactly-two sweep never saw a second dwell; the
+# backjump is a performed cue-up (mid-dwell), not rehearsal motion.
+#   T1 A: 5–130, T2 B: 40–210, T3 C: 95–115 probe + 124–210, T4 D: 160–260
+def dual_ride_events():
+    return [
+        load(5, "A", 1), play(5, "A"), pause(130, "A"),
+        load(40, "B", 2), play(40, "B"), pause(210, "B"),
+        load(95, "C", 3), play(95, "C", playhead=0.0),
+        pause(115, "C", playhead=20.0),
+        seek(122, "C", playhead=1.0),  # backjump DURING the T1·T2 dwell
+        play(124, "C"), pause(211, "C"),
+        load(160, "D", 4), play(160, "D"), pause(260, "D"),
+    ]
+
+
+def test_dwell_rides_through_third_track_entry():
+    # T3's probe and T4's arrival land mid-dwell: the T1·T2 dwell must
+    # span 40–130 (member exit), not chop at 95; T2·T3 chains on pivot T2.
+    result = mine_session(dual_ride_events(), [ORDERING])
+    assert len(result.candidates) == 1
+    c = result.candidates[0]
+    assert c.cast == [1, 2, 3, 4]
+    assert c.n_doubles >= 2
+
+
+def test_mid_dwell_backjump_is_not_practice():
+    # T3's re-entry counts as a return (away-gap 9s), but its backseek is
+    # covered by the T1·T2 dwell — a performed cue-up (gh#177/#182), so
+    # the return stays a performance return.
+    result = mine_session(dual_ride_events(), [ORDERING])
+    assert result.n_returns == 1
+    assert result.n_practice_returns == 0
 
 
 def test_cast_must_be_contiguous_in_an_ordering():

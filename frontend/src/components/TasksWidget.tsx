@@ -124,7 +124,7 @@ export function TasksWidget() {
   const pending = data?.counts.pending ?? 0;
   const failures = data?.undismissed_failures ?? 0;
   const active = running > 0 || pending > 0;
-  const label = active ? `${running} running / ${pending} pending` : 'Tasks';
+  const label = active ? `${running} running / ${pending} pending` : 'TASKS';
 
   return (
     <>

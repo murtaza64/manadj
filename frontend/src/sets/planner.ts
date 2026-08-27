@@ -1458,13 +1458,19 @@ export function planStateAtRaw(plan: SetPlan, mixTime: number): PlanState {
           playing: s.playing,
           pitchPercent: s.pitchPercent,
         };
-        // Recorded slot lanes are the authority, but they never carry
-        // trim (fader/EQ/filter only) — the covered entry's trim offset
-        // stays the baseline during the span (sets #164 precedence).
-        state.lanes[slot.deck] = withEntryTrim(
-          slotLanesAt(slot, beat),
-          plan.entries[entryIndex]?.trim ?? 0
-        );
+        // Recorded slot lanes are the authority — and since gh#190 they
+        // CARRY trim (recorded steps + the slot knob's offset). The
+        // covered entry's trim offset STACKS additively on top (the same
+        // offset-on-recording doctrine as the slot knob; sets #164's
+        // baseline rule for trimless artifacts stays in withEntryTrim).
+        {
+          const lanes = slotLanesAt(slot, beat);
+          const off = plan.entries[entryIndex]?.trim ?? 0;
+          state.lanes[slot.deck] =
+            off === 0
+              ? lanes
+              : { ...lanes, trim: Math.max(0, Math.min(1, (lanes.trim ?? 0.5) + off)) };
+        }
       }
     }
   }

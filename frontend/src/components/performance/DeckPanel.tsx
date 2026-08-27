@@ -656,6 +656,9 @@ function MixZone({ track }: { track: Track | null }) {
       <div className="perf-knobrow">
         {/* TRIM/EQ/FLT and PFL spread evenly across the row; PFL at the
             right end on every Deck */}
+        {/* TRIM runs smaller than the EQ knobs (set-and-forget gain, not a
+            performance control); FLT wears a double outer ring — the one
+            knob whose sweep is bipolar LPF↔HPF. */}
         <Knob
           label="TRIM"
           min={0}
@@ -665,6 +668,7 @@ function MixZone({ track }: { track: Track | null }) {
           onChange={(v) => mixer.setTrim(deck, v)}
           takeover={trimTakeover}
           ghost={auto && auto.trim !== undefined ? auto.trim : null}
+          className="perf-knob-small"
         />
         {eqKnob('low', 'LOW')}
         {eqKnob('mid', 'MID')}
@@ -678,6 +682,7 @@ function MixZone({ track }: { track: Track | null }) {
           onChange={(v) => mixer.setFilter(deck, v)}
           ghost={auto ? auto.filter : null}
           takeover={filterTakeover}
+          className="perf-knob-filter"
         />
         {/* PFL (headphone-cue 02): mixer state, so it works with no track
             loaded and repaints from hardware toggles (note 0x0C). Headphone

@@ -16,17 +16,24 @@ The pipeline, per Session, over the concatenated `session_chunks` events:
    away-gap with someone else audible) is a Practice rep if the returning
    deck saw backward transport motion during the gap (re-seeking to replay
    a junction) or the return is a pair-isolated alternation (fader-drill
-   reps). See CONTEXT.md "Practice rep": a read-time verdict with tunable
-   thresholds; the log itself stays impartial. Doubles inherit the verdict
-   by overlap: a dual-dominance dwell overlapping a practice-flagged
-   return of either member is a drill rep, not choreography (gh#181).
-2b. **Doubles** (gh#181) — sustained dual-dominance dwells: exactly two
-   distinct tracks with channel faders above DOMINANT_FADER together for
+   reps). Backseeks that land inside a dual-dominance dwell of OTHER
+   tracks are discounted (gh#182): a mid-dwell backjump on the entering
+   deck is a performed cue-up (jumps during doubles are the choreography,
+   gh#177), not rehearsal motion. See CONTEXT.md "Practice rep": a
+   read-time verdict with tunable thresholds; the log itself stays
+   impartial. Doubles inherit the verdict by overlap: a dual-dominance
+   dwell overlapping a practice-flagged return of either member is a
+   drill rep, not choreography (gh#181).
+2b. **Doubles** (gh#181) — sustained dual-dominance dwells: two distinct
+   tracks with channel faders above DOMINANT_FADER together for
    ≥ DOUBLE_MIN_S, past blend shape into dwell (the overlap IS the
-   content). A stretch where either deck rides a clean falling ramp
-   (net fall ≥ BLEND_NET_FALL with ≤ BLEND_MAX_REVERSALS direction
-   changes) is a crossfade in progress, not a dwell — dropped. Transport
-   jumps during the dwell strengthen the read but aren't required.
+   content). The dwell rides through a third track's entry (the next
+   overlap arriving does not end this one — gh#182) and closes when a
+   member's own dominance ends. A stretch where either deck rides a clean
+   falling ramp (net fall ≥ BLEND_NET_FALL with ≤ BLEND_MAX_REVERSALS
+   direction changes, the exit tail excluded) is a crossfade in progress,
+   not a dwell — dropped. Transport jumps during the dwell strengthen the
+   read but aren't required.
 3. **Sectioning** — complexity events (performance/practice returns,
    doubles, 3-track-concurrency stretches, self-doubles) clustered in
    time, plus the audibility intervals around them.
@@ -40,6 +47,9 @@ The pipeline, per Session, over the concatenated `session_chunks` events:
    boundary solo still splits (the pivot handing off ends the Routine),
    and a lone double never seeds (a single dwell is just a generous
    overlap — ≥ DOUBLE_CHAIN_MIN chained dwells make choreography).
+   A chain also refuses to seed when a practice-flagged return of a
+   chain-member track overlaps the chain's span (gh#182): a re-tried
+   member means the whole run is a rehearsal re-run, not a performance.
    Layered-run fallback (gh#175): a section that produced no cluster and
    has NO returns at all but a sustained run of long triples
    (≥ TRIPLE_RUN_MIN) seeds from that run — a versus/layered block
@@ -68,7 +78,9 @@ from typing import Any, Iterable, Sequence
 # Session whose marker differs (routine_miner_tasks.enqueue_stale_routine_mining).
 # v2: layered-run (triple-run) seeding for versus-style blocks (gh#175).
 # v3: Double seed class — dual-dominance dwells, pivot-chained (gh#181).
-MINER_VERSION = 3
+# v4: dwells ride through triple seams; mid-dwell backjumps are performed,
+#     not practice; chain-level rehearsal guard (gh#182).
+MINER_VERSION = 4
 
 # --- audibility reconstruction ---
 FADER_ON = 0.10           # channel fader above this = contributing
@@ -91,6 +103,9 @@ DOMINANT_FADER = 0.5      # fader above this = the deck is dominant
 DOUBLE_MIN_S = 30.0       # dual-dominance shorter than this is blend, not dwell
 BLEND_NET_FALL = 0.35     # a deck falling this much across the stretch...
 BLEND_MAX_REVERSALS = 2   # ...with at most this many direction changes = ramp
+BLEND_EXIT_TAIL_S = 10.0  # ignore the dwell's last stretch in the ramp test:
+                          # a member's exit fall lives there (the hand-off
+                          # after the dwell, not a crossfade instead of one)
 DOUBLE_CHAIN_MIN = 2      # pivot-chained dwells needed to seed a cluster
 
 # --- candidate carving ---
@@ -315,9 +330,18 @@ def reconstruct_audibility(
 
 
 def detect_returns(
-    intervals: Sequence[Interval], backseeks: dict[str, list[float]]
+    intervals: Sequence[Interval],
+    backseeks: dict[str, list[float]],
+    doubles: Sequence[DoubleEvent] = (),
 ) -> list[ReturnEvent]:
-    """Returns with the practice verdict attached (CONTEXT.md "Practice rep")."""
+    """Returns with the practice verdict attached (CONTEXT.md "Practice rep").
+
+    Backseeks that land inside a dual-dominance dwell of OTHER tracks are
+    discounted (gh#182): while a double rides, a backjump on the entering
+    deck is the performed cue-up for the next overlap (jumps during
+    doubles are the choreography, gh#177) — rehearsal motion is the
+    backseek with nobody dwelling under it.
+    """
     by_tid: dict[int, list[Interval]] = defaultdict(list)
     for iv in intervals:
         by_tid[iv.track_id].append(iv)
@@ -338,6 +362,9 @@ def detect_returns(
                 1
                 for bt in backseeks.get(i2.channel, [])
                 if gap0 - BACKSEEK_PAD_BEFORE_S <= bt <= gap1 + BACKSEEK_PAD_AFTER_S
+                and not any(
+                    d.t <= bt <= d.end and tid not in d.tracks for d in doubles
+                )
             )
             # Pair-isolated alternation: only one other track around the
             # gap, and both tracks re-enter repeatedly — fader-drill reps.
@@ -398,9 +425,13 @@ def detect_doubles(
     events: Sequence[dict[str, Any]],
 ) -> list[DoubleEvent]:
     """Dual-dominance dwells (gh#181) from DOMINANT_FADER-thresholded
-    intervals: maximal stretches with exactly two distinct tracks dominant,
-    ≥ DOUBLE_MIN_S long, that are not blend-shaped (a deck riding a clean
-    falling ramp is a crossfade in progress — the hand-off, not a dwell).
+    intervals: maximal stretches with two distinct tracks dominant
+    together, ≥ DOUBLE_MIN_S long, that are not blend-shaped (a deck
+    riding a clean falling ramp is a crossfade in progress — the
+    hand-off, not a dwell). A dwell opens when exactly two tracks are
+    dominant, rides through a third track's entry (the next overlap
+    arriving mid-dwell is the corpus's seam shape, not this dwell's end
+    — gh#182), and closes when a member's own dominance ends.
 
     `events` must be sorted by t (mine_session sorts); only fader control
     events are read (for the ramp test).
@@ -415,7 +446,11 @@ def detect_doubles(
     def blend_ramp(ch: str, a: float, b: float) -> bool:
         """Fader on `ch` over [a, b]: a clean net fall = hand-off ramp.
         (A rising ramp is the incoming track arriving — that's what a dwell
-        looks like from the entering side, so only falls disqualify.)"""
+        looks like from the entering side, so only falls disqualify.)
+        The caller excludes the dwell's exit tail: since a dwell now closes
+        when a member's dominance ends (gh#182), the member's exit fall is
+        inside the stretch — a fall confined to the tail is the hand-off
+        AFTER the dwell, not a crossfade instead of one."""
         vals: list[float] = []
         start_val: float | None = None
         for t, v in faders.get(ch, []):
@@ -456,7 +491,8 @@ def detect_doubles(
         if cur_pair is None:
             return
         if end - cur_start >= DOUBLE_MIN_S and not any(
-            blend_ramp(ch, cur_start, end) for ch in cur_chans.values()
+            blend_ramp(ch, cur_start, end - BLEND_EXIT_TAIL_S)
+            for ch in cur_chans.values()
         ):
             a, b = sorted(cur_pair)
             out.append(DoubleEvent(t=cur_start, end=end, track_a=a, track_b=b))
@@ -468,16 +504,14 @@ def detect_doubles(
         else:
             active.discard(i)
         tids = frozenset(dom_intervals[j].track_id for j in active)
-        if len(tids) == 2:
-            if tids != cur_pair:
-                close(t)
-                cur_pair, cur_start = tids, t
-                cur_chans = {
-                    dom_intervals[j].track_id: dom_intervals[j].channel
-                    for j in active
-                }
-        else:
-            close(t)
+        if cur_pair is not None and not cur_pair <= tids:
+            close(t)  # a member's dominance ended — the dwell is over
+        if cur_pair is None and len(tids) == 2:
+            cur_pair, cur_start = tids, t
+            cur_chans = {
+                dom_intervals[j].track_id: dom_intervals[j].channel
+                for j in active
+            }
     return out
 
 
@@ -671,6 +705,25 @@ def _carve_section(
             for iv in section.intervals
         )
 
+    def chain_rehearsed(ch: list[DoubleEvent]) -> bool:
+        """A practice-flagged return of a chain-member track overlapping
+        the chain's span means the run was re-tried — a rehearsal re-run,
+        not a performance (gh#182)."""
+        members = frozenset(tid for d in ch for tid in d.tracks)
+        t0 = min(d.t for d in ch)
+        t1 = max(d.end for d in ch)
+        return any(
+            r.practice
+            and r.track_id in members
+            and r.gap_start < t1
+            and r.end > t0
+            for r in section.returns
+        )
+
+    def flush_chain(ch: list[DoubleEvent]) -> None:
+        if len(ch) >= DOUBLE_CHAIN_MIN and not chain_rehearsed(ch):
+            clusters.append(list(ch))
+
     chain: list[DoubleEvent] = []
     for d in clean_doubles:
         if (
@@ -681,11 +734,9 @@ def _carve_section(
         ):
             chain.append(d)
         else:
-            if len(chain) >= DOUBLE_CHAIN_MIN:
-                clusters.append(list(chain))
+            flush_chain(chain)
             chain = [d]
-    if len(chain) >= DOUBLE_CHAIN_MIN:
-        clusters.append(list(chain))
+    flush_chain(chain)
 
     # Layered-run fallback (gh#175): nothing seeded, no returns at all,
     # but a sustained run of long triples — a versus/layered block whose
@@ -845,10 +896,11 @@ def mine_session(
     """
     events = sorted(events, key=lambda e: e.get("t", 0))
     intervals, backseeks = reconstruct_audibility(events)
-    returns = detect_returns(intervals, backseeks)
     triples = detect_triples(intervals)
     dom_intervals, _ = reconstruct_audibility(events, fader_on=DOMINANT_FADER)
     doubles = detect_doubles(dom_intervals, events)
+    # Doubles first: the practice verdict discounts mid-dwell backjumps.
+    returns = detect_returns(intervals, backseeks, doubles)
     stamp_double_practice(doubles, returns)
     sections = build_sections(intervals, returns, triples, doubles)
 

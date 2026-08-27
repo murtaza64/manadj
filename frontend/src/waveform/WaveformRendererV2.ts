@@ -79,8 +79,9 @@ function formatReadoutTime(seconds: number): string {
 /** Hot-cue slot FALLBACK palette (hotcue-colors 01): bright, fully
  * saturated — the pastel Catppuccin set was rejected. A cue's STORED
  * color (Engine import) takes precedence at every render site; these are
- * what colorless (in-app-created) cues get. Mirrors --hc-1..--hc-8 in
- * styles/variables.css (the GL pass can't read CSS vars — keep in sync).
+ * what colorless (in-app-created) cues get. Values live in theme/tokens.ts
+ * (which also installs --hc-1..--hc-8; the GL pass can't read CSS vars, so
+ * the floats below derive from the imported constants).
  * Also reused by the Set overview ladder (sets 04 review). */
 const CUE_COLOR_RE = /^#[0-9a-f]{6}$/i;
 

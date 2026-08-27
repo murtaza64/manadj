@@ -40,7 +40,7 @@
  * e2e merge; tests feed it directly.
  */
 import { MAX_PITCH_RANGE_PERCENT } from '../playback/tempo';
-import { applyJumpEditsToTrace } from '../routines/routineDraft';
+import { applyJumpEditsToTrace, applyPauseEditsToTrace } from '../routines/routineDraft';
 
 // ── Input (the seam) ─────────────────────────────────────────────────────
 
@@ -96,6 +96,9 @@ export interface RoutineLanePoint {
 
 export interface RoutineSlotLanes {
   fader: RoutineLanePoint[];
+  /** Recorded channel TRIM steps (gh#190: recordings carry trim; the
+   * replay build dropped it — now a first-class recorded lane). */
+  trim: RoutineLanePoint[];
   eqLow: RoutineLanePoint[];
   eqMid: RoutineLanePoint[];
   eqHigh: RoutineLanePoint[];
@@ -104,10 +107,10 @@ export interface RoutineSlotLanes {
    * fader moves defaults CLOSED (its raise is the entry gesture — the
    * pre-window level predates the slice); a slot without any defaults
    * open from its entry (it was audible the whole recorded span). */
-  defaults: { fader: number; eq: number; filter: number };
+  defaults: { fader: number; trim: number; eq: number; filter: number };
   /** Controls whose points are AUTHORED envelopes (gh#170 pass 2): the
    * editor's breakpoints, linearly interpolated — not recorded steps. */
-  authored?: Partial<Record<'fader' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter', boolean>>;
+  authored?: Partial<Record<'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter', boolean>>;
 }
 
 export interface PlannedRoutineSlot {
@@ -136,6 +139,10 @@ export interface PlannedRoutineSlot {
   basePitchPercent: number;
   trace: RoutineTracePoint[];
   lanes: RoutineSlotLanes;
+  /** Per-slot channel TRIM (gh#190 iteration): 0..1, 0.5 nominal —
+   * draft-authored (edits.trims), replayed through the automation
+   * overlay's trim and folded into the waveform modulation. */
+  trim: number;
   /** THIS slot's trace discontinuity instants on the mix axis (#161):
    * the Conductor hard-syncs ONLY the jumping slot's deck — a recorded
    * seek on one deck must never snap the others (they may be mid-blend
@@ -403,12 +410,13 @@ export function traceStateAt(trace: RoutineTracePoint[], beat: number): TraceSta
 
 // ── Lane building ────────────────────────────────────────────────────────
 
-const LANE_CONTROLS = ['fader', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
+const LANE_CONTROLS = ['fader', 'trim', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
 type LaneControl = (typeof LANE_CONTROLS)[number];
 
 export function buildSlotLanes(events: RoutineEventInput[], slot: number, isSlotZero: boolean): RoutineSlotLanes {
   const lanes: Record<LaneControl, RoutineLanePoint[]> = {
     fader: [],
+    trim: [],
     eqLow: [],
     eqMid: [],
     eqHigh: [],
@@ -431,6 +439,7 @@ export function buildSlotLanes(events: RoutineEventInput[], slot: number, isSlot
       // starts closed (the raise is its entry); one with none was audible
       // through the whole slice — open from its entry.
       fader: isSlotZero || lanes.fader.length === 0 ? 1 : 0,
+      trim: 0.5,
       eq: 0.5,
       filter: 0,
     },
@@ -475,10 +484,15 @@ function laneValueAtAuthored(points: RoutineLanePoint[], beat: number, fallback:
 export function slotLanesAt(
   slot: PlannedRoutineSlot,
   beat: number
-): { fader: number; eq: { low: number; mid: number; high: number }; filter: number } {
+): {
+  fader: number;
+  trim: number;
+  eq: { low: number; mid: number; high: number };
+  filter: number;
+} {
   const l = slot.lanes;
   const value = (
-    control: 'fader' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter',
+    control: 'fader' | 'trim' | 'eqLow' | 'eqMid' | 'eqHigh' | 'filter',
     fallback: number
   ): number =>
     l.authored?.[control]
@@ -486,6 +500,9 @@ export function slotLanesAt(
       : laneValueAt(l[control], beat, fallback);
   return {
     fader: value('fader', l.defaults.fader),
+    // Recorded trim, OFFSET by the slot's trim knob (gh#190: the knob is
+    // a whole-slot adjustment on top of the recording, not a mode).
+    trim: Math.max(0, Math.min(1, value('trim', l.defaults.trim) + (slot.trim - 0.5))),
     eq: {
       low: value('eqLow', l.defaults.eq),
       mid: value('eqMid', l.defaults.eq),
@@ -604,12 +621,18 @@ export function plannedWithLaneEdits(
   planned: PlannedRoutine,
   edits: import('../routines/routineDraft').RoutineEdits | null
 ): PlannedRoutine {
-  if (!edits || Object.keys(edits.lanes).length === 0) return planned;
+  if (
+    !edits ||
+    (Object.keys(edits.lanes).length === 0 && Object.keys(edits.trims ?? {}).length === 0)
+  ) {
+    return planned;
+  }
   return {
     ...planned,
     slots: planned.slots.map((s) => ({
       ...s,
       lanes: withLaneEdits(s.lanes, edits, s.slot),
+      trim: edits.trims?.[String(s.slot)] ?? 0.5,
     })),
   };
 }
@@ -661,8 +684,25 @@ export function buildPlannedRoutine(
     if (!edits) return raw;
     const authored = edits.jumps.filter((j) => j.slot === slot);
     const removed = edits.removedRecordedJumps.filter((r) => r.slot === slot);
-    if (authored.length === 0 && removed.length === 0) return raw;
-    return applyJumpEditsToTrace(raw, authored, removed, input.durationBeats);
+    let trace =
+      authored.length === 0 && removed.length === 0
+        ? raw
+        : applyJumpEditsToTrace(raw, authored, removed, input.durationBeats);
+    // Pause edits (gh#190: play/pause events, the jump idiom's sibling) —
+    // authored holds + removed recorded holds, after jump edits (both
+    // keep beats fixed; displacement composes).
+    const pauses = (edits.pauses ?? []).filter((p) => p.slot === slot);
+    const removedPauses = (edits.removedRecordedPauses ?? []).filter((r) => r.slot === slot);
+    if (pauses.length > 0 || removedPauses.length > 0) {
+      trace = applyPauseEditsToTrace(trace, pauses, removedPauses, input.durationBeats);
+    }
+    // Alignment nudge (gh#190 item 6): a RIGID track-time slide — the
+    // slot plays material offset by deltaSec at the same routine beats.
+    // Applied to the trace, so replay, waveform runs and hotcue mapping
+    // all shift together by construction.
+    const nudge = edits.nudges?.[String(slot)] ?? 0;
+    if (nudge !== 0) trace = trace.map((p) => ({ ...p, pos: p.pos + nudge }));
+    return trace;
   });
   const releaseMixSecs = traces.map((trace, slot) =>
     slot === n - 1
@@ -700,10 +740,12 @@ export function buildPlannedRoutine(
       occupyFromMixSec: assignments[slot].occupyFromMixSec,
       releaseMixSec: releaseMixSecs[slot],
       entryMixSec: entryMixSecs[slot],
-      entryTrackSec: input.entryPositions[slot],
+      entryTrackSec: input.entryPositions[slot] + (edits?.nudges?.[String(slot)] ?? 0),
       basePitchPercent,
       trace,
       lanes: withLaneEdits(buildSlotLanes(input.events, slot, slot === 0), edits, slot),
+      // Per-slot channel trim (gh#190): draft-authored, 0.5 nominal.
+      trim: edits?.trims?.[String(slot)] ?? 0.5,
       jumpMixSecs: trace
         .filter((p) => p.jump)
         .map((p) => ctx.mixStartSec + p.beat * secPerBeat)
