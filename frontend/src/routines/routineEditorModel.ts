@@ -652,7 +652,9 @@ export function rulerTicks(
   const step = LABEL_STEPS.find((s) => s * pxPerBeat >= minLabelPx) ?? 256;
   const minor = Math.max(1, step / 4);
   const ticks: RulerTick[] = [];
-  const first = Math.max(0, Math.floor(viewStartBeat / minor) * minor);
+  // Negative beats are legal (#205: out-of-span context renders around the
+  // window) — the routine clock just keeps counting leftward.
+  const first = Math.floor(viewStartBeat / minor) * minor;
   for (let b = first; b <= viewEndBeat; b += minor) {
     const major = b % step === 0;
     ticks.push({

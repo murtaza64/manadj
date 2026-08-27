@@ -26,21 +26,51 @@ export interface BeatRun {
   held?: boolean;
 }
 
+/** Out-of-span CONTEXT to render around the routine window (#205 design
+ * round): the surrounding track material each slot would play if the
+ * clock ran on — the pair editor showed both whole tracks, and aligning
+ * an incoming against an outgoing needs the structure OUTSIDE the window.
+ * Beats before beat 0 / after durationBeats. */
+export interface RunContext {
+  beforeBeats: number;
+  afterBeats: number;
+}
+
 /**
- * Cut a slot trace into draw runs over [0, durationBeats].
+ * Cut a slot trace into draw runs over [0, durationBeats] — extended by
+ * `context` beats on each side when given.
  *
  * - Before the first point: parked at its position (the recording's
- *   pre-entry posture — the deck sat loaded at the entry mark).
+ *   pre-entry posture — the deck sat loaded at the entry mark). With
+ *   context, a slot MOVING at its first point instead extrapolates its
+ *   motion BACKWARD (the trim-widen preview's rule; RoutinePlayer's
+ *   lead-in does the same at audition) — the material it would have been
+ *   playing. A parked first point stays parked (no invented motion).
  * - p→q where q is a JUMP landing: ride p's motion to the jump instant
  *   (traceStateAt's rule), then the next run starts at q's snap.
  * - p→q otherwise: linear (paused segments have ph0 = ph1).
- * - Past the last point: extrapolate its motion to the routine end.
+ * - Past the last point: extrapolate its motion to the routine end (+
+ *   trailing context when the slot is still moving there — the exit
+ *   slot's play-out; a released deck's material just stops).
  */
-export function traceDrawRuns(trace: RoutineTracePoint[], durationBeats: number): BeatRun[] {
+export function traceDrawRuns(
+  trace: RoutineTracePoint[],
+  durationBeats: number,
+  context?: RunContext
+): BeatRun[] {
   const runs: BeatRun[] = [];
   if (trace.length === 0) return runs;
+  const before = Math.max(0, context?.beforeBeats ?? 0);
+  const after = Math.max(0, context?.afterBeats ?? 0);
   const first = trace[0];
-  if (first.beat > 0) {
+  // Backward context is only truthful for a slot ROLLING at the window
+  // open (first point at beat ≈ 0, moving) — RoutinePlayer's lead-in rule.
+  // A later-entering slot sat parked at its entry mark; its pre-entry
+  // material is fiction, so it keeps the held park (drawn blank).
+  if (before > 0 && first.moving && first.ratePerBeat > 0 && first.beat <= 0.5) {
+    const b0 = first.beat - before;
+    runs.push({ b0, b1: first.beat, ph0: first.pos - first.ratePerBeat * before, ph1: first.pos });
+  } else if (first.beat > 0) {
     runs.push({ b0: 0, b1: first.beat, ph0: first.pos, ph1: first.pos, held: true });
   }
   for (let i = 0; i < trace.length - 1; i++) {
@@ -54,11 +84,12 @@ export function traceDrawRuns(trace: RoutineTracePoint[], durationBeats: number)
     runs.push({ b0: p.beat, b1: q.beat, ph0: p.pos, ph1, held: !p.moving });
   }
   const last = trace[trace.length - 1];
-  if (last.beat < durationBeats) {
-    const db = durationBeats - last.beat;
+  const end = durationBeats + (last.moving ? after : 0);
+  if (last.beat < end) {
+    const db = end - last.beat;
     runs.push({
       b0: last.beat,
-      b1: durationBeats,
+      b1: end,
       ph0: last.pos,
       ph1: last.pos + (last.moving ? last.ratePerBeat * db : 0),
       held: !last.moving,

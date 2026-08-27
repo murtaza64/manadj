@@ -44,6 +44,180 @@
   font-size: 12px;
   max-width: 340px;
 }
+
+/* ── Mix picker (#205) — persistent side panel at the editor's right.
+   DESIGN.md-native: tokens only, flat geometry, instant interactions;
+   buttons ride the .btn/.btn-mini recipe (state modifiers below), inputs
+   the .input utility. ── */
+.re-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.re-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* The open artifact readout in the header (the panel is the picker now). */
+.mp-current {
+  font-size: var(--font-body);
+  color: var(--text);
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-panel {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--crust);
+  border-left: 1px solid var(--surface0);
+}
+.mp-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-8) var(--space-4);
+  flex-wrap: wrap;
+}
+.mp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-body);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mp-chip.set {
+  background: rgba(var(--routine-accent-rgb), 0.18);
+  border: 1px solid var(--routine-accent);
+}
+.mp-chip.empty {
+  border: 1px dashed var(--surface1);
+  color: var(--subtext0);
+}
+.mp-chipx {
+  background: transparent;
+  border: none;
+  color: var(--subtext0);
+  cursor: pointer;
+  padding: 0 var(--space-2);
+  font-size: var(--font-small);
+}
+.mp-chipx:hover {
+  color: var(--danger);
+}
+.mp-panel .mp-search {
+  margin: var(--space-4) var(--space-8) var(--space-6);
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-body);
+}
+.mp-panel .mp-search:focus {
+  outline: none;
+  border-color: var(--routine-accent);
+}
+.mp-panel .mp-search:disabled {
+  opacity: 0.5;
+}
+.mp-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 var(--space-6);
+  border-top: 1px solid var(--surface0);
+}
+.mp-row.open {
+  box-shadow: inset 2px 0 0 var(--routine-accent);
+}
+.mp-row.open .mp-label {
+  color: var(--routine-accent);
+}
+.mp-group {
+  padding: var(--space-6) var(--space-8) var(--space-2);
+  font-size: var(--font-micro);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--routine-accent);
+}
+.mp-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-2) var(--space-8);
+  cursor: pointer;
+  font-size: var(--font-body);
+}
+.mp-row.hl {
+  background: rgba(var(--routine-accent-rgb), 0.16);
+}
+.mp-glyph {
+  width: 14px;
+  text-align: center;
+  color: var(--routine-accent);
+  flex-shrink: 0;
+}
+.mp-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mp-meta {
+  margin-left: auto;
+  color: var(--subtext0);
+  font-size: var(--font-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.mp-tools {
+  display: none;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.mp-row.hl .mp-tools {
+  display: inline-flex;
+}
+/* State modifiers over the .btn-mini recipe: favorite = warning,
+   armed delete = danger. */
+.mp-tools .btn.on {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+.mp-tools .btn.sure {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.mp-row .mp-rename {
+  padding: 0 var(--space-4);
+  font-size: var(--font-body);
+  border-color: var(--routine-accent);
+}
+.mp-none {
+  padding: var(--space-12);
+  color: var(--subtext0);
+  font-size: var(--font-body);
+  text-align: center;
+}
+
+/* Sibling cycling (◀ n/m ▶) beside the picker readout. */
+.mp-cycle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--font-small);
+  color: var(--subtext0);
+}
 .re-contract b {
   font-weight: 600;
 }

@@ -14,11 +14,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   cameoToProjection,
+  changedPairEdits,
   editsToTransition,
   incomingRate,
+  NEW_PAIR_SEED_BEATS,
   pairFilterToRoutine,
   pairToEdits,
   routineFilterToPair,
+  seedNewTransition,
   transitionToProjection,
   type PairCameoInput,
   type PairSlotInput,
@@ -298,6 +301,109 @@ describe('pairSlotTranslation — pairToEdits (projection of drawn fields)', () 
     });
     expect(saved.lanes.faderB).toEqual(input.transition.lanes.faderB);
     expect(saved.lanes.filterA).toEqual(input.transition.lanes.filterA);
+  });
+});
+
+describe('pairSlotTranslation — changedPairEdits (the live-draft diff, #205)', () => {
+  // The editor's draft holds the WHOLE projection after load (cloned, so
+  // deep equality is the contract). Only genuinely edited fields may
+  // reach editsToTransition.
+  const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+  it('an untouched draft diffs to nothing — even though every drawn lane is present', () => {
+    const input = baseInput({
+      lanes: { faderB: [{ x: 0, y: 0 }, { x: 0.5, y: 1 }] },
+      jumps: [{ x: 0.4, deltaSec: -2 }],
+    });
+    const proj = transitionToProjection(input);
+    const diff = changedPairEdits(clone(proj.edits), proj.edits);
+    expect(Object.keys(diff.lanes)).toHaveLength(0);
+    expect(diff.jumps).toHaveLength(0);
+    // …so the save is byte-identical.
+    const saved = editsToTransition(diff, {
+      original: input.transition,
+      durationBeats: proj.detail.duration_beats,
+      secPerBeat: proj.secPerBeat,
+    });
+    expect(saved).toEqual(input.transition);
+    expect(JSON.stringify(saved)).toBe(JSON.stringify(input.transition));
+  });
+
+  it('editing one lane leaves the other lanes and jumps out of the diff', () => {
+    const input = baseInput({
+      lanes: {
+        faderA: [{ x: 0, y: 1 }],
+        faderB: [{ x: 0, y: 0 }, { x: 0.5, y: 1 }],
+      },
+      jumps: [{ x: 0.4, deltaSec: -2 }],
+    });
+    const proj = transitionToProjection(input);
+    const draft = clone(proj.edits);
+    draft.lanes[laneKey(1, 'fader')] = [
+      { beat: 0, value: 0 },
+      { beat: 4, value: 0.8 },
+    ];
+    const diff = changedPairEdits(draft, proj.edits);
+    expect(Object.keys(diff.lanes)).toEqual([laneKey(1, 'fader')]);
+    expect(diff.jumps).toHaveLength(0);
+    // Untouched faderA and the incoming jump pass through VERBATIM.
+    const saved = editsToTransition(diff, {
+      original: input.transition,
+      durationBeats: proj.detail.duration_beats,
+      secPerBeat: proj.secPerBeat,
+    });
+    expect(saved.lanes.faderA).toEqual(input.transition.lanes.faderA);
+    expect(saved.jumps).toEqual(input.transition.jumps);
+    expect(saved.lanes.faderB).toEqual([
+      { x: 0, y: 0 },
+      { x: 4 / proj.detail.duration_beats, y: 0.8 },
+    ]);
+  });
+
+  it('an incoming-jump edit does not re-derive untouched outgoing jumps (per-role diff)', () => {
+    const input = baseInput({
+      jumps: [{ x: 0.4, deltaSec: -2 }],
+      jumpsA: [{ x: 0.1, deltaSec: 1 }],
+    });
+    const proj = transitionToProjection(input);
+    const draft = clone(proj.edits);
+    const j1 = draft.jumps.find((j) => j.slot === 1)!;
+    j1.deltaSec = -4; // edit the incoming's jump
+    const diff = changedPairEdits(draft, proj.edits);
+    expect(diff.jumps.every((j) => j.slot === 1)).toBe(true);
+    const saved = editsToTransition(diff, {
+      original: input.transition,
+      durationBeats: proj.detail.duration_beats,
+      secPerBeat: proj.secPerBeat,
+    });
+    expect(saved.jumpsA).toEqual(input.transition.jumpsA); // verbatim
+    expect(saved.jumps![0].deltaSec).toBe(-4);
+  });
+
+  it('nudges/trims diff against absent-as-default', () => {
+    const proj = transitionToProjection(baseInput());
+    const draft = clone(proj.edits);
+    draft.nudges['1'] = -1.5;
+    draft.trims['0'] = 0.5; // nominal — not a change
+    const diff = changedPairEdits(draft, proj.edits);
+    expect(diff.nudges).toEqual({ '1': -1.5 });
+    expect(diff.trims).toEqual({});
+  });
+});
+
+describe('pairSlotTranslation — seedNewTransition (#205 pair synthesis)', () => {
+  it('seeds the window at the outgoing outro, 32 beats on its clock', () => {
+    const seeded = seedNewTransition(300, 120); // 0.5 s/beat → 16 s window
+    expect(seeded.durationSec).toBe(NEW_PAIR_SEED_BEATS * 0.5);
+    expect(seeded.startSec).toBe(300 - 16);
+    expect(seeded.bInSec).toBe(0);
+    expect(seeded.tempoMatch).toBe(true);
+    expect(seeded.lanes).toEqual({});
+  });
+  it('gridless outgoing seeds on the degraded clock; short tracks clamp to 0', () => {
+    const seeded = seedNewTransition(20, null); // 1 s/beat → 32 s window
+    expect(seeded.durationSec).toBe(32);
+    expect(seeded.startSec).toBe(0);
   });
 });
 

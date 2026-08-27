@@ -296,9 +296,9 @@ export interface PairSaveContext {
  * - Authored LANE envelopes → the corresponding pair lane (beats → x;
  *   filter value-space unmapped). A lane never drawn stays as the original
  *   had it.
- * - Authored JUMPS → jumps (slot 0) / jumpsA (slot 1). Only present when
- *   the draft carries jumps for that role; otherwise the original's jumps
- *   pass through.
+ * - Authored JUMPS → jumpsA (slot 0 = outgoing) / jumps (slot 1 =
+ *   incoming). Only present when the draft carries jumps for that role;
+ *   otherwise the original's jumps pass through.
  * - Alignment NUDGE on the incoming slot slides `bInSec` (a rigid
  *   track-seconds slide is exactly the incoming entry-alignment shift).
  * - Everything else (startSec, durationSec, tempoMatch, hiddenLanes,
@@ -349,6 +349,88 @@ export function editsToTransition(edits: RoutineEdits, ctx: PairSaveContext): Tr
   return out;
 }
 
+/**
+ * The CHANGED subset of a live draft's edits against the projection's
+ * baseline (#205): the editor's draft holds the WHOLE projection (every
+ * drawn lane/jump became an authored edit on load), so feeding the full
+ * draft to editsToTransition would re-derive untouched fields through the
+ * beats→x float round-trip — drift the lossless invariant forbids. This
+ * diff keeps only what actually changed since load (deep equality — the
+ * draft store clones on load, so references never match):
+ *
+ * - lanes: per key, dropped when point-for-point equal to the baseline;
+ * - jumps: per ROLE (slot), dropped when the slot's list is unchanged —
+ *   an incoming-jump edit must not re-derive untouched outgoing jumps;
+ * - nudges/trims: per slot, dropped when equal (or both absent).
+ *
+ * editsToTransition(changedPairEdits(draft, baseline), ctx) then touches
+ * only genuinely edited fields; everything else passes through verbatim.
+ */
+export function changedPairEdits(draft: RoutineEdits, baseline: RoutineEdits): RoutineEdits {
+  const lanes: Record<string, RoutineLanePoint[]> = {};
+  for (const [key, pts] of Object.entries(draft.lanes)) {
+    const base = baseline.lanes[key];
+    if (!base || !lanePointsEqual(pts, base)) lanes[key] = pts;
+  }
+  // A lane cleared back to "recorded plays" (key deleted from the draft)
+  // has no pair-side meaning yet — the original lane persists. Flagged in
+  // the module header's scope notes.
+
+  const jumps: AuthoredJump[] = [];
+  const slots = new Set([...draft.jumps, ...baseline.jumps].map((j) => j.slot));
+  for (const slot of slots) {
+    const d = draft.jumps.filter((j) => j.slot === slot);
+    const b = baseline.jumps.filter((j) => j.slot === slot);
+    if (!jumpListsEqual(d, b)) jumps.push(...d);
+  }
+
+  const nudges: Record<string, number> = {};
+  for (const [slot, v] of Object.entries(draft.nudges)) {
+    if ((baseline.nudges[slot] ?? 0) !== v) nudges[slot] = v;
+  }
+  const trims: Record<string, number> = {};
+  for (const [slot, v] of Object.entries(draft.trims)) {
+    if ((baseline.trims[slot] ?? 0.5) !== v) trims[slot] = v;
+  }
+
+  return {
+    lanes,
+    jumps,
+    // A pair projection's synthetic recording has no recorded jumps or
+    // pauses, so removals cannot occur — empty by construction. Authored
+    // PAUSES have no Transition-side field (the artifact cannot express a
+    // hold; a jump can't fake one) — they audition but do not persist,
+    // flagged as a phase-2 design item.
+    removedRecordedJumps: [],
+    pauses: [],
+    removedRecordedPauses: [],
+    nudges,
+    trims,
+  };
+}
+
+function lanePointsEqual(a: RoutineLanePoint[], b: RoutineLanePoint[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].beat !== b[i].beat || a[i].value !== b[i].value) return false;
+  }
+  return true;
+}
+
+function jumpListsEqual(a: AuthoredJump[], b: AuthoredJump[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].beat !== b[i].beat ||
+      a[i].deltaSec !== b[i].deltaSec ||
+      (a[i].repeat ?? 1) !== (b[i].repeat ?? 1)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function authoredJumpToPair(
   j: AuthoredJump,
   durationBeats: number
@@ -374,6 +456,27 @@ function laneIdFor(slot: number, control: string): LaneId | null {
     if (role.slot === slot && role.control === control) return id;
   }
   return null;
+}
+
+// ── New pair drafts (#205, ADR 0037 pair synthesis) ─────────────────────
+
+/** New blank pair drafts seed the window at the outgoing's OUTRO — the
+ * last ~32 beats on the outgoing's clock (degraded 1-beat/sec without a
+ * grid). The incoming enters at its start (bInSec 0; grid-aligned entry
+ * refinement is a picker-round design item). Draft posture (ADR 0037/
+ * 0039): the seeded Transition persists NOTHING until the first edit. */
+export const NEW_PAIR_SEED_BEATS = 32;
+
+export function seedNewTransition(outgoingDurationSec: number, bpmA: number | null): Transition {
+  const secPerBeat = bpmA && bpmA > 0 ? 60 / bpmA : DEGRADED_SEC_PER_BEAT;
+  const windowSec = NEW_PAIR_SEED_BEATS * secPerBeat;
+  return {
+    startSec: Math.max(0, outgoingDurationSec - windowSec),
+    durationSec: windowSec,
+    bInSec: 0,
+    tempoMatch: true,
+    lanes: {},
+  };
 }
 
 // ── Cameo projection (host/guest 2-slot parity) ─────────────────────────
