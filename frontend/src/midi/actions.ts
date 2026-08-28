@@ -1,4 +1,4 @@
-import type { ChannelId } from '../playback/mixer';
+import type { ChannelId, StemName } from '../playback/mixer';
 import type { JogProfile } from './jogCalibration';
 
 /**
@@ -42,6 +42,8 @@ export type ButtonTarget =
   | { control: 'load'; deck: ChannelId }
   /** PFL toggle (headphone-cue 02) — mixer-facing, hence `channel`. */
   | { control: 'pfl'; channel: ChannelId }
+  /** Stem kill toggle (stems #210): mixer-class button like PFL. */
+  | { control: 'stem'; channel: ChannelId; stem: StemName }
   /** Grid editing (midi-performance-ops 05) — stored-data edits, hence
    * registry-direct (ADR 0019): grid ops mean the same thing on every
    * view. Nudge translates the Beatgrid by one discrete ±10ms step. */

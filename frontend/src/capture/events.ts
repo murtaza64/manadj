@@ -46,7 +46,14 @@ export type CaptureControlId =
   | 'crossfaderAssignment'
   | 'crossfader'
   | 'crossfaderEnabled'
-  | 'master';
+  | 'master'
+  /** Stem kill switches (stems #212): booleans as 0/1, per channel. A
+   * Session is the whole event log — a kill the log omits makes replay
+   * lie, so these are recorded from v1 of the stems surface. */
+  | 'stemVocals'
+  | 'stemDrums'
+  | 'stemBass'
+  | 'stemOther';
 
 export type CaptureEvent =
   | {
@@ -132,6 +139,9 @@ export interface InitDeckState {
    * arbitrary sides, so lane composition can't assume A-left/B-right.
    * Absent on takes detected before 4dp 39 (legacy default applies). */
   assignment?: 'left' | 'thru' | 'right';
+  /** Per-stem enables at open (stems #212). Absent on takes detected
+   * before stems (legacy default: all on). */
+  stems?: { vocals: boolean; drums: boolean; bass: boolean; other: boolean };
 }
 
 // ── Detection parameters (versioned — stamped on every Take) ────────────
@@ -154,7 +164,7 @@ export interface InitDeckState {
  * and every capture carries its engagement identity (concurrent
  * deck-sharing engagements share one uuid, so a triple's pairwise
  * offspring are a first-class group). */
-export const DETECTOR_VERSION = 5;
+export const DETECTOR_VERSION = 6;
 
 export interface DetectorParams {
   /** Master-bus gain (trim × channel fader × crossfader) below which a

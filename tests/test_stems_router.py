@@ -108,3 +108,70 @@ def test_has_stems_goes_false_when_stale(
     assert TrackSchema.model_validate(track_with_stems).has_stems is True
     Path(track_with_stems.filename).write_bytes(b"y" * 501)
     assert TrackSchema.model_validate(track_with_stems).has_stems is False
+
+
+def test_stem_waveform_generates_and_serves(
+    client: TestClient, make_track, tmp_path: Path, stems_config: StemsConfig, audio_file
+) -> None:
+    """#213: first request generates the MWF1 blob beside the stems and
+    serves it; the second serves the cached file."""
+    source = tmp_path / "track.mp3"
+    source.write_bytes(b"x" * 500)
+    track = make_track(filename=str(source))
+    d = stems_dir(track.id, stems_config)
+    d.mkdir(parents=True)
+    silence = audio_file("m4a")
+    for stem in STEM_NAMES:
+        (d / f"{stem}.m4a").write_bytes(silence.read_bytes())
+    st = source.stat()
+    meta = StemsMeta(
+        model=stems_config.model,
+        stems_version=STEMS_VERSION,
+        codec="aac",
+        bitrate="256k",
+        sample_rate=44100,
+        source_mtime_ns=st.st_mtime_ns,
+        source_size=st.st_size,
+    )
+    (d / "meta.json").write_text(meta.to_json())
+
+    res = client.get(f"/api/tracks/{track.id}/stems/drums/waveform")
+    assert res.status_code == 200
+    assert res.content[:4] == b"MWF1"
+    assert (d / "drums.mwf").exists()
+    assert "immutable" in res.headers.get("cache-control", "")
+    # cached second hit
+    again = client.get(f"/api/tracks/{track.id}/stems/drums/waveform")
+    assert again.content == res.content
+
+
+def test_stem_waveform_404s_without_current_stems(
+    client: TestClient, make_track, tmp_path: Path, stems_config: StemsConfig
+) -> None:
+    bare = make_track(filename=str(tmp_path / "none.mp3"))
+    assert client.get(f"/api/tracks/{bare.id}/stems/drums/waveform").status_code == 404
+    assert client.get("/api/tracks/424242/stems/guitar/waveform").status_code == 404
+
+
+def test_extract_stems_enqueues_and_dedupes(
+    client: TestClient, make_track, tmp_path: Path, stems_config: StemsConfig, db_session
+) -> None:
+    from backend.tasks.models import Task
+
+    source = tmp_path / "track.mp3"
+    source.write_bytes(b"x" * 100)
+    track = make_track(filename=str(source))
+    first = client.post(f"/api/tracks/{track.id}/stems/split").json()
+    assert first == {"queued": True, "has_stems": False}
+    again = client.post(f"/api/tracks/{track.id}/stems/split").json()
+    assert again == {"queued": False, "has_stems": False}  # deduped
+    tasks = db_session.query(Task).filter(Task.type == "stem-split").all()
+    assert len(tasks) == 1
+    assert client.post("/api/tracks/424242/stems/split").status_code == 404
+
+
+def test_extract_stems_noop_when_current(
+    client: TestClient, track_with_stems
+) -> None:
+    res = client.post(f"/api/tracks/{track_with_stems.id}/stems/split").json()
+    assert res == {"queued": False, "has_stems": True}

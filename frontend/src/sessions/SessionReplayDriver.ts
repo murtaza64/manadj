@@ -26,6 +26,11 @@
 import type { DeckEngine, DeckSnapshot } from '../playback/DeckEngine';
 import type { ChannelId, Mixer } from '../playback/mixer';
 import type { AutomationChannelValues } from '../playback/mixer';
+
+/** All-on stem default (stems #212): the state before any stem event. */
+function allStemsOn(): { vocals: boolean; drums: boolean; bass: boolean; other: boolean } {
+  return { vocals: true, drums: true, bass: true, other: true };
+}
 import { channelCrossfaderGain } from '../playback/mixerMath';
 import type { CrossfaderAssignment } from '../playback/crossfaderAssignmentStore';
 import {
@@ -195,12 +200,19 @@ export class SessionReplayDriver {
    * overlay lanes — never written to base during playback. */
   private recDecks: Record<
     ChannelId,
-    { fader: number; trim: number; eq: { low: number; mid: number; high: number }; filter: number; assignment: CrossfaderAssignment }
+    {
+      fader: number;
+      trim: number;
+      eq: { low: number; mid: number; high: number };
+      filter: number;
+      assignment: CrossfaderAssignment;
+      stems: { vocals: boolean; drums: boolean; bass: boolean; other: boolean };
+    }
   > = {
-    A: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
-    B: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
-    C: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left' },
-    D: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right' },
+    A: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left', stems: allStemsOn() },
+    B: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right', stems: allStemsOn() },
+    C: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'left', stems: allStemsOn() },
+    D: { fader: 1, trim: 0.5, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0, assignment: 'right', stems: allStemsOn() },
   };
   private recCrossfader = 0;
   private recCrossfaderEnabled = true;
@@ -466,6 +478,7 @@ export class SessionReplayDriver {
         eq: { ...s.eq },
         filter: s.filter,
         assignment: s.assignment,
+        stems: { ...s.stems },
       };
       if (s.trackId !== null) {
         engine.setPitch(s.pitch);
@@ -499,6 +512,9 @@ export class SessionReplayDriver {
         trim: r.trim,
         eq: { ...r.eq },
         filter: r.filter,
+        // Stems ride the lane (stems #212): replay reproduces recorded
+        // kills; disengage hands the live user's stems back.
+        stems: { ...r.stems },
       };
       this.lastLanes[d] = lane;
       this.mixer.setAutomation(d, lane);
@@ -556,6 +572,18 @@ export class SessionReplayDriver {
           this.applyLanes([ch]);
         } else if (cue.control === 'filter' && ch) {
           this.recDecks[ch].filter = v;
+          this.applyLanes([ch]);
+        } else if (cue.control === 'stemVocals' && ch) {
+          this.recDecks[ch].stems = { ...this.recDecks[ch].stems, vocals: v !== 0 };
+          this.applyLanes([ch]);
+        } else if (cue.control === 'stemDrums' && ch) {
+          this.recDecks[ch].stems = { ...this.recDecks[ch].stems, drums: v !== 0 };
+          this.applyLanes([ch]);
+        } else if (cue.control === 'stemBass' && ch) {
+          this.recDecks[ch].stems = { ...this.recDecks[ch].stems, bass: v !== 0 };
+          this.applyLanes([ch]);
+        } else if (cue.control === 'stemOther' && ch) {
+          this.recDecks[ch].stems = { ...this.recDecks[ch].stems, other: v !== 0 };
           this.applyLanes([ch]);
         } else if (cue.control === 'crossfaderAssignment' && ch) {
           this.recDecks[ch].assignment = v < 0 ? 'left' : v > 0 ? 'right' : 'thru';

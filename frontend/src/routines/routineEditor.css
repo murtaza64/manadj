@@ -697,6 +697,11 @@
   cursor: pointer;
   z-index: 3;
 }
+/* Collapse/expand toggle for edited lanes (gh#208): sits just left of the
+   author/discard button. */
+.rt-laneauthor.rt-lanecollapse {
+  left: 156px;
+}
 .rt-laneauthor:hover {
   color: var(--text);
   background: var(--surface0);
@@ -729,7 +734,7 @@
   bottom: 0;
   left: 0;
   width: 1.5px;
-  background: var(--playhead);
+  background: var(--playhead); /* Transport playhead (D6 registry) */
   pointer-events: none;
   z-index: 1; /* under the slot panel's dim (gh#190 iteration) */
 }

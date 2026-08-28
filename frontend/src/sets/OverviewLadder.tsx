@@ -34,10 +34,16 @@ import type { HotCue, Track } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
-import { HOT_CUE_CSS_COLORS } from '../hotcues/palette';
+import { cueCssColor } from '../hotcues/palette';
 import { getConductor, setFollowPlayback } from './conductorStore';
 import { WILL_RESTORE_COLOR, type AdjacencyFuture } from './dormancy';
 import { drawStyledWave, MINIMAP_BRIGHTNESS } from './ladderWaveStyle';
+import {
+  WAVE_BG_COLOR,
+  CUE_FLAG_POLE_W,
+  CUE_FLAG_MINI_SIZE,
+  PLAYHEAD_MACHINE,
+} from '../theme/markers';
 import { planColumnModulator } from './ladderPlanModulation';
 import {
   planStateAt,
@@ -536,7 +542,8 @@ export const OverviewLadder = memo(function OverviewLadder({
                 }}
               />
             ))}
-          {/* Conductor playhead (sets 05) — rAF-driven, hidden when idle */}
+          {/* Conductor playhead (sets 05) — rAF-driven, hidden when idle.
+              Machine orange (D6 registry): the Conductor's position. */}
           <div
             ref={playheadRef}
             style={{
@@ -546,7 +553,7 @@ export const OverviewLadder = memo(function OverviewLadder({
               bottom: 0,
               width: 2,
               marginLeft: -1,
-              background: '#ffffff',
+              background: PLAYHEAD_MACHINE,
               boxShadow: '0 0 4px #000',
               zIndex: 5,
               pointerEvents: 'none',
@@ -996,7 +1003,9 @@ const LadderClip = memo(function LadderClip({
   const title = track ? (track.title ?? track.filename) : `Track ${entry.trackId}`;
   const cues = hotCues.map((c) => ({
     t: c.time_seconds,
-    color: c.color ?? HOT_CUE_CSS_COLORS[c.slot_number] ?? '#fff',
+    // Stored cue hex is validated (cueCssColor) — an arbitrary stored string
+    // must never reach the DOM flag fill (gh#201 item 2).
+    color: cueCssColor(c.slot_number, c.color),
   }));
   const span = Math.max(entry.exitMixSec - entry.entryMixSec, 0.001);
   return (
@@ -1008,7 +1017,7 @@ const LadderClip = memo(function LadderClip({
         top,
         height: LANE_H,
         border: `1px solid ${DECK_COLORS[entry.deck]}`,
-        background: '#0b0b12',
+        background: WAVE_BG_COLOR,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -1201,19 +1210,19 @@ function LadderWave({
             <div
               style={{
                 position: 'absolute',
-                left: -1,
+                left: -CUE_FLAG_POLE_W / 2,
                 top: 0,
                 bottom: 0,
-                width: 2,
+                width: CUE_FLAG_POLE_W,
                 background: c.color,
               }}
             />
             <div
               style={{
                 position: 'absolute',
-                left: 1,
-                width: 5,
-                height: 5,
+                left: CUE_FLAG_POLE_W / 2,
+                width: CUE_FLAG_MINI_SIZE,
+                height: CUE_FLAG_MINI_SIZE,
                 top: dir === 'up' ? 0 : undefined,
                 bottom: dir === 'up' ? undefined : 0,
                 background: c.color,

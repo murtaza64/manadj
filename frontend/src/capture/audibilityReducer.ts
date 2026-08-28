@@ -47,6 +47,8 @@ export interface ReducerDeckState {
   /** This deck's crossfader side (Sessions PRD, ADR 0033: tracked for all
    * four decks so the log alone reconstructs audibility). */
   assignment: CrossfaderAssignment;
+  /** Per-stem enables (stems #212); all-on for stem-less tracks. */
+  stems: { vocals: boolean; drums: boolean; bass: boolean; other: boolean };
   /** Varispeed percent (bends excluded — momentary by definition). */
   pitch: number;
   /** Last known playhead (track seconds) and the capture time we knew it. */
@@ -76,6 +78,7 @@ export function freshDeck(assignment: CrossfaderAssignment): ReducerDeckState {
     eq: { low: 0.5, mid: 0.5, high: 0.5 },
     filter: 0,
     assignment,
+    stems: { vocals: true, drums: true, bass: true, other: true },
     pitch: 0,
     playhead: 0,
     playheadAt: 0,
@@ -129,6 +132,11 @@ export function applyEvent(s: AudibilityState, e: CaptureEvent): void {
       else if (e.control === 'eqMid' && d) d.eq.mid = e.value;
       else if (e.control === 'eqHigh' && d) d.eq.high = e.value;
       else if (e.control === 'filter' && d) d.filter = e.value;
+      // Stems mutate in place like eq: retainers deep-clone `stems` too.
+      else if (e.control === 'stemVocals' && d) d.stems.vocals = e.value !== 0;
+      else if (e.control === 'stemDrums' && d) d.stems.drums = e.value !== 0;
+      else if (e.control === 'stemBass' && d) d.stems.bass = e.value !== 0;
+      else if (e.control === 'stemOther' && d) d.stems.other = e.value !== 0;
       else if (e.control === 'crossfaderAssignment' && d)
         d.assignment = assignmentFromValue(e.value);
       else if (e.control === 'crossfader') s.crossfader = e.value;

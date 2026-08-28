@@ -16,6 +16,7 @@ import type { StyleParams } from '../waveform/styles';
 import type { ColumnModulation } from '../sets/ladderWaveStyle';
 import { createStyledColumnRenderer } from '../sets/ladderWaveStyle';
 import { hexToRgbTriplet } from '../theme/deckColors';
+import { AUDIBILITY_FILL_ALPHA, BEAT_TIER_DIM, LADDER_GOLD_RGB } from '../theme/markers';
 import { channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import { eqValueToGain } from '../playback/graph';
 import type { DeckControlSteps, DeckTimeline, GainStep, TimeAxis } from './timelineModel';
@@ -202,7 +203,7 @@ export function drawAudibilityArea(
   geo: LaneGeometry
 ): void {
   if (steps.length === 0) return;
-  ctx.fillStyle = `rgba(${hexToRgbTriplet(color)}, 0.16)`;
+  ctx.fillStyle = `rgba(${hexToRgbTriplet(color)}, ${AUDIBILITY_FILL_ALPHA})`;
   ctx.beginPath();
   const from = Math.max(0, Math.floor(geo.x0));
   const to = Math.min(geo.width, Math.ceil(geo.x1));
@@ -289,7 +290,9 @@ export function columnModulation(controls: DeckControlSteps, t: number): ColumnM
 /** Full-color styled waveform for every constant-rate run of the deck's
  * traces, mirrored around the lane center (the editor's anchor). With
  * `controls`, each column is modulated by the recorded mixer state at its
- * session time (O(log n) step lookups — the gainAt precedent). */
+ * session time (O(log n) step lookups — the gainAt precedent); a function
+ * is a caller-supplied per-timeline-px modulator instead (the routine
+ * timeline's planned lanes, gh#201). */
 export function drawStyledRuns(
   ctx: CanvasRenderingContext2D,
   wave: DecodedWaveform,
@@ -298,7 +301,7 @@ export function drawStyledRuns(
   runs: TraceRun[],
   axis: TimeAxis,
   geo: LaneGeometry,
-  controls?: DeckControlSteps
+  controls?: DeckControlSteps | ((pxX: number) => ColumnModulation)
 ): void {
   const midY = geo.yOffset + geo.height / 2;
   const halfH = geo.height / 2 - 2;
@@ -307,8 +310,9 @@ export function drawStyledRuns(
   // modulation's px→t lookups ride a monotonic segment cursor (runs and
   // their columns advance left→right).
   const renderer = createStyledColumnRenderer(wave, styleId, params);
-  const pxToT = controls ? createMonotonicPxToT(axis) : null;
-  const modAt = controls ? createColumnModulator(controls) : null;
+  const modFn = typeof controls === 'function' ? controls : null;
+  const pxToT = controls && !modFn ? createMonotonicPxToT(axis) : null;
+  const modAt = controls && !modFn ? createColumnModulator(controls as DeckControlSteps) : null;
   // Run endpoints advance in time — a monotonic cursor instead of
   // `axis.tToPx`'s per-call linear segment scan (O(runs × segments)
   // dominated low-zoom repaints alongside per-run setup).
@@ -326,8 +330,9 @@ export function drawStyledRuns(
     const xStart = Math.round(cx0);
     const cols = Math.round(cx1) - xStart;
     if (cols <= 0) continue;
-    const modulate =
-      modAt && pxToT
+    const modulate = modFn
+      ? (x: number) => modFn(xStart + x + 0.5)
+      : modAt && pxToT
         ? (x: number) => modAt(pxToT(xStart + x + 0.5))
         : undefined;
     const columns = renderer.render(phA, phB, cols, 1, modulate);
@@ -346,19 +351,37 @@ export function drawStyledRuns(
   }
 }
 
-/** Beat gridlines, mapped through the runs (jump/pitch-aware): faint
- * lines at beats, brighter at downbeats. Density-gated: downbeats appear
- * from ~4px spacing, all beats from ~10px. */
+/** A track's Metric-ladder data for the lane gridlines (gh#201): the
+ * per-downbeat tier map (meter/ladder.downbeatLadderMap — exact-float keys
+ * of the same downbeat_times array) plus each tier's bar span for density
+ * culling. Absent (null) = every downbeat renders as a plain bar. */
+export interface LaneLadder {
+  downs: Map<number, { tier: number; parenthetical: boolean }>;
+  tierBars: readonly number[];
+}
+
+/** Beat gridlines, mapped through the runs (jump/pitch-aware) and rendered
+ * TIER-AWARE at the lane-guide (dim) register (gh#201: dropping hypermeter
+ * silently is a bug — DESIGN.md D11). Density-gated like the GL renderer:
+ * weak beats from ~10px spacing; each ladder tier only when its own bar
+ * spacing clears the downbeat threshold, so zoomed out only phrase-level
+ * lines survive. Parenthetical bars tint ladder gold (the shared band
+ * language). */
 export function drawGridlines(
   ctx: CanvasRenderingContext2D,
   beatTimes: number[],
   downbeatTimes: number[],
   runs: TraceRun[],
   axis: TimeAxis,
-  geo: LaneGeometry
+  geo: LaneGeometry,
+  ladder?: LaneLadder | null
 ): void {
   const downbeats = new Set(downbeatTimes);
   const tToPx = createMonotonicTToPx(axis);
+  const tierBars = ladder?.tierBars ?? [1];
+  const maxStyle = BEAT_TIER_DIM.width.length - 1;
+  const y = geo.yOffset + 2;
+  const h = geo.height - 4;
   for (const run of runs) {
     const x0 = tToPx(run.t0);
     const x1 = tToPx(run.t1);
@@ -369,8 +392,20 @@ export function drawGridlines(
     const beatGapS = beatTimes.length > 1 ? beatTimes[1] - beatTimes[0] : 0.5;
     const beatPx = beatGapS * pxPerTrackSec;
     const drawBeats = beatPx >= 10;
-    const drawDownbeats = beatPx * 4 >= 16;
-    if (!drawBeats && !drawDownbeats) continue;
+    // Bar spacing from the downbeat lattice itself (any time signature).
+    const barGapS =
+      downbeatTimes.length > 1 ? downbeatTimes[1] - downbeatTimes[0] : beatGapS * 4;
+    const barPx = barGapS * pxPerTrackSec;
+    // Lowest visible tier: the legacy ~16px downbeat threshold, applied to
+    // each tier's own spacing (the GL renderer's culling rule).
+    let minTier = tierBars.length;
+    for (let k = 0; k < tierBars.length; k++) {
+      if (barPx * tierBars[k] >= 16) {
+        minTier = k;
+        break;
+      }
+    }
+    if (!drawBeats && minTier >= tierBars.length) continue;
 
     // Binary search the first beat ≥ ph0.
     let lo = 0;
@@ -386,8 +421,19 @@ export function drawGridlines(
       if (!isDown && !drawBeats) continue;
       const x = x0 + (b - run.ph0) * pxPerTrackSec;
       if (x < geo.x0 || x > geo.x1) continue; // window
-      ctx.fillStyle = isDown ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.10)';
-      ctx.fillRect(Math.round(x), geo.yOffset + 2, 1, geo.height - 4);
+      if (!isDown) {
+        ctx.fillStyle = `rgba(255,255,255,${BEAT_TIER_DIM.weakAlpha})`;
+        ctx.fillRect(Math.round(x), y, BEAT_TIER_DIM.weakWidth, h);
+        continue;
+      }
+      const info = ladder?.downs.get(b);
+      const tier = info?.tier ?? 0;
+      if (tier < minTier) continue; // culled at this zoom
+      const s = Math.min(tier, maxStyle);
+      ctx.fillStyle = info?.parenthetical
+        ? `rgba(${LADDER_GOLD_RGB},${Math.min(1, BEAT_TIER_DIM.alpha[s] + 0.12)})`
+        : `rgba(255,255,255,${BEAT_TIER_DIM.alpha[s]})`;
+      ctx.fillRect(Math.round(x), y, BEAT_TIER_DIM.width[s], h);
     }
   }
 }

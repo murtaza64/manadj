@@ -50,6 +50,8 @@ export default function Player() {
           beatjumpBeats={beatjumpBeats}
           playing={advancing}
           subscribeWake={subscribeWake}
+          /* Documented override of PLAY_MARKER_FRACTION (theme/markers):
+             the library player trades look-ahead for look-behind. */
           playMarkerFraction={0.35}
           timeReadoutAnchor="top-left"
           /* Docked at the transport overlay's bottom edge (panel bottom

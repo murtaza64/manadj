@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWaveformBlob } from '../waveform/useWaveformBlob';
+import type { DecodedWaveform } from '../waveform/blob';
 import { useWaveformRendererV2 } from '../waveform/useWaveformRendererV2';
 import { useViewActive } from '../contexts/viewActive';
 import { loopOverlayRegions } from '../waveform/loopOverlay';
@@ -23,6 +24,14 @@ export interface ScrubTransport {
 
 interface WebGLWaveformProps {
   trackId: number | null;
+  /** Per-stem waveforms (stems #213): GPU-side mask compositing — ahead
+   * of the playhead the top lobe shows the live-mask composite and the
+   * bottom the raw mix; behind it, what was actually heard. */
+  stemWaveforms?: DecodedWaveform[] | null;
+  /** Per-column mask source (track time → 4 gains); stable identity. */
+  stemMaskAt?: ((t: number) => readonly number[]) | null;
+  /** Transparent GL background (underlay fills show through). */
+  transparentBackground?: boolean;
   clock: PlaybackClock;
   cuePoint: number | null;
   transport: ScrubTransport;
@@ -73,6 +82,9 @@ interface WebGLWaveformProps {
 
 export default function WebGLWaveform({
   trackId,
+  stemWaveforms = null,
+  stemMaskAt = null,
+  transparentBackground = false,
   clock,
   cuePoint,
   transport,
@@ -103,8 +115,11 @@ export default function WebGLWaveform({
   const { canvasRef, rendererRef, initError } = useWaveformRendererV2({
     clock,
     waveformData,
+    stemWaveforms,
+    stemMaskAt,
     config: {
       isMinimapMode: false,
+      transparentBackground,
       playMarkerPosition: playMarkerFraction,
       showTimeReadout: true,
       timeReadoutAnchor,

@@ -80,6 +80,16 @@ export const HOT_CUE_CSS_COLORS: Record<number, string> = {
   8: '#00cec9',
 };
 
+// ── Stem kill-switch palette (stems #210) — bright, fully saturated,
+// one identity per stem across every surface that will ever paint them
+// (deck buttons now; lanes/viz later). Consumed as --stem-<name>.
+export const STEM_COLORS = {
+  vocals: '#ffd400',
+  drums: '#ff4455',
+  bass: '#a855f7',
+  other: '#00cec9',
+} as const;
+
 // ── Energy gradient ──────────────────────────────────────────────────────
 export const ENERGY_COLORS: Record<number, string> = {
   1: '#ffffcc',
@@ -184,6 +194,9 @@ export const CSS_VARS: Record<string, string> = {
   // Hotcue slots
   ...Object.fromEntries(
     Object.entries(HOT_CUE_CSS_COLORS).map(([slot, hex]) => [`--hc-${slot}`, hex]),
+  ),
+  ...Object.fromEntries(
+    Object.entries(STEM_COLORS).map(([stem, hex]) => [`--stem-${stem}`, hex]),
   ),
 
   // Energy gradient

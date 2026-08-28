@@ -223,6 +223,48 @@ def get_track_stem(track_id: int, stem: str, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/{track_id}/stems/split")
+def request_stem_split(track_id: int, db: Session = Depends(get_db)):
+    """Enqueue a stem-split task for one track (stems UI's "extract stems").
+    Dedup rides the task queue (type+ref); already-current stems no-op."""
+    from backend.stems import is_current
+    from backend.stems_tasks import enqueue_stem_split
+
+    track = crud.get_track(db, track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+    if is_current(track_id, Path(track.filename)):
+        return {"queued": False, "has_stems": True}
+    task = enqueue_stem_split(db, track_id)
+    return {"queued": task is not None, "has_stems": False}
+
+
+@router.get("/{track_id}/stems/{stem}/waveform")
+def get_track_stem_waveform(track_id: int, stem: str, db: Session = Depends(get_db)):
+    """Serve one stem's MWF1 waveform blob (stems #213), generating it
+    lazily on first request (~1.5 s). Same 404 rules as the stem audio:
+    current stems only (stale = absent, #149)."""
+    from backend.stems import STEM_NAMES, ensure_stem_waveform, is_current
+
+    if stem not in STEM_NAMES:
+        raise HTTPException(status_code=404, detail="Unknown stem")
+    track = crud.get_track(db, track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+    if not is_current(track_id, Path(track.filename)):
+        raise HTTPException(status_code=404, detail="Stems not available")
+    try:
+        blob_path = ensure_stem_waveform(track_id, stem)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Stems not available")
+
+    return FileResponse(
+        blob_path,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
+
+
 @router.get("/metadata/compare", response_model=MetadataComparisonResult)
 def compare_metadata(db: Session = Depends(get_db)):
     """Compare database metadata with file tags for all tracks."""

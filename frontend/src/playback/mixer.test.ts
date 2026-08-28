@@ -444,3 +444,142 @@ describe('master recording tap', () => {
     expect(input.inputs.size).toBe(0);
   });
 });
+
+describe('stem kill switches (stems #210)', () => {
+  it('defaults every stem on and toggles immutably with channel hints', () => {
+    const mixer = new Mixer();
+    expect(mixer.getChannelState('A').stems).toEqual({
+      vocals: true,
+      drums: true,
+      bass: true,
+      other: true,
+    });
+    const hints: unknown[] = [];
+    mixer.subscribe((changed) => hints.push(changed));
+    const before = mixer.getChannelState('A');
+    mixer.setStemEnabled('A', 'drums', false);
+    expect(mixer.getChannelState('A').stems.drums).toBe(false);
+    expect(before.stems.drums).toBe(true); // immutable replacement
+    expect(mixer.getChannelState('B').stems.drums).toBe(true); // channel-scoped
+    expect(hints).toEqual(['A']);
+  });
+
+  it('setStemEnabled is idempotent (no notify without a change)', () => {
+    const mixer = new Mixer();
+    const hints: unknown[] = [];
+    mixer.subscribe((changed) => hints.push(changed));
+    mixer.setStemEnabled('A', 'bass', true); // already on
+    expect(hints).toEqual([]);
+  });
+
+  it('toggleStem flips and resetStems restores all-on', () => {
+    const mixer = new Mixer();
+    mixer.toggleStem('C', 'vocals');
+    mixer.toggleStem('C', 'other');
+    expect(mixer.getChannelState('C').stems.vocals).toBe(false);
+    mixer.resetStems('C');
+    expect(mixer.getChannelState('C').stems).toEqual({
+      vocals: true,
+      drums: true,
+      bass: true,
+      other: true,
+    });
+    const hints: unknown[] = [];
+    mixer.subscribe((changed) => hints.push(changed));
+    mixer.resetStems('C'); // already flat — no notify
+    expect(hints).toEqual([]);
+  });
+});
+
+describe('stem applier + automation stems (stems #212)', () => {
+  const allOn = { vocals: true, drums: true, bass: true, other: true };
+  const drumsOff = { ...allOn, drums: false };
+
+  function rig() {
+    const mixer = new Mixer();
+    const applied: Array<{ channel: string; stems: Record<string, boolean> }> = [];
+    mixer.registerStemApplier((channel, stems) => applied.push({ channel, stems }));
+    applied.length = 0; // drop the registration-time asserts
+    return { mixer, applied };
+  }
+
+  it('live kills reach the applier; automation-held stems do not', () => {
+    const { mixer, applied } = rig();
+    mixer.setStemEnabled('A', 'drums', false);
+    expect(applied).toEqual([{ channel: 'A', stems: drumsOff }]);
+
+    const owner = mixer.engageAutomation();
+    mixer.setAutomation('A', {
+      fader: 1,
+      eq: { low: 0.5, mid: 0.5, high: 0.5 },
+      filter: 0,
+      stems: allOn,
+    });
+    applied.length = 0;
+    mixer.setStemEnabled('A', 'drums', true); // lane holds stems: state only
+    expect(applied).toEqual([]);
+    mixer.disengageAutomation(owner);
+  });
+
+  it('a lane with stems applies them; disengage lands base back', () => {
+    const { mixer, applied } = rig();
+    const owner = mixer.engageAutomation();
+    mixer.setAutomation('B', {
+      fader: 1,
+      eq: { low: 0.5, mid: 0.5, high: 0.5 },
+      filter: 0,
+      stems: drumsOff,
+    });
+    expect(applied).toEqual([{ channel: 'B', stems: drumsOff }]);
+    applied.length = 0;
+    mixer.disengageAutomation(owner);
+    // Base state (all on) lands on every channel.
+    expect(applied.filter((a) => a.channel === 'B')).toEqual([
+      { channel: 'B', stems: allOn },
+    ]);
+  });
+
+  it('a lane that never carries stems leaves the live kills in charge', () => {
+    const { mixer, applied } = rig();
+    mixer.setStemEnabled('C', 'bass', false);
+    applied.length = 0;
+    const owner = mixer.engageAutomation();
+    mixer.setAutomation('C', { fader: 1, eq: { low: 0.5, mid: 0.5, high: 0.5 }, filter: 0 });
+    expect(applied).toEqual([]); // stems-less lane: no stem application
+    mixer.disengageAutomation(owner);
+    mixer.setStemEnabled('C', 'bass', true);
+    expect(applied[applied.length - 1]).toEqual({ channel: 'C', stems: allOn });
+  });
+});
+
+describe('stem solo (stems review feedback)', () => {
+  it('solo isolates a stem; soloing it again restores all-on', () => {
+    const mixer = new Mixer();
+    mixer.soloStem('A', 'vocals');
+    expect(mixer.getChannelState('A').stems).toEqual({
+      vocals: true,
+      drums: false,
+      bass: false,
+      other: false,
+    });
+    mixer.soloStem('A', 'vocals'); // un-solo
+    expect(mixer.getChannelState('A').stems).toEqual({
+      vocals: true,
+      drums: true,
+      bass: true,
+      other: true,
+    });
+  });
+
+  it('solo from a partially-killed state isolates the clicked stem', () => {
+    const mixer = new Mixer();
+    mixer.setStemEnabled('B', 'drums', false);
+    mixer.soloStem('B', 'bass');
+    expect(mixer.getChannelState('B').stems).toEqual({
+      vocals: false,
+      drums: false,
+      bass: true,
+      other: false,
+    });
+  });
+});
