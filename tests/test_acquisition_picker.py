@@ -72,16 +72,50 @@ class TestDelta:
 
 
 class TestOrdering:
-    def test_exact_lossless_first(self) -> None:
+    def test_exact_hq_mp3_first_then_lossless(self) -> None:
+        """gh#214 feedback: a high-quality mp3 is the pick this library
+        wants — it outranks lossless; low-bitrate mp3s rank below lossless."""
         shaped = shape_results(
             [
-                result("exact-lossy", "mp3", bitrate_kbps=320),
+                result("exact-low-mp3", "mp3", bitrate_kbps=128),
+                result("exact-hq-mp3", "mp3", bitrate_kbps=320),
                 result("inexact-lossless", "flac", duration_ms=ITEM_DURATION_MS + 30_000),
                 result("exact-lossless", "flac"),
             ],
             ITEM_DURATION_MS,
         )
-        assert order(shaped) == ["exact-lossless", "exact-lossy", "inexact-lossless"]
+        assert order(shaped) == [
+            "exact-hq-mp3", "exact-lossless", "exact-low-mp3", "inexact-lossless",
+        ]
+
+    def test_quality_beats_delta_within_exact_group(self) -> None:
+        """All exact-duration candidates are the right recording — a 320
+        mp3 two seconds off beats a spot-on flac."""
+        shaped = shape_results(
+            [
+                result("spot-on-flac", "flac", duration_ms=ITEM_DURATION_MS),
+                result(
+                    "close-hq-mp3", "mp3", bitrate_kbps=320,
+                    duration_ms=ITEM_DURATION_MS + 2_000,
+                ),
+            ],
+            ITEM_DURATION_MS,
+        )
+        assert order(shaped) == ["close-hq-mp3", "spot-on-flac"]
+
+    def test_no_item_duration_sorts_by_quality(self) -> None:
+        """Standalone searches (gh#217) have no duration to compare against:
+        no deltas, quality-only ordering."""
+        shaped = shape_results(
+            [
+                result("flac", "flac", duration_ms=180_000),
+                result("hq-mp3", "mp3", bitrate_kbps=320, duration_ms=240_000),
+                result("low-mp3", "mp3", bitrate_kbps=128, duration_ms=200_000),
+            ],
+            None,
+        )
+        assert all(s.duration_delta_ms is None for s in shaped)
+        assert order(shaped) == ["hq-mp3", "flac", "low-mp3"]
 
     def test_unknown_duration_sorts_last(self) -> None:
         shaped = shape_results(
@@ -123,10 +157,10 @@ class TestOrdering:
 
 
 class TestAutoCandidates:
-    """The hands-off pick list (gh#214): mp3-only, exact duration, healthy
-    bitrate, one candidate per peer, capped at five sources."""
+    """The hands-off pick list (gh#214): mp3-only, duration within ±5s,
+    healthy bitrate, one candidate per peer, capped at five sources."""
 
-    def test_only_exact_duration_high_bitrate_mp3s(self) -> None:
+    def test_only_close_duration_high_bitrate_mp3s(self) -> None:
         shaped = shape_results(
             [
                 result("good", "mp3", bitrate_kbps=320, username="a"),
@@ -142,6 +176,23 @@ class TestAutoCandidates:
             ITEM_DURATION_MS,
         )
         assert order(auto_candidates(shaped)) == ["good"]
+
+    def test_a_few_seconds_off_is_fine(self) -> None:
+        """gh#214 feedback: ±5s is acceptable for a blind pick; beyond is not."""
+        shaped = shape_results(
+            [
+                result(
+                    "4s-off", "mp3", bitrate_kbps=320,
+                    duration_ms=ITEM_DURATION_MS + 4_000, username="a",
+                ),
+                result(
+                    "6s-off", "mp3", bitrate_kbps=320,
+                    duration_ms=ITEM_DURATION_MS - 6_000, username="b",
+                ),
+            ],
+            ITEM_DURATION_MS,
+        )
+        assert order(auto_candidates(shaped)) == ["4s-off"]
 
     def test_one_candidate_per_peer_best_first(self) -> None:
         shaped = shape_results(

@@ -638,7 +638,7 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
         </button>
         <button
           className="acquisition-action-button acquisition-action-queue"
-          title="hands-off: auto-pick a high-quality mp3 (exact duration, ≥192 kbps) and retry up to 5 peers on failure"
+          title="hands-off: auto-pick a high-quality mp3 (duration within ±5s, ≥192 kbps) and retry up to 5 peers on failure"
           disabled={autoMutation.isPending}
           onClick={() => autoMutation.mutate()}
         >
@@ -659,7 +659,7 @@ function SoulseekPicker({ item }: { item: SourceItem }) {
       )}
       {results && results.length > 0 && (
         <div className="acquisition-soulseek-results">
-          {/* results arrive server-sorted: exact-duration-lossless first */}
+          {/* results arrive server-sorted: exact-duration hq mp3s first */}
           <div className="acquisition-soulseek-row acquisition-soulseek-head">
             <span>filename</span>
             <span>fmt</span>

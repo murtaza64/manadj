@@ -513,7 +513,12 @@ def soulseek_auto_download(
     duration, healthy bitrate, one candidate per peer, best first — the
     download task falls back through it on failure.
     """
-    from .picker import MIN_AUTO_BITRATE_KBPS, auto_candidates, dicts_to_shaped
+    from .picker import (
+        AUTO_DURATION_TOLERANCE_MS,
+        MIN_AUTO_BITRATE_KBPS,
+        auto_candidates,
+        dicts_to_shaped,
+    )
 
     sup = _require_soulseek(supplier)
     try:
@@ -542,8 +547,9 @@ def soulseek_auto_download(
         raise HTTPException(
             status_code=409,
             detail=(
-                "no auto-pickable mp3 among the search results (need exact "
-                f"duration and ≥{MIN_AUTO_BITRATE_KBPS} kbps) — pick manually"
+                "no auto-pickable mp3 among the search results (need duration "
+                f"within ±{AUTO_DURATION_TOLERANCE_MS // 1000}s and "
+                f"≥{MIN_AUTO_BITRATE_KBPS} kbps) — pick manually"
             ),
         )
     try:
