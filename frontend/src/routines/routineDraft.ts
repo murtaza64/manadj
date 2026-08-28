@@ -98,6 +98,14 @@ export interface RoutineEdits {
    * replayed through the automation overlay's own trim (real gain
    * curves). Keyed by slotId; absent = nominal. */
   trims: Record<string, number>;
+  /** Per-slot ENTRY-OFFSET OVERRIDE (ADR 0039, #207 slice 2): the slot's
+   * entry beat on the routine clock, overriding the baked promotion
+   * output — reorder IS editing entry offsets (slot index = entry order,
+   * ADR 0035; the cast re-sorts as a consequence). The slot's recorded
+   * timeline (trace + recorded lanes) shifts rigidly to the new entry (a
+   * phrase shift). Keyed by slotId; absent = the recorded entry plays.
+   * Undoable, revert-to-recorded, badged '✎' — the authored-lane idiom. */
+  entryOffsets: Record<string, number>;
 }
 
 export const EMPTY_EDITS: RoutineEdits = {
@@ -108,6 +116,7 @@ export const EMPTY_EDITS: RoutineEdits = {
   removedRecordedPauses: [],
   nudges: {},
   trims: {},
+  entryOffsets: {},
 };
 
 export function emptyEdits(): RoutineEdits {
@@ -119,6 +128,7 @@ export function emptyEdits(): RoutineEdits {
     removedRecordedPauses: [],
     nudges: {},
     trims: {},
+    entryOffsets: {},
   };
 }
 
@@ -134,7 +144,8 @@ export function editsAreEmpty(e: RoutineEdits): boolean {
     e.pauses.length === 0 &&
     e.removedRecordedPauses.length === 0 &&
     Object.keys(e.nudges).length === 0 &&
-    Object.keys(e.trims).length === 0
+    Object.keys(e.trims).length === 0 &&
+    Object.keys(e.entryOffsets).length === 0
   );
 }
 
@@ -248,7 +259,22 @@ export function parseEdits(raw: unknown): RoutineEdits {
       }
     }
   }
-  return { lanes, jumps, removedRecordedJumps, pauses, removedRecordedPauses, nudges, trims };
+  const entryOffsets: Record<string, number> = {};
+  if (o.entryOffsets && typeof o.entryOffsets === 'object') {
+    for (const [k, v] of Object.entries(o.entryOffsets as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v)) entryOffsets[k] = v;
+    }
+  }
+  return {
+    lanes,
+    jumps,
+    removedRecordedJumps,
+    pauses,
+    removedRecordedPauses,
+    nudges,
+    trims,
+    entryOffsets,
+  };
 }
 
 // ── Trace transform ──────────────────────────────────────────────────────

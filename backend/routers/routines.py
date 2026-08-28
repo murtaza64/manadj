@@ -284,7 +284,22 @@ def _shift_edits(
 
     nudges = slot_map("nudges", lambda v: bool(v))
     trims = slot_map("trims", lambda v: v != 0.5)
-    if not any([lanes, jumps, removed, nudges, trims, pauses, removed_pauses]):
+    # Entry-offset overrides (ADR 0039, #207 slice 2) are routine beats —
+    # they rebase like beats and drop when they fall off the new span.
+    entry_offsets = {}
+    for key, val in (edits.get("entryOffsets") or {}).items():
+        try:
+            slot = int(str(key))
+        except ValueError:
+            continue
+        if slot >= kept_slots or not isinstance(val, (int, float)):
+            continue
+        nb = val - shift_beats
+        if 0 <= nb <= new_duration:
+            entry_offsets[str(slot)] = nb
+    if not any(
+        [lanes, jumps, removed, nudges, trims, pauses, removed_pauses, entry_offsets]
+    ):
         return None
     return {
         "lanes": lanes,
@@ -294,6 +309,7 @@ def _shift_edits(
         "removedRecordedPauses": removed_pauses,
         "nudges": nudges,
         "trims": trims,
+        "entryOffsets": entry_offsets,
     }
 
 

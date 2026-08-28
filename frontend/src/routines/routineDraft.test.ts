@@ -325,6 +325,41 @@ describe('build integration (the one seam: editor audition ≡ set replay)', () 
     expect(def.slots.map((s) => s.slotId)).toEqual(['0', '1', '2']);
   });
 
+  it('entry-offset overrides re-sort the cast; slotIds stay put and edits follow (ADR 0039, #207)', () => {
+    // Swap slots 1 and 2's entries (the vertical drag's write): slot 1
+    // (slotId '1') now enters at 32, slot 2 (slotId '2') at 16 — the
+    // derived order becomes 0, 2, 1.
+    const edits = {
+      ...emptyEdits(),
+      entryOffsets: { '1': 32, '2': 16 },
+      trims: { '1': 0.7 },
+    };
+    const base = buildPlannedRoutine(input(), ctx).routine;
+    const { routine } = buildPlannedRoutine({ ...input(), edits }, ctx);
+    expect(routine.slots.map((s) => s.slotId)).toEqual(['0', '2', '1']);
+    expect(routine.slots.map((s) => s.slot)).toEqual([0, 1, 2]); // derived index
+    // The trim edit followed slotId '1' to its new position (index 2).
+    expect(routine.slots[2].trim).toBe(0.7);
+    expect(routine.slots[1].trim).toBe(0.5);
+    // The shifted slot's recorded timeline moved rigidly: +16 beats on
+    // the beat axis, same material (positions unchanged per point).
+    const b1 = base.slots[1];
+    const moved = routine.slots.find((s) => s.slotId === '1')!;
+    expect(moved.trace.map((p) => p.beat)).toEqual(b1.trace.map((p) => p.beat + 16));
+    moved.trace.forEach((p, i) => expect(p.pos).toBeCloseTo(b1.trace[i].pos));
+    // Entry markers follow (beat 32 at 120 BPM = mix 16 s).
+    expect(moved.entryMixSec).toBeCloseTo(16);
+    // Recorded lanes ride the shift with the trace.
+    expect(moved.lanes.fader.map((p) => p.beat)).toEqual(
+      b1.lanes.fader.map((p) => p.beat + 16)
+    );
+    // The un-overridden slot 0 is untouched and still enters first.
+    expect(routine.slots[0].slotId).toBe('0');
+    expect(routine.slots[0].entryMixSec).toBeCloseTo(0);
+    // Exit contract: the LAST ENTRY (slotId '1' now) is the exit slot.
+    expect(routine.exit.trackId).toBe(2);
+  });
+
   it('alignment nudges slide the trace rigidly (gh#190 item 6)', () => {
     const base = buildPlannedRoutine(input(), ctx).routine;
     const edits = { ...emptyEdits(), nudges: { '1': 0.25 } };
@@ -389,5 +424,12 @@ describe('parseEdits', () => {
   it('parses nudges, dropping zeros and non-numbers (gh#190 item 6)', () => {
     const parsed = parseEdits({ nudges: { '0': 0.05, '1': 0, '2': 'x', '3': -0.1 } });
     expect(parsed.nudges).toEqual({ '0': 0.05, '3': -0.1 });
+  });
+
+  it('parses entry-offset overrides, dropping non-numbers (ADR 0039, #207)', () => {
+    const parsed = parseEdits({ entryOffsets: { '1': 32, '2': 'x', '0': 0 } });
+    expect(parsed.entryOffsets).toEqual({ '1': 32, '0': 0 });
+    // Absent on legacy layers = no overrides.
+    expect(parseEdits({}).entryOffsets).toEqual({});
   });
 });

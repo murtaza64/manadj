@@ -474,6 +474,24 @@
   white-space: nowrap;
 }
 
+/* Edited entry-offset badge (ADR 0039, #207 slice 2): the '✎ edited'
+   idiom on the slot panel — click reverts to the recorded entry. */
+.rt-entrybadge {
+  background: transparent;
+  border: 1px solid var(--routine-accent);
+  color: var(--routine-accent);
+  border-radius: 3px;
+  font-size: var(--font-micro);
+  font-weight: 700;
+  padding: 0 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rt-entrybadge:hover {
+  background: var(--routine-accent);
+  color: #0b0b0b;
+}
+
 
 /* Lane toggle chips (the editor's gutter idiom, floated top-right of the
    wave row). */

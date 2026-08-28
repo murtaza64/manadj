@@ -672,8 +672,34 @@ export function buildPlannedRoutine(
   const warnings: RoutineBuildWarning[] = [];
   const n = input.cast.length;
   const secPerBeat = 60 / ctx.targetBpm;
-  const entryMixSecs = input.entryOffsetsBeats.map((b) => ctx.mixStartSec + b * secPerBeat);
   const mixEndSec = ctx.mixStartSec + input.durationBeats * secPerBeat;
+
+  const edits = input.edits ?? null;
+  // Stable slot ids (ADR 0039): the edit-addressing handle. Absent input
+  // ids default to the migration identity slotId = String(index).
+  const slotIdsIn = input.cast.map((_, slot) => input.slotIds?.[slot] ?? String(slot));
+  // Effective entry offsets: the edits layer's per-slot OVERRIDE (ADR
+  // 0039, #207 slice 2 — reorder IS editing entry offsets) over the
+  // baked promotion output.
+  const effEntryIn = input.cast.map(
+    (_, slot) => edits?.entryOffsets?.[slotIdsIn[slot]] ?? input.entryOffsetsBeats[slot]
+  );
+  // The DERIVED entry order (slot index = entry order, ADR 0035): the
+  // cast re-sorts by effective entry; identity lives in slotId, so
+  // nothing re-keys. `order[k]` = the recording's slot address for
+  // derived slot k (events stay addressed on the baked indices).
+  const order = input.cast
+    .map((_, i) => i)
+    .sort((a, b) => effEntryIn[a] - effEntryIn[b] || a - b);
+  const slotIds = order.map((i) => slotIdsIn[i]);
+  const entryBeats = order.map((i) => effEntryIn[i]);
+  /** Beat-axis shift of each derived slot's recorded timeline (a phrase
+   * shift: trace AND recorded lanes move to the new entry together). */
+  const entryDeltas = order.map((i) => effEntryIn[i] - input.entryOffsetsBeats[i]);
+  const entryPositions = order.map((i) => input.entryPositions[i]);
+  const trackBpms = order.map((i) => ctx.trackBpms[i]);
+  const castOrdered = order.map((i) => input.cast[i]);
+  const entryMixSecs = entryBeats.map((b) => ctx.mixStartSec + b * secPerBeat);
 
   // Traces first (gh#170 pass 2): allocation needs each slot's RELEASE —
   // the end of its recorded motion — so freed decks can serve later
@@ -681,18 +707,18 @@ export function buildPlannedRoutine(
   // Authored jump edits (the Routine editor's draft layer) apply here so
   // every downstream consumer — allocation, jump scoping, the Conductor,
   // the editor's audition — sees the edited trajectory.
-  const edits = input.edits ?? null;
-  // Stable slot ids (ADR 0039): the edit-addressing handle. Absent input
-  // ids default to the migration identity slotId = String(index).
-  const slotIds = input.cast.map((_, slot) => input.slotIds?.[slot] ?? String(slot));
-  const traces = input.cast.map((_, slot) => {
+  const traces = castOrdered.map((_, slot) => {
     const slotId = slotIds[slot];
-    const raw = buildSlotTrace(
-      slotSamples(input.events, slot),
-      60 / ctx.trackBpms[slot],
-      input.entryOffsetsBeats[slot],
-      input.entryPositions[slot]
+    let raw = buildSlotTrace(
+      slotSamples(input.events, order[slot]),
+      60 / trackBpms[slot],
+      input.entryOffsetsBeats[order[slot]],
+      entryPositions[slot]
     );
+    // Entry-offset override: the whole recorded trajectory shifts to the
+    // new entry beat BEFORE the (absolute-beat) jump/pause edits apply.
+    const delta = entryDeltas[slot];
+    if (delta !== 0) raw = raw.map((p) => ({ ...p, beat: p.beat + delta }));
     if (!edits) return raw;
     const authored = edits.jumps.filter((j) => j.slotId === slotId);
     const removed = edits.removedRecordedJumps.filter((r) => r.slotId === slotId);
@@ -741,11 +767,27 @@ export function buildPlannedRoutine(
     });
   }
 
-  const slots: PlannedRoutineSlot[] = input.cast.map((trackId, slot) => {
-    const bpm = ctx.trackBpms[slot];
+  const slots: PlannedRoutineSlot[] = castOrdered.map((trackId, slot) => {
+    const bpm = trackBpms[slot];
     const basePitchPercent = clampPitch((ctx.targetBpm / bpm - 1) * 100);
     const trace = traces[slot];
     const slotId = slotIds[slot];
+    // Recorded lanes ride the entry-offset shift with the trace (the
+    // slot's automation belongs to its material — a phrase shift moves
+    // both together).
+    let recordedLanes = buildSlotLanes(input.events, order[slot], slot === 0);
+    const delta = entryDeltas[slot];
+    if (delta !== 0) {
+      recordedLanes = {
+        ...recordedLanes,
+        fader: recordedLanes.fader.map((p) => ({ ...p, beat: p.beat + delta })),
+        trim: recordedLanes.trim.map((p) => ({ ...p, beat: p.beat + delta })),
+        eqLow: recordedLanes.eqLow.map((p) => ({ ...p, beat: p.beat + delta })),
+        eqMid: recordedLanes.eqMid.map((p) => ({ ...p, beat: p.beat + delta })),
+        eqHigh: recordedLanes.eqHigh.map((p) => ({ ...p, beat: p.beat + delta })),
+        filter: recordedLanes.filter.map((p) => ({ ...p, beat: p.beat + delta })),
+      };
+    }
     return {
       slot,
       slotId,
@@ -754,10 +796,10 @@ export function buildPlannedRoutine(
       occupyFromMixSec: assignments[slot].occupyFromMixSec,
       releaseMixSec: releaseMixSecs[slot],
       entryMixSec: entryMixSecs[slot],
-      entryTrackSec: input.entryPositions[slot] + (edits?.nudges?.[slotId] ?? 0),
+      entryTrackSec: entryPositions[slot] + (edits?.nudges?.[slotId] ?? 0),
       basePitchPercent,
       trace,
-      lanes: withLaneEdits(buildSlotLanes(input.events, slot, slot === 0), edits, slotId),
+      lanes: withLaneEdits(recordedLanes, edits, slotId),
       // Per-slot channel trim (gh#190): draft-authored, 0.5 nominal.
       trim: edits?.trims?.[slotId] ?? 0.5,
       jumpMixSecs: trace
@@ -793,7 +835,7 @@ export function buildPlannedRoutine(
       last.moving = true;
       // Beatmatched advance is tempo-invariant in beat domain: one track
       // beat per Routine beat = 60/trackBpm track-seconds per beat.
-      last.ratePerBeat = 60 / ctx.trackBpms[n - 1];
+      last.ratePerBeat = 60 / trackBpms[n - 1];
     }
   }
   const trackSecAtEnd = Math.max(0, traceStateAt(exitTrace, input.durationBeats).pos);

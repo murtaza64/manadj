@@ -64,6 +64,29 @@ describe('jump mutations', () => {
   });
 });
 
+describe('entry-offset overrides (ADR 0039, #207 slice 2)', () => {
+  it('a reorder drag (many swap writes) is ONE undo entry; clear reverts to recorded', () => {
+    const s = make();
+    // A vertical drag crossing two slots: two swap mutations, one key.
+    s.setEntryOffsetsLive('drag-1', { a: 32, b: 16 });
+    s.setEntryOffsetsLive('drag-1', { a: 48, c: 32 });
+    s.endGesture();
+    expect(s.getSnapshot().edits.entryOffsets).toEqual({ a: 48, b: 16, c: 32 });
+    s.undo();
+    expect(s.getSnapshot().edits.entryOffsets).toEqual({});
+    s.redo();
+    // null clears an entry (a swap landing back on the recorded offset).
+    s.setEntryOffsetsLive('drag-2', { b: null });
+    s.endGesture();
+    expect(s.getSnapshot().edits.entryOffsets).toEqual({ a: 48, c: 32 });
+    // Revert-to-recorded: one undo step.
+    s.clearEntryOffset('a');
+    expect(s.getSnapshot().edits.entryOffsets).toEqual({ c: 32 });
+    s.undo();
+    expect(s.getSnapshot().edits.entryOffsets).toEqual({ a: 48, c: 32 });
+  });
+});
+
 describe('load boundaries', () => {
   it('loading a routine resets history and identity', () => {
     const s = make();

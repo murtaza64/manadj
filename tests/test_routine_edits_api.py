@@ -120,6 +120,22 @@ def test_retrim_rebases_edits(client, promoted_routine):
     assert edits["removedRecordedJumps"][0]["beat"] == pytest.approx(20.0)
 
 
+def test_retrim_rebases_entry_offset_overrides(client, promoted_routine):
+    """Entry-offset overrides (ADR 0039, #207 slice 2) are routine beats:
+    they shift with the trim and drop when they fall off the new span."""
+    uuid = promoted_routine["uuid"]
+    edits = {**EDITS, "entryOffsets": {"1": 15.0, "2": 5.0}}
+    client.put(f"/api/routines/{uuid}/edits", json={"edits": edits})
+    res = client.post(
+        f"/api/routines/{uuid}/retrim",
+        json={"trim_start_beats": 10.0, "trim_end_beats": 0.0},
+    )
+    assert res.status_code == 200, res.text
+    out = res.json()["edits"]
+    # 15 → 5 survives; 5 → −5 falls off the new span and drops.
+    assert out["entryOffsets"] == {"1": pytest.approx(5.0)}
+
+
 def test_retrim_rebases_legacy_index_keyed_edits(client, promoted_routine):
     """Pre-ADR-0039 rows address slots by `slot` int — rebase still reads
     them (parseEdits migrates them client-side on the next open)."""

@@ -38,6 +38,7 @@ const clone = (e: RoutineEdits): RoutineEdits => ({
   removedRecordedPauses: e.removedRecordedPauses.map((r) => ({ ...r })),
   nudges: { ...e.nudges },
   trims: { ...e.trims },
+  entryOffsets: { ...e.entryOffsets },
 });
 
 export class RoutineDraftStore {
@@ -174,6 +175,28 @@ export class RoutineDraftStore {
       if (deltaSec === 0) delete e.nudges[slotId];
       else e.nudges[slotId] = deltaSec;
     });
+  }
+
+  /** Drag-flavored ENTRY-OFFSET edit (ADR 0039, #207 slice 2 — the
+   * vertical slot drag): write several slots' overrides in ONE mutation
+   * (a reorder swap touches two), coalescing per gesture key — seal with
+   * endGesture on pointer-up. null clears an entry (back to recorded). */
+  setEntryOffsetsLive(gestureKey: string, patch: Record<string, number | null>): void {
+    this.mutate(gestureKey, (e) => {
+      for (const [slotId, v] of Object.entries(patch)) {
+        if (v === null) delete e.entryOffsets[slotId];
+        else e.entryOffsets[slotId] = v;
+      }
+    });
+  }
+
+  /** Revert a slot's entry to the recorded offset (the authored-lane
+   * '↺' idiom). One undo step. */
+  clearEntryOffset(slotId: string): void {
+    this.mutate(`entry-clear:${slotId}`, (e) => {
+      delete e.entryOffsets[slotId];
+    });
+    this.endGesture();
   }
 
   // ── Pauses (gh#190: play/pause events, the jump idiom) ───────────────

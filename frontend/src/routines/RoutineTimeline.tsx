@@ -358,38 +358,111 @@ export function RoutineTimeline({
     return 4 * ROUTINE_TIER_BARS[Math.min(minTier, ROUTINE_TIER_BARS.length - 1)];
   };
 
+  /** Baked (recorded) entry offsets by slotId — the revert target and
+   * the "is this an override?" comparison for the entry-offset edits. */
+  const bakedEntryBySlotId = useMemo(() => {
+    const m: Record<string, number> = {};
+    input.cast.forEach((_, i) => {
+      m[input.slotIds?.[i] ?? String(i)] = input.entryOffsetsBeats[i];
+    });
+    return m;
+  }, [input]);
+  const bakedEntryRef = useRef(bakedEntryBySlotId);
+  bakedEntryRef.current = bakedEntryBySlotId;
+
+  /** A slot's EFFECTIVE entry beat (override included) off the live build. */
+  const effectiveEntryBeat = (s: PlannedRoutineSlot): number => {
+    const p = plannedRef.current;
+    return (s.entryMixSec - p.mixStartSec) / p.secPerBeat;
+  };
+
+  // ── The select-mode slot drag: TWO AXES (ADR 0038, #207 slice 2).
+  // Whichever axis exceeds the threshold first wins the drag:
+  // horizontal = shift/slide material (the landed nudge drag), vertical
+  // = REORDER — the grabbed slot swaps ENTRY OFFSETS with each crossed
+  // slot (reorder is editing entry offsets; the cast re-sorts by entry,
+  // ADR 0035/0039). One undo entry per gesture either way.
+  const AXIS_THRESHOLD_PX = 4;
   const beginSlide = useCallback(
-    (e: React.PointerEvent, slotIds: string[]) => {
+    (e: React.PointerEvent, slotIds: string[], grabbedId: string) => {
       const startX = e.clientX;
-      const key = `nudge-drag:${Date.now()}`;
+      const startY = e.clientY;
+      const key = `slot-drag:${Date.now()}`;
       const base: Record<string, number> = {};
       for (const s of slotIds) base[s] = editsRef.current.nudges[s] ?? 0;
       const prevUserSelect = document.body.style.userSelect;
+      const prevCursor = document.body.style.cursor;
       document.body.style.userSelect = 'none';
-      let moved = false;
+      let axis: 'x' | 'y' | null = null;
+      // After a swap, hold further swaps until the rebuild reflects it
+      // (draft mutation → rebuild → render lag would double-swap).
+      let expectedOrder: string | null = null;
       const onMove = (ev: PointerEvent) => {
         const { pxPerBeat: px } = viewRef.current;
         if (px <= 0) return;
-        const dxBeats = (ev.clientX - startX) / px;
-        if (!moved && Math.abs(ev.clientX - startX) < 3) return;
-        moved = true;
-        let d = dxBeats;
-        if (!ev.shiftKey) {
-          const step = snapStepBeats(px);
-          d = Math.round(dxBeats / step) * step;
+        if (axis === null) {
+          const dx = Math.abs(ev.clientX - startX);
+          const dy = Math.abs(ev.clientY - startY);
+          if (dx < AXIS_THRESHOLD_PX && dy < AXIS_THRESHOLD_PX) return;
+          axis = dx >= dy ? 'x' : 'y';
+          if (axis === 'y') document.body.style.cursor = 'ns-resize';
         }
-        for (const s of slotIds) {
-          const ps = plannedRef.current.slots.find((x) => x.slotId === s);
-          const bpm = tracks.get(ps?.trackId ?? -1)?.bpm ?? null;
-          const rate = bpm && bpm > 0 ? 60 / bpm : 0.5;
-          // Content dragged RIGHT plays earlier material at a given beat:
-          // the nudge (a pos offset) moves OPPOSITE the drag.
-          const v = Math.round((base[s] - d * rate) * 1e4) / 1e4;
-          draftStore.setNudgeLive(key, s, v);
+        if (axis === 'x') {
+          const dxBeats = (ev.clientX - startX) / px;
+          let d = dxBeats;
+          if (!ev.shiftKey) {
+            const step = snapStepBeats(px);
+            d = Math.round(dxBeats / step) * step;
+          }
+          for (const s of slotIds) {
+            const ps = plannedRef.current.slots.find((x) => x.slotId === s);
+            const bpm = tracks.get(ps?.trackId ?? -1)?.bpm ?? null;
+            const rate = bpm && bpm > 0 ? 60 / bpm : 0.5;
+            // Content dragged RIGHT plays earlier material at a given beat:
+            // the nudge (a pos offset) moves OPPOSITE the drag.
+            const v = Math.round((base[s] - d * rate) * 1e4) / 1e4;
+            draftStore.setNudgeLive(key, s, v);
+          }
+          return;
         }
+        // Vertical: reorder by swapping entry offsets with the crossed
+        // neighbor (v1 scope — free-form offset dragging stays on the
+        // horizontal axis / chip controls).
+        const slots = plannedRef.current.slots;
+        const orderSig = slots.map((s) => s.slotId).join(',');
+        if (expectedOrder !== null && orderSig !== expectedOrder) return; // rebuild pending
+        expectedOrder = null;
+        const gi = slots.findIndex((s) => s.slotId === grabbedId);
+        if (gi < 0) return;
+        const blocks = rowsRef.current?.querySelectorAll('.rt-slotblock');
+        if (!blocks || blocks.length !== slots.length) return;
+        const neighborAt = (k: number): { slot: PlannedRoutineSlot; midY: number } | null => {
+          if (k < 0 || k >= slots.length) return null;
+          const r = (blocks[k] as HTMLElement).getBoundingClientRect();
+          return { slot: slots[k], midY: r.top + r.height / 2 };
+        };
+        const above = neighborAt(gi - 1);
+        const below = neighborAt(gi + 1);
+        const target =
+          above && ev.clientY < above.midY ? above : below && ev.clientY > below.midY ? below : null;
+        if (!target) return;
+        const grabbed = slots[gi];
+        const eG = effectiveEntryBeat(grabbed);
+        const eT = effectiveEntryBeat(target.slot);
+        const baked = bakedEntryRef.current;
+        const override = (slotId: string, beat: number): number | null =>
+          Math.abs(beat - (baked[slotId] ?? NaN)) < 1e-9 ? null : beat;
+        draftStore.setEntryOffsetsLive(key, {
+          [grabbed.slotId]: override(grabbed.slotId, eT),
+          [target.slot.slotId]: override(target.slot.slotId, eG),
+        });
+        expectedOrder = slots
+          .map((s) => (s === grabbed ? target.slot.slotId : s === target.slot ? grabbed.slotId : s.slotId))
+          .join(',');
       };
       const onUp = () => {
         document.body.style.userSelect = prevUserSelect;
+        document.body.style.cursor = prevCursor;
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         draftStore.endGesture();
@@ -546,11 +619,11 @@ export function RoutineTimeline({
         if (slotId !== null) {
           setPopover(null);
           if (selectedSlots.includes(slotId)) {
-            beginSlide(e, selectedSlots);
+            beginSlide(e, selectedSlots, slotId);
           } else {
             setSelectedSlots([slotId]);
             selAnchor.current = slotId;
-            beginSlide(e, [slotId]);
+            beginSlide(e, [slotId], slotId);
           }
           return;
         }
@@ -925,7 +998,11 @@ export function RoutineTimeline({
         });
         drawHotCues(ctx, hotcues.get(slot.trackId) ?? [], slotRuns[i], xAt, width, WAVE_H);
       }
-      const entryBeat = input.entryOffsetsBeats[slot.slot];
+      // EFFECTIVE entry (edits-layer override included, ADR 0039) — the
+      // baked input array is indexed by the recording's slot address,
+      // not the derived order.
+      const entryBeat =
+        (slot.entryMixSec - plannedForRuns.mixStartSec) / plannedForRuns.secPerBeat;
       const ex = xAt(entryBeat);
       if (ex >= -4 && ex <= width + 4) {
         ctx.strokeStyle = slotAccent(slot.deck);
@@ -1243,6 +1320,22 @@ export function RoutineTimeline({
                   {slot.slot === planned.slots.length - 1 && (
                     <span className="rt-boundary-tag">exits with</span>
                   )}
+                  {edits.entryOffsets[slot.slotId] !== undefined && (
+                    <button
+                      className="rt-entrybadge"
+                      title={`Entry offset edited: recorded ${(
+                        bakedEntryBySlotId[slot.slotId] ?? 0
+                      ).toFixed(1)}b → ${edits.entryOffsets[slot.slotId].toFixed(
+                        1
+                      )}b (the edits layer — the recording never changes). Click to revert to recorded.`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        draftStore.clearEntryOffset(slot.slotId);
+                      }}
+                    >
+                      ✎ entry {edits.entryOffsets[slot.slotId].toFixed(0)}b ↺
+                    </button>
+                  )}
                 </div>
                 {/* Channel trim (gh#190): the mixer's own knob idiom, PINNED
                     bottom-right of the panel (out of the text rows). */}
@@ -1278,7 +1371,7 @@ export function RoutineTimeline({
                 }}
                 title={
                   selectedSlots.includes(slot.slotId)
-                    ? 'Selected — drag to slide the track (snaps to the smallest visible beat line; shift = fine). Cmd-click to deselect, Esc clears.'
+                    ? 'Selected — drag horizontally to slide the track (snaps to the smallest visible beat line; shift = fine); drag vertically to reorder (swaps entry offsets — the cast re-sorts by entry). Cmd-click to deselect, Esc clears.'
                     : undefined
                 }
               >
