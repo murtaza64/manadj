@@ -134,6 +134,74 @@
   color: var(--text);
 }
 
+/* ── Editor mode toolbar (ADR 0038, gh#207): the segmented control that
+   shows + sets the active top-level mode. ── */
+.re-modebar {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--surface1, #45475a);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.re-modebtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  color: var(--subtext0, #a6adc8);
+  border: none;
+  border-right: 1px solid var(--surface1, #45475a);
+  padding: 3px 9px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.re-modebtn:last-child {
+  border-right: none;
+}
+.re-modebtn:hover:not(.on) {
+  background: var(--surface0, #313244);
+  color: var(--text, #e8e8f0);
+}
+.re-modebtn.on {
+  background: var(--routine-accent);
+  color: var(--routine-accent-ink, #101400);
+}
+.re-modebtn kbd {
+  font-family: monospace;
+  font-size: 9px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 3px;
+  opacity: 0.7;
+}
+
+/* Mode cursor language on the canvas. Pan grabs EVERYTHING (it pans from
+   anywhere, so every child wears grab — except the popover, which stays
+   interactive); jump wears a ↷ cursor on the rows it inserts into. */
+.rt-timeline[data-mode='pan'] .rt-rows,
+.rt-timeline[data-mode='pan'] .rt-rows * {
+  cursor: grab;
+}
+.rt-timeline[data-mode='pan'] .rt-rows:active,
+.rt-timeline[data-mode='pan'] .rt-rows:active * {
+  cursor: grabbing;
+}
+.rt-timeline[data-mode='pan'] .rt-rows .rt-jump-popover,
+.rt-timeline[data-mode='pan'] .rt-rows .rt-jump-popover * {
+  cursor: auto;
+}
+.rt-timeline[data-mode='jump'] .rt-wave-row {
+  /* Heavy black ↷ with a white outline (paint-order: stroke keeps the
+     outline BEHIND the fill) — readable on waveforms and dark rows alike. */
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ctext x='2' y='20' font-size='20' font-weight='900' fill='%23000000' stroke='%23ffffff' stroke-width='2.5' paint-order='stroke' stroke-linejoin='round'%3E%E2%86%B7%3C/text%3E%3C/svg%3E")
+      13 13,
+    crosshair;
+}
+.rt-ruler {
+  cursor: ew-resize;
+}
+
 .re-history {
   display: flex;
   align-items: center;
@@ -266,7 +334,9 @@
 }
 .rt-rows {
   position: relative;
-  cursor: crosshair;
+  /* Select mode wears the regular cursor (gh#207 review feedback);
+     pan/jump set their own below. */
+  cursor: default;
   touch-action: none;
 }
 .rt-slotblock {
