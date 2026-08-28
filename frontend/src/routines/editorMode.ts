@@ -70,7 +70,7 @@ export function initialModeState(mode: EditorMode = HOME_MODE): ModeMachineState
 
 /** An explicit switch (toolbar click, V/J key): cancels any pending hold —
  * the user chose a mode mid-hold; releasing H must not undo that. */
-export function explicitSwitch(s: ModeMachineState, mode: EditorMode): ModeMachineState {
+export function explicitSwitch(_s: ModeMachineState, mode: EditorMode): ModeMachineState {
   return { mode, holdReturn: null, holdDownAt: null };
 }
 
