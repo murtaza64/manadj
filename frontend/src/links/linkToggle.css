@@ -8,13 +8,13 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 2px 5px;
-  color: var(--subtext0, #a6adc8);
+  padding: var(--space-2) var(--space-4);
+  color: var(--subtext0);
   opacity: 0.55;
 }
 
 .link-toggle.on {
-  color: #00e676;
+  color: var(--success);
   opacity: 1;
 }
 
@@ -35,11 +35,11 @@
 @keyframes link-toggle-pulse {
   0%,
   100% {
-    color: var(--subtext0, #a6adc8);
+    color: var(--subtext0);
     opacity: 0.55;
   }
   50% {
-    color: #00e676;
+    color: var(--success);
     opacity: 1;
   }
 }

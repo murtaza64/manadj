@@ -155,7 +155,7 @@ export function TagPopover({
                       color: on ? getTagColor(tag) : undefined,
                       // Red glow = Enter would remove; peach = would add.
                       boxShadow: highlighted
-                        ? `0 0 4px 1px ${on ? 'var(--red)' : 'var(--peach)'}`
+                        ? `0 0 4px 1px ${on ? 'var(--danger)' : 'var(--orange)'}`
                         : undefined,
                     }}
                     onClick={() => toggle(tag)}

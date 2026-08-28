@@ -135,6 +135,8 @@ Shared draw helpers/tables: `frontend/src/theme/markers.ts` (gh#201).
 | 4 | gh#202 | `.btn` fold + `<Modal>` |
 | 5 | gh#203 | inline-style long tail, ruler helper, deprecated-token removal audit |
 
-Until step 2 lands, legacy tokens (`--font-xs..xl`, `--space-xs..xl`,
-deprecated accents) remain installed with pre-D1/D8 values — step 1 changed
-no pixels.
+Step 2 deleted the legacy tokens (`--font-xs..xl`, `--space-xs..xl`, the
+deprecated accents) and retuned `--transition-fast/-normal` to their D9
+values (0.1s/0.15s). Proposed D9 exceptions awaiting a ruling (kept in
+code, flagged in the gh#200 walkthrough): Toast enter animation, waveform
+ghost dim (`.waveform-dimmed`), visualizer chrome auto-hide fades.

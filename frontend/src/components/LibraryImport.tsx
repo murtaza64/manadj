@@ -37,7 +37,7 @@ export function LibraryImport() {
 
   if (error) {
     return (
-      <div style={{ padding: '20px', color: 'var(--red)' }}>
+      <div style={{ padding: '20px', color: 'var(--danger)' }}>
         Error: {error instanceof Error ? error.message : 'Failed to scan library'}
       </div>
     );
@@ -88,7 +88,7 @@ export function LibraryImport() {
           padding: '12px',
         }}>
           <div style={{ color: 'var(--subtext1)', fontSize: '12px' }}>With Metadata</div>
-          <div style={{ color: 'var(--green)', fontSize: '24px', fontWeight: 'bold' }}>
+          <div style={{ color: 'var(--success)', fontSize: '24px', fontWeight: 'bold' }}>
             {stats?.with_metadata || 0}
           </div>
         </div>
@@ -97,7 +97,7 @@ export function LibraryImport() {
           padding: '12px',
         }}>
           <div style={{ color: 'var(--subtext1)', fontSize: '12px' }}>Without Metadata</div>
-          <div style={{ color: 'var(--yellow)', fontSize: '24px', fontWeight: 'bold' }}>
+          <div style={{ color: 'var(--warning)', fontSize: '24px', fontWeight: 'bold' }}>
             {stats?.without_metadata || 0}
           </div>
         </div>
@@ -124,7 +124,7 @@ export function LibraryImport() {
           disabled={importableCandidates.length === 0 || importMutation.isPending}
           style={{
             padding: '8px 16px',
-            background: importableCandidates.length > 0 ? 'var(--green)' : 'var(--surface0)',
+            background: importableCandidates.length > 0 ? 'var(--success)' : 'var(--surface0)',
             color: importableCandidates.length > 0 ? 'var(--base)' : 'var(--subtext1)',
             border: 'none',
             cursor: importableCandidates.length > 0 ? 'pointer' : 'not-allowed',
@@ -140,17 +140,17 @@ export function LibraryImport() {
         <div style={{
           padding: '12px',
           background: 'var(--surface0)',
-          color: 'var(--green)',
+          color: 'var(--success)',
           marginBottom: '20px',
         }}>
           ✓ Successfully imported {importMutation.data.imported} tracks
           {importMutation.data.skipped_no_metadata > 0 && (
-            <span style={{ color: 'var(--yellow)' }}>
+            <span style={{ color: 'var(--warning)' }}>
               {' '}(skipped {importMutation.data.skipped_no_metadata} without metadata)
             </span>
           )}
           {importMutation.data.errors > 0 && (
-            <span style={{ color: 'var(--red)' }}>
+            <span style={{ color: 'var(--danger)' }}>
               {' '}({importMutation.data.errors} errors)
             </span>
           )}
@@ -270,7 +270,7 @@ export function LibraryImport() {
                       {candidate.has_metadata ? (
                         <span style={{
                           padding: '4px 8px',
-                          background: 'var(--green)',
+                          background: 'var(--success)',
                           color: 'var(--base)',
                           fontSize: '12px',
                         }}>
@@ -279,7 +279,7 @@ export function LibraryImport() {
                       ) : (
                         <span style={{
                           padding: '4px 8px',
-                          background: 'var(--yellow)',
+                          background: 'var(--warning)',
                           color: 'var(--base)',
                           fontSize: '12px',
                         }}>

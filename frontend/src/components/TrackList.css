@@ -27,11 +27,10 @@
    (headers are borderless — the tint IS the feedback); sorted = mauve
    accent text (an inverted fill would overweight a table header). */
 .sortable-header {
-  padding: 6px 6px;
+  padding: var(--space-6) var(--space-6);
   cursor: pointer;
   user-select: none;
   color: var(--text);
-  transition: background 0.1s ease;
 }
 
 .sortable-header:hover {
@@ -43,13 +42,13 @@
 }
 
 .sortable-header.sorted {
-  color: var(--mauve);
+  color: var(--accent);
 }
 
 .sortable-header-content {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .sortable-header-content.align-center {
@@ -61,7 +60,7 @@
 }
 
 .sort-indicator {
-  font-size: 10px;
+  font-size: var(--font-micro);
 }
 
 /* Generic sticky column styles. Header z-index sits ABOVE the resize
@@ -86,7 +85,7 @@
 
 /* Loading/error states */
 .track-table-message {
-  padding: 20px;
+  padding: var(--space-16);
 }
 
 .track-table-loading {
@@ -94,7 +93,7 @@
 }
 
 .track-table-error {
-  color: var(--red);
+  color: var(--danger);
 }
 
 /* Fetching overlay */
@@ -115,9 +114,9 @@
 .track-table-fetching-message {
   background: var(--surface0);
   color: var(--text);
-  padding: 8px 16px;
+  padding: var(--space-8) var(--space-16);
   border: 1px solid var(--surface1);
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 /* Column resize handles */
@@ -136,7 +135,7 @@
 .col-resize-handle:hover, body.col-resizing .col-resize-handle {
   background: linear-gradient(
     to right,
-    transparent 3px, var(--blue) 3px, var(--blue) 6px, transparent 6px
+    transparent 3px, var(--accent) 3px, var(--accent) 6px, transparent 6px
   );
 }
 body.col-resizing { cursor: col-resize; user-select: none; }
@@ -149,12 +148,12 @@ body.col-resizing { cursor: col-resize; user-select: none; }
      row geometry (virtualRows.ROW_HEIGHT) holds for the one indexed
      stream — headers and rows window as a unit. */
   height: 28px;
-  padding: 0 12px;
+  padding: 0 var(--space-12);
   /* One shade lighter than the track rows (--crust): the section
      boundary reads at a glance. */
   background: var(--mantle);
-  color: var(--green);
-  font-size: 11px;
+  color: var(--success);
+  font-size: var(--font-small);
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -181,7 +180,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
    Compatible rows show their score where Known rows show their evidence
    marks — one column, two vocabularies (score vs marks). */
 .track-match-score {
-  font-size: 10px;
+  font-size: var(--font-micro);
   color: var(--subtext0);
   text-align: center;
   font-variant-numeric: tabular-nums;
