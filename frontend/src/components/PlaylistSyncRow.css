@@ -2,11 +2,10 @@
 .playlist-sync-row {
   height: 32px;
   border-bottom: 1px solid var(--surface0);
-  transition: background var(--transition-normal);
 }
 
 .playlist-sync-row:hover {
-  background: #1f1f1f;
+  background: var(--surface0);
 }
 
 .playlist-sync-row-clickable {
@@ -14,18 +13,18 @@
 }
 
 .playlist-sync-row-clickable:hover {
-  background: #252525;
+  background: var(--surface0);
 }
 
 .playlist-sync-row-clickable:active {
-  background: #2a2a2a;
+  background: var(--surface1);
 }
 
 /* Cells */
 .playlist-sync-cell {
-  padding: 2px 12px;
+  padding: var(--space-2) var(--space-12);
   vertical-align: middle;
-  font-size: var(--font-xs);
+  font-size: var(--font-body);
 }
 
 .playlist-name-cell {
@@ -45,5 +44,5 @@
 }
 
 .status-cell {
-  padding: 4px 12px;
+  padding: var(--space-4) var(--space-12);
 }

@@ -297,7 +297,7 @@ export default function PlaylistSidebar({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        outline: focused ? '1px solid var(--blue)' : '1px solid transparent',
+        outline: focused ? '1px solid var(--accent)' : '1px solid transparent',
         outlineOffset: '-1px',
         // Pinned, not inherited: the standalone Library inherits the
         // browser's 16px while .perf-root sets 12px — the embedded and
@@ -391,7 +391,7 @@ export default function PlaylistSidebar({
                   right: 0,
                   top: Math.max(0, reorderIndicator.y - 1),
                   height: '2px',
-                  background: 'var(--blue)',
+                  background: 'var(--accent)',
                   pointerEvents: 'none',
                   zIndex: 10,
                 }}

@@ -221,7 +221,7 @@ export default function SetSuggestions({
                   </span>
                 )}
               </span>
-              <span style={{ width: '32px', color: 'var(--sapphire)' }}>
+              <span style={{ width: '32px', color: 'var(--accent)' }}>
                 {formatKeyDisplay(row.track.key ?? null)}
               </span>
               <span style={{ width: '40px', color: 'var(--subtext1)', textAlign: 'right' }}>
@@ -233,7 +233,7 @@ export default function SetSuggestions({
                   flexDirection: 'column',
                   alignItems: 'flex-end',
                   gap: '1px',
-                  color: row.known ? 'var(--green)' : 'var(--subtext0)',
+                  color: row.known ? 'var(--success)' : 'var(--subtext0)',
                   fontSize: '11px',
                   whiteSpace: 'nowrap',
                 }}

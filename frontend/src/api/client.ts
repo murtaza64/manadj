@@ -31,6 +31,7 @@ import type {
   Classification,
   SupplierInfo,
   SoulseekResult,
+  AdhocSoulseekDownload,
   SoulseekSearchResponse,
   AnalysisPendingItem,
   AnalysisTaskStatus,
@@ -1129,6 +1130,13 @@ export const api = {
       return res.json();
     },
 
+    // The remembered search for an item (gh#216), or null if never searched.
+    soulseekRemembered: async (itemId: number): Promise<SoulseekSearchResponse | null> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`);
+      if (!res.ok) throw new Error('Failed to fetch remembered soulseek search');
+      return res.json();
+    },
+
     soulseekSearch: async (itemId: number, query: string): Promise<SoulseekSearchResponse> => {
       const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/search`, {
         method: 'POST',
@@ -1138,6 +1146,56 @@ export const api = {
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
         throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
+      }
+      return res.json();
+    },
+
+    // Standalone search (gh#217): no Source Item, no deltas, not remembered.
+    soulseekGlobalSearch: async (query: string): Promise<SoulseekSearchResponse> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek search failed'));
+      }
+      return res.json();
+    },
+
+    soulseekAdhocDownload: async (
+      result: SoulseekResult,
+      artist?: string,
+      title?: string,
+    ): Promise<AdhocSoulseekDownload> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result, artist: artist || null, title: title || null }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek download failed'));
+      }
+      return res.json();
+    },
+
+    soulseekAdhocDownloads: async (): Promise<AdhocSoulseekDownload[]> => {
+      const res = await fetch(`${API_BASE}/acquisition/soulseek/downloads`);
+      if (!res.ok) throw new Error('Failed to fetch soulseek downloads');
+      return res.json();
+    },
+
+    // Hands-off download (gh#214): auto-pick a high-quality mp3 and retry
+    // across peers server-side. 409 = nothing auto-pickable.
+    soulseekAuto: async (itemId: number): Promise<SourceItem> => {
+      const res = await fetch(`${API_BASE}/acquisition/items/${itemId}/soulseek/auto`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(detailToMessage(error.detail, 'Soulseek auto-download failed'));
       }
       return res.json();
     },
