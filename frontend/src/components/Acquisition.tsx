@@ -252,7 +252,12 @@ export function Acquisition() {
             </div>
           ))}
         </div>
-        {selected && <ItemDetail item={selected} onClose={() => setSelectedId(null)} />}
+        {/* keyed by item so selecting another track remounts the detail panel —
+            otherwise useState in ItemDetail/SoulseekPicker keeps the previous
+            item's search terms and results (gh#215) */}
+        {selected && (
+          <ItemDetail key={selected.id} item={selected} onClose={() => setSelectedId(null)} />
+        )}
         <div className="acquisition-bottom-bar">
           <label className="acquisition-check">
             <input type="checkbox" checked={allVisibleChecked} onChange={toggleAllVisible} />
