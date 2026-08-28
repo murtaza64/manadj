@@ -1,14 +1,14 @@
 .player {
   background: var(--crust);
-  padding: 8px 12px;
+  padding: var(--space-8) var(--space-12);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 300px;
 }
 
 .player-track-info {
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--text);
   font-weight: bold;
   overflow: hidden;
@@ -19,8 +19,8 @@
 .player-metadata {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--space-8);
+  font-size: var(--font-body);
   color: var(--subtext1);
   height: 16px;
   flex-shrink: 0;
@@ -36,7 +36,7 @@
 
 .player-controls {
   display: flex;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 /* Unified interaction vocabulary (perf-layout 08, no-glow revision):
@@ -46,12 +46,12 @@
    controls (CUE/PLAY/deck loads) keep their accent border on hover — the
    tint carries the feedback. */
 .player-button {
-  padding: 4px 12px;
+  padding: var(--space-4) var(--space-12);
   background: transparent;
   color: var(--text);
   border: 1px solid var(--surface1);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: bold;
 }
 
@@ -71,13 +71,13 @@
 
 .player-button-paused {
   background: transparent;
-  color: var(--green);
-  border-color: var(--green);
+  color: var(--success);
+  border-color: var(--success);
   min-width: 60px;
 }
 
 .player-button-paused:hover:not(:disabled) {
-  border-color: var(--green);
+  border-color: var(--success);
 }
 
 /* Engaged = inverted fill; hover/press keep it (state, not feedback).
@@ -93,9 +93,9 @@
 .player-button-playing,
 .player-button-playing:hover:not(:disabled),
 .player-button-playing:active:not(:disabled) {
-  background: var(--green);
+  background: var(--success);
   color: var(--base);
-  border-color: var(--green);
+  border-color: var(--success);
 }
 
 .player-button-cue {
@@ -128,10 +128,10 @@
 }
 
 .player-time {
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--subtext1);
   display: flex;
-  gap: 4px;
+  gap: var(--space-4);
   align-items: center;
 }
 
@@ -149,12 +149,12 @@
   z-index: 2;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 8px;
+  gap: var(--space-4);
+  padding: var(--space-8);
   /* No backdrop-filter over the waveform canvas: filters over canvas
      layers arm a permanent macOS compositor region leak (stability/01);
      the near-opaque background keeps the panel legible without it. */
-  background: rgba(17, 17, 17, 0.88);
+  background: color-mix(in srgb, var(--crust) 88%, transparent);
   width: 170px;
 }
 
@@ -180,18 +180,18 @@
   z-index: 2;
   display: grid;
   grid-template-columns: auto repeat(4, 1fr) auto;
-  gap: 2px;
-  padding: 8px;
+  gap: var(--space-2);
+  padding: var(--space-8);
   /* No backdrop-filter over the waveform canvas: filters over canvas
      layers arm a permanent macOS compositor region leak (stability/01);
      the near-opaque background keeps the panel legible without it. */
-  background: rgba(17, 17, 17, 0.88);
+  background: color-mix(in srgb, var(--crust) 88%, transparent);
 }
 
 .player-cuewalk {
   min-width: 0;
-  padding: 0 5px;
-  font-size: 10px;
+  padding: 0 var(--space-4);
+  font-size: var(--font-micro);
 }
 
 .player-cuewalk-prev {
@@ -205,11 +205,11 @@
 }
 
 .player-error {
-  font-size: 12px;
-  color: var(--red);
-  padding: 4px;
+  font-size: var(--font-body);
+  color: var(--danger);
+  padding: var(--space-4);
   background: var(--base);
-  border: 1px solid var(--red);
+  border: 1px solid var(--danger);
 }
 
 /* Player overflow scrollbar */

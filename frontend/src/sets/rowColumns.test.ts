@@ -74,15 +74,15 @@ describe('bpmDeltaPercent', () => {
 
 describe('bpmDeltaColor', () => {
   it('bands by delta magnitude, sign-agnostic', () => {
-    expect(bpmDeltaColor(0)).toBe('var(--green)');
-    expect(bpmDeltaColor(2)).toBe('var(--green)');
-    expect(bpmDeltaColor(-2)).toBe('var(--green)');
-    expect(bpmDeltaColor(2.1)).toBe('var(--yellow)');
-    expect(bpmDeltaColor(-4)).toBe('var(--yellow)');
+    expect(bpmDeltaColor(0)).toBe('var(--success)');
+    expect(bpmDeltaColor(2)).toBe('var(--success)');
+    expect(bpmDeltaColor(-2)).toBe('var(--success)');
+    expect(bpmDeltaColor(2.1)).toBe('var(--warning)');
+    expect(bpmDeltaColor(-4)).toBe('var(--warning)');
     expect(bpmDeltaColor(4.1)).toBe('#ff9500');
     expect(bpmDeltaColor(-8)).toBe('#ff9500');
-    expect(bpmDeltaColor(8.1)).toBe('var(--red)');
-    expect(bpmDeltaColor(-25)).toBe('var(--red)');
+    expect(bpmDeltaColor(8.1)).toBe('var(--danger)');
+    expect(bpmDeltaColor(-25)).toBe('var(--danger)');
   });
 
   it('never uses the deck identity colors (glossary: identity ≠ state)', () => {

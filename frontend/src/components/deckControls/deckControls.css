@@ -31,29 +31,29 @@
   transform: translateX(-50%);
   display: grid;
   grid-template-columns: repeat(2, minmax(54px, 1fr));
-  gap: 2px;
-  padding: 4px;
+  gap: var(--space-2);
+  padding: var(--space-4);
   background: var(--base);
   border: 1px solid var(--surface2);
 }
 
 .deck-jumpwindow-popover .player-button {
   min-width: 0;
-  padding: 3px 5px;
-  font-size: 10px;
+  padding: var(--space-4);
+  font-size: var(--font-micro);
 }
 
 .deck-cuewalk {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .deck-jumprow .player-button {
   border: none;
   min-width: 24px;
-  font-size: 12px;
-  padding: 4px 6px;
+  font-size: var(--font-body);
+  padding: var(--space-4) var(--space-6);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -63,7 +63,7 @@
 .deck-jumprow > .player-button + .player-button,
 .deck-jumprow > .player-button + .deck-jumpsize,
 .deck-jumprow > .deck-jumpsize + .player-button {
-  border-left: 1px solid var(--surface2, #585b70);
+  border-left: 1px solid var(--surface2);
 }
 
 .deck-jumprow:hover {
@@ -71,10 +71,10 @@
 }
 
 .deck-jumprow .player-button:hover:not(:disabled) {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
   color: var(--text);
   /* Pin the divider (see .deck-bpm hover note) */
-  border-color: var(--surface2, #585b70);
+  border-color: var(--surface2);
 }
 
 .deck-jumpsize {
@@ -82,9 +82,9 @@
   align-items: center;
   justify-content: center;
   min-width: 34px;
-  color: var(--yellow);
+  color: var(--warning);
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 /* Loop row (looping 03/04): 1/2 / LOOP N / x2 — one segmented unit like
@@ -103,9 +103,9 @@
 .deck-looprow .player-button {
   border: none;
   min-width: 24px;
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: 700;
-  padding: 4px 6px;
+  padding: var(--space-4) var(--space-6);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -113,7 +113,7 @@
 }
 
 .deck-looprow > .player-button + .player-button {
-  border-left: 1px solid var(--surface2, #585b70);
+  border-left: 1px solid var(--surface2);
 }
 
 .deck-looprow:hover {
@@ -121,14 +121,14 @@
 }
 
 .deck-looprow .player-button:hover:not(:disabled) {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
   color: var(--text);
   /* Pin the divider (see .deck-bpm hover note) */
-  border-color: var(--surface2, #585b70);
+  border-color: var(--surface2);
 }
 
 .deck-looprow .deck-loop-toggle {
-  gap: 5px;
+  gap: var(--space-4);
 }
 
 .deck-loop-icon {
@@ -139,13 +139,13 @@
 }
 
 .deck-looprow .deck-loop-toggle:hover:not(:disabled) {
-  color: var(--green);
+  color: var(--success);
 }
 
 .deck-looprow .deck-loop-toggle.active,
 .deck-looprow .deck-loop-toggle.active:hover:not(:disabled),
 .deck-looprow .deck-loop-toggle.active:active:not(:disabled) {
-  background: var(--green);
+  background: var(--success);
   color: var(--base);
 }
 
@@ -160,19 +160,19 @@
 
 .deck-bpm .player-button:hover:not(:disabled),
 .deck-bpm-steps .player-button:hover:not(:disabled) {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
   color: var(--text);
   /* Pin the divider: the standalone player-button hover recolors
      border-color, which otherwise brightens ONLY this segment's left
      divider edge (the one border it has). Hover reads as fill + the
      cluster border, never a single edge. */
-  border-color: var(--surface2, #585b70);
+  border-color: var(--surface2);
 }
 
 /* Set-downbeat sets the grid's ANCHOR (ADR 0016) — accent it (color only:
    the border belongs to the cluster). */
 .deck-bpm .deck-downbeat {
-  color: var(--blue);
+  color: var(--accent);
 }
 
 /* BPM control: input / compress-spread micro-steps / 1/2 x2 (curation
@@ -190,7 +190,7 @@
 /* Dividers between every adjacent segment (the fixed-position dropdown is
    out of the visual flow and gets none). */
 .deck-bpm > :not(.deck-bpm-dropdown) + :not(.deck-bpm-dropdown) {
-  border-left: 1px solid var(--surface2, #585b70);
+  border-left: 1px solid var(--surface2);
 }
 
 .deck-bpm-input {
@@ -201,11 +201,10 @@
   min-width: 46px;
   background: transparent;
   border: none;
-  color: var(--yellow);
-  font-size: 13px;
+  color: var(--warning);
+  font-size: var(--font-body);
   font-weight: 700;
-  font-family: inherit;
-  padding: 2px 5px;
+  padding: var(--space-2) var(--space-4);
   text-align: right;
   outline: none;
 }
@@ -226,7 +225,7 @@
 
 .deck-bpm-steps .player-button {
   border: none;
-  padding: 0 4px;
+  padding: 0 var(--space-4);
   min-width: 22px;
   height: 100%;
   display: inline-flex;
@@ -235,7 +234,7 @@
 }
 
 .deck-bpm-steps .player-button + .player-button {
-  border-left: 1px solid var(--surface2, #585b70);
+  border-left: 1px solid var(--surface2);
 }
 
 .deck-bpm-steps .player-button svg { display: block; }
@@ -246,36 +245,36 @@
   border: none;
   min-width: 26px;
   height: 100%;
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-small);
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .deck-bpm-var {
-  color: var(--yellow);
+  color: var(--warning);
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--font-body);
   cursor: help;
 }
 
 .deck-bpm-dropdown {
   position: fixed;
   background: var(--mantle);
-  border: 1px solid var(--lavender);
-  z-index: 1000;
+  border: 1px solid var(--accent);
+  z-index: var(--z-overlay);
   min-width: 140px;
   max-height: 250px;
   overflow-y: auto;
 }
 
 .deck-bpm-option {
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 
 .deck-bpm-option.active { background: var(--surface0); }
-.deck-bpm-option.recommended { color: var(--blue); }
-.deck-bpm-option.current { color: var(--green); font-weight: 700; }
+.deck-bpm-option.recommended { color: var(--accent); }
+.deck-bpm-option.current { color: var(--success); font-weight: 700; }

@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.2);
 }
 
@@ -35,36 +35,35 @@
   z-index: 1;
   background: var(--mantle);
   border: 1px solid var(--surface0);
-  padding: 16px;
+  padding: var(--space-16);
   min-width: 320px;
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .bpm-modal-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .bpm-label {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--font-large);
   font-weight: bold;
 }
 
 .bpm-center-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: var(--space-8) var(--space-12);
   background: var(--base);
   border: 1px solid var(--surface0);
   color: var(--text);
-  font-size: 14px;
-  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: var(--font-large);
 }
 
 .bpm-center-input:focus {
   outline: none;
-  border-color: var(--mauve);
+  border-color: var(--accent);
 }
 
 .bpm-center-input::placeholder {
@@ -84,37 +83,35 @@
 
 .bpm-range-display {
   text-align: center;
-  font-size: 24px;
+  font-size: var(--font-display);
   font-weight: bold;
-  color: var(--mauve);
-  padding: 16px;
+  color: var(--accent);
+  padding: var(--space-16);
   background: var(--base);
   border: 1px solid var(--surface0);
-  font-family: 'UbuntuMono Nerd Font', monospace;
 }
 
 .bpm-range-display.inactive {
   color: var(--subtext0);
-  font-size: 32px;
+  font-size: var(--font-display);
 }
 
 .bpm-modal-footer {
   display: flex;
-  gap: 12px;
+  gap: var(--space-12);
   align-items: center;
   justify-content: flex-end;
-  padding-top: 8px;
+  padding-top: var(--space-8);
   border-top: 1px solid var(--surface0);
 }
 
 .bpm-action-btn {
-  padding: 6px 16px;
+  padding: var(--space-6) var(--space-16);
   background: transparent;
   color: var(--text);
   border: 1px solid var(--surface1);
   cursor: pointer;
-  font-size: 13px;
-  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: var(--font-body);
 }
 
 .bpm-action-btn:hover:not(:disabled) {
