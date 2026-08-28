@@ -70,7 +70,7 @@ export default function EditableCell({ value, onSave, placeholder }: EditableCel
               width: '600px',
               maxWidth: '80vw',
               background: 'var(--surface0)',
-              border: '2px solid var(--blue)',
+              border: '2px solid var(--accent)',
               color: 'var(--text)',
               padding: '2px 4px',
               fontFamily: 'inherit',

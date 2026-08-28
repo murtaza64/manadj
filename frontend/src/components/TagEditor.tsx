@@ -338,7 +338,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                 diagnostics state lives here. */}
             {analysisResults?.grid?.bailed && (
               <span
-                style={{ color: 'var(--red)', fontSize: '12px', fontWeight: 700 }}
+                style={{ color: 'var(--danger)', fontSize: '12px', fontWeight: 700 }}
                 title={`Grid analysis bailed: ${String(analysisResults.grid.evidence?.reason ?? 'unknown')} — no grid or BPM written; needs attention`}
               >
                 !
@@ -384,7 +384,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                     right: 0,
                     padding: '4px 8px',
                     background: 'var(--base)',
-                    border: '1px solid var(--lavender)',
+                    border: '1px solid var(--accent)',
                     color: 'var(--text)',
                     fontSize: '12px',
                     fontFamily: 'UbuntuMono Nerd Font, monospace',
@@ -405,7 +405,7 @@ const TagEditor = forwardRef<TagEditorHandle, Props>(({ track, onSave, onUpdate,
                   : 'var(--surface0)';
 
                 // Glow color: red if tag would be removed, peach if it would be added
-                const glowColor = isSelectedByArrow && isToggled ? 'var(--red)' : 'var(--peach)';
+                const glowColor = isSelectedByArrow && isToggled ? 'var(--danger)' : 'var(--orange)';
 
                 return (
                   <button

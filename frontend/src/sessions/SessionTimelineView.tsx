@@ -33,6 +33,8 @@ import { openCandidateInEditor, openRoutineTakeInEditor } from '../routines/open
 import { requestRoutineEdit } from '../routines/openRoutine';
 import { isTypingTarget } from '../components/performance/performanceKeys';
 import { beatgridQueryOptions } from '../hooks/useBeatgridData';
+import { metricLadderQueryOptions } from '../hooks/useMetricLadderData';
+import { resolveLadder } from '../meter/ladder';
 import type { BeatgridResponse } from '../types';
 import type { CaptureDeck, CaptureEvent } from '../capture/events';
 import { decodeWaveformBlob } from '../waveform/blob';
@@ -65,7 +67,7 @@ import {
   tracePolylinePoints,
   traceRuns,
 } from './waveformLanes';
-import type { TraceRun } from './waveformLanes';
+import type { LaneLadder, TraceRun } from './waveformLanes';
 import { planReplay } from './replayPlanner';
 import type { ServoDeckActivity } from './replayStore';
 import {
@@ -768,6 +770,33 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, gridsReadyKey]);
 
+  // Per-track Metric ladders (gh#201): the lane gridlines render tier-aware
+  // (DESIGN.md D11 — dropping hypermeter silently is a bug), so fetch each
+  // track's persisted ladder and resolve it onto its downbeat lattice.
+  const ladderQueries = useQueries({
+    queries: (model?.trackIds ?? []).map((id) => metricLadderQueryOptions(id)),
+  });
+  const laddersReadyKey = ladderQueries.map((q) => (q.data ? '1' : '0')).join('');
+  const laddersByTrack = useMemo(() => {
+    const out: Record<number, LaneLadder> = {};
+    (model?.trackIds ?? []).forEach((id, i) => {
+      const grid = gridsByTrack[id]?.data ?? null;
+      const persisted = ladderQueries[i]?.data ?? null;
+      const proj = resolveLadder(grid, persisted);
+      if (!grid || !proj) return;
+      const downs = new Map<number, { tier: number; parenthetical: boolean }>();
+      for (let k = 0; k < proj.tiers.length; k++) {
+        downs.set(grid.downbeat_times[k], {
+          tier: proj.tiers[k],
+          parenthetical: proj.parentheticals[k],
+        });
+      }
+      out[id] = { downs, tierBars: proj.tierBars };
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, gridsByTrack, laddersReadyKey]);
+
   // Zoom-adaptive run decimation (this issue): at low zoom a jog/pitch-
   // heavy session cut into thousands of SUB-PIXEL runs, and the per-run
   // fixed cost made every canvas repaint a main-thread stall. Thin trace
@@ -897,7 +926,8 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
               grid.data.downbeat_times ?? [],
               spanRuns,
               axis,
-              geo
+              geo,
+              laddersByTrack[span.trackId] ?? null
             );
           }
         }
@@ -911,7 +941,7 @@ export function SessionTimelineView({ session, focusS, focusSpanS, focusFlash, f
     paintSnapshotRef.current = { canvas: snapCanvas, x0, winW, dpr, svgH, segments: axis.segments };
     blitDirtyRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, runsByDeck, slot, paintEpoch]);
+  }, [model, axis, width, svgH, canvasWinStart, viewportW, wavesByTrack, gridsByTrack, laddersByTrack, runsByDeck, slot, paintEpoch]);
 
   // Stable scene callbacks (the scene is memoized — inline closures would
   // defeat it every render).

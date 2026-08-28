@@ -57,7 +57,7 @@
 .visualizer-chrome-left {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-6);
   max-width: calc(100% - 140px);
   min-width: 0;
 }
@@ -65,14 +65,14 @@
 .visualizer-presets {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 /* Genepool panel: ~100 candidates need search + a height cap. */
 .visualizer-genpanel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .visualizer-gen-search {
@@ -81,8 +81,8 @@
   background: rgba(0, 0, 0, 0.65);
   border: 1px solid hsl(280, 100%, 45%);
   color: hsl(280, 100%, 75%);
-  font: 12px ui-monospace, monospace;
-  padding: 5px 8px;
+  font-size: var(--font-body);
+  padding: var(--space-4) var(--space-8);
 }
 
 .visualizer-gen-search:focus {
@@ -93,7 +93,7 @@
 .visualizer-genlist {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-4);
   /* Two rows max (human: the list ate half the screen), scroll for the rest. */
   max-height: 56px;
   overflow-y: auto;
@@ -105,8 +105,9 @@
   background: rgba(0, 0, 0, 0.65);
   border: 1px solid hsl(200, 100%, 45%);
   color: hsl(200, 100%, 60%);
-  font: bold 13px ui-monospace, monospace;
-  padding: 6px 14px;
+  font-size: var(--font-body);
+  font-weight: bold;
+  padding: var(--space-6) var(--space-12);
   cursor: pointer;
 }
 
@@ -119,8 +120,8 @@
 .visualizer-preset-btn.gen {
   border-color: hsl(280, 100%, 55%);
   color: hsl(280, 100%, 72%);
-  font-size: 11px;
-  padding: 4px 8px;
+  font-size: var(--font-small);
+  padding: var(--space-4) var(--space-8);
 }
 
 .visualizer-preset-btn.gen.active {
@@ -136,14 +137,14 @@
 /* Render-quality picker (chrome, next to HUD). */
 .visualizer-quality {
   display: flex;
-  gap: 4px;
+  gap: var(--space-4);
   margin-left: auto;
-  margin-right: 8px;
+  margin-right: var(--space-8);
 }
 
 .visualizer-preset-btn.quality {
-  font-size: 11px;
-  padding: 4px 8px;
+  font-size: var(--font-small);
+  padding: var(--space-4) var(--space-8);
   border-color: hsl(140, 90%, 45%);
   color: hsl(140, 90%, 65%);
 }
@@ -156,8 +157,8 @@
 .visualizer-preset-btn.cycle {
   border-color: hsl(40, 100%, 50%);
   color: hsl(40, 100%, 65%);
-  font-size: 11px;
-  padding: 4px 8px;
+  font-size: var(--font-small);
+  padding: var(--space-4) var(--space-8);
   margin-left: auto;
   white-space: nowrap;
 }
@@ -176,8 +177,9 @@
   background: rgba(0, 0, 0, 0.75);
   border: 1px solid hsl(280, 100%, 55%);
   color: hsl(280, 100%, 78%);
-  font: bold 13px ui-monospace, monospace;
-  padding: 8px 14px;
+  font-size: var(--font-body);
+  font-weight: bold;
+  padding: var(--space-8) var(--space-12);
   pointer-events: none;
 }
 
@@ -186,7 +188,7 @@
   bottom: 14px;
   right: 14px;
   color: rgba(255, 255, 255, 0.55);
-  font: 11px ui-monospace, monospace;
+  font-size: var(--font-small);
   pointer-events: none;
   text-align: right;
 }
@@ -197,21 +199,21 @@
   right: 14px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-4);
   background: rgba(0, 0, 0, 0.8);
   border: 1px solid hsl(280, 100%, 55%);
   color: hsl(280, 100%, 78%);
-  font: 12px ui-monospace, monospace;
-  padding: 8px 10px;
+  font-size: var(--font-body);
+  padding: var(--space-8) var(--space-8);
 }
 
 .visualizer-note input {
   width: 320px;
   background: rgba(0, 0, 0, 0.6);
   border: 1px solid hsl(280, 100%, 40%);
-  color: #fff;
-  font: 13px ui-monospace, monospace;
-  padding: 5px 8px;
+  color: var(--text);
+  font-size: var(--font-body);
+  padding: var(--space-4) var(--space-8);
 }
 
 .visualizer-note input:focus {
@@ -231,7 +233,7 @@
   right: 0;
   text-align: center;
   color: hsl(55, 100%, 55%);
-  font: 13px ui-monospace, monospace;
+  font-size: var(--font-body);
   opacity: 0.85;
   pointer-events: none;
 }
@@ -243,12 +245,12 @@
   bottom: 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-6);
   opacity: 1;
   transition: opacity 0.3s ease;
   background: rgba(0, 0, 0, 0.55);
   border: 1px solid hsl(200, 100%, 30%);
-  padding: 8px 10px;
+  padding: var(--space-8) var(--space-8);
 }
 
 .chrome-hidden .visualizer-params {
@@ -259,9 +261,9 @@
 .visualizer-param {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   color: hsl(200, 100%, 65%);
-  font: 11px ui-monospace, monospace;
+  font-size: var(--font-small);
 }
 
 .visualizer-param span {
@@ -283,8 +285,8 @@
   width: 250px;
   background: rgba(0, 0, 0, 0.72);
   border: 1px solid hsl(200, 100%, 28%);
-  padding: 8px 10px;
-  font: 10px ui-monospace, monospace;
+  padding: var(--space-8) var(--space-8);
+  font-size: var(--font-micro);
   color: hsl(200, 30%, 80%);
   pointer-events: none;
 }
@@ -294,27 +296,27 @@
 }
 
 .hud-section {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-8);
 }
 
 .hud-title {
   color: hsl(200, 100%, 60%);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  margin-bottom: 3px;
+  margin-bottom: var(--space-4);
 }
 
 .hud-row {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 3px;
+  margin-bottom: var(--space-4);
 }
 
 .hud-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
+  gap: var(--space-6);
+  margin-bottom: var(--space-2);
 }
 
 .hud-bar-label {

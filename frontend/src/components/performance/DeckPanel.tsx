@@ -41,6 +41,7 @@ import { PlayGuideMinimapMarks } from '../../performance/PlayGuideMinimapMarks';
 import { TagPopover } from './TagPopover';
 import { NUDGE_BEND_PERCENT, composeRate, effectiveBpm, keyDrifted } from '../../playback/tempo';
 import { DECK_COLORS, hexToRgbTriplet } from '../../theme/deckColors';
+import { AUDIBILITY_FILL_ALPHA } from '../../theme/markers';
 import { PLAY_MARKER_FRACTION, trackWindowSeconds } from '../../utils/waveformZoom';
 import { channelFaderToGain, trimToGain } from '../../playback/mixerMath';
 import { createStripHistory } from '../../performance/stripHistory';
@@ -341,10 +342,12 @@ export function DeckWaveform({
     let raf = 0;
     let idleTimer = 0;
     let lastDrawKey = '';
-    // Underlay now (performance-mode 09 review): the GL strip renders a
+    // UNDERLAY (performance-mode 09 review): the GL strip renders a
     // transparent background, so the fill sits BELOW the waveform — deck
-    // identity without tinting the body. Slightly more opaque to carry.
-    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, 0.18)`;
+    // identity without tinting the body. Slightly above the shared
+    // audibility-fill wash (gh#201): an underlay must carry through the
+    // strip's dark background where an overlay tint rode the content.
+    const fillCss = `rgba(${hexToRgbTriplet(DECK_COLORS[deck])}, ${AUDIBILITY_FILL_ALPHA + 0.06})`;
     const schedule = (active: boolean) => {
       if (active) raf = requestAnimationFrame(loop);
       else idleTimer = window.setTimeout(loop, 250);

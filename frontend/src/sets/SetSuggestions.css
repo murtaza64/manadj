@@ -5,8 +5,8 @@
 .set-suggestion-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
   border-bottom: 1px solid var(--surface0);
   cursor: pointer;
 }

@@ -1314,7 +1314,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
             }
             style={
               evidenceProposal.rows.length > 0
-                ? { borderColor: 'var(--mauve)', color: 'var(--mauve)' }
+                ? { borderColor: 'var(--accent)', color: 'var(--accent)' }
                 : undefined
             }
           >
@@ -1389,7 +1389,7 @@ export default function SetDetailPane({ setId, onLoadToDeck }: SetDetailPaneProp
               right: 0,
               top: Math.max(0, dropIndicator.y - 1),
               height: '2px',
-              background: 'var(--blue)',
+              background: 'var(--accent)',
               pointerEvents: 'none',
               zIndex: 10,
             }}
@@ -1711,7 +1711,7 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
     if (view.auto) {
       return {
         text: `◇ ${star}${view.transition!.name} · auto`,
-        style: { color: 'var(--green)', opacity: 0.75 },
+        style: { color: 'var(--success)', opacity: 0.75 },
         title:
           'Auto-resolved at plan time (favorite first, else most recently edited) — library-live, ' +
           'not a pin: saving or favoriting a transition for this pair may change what plays. ' +
@@ -1720,7 +1720,7 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
     }
     return {
       text: `◆ ${star}${view.transition!.name}`,
-      style: { color: 'var(--green)' },
+      style: { color: 'var(--success)' },
       title: 'Pin a transition or take for this handover',
     };
   }
@@ -1728,7 +1728,7 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
     const date = new Date(view.take!.detectedAt).toLocaleDateString();
     return {
       text: `● take · ${date} (unpromoted)`,
-      style: { color: 'var(--mauve)' },
+      style: { color: 'var(--accent)' },
       title: 'Pin a transition or take for this handover',
     };
   }
@@ -1746,13 +1746,13 @@ function pinChip(view: ReturnType<typeof adjacencyView>): {
   if (view.status === 'hardcut') {
     return {
       text: '✕ hard cut',
-      style: { color: 'var(--red)' },
+      style: { color: 'var(--danger)' },
       title: 'Hard-cut pin — cut here, play no transition (even though some exist). Click to change',
     };
   }
   return {
     text: '✕ hard cut',
-    style: { color: 'var(--red)' },
+    style: { color: 'var(--danger)' },
     title: 'No transitions for this pair — will hard-cut. Pin a transition or take for this handover',
   };
 }
@@ -1773,7 +1773,7 @@ function WarningChip({
       title={title}
       style={{
         padding: '1px 6px',
-        background: severity === 'error' ? 'var(--red)' : 'var(--yellow)',
+        background: severity === 'error' ? 'var(--danger)' : 'var(--warning)',
         color: 'var(--base)',
         fontSize: '11px',
         fontWeight: 600,
@@ -1923,7 +1923,7 @@ const AdjacencyRow = memo(function AdjacencyRow({
               title="Suggest a track to insert here, ranked by the weaker of the two edges"
               style={{
                 width: '18px',
-                color: 'var(--blue)',
+                color: 'var(--accent)',
                 fontSize: '13px',
                 fontWeight: 700,
               }}
@@ -2014,7 +2014,7 @@ const AdjacencyRow = memo(function AdjacencyRow({
               onPin(aTrackId, { kind: 'transition', uuid: view.transition!.uuid });
             }}
             title="Pin this auto-resolved Transition (freeze it — new saves and favorites will no longer change what plays here)"
-            style={{ borderColor: 'var(--green)', color: 'var(--green)' }}
+            style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
           >
             ↳ pin
           </button>
@@ -2039,7 +2039,7 @@ const AdjacencyRow = memo(function AdjacencyRow({
             title={`This pair has ${view.counts.takes} recorded Take${
               view.counts.takes === 1 ? '' : 's'
             } but no saved Transition — Takes never auto-resolve; pin one to play it here`}
-            style={{ borderColor: 'var(--mauve)', color: 'var(--mauve)' }}
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
           >
             {view.counts.takes === 1
               ? '● take available — pin?'
@@ -2101,7 +2101,7 @@ const AdjacencyRow = memo(function AdjacencyRow({
               onPinFreshTake(aTrackId, bTrackId, freshTake.uuid);
             }}
             title="A Take was just captured for this handover — pin it"
-            style={{ borderColor: 'var(--mauve)', color: 'var(--mauve)', fontWeight: 600 }}
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)', fontWeight: 600 }}
           >
             ● new take — pin?
           </button>
@@ -2114,7 +2114,7 @@ const AdjacencyRow = memo(function AdjacencyRow({
         {view.unpracticed && (
           <span
             title="Unpracticed — this pair has never been mixed: no saved Transition and no Take. ⏵ practice cues it on the decks"
-            style={{ color: 'var(--yellow)', fontWeight: 700, cursor: 'help' }}
+            style={{ color: 'var(--warning)', fontWeight: 700, cursor: 'help' }}
           >
             ⚠
           </span>
@@ -2267,7 +2267,7 @@ const TrimCell = memo(function TrimCell({
           cursor: 'ns-resize',
           userSelect: 'none',
           touchAction: 'none',
-          color: neutral ? 'var(--surface2)' : 'var(--yellow)',
+          color: neutral ? 'var(--surface2)' : 'var(--warning)',
           fontWeight: neutral ? 400 : 600,
         }}
       >
@@ -2526,7 +2526,7 @@ const SetTrackRow = memo(function SetTrackRow({
           title="Play the set from this track's planned entry"
           style={{
             width: `${PLAY_COL_W}px`,
-            color: 'var(--mauve)',
+            color: 'var(--accent)',
             // Inline wins over the row-hover reveal while there is no plan
             ...(onPlayFrom ? undefined : { visibility: 'hidden' as const }),
           }}
@@ -2656,7 +2656,7 @@ const SetTrackRow = memo(function SetTrackRow({
           onRemove(trackId);
         }}
         title="Remove from set"
-        style={{ width: `${REMOVE_COL_W}px`, flexShrink: 0, padding: '2px 0', color: 'var(--red)' }}
+        style={{ width: `${REMOVE_COL_W}px`, flexShrink: 0, padding: '2px 0', color: 'var(--danger)' }}
       >
         ✕
       </button>
@@ -2705,7 +2705,7 @@ function TempoPolicyChip({
         className="set-chip-btn set-header-chip"
         onClick={() => setOpen((o) => !o)}
         title="Tempo policy: Riding eases each track back to its native tempo; Fixed pitches the whole set to one BPM"
-        style={{ color: fixed ? 'var(--peach)' : 'var(--sapphire)' }}
+        style={{ color: fixed ? 'var(--orange)' : 'var(--accent)' }}
       >
         {fixed ? `Fixed · ${effectiveBpm ? `${effectiveBpm.toFixed(1)} BPM` : 'no BPM'}` : 'Riding'}
       </button>
@@ -2737,8 +2737,8 @@ function TempoPolicyChip({
             style={
               !fixed
                 ? {
-                    background: 'var(--sapphire)',
-                    borderColor: 'var(--sapphire)',
+                    background: 'var(--accent)',
+                    borderColor: 'var(--accent)',
                     color: 'var(--base)',
                   }
                 : undefined
@@ -2756,8 +2756,8 @@ function TempoPolicyChip({
             style={
               fixed
                 ? {
-                    background: 'var(--peach)',
-                    borderColor: 'var(--peach)',
+                    background: 'var(--orange)',
+                    borderColor: 'var(--orange)',
                     color: 'var(--base)',
                   }
                 : undefined

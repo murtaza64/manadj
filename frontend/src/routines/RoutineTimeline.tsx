@@ -29,22 +29,32 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Track, HotCue } from '../types';
 import type { DecodedWaveform } from '../waveform/blob';
-import { createStyledColumnRenderer, type ColumnModulation } from '../sets/ladderWaveStyle';
+import type { ColumnModulation } from '../sets/ladderWaveStyle';
+import { drawStyledRuns } from '../sessions/waveformLanes';
+import type { TimeAxis } from '../sessions/timelineModel';
 import { channelFaderToGain, trimToGain } from '../playback/mixerMath';
 import { eqValueToGain } from '../playback/graph';
 import { useStyleSlot } from '../waveform/styleSlots';
 import { cueCssColor } from '../hotcues/palette';
 import { ROUTINE_ACCENT } from '../theme/routineColor';
-import {
-  GUIDE_TIER_ALPHA,
-  GUIDE_TIER_WIDTH,
-  LaneCanvas,
-  type LaneGuide,
-} from '../editor/LaneCanvas';
+import { hexToRgbTriplet } from '../theme/deckColors';
+import { LaneCanvas, type LaneGuide } from '../editor/LaneCanvas';
 import { engineIdToOpenKey } from '../utils/keyUtils';
 import { getBpmColor, getKeyColor } from '../utils/displayColors';
 import { Knob } from '../components/performance/MixerStrip';
-import { TIER_ALPHA, TIER_WIDTH } from '../waveform/WaveformRendererV2';
+import {
+  BEAT_TIER_DIM,
+  BEAT_TIER_FULL,
+  beatTierStyle,
+  drawCueFlag,
+  LADDER_GOLD_RGB,
+  WAVE_BG_COLOR,
+} from '../theme/markers';
+
+/** The waveform-body tier weights (theme/markers BEAT_TIER_FULL) — local
+ * aliases for the ruler's inline tier styling below. */
+const TIER_WIDTH = BEAT_TIER_FULL.width;
+const TIER_ALPHA = BEAT_TIER_FULL.alpha;
 import type { LaneId, LanePoint } from '../editor/mixModel';
 import {
   slotLanesAt,
@@ -57,6 +67,7 @@ import { AUDITION_MARGIN_BEATS, type RoutinePlayer } from './RoutinePlayer';
 import type { RoutineDraftStore } from './routineDraftStore';
 import type { AuthoredJump, AuthoredPause, RoutineEdits } from './routineDraft';
 import { traceDrawRuns, type BeatRun } from './routineWaveRuns';
+import type { EditorMode } from './editorMode';
 import {
   buildGlobalLadder,
   FILTER_LPF_COLOR,
@@ -145,6 +156,8 @@ export function RoutineTimeline({
   trim,
   onTrimChange,
   onSeekBeat,
+  mode,
+  onModeHome,
 }: {
   editor: EditorRoutine;
   /** The jump-edited build WITHOUT lane edits: its trace identities are
@@ -170,6 +183,11 @@ export function RoutineTimeline({
   trim: TrimRange | null;
   onTrimChange: ((trim: TrimRange) => void) | null;
   onSeekBeat: (beat: number) => void;
+  /** Modal editing (ADR 0038, gh#207): gates timeline-canvas pointer
+   * gestures. Chrome (popovers, lane strips, markers) stays always-live. */
+  mode: EditorMode;
+  /** Two-tier Escape's second tier: snap home to select. */
+  onModeHome: () => void;
 }) {
   const { planned, input } = editor;
   const duration = input.durationBeats;
@@ -245,14 +263,20 @@ export function RoutineTimeline({
 
   // ── Wheel: pinch = zoom (cursor-anchored), horizontal = pan, plain
   // vertical = NATIVE vertical scroll (gh#190 iteration — rows overflow
-  // now; trackpad pinch arrives as a ctrlKey wheel). ─────────────────────
+  // now; trackpad pinch arrives as a ctrlKey wheel). In PAN mode plain
+  // vertical wheel zooms instead (gh#207 review feedback) — pan drag
+  // owns vertical motion there.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
       if (px <= 0) return;
-      if (e.ctrlKey || e.metaKey) {
+      const panZoom =
+        modeRef.current === 'pan' && Math.abs(e.deltaY) >= Math.abs(e.deltaX);
+      if (e.ctrlKey || e.metaKey || panZoom) {
         // Pinch-zoom (or ctrl/cmd+wheel), anchored under the cursor.
         e.preventDefault();
         const rect = el.getBoundingClientRect();
@@ -315,9 +339,21 @@ export function RoutineTimeline({
   const selAnchor = useRef<number | null>(null);
   const editsRef = useRef(edits);
   editsRef.current = edits;
+  // Two-tier Escape (ADR 0038): clear transient state first — popover,
+  // then lane-node selection, then slot selection — and only with nothing
+  // transient left, snap the mode home to select.
+  const transientRef = useRef({ popover, laneSel, selectedSlots });
+  transientRef.current = { popover, laneSel, selectedSlots };
+  const onModeHomeRef = useRef(onModeHome);
+  onModeHomeRef.current = onModeHome;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedSlots([]);
+      if (e.key !== 'Escape') return;
+      const t = transientRef.current;
+      if (t.popover) setPopover(null);
+      else if (t.laneSel) setLaneSel(null);
+      else if (t.selectedSlots.length > 0) setSelectedSlots([]);
+      else onModeHomeRef.current();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -360,18 +396,57 @@ export function RoutineTimeline({
           draftStore.setNudgeLive(key, s, v);
         }
       };
-      const onUp = (ev: PointerEvent) => {
+      const onUp = () => {
         document.body.style.userSelect = prevUserSelect;
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         draftStore.endGesture();
-        // A click that never became a drag is still a seek.
-        if (!moved) seekAtClientXRef.current?.(ev.clientX);
+        // A no-drag click was the SELECT itself (ADR 0038: click = focus
+        // slot; seeks live on the background/ruler, not slot rows).
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
     [draftStore, tracks]
+  );
+
+  // ── Pan drag (pan mode / hold-H quasimode): BOTH axes — horizontal
+  // rides the beat scroll, vertical rides the timeline's own overflow-y
+  // scroller (gh#207 review feedback). ─────────────────────────────────
+  const beginPan = useCallback(
+    (e: React.PointerEvent) => {
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const s0 = viewRef.current.scrollBeat;
+      const st0 = containerRef.current?.scrollTop ?? 0;
+      let moved = false;
+      const prevUserSelect = document.body.style.userSelect;
+      document.body.style.userSelect = 'none';
+      const onMove = (ev: PointerEvent) => {
+        const { pxPerBeat: px } = viewRef.current;
+        if (px <= 0) return;
+        if (
+          !moved &&
+          Math.abs(ev.clientX - startX) < 3 &&
+          Math.abs(ev.clientY - startY) < 3
+        )
+          return;
+        moved = true;
+        setScrollBeat(clampScroll(s0 - (ev.clientX - startX) / px, px));
+        const el = containerRef.current;
+        if (el) el.scrollTop = st0 - (ev.clientY - startY);
+      };
+      const onUp = (ev: PointerEvent) => {
+        document.body.style.userSelect = prevUserSelect;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        // A no-drag click stays a seek — seeking is modeless (ADR 0038).
+        if (!moved) seekAtClientXRef.current?.(ev.clientX);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [clampScroll]
   );
 
   // ── Seek scrub ───────────────────────────────────────────────────────
@@ -394,6 +469,46 @@ export function RoutineTimeline({
     [onSeekBeat, duration]
   );
   seekAtClientXRef.current = seekAtClientX;
+
+  const plannedRef = useRef(planned);
+  plannedRef.current = planned;
+
+  // ── Jump insertion (jump mode: SINGLE click — ADR 0038; replaces the
+  // dblclick/alt+dblclick overloads that kept colliding with UI clicks).
+  // The popup carries jump⇄pause and displacement, so a plain insert +
+  // popover covers pause authoring too.
+  const insertJumpAt = useCallback(
+    (clientX: number, shiftKey: boolean, slotIdx: number) => {
+      const slot = plannedRef.current.slots.find((s) => s.slot === slotIdx);
+      if (!slot) return;
+      const el = rowsRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
+      if (px <= 0) return;
+      let beat = s + (clientX - rect.left) / px;
+      if (!shiftKey) beat = Math.round(beat); // beat magnet; shift = free
+      beat = Math.max(0, Math.min(beat, duration));
+      const track = tracks.get(slot.trackId);
+      const trackBpm = track?.bpm ?? null;
+      // Default: a 4-track-beat BACKWARD jump — loopable (the pair
+      // editor's add-jump posture, loop doctrine ready).
+      const deltaSec = trackBpm && trackBpm > 0 ? -4 * (60 / trackBpm) : -2;
+      const jump: AuthoredJump = {
+        id: `j-${Date.now()}-${slot.slot}-${Math.round(beat * 10)}`,
+        slot: slot.slot,
+        beat,
+        deltaSec,
+      };
+      draftStore.addJump(jump);
+      setPopover({ marker: { kind: 'authored', slot: slot.slot, jump }, x: beat });
+    },
+    [draftStore, duration, tracks]
+  );
+
+  // ── Mode-dispatched canvas gestures (ADR 0038) ───────────────────────
+  // Chrome (markers, popovers, lane strips, panels) is exempt: it stays
+  // always-live in every mode. Background clicks seek in every mode.
   const onRowsPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (
@@ -404,35 +519,66 @@ export function RoutineTimeline({
         return;
       const slotEl = (e.target as HTMLElement).closest('[data-slot]');
       const slotIdx = slotEl ? Number(slotEl.getAttribute('data-slot')) : null;
-      // Selection gestures (gh#190 track drag): cmd/ctrl toggles, shift
-      // extends a range from the anchor.
-      if (slotIdx !== null && (e.metaKey || e.ctrlKey)) {
-        setSelectedSlots((prev) =>
-          prev.includes(slotIdx) ? prev.filter((s) => s !== slotIdx) : [...prev, slotIdx]
-        );
-        selAnchor.current = slotIdx;
-        setPopover(null);
-        return;
+      if (mode === 'jump') {
+        if (slotIdx !== null) {
+          setPopover(null);
+          insertJumpAt(e.clientX, e.shiftKey, slotIdx);
+          return;
+        }
+        // Background falls through to the modeless seek below.
+      } else {
+        // Select mode. Selection gestures (gh#190 track drag): cmd/ctrl
+        // toggles, shift extends a range from the anchor; a plain click
+        // selects the slot and a drag slides the selection.
+        if (slotIdx !== null && (e.metaKey || e.ctrlKey)) {
+          setSelectedSlots((prev) =>
+            prev.includes(slotIdx) ? prev.filter((s) => s !== slotIdx) : [...prev, slotIdx]
+          );
+          selAnchor.current = slotIdx;
+          setPopover(null);
+          return;
+        }
+        if (slotIdx !== null && e.shiftKey) {
+          const a = selAnchor.current ?? slotIdx;
+          const [lo, hi] = a <= slotIdx ? [a, slotIdx] : [slotIdx, a];
+          setSelectedSlots(Array.from({ length: hi - lo + 1 }, (_, k) => lo + k));
+          setPopover(null);
+          return;
+        }
+        if (slotIdx !== null) {
+          setPopover(null);
+          if (selectedSlots.includes(slotIdx)) {
+            beginSlide(e, selectedSlots);
+          } else {
+            setSelectedSlots([slotIdx]);
+            selAnchor.current = slotIdx;
+            beginSlide(e, [slotIdx]);
+          }
+          return;
+        }
       }
-      if (slotIdx !== null && e.shiftKey) {
-        const a = selAnchor.current ?? slotIdx;
-        const [lo, hi] = a <= slotIdx ? [a, slotIdx] : [slotIdx, a];
-        setSelectedSlots(Array.from({ length: hi - lo + 1 }, (_, k) => lo + k));
-        setPopover(null);
-        return;
-      }
-      // Dragging a selected row slides every selected track.
-      if (slotIdx !== null && selectedSlots.includes(slotIdx)) {
-        setPopover(null);
-        beginSlide(e, selectedSlots);
-        return;
-      }
+      // Timeline background: the modeless seek-scrub.
       scrubbing.current = true;
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       seekAtClientX(e.clientX);
       setPopover(null);
     },
-    [seekAtClientX, selectedSlots, beginSlide]
+    [mode, seekAtClientX, selectedSlots, beginSlide, insertJumpAt]
+  );
+
+  // Pan mode grabs EVERYTHING at the capture phase (gh#207 review
+  // feedback: pan must work anywhere — panels, lane strips, markers),
+  // except the popover, which stays interactive. A no-drag click still
+  // seeks (modeless seek).
+  const onRowsPointerDownCapture = useCallback(
+    (e: React.PointerEvent) => {
+      if (mode !== 'pan') return;
+      if ((e.target as HTMLElement).closest('.rt-jump-popover')) return;
+      e.stopPropagation();
+      setPopover(null);
+      beginPan(e);
+    },
+    [mode, beginPan]
   );
   const onRowsPointerMove = useCallback(
     (e: React.PointerEvent) => {
@@ -529,66 +675,6 @@ export function RoutineTimeline({
       window.addEventListener('pointerup', onUp);
     },
     [draftStore, duration]
-  );
-
-  // Add-jump lives on the ROWS container: the scrub's pointer capture
-  // retargets the derived dblclick to the container, so a per-row
-  // handler never fires — hit-test the wave row under the point instead.
-  const plannedRef = useRef(planned);
-  plannedRef.current = planned;
-  const onRowsDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      // Double-clicks on CONTROLS are not authoring gestures (gh#190
-      // iteration: rapid nudge clicks were minting jumps).
-      if (
-        (e.target as HTMLElement).closest(
-          '.rt-slotpanel, .rt-panelcol, .rt-lanetoggles, .rt-jump, .rt-laneauthor, .rt-jump-popover, .rt-trimhandle, .rt-lanestrip'
-        )
-      )
-        return;
-      const hit = document
-        .elementFromPoint(e.clientX, e.clientY)
-        ?.closest('[data-slot]') as HTMLElement | null;
-      if (!hit) return;
-      const slotIdx = Number(hit.getAttribute('data-slot'));
-      const slot = plannedRef.current.slots.find((s) => s.slot === slotIdx);
-      if (!slot) return;
-      const el = rowsRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
-      if (px <= 0) return;
-      let beat = s + (e.clientX - rect.left) / px;
-      if (!e.shiftKey) beat = Math.round(beat);
-      beat = Math.max(0, Math.min(beat, duration));
-      // Alt/option + double-click authors a PAUSE (gh#190: play/pause
-      // events); plain double-click keeps the jump gesture.
-      if (e.altKey) {
-        const pause: AuthoredPause = {
-          id: `p-${Date.now()}-${slot.slot}-${Math.round(beat * 10)}`,
-          slot: slot.slot,
-          beat,
-          durBeats: 4,
-        };
-        draftStore.addPause(pause);
-        setPopover({ marker: { kind: 'authored-pause', slot: slot.slot, pause }, x: beat });
-        return;
-      }
-      const track = tracks.get(slot.trackId);
-      const trackBpm = track?.bpm ?? null;
-      // Default: a 4-track-beat BACKWARD jump — loopable (the pair
-      // editor's add-jump posture, loop doctrine ready).
-      const deltaSec = trackBpm && trackBpm > 0 ? -4 * (60 / trackBpm) : -2;
-      const jump: AuthoredJump = {
-        id: `j-${Date.now()}-${slot.slot}-${Math.round(beat * 10)}`,
-        slot: slot.slot,
-        beat,
-        deltaSec,
-      };
-      draftStore.addJump(jump);
-      setPopover({ marker: { kind: 'authored', slot: slot.slot, jump }, x: beat });
-    },
-    [draftStore, duration, tracks]
   );
 
   // ── Playhead (rAF-driven; div transform only — the editor's pink) ────
@@ -728,7 +814,7 @@ export function RoutineTimeline({
       const ctx = ruler.getContext('2d');
       if (ctx) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.fillStyle = '#0b0b0b';
+        ctx.fillStyle = WAVE_BG_COLOR;
         ctx.fillRect(0, 0, width, RULER_H);
         ctx.font = 'bold 10px monospace';
         ctx.textBaseline = 'middle';
@@ -783,7 +869,7 @@ export function RoutineTimeline({
               pos <= 0 ? 0.2 : TIER_ALPHA[Math.min(pos - 1, TIER_ALPHA.length - 1)];
             const w = pos <= 0 ? 1 : TIER_WIDTH[Math.min(pos - 1, TIER_WIDTH.length - 1)];
             ctx.fillStyle = m.parenthetical
-              ? `rgba(255,209,102,${Math.min(1, alpha + 0.25)})`
+              ? `rgba(${LADDER_GOLD_RGB},${Math.min(1, alpha + 0.25)})`
               : `rgba(255,255,255,${alpha})`;
             ctx.fillRect(x, m.tier >= 2 ? 4 : 10, Math.max(w, m.parenthetical ? 2 : 1), RULER_H);
           }
@@ -791,7 +877,7 @@ export function RoutineTimeline({
             const x = xAt(r);
             if (x < -24 || x > width + 24) continue;
             // Left edge = the quantum (gridline geometry).
-            ctx.fillStyle = 'rgba(255,209,102,0.95)';
+            ctx.fillStyle = `rgba(${LADDER_GOLD_RGB},0.95)`;
             ctx.fillRect(x, 0, 2, RULER_H);
             ctx.beginPath();
             ctx.moveTo(x, 0);
@@ -823,7 +909,7 @@ export function RoutineTimeline({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = '#0b0b0b';
+      ctx.fillStyle = WAVE_BG_COLOR;
       ctx.fillRect(0, 0, width, WAVE_H);
       const ladder = slotLadders[i];
       if (ladder) drawLadder(ctx, ladder, xAt, width, WAVE_H, 'wave');
@@ -859,7 +945,7 @@ export function RoutineTimeline({
         ctx.closePath();
         ctx.fill();
       }
-      ctx.fillStyle = 'rgba(11,11,11,0.6)';
+      ctx.fillStyle = `rgba(${hexToRgbTriplet(WAVE_BG_COLOR)},0.6)`;
       const preX = Math.min(width, Math.max(0, ex));
       const zeroX = Math.max(0, xAt(0));
       if (preX > zeroX) ctx.fillRect(zeroX, 0, preX - zeroX, WAVE_H);
@@ -943,7 +1029,7 @@ export function RoutineTimeline({
         const ctx = strip.getContext('2d');
         if (!ctx) continue;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.fillStyle = '#0e0e0e';
+        ctx.fillStyle = WAVE_BG_COLOR;
         ctx.fillRect(0, 0, width, STRIP_H);
         const ladder = slotLadders[slot.slot];
         if (ladder) drawLadder(ctx, ladder, xAt, width, STRIP_H, 'strip');
@@ -1070,21 +1156,34 @@ export function RoutineTimeline({
   };
 
   return (
-    <div className="rt-timeline" ref={containerRef}>
+    <div className="rt-timeline" ref={containerRef} data-mode={mode}>
       <div className="rt-toolbar-float">
         <button className="rt-fit" title="Fit the whole Routine" onClick={fit}>
           fit
         </button>
       </div>
-      <canvas ref={rulerRef} className="rt-ruler" style={{ height: RULER_H }} />
+      {/* The ruler is a modeless seek surface in every mode (ADR 0038). */}
+      <canvas
+        ref={rulerRef}
+        className="rt-ruler"
+        style={{ height: RULER_H }}
+        onPointerDown={(e) => {
+          scrubbing.current = true;
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          seekAtClientX(e.clientX);
+        }}
+        onPointerMove={onRowsPointerMove}
+        onPointerUp={onRowsPointerUp}
+        onPointerCancel={onRowsPointerUp}
+      />
       <div
         className="rt-rows"
         ref={rowsRef}
+        onPointerDownCapture={onRowsPointerDownCapture}
         onPointerDown={onRowsPointerDown}
         onPointerMove={onRowsPointerMove}
         onPointerUp={onRowsPointerUp}
         onPointerCancel={onRowsPointerUp}
-        onDoubleClick={onRowsDoubleClick}
       >
         {/* Continuous panel COLUMN (gh#190 iteration): one unbroken tint +
             right border down the whole timeline — the per-slot panels are
@@ -1377,7 +1476,10 @@ export function RoutineTimeline({
             </div>
           );
         })}
-        {trim &&
+        {/* Trim handles are select-mode canvas edits (ADR 0038) — the
+            shaded trim REGIONS below stay visible in every mode. */}
+        {mode === 'select' &&
+          trim &&
           onTrimChange &&
           (['start', 'end'] as const).map((edge) => {
             const b = edge === 'start' ? trim.startBeat : trim.endBeat;
@@ -1697,23 +1799,19 @@ function JumpPopover({
  * the weak-beat style and the rest escalate from there, so zooming out
  * re-thins the surviving lines instead of leaving a wall of thick ones. */
 /** Style for a ladder line at style position `pos` (relative to the
- * lowest visible level: 0 = weak/thinnest, k > 0 = TIER_*[k−1]). */
+ * lowest visible level: 0 = weak/thinnest, k > 0 = table[k−1]) — the
+ * shared beatTierStyle over the markers.ts tier tables: 'wave' rows at the
+ * FULL register, lane 'strip's at the DIM one. */
 function ladderLineStyle(
   pos: number,
   flavor: 'wave' | 'strip'
 ): { w: number; alpha: number } {
-  const tierWidth = flavor === 'wave' ? TIER_WIDTH : GUIDE_TIER_WIDTH;
-  const tierAlpha = flavor === 'wave' ? TIER_ALPHA : GUIDE_TIER_ALPHA;
-  const weakAlpha = flavor === 'wave' ? 0.15 : 0.09;
-  if (pos <= 0) return { w: 1, alpha: weakAlpha };
-  return {
-    w: tierWidth[Math.min(pos - 1, tierWidth.length - 1)],
-    alpha: tierAlpha[Math.min(pos - 1, tierAlpha.length - 1)],
-  };
+  const { width, alpha } = beatTierStyle(pos, flavor === 'wave' ? BEAT_TIER_FULL : BEAT_TIER_DIM);
+  return { w: width, alpha };
 }
 
 /** The Metric-ladder authoring gold (Reset pennants, parenthetical bars). */
-const LADDER_GOLD = '255,209,102';
+const LADDER_GOLD = LADDER_GOLD_RGB;
 
 function drawGrid(
   ctx: CanvasRenderingContext2D,
@@ -1770,13 +1868,15 @@ function drawLadder(
   }
 }
 
-/** Styled-run waveform pass (the session timeline's drawStyledRuns,
- * beat-axis flavor): per run, columns sample the run's LINEAR beat→track
- * mapping at integer timeline pixels — LOD-correct and scroll-stable.
- * Columns modulate through the slot's lane state (gh#190 item 11):
- * fader gain scales the body, EQ gains scale their band groups — the
- * session timeline / set ladder's exact ColumnModulation contract
- * (filter excluded, both surfaces' choice). */
+/** Styled-run waveform pass — the session timeline's drawStyledRuns
+ * (gh#201: the ONE styled-run drawer), beat-axis flavor: runs map onto a
+ * synthesized single-segment TimeAxis ("time" = routine beats; xAt is
+ * linear, so one segment is exact). Columns modulate through the slot's
+ * lane state (gh#190 item 11): fader gain scales the body, EQ gains scale
+ * their band groups — the session timeline / set ladder's exact
+ * ColumnModulation contract (filter excluded, both surfaces' choice).
+ * HELD spans (pause/park — gh#190 iteration two) draw NOTHING: the deck
+ * emits nothing while paused, so the span stays blank. */
 function drawSlotWave(
   ctx: CanvasRenderingContext2D,
   wave: DecodedWaveform,
@@ -1791,52 +1891,46 @@ function drawSlotWave(
     waveH: number;
   }
 ): void {
-  const midY = geo.waveH / 2;
-  const halfH = geo.waveH / 2 - 2;
-  const renderer = createStyledColumnRenderer(wave, styleId, params);
-  for (const run of runs) {
-    const rx0 = geo.xAt(run.b0);
-    const rx1 = geo.xAt(run.b1);
-    if (rx1 <= rx0) continue;
-    const cx0 = Math.max(rx0, 0);
-    const cx1 = Math.min(rx1, geo.width);
-    if (cx1 <= cx0) continue;
-    const xStart = Math.round(cx0);
-    const cols = Math.round(cx1) - xStart;
-    if (cols <= 0) continue;
-    // A HELD span (pause/park — gh#190 iteration two: NO waveform
-    // content at all): the deck emits nothing while paused, so the span
-    // stays blank — never a stretch-smear or a tiled frame.
-    if (run.held) continue;
-    const phA = run.ph0 + ((cx0 - rx0) / (rx1 - rx0)) * (run.ph1 - run.ph0);
-    const phB = run.ph0 + ((cx1 - rx0) / (rx1 - rx0)) * (run.ph1 - run.ph0);
-    const modulate = (x: number): ColumnModulation => {
-      const lanes = slotLanesAt(modSlot, geo.beatAt(xStart + x + 0.5));
-      return {
-        eq: [
-          eqValueToGain(lanes.eq.low),
-          eqValueToGain(lanes.eq.mid),
-          eqValueToGain(lanes.eq.high),
-        ],
-        scale: Math.min(
-          2,
-          (channelFaderToGain(lanes.fader) * trimToGain(lanes.trim)) / NOMINAL_SLOT_GAIN
-        ),
-      };
+  const live = runs.filter((r) => !r.held && r.b1 > r.b0);
+  if (live.length === 0) return;
+  const b0 = Math.min(...live.map((r) => r.b0));
+  const b1 = Math.max(...live.map((r) => r.b1));
+  if (b1 <= b0) return;
+  const px0 = geo.xAt(b0);
+  const px1 = geo.xAt(b1);
+  const axis: TimeAxis = {
+    segments: [{ start: b0, end: b1, px0, px1, collapsed: false }],
+    tToPx: (t) => px0 + ((t - b0) / (b1 - b0)) * (px1 - px0),
+    pxToT: (x) => b0 + ((x - px0) / Math.max(px1 - px0, 1e-9)) * (b1 - b0),
+    totalPx: px1,
+    visibleDurationS: b1 - b0,
+    pxPerSec: (px1 - px0) / (b1 - b0),
+  };
+  const laneGeo = { width: geo.width, yOffset: 0, height: geo.waveH, x0: 0, x1: geo.width };
+  const modulate = (pxX: number): ColumnModulation => {
+    const lanes = slotLanesAt(modSlot, geo.beatAt(pxX));
+    return {
+      eq: [
+        eqValueToGain(lanes.eq.low),
+        eqValueToGain(lanes.eq.mid),
+        eqValueToGain(lanes.eq.high),
+      ],
+      scale: Math.min(
+        2,
+        (channelFaderToGain(lanes.fader) * trimToGain(lanes.trim)) / NOMINAL_SLOT_GAIN
+      ),
     };
-    const columns = renderer.render(phA, phB, cols, 1, modulate);
-    for (let x = 0; x < cols; x++) {
-      const col = columns[x];
-      if (col.outOfTrack) continue;
-      for (const seg of col.segments) {
-        ctx.fillStyle = seg.css;
-        const y0 = seg.y0 * halfH;
-        const y1 = seg.y1 * halfH;
-        ctx.fillRect(xStart + x, midY - y1, 1, y1 - y0);
-        ctx.fillRect(xStart + x, midY + y0, 1, y1 - y0);
-      }
-    }
-  }
+  };
+  drawStyledRuns(
+    ctx,
+    wave,
+    styleId,
+    params,
+    live.map((r) => ({ t0: r.b0, t1: r.b1, ph0: r.ph0, ph1: r.ph1 })),
+    axis,
+    laneGeo,
+    modulate
+  );
 }
 
 /** Hotcue poles + numbered flags — the V2 renderer's exact idiom (2px
@@ -1851,10 +1945,6 @@ function drawHotCues(
   waveH: number
 ): void {
   if (cues.length === 0) return;
-  ctx.font = 'bold 10px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const flag = 13;
   for (const run of runs) {
     if (run.held) continue; // a held frame has no meaningful cue x
     const lo = Math.min(run.ph0, run.ph1);
@@ -1868,18 +1958,19 @@ function drawHotCues(
       const f = (t - run.ph0) / (run.ph1 - run.ph0);
       const x = rx0 + f * (rx1 - rx0);
       if (x < -2 || x > width + 2) continue;
-      const color = cueCssColor(cue.slot_number, cue.color);
-      ctx.fillStyle = color;
+      // The shared 'full' flag (theme/markers, gh#201: the 13px die dies).
       // LEFT-ALIGNED pole (gh#190 iteration): the pole's LEFT edge is the
       // quantum, exactly like the gridlines' left-aligned rects — a cue
-      // on a beat sits flush on its gridline, not a pixel astride it.
-      ctx.fillRect(x, 0, 2, waveH);
-      ctx.fillRect(x + 2, 0, flag, flag);
-      ctx.fillStyle = 'rgb(17,17,17)';
-      ctx.fillText(String(cue.slot_number), x + 2 + flag / 2, flag / 2 + 0.5);
+      // on a beat sits flush on its gridline, not a pixel astride it
+      // (drawCueFlag centers the pole, so offset by half its width).
+      drawCueFlag(ctx, x + 1, {
+        color: cueCssColor(cue.slot_number, cue.color),
+        variant: 'full',
+        height: waveH,
+        slot: cue.slot_number,
+      });
     }
   }
-  ctx.textAlign = 'left';
 }
 
 /** Recorded lane steps in the editor's strip geometry (gh#190 items 1-3):

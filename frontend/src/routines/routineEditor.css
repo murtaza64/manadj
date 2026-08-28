@@ -14,9 +14,9 @@
   height: 70%;
   min-height: 340px;
   flex-shrink: 0;
-  background: #0b0b0b;
-  color: var(--text, #e8e8f0);
-  font-size: 12px;
+  background: var(--void);
+  color: var(--text);
+  font-size: var(--font-body);
   overflow: hidden;
 }
 
@@ -24,41 +24,41 @@
 .re-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--surface0, #313244);
+  gap: var(--space-12);
+  padding: var(--space-4) var(--space-12);
+  border-bottom: 1px solid var(--surface0);
   flex-wrap: wrap;
 }
 .re-kind {
   color: var(--routine-accent);
   font-weight: 700;
   letter-spacing: 0.08em;
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .re-picker {
-  background: #14141f;
-  color: var(--text, #e8e8f0);
-  border: 1px solid #333;
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 12px;
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-body);
   max-width: 340px;
 }
 .re-contract b {
   font-weight: 600;
 }
 .re-meta {
-  color: var(--subtext0, #a6adc8);
-  font-size: 11px;
+  color: var(--subtext0);
+  font-size: var(--font-small);
 }
 /* Provenance deep-link (gh#170). */
 .re-source {
   background: transparent;
   border: 1px solid rgba(var(--routine-accent-rgb), 0.5);
-  border-radius: 3px;
+  border-radius: var(--radius);
   color: var(--routine-accent);
-  font-size: 11px;
-  padding: 1px 7px;
+  font-size: var(--font-small);
+  padding: var(--space-2) var(--space-8);
   cursor: pointer;
 }
 .re-source:hover {
@@ -69,9 +69,9 @@
 .re-transport {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--surface0, #313244);
+  gap: var(--space-12);
+  padding: var(--space-4) var(--space-12);
+  border-bottom: 1px solid var(--surface0);
   flex-wrap: wrap;
 }
 .re-play {
@@ -80,13 +80,13 @@
   background: transparent;
   color: var(--routine-accent);
   border: 1px solid var(--routine-accent);
-  border-radius: 3px;
-  font-size: 12px;
+  border-radius: var(--radius);
+  font-size: var(--font-body);
   font-weight: 600;
   cursor: pointer;
 }
 .re-play:hover {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
 }
 .re-play.on {
   background: var(--routine-accent);
@@ -100,107 +100,172 @@
   cursor: default;
 }
 .re-beat {
-  font-family: monospace;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: var(--text, #e8e8f0);
+  font-size: var(--font-body);
+  color: var(--text);
   min-width: 140px;
 }
 .re-bpm {
   display: flex;
   align-items: center;
-  gap: 4px;
-  color: var(--subtext0, #a6adc8);
-  font-size: 11px;
+  gap: var(--space-4);
+  color: var(--subtext0);
+  font-size: var(--font-small);
 }
 .re-bpm input {
   width: 62px;
-  background: #14141f;
-  color: var(--text, #e8e8f0);
-  border: 1px solid #333;
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 11px;
-  font-family: monospace;
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-small);
 }
 .re-bpmreset,
 .re-trimreset {
   background: none;
   border: none;
-  color: var(--subtext0, #a6adc8);
+  color: var(--subtext0);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 .re-bpmreset:hover,
 .re-trimreset:hover {
+  color: var(--text);
+}
+
+/* ── Editor mode toolbar (ADR 0038, gh#207): the segmented control that
+   shows + sets the active top-level mode. ── */
+.re-modebar {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--surface1, #45475a);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.re-modebtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  color: var(--subtext0, #a6adc8);
+  border: none;
+  border-right: 1px solid var(--surface1, #45475a);
+  padding: 3px 9px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.re-modebtn:last-child {
+  border-right: none;
+}
+.re-modebtn:hover:not(.on) {
+  background: var(--surface0, #313244);
   color: var(--text, #e8e8f0);
+}
+.re-modebtn.on {
+  background: var(--routine-accent);
+  color: var(--routine-accent-ink, #101400);
+}
+.re-modebtn kbd {
+  font-family: monospace;
+  font-size: 9px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 3px;
+  opacity: 0.7;
+}
+
+/* Mode cursor language on the canvas. Pan grabs EVERYTHING (it pans from
+   anywhere, so every child wears grab — except the popover, which stays
+   interactive); jump wears a ↷ cursor on the rows it inserts into. */
+.rt-timeline[data-mode='pan'] .rt-rows,
+.rt-timeline[data-mode='pan'] .rt-rows * {
+  cursor: grab;
+}
+.rt-timeline[data-mode='pan'] .rt-rows:active,
+.rt-timeline[data-mode='pan'] .rt-rows:active * {
+  cursor: grabbing;
+}
+.rt-timeline[data-mode='pan'] .rt-rows .rt-jump-popover,
+.rt-timeline[data-mode='pan'] .rt-rows .rt-jump-popover * {
+  cursor: auto;
+}
+.rt-timeline[data-mode='jump'] .rt-wave-row {
+  /* Heavy black ↷ with a white outline (paint-order: stroke keeps the
+     outline BEHIND the fill) — readable on waveforms and dark rows alike. */
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ctext x='2' y='20' font-size='20' font-weight='900' fill='%23000000' stroke='%23ffffff' stroke-width='2.5' paint-order='stroke' stroke-linejoin='round'%3E%E2%86%B7%3C/text%3E%3C/svg%3E")
+      13 13,
+    crosshair;
+}
+.rt-ruler {
+  cursor: ew-resize;
 }
 
 .re-history {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 .re-histbtn {
   background: transparent;
-  color: var(--subtext0, #a6adc8);
-  border: 1px solid var(--surface1, #45475a);
-  border-radius: 3px;
+  color: var(--subtext0);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
   width: 24px;
   height: 22px;
-  font-size: 12px;
+  font-size: var(--font-body);
   cursor: pointer;
 }
 .re-histbtn:hover:not(:disabled) {
-  background: var(--surface0, #313244);
-  color: var(--text, #e8e8f0);
+  background: var(--surface0);
+  color: var(--text);
 }
 .re-histbtn:disabled {
   opacity: 0.3;
   cursor: default;
 }
 .re-edited {
-  color: #ffd166;
-  font-size: 11px;
-  border: 1px solid #6b5a10;
-  border-radius: 3px;
-  padding: 1px 6px;
+  color: var(--warning);
+  font-size: var(--font-small);
+  border: 1px solid rgba(var(--warning-rgb), 0.4);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-6);
 }
 
 .re-trim {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 .re-trimlabel {
-  color: var(--subtext0, #a6adc8);
-  font-family: monospace;
-  font-size: 11px;
+  color: var(--subtext0);
+  font-size: var(--font-small);
 }
 .re-trimlabel.dirty {
   color: var(--routine-accent);
 }
 .re-trimoff {
-  color: #555;
-  font-size: 11px;
+  color: var(--overlay0);
+  font-size: var(--font-small);
 }
 .re-trimdrop {
-  color: #ffb521;
-  font-size: 11px;
+  color: var(--warning);
+  font-size: var(--font-small);
 }
 /* Accent CTA: outline at rest (the editor's promote-button posture). */
 .re-trimapply {
   background: transparent;
   color: var(--routine-accent);
   border: 1px solid var(--routine-accent);
-  border-radius: 3px;
-  padding: 2px 8px;
-  font-size: 11px;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-8);
+  font-size: var(--font-small);
   font-weight: 600;
   cursor: pointer;
 }
 .re-trimapply:hover {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
 }
 .re-trimapply:disabled {
   opacity: 0.4;
@@ -208,23 +273,23 @@
 }
 .re-warnings {
   display: flex;
-  gap: 6px;
+  gap: var(--space-6);
 }
 .re-warning {
-  color: #ffb521;
-  border: 1px solid #6b4a10;
-  border-radius: 3px;
-  padding: 1px 6px;
-  font-size: 11px;
+  color: var(--warning);
+  border: 1px solid rgba(var(--warning-rgb), 0.4);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-small);
 }
 .re-warning.error {
-  color: #ff5c39;
-  border-color: #7a2513;
+  color: var(--danger);
+  border-color: rgba(var(--danger-rgb), 0.4);
 }
 
 .re-empty {
-  padding: 40px;
-  color: var(--subtext0, #a6adc8);
+  padding: var(--space-24);
+  color: var(--subtext0);
   text-align: center;
 }
 
@@ -235,7 +300,7 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  background: #0b0b0b;
+  background: var(--void);
 }
 .rt-toolbar-float {
   position: absolute;
@@ -246,30 +311,32 @@
 /* The editor's fit-button look. */
 .rt-fit {
   background: transparent;
-  color: var(--subtext0, #a6adc8);
-  border: 1px solid var(--surface1, #45475a);
-  border-radius: 3px;
-  padding: 1px 8px;
+  color: var(--subtext0);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-8);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .rt-fit:hover {
-  background: var(--surface0, #313244);
-  color: var(--text, #e8e8f0);
+  background: var(--surface0);
+  color: var(--text);
 }
 .rt-ruler {
   display: block;
   width: 100%;
-  border-bottom: 1px solid var(--surface0, #313244);
+  border-bottom: 1px solid var(--surface0);
   /* Vertical overflow (gh#190): rows scroll under a pinned ruler. */
   position: sticky;
   top: 0;
-  z-index: 6;
-  background: #0b0b0b;
+  z-index: var(--z-sticky);
+  background: var(--void);
 }
 .rt-rows {
   position: relative;
-  cursor: crosshair;
+  /* Select mode wears the regular cursor (gh#207 review feedback);
+     pan/jump set their own below. */
+  cursor: default;
   touch-action: none;
 }
 .rt-slotblock {
@@ -281,7 +348,7 @@
 /* Slot blocks separate with real GAPS (gh#190 iteration: hierarchy —
    a track and its lanes read as one unit, blocks read apart). */
 .rt-slotblock {
-  margin-bottom: 14px;
+  margin-bottom: var(--space-12);
 }
 .rt-wave-row canvas,
 .rt-lanestrip canvas {
@@ -296,11 +363,11 @@
    line. Page background shows through the gap. */
 .rt-lanestrip {
   position: relative;
-  border-top: 1px solid #1b1b1b;
-  margin-top: 3px;
+  border-top: 1px solid var(--crust);
+  margin-top: var(--space-4);
 }
 .rt-wave-row + .rt-lanestrip {
-  margin-top: 4px;
+  margin-top: var(--space-4);
 }
 .rt-laneedge {
   position: absolute;
@@ -316,7 +383,7 @@
   left: 8px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 9px;
+  font-size: var(--font-micro);
   font-weight: 700;
   letter-spacing: 0.06em;
   pointer-events: none;
@@ -338,7 +405,7 @@
   left: 0;
   width: 208px;
   background: rgba(11, 11, 11, 0.88);
-  border-right: 1px solid var(--surface0, #313244);
+  border-right: 1px solid var(--surface0);
   z-index: 2;
   box-sizing: border-box;
 }
@@ -349,20 +416,20 @@
   left: 0;
   width: 208px;
   z-index: 2;
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   box-sizing: border-box;
-  font-size: 11px;
+  font-size: var(--font-small);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
   align-items: flex-start;
   pointer-events: auto;
 }
 .rt-sp-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  color: var(--text, #e8e8f0);
+  gap: var(--space-6);
+  color: var(--text);
   max-width: 100%;
 }
 .rt-sp-trunc {
@@ -372,15 +439,15 @@
   max-width: 100%;
 }
 .rt-sp-artist {
-  color: var(--subtext0, #a6adc8);
-  font-size: 10px;
+  color: var(--subtext0);
+  font-size: var(--font-micro);
 }
 .rt-sp-meta {
   display: flex;
-  gap: 8px;
+  gap: var(--space-8);
   align-items: center;
-  color: var(--subtext0, #a6adc8);
-  font-size: 10px;
+  color: var(--subtext0);
+  font-size: var(--font-micro);
   white-space: nowrap;
 }
 .rt-sp-trim {
@@ -394,15 +461,14 @@
   color: var(--routine-accent);
 }
 .rt-slotnum {
-  color: #0b0b0b;
+  color: var(--crust);
   font-weight: 700;
-  font-family: monospace;
-  border-radius: 2px;
-  padding: 0 5px;
+  border-radius: var(--radius);
+  padding: 0 var(--space-4);
 }
 .rt-boundary-tag {
   color: var(--routine-accent);
-  font-size: 9px;
+  font-size: var(--font-micro);
   letter-spacing: 0.06em;
   font-weight: 700;
   white-space: nowrap;
@@ -418,7 +484,7 @@
   bottom: 3px;
   left: 6px;
   display: flex;
-  gap: 2px;
+  gap: var(--space-2);
   z-index: 3;
 }
 .rt-lanetoggle {
@@ -426,11 +492,10 @@
   height: 14px;
   padding: 0;
   border: 1px solid;
-  border-radius: 2px;
+  border-radius: var(--radius);
   background: transparent;
-  font-size: 9px;
+  font-size: var(--font-micro);
   font-weight: 700;
-  font-family: monospace;
   line-height: 1;
   cursor: pointer;
   opacity: 0.85;
@@ -480,17 +545,17 @@
   gap: 1px;
 }
 .rt-dir button {
-  padding: 1px 5px;
+  padding: var(--space-2) var(--space-4);
   background: transparent;
-  border: 1px solid var(--surface1, #45475a);
-  color: var(--subtext0, #a6adc8);
+  border: 1px solid var(--surface1);
+  color: var(--subtext0);
   cursor: pointer;
-  font-size: 10px;
+  font-size: var(--font-micro);
 }
 .rt-dir button.on {
   background: var(--routine-accent);
   border-color: var(--routine-accent);
-  color: #0b0b0b;
+  color: var(--routine-accent-ink);
 }
 .rt-displacement input {
   width: 44px;
@@ -498,8 +563,8 @@
 
 /* Paired resume (▶) marker at a pause's end — smaller chip, same pole. */
 .rt-jump.rt-pause-resume .rt-jump-chip {
-  font-size: 8px;
-  padding: 0 3px;
+  font-size: var(--font-micro);
+  padding: 0 var(--space-4);
 }
 
 /* Pause markers (gh#190 play/pause events) — the jump idiom's look;
@@ -512,8 +577,8 @@
 }
 .rt-jump.ghost-pause .rt-jump-chip {
   background: transparent !important;
-  color: var(--subtext0, #a6adc8);
-  border: 1px dashed var(--subtext0, #a6adc8);
+  color: var(--subtext0);
+  border: 1px dashed var(--subtext0);
 }
 
 .rt-jump.authored {
@@ -527,18 +592,18 @@
 }
 .rt-jump.ghost .rt-jump-chip {
   background: transparent !important;
-  color: #888;
-  border: 1px dashed #666;
+  color: var(--overlay1);
+  border: 1px dashed var(--overlay0);
 }
 .rt-jump-chip {
   position: absolute;
   bottom: 1px;
   left: 3px;
-  padding: 1px 5px;
-  font-size: 10px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-micro);
   white-space: nowrap;
-  color: #001114;
-  border-radius: 3px;
+  color: var(--crust);
+  border-radius: var(--radius);
   user-select: none;
 }
 
@@ -546,46 +611,45 @@
 .rt-jump-popover {
   position: absolute;
   top: calc(100% + 2px);
-  z-index: 7;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  background: #0b0b0b;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-8);
+  background: var(--void);
   border: 1px solid var(--routine-accent);
-  border-radius: 4px;
-  font-size: 11px;
-  color: #e8e8f0;
-  z-index: 120;
+  border-radius: var(--radius);
+  font-size: var(--font-small);
+  color: var(--text);
+  z-index: var(--z-overlay);
   cursor: default;
 }
 .rt-jump-popover label {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-4);
 }
 .rt-jump-popover input {
   width: 52px;
-  background: #14141f;
-  color: #e8e8f0;
-  border: 1px solid #333;
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 11px;
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-small);
 }
 .rt-jump-popover button {
   background: transparent;
-  color: var(--text, #e8e8f0);
-  border: 1px solid var(--surface1, #45475a);
-  padding: 2px 6px;
-  font-size: 11px;
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-small);
   cursor: pointer;
 }
 .rt-jump-popover button:hover {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
 }
 .rt-jump-popover .rt-jump-delete {
-  color: #ff2d95;
+  color: var(--danger);
 }
 
 /* Lane windows (authored strips): the pair editor's .editor-lanewindow. */
@@ -594,7 +658,7 @@
   top: 2px;
   bottom: 2px;
   background: rgba(49, 49, 54, 0.35);
-  outline: 1px solid var(--surface1, #45454f);
+  outline: 1px solid var(--surface1);
 }
 
 /* Edit/discard toggle, left-anchored after the lane label (gh#190). */
@@ -607,17 +671,17 @@
   top: 50%;
   transform: translateY(-50%);
   background: rgba(11, 11, 11, 0.8);
-  color: var(--subtext0, #a6adc8);
-  border: 1px solid var(--surface1, #45475a);
-  border-radius: 3px;
-  padding: 1px 6px;
-  font-size: 10px;
+  color: var(--subtext0);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-micro);
   cursor: pointer;
   z-index: 3;
 }
 .rt-laneauthor:hover {
-  color: var(--text, #e8e8f0);
-  background: var(--surface0, #313244);
+  color: var(--text);
+  background: var(--surface0);
 }
 
 .rt-boundaryline {
@@ -635,7 +699,7 @@
   bottom: 2px;
   left: 3px;
   color: var(--routine-accent);
-  font-size: 9px;
+  font-size: var(--font-micro);
   letter-spacing: 0.1em;
   font-weight: 700;
 }
@@ -647,7 +711,7 @@
   bottom: 0;
   left: 0;
   width: 1.5px;
-  background: var(--pink, #ff2d95);
+  background: var(--playhead); /* Transport playhead (D6 registry) */
   pointer-events: none;
   z-index: 1; /* under the slot panel's dim (gh#190 iteration) */
 }
@@ -678,8 +742,8 @@
   width: 10px;
   height: 26px;
   border: 1.5px solid var(--routine-accent);
-  border-radius: 5px;
-  background: #14141f;
+  border-radius: var(--radius);
+  background: var(--surface0);
 }
 .rt-trimextend {
   position: absolute;

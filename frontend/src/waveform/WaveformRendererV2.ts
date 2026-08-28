@@ -20,7 +20,26 @@ import type { PlaybackClock } from '../playback/clock';
 import { addBeats } from '../playback/quantize';
 import { MAX_LEAD_IN_SECONDS } from '../playback/DeckEngine';
 import { barCountLabel } from '../meter/ladder';
-import { HOT_CUE_CSS_COLORS } from '../hotcues/palette';
+import { cueCssColor } from '../hotcues/palette';
+import {
+  cueGlColor,
+  CUE_FLAG_FULL_SIZE,
+  CUE_FLAG_MINI_SIZE,
+  CUE_FLAG_POLE_W,
+  CUE_FLAG_INK,
+  BEAT_TIER_FULL,
+  TIER_MIN_SPACING_PX,
+  LADDER_GOLD_GL,
+  MAIN_CUE_COLOR_GL,
+  MAIN_CUE_LINE_W,
+  MAIN_CUE_TRI_MINI_HALF,
+  MAIN_CUE_TRI_MINI_DEPTH,
+  PLAYHEAD_TRANSPORT_GL,
+  PLAY_MARKER_FRACTION,
+  WAVE_BG_GL,
+  MINIMAP_BRIGHTNESS,
+} from '../theme/markers';
+import { FONT_MONO, TEXT } from '../theme/tokens';
 import { STEP_RATIO } from '../utils/waveformZoom';
 import { playedDimBoundary } from './loopOverlay';
 import { MAX_LEVELS, TEX_WIDTH } from './blob';
@@ -81,19 +100,6 @@ function formatReadoutTime(seconds: number): string {
   return `${m}:${rest.toFixed(1).padStart(4, '0')}`;
 }
 
-/** Hot-cue slot FALLBACK palette (hotcue-colors 01): bright, fully
- * saturated — the pastel Catppuccin set was rejected. A cue's STORED
- * color (Engine import) takes precedence at every render site; these are
- * what colorless (in-app-created) cues get. Values live in theme/tokens.ts
- * (which also installs --hc-1..--hc-8; the GL pass can't read CSS vars, so
- * the floats below derive from the imported constants).
- * Also reused by the Set overview ladder (sets 04 review). */
-const CUE_COLOR_RE = /^#[0-9a-f]{6}$/i;
-
-/** CSS-side cue color resolution (hotcue-colors 01): the stored per-cue
- * color wins when it's a trustworthy hex; otherwise the slot palette.
- * Shared by every 2D canvas/DOM render site (editor lane guides, editor
- * minimap) so no surface grows its own fallback. */
 /**
  * Which beat indices are downbeats — epsilon matching, not exact floats
  * (ADR 0027 §8). Both arrays are sorted; a two-pointer sweep. The backend
@@ -149,40 +155,20 @@ export interface LadderGridInput {
   topBars: readonly number[];
 }
 
-/** Metric-ladder gridline styling: width (dpr multiples) and alpha per
- * tier, index 0 = bar … 4 = 16-bar boundary. Tier 0 keeps the legacy
- * downbeat look; higher tiers escalate so phrase structure reads at a
- * glance at any zoom. Tunable heuristics, not part of the model. */
-export const TIER_WIDTH: readonly number[] = [2, 2, 2.5, 3, 3.5];
-export const TIER_ALPHA: readonly number[] = [0.3, 0.38, 0.48, 0.6, 0.75];
-/** A tier's lines draw only when that tier's own spacing is at least this
- * many px (dpr-scaled): zoomed out, low tiers cull and only phrase-level
- * lines survive — the generalization of the legacy 2.5px/bar cutoff. */
-export const TIER_MIN_SPACING_PX = 2.5;
+/** Metric-ladder gridline styling — the waveform-body tier table (widths,
+ * alphas, weak-beat style, min spacing). Data lives in theme/markers.ts
+ * (BEAT_TIER_FULL); re-exported here for the surfaces that still import the
+ * raw arrays from the renderer (routine timeline). */
+export const TIER_WIDTH = BEAT_TIER_FULL.width;
+export const TIER_ALPHA = BEAT_TIER_FULL.alpha;
 
-/** '#RRGGBB' → 0-1 floats; null for anything else (falls back to the
- * slot palette — stored colors are Engine-import hex, but don't trust). */
-function parseCueColor(color: string | null | undefined): [number, number, number] | null {
-  if (!color || !CUE_COLOR_RE.test(color)) return null;
-  return [
-    parseInt(color.slice(1, 3), 16) / 255,
-    parseInt(color.slice(3, 5), 16) / 255,
-    parseInt(color.slice(5, 7), 16) / 255,
-  ];
-}
+/** Reset-mark / parenthetical authoring gold (metric-ladder 02): outside the
+ * hot cue palette, warmer than the grey gridlines. */
+const RESET_MARK_COLOR = LADDER_GOLD_GL;
 
-/** Reset-mark indicator color (metric-ladder 02): gold — outside the hot
- * cue palette, warmer than the grey gridlines. */
-const RESET_MARK_COLOR: [number, number, number] = [1.0, 0.82, 0.4];
-
-/** Playhead pink (var(--pink)) — shared by the playhead bar and the
- * beatjump target guides, which are playhead-relative by meaning. */
-const PLAYHEAD_COLOR: [number, number, number] = [0.96, 0.76, 0.91];
-
-/** GL-side palette: the CSS palette as 0-1 floats. */
-const HOT_CUE_COLORS: Record<number, [number, number, number]> = Object.fromEntries(
-  Object.entries(HOT_CUE_CSS_COLORS).map(([slot, hex]) => [slot, parseCueColor(hex)!]),
-);
+/** Transport playhead (--playhead) as GL floats — shared by the playhead bar
+ * and the beatjump target guides, which are playhead-relative by meaning. */
+const PLAYHEAD_COLOR = PLAYHEAD_TRANSPORT_GL;
 
 const BODY_VERTEX_SHADER = `#version 300 es
 const vec2 pos[4] = vec2[4](vec2(-1,-1), vec2(1,-1), vec2(-1,1), vec2(1,1));
@@ -252,7 +238,7 @@ uniform float u_opaqueBg; // 0 = transparent background (underlay fill)
 in vec2 v_uv;
 out vec4 fragColor;
 
-const vec3 BG = vec3(0.03, 0.03, 0.05);
+const vec3 BG = vec3(${WAVE_BG_GL[0]}, ${WAVE_BG_GL[1]}, ${WAVE_BG_GL[2]});
 
 float fetch1(sampler2D tex, int texel) {
   return texelFetch(tex, ivec2(texel % ${TEX_WIDTH}, texel / ${TEX_WIDTH}), 0).r;
@@ -634,11 +620,12 @@ export class WaveformRendererV2 {
     this.config = config;
     this.isMinimap = config.isMinimapMode ?? false;
     this.anchor = this.isMinimap ? 'bottom' : (config.amplitudeAnchor ?? 'center');
-    // Minimap dims the body (legacy parity) so markers pop; markers stay
-    // full. 0.55 → 0.65 (performance-mode 09 review): the unplayed body
-    // reads brighter while the played wash below carries the contrast.
+    // Minimap dims the body (MINIMAP_BRIGHTNESS, markers.ts) so markers pop;
+    // markers stay full. The unplayed body reads brighter while the played
+    // wash below carries the contrast (performance-mode 09 review).
     this.brightness =
-      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) * (this.isMinimap ? 0.65 : 1);
+      Math.max(0, Math.min(1, config.waveformBrightness ?? 1)) *
+      (this.isMinimap ? MINIMAP_BRIGHTNESS : 1);
     this.transparentBg = config.transparentBackground ?? false;
     const gl = canvas.getContext('webgl2', { alpha: this.transparentBg });
     if (!gl) throw new Error('WebGL 2 not supported');
@@ -864,7 +851,8 @@ export class WaveformRendererV2 {
     const duration = this.data!.duration;
 
     gl.disable(gl.SCISSOR_TEST);
-    gl.clearColor(0.03 * 0.6, 0.03 * 0.6, 0.05 * 0.6, 1); // BG * 0.6 (shader constant)
+    // BG (--void) * 0.6 — the shader's out-of-track dim.
+    gl.clearColor(WAVE_BG_GL[0] * 0.6, WAVE_BG_GL[1] * 0.6, WAVE_BG_GL[2] * 0.6, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     const ctx = this.ensureOverlayContext();
     ctx?.clearRect(0, 0, w, h);
@@ -1023,7 +1011,7 @@ export class WaveformRendererV2 {
       visibleSeconds = Math.max((this.windowEnd - this.windowStart) * duration, 1e-6);
     } else {
       visibleSeconds = this.visibleSeconds;
-      const marker = this.config.playMarkerPosition ?? 0.25;
+      const marker = this.config.playMarkerPosition ?? PLAY_MARKER_FRACTION;
       startTime = this.lastPlayhead - marker * visibleSeconds;
     }
     return { startTime, visibleSeconds, playhead: this.lastPlayhead, w, h, dpr };
@@ -1447,16 +1435,16 @@ export class WaveformRendererV2 {
   private pushCuePoint(view: FrameView, verts: number[]): void {
     const cueX = this.timeToX(this.cuePoint!, view);
     if (cueX < 0 || cueX >= view.w) return;
-    // The CUE button's accent (--energy-3 #ff9933) — marker and button
-    // read as one control.
-    const [r, g, b] = [1.0, 0.6, 0.2];
-    pushRect(verts, cueX, 0, 2, view.h, r, g, b);
-    const cx = cueX + 1;
+    // Main cue: --orange 2px line + bottom identity triangle (D11). Same
+    // orange family as the Machine playhead — geometry disambiguates.
+    const [r, g, b] = MAIN_CUE_COLOR_GL;
+    pushRect(verts, cueX, 0, MAIN_CUE_LINE_W, view.h, r, g, b);
+    const cx = cueX + MAIN_CUE_LINE_W / 2;
     if (this.isMinimap) {
       // Zoned marks: the main cue's identity glyph is a BOTTOM triangle
       // (the top zone belongs to hotcue flags, mid to guide arrows).
-      const halfW = 5 * view.dpr;
-      const depth = 8 * view.dpr;
+      const halfW = MAIN_CUE_TRI_MINI_HALF * view.dpr;
+      const depth = MAIN_CUE_TRI_MINI_DEPTH * view.dpr;
       verts.push(
         cx - halfW, view.h, r, g, b,
         cx + halfW, view.h, r, g, b,
@@ -1465,7 +1453,7 @@ export class WaveformRendererV2 {
     } else {
       // Bottom identity triangle, sized to read at a glance (12% of the
       // wave height, never smaller than the minimap glyph).
-      const triH = Math.max(view.h * 0.12, 8 * view.dpr);
+      const triH = Math.max(view.h * 0.12, MAIN_CUE_TRI_MINI_DEPTH * view.dpr);
       verts.push(
         cx - triH / 2, view.h, r, g, b,
         cx + triH / 2, view.h, r, g, b,
@@ -1565,19 +1553,22 @@ export class WaveformRendererV2 {
       if (x < 0 || x >= view.w) continue;
       // Stored per-cue color first (pad/ladder precedence — hotcue-colors
       // 01); saturated slot palette for colorless cues.
-      const [r, g, b] = parseCueColor(hc.color) ?? HOT_CUE_COLORS[slot] ?? [1, 1, 1];
+      const [r, g, b] = cueGlColor(slot, hc.color);
       if (this.isMinimap) {
-        // Zoned marks: 2px full-height pole flying a 5×5 square flag off
-        // its top RIGHT — the hotcues' identity zone is the top edge.
-        pushRect(verts, x - 1 * view.dpr, 0, 2 * view.dpr, view.h, r, g, b);
-        pushRect(verts, x + 1 * view.dpr, 0, 5 * view.dpr, 5 * view.dpr, r, g, b);
+        // Zoned marks: the 'mini' cue flag (markers.ts) — a 2px full-height
+        // pole flying a 5×5 square flag off its top RIGHT (the hotcues'
+        // identity zone is the top edge).
+        const poleW = CUE_FLAG_POLE_W * view.dpr;
+        const flag = CUE_FLAG_MINI_SIZE * view.dpr;
+        pushRect(verts, x - poleW / 2, 0, poleW, view.h, r, g, b);
+        pushRect(verts, x + poleW / 2, 0, flag, flag, r, g, b);
         continue;
       }
       // Zoomed surfaces (main waveform + editor timeline rows): 2px pole
       // only — the numbered FLAG (2D overlay, renderHotCueNumbers) flies
       // off the pole at the identity-zone edge, scaling the minimap's
       // pole+flag idiom up.
-      const poleW = 2 * view.dpr;
+      const poleW = CUE_FLAG_POLE_W * view.dpr;
       pushRect(verts, x - poleW / 2, 0, poleW, view.h, r, g, b);
     }
   }
@@ -1590,7 +1581,7 @@ export class WaveformRendererV2 {
       x = this.timeToX(view.playhead, view);
       if (x < 0 || x >= view.w) return;
     } else {
-      x = view.w * (this.config.playMarkerPosition ?? 0.25);
+      x = view.w * (this.config.playMarkerPosition ?? PLAY_MARKER_FRACTION);
     }
     pushRect(verts, x, 0, 3, view.h, ...PLAYHEAD_COLOR);
   }
@@ -1686,9 +1677,12 @@ export class WaveformRendererV2 {
    * scaled up, solid cue color with the slot number knocked out dark. */
   private renderHotCueNumbers(ctx: CanvasRenderingContext2D, view: FrameView): void {
     if (this.hotCues.size === 0) return;
-    const squareSize = 16 * view.dpr;
+    // The 'full' cue-flag square (markers.ts): the pole is already drawn in
+    // the GL batch (pushHotCues), so here we knock the numbered square out
+    // with the shared geometry/ink/font instead of a whole drawCueFlag.
+    const squareSize = CUE_FLAG_FULL_SIZE * view.dpr;
     const squareY = this.anchor === 'bottom' ? view.h - squareSize : 0;
-    ctx.font = `bold ${12 * view.dpr}px monospace`;
+    ctx.font = `bold ${CUE_FLAG_FULL_SIZE * 0.75 * view.dpr}px ${FONT_MONO}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const [slot, hc] of this.hotCues.entries()) {
@@ -1696,14 +1690,9 @@ export class WaveformRendererV2 {
       if (x < 0 || x >= view.w) continue;
       // Attached to the 2px pole's right edge (pole is centered on x).
       const squareX = x + view.dpr;
-      // Stored per-cue color first, like the marks (hotcue-colors 01).
-      const color =
-        hc.color && CUE_COLOR_RE.test(hc.color)
-          ? hc.color
-          : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');
-      ctx.fillStyle = color;
+      ctx.fillStyle = cueCssColor(slot, hc.color);
       ctx.fillRect(squareX, squareY, squareSize, squareSize);
-      ctx.fillStyle = 'rgb(17, 17, 17)';
+      ctx.fillStyle = CUE_FLAG_INK;
       ctx.fillText(String(slot), squareX + squareSize / 2, squareY + squareSize / 2);
     }
   }
@@ -1719,7 +1708,7 @@ export class WaveformRendererV2 {
       `${formatReadoutTime(view.playhead)} / ${formatReadoutTime(duration)}` +
       (bar !== null ? `  bar ${bar}${count}` : '');
     const pad = 6 * view.dpr;
-    ctx.font = `bold ${12 * view.dpr}px monospace`;
+    ctx.font = `bold ${12 * view.dpr}px ${FONT_MONO}`;
     const metrics = ctx.measureText(text);
     const textHeight = 14 * view.dpr;
     if (this.config.timeReadoutAnchor === 'top-left') {
@@ -1730,7 +1719,7 @@ export class WaveformRendererV2 {
       ctx.textBaseline = 'top';
       ctx.fillStyle = 'rgba(17, 17, 17, 0.7)';
       ctx.fillRect(x - pad, y - pad / 2, metrics.width + pad * 2, textHeight + pad);
-      ctx.fillStyle = 'rgb(205, 214, 244)'; // var(--text)
+      ctx.fillStyle = TEXT;
       ctx.fillText(text, x, y);
       return;
     }
@@ -1743,7 +1732,7 @@ export class WaveformRendererV2 {
       metrics.width + pad * 2,
       textHeight + pad,
     );
-    ctx.fillStyle = 'rgb(205, 214, 244)'; // var(--text)
+    ctx.fillStyle = TEXT;
     ctx.fillText(text, view.w - pad, view.h - pad);
   }
 

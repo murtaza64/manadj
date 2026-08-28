@@ -60,6 +60,9 @@ class SupplierSearchResult:
     queue_length: int | None
     # whether the peer had an open upload slot at search time
     has_free_slot: bool | None = None
+    # the peer offering the file — hands-off retries (gh#214) spread their
+    # candidate list across distinct peers
+    username: str | None = None
 
 
 class TransferState(Enum):
@@ -110,6 +113,12 @@ class SearchSupplier(Supplier, Protocol):
 
     def transfer_status(self, transfer_id: str) -> TransferStatus:
         """Poll a requested transfer's current state (no blocking wait)."""
+        ...
+
+    def cancel(self, transfer_id: str) -> None:
+        """Cancel a requested transfer (e.g. one stalled in a peer's queue,
+        abandoned by a hands-off retry, gh#214). Best-effort semantics: the
+        caller tolerates failure."""
         ...
 
 
