@@ -11,6 +11,7 @@ import {
   createStyledColumnRenderer,
   PAINTABLE_STYLE_IDS,
 } from './ladderWaveStyle';
+import { WAVE_BG_GL } from '../theme/markers';
 
 const SR = 44100;
 const PEAK_HOP = 128;
@@ -97,8 +98,8 @@ describe('computeStyledColumns', () => {
     // Top segment: low group only => BG + [1, .1, .1] clamped.
     const top = parseCss(segs[2].css);
     expect(top[0]).toBe(255);
-    expect(top[1]).toBe(Math.round((0.03 + 0.1) * 255));
-    expect(top[2]).toBe(Math.round((0.05 + 0.1) * 255));
+    expect(top[1]).toBe(Math.round((WAVE_BG_GL[1] + 0.1) * 255));
+    expect(top[2]).toBe(Math.round((WAVE_BG_GL[2] + 0.1) * 255));
   });
 
   it('applies master to group heights', () => {
@@ -158,7 +159,7 @@ describe('computeStyledColumns', () => {
     const segs = cols[5].segments;
     expect(segs).toHaveLength(1);
     const rgb = parseCss(segs[0].css);
-    expect(rgb[1]).toBe(Math.round((0.03 + 0.5) * 255));
+    expect(rgb[1]).toBe(Math.round((WAVE_BG_GL[1] + 0.5) * 255));
   });
 
   it('brightness dims toward BG', () => {
@@ -168,7 +169,7 @@ describe('computeStyledColumns', () => {
     const dimRgb = parseCss(dim[5].segments[2].css);
     // BG + (c - BG) * 0.5, per channel.
     for (let k = 0; k < 3; k++) {
-      const bg = [0.03, 0.03, 0.05][k] * 255;
+      const bg = WAVE_BG_GL[k] * 255;
       expect(Math.abs(dimRgb[k] - (bg + (fullRgb[k] - bg) * 0.5))).toBeLessThanOrEqual(1);
     }
   });

@@ -3,10 +3,9 @@
  * backend/hotcue_palette.py under test guard). This module owns the
  * stored-color validation rule. */
 import { HOT_CUE_CSS_COLORS } from '../theme/tokens';
+import { CUE_COLOR_RE } from '../theme/markers';
 
 export { HOT_CUE_CSS_COLORS };
-
-const CUE_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 export function cueCssColor(slot: number, stored?: string | null): string {
   return stored && CUE_COLOR_RE.test(stored) ? stored : (HOT_CUE_CSS_COLORS[slot] ?? '#ffffff');

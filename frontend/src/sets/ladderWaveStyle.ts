@@ -22,16 +22,19 @@
 // - No modulation pass (u_modTex — ladder clips are static previews).
 // - The mirrored-lane layout supplies orientation; the style/slot anchor
 //   is ignored (ladder layout wins — issue 30 constraint).
-// - Body brightness matches the GL minimap's 0.55x dim (MINIMAP_BRIGHTNESS
-//   below): the ladder renders the minimap slot, and full brightness read
-//   as oversaturated next to the deck minimaps (review feedback 2026-07-05).
+// - Body brightness matches the GL minimap's dim (MINIMAP_BRIGHTNESS,
+//   theme/markers.ts): the ladder renders the minimap slot, and full
+//   brightness read as oversaturated next to the deck minimaps (review
+//   feedback 2026-07-05).
 
 import type { DecodedWaveform, LodPack } from '../waveform/blob';
 import type { RGB, StyleParams } from '../waveform/styles';
 import { getStyle } from '../waveform/styles';
+import { MINIMAP_BRIGHTNESS, WAVE_BG_GL } from '../theme/markers';
 
-/** Shader background (BODY_PRELUDE's BG). */
-const BG: RGB = [0.03, 0.03, 0.05];
+/** Shader background (BODY_PRELUDE's BG) — derived from --void, same as the
+ * GL renderer's shader constant. */
+const BG: RGB = WAVE_BG_GL;
 
 /** One constant-color vertical run of a column; y in amplitude coords
  * (0 = baseline at the center line, 1 = full lane height). */
@@ -543,10 +546,11 @@ export function createStyledColumnRenderer(
   return { render };
 }
 
-/** The GL minimap's body dim (WaveformRendererV2 constructor: minimap mode
- * multiplies body brightness by 0.65 — markers stay full). The ladder
- * renders the same minimap slot, so it dims identically. */
-export const MINIMAP_BRIGHTNESS = 0.65;
+/** The GL minimap's body dim (theme/markers.ts: minimap mode multiplies body
+ * brightness by MINIMAP_BRIGHTNESS — markers stay full). The ladder renders
+ * the same minimap slot, so it dims identically. Re-exported for the ladder's
+ * existing import path. */
+export { MINIMAP_BRIGHTNESS };
 
 /** Canvas background matching the shader's BG. */
 export const WAVE_BG_CSS = toCss(BG, 1);
