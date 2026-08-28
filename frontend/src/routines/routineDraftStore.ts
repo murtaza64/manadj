@@ -87,16 +87,16 @@ export class RoutineDraftStore {
 
   // ── Mutations (all coalesce by gesture key) ──────────────────────────
 
-  setLane(slot: number, control: string, points: RoutineLanePoint[]): void {
-    this.mutate(`lane:${slot}:${control}`, (e) => {
-      e.lanes[laneKey(slot, control)] = [...points].sort((a, b) => a.beat - b.beat);
+  setLane(slotId: string, control: string, points: RoutineLanePoint[]): void {
+    this.mutate(`lane:${slotId}:${control}`, (e) => {
+      e.lanes[laneKey(slotId, control)] = [...points].sort((a, b) => a.beat - b.beat);
     });
   }
 
   /** Drop an authored lane — the recorded step lane plays again. */
-  clearLane(slot: number, control: string): void {
-    this.mutate(`lane-clear:${slot}:${control}`, (e) => {
-      delete e.lanes[laneKey(slot, control)];
+  clearLane(slotId: string, control: string): void {
+    this.mutate(`lane-clear:${slotId}:${control}`, (e) => {
+      delete e.lanes[laneKey(slotId, control)];
     });
     this.endGesture();
   }
@@ -108,7 +108,7 @@ export class RoutineDraftStore {
     this.endGesture();
   }
 
-  updateJump(id: string, patch: Partial<Omit<AuthoredJump, 'id' | 'slot'>>): void {
+  updateJump(id: string, patch: Partial<Omit<AuthoredJump, 'id' | 'slotId'>>): void {
     this.mutate(`jump-update:${id}`, (e) => {
       const j = e.jumps.find((x) => x.id === id);
       if (!j) return;
@@ -125,19 +125,21 @@ export class RoutineDraftStore {
   }
 
   /** Suppress a RECORDED discontinuity (continuity restored at replay). */
-  removeRecordedJump(slot: number, beat: number): void {
-    this.mutate(`recorded-remove:${slot}:${beat}`, (e) => {
-      if (!e.removedRecordedJumps.some((r) => r.slot === slot && Math.abs(r.beat - beat) < 1e-6)) {
-        e.removedRecordedJumps.push({ slot, beat });
+  removeRecordedJump(slotId: string, beat: number): void {
+    this.mutate(`recorded-remove:${slotId}:${beat}`, (e) => {
+      if (
+        !e.removedRecordedJumps.some((r) => r.slotId === slotId && Math.abs(r.beat - beat) < 1e-6)
+      ) {
+        e.removedRecordedJumps.push({ slotId, beat });
       }
     });
     this.endGesture();
   }
 
-  restoreRecordedJump(slot: number, beat: number): void {
-    this.mutate(`recorded-restore:${slot}:${beat}`, (e) => {
+  restoreRecordedJump(slotId: string, beat: number): void {
+    this.mutate(`recorded-restore:${slotId}:${beat}`, (e) => {
       e.removedRecordedJumps = e.removedRecordedJumps.filter(
-        (r) => !(r.slot === slot && Math.abs(r.beat - beat) < 1e-6)
+        (r) => !(r.slotId === slotId && Math.abs(r.beat - beat) < 1e-6)
       );
     });
     this.endGesture();
@@ -145,10 +147,10 @@ export class RoutineDraftStore {
 
   /** Per-slot alignment nudge (gh#190 item 6): set the slot's rigid
    * track-time slide. 0 clears the entry. One undo step per call. */
-  setNudge(slot: number, deltaSec: number): void {
-    this.mutate(`nudge:${slot}:${deltaSec}`, (e) => {
-      if (deltaSec === 0) delete e.nudges[String(slot)];
-      else e.nudges[String(slot)] = deltaSec;
+  setNudge(slotId: string, deltaSec: number): void {
+    this.mutate(`nudge:${slotId}:${deltaSec}`, (e) => {
+      if (deltaSec === 0) delete e.nudges[slotId];
+      else e.nudges[slotId] = deltaSec;
     });
     this.endGesture();
   }
@@ -156,21 +158,21 @@ export class RoutineDraftStore {
   /** Per-slot channel trim (gh#190 iteration): 0..1, 0.5 = nominal
    * (clears the entry). Slider drags coalesce per slot; seal with
    * endGesture on release. */
-  setTrim(slot: number, value: number): void {
+  setTrim(slotId: string, value: number): void {
     const v = Math.max(0, Math.min(1, value));
-    this.mutate(`trim:${slot}`, (e) => {
-      if (Math.abs(v - 0.5) < 1e-6) delete e.trims[String(slot)];
-      else e.trims[String(slot)] = v;
+    this.mutate(`trim:${slotId}`, (e) => {
+      if (Math.abs(v - 0.5) < 1e-6) delete e.trims[slotId];
+      else e.trims[slotId] = v;
     });
   }
 
   /** Drag-flavored nudge (gh#190 track drag): the whole drag coalesces
    * into ONE undo entry per gesture key — seal with endGesture on
    * pointer-up. `key` should identify the gesture, not the value. */
-  setNudgeLive(gestureKey: string, slot: number, deltaSec: number): void {
+  setNudgeLive(gestureKey: string, slotId: string, deltaSec: number): void {
     this.mutate(gestureKey, (e) => {
-      if (deltaSec === 0) delete e.nudges[String(slot)];
-      else e.nudges[String(slot)] = deltaSec;
+      if (deltaSec === 0) delete e.nudges[slotId];
+      else e.nudges[slotId] = deltaSec;
     });
   }
 
@@ -183,7 +185,7 @@ export class RoutineDraftStore {
     this.endGesture();
   }
 
-  updatePause(id: string, patch: Partial<Omit<AuthoredPause, 'id' | 'slot'>>): void {
+  updatePause(id: string, patch: Partial<Omit<AuthoredPause, 'id' | 'slotId'>>): void {
     this.mutate(`pause-update:${id}`, (e) => {
       const p = e.pauses.find((x) => x.id === id);
       if (!p) return;
@@ -200,14 +202,14 @@ export class RoutineDraftStore {
   }
 
   /** Suppress a RECORDED hold (the deck plays through it at replay). */
-  removeRecordedPause(slot: number, beat: number): void {
-    this.mutate(`recorded-pause-remove:${slot}:${beat}`, (e) => {
+  removeRecordedPause(slotId: string, beat: number): void {
+    this.mutate(`recorded-pause-remove:${slotId}:${beat}`, (e) => {
       if (
         !e.removedRecordedPauses.some(
-          (r) => r.slot === slot && Math.abs(r.beat - beat) < 1e-6
+          (r) => r.slotId === slotId && Math.abs(r.beat - beat) < 1e-6
         )
       ) {
-        e.removedRecordedPauses.push({ slot, beat });
+        e.removedRecordedPauses.push({ slotId, beat });
       }
     });
     this.endGesture();
@@ -217,20 +219,20 @@ export class RoutineDraftStore {
    * recorded jumps become movable/resizable while the original stays
    * restorable). Removal + authored replacement compose to the exact
    * recorded trajectory by construction; one mutation = one undo step. */
-  convertRecordedJump(slot: number, beat: number, deltaSec: number): AuthoredJump {
+  convertRecordedJump(slotId: string, beat: number, deltaSec: number): AuthoredJump {
     const jump: AuthoredJump = {
-      id: `j-conv-${slot}-${Math.round(beat * 100)}`,
-      slot,
+      id: `j-conv-${slotId}-${Math.round(beat * 100)}`,
+      slotId,
       beat,
       deltaSec,
     };
-    this.mutate(`jump-convert:${slot}:${beat}`, (e) => {
+    this.mutate(`jump-convert:${slotId}:${beat}`, (e) => {
       if (
         !e.removedRecordedJumps.some(
-          (r) => r.slot === slot && Math.abs(r.beat - beat) < 1e-6
+          (r) => r.slotId === slotId && Math.abs(r.beat - beat) < 1e-6
         )
       ) {
-        e.removedRecordedJumps.push({ slot, beat });
+        e.removedRecordedJumps.push({ slotId, beat });
       }
       if (!e.jumps.some((j) => j.id === jump.id)) e.jumps.push({ ...jump });
     });
@@ -246,7 +248,7 @@ export class RoutineDraftStore {
       const j = e.jumps.find((x) => x.id === id);
       if (!j) return;
       e.jumps = e.jumps.filter((x) => x.id !== id);
-      out = { id: `p-${id}`, slot: j.slot, beat: j.beat, durBeats: Math.max(0.5, durBeats) };
+      out = { id: `p-${id}`, slotId: j.slotId, beat: j.beat, durBeats: Math.max(0.5, durBeats) };
       e.pauses.push({ ...out });
     });
     this.endGesture();
@@ -260,7 +262,7 @@ export class RoutineDraftStore {
       const p = e.pauses.find((x) => x.id === id);
       if (!p) return;
       e.pauses = e.pauses.filter((x) => x.id !== id);
-      out = { id: `j-${id}`, slot: p.slot, beat: p.beat, deltaSec };
+      out = { id: `j-${id}`, slotId: p.slotId, beat: p.beat, deltaSec };
       e.jumps.push({ ...out });
     });
     this.endGesture();
@@ -271,20 +273,20 @@ export class RoutineDraftStore {
    * length-editable, movable — "editing a pause length" without a new
    * split primitive). One mutation = one undo step: suppress the
    * recorded hold and author its replacement over the same span. */
-  convertRecordedPause(slot: number, beat: number, durBeats: number): AuthoredPause {
+  convertRecordedPause(slotId: string, beat: number, durBeats: number): AuthoredPause {
     const pause: AuthoredPause = {
-      id: `p-conv-${slot}-${Math.round(beat * 100)}`,
-      slot,
+      id: `p-conv-${slotId}-${Math.round(beat * 100)}`,
+      slotId,
       beat,
       durBeats: Math.max(0.5, durBeats),
     };
-    this.mutate(`pause-convert:${slot}:${beat}`, (e) => {
+    this.mutate(`pause-convert:${slotId}:${beat}`, (e) => {
       if (
         !e.removedRecordedPauses.some(
-          (r) => r.slot === slot && Math.abs(r.beat - beat) < 1e-6
+          (r) => r.slotId === slotId && Math.abs(r.beat - beat) < 1e-6
         )
       ) {
-        e.removedRecordedPauses.push({ slot, beat });
+        e.removedRecordedPauses.push({ slotId, beat });
       }
       if (!e.pauses.some((p) => p.id === pause.id)) e.pauses.push({ ...pause });
     });
@@ -292,10 +294,10 @@ export class RoutineDraftStore {
     return pause;
   }
 
-  restoreRecordedPause(slot: number, beat: number): void {
-    this.mutate(`recorded-pause-restore:${slot}:${beat}`, (e) => {
+  restoreRecordedPause(slotId: string, beat: number): void {
+    this.mutate(`recorded-pause-restore:${slotId}:${beat}`, (e) => {
       e.removedRecordedPauses = e.removedRecordedPauses.filter(
-        (r) => !(r.slot === slot && Math.abs(r.beat - beat) < 1e-6)
+        (r) => !(r.slotId === slotId && Math.abs(r.beat - beat) < 1e-6)
       );
     });
     this.endGesture();

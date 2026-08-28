@@ -49,6 +49,11 @@ import { applyJumpEditsToTrace, applyPauseEditsToTrace } from '../routines/routi
  * opaque dicts, tolerantly parsed here. */
 export interface RoutinePlanInput {
   cast: number[];
+  /** Stable slot ids, parallel to `cast` (ADR 0039 — slot-addressed
+   * edits key on these, never the index). Absent = the migration
+   * default: slotId = String(index), lossless for promoted routines
+   * (they never reorder; the index IS a stable id there). */
+  slotIds?: string[];
   entryOffsetsBeats: number[];
   /** Track-seconds at each slot's entry (promotion's playhead lens; may
    * extrapolate slightly below 0 for a pre-roll entry mark). */
@@ -114,7 +119,10 @@ export interface RoutineSlotLanes {
 }
 
 export interface PlannedRoutineSlot {
+  /** Entry-ordered index — the RENDER handle (derived view, ADR 0039). */
   slot: number;
+  /** Stable slot id — the EDIT handle (draft mutations key on this). */
+  slotId: string;
   trackId: number;
   /** Allocated deck; null = overflow (unallocatable — flagged at plan
    * time, silent at replay). Decks are REUSED across slots (gh#170
@@ -631,24 +639,24 @@ export function plannedWithLaneEdits(
     ...planned,
     slots: planned.slots.map((s) => ({
       ...s,
-      lanes: withLaneEdits(s.lanes, edits, s.slot),
-      trim: edits.trims?.[String(s.slot)] ?? 0.5,
+      lanes: withLaneEdits(s.lanes, edits, s.slotId),
+      trim: edits.trims?.[s.slotId] ?? 0.5,
     })),
   };
 }
 
 /** Authored lane envelopes REPLACE the recorded step lane for their
- * (slot, control) — the draft layer (gh#170 pass 2). */
+ * (slotId, control) — the draft layer (gh#170 pass 2). */
 function withLaneEdits(
   lanes: RoutineSlotLanes,
   edits: import('../routines/routineDraft').RoutineEdits | null,
-  slot: number
+  slotId: string
 ): RoutineSlotLanes {
   if (!edits) return lanes;
   const controls = ['fader', 'eqLow', 'eqMid', 'eqHigh', 'filter'] as const;
   let out = lanes;
   for (const control of controls) {
-    const pts = edits.lanes[`${slot}:${control}`];
+    const pts = edits.lanes[`${slotId}:${control}`];
     if (!pts) continue;
     if (out === lanes) out = { ...lanes, authored: { ...lanes.authored } };
     out[control] = pts;
@@ -674,7 +682,11 @@ export function buildPlannedRoutine(
   // every downstream consumer — allocation, jump scoping, the Conductor,
   // the editor's audition — sees the edited trajectory.
   const edits = input.edits ?? null;
+  // Stable slot ids (ADR 0039): the edit-addressing handle. Absent input
+  // ids default to the migration identity slotId = String(index).
+  const slotIds = input.cast.map((_, slot) => input.slotIds?.[slot] ?? String(slot));
   const traces = input.cast.map((_, slot) => {
+    const slotId = slotIds[slot];
     const raw = buildSlotTrace(
       slotSamples(input.events, slot),
       60 / ctx.trackBpms[slot],
@@ -682,8 +694,8 @@ export function buildPlannedRoutine(
       input.entryPositions[slot]
     );
     if (!edits) return raw;
-    const authored = edits.jumps.filter((j) => j.slot === slot);
-    const removed = edits.removedRecordedJumps.filter((r) => r.slot === slot);
+    const authored = edits.jumps.filter((j) => j.slotId === slotId);
+    const removed = edits.removedRecordedJumps.filter((r) => r.slotId === slotId);
     let trace =
       authored.length === 0 && removed.length === 0
         ? raw
@@ -691,8 +703,8 @@ export function buildPlannedRoutine(
     // Pause edits (gh#190: play/pause events, the jump idiom's sibling) —
     // authored holds + removed recorded holds, after jump edits (both
     // keep beats fixed; displacement composes).
-    const pauses = (edits.pauses ?? []).filter((p) => p.slot === slot);
-    const removedPauses = (edits.removedRecordedPauses ?? []).filter((r) => r.slot === slot);
+    const pauses = (edits.pauses ?? []).filter((p) => p.slotId === slotId);
+    const removedPauses = (edits.removedRecordedPauses ?? []).filter((r) => r.slotId === slotId);
     if (pauses.length > 0 || removedPauses.length > 0) {
       trace = applyPauseEditsToTrace(trace, pauses, removedPauses, input.durationBeats);
     }
@@ -700,7 +712,7 @@ export function buildPlannedRoutine(
     // slot plays material offset by deltaSec at the same routine beats.
     // Applied to the trace, so replay, waveform runs and hotcue mapping
     // all shift together by construction.
-    const nudge = edits.nudges?.[String(slot)] ?? 0;
+    const nudge = edits.nudges?.[slotId] ?? 0;
     if (nudge !== 0) trace = trace.map((p) => ({ ...p, pos: p.pos + nudge }));
     return trace;
   });
@@ -733,19 +745,21 @@ export function buildPlannedRoutine(
     const bpm = ctx.trackBpms[slot];
     const basePitchPercent = clampPitch((ctx.targetBpm / bpm - 1) * 100);
     const trace = traces[slot];
+    const slotId = slotIds[slot];
     return {
       slot,
+      slotId,
       trackId,
       deck: assignments[slot].deck,
       occupyFromMixSec: assignments[slot].occupyFromMixSec,
       releaseMixSec: releaseMixSecs[slot],
       entryMixSec: entryMixSecs[slot],
-      entryTrackSec: input.entryPositions[slot] + (edits?.nudges?.[String(slot)] ?? 0),
+      entryTrackSec: input.entryPositions[slot] + (edits?.nudges?.[slotId] ?? 0),
       basePitchPercent,
       trace,
-      lanes: withLaneEdits(buildSlotLanes(input.events, slot, slot === 0), edits, slot),
+      lanes: withLaneEdits(buildSlotLanes(input.events, slot, slot === 0), edits, slotId),
       // Per-slot channel trim (gh#190): draft-authored, 0.5 nominal.
-      trim: edits?.trims?.[String(slot)] ?? 0.5,
+      trim: edits?.trims?.[slotId] ?? 0.5,
       jumpMixSecs: trace
         .filter((p) => p.jump)
         .map((p) => ctx.mixStartSec + p.beat * secPerBeat)

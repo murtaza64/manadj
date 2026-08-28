@@ -40,14 +40,14 @@ const steady = (): RoutineTracePoint[] => [pt(0, 10), pt(64, 42)];
 describe('expandAuthoredJump', () => {
   it('a single jump is itself', () => {
     expect(
-      expandAuthoredJump({ id: 'a', slot: 0, beat: 16, deltaSec: -2 }, () => 0.5, 64)
+      expandAuthoredJump({ id: 'a', slotId: '0', beat: 16, deltaSec: -2 }, () => 0.5, 64)
     ).toEqual([{ beat: 16, deltaSec: -2 }]);
   });
 
   it('a backward jump with repeat recurs at its displacement period (the loop doctrine)', () => {
     // −2s at 0.5 track-sec/beat = a 4-beat loop.
     const out = expandAuthoredJump(
-      { id: 'a', slot: 0, beat: 16, deltaSec: -2, repeat: 3 },
+      { id: 'a', slotId: '0', beat: 16, deltaSec: -2, repeat: 3 },
       () => 0.5,
       64
     );
@@ -57,7 +57,7 @@ describe('expandAuthoredJump', () => {
 
   it('repeat is backward-only (a forward jump has no natural period)', () => {
     const out = expandAuthoredJump(
-      { id: 'a', slot: 0, beat: 16, deltaSec: 2, repeat: 3 },
+      { id: 'a', slotId: '0', beat: 16, deltaSec: 2, repeat: 3 },
       () => 0.5,
       64
     );
@@ -69,7 +69,7 @@ describe('applyJumpEditsToTrace', () => {
   it('an authored jump inserts a landing and displaces the tail', () => {
     const out = applyJumpEditsToTrace(
       steady(),
-      [{ id: 'a', slot: 0, beat: 32, deltaSec: -4 }],
+      [{ id: 'a', slotId: '0', beat: 32, deltaSec: -4 }],
       [],
       64
     );
@@ -89,7 +89,7 @@ describe('applyJumpEditsToTrace', () => {
     // −2s at rate 0.5 = 4-beat period, repeat 3 → landings at 16/20/24.
     const out = applyJumpEditsToTrace(
       steady(),
-      [{ id: 'a', slot: 0, beat: 16, deltaSec: -2, repeat: 3 }],
+      [{ id: 'a', slotId: '0', beat: 16, deltaSec: -2, repeat: 3 }],
       [],
       64
     );
@@ -107,7 +107,7 @@ describe('applyJumpEditsToTrace', () => {
   it('removing a recorded jump restores continuity', () => {
     // A recorded −8s seek at beat 32: ride-out 26, landing 18.
     const trace = [pt(0, 10), pt(32, 18, { jump: true }), pt(64, 34)];
-    const out = applyJumpEditsToTrace(trace, [], [{ slot: 0, beat: 32 }], 64);
+    const out = applyJumpEditsToTrace(trace, [], [{ slotId: '0', beat: 32 }], 64);
     expect(out.some((p) => p.jump)).toBe(false);
     // The landing rejoins the ridden-out position; the tail follows.
     expect(out.find((p) => p.beat === 32)?.pos).toBeCloseTo(26);
@@ -124,7 +124,7 @@ describe('applyPauseEditsToTrace (gh#190 play/pause events)', () => {
   it('an authored pause holds the deck, then resumes from the hold', () => {
     const out = applyPauseEditsToTrace(
       steady(),
-      [{ id: 'p', slot: 0, beat: 16, durBeats: 8 }],
+      [{ id: 'p', slotId: '0', beat: 16, durBeats: 8 }],
       [],
       64
     );
@@ -148,7 +148,7 @@ describe('applyPauseEditsToTrace (gh#190 play/pause events)', () => {
       pt(24, 18),
       pt(64, 38),
     ];
-    const out = applyPauseEditsToTrace(trace, [], [{ slot: 0, beat: 16 }], 64);
+    const out = applyPauseEditsToTrace(trace, [], [{ slotId: '0', beat: 16 }], 64);
     // Motion continues at the pre-pause rate through the old hold…
     expect(traceStateAt(out, 20).moving).toBe(true);
     expect(traceStateAt(out, 20).pos).toBeCloseTo(20);
@@ -168,7 +168,7 @@ describe('applyPauseEditsToTrace (gh#190 play/pause events)', () => {
       pt(23.3, 18.1), // resume: crept +0.1 during the hold
       pt(64, 38.45),
     ];
-    const out = applyPauseEditsToTrace(trace, [], [{ slot: 0, beat: 16 }], 64);
+    const out = applyPauseEditsToTrace(trace, [], [{ slotId: '0', beat: 16 }], 64);
     // Extended ride: pos(b) = 10 + 0.5·b for the WHOLE tail.
     expect(traceStateAt(out, 23.3).pos).toBeCloseTo(10 + 23.3 * 0.5);
     expect(traceStateAt(out, 40).pos).toBeCloseTo(10 + 40 * 0.5);
@@ -221,7 +221,7 @@ describe('removing a hold that ends in a seek', () => {
       pt(28, 4),
       pt(64, 22),
     ];
-    const out = applyPauseEditsToTrace(trace, [], [{ slot: 0, beat: 16 }], 64);
+    const out = applyPauseEditsToTrace(trace, [], [{ slotId: '0', beat: 16 }], 64);
     // The old hold now rides at the pre-pause rate…
     expect(traceStateAt(out, 18).moving).toBe(true);
     expect(traceStateAt(out, 18).pos).toBeCloseTo(19);
@@ -271,7 +271,7 @@ describe('build integration (the one seam: editor audition ≡ set replay)', () 
   it('authored jumps ride into jumpMixSecs (the Conductor hard-sync feed)', () => {
     const edits = {
       ...emptyEdits(),
-      jumps: [{ id: 'a', slot: 1, beat: 40, deltaSec: -2 }],
+      jumps: [{ id: 'a', slotId: '1', beat: 40, deltaSec: -2 }],
     };
     const { routine } = buildPlannedRoutine({ ...input(), edits }, ctx);
     // Beat 40 at 120 BPM = mix 20 s, on slot 1's deck only.
@@ -300,6 +300,31 @@ describe('build integration (the one seam: editor audition ≡ set replay)', () 
     expect(slot1.lanes.authored?.eqLow).toBeUndefined();
   });
 
+  it('edits address slots by slotId, not index — re-keying is impossible by construction (ADR 0039)', () => {
+    // Explicit non-index slot ids: the same edits land on the same slots.
+    const edits = {
+      ...emptyEdits(),
+      jumps: [{ id: 'a', slotId: 'mid', beat: 40, deltaSec: -2 }],
+      lanes: { 'mid:fader': [{ beat: 16, value: 0 }, { beat: 24, value: 1 }] },
+      nudges: { mid: 0.25 },
+      trims: { mid: 0.7 },
+    };
+    const { routine } = buildPlannedRoutine(
+      { ...input(), slotIds: ['first', 'mid', 'last'], edits },
+      ctx
+    );
+    const slot1 = routine.slots[1];
+    expect(slot1.slotId).toBe('mid');
+    expect(slot1.jumpMixSecs).toHaveLength(1);
+    expect(slot1.lanes.authored?.fader).toBe(true);
+    expect(slot1.trim).toBe(0.7);
+    expect(routine.slots[0].jumpMixSecs).toHaveLength(0);
+    expect(routine.slots[0].trim).toBe(0.5);
+    // Absent slotIds default to the migration identity String(index).
+    const def = buildPlannedRoutine(input(), ctx).routine;
+    expect(def.slots.map((s) => s.slotId)).toEqual(['0', '1', '2']);
+  });
+
   it('alignment nudges slide the trace rigidly (gh#190 item 6)', () => {
     const base = buildPlannedRoutine(input(), ctx).routine;
     const edits = { ...emptyEdits(), nudges: { '1': 0.25 } };
@@ -322,15 +347,37 @@ describe('parseEdits', () => {
     const parsed = parseEdits({
       lanes: { '0:fader': [{ beat: 4, value: 0.5 }, { beat: 2, value: 1 }, 'junk'] },
       jumps: [
-        { id: 'a', slot: 1, beat: 8, deltaSec: -2, repeat: 4 },
-        { slot: 'x', beat: 8 },
+        { id: 'a', slotId: '1', beat: 8, deltaSec: -2, repeat: 4 },
+        { slotId: 7, beat: 8 },
       ],
-      removedRecordedJumps: [{ slot: 0, beat: 12.5 }, null],
+      removedRecordedJumps: [{ slotId: '0', beat: 12.5 }, null],
     });
     expect(parsed.lanes['0:fader'].map((p) => p.beat)).toEqual([2, 4]); // sorted, junk dropped
     expect(parsed.jumps).toHaveLength(1);
     expect(parsed.jumps[0].repeat).toBe(4);
-    expect(parsed.removedRecordedJumps).toEqual([{ slot: 0, beat: 12.5 }]);
+    expect(parsed.removedRecordedJumps).toEqual([{ slotId: '0', beat: 12.5 }]);
+  });
+
+  it('migrates legacy index-keyed edits losslessly: slot n → slotId String(n) (ADR 0039)', () => {
+    const parsed = parseEdits({
+      lanes: { '1:fader': [{ beat: 4, value: 0.5 }] },
+      jumps: [{ id: 'a', slot: 1, beat: 8, deltaSec: -2, repeat: 4 }],
+      removedRecordedJumps: [{ slot: 0, beat: 12.5 }],
+      pauses: [{ id: 'p', slot: 2, beat: 6, durBeats: 4 }],
+      removedRecordedPauses: [{ slot: 2, beat: 30 }],
+      nudges: { '1': 0.05 },
+      trims: { '2': 0.7 },
+    });
+    expect(parsed.jumps[0]).toEqual({ id: 'a', slotId: '1', beat: 8, deltaSec: -2, repeat: 4 });
+    expect(parsed.removedRecordedJumps).toEqual([{ slotId: '0', beat: 12.5 }]);
+    expect(parsed.pauses[0]).toEqual({ id: 'p', slotId: '2', beat: 6, durBeats: 4 });
+    expect(parsed.removedRecordedPauses).toEqual([{ slotId: '2', beat: 30 }]);
+    // Lane / nudge / trim keys are already the migrated form.
+    expect(parsed.lanes['1:fader']).toEqual([{ beat: 4, value: 0.5 }]);
+    expect(parsed.nudges).toEqual({ '1': 0.05 });
+    expect(parsed.trims).toEqual({ '2': 0.7 });
+    // Round-trip: a re-parse of the migrated form is itself.
+    expect(parseEdits(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
   });
 
   it('null/garbage = empty', () => {

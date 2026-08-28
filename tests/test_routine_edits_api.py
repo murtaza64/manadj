@@ -72,10 +72,12 @@ def promoted_routine(client, db, make_track):
     return res.json()
 
 
+# SlotId-addressed (ADR 0039): promoted routines carry index-string ids
+# from the lossless migration.
 EDITS = {
     "lanes": {"1:fader": [{"beat": 20.0, "value": 0.0}, {"beat": 40.0, "value": 1.0}]},
-    "jumps": [{"id": "j1", "slot": 2, "beat": 80.0, "deltaSec": -2.0, "repeat": 4}],
-    "removedRecordedJumps": [{"slot": 0, "beat": 30.0}],
+    "jumps": [{"id": "j1", "slotId": "2", "beat": 80.0, "deltaSec": -2.0, "repeat": 4}],
+    "removedRecordedJumps": [{"slotId": "0", "beat": 30.0}],
 }
 
 
@@ -115,6 +117,26 @@ def test_retrim_rebases_edits(client, promoted_routine):
     assert edits["lanes"]["1:fader"][0]["beat"] == pytest.approx(10.0)
     assert edits["jumps"][0]["beat"] == pytest.approx(70.0)
     assert edits["jumps"][0]["repeat"] == 4
+    assert edits["removedRecordedJumps"][0]["beat"] == pytest.approx(20.0)
+
+
+def test_retrim_rebases_legacy_index_keyed_edits(client, promoted_routine):
+    """Pre-ADR-0039 rows address slots by `slot` int — rebase still reads
+    them (parseEdits migrates them client-side on the next open)."""
+    uuid = promoted_routine["uuid"]
+    legacy = {
+        "lanes": {},
+        "jumps": [{"id": "j1", "slot": 2, "beat": 80.0, "deltaSec": -2.0}],
+        "removedRecordedJumps": [{"slot": 0, "beat": 30.0}],
+    }
+    client.put(f"/api/routines/{uuid}/edits", json={"edits": legacy})
+    res = client.post(
+        f"/api/routines/{uuid}/retrim",
+        json={"trim_start_beats": 10.0, "trim_end_beats": 0.0},
+    )
+    assert res.status_code == 200, res.text
+    edits = res.json()["edits"]
+    assert edits["jumps"][0]["beat"] == pytest.approx(70.0)
     assert edits["removedRecordedJumps"][0]["beat"] == pytest.approx(20.0)
 
 

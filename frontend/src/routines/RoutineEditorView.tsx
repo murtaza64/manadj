@@ -355,12 +355,24 @@ export default function RoutineEditorView() {
     if (!buildable) return null;
     return buildEditorRoutine(detail!, trackBpms as number[], effectiveBpm!, null);
   }, [detail, trackBpms, buildable, effectiveBpm]);
+  // Keyed by SLOT ID (ADR 0039): provenance survives any derived-index
+  // reshuffle between the raw and edited builds.
   const recordedJumpsBySlot = useMemo(
-    () => (rawEditor ? rawEditor.planned.slots.map((s) => recordedJumps(s.trace)) : []),
+    () =>
+      rawEditor
+        ? Object.fromEntries(
+            rawEditor.planned.slots.map((s) => [s.slotId, recordedJumps(s.trace)])
+          )
+        : {},
     [rawEditor]
   );
   const recordedPausesBySlot = useMemo(
-    () => (rawEditor ? rawEditor.planned.slots.map((s) => recordedPauses(s.trace)) : []),
+    () =>
+      rawEditor
+        ? Object.fromEntries(
+            rawEditor.planned.slots.map((s) => [s.slotId, recordedPauses(s.trace)])
+          )
+        : {},
     [rawEditor]
   );
   // Jump-edited base: traces carry authored/removed jumps. Lane edits
