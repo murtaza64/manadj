@@ -5,7 +5,7 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
-  z-index: 1000;
+  z-index: var(--z-modal);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -17,19 +17,19 @@
   max-width: calc(100vw - 40px);
   background: var(--mantle);
   border: 1px solid var(--surface1);
-  padding: 14px;
+  padding: var(--space-12);
   color: var(--text);
 }
 
 .vizmodal-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: var(--space-8);
+  margin-bottom: var(--space-12);
 }
 
 .vizmodal-header h2 {
-  font-size: 14px;
+  font-size: var(--font-large);
   margin: 0;
   flex: 1;
 }
@@ -42,7 +42,7 @@
 }
 
 .vizmodal-dot.on {
-  background: var(--green);
+  background: var(--success);
 }
 
 .vizmodal-close {
@@ -54,11 +54,11 @@
 }
 
 .vizmodal h3 {
-  font-size: 11px;
+  font-size: var(--font-small);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--subtext0);
-  margin: 12px 0 6px;
+  margin: var(--space-12) 0 var(--space-6);
 }
 
 .vizmodal-row,
@@ -66,27 +66,27 @@
 .vizmodal-displays {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .vizmodal-btn {
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--subtext0);
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: 700;
-  padding: 5px 10px;
+  padding: var(--space-4) var(--space-12);
   cursor: pointer;
 }
 
 .vizmodal-btn:hover:not(:disabled) {
-  border-color: var(--mauve);
-  color: var(--mauve);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .vizmodal-btn.active {
-  background: var(--mauve);
-  border-color: var(--mauve);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--base);
 }
 
@@ -100,9 +100,9 @@
 }
 
 .vizmodal-btn.gen {
-  font-size: 11px;
+  font-size: var(--font-small);
   font-weight: 400;
-  padding: 3px 7px;
+  padding: var(--space-2) var(--space-8);
 }
 
 /* Genepool list: 100-candidate pool needs search + a height cap. */
@@ -112,15 +112,14 @@
   background: transparent;
   border: 1px solid var(--overlay0);
   color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 8px;
-  margin-bottom: 6px;
+  font-size: var(--font-body);
+  padding: var(--space-4) var(--space-8);
+  margin-bottom: var(--space-6);
 }
 
 .vizmodal-gen-search:focus {
   outline: none;
-  border-color: var(--mauve);
+  border-color: var(--accent);
 }
 
 .vizmodal-genlist {
@@ -137,15 +136,15 @@
 .vizmodal-params {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .vizmodal-param {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   color: var(--subtext0);
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 
 .vizmodal-param span {
@@ -155,7 +154,7 @@
 
 .vizmodal-param input[type='range'] {
   flex: 1;
-  accent-color: var(--mauve);
+  accent-color: var(--accent);
 }
 
 .vizmodal-param input[type='range']:disabled {

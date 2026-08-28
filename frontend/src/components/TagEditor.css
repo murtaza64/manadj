@@ -1,6 +1,6 @@
 .tag-editor {
-  background: #111111;
-  padding: 8px 12px;
+  background: var(--crust);
+  padding: var(--space-8) var(--space-12);
   max-height: 200px;
   overflow: auto;
   flex: 1;
@@ -9,86 +9,82 @@
 .tag-editor-metadata {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: #bac2de;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+  font-size: var(--font-body);
+  color: var(--subtext1);
 }
 
 .tag-editor-metadata-title {
   font-weight: bold;
-  color: #cdd6f4;
+  color: var(--text);
 }
 
 .tag-editor-metadata-field {
-  color: #a6adc8;
+  color: var(--subtext0);
 }
 
 .tag-editor-metadata-separator {
-  color: #6c7086;
+  color: var(--overlay0);
 }
 
 .tag-editor-energy-row {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-8);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .tag-editor-energy-squares {
   display: flex;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .tag-editor-energy-icon {
   flex-shrink: 0;
-  margin-right: 8px;
+  margin-right: var(--space-8);
 }
 
 .tag-editor-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .tag-editor-tag-button {
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   cursor: pointer;
-  font-size: 12px;
-  color: #cdd6f4;
+  font-size: var(--font-body);
+  color: var(--text);
 }
 
 .tag-editor-actions {
   display: flex;
-  gap: 4px;
-  margin-top: 8px;
+  gap: var(--space-4);
+  margin-top: var(--space-8);
 }
 
 .tag-editor-save {
-  padding: 4px 12px;
-  background: #a6e3a1;
-  color: #1e1e1e;
+  padding: var(--space-4) var(--space-12);
+  background: var(--success);
+  color: var(--base);
   border: none;
   cursor: pointer;
   font-weight: bold;
-  font-size: 12px;
-}
-
-.tag-editor-save:hover {
-  background: #94e2d5;
+  font-size: var(--font-body);
 }
 
 .tag-editor-cancel {
-  padding: 4px 12px;
-  background: #45454f;
-  color: #cdd6f4;
+  padding: var(--space-4) var(--space-12);
+  background: var(--surface1);
+  color: var(--text);
   border: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 
 .tag-editor-cancel:hover {
-  background: #58585b;
+  background: var(--surface2);
 }
 
 .tag-editor-disabled {
@@ -102,9 +98,9 @@
 }
 
 .tag-editor-manage-button {
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--subtext0);
   font-style: italic;
 }
@@ -136,7 +132,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-modal);
   padding-top: 120px;
 }
 
@@ -153,35 +149,34 @@
 
 /* Search Input */
 .tag-edit-search {
-  padding: 16px;
+  padding: var(--space-16);
   border-bottom: 1px solid var(--surface0);
 }
 
 .tag-edit-search-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: var(--space-8) var(--space-12);
   background: var(--base);
   border: 1px solid var(--surface0);
   color: var(--text);
-  font-size: 14px;
-  font-family: 'UbuntuMono Nerd Font', monospace;
+  font-size: var(--font-large);
 }
 
 .tag-edit-search-input:focus {
   outline: none;
-  border-color: var(--lavender);
+  border-color: var(--accent);
 }
 
 /* Categories Container */
 .tag-edit-categories {
-  padding: 16px;
+  padding: var(--space-16);
   overflow-y: auto;
   flex: 1;
 }
 
 /* Category Section */
 .tag-edit-category {
-  margin-bottom: 20px;
+  margin-bottom: var(--space-16);
 }
 
 .tag-edit-category:last-child {
@@ -190,8 +185,8 @@
 
 .tag-edit-category-title {
   color: var(--text);
-  font-size: 13px;
-  margin: 0 0 8px 0;
+  font-size: var(--font-body);
+  margin: 0 0 var(--space-8) 0;
   font-weight: bold;
 }
 
@@ -199,17 +194,16 @@
 .tag-edit-tag-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 /* Individual Tag Button */
 .tag-edit-tag {
-  padding: 6px 10px;
+  padding: var(--space-6) var(--space-8);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-body);
   color: var(--text);
   background: transparent;
-  transition: background 0.1s;
 }
 
 .tag-edit-tag:hover {

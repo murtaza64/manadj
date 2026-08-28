@@ -2,7 +2,16 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -51,6 +60,27 @@ class AudioProvenance(Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     asserted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     acquired_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
+
+
+class SoulseekSearch(Base):
+    """The remembered Soulseek search for a Source Item (gh#216).
+
+    One row per item: the query actually searched and the shaped results
+    (JSON list of picker-facing candidate dicts), overwritten by every new
+    search — manual or auto. Lets the picker hydrate instantly on item
+    selection instead of re-searching peers (~20s), and gives the hands-off
+    download (gh#214) a candidate list to snapshot from.
+    """
+
+    __tablename__ = "soulseek_searches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    source_item_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("source_items.id"), nullable=False, unique=True, index=True
+    )
+    query: Mapped[str] = mapped_column(String, nullable=False)
+    results_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    searched_at: Mapped[datetime | None] = mapped_column(DateTime, default=func.now())
 
 
 # Correspondence statuses: 'proposed' awaits user review; 'confirmed' fulfills

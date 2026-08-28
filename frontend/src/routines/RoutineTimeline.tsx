@@ -67,6 +67,7 @@ import { AUDITION_MARGIN_BEATS, type RoutinePlayer } from './RoutinePlayer';
 import type { RoutineDraftStore } from './routineDraftStore';
 import type { AuthoredJump, AuthoredPause, RoutineEdits } from './routineDraft';
 import { traceDrawRuns, type BeatRun } from './routineWaveRuns';
+import type { EditorMode } from './editorMode';
 import {
   buildGlobalLadder,
   FILTER_LPF_COLOR,
@@ -155,6 +156,8 @@ export function RoutineTimeline({
   trim,
   onTrimChange,
   onSeekBeat,
+  mode,
+  onModeHome,
 }: {
   editor: EditorRoutine;
   /** The jump-edited build WITHOUT lane edits: its trace identities are
@@ -180,6 +183,11 @@ export function RoutineTimeline({
   trim: TrimRange | null;
   onTrimChange: ((trim: TrimRange) => void) | null;
   onSeekBeat: (beat: number) => void;
+  /** Modal editing (ADR 0038, gh#207): gates timeline-canvas pointer
+   * gestures. Chrome (popovers, lane strips, markers) stays always-live. */
+  mode: EditorMode;
+  /** Two-tier Escape's second tier: snap home to select. */
+  onModeHome: () => void;
 }) {
   const { planned, input } = editor;
   const duration = input.durationBeats;
@@ -255,14 +263,20 @@ export function RoutineTimeline({
 
   // ── Wheel: pinch = zoom (cursor-anchored), horizontal = pan, plain
   // vertical = NATIVE vertical scroll (gh#190 iteration — rows overflow
-  // now; trackpad pinch arrives as a ctrlKey wheel). ─────────────────────
+  // now; trackpad pinch arrives as a ctrlKey wheel). In PAN mode plain
+  // vertical wheel zooms instead (gh#207 review feedback) — pan drag
+  // owns vertical motion there.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
       if (px <= 0) return;
-      if (e.ctrlKey || e.metaKey) {
+      const panZoom =
+        modeRef.current === 'pan' && Math.abs(e.deltaY) >= Math.abs(e.deltaX);
+      if (e.ctrlKey || e.metaKey || panZoom) {
         // Pinch-zoom (or ctrl/cmd+wheel), anchored under the cursor.
         e.preventDefault();
         const rect = el.getBoundingClientRect();
@@ -325,9 +339,21 @@ export function RoutineTimeline({
   const selAnchor = useRef<number | null>(null);
   const editsRef = useRef(edits);
   editsRef.current = edits;
+  // Two-tier Escape (ADR 0038): clear transient state first — popover,
+  // then lane-node selection, then slot selection — and only with nothing
+  // transient left, snap the mode home to select.
+  const transientRef = useRef({ popover, laneSel, selectedSlots });
+  transientRef.current = { popover, laneSel, selectedSlots };
+  const onModeHomeRef = useRef(onModeHome);
+  onModeHomeRef.current = onModeHome;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedSlots([]);
+      if (e.key !== 'Escape') return;
+      const t = transientRef.current;
+      if (t.popover) setPopover(null);
+      else if (t.laneSel) setLaneSel(null);
+      else if (t.selectedSlots.length > 0) setSelectedSlots([]);
+      else onModeHomeRef.current();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -370,18 +396,57 @@ export function RoutineTimeline({
           draftStore.setNudgeLive(key, s, v);
         }
       };
-      const onUp = (ev: PointerEvent) => {
+      const onUp = () => {
         document.body.style.userSelect = prevUserSelect;
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         draftStore.endGesture();
-        // A click that never became a drag is still a seek.
-        if (!moved) seekAtClientXRef.current?.(ev.clientX);
+        // A no-drag click was the SELECT itself (ADR 0038: click = focus
+        // slot; seeks live on the background/ruler, not slot rows).
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
     },
     [draftStore, tracks]
+  );
+
+  // ── Pan drag (pan mode / hold-H quasimode): BOTH axes — horizontal
+  // rides the beat scroll, vertical rides the timeline's own overflow-y
+  // scroller (gh#207 review feedback). ─────────────────────────────────
+  const beginPan = useCallback(
+    (e: React.PointerEvent) => {
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const s0 = viewRef.current.scrollBeat;
+      const st0 = containerRef.current?.scrollTop ?? 0;
+      let moved = false;
+      const prevUserSelect = document.body.style.userSelect;
+      document.body.style.userSelect = 'none';
+      const onMove = (ev: PointerEvent) => {
+        const { pxPerBeat: px } = viewRef.current;
+        if (px <= 0) return;
+        if (
+          !moved &&
+          Math.abs(ev.clientX - startX) < 3 &&
+          Math.abs(ev.clientY - startY) < 3
+        )
+          return;
+        moved = true;
+        setScrollBeat(clampScroll(s0 - (ev.clientX - startX) / px, px));
+        const el = containerRef.current;
+        if (el) el.scrollTop = st0 - (ev.clientY - startY);
+      };
+      const onUp = (ev: PointerEvent) => {
+        document.body.style.userSelect = prevUserSelect;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        // A no-drag click stays a seek — seeking is modeless (ADR 0038).
+        if (!moved) seekAtClientXRef.current?.(ev.clientX);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [clampScroll]
   );
 
   // ── Seek scrub ───────────────────────────────────────────────────────
@@ -404,6 +469,46 @@ export function RoutineTimeline({
     [onSeekBeat, duration]
   );
   seekAtClientXRef.current = seekAtClientX;
+
+  const plannedRef = useRef(planned);
+  plannedRef.current = planned;
+
+  // ── Jump insertion (jump mode: SINGLE click — ADR 0038; replaces the
+  // dblclick/alt+dblclick overloads that kept colliding with UI clicks).
+  // The popup carries jump⇄pause and displacement, so a plain insert +
+  // popover covers pause authoring too.
+  const insertJumpAt = useCallback(
+    (clientX: number, shiftKey: boolean, slotIdx: number) => {
+      const slot = plannedRef.current.slots.find((s) => s.slot === slotIdx);
+      if (!slot) return;
+      const el = rowsRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
+      if (px <= 0) return;
+      let beat = s + (clientX - rect.left) / px;
+      if (!shiftKey) beat = Math.round(beat); // beat magnet; shift = free
+      beat = Math.max(0, Math.min(beat, duration));
+      const track = tracks.get(slot.trackId);
+      const trackBpm = track?.bpm ?? null;
+      // Default: a 4-track-beat BACKWARD jump — loopable (the pair
+      // editor's add-jump posture, loop doctrine ready).
+      const deltaSec = trackBpm && trackBpm > 0 ? -4 * (60 / trackBpm) : -2;
+      const jump: AuthoredJump = {
+        id: `j-${Date.now()}-${slot.slot}-${Math.round(beat * 10)}`,
+        slot: slot.slot,
+        beat,
+        deltaSec,
+      };
+      draftStore.addJump(jump);
+      setPopover({ marker: { kind: 'authored', slot: slot.slot, jump }, x: beat });
+    },
+    [draftStore, duration, tracks]
+  );
+
+  // ── Mode-dispatched canvas gestures (ADR 0038) ───────────────────────
+  // Chrome (markers, popovers, lane strips, panels) is exempt: it stays
+  // always-live in every mode. Background clicks seek in every mode.
   const onRowsPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (
@@ -414,35 +519,66 @@ export function RoutineTimeline({
         return;
       const slotEl = (e.target as HTMLElement).closest('[data-slot]');
       const slotIdx = slotEl ? Number(slotEl.getAttribute('data-slot')) : null;
-      // Selection gestures (gh#190 track drag): cmd/ctrl toggles, shift
-      // extends a range from the anchor.
-      if (slotIdx !== null && (e.metaKey || e.ctrlKey)) {
-        setSelectedSlots((prev) =>
-          prev.includes(slotIdx) ? prev.filter((s) => s !== slotIdx) : [...prev, slotIdx]
-        );
-        selAnchor.current = slotIdx;
-        setPopover(null);
-        return;
+      if (mode === 'jump') {
+        if (slotIdx !== null) {
+          setPopover(null);
+          insertJumpAt(e.clientX, e.shiftKey, slotIdx);
+          return;
+        }
+        // Background falls through to the modeless seek below.
+      } else {
+        // Select mode. Selection gestures (gh#190 track drag): cmd/ctrl
+        // toggles, shift extends a range from the anchor; a plain click
+        // selects the slot and a drag slides the selection.
+        if (slotIdx !== null && (e.metaKey || e.ctrlKey)) {
+          setSelectedSlots((prev) =>
+            prev.includes(slotIdx) ? prev.filter((s) => s !== slotIdx) : [...prev, slotIdx]
+          );
+          selAnchor.current = slotIdx;
+          setPopover(null);
+          return;
+        }
+        if (slotIdx !== null && e.shiftKey) {
+          const a = selAnchor.current ?? slotIdx;
+          const [lo, hi] = a <= slotIdx ? [a, slotIdx] : [slotIdx, a];
+          setSelectedSlots(Array.from({ length: hi - lo + 1 }, (_, k) => lo + k));
+          setPopover(null);
+          return;
+        }
+        if (slotIdx !== null) {
+          setPopover(null);
+          if (selectedSlots.includes(slotIdx)) {
+            beginSlide(e, selectedSlots);
+          } else {
+            setSelectedSlots([slotIdx]);
+            selAnchor.current = slotIdx;
+            beginSlide(e, [slotIdx]);
+          }
+          return;
+        }
       }
-      if (slotIdx !== null && e.shiftKey) {
-        const a = selAnchor.current ?? slotIdx;
-        const [lo, hi] = a <= slotIdx ? [a, slotIdx] : [slotIdx, a];
-        setSelectedSlots(Array.from({ length: hi - lo + 1 }, (_, k) => lo + k));
-        setPopover(null);
-        return;
-      }
-      // Dragging a selected row slides every selected track.
-      if (slotIdx !== null && selectedSlots.includes(slotIdx)) {
-        setPopover(null);
-        beginSlide(e, selectedSlots);
-        return;
-      }
+      // Timeline background: the modeless seek-scrub.
       scrubbing.current = true;
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       seekAtClientX(e.clientX);
       setPopover(null);
     },
-    [seekAtClientX, selectedSlots, beginSlide]
+    [mode, seekAtClientX, selectedSlots, beginSlide, insertJumpAt]
+  );
+
+  // Pan mode grabs EVERYTHING at the capture phase (gh#207 review
+  // feedback: pan must work anywhere — panels, lane strips, markers),
+  // except the popover, which stays interactive. A no-drag click still
+  // seeks (modeless seek).
+  const onRowsPointerDownCapture = useCallback(
+    (e: React.PointerEvent) => {
+      if (mode !== 'pan') return;
+      if ((e.target as HTMLElement).closest('.rt-jump-popover')) return;
+      e.stopPropagation();
+      setPopover(null);
+      beginPan(e);
+    },
+    [mode, beginPan]
   );
   const onRowsPointerMove = useCallback(
     (e: React.PointerEvent) => {
@@ -539,66 +675,6 @@ export function RoutineTimeline({
       window.addEventListener('pointerup', onUp);
     },
     [draftStore, duration]
-  );
-
-  // Add-jump lives on the ROWS container: the scrub's pointer capture
-  // retargets the derived dblclick to the container, so a per-row
-  // handler never fires — hit-test the wave row under the point instead.
-  const plannedRef = useRef(planned);
-  plannedRef.current = planned;
-  const onRowsDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      // Double-clicks on CONTROLS are not authoring gestures (gh#190
-      // iteration: rapid nudge clicks were minting jumps).
-      if (
-        (e.target as HTMLElement).closest(
-          '.rt-slotpanel, .rt-panelcol, .rt-lanetoggles, .rt-jump, .rt-laneauthor, .rt-jump-popover, .rt-trimhandle, .rt-lanestrip'
-        )
-      )
-        return;
-      const hit = document
-        .elementFromPoint(e.clientX, e.clientY)
-        ?.closest('[data-slot]') as HTMLElement | null;
-      if (!hit) return;
-      const slotIdx = Number(hit.getAttribute('data-slot'));
-      const slot = plannedRef.current.slots.find((s) => s.slot === slotIdx);
-      if (!slot) return;
-      const el = rowsRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const { pxPerBeat: px, scrollBeat: s } = viewRef.current;
-      if (px <= 0) return;
-      let beat = s + (e.clientX - rect.left) / px;
-      if (!e.shiftKey) beat = Math.round(beat);
-      beat = Math.max(0, Math.min(beat, duration));
-      // Alt/option + double-click authors a PAUSE (gh#190: play/pause
-      // events); plain double-click keeps the jump gesture.
-      if (e.altKey) {
-        const pause: AuthoredPause = {
-          id: `p-${Date.now()}-${slot.slot}-${Math.round(beat * 10)}`,
-          slot: slot.slot,
-          beat,
-          durBeats: 4,
-        };
-        draftStore.addPause(pause);
-        setPopover({ marker: { kind: 'authored-pause', slot: slot.slot, pause }, x: beat });
-        return;
-      }
-      const track = tracks.get(slot.trackId);
-      const trackBpm = track?.bpm ?? null;
-      // Default: a 4-track-beat BACKWARD jump — loopable (the pair
-      // editor's add-jump posture, loop doctrine ready).
-      const deltaSec = trackBpm && trackBpm > 0 ? -4 * (60 / trackBpm) : -2;
-      const jump: AuthoredJump = {
-        id: `j-${Date.now()}-${slot.slot}-${Math.round(beat * 10)}`,
-        slot: slot.slot,
-        beat,
-        deltaSec,
-      };
-      draftStore.addJump(jump);
-      setPopover({ marker: { kind: 'authored', slot: slot.slot, jump }, x: beat });
-    },
-    [draftStore, duration, tracks]
   );
 
   // ── Playhead (rAF-driven; div transform only — the editor's pink) ────
@@ -1080,21 +1156,34 @@ export function RoutineTimeline({
   };
 
   return (
-    <div className="rt-timeline" ref={containerRef}>
+    <div className="rt-timeline" ref={containerRef} data-mode={mode}>
       <div className="rt-toolbar-float">
         <button className="rt-fit" title="Fit the whole Routine" onClick={fit}>
           fit
         </button>
       </div>
-      <canvas ref={rulerRef} className="rt-ruler" style={{ height: RULER_H }} />
+      {/* The ruler is a modeless seek surface in every mode (ADR 0038). */}
+      <canvas
+        ref={rulerRef}
+        className="rt-ruler"
+        style={{ height: RULER_H }}
+        onPointerDown={(e) => {
+          scrubbing.current = true;
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          seekAtClientX(e.clientX);
+        }}
+        onPointerMove={onRowsPointerMove}
+        onPointerUp={onRowsPointerUp}
+        onPointerCancel={onRowsPointerUp}
+      />
       <div
         className="rt-rows"
         ref={rowsRef}
+        onPointerDownCapture={onRowsPointerDownCapture}
         onPointerDown={onRowsPointerDown}
         onPointerMove={onRowsPointerMove}
         onPointerUp={onRowsPointerUp}
         onPointerCancel={onRowsPointerUp}
-        onDoubleClick={onRowsDoubleClick}
       >
         {/* Continuous panel COLUMN (gh#190 iteration): one unbroken tint +
             right border down the whole timeline — the per-slot panels are
@@ -1387,7 +1476,10 @@ export function RoutineTimeline({
             </div>
           );
         })}
-        {trim &&
+        {/* Trim handles are select-mode canvas edits (ADR 0038) — the
+            shaded trim REGIONS below stay visible in every mode. */}
+        {mode === 'select' &&
+          trim &&
           onTrimChange &&
           (['start', 'end'] as const).map((edge) => {
             const b = edge === 'start' ? trim.startBeat : trim.endBeat;

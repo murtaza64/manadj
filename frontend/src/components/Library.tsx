@@ -1261,10 +1261,10 @@ export default function Library({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      background: playlistFilterOn ? 'var(--blue)' : 'transparent',
+                      background: playlistFilterOn ? 'var(--accent)' : 'transparent',
                       color: playlistFilterOn ? 'var(--base)' : 'var(--text)',
                       border: playlistFilterOn
-                        ? '1px solid var(--blue)'
+                        ? '1px solid var(--accent)'
                         : '1px solid var(--surface1)',
                       cursor: 'pointer',
                     }}
@@ -1297,7 +1297,7 @@ export default function Library({
                     onClick={() => setIsSplitViewOpen((v) => !v)}
                     style={{
                       padding: '2px 10px',
-                      background: splitView ? 'var(--blue)' : 'var(--surface0)',
+                      background: splitView ? 'var(--accent)' : 'var(--surface0)',
                       color: splitView ? 'var(--base)' : 'var(--text)',
                       border: '1px solid var(--surface1)',
                       borderRadius: '3px',
@@ -1348,7 +1348,7 @@ export default function Library({
                   flex: 1,
                   minHeight: 0,
                   overflow: 'auto',
-                  outline: focusedArea === 'playlist' ? '1px solid var(--blue)' : '1px solid transparent',
+                  outline: focusedArea === 'playlist' ? '1px solid var(--accent)' : '1px solid transparent',
                   outlineOffset: '-1px',
                 }}
               >
@@ -1360,7 +1360,7 @@ export default function Library({
                       right: 0,
                       top: Math.max(0, dropIndicator.y - 1),
                       height: '2px',
-                      background: 'var(--blue)',
+                      background: 'var(--accent)',
                       pointerEvents: 'none',
                       zIndex: 10,
                     }}
@@ -1404,7 +1404,7 @@ export default function Library({
                   flex: 1,
                   minHeight: 0,
                   overflow: 'auto',
-                  outline: focusedArea === 'library' ? '1px solid var(--blue)' : '1px solid transparent',
+                  outline: focusedArea === 'library' ? '1px solid var(--accent)' : '1px solid transparent',
                   outlineOffset: '-1px',
                 }}
               >
@@ -1477,7 +1477,7 @@ export default function Library({
                       right: 0,
                       top: Math.max(0, dropIndicator.y - 1),
                       height: '2px',
-                      background: 'var(--blue)',
+                      background: 'var(--accent)',
                       pointerEvents: 'none',
                       zIndex: 10,
                     }}

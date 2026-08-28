@@ -6,15 +6,6 @@
    effects, or hue-shifts. Selection and the loaded/playing row marks are
    STATES (sets 18/35), not hovers — they outrank the hover wash. */
 
-/* --peach: sets 16 picked peach for the lit Pick up (and sets 06 for the
-   Fixed tempo chip) before the token existed outside Waveform.css's
-   scope — it silently resolved to nothing. Defined here, scoped, because
-   a :root definition would switch on two dormant pre-08 box-shadow glows
-   (TagEditor/TagPopover) that 08 removed. Bright, fully saturated. */
-.set-header {
-  --peach: #ff9500;
-}
-
 /* Three-zone header (sets 22): name/chips left, transport center,
    secondary actions right. The 1fr side zones shrink and wrap; the auto
    center column never does — the transport keeps center priority at any
@@ -23,8 +14,8 @@
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-12);
   border-bottom: 1px solid var(--surface0);
   background: var(--crust);
 }
@@ -33,16 +24,16 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--font-body);
   color: var(--text);
 }
 
 .set-header-transport {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   white-space: nowrap;
   /* Center on the VIEWPORT, not the header (22 follow-up): the pane
      sits right of the sidebar, so the grid's own centering reads
@@ -59,7 +50,7 @@
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
 }
 
@@ -74,8 +65,8 @@
   align-items: center;
   justify-content: center;
   height: 22px;
-  padding: 0 10px;
-  font-size: 12px;
+  padding: 0 var(--space-8);
+  font-size: var(--font-body);
   font-weight: bold;
   line-height: 1;
 }
@@ -87,8 +78,8 @@
 }
 
 .set-header-actions .btn {
-  padding: 3px 10px;
-  font-size: 12px;
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--font-body);
   font-weight: normal;
 }
 
@@ -97,8 +88,8 @@
 .set-play.on,
 .set-play.on:hover:not(:disabled),
 .set-play.on:active:not(:disabled) {
-  background: var(--mauve);
-  border-color: var(--mauve);
+  background: var(--accent);
+  border-color: var(--accent);
   color: var(--base);
 }
 
@@ -107,8 +98,8 @@
 .set-pickup.lit,
 .set-pickup.lit:hover:not(:disabled),
 .set-pickup.lit:active:not(:disabled) {
-  background: var(--peach);
-  border-color: var(--peach);
+  background: var(--orange);
+  border-color: var(--orange);
   color: var(--base);
 }
 
@@ -125,7 +116,7 @@
   cursor: grab;
   /* The library track table's text scale (TrackRow.css .track-cell-text);
      the fixed-width cells match via rowColumns.cellStyle. */
-  font-size: 13px;
+  font-size: var(--font-body);
 }
 
 /* Energy circle (review iteration): the library track table's energy
@@ -149,8 +140,8 @@
 
 .set-track-row.selected,
 .set-track-row.selected:hover {
-  background: color-mix(in srgb, var(--blue) 22%, transparent);
-  box-shadow: inset 0 0 0 2px var(--blue);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 /* Loaded rows (sets 35; replaces the conducting mauve wash): the deck
@@ -167,14 +158,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: var(--space-2);
   pointer-events: none;
 }
 
 .set-playing-mark span {
   width: 3px;
   height: 11px;
-  background: var(--green);
+  background: var(--success);
   transform-origin: bottom;
   animation: set-eq-bounce 0.9s ease-in-out infinite;
 }
@@ -223,7 +214,7 @@
   background-size: 3px 100%;
   background-repeat: no-repeat;
   border-bottom: 1px solid var(--surface0);
-  font-size: 12px;
+  font-size: var(--font-body);
   cursor: pointer;
 }
 
@@ -240,8 +231,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 12px;
-  font-family: inherit;
+  font-size: var(--font-body);
 }
 
 .set-glyph-btn:hover:not(:disabled) {
@@ -264,10 +254,9 @@
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--surface0);
-  color: var(--blue);
+  color: var(--accent);
   cursor: pointer;
-  font-size: 12px;
-  font-family: inherit;
+  font-size: var(--font-body);
   text-align: left;
 }
 
@@ -301,13 +290,12 @@
    Accent-outline CTAs and the solid red hard-cut chip pin their
    border/background inline — inline wins over the hover rule. */
 .set-chip-btn {
-  padding: 1px 8px;
+  padding: 1px var(--space-8);
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--text);
   cursor: pointer;
-  font-size: 12px;
-  font-family: inherit;
+  font-size: var(--font-body);
 }
 
 .set-chip-btn:hover {
@@ -329,26 +317,25 @@
   justify-content: center;
   min-width: 32px;
   height: 18px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   line-height: 1;
 }
 
 /* Header-sized chip (tempo policy) */
 .set-header-chip {
-  padding: 2px 10px;
+  padding: var(--space-2) var(--space-8);
 }
 
 /* Tempo-policy popover options: quiet at rest; the active policy paints
    its solid accent fill inline (engaged — pinned across hover/press). */
 .set-tempo-option {
-  padding: 3px 8px;
+  padding: var(--space-4) var(--space-8);
   text-align: left;
   background: transparent;
   border: 1px solid var(--surface1);
   color: var(--text);
   cursor: pointer;
-  font-size: 12px;
-  font-family: inherit;
+  font-size: var(--font-body);
 }
 
 .set-tempo-option:hover {
@@ -365,19 +352,19 @@
 .set-cameo-pin-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 1px 8px 3px 44px;
+  gap: var(--space-6);
+  padding: 1px var(--space-8) var(--space-4) 44px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-small);
 }
 .set-cameo-pin-chip {
-  color: #ff7a00;
-  border: 1px solid rgba(255, 122, 0, 0.45);
-  border-radius: 8px;
-  padding: 0 6px;
+  color: var(--orange);
+  border: 1px solid rgba(var(--orange-rgb), 0.45);
+  border-radius: var(--radius);
+  padding: 0 var(--space-6);
   line-height: 16px;
   white-space: nowrap;
 }
 .set-cameo-pin-row:hover .set-cameo-pin-chip {
-  border-color: #ff7a00;
+  border-color: var(--orange);
 }

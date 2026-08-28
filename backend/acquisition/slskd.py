@@ -106,6 +106,7 @@ class SlskdSupplier:
                         duration_ms=length_secs * 1000 if length_secs else None,
                         queue_length=queue,
                         has_free_slot=free_slot,
+                        username=username,
                     )
                 )
         logger.info("slskd search %r: %d candidate files", query, len(results))
@@ -150,6 +151,26 @@ class SlskdSupplier:
         if "inprogress" in state:
             return TransferStatus(state=TransferState.IN_PROGRESS)
         return TransferStatus(state=TransferState.QUEUED)
+
+    def cancel(self, transfer_id: str) -> None:
+        """Cancel a transfer (hands-off retry abandoning a stalled peer).
+
+        slskd addresses transfers by their record id; look it up from the
+        (username, filename) ref. A vanished transfer is already as good as
+        cancelled. `remove=false` keeps the record for slskd's own history.
+        """
+        ref = json.loads(transfer_id)
+        username, filename = ref["username"], ref["filename"]
+        entry = self._find_transfer(username, filename)
+        if entry is None or not entry.get("id"):
+            return
+        resp = self._session.delete(
+            f"{self._base}/transfers/downloads/{requests.utils.quote(username)}/{entry['id']}",
+            params={"remove": "false"},
+            timeout=REQUEST_TIMEOUT_SECS,
+        )
+        resp.raise_for_status()
+        logger.info("slskd transfer cancelled: %s from %s", filename, username)
 
     def _completed_local_path(self, entry: dict[str, Any]) -> Path | None:
         """Where slskd put a completed download.

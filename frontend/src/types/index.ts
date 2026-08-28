@@ -503,6 +503,9 @@ export interface DownloadStatus {
   cooling_down_until?: string | null;
   // which Supplier is delivering the audio
   via: 'soundcloud' | 'soulseek';
+  // hands-off soulseek downloads (gh#214): candidate being tried (1-based) / total
+  attempt?: number | null;
+  attempts_total?: number | null;
 }
 
 // Suppliers (see CONTEXT.md: Supplier / Direct Supplier / Search Supplier)
@@ -520,14 +523,29 @@ export interface SoulseekResult {
   duration_ms: number | null;
   queue_length: number | null;
   has_free_slot: boolean | null;
+  // the peer offering the file
+  username?: string | null;
   // derived server-side vs the item's duration; results arrive sorted
   // exact-duration-lossless first (issue 04)
   duration_delta_ms: number | null;
 }
 
+// A standalone (Source-Item-less) soulseek download (gh#217)
+export interface AdhocSoulseekDownload {
+  task_id: number;
+  filename: string;
+  artist: string | null;
+  title: string;
+  task_state: 'pending' | 'running' | 'done' | 'failed';
+  error: string | null;
+  created_at: string | null;
+}
+
 export interface SoulseekSearchResponse {
   query: string;
   results: SoulseekResult[];
+  // ISO-8601 UTC when this search ran (remembered searches, gh#216)
+  searched_at?: string | null;
 }
 
 // State of a track's latest analysis task (task-system 01): the Analyze

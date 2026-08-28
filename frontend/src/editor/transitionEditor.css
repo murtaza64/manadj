@@ -13,8 +13,8 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--base, #1e1e2e);
-  color: var(--text, #cdd6f4);
+  background: var(--base);
+  color: var(--text);
 }
 
 .editor-top {
@@ -22,8 +22,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--crust, #11111b);
-  border-bottom: 2px solid var(--surface1, #45475a);
+  background: var(--crust);
+  border-bottom: 2px solid var(--surface1);
   overflow: hidden;
   /* Drag-heavy surface: stray lane/region drags must not text-select
      labels or controls (issue 15). Readable text opts back in below. */
@@ -37,26 +37,25 @@
 }
 
 .editor-bpm-base {
-  color: var(--yellow, #f9e2af);
+  color: var(--warning);
   font-weight: 700;
 }
 
 .editor-bpm-eff {
-  color: var(--sapphire, #74c7ec);
-  font-family: monospace;
-  font-size: 13px;
+  color: var(--accent);
+  font-size: var(--font-body);
   font-weight: 700;
 }
 
 .editor-bpm-eff em {
   font-style: normal;
-  font-size: 10px;
+  font-size: var(--font-micro);
   opacity: 0.75;
 }
 
 .editor-tweaktitle {
-  font-size: 11px;
-  color: var(--subtext0, #a6adc8);
+  font-size: var(--font-small);
+  color: var(--subtext0);
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -78,7 +77,7 @@
 }
 
 .editor-decklabel {
-  font-size: 12px;
+  font-size: var(--font-body);
   font-weight: 700;
 }
 
@@ -92,7 +91,7 @@
 
 .editor-decklabels {
   display: flex;
-  gap: 24px;
+  gap: var(--space-24);
 }
 
 .editor-timeline-wrap {
@@ -114,8 +113,8 @@
      toggle chips (--lanegutter-w) and the pinned lane labels beside them. */
   --lanepanel-w: 116px;
   position: relative;
-  border: 1px solid var(--surface0, #313244);
-  background: #0b0b0b;
+  border: 1px solid var(--surface0);
+  background: var(--void);
   /* Flexible stack height: adding/removing lanes redistributes THIS space
      (strips flex below) instead of growing the timeline vertically. */
   flex: 1 1 0;
@@ -151,7 +150,7 @@
   /* The gap mirrors the two fixed-height wave rows between the strip
      regions, so each chip group spans (about) its deck's strips. */
   gap: calc(2 * var(--waverow-h, max(56px, 8vh)));
-  padding: 3px;
+  padding: var(--space-4);
   pointer-events: none;
 }
 
@@ -163,18 +162,17 @@
      outer edges and the wave-facing edges breathe the same amount. */
   flex: 1 1 0;
   justify-content: space-evenly;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .editor-lanetoggle {
-  font-family: monospace;
-  font-size: 9px;
+  font-size: var(--font-micro);
   font-weight: bold;
   line-height: 1;
   /* Opaque-ish backing: chips float over lane strips/waveforms now. */
   background: rgba(11, 11, 11, 0.8);
   border: 1px solid;
-  padding: 2px 4px;
+  padding: var(--space-2) var(--space-4);
   cursor: pointer;
   text-align: center;
   pointer-events: auto;
@@ -188,7 +186,7 @@
 
 .editor-lanetoggle.on {
   /* Inverted fill (unified engaged vocabulary); bg/border come inline. */
-  color: #0b0b0b;
+  color: var(--crust);
   opacity: 1;
 }
 
@@ -206,23 +204,23 @@
 .editor-switcher {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--surface1, #45475a);
+  border: 1px solid var(--surface1);
   height: 22px;
   box-sizing: border-box;
 }
 
 .editor-switcher > * + * {
-  border-left: 1px solid var(--surface1, #45475a);
+  border-left: 1px solid var(--surface1);
 }
 
 .editor-switcher button {
   background: transparent;
   border: none;
-  color: var(--text, #cdd6f4);
+  color: var(--text);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-small);
   font-weight: bold;
-  padding: 0 6px;
+  padding: 0 var(--space-6);
 }
 
 .editor-switcher button:disabled {
@@ -232,15 +230,15 @@
 
 /* Segment hover = fill (joined-panel idiom); the group border brightens */
 .editor-switcher:hover {
-  border-color: var(--text, #cdd6f4);
+  border-color: var(--text);
 }
 
 .editor-switcher button:hover:not(:disabled) {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
 }
 
 .editor-switcher button:active:not(:disabled) {
-  background: var(--surface1, #45475a);
+  background: var(--surface1);
 }
 
 /* FIXED GEOMETRY (gh#167 feedback): every switcher segment has a set
@@ -260,10 +258,10 @@
   box-sizing: border-box;
   background: transparent;
   border: none;
-  color: var(--text, #cdd6f4);
-  font-size: 11px;
+  color: var(--text);
+  font-size: var(--font-small);
   font-weight: bold;
-  padding: 0 6px;
+  padding: 0 var(--space-6);
   outline: none;
 }
 
@@ -276,15 +274,15 @@
 /* ★ renders smaller than other glyphs at the switcher's 11px — bump the
    favorite control ~30% (follow-mode 08 rider). */
 .editor-switcher-star {
-  font-size: 14px;
+  font-size: var(--font-large);
 }
 
 /* Engaged = inverted fill (unified vocabulary) */
 .editor-switcher-star.on,
 .editor-switcher-star.on:hover:not(:disabled),
 .editor-switcher-star.on:active:not(:disabled) {
-  background: var(--yellow, #f9e2af);
-  color: var(--base, #1e1e2e);
+  background: var(--warning);
+  color: var(--base);
 }
 
 .editor-switcher-pos {
@@ -294,10 +292,9 @@
   min-width: 42px;
   flex: none;
   box-sizing: border-box;
-  padding: 0 5px;
-  font-size: 10px;
-  font-family: monospace;
-  color: var(--subtext0, #a6adc8);
+  padding: 0 var(--space-4);
+  font-size: var(--font-micro);
+  color: var(--subtext0);
 }
 
 .editor-switcher button.editor-switcher-star {
@@ -315,15 +312,15 @@
 .editor-switcher-del.confirming,
 .editor-switcher-del.confirming:hover:not(:disabled),
 .editor-switcher-del.confirming:active:not(:disabled) {
-  background: var(--red, #f38ba8);
-  color: var(--base, #1e1e2e);
+  background: var(--danger);
+  color: var(--base);
 }
 
 /* Evidence switcher (gh#167): only the CURRENT evidence renders as the
    name chip; the ▾ opens the full evidence dropdown (ContextMenu). A
    loaded Take reads mauve (the Set view's ● take color). */
 .editor-switcher-name.take {
-  color: var(--mauve, #cba6f7);
+  color: var(--accent);
 }
 
 .editor-switcher button.editor-switcher-browse {
@@ -337,12 +334,12 @@
   top: 6px;
   right: 6px;
   z-index: 2;
-  padding: 2px 10px;
+  padding: var(--space-2) var(--space-12);
   background: var(--crust);
-  border: 1px solid var(--sapphire);
-  color: var(--sapphire);
+  border: 1px solid var(--accent);
+  color: var(--accent);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-small);
   font-weight: bold;
 }
 
@@ -366,7 +363,7 @@
 /* The seam (issue 13): rows sit flush — no border/gap between A and B, so
    peak-vs-peak beat alignment reads exactly at the meeting line. */
 .editor-timeline-row.b {
-  border-bottom: 1px solid var(--surface0, #313244);
+  border-bottom: 1px solid var(--surface0);
 }
 
 .editor-wavecanvas {
@@ -411,18 +408,18 @@
      grows. min-height keeps a strip editable in crowded stacks. */
   flex: 1 1 0;
   min-height: 22px;
-  border-bottom: 2px solid #1b1b1b;
+  border-bottom: 2px solid var(--crust);
   touch-action: none;
 }
 
 /* Flat strips (mix-editor 32) + deck accent edge: A lanes read as A's, B
    as B's via the 3px edge alone — no gradient wash. */
 .editor-lanestrip.a {
-  background: #0e0e0e;
+  background: var(--void);
 }
 
 .editor-lanestrip.b {
-  background: #0e0e0e;
+  background: var(--void);
 }
 
 /* Backdrop panel: per-strip, pinned to the viewport's left edge like the
@@ -471,11 +468,10 @@
   will-change: transform;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-family: monospace;
+  gap: var(--space-4);
+  font-size: var(--font-micro);
   background: rgba(11, 11, 11, 0.8);
-  padding: 1px 4px;
+  padding: var(--space-2) var(--space-4);
 
 }
 
@@ -487,7 +483,7 @@
   background: rgba(49, 49, 54, 0.35);
   /* Outline instead of border: borders inset the drawing surface, skewing
      guide/curve x-coordinates off the shared time axis. */
-  outline: 1px solid var(--surface1, #45454f);
+  outline: 1px solid var(--surface1);
 }
 
 /* Pointer target: overhangs the lane rect by LANE_PAD on the SIDES ONLY
@@ -549,10 +545,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: var(--space-12);
   min-height: 22px;
-  font-size: 12px;
-  color: #bff7ff;
+  font-size: var(--font-body);
+  color: var(--accent);
 }
 
 .editor-take-banner.hidden {
@@ -560,8 +556,8 @@
 }
 
 .editor-take-banner button {
-  padding: 3px 10px;
-  font-size: 12px;
+  padding: var(--space-4) var(--space-12);
+  font-size: var(--font-body);
   cursor: pointer;
   background: transparent;
 }
@@ -577,8 +573,8 @@
 /* Accent CTA: outline at rest (solid fill is reserved for engaged
    states), border stays cyan on hover */
 .editor-take-promote {
-  border: 1px solid #00e5ff;
-  color: #00e5ff;
+  border: 1px solid var(--accent);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -630,12 +626,12 @@
      up from here), not the top of the timeline. */
   bottom: 1px;
   left: 3px;
-  padding: 1px 5px;
-  font-size: 10px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-micro);
   white-space: nowrap;
-  color: #001114;
+  color: var(--crust);
   background: var(--deck-b);
-  border-radius: 3px;
+  border-radius: var(--radius);
   user-select: none;
 }
 
@@ -653,32 +649,32 @@
   top: calc(100% + 2px);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  background: #0b0b0b;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-8);
+  background: var(--void);
   border: 1px solid var(--deck-b);
-  border-radius: 4px;
-  font-size: 11px;
-  color: #e8e8f0;
+  border-radius: var(--radius);
+  font-size: var(--font-small);
+  color: var(--text);
   z-index: 120;
 }
 
 .editor-jump-popover input {
   width: 62px;
-  background: #14141f;
-  color: #e8e8f0;
-  border: 1px solid #333;
-  border-radius: 3px;
-  padding: 2px 4px;
-  font-size: 11px;
+  background: var(--void);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-small);
 }
 
 .editor-jump-popover button {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--surface1);
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--font-small);
   cursor: pointer;
 }
 
@@ -692,12 +688,12 @@
 }
 
 .editor-jump-popover .editor-jump-delete {
-  color: #ff2d95;
+  color: var(--danger);
 }
 
 .editor-jump-beatsteps {
   display: flex;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .editor-playhead {
@@ -759,7 +755,7 @@
   bottom: 8px;
   left: 0;
   width: 1px;
-  background: var(--surface0, #313244);
+  background: var(--surface0);
   pointer-events: none;
 }
 
@@ -767,10 +763,10 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 8px 10px;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
 
-  font-size: 12px;
+  font-size: var(--font-body);
   min-width: 0;
 }
 
@@ -798,7 +794,7 @@
 .editor-deckcard-head {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
 }
 
@@ -814,30 +810,29 @@
 }
 
 .editor-deckcard-artist {
-  font-size: 11px;
-  color: var(--subtext0, #a6adc8);
+  font-size: var(--font-small);
+  color: var(--subtext0);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .editor-deckcard-key {
-  color: var(--mauve, #cba6f7);
-  font-family: monospace;
+  color: var(--accent);
   font-weight: 700;
 }
 
 .editor-deckcard-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
 }
 
 .editor-deckcard-row label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .editor-deckcard-row input {
@@ -847,25 +842,25 @@
 .editor-deckcard-row button,
 .editor-deckcard-head button {
   background: none;
-  border: 1px solid var(--surface1, #45475a);
-  color: var(--text, #cdd6f4);
+  border: 1px solid var(--surface1);
+  color: var(--text);
 
   cursor: pointer;
-  font-size: 10px;
-  padding: 2px 6px;
+  font-size: var(--font-micro);
+  padding: var(--space-2) var(--space-6);
 }
 
 /* Unified vocabulary: hover = tint + white border (accent clusters pin
    their accent border below), press = fill step */
 .editor-deckcard-row button:hover:not(:disabled),
 .editor-deckcard-head button:hover:not(:disabled) {
-  background: var(--surface0, #313244);
-  border-color: var(--text, #cdd6f4);
+  background: var(--surface0);
+  border-color: var(--text);
 }
 
 .editor-deckcard-row button:active:not(:disabled),
 .editor-deckcard-head button:active:not(:disabled) {
-  background: var(--surface1, #45475a);
+  background: var(--surface1);
 }
 
 .editor-deckcard-row button:disabled,
@@ -880,33 +875,32 @@
 .editor-pair {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--surface1, #45475a);
+  border: 1px solid var(--surface1);
   height: 22px;
   box-sizing: border-box;
 }
 
 .editor-pair > * + * {
-  border-left: 1px solid var(--surface1, #45475a);
+  border-left: 1px solid var(--surface1);
 }
 
 /* Panel idiom: group border brightens on hover; segments keep their
    divider color (pinned below) and read feedback as fill */
 .editor-pair:hover {
-  border-color: var(--text, #cdd6f4);
+  border-color: var(--text);
 }
 
 .editor-deckcard-row .editor-pair button:hover:not(:disabled) {
-  border-color: var(--surface1, #45475a);
+  border-color: var(--surface1);
 }
 
 .editor-pair-label {
   display: flex;
   align-items: center;
-  padding: 0 6px;
-  font-size: 10px;
-  font-family: monospace;
+  padding: 0 var(--space-6);
+  font-size: var(--font-micro);
   font-weight: bold;
-  color: var(--subtext0, #a6adc8);
+  color: var(--subtext0);
 }
 
 .editor-deckcard-row .editor-pair button {
@@ -919,7 +913,7 @@
 .editor-pair .editor-slidesize {
   display: flex;
   align-items: center;
-  padding: 0 4px;
+  padding: 0 var(--space-4);
 }
 
 /* Uniform control height across the card rows (one baseline grid). */
@@ -934,15 +928,14 @@
    stays yellow on hover. */
 .editor-deckcard-row .editor-action,
 .editor-deckcard-row .editor-action:hover:not(:disabled) {
-  color: var(--yellow, #f9e2af);
-  border-color: var(--yellow, #f9e2af);
+  color: var(--warning);
+  border-color: var(--warning);
 }
 
 .editor-slidesize {
   min-width: 24px;
   text-align: center;
-  font-size: 11px;
-  font-family: monospace;
+  font-size: var(--font-small);
   font-weight: bold;
 }
 
@@ -953,29 +946,29 @@
 .editor-alignment,
 .editor-alignment.editor-pair,
 .editor-alignment .editor-pair {
-  border-color: #ff9500;
+  border-color: var(--orange);
 }
 
 .editor-alignment .editor-pair-label,
 .editor-alignment.editor-pair .editor-pair-label {
-  color: #ff9500;
+  color: var(--orange);
 }
 
 .editor-alignment.editor-pair > * + *,
 .editor-alignment .editor-pair > * + * {
-  border-left-color: #ff9500;
+  border-left-color: var(--orange);
 }
 
 /* Alignment clusters are accent controls: the orange border holds on
    hover (group and segment dividers both) */
 .editor-alignment.editor-pair:hover,
 .editor-alignment .editor-pair:hover {
-  border-color: #ff9500;
+  border-color: var(--orange);
 }
 
 .editor-alignment.editor-pair > button:hover:not(:disabled),
 .editor-alignment .editor-pair > button:hover:not(:disabled) {
-  border-color: #ff9500;
+  border-color: var(--orange);
 }
 
 /* The lock is stateful, not passively accented: ENGAGED = alignment
@@ -988,7 +981,7 @@
 .editor-cuerow {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .editor-cuerow .hot-cue {
@@ -997,7 +990,7 @@
   width: 26px;
   min-width: 26px;
   padding: 0;
-  font-size: 11px;
+  font-size: var(--font-small);
   box-sizing: border-box;
 }
 
@@ -1011,7 +1004,7 @@
 .editor-slides-main {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 /* Deck B only (has lock): push the main cluster right so lock can sit left. */
@@ -1033,16 +1026,16 @@
      top-packed with a fixed gap. */
   justify-content: space-evenly;
   align-items: center;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-12);
 
-  font-size: 12px;
+  font-size: var(--font-body);
 }
 
 .editor-center-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-12);
 }
 
 /* Center-panel controls use one 22px vertical rhythm. Scoped here so the
@@ -1060,11 +1053,11 @@
 }
 
 .editor-center .player-button {
-  padding: 0 10px;
+  padding: 0 var(--space-12);
 }
 
 .editor-center .link-toggle {
-  padding: 0 5px;
+  padding: 0 var(--space-4);
 }
 
 /* Beat-domain readouts (issue 18): display-only values, monospace so they
@@ -1072,31 +1065,30 @@
 .editor-readout {
   display: flex;
   align-items: baseline;
-  gap: 5px;
+  gap: var(--space-4);
 }
 
 .editor-readout-label {
-  color: var(--subtext0, #a6adc8);
-  font-size: 11px;
+  color: var(--subtext0);
+  font-size: var(--font-small);
 }
 
 .editor-readout-value {
-  color: var(--sapphire, #74c7ec);
-  font-family: monospace;
+  color: var(--accent);
   font-weight: bold;
-  font-size: 12px;
+  font-size: var(--font-body);
   font-variant-numeric: tabular-nums;
 }
 
 .editor-readout-time .editor-readout-value {
-  color: var(--subtext0, #a6adc8);
+  color: var(--subtext0);
   font-weight: normal;
 }
 
 .editor-center-row label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 /* Site control idiom (player-button): transparent background, 1px border,
@@ -1107,12 +1099,12 @@
 .editor-center-row select {
   appearance: none;
   background: transparent;
-  border: 1px solid var(--surface1, #45475a);
+  border: 1px solid var(--surface1);
   border-radius: 0;
-  color: var(--text, #cdd6f4);
+  color: var(--text);
   font-weight: bold;
-  font-size: 11px;
-  padding: 2px 5px;
+  font-size: var(--font-small);
+  padding: var(--space-2) var(--space-4);
 }
 
 .editor-center-row input[type='number']::-webkit-outer-spin-button,
@@ -1125,7 +1117,7 @@
 
 .editor-center-row select {
   cursor: pointer;
-  padding-right: 18px;
+  padding-right: var(--space-16);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path d='M0 0l4 5 4-5z' fill='%23a6adc8'/></svg>");
   background-repeat: no-repeat;
   background-position: right 5px center;
@@ -1135,7 +1127,7 @@
 .editor-deckcard-row input:focus-visible,
 .editor-center-row select:focus-visible {
   outline: none;
-  border-color: var(--sapphire, #74c7ec);
+  border-color: var(--accent);
 }
 
 .editor-center-row input[type='number'] {
@@ -1149,25 +1141,25 @@
   height: 22px;
   box-sizing: border-box;
   background: transparent;
-  border: 1px solid var(--surface1, #45475a);
-  color: var(--text, #cdd6f4);
+  border: 1px solid var(--surface1);
+  color: var(--text);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-small);
   font-weight: bold;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
 }
 
 .editor-toggle:hover {
-  background: var(--surface0, #313244);
-  border-color: var(--green, #a6e3a1);
-  color: var(--green, #a6e3a1);
+  background: var(--surface0);
+  border-color: var(--success);
+  color: var(--success);
 }
 
 .editor-toggle.on,
 .editor-toggle.on:hover {
-  background: var(--green, #a6e3a1);
-  border-color: var(--green, #a6e3a1);
-  color: var(--base, #1e1e2e);
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--base);
 }
 
 .editor-globalminimap {
@@ -1175,9 +1167,9 @@
   height: 26px;
   flex: 0 0 auto;
   display: block;
-  border: 1px solid var(--surface0, #313244);
+  border: 1px solid var(--surface0);
 
-  margin-top: 4px;
+  margin-top: var(--space-4);
   cursor: pointer;
   touch-action: none;
 }
@@ -1203,17 +1195,17 @@
 .editor-lockbtn.on,
 .editor-lockbtn.on:hover:not(:disabled),
 .editor-lockbtn.on:active:not(:disabled) {
-  background: #ff9500;
-  border-color: #ff9500;
-  color: var(--base, #1e1e2e);
+  background: var(--orange);
+  border-color: var(--orange);
+  color: var(--base);
 }
 
 .editor-mutebtn.on,
 .editor-mutebtn.on:hover:not(:disabled),
 .editor-mutebtn.on:active:not(:disabled) {
-  background: var(--red, #f38ba8);
-  border-color: var(--red, #f38ba8);
-  color: var(--base, #1e1e2e);
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--base);
 }
 
 /* ── Transition templates (issue 03) ─────────────────────────────────── */
@@ -1227,30 +1219,30 @@
   height: 22px;
   box-sizing: border-box;
   background: transparent;
-  border: 1px solid var(--surface1, #45475a);
-  color: var(--text, #cdd6f4);
+  border: 1px solid var(--surface1);
+  color: var(--text);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-small);
   font-weight: bold;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
 }
 
 .editor-templates-trigger:hover {
-  background: var(--surface0, #313244);
-  border-color: var(--text, #cdd6f4);
+  background: var(--surface0);
+  border-color: var(--text);
 }
 
 .editor-templates-trigger:active {
-  background: var(--surface1, #45475a);
+  background: var(--surface1);
 }
 
 /* Open = engaged: inverted green fill (mix-editor 32 — sapphire retired
    from editor engaged-states; green is the app-wide active color). */
 .editor-templates-trigger[aria-expanded='true'],
 .editor-templates-trigger[aria-expanded='true']:hover {
-  background: var(--green, #a6e3a1);
-  border-color: var(--green, #a6e3a1);
-  color: var(--base, #1e1e2e);
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--base);
 }
 
 .editor-templates-panel {
@@ -1259,34 +1251,34 @@
   left: 0;
   z-index: 30;
   min-width: 280px;
-  background: var(--crust, #11111b);
-  border: 1px solid var(--surface1, #45475a);
-  padding: 4px;
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .editor-templates-empty {
-  padding: 6px 8px;
-  font-size: 11px;
-  color: var(--subtext0, #a6adc8);
+  padding: var(--space-6) var(--space-8);
+  font-size: var(--font-small);
+  color: var(--subtext0);
 }
 
 .editor-templates-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 4px;
+  gap: var(--space-6);
+  padding: var(--space-2) var(--space-4);
 }
 
 .editor-templates-row button {
   background: transparent;
   border: none;
-  color: var(--text, #cdd6f4);
+  color: var(--text);
   cursor: pointer;
-  font-size: 11px;
-  padding: 2px 4px;
+  font-size: var(--font-small);
+  padding: var(--space-2) var(--space-4);
 }
 
 .editor-templates-row button:disabled {
@@ -1296,11 +1288,11 @@
 
 /* Borderless menu items: hover reads as fill */
 .editor-templates-row button:hover:not(:disabled) {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
 }
 
 .editor-templates-row button:active:not(:disabled) {
-  background: var(--surface1, #45475a);
+  background: var(--surface1);
 }
 
 .editor-templates-name {
@@ -1316,37 +1308,36 @@
 .editor-templates-stepper {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
 .editor-templates-beats {
-  font-family: monospace;
-  font-size: 10px;
-  color: var(--subtext0, #a6adc8);
+  font-size: var(--font-micro);
+  color: var(--subtext0);
   min-width: 24px;
   text-align: center;
 }
 
 /* Accent CTA text (the row hover is a bg fill, so no !important needed) */
 .editor-templates-apply {
-  color: var(--green, #a6e3a1);
+  color: var(--success);
   font-weight: bold;
 }
 
 .editor-templates-save {
-  margin-top: 2px;
+  margin-top: var(--space-2);
   border: none;
-  border-top: 1px solid var(--surface1, #45475a);
+  border-top: 1px solid var(--surface1);
   background: transparent;
-  color: var(--sapphire, #74c7ec);
+  color: var(--accent);
   cursor: pointer;
-  font-size: 11px;
-  padding: 5px 8px;
+  font-size: var(--font-small);
+  padding: var(--space-4) var(--space-8);
   text-align: left;
 }
 
 .editor-templates-save:hover:not(:disabled) {
-  background: var(--surface0, #313244);
+  background: var(--surface0);
 }
 
 .editor-templates-save:disabled {
@@ -1356,10 +1347,10 @@
 
 /* Apply notices: fallbacks, clamps, extreme tempo match. Click dismisses. */
 .editor-notices {
-  font-size: 11px;
-  color: var(--yellow, #f9e2af);
+  font-size: var(--font-small);
+  color: var(--warning);
   cursor: pointer;
-  padding: 2px 4px;
+  padding: var(--space-2) var(--space-4);
   text-align: center;
 }
 
@@ -1367,7 +1358,7 @@
 .editor-savetpl-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
@@ -1375,45 +1366,45 @@
 }
 
 .editor-savetpl {
-  background: var(--crust, #11111b);
-  border: 1px solid var(--sapphire, #74c7ec);
-  padding: 14px;
+  background: var(--crust);
+  border: 1px solid var(--accent);
+  padding: var(--space-12);
   min-width: 360px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--text, #cdd6f4);
+  gap: var(--space-12);
+  font-size: var(--font-body);
+  color: var(--text);
 }
 
 .editor-savetpl-title {
   font-weight: bold;
-  color: var(--sapphire, #74c7ec);
+  color: var(--accent);
 }
 
 .editor-savetpl label {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .editor-savetpl input[type='text'],
 .editor-savetpl input:not([type]),
 .editor-savetpl select {
-  background: var(--mantle, #181825);
-  border: 1px solid var(--surface1, #45475a);
-  color: var(--text, #cdd6f4);
-  font-size: 12px;
-  padding: 3px 6px;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  font-size: var(--font-body);
+  padding: var(--space-4) var(--space-6);
   flex: 1;
 }
 
 .editor-savetpl-side {
   display: flex;
   align-items: center;
-  gap: 10px;
-  border: 1px solid var(--surface0, #313244);
-  padding: 6px 8px;
+  gap: var(--space-12);
+  border: 1px solid var(--surface0);
+  padding: var(--space-6) var(--space-8);
 }
 
 .editor-savetpl-sidehead {
@@ -1425,8 +1416,7 @@
 }
 
 .editor-savetpl-delta {
-  font-family: monospace;
-  color: var(--subtext0, #a6adc8);
+  color: var(--subtext0);
   white-space: nowrap;
 }
 
@@ -1434,38 +1424,38 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--space-12);
 }
 
 .editor-savetpl-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .editor-savetpl-actions button {
   background: transparent;
-  border: 1px solid var(--surface1, #45475a);
-  color: var(--text, #cdd6f4);
+  border: 1px solid var(--surface1);
+  color: var(--text);
   cursor: pointer;
-  font-size: 12px;
-  padding: 4px 12px;
+  font-size: var(--font-body);
+  padding: var(--space-4) var(--space-12);
 }
 
 .editor-savetpl-actions button:hover:not(:disabled) {
-  background: var(--surface0, #313244);
-  border-color: var(--text, #cdd6f4);
+  background: var(--surface0);
+  border-color: var(--text);
 }
 
 .editor-savetpl-actions button:active:not(:disabled) {
-  background: var(--surface1, #45475a);
+  background: var(--surface1);
 }
 
 /* Accent CTA: border stays green on hover */
 .editor-savetpl-confirm,
 .editor-savetpl-confirm:hover:not(:disabled) {
-  color: var(--green, #a6e3a1);
-  border-color: var(--green, #a6e3a1);
+  color: var(--success);
+  border-color: var(--success);
 }
 
 .editor-savetpl-confirm:disabled {
@@ -1475,10 +1465,10 @@
 
 /* The derived recipe sentence (issue 28) — the sentence IS the template. */
 .editor-savetpl-recipe {
-  border: 1px solid var(--surface0, #313244);
-  padding: 8px;
-  font-size: 12px;
-  color: var(--sapphire, #74c7ec);
+  border: 1px solid var(--surface0);
+  padding: var(--space-8);
+  font-size: var(--font-body);
+  color: var(--accent);
   line-height: 1.4;
 }
 
@@ -1487,8 +1477,8 @@
    again (or any transport gesture) to cancel. */
 .editor-center .player-button-arming {
   background: transparent;
-  color: #ffd400;
-  border-color: #ffd400;
+  color: var(--warning);
+  border-color: var(--warning);
   animation: editor-arm-pulse 0.7s ease-in-out infinite alternate;
 }
 

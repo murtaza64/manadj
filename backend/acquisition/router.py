@@ -1,6 +1,7 @@
 """Acquisition API endpoints."""
 
 from datetime import timezone
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -25,12 +26,25 @@ from .manager import (
     restore_item,
     set_classification,
 )
-from .cleanup import clean_metadata
-from .download import pick_supplier_result
+from .download import (
+    ADHOC_REF,
+    pick_supplier_result,
+    start_adhoc_download,
+    start_supplier_download,
+)
 from .picker import shape_results
+from .searches import (
+    default_search_query,
+    remember_search,
+    remembered_results,
+    remembered_search,
+)
 from .models import AudioProvenance, SourceCorrespondence, SourceItem
 from .source import SoundCloudSource, Source
 from .supplier import SearchSupplier, SupplierSearchResult
+
+if TYPE_CHECKING:
+    from ..tasks.models import Task
 
 router = APIRouter()
 
@@ -137,6 +151,10 @@ class DownloadStatus(BaseModel):
     cooling_down_until: str | None = None
     # which Supplier is delivering the audio: "soundcloud" | "soulseek"
     via: str = "soundcloud"
+    # hands-off soulseek downloads (gh#214): which candidate is being tried
+    # (1-based) out of how many
+    attempt: int | None = None
+    attempts_total: int | None = None
 
 
 class BulkQueueRequest(BaseModel):
@@ -198,6 +216,22 @@ def _via(task: "Task") -> str:
     return "soulseek" if task.type == "soulseek-download" else "soundcloud"
 
 
+def _task_status(task: "Task") -> DownloadStatus:
+    status = DownloadStatus(
+        task_state=task.state,
+        error=task.error,
+        cooling_down_until=_cooling_down_until(task),
+        via=_via(task),
+    )
+    if task.type == "soulseek-download":
+        payload = task.payload
+        candidates = payload.get("candidates")
+        if candidates:
+            status.attempt = payload.get("attempt", 0) + 1
+            status.attempts_total = len(candidates)
+    return status
+
+
 def _download_map(db: Session) -> dict[int, DownloadStatus]:
     """source_item_id -> latest download-task status (either Supplier)."""
     statuses: dict[int, DownloadStatus] = {}
@@ -207,12 +241,7 @@ def _download_map(db: Session) -> dict[int, DownloadStatus]:
         db.query(Task).filter(Task.type.in_(DOWNLOAD_TASK_TYPES)).order_by(Task.id).all()
     ):
         if task.ref and task.ref.startswith("source_item:"):
-            statuses[int(task.ref.split(":", 1)[1])] = DownloadStatus(
-                task_state=task.state,
-                error=task.error,
-                cooling_down_until=_cooling_down_until(task),
-                via=_via(task),
-            )
+            statuses[int(task.ref.split(":", 1)[1])] = _task_status(task)
     return statuses
 
 
@@ -234,8 +263,7 @@ def _provenance_map(db: Session) -> dict[int, ProvenanceInfo]:
 
 def _search_query(item: SourceItem) -> str:
     """The Cleanup-derived default query for Search Supplier pickers."""
-    meta = clean_metadata(item.title, item.uploader, get_config().acquisition.cleanup)
-    return f"{meta.artist} {meta.title}" if meta.artist else meta.title
+    return default_search_query(item, get_config().acquisition.cleanup)
 
 
 @router.get("/items", response_model=list[SourceItemResponse])
@@ -264,12 +292,7 @@ def _item_response(db: Session, item_id: int) -> SourceItemResponse:
         resp.provenance = _provenance_map(db).get(resp.correspondence.track_id)
     tasks = [t for t in list_tasks(db, ref=f"source_item:{item_id}") if t.type in DOWNLOAD_TASK_TYPES]
     if tasks:
-        resp.download = DownloadStatus(
-            task_state=tasks[0].state,
-            error=tasks[0].error,
-            cooling_down_until=_cooling_down_until(tasks[0]),
-            via=_via(tasks[0]),
-        )
+        resp.download = _task_status(tasks[0])
     return resp
 
 
@@ -401,6 +424,8 @@ class SoulseekResult(BaseModel):
     duration_ms: int | None
     queue_length: int | None
     has_free_slot: bool | None = None
+    # the peer offering the file (hands-off retries spread across peers)
+    username: str | None = None
     # derived server-side against the item's duration (search only; ignored
     # on pick — the Supplier needs none of it)
     duration_delta_ms: int | None = None
@@ -409,6 +434,8 @@ class SoulseekResult(BaseModel):
 class SoulseekSearchResponse(BaseModel):
     query: str  # the query actually searched (echoes the default when unset)
     results: list[SoulseekResult]
+    # ISO-8601 UTC when this search ran; set on remembered searches (gh#216)
+    searched_at: str | None = None
 
 
 @router.get("/suppliers", response_model=list[SupplierInfo])
@@ -432,7 +459,11 @@ def soulseek_search(
     db: Session = Depends(get_db),
     supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
 ) -> SoulseekSearchResponse:
-    """Search Soulseek for candidates for an unfulfilled item."""
+    """Search Soulseek for candidates for an unfulfilled item.
+
+    Every search is remembered per item (gh#216): the picker hydrates from
+    it on selection, and a new search overwrites it.
+    """
     sup = _require_soulseek(supplier)
     try:
         item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
@@ -440,6 +471,96 @@ def soulseek_search(
         raise HTTPException(status_code=404, detail="source item not found")
     query = (body.query or "").strip() or _search_query(item)
     shaped = shape_results(sup.search(query), item.duration_ms)
+    results = [
+        SoulseekResult(**vars(s.result), duration_delta_ms=s.duration_delta_ms)
+        for s in shaped
+    ]
+    row = remember_search(db, item.id, query, [r.model_dump() for r in results])
+    return SoulseekSearchResponse(
+        query=query,
+        results=results,
+        searched_at=(
+            row.searched_at.replace(tzinfo=timezone.utc).isoformat()
+            if row.searched_at
+            else None
+        ),
+    )
+
+
+@router.get(
+    "/items/{item_id}/soulseek/search", response_model=SoulseekSearchResponse | None
+)
+def soulseek_remembered_search(
+    item_id: int, db: Session = Depends(get_db)
+) -> SoulseekSearchResponse | None:
+    """The remembered search for an item, or null if it was never searched."""
+    row = remembered_search(db, item_id)
+    if row is None:
+        return None
+    return SoulseekSearchResponse(
+        query=row.query,
+        results=[SoulseekResult(**d) for d in remembered_results(row)],
+        searched_at=(
+            row.searched_at.replace(tzinfo=timezone.utc).isoformat()
+            if row.searched_at
+            else None
+        ),
+    )
+
+
+# --- Standalone soulseek search + download (gh#217) -------------------------
+
+
+class SoulseekGlobalSearchRequest(BaseModel):
+    query: str
+
+
+class AdhocDownloadRequest(BaseModel):
+    result: SoulseekResult
+    # optional naming; else derived from the remote filename via Cleanup
+    artist: str | None = None
+    title: str | None = None
+
+
+class AdhocDownloadInfo(BaseModel):
+    task_id: int
+    filename: str
+    artist: str | None
+    title: str
+    task_state: str
+    error: str | None
+    created_at: str | None
+
+
+def _adhoc_info(task: "Task") -> AdhocDownloadInfo:
+    payload = task.payload
+    return AdhocDownloadInfo(
+        task_id=task.id,
+        filename=payload.get("filename", ""),
+        artist=payload.get("artist"),
+        title=payload.get("title", ""),
+        task_state=task.state,
+        error=task.error,
+        created_at=(
+            task.created_at.replace(tzinfo=timezone.utc).isoformat()
+            if task.created_at
+            else None
+        ),
+    )
+
+
+@router.post("/soulseek/search", response_model=SoulseekSearchResponse)
+def soulseek_global_search(
+    body: SoulseekGlobalSearchRequest,
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> SoulseekSearchResponse:
+    """Search Soulseek with no Source Item attached (gh#217): no duration to
+    compare against (deltas null), nothing remembered."""
+    sup = _require_soulseek(supplier)
+    query = body.query.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="empty query")
+    shaped = shape_results(sup.search(query), None)
     return SoulseekSearchResponse(
         query=query,
         results=[
@@ -447,6 +568,93 @@ def soulseek_search(
             for s in shaped
         ],
     )
+
+
+@router.post("/soulseek/download", response_model=AdhocDownloadInfo)
+def soulseek_adhoc_download(
+    body: AdhocDownloadRequest,
+    db: Session = Depends(get_db),
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> AdhocDownloadInfo:
+    """Download a picked result with no Source Item (gh#217)."""
+    sup = _require_soulseek(supplier)
+    result = SupplierSearchResult(**body.result.model_dump(exclude={"duration_delta_ms"}))
+    try:
+        task = start_adhoc_download(
+            db, sup, result, body.artist, body.title, get_config().acquisition.cleanup
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _adhoc_info(task)
+
+
+@router.get("/soulseek/downloads", response_model=list[AdhocDownloadInfo])
+def soulseek_adhoc_downloads(db: Session = Depends(get_db)) -> list[AdhocDownloadInfo]:
+    """Recent standalone downloads, newest first."""
+    return [_adhoc_info(t) for t in list_tasks(db, ref=ADHOC_REF, limit=20)]
+
+
+@router.post("/items/{item_id}/soulseek/auto", response_model=SourceItemResponse)
+def soulseek_auto_download(
+    item_id: int,
+    db: Session = Depends(get_db),
+    supplier: "SearchSupplier | None" = Depends(get_soulseek_supplier),
+) -> SourceItemResponse:
+    """Hands-off download (gh#214): search if needed, auto-pick, download.
+
+    Candidates come from the remembered search when one exists (remembering
+    is the point: no 20s wait per item), else a fresh default-query search
+    (which is then remembered). The auto pick list is mp3-only, exact
+    duration, healthy bitrate, one candidate per peer, best first — the
+    download task falls back through it on failure.
+    """
+    from .picker import (
+        AUTO_DURATION_TOLERANCE_MS,
+        MIN_AUTO_BITRATE_KBPS,
+        auto_candidates,
+        dicts_to_shaped,
+    )
+
+    sup = _require_soulseek(supplier)
+    try:
+        item = db.query(SourceItem).filter(SourceItem.id == item_id).one()
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="source item not found")
+
+    row = remembered_search(db, item_id)
+    if row is not None:
+        shaped = dicts_to_shaped(remembered_results(row))
+    else:
+        query = _search_query(item)
+        shaped = shape_results(sup.search(query), item.duration_ms)
+        remember_search(
+            db,
+            item_id,
+            query,
+            [
+                SoulseekResult(**vars(s.result), duration_delta_ms=s.duration_delta_ms).model_dump()
+                for s in shaped
+            ],
+        )
+
+    candidates = auto_candidates(shaped)
+    if not candidates:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "no auto-pickable mp3 among the search results (need duration "
+                f"within ±{AUTO_DURATION_TOLERANCE_MS // 1000}s and "
+                f"≥{MIN_AUTO_BITRATE_KBPS} kbps) — pick manually"
+            ),
+        )
+    try:
+        start_supplier_download(db, item_id, sup, [c.result for c in candidates])
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except RuntimeError as e:
+        # every candidate peer rejected the request outright
+        raise HTTPException(status_code=502, detail=str(e))
+    return _item_response(db, item_id)
 
 
 @router.post("/items/{item_id}/soulseek/pick", response_model=SourceItemResponse)

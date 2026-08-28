@@ -596,7 +596,7 @@ export const OverviewLadder = memo(function OverviewLadder({
             padding: '0 6px',
             fontSize: '13px',
             lineHeight: '18px',
-            background: follow ? 'var(--mauve)' : 'rgba(0,0,0,0.55)',
+            background: follow ? 'var(--accent)' : 'rgba(0,0,0,0.55)',
             color: follow ? 'var(--base)' : 'var(--text)',
             border: '1px solid var(--surface1)',
             cursor: 'pointer',
